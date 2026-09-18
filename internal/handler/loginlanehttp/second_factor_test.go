@@ -218,13 +218,13 @@ func TestLane_F12_15_18_StepUpNamesTheMethodAndTheRemainder(t *testing.T) {
 
 // TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode — снятие и
 // перечеканка: `{"method","code"}` в теле; снятие отвечает сессией и
-// `assurance` (с остатком, когда подтверждали запасным); перечеканка — новым
-// набором.
+// `assurance`, и `backupCodesRemaining: 0` ВСЕГДА (Р4 ред. 10, kaname#275:
+// фактор снят, набора нет); перечеканка — новым набором.
 func TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode(t *testing.T) {
 	fresh, _ := domain.NewSessionBearer()
-	three := 3
+	zero := 0
 	stub := &stubLane{
-		removeOut: humansession.RemoveSecondFactorOutput{View: levelTwoView(), Bearer: fresh, Assurance: humansession.AssuranceView{Level: "2", MissingForLevel2: []string{}}, BackupCodesRemaining: &three},
+		removeOut: humansession.RemoveSecondFactorOutput{View: levelTwoView(), Bearer: fresh, Assurance: humansession.AssuranceView{Level: "2", MissingForLevel2: []string{}}, BackupCodesRemaining: &zero},
 		regenOut:  humansession.RegenerateBackupCodesOutput{View: levelTwoView(), Bearer: fresh, Assurance: assuranceTwo(), BackupCodes: []string{"0123456789"}},
 	}
 	l := newLane(t, stub, "")
@@ -237,7 +237,7 @@ func TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode(t *testing.T) {
 	var keys map[string]any
 	require.NoError(t, json.Unmarshal([]byte(r.body), &keys))
 	require.Len(t, keys, 3)
-	require.EqualValues(t, 3, keys["backupCodesRemaining"])
+	require.EqualValues(t, 0, keys["backupCodesRemaining"])
 	require.Equal(t, map[string]any{"level": "2", "level2Reachable": false, "missingForLevel2": []any{}}, keys["assurance"])
 	require.Equal(t, fresh.CookieValue(), cookieNamed(r.cookies, "kaname_session").Value)
 	require.Equal(t, assurance.MethodLookupSecret, stub.removeIn[0].Factor.Method)
