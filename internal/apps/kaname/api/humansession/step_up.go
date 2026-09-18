@@ -234,30 +234,38 @@ func (uc *StepUpUseCase) refuse(ctx context.Context, v presentVerdict, j judgedP
 // Вердикт вынесен, и уход клиента после него не вправе стереть ни след
 // попытки, ни запись журнала. Отвязка снимает отмену, но не время: повисшая
 // база иначе держала бы горутину без предела. Величина — та же, что у других
-// отвязанных записей службы (`providerReleaseTimeout`): одна транзакция из
-// трёх вставок и, при её сбое, одна транзакция из двух.
+// отвязанных записей службы (`providerReleaseTimeout`), и её получает КАЖДАЯ из
+// двух записей отдельно, а не пополам: транзакция из трёх вставок и, при её
+// сбое, транзакция из двух — каждой свой полный срок (С2).
 const refusalWriteBudget = 5 * time.Second
 
 // recordRefusal — суждённое предъявление отклонено: след попытки и запись
-// журнала повышения с исходом `refused` — ОДНОЙ транзакцией (Р7, Ф11-14), на
-// контексте, отвязанном от отмены запроса. Отказ наружу уходит в любом исходе
-// записи. Не сложилась транзакция — след попытки пишется своей: счёт неверных
-// предъявлений есть контроль частоты, и сбой записи журнала не вправе его
-// выключить; потеря записи журнала звучит ошибкой в журнале процесса.
+// журнала повышения с исходом `refused` — ОДНОЙ транзакцией (Р7, Ф11-14),
+// отвязанной от отмены запроса. Отказ наружу уходит в любом исходе записи. Не
+// сложилась транзакция — след попытки пишется СВОЕЙ, со СВОИМ сроком: счёт
+// неверных предъявлений есть контроль частоты, и сбой записи журнала не вправе
+// его выключить; потеря записи журнала звучит ошибкой в журнале процесса.
+//
+// Срок каждой записи — свой, не общий (С2). Общий срок на насыщенном пуле
+// доставался бы запасной уже истёкшим: основная транзакция ждёт соединения и
+// выбирает его целиком, а `pgxpool.Acquire` запасной падает сразу на истёкшем
+// контексте — след попытки не лёг бы, неверное предъявление осталось бы
+// несосчитанным.
 func (uc *StepUpUseCase) recordRefusal(ctx context.Context, j judgedPresentation) {
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalWriteBudget)
-	defer cancel()
-	err := uc.writeRefusal(wctx, j)
-	if err == nil {
-		return
-	}
-	uc.deps.Logger.ErrorContext(ctx, "step-up: refused presentation not journaled", j.logAttrs(err)...)
-	if werr := recordFailureTx(wctx, uc.deps.Store, j.addressKey, j.source, j.at); werr != nil {
-		uc.deps.Logger.ErrorContext(ctx, "step-up: failed attempt not recorded", j.logAttrs(werr)...)
+	base := context.WithoutCancel(ctx)
+	if err := uc.writeRefusal(base, j); err != nil {
+		uc.deps.Logger.ErrorContext(ctx, "step-up: refused presentation not journaled", j.logAttrs(err)...)
+		if werr := uc.recordRefusalAttempt(base, j); werr != nil {
+			uc.deps.Logger.ErrorContext(ctx, "step-up: failed attempt not recorded", j.logAttrs(werr)...)
+		}
 	}
 }
 
-func (uc *StepUpUseCase) writeRefusal(ctx context.Context, j judgedPresentation) error {
+// writeRefusal — след попытки и запись журнала `refused` одной транзакцией,
+// под собственным сроком, отсчитанным от base.
+func (uc *StepUpUseCase) writeRefusal(base context.Context, j judgedPresentation) error {
+	ctx, cancel := context.WithTimeout(base, refusalWriteBudget)
+	defer cancel()
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return fmt.Errorf("step-up refusal: open writer: %w", err)
@@ -273,6 +281,14 @@ func (uc *StepUpUseCase) writeRefusal(ctx context.Context, j judgedPresentation)
 		return fmt.Errorf("step-up refusal: commit: %w", err)
 	}
 	return nil
+}
+
+// recordRefusalAttempt — только след попытки, под СВОИМ сроком от base:
+// запасная запись, когда общая транзакция не сложилась.
+func (uc *StepUpUseCase) recordRefusalAttempt(base context.Context, j judgedPresentation) error {
+	ctx, cancel := context.WithTimeout(base, refusalWriteBudget)
+	defer cancel()
+	return recordFailureTx(ctx, uc.deps.Store, j.addressKey, j.source, j.at)
 }
 
 // logAttrs — чья запись не легла: идентификаторы личности и сессии и способ.
