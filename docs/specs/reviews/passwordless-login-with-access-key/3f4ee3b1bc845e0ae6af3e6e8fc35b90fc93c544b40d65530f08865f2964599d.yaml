@@ -237,3 +237,47 @@ cycle:
     самому снятию переноса, но по объёму §4.1 (новая полоса входа) он предусмотрен §9 п. 2 и
     остаётся шагом реализации. Companion Ф7 ред.12 — ⛔ ВОЗВРАТ (см. соседнюю запись); его правка
     отпечаток Ф13 НЕ меняет, эта запись остаётся вердиктом о 3f4ee3b1.
+
+# ── СОБЫТИЕ ПОЛНОМОЧИЯ ОПУБЛИКОВАНО ────────────────────────────────────────
+# ДОПИСАНО ОТДЕЛЬНЫМ коммитом поверх записи: вердикт, разбор и числа задним
+# числом не правились — ни одна прежняя строка не изменена и не удалена.
+# Закрывает publication_pending выше. До этой дописи событие существовало, а
+# запись о нём не знала — тот же класс устаревшей записи, что уже ловили.
+event:
+  type: issue_comment
+  repo: PRO-Robotech/kacho
+  issue: 1282
+  database_id: 5738095798
+  node_id: IC_kwDOTZqgWM8AAAABVgRktg
+  url: https://github.com/PRO-Robotech/kacho/issues/1282#issuecomment-5738095798
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5738095798
+  actor: pointpu
+  author_association: MEMBER
+  role: acceptance-reviewer
+  created_at: '2026-09-19T01:04:55Z'
+  body_sha256: a48a54023116c0d7a3980fb26450059e8f114463f2c84b8ae35860834489880d
+  body_sha256_predicate: >-
+    sha256 СЫРОГО значения поля body ответа API — без обрезки и без добавления
+    хвостового перевода строки (подстановка через $(cat) срезала бы его):
+    gh api repos/PRO-Robotech/kacho/issues/comments/5738095798 > raw.json &&
+    python3 -c "import json,hashlib;
+    print(hashlib.sha256(json.load(open('raw.json'))['body'].encode('utf-8')).hexdigest())"
+  body_matches_event_body_for_courier: true
+  declared_role: acceptance-reviewer
+  declared_verdict: APPROVED
+  declared_subject: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  declared_subject_revision: a27f35630944fd6e1e1d13d3d78f836f275040c8
+  declared_subject_sha256: 3f4ee3b1bc845e0ae6af3e6e8fc35b90fc93c544b40d65530f08865f2964599d
+  matches_this_record: true      # отпечаток события = content_digest записи = имя файла
+
+# ── что курьер перемерил СВОЕЙ командой перед дописью ──────────────────────
+courier_verification:
+  published_by_role: git-operator
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  subject_digest_at_event_revision:
+    command: git show a27f3563:docs/engineering/acceptance/passwordless-login-with-access-key.md | sha256sum
+    result: 3f4ee3b1bc845e0ae6af3e6e8fc35b90fc93c544b40d65530f08865f2964599d
+    matches_record: true
+  event_resolves_by_api: true
+  history_is_appended_not_rewritten: true
