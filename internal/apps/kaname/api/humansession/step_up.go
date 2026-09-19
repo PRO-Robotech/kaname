@@ -140,6 +140,9 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
 
+	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
+	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
+	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
@@ -162,7 +165,15 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
-	if err := w.ResetFailures(ctx, FailureByAddress, addressKey); err != nil {
+	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
+	// личности факторов (Ф12 Р7 ред. 11, Ф3 Р10 ред. 11). У церемонии сюда
+	// ведут ОБЕ ветви: код доводит сессию до «2» и счёт обнуляет, а ветвь
+	// `password` у личности с заведённым фактором оставляет «1» — успех, но не
+	// завершённый вход, и счёт остаётся (kaname#287).
+	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		AddressKey: addressKey, Presented: methods,
+	}); err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
 	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Method, level); err != nil {
