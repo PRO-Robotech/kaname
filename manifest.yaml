@@ -674,6 +674,42 @@ resources:
       - {name: internalOnRecoveryCompleted, class: update, internal: true}
       - {name: internalUpsertFromIdentity, class: update, internal: true}
 
+  # membership — ЧЛЕНСТВО как объект гейта чтения личности (IAM-ID-1, S3.1).
+  # Членство принадлежит РОВНО ОДНОМУ аккаунту, поэтому
+  # `super_admin = admin from account` на `iam_membership` резолвится в пределах
+  # этого аккаунта, а доступ администратора своего аккаунта остаётся. Глобальная
+  # личность (`iam_user`) такого сужения не даёт. Ключ объекта — СОБСТВЕННЫЙ
+  # неизменяемый id членства (`memberships.id`, форма `mbr-…`, ban #15);
+  # композит `<account>:<user>` рассмотрен и ОТВЕРГНУТ — он потребовал бы
+  # расширить арность деривации в ФУНДАМЕНТЕ (прецедентов ноль), а у членства
+  # уже есть стабильный id.
+  # Материализуется реконсайлером по членству, НЕ на create-path (ban #9);
+  # строкой цепи областей предок — единственный аккаунт членства.
+  - name: membership
+    objectType: iam_membership
+    parents: [account]
+    producer: derived
+    tiers:
+      - admin
+      - editor
+      - {name: viewer, from: [subject, editor]}
+    cascade:
+      - {relation: admin, from: account}
+    relations:
+      - name: subject
+        definition: '[user]'
+        position: beforeTiers
+    notes:
+      - before: v_get
+        text: |
+          # `subject` — сам человек: он читает СВОЮ запись членства (самочтение).
+          # На `v_get` он есть, на `v_list` — нет, ровно как у `iam_user`: форму
+          # v_get нельзя подменять формой v_list, иначе человек перестаёт читать
+          # себя, а прочие пробы остаются зелёными (IAM-ID-1-31, дыра «б»).
+    verbs:
+      - {name: get, from: [subject, super_admin]}
+      - list
+
   - name: serviceAccount
     objectType: iam_service_account
     parents: [account]

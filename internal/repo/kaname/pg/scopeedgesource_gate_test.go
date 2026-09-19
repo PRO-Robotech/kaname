@@ -193,6 +193,13 @@ var legalDifferences = []legalDifference{
 var exactSourceTypes = map[string]string{
 	"iam_group":           "o.account_id",
 	"iam_service_account": "o.account_id",
+	// Членство (IAM-ID-1, S3.1) — ТОЧНОЕ совпадение, и это несущее свойство, а
+	// не совпадение написаний: обе стороны читают ОДНУ колонку СОБСТВЕННОЙ
+	// строки связи (`kaname.memberships.account_id`), потому что предок у
+	// членства РОВНО ОДИН. Именно этим оно отличается от `iam_user` ниже, где
+	// предок берётся связью и выражается НАБОРОМ, — и именно на этом отличии
+	// держится изоляция соседнего аккаунта.
+	"iam_membership": "o.account_id",
 }
 
 // upBlock возвращает исполняемый блок `Up` БЕЗ строк комментария.

@@ -518,6 +518,29 @@ type iamDirectScanSpec struct {
 	parentProjectExpr  string
 	// join is an optional LEFT JOIN clause (e.g. resolve a project's account_id).
 	join string
+	// labelsExpr — выражение, дающее метки объекта как jsonb. Пусто означает
+	// ШТАТНУЮ колонку `o.labels`, которую несёт всякая own-table под единой
+	// моделью видимости (миграция 0041).
+	//
+	// Поле заведено ради типа, у которого такой колонки НЕТ BY CONSTRUCTION:
+	// `kaname.memberships` — связь, а не ресурс с собственными метками. Без
+	// него проекция одного объекта (`GetIAMDirectObject`) выбирала бы
+	// несуществующую колонку и падала бы `42703` на КАЖДОМ проходе по членству —
+	// то есть тип, объявленный материализуемым, ронял бы проход вместо того,
+	// чтобы ничего не выбрать по меткам.
+	labelsExpr string
+}
+
+// labels — КАНОНИЧЕСКАЯ форма источника меток: выражение типа jsonb над `o`.
+//
+// Единственная точка, где умолчание сводится к выражению: два читателя
+// (проекция объекта и отбор по меткам) обязаны спрашивать ОДНО выражение, иначе
+// они разойдутся молча на типе без колонки.
+func (s iamDirectScanSpec) labels() string {
+	if s.labelsExpr != "" {
+		return s.labelsExpr
+	}
+	return "o.labels"
 }
 
 // accountsExpr — КАНОНИЧЕСКАЯ форма источника аккаунтов: SQL-выражение типа
@@ -591,6 +614,26 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 			" WHERE m.user_id = o.id AND COALESCE(m.account_id, '') <> ''" +
 			" ORDER BY m.account_id)",
 		parentProjectExpr: "''",
+	},
+	// ЧЛЕНСТВО — объект гейта чтения личности (IAM-ID-1, S3.1), адресуемый СВОИМ
+	// неизменяемым `mbr-…` (ban #15: authz-цель ключуется стабильным id, а не
+	// парой). Предок — РОВНО ОДИН аккаунт, и он свойство СОБСТВЕННОЙ строки
+	// (`o.account_id`), а не связи: здесь стоит скаляр, а не выражение-НАБОР,
+	// как у `iam.user` выше. Одно-аккаунтность здесь и есть предмет:
+	// `admin from account` на `iam_membership:<mbr-…>` разворачивается
+	// только в администратора ЭТОГО аккаунта, поэтому админ соседнего до
+	// личности не дотягивается.
+	//
+	// Состояние членства НЕ ЧИТАЕТСЯ — то же решение, что у ветви цепи областей
+	// и у `iam.user`: звено есть указатель ВВЕРХ, а не выдача. Приглашённый
+	// обязан быть достижим распорядителю аккаунта, куда его пригласили, иначе
+	// приглашение нельзя ни прочитать, ни отозвать до первого входа.
+	//
+	// Собственной колонки `labels` у связи нет — см. `labelsExpr`.
+	"iam.membership": {
+		objectType: "iam.membership", table: "kaname.memberships",
+		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
+		labelsExpr: "'{}'::jsonb",
 	},
 	// access_binding is scoped by (resource_type, resource_id): map the scope anchor
 	// onto the containment parents so the owner binding contains the bindings of its
@@ -737,7 +780,7 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 		if spec.join != "" {
 			q += " " + spec.join
 		}
-		q += " WHERE o.labels @> $1::jsonb ORDER BY o.id ASC"
+		q += " WHERE " + spec.labels() + " @> $1::jsonb ORDER BY o.id ASC"
 		rows, qerr := s.tx.Query(ctx, q, labelsJSON)
 		if qerr != nil {
 			return nil, fmt.Errorf("reconcile: iam-direct match labels %s: %w", spec.objectType, qerr)
@@ -818,7 +861,7 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		// forward path only routes iam-direct types here).
 		return domain.MirrorObject{}, false, nil
 	}
-	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", o.labels" +
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.labels() +
 		" FROM " + spec.table + " o"
 	if spec.join != "" {
 		q += " " + spec.join
@@ -1047,7 +1090,7 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	// (labels @> match_labels через GIN).
 	labelsBranch := ""
 	if hasLabels {
-		labelsBranch = " OR (rrs.arm = 'labels' AND o.labels @> rrs.match_labels)"
+		labelsBranch = " OR (rrs.arm = 'labels' AND " + spec.labels() + " @> rrs.match_labels)"
 	}
 	anchorBranch := `(rrs.arm = 'anchor' AND (
 	                       b.resource_type NOT IN ('account','project')

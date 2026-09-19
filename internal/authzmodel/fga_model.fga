@@ -149,7 +149,11 @@ model
 #     `nlb_listener` (KAC-178 §4 — Listener as first-class FGA object),
 #     `registry_registry`, `registry_repository`,
 #     `iam_role`, `iam_access_binding`, `iam_service_account`, `iam_group`,
-#     `iam_user`.
+#     `iam_user`,
+#     `iam_membership` (IAM-ID-1 S3.1 — объект гейта чтения личности: членство
+#     принадлежит РОВНО ОДНОМУ аккаунту и адресуется СВОИМ неизменяемым id
+#     mbr-…, поэтому admin from account на нём разворачивается только в
+#     администратора ЭТОГО аккаунта и сосед до личности не дотягивается).
 #   - relations: `viewer` / `editor` / `admin` / `owner` / `member` per the
 #     Kachō roles vocabulary (KAC-121).
 #   - conditional relations: `with` clause names a Condition (built-in or
@@ -826,6 +830,21 @@ type iam_user
     # надзор облака доходит НА САМОМ ДЕЛЕ — вердиктом по закоммиченным строкам
     # (`service/removing_the_identity_integration_test.go`).
     define identity_remover: subject or super_admin from account
+
+type iam_membership
+  relations
+    define account: [account]
+    define super_admin: admin from account
+    define subject: [user]
+    define admin: [user, service_account, group#member] or super_admin
+    define editor: [user, service_account, group#member] or admin
+    define viewer: [user, service_account, group#member] or subject or editor
+    # `subject` — сам человек: он читает СВОЮ запись членства (самочтение).
+    # На `v_get` он есть, на `v_list` — нет, ровно как у `iam_user`: форму
+    # v_get нельзя подменять формой v_list, иначе человек перестаёт читать
+    # себя, а прочие пробы остаются зелёными (IAM-ID-1-31, дыра «б»).
+    define v_get: [user, service_account, group#member] or subject or super_admin
+    define v_list: [user, service_account, group#member] or super_admin
 
 type iam_service_account
   relations

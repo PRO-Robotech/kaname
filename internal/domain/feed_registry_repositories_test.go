@@ -84,12 +84,18 @@ func TestMaterializable_IsLabelSelectablePlusRepositories(t *testing.T) {
 		_, ok := mat[ty]
 		assert.True(t, ok, "label-selectable %s must be materializable", ty)
 	}
-	// The materializable set has exactly one extra element over label-selectable.
-	assert.Equal(t, len(labelSelectableTypes)+1, len(mat),
-		"materializable = labelSelectable ∪ {registry.repositories} (exactly one extra)")
-	// And that extra element is registry.repositories, which is NOT label-selectable.
-	_, matHasRepo := mat["registry.repositories"]
-	assert.True(t, matHasRepo, "registry.repositories must be the extra materializable type")
-	assert.False(t, IsLabelSelectableType("registry.repositories"),
-		"the extra materializable type must not be label-selectable")
+	// Экстра-элементов РОВНО ДВА, и каждый назван: у обоих нет собственной колонки
+	// labels by construction, поэтому они материализуемы, но не label-selectable.
+	//   - registry.repositories — repo появляется через docker push, без labels;
+	//   - iam.membership — строка `kaname.memberships` колонки labels не несёт
+	//     (S3.1: объект гейта чтения личности, адресуемый своим `mbr-…`).
+	extras := []string{"registry.repositories", "iam.membership"}
+	assert.Equal(t, len(labelSelectableTypes)+len(extras), len(mat),
+		"materializable = labelSelectable ∪ {registry.repositories, iam.membership} (ровно два экстра)")
+	for _, ty := range extras {
+		_, matHas := mat[ty]
+		assert.Truef(t, matHas, "%s обязан быть материализуемым", ty)
+		assert.Falsef(t, IsLabelSelectableType(ty),
+			"экстра-материализуемый %s не обязан быть label-selectable — у него нет своей колонки labels", ty)
+	}
 }

@@ -112,11 +112,19 @@ func IsLabelSelectableType(objectType string) bool {
 // the images are unreachable even for the owner). Decoupling the two sets here keeps
 // IsLabelSelectableType honest while making registry.repositories grantable.
 var materializableTypes = func() map[string]struct{} {
-	m := make(map[string]struct{}, len(labelSelectableTypes)+1)
+	m := make(map[string]struct{}, len(labelSelectableTypes)+2)
 	for ty := range labelSelectableTypes {
 		m[ty] = struct{}{}
 	}
 	m["registry.repositories"] = struct{}{}
+	// iam.membership — материализуемый, но НЕ label-selectable: у строки
+	// `kaname.memberships` собственной колонки labels нет by construction
+	// (образец — registry.repositories выше). Owner/wildcard-грант ОБЯЗАН
+	// развернуться на него (ARM_ANCHOR), иначе реконсайлер не материализует
+	// кортеж области членства, и администратор своего аккаунта получает
+	// fail-closed на чтении личности через `iam_membership:<mbr-…>`, где `mbr-…`
+	// это `memberships.id` (IAM-ID-1, S3.1).
+	m["iam.membership"] = struct{}{}
 	return m
 }()
 
@@ -127,12 +135,13 @@ var materializableTypes = func() map[string]struct{} {
 // kind inside the scope, instead of relying on the FGA derivation cascade.
 //
 // This is a STRICT SUPERSET of labelSelectableTypes, differing by exactly
-// registry.repositories (materializable, not label-selectable). Every other
-// materializable type (mirror-fed vpc/compute/loadbalancer + EVERY iam-native type)
-// is also ARM_LABELS-selectable. The iam content types (user/serviceAccount/group/
-// role/accessBinding) remain materializable by ARM_ANCHOR/ARM_NAMES (replacing the
-// flat model's missing `from account` cascade with per-object materialization) AND
-// are additionally label-selectable.
+// registry.repositories and iam.membership (both materializable, NOT
+// label-selectable — neither carries own-table labels). Every other materializable
+// type (mirror-fed vpc/compute/loadbalancer + the iam-native project/account/user/
+// serviceAccount/group/role/accessBinding) is also ARM_LABELS-selectable. The iam
+// content types remain materializable by ARM_ANCHOR/ARM_NAMES (replacing the flat
+// model's missing `from account` cascade with per-object materialization) AND are
+// additionally label-selectable; iam.membership is ANCHOR/NAMES-only.
 //
 // Sorted so the resulting selector + role_rule_selectors index are deterministic
 // (stable fast-path JOIN + migration-seed lockstep, rule_wildcard_scope_test.go).

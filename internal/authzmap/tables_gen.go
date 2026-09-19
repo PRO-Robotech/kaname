@@ -16,7 +16,7 @@
 // и это ИЗМЕРЕНИЕ, а не проза: таблицы считает обход пакета
 // (authzmapgen TestTypeTablesGeneratedCountIsMeasuredNotClaimed), объявленный
 // остаток равен нулю, и возвращение рукописной таблицы краснеет с её именем.
-// Перепись производителя: манифестов 6, модулей 6, ресурсов 27, из них глагольных 27, отношений действия 108.
+// Перепись производителя: манифестов 6, модулей 6, ресурсов 28, из них глагольных 28, отношений действия 110.
 
 package authzmap
 
@@ -40,6 +40,7 @@ var typeVerbRelations = map[string][]string{
 	"compute_placement_group":   {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_access_binding":        {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_group":                 {"v_delete", "v_get", "v_list", "v_update"},
+	"iam_membership":            {"v_get", "v_list"},
 	"iam_role":                  {"v_delete", "v_list", "v_update"},
 	"iam_service_account":       {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_user":                  {"v_get", "v_list"},
@@ -88,6 +89,7 @@ var objectTypes = map[string]string{
 	"iam.accessBinding":                 "iam_access_binding",
 	"iam.account":                       "account",
 	"iam.group":                         "iam_group",
+	"iam.membership":                    "iam_membership",
 	"iam.project":                       "project",
 	"iam.role":                          "iam_role",
 	"iam.serviceAccount":                "iam_service_account",

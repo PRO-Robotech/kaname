@@ -110,7 +110,11 @@ func TestMaterializingSelectors_RolePersistence_ExpandsWildcard(t *testing.T) {
 //
 // rule_fp is UNCHANGED across every re-seed (it hashes the RULE, not object_types); only
 // object_types moves. The constant below mirrors the latest migration to touch the row —
-// currently 0090, which appended `vpc.cidrGroup` (the named prefix set: its type was
+// currently `20260919130000_membership_is_an_authz_object`, which appended
+// `iam.membership` (объект гейта чтения личности, S3.1: членство несёт РОВНО ОДИН
+// аккаунт-предок, поэтому `admin from account` на нём одно-аккаунтен; без записи в этом
+// наборе роль-владелец не разворачивалась бы на членства своего аккаунта).
+// Before it, 0090 appended `vpc.cidrGroup` (the named prefix set: its type was
 // declared verb-bearing and mirror-registered, but absent from the materializable set, so
 // its creator got denied on their OWN fresh resource — the #71 class, now held tree-wide
 // by authzmap/verb_type_materializable_test.go). Before it, 0087 and 0088 appended the
@@ -120,7 +124,7 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 	const migrationRuleFP = "3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4"
 	migrationObjectTypes := []string{
 		"compute.guestAccessKey", "compute.instance", "compute.placementGroup",
-		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
+		"iam.accessBinding", "iam.account", "iam.group", "iam.membership", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
@@ -154,12 +158,12 @@ func TestOwnerRoleSelector_MigrationLockstep(t *testing.T) {
 // the verbs (and thus rule_fp) differ; verbs are not stored in role_rule_selectors.
 func TestSystemWildcardRoleSelectors_MigrationLockstep(t *testing.T) {
 	// The full materializable type set the seed migrations hard-code, as it stands after
-	// migration 0088 appended `vpc.cidrGroup` (0074 before it removed the retired compute
-	// block-storage types) — mirror of the owner selector list in
-	// TestOwnerRoleSelector_MigrationLockstep.
+	// `20260919130000_membership_is_an_authz_object` appended `iam.membership` (before it
+	// 0088 appended `vpc.cidrGroup`, and 0074 removed the retired compute block-storage
+	// types) — mirror of the owner selector list in TestOwnerRoleSelector_MigrationLockstep.
 	migrationObjectTypes := []string{
 		"compute.guestAccessKey", "compute.instance", "compute.placementGroup",
-		"iam.accessBinding", "iam.account", "iam.group", "iam.project",
+		"iam.accessBinding", "iam.account", "iam.group", "iam.membership", "iam.project",
 		"iam.role", "iam.serviceAccount", "iam.user",
 		"loadbalancer.listeners", "loadbalancer.networkLoadBalancers", "loadbalancer.targetGroups",
 		"registry.registries", "registry.repositories",
