@@ -14,7 +14,8 @@
 //  4. FGA Check `viewer@cluster:cluster_root`.
 //  5. Reader.Users().ListAccountsForUser → set of account ids.
 //  6. For each account: Reader.Accounts().Get + AccessBindings().ListBySubject
-//     (filtered to account-scope) → coarse role tags.
+//     (filtered to account-scope) + Roles().Get per DISTINCT bound role →
+//     coarse role tags (the tag follows the role name; see roleTags).
 //
 // Designed for UI bootstrap and CLI permission previews — the data is
 // coarse (cluster flags + per-account role tags) and intentionally NOT a
@@ -198,7 +199,12 @@ func (u *WhoAmIUseCase) collectAccounts(ctx context.Context, userID domain.UserI
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	rolesByAccount := make(map[domain.AccountID]map[string]struct{}, len(accountIDs))
+	// Тег читается у РОЛИ, поэтому сперва собирается набор РАЗЛИЧНЫХ ролей
+	// привязок уровня аккаунта: каталогу задаётся один вопрос на роль, а не
+	// на привязку, и стоимость снимка остаётся функцией числа аккаунтов
+	// вызывающего, а не числа его выдач.
+	accountBindings := make([]domain.AccessBinding, 0, len(bindings))
+	boundRoles := make(map[domain.RoleID]struct{}, len(bindings))
 	for _, b := range bindings {
 		if b.Status != domain.AccessBindingStatusActive {
 			continue
@@ -206,12 +212,21 @@ func (u *WhoAmIUseCase) collectAccounts(ctx context.Context, userID domain.UserI
 		if string(b.ResourceType) != "account" {
 			continue
 		}
+		accountBindings = append(accountBindings, b)
+		boundRoles[b.RoleID] = struct{}{}
+	}
+	tagByRole, err := roleTags(ctx, rd, boundRoles)
+	if err != nil {
+		return nil, err
+	}
+	rolesByAccount := make(map[domain.AccountID]map[string]struct{}, len(accountIDs))
+	for _, b := range accountBindings {
 		bucket, ok := rolesByAccount[domain.AccountID(b.ResourceID)]
 		if !ok {
 			bucket = make(map[string]struct{})
 			rolesByAccount[domain.AccountID(b.ResourceID)] = bucket
 		}
-		bucket[classifyRoleID(b.RoleID)] = struct{}{}
+		bucket[tagByRole[b.RoleID]] = struct{}{}
 	}
 
 	out := make([]WhoAmIAccountMembership, 0, len(accountIDs))
@@ -237,7 +252,7 @@ func (u *WhoAmIUseCase) collectAccounts(ctx context.Context, userID domain.UserI
 			if rolesByAccount[aid] == nil {
 				rolesByAccount[aid] = make(map[string]struct{})
 			}
-			rolesByAccount[aid]["owner"] = struct{}{}
+			rolesByAccount[aid][roleTagOwner] = struct{}{}
 		}
 		if bucket := rolesByAccount[aid]; len(bucket) > 0 {
 			tags := make([]string, 0, len(bucket))
@@ -256,25 +271,63 @@ func (u *WhoAmIUseCase) collectAccounts(ctx context.Context, userID domain.UserI
 	return out, nil
 }
 
-// classifyRoleID maps a role id to a coarse role tag (admin / editor /
-// viewer). Mirrors UserService.Invite::resolveRoleRelation: looks at the
-// trailing segment of the role id, falls back to `viewer` (least
-// privilege) for anything unrecognised. Avoids a per-binding Roles().Get
-// round-trip — the role id is the source of truth for the UI tag.
-func classifyRoleID(roleID domain.RoleID) string {
-	v := strings.ToLower(string(roleID))
+// Словарь грубых тегов роли — тот самый, что объявлен полем
+// `AccountMembership.roles` публичного контракта. Второго написания у этих
+// значений нет: словарь назван здесь один раз и читается отсюда.
+const (
+	roleTagOwner  = "owner"
+	roleTagAdmin  = "admin"
+	roleTagEditor = "editor"
+	roleTagViewer = "viewer"
+)
+
+// roleTags — грубый тег каждой РАЗЛИЧНОЙ роли, выданной привязками уровня
+// аккаунта.
+//
+// Тег берётся у ИМЕНИ роли, а не у её идентификатора. Идентификатор роли есть
+// `rol` плюс производный суффикс (`domain.SystemRoleID`) и тега не несёт **by
+// construction**: сегмента, отделённого точкой, в нём нет ни у одной роли —
+// ни у посевной, ни у заведённой арендатором. Имя же точку несёт
+// (`iam.account.admin`) и остаётся единственным источником, из которого тег
+// выводим.
+//
+// Роли, которой в каталоге нет, тег не сочиняется: она и есть «неопознанная»
+// и получает наименьшую привилегию — то же, что объявляет контракт про
+// нераспознанную роль. Отказ ЧТЕНИЯ каталога от этого отделён: он едет
+// вызывающему ошибкой, а не тихим `viewer`.
+func roleTags(ctx context.Context, rd kanamerepo.Reader, ids map[domain.RoleID]struct{}) (map[domain.RoleID]string, error) {
+	out := make(map[domain.RoleID]string, len(ids))
+	for id := range ids {
+		r, err := rd.Roles().Get(ctx, id)
+		if err != nil {
+			if status.Code(shared.MapRepoErr(err)) == codes.NotFound {
+				out[id] = roleTagViewer
+				continue
+			}
+			return nil, shared.MapRepoErr(err)
+		}
+		out[id] = classifyRoleName(r.Name)
+	}
+	return out, nil
+}
+
+// classifyRoleName maps a role NAME to a coarse role tag (owner / admin /
+// editor / viewer): the trailing dot-separated segment of the name, falling
+// back to `viewer` (least privilege) for anything unrecognised.
+func classifyRoleName(name domain.RoleName) string {
+	v := strings.ToLower(string(name))
 	if i := strings.LastIndexByte(v, '.'); i >= 0 {
 		v = v[i+1:]
 	}
 	switch v {
 	case "admin":
-		return "admin"
+		return roleTagAdmin
 	case "edit", "editor":
-		return "editor"
+		return roleTagEditor
 	case "view", "viewer":
-		return "viewer"
+		return roleTagViewer
 	case "owner":
-		return "owner"
+		return roleTagOwner
 	}
-	return "viewer"
+	return roleTagViewer
 }
