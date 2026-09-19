@@ -56,8 +56,9 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-09-19'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-18T23:59:09Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 6 — APPROVED: блокирующих ноль. Правка Р10 хирургическая, согласует счёт частоты
     этого документа с заимствованием Ф12 (Р7): сброс — по входу, завершённому до уровня всех
@@ -86,6 +87,79 @@ effective_approval:
       subject_sha256 (713ff0bd…) дословно; блок `event` дописывается отдельным коммитом поверх
       записи, задним числом не правится.
 
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    decided_by: acceptance-reviewer
+    decided_at: '2026-09-19'
+    issued_by_event: 5737618512
+    basis: >-
+      change-graph.md §3: вердикт действителен, когда его подтверждает внешнее событие —
+      принадлежащее названной задаче, с допущенным к роли автором, с телом, связывающим точный
+      отпечаток предмета, роль и вердикт. Все четыре условия выполнены и перемерены рецензентом
+      на своей ревизии; ни одно не взято со слов задания или дописывающего.
+    remeasured: >-
+      (1) Отпечаток предмета — `git show
+      73b16c78:docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+      | sha256sum` → 713ff0bd82d8df762c3a07c7d86e1737a6a3d2962cc3946c9dd2c04f8bb5e07c; совпал с именем файла ЭТОЙ записи и со строкой
+      `subject_sha256` тела события. (2) Принадлежность задаче — `gh api
+      repos/PRO-Robotech/kacho/issues/comments/5737618512` → `issue_url` указывает на
+      PRO-Robotech/kacho#1269, то есть на `subject.task`. (3) Полномочие — `pointpu` значится в
+      `review_authority.acceptance-reviewer` политики `docs/changes/policy.yaml`, `gh api
+      repos/PRO-Robotech/kacho/collaborators/pointpu/permission` → admin, `author_association`
+      ответа → MEMBER; эпоха post-cutover: `git merge-base --is-ancestor
+      1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main` в воркспейсе → 0. (4) Тело — пять
+      обязательных строк дословно, каждая ровно одна (`grep -cxF` → 1 по каждой), контроль в
+      другую сторону `grep -cxF 'verdict: CHANGES_REQUESTED'` → 0; отпечаток тела `gh api … |
+      jq -j .body | sha256sum` → 989dea4a80fbb4df5e8f8320a176a59499af2a1b7453c793577b1534218663a7, совпал с `event.body_sha256`;
+      `created_at == updated_at` ⇒ после публикации тело не правилось.
+    mechanism: >-
+      Правка ЭТОЙ записи на месте, а не новая запись и не правка шапки документа. Отпечаток
+      предмета не менялся, а координата записи ПО ОПРЕДЕЛЕНИЮ есть этот отпечаток
+      (`<sha256>.yaml`), поэтому второй записи о той же редакции не бывает by construction.
+      Запрет change-graph.md §2 («история ревью добавляется, не переписывается») предметом имеет
+      РЕДАКЦИЮ: новая редакция получает СОСЕДНЮЮ запись, чтобы свидетельство о прежней не
+      стиралось. Здесь редакция та же, вердикт, разбор, находки, числа и `why` не тронуты —
+      `why` намеренно оставлено рассуждением на момент вердикта, когда события в записи ещё не
+      было. Тронуты ровно три выводимых поля (issued/issued_at/ban1_lifted), добавлен этот блок
+      и выправлена одна фраза `event.publication_note`, которую этот же коммит сделал ложной.
+      `effective_approval` выводится из СОБЫТИЯ, то есть из факта, наступившего позже записи;
+      не привести его к факту значит оставить запись, утверждающую «санкции нет» там, где она
+      выдана.
+    precedent: >-
+      Форма взята у записи круга 7 этого каталога (423f7233…, событие 5730853026), и это НЕ
+      единичный прецедент, а инвариант каталога. Перепись по ветке `docs/kn-review-event-records`:
+      записей `docs/specs/reviews/*/*.yaml` — 53; из них с `verdict: APPROVED` и
+      `event.status: performed` — 23; `issued: true` у 21. Исключений было ровно два — эта запись
+      и парная ей. Контроль в другую сторону, доказывающий, что поле следует СОБЫТИЮ, а не
+      вердикту: `registration-and-its-three-consequences/7c81fa29…` — `verdict: APPROVED` при
+      `event.status: not_performed` и `issued: false`.
+    divergence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужен PyYAML
+      import glob, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      bad = [p for p, d in rows
+             if (d.get('event') or {}).get('status') == 'performed'
+             and d.get('verdict') == 'APPROVED'
+             and (d.get('effective_approval') or {}).get('issued') is not True]
+      print('осмотрено', len(rows), '· расхождений', len(bad))
+      for p in bad:
+          print(' ', p)
+      PY
+    divergence_predicate_result: >-
+      До этого коммита — «осмотрено 53 · расхождений 2» (эта запись и парная ей). После —
+      «осмотрено 53 · расхождений 0». Предикат проверен в обе стороны тем же прогоном: он
+      краснел ровно на двух известных записях и молчал на 21 исправной.
+    gate: >-
+      ГЕЙТА на это свойство в дереве НЕТ, и это сказано прямо, а не обойдено. Замер: `grep -rn
+      effective_approval` по скриптам и гейтам обоих деревьев — в `scripts/change-graph-gate/`
+      воркспейса 0 вхождений, в `scripts/docs-gate/` 0, в `internal/check/*.go` службы (не-тестовый
+      код) каталог `docs/specs/reviews/` не читается вовсе — 0 вхождений. Семейство `cg.review`
+      судит пакет `docs/changes/<change-id>/`, у которого другой дом, и до этих записей не
+      достаёт. Значит предикат выше держится ВНИМАНИЕМ; держателя у него нет, и это находка
+      уровня класса: расхождение «событие есть — запись молчит» стоило за сессию четырёх ложных
+      выводов — число со слов диспетчера, рецензентом не перемерялось. Задачу на гейт заводит не
+      рецензент: она названа строкой «нужен следующий» в возврате этого круга.
+
 authority:
   mode: versioned_policy_authority
   epoch: post-cutover
@@ -98,6 +172,43 @@ authority:
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
   allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5737618512
+  node_id: IC_kwDOTZqgWM8AAAABVf0cUA
+  url: https://github.com/PRO-Robotech/kacho/issues/1269#issuecomment-5737618512
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5737618512
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-18T23:59:09Z'
+  body_sha256: 989dea4a80fbb4df5e8f8320a176a59499af2a1b7453c793577b1534218663a7
+  subject_sha256: 713ff0bd82d8df762c3a07c7d86e1737a6a3d2962cc3946c9dd2c04f8bb5e07c
+  subject_revision: 73b16c78
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа задним числом
+    не правлены. Коммитом `ce46cfed` поля `effective_approval`
+    (issued/issued_at/ban1_lifted) тронуты НЕ были: дописывающий — `git-operator`, вердикта о
+    санкции он не выносит, и на тот момент запись объявляла `issued: false` при состоявшемся
+    событии. Расхождение снято СЛЕДУЮЩИМ коммитом, рецензентом — см.
+    `effective_approval.sanction`. Эта фраза правлена ровно потому, что тот коммит сделал её
+    прежнюю редакцию («запись по-прежнему объявляет issued: false») ложной; измерения
+    дописывающего ниже не тронуты.
+    Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5737618512` (id, node_id, user pointpu, MEMBER,
+    created_at; created_at == updated_at, то есть после публикации тело не правилось); пять строк
+    тела дословно, каждая ровно одна (`grep -cxF` → 1 по каждой); отпечаток тела — `gh api … |
+    jq -j .body | sha256sum` → 989dea4a…; форма команды проверена контролем в обе стороны на
+    событии круга 7 (5730853026): `jq -j` → 8409dfc3… как в его записи, `jq -r` → c6b8caac… —
+    другое число о другом входе. Отпечаток предмета снят самостоятельно: `git show
+    73b16c78:docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md | sha256sum` → 713ff0bd82d8df762c3a07c7d86e1737a6a3d2962cc3946c9dd2c04f8bb5e07c, совпал
+    с именем файла записи и со строкой `subject_sha256` тела события.
 
 attribution:
   reviewer_kind: claude_agent
