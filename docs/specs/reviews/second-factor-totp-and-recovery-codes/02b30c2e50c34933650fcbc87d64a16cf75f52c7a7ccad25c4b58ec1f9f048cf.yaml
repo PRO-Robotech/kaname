@@ -124,6 +124,40 @@ authority:
   authorized_actors: [pointpu]
   allowlisted_for_role: false
 
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5737617038
+  node_id: IC_kwDOTZqgWM8AAAABVf0Wjg
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5737617038
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5737617038
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-18T23:58:56Z'
+  body_sha256: b758c7da17e14a28a8148fee624f547d6aad9ef291357df985a794f1a74b3830
+  subject_sha256: 02b30c2e50c34933650fcbc87d64a16cf75f52c7a7ccad25c4b58ec1f9f048cf
+  subject_revision: 73b16c78
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа задним числом
+    не правлены. В ОТЛИЧИЕ от записи круга 7 этого каталога поля `effective_approval`
+    (issued/issued_at/ban1_lifted) НЕ тронуты: дописывающий — `git-operator`, вердикта о санкции
+    он не выносит. Запись поэтому по-прежнему объявляет `issued: false` при состоявшемся событии;
+    снять расхождение — решение того, кто выпускает effective approval.
+    Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5737617038` (id, node_id, user pointpu, MEMBER,
+    created_at; created_at == updated_at, то есть после публикации тело не правилось); пять строк
+    тела дословно, каждая ровно одна (`grep -cxF` → 1 по каждой); отпечаток тела — `gh api … |
+    jq -j .body | sha256sum` → b758c7da…; форма команды проверена контролем в обе стороны на
+    событии круга 7 (5730853026): `jq -j` → 8409dfc3… как в его записи, `jq -r` → c6b8caac… —
+    другое число о другом входе. Отпечаток предмета снят самостоятельно: `git show
+    73b16c78:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md | sha256sum` → 02b30c2e50c34933650fcbc87d64a16cf75f52c7a7ccad25c4b58ec1f9f048cf, совпал
+    с именем файла записи и со строкой `subject_sha256` тела события.
+
 attribution:
   reviewer_kind: claude_agent
   publishing_actor: pointpu

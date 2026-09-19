@@ -99,6 +99,40 @@ authority:
   authorized_actors: [pointpu]
   allowlisted_for_role: false
 
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5737618512
+  node_id: IC_kwDOTZqgWM8AAAABVf0cUA
+  url: https://github.com/PRO-Robotech/kacho/issues/1269#issuecomment-5737618512
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5737618512
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-18T23:59:09Z'
+  body_sha256: 989dea4a80fbb4df5e8f8320a176a59499af2a1b7453c793577b1534218663a7
+  subject_sha256: 713ff0bd82d8df762c3a07c7d86e1737a6a3d2962cc3946c9dd2c04f8bb5e07c
+  subject_revision: 73b16c78
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа задним числом
+    не правлены. В ОТЛИЧИЕ от записи круга 7 этого каталога поля `effective_approval`
+    (issued/issued_at/ban1_lifted) НЕ тронуты: дописывающий — `git-operator`, вердикта о санкции
+    он не выносит. Запись поэтому по-прежнему объявляет `issued: false` при состоявшемся событии;
+    снять расхождение — решение того, кто выпускает effective approval.
+    Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5737618512` (id, node_id, user pointpu, MEMBER,
+    created_at; created_at == updated_at, то есть после публикации тело не правилось); пять строк
+    тела дословно, каждая ровно одна (`grep -cxF` → 1 по каждой); отпечаток тела — `gh api … |
+    jq -j .body | sha256sum` → 989dea4a…; форма команды проверена контролем в обе стороны на
+    событии круга 7 (5730853026): `jq -j` → 8409dfc3… как в его записи, `jq -r` → c6b8caac… —
+    другое число о другом входе. Отпечаток предмета снят самостоятельно: `git show
+    73b16c78:docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md | sha256sum` → 713ff0bd82d8df762c3a07c7d86e1737a6a3d2962cc3946c9dd2c04f8bb5e07c, совпал
+    с именем файла записи и со строкой `subject_sha256` тела события.
+
 attribution:
   reviewer_kind: claude_agent
   publishing_actor: pointpu
