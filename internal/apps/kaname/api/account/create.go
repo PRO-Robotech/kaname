@@ -241,6 +241,16 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 		return nil, shared.MapValidationErr(err)
 	}
 
+	// Резерв пространства личных аккаунтов (Ф4 Р9 п.3): имя из `personal-cloud-`
+	// отвергается синхронно, ПОСЛЕ отказа по форме (её судит Validate выше) — это
+	// вход арендатора в пространство, которое заполняет система. INVALID_ARGUMENT,
+	// а не ALREADY_EXISTS: отвергается сам ВХОД, независимо от состояния каталога;
+	// ничего с таким именем существовать не обязано (code-authoring §4.1 — форма
+	// раньше резерва).
+	if domain.IsPersonalAccountName(a.Name) {
+		return nil, shared.InvalidArg("name", reservedAccountNameRefusal)
+	}
+
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Create account %s", a.Name),

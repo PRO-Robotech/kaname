@@ -253,8 +253,20 @@ func namedByThisForm(err error) error {
 
 // refuse — отказ по сентинелу адаптера: единый отказ регистрации (Р3) либо
 // недоступность. Причина — только в клетке счётчика.
+//
+// Классификация идёт ПО МЕСТУ, а не по одному сентинелу: нарушение уникальности
+// из записи ЛИЧНОГО аккаунта (`ErrPersonalAccountNameUnavailable`, вложено в
+// `ErrAlreadyExists`) — НЕВЫПОЛНЕНИЕ, а не занятость адреса, поэтому проверяется
+// ПЕРВЫМ, до общего `ErrAlreadyExists`. Иначе тот же 23505 из системно-выбранного
+// имени ушёл бы в единый отказ занятости (400) и солгал бы о свободном адресе (Р9,
+// Р3).
 func (uc *RegisterUseCase) refuse(err error) error {
 	switch {
+	case errors.Is(err, iamerr.ErrPersonalAccountNameUnavailable):
+		uc.logger.Error("registration: not performed — personal account name could not be allocated; state unchanged",
+			"err", err.Error())
+		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
+		return humansession.ErrStoreUnavailable
 	case errors.Is(err, iamerr.ErrAlreadyExists):
 		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeRefusedOccupied)
 		return ErrRefused

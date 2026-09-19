@@ -214,9 +214,23 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
+	// accounts_name_unique судит имя через САМО ОГРАНИЧЕНИЕ (ban #10), но исходом
+	// `ON CONFLICT (name) DO NOTHING`, а не сырым 23505. Различие несущее: сырое
+	// нарушение уникальности обрывает транзакцию до конца её тела, тогда как личный
+	// аккаунт регистрации перебирает свободное имя ТОЙ ЖЕ транзакцией
+	// (`user.RegisterMirrorTx`). ON CONFLICT оставляет транзакцию годной —
+	// столкновение возвращает НОЛЬ строк, и повтор с иным именем идёт следующим
+	// оператором. Это и есть та «равноценная альтернатива одним оператором», о
+	// которой говорит комментарий в bootstrap-теле.
+	//
+	// Тон и признак отказа сохранены дословно: ноль строк переводится в тот же
+	// ErrAlreadyExists «Account with name <name> already exists», что производил
+	// прежний 23505 (`uniqueText`, ветвь accounts_name_unique) — контракт
+	// Account.Create по столкновению имени не меняется.
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (name) DO NOTHING
 		RETURNING %s`, accountCols)
 
 	row := w.tx.QueryRow(ctx, q,
@@ -225,10 +239,19 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	)
 	out, err := scanAccount(row)
 	if err != nil {
-		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Имя занято (accounts_name_unique) — ON CONFLICT ничего не вставил и НЕ
+			// поднял 23505, поэтому транзакция цела и вызывающий вправе повторить с
+			// иным именем. Признак/текст те же, что у прежнего 23505.
+			return domain.Account{}, iamerr.Wrapf(iamerr.ErrAlreadyExists,
+				"Account with name %s already exists", a.Name)
+		}
+		// На прочих UNIQUE (например первичный ключ — id глобально уникален by
+		// construction, значит это НАШ дефект) / FK / CHECK идём через mapErr с
+		// verbatim-text hint'ами.
 		switch pgfault.Classify(err).Class {
 		case pgfault.Unique:
-			return domain.Account{}, mapErr(err, "", string(a.Name)) // accounts_name_unique → "Account with name <name> already exists"
+			return domain.Account{}, mapErr(err, "", string(a.ID))
 		case pgfault.ForeignKey:
 			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
 		case pgfault.Check:
