@@ -45,6 +45,7 @@ type fakeWhoAmIRepo struct {
 	accountsBy map[domain.UserID][]domain.AccountID
 	accounts   map[domain.AccountID]domain.Account
 	bindings   []domain.AccessBinding
+	roles      map[domain.RoleID]domain.Role
 	listErr    error
 }
 
@@ -67,7 +68,7 @@ func (r *fakeWhoAmIReader) ServiceAccounts() service_account.ReaderIface {
 	return nil
 }
 func (r *fakeWhoAmIReader) Groups() group.ReaderIface { return nil }
-func (r *fakeWhoAmIReader) Roles() role.ReaderIface   { return nil }
+func (r *fakeWhoAmIReader) Roles() role.ReaderIface   { return &fakeRoleRdr{parent: r.parent} }
 func (r *fakeWhoAmIReader) AccessBindings() access_binding.ReaderIface {
 	return &fakeABRdr{parent: r.parent}
 }
@@ -92,6 +93,45 @@ func (r *fakeAcctRdr) ExistsByName(context.Context, domain.AccountName) (bool, e
 }
 func (r *fakeAcctRdr) CountAccountsByOwner(context.Context, domain.UserID) (int, error) {
 	return 0, nil
+}
+
+// fakeRoleRdr — дублёр каталога ролей. Отвечает ровно то, что настоящий:
+// строку роли по её id, а отсутствующую — тем же ErrNotFound. Роль, которой
+// в карте нет, для use-case неотличима от снятой из каталога.
+type fakeRoleRdr struct{ parent *fakeWhoAmIRepo }
+
+func (r *fakeRoleRdr) Get(_ context.Context, id domain.RoleID) (domain.Role, error) {
+	rl, ok := r.parent.roles[id]
+	if !ok {
+		return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
+	}
+	return rl, nil
+}
+
+// Остальные методы каталога WhoAmI не зовёт: снимок личности читает имя роли и
+// ничего больше. Пустой ответ здесь — не «ответить нечем», а отсутствие
+// предмета: утверждения, которого никто не делал, дублёр не производит.
+func (r *fakeRoleRdr) GetWithVersion(ctx context.Context, id domain.RoleID) (domain.Role, string, error) {
+	got, err := r.Get(ctx, id)
+	return got, "v1", err
+}
+func (*fakeRoleRdr) List(context.Context, role.ListFilter) ([]domain.Role, string, error) {
+	return nil, "", nil
+}
+func (*fakeRoleRdr) ListAssignable(context.Context, string, string, role.ListFilter) ([]domain.Role, string, error) {
+	return nil, "", nil
+}
+func (*fakeRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	return nil, nil
+}
+func (*fakeRoleRdr) WithdrawnGrants(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.WithdrawnGrant, error) {
+	return nil, nil
+}
+func (*fakeRoleRdr) PrunedSelectorTypes(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.PrunedSelectorType, error) {
+	return nil, nil
+}
+func (*fakeRoleRdr) Lifecycles(context.Context, []domain.RoleID) (map[domain.RoleID]domain.RoleLifecycle, error) {
+	return nil, nil
 }
 
 // fakeUserRdr.
@@ -248,7 +288,7 @@ func TestWhoAmI_User_FullSnapshot(t *testing.T) {
 				SubjectID:    uid,
 				ResourceType: "account",
 				ResourceID:   acc2,
-				RoleID:       "iam.editor",
+				RoleID:       seededRoleIDEdit,
 				Status:       domain.AccessBindingStatusActive,
 			},
 			// REVOKED binding on acc1 — must NOT contribute a tag.
@@ -257,9 +297,13 @@ func TestWhoAmI_User_FullSnapshot(t *testing.T) {
 				SubjectID:    uid,
 				ResourceType: "account",
 				ResourceID:   acc1,
-				RoleID:       "iam.admin",
+				RoleID:       seededRoleIDAccountAdmin,
 				Status:       domain.AccessBindingStatusRevoked,
 			},
+		},
+		roles: map[domain.RoleID]domain.Role{
+			seededRoleIDEdit:         {ID: seededRoleIDEdit, Name: "edit", IsSystem: true},
+			seededRoleIDAccountAdmin: {ID: seededRoleIDAccountAdmin, Name: "iam.account.admin", IsSystem: true},
 		},
 	}
 	checker := &fakeChecker{allow: map[string]bool{
@@ -399,23 +443,46 @@ func TestWhoAmI_ServiceAccount_NoAccountListing(t *testing.T) {
 	}
 }
 
-func TestClassifyRoleID_HappyPath(t *testing.T) {
+// TestClassifyRoleName_HappyPath — словарь тегов читается по ИМЕНИ роли.
+// Имена взяты из посева (`internal/migrations/0001_initial.sql`), а не
+// сочинены: имя вида `iam.<тег>` в этом дереве не носит ни одна роль, и
+// проба на нём закрепляла бы поведение, которого продукт не производит.
+func TestClassifyRoleName_HappyPath(t *testing.T) {
 	cases := []struct {
-		id, want string
+		name, want string
 	}{
-		{"iam.admin", "admin"},
-		{"iam.editor", "editor"},
-		{"iam.viewer", "viewer"},
-		{"iam.edit", "editor"},
-		{"iam.view", "viewer"},
-		{"iam.owner", "owner"},
-		{"customRole", "viewer"},   // unknown → viewer (least privilege)
-		{"", "viewer"},             // empty → viewer
-		{"compute.admin", "admin"}, // dotted ids: last segment classified
+		{"owner", "owner"},             // посев: rol72122ce96bfec66e2
+		{"admin", "admin"},             // посев: rol21232f297a57a5a74
+		{"edit", "editor"},             // посев: rolde95b43bceeb4b998
+		{"view", "viewer"},             // посев: rol1bda80f2be4d3658e
+		{"iam.account.admin", "admin"}, // посев: составное имя — тег по хвосту
+		{"iam.account.edit", "editor"}, // посев
+		{"iam.account.view", "viewer"}, // посев
+		{"vpc.gateway.view", "viewer"}, // посев: составное имя другого модуля
+		{"billing-ops", "viewer"},      // роль арендатора → наименьшая привилегия
+		{"", "viewer"},                 // имени нет → наименьшая привилегия
+		{"ADMIN", "admin"},             // регистр имени тега не меняет
 	}
 	for _, c := range cases {
-		if got := classifyRoleID(domain.RoleID(c.id)); got != c.want {
-			t.Errorf("classifyRoleID(%q) = %q; want %q", c.id, got, c.want)
+		if got := classifyRoleName(domain.RoleName(c.name)); got != c.want {
+			t.Errorf("classifyRoleName(%q) = %q; want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestClassifyRoleName_RoleIDCarriesNoTag — идентификатор роли тега не несёт:
+// это ПРИЧИНА дефекта #279, и она закрепляется прямо. Подставленный вместо
+// имени id обязан дать откат, а не тег — иначе кто-нибудь снова прочтёт его
+// как источник классификации.
+func TestClassifyRoleName_RoleIDCarriesNoTag(t *testing.T) {
+	for _, id := range []string{
+		domain.OwnerRoleID,
+		domain.ClusterAdminRoleID,
+		seededRoleIDAccountAdmin,
+		seededRoleIDEdit,
+	} {
+		if got := classifyRoleName(domain.RoleName(id)); got != "viewer" {
+			t.Errorf("classifyRoleName(%q) = %q; id роли тега не несёт, ожидался откат viewer", id, got)
 		}
 	}
 }
@@ -439,4 +506,107 @@ func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.Acco
 // подставная строка была бы утверждением, которого никто не делал (kaname#181).
 func (*fakeUserRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
 	return domain.Membership{}, iamerr.ErrNotFound
+}
+
+// ── Тег роли берётся у ПОСЕВНОЙ роли, а не у хвоста её id (#279) ─────────
+
+// Посевные id ролей и их имена — дословно из `internal/migrations/0001_initial.sql`
+// (строки 3777, 3778, 3780, 3788, 3814). Точки в id нет НИ У ОДНОЙ из 48 посевных
+// ролей: id есть `rol` плюс производный суффикс (`internal/domain/derived_id.go`),
+// точка живёт только в ИМЕНИ (`iam.account.admin`).
+const (
+	seededRoleIDAccountAdmin = "rol6307d201bf18e6763" // name: iam.account.admin
+	seededRoleIDEdit         = "rolde95b43bceeb4b998" // name: edit
+	seededRoleIDView         = "rol1bda80f2be4d3658e" // name: view
+	customRoleIDBillingOps   = "rol0000000000custom1" // роль арендатора: тега не имеет
+)
+
+// TestWhoAmI_AccountRoles_FollowTheSeededRole — тег привязки уровня аккаунта
+// обязан отвечать РОЛИ, которую привязка выдаёт.
+//
+// Положительные близнецы здесь — два, и оба обязаны остаться зелёными после
+// правки: роль `view`, у которой `viewer` законен ПО ИМЕНИ, и роль арендатора
+// `billing-ops`, у которой `viewer` законен как откат наименьшей привилегии.
+// Без них правка просто перевернула бы ошибку.
+func TestWhoAmI_AccountRoles_FollowTheSeededRole(t *testing.T) {
+	const uid = "usr0000000000000seed"
+	const (
+		accOwn    = "acc0000000000000own1"
+		accAdmin  = "acc0000000000000adm1"
+		accEdit   = "acc0000000000000edt1"
+		accView   = "acc0000000000000vew1"
+		accCustom = "acc0000000000000cst1"
+	)
+	binding := func(acc, roleID string) domain.AccessBinding {
+		return domain.AccessBinding{
+			SubjectType:  "user",
+			SubjectID:    uid,
+			ResourceType: "account",
+			ResourceID:   acc,
+			RoleID:       domain.RoleID(roleID),
+			Status:       domain.AccessBindingStatusActive,
+		}
+	}
+	repo := &fakeWhoAmIRepo{
+		users:      map[domain.UserID]domain.User{uid: {ID: uid, Email: "seed@example.test"}},
+		accountsBy: map[domain.UserID][]domain.AccountID{uid: {accOwn, accAdmin, accEdit, accView, accCustom}},
+		accounts: map[domain.AccountID]domain.Account{
+			// Личный аккаунт: вызывающий — его владелец, и привязка OwnerRoleID
+			// уровня аккаунта у него есть (user/mirror_tx.go, account/create.go).
+			accOwn:    {ID: accOwn, Name: "Own", OwnerUserID: uid},
+			accAdmin:  {ID: accAdmin, Name: "Adm", OwnerUserID: "usr000000000000other"},
+			accEdit:   {ID: accEdit, Name: "Edt", OwnerUserID: "usr000000000000other"},
+			accView:   {ID: accView, Name: "Vew", OwnerUserID: "usr000000000000other"},
+			accCustom: {ID: accCustom, Name: "Cst", OwnerUserID: "usr000000000000other"},
+		},
+		bindings: []domain.AccessBinding{
+			binding(accOwn, domain.OwnerRoleID),
+			binding(accAdmin, seededRoleIDAccountAdmin),
+			binding(accEdit, seededRoleIDEdit),
+			binding(accView, seededRoleIDView),
+			binding(accCustom, customRoleIDBillingOps),
+		},
+		roles: map[domain.RoleID]domain.Role{
+			domain.OwnerRoleID:       {ID: domain.OwnerRoleID, Name: "owner", IsSystem: true},
+			seededRoleIDAccountAdmin: {ID: seededRoleIDAccountAdmin, Name: "iam.account.admin", IsSystem: true},
+			seededRoleIDEdit:         {ID: seededRoleIDEdit, Name: "edit", IsSystem: true},
+			seededRoleIDView:         {ID: seededRoleIDView, Name: "view", IsSystem: true},
+			customRoleIDBillingOps:   {ID: customRoleIDBillingOps, Name: "billing-ops", AccountID: accCustom},
+		},
+	}
+	uc := NewWhoAmIUseCase(repo, nil)
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "user", ID: uid})
+
+	res, err := uc.Execute(ctx)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	got := make(map[domain.AccountID][]string, len(res.Accounts))
+	for _, a := range res.Accounts {
+		got[a.AccountID] = a.Roles
+	}
+	for _, c := range []struct {
+		account domain.AccountID
+		want    []string
+		why     string
+	}{
+		{accOwn, []string{"owner"}, "владелец личного аккаунта держит роль owner и только её"},
+		{accAdmin, []string{"admin"}, "участник с ролью iam.account.admin — администратор"},
+		{accEdit, []string{"editor"}, "роль edit — редактор"},
+		{accView, []string{"viewer"}, "положительный близнец: у роли view тег viewer ЗАКОНЕН"},
+		{accCustom, []string{"viewer"}, "положительный близнец: неизвестная роль откатывается в viewer"},
+	} {
+		have := got[c.account]
+		if len(have) != len(c.want) {
+			t.Errorf("%s: roles(%s) = %v; want %v", c.why, c.account, have, c.want)
+			continue
+		}
+		for i := range c.want {
+			if have[i] != c.want[i] {
+				t.Errorf("%s: roles(%s) = %v; want %v", c.why, c.account, have, c.want)
+				break
+			}
+		}
+	}
 }
