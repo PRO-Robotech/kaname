@@ -44,6 +44,16 @@ type IssueInput struct {
 	// EmitAudit — писать ли событие выдачи здесь; выдающий глагол, у которого
 	// своё событие (регистрация, восстановление), выключает.
 	EmitAudit bool
+	// AccessKeyID — ключ, утверждением которого выдана сессия (Ф13 Р10).
+	// Пусто — «не задано»: выдача не ключом. Значения множеств не пересекаются
+	// by construction — идентификатор ключа пустым не бывает.
+	//
+	// Поле идёт ТОЛЬКО в payload события `iam.session.issued`; состав ЗАПИСИ
+	// сессии (`domain.HumanSession`) им не расширяется (§7 инв. 11): ключ —
+	// факт о том, ЧЕМ вошли, а не свойство сессии, и читателя в записи у него
+	// нет. Гейт `audit_payload_pii` поле покрывает: `ak-…` — адрес наружу
+	// (Ф7 Р10), не личные данные.
+	AccessKeyID domain.AccessKeyID
 }
 
 // IssueSession — запись, память первой аутентификации и (если просили)
@@ -88,16 +98,22 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 		return domain.HumanSession{}, domain.SessionBearer{}, err
 	}
 	if in.EmitAudit {
+		// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
+		// неизменяемым идентификатором, сессия — своим.
+		payload := map[string]any{
+			"user_id":    string(in.User.ID),
+			"session_id": string(s.ID),
+			"methods":    methods,
+		}
+		// Ключ — только когда им и вошли: пустое значение в событие не идёт,
+		// иначе «не задано» стало бы неотличимо от значения (Ф13 Р10).
+		if in.AccessKeyID != "" {
+			payload["access_key_id"] = string(in.AccessKeyID)
+		}
 		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 			EventType:       AuditSessionIssued,
 			TenantAccountID: string(in.User.AccountID),
-			// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
-			// неизменяемым идентификатором, сессия — своим.
-			Payload: map[string]any{
-				"user_id":    string(in.User.ID),
-				"session_id": string(s.ID),
-				"methods":    methods,
-			},
+			Payload:         payload,
 		}); err != nil {
 			return domain.HumanSession{}, domain.SessionBearer{}, err
 		}

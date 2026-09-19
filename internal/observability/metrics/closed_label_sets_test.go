@@ -190,6 +190,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "ноль заведений за всю жизнь и непровязанный глагол выглядят одинаково без клетки",
 	},
+	AccessKeyLoginOutcomesMetric: {
+		Cells: len(humansession.AccessKeyLoginOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вход ключом отвечает ОДНИМ отказом на все причины (Ф13 Р7): испытание, удостоверение, рукоятка и подпись снаружи неразличимы by construction, и клетка — единственное место, где причина видна. Ноль по ней до первого события обязан быть виден, иначе непровязанная полоса выглядит как полоса без отказов",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },

@@ -46,6 +46,57 @@ func LoginOutcomes() []LoginOutcome {
 	}
 }
 
+// AccessKeyLoginOutcome — исход полосы входа КЛЮЧОМ по причине (Ф13 Р10,
+// Ф13-30). Наружу все отказы уходят одним ответом (Р7); причина различима
+// только этой клеткой и журналом службы.
+//
+// Ветви «удостоверения нет вовсе» и «ключ снят» считает ОДНА клетка
+// `credential-unknown`: снятие удаляет строку, и у проверяющего эти два
+// состояния суть одно (Р15) — различить их нечем, поэтому клетки «ключ снят»
+// не существует.
+type AccessKeyLoginOutcome string
+
+const (
+	// AccessKeyLoginIssued — сессия выдана.
+	AccessKeyLoginIssued AccessKeyLoginOutcome = "issued"
+	// AccessKeyLoginChallengeIssued — испытание выдано (глагол `begin`).
+	AccessKeyLoginChallengeIssued AccessKeyLoginOutcome = "challenge-issued"
+	// AccessKeyLoginChallengeRefused — испытание не выдавалось, потреблено,
+	// истекло либо выдано в другом контексте формы.
+	AccessKeyLoginChallengeRefused AccessKeyLoginOutcome = "challenge-refused"
+	// AccessKeyLoginCredentialUnknown — строки удостоверения нет (в том числе
+	// потому, что ключ снят).
+	AccessKeyLoginCredentialUnknown AccessKeyLoginOutcome = "credential-unknown"
+	// AccessKeyLoginUserHandle — рукоятка не равна рукоятке строки (включая
+	// строку без рукоятки: совпасть не может).
+	AccessKeyLoginUserHandle AccessKeyLoginOutcome = "user-handle"
+	// AccessKeyLoginAssertionRefused — утверждение отвергнуто проверяющим
+	// (подпись, происхождение, хэш имени, присутствие, алгоритм).
+	AccessKeyLoginAssertionRefused AccessKeyLoginOutcome = "assertion-refused"
+	// AccessKeyLoginCounter — счётчик подписи не больше сохранённого.
+	AccessKeyLoginCounter AccessKeyLoginOutcome = "counter"
+	// AccessKeyLoginCounterRace — сдвиг счётчика перехвачен другим
+	// утверждением того же ключа (Ф7-20 ветвь «б»).
+	AccessKeyLoginCounterRace AccessKeyLoginOutcome = "counter-race"
+	// AccessKeyLoginBlocked — владелец ключа заблокирован распорядителем.
+	AccessKeyLoginBlocked AccessKeyLoginOutcome = "blocked"
+	// AccessKeyLoginRateLimited — отказ по частоте (попыткой не считается).
+	AccessKeyLoginRateLimited AccessKeyLoginOutcome = "rate-limited"
+	// AccessKeyLoginStoreFailed — хранилище не ответило.
+	AccessKeyLoginStoreFailed AccessKeyLoginOutcome = "store-failed"
+)
+
+// AccessKeyLoginOutcomes — закрытый перечень исходов полосы входа ключом:
+// приёмник засевает им клетки нулём до первого события (форма Ф-е).
+func AccessKeyLoginOutcomes() []AccessKeyLoginOutcome {
+	return []AccessKeyLoginOutcome{
+		AccessKeyLoginIssued, AccessKeyLoginChallengeIssued, AccessKeyLoginChallengeRefused,
+		AccessKeyLoginCredentialUnknown, AccessKeyLoginUserHandle, AccessKeyLoginAssertionRefused,
+		AccessKeyLoginCounter, AccessKeyLoginCounterRace, AccessKeyLoginBlocked,
+		AccessKeyLoginRateLimited, AccessKeyLoginStoreFailed,
+	}
+}
+
 // RewriteOutcome — исход переписывания материала при успешной проверке
 // (Ф3-43; ID-PW-1 PWV-08…11, 19): переписано · не требовалось · отказ записи ·
 // не переписывается по причине (72 байта · нулевой байт).
@@ -151,6 +202,9 @@ type Observer interface {
 	SecondFactorPresentationObserved(method assurance.Method, outcome PresentationOutcome)
 	SecondFactorRefusalObserved(refusal SecondFactorRefusal)
 	SecondFactorEventObserved(event SecondFactorEvent)
+	// AccessKeyLoginObserved — исход полосы входа ключом (Ф13 Р10): наружу
+	// отказы неразличимы, поэтому причина живёт только здесь.
+	AccessKeyLoginObserved(outcome AccessKeyLoginOutcome)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
@@ -169,3 +223,4 @@ func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome)        
 func (NopObserver) SecondFactorPresentationObserved(assurance.Method, PresentationOutcome) {}
 func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)                        {}
 func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}
+func (NopObserver) AccessKeyLoginObserved(AccessKeyLoginOutcome)                           {}

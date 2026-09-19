@@ -107,6 +107,9 @@ type loginLane struct {
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// loginChallenges — испытания полосы входа ключом (Ф13, kacho#1282): своя
+	// таблица со своим уборщиком.
+	loginChallenges *kanamepg.AccessKeyLoginRepo
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -175,7 +178,7 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
-		Challenges: l.keys,
+		Challenges: l.keys, LoginChallenges: l.loginChallenges,
 	}
 }
 
@@ -546,6 +549,26 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Вход ключом доступа (Ф13, kacho#1282): два глагола формы над ТЕМИ ЖЕ
+	// примитивами, что полоса сессии, — проверяющий утверждений Ф7, правило
+	// уровня Ф11, выдача Ф1, единый отказ и счёт Ф3. Своих ручек посадки полоса
+	// не заводит: привязка и срок испытания — величины Ф7 (§7 инв. 5).
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	loginChallenges := kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
+	akDeps := humansession.AccessKeyLoginDeps{
+		Store: sessions, Keys: loginChallenges, Methods: methods,
+		Binding: cfg.AuthN.AccessKeys.Binding(), ChallengeTTL: access_keys.ChallengeTTL,
+		UserVerification: access_keys.UserVerificationAssertion,
+		Limits:           limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+	}
+	akBeginUC, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	akLoginUC, err := humansession.NewAccessKeyLoginUseCase(akDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -556,6 +579,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+		akBegin: akBeginUC, akLogin: akLoginUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -564,7 +588,8 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
-		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		loginChallenges: loginChallenges,
 	}, nil
 }
 
@@ -614,6 +639,17 @@ type laneVerbs struct {
 	remove     *humansession.RemoveSecondFactorUseCase
 	regenerate *humansession.RegenerateBackupCodesUseCase
 	stepUp     *humansession.StepUpUseCase
+	// Вход ключом доступа (Ф13).
+	akBegin *humansession.BeginAccessKeyLoginUseCase
+	akLogin *humansession.AccessKeyLoginUseCase
+}
+
+func (v laneVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	return v.akBegin.Execute(ctx, in)
+}
+
+func (v laneVerbs) AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	return v.akLogin.Execute(ctx, in)
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {

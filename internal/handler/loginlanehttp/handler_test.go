@@ -89,6 +89,24 @@ type stubLane struct {
 	removeIn   []humansession.RemoveSecondFactorInput
 	regenIn    []humansession.RegenerateBackupCodesInput
 	stepUpIn   []humansession.StepUpInput
+
+	// Вход ключом доступа (Ф13).
+	akBeginOut humansession.BeginAccessKeyLoginOutput
+	akBeginErr error
+	akLoginOut humansession.LoginOutput
+	akLoginErr error
+	akBeginIn  []humansession.BeginAccessKeyLoginInput
+	akLoginIn  []humansession.AccessKeyLoginInput
+}
+
+func (s *stubLane) BeginAccessKeyLogin(_ context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	s.akBeginIn = append(s.akBeginIn, in)
+	return s.akBeginOut, s.akBeginErr
+}
+
+func (s *stubLane) AccessKeyLogin(_ context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	s.akLoginIn = append(s.akLoginIn, in)
+	return s.akLoginOut, s.akLoginErr
 }
 
 func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {

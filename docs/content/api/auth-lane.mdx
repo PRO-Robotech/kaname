@@ -36,6 +36,8 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/access-key/begin</code></td><td>испытание входа ключом доступа; человека запрос не называет</td><td><code>access-key-login</code></td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/access-key/login</code></td><td>вход ключом доступа без пароля; отвечает как вход паролем</td><td><code>access-key-login</code></td><td>нет</td></tr>
   </tbody>
 </table>
 
@@ -100,7 +102,7 @@ SAN проверенного клиентского сертификата по�
 печеньем `kaname_form`. Признак — свёртка HMAC-SHA256 над видом формы с ключом-контекстом:
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
-`recovery`, `recovery-complete`, `second-factor`, `step-up`.
+`recovery`, `recovery-complete`, `second-factor`, `step-up`, `access-key-login`.
 
 <CodeBlock language="bash">
   {dedent`
@@ -110,7 +112,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up access-key-login]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -277,6 +279,65 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 `missingForLevel2` — какие способы (`totp`, `lookup_secret`) его предъявление в этой сессии
 выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
 запасным кодом — `2`; один пароль либо код восстановления — `1`.
+
+### Вход ключом доступа — `POST /iam/v1/auth/access-key/{begin,login}`
+
+Ключ доступа — **первичный** способ входа, не добавка к паролю: человек без пароля входит им и
+получает ту же сессию, что вошедший паролем. Два обращения одной формы, и вид признака у них
+общий — `access-key-login`.
+
+**Первое — испытание.** Запрос не называет человека вовсе: ни адреса, ни имени. Ответ —
+`PublicKeyCredentialRequestOptions`, где `allowCredentials` **пустой массив словом**: браузер
+сам предлагает подходящее обнаруживаемое удостоверение, а служба не подсказывает, у кого оно
+есть. `timeout` — срок испытания в миллисекундах; `rpId` и `userVerification` — величины
+привязки службы.
+
+<CodeBlock language="json">
+  {dedent`
+    POST /iam/v1/auth/access-key/begin
+    {"csrfToken": "…"}
+
+    200
+    {"publicKey": {
+      "challenge": "…", "rpId": "console.example", "timeout": 300000,
+      "userVerification": "preferred", "allowCredentials": []
+    }}
+  `}
+</CodeBlock>
+
+Испытание живёт при **контексте формы**, а не при человеке, и его **одно** на контекст:
+повторное обращение замещает прежнее. Предъявление гасит испытание — каким бы ни был исход, —
+поэтому второе обращение с тем же испытанием не проходит никогда, и собирать утверждение
+заново нужно с нового `begin`.
+
+**Второе — предъявление.** Тело несёт ответ браузера целиком. Поля — base64url **без
+дополнения**; `userHandle` **обязателен**: им служба и узнаёт, чей это ключ.
+
+<CodeBlock language="json">
+  {dedent`
+    POST /iam/v1/auth/access-key/login
+    {"csrfToken": "…", "credential": {
+      "id": "…", "rawId": "…", "type": "public-key",
+      "response": {"clientDataJSON": "…", "authenticatorData": "…",
+                   "signature": "…", "userHandle": "…"}
+    }}
+  `}
+</CodeBlock>
+
+Ответ успеха — **та же форма, что у входа паролём**: `user`, `session`, печенье
+`kaname_session` и новый `kaname_form`. Уровень сессии выводится из флагов **этого**
+утверждения: ключ, выполнивший проверку пользователя и не допускающий резервного копирования,
+даёт «3»; всякое другое утверждение ключа — «2». Поля `secondFactor` у этой формы нет: второй
+фактор она не требует и не принимает.
+
+Отказ входа ключом — **тот же один отказ**, что у входа паролём: `401`, код `16`,
+`authentication failed`, без печенья. Что именно не сошлось — испытание, удостоверение,
+рукоятка, подпись, — ответ не говорит и говорить не будет; различает причины только оператор
+службы по её счётчикам. Отказ **формы** (поле не прислано, лишнее поле, чужой вид признака)
+остаётся отличимым: он про запрос, а не про личность.
+
+Ключ у человека может быть не один, и вход не спрашивает, какой именно: подойдёт любой его
+принятый ключ. Пароль при этом не читается и не требуется — полосы независимы.
 
 ### Ключи доступа (WebAuthn) — `AccessKeyService`
 

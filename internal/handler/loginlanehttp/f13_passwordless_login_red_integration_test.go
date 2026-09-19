@@ -164,9 +164,9 @@ func TestAccessKeyLogin_F1308_D2_ChallengeIsOneTimeAndAtomic(t *testing.T) {
 	h := newSessionLane(t)
 	fixtureIsSound(t, h)
 
-	// Контекст формы — существующим глаголом (на `dd66b5be` вида
-	// `access-key-login` ещё нет; при посадке L1 контекст берётся под ним).
-	token, formCk := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
+	// Контекст формы — под СВОИМ видом (L1 посажен): признак вида `login`
+	// этой форме не годится (Ф13-02 «б»).
+	token, formCk := akFormContext(t, h)
 
 	// (1) begin выдаёт испытание — Ф13-01. КРАСНЫЙ: глагол не смонтирован.
 	begin := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyBegin,
@@ -198,6 +198,7 @@ func TestAccessKeyLogin_F1308_D2_ChallengeIsOneTimeAndAtomic(t *testing.T) {
 	// горутины над ОДНИМ испытанием — ровно одна проходит (Ф13-08, cross-replica).
 	auth := webauthntest.New(t, webauthntest.AlgES256)
 	userHandle := []byte("uh-" + string(h.user.ID))
+	givenAcceptedAccessKey(t, h, auth, userHandle)
 	const racers = 2
 	var (
 		wg      sync.WaitGroup
@@ -240,8 +241,9 @@ func TestAccessKeyLogin_F1308_D2_ChallengeIsOneTimeAndAtomic(t *testing.T) {
 func TestAccessKeyLogin_F1320_D3_UserHandleRequiredAndUnconditional(t *testing.T) {
 	h := newSessionLane(t)
 	fixtureIsSound(t, h)
-	token, formCk := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
 	auth := webauthntest.New(t, webauthntest.AlgES256)
+	givenAcceptedAccessKey(t, h, auth, []byte("uh-"+string(h.user.ID)))
+	token, formCk := akFormContext(t, h)
 	as := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte("challenge-of-the-probe-0001"), Origin: akProbeOrigin, RPID: akProbeRPID})
 
 	// (а) userHandle ОТСУТСТВУЕТ → 400 отказ формы, ДО сверки байтов (Ф3-05).
@@ -252,9 +254,12 @@ func TestAccessKeyLogin_F1320_D3_UserHandleRequiredAndUnconditional(t *testing.T
 	require.Contains(t, noHandle.body, "userHandle", "D3/Ф13-07: отказ формы называет поле")
 
 	// (б) userHandle несовпавший → ЕДИНЫЙ отказ входа 401 (безусловная сверка,
-	// Ф13-20/Ф13-06 «з»), а не «пропуск».
+	// Ф13-20/Ф13-06 «з»), а не «пропуск». Испытание живое, ключ принят —
+	// отказывает ровно рукоятка.
+	liveB, tokenB, formB := akLiveChallenge(t, h)
+	asB := auth.Assert(t, webauthntest.AssertionOptions{Challenge: liveB, Origin: akProbeOrigin, RPID: akProbeRPID})
 	mismatch := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
-		map[string]any{"csrfToken": token, "credential": credentialBody(as, []byte("some-other-persons-handle"))}, fwd(), formCk)
+		map[string]any{"csrfToken": tokenB, "credential": credentialBody(asB, []byte("some-other-persons-handle"))}, fwd(), formB)
 	require.Equalf(t, http.StatusUnauthorized, mismatch.status,
 		"D3/Ф13-20: несовпавшая рукоятка — единый отказ входа 401 (безусловная сверка): %s", mismatch.body)
 }
@@ -285,9 +290,10 @@ func TestAccessKeyLogin_F1306_D7_UnifiedRefusalIsBytewiseEqualToF302(t *testing.
 	require.Nil(t, cookieNamed(f302.cookies, loginlanehttp.CookieSession), "опорный отказ Ф3-02 без Set-Cookie")
 
 	// Отказ входа КЛЮЧОМ — ветвь (а) Ф13-06: подпись не сверяется (форсированная).
-	tok2, form2 := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
 	auth := webauthntest.New(t, webauthntest.AlgES256)
-	forged := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte("challenge-of-the-probe-0002"), Origin: akProbeOrigin, RPID: akProbeRPID, ForgeSignature: true})
+	givenAcceptedAccessKey(t, h, auth, []byte("uh-"+string(h.user.ID)))
+	live2, tok2, form2 := akLiveChallenge(t, h)
+	forged := auth.Assert(t, webauthntest.AssertionOptions{Challenge: live2, Origin: akProbeOrigin, RPID: akProbeRPID, ForgeSignature: true})
 	keyRefusal := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
 		map[string]any{"csrfToken": tok2, "credential": credentialBody(forged, []byte("uh-"+string(h.user.ID)))}, fwd(), form2)
 
@@ -333,10 +339,11 @@ func TestAccessKeyLogin_F1305_D10_SessionIssuedEventCarriesAccessKeyID(t *testin
 		     AND jsonb_exists(event_payload, 'access_key_id')`).Scan(&pwWithKey))
 	require.Equal(t, 0, pwWithKey, "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: событие входа паролём НЕ несёт access_key_id (sentinel чист)")
 
-	// Проба возможности: вход КЛЮЧОМ. Красный: 404 (глагол не смонтирован).
-	token, formCk := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
+	// Проба возможности: вход КЛЮЧОМ.
 	auth := webauthntest.New(t, webauthntest.AlgES256)
-	as := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte("challenge-of-the-probe-0003"), Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: true})
+	givenAcceptedAccessKey(t, h, auth, []byte("uh-"+string(h.user.ID)))
+	live, token, formCk := akLiveChallenge(t, h)
+	as := auth.Assert(t, webauthntest.AssertionOptions{Challenge: live, Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: true})
 	login := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
 		map[string]any{"csrfToken": token, "credential": credentialBody(as, []byte("uh-"+string(h.user.ID)))}, fwd(), formCk)
 	require.Equalf(t, http.StatusOK, login.status,
@@ -376,18 +383,19 @@ func TestAccessKeyLogin_F1305_D12_LoginVerifiesAssertionThroughF7(t *testing.T) 
 	fixtureIsSound(t, h)
 	auth := webauthntest.New(t, webauthntest.AlgES256)
 	userHandle := []byte("uh-" + string(h.user.ID))
+	givenAcceptedAccessKey(t, h, auth, userHandle)
 
-	// Негодная подпись → единый отказ входа (проверяющий отверг). Красный: 404.
-	tokBad, formBad := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
-	forged := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte("challenge-of-the-probe-0004"), Origin: akProbeOrigin, RPID: akProbeRPID, ForgeSignature: true})
+	// Негодная подпись → единый отказ входа (проверяющий отверг).
+	liveBad, tokBad, formBad := akLiveChallenge(t, h)
+	forged := auth.Assert(t, webauthntest.AssertionOptions{Challenge: liveBad, Origin: akProbeOrigin, RPID: akProbeRPID, ForgeSignature: true})
 	bad := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
 		map[string]any{"csrfToken": tokBad, "credential": credentialBody(forged, userHandle)}, fwd(), formBad)
 	require.Equalf(t, http.StatusUnauthorized, bad.status,
 		"D12/Ф13-06 «а»: негодная подпись — единый отказ входа (сверка Ф7 отвергла) — красный, пока глагол login не смонтирован: %s", bad.body)
 
 	// Годное утверждение → сессия (проверяющий принял, выдача Ф1).
-	tokOK, formOK := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
-	good := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte("challenge-of-the-probe-0005"), Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: true})
+	liveOK, tokOK, formOK := akLiveChallenge(t, h)
+	good := auth.Assert(t, webauthntest.AssertionOptions{Challenge: liveOK, Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: true})
 	ok := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
 		map[string]any{"csrfToken": tokOK, "credential": credentialBody(good, userHandle)}, fwd(), formOK)
 	require.Equalf(t, http.StatusOK, ok.status,
@@ -409,10 +417,11 @@ func TestAccessKeyLogin_F1310_F1311_AAL_LevelFromAssertionFlagsNotConstant(t *te
 	fixtureIsSound(t, h)
 	auth := webauthntest.New(t, webauthntest.AlgES256)
 	userHandle := []byte("uh-" + string(h.user.ID))
+	givenAcceptedAccessKey(t, h, auth, userHandle)
 
-	level := func(userVerified bool, challenge string) (int, string) {
-		token, formCk := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
-		as := auth.Assert(t, webauthntest.AssertionOptions{Challenge: []byte(challenge), Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: userVerified})
+	level := func(userVerified bool) (int, string) {
+		live, token, formCk := akLiveChallenge(t, h)
+		as := auth.Assert(t, webauthntest.AssertionOptions{Challenge: live, Origin: akProbeOrigin, RPID: akProbeRPID, UserVerified: userVerified})
 		r := h.lane.do(t, h.c, http.MethodPost, pathAccessKeyLogin,
 			map[string]any{"csrfToken": token, "credential": credentialBody(as, userHandle)}, fwd(), formCk)
 		var out struct {
@@ -425,14 +434,14 @@ func TestAccessKeyLogin_F1310_F1311_AAL_LevelFromAssertionFlagsNotConstant(t *te
 	}
 
 	// Ф11-03: userVerified=false → «2». Красный: 404.
-	st2, lvl2 := level(false, "challenge-of-the-probe-0006")
+	st2, lvl2 := level(false)
 	require.Equalf(t, http.StatusOK, st2,
 		"AAL/Ф13-10: вход ключом без проверки пользователя выдаёт сессию — красный, пока глагол login не смонтирован (уровень получен: %q)", lvl2)
 	require.Equal(t, "2", lvl2, "AAL/Ф11-03: проверка не выполнена, резерв не допускается → уровень «2»")
 
 	// Ф11-04: userVerified=true → «3». Пара — положительный контроль: без неё
 	// «2» было бы неотличимо от «полоса всегда отвечает константой».
-	st3, lvl3 := level(true, "challenge-of-the-probe-0007")
+	st3, lvl3 := level(true)
 	require.Equal(t, http.StatusOK, st3, "AAL/Ф13-11: вход ключом с проверкой пользователя выдаёт сессию")
 	require.Equal(t, "3", lvl3, "AAL/Ф11-04: проверка выполнена → уровень «3»")
 	require.NotEqual(t, lvl2, lvl3, "AAL: уровень — по флагам ЭТОГО утверждения, не константа полосы")

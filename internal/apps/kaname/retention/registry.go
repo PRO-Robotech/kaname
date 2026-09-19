@@ -105,6 +105,10 @@ const (
 	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
 	// заводит начало церемонии либо предъявления под живой сессией.
 	SubjectAccessKeyChallenges = "access_key_challenges"
+	// SubjectAccessKeyLoginChallenges — испытания ПОЛОСЫ ВХОДА ключом (Ф13,
+	// kacho#1282): своя таблица, привязанная к контексту формы, — у входа
+	// вызывающего нет, и запись церемоний её не вмещает.
+	SubjectAccessKeyLoginChallenges = "access_key_login_challenges"
 )
 
 // HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
@@ -117,6 +121,7 @@ type HumanSessionReapers struct {
 	Codes            RecoveryCodeReaper
 	Enrollments      EnrollmentReaper
 	Challenges       AccessKeyChallengeReaper
+	LoginChallenges  AccessKeyLoginChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
 }
@@ -147,11 +152,18 @@ type AccessKeyChallengeReaper interface {
 	SweepUnservableChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// AccessKeyLoginChallengeReaper — порт уборщика истёкших и предъявленных
+// испытаний полосы входа ключом.
+type AccessKeyLoginChallengeReaper interface {
+	SweepUnservableLoginChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
 // под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil ||
+		r.LoginChallenges == nil || r.EnrollmentWindow <= 0 {
 		return base
 	}
 	return append(base,
@@ -191,6 +203,14 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			// Ф7-54), снятое — тоже (Ф7-03, Ф7-53); граница включающая у обоих.
 			Grace: 0,
 			Sweep: r.Challenges.SweepUnservableChallenges,
+		},
+		Subject{
+			Name: SubjectAccessKeyLoginChallenges,
+			// Порог — тот же предикат читателя, что у испытаний церемоний:
+			// оператор однократности не обслужит ни истёкшую строку, ни
+			// предъявленную; граница срока включающая у обоих.
+			Grace: 0,
+			Sweep: r.LoginChallenges.SweepUnservableLoginChallenges,
 		},
 	)
 }

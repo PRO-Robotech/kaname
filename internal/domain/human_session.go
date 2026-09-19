@@ -258,9 +258,15 @@ const (
 	// фактора, ветвью пароля (Ф11-09), и признак семейства ей не годится.
 	FormSecondFactor FormKind = "second-factor"
 	FormStepUp       FormKind = "step-up"
+	// FormAccessKeyLogin — вход ключом доступа (Ф13 Р1): ОДИН вид на два
+	// глагола формы, `access-key/begin` и `access-key/login`, потому что это
+	// одна форма в двух запросах — испытание выдаётся под тем же контекстом,
+	// под которым предъявляется утверждение. Признак вида `login` этой форме
+	// не годится (Ф13-02 «б»): у неё свой предмет и свои последствия.
+	FormAccessKeyLogin FormKind = "access-key-login"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete, FormSecondFactor, FormStepUp}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete, FormSecondFactor, FormStepUp, FormAccessKeyLogin}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

@@ -124,6 +124,7 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	lane := &loginLane{
 		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
 		freshness: 15 * time.Minute, keys: kanamepg.NewAccessKeyRepo(nil), keyFreshness: kanamepg.NewHumanSessionFreshness(nil),
+		loginChallenges: kanamepg.NewAccessKeyLoginRepo(nil, kanamepg.NewAccessKeyRepo(nil)),
 	}
 	require.True(t, lane.wired())
 	require.Equal(t, []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}, lane.signInMethods())
@@ -136,9 +137,10 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	for _, s := range retention.WithHumanSessions(nil, reapers) {
 		names[s.Name] = s.Grace
 	}
-	require.Len(t, names, 5, "пятый — испытания ключей доступа (Ф7)")
+	require.Len(t, names, 6, "шестой — испытания полосы входа ключом (Ф13)")
 	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
 	require.Contains(t, names, retention.SubjectAccessKeyChallenges)
+	require.Contains(t, names, retention.SubjectAccessKeyLoginChallenges)
 
 	// Ф12-37: сброс распорядителем провязан ровно там, где полоса поднята.
 	require.NotNil(t, lane.resetSecondFactorUseCase(nil, nil))

@@ -87,15 +87,21 @@ const (
 	PathSecondFactorRemove      = "/iam/v1/auth/second-factor/remove"
 	PathSecondFactorBackupCodes = "/iam/v1/auth/second-factor/backup-codes"
 	PathStepUp                  = "/iam/v1/auth/step-up"
+	// Вход ключом доступа (Ф13 Р1): два глагола ОДНОЙ формы — выдача
+	// испытания и предъявление утверждения. Вид формы у них общий
+	// (`domain.FormAccessKeyLogin`): это одна форма в двух запросах.
+	PathAccessKeyBegin = "/iam/v1/auth/access-key/begin"
+	PathAccessKeyLogin = "/iam/v1/auth/access-key/login"
 )
 
-// Paths — тринадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// Paths — пятнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
 // для ретрансляции (§8 инв. 7).
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
 		PathSecondFactorBackupCodes, PathStepUp,
+		PathAccessKeyBegin, PathAccessKeyLogin,
 	}
 }
 
@@ -137,6 +143,11 @@ type Lane interface {
 	RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error)
 	RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error)
 	StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error)
+	// Вход ключом доступа (Ф13 Р1): испытание выдаётся, не назвав человека;
+	// предъявление утверждения выдаёт сессию — той же формой ответа, что вход
+	// паролём.
+	BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error)
+	AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -189,6 +200,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathSecondFactorRemove, h.method(http.MethodPost, h.removeSecondFactor))
 	h.mux.HandleFunc(PathSecondFactorBackupCodes, h.method(http.MethodPost, h.regenerateBackupCodes))
 	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
+	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
+	h.mux.HandleFunc(PathAccessKeyLogin, h.method(http.MethodPost, h.accessKeyLogin))
 	return h, nil
 }
 

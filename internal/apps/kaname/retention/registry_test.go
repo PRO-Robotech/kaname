@@ -164,15 +164,19 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	window := 15 * time.Minute
 	full := HumanSessionReapers{
 		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
-		LongestWindow: 10 * time.Minute, EnrollmentWindow: window,
+		LoginChallenges: stubReaper{},
+		LongestWindow:   10 * time.Minute, EnrollmentWindow: window,
 	}
 	got := WithHumanSessions(nil, full)
 	byName := map[string]Subject{}
 	for _, s := range got {
 		byName[s.Name] = s
 	}
-	if len(got) != 5 {
-		t.Fatalf("предметов полосы входа %d, ждали 5: %v", len(got), byName)
+	// Шестой предмет — испытания полосы входа ключом (Ф13, kacho#1282): своя
+	// таблица, свой уборщик. Число — перепись популяции, и двигает её тот, кто
+	// завёл предмет.
+	if len(got) != 6 {
+		t.Fatalf("предметов полосы входа %d, ждали 6: %v", len(got), byName)
 	}
 	s, ok := byName[SubjectSecondFactorEnrollments]
 	if !ok {
@@ -184,10 +188,10 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	if s.Sweep == nil {
 		t.Errorf("предмет %q объявлен без уборщика", s.Name)
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LoginChallenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
 		t.Errorf("без уборщика заведений полоса даёт %d записей, ждали 0", len(got))
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LoginChallenges: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без окна заведений полоса даёт %d записей, ждали 0: порог нулём снимал бы живые pending", len(got))
 	}
 }
@@ -200,7 +204,8 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	full := HumanSessionReapers{
 		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
-		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+		LoginChallenges: stubReaper{},
+		LongestWindow:   10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
 	}
 	byName := map[string]Subject{}
 	for _, s := range WithHumanSessions(nil, full) {
@@ -221,9 +226,30 @@ func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	if got := WithHumanSessions(nil, without); len(got) != 0 {
 		t.Errorf("без уборщика испытаний полоса даёт %d записей, ждали 0", len(got))
 	}
+	// Шестой предмет — испытания ПОЛОСЫ ВХОДА (Ф13): своя строка в перечне и
+	// своё отрицание. Без него запись о нём зеленела бы на любом наборе.
+	l, ok := byName[SubjectAccessKeyLoginChallenges]
+	if !ok {
+		t.Fatalf("предмета %q нет среди %v", SubjectAccessKeyLoginChallenges, byName)
+	}
+	if l.Grace != 0 {
+		t.Errorf("порог испытаний входа %v, ждали 0: истёкшее и предъявленное читатель уже не обслужит", l.Grace)
+	}
+	if l.Sweep == nil {
+		t.Errorf("предмет %q объявлен без уборщика", l.Name)
+	}
+	withoutLogin := full
+	withoutLogin.LoginChallenges = nil
+	if got := WithHumanSessions(nil, withoutLogin); len(got) != 0 {
+		t.Errorf("без уборщика испытаний полосы входа полоса даёт %d записей, ждали 0", len(got))
+	}
 }
 
 func (stubReaper) SweepUnservableChallenges(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepUnservableLoginChallenges(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
 }
 

@@ -515,6 +515,8 @@ type countingObserver struct {
 	sfPresent  map[string]int
 	sfRefusals map[humansession.SecondFactorRefusal]int
 	sfEvents   map[humansession.SecondFactorEvent]int
+	// Вход ключом доступа (Ф13): исходы полосы по причине.
+	akLogin map[humansession.AccessKeyLoginOutcome]int
 }
 
 func newCountingObserver() *countingObserver {
@@ -527,6 +529,7 @@ func newCountingObserver() *countingObserver {
 		sfPresent:          map[string]int{},
 		sfRefusals:         map[humansession.SecondFactorRefusal]int{},
 		sfEvents:           map[humansession.SecondFactorEvent]int{},
+		akLogin:            map[humansession.AccessKeyLoginOutcome]int{},
 	}
 }
 
@@ -544,6 +547,11 @@ func (o *countingObserver) SecondFactorEventObserved(x humansession.SecondFactor
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.sfEvents[x]++
+}
+func (o *countingObserver) AccessKeyLoginObserved(x humansession.AccessKeyLoginOutcome) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.akLogin[x]++
 }
 
 func (o *countingObserver) LoginObserved(x humansession.LoginOutcome) {

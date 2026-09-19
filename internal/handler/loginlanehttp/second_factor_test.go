@@ -329,14 +329,17 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	require.Empty(t, stub.stepUpIn)
 	require.Empty(t, stub.confirmIn)
 
-	// Перечень путей — одно объявление, и шесть глаголов в нём.
+	// Перечень путей — одно объявление, и шесть глаголов семейства в нём.
+	// Число — ПЕРЕПИСЬ популяции, а не предел: его двигает заведение глагола
+	// (Ф13 добавила два — `access-key/begin` и `access-key/login`), и двигать
+	// его обязан тот, кто популяцию изменил, иначе перечень растёт молча.
 	for _, p := range []string{
 		"/iam/v1/auth/second-factor/enroll", "/iam/v1/auth/second-factor/confirm", "/iam/v1/auth/second-factor/remove",
 		"/iam/v1/auth/second-factor/backup-codes", "/iam/v1/auth/second-factor", "/iam/v1/auth/step-up",
 	} {
 		require.Contains(t, loginlanehttp.Paths(), p)
 	}
-	require.Len(t, loginlanehttp.Paths(), 13)
+	require.Len(t, loginlanehttp.Paths(), 15)
 }
 
 // TestLane_F12_RefusalsCarryTheirTokens — отказы глаголов семейства (Р4):

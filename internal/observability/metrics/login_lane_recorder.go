@@ -45,6 +45,9 @@ const (
 	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
 	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
 	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
+	// AccessKeyLoginOutcomesMetric — исходы полосы входа ключом (Ф13 Р10):
+	// наружу отказы неразличимы, и это единственное место, где причина видна.
+	AccessKeyLoginOutcomesMetric = Namespace + "_access_key_login_outcomes_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -69,6 +72,7 @@ type LoginLaneRecorder struct {
 	sfPresent    *prometheus.CounterVec
 	sfRefuse     *prometheus.CounterVec
 	sfEvent      *prometheus.CounterVec
+	akLogin      *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -172,9 +176,14 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
 					"regenerated, a backup code consumed.",
 			}, []string{"event"}),
+			akLogin: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: AccessKeyLoginOutcomesMetric,
+				Help: "Access-key sign-in lane outcomes by reason: the caller sees one refusal for all of them, " +
+					"so this is where the reason lives. Revoked keys and keys that never existed share one cell.",
+			}, []string{"outcome"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
-			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent)
+			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent, rec.akLogin)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -218,6 +227,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.SecondFactorRefusals() {
 			rec.sfRefuse.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.AccessKeyLoginOutcomes() {
+			rec.akLogin.WithLabelValues(string(o)).Add(0)
 		}
 		for _, o := range humansession.SecondFactorEvents() {
 			rec.sfEvent.WithLabelValues(string(o)).Add(0)
@@ -293,6 +305,10 @@ func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFac
 
 func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {
 	l.sfEvent.WithLabelValues(string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) AccessKeyLoginObserved(o humansession.AccessKeyLoginOutcome) {
+	l.akLogin.WithLabelValues(string(o)).Inc()
 }
 
 var (

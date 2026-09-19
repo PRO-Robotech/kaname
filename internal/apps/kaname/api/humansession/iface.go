@@ -210,6 +210,46 @@ type Writer interface {
 	Rollback(ctx context.Context) error
 }
 
+// AccessKeyLoginStore — хранилище ПОЛОСЫ ВХОДА ключом (Ф13 Р2, Р3, Р13).
+//
+// ГРАНИЦА НАЗВАНА. Полоса входа человека не знает: она обнаруживает его по
+// предъявленному удостоверению. Поэтому испытание здесь привязано к КОНТЕКСТУ
+// ФОРМЫ, а не к человеку, и живёт в своей таблице — инвариант испытаний
+// церемоний Ф7 («строка принадлежит вызывающему») этим не ослабляется.
+//
+// Сдвиг счётчика ключа — тот же оператор, что у полосы сессии (Ф7 Р6): полоса
+// входа для ключа есть предъявление (Ф13-05), и судится оно теми же
+// правилами.
+type AccessKeyLoginStore interface {
+	// IssueChallenge кладёт выданное испытание, ЗАМЕЩАЯ живое испытание того
+	// же контекста одной транзакцией (Ф13-03). Одно живое на контекст держит
+	// частичный ключ уникальности схемы, а не проверка перед вставкой.
+	IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge) error
+	// ConsumeChallenge — ОДИН оператор однократности (Ф13-08): строка этого
+	// контекста, не потреблённая и не истёкшая на now, получает отметку.
+	// consumed=false — её нет, она потреблена либо истекла; различать это
+	// вызывающему незачем — отказ один (Р7).
+	ConsumeChallenge(ctx context.Context, challenge []byte, formContext string, now time.Time) (consumed bool, err error)
+	// KeyByCredentialID — строка ключа по идентификатору удостоверения;
+	// found=false — строки нет. Снятый ключ и «удостоверения не было» суть
+	// одно состояние (Р15): строки нет ни у того, ни у другого.
+	KeyByCredentialID(ctx context.Context, credentialID []byte) (domain.AccessKey, bool, error)
+	// AdvanceSignCount — атомарный сдвиг счётчика и момента предъявления с
+	// условием на прежнее значение (Ф7 Р6): advanced=false — проигравший
+	// конкуренции.
+	AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (advanced bool, err error)
+	// UserOf — человек, которому принадлежит найденная строка ключа: ему и
+	// выдаётся сессия (Р3). Нет человека — ErrNotFound.
+	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
+// AccessKeyLoginChallengeSweeper — порт уборки испытаний полосы входа (форма
+// Ф-ж): строки, которые оператор однократности уже не обслужит ни при каком
+// предъявлении.
+type AccessKeyLoginChallengeSweeper interface {
+	SweepUnservableLoginChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора
 // (Ф12-44): строки `pending`, чей срок (окно Р8 от момента заведения) истёк,
 // — `confirm` их уже не примет ни при каком коде.
