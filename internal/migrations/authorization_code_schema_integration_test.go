@@ -406,5 +406,7 @@ func TestIntegration_AuthorizationCodeMigrationRollsBackAndForward(t *testing.T)
 
 	version, err := goose.GetDBVersion(db)
 	require.NoError(t, err)
-	require.Equal(t, own, version, "цепочка обязана стоять на своём конце")
+	// Не равенство, а «не ниже предмета»: цепочка живёт дальше — ствол кладёт
+	// поверх новые файлы, и равенство красило бы пробу на каждом следующем.
+	require.GreaterOrEqual(t, version, own, "цепочка обязана стоять не ниже предмета")
 }
