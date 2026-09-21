@@ -305,7 +305,7 @@ func TestIntegration_AuthorizationCodeContextCannotDivergeFromItsFamily(t *testi
 // снестись на ребёнка.
 func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
 	db := acDB(t)
-	client, user, session, family := acScene(t, db, "acimm")
+	client, user, session, family := acScene(t, db, "ackey")
 
 	require.NoError(t, acInsertCode(db, acDigest(0x41), family, client, user, session,
 		[]string{"openid", "profile"}, "S256", acChallenge), "положительный контроль посева")
@@ -317,12 +317,12 @@ func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
 		       (id, user_id, bearer_digest, authenticated_at, last_presented_at, expires_at,
 		        assurance_level, presented_methods)
 		VALUES ($1, $2, $3, now(), now(), now() + interval '1 hour', '1', ARRAY['password'])`,
-		"hs-"+acPad("acimm2"), user, acDigest(0x4242))
+		"hs-"+acPad("ackey2"), user, acDigest(0x4242))
 	require.NoError(t, err, "посев второй сессии")
 
 	// ОТРИЦАНИЕ 1: сессию выданного переписать нельзя.
 	_, err = db.Exec(`UPDATE kaname.token_families SET session_id = $2 WHERE id = $1`,
-		family, "hs-"+acPad("acimm2"))
+		family, "hs-"+acPad("ackey2"))
 	requirePgRefusal(t, err, "23503", "authorization_codes_family_context_fk",
 		"сессию уже выданного кода нельзя переписать обновлением семейства")
 
