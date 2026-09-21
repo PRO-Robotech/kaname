@@ -286,9 +286,40 @@ const endSessionsOfSQL = `
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
 func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	ended, err := endSessionsOf(ctx, w.tx, userID, keep, at, reason)
+	return endSessionsAndRevokeWhatTheyHold(ctx, w.tx, userID, keep, at, reason)
+}
+
+// endSessionsAndRevokeWhatTheyHold — ЕДИНСТВЕННЫЙ способ снять сессии: снимает
+// записи И отзывает выданное в них (задача kaname#313).
+//
+// # ПОЧЕМУ ЭТО ОДИН ОПЕРАТОР, А НЕ ДВА РЯДОМ
+//
+// Ротацию обновляющего токена останавливает РОВНО отзыв семейства: запрос
+// ротации не читает ни отметку окончания сессии, ни одну из отсечек — он судит
+// по `active`, сроку токена и отметке отзыва семейства, и больше ни по чему.
+// Значит сессия, снятая БЕЗ отзыва семейства, снята только в записи: её
+// обновляющий токен продолжает ротироваться в свежие.
+//
+// Пока снятие и отзыв были двумя действиями, «снять и не отозвать» было
+// ПРЕДСТАВИМО — и представилось: из двух снимающих методов отзывал один.
+// Асимметрия эта заведена не давно, а тем же изменением, что чинило соседний
+// путь. Теперь снимающий метод ровно один, и обойти отзыв нечем.
+//
+// # ПОЧЕМУ ИДЕНТИФИКАТОРЫ, А НЕ ЧИСЛО
+//
+// Отзыв адресуется снятым записям поимённо. Второй запрос «а какие это были»
+// вернул бы уже снятые строки вперемешку с теми, что сняли до нас, — и отозвал
+// бы выданное в чужих сессиях.
+func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID domain.UserID,
+	keep domain.HumanSessionID, at time.Time, reason string,
+) (int, error) {
+	ended, err := endSessionsOf(ctx, tx, userID, keep, at, reason)
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.EndOthers", string(userID))
+		return 0, mapErr(err, "HumanSession.End", string(userID))
+	}
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return 0, rerr
 	}
 	return len(ended), nil
 }
@@ -296,9 +327,8 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 // endSessionsOf исполняет ОДИН оператор снятия и возвращает ИДЕНТИФИКАТОРЫ
 // снятых записей.
 //
-// Идентификаторы, а не число: по ним отзывается выданное в этих сессиях, и
-// второй запрос «а какие это были» вернул бы уже снятые строки вперемешку с
-// теми, что сняли до нас.
+// ЗВАТЬ ЕГО НАПРЯМУЮ НЕЛЬЗЯ: снятие без отзыва выданного — половина действия
+// (разбор выше). Единственный его читатель — `endSessionsAndRevokeWhatTheyHold`.
 func endSessionsOf(ctx context.Context, tx pgx.Tx, userID domain.UserID,
 	keep domain.HumanSessionID, at time.Time, reason string,
 ) ([]string, error) {
@@ -359,30 +389,19 @@ func (r *HumanSessionRepo) EndAllSessions(ctx context.Context, userID domain.Use
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	ended, err := endSessionsOf(ctx, tx, userID, "", at, reason)
+	// ТОТ ЖЕ единственный оператор, что и у полосы входа: снять записи и
+	// отозвать выданное в них. Привязка семейства к сессии — внешний ключ с
+	// каскадом НА УДАЛЕНИИ строки, а снятие строку не удаляет; без отзыва
+	// обновляющий токен снятой сессии жил бы до порога УДЕРЖАНИЯ — то есть до
+	// настройки хранения, а не до решения о безопасности.
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, tx, userID, "", at, reason)
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+		return 0, err
 	}
-
-	// ВЫДАННОЕ В ЭТИХ СЕССИЯХ ОТЗЫВАЕТСЯ ТОЙ ЖЕ ТРАНЗАКЦИЕЙ (задача kaname#313).
-	//
-	// Привязка семейства к сессии — внешний ключ с каскадом НА УДАЛЕНИИ строки,
-	// а снятие строку не удаляет: оно ставит отметку, а удаляет строку уборка
-	// спустя порог удержания. Без этого оператора обновляющий токен снятой
-	// сессии жил бы и ротировался в свежие, а окно равнялось бы величине
-	// УДЕРЖАНИЯ — то есть настройке хранения, а не решению о безопасности.
-	//
-	// Той же транзакцией, а не следом: снятая сессия с живым семейством — это
-	// состояние, в котором глагол уже ответил, а доступ ещё есть.
-	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
-		domain.FamilyRevokedBySessionEnd); rerr != nil {
-		return 0, rerr
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
 	}
-	return len(ended), nil
+	return ended, nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент

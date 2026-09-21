@@ -75,3 +75,74 @@ func TestIntegration_LoginLaneCutoffWriterWritesBothRecords(t *testing.T) {
 			"выдаче и НЕ снят на предъявлении — прежний носитель продолжает "+
 			"аутентифицировать вызовы")
 }
+
+// TestIntegration_EndingOtherSessionsRevokesTheirFamilies — снятие ПРОЧИХ
+// сессий (смена пароля, снятие второго фактора, завершение восстановления)
+// отзывает выданное в них.
+//
+// Ротацию обновляющего токена останавливает РОВНО отзыв семейства: запрос
+// ротации не читает ни отметку окончания сессии, ни одну из отсечек. Значит
+// сессия, снятая без отзыва, снята только в записи.
+func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "endsf")
+	ceremony := kanamepg.NewOAuthCeremonyRepo(pool)
+	require.NoError(t, ceremony.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
+		Context:             scene,
+		CodeDigest:          ceremonyDigest(7101),
+		RedirectURI:         "https://app.example.test/cb",
+		CodeChallenge:       ceremonyChallenge,
+		CodeChallengeMethod: domain.PKCEMethodS256,
+		TTL:                 time.Minute,
+	}))
+	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
+		CodeDigest:         ceremonyDigest(7101),
+		RefreshTokenDigest: ceremonyDigest(7102),
+		RefreshTokenTTL:    time.Hour,
+	})
+	require.NoError(t, err)
+
+	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: до снятия обновляющий токен РОТИРУЕТСЯ.
+	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
+		PresentedDigest: ceremonyDigest(7102),
+		SuccessorDigest: ceremonyDigest(7103),
+		TTL:             time.Hour,
+	})
+	require.NoError(t, err, "до снятия ротация обязана проходить — иначе отрицание ниже беспредметно")
+
+	// ПРЕДМЕТ: снять ПРОЧИЕ сессии (сохраняемой сессии у этой личности нет,
+	// поэтому снимается посевная) — тем же путём, каким это делает смена пароля.
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	w, err := sessions.Writer(ctx)
+	require.NoError(t, err)
+	n, err := w.EndOtherSessions(ctx, domain.UserID(scene.UserID),
+		domain.HumanSessionID("hs-keep-none-0000"), time.Now().UTC(),
+		domain.RevokeReasonPasswordChange)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "снята обязана быть посевная сессия")
+	require.NoError(t, w.Commit(ctx))
+
+	// Преемник, выданный ротацией, больше не ротируется: семейство отозвано.
+	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
+		PresentedDigest: ceremonyDigest(7103),
+		SuccessorDigest: ceremonyDigest(7104),
+		TTL:             time.Hour,
+	})
+	require.Error(t, err,
+		"после снятия сессии обновляющий токен ПРОДОЛЖАЕТ ротироваться в свежие: "+
+			"снятие записи ротацию не останавливает, её останавливает только отзыв семейства")
+
+	var revokedReason *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT revoked_reason FROM kaname.token_families WHERE id = $1`,
+		scene.FamilyID).Scan(&revokedReason))
+	require.NotNil(t, revokedReason, "семейство снятой сессии не отозвано")
+	require.Equal(t, string(domain.FamilyRevokedBySessionEnd), *revokedReason)
+}
