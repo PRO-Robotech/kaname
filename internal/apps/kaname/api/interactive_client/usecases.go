@@ -142,7 +142,7 @@ type providerCompensationEmitter interface {
 // CreateUseCase — registers the client at the identity provider, then records it.
 type CreateUseCase struct {
 	repo      clientRepo
-	provider  providerClients
+	provider  ProviderClients
 	opsRepo   operations.Repo
 	audiences []string
 	logger    *slog.Logger
@@ -200,7 +200,7 @@ func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, re
 
 // NewCreateUseCase — constructor. `audiences` comes from iam's own configuration
 // (Р2): the caller never supplies it and it is echoed output-only.
-func NewCreateUseCase(r clientRepo, p providerClients, ops operations.Repo, audiences []string, logger *slog.Logger) *CreateUseCase {
+func NewCreateUseCase(r clientRepo, p ProviderClients, ops operations.Repo, audiences []string, logger *slog.Logger) *CreateUseCase {
 	return &CreateUseCase{repo: r, provider: p, opsRepo: ops, audiences: audiences, logger: logger}
 }
 
@@ -416,13 +416,13 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 // DeleteUseCase — removes the client at the provider and its row.
 type DeleteUseCase struct {
 	repo     clientRepo
-	provider providerClients
+	provider ProviderClients
 	opsRepo  operations.Repo
 	logger   *slog.Logger
 }
 
 // NewDeleteUseCase — constructor.
-func NewDeleteUseCase(r clientRepo, p providerClients, ops operations.Repo, logger *slog.Logger) *DeleteUseCase {
+func NewDeleteUseCase(r clientRepo, p ProviderClients, ops operations.Repo, logger *slog.Logger) *DeleteUseCase {
 	return &DeleteUseCase{repo: r, provider: p, opsRepo: ops, logger: logger}
 }
 
