@@ -104,7 +104,7 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 				continue
 			}
 			if verb == "create" || verb == "alter" || verb == "drop" {
-				byObject[verb+" "+objectWordOf(toks)]++
+				byObject[verb+" "+objectKindOf(toks)]++
 			} else {
 				byObject[verb+" (обслуживание)"]++
 			}
@@ -166,27 +166,6 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 			"не видела ПО ПОСТРОЕНИЮ: вид, объявленный знакомым, ею не ищется.",
 			strings.Join(lines, "\n"))
 	}
-}
-
-// objectWordOf — вид объекта в голове оператора, для переписи.
-func objectWordOf(toks []sqlToken) string {
-	i := 1
-	for i < len(toks) && (toks[i].word == "or" || toks[i].word == "replace" ||
-		toks[i].word == "global" || toks[i].word == "local" || toks[i].word == "temp" ||
-		toks[i].word == "temporary" || toks[i].word == "unlogged" ||
-		toks[i].word == "unique" || toks[i].word == "concurrently") {
-		i++
-	}
-	if i >= len(toks) {
-		return "?"
-	}
-	if toks[i].word == "materialized" && i+1 < len(toks) {
-		return "materialized " + toks[i+1].word
-	}
-	if toks[i].word == "constraint" && i+1 < len(toks) {
-		return "constraint " + toks[i+1].word
-	}
-	return toks[i].word
 }
 
 // TestMigrationSelectionOnTheRealTree — инъекция НАСТОЯЩИМ входом из дерева.

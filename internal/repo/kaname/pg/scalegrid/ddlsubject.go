@@ -118,7 +118,16 @@ type qname struct {
 
 // matches — совпадает ли имя с ИСКОМЫМ. У искомого схема может быть не названа
 // (так их пишут пробы) — тогда схема не сужает.
+//
+// Имя, СОДЕРЖАЩЕЕ подстановку, совпадает с любым искомым: оно и означает «какое
+// именно — выяснится при исполнении». Осторожность здесь наступает ПОФАЙЛОВО, в
+// том поле, где подстановка стоит, а не на всём операторе: у динамического
+// `CREATE TRIGGER` неизвестна таблица-хозяин, и прибору ЧТЕНИЯ это по-прежнему
+// безразлично, а прибору ЗАПИСИ — нет.
 func (q qname) matches(want qname) bool {
+	if strings.Contains(q.name, dynamicPlaceholder) || strings.Contains(q.schema, dynamicPlaceholder) {
+		return true
+	}
 	if q.name != want.name {
 		return false
 	}
@@ -190,7 +199,7 @@ func (s ddlStatement) touchesAnyOf(want []qname, scope ddlScope, corpus corpusIn
 		return true
 	}
 	for _, sch := range s.schemas {
-		if sch == anySchema {
+		if sch == anySchema || strings.Contains(sch, dynamicPlaceholder) {
 			return len(want) > 0
 		}
 		for _, w := range want {
@@ -352,65 +361,176 @@ func rememberOwner(into map[qname]qname, name, owner qname) {
 
 // ── РАЗБОР ГОЛОВЫ ОПЕРАТОРА ────────────────────────────────────────────────
 
-// dynamicDDL — исполняемый DDL, чей субъект подставляется во время выполнения.
+// ИСПОЛНЯЕМЫЙ SQL РАЗБИРАЕТСЯ ТЕМ ЖЕ РАЗБОРОМ — ВТОРОГО СЛОВАРЯ НЕТ
 //
-// Признак парный: должно быть И исполнение (`EXECUTE`), И глагол определения в
-// том же операторе. Одного глагола мало — тело вправе цитировать оператор в
-// объяснении, и такая цитата ничего не исполняет.
+// Прежде признак динамического случая был ПАРНЫМ: слово `EXECUTE` и совпадение
+// с отдельным перечнем глаголов. Перечень знал формы, заведённые к тому дню, и
+// не рос вместе с разбором: статистика, политика, триггер, правило, внешняя
+// таблица, перестроение — всё, что разбор научился судить позже, — в
+// динамическом виде МОЛЧАЛО. Замер зондом: семь новых форм молчат, старая
+// краснеет. Шапки четырёх отчётов при этом обещали обратное — что такие случаи
+// судятся осторожно.
+//
+// Двум спискам об одном предмете расходиться свойственно, и разойдутся они
+// снова при следующей форме. Поэтому список ОДИН, и он же разбор: содержимое
+// исполняемого литерала разбирается `ddlStatementOf` — той самой функцией, что
+// разбирает оператор в файле. Что она умеет судить, то и в динамическом виде
+// судится, BY CONSTRUCTION.
+//
+// # Подстановка отличается от полного имени, и исходы у них РАЗНЫЕ
+//
+//	EXECUTE format('ALTER TABLE kaname.%I …', r.t)   субъект НЕИЗВЕСТЕН → осторожно
+//	EXECUTE 'ALTER TABLE kaname.limits …'            субъект известен  → судится точно
+//
+// Осторожность наступает В ТОМ ПОЛЕ, где стоит подстановка, а не на всём
+// операторе: у динамического `CREATE TRIGGER … ON kaname.%I` неизвестна
+// таблица-хозяин, и прибору ЧТЕНИЯ это безразлично по-прежнему, а прибору
+// ЗАПИСИ — нет. Прежняя непрозрачность красила оператор целиком и обоим.
+//
+// Прежний признак не различал их вовсе: любой исполняемый DDL делал оператор
+// непрозрачным, то есть задевающим ЛЮБУЮ измеряемую таблицу. Полностью
+// выписанный оператор над ЧУЖОЙ таблицей краснел зря.
 var (
 	dynamicExecute = regexp.MustCompile(`(?i)\bEXECUTE\b`)
-	dynamicVerb    = regexp.MustCompile(`(?is)\b(?:ALTER|DROP)\s+TABLE\b|` +
-		`\bCREATE\s+(?:UNIQUE\s+)?INDEX\b|\b(?:DROP|ALTER)\s+INDEX\b|` +
-		`\bCREATE\s+TABLE\b|\b(?:CREATE|DROP|ALTER)\s+(?:MATERIALIZED\s+)?VIEW\b|` +
-		`\b(?:CREATE|DROP|ALTER)\s+SCHEMA\b`)
+
+	// formatPlaceholder — подстановка `format`. После неё имя субъекта из
+	// текста не выводится, и это единственный случай осторожного исхода.
+	formatPlaceholder = regexp.MustCompile(`%[IsLdq]`)
 )
 
-// definesFunction — голова оператора есть ОПРЕДЕЛЕНИЕ функции или процедуры.
-func definesFunction(toks []sqlToken) bool {
-	if len(toks) == 0 || (toks[0].word != "create" && toks[0].word != "drop" && toks[0].word != "alter") {
-		return false
-	}
-	i := skipWords(toks, 1, "or", "replace", "if", "exists", "not")
-	return i < len(toks) && (toks[i].word == "function" || toks[i].word == "procedure")
+// dynamicPlaceholder — чем подстановка заменяется перед разбором. Слово, а не
+// знак: разбору нужна законная лексема имени, иначе субъект не выделится вовсе
+// и оператор пройдёт за «ничего не меняет».
+const dynamicPlaceholder = "dynsubjectplaceholder"
+
+// planRelevant — разобранный оператор говорит о структуре хоть чего-нибудь.
+func (s ddlStatement) planRelevant() bool {
+	return len(s.subjects) > 0 || len(s.stats) > 0 || len(s.indexes) > 0 ||
+		len(s.schemas) > 0 || len(s.triggersOn) > 0 || s.unknownObject != ""
 }
 
-// namingHeads — головы операторов, которые функцию НАЗЫВАЮТ, но не исполняют:
-// `COMMENT ON FUNCTION`, `DROP FUNCTION`, `GRANT … ON FUNCTION`. Перечень нужен
-// затем, что определитель динамической функции и её исполнитель — разные
-// миграции, и спутать их значит взять не ту.
+// merge — предметы вложенного оператора становятся предметами внешнего.
+//
+// Переносятся ВСЕ поля, включая триггеры и раздел ссылок: их читает прибор
+// ЗАПИСИ, и перенести только субъекты значило бы сделать исполняемый оператор
+// слепым ровно там, где он видим у оператора в файле.
+func (s *ddlStatement) merge(inner ddlStatement) {
+	s.subjects = append(s.subjects, inner.subjects...)
+	s.stats = append(s.stats, inner.stats...)
+	s.indexes = append(s.indexes, inner.indexes...)
+	s.schemas = append(s.schemas, inner.schemas...)
+	s.triggersOn = append(s.triggersOn, inner.triggersOn...)
+	s.refs = append(s.refs, inner.refs...)
+	if inner.unknownObject != "" && s.unknownObject == "" {
+		s.unknownObject = inner.unknownObject
+	}
+}
+
+// namingHeads — головы операторов, которые объект НАЗЫВАЮТ, но не исполняют:
+// `COMMENT ON FUNCTION`, `DROP FUNCTION`, `GRANT … ON FUNCTION`, определение
+// функции. Перечень нужен затем, что определитель динамической функции и её
+// исполнитель — разные миграции, и спутать их значит взять не ту.
 var namingHeads = map[string]bool{
 	"comment": true, "grant": true, "revoke": true, "drop": true, "alter": true,
 	"create": true, "set": true, "reset": true, "lock": true, "begin": true,
-	"commit": true, "rollback": true, "savepoint": true, "analyze": true,
-	"vacuum": true, "cluster": true, "reindex": true,
+	"commit": true, "rollback": true, "savepoint": true,
 }
 
-// statementExecutesDDL — исполняет ли оператор DDL, чей субъект из текста не
-// выводится: прямо (`EXECUTE format('ALTER TABLE …')`) либо через функцию,
-// которая это делает.
-func statementExecutesDDL(stmt string, toks []sqlToken, dynamic map[string]bool) bool {
-	if dynamicExecute.MatchString(stmt) && dynamicVerb.MatchString(stmt) {
-		return true
-	}
+// executedDDL — предметы SQL, который оператор ИСПОЛНЯЕТ, а не содержит.
+func executedDDL(stmt string, toks []sqlToken, corpus corpusIndex, out *ddlStatement) {
 	if len(toks) == 0 || namingHeads[toks[0].word] {
-		return false
+		return
 	}
-	return namesAnyOf(stmt, dynamic)
+	// Зов функции, которая сама исполняет DDL: её предмет тем более неизвестен.
+	if namesAnyOf(stmt, corpus.dynamicDDLFuncs) {
+		out.opaque = true
+		return
+	}
+	if !dynamicExecute.MatchString(stmt) {
+		return
+	}
+	for _, lit := range executedLiterals(stmt) {
+		inner := parseStatementHead(formatPlaceholder.ReplaceAllString(lit, dynamicPlaceholder))
+		if !inner.planRelevant() {
+			continue
+		}
+		out.merge(inner)
+	}
+}
+
+// executedLiterals — содержимое строковых литералов и тел в долларовых
+// кавычках НА ВСЕХ УРОВНЯХ: ровно то, что может быть отдано серверу как SQL.
+//
+// Уровней именно несколько, и это не запас: исполняемый оператор живёт внутри
+// тела функции или `DO`-блока, то есть литералом ВНУТРИ литерала. Разбор в один
+// уровень видит тело целиком (`DECLARE … BEGIN …`), головы определения в нём
+// нет, и он молчит — так первая редакция этой починки и промолчала по всем
+// формам сразу.
+//
+// Спуск конечен по построению: каждый следующий уровень строго короче
+// предыдущего. Предел глубины назван всё равно — на случай текста, устроенного
+// так, что наш собственный пропуск литералов не сдвинется.
+func executedLiterals(stmt string) []string {
+	return literalsAtDepth(stmt, 0)
+}
+
+// literalsAtDepth — литералы одного уровня и всё, что лежит внутри них.
+func literalsAtDepth(src string, depth int) []string {
+	const maxLiteralDepth = 4
+	if depth > maxLiteralDepth {
+		return nil
+	}
+	var out []string
+	for i := 0; i < len(src); {
+		var body string
+		switch {
+		case src[i] == '\'':
+			j := skipSingleQuoted(src, i, escapedStringPrefix(src, i))
+			if j-1 > i+1 {
+				body = src[i+1 : j-1]
+			}
+			i = j
+		case src[i] == '$':
+			end, ok := dollarQuoteEnd(src, i)
+			if !ok {
+				i++
+				continue
+			}
+			body = dollarQuotedBodyOf(src[i:end])
+			i = end
+		default:
+			i++
+			continue
+		}
+		if body == "" {
+			continue
+		}
+		out = append(out, body)
+		out = append(out, literalsAtDepth(body, depth+1)...)
+	}
+	return out
 }
 
 // bodyExecutesDDL — тело функции исполняет DDL прямо или через другую такую же.
 func bodyExecutesDDL(body string, dynamic map[string]bool) bool {
-	if dynamicExecute.MatchString(body) && dynamicVerb.MatchString(body) {
+	if namesAnyOf(body, dynamic) {
 		return true
 	}
-	return namesAnyOf(body, dynamic)
+	if !dynamicExecute.MatchString(body) {
+		return false
+	}
+	for _, lit := range executedLiterals(body) {
+		if parseStatementHead(formatPlaceholder.ReplaceAllString(lit, dynamicPlaceholder)).planRelevant() {
+			return true
+		}
+	}
+	return false
 }
 
 // namesAnyOf — встречается ли в тексте хоть одно из имён ЦЕЛЫМ СЛОВОМ.
 //
 // Ищется по СЫРОМУ тексту, а не по лексемам: вызов живёт внутри тела в
-// долларовых кавычках, а лексема тела — одна метка. Первая редакция искала по
-// лексемам и вызова не видела вовсе.
+// долларовых кавычках, а лексема тела — одна метка.
 func namesAnyOf(src string, names map[string]bool) bool {
 	if len(names) == 0 {
 		return false
@@ -484,6 +604,53 @@ func dollarQuotedBodyOf(stmt string) string {
 	return ""
 }
 
+// objectKindOf — ВИД ОБЪЕКТА, как его читает разбор.
+//
+// Один дом на три читателя: разбор, перепись форм и проба доказательства
+// безвредности. Каждый, кто выводил вид по-своему, выводил его иначе — перепись
+// считала слово в позиции 1..3 и ловила «function» в `ALTER TABLE … DROP
+// CONSTRAINT … FUNCTION`, а проба не проверяла вида вовсе.
+//
+// Короткий оператор даёт ВЕРДИКТ, а не срез за границей: раньше здесь стоял
+// `toks[1:4]`, и оператор из двух лексем ронял бы весь прогон. В корпусе такого
+// не случилось — но не по построению, а потому, что ёмкость среза оказывалась
+// достаточной.
+func objectKindOf(toks []sqlToken) string {
+	if len(toks) == 0 {
+		return ""
+	}
+	at := func(i int) string {
+		if i < 0 || i >= len(toks) {
+			return ""
+		}
+		return toks[i].word
+	}
+	switch toks[0].word {
+	case "analyze", "analyse", "reindex", "cluster", "vacuum":
+		return toks[0].word
+	case "create":
+		i := skipWords(toks, 1, "or", "replace", "global", "local", "temp", "temporary",
+			"unlogged", "unique", "concurrently", "recursive")
+		return twoWordKind(at(i), at(i+1))
+	case "alter", "drop":
+		return twoWordKind(at(1), at(2))
+	}
+	return ""
+}
+
+// twoWordKind — виды, чьё имя состоит из двух слов, называются целиком: иначе
+// `MATERIALIZED VIEW` и `FOREIGN TABLE` неотличимы от `MATERIALIZED` и
+// `FOREIGN`, а `CONSTRAINT TRIGGER` — от ограничения.
+func twoWordKind(first, second string) string {
+	switch first {
+	case "materialized", "constraint", "foreign":
+		if second != "" {
+			return first + " " + second
+		}
+	}
+	return first
+}
+
 // ddlStatementOf — разбор головы ОДНОГО оператора.
 //
 // # Что разбирается, а что нет
@@ -500,6 +667,19 @@ func dollarQuotedBodyOf(stmt string) string {
 // было бы слепотой. Что корпус миграций сегодня такой формы не содержит —
 // отдельное утверждение, и его держит проба переписи.
 func ddlStatementOf(stmt string, corpus corpusIndex) ddlStatement {
+	out := parseStatementHead(stmt)
+	// ОПРЕДЕЛЕНИЕ функции НЕ ИСПОЛНЯЕТ её тело: структуры оно не меняет, даже
+	// если тело сплошь состоит из динамического DDL. Меняет её тот оператор,
+	// который функцию ЗОВЁТ, — и он, как правило, живёт в ДРУГОЙ миграции.
+	executedDDL(stmt, sqlTokens(stmt), corpus, &out)
+	return out
+}
+
+// parseStatementHead — разбор ОДНОГО оператора без учёта исполняемого им SQL.
+//
+// Отделено от `ddlStatementOf` затем, что исполняемый литерал разбирается ЭТОЙ
+// же функцией: рекурсия здесь кончается по построению, а не по счётчику.
+func parseStatementHead(stmt string) ddlStatement {
 	var out ddlStatement
 	toks := sqlTokens(stmt)
 	if len(toks) == 0 {
@@ -514,15 +694,6 @@ func ddlStatementOf(stmt string, corpus corpusIndex) ddlStatement {
 				out.refs = append(out.refs, ref)
 			}
 		}
-	}
-	// ОПРЕДЕЛЕНИЕ функции НЕ ИСПОЛНЯЕТ её тело: структуры оно не меняет, даже
-	// если тело сплошь состоит из динамического DDL. Меняет её тот оператор,
-	// который функцию ЗОВЁТ, — и он, как правило, живёт в ДРУГОЙ миграции.
-	// Прежняя редакция этого распознавателя судила по одному файлу и брала
-	// ровно не тот: определителя брала, исполнителя пропускала.
-	if !definesFunction(toks) && statementExecutesDDL(stmt, toks, corpus.dynamicDDLFuncs) {
-		out.opaque = true
-		return out
 	}
 
 	switch toks[0].word {

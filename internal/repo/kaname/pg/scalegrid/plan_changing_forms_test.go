@@ -294,6 +294,20 @@ func TestHarmlessObjectKindsAreProvenNotDeclared(t *testing.T) {
 				t.Fatalf("вид %q объявлен безвредным без причины: читатель не узнает, ПОЧЕМУ "+
 					"план чтения не меняется", word)
 			}
+			// ДОКАЗАТЕЛЬСТВО ОБЯЗАНО БЫТЬ О СВОЁМ ВИДЕ. Без этой проверки три
+			// произвольных оператора проходят всю пару целиком: они исполняются,
+			// исходы сходятся, и никто не спрашивает, тот ли это вид, чью
+			// безвредность они покупают.
+			for what, sql := range map[string]string{"naming": h.naming, "foreign": h.foreign} {
+				if got := objectKindOf(sqlTokens(sql)); got != word {
+					t.Errorf("оператор %s разбирается в вид %q, а покупает безвредность вида %q — "+
+						"доказательство приписано ЧУЖОМУ виду:\n  %s", what, got, word, sql)
+				}
+			}
+			if got := objectKindOf(sqlTokens(h.control)); got == word {
+				t.Errorf("положительный контроль того же вида %q: он обязан быть ИНОЙ формой, "+
+					"меняющей план, иначе контролем не является:\n  %s", word, h.control)
+			}
 			if migrationTouches(h.naming, measured, scopeReadPlan, corpusIndex{}) {
 				t.Errorf("оператор вида %q, называющий измеряемую таблицу, признан влияющим — "+
 					"значит вид безвредным не является:\n  %s", word, h.naming)
@@ -338,13 +352,13 @@ func TestHarmlessObjectKindsAreProvenNotDeclared(t *testing.T) {
 			if len(toks) == 0 {
 				continue
 			}
-			switch toks[0].word {
-			case "create", "alter", "drop":
-				for _, tk := range toks[1:4] {
-					if seenKind := tk.word; objectsWithoutTableSubject[seenKind].why != "" {
-						seen[seenKind]++
-					}
-				}
+			// СЧЁТ ПРЕДМЕТА ИДЁТ ПО ВИДУ ТАМ, ГДЕ ЕГО ЧИТАЕТ РАЗБОР, а не по
+			// слову в позиции. Прежний предикат брал любое слово из первых
+			// трёх лексем — то есть был ШИРЕ покупаемого и засчитывал предмет
+			// там, где вида нет. Он же ронял прогон срезом за границей на
+			// операторе короче четырёх лексем.
+			if kind := objectKindOf(toks); objectsWithoutTableSubject[kind].why != "" {
+				seen[kind]++
 			}
 		}
 	}

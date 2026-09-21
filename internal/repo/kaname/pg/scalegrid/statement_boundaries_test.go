@@ -184,3 +184,50 @@ func TestForeignTableIsATable(t *testing.T) {
 		t.Fatal("инъекция односторонняя")
 	}
 }
+
+// TestShortStatementYieldsAVerdictNotAPanic — КОРОТКИЙ ОПЕРАТОР ДАЁТ ВЕРДИКТ.
+//
+// Срез `toks[1:4]` в переписи предмета выходил за границу на операторе короче
+// четырёх лексем — это ПАНИКА, обрывающая весь прогон, а не находка. В корпусе
+// она не случилась, но не по построению: ёмкость среза оказывалась достаточной,
+// и защищало нас устройство памяти, а не код.
+//
+// Ось заведена отдельно от предмета: короткий оператор законен (`VACUUM;`,
+// `COMMIT;`), и прибор обязан отвечать о нём, а не падать.
+func TestShortStatementYieldsAVerdictNotAPanic(t *testing.T) {
+	measured := []string{"access_bindings"}
+
+	short := []string{
+		"", ";", " ", "\n", "--только комментарий\n",
+		"VACUUM;", "COMMIT;", "ANALYZE;", "BEGIN;", "CREATE;", "DROP;", "ALTER;",
+		"CREATE TABLE;", "DROP INDEX;", "REINDEX;", "CLUSTER;", "$$", "'", "\"",
+	}
+
+	var verdicts int
+	for _, sql := range short {
+		t.Run(strings.TrimSpace(strings.Join(strings.Fields(sql), " ")), func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("оператор из %d лексем уронил прибор: %v\n  Паника обрывает ВЕСЬ "+
+						"прогон и находкой не является: вердикта не получает ни одна проба",
+						len(sqlTokens(sql)), r)
+				}
+			}()
+			_ = migrationTouches(sql, measured, scopeReadPlan, corpusIndex{})
+			_ = objectKindOf(sqlTokens(sql))
+			_ = ddlStatementOf(sql, corpusIndex{})
+			_ = executedLiterals(sql)
+			verdicts++
+		})
+	}
+	t.Logf("перепись: коротких операторов проверено %d, вердиктов получено %d", len(short), verdicts)
+	if verdicts != len(short) {
+		t.Fatalf("вердикт получен не по каждому: %d из %d", verdicts, len(short))
+	}
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: короткий оператор НАД ИЗМЕРЯЕМОЙ таблицей всё ещё
+	// краснеет — ось не выродилась в «на коротком молчим».
+	if !migrationTouches("VACUUM kaname.access_bindings;", measured, scopeReadPlan, corpusIndex{}) {
+		t.Fatal("короткий оператор над измеряемой таблицей отсеян: ось съела предмет")
+	}
+}
