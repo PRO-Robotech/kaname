@@ -71,14 +71,14 @@ func sessionAwareHandler(rec sessionRevoker, sess *recordingSessions, ext *stati
 // EXTERNAL subject of the named user.
 func TestForceLogout_EndsTheProviderSession(t *testing.T) {
 	sess := &recordingSessions{}
-	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "kratos-uuid-victim"}}
+	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "external-uuid-victim"}}
 	h, _ := sessionAwareHandler(&fakeForceLogoutRecorder{}, sess, ext)
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
 	require.True(t, op.GetDone())
 
-	require.Equal(t, []string{"kratos-uuid-victim"}, sess.subjects,
+	require.Equal(t, []string{"external-uuid-victim"}, sess.subjects,
 		"the session must be ended for the identity the provider knows, not the kacho user id")
 }
 
@@ -90,7 +90,7 @@ func TestForceLogout_EndsTheProviderSession(t *testing.T) {
 // teardown. What must not happen is a success report.
 func TestForceLogout_ProviderUnreachable_FailsTheMutation(t *testing.T) {
 	sess := &recordingSessions{err: errors.New("provider unreachable")}
-	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "kratos-uuid-victim"}}
+	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "external-uuid-victim"}}
 	rec := &fakeForceLogoutRecorder{}
 	h, ops := sessionAwareHandler(rec, sess, ext)
 

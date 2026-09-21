@@ -143,18 +143,18 @@ func sakeyAuditRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool, event
 
 // buildIssueUC wires a real IssueSAKeyUseCase against the live pool + the given
 // fake Hydra, with the durable audit emitter attached.
-func buildIssueUC(pool *pgxpool.Pool, hydra OAuthClientAdmin) *IssueSAKeyUseCase {
+func buildIssueUC(pool *pgxpool.Pool, provider OAuthClientAdmin) *IssueSAKeyUseCase {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	uc := NewIssueSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), hydra, opsRepo)
+	uc := NewIssueSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), provider, opsRepo)
 	uc.WithAuditEmitter(kanamepg.NewAuditOutboxEmitter(pool))
 	return uc
 }
 
-func buildRevokeUC(pool *pgxpool.Pool, hydra OAuthClientAdmin) *RevokeSAKeyUseCase {
+func buildRevokeUC(pool *pgxpool.Pool, provider OAuthClientAdmin) *RevokeSAKeyUseCase {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	uc := NewRevokeSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), hydra, opsRepo)
+	uc := NewRevokeSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), provider, opsRepo)
 	uc.WithAuditEmitter(kanamepg.NewAuditOutboxEmitter(pool))
 	return uc
 }
@@ -179,37 +179,37 @@ func awaitAudit(ctx context.Context, t *testing.T, pool *pgxpool.Pool, eventType
 	t.Fatalf("audit row %s for key %s never appeared", eventType, keyID)
 }
 
-// fakeHydra — minimal OAuthClientAdmin recording calls and returning a fixed
+// fakeOAuthClientAdmin — minimal OAuthClientAdmin recording calls and returning a fixed
 // client id. No secret material is produced (private_key_jwt mode).
-type fakeHydra struct {
+type fakeOAuthClientAdmin struct {
 	createCalls int
 	deleteCalls int
 }
 
-func (f *fakeHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
+func (f *fakeOAuthClientAdmin) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
 	f.createCalls++
-	return clients.HydraOAuthClient{ClientID: "hydra-cli-" + fmt.Sprint(f.createCalls)}, nil
+	return clients.HydraOAuthClient{ClientID: "provider-cli-" + fmt.Sprint(f.createCalls)}, nil
 }
-func (f *fakeHydra) DeleteOAuthClient(ctx context.Context, clientID string) error {
+func (f *fakeOAuthClientAdmin) DeleteOAuthClient(ctx context.Context, clientID string) error {
 	f.deleteCalls++
 	return nil
 }
 
-// collidingHydra returns a CONSTANT ClientID on every CreateOAuthClient, so the
+// collidingOAuthClientAdmin returns a CONSTANT ClientID on every CreateOAuthClient, so the
 // second Issue's mapping INSERT collides on the (unchanged) UNIQUE hydra_client_id
 // index → the worker-tx rolls back. Used by the atomicity test after migration
 // 0047 relaxed sva_unique (N:1 keys per ServiceAccount) removed the previous
 // duplicate-Issue rollback trigger.
-type collidingHydra struct {
+type collidingOAuthClientAdmin struct {
 	createCalls int
 	deleteCalls int
 }
 
-func (f *collidingHydra) CreateOAuthClient(_ context.Context, _ clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
+func (f *collidingOAuthClientAdmin) CreateOAuthClient(_ context.Context, _ clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
 	f.createCalls++
-	return clients.HydraOAuthClient{ClientID: "hydra-cli-collision-const"}, nil
+	return clients.HydraOAuthClient{ClientID: "provider-cli-collision-const"}, nil
 }
-func (f *collidingHydra) DeleteOAuthClient(_ context.Context, _ string) error {
+func (f *collidingOAuthClientAdmin) DeleteOAuthClient(_ context.Context, _ string) error {
 	f.deleteCalls++
 	return nil
 }
@@ -227,7 +227,7 @@ func TestSAKeyAudit_5_2_20_IssueEmitsNoSecret(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5220")
-	uc := buildIssueUC(pool, &fakeHydra{})
+	uc := buildIssueUC(pool, &fakeOAuthClientAdmin{})
 
 	op, err := uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID,
@@ -275,7 +275,7 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5221")
 
 	// Issue a key first.
-	issueUC := buildIssueUC(pool, &fakeHydra{})
+	issueUC := buildIssueUC(pool, &fakeOAuthClientAdmin{})
 	_, err = issueUC.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID,
 		CreatedByUserID:  string(uid),
@@ -290,7 +290,7 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 
 	// Revoke it (different principal to prove actor-from-context).
 	revoker := uid
-	revokeUC := buildRevokeUC(pool, &fakeHydra{})
+	revokeUC := buildRevokeUC(pool, &fakeOAuthClientAdmin{})
 	_, err = revokeUC.Execute(withSAKeyPrincipal(ctx, string(revoker)), RevokeInput{
 		ServiceAccountID: svaID,
 		KeyID:            domain.SAOAuthClientID(keyID),
@@ -320,7 +320,7 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 //
 // The trigger is the (unchanged) UNIQUE hydra_client_id index: migration 0047
 // relaxed sva_unique to N:1, so a duplicate sva no longer rolls back. We drive
-// the collision with a hydra stub that returns a CONSTANT client id, so the
+// the collision with a provider stub that returns a CONSTANT client id, so the
 // second Issue's mapping INSERT deterministically fails and rolls the worker-tx
 // back — the atomicity property under test is unchanged.
 
@@ -335,7 +335,7 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5235")
-	uc := buildIssueUC(pool, &collidingHydra{})
+	uc := buildIssueUC(pool, &collidingOAuthClientAdmin{})
 
 	// First Issue succeeds and lands one key (hydra_client_id="…collision-const").
 	_, err = uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
@@ -401,7 +401,7 @@ func TestSAKeyAudit_5_2_40_ActorFromPrincipal(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5240")
-	uc := buildIssueUC(pool, &fakeHydra{})
+	uc := buildIssueUC(pool, &fakeOAuthClientAdmin{})
 
 	// CreatedByUserID body field set to the real principal (handler enforces
 	// equality); the audit actor must equal the principal regardless.
