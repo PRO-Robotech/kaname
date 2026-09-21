@@ -70,7 +70,7 @@ type forceLogoutOperationRepo interface {
 // pg-side session taxonomy + audit_outbox_event_type CHECK.
 const eventSessionForceLogout = "iam.session.force_logout"
 
-// providerSessions — the identity provider's login-session surface.
+// ProviderSessions — the identity provider's login-session surface.
 //
 // Force-logout writes a cutoff that stops tokens from being ISSUED. That is the
 // authoritative half, and on its own it leaves the person's browser holding a
@@ -90,7 +90,7 @@ type ProviderSessions interface {
 	DeleteLoginSessions(ctx context.Context, subject string) error
 }
 
-// externalIDResolver maps a kacho user id to the identity the provider knows.
+// ExternalIDResolver maps a kacho user id to the identity the provider knows.
 //
 // The two are different namespaces and neither substitutes for the other:
 // force-logout names a `users.id`, the provider keys its sessions on the
@@ -114,7 +114,7 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 	return h
 }
 
-// ownSessions — НАШИ записи сессии входа (`human_sessions`), снимаемые целиком
+// OwnSessions — НАШИ записи сессии входа (`human_sessions`), снимаемые целиком
 // по личности (kaname#313).
 //
 // # ПОЧЕМУ ЭТО ВТОРОЙ ПОРТ, А НЕ ВТОРАЯ РЕАЛИЗАЦИЯ ПЕРВОГО
@@ -134,6 +134,15 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 // носитель, выданный ДО принудительного выхода, резолвится и ПОСЛЕ него.
 // Проверено опытом: `force_logout_own_session_integration_test.go` предъявляет
 // тот же носитель до и после.
+//
+// ЧТО ЭТО НЕ ЗАМЕЩАЕТ. Приёмка Ф3-25 ставит отказ предъявленной сессии НА КРАЮ,
+// сравнением момента аутентификации с отсечкой; про край здесь не утверждается
+// ничего, и его путь остаётся. Снятие закрывает три вещи ВНУТРИ службы:
+// собственный выход человека снимает строку И пишет отсечку, а тот же акт
+// распорядителя писал только отсечку — след одного выхода был разным; уборка
+// сносит истёкшие и СНЯТЫЕ строки, поэтому не снятая живёт до абсолютного
+// срока; и «сессии нет» получал только тот читатель, кто сверх резолва спросил
+// ещё и отсечку.
 //
 // Реализуется `*repo/kaname/pg.HumanSessionRepo` — ТЕМ ЖЕ адаптером, которым
 // снимает свои записи полоса входа. Два писателя одной таблицы зовут один
