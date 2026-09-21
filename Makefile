@@ -58,6 +58,58 @@ PLATFORM_TREE ?= $(MONOREPO_ROOT)
 # Объявление одно на дерево; здесь — только его адрес, см. разбор в самом файле.
 include provenance.mk
 
+# ─── ХУКИ GIT ───────────────────────────────────────────────────────────────
+#
+# ЛОКАЛЬНЫЙ ПРОГОН ДЕРЖИТСЯ ХУКОМ, А ХУК — ЭТИМИ ЦЕЛЯМИ.
+#
+# ЧЕГО НЕ БЫЛО ДО СИХ ПОР. В клонах этого репозитория лежал переходник
+# `.git/hooks/pre-push`, искавший `scripts/hooks/pre-push`, — а каталога
+# `scripts/hooks` в дереве не существовало ВОВСЕ. Не найдя адресата, переходник
+# печатал строку и выходил НУЛЁМ, то есть пропускал отправку. Замер
+# (2026-09-22, ствол `cbbac984`): отправка прошла за 1.3 с, код 0, исполненных
+# проверок 0. Всё, что уезжало отсюда, уезжало НЕПРОВЕРЕННЫМ — не «зелёным»,
+# и отличить одно от другого по исходу `git push` было нечем.
+#
+# Починка — две половины, и обе здесь: адресат заведён (`scripts/hooks/pre-push`),
+# а переходник новой редакции на ненайденном адресате ОТКАЗЫВАЕТ. Что он
+# действительно отказывает и действительно доходит — доказано инъекцией
+# (`scripts/hooks/install-inject.sh`), которую зовёт конвейер.
+#
+# `check-hooks` НАМЕРЕННО БЕЗ СТРОКИ `##`, И ЭТО НЕ НЕДОСМОТР. Перечень `##`
+# читает гейт самостоятельного клона (`tools/standalonetargets`): каждая
+# непомеченная цель обязана в свежем клоне РАБОТАТЬ. `check-hooks` в свежем
+# клоне обязана ОТКАЗЫВАТЬ — в этом вся её польза, — и попала бы в находки by
+# construction. Зелёной её сделало бы только соседство: если бы `install-hooks`
+# отработала раньше в том же каталоге. Предпосылка, которую создаёт соседняя
+# цель, — отдельный дефект, и заводить его ради строки перечня не стоит.
+# Цель при этом названа в строке `install-hooks`, то есть из `make help` видна.
+.PHONY: install-hooks check-hooks hooks-notice
+
+## install-hooks — провязать хуки git из scripts/hooks в этот клон (проверить: make check-hooks)
+install-hooks:
+	@bash scripts/hooks/install.sh install
+
+# check-hooks — провязаны ли хуки; непровязанный клон и переходник прежней
+# редакции — оба отказ. Разбор, почему у цели нет строки `##`, — абзацем выше.
+check-hooks:
+	@bash scripts/hooks/install.sh check
+
+# hooks-notice — та же проверка, ничего не роняющая: одна строка в stderr, когда
+# провязки нет. Висит на целях, которые гоняют ПЕРЕД отправкой ветки, потому что
+# непровязанность иначе ненаблюдаема совсем: клон без хука ведёт себя ровно так
+# же, как клон с зелёным хуком.
+hooks-notice:
+	@bash scripts/hooks/install.sh notice
+
+# В конвейере хуки бессмысленны — он не отправляет веток из рабочей копии, —
+# поэтому напоминание туда не едет. Условие названо переменной, а не спрятано
+# внутри скрипта: видно, что именно его отключает.
+ifeq ($(origin CI),undefined)
+HOOKS_NOTICE := hooks-notice
+else
+HOOKS_NOTICE :=
+endif
+
 .PHONY: test-standalone help build build-migrator test test-short vet lint docker generate audit-list-filter
 
 # help — перечень целей. Первая цель файла, поэтому голый `make` печатает её:
@@ -105,11 +157,11 @@ define delegate_to_tree
 endef
 
 ## test — все пробы службы (юниты + интеграция) [монорепо]
-test:
+test: $(HOOKS_NOTICE)
 	$(call delegate_to_tree,test-service,go test ./... -race -cover -count=1 -p 1)
 
 ## test-short — пробы без контейнеров [монорепо]
-test-short:
+test-short: $(HOOKS_NOTICE)
 	$(call delegate_to_tree,test-service-short,go test ./... -race -cover -short -count=1)
 
 ## test-standalone — пробы модуля в самостоятельном клоне, с переписью пропущенного
@@ -126,7 +178,7 @@ test-short:
 ##
 ##   make test-standalone                 # -short, без контейнеров
 ##   make test-standalone ARGS="-race"    # свои флаги
-test-standalone:
+test-standalone: $(HOOKS_NOTICE)
 	@bash scripts/test-standalone.sh $(ARGS)
 
 ## vet — go vet по модулю
