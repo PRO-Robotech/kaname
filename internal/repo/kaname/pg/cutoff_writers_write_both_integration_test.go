@@ -295,3 +295,51 @@ func TestIntegration_LosingCutoffDoesNotRewriteReasonAndActor(t *testing.T) {
 				"неверного принявшего решение", q.name)
 	}
 }
+
+// TestIntegration_PoolDoorIsAtomicToo — дверь на ПУЛОВОМ исполнителе кладёт обе
+// записи одной транзакцией, а негодный вход отвергает ДО первой записи.
+//
+// На пуле два оператора суть два автокоммита, и между ними существует
+// наблюдаемое состояние «одна запись без другой». Путь этот сегодня без
+// прод-вызывающих — тем важнее, что обещание двери и её дело совпадают: латентный
+// путь оживает тихо.
+func TestIntegration_PoolDoorIsAtomicToo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "pdknr")
+	repo := kanamepg.NewUserTokenRevocationRepo(pool)
+
+	// НЕГОДНЫЙ ВХОД: решившего нет и причины нет — имя механизма не выводится.
+	// Отказ обязан прийти ДО первой записи.
+	err = repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: "", RevokeBefore: time.Now().UTC(),
+	}, "")
+	require.Error(t, err, "негодный вход обязан быть отвергнут")
+
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.user_token_revocations WHERE user_id = ''`).Scan(&rows))
+	require.Zero(t, rows, "отвергнутый вход оставил ПЕРВУЮ запись: проверки стоят "+
+		"после исполнения, и половина записывается прежде отказа")
+
+	// ГОДНЫЙ ВХОД на том же пуловом исполнителе: обе записи на месте.
+	require.NoError(t, repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: domain.UserID(scene.UserID), RevokeBefore: time.Now().UTC(),
+		Reason: domain.RevokeReasonLogout,
+	}, domain.UserID(scene.UserID)))
+
+	for _, q := range []struct{ name, sql string }{
+		{"отсечка субъекта", `SELECT count(*) FROM kaname.user_token_revocations WHERE user_id = $1`},
+		{"отсечка предъявления", `SELECT count(*) FROM kaname.minted_token_revocations WHERE subject = $1`},
+	} {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, q.sql, scene.UserID).Scan(&n), q.name)
+		require.Equal(t, 1, n, "%s не положена пуловой дверью", q.name)
+	}
+}

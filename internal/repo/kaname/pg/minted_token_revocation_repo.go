@@ -114,16 +114,38 @@ type cutoffExecutor interface {
 func upsertMintedCutoff(ctx context.Context, ex cutoffExecutor,
 	subject string, before time.Time, reason, decidedBy string,
 ) error {
+	if err := validateMintedCutoffInput(subject, decidedBy); err != nil {
+		return err
+	}
+	if _, err := ex.Exec(ctx, upsertMintedCutoffSQL, subject, before, reason, decidedBy); err != nil {
+		return wrapPgErr(err, "TokenRevocation", subject)
+	}
+	return nil
+}
+
+// validateMintedCutoffInput — проверки входа ОТДЕЛЬНО от исполнения.
+//
+// Отдельно затем, чтобы их мог позвать писатель ПАРЫ записей — ДО первого
+// оператора. Проверка, стоящая после исполнения соседней записи, отвергает вход
+// тогда, когда половина уже записана: вызывающий получает отказ, а состояние
+// изменено.
+func validateMintedCutoffInput(subject, decidedBy string) error {
 	if strings.TrimSpace(subject) == "" {
 		return fmt.Errorf("%w: revocation must name its subject", iamerr.ErrInvalidArg)
 	}
 	if strings.TrimSpace(decidedBy) == "" {
 		return fmt.Errorf("%w: revocation must name who decided it", iamerr.ErrInvalidArg)
 	}
-	if _, err := ex.Exec(ctx, upsertMintedCutoffSQL, subject, before, reason, decidedBy); err != nil {
-		return wrapPgErr(err, "TokenRevocation", subject)
-	}
 	return nil
+}
+
+// cutoffTxBeginner — исполнитель, УМЕЮЩИЙ ОТКРЫТЬ ТРАНЗАКЦИЮ.
+//
+// Пул умеет, транзакция — нет, и различать их надо: дверь обещает не только
+// «обе записи», но и «одной транзакцией», а на пуле два оператора суть два
+// автокоммита. Обещание приведено к делу, а не наоборот (kaname#313).
+type cutoffTxBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // SweepStaleCutoffs убирает отсечки, ставшие БЕССМЫСЛЕННЫМИ, — партией и по

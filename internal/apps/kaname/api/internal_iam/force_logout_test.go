@@ -120,7 +120,6 @@ func forceLogoutHandlerWithOps(rec sessionRevoker) (*Handler, *recordingForceLog
 		WithSessionRevoker(rec).
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
 		WithOperations(ops).
-		WithOwnSessions(&recordingOwnSessions{}).
 		// Исполнитель снятия сессии провязан ТАК ЖЕ, как его провязывает
 		// композиционный корень: без него глагол отказывает закрыто, и пробы
 		// ниже судили бы отказ провязки вместо своего предмета (kaname#313).

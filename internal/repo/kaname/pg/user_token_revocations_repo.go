@@ -102,14 +102,46 @@ func (r *UserTokenRevocationRepo) UpsertRevokeAll(ctx context.Context, u domain.
 func upsertSubjectCutoff(ctx context.Context, ex cutoffExecutor,
 	u domain.UserTokenRevocation, revokedBy domain.UserID,
 ) error {
+	decidedBy := string(revokedBy)
+	if decidedBy == "" {
+		decidedBy = mechanismDecider(u.Reason)
+	}
+	// ПРОВЕРКИ ВХОДА ОБЕИХ ЗАПИСЕЙ — ДО ПЕРВОГО ОПЕРАТОРА. Проверка, стоящая
+	// после исполнения первой записи, отвергает вход тогда, когда половина уже
+	// записана: вызывающий получает отказ, а состояние изменено.
+	if err := validateMintedCutoffInput(string(u.UserID), decidedBy); err != nil {
+		return err
+	}
+	// ОДНОЙ ТРАНЗАКЦИЕЙ — И НА ПУЛЕ ТОЖЕ. На пуле два оператора суть два
+	// автокоммита, и между ними существует наблюдаемое состояние «одна запись
+	// без другой» — ровно то, ради чего дверь заведена. Транзакция вызывающего
+	// уже открыта и своей не заводит: вложенной ей быть нельзя, а разорвать
+	// чужую атомарность тем более.
+	if beginner, ok := ex.(cutoffTxBeginner); ok {
+		tx, err := beginner.Begin(ctx)
+		if err != nil {
+			return mapErr(err, "", string(u.UserID))
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if werr := writeBothCutoffs(ctx, tx, u, revokedBy, decidedBy); werr != nil {
+			return werr
+		}
+		if cerr := tx.Commit(ctx); cerr != nil {
+			return mapErr(cerr, "", string(u.UserID))
+		}
+		return nil
+	}
+	return writeBothCutoffs(ctx, ex, u, revokedBy, decidedBy)
+}
+
+// writeBothCutoffs — сами две записи, одна за другой, на ОДНОМ исполнителе.
+func writeBothCutoffs(ctx context.Context, ex cutoffExecutor,
+	u domain.UserTokenRevocation, revokedBy domain.UserID, decidedBy string,
+) error {
 	if _, err := ex.Exec(ctx, subjectCutoffRowSQL,
 		string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy),
 	); err != nil {
 		return mapErr(err, "", string(u.UserID))
-	}
-	decidedBy := string(revokedBy)
-	if decidedBy == "" {
-		decidedBy = mechanismDecider(u.Reason)
 	}
 	return upsertMintedCutoff(ctx, ex, string(u.UserID), u.RevokeBefore, u.Reason, decidedBy)
 }
