@@ -10,7 +10,7 @@ package pg
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ИСПОЛНЯЕТСЯ, А ЧТО ИСПОЛНЯЕТ СХЕМА
 //
-// Под `external` порт `providerClients` зеркалит нашу строку в ЧУЖОЙ реестр:
+// Под `external` порт `ProviderClients` зеркалит нашу строку в ЧУЖОЙ реестр:
 // тот выдаёт идентификатор клиента, он же хранит его и он же сносит его вместе
 // с выданным по нему. Под `own` второго реестра нет: реестр — это
 // `kaname.interactive_clients`, и «зеркалить» его некуда.
@@ -102,7 +102,7 @@ type ClientSecretStore interface {
 	ClearClientSecretVerifier(ctx context.Context, clientID string) error
 }
 
-// OwnInteractiveClientProvider — исполнитель порта `providerClients` на
+// OwnInteractiveClientProvider — исполнитель порта `ProviderClients` на
 // посадке без внешнего поставщика.
 type OwnInteractiveClientProvider struct {
 	clients ClientSecretStore
