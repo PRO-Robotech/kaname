@@ -15,6 +15,17 @@ package access_keys
 // #10), последний способ входа не снимается (Ф7-26), снятие суженное
 // владельцем — чужой и несуществующий неразличимы (Ф7-27), событие аудита.
 // Слот потолка возвращает удаление строки — триггером, в той же транзакции.
+//
+// # Страж считает СПОСОБЫ, а не строки
+//
+// Способом входа без имени является только ключ, чья обнаружимость
+// ПОДТВЕРЖДЕНА: без обнаруживаемого удостоверения полоса входа без имени
+// невозможна by construction. Поэтому страж спрашивает, сколько ГОДНЫХ К
+// ПРЕДЪЯВЛЕНИЮ способов останется у человека ПОСЛЕ снятия названного ключа, —
+// а не сколько строк у него сейчас. Счёт строк пропустил бы ровно тот случай,
+// ради которого страж заведён: человек без пароля с двумя ключами, об
+// обнаружимости которых чужая реализация промолчала, снимает один и остаётся с
+// тем, что в полосе входа не появится.
 
 import (
 	"context"
@@ -85,8 +96,9 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// NOT_FOUND, а не операцию с ошибкой; чужой ключ этой же полосой — строка
 	// сужена владельцем и не видна (Ф7-27).
 	keyID := domain.AccessKeyID(in.AccessKeyID)
+	keys := uc.keysOf(ctx, in.UserID)
 	var owned bool
-	for _, k := range uc.keysOf(ctx, in.UserID) {
+	for _, k := range keys {
 		if k.ID == keyID {
 			owned = true
 			break
@@ -105,7 +117,7 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// Последний способ входа судится синхронно, чтобы отказ назвал следующий
 	// шаг клиенту, и ещё раз под замком внутри транзакции — второе чтение
 	// держит инвариант, первое только классифицирует.
-	if err := uc.lastMethodRefusal(ctx, in.UserID, 0); err != nil {
+	if err := uc.lastMethodRefusal(ctx, in.UserID, keyID, keys); err != nil {
 		return nil, err
 	}
 	if err := uc.ops.Create(ctx, op); err != nil {
@@ -127,9 +139,23 @@ func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) []dom
 	return keys
 }
 
-// lastMethodRefusal — человек без пароля с одним ключом (сверх locked)
-// остался бы без способа входа (Ф7-26).
-func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID, lockedCount int) error {
+// presentableAfterRevoking — сколько способов входа БЕЗ ИМЕНИ останется у
+// человека, если снять названный ключ. Признак берётся ПОСТРОЧНО: он записан
+// церемонией и другого источника у него нет.
+func presentableAfterRevoking(keys []domain.AccessKey, revoked domain.AccessKeyID) int {
+	n := 0
+	for _, k := range keys {
+		if k.ID == revoked || !k.Discoverability.Presentable() {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// lastMethodRefusal — снятие, после которого у человека без пароля не остаётся
+// ни одного годного к предъявлению способа входа, отвергается (Ф7-26).
+func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID, revoked domain.AccessKeyID, keys []domain.AccessKey) error {
 	has, err := uc.deps.Methods.HasPassword(ctx, userID)
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
@@ -137,11 +163,7 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 	if has {
 		return nil
 	}
-	n := lockedCount
-	if n == 0 {
-		n = len(uc.keysOf(ctx, userID))
-	}
-	if n <= 1 {
+	if presentableAfterRevoking(keys, revoked) == 0 {
 		uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
 		return lastSignInMethod()
 	}
@@ -159,7 +181,7 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.lock", err)
 	}
-	if err := uc.lastMethodRefusal(ctx, userID, len(locked)); err != nil {
+	if err := uc.lastMethodRefusal(ctx, userID, keyID, locked); err != nil {
 		return nil, err
 	}
 	removed, found, err := w.DeleteOwnedByID(ctx, userID, keyID)

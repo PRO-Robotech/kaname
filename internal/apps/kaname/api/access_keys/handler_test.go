@@ -72,7 +72,8 @@ func TestAccessKeyHandler_AnonymousIsRefusedOnEveryVerb(t *testing.T) {
 
 // TestAccessKeyHandler_F7_40_ChallengeIsTheCeremonyForm — испытание регистрации
 // отдаётся формой `PublicKeyCredentialCreationOptions`: шесть литералов
-// контракта на месте, рукоятка — байты `id` человека, срок назван.
+// контракта на месте, рукоятка — случайное значение длины нормы (а не `id`
+// человека и не его адрес, стоящий в соседнем поле), срок назван.
 func TestAccessKeyHandler_F7_40_ChallengeIsTheCeremonyForm(t *testing.T) {
 	h := newHarness(t)
 	hd := h.handler()
@@ -81,8 +82,10 @@ func TestAccessKeyHandler_F7_40_ChallengeIsTheCeremonyForm(t *testing.T) {
 	require.Len(t, ch.GetChallenge(), domain.AccessKeyChallengeBytes)
 	require.Equal(t, rpID, ch.GetRp().GetId())
 	require.Equal(t, access_keys.RPDisplayName, ch.GetRp().GetName())
-	require.Equal(t, []byte(alice), ch.GetUser().GetId())
+	require.Len(t, ch.GetUser().GetId(), domain.CeremonyHandleBytes, "рукоятка — 64 случайных байта (норма §14.6.1)")
+	require.NotEqual(t, []byte(alice), ch.GetUser().GetId(), "рукоятка — не платформенный id")
 	require.NotEmpty(t, ch.GetUser().GetName())
+	require.NotEqual(t, []byte(ch.GetUser().GetName()), ch.GetUser().GetId(), "адрес стоит в соседнем поле и в рукоятку не переезжает")
 	require.Equal(t, access_keys.UserVerificationRegistration, ch.GetAuthenticatorSelection().GetUserVerification())
 	require.Equal(t, access_keys.ResidentKey, ch.GetAuthenticatorSelection().GetResidentKey())
 	require.True(t, ch.GetAuthenticatorSelection().GetRequireResidentKey())

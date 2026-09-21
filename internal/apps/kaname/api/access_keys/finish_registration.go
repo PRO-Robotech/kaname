@@ -13,8 +13,9 @@ package access_keys
 // (не выдавалось · предъявлено · просрочено — три различимых состояния, Ф7-34)
 // → сверка результата шестью осями проверяющим → расширение свойств (Ф7-41)
 // → операция. Внутри операции ОДНОЙ транзакцией: потребление испытания
-// (условный оператор — второе предъявление проигрывает), строка ключа (её
-// уникальность и слот потолка судит база), событие аудита.
+// (условный оператор — второе предъявление проигрывает), рукоятка человека
+// (тот же оператор, что у выдачи испытания, — возвращает уже заведённую),
+// строка ключа (её уникальность и слот потолка судит база), событие аудита.
 //
 // Испытание потребляется на УСПЕХЕ: отказ по сроку, происхождению, хэшу имени,
 // алгоритму, присутствию или форме оставляет его выданным — «тот же результат с
@@ -53,6 +54,8 @@ type FinishRegistrationInput struct {
 	ClientDataJSON    []byte
 	AttestationObject []byte
 	// Discoverable — `clientExtensionResults.credProps.rk`; nil — не сообщено.
+	// Все три стороны доезжают до СТРОКИ: спрашивают об обнаружимости один раз
+	// за жизнь ключа, и «не сообщено» — такой же факт, как остальные два.
 	Discoverable *bool
 }
 
@@ -140,16 +143,26 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 		uc.deps.Observer.AccessKeyRefusalObserved(LaneRegistration, RefusalMalformed)
 		return nil, fieldRule("credential.id", "does not match the attested credential id")
 	}
-	// Расширение свойств удостоверения: три стороны (Ф7-41).
-	if in.Discoverable != nil && !*in.Discoverable {
-		uc.deps.Observer.AccessKeyRefusalObserved(LaneRegistration, RefusalNotDiscoverable)
-		return nil, withReason(codes.InvalidArgument, ReasonNotDiscoverable, TextNotDiscoverable)
+	// Расширение свойств удостоверения: три стороны (Ф7-41). Сообщённое «не
+	// обнаруживаемое» — отказ, и строки не будет; остальные две стороны ложатся
+	// в строку РАЗНЫМИ состояниями: «не сообщено» — не то же, что
+	// «обнаруживаемое», и потом их уже не различить.
+	discoverability := domain.DiscoverabilityNotReported
+	if in.Discoverable != nil {
+		if !*in.Discoverable {
+			uc.deps.Observer.AccessKeyRefusalObserved(LaneRegistration, RefusalNotDiscoverable)
+			return nil, withReason(codes.InvalidArgument, ReasonNotDiscoverable, TextNotDiscoverable)
+		}
+		discoverability = domain.DiscoverabilityConfirmed
 	}
 
 	keyID := domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen))
+	// Рукоятка в строку кладётся ВНУТРИ пишущей транзакции (`commit`): её
+	// значение — факт хранилища, а не входа, и читается оно тем же оператором,
+	// которым при надобности чеканится.
 	key := domain.AccessKey{
 		ID: keyID, UserID: in.UserID, CredentialID: res.CredentialID, PublicKey: res.PublicKey,
-		Algorithm: int64(res.Algorithm), SignCount: res.SignCount, UserHandle: []byte(in.UserID),
+		Algorithm: int64(res.Algorithm), SignCount: res.SignCount, Discoverability: discoverability,
 		Name:        domain.AccessKeyName(corevalidate.NameOrDefault(in.Name, string(keyID))),
 		Description: domain.AccessKeyDescription(in.Description), CreatedAt: now,
 	}
@@ -168,18 +181,34 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 	actor := string(in.Actor)
 	challenge := ch.Challenge
 	operations.Run(ctx, uc.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return uc.commit(ctx, key, user.AccountID, challenge, actor, now)
+		return uc.commit(ctx, key, user, challenge, actor, now)
 	})
 	return &op, nil
 }
 
 // commit — ОДНА транзакция: потребление испытания, строка, событие.
-func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.AccessKey, account domain.AccountID, challenge []byte, actor string, now time.Time) (*anypb.Any, error) {
+func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.AccessKey, user domain.User, challenge []byte, actor string, now time.Time) (*anypb.Any, error) {
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.writer", err)
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	// Рукоятка: строка человека уже есть — её завела выдача испытания, без
+	// которого сюда не доходят, — и оператор возвращает ЕЁ значение. Чеканка
+	// здесь не ветвь «на всякий случай»: она и есть тот же один оператор, и
+	// потому недостижимой ветви в коде нет.
+	minted, err := domain.NewCeremonyHandle()
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.mint", err)
+	}
+	handle, err := w.EnsureCeremonyHandle(ctx, key.UserID, minted)
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.handle", err)
+	}
+	if err := handle.CarriesNoNameOf(user); err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.handle", err)
+	}
+	key.UserHandle = handle
 	consumed, err := w.ConsumeChallenge(ctx, challenge, key.UserID, domain.ChallengeForRegistration, now)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.consume", err)
@@ -194,7 +223,7 @@ func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.Acce
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.insert", err)
 	}
-	if err := emitKeyAudit(ctx, w, AuditAccessKeyRegistered, persisted, account, actor); err != nil {
+	if err := emitKeyAudit(ctx, w, AuditAccessKeyRegistered, persisted, user.AccountID, actor); err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.audit", err)
 	}
 	if err := w.Commit(ctx); err != nil {

@@ -75,11 +75,18 @@ func akCeiling(t *testing.T, pool *pgxpool.Pool, limit int64) {
 }
 
 func akKey(user domain.UserID, cred string) domain.AccessKey {
+	// Рукоятка — случайная, как у живой церемонии: платформенный `id` домен
+	// отвергает, и подставить его сюда фикстурой значило бы сделать её
+	// снисходительнее продукта.
+	handle, err := domain.NewCeremonyHandle()
+	if err != nil {
+		panic(err)
+	}
 	return domain.AccessKey{
 		ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: user,
 		CredentialID: []byte(fmt.Sprintf("%-32s", cred)), PublicKey: []byte{0xa5, 0x01, 0x02},
-		Algorithm: -7, UserHandle: []byte(user), Name: "", Description: "проба",
-		CreatedAt: time.Now().UTC(),
+		Algorithm: -7, UserHandle: handle, Discoverability: domain.DiscoverabilityConfirmed,
+		Name: "", Description: "проба", CreatedAt: time.Now().UTC(),
 	}
 }
 

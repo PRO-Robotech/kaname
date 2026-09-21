@@ -230,7 +230,8 @@ func TestAccessKey_F7_01_CeremonyRegistersAKey(t *testing.T) {
 	key := h.mustRegister(alice, a)
 	require.NoError(t, corevalidate.ResourceID("access key", "ak", string(key.ID)), "свой id проходит маршрутизатор (Ф7-47)")
 	require.Equal(t, string(key.ID), string(key.Name), "пустое имя заменено умолчанием от id (Р10)")
-	require.Equal(t, []byte(alice), key.UserHandle, "рукоятка — платформенный id человека (Ф13 Р3)")
+	require.NotEqual(t, []byte(alice), key.UserHandle, "рукоятка — не платформенный id: отозвать его из аутентификатора нечем")
+	require.Len(t, key.UserHandle, domain.CeremonyHandleBytes, "рукоятка — случайное значение длины нормы §14.6.1")
 
 	out, err := h.assertWith(alice, a, webauthntest.AssertionOptions{})
 	require.NoError(t, err)
@@ -282,7 +283,8 @@ func TestAccessKey_F7_40_RegistrationChallengeNamesSixContractValues(t *testing.
 	require.Equal(t, access_keys.Attestation, ch.Attestation)
 	require.True(t, ch.CredProps, "запрос расширения свойств удостоверения (Ф7-41)")
 	require.Equal(t, h.now.Add(access_keys.ChallengeTTL), ch.ExpiresAt)
-	require.Equal(t, []byte(alice), ch.UserHandle)
+	require.Len(t, []byte(ch.UserHandle), domain.CeremonyHandleBytes, "рукоятка церемонии — случайное значение длины нормы §14.6.1")
+	require.NotEqual(t, []byte(alice), []byte(ch.UserHandle), "рукоятка церемонии — не платформенный id")
 	named, total := access_keys.ContractValuesInRegistrationChallenge(ch)
 	require.Equal(t, 6, total)
 	require.Equal(t, 6, named)
@@ -769,12 +771,16 @@ func TestAccessKey_UserHandleIsVerifiedWhenPresented(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	a := webauthntest.New(t, webauthntest.AlgES256)
-	h.mustRegister(alice, a)
+	key := h.mustRegister(alice, a)
+	// Чужая рукоятка — рукоятка ДРУГОГО человека, а не выдуманные байты: так
+	// отрицание меряет сверку, а не длину.
+	foreign := h.mustRegister(bob, webauthntest.New(t, webauthntest.AlgES256))
+	require.NotEqual(t, key.UserHandle, foreign.UserHandle)
 	ch := h.beginAssertion(alice)
 	as := a.Assert(t, webauthntest.AssertionOptions{Challenge: ch.Challenge, Origin: origin, RPID: rpID})
-	_, err := h.finishAssertion(alice, as, []byte(bob))
+	_, err := h.finishAssertion(alice, as, foreign.UserHandle)
 	requireUnifiedRefusal(t, err)
-	_, err = h.finishAssertion(alice, as, []byte(alice))
+	_, err = h.finishAssertion(alice, as, key.UserHandle)
 	require.NoError(t, err)
 }
 

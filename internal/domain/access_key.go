@@ -26,8 +26,23 @@ package domain
 // проверки пользователя в строке НЕТ: различитель ступени берётся из флагов
 // каждого утверждения, а не из памяти о регистрации (Ф11 Р3). Аттестации нет
 // by construction (Р4).
+//
+// # Обнаружимость — величина, о которой спрашивают РОВНО ОДИН РАЗ
+//
+// Расширение свойств удостоверения (`credProps.rk`) сообщается в церемонии
+// регистрации и больше никогда: из флагов последующих утверждений оно не
+// выводится. Поэтому признак — хранимый факт строки, а не умолчание, и
+// состояний у него ТРИ: сообщено «обнаруживаемое», сообщено «не
+// обнаруживаемое», не сообщено вовсе. Третье — первоклассное состояние, а не
+// пустое поле: не все реализации расширение возвращают, и отвергать за их
+// молчание значило бы отказывать годным ключам.
+//
+// Читатель — страж последнего способа входа (Ф7-26): способом входа БЕЗ ИМЕНИ
+// является только подтверждённо обнаружимый ключ, потому что полоса входа без
+// имени без обнаруживаемого удостоверения невозможна by construction.
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"time"
@@ -94,6 +109,49 @@ func (d AccessKeyDescription) Validate() error {
 // не меньше 16 требуемых нормой (§13.4.3).
 const AccessKeyChallengeBytes = 32
 
+// AccessKeyDiscoverability — что расширение свойств удостоверения сообщило в
+// церемонии регистрации. Словарь ЗАКРЫТ и совпадает с ограничением схемы
+// `user_access_keys_discoverability_check`.
+type AccessKeyDiscoverability string
+
+const (
+	// DiscoverabilityConfirmed — сообщено «удостоверение обнаруживаемое».
+	DiscoverabilityConfirmed AccessKeyDiscoverability = "discoverable"
+	// DiscoverabilityRefuted — сообщено «удостоверение НЕ обнаруживаемое».
+	// Церемония такой результат отвергает (Ф7-41) и строки не заводит, поэтому
+	// СЕГОДНЯ это состояние не пишет ни одна полоса. В словаре оно тем не менее
+	// есть: словарь описывает, что сообщило РАСШИРЕНИЕ, а сторон у него ровно
+	// три, и колонка, не умеющая записать собственный предмет, потребовала бы
+	// правки схемы при первом же изменении политики приёма — у величины, о
+	// которой спрашивают один раз.
+	DiscoverabilityRefuted AccessKeyDiscoverability = "not-discoverable"
+	// DiscoverabilityNotReported — расширение не сообщено вовсе. Отличимо от
+	// обоих предыдущих: «мы не знаем» — не то же, что «мы знаем, что нет».
+	DiscoverabilityNotReported AccessKeyDiscoverability = "not-reported"
+)
+
+// AccessKeyDiscoverabilities — закрытый перечень.
+func AccessKeyDiscoverabilities() []AccessKeyDiscoverability {
+	return []AccessKeyDiscoverability{DiscoverabilityConfirmed, DiscoverabilityRefuted, DiscoverabilityNotReported}
+}
+
+// Validate — состояние из словаря; пустое негодно: строка без признака
+// означала бы, что о ней забыли спросить, а спросить уже не у кого.
+func (d AccessKeyDiscoverability) Validate() error {
+	switch d {
+	case DiscoverabilityConfirmed, DiscoverabilityRefuted, DiscoverabilityNotReported:
+		return nil
+	default:
+		return fmt.Errorf("Illegal argument discoverability: must be one of %v", AccessKeyDiscoverabilities())
+	}
+}
+
+// Presentable — годен ли ключ к предъявлению как СПОСОБ ВХОДА без имени.
+// Неподтверждённая обнаружимость годности не даёт: и «сообщено, что нет», и
+// «не сообщено» означают, что появления ключа в полосе входа без имени никто
+// не обещал.
+func (d AccessKeyDiscoverability) Presentable() bool { return d == DiscoverabilityConfirmed }
+
 // AccessKey — строка ключа.
 type AccessKey struct {
 	ID     AccessKeyID
@@ -107,12 +165,18 @@ type AccessKey struct {
 	Algorithm int64
 	// SignCount — сохранённое значение счётчика подписи (Р6).
 	SignCount uint32
-	// UserHandle — рукоятка `user.id` церемонии; у ключей Ф7 — платформенный
-	// `id` человека как байты (Ф13 Р3). Пустая — источник переноса её не нёс.
-	UserHandle  []byte
-	Name        AccessKeyName
-	Description AccessKeyDescription
-	CreatedAt   time.Time
+	// UserHandle — рукоятка `user.id` ЭТОГО ключа: у ключей церемонии —
+	// значение из `kaname.user_ceremony_handles` (64 случайных байта на
+	// человека), у перенесённых — то, что нёс источник. Пустая — источник
+	// переноса её не нёс. Платформенным `id` не является и не была бы
+	// отзываема, если бы являлась (`CeremonyHandle`).
+	UserHandle []byte
+	// Discoverability — что расширение свойств удостоверения сообщило в
+	// церемонии; спрашивают об этом один раз за жизнь ключа.
+	Discoverability AccessKeyDiscoverability
+	Name            AccessKeyName
+	Description     AccessKeyDescription
+	CreatedAt       time.Time
 	// LastUsedAt — момент последнего успешного предъявления; нулевой указатель
 	// — предъявлений не было.
 	LastUsedAt *time.Time
@@ -134,6 +198,17 @@ func (k AccessKey) Validate() error {
 	}
 	if k.Algorithm == 0 {
 		return fmt.Errorf("Illegal argument algorithm: required")
+	}
+	if err := k.Discoverability.Validate(); err != nil {
+		return err
+	}
+	// ЗАМОК на рукоятку, выраженный там, где строка судит саму себя: значение,
+	// несущее платформенный `id`, уехало бы в чужой аутентификатор без способа
+	// его оттуда отозвать. Адрес и отображаемое имя судятся производителем
+	// (`CeremonyHandle.CarriesNoNameOf`) — их в строке нет.
+	if len(k.UserHandle) > 0 && bytes.Contains(bytes.ToLower(k.UserHandle), bytes.ToLower([]byte(k.UserID))) {
+		return fmt.Errorf("Illegal argument user_handle: carries the platform user id — a handle already written " +
+			"into an authenticator cannot be revoked or rewritten")
 	}
 	if err := k.Name.Validate(); err != nil {
 		return err

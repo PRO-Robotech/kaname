@@ -22,6 +22,10 @@ package pg
 // Идентификатор удостоверения, открытый ключ и рукоятка хранятся байтами как
 // приняты; индекс по идентификатору — сам ключ уникальности: по нему ищет
 // проверка утверждения (Ф7-08, Ф7-09).
+//
+// Рукоятка ЧЕЛОВЕКА живёт своей таблицей (`user_ceremony_handles`) и заводится
+// одним оператором с разрешением конфликта: «завести, если нет, иначе вернуть
+// то, что есть» — условие держит ключ строки, а не сравнение прочитанного.
 
 import (
 	"context"
@@ -43,7 +47,7 @@ type AccessKeyRepo struct{ pool *pgxpool.Pool }
 // NewAccessKeyRepo — построение над пулом.
 func NewAccessKeyRepo(pool *pgxpool.Pool) *AccessKeyRepo { return &AccessKeyRepo{pool: pool} }
 
-const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, last_used_at`
+const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, discoverability, name, description, created_at, last_used_at`
 
 func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 	var (
@@ -52,7 +56,7 @@ func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 		used      *time.Time
 	)
 	if err := row.Scan(&k.ID, &k.UserID, &k.CredentialID, &k.PublicKey, &k.Algorithm, &signCount, &k.UserHandle,
-		&k.Name, &k.Description, &k.CreatedAt, &used); err != nil {
+		&k.Discoverability, &k.Name, &k.Description, &k.CreatedAt, &used); err != nil {
 		return domain.AccessKey{}, err
 	}
 	// Схема держит счётчик в `[0, 2^32-1]`, поэтому сужение без потерь.
@@ -236,6 +240,30 @@ func (w *accessKeyWriter) InsertChallenge(ctx context.Context, c domain.AccessKe
 	return nil
 }
 
+// EnsureCeremonyHandle — рукоятка человека ОДНИМ оператором. `DO UPDATE` с
+// присваиванием того же ключа не меняет значения, но делает строку видимой
+// `RETURNING`: без него проигравший конкуренцию получил бы ноль строк и
+// сорвался бы там, где ответ уже есть. Смены значения здесь нет и быть не
+// может — рукоятка уже лежит в аутентификаторе держателя.
+func (w *accessKeyWriter) EnsureCeremonyHandle(ctx context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if err := minted.Validate(); err != nil {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
+	}
+	var got []byte
+	err := w.tx.QueryRow(ctx, `
+		INSERT INTO user_ceremony_handles (user_id, handle)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING handle`, string(userID), []byte(minted)).Scan(&got)
+	if err != nil {
+		return nil, mapErr(err, "AccessKey.EnsureCeremonyHandle", "")
+	}
+	return domain.CeremonyHandle(got), nil
+}
+
 // ConsumeChallenge — ОДИН оператор однократности: строка вызывающего этой
 // процедуры, не потреблённая и не истёкшая на now, получает отметку.
 func (w *accessKeyWriter) ConsumeChallenge(ctx context.Context, challenge []byte, userID domain.UserID, purpose domain.AccessKeyChallengePurpose, now time.Time) (bool, error) {
@@ -260,11 +288,11 @@ func (w *accessKeyWriter) InsertKey(ctx context.Context, k domain.AccessKey) (do
 		handle = k.UserHandle
 	}
 	row := w.tx.QueryRow(ctx, `
-		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, discoverability, name, description, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+accessKeyCols,
 		string(k.ID), string(k.UserID), k.CredentialID, k.PublicKey, k.Algorithm, int64(k.SignCount), handle,
-		string(k.Name), string(k.Description), k.CreatedAt)
+		string(k.Discoverability), string(k.Name), string(k.Description), k.CreatedAt)
 	got, err := scanAccessKey(row)
 	if err != nil {
 		return domain.AccessKey{}, mapErr(err, "AccessKey.Insert", "")

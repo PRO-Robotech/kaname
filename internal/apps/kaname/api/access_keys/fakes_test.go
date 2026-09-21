@@ -26,6 +26,9 @@ type fakeStore struct {
 	users      map[domain.UserID]domain.User
 	keys       map[domain.AccessKeyID]domain.AccessKey
 	challenges map[string]domain.AccessKeyChallenge
+	// handles — рукоятка человека: заводится один раз и не меняется, как у
+	// настоящей таблицы (ключ строки — человек).
+	handles map[domain.UserID]domain.CeremonyHandle
 	// ceiling — потолок ключей у человека; nil — не объявлен (KQ002).
 	ceiling *int64
 	audit   []outboxtypes.AuditEvent
@@ -39,7 +42,7 @@ type fakeStore struct {
 func newFakeStore() *fakeStore {
 	ten := int64(10)
 	return &fakeStore{users: map[domain.UserID]domain.User{}, keys: map[domain.AccessKeyID]domain.AccessKey{},
-		challenges: map[string]domain.AccessKeyChallenge{}, ceiling: &ten}
+		challenges: map[string]domain.AccessKeyChallenge{}, handles: map[domain.UserID]domain.CeremonyHandle{}, ceiling: &ten}
 }
 
 func (s *fakeStore) addUser(id domain.UserID, status domain.InviteStatus) domain.User {
@@ -122,6 +125,26 @@ type fakeWriter struct {
 func (w *fakeWriter) InsertChallenge(_ context.Context, c domain.AccessKeyChallenge) error {
 	w.ops = append(w.ops, func() { w.s.challenges[string(c.Challenge)] = c })
 	return nil
+}
+
+// EnsureCeremonyHandle — тот же исход, что у оператора базы: строки нет —
+// ложится чеканенная, строка есть — возвращается ЕЁ значение, и смены не
+// бывает. Дублёр не снисходительнее продукта: негодную чеканку он отвергает
+// так же, как ограничение схемы.
+func (w *fakeWriter) EnsureCeremonyHandle(_ context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if err := minted.Validate(); err != nil {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
+	}
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	if got, ok := w.s.handles[userID]; ok {
+		return append(domain.CeremonyHandle(nil), got...), nil
+	}
+	w.ops = append(w.ops, func() { w.s.handles[userID] = minted })
+	return minted, nil
 }
 
 func (w *fakeWriter) ConsumeChallenge(_ context.Context, ch []byte, userID domain.UserID, p domain.AccessKeyChallengePurpose, now time.Time) (bool, error) {

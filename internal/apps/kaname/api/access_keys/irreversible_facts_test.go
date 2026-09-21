@@ -127,10 +127,8 @@ func TestAccessKey_CeremonyHandleIsNotThePlatformIdentifier(t *testing.T) {
 
 	ch := h.beginRegistration(alice)
 	require.NotEqual(t, []byte(alice), []byte(ch.UserHandle), "рукоятка церемонии равна платформенному id")
-	// 64 — рекомендация нормы §14.6.1 («64 random bytes»); после правки
-	// величина переезжает в `domain.CeremonyHandleBytes`, здесь она названа
-	// числом, потому что на день красного объявителя у неё нет.
-	require.Len(t, []byte(ch.UserHandle), 64, "рукоятка — 64 случайных байта (норма §14.6.1)")
+	require.Len(t, []byte(ch.UserHandle), domain.CeremonyHandleBytes,
+		"рукоятка — %d случайных байт (рекомендация нормы §14.6.1)", domain.CeremonyHandleBytes)
 
 	first := registerWithDiscoverability(t, h, alice, webauthntest.New(t, webauthntest.AlgES256), nil)
 	require.NotEqual(t, []byte(alice), first.UserHandle, "рукоятка строки равна платформенному id")
@@ -166,4 +164,7 @@ func TestAccessKey_CeremonyHandleCarriesNoNameOfThePerson(t *testing.T) {
 		require.False(t, bytes.Contains(bytes.ToLower(key.UserHandle), bytes.ToLower([]byte(name.value))),
 			"рукоятка несёт %s (%q): отозвать её нечем — она уже в чужом аутентификаторе", name.what, name.value)
 	}
+	// Тот же запрет, выраженный доменом: он и есть то, что стоит на пути
+	// автора, подставившего соседнее поле.
+	require.NoError(t, domain.CeremonyHandle(key.UserHandle).CarriesNoNameOf(user))
 }
