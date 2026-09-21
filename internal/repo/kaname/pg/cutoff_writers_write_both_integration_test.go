@@ -146,3 +146,104 @@ func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
 	require.NotNil(t, revokedReason, "семейство снятой сессии не отозвано")
 	require.Equal(t, string(domain.FamilyRevokedBySessionEnd), *revokedReason)
 }
+
+// TestIntegration_EndingOneSessionRevokesItsFamily — снятие ОДНОЙ записи по
+// идентификатору отзывает выданное в ней.
+//
+// Живой вызывающий этого пути — СОБСТВЕННЫЙ ВЫХОД ЧЕЛОВЕКА, и ни одна из
+// соседних проб его не судила: набор проб повторял слепое пятно кода — обе
+// судили методы, снимающие НЕСКОЛЬКО записей, и третьего не видели.
+func TestIntegration_EndingOneSessionRevokesItsFamily(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "endne")
+	ceremony := kanamepg.NewOAuthCeremonyRepo(pool)
+	require.NoError(t, ceremony.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
+		Context:             scene,
+		CodeDigest:          ceremonyDigest(8201),
+		RedirectURI:         "https://app.example.test/cb",
+		CodeChallenge:       ceremonyChallenge,
+		CodeChallengeMethod: domain.PKCEMethodS256,
+		TTL:                 time.Minute,
+	}))
+	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
+		CodeDigest:         ceremonyDigest(8201),
+		RefreshTokenDigest: ceremonyDigest(8202),
+		RefreshTokenTTL:    time.Hour,
+	})
+	require.NoError(t, err)
+
+	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: до выхода ротация ПРОХОДИТ.
+	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
+		PresentedDigest: ceremonyDigest(8202),
+		SuccessorDigest: ceremonyDigest(8203),
+		TTL:             time.Hour,
+	})
+	require.NoError(t, err, "до выхода ротация обязана проходить — иначе отрицание беспредметно")
+
+	// ПРЕДМЕТ: человек выходит САМ — тем же оператором, каким его выводит выход.
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	w, err := sessions.Writer(ctx)
+	require.NoError(t, err)
+	ended, err := w.EndSession(ctx, domain.HumanSessionID(scene.SessionID),
+		time.Now().UTC(), domain.RevokeReasonLogout)
+	require.NoError(t, err)
+	require.True(t, ended, "запись обязана быть снята этим вызовом")
+	require.NoError(t, w.Commit(ctx))
+
+	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
+		PresentedDigest: ceremonyDigest(8203),
+		SuccessorDigest: ceremonyDigest(8204),
+		TTL:             time.Hour,
+	})
+	require.Error(t, err,
+		"после СОБСТВЕННОГО выхода человека обновляющий токен продолжает ротироваться "+
+			"в свежие: запись помечена окончённой, а выданное в ней живо")
+
+	var revokedReason *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT revoked_reason FROM kaname.token_families WHERE id = $1`,
+		scene.FamilyID).Scan(&revokedReason))
+	require.NotNil(t, revokedReason, "семейство снятой записи не отозвано")
+	require.Equal(t, string(domain.FamilyRevokedBySessionEnd), *revokedReason)
+}
+
+// TestIntegration_RepeatedEndSessionDoesNotRewriteTheReason — повторное снятие
+// ничего не снимает и причину отзыва не переписывает.
+//
+// Без этой оси отзыв можно было бы поставить безусловно, и проигравший гонку
+// переписал бы причину победителя.
+func TestIntegration_RepeatedEndSessionDoesNotRewriteTheReason(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "endrp")
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+
+	w, err := sessions.Writer(ctx)
+	require.NoError(t, err)
+	first, err := w.EndSession(ctx, domain.HumanSessionID(scene.SessionID),
+		time.Now().UTC(), domain.RevokeReasonLogout)
+	require.NoError(t, err)
+	require.True(t, first)
+	require.NoError(t, w.Commit(ctx))
+
+	w2, err := sessions.Writer(ctx)
+	require.NoError(t, err)
+	second, err := w2.EndSession(ctx, domain.HumanSessionID(scene.SessionID),
+		time.Now().UTC(), domain.RevokeReasonPasswordChange)
+	require.NoError(t, err)
+	require.False(t, second, "повторное снятие обязано не снимать ничего")
+	require.NoError(t, w2.Commit(ctx))
+}
