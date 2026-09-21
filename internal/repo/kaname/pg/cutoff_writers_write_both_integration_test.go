@@ -14,6 +14,7 @@ package pg_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,14 +297,86 @@ func TestIntegration_LosingCutoffDoesNotRewriteReasonAndActor(t *testing.T) {
 	}
 }
 
-// TestIntegration_PoolDoorIsAtomicToo — дверь на ПУЛОВОМ исполнителе кладёт обе
-// записи одной транзакцией, а негодный вход отвергает ДО первой записи.
+// TestIntegration_PoolDoorRollsBackTheFirstRecordWhenTheSecondFails — ОТКАЗ
+// ВТОРОЙ ЗАПИСИ НА ПУЛЕ НЕ ОСТАВЛЯЕТ ПЕРВОЙ.
 //
-// На пуле два оператора суть два автокоммита, и между ними существует
-// наблюдаемое состояние «одна запись без другой». Путь этот сегодня без
-// прод-вызывающих — тем важнее, что обещание двери и её дело совпадают: латентный
-// путь оживает тихо.
-func TestIntegration_PoolDoorIsAtomicToo(t *testing.T) {
+// # ЭТО И ЕСТЬ РАЗЛИЧАЮЩЕЕ СВОЙСТВО
+//
+// Здесь стояла проба, утверждавшая ПРИСУТСТВИЕ обеих строк. Утверждение это
+// истинно и БЕЗ ВСЯКОЙ транзакции — два автокоммита подряд кладут обе строки
+// ровно так же. То есть проба не различала того, что проверяла, и зеленела бы
+// на двери, потерявшей атомарность целиком.
+//
+// Различает их только ОТКАЗ на второй записи: без транзакции первая остаётся,
+// с транзакцией её нет.
+//
+// # ЧЕМ ОТКАЗ ВЫЗВАН — ВХОДОМ, А НЕ ПОДМЕНОЙ
+//
+// Причина длиной свыше 121 знака проходит ограничение первой записи (там предел
+// 256) и НЕ проходит ограничение второй: имя механизма выводится из причины
+// приставкой `kaname:`, и предел решившего там — 128. Подставлять сюда сбойный
+// исполнитель не пришлось: отказ приходит от самой схемы, на законном пути.
+func TestIntegration_PoolDoorRollsBackTheFirstRecordWhenTheSecondFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "rbckt")
+	repo := kanamepg.NewUserTokenRevocationRepo(pool)
+
+	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: та же дверь, тот же пул, ГОДНАЯ причина — обе
+	// строки на месте. Без него отрицание ниже зеленело бы на двери, которая не
+	// пишет вообще ничего.
+	require.NoError(t, repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: domain.UserID(scene.UserID), RevokeBefore: time.Now().UTC(),
+		Reason: domain.RevokeReasonLogout,
+	}, ""))
+	for _, q := range []struct{ name, sql string }{
+		{"отсечка субъекта", `SELECT count(*) FROM kaname.user_token_revocations WHERE user_id = $1`},
+		{"отсечка предъявления", `SELECT count(*) FROM kaname.minted_token_revocations WHERE subject = $1`},
+	} {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, q.sql, scene.UserID).Scan(&n), q.name)
+		require.Equal(t, 1, n, "%s не положена годным входом", q.name)
+	}
+
+	// ПРЕДМЕТ: тот же пул, но ВТОРАЯ запись отвергается схемой. Момент берём
+	// ПОЗЖЕ стоящего — иначе замок отбросил бы причину, и отказа не случилось бы.
+	longReason := strings.Repeat("z", 130)
+	other := domain.UserID(scene.UserID + "-2")
+	_, err = pool.Exec(ctx, `
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
+		SELECT $1, account_id, $2, $3, display_name, invite_status
+		  FROM kaname.users WHERE id = $4`,
+		string(other), "ext-"+string(other), string(other)+"@example.invalid", scene.UserID)
+	require.NoError(t, err, "посев второго человека")
+
+	err = repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: other, RevokeBefore: time.Now().UTC(), Reason: longReason,
+	}, "")
+	require.Error(t, err, "вторая запись обязана быть отвергнута схемой — иначе "+
+		"утверждение ниже беспредметно")
+
+	var left int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.user_token_revocations WHERE user_id = $1`,
+		string(other)).Scan(&left))
+	require.Zero(t, left,
+		"отказ второй записи оставил ПЕРВУЮ в базе: на пуле два оператора суть два "+
+			"автокоммита, и между ними живёт состояние «одна запись без другой» — "+
+			"ровно то, ради чего дверь заведена")
+}
+
+// TestIntegration_PoolDoorRejectsBadInputBeforeTheFirstRecord — негодный вход
+// отвергается ДО первой записи, годный кладёт обе.
+//
+// Имя по утверждениям, а не шире их: АТОМАРНОСТЬ эта проба не судит — присутствие
+// обеих строк истинно и без транзакции. Её судит проба отката выше.
+func TestIntegration_PoolDoorRejectsBadInputBeforeTheFirstRecord(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}

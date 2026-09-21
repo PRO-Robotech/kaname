@@ -463,6 +463,10 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 	if err := reason.Validate(); err != nil {
 		return 0, err
 	}
+	// КУРСОР ЗАКРЫВАЕТСЯ РУКАМИ, А НЕ `defer`, И ЭТО НЕ НЕБРЕЖНОСТЬ: следом на
+	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
+	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
+	// них — то есть слишком поздно.
 	rows, err := tx.Query(ctx, `
 		SELECT id FROM kaname.token_families
 		 WHERE session_id = ANY($1) AND revoked_at IS NULL`, sessionIDs)

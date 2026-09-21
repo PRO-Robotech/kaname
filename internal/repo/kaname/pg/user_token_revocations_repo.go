@@ -10,12 +10,14 @@ package pg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // UserTokenRevocationRepo — pool-scoped (autocommit-style single-statement
@@ -114,14 +116,26 @@ func upsertSubjectCutoff(ctx context.Context, ex cutoffExecutor,
 	}
 	// ОДНОЙ ТРАНЗАКЦИЕЙ — И НА ПУЛЕ ТОЖЕ. На пуле два оператора суть два
 	// автокоммита, и между ними существует наблюдаемое состояние «одна запись
-	// без другой» — ровно то, ради чего дверь заведена. Транзакция вызывающего
-	// уже открыта и своей не заводит: вложенной ей быть нельзя, а разорвать
-	// чужую атомарность тем более.
-	if beginner, ok := ex.(cutoffTxBeginner); ok {
-		tx, err := beginner.Begin(ctx)
+	// без другой» — ровно то, ради чего дверь заведена.
+	//
+	// ИСПОЛНИТЕЛИ РАЗЛИЧАЮТСЯ ПО ТИПУ, А ПЕРЕЧЕНЬ ИХ ЗАКРЫТ. Прежде различал
+	// признак «умеет открыть транзакцию», и он не различал ничего: этот метод
+	// есть и у транзакции — `pgx.Tx` объявляет вложенное начало. Ветвь пула
+	// бралась на всех вызывающих, и дверь открывала точку сохранения там, где
+	// шапка писала, что вложенной транзакции быть не может.
+	//
+	// Третьего исполнителя дверь не принимает НАМЕРЕННО: соединение, курсор,
+	// обёртка — всё это умеет исполнять операторы и не даёт ни атомарности, ни
+	// её обещания. Молча отдать такому неатомарную полосу значило бы вернуть тот
+	// же дефект под другим именем; отказ виден сразу.
+	switch e := ex.(type) {
+	case *pgxpool.Pool:
+		tx, err := e.Begin(ctx)
 		if err != nil {
 			return mapErr(err, "", string(u.UserID))
 		}
+		// Откат безусловным `defer`: после успешного `Commit` он пустой, а на
+		// любом раннем возврате — единственное, что не оставит половины.
 		defer func() { _ = tx.Rollback(ctx) }()
 		if werr := writeBothCutoffs(ctx, tx, u, revokedBy, decidedBy); werr != nil {
 			return werr
@@ -130,8 +144,15 @@ func upsertSubjectCutoff(ctx context.Context, ex cutoffExecutor,
 			return mapErr(cerr, "", string(u.UserID))
 		}
 		return nil
+	case pgx.Tx:
+		// Транзакция вызывающего уже открыта, и своей дверь не заводит: вложенная
+		// подменила бы отравление внешней транзакции откатом к точке сохранения,
+		// то есть изменила бы поведение при отказе, ничего об этом не сказав.
+		return writeBothCutoffs(ctx, e, u, revokedBy, decidedBy)
+	default:
+		return fmt.Errorf("%w: subject cutoff needs a pool or a transaction, got %T",
+			iamerr.ErrInternal, ex)
 	}
-	return writeBothCutoffs(ctx, ex, u, revokedBy, decidedBy)
 }
 
 // writeBothCutoffs — сами две записи, одна за другой, на ОДНОМ исполнителе.
