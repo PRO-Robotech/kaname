@@ -86,11 +86,11 @@ const eventSessionForceLogout = "iam.session.force_logout"
 // with nothing prompting the re-authentication that would clear it. Ending the
 // session is what turns a standing refusal into a logout.
 //
-// Implemented by *clients.HydraAdminClient. nil on a posture that declares no
-// external identity provider at all — there the login session is OUR row and
-// `OwnSessions` below is what ends it; nil also when the provider-admin surface
-// is simply not configured, and there the cutoff is still recorded and still
-// enforced.
+// Реализуется `*clients.HydraAdminClient`. Пусто на посадке, которая внешнего
+// поставщика не объявляет вовсе: там сессия входа — НАША строка, и снимает её
+// `OwnSessions` ниже. Пусто и тогда, когда административная поверхность
+// поставщика просто не настроена; там отсечка по-прежнему пишется и
+// по-прежнему действует.
 //
 // ИМЕНОВАН НАРУЖУ: провязывается он теперь ПО ПОСАДКЕ, и композиционный корень
 // обязан уметь вернуть «никого» ЧИСТЫМ nil. Возврат типизированного nil мимо
@@ -344,6 +344,17 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	// СТОИТ ЗДЕСЬ, А НЕ ВЫШЕ, НАМЕРЕННО: отсечка уже закоммичена и остаётся —
 	// она защитна сама по себе и идемпотентна. Теряется только ложное
 	// «выведен», а повтор глагола после починки провязки доснимет сессию.
+	//
+	// ОДНА НОГА ЭТОГО ДОВОДА НЕ ПЕРЕМЕРЕНА ЗДЕСЬ, и сказано это затем, чтобы
+	// через месяц довод не прочли как доказанный целиком. «Отсечка защитна сама
+	// по себе» опирается на то, ЧТО С НЕЙ ДЕЛАЮТ ЧИТАТЕЛИ: хуки выдачи и край.
+	// Край живёт в другом доме, и настоящий дифф его поведения не измеряет —
+	// измерено здесь только то, что записи кладутся и что по ним судит
+	// авторитет отзыва на пути запроса. Если читатель отсечку не применит,
+	// защитной она не будет, и этот довод рухнет вместе с ним.
+	//
+	// ПРЕДИКАТ ПРОВЕРКИ: сквозная проба, предъявляющая носитель КРАЮ до и после
+	// глагола. Её здесь нет и быть не может — дом другой.
 	if h.ownSessions == nil && h.providerSessions == nil {
 		gerr := status.Error(codes.Unavailable,
 			"no login-session teardown is wired: the cutoff alone does not end a session")

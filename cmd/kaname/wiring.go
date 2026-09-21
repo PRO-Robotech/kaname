@@ -758,11 +758,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithLogger(logger).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
-		// ...and ENDS the session, which is what turns a standing refusal into a
-		// logout. The cutoff alone stops tokens from being issued but leaves the
-		// browser holding a live session, which then presents its original
-		// authentication instant forever and is refused forever, with nothing
-		// prompting a re-login.
+		// ...и СНИМАЕТ сессию — это и превращает вечный отказ в выход. Отсечка
+		// сама по себе лишь останавливает выдачу, оставляя браузеру живую
+		// сессию: та при следующем обращении предъявляет свой ПЕРВОНАЧАЛЬНЫЙ
+		// момент аутентификации, отсечка её отвергает — верно и навсегда, — и
+		// ничто не побуждает к повторному входу, который снял бы отказ.
 		//
 		// ЧЬЮ ИМЕННО СЕССИЮ СНИМАТЬ, РЕШАЕТ ПОСАДКА (задача kaname#313), и
 		// решает она это ТЕМ ЖЕ предикатом, которым решает, строить ли
