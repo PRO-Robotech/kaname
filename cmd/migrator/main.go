@@ -7,8 +7,8 @@
 //
 // API совпадает с goose-flavour:
 //
-//	kaname-migrator up [--target <version>]
-//	kaname-migrator down [--target <version>]
+//	kaname-migrator up [--target <номер>]
+//	kaname-migrator down [--target <номер>]
 //	kaname-migrator status
 //
 // # Глагола `create` здесь НЕТ — и это решение, а не пропуск (#566)
