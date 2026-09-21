@@ -758,15 +758,22 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithLogger(logger).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
-		// ...and ENDS the session at the provider. The cutoff alone stops tokens
-		// from being issued but leaves the browser holding a live session, which
-		// then presents its original authentication instant forever and is
-		// refused forever, with nothing prompting a re-login. Same lever the
-		// self-service logout at the edge already pulls for its own caller.
-		WithProviderSessions(
-			mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()),
-			&forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)},
-		).
+		// ...and ENDS the session, which is what turns a standing refusal into a
+		// logout. The cutoff alone stops tokens from being issued but leaves the
+		// browser holding a live session, which then presents its original
+		// authentication instant forever and is refused forever, with nothing
+		// prompting a re-login.
+		//
+		// ЧЬЮ ИМЕННО СЕССИЮ СНИМАТЬ, РЕШАЕТ ПОСАДКА (задача kaname#313), и
+		// решает она это ТЕМ ЖЕ предикатом, которым решает, строить ли
+		// административную дорогу. Под `external` сессией входа владеет
+		// поставщик, и снимается она у него; под `own` поставщика нет вовсе, а
+		// сессия входа — НАША строка, и снимается она нашим же адаптером.
+		// Провязаны они ВЗАИМНО ИСКЛЮЧАЮЩЕ: провязать обе значило бы на каждой
+		// посадке звать одну впустую, а под `own` — звать отставленную дорогу и
+		// отказывать всему глаголу за её отсутствием.
+		WithProviderSessions(forceLogoutProviderSessions(cfg, pool, metricsReg.ProviderRoadRecorder())).
+		WithOwnSessions(forceLogoutOwnSessions(cfg, pool)).
 		// ForceLogout returns an Operation — the row it names is persisted here,
 		// before the cutoff is written and terminally after it, so the id the
 		// admin gets back is queryable and the force-logout shows up in the
@@ -858,17 +865,30 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
-	interactiveProvider := clients.NewInteractiveClientProvider(
-		mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()))
+	interactiveProvider := interactiveClientProvider(cfg,
+		kanamepg.NewOAuthCeremonyRepo(pool), metricsReg.ProviderRoadRecorder())
+	interactiveCreate := interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider,
+		opsRepo, []string{interactiveAudience}, logger)
+	// КОМПЕНСАЦИЯ ПОЛУСДЕЛАННОЙ РЕГИСТРАЦИИ ПРОВЯЗЫВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ
+	// ЧТО КОМПЕНСИРОВАТЬ (задача kaname#313).
+	//
+	// Намерение это — durable запись «снять клиента У ПОСТАВЩИКА», и дренирует
+	// её очередь компенсаций ТОЙ ЖЕ административной дорогой. Под `own` дороги
+	// нет: заведение ничего у поставщика не создаёт (оно чеканит имя клиента и
+	// кладёт нашу же строку), а записанное намерение не исполнилось бы НИ ПРИ
+	// КАКОЙ попытке — очередь повторяла бы вечно то, чего не бывает.
+	//
+	// Прямое снятие как запасной путь остаётся на обеих посадках: под `own` оно
+	// зовёт наш реестр и идемпотентно.
+	if providerAdminHopIsBuilt(cfg) {
+		interactiveCreate = interactiveCreate.WithCompensationEmitter(
+			clients.NewProviderCompensationOutbox(pool).
+				WithEmitObserver(metricsReg.CompensationRecorder()))
+	}
 	interactiveClientHandler := interactiveclientapp.NewHandler(
 		interactiveclientapp.NewGetUseCase(interactiveRepo),
 		interactiveclientapp.NewListUseCase(interactiveRepo),
-		// Компенсация полусделанной регистрации — durable намерение, прямое
-		// снятие как запасной путь (см. buildSAKeysHandler).
-		interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider, opsRepo,
-			[]string{interactiveAudience}, logger).
-			WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).
-				WithEmitObserver(metricsReg.CompensationRecorder())),
+		interactiveCreate,
 		interactiveclientapp.NewUpdateUseCase(interactiveRepo, opsRepo, logger),
 		interactiveclientapp.NewDeleteUseCase(interactiveRepo, interactiveProvider, opsRepo, logger),
 	)
@@ -1055,6 +1075,67 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 		log.Fatalf("provider-admin client: %v", err)
 	}
 	return c.WithRoadObserver(roadObs)
+}
+
+// interactiveClientProvider — ЧЕМ исполняются заведение и снятие клиента
+// интерактивного входа на ЭТОЙ посадке (задача kaname#313).
+//
+// Развилка НЕ новая: она берёт ответ у того же предиката, которым корень решает,
+// строить ли административную дорогу, — `providerAdminHopIsBuilt`. Второе
+// условие об одной посадке разошлось бы с первым молча, и разошлось бы там, где
+// расхождение означает «клиент заведён у одного реестра, а снимается у другого».
+//
+// ПОЧЕМУ ВЫБОР ЗДЕСЬ, А НЕ ВЕТВЬЮ В USE-CASE. Глагол ресурса про посадку не
+// знает и знать ему нечем: он просит порт завести клиента и снять его. Ветвь
+// внутри него была бы решением о развёртывании, принятым в бизнес-слое, — и
+// принималось бы оно на каждом запросе заново.
+//
+// ОТСТАВЛЕННОЙ ДОРОГИ ЭТА ПОЛОСА БОЛЬШЕ НЕ ПОЛУЧАЕТ: под `own` строитель
+// административной дороги отсюда не зовётся вовсе, поэтому терминальный отказ
+// «внешнего поставщика нет» на путь заведения и снятия не попадает.
+func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSecretStore,
+	roadObs clients.ProviderRoadObserver,
+) interactiveclientapp.ProviderClients {
+	if providerAdminHopIsBuilt(cfg) {
+		return clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg, roadObs))
+	}
+	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry)
+}
+
+// forceLogoutProviderSessions — снятие сессии входа У ВНЕШНЕГО ПОСТАВЩИКА, если
+// он на этой посадке есть (задача kaname#313).
+//
+// Под `own` возвращает пару nil, и `WithProviderSessions` её не принимает:
+// провязка требует обоих — поставщика и разрешение имени субъекта, — а под `own`
+// внешнего субъекта не существует вовсе, и разрешать нечего.
+//
+// До этой правки пара провязывалась БЕЗУСЛОВНО, и под `own` принудительный
+// выход получал отставленную дорогу: снятие отказывало терминально, а отказ
+// снятия делает недоступным весь глагол. То есть распорядитель не мог вывести
+// никого.
+func forceLogoutProviderSessions(cfg config.Config, pool *pgxpool.Pool,
+	roadObs clients.ProviderRoadObserver,
+) (internaliamapp.ProviderSessions, internaliamapp.ExternalIDResolver) {
+	if !providerAdminHopIsBuilt(cfg) {
+		// ЧИСТЫЙ nil, а не типизированный: страж провязки судит интерфейс, и
+		// типизированный nil прошёл бы его насквозь.
+		return nil, nil
+	}
+	return mustProviderAdminClient(cfg, roadObs),
+		&forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)}
+}
+
+// forceLogoutOwnSessions — снятие НАШИХ записей сессии входа, если посадка их
+// заводит (задача kaname#313).
+//
+// Предикат тот же, что у полосы входа: записи сессии заводит только `own`
+// (`loginLaneWanted`), и под `external` снимать нечего. Второе условие об одной
+// посадке разошлось бы с первым молча.
+func forceLogoutOwnSessions(cfg config.Config, pool *pgxpool.Pool) internaliamapp.OwnSessions {
+	if !loginLaneWanted(cfg) {
+		return nil
+	}
+	return kanamepg.NewHumanSessionRepo(pool)
 }
 
 // saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
