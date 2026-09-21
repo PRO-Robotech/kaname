@@ -45,6 +45,14 @@ package pg
 //   - неделимость обмена и ротации — условный `UPDATE … RETURNING`;
 //   - согласие контекста церемонии между семейством, кодом и токеном —
 //     СОСТАВНОЙ внешний ключ по четырём столбцам сразу;
+//   - «живая запись при отозванном семействе» — НЕПРЕДСТАВИМА. Живость
+//     семейства стоит в ключе (`token_families.live`), дети ссылаются на неё
+//     шестым столбцом с `ON UPDATE CASCADE`, а их `active` — ПРОИЗВОДНАЯ
+//     колонка от собственной отметки снятия и этой живости. Поэтому отзыв стал
+//     обновлением КЛЮЧА и движок сам разводит его со вставкой ребёнка: успел
+//     отзыв — вставка получает 23503 и транзакция выдачи откатывается; успела
+//     вставка — каскад проставляет свежей строке признак. Гасить `active`
+//     руками не может НИКТО: запись в неё отвергается кодом 428C9;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
 //   - «одно согласие на тройку субъект-клиент-область» —
 //     `consent_grants_subject_client_scope_uk`;
@@ -173,14 +181,17 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 // exchangeCodeSQL — ТОТ САМЫЙ оператор: условие на прежнее состояние и возврат
 // затронутой строки. Стоит ОДНОЙ константой: второе написание разошлось бы с
 // первым молча, а разойтись ему есть куда — условие здесь и есть инвариант.
+//
+// Пишется ОТМЕТКА снятия, а не признак: `active` — производная колонка, и запись
+// в неё база отвергает (428C9). Отдельного условия «семейство не отозвано» здесь
+// тоже НЕТ и быть не должно: живость семейства входит в саму производную, и
+// второе её написание разошлось бы с первым молча.
 const exchangeCodeSQL = `
 UPDATE kaname.authorization_codes AS c
-   SET active = false, deactivated_at = now(), deactivated_reason = 'redeemed'
+   SET deactivated_at = now(), deactivated_reason = 'redeemed'
  WHERE c.code_digest = $1
    AND c.active
    AND c.expires_at > now()
-   AND NOT EXISTS (SELECT 1 FROM kaname.token_families f
-                    WHERE f.id = c.family_id AND f.revoked_at IS NOT NULL)
 RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
           c.redirect_uri, c.code_challenge, c.code_challenge_method`
 
@@ -286,13 +297,11 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 // состояние и возврат затронутой строки.
 const rotateRefreshSQL = `
 UPDATE kaname.refresh_tokens AS t
-   SET active = false, deactivated_at = now(), deactivated_reason = 'rotated',
+   SET deactivated_at = now(), deactivated_reason = 'rotated',
        successor_digest = $2
  WHERE t.token_digest = $1
    AND t.active
    AND t.expires_at > now()
-   AND NOT EXISTS (SELECT 1 FROM kaname.token_families f
-                    WHERE f.id = t.family_id AND f.revoked_at IS NOT NULL)
 RETURNING t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.generation`
 
 // RotateRefreshToken ротирует обновляющий токен: предъявленный помечается
@@ -402,24 +411,32 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// `live` идёт В ТОМ ЖЕ операторе, что отметка: пара держится ограничением
+	// `token_families_live_pair_ck`, и оператор, тронувший одну половину, второй
+	// попытки не получает. Именно эта колонка делает отзыв обновлением КЛЮЧА.
 	if _, err = tx.Exec(ctx, `
 		UPDATE kaname.token_families
-		   SET revoked_at = now(), revoked_reason = $2
+		   SET revoked_at = now(), revoked_reason = $2, live = false
 		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason)); err != nil {
 		return wrapPgErr(err, "TokenFamily", familyID)
 	}
-	// Снятие идёт по ЖИВЫМ строкам: уже снятую отметку — и её причину — второй
-	// отзыв не переписывает.
+	// Признак живости выданного СНЯЛ КАСКАД — операторы ниже дописывают ПРИЧИНУ,
+	// ради которой словарь заведён, и ничего не гасят.
+	//
+	// Предикат — отметка, а не признак: `active` производен и каскадом уже снят,
+	// так что `AND active` не нашёл бы здесь ни одной строки. «Ещё не помечена»
+	// выражает `deactivated_at IS NULL`, и он же делает повтор пустым: уже
+	// снятую отметку — и её причину — второй отзыв не переписывает.
 	if _, err = tx.Exec(ctx, `
 		UPDATE kaname.authorization_codes
-		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = $1 AND active`, familyID); err != nil {
+		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = $1 AND deactivated_at IS NULL`, familyID); err != nil {
 		return wrapPgErr(err, "AuthorizationCode", familyID)
 	}
 	if _, err = tx.Exec(ctx, `
 		UPDATE kaname.refresh_tokens
-		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = $1 AND active`, familyID); err != nil {
+		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = $1 AND deactivated_at IS NULL`, familyID); err != nil {
 		return wrapPgErr(err, "RefreshToken", familyID)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -492,20 +509,20 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE kaname.token_families
-		   SET revoked_at = now(), revoked_reason = $2
+		   SET revoked_at = now(), revoked_reason = $2, live = false
 		 WHERE id = ANY($1) AND revoked_at IS NULL`, families, string(reason)); err != nil {
 		return 0, wrapPgErr(err, "TokenFamily", "")
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE kaname.authorization_codes
-		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = ANY($1) AND active`, families); err != nil {
+		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = ANY($1) AND deactivated_at IS NULL`, families); err != nil {
 		return 0, wrapPgErr(err, "AuthorizationCode", "")
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE kaname.refresh_tokens
-		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = ANY($1) AND active`, families); err != nil {
+		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = ANY($1) AND deactivated_at IS NULL`, families); err != nil {
 		return 0, wrapPgErr(err, "RefreshToken", "")
 	}
 	return len(families), nil

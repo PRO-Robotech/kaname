@@ -16,6 +16,9 @@
 //     условный `UPDATE … RETURNING` по одному коду. Ровно одна получает строку,
 //     вторая — ноль. Это и есть механизм, ради которого заведена колонка
 //     `active`: пары «прочитать, затем записать» в обмене нет;
+//   - `active` ПРОИЗВОДНА И НЕЗАПИСЫВАЕМА. Она вычисляется базой из отметки
+//     снятия и живости семейства; попытка записать её отвергается кодом 428C9.
+//     Гашение пишет ОТМЕТКУ, признак следует за ней сам;
 //   - «НЕАКТИВЕН» И «НЕ НАЙДЕН» РАЗЛИЧИМЫ. Погашенный код ОСТАЁТСЯ строкой и
 //     читается с `active = false`; удаление стёрло бы это различение, на котором
 //     стоит обнаружение повтора;
@@ -185,12 +188,10 @@ func pqTextArray(in []string) string {
 // механизм, который исполняет слой доступа; второе написание разошлось бы молча.
 const acRedeemSQL = `
 UPDATE kaname.authorization_codes AS c
-   SET active = false, deactivated_at = now(), deactivated_reason = 'redeemed'
+   SET deactivated_at = now(), deactivated_reason = 'redeemed'
  WHERE c.code_digest = $1
    AND c.active
    AND c.expires_at > now()
-   AND NOT EXISTS (SELECT 1 FROM kaname.token_families f
-                    WHERE f.id = c.family_id AND f.revoked_at IS NOT NULL)
 RETURNING c.family_id`
 
 // TestIntegration_AuthorizationCodeRedemptionIsOneStatement — гашение одной
@@ -304,11 +305,28 @@ func TestIntegration_AuthorizationCodeVocabulariesAreClosed(t *testing.T) {
 		"23514", "authorization_codes_challenge_form_ck",
 		"испытание негодной формы обязано быть отвергнуто")
 
-	// Признак активности и отметка снятия — одно состояние: рассогласовать нельзя.
+	// Признак активности ПРОИЗВОДЕН: рассогласовать его с отметкой нельзя,
+	// потому что записать его нельзя вовсе. Имени ограничения у этого отказа
+	// нет — его даёт не ограничение, а вид колонки.
 	_, err := db.Exec(`
 		UPDATE kaname.authorization_codes SET active = false WHERE code_digest = $1`, acDigest(0x31))
-	requirePgRefusal(t, err, "23514", "authorization_codes_active_pair_ck",
-		"снятый признак без отметки снятия обязан быть отвергнут")
+	requirePgRefusal(t, err, "428C9", "",
+		"запись в производный признак активности обязана быть отвергнута: "+
+			"признак следует за отметкой снятия, а не наоборот")
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ к отрицанию выше: отметка пишется, и признак
+	// следует за ней САМ. Без него «запись отвергнута» было бы истинно и в мире,
+	// где колонка не пишется НИКАК и снятие невыразимо.
+	_, err = db.Exec(`
+		UPDATE kaname.authorization_codes
+		   SET deactivated_at = now(), deactivated_reason = 'redeemed'
+		 WHERE code_digest = $1`, acDigest(0x31))
+	require.NoError(t, err, "снятие ОТМЕТКОЙ обязано проходить")
+	var active bool
+	require.NoError(t, db.QueryRow(
+		`SELECT active FROM kaname.authorization_codes WHERE code_digest = $1`,
+		acDigest(0x31)).Scan(&active))
+	require.False(t, active, "признак обязан пересчитаться сам по отметке снятия")
 }
 
 // TestIntegration_RefreshTokenRotationIsOneStatement — ротация ТЕМ ЖЕ
@@ -342,11 +360,9 @@ func TestIntegration_RefreshTokenRotationIsOneStatement(t *testing.T) {
 			var gen int
 			err = tx.QueryRow(`
 				UPDATE kaname.refresh_tokens AS r
-				   SET active = false, deactivated_at = now(), deactivated_reason = 'rotated',
+				   SET deactivated_at = now(), deactivated_reason = 'rotated',
 				       successor_digest = $2
 				 WHERE r.token_digest = $1 AND r.active AND r.expires_at > now()
-				   AND NOT EXISTS (SELECT 1 FROM kaname.token_families f
-				                    WHERE f.id = r.family_id AND f.revoked_at IS NOT NULL)
 				RETURNING r.generation`, parent, successor).Scan(&gen)
 			if err != nil {
 				return
