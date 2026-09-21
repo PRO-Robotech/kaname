@@ -58,7 +58,7 @@ PLATFORM_TREE ?= $(MONOREPO_ROOT)
 # Объявление одно на дерево; здесь — только его адрес, см. разбор в самом файле.
 include provenance.mk
 
-.PHONY: test-standalone help build build-migrator test test-short vet lint docker generate audit-list-filter
+.PHONY: test-standalone help build build-migrator test test-short vet lint docker generate audit-list-filter install-hooks check-hooks
 
 # help — перечень целей. Первая цель файла, поэтому голый `make` печатает её:
 # читатель, впервые открывший модуль, спрашивает «что тут можно запустить», и
@@ -132,6 +132,19 @@ test-standalone:
 ## vet — go vet по модулю
 vet:
 	go vet ./...
+
+## install-hooks — провязать хук отправки git из scripts/hooks (один раз на клон)
+##
+## Экземпляр СВОЙ: у kacho стоит та же идея переходника в её собственном
+## scripts/hooks/install.sh, и она не перенесена сюда файлом — копия одного
+## отслеживаемого пути в двух стволах запрещена (ban20-copy-ban). Разбор
+## расхождения формы — в шапке scripts/hooks/install.sh.
+install-hooks:
+	@bash scripts/hooks/install.sh install
+
+## check-hooks — сказать, провязан ли хук отправки; непровязанный клон — отказ
+check-hooks:
+	@bash scripts/hooks/install.sh check
 
 # Кэш линтера — СВОЙ у каждой рабочей копии. Умолчание (~/.cache/golangci-lint)
 # общее на машину, а запись в нём ключуется содержимым пакета, не деревом: соседняя
