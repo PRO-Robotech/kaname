@@ -103,16 +103,23 @@ func TestForceLogout_ProviderUnreachable_FailsTheMutation(t *testing.T) {
 		"a poll of the operation must see the failure, not a success")
 }
 
-// TestForceLogout_SessionsNotWired_StillRecordsTheCutoff — a deployment without
-// the provider-admin surface configured keeps the behaviour it had. The cutoff
-// is the authoritative half and is now enforced at issuance; the teardown is
-// what makes the refusal recoverable.
-func TestForceLogout_SessionsNotWired_StillRecordsTheCutoff(t *testing.T) {
+// TestForceLogout_ProviderSessionsNotWired_OwnTeardownStillRuns — посадка без
+// поверхности поставщика снимает сессию СВОИМ исполнителем.
+//
+// Здесь утверждалось, что такая посадка «сохраняет поведение, которое у неё
+// было», то есть пишет отсечку и не снимает ничего. Исполнителей снятия теперь
+// два, и посадка выбирает одного; «ни одного» стало закрытым отказом
+// (`TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff`), а эта проба
+// судит то, ради чего второй исполнитель и заведён.
+func TestForceLogout_ProviderSessionsNotWired_OwnTeardownStillRuns(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
-	h := forceLogoutHandler(rec)
+	own := &recordingOwnSessions{ended: 1}
+	h, _ := ownSessionHandler(rec, own)
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
 	require.True(t, op.GetDone())
 	assert.Equal(t, 1, rec.allCnt)
+	assert.Equal(t, []domain.UserID{"usr_victim"}, own.users,
+		"своя полоса снятия обязана исполниться и без поверхности поставщика")
 }

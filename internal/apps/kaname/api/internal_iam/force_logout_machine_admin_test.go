@@ -68,7 +68,10 @@ func TestForceLogout_ServiceAccountAdminIsAskedAsServiceAccount(t *testing.T) {
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
-		WithOperations(&recordingForceLogoutOps{})
+		WithOperations(&recordingForceLogoutOps{}).
+		// Исполнитель снятия провязан как в корне: без него глагол отказывает
+		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
+		WithOwnSessions(&recordingOwnSessions{})
 
 	_, err := h.ForceLogout(ctxPrincipal("service_account", saID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -94,7 +97,10 @@ func TestForceLogout_UserAdminIsAskedAsUser(t *testing.T) {
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
-		WithOperations(&recordingForceLogoutOps{})
+		WithOperations(&recordingForceLogoutOps{}).
+		// Исполнитель снятия провязан как в корне: без него глагол отказывает
+		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
+		WithOwnSessions(&recordingOwnSessions{})
 
 	_, err := h.ForceLogout(ctxPrincipal("user", usrID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -114,7 +120,10 @@ func TestForceLogout_UnnameablePrincipalIsRefusedWithoutAsking(t *testing.T) {
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
-		WithOperations(&recordingForceLogoutOps{})
+		WithOperations(&recordingForceLogoutOps{}).
+		// Исполнитель снятия провязан как в корне: без него глагол отказывает
+		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
+		WithOwnSessions(&recordingOwnSessions{})
 
 	_, err := h.ForceLogout(ctxPrincipal("banana", "whatever"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",

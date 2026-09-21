@@ -51,7 +51,11 @@ func forceLogoutHandlerWithGate(rec sessionRevoker, chk *fakeForceLogoutChecker)
 	return NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
-		WithOperations(&recordingForceLogoutOps{})
+		WithOperations(&recordingForceLogoutOps{}).
+		// Исполнитель снятия провязан как в корне: без него глагол отказывает
+		// закрыто, и пробы стража судили бы отказ провязки вместо своего
+		// предмета (kaname#313).
+		WithOwnSessions(&recordingOwnSessions{})
 }
 
 func ctxAdmin(id string) context.Context {

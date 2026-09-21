@@ -129,8 +129,14 @@ type Handler struct {
 	// surface and the resolver naming a kacho user to it, used by ForceLogout to
 	// END the session rather than only record that it must not be honoured.
 	// Both nil when that surface is not configured.
-	providerSessions providerSessions
-	externalIDs      externalIDResolver
+	providerSessions ProviderSessions
+	externalIDs      ExternalIDResolver
+
+	// ownSessions — снятие НАШИХ записей сессии входа (`human_sessions`).
+	// Провязывается на посадке `own`, где внешнего поставщика нет вовсе и
+	// сессия входа человека — наша строка. nil на посадке `external`: там
+	// сессией владеет поставщик, и снимает её поле выше.
+	ownSessions OwnSessions
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not
