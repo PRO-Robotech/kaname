@@ -8,10 +8,15 @@
 //	POST /iam/v1/hooks/token          — Hydra access_token webhook.
 //	POST /iam/v1/hooks/refresh        — Hydra refresh_token webhook.
 //	POST /iam/v1/hooks/provision      — Kratos registration/login user-provisioning webhook.
+//	POST /iam/v1/hooks/recovery       — Kratos recovery-completed webhook.
 //	GET  /healthz                     — liveness probe.
 //	GET  /readyz                      — readiness probe.
 //
-// Hook-endpoints (token/refresh/provision) require Bearer X-Kacho-Hook-Token.
+// Перечень выше — ОПИСЬ ПОЛОСЫ, и её полноту держит проба
+// `route_prose_names_every_route_test.go`: маршрут восстановления приехал позже
+// трёх соседних, и обе описи пакета молча остались трёхстрочными.
+//
+// Hook-endpoints (token/refresh/provision/recovery) require Bearer X-Kacho-Hook-Token.
 // Listener — cluster-internal-only (ban #6: Internal.* not on external endpoint).
 //
 // # Живость и готовность строит ОБЪЯВЛЕННЫЙ носитель, а не этот пакет (#1752)
