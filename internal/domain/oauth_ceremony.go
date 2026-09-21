@@ -46,6 +46,15 @@ var (
 	ErrRefreshTokenReplayed = errors.New("refresh token: already rotated")
 	// ErrRefreshTokenExpired — строка активна, но срок вышел.
 	ErrRefreshTokenExpired = errors.New("refresh token: expired")
+
+	// ErrCeremonySessionNotLive — семейство заводится в сессию, которая уже не
+	// жива: снята выходом (своим либо принудительным) или истекла.
+	//
+	// Исход ЗАВЕДЕНИЯ, а не предъявления, поэтому он стоит отдельно от тройки
+	// выше: там разбирается предъявленная строка, здесь — право завести новую.
+	// Производитель у него ОДИН и он есть — условная вставка семейства
+	// (`insertFamilyOnLiveSessionSQL`), возвращающая ноль строк.
+	ErrCeremonySessionNotLive = errors.New("ceremony session: not live")
 )
 
 // ЗДЕСЬ СТОЯЛ ЧЕТВЁРТЫЙ ИСХОД — `ErrTokenFamilyRevoked`, «семейство отозвано».

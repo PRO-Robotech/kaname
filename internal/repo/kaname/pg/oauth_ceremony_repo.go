@@ -136,6 +136,50 @@ type RefreshRotation struct {
 	TTL             time.Duration
 }
 
+// lockSessionOfCeremonySQL — ЗАМОК СЕССИИ, А НЕ ПРОВЕРКА. Состояния он не
+// читает и ни на что не влияет своим результатом; решение о живости принимает
+// условная вставка ниже, ОДНИМ оператором вместе с записью.
+//
+// # ТОТ ЖЕ КЛАСС, ЧТО ЭТАЖОМ НИЖЕ, ТОЛЬКО ПРО СЕССИЮ
+//
+// `human_sessions.ended_at` не входит НИ В ОДИН уникальный индекс (измерено:
+// у таблицы их два — `human_sessions_pkey` по `id` и
+// `human_sessions_bearer_digest_uniq`). Значит снятие сессии меняет НЕключевую
+// колонку и берёт `FOR NO KEY UPDATE`, а вставка семейства по внешнему ключу на
+// сессию берёт `FOR KEY SHARE`. Эти два замка СОВМЕСТИМЫ — ровно тот довод,
+// которым миграция объясняет вынос живости семейства в ключ, только этажом
+// выше.
+//
+// Последствие измерено, 6 прогонов из 6: выход НЕ ЖДАЛ (2.7–3.0 мс), отозвал
+// НОЛЬ семейств, и итог — сессия снята, семейство на ней живо, код активен. А
+// оператор ротации отметку снятия сессии не читает (так и написано в шапке
+// снятия), поэтому проскочившее семейство ротируется БЕССРОЧНО.
+//
+// # ПОЧЕМУ `FOR SHARE`, А НЕ `FOR KEY SHARE` И НЕ `FOR UPDATE`
+//
+// `FOR KEY SHARE` со снятием сессии НЕ конфликтует — он и есть тот замок,
+// который берёт внешний ключ, и именно его совместимость открывает гонку.
+// `FOR SHARE` конфликтует с `FOR NO KEY UPDATE` и держит снятие: измерено —
+// снятие ждёт все 2002 мс до `lock_timeout`. `FOR UPDATE` держал бы и его, но
+// заодно развёл бы между собой ДВЕ ОДНОВРЕМЕННЫЕ ВЫДАЧИ в одной сессии, которым
+// расходиться незачем: `FOR SHARE` их пропускает вместе.
+const lockSessionOfCeremonySQL = `
+SELECT 1 FROM kaname.human_sessions WHERE id = $1 FOR SHARE`
+
+// insertFamilyOnLiveSessionSQL — заведение семейства С УСЛОВИЕМ НА ЖИВОСТЬ
+// сессии, выраженным В ТОМ ЖЕ операторе, что запись.
+//
+// Пары «посмотреть, жива ли сессия — вставить» здесь нет и быть не может:
+// условие и вставка исполняет сам движок под строчным замком, а ноль
+// затронутых строк — отказ (ban #10). Условие шире отметки снятия: истечение
+// сессии ключом невыразимо в принципе — оно наступает ходом времени, а не
+// чьим-то оператором, — и отсекается ровно здесь.
+const insertFamilyOnLiveSessionSQL = `
+INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
+SELECT $1, $2, $3, $4, $5
+  FROM kaname.human_sessions s
+ WHERE s.id = $4 AND s.ended_at IS NULL AND s.expires_at > now()`
+
 // IssueAuthorizationCode заводит семейство и его код ОДНОЙ транзакцией.
 //
 // Одной, а не двумя: семейство без кода — сирота, которую не обменяет никто и
@@ -164,12 +208,25 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1,$2,$3,$4,$5)`,
+	// ЗАМОК СЕССИИ — ПЕРВЫМ. Порядок замков, а не проверка: см.
+	// `lockSessionOfCeremonySQL`. Снятие сессии идёт «сессия → семейства →
+	// дети», и выдача обязана начинаться с той же сессии, иначе они
+	// расходятся и снятие проходит мимо заводимого семейства.
+	if _, err = tx.Exec(ctx, lockSessionOfCeremonySQL, in.Context.SessionID); err != nil {
+		return wrapPgErr(err, "HumanSession", in.Context.SessionID)
+	}
+
+	tag, err := tx.Exec(ctx, insertFamilyOnLiveSessionSQL,
 		in.Context.FamilyID, in.Context.ClientID, in.Context.UserID,
-		in.Context.SessionID, in.Context.Scope); err != nil {
+		in.Context.SessionID, in.Context.Scope)
+	if err != nil {
 		return wrapPgErr(err, "TokenFamily", in.Context.FamilyID)
+	}
+	// Ноль затронутых строк — сессия не жива. Отказ ОДИН на оба её исхода:
+	// снятую и истёкшую сессию предъявителю различать незачем, а нам — не по
+	// чему: обе означают «входа, в котором идёт церемония, больше нет».
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: session %s", domain.ErrCeremonySessionNotLive, in.Context.SessionID)
 	}
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO kaname.authorization_codes

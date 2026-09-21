@@ -196,19 +196,29 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 			// КОНЕЧНОЕ СОСТОЯНИЕ — вот что судится. Кто из двоих отказал, зависит
 			// от расписания и утверждению не подлежит; не подлежит сомнению
 			// другое: семейство отозвано, живого выданного по нему нет.
+			// ЗНАМЕНАТЕЛЬ СНИМАЕТСЯ ВМЕСТЕ С ЧИСЛИТЕЛЕМ, и это не педантизм:
+			// «живых ноль» истинно на ПУСТОМ множестве. В сцене «отзыв первым»
+			// обмен законно отказывает, строк обновляющего токена у семейства не
+			// появляется вовсе — и утверждение о нуле живых там не утверждало бы
+			// НИЧЕГО, оставаясь зелёным при любой поломке.
 			var live bool
-			var liveTokens, liveCodes int
+			var liveTokens, liveCodes, rowTokens, rowCodes int
 			require.NoError(t, pool.QueryRow(ctx, `
 				SELECT f.live,
 				       (SELECT count(*) FROM kaname.refresh_tokens t
 				         WHERE t.family_id = f.id AND t.active),
 				       (SELECT count(*) FROM kaname.authorization_codes c
-				         WHERE c.family_id = f.id AND c.active)
+				         WHERE c.family_id = f.id AND c.active),
+				       (SELECT count(*) FROM kaname.refresh_tokens t
+				         WHERE t.family_id = f.id),
+				       (SELECT count(*) FROM kaname.authorization_codes c
+				         WHERE c.family_id = f.id)
 				  FROM kaname.token_families f WHERE f.id = $1`,
-				base.FamilyID).Scan(&live, &liveTokens, &liveCodes))
+				base.FamilyID).Scan(&live, &liveTokens, &liveCodes, &rowTokens, &rowCodes))
 
-			t.Logf("сцена %q прогон %d: отзыв=%v · обмен=%v · семейство живо=%v · живых токенов=%d · живых кодов=%d",
-				scene.name, run, revokeErr, exchangeErr, live, liveTokens, liveCodes)
+			t.Logf("сцена %q прогон %d: отзыв=%v · обмен=%v · семейство живо=%v · "+
+				"токенов %d, из них живых %d · кодов %d, из них живых %d",
+				scene.name, run, revokeErr, exchangeErr, live, rowTokens, liveTokens, rowCodes, liveCodes)
 
 			require.NoError(t, revokeErr,
 				"сцена %q прогон %d: ОТЗЫВ обязан пройти — он контроль безопасности, "+
@@ -216,12 +226,28 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 				scene.name, run)
 			require.False(t, live,
 				"сцена %q прогон %d: семейство обязано быть отозвано", scene.name, run)
-			require.Zero(t, liveTokens,
-				"сцена %q прогон %d: живого обновляющего токена у отозванного семейства быть не может",
+
+			// Знаменатель: у семейства ЕСТЬ о чём утверждать. Код сеется всегда,
+			// поэтому строго больше нуля он обязан быть в КАЖДОМ прогоне.
+			require.Positive(t, rowCodes,
+				"сцена %q прогон %d: строк кода у семейства ноль — утверждение о живых "+
+					"проверялось бы на пустом множестве и не значило бы ничего",
 				scene.name, run)
 			require.Zero(t, liveCodes,
-				"сцена %q прогон %d: живого кода у отозванного семейства быть не может",
-				scene.name, run)
+				"сцена %q прогон %d: живого кода у отозванного семейства быть не может "+
+					"(строк кода %d)", scene.name, run, rowCodes)
+
+			// Токен появляется только там, где обмен ВЫИГРАЛ. Тогда — и только
+			// тогда — «живых ноль» есть утверждение о существующей строке, и
+			// знаменатель требуется именно в этой ветви.
+			if exchangeErr == nil {
+				require.Positive(t, rowTokens,
+					"сцена %q прогон %d: обмен прошёл, значит строка обновляющего токена "+
+						"обязана существовать — иначе судить нечего", scene.name, run)
+			}
+			require.Zero(t, liveTokens,
+				"сцена %q прогон %d: живого обновляющего токена у отозванного семейства "+
+					"быть не может (строк токена %d)", scene.name, run, rowTokens)
 		}
 	}
 
