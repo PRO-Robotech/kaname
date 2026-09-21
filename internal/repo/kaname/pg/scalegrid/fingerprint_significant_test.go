@@ -4,6 +4,7 @@
 package scalegrid
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,8 +335,11 @@ func askVerdict() string {
 `)
 	// Оснастка отпечатка: обязана существовать и обязана оставаться оснасткой,
 	// иначе `withoutScaffolding` справедливо откажет.
-	writeFile(t, filepath.Join(root, gridDir, "fingerprint.go"), "package scalegrid\n\nfunc fp() int { return 1 }\n")
-	writeFile(t, filepath.Join(root, gridDir, "report.go"), "package scalegrid\n\nfunc rep() int { return 2 }\n")
+	//
+	// Перечень ВЫВОДИТСЯ из самого объявления, а не выписывается: выписанный
+	// разошёлся бы с ним при первом же новом файле оснастки — и разошёлся бы
+	// молча для читателя, отказом для прогона.
+	writeScaffolding(t, func(rel string) string { return filepath.Join(root, rel) })
 	writeFile(t, filepath.Join(root, gridDir, "grid.go"), "package scalegrid\n\n// grid — сетка замера.\nfunc grid() int { return 3 }\n")
 	writeFile(t, filepath.Join(root, migrateDir, "0001_initial.sql"),
 		"-- +goose Up\nCREATE TABLE kaname.access_bindings (id text PRIMARY KEY);\n")
@@ -371,4 +375,20 @@ func coordsFor(t *testing.T) repoCoordinates {
 	}
 	t.Logf("перепись распознавателя: каталогов верхнего уровня %d", len(coords.topLevel))
 	return coords
+}
+
+// writeScaffolding — синтетическая оснастка отпечатка, ВЫВЕДЕННАЯ из объявления.
+//
+// Тело у каждого файла своё: одинаковое дало бы совпадающие хэши и скрыло бы
+// перепутанный порядок.
+func writeScaffolding(t *testing.T, at func(rel string) string) {
+	t.Helper()
+	if len(fingerprintScaffolding) == 0 {
+		t.Fatal("оснасткой не объявлен НИ ОДИН файл: фикстура строила бы пустоту")
+	}
+	n := 0
+	for rel := range fingerprintScaffolding {
+		n++
+		writeFile(t, at(rel), fmt.Sprintf("package scalegrid\n\nfunc scaffold%d() int { return %d }\n", n, n))
+	}
 }
