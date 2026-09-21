@@ -97,6 +97,9 @@ type ddlStatement struct {
 	// indexes — индексы, названные по имени. Таблицу-хозяйку из текста вывести
 	// нельзя: имя индекса её не содержит by construction.
 	indexes []qname
+	// stats — расширенные статистики, названные по имени. Та же беда, что у
+	// индекса, и та же цена ошибки: менять план — их единственное назначение.
+	stats []qname
 	// triggersOn — таблицы, на которых заводится или снимается триггер.
 	triggersOn []qname
 	// refs — таблицы, НА КОТОРЫЕ оператор ссылается внешним ключом.
@@ -113,8 +116,9 @@ type ddlStatement struct {
 //
 // Два таких сведения, и оба нужны, чтобы не промолчать:
 //
-//	indexOwner       имя индекса таблицу не содержит by construction, а снятие
-//	                 индекса план чтения меняет наверняка;
+//	indexOwner       имя индекса и имя расширенной статистики таблицы не
+//	                 содержат by construction, а снятие каждого из них план
+//	                 чтения меняет наверняка;
 //	dynamicDDLFuncs  функция, исполняющая DDL через EXECUTE, ОПРЕДЕЛЯЕТСЯ одной
 //	                 миграцией, а ИСПОЛНЯЕТСЯ другой — и структуру меняет вторая.
 //
@@ -122,6 +126,7 @@ type ddlStatement struct {
 // от нового индекса и от новой функции.
 type corpusIndex struct {
 	indexOwner      map[qname]qname
+	statsOwner      map[qname]qname
 	dynamicDDLFuncs map[string]bool
 }
 
@@ -153,16 +158,21 @@ func (s ddlStatement) touchesAnyOf(want []qname, scope ddlScope, corpus corpusIn
 			}
 		}
 	}
-	for _, idx := range s.indexes {
-		owner, known := corpus.indexOwner[idx]
-		if !known {
-			// Имя индекса ни одним `CREATE INDEX … ON …` этого каталога не
-			// объявлено: связать его с таблицей нечем, и осторожный исход —
-			// единственный, не вносящий слепоты.
-			return true
-		}
-		if hit([]qname{owner}) {
-			return true
+	for _, named := range []struct {
+		names []qname
+		owner map[qname]qname
+	}{{s.indexes, corpus.indexOwner}, {s.stats, corpus.statsOwner}} {
+		for _, n := range named.names {
+			owner, known := named.owner[n]
+			if !known {
+				// Имя ни одним объявлением этого каталога не связано с
+				// таблицей: связать нечем, и осторожный исход — единственный,
+				// не вносящий слепоты.
+				return true
+			}
+			if hit([]qname{owner}) {
+				return true
+			}
 		}
 	}
 	if scope == scopeWriteCost {
@@ -204,9 +214,13 @@ func migrationTouches(src string, tables []string, scope ddlScope, corpus corpus
 // Множество функций с динамическим DDL замыкается до неподвижной точки: тело,
 // зовущее такую функцию, исполняет её DDL так же, как если бы писало его само.
 func buildCorpusIndex(bodies map[string]string) corpusIndex {
-	c := corpusIndex{indexOwner: map[qname]qname{}, dynamicDDLFuncs: map[string]bool{}}
+	c := corpusIndex{
+		indexOwner:      map[qname]qname{},
+		statsOwner:      map[qname]qname{},
+		dynamicDDLFuncs: map[string]bool{},
+	}
 	for _, body := range bodies {
-		indexOwnersIn(body, c.indexOwner)
+		namedOwnersIn(body, c.indexOwner, c.statsOwner)
 	}
 	defs := map[string]string{} // имя функции → её тело
 	for _, body := range bodies {
@@ -231,14 +245,26 @@ func buildCorpusIndex(bodies map[string]string) corpusIndex {
 	return c
 }
 
-// indexOwnersIn — словарь «индекс → его таблица», выведенный из текста.
+// namedOwnersIn — словари «индекс → его таблица» и «расширенная статистика →
+// её таблица», выведенные из текста.
 //
-// Выводится, а не выписывается: выписанный перечень не двигался бы от нового
-// индекса и продолжал бы знать снятые.
-func indexOwnersIn(src string, into map[qname]qname) {
+// Выводятся, а не выписываются: выписанный перечень не двигался бы от нового
+// объявления и продолжал бы знать снятые.
+func namedOwnersIn(src string, indexes, stats map[qname]qname) {
 	for _, stmt := range sqlStatements(src) {
 		toks := sqlTokens(stmt)
 		if len(toks) < 3 || toks[0].word != "create" {
+			continue
+		}
+		if toks[1].word == "statistics" {
+			name, next := qnameAt(toks, skipWords(toks, 2, "if", "not", "exists"))
+			from := findWordAtDepth(toks, next, "from")
+			if name.name == "" || from < 0 {
+				continue
+			}
+			if owner, _ := qnameAt(toks, from+1); owner.name != "" {
+				rememberOwner(stats, name, owner)
+			}
 			continue
 		}
 		i := 1
@@ -269,14 +295,18 @@ func indexOwnersIn(src string, into map[qname]qname) {
 		if owner.name == "" {
 			continue
 		}
-		// Имя индекса пишут и со схемой, и без неё; в словарь идут обе формы,
-		// потому что `DROP INDEX` встречается в обеих.
-		if idx.schema == "" {
-			idx.schema = owner.schema
-		}
-		into[idx] = owner
-		into[qname{name: idx.name}] = owner
+		rememberOwner(indexes, idx, owner)
 	}
+}
+
+// rememberOwner — имя объекта пишут и со схемой, и без неё; в словарь идут обе
+// формы, потому что `DROP INDEX`/`DROP STATISTICS` встречаются в обеих.
+func rememberOwner(into map[qname]qname, name, owner qname) {
+	if name.schema == "" {
+		name.schema = owner.schema
+	}
+	into[name] = owner
+	into[qname{name: name.name}] = owner
 }
 
 // ── РАЗБОР ГОЛОВЫ ОПЕРАТОРА ────────────────────────────────────────────────
@@ -465,18 +495,71 @@ func ddlStatementOf(stmt string, corpus corpusIndex) ddlStatement {
 	return out
 }
 
-// objectsWithoutTableSubject — виды объектов, чьё определение субъектом
-// таблицы не делает. Перечень ЗАКРЫТ: вид вне него даёт `unknownObject`.
-var objectsWithoutTableSubject = map[string]bool{
-	"function": true, "procedure": true, "sequence": true, "type": true,
-	"domain": true, "extension": true, "aggregate": true, "operator": true,
-	"cast": true, "collation": true, "server": true, "policy": true,
-	"publication": true, "subscription": true, "statistics": true,
-	"language": true, "role": true, "user": true, "group": true, "database": true,
-	"tablespace": true, "conversion": true, "text": true /* TEXT SEARCH … */, "event": true,
-	"foreign": true,                                      /* FOREIGN DATA WRAPPER / FOREIGN TABLE — своя таблица, не измеряемая */
-	"access":  true /* ACCESS METHOD */, "default": true, /* ALTER DEFAULT PRIVILEGES */
-	"large": true /* LARGE OBJECT */, "transform": true,
+// БЕЗВРЕДНОСТЬ ВИДА ОБЪЕКТА ДОКАЗЫВАЕТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ
+//
+// Первая редакция этого словаря была ПЕРЕЧНЕМ СЛОВ: вид, попавший в него,
+// покупал молчание одним своим присутствием. Через эту дверь класс и вошёл —
+// `statistics` и `policy` лежали там без единой инъекции, а менять план чтения
+// таблицы есть ЕДИНСТВЕННОЕ назначение расширенной статистики и прямое
+// следствие политики построчной безопасности.
+//
+// Хуже того, слепоту нельзя было увидеть переписью форм: вид, объявленный
+// знакомым, ею не ищется ПО ПОСТРОЕНИЮ — «незнакомых ноль» было верно и не
+// значило ничего.
+//
+// Поэтому запись несёт ТРИ оператора, и проба прогоняет каждый:
+//
+//	naming   этот вид, НАЗЫВАЮЩИЙ измеряемую таблицу        обязан молчать
+//	foreign  тот же вид над НЕИЗМЕРЯЕМОЙ                     обязан молчать так же
+//	control  иная форма, меняющая план ТОЙ ЖЕ измеряемой     обязана краснеть
+//
+// Первые два вместе показывают, что исход есть решение о ВИДЕ, а не совпадение
+// имени; третий — что имя распознавателю ВИДНО, иначе «молчит» было бы
+// неотличимо от «не видит». Записи без всех трёх безвредности не покупают:
+// `proven` возвращает ложь, и вид уходит в осторожный исход наравне с
+// незнакомым.
+//
+// Перечень СУЖЕН до видов, которые в каталоге миграций сегодня встречаются.
+// Запись, которой нечего исключать, — находка: она переживает свой предмет и
+// молча покрывает пустоту.
+type harmlessObject struct {
+	why     string
+	naming  string
+	foreign string
+	control string
+}
+
+// proven — запись несёт все три половины доказательства.
+func (h harmlessObject) proven() bool {
+	return h.naming != "" && h.foreign != "" && h.control != ""
+}
+
+// objectsWithoutTableSubject — виды объектов, чьё определение плана чтения
+// измеряемой таблицы не меняет. Вид вне словаря — осторожный исход.
+var objectsWithoutTableSubject = map[string]harmlessObject{
+	"function": {
+		why: "функция ЧИТАЕТ таблицу, а не меняет её: ни столбца, ни индекса, " +
+			"ни статистики у таблицы от объявления функции не прибавляется",
+		naming: "CREATE FUNCTION kaname.ab_count() RETURNS bigint LANGUAGE sql AS $$" +
+			" SELECT count(*) FROM kaname.access_bindings; $$;",
+		foreign: "CREATE FUNCTION kaname.lim_count() RETURNS bigint LANGUAGE sql AS $$" +
+			" SELECT count(*) FROM kaname.limits; $$;",
+		control: "ALTER TABLE kaname.access_bindings ADD COLUMN note text;",
+	},
+	"sequence": {
+		why: "последовательность живёт своим объектом; привязка её к столбцу " +
+			"таблицы плана чтения этой таблицы не меняет",
+		naming:  "ALTER SEQUENCE kaname.ab_seq OWNED BY kaname.access_bindings.id;",
+		foreign: "ALTER SEQUENCE kaname.lim_seq OWNED BY kaname.limits.id;",
+		control: "ALTER TABLE kaname.access_bindings ALTER COLUMN id SET DEFAULT 0;",
+	},
+}
+
+// harmless — вид объекта, безвредность которого ДОКАЗАНА. Объявленная, но не
+// доказанная безвредность молчания не покупает.
+func harmless(word string) bool {
+	h, ok := objectsWithoutTableSubject[word]
+	return ok && h.proven()
 }
 
 func parseCreate(toks []sqlToken, out *ddlStatement) {
@@ -502,6 +585,11 @@ func parseCreate(toks []sqlToken, out *ddlStatement) {
 				out.subjects = append(out.subjects, parent)
 			}
 		}
+		// Наследование — то же самое другими словами: после него чтение
+		// РОДИТЕЛЯ обходит и потомка. Имена стоят в скобках, поэтому берутся
+		// перечнем. `LIKE` сюда не относится: он копирует описание столбцов
+		// один раз и связи не заводит.
+		out.subjects = append(out.subjects, inheritedParents(toks, next)...)
 	case "view":
 		if name, _ := qnameAt(toks, i+1); name.name != "" {
 			out.subjects = append(out.subjects, name)
@@ -513,6 +601,23 @@ func parseCreate(toks []sqlToken, out *ddlStatement) {
 		}
 	case "unique", "index":
 		parseIndexHead(toks, i, out)
+	case "statistics":
+		// `CREATE STATISTICS <имя> [(виды)] ON <столбцы> FROM <таблица>` —
+		// субъект стоит в хвосте `FROM`. Менять план чтения этой таблицы —
+		// ЕДИНСТВЕННОЕ назначение расширенной статистики.
+		if from := findWordAtDepth(toks, i, "from"); from >= 0 {
+			if tbl, _ := qnameAt(toks, from+1); tbl.name != "" {
+				out.subjects = append(out.subjects, tbl)
+			}
+		}
+	case "policy":
+		// `CREATE POLICY <имя> ON <таблица> …` — условие политики подставляется
+		// в КАЖДЫЙ запрос к таблице, то есть в её план чтения.
+		if on := findWordAtDepth(toks, i, "on"); on >= 0 {
+			if tbl, _ := qnameAt(toks, on+1); tbl.name != "" {
+				out.subjects = append(out.subjects, tbl)
+			}
+		}
 	case "schema":
 		j := skipWords(toks, i+1, "if", "not", "exists")
 		if j < len(toks) && toks[j].ident {
@@ -541,10 +646,32 @@ func parseCreate(toks []sqlToken, out *ddlStatement) {
 			}
 		}
 	default:
-		if !objectsWithoutTableSubject[toks[i].word] {
+		if !harmless(toks[i].word) {
 			out.unknownObject = toks[i].word
 		}
 	}
+}
+
+// inheritedParents — родители из оговорки `INHERITS (a, b)`.
+func inheritedParents(toks []sqlToken, from int) []qname {
+	h := findWordAtDepth(toks, from, "inherits")
+	if h < 0 || h+1 >= len(toks) || toks[h+1].word != "(" {
+		return nil
+	}
+	var out []qname
+	for i := h + 2; i < len(toks) && toks[i].word != ")"; {
+		name, next := qnameAt(toks, i)
+		if name.name == "" {
+			i++
+			continue
+		}
+		out = append(out, name)
+		i = next
+		if i < len(toks) && toks[i].word == "," {
+			i++
+		}
+	}
+	return out
 }
 
 // parseIndexHead — `[UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] [имя] ON [ONLY] <таблица>`.
@@ -582,6 +709,24 @@ func parseAlter(toks []sqlToken, out *ddlStatement) {
 		if r := findSeqAtDepth(toks, next, "rename", "to"); r >= 0 && r+2 < len(toks) {
 			out.subjects = append(out.subjects, qname{schema: name.schema, name: toks[r+2].word})
 		}
+		// `INHERIT <родитель>` и `NO INHERIT <родитель>` меняют план чтения
+		// РОДИТЕЛЯ, а субъектом оператора стоит потомок.
+		if h := findWordAtDepth(toks, next, "inherit"); h >= 0 {
+			if parent, _ := qnameAt(toks, h+1); parent.name != "" {
+				out.subjects = append(out.subjects, parent)
+			}
+		}
+	case "statistics":
+		i := skipWords(toks, 2, "if", "exists")
+		if st, _ := qnameAt(toks, i); st.name != "" {
+			out.stats = append(out.stats, st)
+		}
+	case "policy":
+		if on := findWordAtDepth(toks, 2, "on"); on >= 0 {
+			if tbl, _ := qnameAt(toks, on+1); tbl.name != "" {
+				out.subjects = append(out.subjects, tbl)
+			}
+		}
 	case "view", "materialized":
 		i := 2
 		if toks[1].word == "materialized" {
@@ -607,7 +752,7 @@ func parseAlter(toks []sqlToken, out *ddlStatement) {
 			out.schemas = append(out.schemas, toks[i].word)
 		}
 	default:
-		if !objectsWithoutTableSubject[toks[1].word] {
+		if !harmless(toks[1].word) {
 			out.unknownObject = toks[1].word
 		}
 	}
@@ -626,6 +771,14 @@ func parseDrop(toks []sqlToken, out *ddlStatement) {
 		out.subjects = append(out.subjects, qnameList(toks, skipWords(toks, 3, "if", "exists"))...)
 	case "index":
 		out.indexes = append(out.indexes, qnameList(toks, skipWords(toks, 2, "concurrently", "if", "exists"))...)
+	case "statistics":
+		out.stats = append(out.stats, qnameList(toks, skipWords(toks, 2, "if", "exists"))...)
+	case "policy":
+		if on := findWordAtDepth(toks, 2, "on"); on >= 0 {
+			if tbl, _ := qnameAt(toks, on+1); tbl.name != "" {
+				out.subjects = append(out.subjects, tbl)
+			}
+		}
 	case "schema":
 		for _, q := range qnameList(toks, skipWords(toks, 2, "if", "exists")) {
 			out.schemas = append(out.schemas, q.name)
@@ -637,7 +790,7 @@ func parseDrop(toks []sqlToken, out *ddlStatement) {
 			}
 		}
 	default:
-		if !objectsWithoutTableSubject[toks[1].word] {
+		if !harmless(toks[1].word) {
 			out.unknownObject = toks[1].word
 		}
 	}
