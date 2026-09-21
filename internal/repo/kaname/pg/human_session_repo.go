@@ -265,15 +265,54 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 	return tag.RowsAffected() == 1, nil
 }
 
+// endSessionsOfSQL — ОДНА операция снятия живых записей личности на всё дерево.
+//
+// Выписана константой, потому что исполнителей у неё ДВА: транзакция полосы
+// входа (смена пароля, снятие второго фактора, завершение восстановления) и
+// пул административного принудительного выхода. Две копии одного оператора
+// разошлись бы молча — и разошлись бы та, которую правили последней, — а
+// расхождение здесь означает «по одной полосе человек выведен, по другой нет».
+//
+// `keep` пустой снимает ВСЕ живые записи: пустая строка не равна ни одному
+// идентификатору, поэтому исключать ей нечего. Это не подставное значение, а
+// то же поведение, каким им уже пользуется завершение восстановления.
+const endSessionsOfSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL`
+
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
 func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	tag, err := w.tx.Exec(ctx, `
-		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
-		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL`, string(userID), string(keep), at, reason)
+	tag, err := w.tx.Exec(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
 	if err != nil {
 		return 0, mapErr(err, "HumanSession.EndOthers", string(userID))
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// EndAllSessions — ВСЕ живые записи сессии входа личности, снятые на пуле.
+//
+// Читатель у него один — административный принудительный выход, — и приходит он
+// не с полосы входа, а с внутреннего слушателя: своей транзакции у него здесь
+// нет, а отсечка субъекта ложится СВОЕЙ транзакцией до этого вызова.
+//
+// ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ОТ ОТСЕЧКИ ЗАПИСЬ, А НЕ ЕЁ СЛЕДСТВИЕ. Отсечка судит
+// ВЫДАЧУ: её читают хуки выдачи и край. Резолв нашей сессии её НЕ ПРИМЕНЯЕТ и
+// говорит это о себе прямо (`humansession/resolve.go`): строка судится по трём
+// признакам — снята · истекла · личность неактивна. Значит носитель, выданный
+// до принудительного выхода, резолвился бы после него, а человек, которого
+// распорядитель вывел, работал бы дальше.
+//
+// Возвращает ЧИСЛО снятых записей: «снимать было нечего» и «сняли» — разные
+// исходы, и слитые в один они читаются вызывающим одинаково.
+func (r *HumanSessionRepo) EndAllSessions(ctx context.Context, userID domain.UserID, at time.Time, reason string) (int, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.user_id: required")
+	}
+	tag, err := r.pool.Exec(ctx, endSessionsOfSQL, string(userID), "", at, reason)
+	if err != nil {
+		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
 	}
 	return int(tag.RowsAffected()), nil
 }

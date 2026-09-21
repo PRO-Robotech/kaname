@@ -38,13 +38,28 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
+
+// ownPostureForceLogoutHandler — обработчик, собранный КАК ЕГО СОБИРАЕТ КОРЕНЬ
+// на посадке `own`: отсечка, операция, страж — и снятие НАШИХ записей сессии
+// входа. Чужой поставщик не провязан: его на этой посадке нет вовсе, и выбор
+// корня проверяется отдельно (`cmd/kaname/force_logout_teardown_wiring_test.go`).
+func ownPostureForceLogoutHandler(t *testing.T, pool *pgxpool.Pool) *internaliam.Handler {
+	t.Helper()
+	return internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
+		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
+		WithAdminChecker(allowAdmin{}).
+		WithOperations(operations.NewRepo(pool, "kaname")).
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
+}
 
 // ownSessionBearerDigest — свёртка носителя в форме, которую держит
 // `human_sessions_bearer_digest_check`. Значение фикстуры, не секрет.
@@ -84,7 +99,8 @@ func TestIntegration_ForceLogoutEndsOurOwnLoginSession(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	h, pool := newForceLogoutHandler(t)
+	_, pool := newForceLogoutHandler(t)
+	h := ownPostureForceLogoutHandler(t, pool)
 	uid := seedForceLogoutUser(t, ctx, pool)
 	seedOwnLoginSession(t, ctx, pool, uid, ownSessionBearerDigest)
 

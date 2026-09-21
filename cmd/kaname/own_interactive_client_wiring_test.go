@@ -38,6 +38,17 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
+// ownClientRegistryDouble — собственный реестр клиентов, отвечающий контрактом
+// настоящего: снятие проверочного значения записывается и возвращает тот же
+// исход. Поведение хранилища здесь не воспроизводится — его судит
+// интеграционная проба слоя доступа; здесь судится ВЫБОР исполнителя корнем.
+type ownClientRegistryDouble struct{ cleared []string }
+
+func (d *ownClientRegistryDouble) ClearClientSecretVerifier(_ context.Context, clientID string) error {
+	d.cleared = append(d.cleared, clientID)
+	return nil
+}
+
 // ownInteractiveSpec — то, что use-case просит у порта на заведении: имя,
 // адреса возврата и РЕШЁННАЯ им форма выдачи. Значения взяты из того же
 // выражения, которым корень зовёт порт, а не придуманы здесь.
@@ -57,14 +68,23 @@ func TestCompositionRoot_InteractiveClientCreateHasAnExecutorUnderOwnPosture(t *
 	ctx := context.Background()
 	cfg := roadCfg(config.IdentityProviderOwn, "9097")
 
-	// ТАК КОРЕНЬ СТРОИТ ПОРТ СЕГОДНЯ — выражение скопировано из `buildServices`,
-	// а не сочинено здесь: проба обязана спрашивать о том, что процесс делает.
-	prov := clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg, nil))
+	prov := interactiveClientProvider(cfg, &ownClientRegistryDouble{}, nil)
 
-	_, err := prov.Register(ctx, ownInteractiveSpec())
+	pc, err := prov.Register(ctx, ownInteractiveSpec())
 	if errors.Is(err, clients.ErrNoExternalIdentityProvider) {
 		t.Fatalf("под собственной посадкой заведение интерактивного клиента "+
 			"исполнять НЕЧЕМ — порт отказывает за отсутствием чужого поставщика: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("заведение под собственной посадкой отказало: %v", err)
+	}
+	if pc.ClientID == "" {
+		t.Fatal("исполнитель не назвал имени клиента — строке реестра нечем " +
+			"быть ключённой, и церемония не найдёт клиента ни по чему")
+	}
+	// Форма выдачи — РЕШЕНИЕ use-case, и она возвращается дословно.
+	if len(pc.GrantTypes) != 2 || pc.GrantTypes[0] != "authorization_code" {
+		t.Errorf("форма выдачи подменена исполнителем: %v", pc.GrantTypes)
 	}
 }
 
@@ -78,13 +98,21 @@ func TestCompositionRoot_InteractiveClientDeleteHasAnExecutorUnderOwnPosture(t *
 	ctx := context.Background()
 	cfg := roadCfg(config.IdentityProviderOwn, "9097")
 
-	// ТО ЖЕ выражение корня, что и на заведении: порт у обоих глаголов один.
-	prov := clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg, nil))
+	registry := &ownClientRegistryDouble{}
+	prov := interactiveClientProvider(cfg, registry, nil)
 
 	err := prov.Deregister(ctx, "oic-00000000000000000")
 	if errors.Is(err, clients.ErrNoExternalIdentityProvider) {
 		t.Fatalf("под собственной посадкой снятие интерактивного клиента "+
 			"исполнять НЕЧЕМ — порт отказывает за отсутствием чужого поставщика: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("снятие под собственной посадкой отказало: %v", err)
+	}
+	if len(registry.cleared) != 1 || registry.cleared[0] != "oic-00000000000000000" {
+		t.Errorf("снятие не дошло до собственного реестра: %v — проверочное "+
+			"значение секрета обязано уйти вместе с клиентом, чем бы оно туда "+
+			"ни попало", registry.cleared)
 	}
 }
 
@@ -96,17 +124,23 @@ func TestCompositionRoot_InteractiveClientDeleteHasAnExecutorUnderOwnPosture(t *
 func TestCompositionRoot_InteractiveClientKeepsTheForeignRoadUnderExternalPosture(t *testing.T) {
 	cfg := roadCfg(config.IdentityProviderExternal, "9097")
 
-	road := mustProviderAdminClient(cfg, nil)
-	if road == nil || road.BaseURL == "" {
-		t.Fatal("под external дорога к чужому поставщику НЕ построена — отрицания " +
-			"выше зеленели бы на корне, который его не зовёт никогда")
-	}
+	registry := &ownClientRegistryDouble{}
+	prov := interactiveClientProvider(cfg, registry, nil)
 
-	// Порт строится ТЕМ ЖЕ выражением и получает построенную дорогу. Вызова
-	// здесь нет намеренно: он ушёл бы в сеть за адресом, которого на машине
-	// прогона не существует, и проба судила бы разрешение имён, а не полосу.
-	// Признак построенности взят у продукта (`roadIsBuilt` судит по адресу).
-	if prov := clients.NewInteractiveClientProvider(road); prov == nil {
-		t.Fatal("под external исполнителя нет вовсе")
+	if _, ok := prov.(*clients.InteractiveClientProvider); !ok {
+		t.Fatalf("под external исполнителем стал %T — прежняя посадка обязана "+
+			"ходить к чужому поставщику, и её поведение эта задача не меняет", prov)
+	}
+	// Дорога построена — иначе отрицания выше зеленели бы на корне, который
+	// чужого поставщика не зовёт никогда. Вызова здесь нет намеренно: он ушёл
+	// бы в сеть за адресом, которого на машине прогона не существует, и проба
+	// судила бы разрешение имён. Признак построенности взят у продукта
+	// (`roadIsBuilt` судит по адресу).
+	if road := mustProviderAdminClient(cfg, nil); road == nil || road.BaseURL == "" {
+		t.Fatal("под external дорога к чужому поставщику НЕ построена")
+	}
+	if len(registry.cleared) != 0 {
+		t.Errorf("под external собственный реестр тронут: %v — прежняя посадка "+
+			"о нём знать не должна", registry.cleared)
 	}
 }

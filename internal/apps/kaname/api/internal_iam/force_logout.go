@@ -81,7 +81,12 @@ const eventSessionForceLogout = "iam.session.force_logout"
 //
 // Implemented by *clients.HydraAdminClient. nil when the provider-admin surface
 // is not configured: the cutoff is still recorded and still enforced.
-type providerSessions interface {
+//
+// ИМЕНОВАН НАРУЖУ: провязывается он теперь ПО ПОСАДКЕ, и композиционный корень
+// обязан уметь вернуть «никого» ЧИСТЫМ nil. Возврат типизированного nil мимо
+// интерфейса прошёл бы страж провязки насквозь — и снятие сессии падало бы на
+// разыменовании вместо честного «на этой посадке снимать нечего» (kaname#313).
+type ProviderSessions interface {
 	DeleteLoginSessions(ctx context.Context, subject string) error
 }
 
@@ -91,19 +96,63 @@ type providerSessions interface {
 // force-logout names a `users.id`, the provider keys its sessions on the
 // subject it issued. Passing one where the other belongs would delete nothing
 // and report success.
-type externalIDResolver interface {
+//
+// Именован наружу по той же причине, что и порт выше.
+type ExternalIDResolver interface {
 	ExternalIDOf(ctx context.Context, id domain.UserID) (string, error)
 }
 
 // WithProviderSessions — attaches the provider's login-session surface and the
 // resolver that names a user to it. Both or neither: a teardown that cannot
 // resolve its subject is not a teardown.
-func (h *Handler) WithProviderSessions(p providerSessions, r externalIDResolver) *Handler {
+func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver) *Handler {
 	if p == nil || r == nil {
 		return h
 	}
 	h.providerSessions = p
 	h.externalIDs = r
+	return h
+}
+
+// ownSessions — НАШИ записи сессии входа (`human_sessions`), снимаемые целиком
+// по личности (kaname#313).
+//
+// # ПОЧЕМУ ЭТО ВТОРОЙ ПОРТ, А НЕ ВТОРАЯ РЕАЛИЗАЦИЯ ПЕРВОГО
+//
+// `providerSessions` адресует субъекта ЧУЖИМИ именами: снятие идёт по внешнему
+// субъекту, которого на посадке `own` не существует вовсе, и резолвер этого
+// имени там отказывает by construction. Здесь предмет адресуется `users.id` —
+// тем самым, который назвал распорядитель. Подставить один порт под другой
+// значило бы подставить и разрешение имени, которого нет.
+//
+// # ПОЧЕМУ ОТСЕЧКИ НЕ ХВАТАЕТ, И ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО
+//
+// Отсечка субъекта (`user_token_revocations.revoke_before`) действует на
+// ВЫДАЧЕ: её читают хуки выдачи и край. Резолв нашей сессии её НЕ ПРИМЕНЯЕТ и
+// объявляет это о себе прямо (`humansession/resolve.go`, §8 инв. 8) — строка
+// судится по трём признакам: снята · истекла · личность неактивна. Значит
+// носитель, выданный ДО принудительного выхода, резолвится и ПОСЛЕ него.
+// Проверено опытом: `force_logout_own_session_integration_test.go` предъявляет
+// тот же носитель до и после.
+//
+// Реализуется `*repo/kaname/pg.HumanSessionRepo` — ТЕМ ЖЕ адаптером, которым
+// снимает свои записи полоса входа. Два писателя одной таблицы зовут один
+// оператор (`endSessionsOfSQL`).
+type OwnSessions interface {
+	EndAllSessions(ctx context.Context, userID domain.UserID, at time.Time, reason string) (int, error)
+}
+
+// WithOwnSessions — привязывает снятие НАШИХ записей сессии входа.
+// Composition-root only, посадка `own`.
+//
+// nil оставляет прежнее поведение: отсечка пишется, наши записи не трогаются.
+// Это законно ровно там, где наших записей и нет, — под `external` полоса входа
+// не поднимается вовсе, и снимать нечего.
+func (h *Handler) WithOwnSessions(s OwnSessions) *Handler {
+	if s == nil {
+		return h
+	}
+	h.ownSessions = s
 	return h
 }
 
@@ -258,6 +307,40 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 				"operation_id", op.ID, "err", merr.Error())
 		}
 		return nil, gerr
+	}
+
+	// СНЯТЬ НАШУ ЗАПИСЬ СЕССИИ ВХОДА, теперь когда отсечка устойчива
+	// (kaname#313).
+	//
+	// Порядок тот же и по той же причине, что у снятия у чужого поставщика:
+	// отсечка идёт первой, потому что держится без чьего-либо содействия;
+	// снятие следует, потому что оно и превращает вечный отказ в выход.
+	//
+	// ПРИЧИНА СНЯТИЯ — `logout`, и это РЕШЕНИЕ, а не умолчание. Словарь
+	// `human_sessions_ended_reason_check` ЗАКРЫТ (`logout` · `password-change` ·
+	// `second-factor-removed`), и значения «выведен распорядителем» в нём нет.
+	// Четвёртое значение — новая миграция, то есть предмет другой полосы;
+	// значение ВНЕ словаря база отвергла бы, и принудительный выход отказывал бы
+	// на всяком входе — то есть попытка записать более точную причину стоила бы
+	// самого выхода. Административная природа при этом не теряется: её несёт
+	// запись журнала `iam.session.force_logout`, положенная той же транзакцией,
+	// что и отсечка, и несущая актора.
+	//
+	// Ноль снятых записей — законный исход, а не отказ: у человека могло не быть
+	// ни одной живой сессии, и требовать её значило бы отказывать в выходе тому,
+	// кто уже вышел.
+	if h.ownSessions != nil {
+		if _, err := h.ownSessions.EndAllSessions(ctx, marker.UserID, now,
+			domain.RevokeReasonLogout); err != nil {
+			gerr := status.Error(codes.Unavailable, "could not end the login session")
+			slog.ErrorContext(ctx, "ForceLogout: own login-session teardown failed",
+				"operation_id", op.ID, "user_id", userID, "err", err.Error())
+			if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
+				slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
+					"operation_id", op.ID, "err", merr.Error())
+			}
+			return nil, gerr
+		}
 	}
 
 	// End the session at the provider, now that the cutoff is durable.

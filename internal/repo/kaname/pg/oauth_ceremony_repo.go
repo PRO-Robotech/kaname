@@ -62,11 +62,24 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // consentIDPrefix — префикс идентификатора согласия; форма закрыта
 // ограничением `consent_grants_id_form_ck`.
 const consentIDPrefix = "cg"
+
+// refuseNoSuchClient — ЕДИНСТВЕННЫЙ производитель отказа «интерактивного
+// клиента с таким идентификатором в реестре нет».
+//
+// Отказ несёт ПРИЗНАК `iamerr.ErrNotFound`, а не только текст. Причина
+// прикладная: снятие клиента идёт ПОСЛЕ удаления его строки, поэтому
+// «строки нет» — ожидаемое состояние, а не неполадка, и отличить его от
+// неполадки хранилища вызывающий обязан машинно. Разбор прозы вместо признака
+// сделал бы идемпотентность снятия зависящей от формулировки.
+func refuseNoSuchClient(clientID string) error {
+	return iamerr.Wrapf(iamerr.ErrNotFound, "interactive client %s: not found", clientID)
+}
 
 // OAuthCeremonyRepo — хранилище собственной церемонии.
 type OAuthCeremonyRepo struct{ pool *pgxpool.Pool }
@@ -546,7 +559,7 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 		return wrapPgErr(err, "InteractiveClient", clientID)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("interactive client %s: not found", clientID)
+		return refuseNoSuchClient(clientID)
 	}
 	return nil
 }
@@ -565,7 +578,7 @@ func (r *OAuthCeremonyRepo) ClearClientSecretVerifier(ctx context.Context, clien
 		return wrapPgErr(err, "InteractiveClient", clientID)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("interactive client %s: not found", clientID)
+		return refuseNoSuchClient(clientID)
 	}
 	return nil
 }
@@ -584,7 +597,7 @@ func (r *OAuthCeremonyRepo) ClientSecretVerifier(ctx context.Context, clientID s
 		SELECT secret_verifier FROM kaname.interactive_clients WHERE client_id = $1`,
 		clientID).Scan(&material)
 	if stderrors.Is(err, pgx.ErrNoRows) {
-		return domain.LoginVerifier{}, false, fmt.Errorf("interactive client %s: not found", clientID)
+		return domain.LoginVerifier{}, false, refuseNoSuchClient(clientID)
 	}
 	if err != nil {
 		return domain.LoginVerifier{}, false, wrapPgErr(err, "InteractiveClient", clientID)
