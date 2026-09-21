@@ -11,6 +11,13 @@
 // Operation, done=true). The earlier per-jti synthetic-jti write was inert — a
 // synthetic jti can never match the target's real live-token jti.
 //
+// СНЯТИЕ САМОЙ СЕССИИ ВХОДА ИДЁТ ВТОРЫМ ДЕЙСТВИЕМ, и ЧЬЮ сессию снимать, решает
+// посадка (kaname#313): под `external` — сессию у внешнего поставщика
+// (`ProviderSessions`), под `own` — НАШУ строку `human_sessions`
+// (`OwnSessions`). Провязан ровно один из двух: провязать оба значило бы на
+// каждой посадке звать одного впустую, а под `own` — звать дорогу, которой нет,
+// и отказывать всему глаголу за её отсутствием.
+//
 // ForceLogout was advertised (caller_policy + permission_catalog) but
 // Unimplemented before this fix — an advertised-but-Unimplemented RPC is a
 // contract gap.
@@ -79,8 +86,11 @@ const eventSessionForceLogout = "iam.session.force_logout"
 // with nothing prompting the re-authentication that would clear it. Ending the
 // session is what turns a standing refusal into a logout.
 //
-// Implemented by *clients.HydraAdminClient. nil when the provider-admin surface
-// is not configured: the cutoff is still recorded and still enforced.
+// Implemented by *clients.HydraAdminClient. nil on a posture that declares no
+// external identity provider at all — there the login session is OUR row and
+// `OwnSessions` below is what ends it; nil also when the provider-admin surface
+// is simply not configured, and there the cutoff is still recorded and still
+// enforced.
 //
 // ИМЕНОВАН НАРУЖУ: провязывается он теперь ПО ПОСАДКЕ, и композиционный корень
 // обязан уметь вернуть «никого» ЧИСТЫМ nil. Возврат типизированного nil мимо
