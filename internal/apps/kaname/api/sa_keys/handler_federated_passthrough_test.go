@@ -58,7 +58,7 @@ func TestHandlerIssue_Federated_IssuerKeyMaterialReachesTheTrustList(t *testing.
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
 	ti := &fakeTrustedIssuers{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithTrustedIssuerWriter(ti)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).WithTrustedIssuerWriter(ti)
 	h := NewHandler(uc, nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
@@ -107,7 +107,7 @@ func TestHandlerIssue_Federated_MissingIssuerKeyIsRefusedNamingTheField(t *testi
 			repo := &stubSAClientRepo{}
 			ops := &stubOpsRepo{}
 			ti := &fakeTrustedIssuers{}
-			uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithTrustedIssuerWriter(ti)
+			uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).WithTrustedIssuerWriter(ti)
 			h := NewHandler(uc, nil, nil)
 
 			ctx := operations.WithPrincipal(context.Background(),
