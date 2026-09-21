@@ -71,16 +71,35 @@ func (r *MintedTokenRevocationRepo) Revoke(ctx context.Context, subject string, 
 // оператора разошлись бы молча — и разошлась бы та, которую правили последней, —
 // а расхождение здесь означает «по одной записи отозван, по другой нет».
 //
-// Форма совпадает со схемными писателями этой же строки (функции
-// `kaname.minted_cutoff_on_*`): монотонный `GREATEST` одинаков у всех, и
-// откатить границу назад не может ни один.
+// # МОМЕНТ МОНОТОНЕН, А ПРИЧИНА И АКТОР ПРИНАДЛЕЖАТ СТОЯЩЕМУ МОМЕНТУ
+//
+// Монотонный `GREATEST` одинаков у всех писателей этой строки. Но одного его
+// мало, и прежняя редакция этим и ограничивалась: причина и актор
+// переписывались БЕЗУСЛОВНО. Следствие наступило ровно тогда, когда обе записи
+// стали класться одной дверью: полоса входа несёт СВОЙ момент (он бывает раньше
+// стоящего), администратор — текущий. На проигравшей записи соседняя строка
+// сохраняет причину и актора администратора, а эта — принимала чужие. Итог:
+// строка, по которой судит авторитет отзыва НА ПУТИ ЗАПРОСА, называла неверного
+// принявшего решение.
+//
+// Теперь замок тот же, что у соседней строки: причина и актор переписываются
+// ТОЛЬКО вместе с принятым моментом, на равных стоит последняя запись.
+// Отброшенный момент не переносит сюда ничего.
+//
+// ЧТО ОСТАЁТСЯ РАСХОЖДЕНИЕМ И ГДЕ ОНО ЖИВЁТ: схемные писатели этой же строки
+// (`kaname.minted_cutoff_on_*`) переписывают причину и актора безусловно — они
+// SQL, и правит их миграция, то есть другая полоса. Предикат снятия: у функций
+// `minted_cutoff_on_*` стоит тот же `CASE WHEN` по моменту, что и здесь.
 const upsertMintedCutoffSQL = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
 		VALUES ($1,$2,$3,$4)
 		ON CONFLICT (subject) DO UPDATE
 		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
-		       reason        = EXCLUDED.reason,
-		       revoked_by    = EXCLUDED.revoked_by,
-		       updated_at    = now()`
+		       reason        = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN EXCLUDED.reason ELSE kaname.minted_token_revocations.reason END,
+		       revoked_by    = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN EXCLUDED.revoked_by ELSE kaname.minted_token_revocations.revoked_by END,
+		       updated_at    = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN now() ELSE kaname.minted_token_revocations.updated_at END`
 
 // cutoffExecutor — пул либо транзакция. Операторы отсечки одни, исполнителей двое.
 type cutoffExecutor interface {

@@ -247,3 +247,51 @@ func TestIntegration_RepeatedEndSessionDoesNotRewriteTheReason(t *testing.T) {
 	require.False(t, second, "повторное снятие обязано не снимать ничего")
 	require.NoError(t, w2.Commit(ctx))
 }
+
+// TestIntegration_LosingCutoffDoesNotRewriteReasonAndActor — отброшенный момент
+// не переносит НИ В ОДНУ из двух записей ни причины, ни актора.
+//
+// Расхождение это оживает ровно тогда, когда обе записи кладутся одной дверью:
+// полоса входа несёт СВОЙ момент, он бывает раньше стоящего, а администратор —
+// текущий. Без замка запись, по которой судит авторитет отзыва НА ПУТИ ЗАПРОСА,
+// назвала бы неверного принявшего решение.
+func TestIntegration_LosingCutoffDoesNotRewriteReasonAndActor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	scene := ceremonyScene(t, ctx, pool, "ckrsn")
+	repo := kanamepg.NewUserTokenRevocationRepo(pool)
+	admin := domain.UserID(scene.UserID)
+
+	// Стоящая отсечка — ПОЗДНИЙ момент, причина и актор распорядителя.
+	late := time.Now().UTC()
+	require.NoError(t, repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: domain.UserID(scene.UserID), RevokeBefore: late,
+		Reason: "admin-force-logout",
+	}, admin))
+
+	// Проигравшая — РАННИЙ момент, причина и актор полосы входа.
+	require.NoError(t, repo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: domain.UserID(scene.UserID), RevokeBefore: late.Add(-time.Hour),
+		Reason: domain.RevokeReasonLogout,
+	}, domain.UserID(scene.UserID)))
+
+	// ОБЕ записи обязаны сохранить причину стоящего момента.
+	for _, q := range []struct{ name, sql string }{
+		{"отсечка субъекта",
+			`SELECT reason FROM kaname.user_token_revocations WHERE user_id = $1`},
+		{"отсечка предъявления",
+			`SELECT reason FROM kaname.minted_token_revocations WHERE subject = $1`},
+	} {
+		var reason string
+		require.NoError(t, pool.QueryRow(ctx, q.sql, scene.UserID).Scan(&reason), q.name)
+		require.Equal(t, "admin-force-logout", reason,
+			"%s: отброшенный момент переписал причину стоящего — строка называет "+
+				"неверного принявшего решение", q.name)
+	}
+}
