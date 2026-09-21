@@ -428,6 +428,85 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	return nil
 }
 
+// revokeFamiliesOfSessionsTx отзывает семейства, привязанные к НАЗВАННЫМ
+// сессиям, — в транзакции вызывающего.
+//
+// # ПОЧЕМУ ЭТОТ ПИСАТЕЛЬ ОБЯЗАН СУЩЕСТВОВАТЬ
+//
+// Привязка семейства к сессии есть внешний ключ с каскадом НА УДАЛЕНИИ строки.
+// Снятие сессии строку не удаляет — оно ставит отметку, а удаляет строку уборка
+// спустя порог удержания. Значит без этого писателя обновляющий токен снятой
+// сессии живёт и ротируется в свежие, а окно равно величине УДЕРЖАНИЯ, то есть
+// настройке хранения, а не решению о безопасности.
+//
+// Словарь причин отзыва объявлен ЗАКРЫТЫМ, и до этой полосы у четырёх его
+// значений не было ни одного писателя. Объявленная возможность, которой никто
+// не исполняет, — долг, а не будущее: она читается как работающая и не
+// работает ни при каком входе.
+//
+// # ПОРЯДОК ОПЕРАТОРОВ НЕСУЩИЙ
+//
+// Семейства выбираются ПЕРВЫМИ и по ним же снимается выданное: пометь мы
+// семейства раньше, чем выберем их, условие живости опустошило бы выборку — и
+// коды с токенами остались бы живыми при отозванном семействе.
+//
+// # ИДЕМПОТЕНТНОСТЬ — УСЛОВИЕМ, А НЕ ПРОВЕРКОЙ
+//
+// Уже снятую отметку и её причину повтор не переписывает: условие `revoked_at
+// IS NULL` делает второй отзыв пустым, а не вторым.
+func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
+	sessionIDs []string, reason domain.FamilyRevocationReason,
+) (int, error) {
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
+	if err := reason.Validate(); err != nil {
+		return 0, err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM kaname.token_families
+		 WHERE session_id = ANY($1) AND revoked_at IS NULL`, sessionIDs)
+	if err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", "")
+	}
+	var families []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, wrapPgErr(err, "TokenFamily", "")
+		}
+		families = append(families, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", "")
+	}
+	if len(families) == 0 {
+		return 0, nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE kaname.token_families
+		   SET revoked_at = now(), revoked_reason = $2
+		 WHERE id = ANY($1) AND revoked_at IS NULL`, families, string(reason)); err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", "")
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE kaname.authorization_codes
+		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = ANY($1) AND active`, families); err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE kaname.refresh_tokens
+		   SET active = false, deactivated_at = now(), deactivated_reason = 'family-revoked'
+		 WHERE family_id = ANY($1) AND active`, families); err != nil {
+		return 0, wrapPgErr(err, "RefreshToken", "")
+	}
+	return len(families), nil
+}
+
 // ── Согласие ────────────────────────────────────────────────────────────────
 
 // GrantConsent записывает согласие человека клиенту на перечисленные области.

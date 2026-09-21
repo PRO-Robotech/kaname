@@ -278,17 +278,43 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 // то же поведение, каким им уже пользуется завершение восстановления.
 const endSessionsOfSQL = `
 		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
-		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL`
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL
+		 RETURNING id`
 
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
 func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	tag, err := w.tx.Exec(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
+	ended, err := endSessionsOf(ctx, w.tx, userID, keep, at, reason)
 	if err != nil {
 		return 0, mapErr(err, "HumanSession.EndOthers", string(userID))
 	}
-	return int(tag.RowsAffected()), nil
+	return len(ended), nil
+}
+
+// endSessionsOf исполняет ОДИН оператор снятия и возвращает ИДЕНТИФИКАТОРЫ
+// снятых записей.
+//
+// Идентификаторы, а не число: по ним отзывается выданное в этих сессиях, и
+// второй запрос «а какие это были» вернул бы уже снятые строки вперемешку с
+// теми, что сняли до нас.
+func endSessionsOf(ctx context.Context, tx pgx.Tx, userID domain.UserID,
+	keep domain.HumanSessionID, at time.Time, reason string,
+) ([]string, error) {
+	rows, err := tx.Query(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if serr := rows.Scan(&id); serr != nil {
+			return nil, serr
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // EndAllSessions — ВСЕ живые записи сессии входа личности, снятые на пуле.
@@ -326,11 +352,36 @@ func (r *HumanSessionRepo) EndAllSessions(ctx context.Context, userID domain.Use
 	if userID == "" {
 		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.user_id: required")
 	}
-	tag, err := r.pool.Exec(ctx, endSessionsOfSQL, string(userID), "", at, reason)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
 	}
-	return int(tag.RowsAffected()), nil
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	ended, err := endSessionsOf(ctx, tx, userID, "", at, reason)
+	if err != nil {
+		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+	}
+
+	// ВЫДАННОЕ В ЭТИХ СЕССИЯХ ОТЗЫВАЕТСЯ ТОЙ ЖЕ ТРАНЗАКЦИЕЙ (задача kaname#313).
+	//
+	// Привязка семейства к сессии — внешний ключ с каскадом НА УДАЛЕНИИ строки,
+	// а снятие строку не удаляет: оно ставит отметку, а удаляет строку уборка
+	// спустя порог удержания. Без этого оператора обновляющий токен снятой
+	// сессии жил бы и ротировался в свежие, а окно равнялось бы величине
+	// УДЕРЖАНИЯ — то есть настройке хранения, а не решению о безопасности.
+	//
+	// Той же транзакцией, а не следом: снятая сессия с живым семейством — это
+	// состояние, в котором глагол уже ответил, а доступ ещё есть.
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return 0, rerr
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+	}
+	return len(ended), nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент
