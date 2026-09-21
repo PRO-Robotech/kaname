@@ -47,7 +47,7 @@ func settingKeysFromProducer(t *testing.T) map[string]bool {
 			}
 			keys[key] = true
 			ft := f.Type
-			for ft.Kind() == reflect.Ptr {
+			for ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {
