@@ -624,12 +624,15 @@ func parseCreate(toks []sqlToken, out *ddlStatement) {
 			out.schemas = append(out.schemas, toks[j].word)
 		}
 	case "foreign":
-		// `CREATE FOREIGN TABLE <имя>` — таблица; `CREATE FOREIGN DATA WRAPPER` — нет.
-		if i+1 < len(toks) && toks[i+1].word == "table" {
-			j := skipWords(toks, i+2, "if", "not", "exists")
-			if name, _ := qnameAt(toks, j); name.name != "" {
-				out.subjects = append(out.subjects, name)
-			}
+		// `CREATE FOREIGN TABLE <имя>` — ТАБЛИЦА: она носит имя в той же схеме и
+		// тем же именем читается запросом вердикта. Оговорка «внешняя» говорит,
+		// ГДЕ лежат данные, а не чьё имя стоит субъектом.
+		// `CREATE FOREIGN DATA WRAPPER` таблицей не является — и безвредным
+		// видом тоже не объявлен, поэтому судится ОСТОРОЖНО, а не молча.
+		if names := foreignTableName(toks, i); len(names) > 0 {
+			out.subjects = append(out.subjects, names...)
+		} else {
+			out.unknownObject = foreignKindName(toks, i)
 		}
 	case "trigger", "constraint":
 		// CREATE TRIGGER … ON <таблица> и CREATE CONSTRAINT TRIGGER … ON <…>.
@@ -650,6 +653,23 @@ func parseCreate(toks []sqlToken, out *ddlStatement) {
 			out.unknownObject = toks[i].word
 		}
 	}
+}
+
+// foreignTableName — имена из `FOREIGN TABLE <имя>[, …]`; у прочих объектов с
+// оговоркой `FOREIGN` (обёртка данных, сервер) имени таблицы нет.
+func foreignTableName(toks []sqlToken, at int) []qname {
+	if at+1 >= len(toks) || toks[at+1].word != "table" {
+		return nil
+	}
+	return qnameList(toks, skipWords(toks, at+2, "if", "not", "exists"))
+}
+
+// foreignKindName — вид объекта с оговоркой `FOREIGN`, для текста находки.
+func foreignKindName(toks []sqlToken, at int) string {
+	if at+1 < len(toks) {
+		return "foreign " + toks[at+1].word
+	}
+	return "foreign"
 }
 
 // inheritedParents — родители из оговорки `INHERITS (a, b)`.
@@ -716,6 +736,12 @@ func parseAlter(toks []sqlToken, out *ddlStatement) {
 				out.subjects = append(out.subjects, parent)
 			}
 		}
+	case "foreign":
+		if names := foreignTableName(toks, 1); len(names) > 0 {
+			out.subjects = append(out.subjects, names...)
+		} else {
+			out.unknownObject = foreignKindName(toks, 1)
+		}
 	case "statistics":
 		i := skipWords(toks, 2, "if", "exists")
 		if st, _ := qnameAt(toks, i); st.name != "" {
@@ -771,6 +797,12 @@ func parseDrop(toks []sqlToken, out *ddlStatement) {
 		out.subjects = append(out.subjects, qnameList(toks, skipWords(toks, 3, "if", "exists"))...)
 	case "index":
 		out.indexes = append(out.indexes, qnameList(toks, skipWords(toks, 2, "concurrently", "if", "exists"))...)
+	case "foreign":
+		if names := foreignTableName(toks, 1); len(names) > 0 {
+			out.subjects = append(out.subjects, names...)
+		} else {
+			out.unknownObject = foreignKindName(toks, 1)
+		}
 	case "statistics":
 		out.stats = append(out.stats, qnameList(toks, skipWords(toks, 2, "if", "exists"))...)
 	case "policy":
@@ -835,7 +867,7 @@ func sqlTokens(stmt string) []sqlToken {
 			out = append(out, sqlToken{word: ")", depth: depth})
 			i++
 		case c == '\'':
-			i = skipSingleQuoted(stmt, i)
+			i = skipSingleQuoted(stmt, i, escapedStringPrefix(stmt, i))
 			out = append(out, sqlToken{word: "'", depth: depth})
 		case c == '"':
 			j := i + 1
@@ -1011,7 +1043,7 @@ func sqlStatements(src string) []string {
 			i = j
 			b.WriteByte(' ')
 		case src[i] == '\'':
-			j := skipSingleQuoted(src, i)
+			j := skipSingleQuoted(src, i, escapedStringPrefix(src, i))
 			b.WriteString(src[i:j])
 			i = j
 		case src[i] == '"':
@@ -1050,9 +1082,29 @@ func sqlStatements(src string) []string {
 }
 
 // skipSingleQuoted — индекс за закрывающей кавычкой литерала.
-func skipSingleQuoted(src string, i int) int {
+//
+// Форм литерала ДВЕ, и различаются они приставкой:
+//
+//	'…'    обычная. Кавычку вносит только УДВОЕНИЕ; обратный слэш — обычный
+//	       знак (standard_conforming_strings=on, умолчание с Postgres 9.1).
+//	E'…'   с экранированием. Обратный слэш экранирует ВСЁ, включая кавычку.
+//
+// Пропуск, не знающий второй формы, кончает литерал на `\'` и дальше читает
+// как код то, что кодом не является, — а следующая настоящая кавычка открывает
+// литерал, который тянется ДО КОНЦА ФАЙЛА. Теряется поэтому не один оператор, а
+// весь оставшийся текст: замер на трёх операторах дал один.
+//
+// `escaped` говорит, какая это форма; устанавливает его вызывающий, потому что
+// приставка стоит ПЕРЕД кавычкой и в кавычку не входит.
+func skipSingleQuoted(src string, i int, escaped bool) int {
 	j := i + 1
 	for j < len(src) {
+		if escaped && src[j] == '\\' {
+			// Экранируется СЛЕДУЮЩИЙ знак, каким бы он ни был: `\\` — это слэш,
+			// и кавычка за ним литерал закрывает.
+			j += 2
+			continue
+		}
 		if src[j] == '\'' {
 			if j+1 < len(src) && src[j+1] == '\'' {
 				j += 2
@@ -1063,6 +1115,18 @@ func skipSingleQuoted(src string, i int) int {
 		j++
 	}
 	return len(src)
+}
+
+// escapedStringPrefix — стоит ли перед кавычкой приставка `E`/`e`, делающая
+// литерал экранируемым.
+//
+// Приставкой она является только ОТДЕЛЬНЫМ словом: у `kaname.some_e'x'` буква
+// `e` — хвост имени, и литерал за ней обычный.
+func escapedStringPrefix(src string, quote int) bool {
+	if quote == 0 || (src[quote-1] != 'E' && src[quote-1] != 'e') {
+		return false
+	}
+	return quote == 1 || !identPart(src[quote-2])
 }
 
 // dollarQuoteEnd — индекс за закрывающей долларовой кавычкой и признак того,
