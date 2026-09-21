@@ -152,6 +152,9 @@ func (s ddlStatement) touchesAnyOf(want []qname, scope ddlScope, corpus corpusIn
 		return true
 	}
 	for _, sch := range s.schemas {
+		if sch == anySchema {
+			return len(want) > 0
+		}
 		for _, w := range want {
 			if w.schema == "" || w.schema == sch {
 				return true
@@ -491,8 +494,84 @@ func ddlStatementOf(stmt string, corpus corpusIndex) ddlStatement {
 		parseAlter(toks, &out)
 	case "drop":
 		parseDrop(toks, &out)
+	case "analyze", "analyse", "reindex", "cluster", "vacuum":
+		parseMaintenance(toks, &out)
 	}
 	return out
+}
+
+// judgedHeads — головы операторов, которые разбор РАЗБИРАЕТ.
+//
+// Один источник на разбор и на перепись: перепись, знающая меньше разбора,
+// печатает число о другом предмете, и именно так у одного вывода получились
+// три разных числа форм.
+var judgedHeads = map[string]bool{
+	"create": true, "alter": true, "drop": true,
+	"analyze": true, "analyse": true, "reindex": true, "cluster": true, "vacuum": true,
+}
+
+// ПЕРЕСТРОЕНИЕ И СБОР СТАТИСТИКИ МЕНЯЮТ ПЛАН, НЕ БУДУЧИ ОПРЕДЕЛЕНИЕМ
+//
+// У этих команд своя голова, и разбор до них не доходил вовсе — а план чтения
+// они меняют прямее, чем иное определение:
+//
+//	ANALYZE   переписывает статистику планировщика
+//	REINDEX   перестраивает индексы таблицы
+//	CLUSTER   перекладывает строки по индексу, меняя корреляцию
+//	VACUUM    двигает оценки числа строк и страниц
+//
+// Команда БЕЗ имени таблицы (`VACUUM;`, `ANALYZE;`) относится ко всей базе,
+// значит и к измеряемым таблицам: она берётся как правка схемы целиком.
+func parseMaintenance(toks []sqlToken, out *ddlStatement) {
+	i := skipWords(toks, 1, "verbose", "full", "freeze", "analyze", "analyse",
+		"concurrently", "force")
+	i = skipParenGroup(toks, i)
+	i = skipWords(toks, i, "verbose", "full", "freeze", "analyze", "analyse", "concurrently")
+
+	if toks[0].word == "reindex" {
+		switch {
+		case i < len(toks) && toks[i].word == "index":
+			out.indexes = append(out.indexes, qnameList(toks, skipWords(toks, i+1, "concurrently"))...)
+			return
+		case i < len(toks) && (toks[i].word == "schema" || toks[i].word == "database" ||
+			toks[i].word == "system"):
+			j := skipWords(toks, i+1, "concurrently")
+			if j < len(toks) && toks[j].ident {
+				out.schemas = append(out.schemas, toks[j].word)
+			} else {
+				out.schemas = append(out.schemas, anySchema)
+			}
+			return
+		case i < len(toks) && toks[i].word == "table":
+			i = skipWords(toks, i+1, "concurrently")
+		}
+	}
+
+	names := qnameList(toks, i)
+	if len(names) == 0 {
+		// Имени нет — команда относится ко ВСЕЙ базе, то есть и к измеряемым
+		// таблицам. Молчание здесь было бы слепотой на самой широкой форме.
+		out.schemas = append(out.schemas, anySchema)
+		return
+	}
+	out.subjects = append(out.subjects, names...)
+}
+
+// anySchema — метка «схема любая»: так записывается команда по всей базе.
+const anySchema = "*"
+
+// skipParenGroup — индекс за группой в скобках, если она стоит на месте i.
+func skipParenGroup(toks []sqlToken, i int) int {
+	if i >= len(toks) || toks[i].word != "(" {
+		return i
+	}
+	for i < len(toks) && toks[i].word != ")" {
+		i++
+	}
+	if i < len(toks) {
+		i++
+	}
+	return i
 }
 
 // БЕЗВРЕДНОСТЬ ВИДА ОБЪЕКТА ДОКАЗЫВАЕТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ

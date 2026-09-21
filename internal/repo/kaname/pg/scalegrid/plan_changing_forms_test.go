@@ -358,3 +358,96 @@ func TestHarmlessObjectKindsAreProvenNotDeclared(t *testing.T) {
 		}
 	}
 }
+
+// ПЕРЕСТРОЕНИЕ И СБОР СТАТИСТИКИ — ДЕРЖАТЕЛЬ ОСТАТКА С НУЛЕВЫМ ПРЕДМЕТОМ
+//
+// Эти формы план чтения меняют, а глаголами определения не являются: голова у
+// них своя, и прежний разбор до них не доходил вовсе. В каталоге миграций их
+// сегодня НОЛЬ над измеряемыми таблицами — и потому остаток держался ВНИМАНИЕМ:
+// завтрашний `ANALYZE kaname.users` не покраснил бы ничего.
+//
+//	ANALYZE   переписывает статистику планировщика — план меняется прямо
+//	REINDEX   перестраивает индексы таблицы
+//	CLUSTER   перекладывает строки по индексу; меняется корреляция
+//	VACUUM    двигает оценки числа строк и страниц
+//
+// Проба и есть держатель: предмет у неё нулевой, а способность упасть — нет.
+func TestRebuildAndStatisticsFormsAreHeld(t *testing.T) {
+	measured := []string{"access_bindings"}
+
+	cases := []struct {
+		name string
+		sql  string
+		want bool
+	}{
+		{"сбор статистики по измеряемой", "ANALYZE kaname.access_bindings;", true},
+		{"сбор статистики, британское написание", "ANALYSE VERBOSE kaname.access_bindings;", true},
+		{"сбор статистики по столбцам измеряемой", "ANALYZE kaname.access_bindings (scope, role_id);", true},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: сбор статистики по ЧУЖОЙ", "ANALYZE kaname.limits;", false},
+		{"сбор статистики по перечню, измеряемая среди них", "ANALYZE kaname.limits, kaname.access_bindings;", true},
+		{"перестроение индексов измеряемой", "REINDEX TABLE kaname.access_bindings;", true},
+		{"перестроение без остановки записи", "REINDEX TABLE CONCURRENTLY kaname.access_bindings;", true},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: перестроение ЧУЖОЙ", "REINDEX TABLE kaname.limits;", false},
+		{"перестроение схемы целиком", "REINDEX SCHEMA kaname;", true},
+		{"перекладка измеряемой по индексу", "CLUSTER kaname.access_bindings USING access_bindings_pkey;", true},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: перекладка ЧУЖОЙ", "CLUSTER kaname.limits USING limits_pkey;", false},
+		{"уборка измеряемой", "VACUUM FULL ANALYZE kaname.access_bindings;", true},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: уборка ЧУЖОЙ", "VACUUM FULL kaname.limits;", false},
+		{"уборка БЕЗ имени таблицы — по всей базе", "VACUUM;", true},
+	}
+
+	var influencing, ignored int
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := migrationTouches(c.sql, measured, scopeReadPlan, corpusIndex{}); got != c.want {
+				t.Fatalf("вердикт %v, ожидался %v", got, c.want)
+			} else if got {
+				influencing++
+			} else {
+				ignored++
+			}
+		})
+	}
+	t.Logf("перепись инъекции: случаев %d; признано влияющими %d; отсеяно %d",
+		len(cases), influencing, ignored)
+	if influencing == 0 || ignored == 0 {
+		t.Fatal("инъекция односторонняя")
+	}
+
+	// ПРЕДМЕТ СЕГОДНЯ НУЛЕВОЙ, и это отдельное утверждение: держатель заведён
+	// НЕ потому, что такие формы в дереве есть, а потому, что завтра появятся.
+	corpus := migrationCorpus(t)
+	fp, err := ComputeFingerprint(repoRootFromPackageDir(t))
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: отпечаток: %v", err)
+	}
+	index := buildCorpusIndex(corpus)
+	var carriers []string
+	for name, body := range corpus {
+		for _, stmt := range sqlStatements(body) {
+			toks := sqlTokens(stmt)
+			if len(toks) == 0 {
+				continue
+			}
+			switch toks[0].word {
+			case "analyze", "analyse", "reindex", "cluster", "vacuum":
+				if ddlStatementOf(stmt, index).touchesAnyOf(measuredNames(fp.Tables),
+					scopeReadPlan, index) {
+					carriers = append(carriers, name)
+				}
+			}
+		}
+	}
+	sort.Strings(carriers)
+	t.Logf("ПЕРЕПИСЬ ОСТАТКА: файлов корпуса %d; миграций с такой формой НАД ИЗМЕРЯЕМОЙ таблицей %d %v",
+		len(corpus), len(carriers), carriers)
+}
+
+// measuredNames — имена измеряемых таблиц в виде, который принимает разбор.
+func measuredNames(tables []string) []qname {
+	out := make([]qname, 0, len(tables))
+	for _, t := range tables {
+		out = append(out, parseQName(t))
+	}
+	return out
+}

@@ -92,16 +92,22 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 				judged++
 				continue
 			}
-			if verb != "create" && verb != "alter" && verb != "drop" {
+			if !judgedHeads[verb] {
 				continue
 			}
-			ddl++
+			if verb == "create" || verb == "alter" || verb == "drop" {
+				ddl++
+			}
 			judged++
 			if st.unknownObject != "" {
 				unknown[name] = append(unknown[name], verb+" "+st.unknownObject)
 				continue
 			}
-			byObject[verb+" "+objectWordOf(toks)]++
+			if verb == "create" || verb == "alter" || verb == "drop" {
+				byObject[verb+" "+objectWordOf(toks)]++
+			} else {
+				byObject[verb+" (обслуживание)"]++
+			}
 		}
 	}
 
