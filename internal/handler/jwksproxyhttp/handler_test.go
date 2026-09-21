@@ -32,7 +32,7 @@ import (
 const (
 	upstreamJWKS1 = `{"keys":[{"kty":"RSA","use":"sig","kid":"upstream-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"}]}`
 	upstreamJWKS2 = `{"keys":[{"kty":"RSA","use":"sig","kid":"upstream-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"},{"kty":"RSA","use":"sig","kid":"upstream-kid-2","alg":"RS256","n":"ZZZdefff","e":"AQAB"}]}`
-	emptyJWKS  = `{"keys":[]}`
+	emptyJWKS     = `{"keys":[]}`
 )
 
 // fakeClock is an injectable, advanceable clock so cache-TTL / rotation tests are
