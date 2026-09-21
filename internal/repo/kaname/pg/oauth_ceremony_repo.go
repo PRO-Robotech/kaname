@@ -461,16 +461,23 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 // не исполняет, — долг, а не будущее: она читается как работающая и не
 // работает ни при каком входе.
 //
-// # ПОРЯДОК ОПЕРАТОРОВ НЕСУЩИЙ
+// # ВЫБОР И ПОМЕТКА — ОДИН ОПЕРАТОР
 //
-// Семейства выбираются ПЕРВЫМИ и по ним же снимается выданное: пометь мы
-// семейства раньше, чем выберем их, условие живости опустошило бы выборку — и
-// коды с токенами остались бы живыми при отозванном семействе.
+// ЗДЕСЬ СТОЯЛО, что порядок операторов несущий и семейства обязаны выбираться
+// ПЕРВЫМИ, а пометка идти следом. Предмет у этого объяснения был — отдельная
+// выборка, — и предмета больше нет: выбор и пометка исполняются ОДНИМ
+// `UPDATE … RETURNING`. Вопроса «что раньше» он не задаёт.
+//
+// Разведёнными они были не только многословны, но и НЕВЕРНЫ в переписи: два
+// одновременных снятия сессий одного человека выбирали бы одни и те же живые
+// семейства и оба возвращали бы их числом, хотя отозвал каждое ровно один.
+// `RETURNING` отдаёт строку ТОМУ, чей оператор её изменил, и число, которое
+// уходит вызывающему, считает сделанное этим вызовом, а не увиденное им.
 //
 // # ИДЕМПОТЕНТНОСТЬ — УСЛОВИЕМ, А НЕ ПРОВЕРКОЙ
 //
 // Уже снятую отметку и её причину повтор не переписывает: условие `revoked_at
-// IS NULL` делает второй отзыв пустым, а не вторым.
+// IS NULL` стоит в том же операторе и делает второй отзыв пустым, а не вторым.
 func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 	sessionIDs []string, reason domain.FamilyRevocationReason,
 ) (int, error) {
@@ -484,9 +491,15 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
 	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
 	// них — то есть слишком поздно.
+	//
+	// `live = false` идёт тем же оператором, что отметка: пара держится
+	// ограничением `token_families_live_pair_ck`, и она же делает отзыв
+	// обновлением КЛЮЧА, конфликтующим со вставкой ребёнка.
 	rows, err := tx.Query(ctx, `
-		SELECT id FROM kaname.token_families
-		 WHERE session_id = ANY($1) AND revoked_at IS NULL`, sessionIDs)
+		UPDATE kaname.token_families
+		   SET revoked_at = now(), revoked_reason = $2, live = false
+		 WHERE session_id = ANY($1) AND revoked_at IS NULL
+		RETURNING id`, sessionIDs, string(reason))
 	if err != nil {
 		return 0, wrapPgErr(err, "TokenFamily", "")
 	}
@@ -507,12 +520,8 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 		return 0, nil
 	}
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE kaname.token_families
-		   SET revoked_at = now(), revoked_reason = $2, live = false
-		 WHERE id = ANY($1) AND revoked_at IS NULL`, families, string(reason)); err != nil {
-		return 0, wrapPgErr(err, "TokenFamily", "")
-	}
+	// Признак живости выданного СНЯЛ КАСКАД — операторы ниже дописывают ПРИЧИНУ.
+	// Предикат — отметка, а не признак: `active` производен и каскадом уже снят.
 	if _, err := tx.Exec(ctx, `
 		UPDATE kaname.authorization_codes
 		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
