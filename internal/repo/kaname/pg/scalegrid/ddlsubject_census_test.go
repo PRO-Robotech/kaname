@@ -62,7 +62,9 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 	}
 	sort.Strings(files)
 
-	var statements, ddl int
+	index := buildCorpusIndex(corpus)
+
+	var statements, ddl, judged int
 	byObject := map[string]int{}
 	unknown := map[string][]string{}
 	opaque := map[string]int{}
@@ -75,18 +77,28 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 				continue
 			}
 			verb := toks[0].word
+			// ОПАСНОЕ СУЖЕНИЕ ПЕРЕПИСИ, из-за которого числа расходились.
+			//
+			// Перепись считала только операторы с головой определения — а
+			// прибор судит ещё и НЕПРОЗРАЧНЫЙ оператор, чья голова `DO`. После
+			// того как определение функции перестало быть непрозрачным (им стал
+			// ВЫЗОВ, а он живёт в `DO`-блоке), эта форма исчезла из переписи,
+			// оставшись в работе прибора. Перепись, не считающая того, что
+			// прибор судит, — то же самое «число без своего предиката».
+			st := ddlStatementOf(stmt, index)
+			if st.opaque {
+				opaque[name]++
+				byObject["<динамический DDL>"]++
+				judged++
+				continue
+			}
 			if verb != "create" && verb != "alter" && verb != "drop" {
 				continue
 			}
 			ddl++
-			s := ddlStatementOf(stmt, corpusIndex{})
-			if s.opaque {
-				opaque[name]++
-				byObject["<динамический DDL>"]++
-				continue
-			}
-			if s.unknownObject != "" {
-				unknown[name] = append(unknown[name], verb+" "+s.unknownObject)
+			judged++
+			if st.unknownObject != "" {
+				unknown[name] = append(unknown[name], verb+" "+st.unknownObject)
 				continue
 			}
 			byObject[verb+" "+objectWordOf(toks)]++
@@ -99,8 +111,13 @@ func TestDdlRecogniserKnowsEveryFormInTheCorpus(t *testing.T) {
 	}
 	sort.Strings(kinds)
 
-	t.Logf("ОБЪЁМ ОСМОТРЕННОГО: файлов миграций %d, операторов %d, из них определения %d",
-		len(files), statements, ddl)
+	// ЧИСЛО ФОРМ ПЕЧАТАЕТСЯ ЧИСЛОМ, а не оставляется читателю для счёта глазом
+	// по перечню ниже. Именно так у трёх читателей одного вывода получились три
+	// разных числа: 17 (только формы определения), 18 (с непрозрачной формой) и
+	// 19 (сосчитано глазом и ошибочно).
+	t.Logf("ОБЪЁМ ОСМОТРЕННОГО: файлов миграций %d · операторов %d · из них с головой "+
+		"определения %d · СУДИМЫХ прибором %d · РАЗЛИЧНЫХ ФОРМ %d",
+		len(files), statements, ddl, judged, len(byObject))
 	for _, k := range kinds {
 		t.Logf("  форма %-34s — операторов %d", k, byObject[k])
 	}
