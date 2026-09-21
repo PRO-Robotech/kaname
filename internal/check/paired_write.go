@@ -174,7 +174,7 @@ func ScanPairedWrites(path string, src []byte, first, second *regexp.Regexp,
 				rec.Second = rec.Second || does[1]
 			}
 		})
-		rec.Calls = sortedTableSet(calls)
+		rec.Calls = sortedNames(calls)
 		if rec.First {
 			census.DoFirst++
 		}
@@ -267,6 +267,19 @@ func ResolvePairedWrites(funcs []PairedWriteFunc, census *PairedWriteCensus) []P
 		funcs[i].Second = does[k][1]
 	}
 	return funcs
+}
+
+// sortedNames — множество имён, отсортированное. СВОЙ, а не заимствованный у
+// соседнего прибора: гейт обязан собираться без него, иначе он не отдельный
+// прибор, а его придаток — и проверить его на дереве, где соседа ещё нет,
+// нечем (измерено на историческом прогоне).
+func sortedNames(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // PairedWriteFindings — функции, делающие ПЕРВОЕ и не делающие второго.

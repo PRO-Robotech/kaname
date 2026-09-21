@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -33,8 +34,11 @@ const (
 	// запроса. Имена подаются гейтом, а не выводятся: пара — это решение, и
 	// выведенная пара сменилась бы вместе с деревом молча.
 	pairedCutoffSecond = "minted_token_revocations"
+)
 
-	pairedCutoffCeiling = 0
+var (
+	cutoffFirstRe  = regexp.MustCompile(`(?is)INTO\s+(?:kaname\.)?` + pairedCutoffFirst + `\b`)
+	cutoffSecondRe = regexp.MustCompile(`(?is)INTO\s+(?:kaname\.)?` + pairedCutoffSecond + `\b`)
 )
 
 func TestSubjectCutoffWritersWriteBothRecords(t *testing.T) {
@@ -49,7 +53,8 @@ func TestSubjectCutoffWritersWriteBothRecords(t *testing.T) {
 		t.Fatalf("состав дерева: %v — вердикт беспредметен", err)
 	}
 
-	statements := map[string]string{}
+	// ПЕРВЫЙ ПРОХОД — объявления операторов, вынесенные из тела.
+	statements := map[string][2]bool{}
 	var prod []string
 	for _, abs := range files {
 		rel, rerr := filepath.Rel(corpusRoot, abs)
@@ -65,74 +70,75 @@ func TestSubjectCutoffWritersWriteBothRecords(t *testing.T) {
 			continue
 		}
 		prod = append(prod, rel)
-		if serr := check.ScanRevocationStatements(rel, src, statements); serr != nil {
+		if serr := check.ScanPairedStatements(rel, src, cutoffFirstRe, cutoffSecondRe, statements); serr != nil {
 			t.Fatalf("разбор объявлений %s: %v", rel, serr)
 		}
 	}
 
-	var writers []check.RevocationWriter
-	census := check.RevocationWriterCensus{Tables: map[string]struct{}{}}
+	var (
+		funcs  []check.PairedWriteFunc
+		census check.PairedWriteCensus
+	)
 	for _, rel := range prod {
 		src, rderr := os.ReadFile(filepath.Join(corpusRoot, rel)) // #nosec G304 -- путь из состава дерева
 		if rderr != nil {
 			continue
 		}
-		ws, c, serr := check.ScanRevocationWriters(rel, src, statements)
+		fs, c, serr := check.ScanPairedWrites(rel, src, cutoffFirstRe, cutoffSecondRe, statements)
 		if serr != nil {
 			t.Fatalf("разбор %s: %v", rel, serr)
 		}
-		writers = append(writers, ws...)
+		funcs = append(funcs, fs...)
 		census.Funcs += c.Funcs
-		census.Writers += c.Writers
-		for tbl := range c.Tables {
-			census.Tables[tbl] = struct{}{}
-		}
+		census.DoFirst += c.DoFirst
+		census.DoSecond += c.DoSecond
+		census.DeadCalls += c.DeadCalls
 	}
 
-	// Множество таблиц достраивается ЧЕРЕЗ ВЫЗОВ: дверь, кладущая вторую запись
-	// вызовом помощника, пишет её так же, как назвавшая оператор.
-	writers = check.PropagateTablesThroughCalls(writers)
-
-	first := 0
-	for _, w := range writers {
-		for _, tbl := range w.Tables {
-			if tbl == pairedCutoffFirst {
-				first++
-				break
-			}
+	directFirst := census.DoFirst
+	funcs = check.ResolvePairedWrites(funcs, &census)
+	findings := check.PairedWriteFindings(funcs)
+	reach := 0
+	for _, f := range funcs {
+		if f.First {
+			reach++
 		}
 	}
-	lonely := check.WritersOfOneCutoffWithoutTheOther(writers, pairedCutoffFirst, pairedCutoffSecond)
 
 	t.Logf("перепись: прод-файлов Go разобрано %d · функций с телом осмотрено %d · "+
-		"записей отсечки выведено %d (%s) · писателей найдено %d · из них касаются %s — %d · "+
-		"кладут ОДНУ из двух %d (потолок %d)",
-		len(prod), census.Funcs, len(census.Tables),
-		strings.Join(check.SortedTables(census), ", "), census.Writers,
-		pairedCutoffFirst, first, len(lonely), pairedCutoffCeiling)
+		"объявлений оператора вне тела осмотрено %d · пишут %s ПРЯМО %d, с учётом "+
+		"вызовов %d · пишут %s прямо %d · вызовов в мёртвых ветвях отброшено %d · "+
+		"имён неоднозначных %d · находок %d (потолок 0)",
+		len(prod), census.Funcs, len(statements), pairedCutoffFirst, directFirst, reach,
+		pairedCutoffSecond, census.DoSecond, census.DeadCalls, census.Ambiguous, len(findings))
 
-	if err := check.RevocationWriterPremise(len(prod), revocationWriterCensusFloor, census); err != nil {
-		t.Fatalf("вердикт беспредметен: %v", err)
+	if len(prod) < revocationWriterCensusFloor {
+		t.Fatalf("прод-файлов разобрано %d при пороге %d — обход не добрался до дерева",
+			len(prod), revocationWriterCensusFloor)
 	}
-	if first == 0 {
+	if directFirst == 0 {
 		t.Fatalf("писателей записи %s не найдено ни одного: предмета в дереве нет, "+
 			"и «находок ноль» здесь означает «прочитано ноль»", pairedCutoffFirst)
 	}
+	if census.DoSecond == 0 {
+		t.Fatalf("писателей записи %s не найдено ни одного — разбор видит одну "+
+			"половину пары и не видит второй", pairedCutoffSecond)
+	}
 
-	if len(lonely) > pairedCutoffCeiling {
+	if len(findings) > 0 {
 		var where []string
-		for _, f := range lonely {
-			where = append(where, fmt.Sprintf("%s:%d  %s() — пишет %s, НЕ пишет %s",
-				f.Writer.File, f.Writer.Line, f.Writer.Name, pairedCutoffFirst, f.Missing))
+		for _, f := range findings {
+			where = append(where, fmt.Sprintf("%s:%d  %s.%s() — пишет %s, НЕ пишет %s",
+				f.File, f.Line, f.Pkg, f.Name, pairedCutoffFirst, pairedCutoffSecond))
 		}
-		t.Fatalf("писателей ОДНОЙ записи отсечки из двух: %d при потолке %d:\n  %s\n\n"+
+		t.Fatalf("писателей ОДНОЙ записи отсечки из двух: %d\n  %s\n\n"+
 			"Судят по этим записям РАЗНЫЕ читатели: первую — хуки выдачи, вторую — "+
 			"авторитет отзыва на пути запроса. Снятие доступа, дошедшее до одной, "+
 			"снимает доступ на выдаче и НЕ снимает на предъявлении: прежний носитель "+
 			"продолжает аутентифицировать вызовы, а глагол отвечает успехом.\n"+
-			"Исход один: класть обе ОДНОЙ дверью и одной транзакцией. Положить вторую "+
-			"рядом, вторым вызовом, исходом НЕ является: состояние «одна без другой» "+
-			"остаётся представимым, и представится оно на следующем писателе.",
-			len(lonely), pairedCutoffCeiling, strings.Join(where, "\n  "))
+			"Исход один: класть обе ОДНОЙ дверью. Положить вторую рядом, вторым "+
+			"вызовом, исходом НЕ является: состояние «одна без другой» остаётся "+
+			"представимым, и представится оно на следующем писателе.",
+			len(findings), strings.Join(where, "\n  "))
 	}
 }
