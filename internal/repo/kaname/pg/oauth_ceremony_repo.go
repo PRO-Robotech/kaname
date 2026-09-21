@@ -44,15 +44,24 @@ package pg
 //
 //   - неделимость обмена и ротации — условный `UPDATE … RETURNING`;
 //   - согласие контекста церемонии между семейством, кодом и токеном —
-//     СОСТАВНОЙ внешний ключ по четырём столбцам сразу;
+//     СОСТАВНОЙ внешний ключ `<t>_family_context_fk` по ПЯТИ столбцам сразу
+//     (`family_id` плюс четыре столбца контекста: клиент, человек, сессия,
+//     область). `ON UPDATE` у него НЕТ намеренно: строка выданного —
+//     свидетельство о предъявленном, а не кэш семейства, и переписать её
+//     контекст обновлением родителя нельзя — попытка отвергается 23503;
 //   - «живая запись при отозванном семействе» — НЕПРЕДСТАВИМА. Живость
-//     семейства стоит в ключе (`token_families.live`), дети ссылаются на неё
-//     шестым столбцом с `ON UPDATE CASCADE`, а их `active` — ПРОИЗВОДНАЯ
-//     колонка от собственной отметки снятия и этой живости. Поэтому отзыв стал
-//     обновлением КЛЮЧА и движок сам разводит его со вставкой ребёнка: успел
-//     отзыв — вставка получает 23503 и транзакция выдачи откатывается; успела
-//     вставка — каскад проставляет свежей строке признак. Гасить `active`
-//     руками не может НИКТО: запись в неё отвергается кодом 428C9;
+//     семейства стоит в СВОЁМ ключе (`token_families_live_uk (id, live)`), дети
+//     ссылаются на неё ОТДЕЛЬНЫМ ключом `<t>_family_live_fk` с
+//     `ON UPDATE CASCADE`, а их `active` — ПРОИЗВОДНАЯ колонка от собственной
+//     отметки снятия и этой живости. Поэтому отзыв стал обновлением КЛЮЧА и
+//     движок сам разводит его со вставкой ребёнка: успел отзыв — вставка
+//     получает 23503 и транзакция выдачи откатывается; успела вставка — каскад
+//     проставляет свежей строке признак. Гасить `active` руками не может НИКТО:
+//     запись в неё отвергается кодом 428C9;
+//   - ПОРЯДОК ЗАМКОВ «родитель → ребёнок» на обоих путях: обмен и ротация берут
+//     семейство первыми (`lockFamilyOfCodeSQL`, `lockFamilyOfRefreshSQL`), иначе
+//     встречный порядок с каскадом отзыва даёт цикл, жертвой которого движок
+//     выбирал сам отзыв;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
 //   - «одно согласие на тройку субъект-клиент-область» —
 //     `consent_grants_subject_client_scope_uk`;
@@ -178,6 +187,38 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	return nil
 }
 
+// lockFamilyOfCodeSQL — ЗАМОК, А НЕ ПРОВЕРКА. Оператор не читает состояния и ни
+// на что не влияет своим результатом: ноль строк — законный исход, разбираемый
+// ниже по нулю строк самого обмена.
+//
+// # ЗАЧЕМ ОН СТОИТ ЗДЕСЬ И ПОЧЕМУ ЕГО НЕЛЬЗЯ СНЕСТИ
+//
+// Отзыв семейства ходит от РОДИТЕЛЯ К ДЕТЯМ: он берёт ключевой замок на строке
+// семейства, а `ON UPDATE CASCADE` затем идёт за замками всех его детей. Обмен
+// без этого оператора шёл НАВСТРЕЧУ — условный `UPDATE` брал замок на РЕБЁНКЕ,
+// и лишь вставка преемника бралась за семейство. Два встречных порядка дают
+// цикл, и движок снимал одного из двоих.
+//
+// Снимал он ОТЗЫВ: 6 прогонов из 6 на postgres:16-alpine жертвой становилась
+// транзакция отзыва — семейство оставалось живым, токен активным. Проигрывал не
+// запрос арендатора, а контроль безопасности, у которого повтора нет: повторить
+// обязан клиент, а похититель не повторяет.
+//
+// Поэтому замок на семействе берётся ПЕРВЫМ, и оба порядка становятся
+// «родитель → ребёнок». Повтор лечил бы симптом и оставлял бы контроль
+// зависимым от поведения клиента.
+//
+// # ЭТО НЕ НАРУШАЕТ ban #10
+//
+// Условие сравнения-и-записи осталось ЦЕЛИКОМ в `UPDATE` ниже: здесь не
+// читается ни `active`, ни срок, ни живость семейства, и ни одно решение по
+// результату этого оператора не принимается. Пары «проверил, затем записал» тут
+// нет — есть упорядочивание замков, которое движок иначе выстроить не может.
+const lockFamilyOfCodeSQL = `
+SELECT 1 FROM kaname.token_families
+ WHERE id = (SELECT family_id FROM kaname.authorization_codes WHERE code_digest = $1)
+   FOR KEY SHARE`
+
 // exchangeCodeSQL — ТОТ САМЫЙ оператор: условие на прежнее состояние и возврат
 // затронутой строки. Стоит ОДНОЙ константой: второе написание разошлось бы с
 // первым молча, а разойтись ему есть куда — условие здесь и есть инвариант.
@@ -219,6 +260,12 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ. Порядок замков, а не проверка: см.
+	// `lockFamilyOfCodeSQL`. Ноль строк здесь законен и ничего не решает.
+	if _, err = tx.Exec(ctx, lockFamilyOfCodeSQL, in.CodeDigest); err != nil {
+		return domain.RedeemedCode{}, wrapPgErr(err, "TokenFamily", "")
+	}
 
 	var out domain.RedeemedCode
 	err = tx.QueryRow(ctx, exchangeCodeSQL, in.CodeDigest).Scan(
@@ -296,6 +343,14 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 	}
 }
 
+// lockFamilyOfRefreshSQL — ЗАМОК, А НЕ ПРОВЕРКА, и по той же причине, что
+// `lockFamilyOfCodeSQL`: ротация обязана брать семейство ПЕРВОЙ, иначе её
+// порядок замков встречен порядку отзыва и жертвой цикла становится отзыв.
+const lockFamilyOfRefreshSQL = `
+SELECT 1 FROM kaname.token_families
+ WHERE id = (SELECT family_id FROM kaname.refresh_tokens WHERE token_digest = $1)
+   FOR KEY SHARE`
+
 // rotateRefreshSQL — ТОТ ЖЕ механизм, что у обмена кода: условие на прежнее
 // состояние и возврат затронутой строки.
 const rotateRefreshSQL = `
@@ -329,6 +384,11 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ, по той же причине, что у обмена.
+	if _, err = tx.Exec(ctx, lockFamilyOfRefreshSQL, in.PresentedDigest); err != nil {
+		return domain.RotatedRefreshToken{}, wrapPgErr(err, "TokenFamily", "")
+	}
 
 	var out domain.RotatedRefreshToken
 	err = tx.QueryRow(ctx, rotateRefreshSQL, in.PresentedDigest, in.SuccessorDigest).Scan(
@@ -419,25 +479,21 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason)); err != nil {
 		return wrapPgErr(err, "TokenFamily", familyID)
 	}
-	// Признак живости выданного СНЯЛ КАСКАД — операторы ниже дописывают ПРИЧИНУ,
-	// ради которой словарь заведён, и ничего не гасят.
+	// ВЫДАННОЕ СНЯЛ КАСКАД, И БОЛЬШЕ ЗДЕСЬ ДЕЛАТЬ НЕЧЕГО.
 	//
-	// Предикат — отметка, а не признак: `active` производен и каскадом уже снят,
-	// так что `AND active` не нашёл бы здесь ни одной строки. «Ещё не помечена»
-	// выражает `deactivated_at IS NULL`, и он же делает повтор пустым: уже
-	// снятую отметку — и её причину — второй отзыв не переписывает.
-	if _, err = tx.Exec(ctx, `
-		UPDATE kaname.authorization_codes
-		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = $1 AND deactivated_at IS NULL`, familyID); err != nil {
-		return wrapPgErr(err, "AuthorizationCode", familyID)
-	}
-	if _, err = tx.Exec(ctx, `
-		UPDATE kaname.refresh_tokens
-		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = $1 AND deactivated_at IS NULL`, familyID); err != nil {
-		return wrapPgErr(err, "RefreshToken", familyID)
-	}
+	// ЗДЕСЬ СТОЯЛИ два оператора, дописывавших детям причину `'family-revoked'`.
+	// Их больше нет, и это не упущение: основание смерти ребёнка ПРИНАДЛЕЖИТ
+	// СЕМЕЙСТВУ (`token_families.revoked_reason`), а копия на ребёнке была
+	// вторым написанием одного факта. Читается основание соединением.
+	//
+	// Снятое вместе с ними: одно место двойной записи и ДВА оператора из
+	// транзакции отзыва, которая идёт под ключевым замком семейства и стоила
+	// O(поколений) — на 20 000 детей это 241 мс дописывания поверх 698 мс
+	// каскада.
+	//
+	// Что ребёнок мёртв — говорит `active`, производный от `family_live`,
+	// который снёс каскад. Своя отметка `deactivated_at` осталась означать
+	// СОБСТВЕННОЕ событие строки: погашение либо ротацию.
 	if err = tx.Commit(ctx); err != nil {
 		return wrapPgErr(err, "TokenFamily", familyID)
 	}
@@ -519,20 +575,9 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 		return 0, nil
 	}
 
-	// Признак живости выданного СНЯЛ КАСКАД — операторы ниже дописывают ПРИЧИНУ.
-	// Предикат — отметка, а не признак: `active` производен и каскадом уже снят.
-	if _, err := tx.Exec(ctx, `
-		UPDATE kaname.authorization_codes
-		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = ANY($1) AND deactivated_at IS NULL`, families); err != nil {
-		return 0, wrapPgErr(err, "AuthorizationCode", "")
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE kaname.refresh_tokens
-		   SET deactivated_at = now(), deactivated_reason = 'family-revoked'
-		 WHERE family_id = ANY($1) AND deactivated_at IS NULL`, families); err != nil {
-		return 0, wrapPgErr(err, "RefreshToken", "")
-	}
+	// Выданное снял КАСКАД: здесь, как и в `RevokeFamily`, дописывающих
+	// операторов больше нет — основание принадлежит семейству, а не копии на
+	// ребёнке.
 	return len(families), nil
 }
 

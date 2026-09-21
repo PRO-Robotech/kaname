@@ -264,19 +264,103 @@ func TestIntegration_AuthorizationCodeContextCannotDivergeFromItsFamily(t *testi
 	// Область РАЗОШЛАСЬ с семейством — отвергает база.
 	err := acInsertCode(db, acDigest(0x22), family, client, user, session,
 		[]string{"openid"}, "S256", acChallenge)
-	requirePgRefusal(t, err, "23503", "authorization_codes_family_fk",
+	requirePgRefusal(t, err, "23503", "authorization_codes_family_context_fk",
 		"код с областью, которой у семейства нет, обязан быть отвергнут ключом")
 
 	// Человек разошёлся с семейством — тем же ключом.
 	err = acInsertCode(db, acDigest(0x23), family, client, "usr"+acPad("nobody"),
 		session, []string{"openid", "profile"}, "S256", acChallenge)
-	requirePgRefusal(t, err, "23503", "authorization_codes_family_fk",
+	requirePgRefusal(t, err, "23503", "authorization_codes_family_context_fk",
 		"код с чужим человеком обязан быть отвергнут ключом")
 
 	// Положительный контроль: согласованный контекст проходит. Без него
 	// «вставка отвергнута» было бы истинно и тогда, когда отвергается ВСЁ.
 	require.NoError(t, acInsertCode(db, acDigest(0x21), family, client, user, session,
 		[]string{"openid", "profile"}, "S256", acChallenge))
+}
+
+// TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily — КОНТЕКСТ ВЫДАННОГО
+// НЕИЗМЕНЯЕМ СО СТОРОНЫ СЕМЕЙСТВА.
+//
+// # Что именно ловится
+//
+// Пока контекст и живость стояли в ОДНОМ ключе, каскад, заведённый ради
+// живости, доставался и контексту: `UPDATE token_families SET session_id = …`
+// и `SET scope = …` проходили и МОЛЧА переписывали сессию и область прав уже
+// выданного кода. Измерено до расщепления: область `{openid,profile}` строки,
+// выданной раньше, становилась `{openid,profile,admin}` — то есть права
+// выданного расширялись задним числом обновлением родителя.
+//
+// Строка выданного есть СВИДЕТЕЛЬСТВО о предъявленном, а не кэш текущего
+// семейства, поэтому отказ обязан приходить от БАЗЫ, а не от дисциплины
+// писателя: писателя, который «просто не пишет эти колонки», не существует —
+// существует ключ, который такую запись отвергает.
+//
+// # Почему положительный близнец обязателен
+//
+// Отрицание «обновление отвергнуто» было бы истинно и у схемы, которая
+// отвергает ВСЯКОЕ обновление семейства, — а такая схема ломает сам отзыв,
+// ради которого каскад и заводился. Поэтому рядом стоит близнец, меняющий
+// РОВНО ОДИН факт: обновляется не контекст, а живость, и оно обязано ПРОЙТИ и
+// снестись на ребёнка.
+func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
+	db := acDB(t)
+	client, user, session, family := acScene(t, db, "acimm")
+
+	require.NoError(t, acInsertCode(db, acDigest(0x41), family, client, user, session,
+		[]string{"openid", "profile"}, "S256", acChallenge), "положительный контроль посева")
+
+	// Вторая сессия того же человека — чтобы было КУДА переписывать: отказ на
+	// несуществующей сессии пришёл бы от другого ключа и о другом.
+	_, err := db.Exec(`
+		INSERT INTO kaname.human_sessions
+		       (id, user_id, bearer_digest, authenticated_at, last_presented_at, expires_at,
+		        assurance_level, presented_methods)
+		VALUES ($1, $2, $3, now(), now(), now() + interval '1 hour', '1', ARRAY['password'])`,
+		"hs-"+acPad("acimm2"), user, acDigest(0x4242))
+	require.NoError(t, err, "посев второй сессии")
+
+	// ОТРИЦАНИЕ 1: сессию выданного переписать нельзя.
+	_, err = db.Exec(`UPDATE kaname.token_families SET session_id = $2 WHERE id = $1`,
+		family, "hs-"+acPad("acimm2"))
+	requirePgRefusal(t, err, "23503", "authorization_codes_family_context_fk",
+		"сессию уже выданного кода нельзя переписать обновлением семейства")
+
+	// ОТРИЦАНИЕ 2: область прав выданного переписать нельзя — это и есть
+	// расширение прав задним числом.
+	_, err = db.Exec(`UPDATE kaname.token_families SET scope = $2 WHERE id = $1`,
+		family, pqTextArray([]string{"openid", "profile", "admin"}))
+	requirePgRefusal(t, err, "23503", "authorization_codes_family_context_fk",
+		"область прав уже выданного кода нельзя расширить обновлением семейства")
+
+	// Контекст ребёнка НЕ СДВИНУЛСЯ: отказ обязан оставлять строку как была, а
+	// не откатывать половину.
+	var gotSession string
+	var gotScope string
+	require.NoError(t, db.QueryRow(
+		`SELECT session_id, scope::text FROM kaname.authorization_codes WHERE code_digest = $1`,
+		acDigest(0x41)).Scan(&gotSession, &gotScope))
+	require.Equal(t, session, gotSession, "сессия выданного обязана остаться прежней")
+	require.Equal(t, `{openid,profile}`, gotScope, "область выданного обязана остаться прежней")
+
+	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: отличается РОВНО ОДНИМ фактом — обновляется
+	// живость, а не контекст. Обязан пройти и снестись каскадом.
+	_, err = db.Exec(`
+		UPDATE kaname.token_families
+		   SET revoked_at = now(), revoked_reason = 'logout', live = false
+		 WHERE id = $1 AND revoked_at IS NULL`, family)
+	require.NoError(t, err, "отзыв семейства обязан ПРОХОДИТЬ: расщепление ключа его не трогает")
+
+	var familyLive, active bool
+	var ownMark sql.NullTime
+	require.NoError(t, db.QueryRow(
+		`SELECT family_live, active, deactivated_at FROM kaname.authorization_codes WHERE code_digest = $1`,
+		acDigest(0x41)).Scan(&familyLive, &active, &ownMark))
+	require.False(t, familyLive, "каскад живости обязан снестись на ребёнка")
+	require.False(t, active, "ребёнок отозванного семейства обязан быть неактивен")
+	require.False(t, ownMark.Valid,
+		"СВОЕЙ отметки снятия у ребёнка быть не должно: он умер вместе с семейством, "+
+			"а не собственным событием — основание читается у семейства")
 }
 
 // TestIntegration_AuthorizationCodeVocabulariesAreClosed — словари и формы.

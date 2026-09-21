@@ -37,7 +37,22 @@
 -- повторного использования строится на различении «неактивен» и «не найден»:
 -- первое — повтор, и по нему отзывается ВСЁ семейство; второе — неизвестный
 -- код. Удалённая строка неотличима от никогда не существовавшей, и удаление
--- стоило бы ровно этого различения. Строки после истечения убирает уборка.
+-- стоило бы ровно этого различения.
+--
+-- ЧТО СНИМАЕТ СТРОКУ — названо ТОЧНО, потому что здесь стояло обещание шире
+-- предмета. Своей записи в реестре уборки (`internal/apps/kaname/retention`) у
+-- этих трёх таблиц НЕТ, и ни один уборщик их не перечисляет: предикат
+-- `grep -n 'Subject' internal/apps/kaname/retention/registry.go` не даёт ни
+-- одного предмета церемонии. Строки снимает ЕДИНСТВЕННЫЙ путь — каскад
+-- `token_families_session_fk` от удаления строки сессии, а её удаляет уборка
+-- предмета `human_sessions` (`SweepUnservableSessions`, порог поверх снятия
+-- либо истечения).
+--
+-- Отсюда действительный порог жизни этих строк: НЕ срок кода, который идёт
+-- минутами, а срок необслуживаемой сессии плюс порог её уборки. Обновляющий
+-- токен, переживающий сессию, этим путём не убирается вовсе — рост ограничен
+-- числом сессий, а не числом выдач, и запись предметом заведена НЕ здесь
+-- (долг назван отдельной задачей, а не отложен маркером).
 --
 -- =============================================================================
 -- СЕМЕЙСТВО — ДОМ КОНТЕКСТА ЦЕРЕМОНИИ, И СОГЛАСИЕ ДЕРЖИТ КЛЮЧ
@@ -45,8 +60,15 @@
 -- Клиент, человек, сессия и область живут на строке семейства И на строке кода
 -- (так их читает обмен одним запросом, без соединения). Два написания молча
 -- разойтись НЕ МОГУТ: код и обновляющий токен ссылаются на семейство СОСТАВНЫМ
--- внешним ключом по всем четырём столбцам сразу — расхождение отвергает база,
--- а не проверка писателя.
+-- внешним ключом по всем ЧЕТЫРЁМ столбцам контекста сразу (`client_id`,
+-- `user_id`, `session_id`, `scope` — плюс сам `family_id`, итого пять) —
+-- расхождение отвергает база, а не проверка писателя.
+--
+-- У этого ключа НЕТ `ON UPDATE`, и это существо, а не умолчание: строка
+-- выданного есть СВИДЕТЕЛЬСТВО о предъявленном, а не кэш текущего семейства.
+-- Каскад на контексте означал бы, что сессию и область прав уже выданного кода
+-- можно переписать обновлением родителя, — и ровно это он и означал, пока ключ
+-- был один на контекст И живость.
 --
 -- Сессия обязательна и уходит вместе с собой каскадом: код, выданный в сессии,
 -- которой больше нет, обменять всё равно нельзя, а строка без сессии читалась бы
@@ -67,14 +89,40 @@
 -- и снят по истечении 2 с.
 --
 -- Поэтому признак живости семейства вынесен ОТДЕЛЬНОЙ колонкой `live`, связанной
--- с отметкой ограничением `token_families_live_pair_ck`, и ВВЕДЁН В КЛЮЧ, на
--- который ссылаются дети. Следствия, и все три держит движок, а не писатель:
+-- с отметкой ограничением `token_families_live_pair_ck`, и введён в СВОЙ ключ
+-- `token_families_live_uk (id, live)`, на который дети ссылаются ОТДЕЛЬНЫМ от
+-- контекста внешним ключом. Следствия, и все три держит движок, а не писатель:
 --
 --   - отзыв стал КЛЮЧЕВЫМ обновлением и конфликтует со вставкой ребёнка;
 --   - отзыв успел первым — вставка получает 23503, и транзакция выдачи
 --     откатывается целиком: токена не появляется;
 --   - вставка успела первой — `ON UPDATE CASCADE` проставляет свежей строке
 --     `family_live = false`, и гасить её руками нечего.
+--
+-- =============================================================================
+-- ЭТОТ ЖЕ КАСКАД ДАЁТ ЦИКЛ ЗАМКОВ — И СНИМАЕТСЯ ОН ПОРЯДКОМ, А НЕ ПОВТОРОМ
+-- =============================================================================
+-- Каскад, которым держится предыдущий раздел, ходит от РОДИТЕЛЯ К ДЕТЯМ: отзыв
+-- берёт ключевой замок на семействе, а затем идёт за замками всех его строк.
+-- Выдача до этой полосы шла НАВСТРЕЧУ: условный `UPDATE` предъявленной строки
+-- брал замок на РЕБЁНКЕ, и лишь потом вставка преемника брала `FOR KEY SHARE`
+-- на семействе. Два встречных порядка — это цикл, и движок снимал одного.
+--
+-- Снимал он ОТЗЫВ: замер на postgres:16-alpine, 6 прогонов из 6 — жертвой
+-- становится транзакция отзыва, семейство остаётся живым, токен остаётся
+-- активным. Цикл даёт САМ КАСКАД: отзыв, состоящий из ОДНОГО оператора, даёт те
+-- же 6 из 6, так что снятие дописывающих операторов его не лечит.
+--
+-- Проигрывает здесь не запрос арендатора, а КОНТРОЛЬ БЕЗОПАСНОСТИ, и повтора у
+-- него нет: признак повторяемости до клиента доезжает, но повторить обязан
+-- клиент, а похититель не повторяет. Поэтому цикл снят ПОРЯДКОМ ЗАМКОВ, а не
+-- повтором: обмен и ротация берут замок семейства ПЕРВЫМИ, отдельным оператором
+-- до условного `UPDATE` ребёнка (`internal/repo/kaname/pg/oauth_ceremony_repo.go`,
+-- `lockFamilyOfCodeSQL` и `lockFamilyOfRefreshSQL`). Оба порядка становятся
+-- «родитель → ребёнок», и цикла не остаётся.
+--
+-- Повтор лечил бы СИМПТОМ и оставлял бы контроль безопасности зависимым от
+-- поведения клиента — поэтому его здесь нет.
 --
 -- Признак активности ребёнка стал ПРОИЗВОДНЫМ (`GENERATED ALWAYS … STORED`) от
 -- собственной отметки снятия и живости семейства. Производным, а не проверяемым
@@ -106,10 +154,24 @@ CREATE TABLE kaname.token_families (
     -- оно со вставкой ребёнка НЕ конфликтует (см. головной раздел).
     live           boolean DEFAULT true NOT NULL,
     CONSTRAINT token_families_pkey PRIMARY KEY (id),
-    -- Составной ключ, на который ссылаются код и обновляющий токен: он и делает
-    -- согласие контекста свойством СХЕМЫ. `live` шестым столбцом — чтобы отзыв
-    -- был обновлением КЛЮЧА и движок сам разводил его со вставкой ребёнка.
-    CONSTRAINT token_families_context_uk UNIQUE (id, client_id, user_id, session_id, scope, live),
+    -- ДВА ключа, потому что у них ДВЕ РАЗНЫЕ ЗАДАЧИ, и в одном они несовместимы.
+    --
+    -- Контекст церемонии обязан быть НЕИЗМЕНЯЕМЫМ у выданного: строка кода —
+    -- свидетельство о том, что было предъявлено, а не кэш текущего состояния
+    -- семейства. Живость, наоборот, обязана СНОСИТЬСЯ вниз каскадом.
+    --
+    -- Один ключ на все шесть столбцов давал ровно одно правило обновления на
+    -- обе задачи, и каскад, заведённый ради живости, доставался контексту:
+    -- `UPDATE token_families SET session_id = …` и `SET scope = …` ПРОХОДИЛИ и
+    -- молча переписывали сессию и область прав уже выданного кода (измерено:
+    -- область `{openid,profile}` становилась `{openid,profile,admin}` у строки,
+    -- выданной до этого оператора). Задним числом расширить права выданного
+    -- нельзя ничем, и меньше всего — обновлением родителя.
+    CONSTRAINT token_families_context_uk UNIQUE (id, client_id, user_id, session_id, scope),
+    -- Живость отдельным ключом: `live` стоит в УНИКАЛЬНОМ индексе, поэтому отзыв
+    -- остаётся обновлением КЛЮЧА и движок по-прежнему разводит его со вставкой
+    -- ребёнка (см. головной раздел). Ради этого ключ и заведён.
+    CONSTRAINT token_families_live_uk UNIQUE (id, live),
     CONSTRAINT token_families_id_form_ck CHECK ((id ~ '^tfm-[0-9a-hjkmnp-tv-z]{17}$'::text)),
     CONSTRAINT token_families_client_fk FOREIGN KEY (client_id)
         REFERENCES kaname.interactive_clients(client_id) ON DELETE CASCADE,
@@ -167,11 +229,18 @@ CREATE TABLE kaname.authorization_codes (
     -- копия таблицы не даёт ни одного годного кода. Та же форма, что у свёртки
     -- носителя сессии (`human_sessions.bearer_digest`).
     CONSTRAINT authorization_codes_digest_form_ck CHECK ((code_digest ~ '^[0-9a-f]{64}$'::text)),
-    -- Составной ключ на семейство: контекст кода не может разойтись с семейством.
-    -- Шестым столбцом идёт живость: ключ отвергает код, заводимый в отозванное
-    -- семейство, а `ON UPDATE CASCADE` сносит отзыв на уже лежащие строки.
-    CONSTRAINT authorization_codes_family_fk FOREIGN KEY (family_id, client_id, user_id, session_id, scope, family_live)
-        REFERENCES kaname.token_families(id, client_id, user_id, session_id, scope, live)
+    -- КОНТЕКСТ — ключ БЕЗ `ON UPDATE`: контекст кода не может разойтись с
+    -- семейством, и переписать его у выданного нельзя ни с какой стороны.
+    -- Умолчание `NO ACTION` отвергает попытку сменить сессию либо область прав
+    -- семейства, у которого есть выданное, кодом 23503.
+    CONSTRAINT authorization_codes_family_context_fk FOREIGN KEY (family_id, client_id, user_id, session_id, scope)
+        REFERENCES kaname.token_families(id, client_id, user_id, session_id, scope)
+        ON DELETE CASCADE,
+    -- ЖИВОСТЬ — ключ С `ON UPDATE CASCADE`: он отвергает код, заводимый в
+    -- отозванное семейство, и сносит отзыв на уже лежащие строки. Каскад здесь
+    -- законен ровно потому, что `live` — не контекст, а состояние семейства.
+    CONSTRAINT authorization_codes_family_live_fk FOREIGN KEY (family_id, family_live)
+        REFERENCES kaname.token_families(id, live)
         ON DELETE CASCADE ON UPDATE CASCADE,
     -- Одно семейство заводится ОДНИМ кодом: второй код того же семейства — это
     -- вторая церемония, и семейство ей полагается своё.
@@ -187,9 +256,19 @@ CREATE TABLE kaname.authorization_codes (
     CONSTRAINT authorization_codes_challenge_form_ck CHECK ((code_challenge ~ '^[A-Za-z0-9_-]{43}$'::text)),
     CONSTRAINT authorization_codes_expiry_after_issue_ck CHECK ((expires_at > issued_at)),
     CONSTRAINT authorization_codes_deactivated_pair_ck CHECK (((deactivated_at IS NULL) = (deactivated_reason IS NULL))),
+    -- Словарь ЗАКРЫТ и несёт ровно то, что произошло С САМОЙ СТРОКОЙ. Смерти от
+    -- отзыва семейства здесь НЕТ и быть не должно: основание принадлежит
+    -- семейству (`token_families.revoked_reason`), а строка кода отвечает за
+    -- СВОЁ событие. Копия основания на ребёнке была бы вторым написанием одного
+    -- факта — и писалась бы отдельным оператором по КАЖДОЙ строке семейства
+    -- внутри транзакции отзыва, под ключевым замком.
+    --
+    -- Различение при этом не теряется, а становится СТРУКТУРНЫМ:
+    --   `deactivated_at IS NOT NULL` — строку погасило собственное событие;
+    --   `NOT family_live`            — строка умерла вместе с семейством,
+    --                                  основание читается соединением.
     CONSTRAINT authorization_codes_deactivated_reason_ck CHECK (
-        ((deactivated_reason IS NULL) OR (deactivated_reason = ANY (ARRAY[
-            'redeemed'::text, 'family-revoked'::text]))))
+        ((deactivated_reason IS NULL) OR (deactivated_reason = 'redeemed'::text)))
 );
 -- +goose StatementEnd
 
@@ -231,8 +310,13 @@ CREATE TABLE kaname.refresh_tokens (
     active             boolean GENERATED ALWAYS AS (((deactivated_at IS NULL) AND family_live)) STORED,
     CONSTRAINT refresh_tokens_pkey PRIMARY KEY (token_digest),
     CONSTRAINT refresh_tokens_digest_form_ck CHECK ((token_digest ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT refresh_tokens_family_fk FOREIGN KEY (family_id, client_id, user_id, session_id, scope, family_live)
-        REFERENCES kaname.token_families(id, client_id, user_id, session_id, scope, live)
+    -- Те же два ключа и по той же причине, что у кода: контекст — без
+    -- `ON UPDATE`, живость — с каскадом.
+    CONSTRAINT refresh_tokens_family_context_fk FOREIGN KEY (family_id, client_id, user_id, session_id, scope)
+        REFERENCES kaname.token_families(id, client_id, user_id, session_id, scope)
+        ON DELETE CASCADE,
+    CONSTRAINT refresh_tokens_family_live_fk FOREIGN KEY (family_id, family_live)
+        REFERENCES kaname.token_families(id, live)
         ON DELETE CASCADE ON UPDATE CASCADE,
     -- Поколение в семействе ОДНО на номер: две строки одного номера означали бы
     -- разветвление семейства, то есть ту же двойную выдачу, только на ротации.
@@ -240,9 +324,10 @@ CREATE TABLE kaname.refresh_tokens (
     CONSTRAINT refresh_tokens_generation_ck CHECK ((generation >= 0)),
     CONSTRAINT refresh_tokens_expiry_after_issue_ck CHECK ((expires_at > issued_at)),
     CONSTRAINT refresh_tokens_deactivated_pair_ck CHECK (((deactivated_at IS NULL) = (deactivated_reason IS NULL))),
+    -- Словарь ЗАКРЫТ и несёт СВОЁ событие строки; смерть от отзыва семейства
+    -- читается как `NOT family_live`, а основание — у семейства.
     CONSTRAINT refresh_tokens_deactivated_reason_ck CHECK (
-        ((deactivated_reason IS NULL) OR (deactivated_reason = ANY (ARRAY[
-            'rotated'::text, 'family-revoked'::text])))),
+        ((deactivated_reason IS NULL) OR (deactivated_reason = 'rotated'::text))),
     -- Преемник есть РОВНО у ротации: снятый отзывом токен преемника не имеет, а
     -- ротация без преемника означала бы потерянное поколение.
     CONSTRAINT refresh_tokens_successor_pair_ck CHECK (
