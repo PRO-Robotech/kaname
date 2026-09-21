@@ -251,22 +251,28 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 // refuseCode называет ПРИЧИНУ, по которой условие обмена не выполнилось, и —
 // если это ПОВТОР — отзывает всё семейство.
 //
-// Корзины «прочее» у разбора нет: строка либо отсутствует, либо неактивна,
-// либо истекла, либо её семейство отозвано. Четвёртого исхода на сегодняшней
-// схеме не существует, и пятый означал бы, что условие обмена и этот разбор
+// Корзины «прочее» у разбора нет, и исходов РОВНО ТРИ: строка либо
+// отсутствует, либо неактивна, либо истекла. Четвёртого на сегодняшней схеме не
+// существует, и появление его означало бы, что условие обмена и этот разбор
 // разошлись — поэтому он отдельный ГРОМКИЙ отказ, а не тихое «повтор».
+//
+// ОТОЗВАННОЕ СЕМЕЙСТВО ОТДЕЛЬНОЙ ВЕТВЬЮ НЕ СТОИТ, И ЭТО НЕ УПУЩЕНИЕ: признак
+// активности строки ПРОИЗВОДЕН от живости семейства, поэтому отозванное
+// семейство наблюдается здесь как `!active` и разбирается первой же ветвью.
+// Ветвь, стоявшая ниже неё, не получала управления ни при каком входе — а
+// закрытый `switch` с ветвью, которой не достаётся вход, читается следующим как
+// живая. Семейство больше не опрашивается вовсе: соединение с ним отвечало на
+// вопрос, ответ на который теперь несёт сама строка.
 func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error {
 	var (
-		active        bool
-		expired       bool
-		familyID      string
-		familyRevoked bool
+		active   bool
+		expired  bool
+		familyID string
 	)
 	err := r.pool.QueryRow(ctx, `
-		SELECT c.active, c.expires_at <= now(), c.family_id, f.revoked_at IS NOT NULL
+		SELECT c.active, c.expires_at <= now(), c.family_id
 		  FROM kaname.authorization_codes c
-		  JOIN kaname.token_families f ON f.id = c.family_id
-		 WHERE c.code_digest = $1`, digest).Scan(&active, &expired, &familyID, &familyRevoked)
+		 WHERE c.code_digest = $1`, digest).Scan(&active, &expired, &familyID)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("%w: digest not found", domain.ErrAuthorizationCodeUnknown)
 	}
@@ -282,14 +288,11 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
-	case familyRevoked:
-		return fmt.Errorf("%w: family %s", domain.ErrTokenFamilyRevoked, familyID)
 	case expired:
 		return fmt.Errorf("%w: family %s", domain.ErrAuthorizationCodeExpired, familyID)
 	default:
-		return fmt.Errorf("authorization code %s: exchange affected no row while the row is live, "+
-			"unexpired and its family is not revoked — the exchange condition and this "+
-			"adjudication have diverged", familyID)
+		return fmt.Errorf("authorization code %s: exchange affected no row while the row is live "+
+			"and unexpired — the exchange condition and this adjudication have diverged", familyID)
 	}
 }
 
@@ -355,19 +358,18 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 }
 
 // refuseRefresh — разбор нуля затронутых строк ротации, тот же по устройству,
-// что и у обмена кода.
+// что и у обмена кода: исходов РОВНО ТРИ, и отозванное семейство приходит сюда
+// как `!active` — признак производен от его живости.
 func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) error {
 	var (
-		active        bool
-		expired       bool
-		familyID      string
-		familyRevoked bool
+		active   bool
+		expired  bool
+		familyID string
 	)
 	err := r.pool.QueryRow(ctx, `
-		SELECT t.active, t.expires_at <= now(), t.family_id, f.revoked_at IS NOT NULL
+		SELECT t.active, t.expires_at <= now(), t.family_id
 		  FROM kaname.refresh_tokens t
-		  JOIN kaname.token_families f ON f.id = t.family_id
-		 WHERE t.token_digest = $1`, digest).Scan(&active, &expired, &familyID, &familyRevoked)
+		 WHERE t.token_digest = $1`, digest).Scan(&active, &expired, &familyID)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("%w: digest not found", domain.ErrRefreshTokenUnknown)
 	}
@@ -380,14 +382,11 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
-	case familyRevoked:
-		return fmt.Errorf("%w: family %s", domain.ErrTokenFamilyRevoked, familyID)
 	case expired:
 		return fmt.Errorf("%w: family %s", domain.ErrRefreshTokenExpired, familyID)
 	default:
 		return fmt.Errorf("refresh token of family %s: rotation affected no row while the row is "+
-			"live, unexpired and its family is not revoked — the rotation condition and this "+
-			"adjudication have diverged", familyID)
+			"live and unexpired — the rotation condition and this adjudication have diverged", familyID)
 	}
 }
 
