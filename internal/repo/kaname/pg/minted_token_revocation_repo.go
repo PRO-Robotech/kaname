@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -59,20 +60,48 @@ func (r *MintedTokenRevocationRepo) RevokedBefore(ctx context.Context, subject s
 // оператором, а не проверкой-перед-записью: под конкуренцией «прочитать,
 // сравнить, записать» дало бы откат границы.
 func (r *MintedTokenRevocationRepo) Revoke(ctx context.Context, subject string, before time.Time, reason, decidedBy string) error {
-	if strings.TrimSpace(subject) == "" {
-		return fmt.Errorf("%w: revocation must name its subject", iamerr.ErrInvalidArg)
-	}
-	if strings.TrimSpace(decidedBy) == "" {
-		return fmt.Errorf("%w: revocation must name who decided it", iamerr.ErrInvalidArg)
-	}
-	const q = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+	return upsertMintedCutoff(ctx, r.pool, subject, before, reason, decidedBy)
+}
+
+// upsertMintedCutoffSQL — ОДНА операция записи этой отсечки на всё дерево.
+//
+// Выписана константой, потому что исполнителей у неё двое: пул (глагол выше) и
+// ТРАНЗАКЦИЯ вызывающего, которому эта отсечка нужна неделимо с соседней
+// (`SessionRevocationsAdapter.RevokeAllUserTokensTx`). Две копии одного
+// оператора разошлись бы молча — и разошлась бы та, которую правили последней, —
+// а расхождение здесь означает «по одной записи отозван, по другой нет».
+//
+// Форма совпадает со схемными писателями этой же строки (функции
+// `kaname.minted_cutoff_on_*`): монотонный `GREATEST` одинаков у всех, и
+// откатить границу назад не может ни один.
+const upsertMintedCutoffSQL = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
 		VALUES ($1,$2,$3,$4)
 		ON CONFLICT (subject) DO UPDATE
 		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
 		       reason        = EXCLUDED.reason,
 		       revoked_by    = EXCLUDED.revoked_by,
 		       updated_at    = now()`
-	if _, err := r.pool.Exec(ctx, q, subject, before, reason, decidedBy); err != nil {
+
+// mintedCutoffExecutor — пул либо транзакция. Оператор один, исполнителей двое.
+type mintedCutoffExecutor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// upsertMintedCutoff — запись отсечки ЛЮБЫМ исполнителем.
+//
+// Проверки входа стоят ЗДЕСЬ, а не у каждого вызывающего: субъект без имени и
+// решение без принявшего — строки, которые невозможно ни прочесть, ни оспорить,
+// и пропустить их один раз достаточно, чтобы отсечка стала неадресуемой.
+func upsertMintedCutoff(ctx context.Context, ex mintedCutoffExecutor,
+	subject string, before time.Time, reason, decidedBy string,
+) error {
+	if strings.TrimSpace(subject) == "" {
+		return fmt.Errorf("%w: revocation must name its subject", iamerr.ErrInvalidArg)
+	}
+	if strings.TrimSpace(decidedBy) == "" {
+		return fmt.Errorf("%w: revocation must name who decided it", iamerr.ErrInvalidArg)
+	}
+	if _, err := ex.Exec(ctx, upsertMintedCutoffSQL, subject, before, reason, decidedBy); err != nil {
 		return wrapPgErr(err, "TokenRevocation", subject)
 	}
 	return nil
