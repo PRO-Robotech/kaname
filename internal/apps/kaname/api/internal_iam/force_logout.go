@@ -328,6 +328,34 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 		return nil, gerr
 	}
 
+	// НИ ОДНОГО ИСПОЛНИТЕЛЯ СНЯТИЯ — ЗАКРЫТЫЙ ОТКАЗ, А НЕ МОЛЧАЛИВОЕ
+	// НИЧЕГОНЕДЕЛАНИЕ (задача kaname#313).
+	//
+	// Исполнителей снятия два, и посадка выбирает РОВНО ОДНОГО: под `own` —
+	// наши записи, под `external` — сессию у поставщика. Ни одного не провязано
+	// — значит глагол пишет отсечку и НЕ СНИМАЕТ НИЧЕГО, отвечая успехом.
+	// Регрессия провязки в этом состоянии неотличима от исправной работы: тот
+	// же код ответа, то же тело операции, та же запись журнала, — и увидеть
+	// разницу можно только запросом в базу.
+	//
+	// Довод тот же, которым закрыт читатель отсечки у соседа: непровязка,
+	// отвечающая успехом, молча снимает контроль.
+	//
+	// СТОИТ ЗДЕСЬ, А НЕ ВЫШЕ, НАМЕРЕННО: отсечка уже закоммичена и остаётся —
+	// она защитна сама по себе и идемпотентна. Теряется только ложное
+	// «выведен», а повтор глагола после починки провязки доснимет сессию.
+	if h.ownSessions == nil && h.providerSessions == nil {
+		gerr := status.Error(codes.Unavailable,
+			"no login-session teardown is wired: the cutoff alone does not end a session")
+		slog.ErrorContext(ctx, "ForceLogout: no login-session teardown is wired",
+			"operation_id", op.ID, "user_id", userID)
+		if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
+			slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
+				"operation_id", op.ID, "err", merr.Error())
+		}
+		return nil, gerr
+	}
+
 	// СНЯТЬ НАШУ ЗАПИСЬ СЕССИИ ВХОДА, теперь когда отсечка устойчива
 	// (kaname#313).
 	//
@@ -377,8 +405,25 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	// ни одной живой сессии, и требовать её значило бы отказывать в выходе тому,
 	// кто уже вышел.
 	if h.ownSessions != nil {
-		if _, err := h.ownSessions.EndAllSessions(ctx, marker.UserID, now,
-			domain.RevokeReasonLogout); err != nil {
+		ended, err := h.ownSessions.EndAllSessions(ctx, marker.UserID, now,
+			domain.RevokeReasonLogout)
+		if err == nil {
+			// ЧИСЛО СНЯТОГО НАЗЫВАЕТСЯ НА УСПЕШНОМ ПУТИ (задача kaname#313).
+			//
+			// Без него «сняли три» и «снимать было нечем» наблюдаются
+			// одинаково: тело операции несёт объявленную контрактом величину
+			// ЗАПИСЕЙ ОТЗЫВА, а не число сессий, и по нему регрессию не видно.
+			// Строка журнала — единственное место, где это число сегодня
+			// наблюдаемо, и потому она стоит на успешном пути, а не только на
+			// отказе.
+			//
+			// ОСТАТОК НАЗВАН: запись события кладётся транзакцией отсечки, то
+			// есть ДО снятия, и числа в себе не несёт. Свести их — менять
+			// порядок, в котором отсечка идёт первой; это свой предмет.
+			slog.InfoContext(ctx, "ForceLogout: own login sessions ended",
+				"operation_id", op.ID, "user_id", userID, "sessions_ended", ended)
+		}
+		if err != nil {
 			gerr := status.Error(codes.Unavailable, "could not end the login session")
 			slog.ErrorContext(ctx, "ForceLogout: own login-session teardown failed",
 				"operation_id", op.ID, "user_id", userID, "err", err.Error())

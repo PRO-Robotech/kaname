@@ -70,20 +70,33 @@ func TestForceLogout_EndsOurOwnLoginSession(t *testing.T) {
 			"значение вне его база отвергнет, и выход откажет на всяком входе")
 }
 
-// TestForceLogout_OwnSessionsNotWired_StillRecordsTheCutoff — посадка без наших
-// записей сессии входа сохраняет поведение, которое у неё было.
+// TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff — ни одного
+// исполнителя снятия не провязано: глагол ОТКАЗЫВАЕТ, отсечка остаётся.
 //
-// Это и есть контроль прежней посадки: под `external` полоса входа не
-// поднимается, наших записей нет, и снимать нечего — отсечка по-прежнему
-// единственная запись этого глагола здесь.
-func TestForceLogout_OwnSessionsNotWired_StillRecordsTheCutoff(t *testing.T) {
+// Здесь стояла проба, утверждавшая обратное: непровязанное снятие отвечало
+// успехом, и это объявлялось сохранением прежнего поведения. Оно и было
+// дефектом формы — регрессия провязки давала тот же код ответа, то же тело
+// операции и ту же запись журнала, что исправная работа, и увидеть разницу
+// можно было только запросом в базу.
+//
+// Отсечка при этом НЕ теряется: она защитна сама по себе и идемпотентна, а
+// повтор глагола после починки провязки доснимет сессию. Теряется только
+// ложное «выведен».
+func TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
-	h := forceLogoutHandler(rec)
+	ops := &recordingForceLogoutOps{}
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
+		WithSessionRevoker(rec).
+		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
+		WithOperations(ops)
 
-	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
-	require.NoError(t, err)
-	require.True(t, op.GetDone())
-	assert.Equal(t, 1, rec.allCnt)
+	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.Error(t, err, "непровязанное снятие не имеет права отвечать успехом")
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+
+	assert.Equal(t, 1, rec.allCnt, "отсечка остаётся — она защитна и идемпотентна")
+	assert.Contains(t, ops.calls, "markerror",
+		"опрос операции обязан увидеть отказ, а не успех")
 }
 
 // TestForceLogout_OwnSessionTeardownFails_FailsTheMutation — распорядителю не
