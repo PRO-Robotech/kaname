@@ -82,8 +82,8 @@ const upsertMintedCutoffSQL = `INSERT INTO kaname.minted_token_revocations (subj
 		       revoked_by    = EXCLUDED.revoked_by,
 		       updated_at    = now()`
 
-// mintedCutoffExecutor — пул либо транзакция. Оператор один, исполнителей двое.
-type mintedCutoffExecutor interface {
+// cutoffExecutor — пул либо транзакция. Операторы отсечки одни, исполнителей двое.
+type cutoffExecutor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
@@ -92,7 +92,7 @@ type mintedCutoffExecutor interface {
 // Проверки входа стоят ЗДЕСЬ, а не у каждого вызывающего: субъект без имени и
 // решение без принявшего — строки, которые невозможно ни прочесть, ни оспорить,
 // и пропустить их один раз достаточно, чтобы отсечка стала неадресуемой.
-func upsertMintedCutoff(ctx context.Context, ex mintedCutoffExecutor,
+func upsertMintedCutoff(ctx context.Context, ex cutoffExecutor,
 	subject string, before time.Time, reason, decidedBy string,
 ) error {
 	if strings.TrimSpace(subject) == "" {

@@ -16,7 +16,8 @@ package pg
 // материала нет.
 //
 // Операцию записи отсечки этот файл тоже не переписывает: она одна на дерево
-// (`upsertRevokeAllSQL`, §4.1 п.17), и три существующих писателя зовут её же.
+// (`subjectCutoffRowSQL`, §4.1 п.17), и зовут её все писатели ОДНОЙ дверью
+// `upsertSubjectCutoff` — она кладёт ОБЕ записи отсечки (kaname#313).
 
 import (
 	"context"
@@ -426,15 +427,19 @@ func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.Hum
 	return nil
 }
 
-// UpsertCutoff — ТА ЖЕ операция, что у трёх существующих писателей (`now`).
+// UpsertCutoff — ТА ЖЕ дверь, что у прочих писателей отсечки: кладёт ОБЕ
+// записи одной транзакцией (`upsertSubjectCutoff`, kaname#313).
+//
+// Здесь стоял прямой вызов оператора ПЕРВОЙ записи, и вторую этот путь не писал
+// вовсе. Читателей у второй — авторитет отзыва на пути запроса, поэтому выход,
+// смена пароля, восстановление и сброс второго фактора снимали доступ на
+// выдаче и НЕ снимали на предъявлении: прежний носитель продолжал
+// аутентифицировать вызовы.
 func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	if err := u.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	if _, err := w.tx.Exec(ctx, upsertRevokeAllSQL, string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy)); err != nil {
-		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
+	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).

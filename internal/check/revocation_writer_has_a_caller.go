@@ -32,10 +32,21 @@
 //
 //  1. писатель, чей единственный вызывающий — тоже мёртвый код: цепочку
 //     достижимости от композиционного корня разбор не строит;
+//
 //  2. писатель на SQL, собранном из кусков во время исполнения: разбор читает
 //     строковый ЛИТЕРАЛ, а не результат конкатенации;
+//
 //  3. писатель в схеме (триггер, функция) — он не Go и здесь не судится;
-//     именно такие писатели и создают вид работающего контроля.
+//     именно такие писатели и создают вид работающего контроля;
+//
+//  4. ПИСАТЕЛЬ ОДНОЙ ЗАПИСИ ОТСЕЧКИ ИЗ ДВУХ — у него исполнитель ЕСТЬ, и этот
+//     гейт о нём молчит законно. Свойство независимое, и судит его отдельный
+//     гейт `TestSubjectCutoffWritersWriteBothRecords` в этом же пакете.
+//
+//     Перечень границ, названный не полностью, хуже отсутствующего: он создаёт
+//     уверенность. Эта граница названа здесь потому, что именно её отсутствие
+//     позволило дефекту уцелеть — гейт был зелён, а четыре писателя полосы
+//     входа клали одну запись из двух.
 package check
 
 import (
@@ -54,6 +65,15 @@ type RevocationWriter struct {
 	Line  int
 	Name  string
 	Table string
+	// Tables — ВСЕ записи отсечки, которых касается тело, а не только первая.
+	// Множество, а не одна: предмет соседнего гейта — писатель ОДНОЙ записи из
+	// двух, и увидеть его можно только по множеству.
+	Tables []string
+	// Calls — имена, вызванные телом. Нужны, чтобы достроить множество таблиц
+	// ЧЕРЕЗ ВЫЗОВ: дверь, кладущая вторую запись вызовом помощника, пишет её
+	// ровно так же, как назвавшая оператор, и разбор, видящий только литерал,
+	// объявил бы её писателем одной записи (ложная находка, измерена).
+	Calls []string
 	// Why — почему писатель стал находкой. Находка обязана называть ПРИЧИНУ, а
 	// не только координату: «его не зовут» и «по имени не разобрать, зовут ли»
 	// требуют разного, и слитые в одно они читаются одинаково.
@@ -144,6 +164,8 @@ func ScanRevocationWriters(path string, src []byte, statements map[string]string
 		}
 		census.Funcs++
 		table := ""
+		touched := map[string]struct{}{}
+		calls := map[string]struct{}{}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.BasicLit:
@@ -155,15 +177,25 @@ func ScanRevocationWriters(path string, src []byte, statements map[string]string
 					return true
 				}
 				census.Tables[m[1]] = struct{}{}
+				touched[m[1]] = struct{}{}
 				if table == "" {
 					table = m[1]
 				}
+			case *ast.CallExpr:
+				switch fun := node.Fun.(type) {
+				case *ast.Ident:
+					calls[fun.Name] = struct{}{}
+				case *ast.SelectorExpr:
+					calls[fun.Sel.Name] = struct{}{}
+				}
+				return true
 			case *ast.Ident:
 				tbl, ok := statements[node.Name]
 				if !ok {
 					return true
 				}
 				census.Tables[tbl] = struct{}{}
+				touched[tbl] = struct{}{}
 				if table == "" {
 					table = tbl
 				}
@@ -176,7 +208,8 @@ func ScanRevocationWriters(path string, src []byte, statements map[string]string
 		census.Writers++
 		out = append(out, RevocationWriter{
 			File: path, Line: fset.Position(fn.Pos()).Line,
-			Name: fn.Name.Name, Table: table,
+			Name: fn.Name.Name, Table: table, Tables: sortedTableSet(touched),
+			Calls: sortedTableSet(calls),
 		})
 	}
 	return out, census, nil
@@ -263,6 +296,99 @@ func RevocationWritersWithoutACaller(
 			return out[i].File < out[j].File
 		}
 		return out[i].Line < out[j].Line
+	})
+	return out
+}
+
+// sortedTableSet — множество имён таблиц, отсортированное.
+func sortedTableSet(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PropagateTablesThroughCalls достраивает множество таблиц КАЖДОГО писателя
+// таблицами тех писателей, которых он зовёт, — до неподвижной точки.
+//
+// Без этого дверь, кладущая вторую запись вызовом помощника, читалась бы как
+// писатель одной записи. Это не догадка: первая редакция гейта дала ровно такую
+// ложную находку на собственной двери.
+//
+// Достраивание ЩЕДРО к писателю — по имени, без разбора типов. Направление
+// ошибки то же, что у соседнего гейта, и по той же причине: ложная находка у
+// гейта, судящего безопасность, заставляет снимать сам гейт.
+func PropagateTablesThroughCalls(writers []RevocationWriter) []RevocationWriter {
+	byName := map[string]map[string]struct{}{}
+	for _, w := range writers {
+		if byName[w.Name] == nil {
+			byName[w.Name] = map[string]struct{}{}
+		}
+		for _, t := range w.Tables {
+			byName[w.Name][t] = struct{}{}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, w := range writers {
+			for _, callee := range w.Calls {
+				for t := range byName[callee] {
+					if _, has := byName[w.Name][t]; !has {
+						byName[w.Name][t] = struct{}{}
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	out := make([]RevocationWriter, 0, len(writers))
+	for _, w := range writers {
+		w.Tables = sortedTableSet(byName[w.Name])
+		out = append(out, w)
+	}
+	return out
+}
+
+// PairedCutoffFinding — писатель ОДНОЙ записи отсечки из пары.
+type PairedCutoffFinding struct {
+	Writer  RevocationWriter
+	Missing string
+}
+
+// WritersOfOneCutoffWithoutTheOther — писатели, коснувшиеся `first` и не
+// коснувшиеся `second`.
+//
+// # ПОЧЕМУ ЭТОТ ГЕЙТ ОТДЕЛЬНЫЙ ОТ СОСЕДНЕГО
+//
+// Соседний спрашивает, есть ли у писателя исполнитель. Этот — пишет ли писатель
+// ОБЕ записи. Свойства независимы: у писателя одной записи исполнитель может
+// быть, и соседний гейт о нём молчит законно. Ровно так дефект и уцелел: четыре
+// писателя полосы входа исполнялись и клали одну запись из двух.
+func WritersOfOneCutoffWithoutTheOther(
+	writers []RevocationWriter, first, second string,
+) []PairedCutoffFinding {
+	var out []PairedCutoffFinding
+	for _, w := range writers {
+		touchesFirst, touchesSecond := false, false
+		for _, t := range w.Tables {
+			if t == first {
+				touchesFirst = true
+			}
+			if t == second {
+				touchesSecond = true
+			}
+		}
+		if touchesFirst && !touchesSecond {
+			out = append(out, PairedCutoffFinding{Writer: w, Missing: second})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Writer.File != out[j].Writer.File {
+			return out[i].Writer.File < out[j].Writer.File
+		}
+		return out[i].Writer.Line < out[j].Writer.Line
 	})
 	return out
 }
