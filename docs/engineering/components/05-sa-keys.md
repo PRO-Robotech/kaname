@@ -225,10 +225,9 @@ sequenceDiagram
 
 ## Конфигурация
 
-| Env var                                | YAML key                                  | Default | Описание                          |
-|----------------------------------------|-------------------------------------------|---------|-----------------------------------|
-| `KANAME_HYDRA_ADMIN_URL`            | `extapi.hydra.admin-url`                  | —       | URL Hydra admin API.              |
-| `KANAME_HYDRA_ADMIN_TOKEN`          | `extapi.hydra.admin-token`                | —       | Bearer для Hydra admin.           |
+Опись стояла здесь и ОТСТАЛА ОТ ДЕРЕВА — теми же двумя строками группы
+`extapi.*`, которой в настройке нет (см. `04-service-account.md`). Дом описи
+один: справочник посадки `docs/content/install/configuration.mdx`.
 
 ## Как пользоваться
 

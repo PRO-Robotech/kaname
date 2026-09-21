@@ -135,11 +135,20 @@ SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys
 
 ## Конфигурация
 
-| Env var                              | YAML key                              | Default | Описание                                |
-|--------------------------------------|---------------------------------------|---------|-----------------------------------------|
-| `KANAME_HYDRA_ADMIN_URL`          | `extapi.hydra.admin-url`              | —       | URL Hydra admin API.                    |
-| `KANAME_HYDRA_ADMIN_TOKEN`        | `extapi.hydra.admin-token`            | —       | Bearer token для Hydra admin.           |
-| `KANAME_HYDRA_ISSUER`             | `authn.hydra-issuer`                  | `https://hydra.<domain>` | Hydra issuer URL.    |
+Опись стояла здесь и ОТСТАЛА ОТ ДЕРЕВА: она называла YAML-ключи группы
+`extapi.*`, которой в настройке нет ни одной ручки
+(`internal/apps/kaname/config/mode.go`), — ручки поставщика личности живут под
+`authn.*`. Строка о предъявителе была хуже прочих: YAML-ключа для него нет и не
+было, значение приходит только переменной окружения, чьё ИМЯ объявляет
+`authn.hydra-admin-token-env`, — прочитавший опись писал бы секрет в файл
+посадки.
+
+Дом описи один — справочник посадки `docs/content/install/configuration.mdx`;
+второй копии здесь не заводится. Держит это гейт
+`TestDocumentedSettingKeysExistInTheSettingsTree`
+(`internal/check/documented_setting_key_exists.go`): всякий ключ, названный
+описью, существует в дереве настроек, а множество ключей берётся у структуры
+`config.Config`, а не перечнем.
 
 ## Как пользоваться
 
