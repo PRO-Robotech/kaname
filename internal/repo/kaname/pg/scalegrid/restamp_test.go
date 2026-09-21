@@ -57,6 +57,42 @@ const restampNoteMark = "  пересчёт шапки      "
 // пересчёт, сделанный на несошедшихся файлах, записал бы в шапку свежесть,
 // которой нет.
 func restampHeader(text string, fp scalegrid.Fingerprint, lines, note string) (string, []string) {
+	out, refusals, _ := restampHeaderWithDelta(text, fp, lines, note)
+	return out, refusals
+}
+
+// reportDelta — что у ЭТОГО отчёта вышло из предмета и что пришло.
+type reportDelta struct {
+	departed []string
+	arrived  []string
+}
+
+// line — дельта словами, для шапки.
+func (d reportDelta) line() string {
+	name := func(ids []string) string {
+		if len(ids) == 0 {
+			return "—"
+		}
+		sort.Strings(ids)
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("выбыло %d (%s) · пришло %d (%s)",
+		len(d.departed), name(d.departed), len(d.arrived), name(d.arrived))
+}
+
+// restampHeaderWithDelta — пересчёт, ПЕЧАТАЮЩИЙ дельту этого отчёта.
+//
+// # Почему дельта печатается, а не берётся у оператора
+//
+// Довод пересчёта передаётся ОДНОЙ ручкой на все отчёты сразу, а дельта у
+// каждого СВОЯ: у отчёта о записи из предмета не вышло ничего, а общий довод
+// говорил «вышли 3 файла». То есть шапка утверждала о себе неправду — ровно тот
+// класс, который этот прибор и ловит, только про самого себя.
+//
+// Поэтому дельту прибор ВЫЧИСЛЯЕТ (он и так её знает — на ней стоит проверка
+// законности) и печатает сам; у оператора остаётся только то, чего прибор знать
+// не может: довод по ПРИШЕДШИМ файлам.
+func restampHeaderWithDelta(text string, fp scalegrid.Fingerprint, lines, note string) (string, []string, reportDelta) {
 	var refusals []string
 
 	recorded := recordedFileHashes(text)
@@ -96,14 +132,30 @@ func restampHeader(text string, fp scalegrid.Fingerprint, lines, note string) (s
 		refusals = append(refusals, "довод по ПРИШЕДШИМ файлам не передан: пересчёт обязан "+
 			"назвать, чем доказано, что новый файл предмета лежал в дереве замера неподвижно")
 	}
+	stays := map[string]bool{}
+	for _, id := range fp.Identities {
+		stays[id] = true
+	}
+	var delta reportDelta
+	for id := range recorded {
+		if !stays[id] {
+			delta.departed = append(delta.departed, id)
+		}
+	}
+	for _, id := range fp.Identities {
+		if _, ok := recorded[id]; !ok {
+			delta.arrived = append(delta.arrived, id)
+		}
+	}
+
 	if len(refusals) > 0 {
-		return text, refusals
+		return text, refusals, delta
 	}
 
 	start := strings.Index(text, scalegrid.MarkerComposition)
 	listAt := strings.Index(text, scalegrid.MarkerFileList)
 	if start < 0 || listAt < 0 {
-		return text, []string{"в шапке нет блока отпечатка: заменять нечего"}
+		return text, []string{"в шапке нет блока отпечатка: заменять нечего"}, delta
 	}
 	// Прежняя пометка о пересчёте входит в заменяемое: иначе пометки копились
 	// бы одна на другой, и шапка несла бы столько доводов, сколько было
@@ -127,8 +179,8 @@ func restampHeader(text string, fp scalegrid.Fingerprint, lines, note string) (s
 		end += len(line)
 	}
 
-	out := text[:start] + restampNoteMark + note + "\n" + lines + text[end:]
-	return out, nil
+	out := text[:start] + restampNoteMark + delta.line() + " · " + note + "\n" + lines + text[end:]
+	return out, nil, delta
 }
 
 // fileHashInLines — хэш файла по тождеству из свежесосчитанного блока.
@@ -297,7 +349,7 @@ func TestRestampGuardedReportHeaders(t *testing.T) {
 			continue
 		}
 
-		out, refusals := restampHeader(text, best, best.FingerprintLines(root), note)
+		out, refusals, delta := restampHeaderWithDelta(text, best, best.FingerprintLines(root), note)
 		if len(refusals) == 0 {
 			refusals = departedFilesRefusals(root, recorded, best)
 		}
@@ -311,8 +363,8 @@ func TestRestampGuardedReportHeaders(t *testing.T) {
 			t.Fatalf("%s: запись: %v", path, err)
 		}
 		done++
-		t.Logf("%s: блок отпечатка пересчитан по прибору «%s» — файлов %d, состав %s, содержимое %s",
-			shortName(path), bestName, len(best.Files), best.Composition, best.Content)
+		t.Logf("%s: блок отпечатка пересчитан по прибору «%s» — файлов %d, %s, состав %s",
+			shortName(path), bestName, len(best.Files), delta.line(), best.Composition)
 	}
 	t.Logf("ПЕРЕПИСЬ: отчётов с отпечатком %d · пересчитано %d · пропущено %d",
 		len(reports), done, skipped)
@@ -377,3 +429,89 @@ func reportArtifacts(t *testing.T, root string) []string {
 }
 
 func shortName(path string) string { return filepath.Base(path) }
+
+// TestRestampNotePrintsThisReportsOwnDelta — шапка называет дельту ЭТОГО
+// отчёта, а не ту, что передал оператор.
+//
+// Довод пересчёта передаётся одной ручкой на все отчёты, а предметы у отчётов
+// разные: у прибора записи из предмета не вышло НИ ОДНОГО файла, тогда как
+// общий довод говорил «вышли 3». Шапка утверждала о себе неправду — тот самый
+// класс, который этот прибор и ловит.
+func TestRestampNotePrintsThisReportsOwnDelta(t *testing.T) {
+	const kept = "миграции/0001_initial.sql"
+	const gone = "миграции/0002_departed.sql"
+	const came = "миграции/0003_arrived.sql"
+
+	head := "ПРОВЕНАНС\n  снято               2026-09-17 10:58:04 MSK\n\nОТПЕЧАТОК\n"
+	tail := "\nСЕТКА\n  ось N: 100\n"
+	row := func(hash, id string) string {
+		return scalegrid.MarkerFile + hash + "  " + id + "  services/iam/internal/migrations/x.sql\n"
+	}
+	block := func(rows ...string) string {
+		return scalegrid.MarkerComposition + "aaaaaaaaaaaaaaaa\n" +
+			scalegrid.MarkerContent + "bbbbbbbbbbbbbbbb\n" +
+			"  файлов под отпечатком 1, таблиц выведено 1 (kaname.users)\n" +
+			"  предикат отпечатка    синтетика\n" +
+			scalegrid.MarkerFileList + "\n" + strings.Join(rows, "")
+	}
+
+	// Отчёт А: один файл вышел, один пришёл.
+	recordedA := block(row("1111111111111111", kept), row("2222222222222222", gone))
+	todayA := block(row("1111111111111111", kept), row("3333333333333333", came))
+	fpA := scalegrid.Fingerprint{
+		Files:      []string{"a.sql", "b.sql"},
+		Identities: []string{kept, came},
+		Tables:     []string{"kaname.users"},
+	}
+	outA, refusals, deltaA := restampHeaderWithDelta(head+recordedA+tail, fpA, todayA, "довод")
+	if len(refusals) != 0 {
+		t.Fatalf("пересчёт А отвергнут: %v", refusals)
+	}
+	if len(deltaA.departed) != 1 || len(deltaA.arrived) != 1 {
+		t.Fatalf("дельта А сосчитана как выбыло %d пришло %d, ожидалось 1 и 1",
+			len(deltaA.departed), len(deltaA.arrived))
+	}
+	if !strings.Contains(outA, "выбыло 1 ("+gone+")") || !strings.Contains(outA, "пришло 1 ("+came+")") {
+		t.Fatalf("шапка А не называет СВОЮ дельту поимённо:\n%s", noteLineOf(outA))
+	}
+
+	// Отчёт Б: ДЕФЕКТ, ради которого проба заведена. Не вышло НИЧЕГО, пришёл
+	// один. Отличие от А ровно одно — состав записанного перечня, — а довод
+	// оператора тот же самый.
+	recordedB := block(row("1111111111111111", kept))
+	todayB := block(row("1111111111111111", kept), row("3333333333333333", came))
+	fpB := scalegrid.Fingerprint{
+		Files:      []string{"a.sql", "b.sql"},
+		Identities: []string{kept, came},
+		Tables:     []string{"kaname.users"},
+	}
+	outB, refusals, deltaB := restampHeaderWithDelta(head+recordedB+tail, fpB, todayB, "довод")
+	if len(refusals) != 0 {
+		t.Fatalf("пересчёт Б отвергнут: %v", refusals)
+	}
+	if len(deltaB.departed) != 0 {
+		t.Fatalf("у отчёта Б выбывших %d, ожидалось 0", len(deltaB.departed))
+	}
+	if !strings.Contains(outB, "выбыло 0 (—)") {
+		t.Fatalf("шапка Б утверждает о выбывших то, чего у неё не было:\n%s", noteLineOf(outB))
+	}
+	if noteLineOf(outA) == noteLineOf(outB) {
+		t.Fatal("шапки двух отчётов с РАЗНОЙ дельтой несут одну строку: довод оператора " +
+			"подставлен обоим без изменения, и один из них лжёт о себе")
+	}
+	t.Logf("А: %s", noteLineOf(outA))
+	t.Logf("Б: %s", noteLineOf(outB))
+}
+
+// noteLineOf — строка пересчёта из шапки.
+func noteLineOf(text string) string {
+	i := strings.Index(text, restampNoteMark)
+	if i < 0 {
+		return "(строки пересчёта нет)"
+	}
+	rest := text[i:]
+	if j := strings.IndexByte(rest, '\n'); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
