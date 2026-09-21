@@ -136,7 +136,7 @@ func TestCompositionRoot_InteractiveClientKeepsTheForeignRoadUnderExternalPostur
 	// бы в сеть за адресом, которого на машине прогона не существует, и проба
 	// судила бы разрешение имён. Признак построенности взят у продукта
 	// (`roadIsBuilt` судит по адресу).
-	if road := mustProviderAdminClient(cfg, nil); road == nil || road.BaseURL == "" {
+	if road, built := mustProviderAdminClient(cfg, nil); !built || road == nil || road.BaseURL == "" {
 		t.Fatal("под external дорога к чужому поставщику НЕ построена")
 	}
 	if len(registry.cleared) != 0 {
