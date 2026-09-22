@@ -52,8 +52,8 @@ INSTALL="$ROOT/scripts/hooks/install.sh"
 
 checks=0
 failed=0
-ok()  { checks=$((checks + 1)); echo "  ok   — $1"; }
-bad() { checks=$((checks + 1)); failed=$((failed + 1)); echo "  БЕДА — $1" >&2; }
+ok()  { checks=$((checks + 1)); note_check; echo "  ok   — $1"; }
+bad() { checks=$((checks + 1)); note_check; failed=$((failed + 1)); echo "  БЕДА — $1" >&2; }
 
 MARK='УСЛОВИЕ НЕ СОЗДАНО'
 
@@ -66,6 +66,29 @@ MARK='УСЛОВИЕ НЕ СОЗДАНО'
 #
 # Порядок здесь — порядок осей в файле; имя оси отделено от её места, потому
 # что ось «5а» вставлена между пятой и шестой.
+# СЧЁТ ВЕДЁТСЯ ПО ОСЯМ, А НЕ ОДНОЙ СУММОЙ.
+#
+# Первая редакция сравнивала сумму с суммой, и этого было мало: покрытие,
+# ушедшее из одной оси, возмещалось прибавкой в другой, и ведомость молчала.
+# Проверено компенсирующей инъекцией с контролем — снять утверждение у оси 1 и
+# прибавить оси 2: контроль (одна прибавка) давал код 2, компенсация — код 0.
+# Значит числа `AXIS_CHECKS` были пояснением, а не проверкой.
+#
+# current_axis объявляет, чьё утверждение сейчас считается. Утверждение, не
+# приписанное ни одной оси, — тоже дефект пробы: его некому требовать.
+current_axis=0
+orphan_checks=0
+axis_seen=()
+axis_short=()
+
+note_check() {
+    if [ "$current_axis" -gt 0 ]; then
+        axis_seen[$current_axis]=$(( ${axis_seen[$current_axis]:-0} + 1 ))
+    else
+        orphan_checks=$((orphan_checks + 1))
+    fi
+}
+
 AXIS_NAME=(1 2 3 4 5 5а 6 7 8 9)
 AXIS_CHECKS=(2 4 5 1 4 3 2 2 1 2)
 AXES_DECLARED=${#AXIS_CHECKS[@]}
@@ -76,8 +99,11 @@ unmet_reasons=()
 # axis_done <место по ведомости, с 1> — ось исполнена; её утверждения идут в
 # ожидаемое число. Ожидаемое набирается ТОЛЬКО по исполненным осям.
 axis_done() {
+    local want="${AXIS_CHECKS[$1 - 1]}" seen="${axis_seen[$1]:-0}"
     axes_executed=$((axes_executed + 1))
-    expected_checks=$((expected_checks + AXIS_CHECKS[$1 - 1]))
+    expected_checks=$((expected_checks + want))
+    [ "$seen" -eq "$want" ] || \
+        axis_short+=("ось ${AXIS_NAME[$1 - 1]}: объявлено $want, исполнено $seen")
 }
 
 # axis_unmet <место> <предпосылка> — ось НЕ исполнялась.
@@ -150,6 +176,7 @@ push_probe() {
 }
 
 echo "── ось 1: БОЕВОЙ АДРЕСАТ СУЩЕСТВУЕТ И ОТСЛЕЖИВАЕТСЯ (спрашиваем индекс, не диск)"
+current_axis=1
 tracked="$(git -C "$ROOT" ls-files -s scripts/hooks/pre-push)"
 if [ -z "$tracked" ]; then
     bad "scripts/hooks/pre-push не отслеживается: переходник поедет в клоны к адресату, которого нет"
@@ -163,6 +190,7 @@ fi
 axis_done 1
 
 echo "── ось 2: ПЕРЕХОДНИК ДОХОДИТ ДО АДРЕСАТА И ПРОПУСКАЕТ ЗЕЛЁНУЮ ОТПРАВКУ"
+current_axis=2
 c="$work/reach"
 if ! new_clone "$c"; then
     axis_unmet 2 "фикстура не собрана"
@@ -194,6 +222,7 @@ else
 fi
 
 echo "── ось 3: ИНЪЕКЦИЯ — АДРЕСАТА НЕТ, ОТПРАВКА ОБЯЗАНА ОТКАЗАТЬ"
+current_axis=3
 c="$work/gone"
 if ! new_clone "$c"; then
     axis_unmet 3 "фикстура не собрана"
@@ -230,6 +259,7 @@ else
 fi
 
 echo "── ось 4: ИНЪЕКЦИЯ — КРАСНЫЙ АДРЕСАТ РОНЯЕТ ОТПРАВКУ (переходник не глотает код)"
+current_axis=4
 c="$work/red"
 if ! new_clone "$c"; then
     axis_unmet 4 "фикстура не собрана"
@@ -244,6 +274,7 @@ else
 fi
 
 echo "── ось 5: ПЕРЕХОДНИК ПРЕЖНЕЙ РЕДАКЦИИ ЧИСЛИТСЯ НЕПРОВЯЗАННЫМ"
+current_axis=5
 c="$work/stale"
 if ! new_clone "$c"; then
     axis_unmet 5 "фикстура не собрана"
@@ -291,6 +322,7 @@ V1
 fi
 
 echo "── ось 5а: СВЕЖИЙ КЛОН — ТРЕТИЙ ИСХОД МЕТКОЙ, ЧУЖОЙ ФАЙЛ — НАХОДКА БЕЗ МЕТКИ"
+current_axis=6
 #
 # Ось нужна потому, что гейт самостоятельного клона этот путь НЕ ПРОХОДИТ:
 # он зовёт цели в порядке объявления, `install-hooks` стоит раньше `check-hooks`
@@ -323,6 +355,7 @@ else
 fi
 
 echo "── ось 6: ЧУЖОЙ ФАЙЛ ПОД ИМЕНЕМ ХУКА НЕ ЗАТИРАЕТСЯ"
+current_axis=7
 c="$work/foreign"
 if ! new_clone "$c"; then
     axis_unmet 7 "фикстура не собрана"
@@ -345,6 +378,7 @@ else
 fi
 
 echo "── ось 7: ПУСТОЙ ОБХОД — ОТКАЗ, А НЕ «НЕЧЕГО ДЕЛАТЬ»"
+current_axis=8
 c="$work/empty"
 mkdir -p "$c" && printf 'без хуков\n' > "$c/README"
 git -C "$c" init -q . >/dev/null 2>&1
@@ -363,6 +397,7 @@ fi
 axis_done 8
 
 echo "── ось 8: НАСТРОЙКА, ПЕРЕБИВАЮЩАЯ .git/hooks, ОСТАНАВЛИВАЕТ УСТАНОВКУ"
+current_axis=9
 c="$work/hookspath"
 if ! new_clone "$c"; then
     axis_unmet 9 "фикстура не собрана"
@@ -377,6 +412,7 @@ else
 fi
 
 echo "── ось 9: ТЕКСТ ПЕРЕХОДНИКА ИМЕЕТ ОДНОГО ПРОИЗВОДИТЕЛЯ"
+current_axis=10
 gen="$(bash "$INSTALL" stub pre-push 2>/dev/null)"
 if [ -z "$gen" ]; then
     bad "генератор не отдал текст переходника — опыт выше сверял бы копию, а не производимое"
@@ -399,6 +435,8 @@ for r in ${unmet_reasons[@]+"${unmet_reasons[@]}"}; do echo "  предпосы�
 echo "утверждений объявлено : $expected_checks  (по ведомости ИСПОЛНЕННЫХ осей)"
 echo "утверждений исполнено : $checks"
 echo "из них не сошлось     : $failed"
+echo "утверждений вне осей  : $orphan_checks  (ведомости не приписаны)"
+for m in ${axis_short[@]+"${axis_short[@]}"}; do echo "  объём разошёлся     : $m"; done
 
 # ПОРЯДОК ИСХОДОВ. Сперва беспредметность, потом находка, потом неисполнение:
 # несошедшееся утверждение — вердикт о предмете, и он старше молчания. Он же
@@ -420,6 +458,18 @@ fi
 if [ "$axes_executed" -ne "$AXES_DECLARED" ]; then
     echo "НЕ ИСПОЛНЯЛОСЬ: объявлено осей $AXES_DECLARED, исполнено $axes_executed, а причины не названо." >&2
     echo "  Расхождение без предпосылки — дефект самой пробы, а не исход предмета." >&2
+    exit 2
+fi
+if [ "${#axis_short[@]}" -gt 0 ]; then
+    echo "НЕ ИСПОЛНЯЛОСЬ: у осей ${#axis_short[@]} объём разошёлся с объявленным:" >&2
+    for m in ${axis_short[@]+"${axis_short[@]}"}; do echo "  $m" >&2; done
+    echo "  СУММА при этом могла сойтись: покрытие, ушедшее из одной оси, не возмещается" >&2
+    echo "  прибавкой в другой. Потому объём спрашивается у КАЖДОЙ оси, а не у прогона." >&2
+    exit 2
+fi
+if [ "$orphan_checks" -gt 0 ]; then
+    echo "НЕ ИСПОЛНЯЛОСЬ: утверждений вне осей $orphan_checks — их некому требовать." >&2
+    echo "  Утверждение, не приписанное ни одной оси, выпадает из ведомости молча." >&2
     exit 2
 fi
 if [ "$checks" -ne "$expected_checks" ]; then
