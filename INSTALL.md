@@ -92,8 +92,12 @@ ensure CRDs are installed first
 
 Боевой профиль чарта (`deploy/values.prod.yaml`) по-прежнему объявляет
 `external`, и профиля с `own` в поставке нет: перевод — накладка оператора
-`authn.identityProvider: own` поверх боевого профиля (kacho#2699). Проверить на
-своей ревизии:
+`authn.identityProvider: own` поверх боевого профиля (kacho#2699). Та же
+накладка включает токен-эндпоинт платформы — блок `authn.clientToken` чарта
+(`enabled: true` и четыре величины §3 `authn.client-token.*`): без него страж
+посадки `own` не поднимает, потому что ключ служебной учётки обменивается на
+токен именно там, а внешнего поставщика у этой посадки нет (kaname#337).
+Проверить на своей ревизии:
 
 ```sh
 go test ./cmd/kaname/ -run TestEveryLaneIsEitherProfiledOrProvablyUnreachable -v
