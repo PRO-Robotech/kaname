@@ -121,6 +121,7 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 		Algorithm:    domain.SigningAlgES256,
 		KeyLifetime:  90 * 24 * time.Hour,
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: time.Minute,
 		Clock:        clock,
 	}, repo, repo, wrapper)
 	require.NoError(t, err)

@@ -42,6 +42,22 @@ func buildTokenSigning(
 	cfg config.Config,
 	logger *slog.Logger,
 ) (*signingkeys.Keystore, *tokensigner.Signer, error) {
+	return buildTokenSigningAt(ctx, pool, cfg, time.Now, logger)
+}
+
+// buildTokenSigningAt — то же построение с часами на ВХОДЕ.
+//
+// Часы вынесены в вызов, а не подставлены в теле: момент ротации есть функция
+// времени, и проба, поднимающая ключницу ТЕМ ЖЕ построением, что `serve`, без
+// управляемых часов не различила бы «рано» и «пора». Производственный вызов
+// один — buildTokenSigning, и он подаёт системные часы.
+func buildTokenSigningAt(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	cfg config.Config,
+	clock signingkeys.Clock,
+	logger *slog.Logger,
+) (*signingkeys.Keystore, *tokensigner.Signer, error) {
 	ts := cfg.AuthN.TokenSigning
 	if !ts.Enabled {
 		return nil, nil, nil
@@ -81,11 +97,16 @@ func buildTokenSigning(
 		// Отсрочка снятия ВЫЧИСЛЕНА из объявленных слагаемых, а не выбрана
 		// здесь: смена любого из них без пересмотра отсрочки роняет гейт.
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		Clock:        time.Now,
+		RotationLead: signingKeyRotationLead,
+		Clock:        clock,
 		Logger:       logger.With(slog.String("component", "signing_keystore")),
 	}, repo, repo, wrapper)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ключница: %w", err)
+		// Срок ключа, не превышающий запаса ротации, отвергается здесь, а не
+		// стражем настройки: запас — величина этого корня. Имя ручки
+		// приписывается, чтобы оператору было что править.
+		return nil, nil, fmt.Errorf("ключница (authn.token-signing.key-lifetime=%s, запас ротации %s): %w",
+			ts.KeyLifetime, signingKeyRotationLead, err)
 	}
 
 	// Подписывающий ключ обеспечивается ПРИ СТАРТЕ. Порядок «в наборе →
@@ -105,7 +126,7 @@ func buildTokenSigning(
 		// Часы — ВХОД, а не окружение: без этого сценарии расхождения часов
 		// недетерминированы, а детерминизм входа есть условие того, чтобы
 		// проба вообще могла упасть предсказуемо.
-		Clock:       time.Now,
+		Clock:       tokensigner.Clock(clock),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, keystore)
 	if err != nil {
@@ -121,23 +142,29 @@ func buildTokenSigning(
 	return keystore, signer, nil
 }
 
-// startSigningKeySweeper снимает из набора выведенные ключи, чья отсрочка
+// startSigningKeyMaintenance поднимает обслуживание ключницы: ротацию до
+// объявленного срока подписывающего и снятие выведенных ключей, чья отсрочка
 // истекла.
 //
-// Почему отдельным ходом, а не при ротации: отсрочка истекает ПОЗЖЕ действия,
-// её вызвавшего, и снятие, привязанное к ротации, случалось бы либо слишком
-// рано (живые токены отвергаются), либо не случалось бы вовсе.
+// Почему снятие отдельным ходом, а не при ротации: отсрочка истекает ПОЗЖЕ
+// действия, её вызвавшего, и снятие, привязанное к ротации, случалось бы либо
+// слишком рано (живые токены отвергаются), либо не случалось бы вовсе.
+//
+// ПЕРВЫЙ ПРОХОД — ПРИ СТАРТЕ и синхронно (#314): ноль проходов у живого
+// процесса иначе читался бы как норма целый интервал, а ротация, чей срок
+// наступил, пока служба стояла, ждала бы его же.
 //
 // РЕПЛИКИ: на-реплику — петля идёт в каждой реплике, и дубль безвреден не по
-// намерению, а по СВОЙСТВУ ОПЕРАТОРА: снятие выражено переходом из
-// определённого состояния (`WHERE state = 'RETIRED'`), поэтому второй
-// исполнитель получает ноль строк, а не отменяет работу первого. Ноль строк
-// сметатель читает как «уже снято» и продолжает обход — иначе он работал бы
-// тем хуже, чем больше реплик.
-func startSigningKeySweeper(ctx context.Context, ks *signingkeys.Keystore, logger *slog.Logger) {
+// намерению, а по СВОЙСТВУ ОПЕРАТОРОВ: снятие выражено переходом из
+// определённого состояния (`WHERE state = 'RETIRED'`), а передача подписи —
+// условно на ожидаемого подписывающего, поэтому второй исполнитель получает
+// ноль строк, а не отменяет работу первого. Проигравший ротацию выводит свой
+// порождённый ключ сам (signingkeys.RotateIfDue).
+func startSigningKeyMaintenance(ctx context.Context, ks *signingkeys.Keystore, logger *slog.Logger) {
 	if ks == nil {
 		return
 	}
+	signingKeyMaintenancePass(ctx, ks, logger)
 	go func() {
 		ticker := time.NewTicker(signingKeySweepInterval)
 		defer ticker.Stop()
@@ -146,27 +173,64 @@ func startSigningKeySweeper(ctx context.Context, ks *signingkeys.Keystore, logge
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				n, err := ks.SweepRemovable(ctx)
-				if err != nil {
-					// Отставший сметатель НЕ фатален: ключ постоит в наборе
-					// дольше нужного, а предел продолжает действовать. Ронять
-					// сервис из-за него значило бы менять ограниченное
-					// отставание на полный отказ.
-					logger.Warn("signing key sweep failed", slog.String("err", err.Error()))
-					continue
-				}
-				if n > 0 {
-					logger.Info("signing keys removed from the key set", slog.Int("count", n))
-				}
+				signingKeyMaintenancePass(ctx, ks, logger)
 			}
 		}
 	}()
 }
 
-// signingKeySweepInterval — как часто проверяется, не истекла ли отсрочка.
-// Величина мала относительно самой отсрочки: сметатель, ходящий реже, чем
-// истекает отсрочка, оставлял бы снятые ключи в наборе на целый свой период.
+// signingKeyMaintenancePass — ОДИН проход обслуживания: ротация, если срок
+// подошёл, затем снятие.
+//
+// Порядок несущий: ротация первой, потому что ключ, выведенный ею, снимается
+// не этим проходом, а через отсрочку, — обратный порядок ничего не выиграл бы,
+// а отказ ротации не должен останавливать снятие. Отставшее обслуживание НЕ
+// фатально: ключ постоит в наборе дольше нужного либо подпишет дольше запаса,
+// и ронять сервис из-за него значило бы менять ограниченное отставание на
+// полный отказ. Оба отказа звучат журналом и счётчиком отказов ключницы, а
+// сорванный проход сметателя проходом не считается — правило тревоги на ноль
+// проходов его увидит.
+//
+// Проход ограничен своим сроком: зависшее хранилище не держит петлю вечно.
+func signingKeyMaintenancePass(ctx context.Context, ks *signingkeys.Keystore, logger *slog.Logger) {
+	passCtx, cancel := context.WithTimeout(ctx, signingKeyPassTimeout)
+	defer cancel()
+	rotated, err := ks.RotateIfDue(passCtx)
+	switch {
+	case err != nil:
+		logger.Warn("signing key rotation failed", slog.String("err", err.Error()))
+	case rotated:
+		logger.Info("signing key rotated ahead of its declared term",
+			slog.String("rotation_lead", signingKeyRotationLead.String()))
+	}
+	n, err := ks.SweepRemovable(passCtx)
+	if err != nil {
+		logger.Warn("signing key sweep failed", slog.String("err", err.Error()))
+		return
+	}
+	if n > 0 {
+		logger.Info("signing keys removed from the key set", slog.Int("count", n))
+	}
+}
+
+// signingKeySweepInterval — как часто идёт проход обслуживания. Величина мала
+// относительно отсрочки: сметатель, ходящий реже, чем истекает отсрочка,
+// оставлял бы снятые ключи в наборе на целый свой период.
 const signingKeySweepInterval = 15 * time.Minute
+
+// signingKeyRotationLead — за сколько до объявленного срока подписывающего
+// подпись переходит к новому ключу.
+//
+// Четыре интервала прохода, а не один: ротация обязана случиться ДО срока и
+// тогда, когда несколько проходов подряд сорвались (хранилище недоступно), — с
+// одним интервалом запаса первый же пропуск переносил бы её за срок. Срок ключа
+// обязан быть длиннее запаса; иначе ключница отказывает в построении.
+const signingKeyRotationLead = 4 * signingKeySweepInterval
+
+// signingKeyPassTimeout — срок ОДНОГО прохода обслуживания: порождение ключа,
+// передача подписи и обход набора. Много больше их обычной длительности и
+// меньше интервала, чтобы зависший проход не наложился на следующий.
+const signingKeyPassTimeout = 2 * time.Minute
 
 // signingKeyStartupRefusal облекает отказ обеспечения подписывающего ключа в
 // текст, который видит ОПЕРАТОР, поднимающий стенд.

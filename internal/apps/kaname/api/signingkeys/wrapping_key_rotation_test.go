@@ -54,6 +54,7 @@ func keystoreOver(t *testing.T, store *memStore, at time.Time, wrapKeys ...[]byt
 		Algorithm:    domain.SigningAlgRS256,
 		KeyLifetime:  90 * 24 * time.Hour,
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: time.Minute,
 		Clock:        fixedClock(at),
 	}, store, store, wrapper)
 	require.NoError(t, err)

@@ -316,3 +316,33 @@ func TestAlertRulesObjectCanBeSwitchedOff(t *testing.T) {
 	require.NotContains(t, off, "PrometheusRule",
 		"выключенный объект оставил след в рендере — выключение обязано быть полным")
 }
+
+// TestSigningKeySweeperSilenceIsAlerted — ноль проходов сметателя выведенных
+// ключей читается правилом тревоги как СИГНАЛ, а не как тишина (#314).
+//
+// Сметатель, переставший ходить, не отказывает — он молчит: выведенные ключи
+// остаются в наборе дольше отсрочки, и ни одна проба положительного пути этого
+// не видит. Поэтому предмет — правило, звонящее на ОТСУТСТВИЕ прохода, в
+// объекте, который поставляет чарт, на каждой посадке. Совпадение объекта со
+// страницей держит TestDeliveredAlertRulesMatchThePublishedPage, производителя
+// ряда — TestAlertSelectorsNameAContractTheTreeProduces; здесь — только наличие.
+func TestSigningKeySweeperSilenceIsAlerted(t *testing.T) {
+	const series = `kaname_signing_key_events_total{event="swept"}`
+	renders := alertRenders(t)
+	require.NotEmpty(t, renders, "перепись посадок пуста — проверять нечего, это не зелёное")
+	for _, r := range renders {
+		t.Run(r.name, func(t *testing.T) {
+			rules, objects := chartAlertRules(t, renderStandaloneChart(t, r.chain, r.sets...))
+			require.Positive(t, objects, "объект правил не отрендерился — вердикта о правиле нет")
+			var found []string
+			for _, rule := range rules {
+				expr := strings.Join(strings.Fields(rule.Expr), " ")
+				if strings.Contains(expr, series) && strings.Contains(expr, "== 0") {
+					found = append(found, rule.Alert)
+				}
+			}
+			t.Logf("перепись: правил в объекте %d · звонящих на ноль проходов сметателя %d %v", len(rules), len(found), found)
+			require.Len(t, found, 1, "ноль проходов сметателя обязан звонить ровно одним правилом")
+		})
+	}
+}

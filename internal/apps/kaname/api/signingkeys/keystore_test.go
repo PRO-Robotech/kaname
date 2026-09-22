@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 )
@@ -37,6 +39,12 @@ import (
 type memStore struct {
 	rows map[domain.KeyID]domain.SigningKeyRecord
 	err  error
+	// insertErr — отказ ТОЛЬКО записи новой строки: так проба получает
+	// частичный исход «снять удалось, завести замену — нет».
+	insertErr error
+	// beforeReplace — вмешательство соседней реплики между чтением
+	// подписывающего и передачей подписи.
+	beforeReplace func()
 }
 
 func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.SigningKeyRecord{}} }
@@ -46,6 +54,9 @@ var errTwoActive = errors.New("memstore: two signing keys would be active")
 func (m *memStore) Insert(_ context.Context, rec domain.SigningKeyRecord) error {
 	if m.err != nil {
 		return m.err
+	}
+	if m.insertErr != nil {
+		return m.insertErr
 	}
 	if rec.State == domain.SigningKeyActive && m.activeKID() != "" {
 		return errTwoActive
@@ -69,7 +80,7 @@ func (m *memStore) Get(_ context.Context, kid domain.KeyID) (domain.SigningKeyRe
 	}
 	r, ok := m.rows[kid]
 	if !ok {
-		return domain.SigningKeyRecord{}, errors.New("memstore: no such key")
+		return domain.SigningKeyRecord{}, fmt.Errorf("%w: SigningKey %s", iamerr.ErrNotFound, kid)
 	}
 	return r, nil
 }
@@ -81,7 +92,37 @@ func (m *memStore) Active(_ context.Context) (domain.SigningKeyRecord, error) {
 	if kid := m.activeKID(); kid != "" {
 		return m.rows[kid], nil
 	}
-	return domain.SigningKeyRecord{}, errors.New("memstore: no active signing key")
+	// Тот же отказ, что у настоящего хранилища: «подписывающего нет» —
+	// невыполненное предусловие, а не сбой; дублёр, отвечающий иначе, прятал
+	// бы ровно ту развилку, которую судят пробы.
+	return domain.SigningKeyRecord{}, fmt.Errorf("%w: no active signing key", iamerr.ErrFailedPrecondition)
+}
+
+// ReplaceActive — передача подписи УСЛОВНО на ожидаемого подписывающего, с
+// тем же контрактом, что у настоящего хранилища: ожидаемый обязан быть
+// подписывающим, следующий — опубликованным; иначе невыполненное предусловие.
+func (m *memStore) ReplaceActive(_ context.Context, next, expected domain.KeyID, at time.Time) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.beforeReplace != nil {
+		m.beforeReplace()
+	}
+	cur, ok := m.rows[expected]
+	if !ok || cur.State != domain.SigningKeyActive {
+		return fmt.Errorf("%w: SigningKey %s is no longer the signing key", iamerr.ErrFailedPrecondition, expected)
+	}
+	nr, ok := m.rows[next]
+	if !ok || nr.State != domain.SigningKeyPublished {
+		return fmt.Errorf("%w: SigningKey %s cannot become the signing key", iamerr.ErrFailedPrecondition, next)
+	}
+	cur.State = domain.SigningKeyRetired
+	cur.RetiredAt = &at
+	m.rows[expected] = cur
+	nr.State = domain.SigningKeyActive
+	nr.ActivatedAt = &at
+	m.rows[next] = nr
+	return nil
 }
 
 func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) {
@@ -118,6 +159,11 @@ func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) e
 }
 
 func (m *memStore) Retire(_ context.Context, kid domain.KeyID, at time.Time) error {
+	// Предусловие перехода — то же, что у настоящего хранилища: выводится
+	// только опубликованный; подписывающий уходит передачей преемнику.
+	if r, ok := m.rows[kid]; ok && r.State != domain.SigningKeyPublished {
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
+	}
 	return m.set(kid, domain.SigningKeyRetired, &at, func(r *domain.SigningKeyRecord) { r.RetiredAt = &at })
 }
 
@@ -126,6 +172,9 @@ func (m *memStore) Remove(_ context.Context, kid domain.KeyID, at time.Time) err
 }
 
 func (m *memStore) Compromise(_ context.Context, kid domain.KeyID, at time.Time) error {
+	if r, ok := m.rows[kid]; ok && r.State == domain.SigningKeyCompromised {
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
+	}
 	return m.set(kid, domain.SigningKeyCompromised, &at, func(r *domain.SigningKeyRecord) { r.CompromisedAt = &at })
 }
 
@@ -135,7 +184,9 @@ func (m *memStore) set(kid domain.KeyID, st domain.SigningKeyState, _ *time.Time
 	}
 	r, ok := m.rows[kid]
 	if !ok {
-		return errors.New("memstore: no such key")
+		// Настоящее хранилище на неизвестный ключ отвечает невыполненным
+		// предусловием перехода (ноль строк условного оператора).
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
 	}
 	r.State = st
 	stamp(&r)
@@ -157,6 +208,7 @@ func mustKeystore(t *testing.T, store *memStore, logBuf *bytes.Buffer) *signingk
 		Algorithm:    domain.SigningAlgRS256,
 		KeyLifetime:  90 * 24 * time.Hour,
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: time.Minute,
 		Clock:        fixedClock(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
 		Logger:       logger,
 	}, store, store, wrapper)
@@ -174,6 +226,7 @@ func TestKeystore_F1_01_AlgorithmComesFromConfigurationAndBindsToTheKey(t *testi
 			Algorithm:    alg,
 			KeyLifetime:  time.Hour,
 			RemovalGrace: tokenpolicy.KeyRemovalGrace,
+			RotationLead: time.Minute,
 			Clock:        fixedClock(time.Now()),
 		}, store, store, wrapper)
 		require.NoError(t, err)
@@ -304,6 +357,7 @@ func TestKeystore_RefusesToBuildIncomplete(t *testing.T) {
 		Algorithm:    domain.SigningAlgRS256,
 		KeyLifetime:  time.Hour,
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: time.Minute,
 		Clock:        fixedClock(time.Now()),
 	}
 	for name, mutate := range map[string]func(*signingkeys.Config){
@@ -363,6 +417,7 @@ func TestKeystore_F1_30_SweepRemovesOnlyAfterTheComputedGrace(t *testing.T) {
 		Algorithm:    domain.SigningAlgRS256,
 		KeyLifetime:  90 * 24 * time.Hour,
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: time.Minute,
 		Clock:        func() time.Time { return clockAt },
 	}, store, store, wrapper)
 	require.NoError(t, err)

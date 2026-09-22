@@ -168,11 +168,66 @@ func (r *SigningKeyRepo) Activate(ctx context.Context, kid domain.KeyID, at time
 	return nil
 }
 
-// Retire выводит ключ из подписи, оставляя его в наборе на отсрочку.
+// ReplaceActive передаёт подпись от `expected` к `next` — УСЛОВНО на то, что
+// `expected` всё ещё подписывает.
+//
+// Одна транзакция, два условных оператора. Понижение называет ОЖИДАЕМЫЙ ключ,
+// а не «любого подписывающего»: реплика, прочитавшая подписывающего и
+// решившая его сменить, не должна сменить того, кого уже поставила соседняя.
+// Конкурент, понизивший ту же строку первым, держит её блокировку; второй
+// после его фиксации перечитывает строку, условие больше не выполняется, и он
+// получает ноль строк — невыполненное предусловие, без изменений. Повышение —
+// только из PUBLISHED: переход в подпись из иных состояний не выражается.
+//
+// Инвариант «подписывает ровно один» по-прежнему держит частичный
+// уникальный индекс; условие здесь — про то, КОГО сменяем.
+func (r *SigningKeyRepo) ReplaceActive(ctx context.Context, next, expected domain.KeyID, at time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr(err, "SigningKey", string(next))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const demote = `UPDATE kaname.token_signing_keys
+		SET state = 'RETIRED', retired_at = $1
+		WHERE kid = $2 AND state = 'ACTIVE'
+		RETURNING kid`
+	var got string
+	if err := tx.QueryRow(ctx, demote, at, string(expected)).Scan(&got); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: SigningKey %s is no longer the signing key", iamerr.ErrFailedPrecondition, expected)
+		}
+		return wrapPgErr(err, "SigningKey", string(expected))
+	}
+
+	const promote = `UPDATE kaname.token_signing_keys
+		SET state = 'ACTIVE', activated_at = $1
+		WHERE kid = $2 AND state = 'PUBLISHED'
+		RETURNING kid`
+	if err := tx.QueryRow(ctx, promote, at, string(next)).Scan(&got); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: SigningKey %s cannot become the signing key", iamerr.ErrFailedPrecondition, next)
+		}
+		return wrapPgErr(err, "SigningKey", string(next))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr(err, "SigningKey", string(next))
+	}
+	return nil
+}
+
+// Retire выводит из обращения ОПУБЛИКОВАННЫЙ ключ, оставляя его в наборе на
+// отсрочку.
+//
+// Подписывающего этот переход НЕ выводит (#314): подписывающий покидает подпись
+// только передачей преемнику (ReplaceActive, Activate) либо объявлением
+// утечки. Иначе вывод без преемника оставлял бы службу без подписи, а условие
+// «ключ ещё не подписывает» держалось бы чтением перед записью — окном, в
+// которое ключ успевает вступить в подпись.
 func (r *SigningKeyRepo) Retire(ctx context.Context, kid domain.KeyID, at time.Time) error {
 	return r.transition(ctx, kid, `UPDATE kaname.token_signing_keys
 		SET state = 'RETIRED', retired_at = $1
-		WHERE kid = $2 AND state IN ('PUBLISHED','ACTIVE') RETURNING kid`, at)
+		WHERE kid = $2 AND state = 'PUBLISHED' RETURNING kid`, at)
 }
 
 // Remove снимает ключ из набора: отсрочка истекла.

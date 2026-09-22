@@ -517,7 +517,7 @@ func runServe(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("своя чеканка токенов: %w", err)
 	}
-	startSigningKeySweeper(ctx, signingKeystore, logger)
+	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
 	// Уборка ресурсного журнала подписки — своим уборщиком (см.
 	// `subscription_wiring.go`, там же довод, почему не предметом общего).
@@ -1430,6 +1430,7 @@ func runServe(cfg config.Config) error {
 				return metrics.SigningKeyCounts{
 					Generated: st.Generated, Activated: st.Activated, Retired: st.Retired,
 					Removed: st.Removed, Compromised: st.Compromised, Failures: st.Failures,
+					Sweeps: st.Sweeps,
 				}
 			})
 			records = append(records, jwksproxyhttp.Record{

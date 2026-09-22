@@ -200,6 +200,13 @@ spec:
           annotations:
             summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
 
+        - alert: KanameSigningKeySweeperSilent
+          # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
+          expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+          for: 30m
+          annotations:
+            summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"
+
         - alert: KanameClientTokenRefusalRate
           expr: |
             sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
