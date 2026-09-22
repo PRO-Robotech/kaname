@@ -32,6 +32,10 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	cfg.AuthN.SelfServiceFreshness = 15 * time.Minute
 	cfg.AuthN.IdentityProvider = p
 	cfg.AuthN.TokenSigning = ownMintingSettings()
+	// Свой контур выдачи ключей служебных учёток — требование посадки `own`
+	// (задача #337): токен-эндпоинт и слушатель, на котором он монтируется.
+	cfg.APIServer.RegistryToken = registryTokenLaneSettings()
+	cfg.AuthN.ClientToken = clientTokenLaneSettings()
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
 	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.Registration = registrationSettings()

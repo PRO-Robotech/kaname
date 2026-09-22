@@ -160,6 +160,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.HydraTokenURL = ""
 	case "своя чеканка токенов включена":
 		broken.AuthN.TokenSigning.Enabled = false
+	case "контур выдачи ключей служебных учёток переведён на свою чеканку":
+		broken.AuthN.ClientToken.Enabled = false
 	case "приём предъявленного удостоверения включён":
 		broken.AuthN.PresentedCredential.Enabled = false
 	case "подписант своей чеканки провязан":
