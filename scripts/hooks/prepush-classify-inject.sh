@@ -114,7 +114,11 @@ MARK='УСЛОВИЕ НЕ СОЗДАНО'
 work="$(mktemp -d)" || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — нет временного каталога" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
 
-probe_dir="$work"
+# Спрашивается ФИЗИЧЕСКИЙ путь: подъём по `dirname` идёт по тексту, и TMPDIR,
+# заданный символьной ссылкой внутрь репозитория, прошёл бы молча. Дыра была
+# общей у обеих проб и у хука — форму копировали вместе с нею.
+probe_dir="$(cd "$work" 2>/dev/null && pwd -P)"
+[ -n "$probe_dir" ] || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — физический путь временного каталога не установлен: $work" >&2; exit 2; }
 while :; do
     if [ -e "$probe_dir/.git" ]; then
         echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — временный каталог внутри репозитория ($probe_dir/.git)" >&2
