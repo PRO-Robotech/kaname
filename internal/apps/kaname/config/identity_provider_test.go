@@ -39,6 +39,29 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	return cfg
 }
 
+// registryTokenLaneSettings — поднятый слушатель поверхности выдачи: на нём
+// монтируется токен-эндпоинт платформы, и без него включённый эндпоинт
+// обслуживать негде. Адресат докерной полосы объявлен и входит в перечень
+// адресатов платформы ниже — иначе отказал бы страж докерной полосы.
+func registryTokenLaneSettings() config.RegistryTokenConfig {
+	return config.RegistryTokenConfig{
+		Endpoint: "tcp://0.0.0.0:9096",
+		Service:  "registry.kacho.local",
+	}
+}
+
+// clientTokenLaneSettings — токен-эндпоинт платформы, объявленный полностью:
+// четыре величины эндпоинта, каждую стережёт его собственный страж.
+func clientTokenLaneSettings() config.ClientTokenConfig {
+	return config.ClientTokenConfig{
+		Enabled:          true,
+		AllowedAudiences: "registry.kacho.local, https://api.kacho.cloud",
+		DefaultAudience:  "https://api.kacho.cloud",
+		TokenTTL:         15 * time.Minute,
+		BodyCeiling:      64 << 10,
+	}
+}
+
 // accessKeySettings — годная привязка ключей доступа (Ф7 Р2): имя, одно
 // происхождение под ним, весь словарь алгоритмов; каждое стережёт свой страж
 // под посадкой `own`.
