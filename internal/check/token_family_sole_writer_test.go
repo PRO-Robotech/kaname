@@ -59,7 +59,7 @@ func TestTokenFamilyIsWrittenByASingleGuardedProducer(t *testing.T) {
 		t.Fatal("проверка НЕ ИСПОЛНЯЛАСЬ: обход дал ноль непроверочных файлов")
 	}
 
-	census, err := check.TokenFamilyWriters(files)
+	census, err := check.OAuthFamilyWriters(files)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestTokenFamilyIsWrittenByASingleGuardedProducer(t *testing.T) {
 	}
 
 	for _, w := range census.Writers {
-		if w.Kind == check.TokenFamilyWriterBare {
+		if w.Kind == check.OAuthFamilyWriterBare {
 			t.Errorf("%s:%d — вставка в таблицу семейств БЕЗ условия живости сессии.\n"+
 				"  Второй писатель обходит условие МОЛЧА: он компилируется, проходит пробы\n"+
 				"  церемонии и заводит живое семейство в снятой либо истёкшей сессии.\n"+

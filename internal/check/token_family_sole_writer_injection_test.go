@@ -48,7 +48,7 @@ const readFamilySQL = ` + "`" + `SELECT id FROM kaname.token_families WHERE id =
 func TestTokenFamilyGateFindsASecondWriter(t *testing.T) {
 	t.Parallel()
 
-	census, err := check.TokenFamilyWriters(map[string]string{
+	census, err := check.OAuthFamilyWriters(map[string]string{
 		"guarded.go": guardedWriterSrc,
 		"sneaky.go":  bareWriterSrc,
 	})
@@ -63,7 +63,7 @@ func TestTokenFamilyGateFindsASecondWriter(t *testing.T) {
 	}
 	var sawSneaky bool
 	for _, w := range census.Writers {
-		if w.File == "sneaky.go" && w.Kind == check.TokenFamilyWriterBare {
+		if w.File == "sneaky.go" && w.Kind == check.OAuthFamilyWriterBare {
 			sawSneaky = true
 		}
 	}
@@ -77,7 +77,7 @@ func TestTokenFamilyGateFindsASecondWriter(t *testing.T) {
 func TestTokenFamilyGateIsSilentOnAMention(t *testing.T) {
 	t.Parallel()
 
-	census, err := check.TokenFamilyWriters(map[string]string{
+	census, err := check.OAuthFamilyWriters(map[string]string{
 		"guarded.go": guardedWriterSrc,
 		"mention.go": mentionOnlySrc,
 	})
@@ -98,7 +98,7 @@ func TestTokenFamilyGateIsSilentOnAMention(t *testing.T) {
 func TestTokenFamilyGateRedOnAnEmptyTraversal(t *testing.T) {
 	t.Parallel()
 
-	census, err := check.TokenFamilyWriters(map[string]string{
+	census, err := check.OAuthFamilyWriters(map[string]string{
 		"nothing.go": "package pg\n\nconst x = `SELECT 1`\n",
 	})
 	if err != nil {
