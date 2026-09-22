@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# prepush-classify-inject.sh — доказательство инъекцией, что КАТЕГОРИЯ ГРУППЫ не
+# выводится из её вывода и не маскируется им.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ПРЕДМЕТ — ВОСПРОИЗВЕДЁННЫЙ ДЕФЕКТ, А НЕ ОПАСЕНИЕ
+#
+# Первая редакция хука определяла категорию чтением вывода группы: строка,
+# начинавшаяся (после снятия отступа) меткой «УСЛОВИЕ НЕ СОЗДАНО», переводила
+# ВСЮ группу в третью категорию. Вывод группы — это вывод чужих программ, и
+# прогонщик проб печатает текст отказа упавшей пробы с отступом.
+#
+# Воспроизведено на боевом хуке 2026-09-22 пробой
+# `t.Errorf("…:\nУСЛОВИЕ НЕ СОЗДАНО (не находка): так выглядит маска")`:
+# хук напечатал «зелёное — исполнено 6 из 7 групп, отказов 0» и вышел КОДОМ 0,
+# то есть отправку пропустил. Метка общесловарная — её несут 99 файлов дерева.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ЧТО ИМЕННО ЗДЕСЬ ДОКАЗЫВАЕТСЯ — ДВЕ ОСИ, И ОДНОЙ БЫЛО БЫ МАЛО
+#
+#  1. ОПРЕДЕЛИТЕЛЬ. Он отображает пару сигналов (код возврата · заявка) в
+#     категорию и ВЫВОДА ГРУППЫ НЕ ПРИНИМАЕТ ВОВСЕ — попытка его передать есть
+#     отказ. Это доказывается подстановками, включая несогласные пары.
+#  2. СКВОЗНОЙ ОПЫТ ЧЕРЕЗ БОЕВОЙ ХУК. Оси 1 мало by construction: она ничего не
+#     говорит о том, ЧЕМ пользуется хук. Поэтому синтетический модуль с
+#     настоящими `pre-push`, `prepush-classify.sh` и прогонщиком вердикта
+#     прогоняется трижды: проба зелёная · проба падает С МЕТКОЙ · проба падает
+#     БЕЗ МЕТКИ. Законный близнец отличается от инъекции РОВНО ОДНИМ фактом —
+#     наличием метки в тексте отказа, — и обязан дать тот же исход.
+#
+# Прогон: `bash scripts/hooks/prepush-classify-inject.sh` (или `--self-test`).
+set -uo pipefail
+
+case "${1:-}" in
+    ""|--self-test) ;;
+    *) echo "prepush-classify-inject: неизвестный довод «$1»" >&2; exit 2 ;;
+esac
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — это не рабочая копия git" >&2; exit 2; }
+CLASSIFY="$ROOT/scripts/hooks/prepush-classify.sh"
+HOOK="$ROOT/scripts/hooks/pre-push"
+INSTALL="$ROOT/scripts/hooks/install.sh"
+RUNNER="$ROOT/.github/scripts/go-test-verdict.py"
+for f in "$CLASSIFY" "$HOOK" "$INSTALL" "$RUNNER"; do
+    [ -f "$f" ] || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — нет $f" >&2; exit 2; }
+done
+
+checks=0
+failed=0
+ok()  { checks=$((checks + 1)); echo "  ok   — $1"; }
+bad() { checks=$((checks + 1)); failed=$((failed + 1)); echo "  БЕДА — $1" >&2; }
+
+work="$(mktemp -d)" || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — нет временного каталога" >&2; exit 2; }
+trap 'rm -rf "$work"' EXIT
+
+probe_dir="$work"
+while :; do
+    if [ -e "$probe_dir/.git" ]; then
+        echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — временный каталог внутри репозитория ($probe_dir/.git)" >&2
+        exit 2
+    fi
+    parent="$(dirname "$probe_dir")"
+    [ "$parent" != "$probe_dir" ] || break
+    probe_dir="$parent"
+done
+
+MARK='УСЛОВИЕ НЕ СОЗДАНО'
+
+# ── ОСЬ 1: ОТОБРАЖЕНИЕ СИГНАЛОВ В КАТЕГОРИЮ ─────────────────────────────────
+echo "── ось 1: определитель отображает пару сигналов в категорию"
+
+say() { # say <ожидаемое> <код> <содержимое заявки> <что это>
+    local want="$1" rc="$2" body="$3" what="$4" got
+    local f="$work/unmet.$RANDOM"
+    printf '%s' "$body" > "$f"
+    got="$("$CLASSIFY" --rc "$rc" --unmet "$f" 2>/dev/null)"
+    if [ "$got" = "$want" ]; then ok "$what → $want"; else bad "$what → «$got», ожидалось «$want»"; fi
+}
+
+refuses() { # refuses <что это> <доводы...>
+    local what="$1"; shift
+    if "$CLASSIFY" "$@" >/dev/null 2>&1; then
+        bad "$what — принято молча, а это «судить не по чему»"
+    else
+        ok "$what — отказ"
+    fi
+}
+
+say green 0 ""  "код 0, заявки нет"
+say red   1 ""  "код 1, заявки нет"
+say red   2 ""  "код 2, заявки нет"
+say unmet 3 "линтера нет в PATH
+" "код 3 и заявка с причиной"
+
+# МАСКА: тот же красный исход, но текст группы несёт метку первой на строке.
+# Определителю его передать НЕЧЕМ — и это утверждение проверяется, а не
+# декларируется.
+say red 1 "" "красное, чей вывод несёт метку (вывод определителю не передаётся)"
+refuses "попытка передать вывод группы" --rc 1 --unmet "$work/u1" --out "$work/any"
+: > "$work/u1"
+refuses "попытка передать вывод третьим доводом" --rc 1 --unmet "$work/u1" "$work/any"
+
+# НЕСОГЛАСНЫЕ СИГНАЛЫ — САМОСТОЯТЕЛЬНЫЙ ИСХОД, А НЕ ВЫБОР ОДНОГО ИЗ ДВУХ.
+printf 'причина\n' > "$work/u2"
+refuses "заявка есть, а код не 3" --rc 1 --unmet "$work/u2"
+refuses "код 3, а заявки с причиной нет" --rc 3 --unmet "$work/u1"
+refuses "файла заявки нет вовсе" --rc 0 --unmet "$work/нет-такого"
+refuses "код возврата не число" --rc x --unmet "$work/u1"
+
+# ДВА ОБЪЯВЛЕНИЯ ОДНОЙ ВЕЛИЧИНЫ — ОДИН ПРЕДИКАТ.
+hook_rc="$(sed -n 's/^UNMET_RC=\([0-9][0-9]*\).*/\1/p' "$HOOK" | head -1)"
+cls_rc="$(sed -n 's/^UNMET_RC=\([0-9][0-9]*\).*/\1/p' "$CLASSIFY" | head -1)"
+if [ -n "$hook_rc" ] && [ "$hook_rc" = "$cls_rc" ]; then
+    ok "код «не исполнялась» объявлен одинаково в хуке и определителе ($hook_rc)"
+else
+    bad "код «не исполнялась» разошёлся: хук «$hook_rc», определитель «$cls_rc»"
+fi
+
+# ── ОСЬ 2: СКВОЗНОЙ ОПЫТ ЧЕРЕЗ БОЕВОЙ ХУК ───────────────────────────────────
+echo "── ось 2: сквозной опыт — настоящий хук на синтетическом модуле"
+
+for t in go make python3 gofmt; do
+    command -v "$t" >/dev/null 2>&1 || {
+        echo "  $MARK (не находка): «$t» не найден — ось 2 НЕ ИСПОЛНЯЛАСЬ" >&2
+        echo "  вердикта о сквозном опыте НЕТ — ни зелёного, ни красного" >&2
+        t=""
+        break
+    }
+done
+
+build_module() { # build_module <каталог> <тело пробы>
+    local d="$1" body="$2"
+    mkdir -p "$d/.github/scripts" "$d/scripts/hooks" || return 1
+    cp "$RUNNER" "$d/.github/scripts/go-test-verdict.py" || return 1
+    cp "$HOOK" "$d/scripts/hooks/pre-push" || return 1
+    cp "$CLASSIFY" "$d/scripts/hooks/prepush-classify.sh" || return 1
+    chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
+    printf 'module probe.invalid/mask\n\ngo 1.21\n' > "$d/go.mod"
+    cat > "$d/mask_test.go" <<GO
+package mask
+
+import "testing"
+
+func TestMaskProbe(t *testing.T) {
+$body
+}
+GO
+    gofmt -w "$d/mask_test.go" || return 1
+    # Цели рецепта — настоящие по форме, но пустые по содержанию: предмет опыта
+    # не они. Пин линтера пуст намеренно — хук объявит группу lint третьим
+    # исходом, и опыт перестанет зависеть от того, стоит ли линтер на машине.
+    cat > "$d/Makefile" <<'MK'
+.PHONY: vet lint audit-list-filter print-golangci-pin
+vet:
+	@go vet ./...
+lint:
+	@echo "линтер в опыте не зовётся"
+audit-list-filter:
+	@echo "ok"
+print-golangci-pin:
+	@printf ''
+MK
+    git -C "$d" init -q .
+    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe add -A
+    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe commit -q -m "фикстура опыта"
+    git init --bare -q "$d.git"
+    git -C "$d" remote add origin "$d.git"
+    ( cd "$d" && bash "$INSTALL" install ) >/dev/null 2>&1
+}
+
+run_case() { # run_case <имя> <тело пробы> <ожидаемый исход: pass|refuse> <что утверждаем>
+    local name="$1" body="$2" want="$3" what="$4"
+    local d out rc
+    d="$work/$name"
+    if ! build_module "$d" "$body"; then bad "$what — фикстура не собрана, опыт НЕ ИСПОЛНЯЛСЯ"; return; fi
+    out="$(git -C "$d" push origin HEAD:refs/heads/probe 2>&1)"
+    rc=$?
+    if [ "$want" = pass ]; then
+        if [ "$rc" -eq 0 ]; then ok "$what — отправка прошла"
+        else bad "$what — отправка отказана, хотя всё зелено: $out"; fi
+        return
+    fi
+    if [ "$rc" -eq 0 ]; then
+        bad "$what — отправка ПРОШЛА: красное обнулено, маска жива"
+        return
+    fi
+    ok "$what — отправка отказана"
+    if printf '%s' "$out" | grep -q 'красные.*пробы'; then
+        ok "$what — красной названа именно группа проб, а не соседняя"
+    else
+        bad "$what — отказ пришёл не от группы проб: $out"
+    fi
+}
+
+if [ -n "${t:-}" ]; then
+    # КОНТРОЛЬ: фикстура УМЕЕТ давать зелёное. Без него отказ ниже был бы
+    # структурным, и инъекция доказывала бы, что опыт сломан.
+    run_case control '	_ = t' pass "контроль: проба зелёная"
+
+    # ИНЪЕКЦИЯ: падение, чей текст несёт метку ПЕРВОЙ на своей строке.
+    run_case masked \
+        '	t.Errorf("проба упала, и текст переносится:\n'"$MARK"' (не находка): так выглядит маска")' \
+        refuse "инъекция: падение С МЕТКОЙ в тексте"
+
+    # ЗАКОННЫЙ БЛИЗНЕЦ: то же падение БЕЗ метки. Отличие ровно в одном факте.
+    run_case plain \
+        '	t.Errorf("проба упала, и текст переносится:\nобычный текст отказа без метки")' \
+        refuse "законный близнец: падение БЕЗ метки"
+fi
+
+echo
+echo "=== prepush-classify-inject: перепись ==="
+echo "утверждений исполнено : $checks"
+echo "из них не сошлось     : $failed"
+if [ "$checks" -eq 0 ]; then
+    echo "БЕСПРЕДМЕТНО: не исполнено ни одного утверждения — это не зелёное." >&2
+    exit 2
+fi
+if [ "$failed" -gt 0 ]; then
+    echo "ОТКАЗ: категория группы выводима из её вывода либо сигналы сводятся неверно." >&2
+    exit 1
+fi
+echo "ЗЕЛЁНОЕ: вывод группы на её категорию не влияет; падение с меткой и без неё отказывает одинаково."
