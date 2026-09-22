@@ -18,7 +18,11 @@
 #   0 — все объявленные проверки исполнены, отказов нет;
 #   1 — исполнены, и есть отказ по существу (находка в дереве);
 #   3 — есть объявленная проверка, которая НЕ ИСПОЛНИЛАСЬ (прибор не запустился);
-#   4 — хук не смог установить, что уезжает (диапазон отправки не построен).
+#   4 — хук не смог установить, что уезжает (диапазон отправки не построен);
+#  64 — вызов НЕ по контракту: ни отправка git (ровно два аргумента), ни режим
+#       (ровно один флаг из словаря ниже). Отправкой этот код НЕ производится
+#       никогда: git передаёт ровно два аргумента, а они режимом не читаются
+#       (разбор — у разбора аргументов, «КОНТРАКТ GIT И РЕЖИМЫ»).
 #
 # Коды 3 и 4 — не «красное»: находок нет ни одной, потому что не смотрели. Оба
 # останавливают отправку, и это ровно та разница, ради которой хук написан.
@@ -47,11 +51,16 @@
 # `wip/`,`tmp/` по имени), и обе выходят нулём. Обход `--no-verify` по правилу
 # корпуса выдаётся явной просьбой владельца (gi-no-verify-by-request).
 #
-# РЕЖИМЫ ДЛЯ ЧЕЛОВЕКА (проверок не гоняют, отправку не трогают):
+# РЕЖИМЫ ДЛЯ ЧЕЛОВЕКА — ЕДИНСТВЕННЫМ аргументом-флагом (проверок не гоняют,
+# отправку не трогают):
 #   scripts/hooks/pre-push --boundary   — напечатать границу: что НЕ проверяется;
 #   scripts/hooks/pre-push --roster     — напечатать объявленный набор;
 #   scripts/hooks/pre-push --wiring     — сказать, провязан ли хук в этот клон;
-#   scripts/hooks/pre-push --self-test  — доказать ОПЫТОМ, что коды 0/1/3 разные.
+#   scripts/hooks/pre-push --self-test  — доказать ОПЫТОМ, что коды 0/1/3/4 разные
+#                                         и что настоящий `git push` доходит до
+#                                         проверок, а не отказывает на разборе.
+# Позванный git'ом хук получает ДВА аргумента «<удалённый> <адрес>» — это не
+# режимы, и режимом они не читаются никогда.
 set -uo pipefail
 
 ZERO="0000000000000000000000000000000000000000"
@@ -346,16 +355,61 @@ PUSH_SEEN=0
 PUSH_LIVE=0
 PUSH_TIP=""
 PUSH_TOUCHED=""
+PUSH_REMOTE=""
+PUSH_URL=""
 
-case "${1:-}" in
-    --boundary) print_boundary; exit 0 ;;
-    --roster)
+# ── АРГУМЕНТЫ: КОНТРАКТ GIT И РЕЖИМЫ РАЗЛИЧАЮТСЯ ЧИСЛОМ, А НЕ ВИДОМ ─────────
+#
+# git зовёт pre-push РОВНО с двумя аргументами — `<имя удалённого> <адрес>`
+# (при отправке по адресу без имени оба равны адресу), — а ссылки подаёт в
+# stdin. Прежняя редакция принимала первый аргумент за свой режим и на ЛЮБОЙ
+# настоящей отправке выходила «неизвестный режим «origin»» кодом 64, которого в
+# её же словаре кодов не было: каждая отправка из ветки отказывала. Самопроба
+# этого не видела, потому что звала хук БЕЗ аргументов — то есть подавала лишь
+# половину настоящего входа (stdin без argv). Теперь её сценарии получают argv
+# в форме git, а три из них идут настоящим `git push` (см. самопробу).
+#
+# ПОЧЕМУ ЧИСЛОМ, А НЕ ПРЕФИКСОМ `--`. Имя удалённого на `--` законно. Измерено
+# 2026-09-22, git 2.53.0: `git remote add -- --boundary <адрес>` принимается, и
+# `git push -- --boundary …` зовёт хук с $1=«--boundary», $#=2. Разбор по
+# префиксу принял бы такую отправку за режим «граница» и выпустил бы её НУЛЁМ
+# без единой проверки — тот самый fail-open, против которого хук написан.
+# Поэтому:
+#   два аргумента — вызов git, что бы в них ни стояло; режимом НЕ читаются;
+#   ноль           — ручной прогон основного хода (предмет — HEAD, см. ниже);
+#   один           — режим, и только из словаря;
+#   прочее         — вызов не по контракту: код 64, объявленный в шапке.
+MODE=push
+case "$#" in
+    2) PUSH_REMOTE="$1"; PUSH_URL="$2" ;;
+    0) ;;
+    1)
+        case "$1" in
+            --boundary|--roster|--wiring|--self-test) MODE="${1#--}" ;;
+            *)
+                echo "pre-push: «$1» — не режим этого хука; режимы: --boundary, --roster," >&2
+                echo "--wiring, --self-test. git зовёт хук с ДВУМЯ аргументами" >&2
+                echo "«<удалённый> <адрес>», а не с одним. Проверок не было (код 64)." >&2
+                exit 64
+                ;;
+        esac
+        ;;
+    *)
+        echo "pre-push: аргументов $# — это ни вызов git (ровно два: «<удалённый> <адрес>»)," >&2
+        echo "ни режим (ровно один флаг). Проверок не было (код 64)." >&2
+        exit 64
+        ;;
+esac
+
+case "$MODE" in
+    boundary) print_boundary; exit 0 ;;
+    roster)
         printf '%s\n' "== объявленный набор (знаменатель хука):"
         roster | nl -ba -w2 -s'. ' | sed 's/|/  ·  /g'
         printf '%s\n' "== объявлено проверок: $(roster | grep -c .)"
         exit 0
         ;;
-    --wiring)
+    wiring)
         common="$(git rev-parse --git-common-dir 2>/dev/null)" || common=""
         case "$common" in /*) ;; *) common="$ROOT/$common" ;; esac
         stub="$common/hooks/pre-push"
@@ -377,32 +431,52 @@ case "${1:-}" in
         echo "провязано: $stub → $ROOT/scripts/hooks/pre-push"
         exit 0
         ;;
-    --self-test) SELF_TEST=1 ;;
-    "") SELF_TEST=0 ;;
-    *) echo "pre-push: неизвестный режим «$1»" >&2; exit 64 ;;
+    self-test) SELF_TEST=1 ;;
+    push) SELF_TEST=0 ;;
 esac
 
 # ── САМОПРОБА: ДОКАЗАТЬ ОПЫТОМ, ЧТО КОДЫ РАЗНЫЕ ─────────────────────────────
 #
 # Инъекция, а не прочтение. Самопроба подкладывает в PATH подставные `make`,
 # `go` и `gofmt` с заданным кодом возврата и ПЕРЕЗАПУСКАЕТ ЭТОТ ЖЕ ФАЙЛ целиком,
-# со синтетическим stdin. Судится наблюдаемый код процесса, а не внутренняя
-# ветка: заголовок пробы иначе был бы шире её тела.
+# с входом в ФОРМЕ GIT: два аргумента «<удалённый> <адрес>» и строки ссылок в
+# stdin. Судится наблюдаемый код процесса, а не внутренняя ветка: заголовок
+# пробы иначе был бы шире её тела.
 #
-# Четыре прогона, и каждый роняет РОВНО своё:
+# ВХОД — ВЕСЬ, А НЕ ЕГО ПОЛОВИНА. Прежняя редакция подавала stdin без argv, и
+# потому была слепа к дефекту, остановившему КАЖДУЮ отправку: хук читал первый
+# аргумент git как свой режим и выходил 64. Поэтому сценарии A–E и G получают
+# argv git, а H–J не подделывают вход вовсе — его производит настоящий
+# `git push` в голый репозиторий во временном каталоге.
+#
+# Десять прогонов, и каждый роняет РОВНО своё:
 #   A — все приборы отвечают 0        → ожидается 0 («проверки прошли»);
 #   B — один прибор отвечает 2        → ожидается 3 («прибор не запустился»);
 #   C — один прибор отвечает 1        → ожидается 1 («находка»);
 #   D — gofmt отвечает 127 «нет команды» → ожидается 3 («прибор не запустился»);
-#   E — уезжает НЕ та вершина, что в копии → ожидается 4 («судил бы не то»).
-# Код 2 у самой пробы — отказ её ПРЕДПОСЫЛКИ (дерево тронуто), а не вердикт.
+#   E — уезжает НЕ та вершина, что в копии → ожидается 4 («судил бы не то»);
+#   F — единственный аргумент, не режим → ожидается 64 («вызов не по контракту»);
+#   G — удалённый ЗОВЁТСЯ как режим («--boundary»), прибор отвечает 1
+#       → ожидается 1: аргумент git не читается режимом (иначе — 0 без проверок);
+#   H — настоящий `git push` одного УДАЛЕНИЯ ссылки → 0 и «ПРЕДМЕТА НЕТ»;
+#   I — настоящий `git push` ветки, все приборы 0 → 0 и знаменатель «исполнено N
+#       из N», ветка доехала;
+#   J — настоящий `git push` обновления ветки, прибор отвечает 1 → 1, ветка на
+#       удалённом НЕ сдвинулась: fail-closed держится до сервера, а не до лога.
+# Код 2 у самой пробы — отказ её ПРЕДПОСЫЛКИ (дерево тронуто, стенд пробы не
+# построен), а не вердикт.
 # Свойство, ради которого проба существует: A ≠ B, A ≠ D и A ≠ E. НИ ОДНА форма
-# «проверок не было» не приходит тем же кодом, что «проверки прошли».
+# «проверок не было» не приходит тем же кодом, что «проверки прошли», — и
+# настоящая отправка доходит до проверок, а не отказывает на разборе аргументов.
 if [ "${SELF_TEST:-0}" = "1" ]; then
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/kaname-prepush-selftest.XXXXXX")" || exit 4
     trap 'rm -rf "$tmp"' EXIT
     head_sha="$(git rev-parse HEAD)"
     synth_stdin="refs/heads/probe $head_sha refs/heads/probe $ZERO"
+    # Удалённый пробы и его адрес: их же получают синтетические сценарии как
+    # argv git, и в них же отправляют сценарии H–J настоящим `git push`.
+    probe_remote="kaname-probe"
+    probe_bare="$tmp/probe.git"
 
     shim() { # shim <каталог> <имя> <код>
         # Подставной прибор пишет в stderr: его СТРОКА не должна попадать в
@@ -410,8 +484,10 @@ if [ "${SELF_TEST:-0}" = "1" ]; then
         printf '#!/bin/sh\necho "подставной %s: код %s" >&2\nexit %s\n' "$2" "$3" "$3" > "$1/$2"
         chmod +x "$1/$2"
     }
-    scenario() { # scenario <имя> <ожидаемый код> <код make> <код go> <код gofmt> [drop|other-tip]
+    scenario() { # scenario <имя> <ожидаемый код> <код make> <код go> <код gofmt> [вариант]
         local name="$1" want="$2" bin got feed="$synth_stdin"
+        # argv — в форме git: два аргумента «<удалённый> <адрес>».
+        local -a argv=("$probe_remote" "$probe_bare")
         bin="$tmp/bin-$name"; mkdir -p "$bin"
         # Драйверы сборки подставляются ВСЕГДА и никогда не выпадают в
         # настоящие: `make proto-gen-diff` начинается с `rm -rf pkg/api`, а
@@ -438,13 +514,82 @@ if [ "${SELF_TEST:-0}" = "1" ]; then
         # от нечитаемой ссылки.
         [ "${6:-}" = "other-tip" ] &&
             feed="refs/heads/probe $(git rev-parse HEAD~1) refs/heads/probe $ZERO"
+        # Сценарий G: удалённый ЗОВЁТСЯ как режим. Это настоящий вход git
+        # (измерено — см. разбор аргументов), и режимом он читаться не должен.
+        [ "${6:-}" = "remote-named-as-mode" ] && argv=(--boundary "$probe_bare")
+        # Сценарий F: единственный аргумент, которого нет в словаре режимов.
+        [ "${6:-}" = "lone-unknown-flag" ] && argv=(--no-such-mode)
         printf '%s\n' "$feed" |
-            env PATH="$bin:$PATH" bash "$ROOT/scripts/hooks/pre-push" > "$tmp/out-$name" 2>&1
+            env PATH="$bin:$PATH" bash "$ROOT/scripts/hooks/pre-push" "${argv[@]}" > "$tmp/out-$name" 2>&1
         got=$?
         if [ "$got" = "$want" ]; then
             echo "  [ОК]     сценарий $name — код $got (ожидался $want)"
         else
             echo "  [ПРОВАЛ] сценарий $name — код $got, ожидался $want"
+            sed 's/^/           | /' "$tmp/out-$name" | tail -25
+            FAILED=1
+        fi
+    }
+    # НАСТОЯЩИЙ `git push`: вход хуку производит сам git — argv, stdin и
+    # окружение, — а проба его не сочиняет. Стенд: голый репозиторий в $tmp,
+    # объекты которого берутся через alternates из этой копии (отправка не
+    # копирует историю); провязка — `core.hooksPath` на каталог пробы, а не
+    # переходник клона: тот не отслеживается git и есть не у каждого. Её
+    # pre-push передаёт хуку `"$@"` и stdin как есть — как переходник — с одним
+    # отличием: записывает код ХУКА, потому что `git push` сводит 1, 3, 4 и 64
+    # в один свой. Удалённый заводится `-c remote.<имя>.url`, а не в конфиг
+    # копии, и без fetch-спецификации: ни удалённого, ни remote-tracking
+    # ссылок в копии не остаётся (это проверяется после сценариев).
+    # Приборы здесь подставные, как у A–E: предмет H–J — путь от `git push` до
+    # набора и обратно до сервера, а не вердикт приборов о дереве.
+    push_scenario() { # push_scenario <имя> <код хука> <код make> <delete|new|update> <строка вывода>
+        local name="$1" want="$2" kind="$4" marker="$5"
+        local bin target refspec seed="" hook_rc push_rc after expect_after why=""
+        bin="$tmp/bin-$name"; mkdir -p "$bin"
+        shim "$bin" make "$3"; shim "$bin" go 0; shim "$bin" buf 0; shim "$bin" gofmt 0
+        target="refs/heads/kaname-prepush-probe-$name"
+        case "$kind" in
+            delete) seed="$head_sha"; refspec=":$target" ;;
+            new)    refspec="$push_src:$target" ;;
+            update) seed="$(git rev-parse HEAD~1)"; refspec="$push_src:$target" ;;
+        esac
+        if [ -n "$seed" ] &&
+           ! git --git-dir="$probe_bare" update-ref "$target" "$seed" 2>"$tmp/seed-$name"; then
+            echo "  [ПРОВАЛ] сценарий $name — стенд не построен: $target не заведена на удалённом"
+            sed 's/^/           | /' "$tmp/seed-$name"
+            FAILED=1
+            return
+        fi
+        rm -f "$tmp/hook-rc"
+        env PATH="$bin:$PATH" git -c core.hooksPath="$tmp/hooks" \
+            -c "remote.$probe_remote.url=$probe_bare" \
+            push --no-follow-tags "$probe_remote" "$refspec" \
+            < /dev/null > "$tmp/out-$name" 2>&1
+        push_rc=$?
+        hook_rc="$(cat "$tmp/hook-rc" 2>/dev/null)" || hook_rc=""
+        after="$(git --git-dir="$probe_bare" rev-parse -q --verify "$target" 2>/dev/null)" || after=""
+        if [ "$want" = 0 ]; then
+            if [ "$kind" = delete ]; then expect_after=""; else expect_after="$head_sha"; fi
+        else
+            expect_after="$seed"
+        fi
+        if [ -z "$hook_rc" ]; then
+            why="хук НЕ ПОЗВАН: git push вышел $push_rc, а кода хука нет"
+        elif [ "$hook_rc" != "$want" ]; then
+            why="хук вышел $hook_rc, ожидался $want"
+        elif { [ "$want" = 0 ] && [ "$push_rc" != 0 ]; } ||
+             { [ "$want" != 0 ] && [ "$push_rc" = 0 ]; }; then
+            why="хук вышел $hook_rc, а git push — $push_rc: исход хука не дошёл до отправки"
+        elif [ "$after" != "$expect_after" ]; then
+            why="$target на удалённом ${after:-нет}, ожидалось ${expect_after:-нет}"
+        elif ! grep -qF -- "$marker" "$tmp/out-$name"; then
+            why="в выводе нет строки «$marker»"
+        fi
+        if [ -z "$why" ]; then
+            echo "  [ОК]     сценарий $name — настоящий git push ($kind): хук $hook_rc, git push $push_rc,"
+            echo "           $target на удалённом: ${after:-нет}; «$marker» — напечатано"
+        else
+            echo "  [ПРОВАЛ] сценарий $name — настоящий git push ($kind): $why"
             sed 's/^/           | /' "$tmp/out-$name" | tail -25
             FAILED=1
         fi
@@ -508,12 +653,47 @@ if [ "${SELF_TEST:-0}" = "1" ]; then
     else
         echo "  [ОК]     гард текста отказов — подстановок команды в сообщениях нет"
     fi
+    # СТЕНД НАСТОЯЩЕЙ ОТПРАВКИ строится ДО сценариев: не построенный стенд —
+    # отказ предпосылки (код 2), а не провал H–J без названной причины.
+    push_src="$(git symbolic-ref -q HEAD)" || push_src="HEAD"
+    probe_objects="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/objects"
+    if [ ! -d "$probe_objects" ] || ! git init -q --bare "$probe_bare" > "$tmp/init.err" 2>&1; then
+        echo "== ПРЕДПОСЫЛКА ПРОБЫ НЕ ВЫПОЛНЕНА: стенд настоящей отправки не построен" >&2
+        echo "   (каталог объектов копии: $probe_objects). Вердикта о хуке нет ни одного." >&2
+        sed 's/^/     /' "$tmp/init.err" >&2
+        exit 2
+    fi
+    printf '%s\n' "$probe_objects" > "$probe_bare/objects/info/alternates"
+    mkdir -p "$tmp/hooks"
+    printf '#!/usr/bin/env bash\n"%s" "$@"\nrc=$?\necho "$rc" > "%s"\nexit "$rc"\n' \
+        "$ROOT/scripts/hooks/pre-push" "$tmp/hook-rc" > "$tmp/hooks/pre-push"
+    chmod +x "$tmp/hooks/pre-push"
+    # След настоящей отправки в КОПИИ: remote-tracking ссылки и удалённый в
+    # конфиге. Сверяется до и после, как след в дереве.
+    probe_trace_before="$(git for-each-ref "refs/remotes/$probe_remote" | grep -c .)/$(git config --get-all "remote.$probe_remote.url" | grep -c .)"
+    n_roster="$(roster | grep -c .)"
+
     scenario A 0 0 0 0
     scenario B 3 2 0 0
     scenario C 1 1 0 0
     scenario D 3 0 0 0 drop-gofmt
     scenario E 4 0 0 0 other-tip
+    scenario F 64 0 0 0 lone-unknown-flag
+    scenario G 1 1 0 0 remote-named-as-mode
+    push_scenario H 0 0 delete "ПРЕДМЕТА НЕТ"
+    push_scenario I 0 0 new \
+        "ЗНАМЕНАТЕЛЬ: объявлено $n_roster · исполнено $n_roster · отказов 0 · НЕ исполнено 0"
+    push_scenario J 1 1 update "ОТКАЗ: локальные проверки красные"
 
+    probe_trace_after="$(git for-each-ref "refs/remotes/$probe_remote" | grep -c .)/$(git config --get-all "remote.$probe_remote.url" | grep -c .)"
+    if [ "$probe_trace_after" != "$probe_trace_before" ]; then
+        echo "  [ПРОВАЛ] настоящая отправка ОСТАВИЛА СЛЕД в копии: ссылок refs/remotes/$probe_remote/" \
+             "и записей remote.$probe_remote.url было $probe_trace_before, стало $probe_trace_after"
+        FAILED=1
+    else
+        echo "  [ОК]     след настоящей отправки в копии: ссылок/записей удалённого" \
+             "$probe_trace_after — как было"
+    fi
     dirty_after="$(tree_touched_excluding_self)"
     if [ "$dirty_after" != "$dirty_before" ]; then
         echo "  [ПРОВАЛ] проба ОСТАВИЛА СЛЕД: тронутых отслеживаемых было" \
@@ -525,8 +705,9 @@ if [ "${SELF_TEST:-0}" = "1" ]; then
         echo "  [ОК]     след в дереве: тронутых отслеживаемых $dirty_after — как было"
     fi
     if [ "$FAILED" = 0 ]; then
-        echo "== самопроба: свойство ДОКАЗАНО — «проверки прошли» (0), «находка» (1)"
-        echo "   и «прибор не запустился» (3) приходят РАЗНЫМИ кодами."
+        echo "== самопроба: свойство ДОКАЗАНО — «проверки прошли» (0), «находка» (1),"
+        echo "   «прибор не запустился» (3), «судил бы не то» (4) и «вызов не по контракту» (64)"
+        echo "   приходят РАЗНЫМИ кодами, а настоящий git push доходит до проверок."
         exit 0
     fi
     echo "== самопроба ПРОВАЛЕНА: хук не различает исходы, ради которых написан." >&2
@@ -539,6 +720,15 @@ read_push_subject
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 echo "== pre-push kaname: локальные проверки перед отправкой ветки «$branch»"
 echo "   обойти можно только 'git push --no-verify' — второй двери у этого хука нет"
+# Адрес не печатается: в нём бывают учётные данные. Имя удалённого печатается,
+# когда оно есть: при отправке по адресу git передаёт адрес дважды.
+if [ -n "$PUSH_REMOTE" ] && [ "$PUSH_REMOTE" != "$PUSH_URL" ]; then
+    echo "   удалённый: «$PUSH_REMOTE» (адрес не печатается)"
+elif [ -n "$PUSH_REMOTE" ]; then
+    echo "   удалённый: без имени, отправка по адресу (адрес не печатается)"
+else
+    echo "   аргументов git нет — хук позван не отправкой, а руками"
+fi
 
 if [ "$PUSH_SEEN" -gt 0 ] && [ "$PUSH_LIVE" -eq 0 ]; then
     echo "== ПРЕДМЕТА НЕТ: отправка несёт только УДАЛЕНИЕ ссылок ($PUSH_SEEN шт.) —"
