@@ -77,7 +77,7 @@ func buildTokenSigning(
 	repo := kanamepg.NewSigningKeyRepo(pool)
 	keystore, err := signingkeys.New(signingkeys.Config{
 		Algorithm:   alg,
-		KeyLifetime: ts.ResolveKeyLifetime(),
+		KeyLifetime: ts.KeyLifetime,
 		// Отсрочка снятия ВЫЧИСЛЕНА из объявленных слагаемых, а не выбрана
 		// здесь: смена любого из них без пересмотра отсрочки роняет гейт.
 		RemovalGrace: tokenpolicy.KeyRemovalGrace,
