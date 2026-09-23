@@ -103,6 +103,16 @@ type Request struct {
 	Audience  []string
 	TokenType string
 	TTL       time.Duration
+	// NotAfter — граница, позже которой срок токена лечь НЕ ВПРАВЕ. Нулевое
+	// значение — «границы нет», и срок равен запрошенному.
+	//
+	// Граница — вход подписанта, а не пересчёт вызывающего в TTL: вызывающий,
+	// переведший границу в срок по СВОИМ часам, разошёлся бы с отметкой выпуска
+	// подписанта на время между двумя чтениями часов, и exp лёг бы позже границы
+	// ровно тогда, когда эти чтения разделяет смена секунды. Срок токена —
+	// меньшее из запрошенного и границы; граница, уже прошедшая к секунде
+	// выпуска, — отказ ErrExpiryRequired, а не токен нулевого срока.
+	NotAfter time.Time
 	// Confirmation — привязка. nil означает «не запрашивали», и это законно
 	// для человеческого принципала.
 	Confirmation *Confirmation
@@ -113,6 +123,11 @@ type Request struct {
 }
 
 // Token — выпущенный токен.
+//
+// IssuedAt и ExpiresAt — ровно те `iat` и `exp`, что легли в токен: в целых
+// секундах. Отданная величина с долей секунды, которой в токене нет, расходилась
+// бы с тем, что увидит проверяющий, и срок, посчитанный вызывающим по ней, был бы
+// длиннее срока самого токена.
 type Token struct {
 	Token     string
 	KID       domain.KeyID
@@ -179,6 +194,19 @@ func (s *Signer) Sign(ctx context.Context, req Request) (Token, error) {
 
 	now := s.cfg.Clock().UTC().Truncate(time.Second)
 	exp := now.Add(req.TTL)
+	if !req.NotAfter.IsZero() && exp.After(req.NotAfter) {
+		exp = req.NotAfter.UTC()
+	}
+	// Утверждения несут целые секунды; срок округляется ВНИЗ — к границе, а не
+	// за неё.
+	exp = exp.Truncate(time.Second)
+	if !exp.After(now) {
+		if req.NotAfter.IsZero() {
+			return Token{}, fmt.Errorf("%w: lifetime %s rounds down to no whole second", ErrExpiryRequired, req.TTL)
+		}
+		return Token{}, fmt.Errorf("%w: the declared bound %s leaves no whole second at issue time %s",
+			ErrExpiryRequired, req.NotAfter.UTC().Format(time.RFC3339Nano), now.Format(time.RFC3339))
+	}
 	jti := ids.NewID("tok")
 
 	claims := jwt.MapClaims{}

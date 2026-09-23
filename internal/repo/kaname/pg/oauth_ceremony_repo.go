@@ -506,7 +506,7 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 		// ПОВТОР. Отзыв семейства — следствие, неотделимое от решения: вернуть
 		// «повтор», не отозвав, значило бы объявить похищение и ничего по нему
 		// не сделать.
-		if rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
+		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
 			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
@@ -613,7 +613,7 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 	}
 	switch {
 	case !active:
-		if rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
+		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
 			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
@@ -626,33 +626,42 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 }
 
 // RevokeFamily отзывает семейство целиком ОДНОЙ транзакцией: отметка на
-// семействе и снятие всего живого, что по нему выдано.
+// семействе, снятие всего живого, что по нему выдано, и отсечка по ключу
+// семейства для места предъявления (`writeFamilyCutoffsTx`).
 //
-// Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторный отзыв
-// пустым, а не вторым. Два одновременных обнаружения повтора — обычное дело
+// Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторную отметку
+// пустой, а не второй. Два одновременных обнаружения повтора — обычное дело
 // (проигравших гонку больше одного), и второй из них не вправе ни отказать, ни
-// переписать причину первого.
-func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) error {
+// переписать причину первого. Отсечка же пишется БЕЗУСЛОВНО — и при нуле строк
+// отметки: семейство, отмеченное писателем мимо этой двери, получает её на
+// первом же отзыве дверью, а монотонная запись повтору безвредна.
+//
+// Возвращается число строк отметки: 1 — отозвано этим вызовом, 0 — уже было.
+func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) (int64, error) {
 	if familyID == "" {
-		return fmt.Errorf("Illegal argument token_family.id: required")
+		return 0, fmt.Errorf("Illegal argument token_family.id: required")
 	}
 	if err := reason.Validate(); err != nil {
-		return err
+		return 0, err
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// `live` идёт В ТОМ ЖЕ операторе, что отметка: пара держится ограничением
 	// `token_families_live_pair_ck`, и оператор, тронувший одну половину, второй
 	// попытки не получает. Именно эта колонка делает отзыв обновлением КЛЮЧА.
-	if _, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE kaname.token_families
 		   SET revoked_at = now(), revoked_reason = $2, live = false
-		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason)); err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason))
+	if err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
+	}
+	if err = writeFamilyCutoffsTx(ctx, tx, []string{familyID}, reason); err != nil {
+		return 0, err
 	}
 	// ВЫДАННОЕ СНЯЛ КАСКАД, И БОЛЬШЕ ЗДЕСЬ ДЕЛАТЬ НЕЧЕГО.
 	//
@@ -670,7 +679,52 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	// который снёс каскад. Своя отметка `deactivated_at` осталась означать
 	// СОБСТВЕННОЕ событие строки: погашение либо ротацию.
 	if err = tx.Commit(ctx); err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// writeFamilyCutoffsTx кладёт отсечку по ключу КАЖДОГО названного семейства —
+// в транзакции вызывающего, той же, что ставит отметку отзыва (задача
+// PRO-Robotech/kaname#396, K1).
+//
+// # Зачем отзыву семейства отсечка
+//
+// Токен доступа сверяют по ключам издателя, без записи семейства: место,
+// принимающее его, спрашивает только отсечку (`tokenrevocation`), а отметка
+// `token_families.revoked_at` снимает лишь выданное хранилищем. Без отсечки
+// отзыв семейства снимал бы токен обновления, а токен доступа того же семейства
+// жил бы при предъявлении до своего `exp`. Писатель отзыва, дошедший до одной
+// записи и не дошедший до второй, — контроль, исполненный наполовину и
+// выглядящий исполненным целиком; поэтому обе записи кладёт одна транзакция, и
+// писателей отзыва семейства — двое, оба через эту функцию.
+//
+// # Момент отсечки служит только уборке
+//
+// Правило отвергает токен семейства при ЛЮБОЙ отметке выпуска
+// (`tokenrevocation.FamilyKeyClaim`), и момент строки сравнения не несёт. Его
+// читает уборка отсечек: строка снимается после `revoke_before + MaxTokenTTL +
+// ClockSkew + RemovalSlack`. Момент — начало транзакции (`now()` — тот же, что у
+// `revoked_at` отметки), поэтому строка переживает всякий токен семейства,
+// выпущенный не позже `ClockSkew + RemovalSlack` после отметки; позже лечь выпуску
+// не даёт срок операции церемонии, начатой до отметки, — а начатую после отметки
+// выборка отозванного семейства отвергает.
+//
+// Строка ложится той же дверью, что отсечка субъекта (`upsertMintedCutoff`):
+// момент монотонен, причина и решивший принадлежат стоящему моменту. Решивший —
+// механизм, названный причиной отзыва.
+func writeFamilyCutoffsTx(ctx context.Context, tx pgx.Tx, familyIDs []string, reason domain.FamilyRevocationReason) error {
+	if len(familyIDs) == 0 {
+		return nil
+	}
+	var at time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&at); err != nil {
+		return wrapPgErr(err, "TokenFamily", "")
+	}
+	for _, id := range familyIDs {
+		if err := upsertMintedCutoff(ctx, tx, id, at, string(reason), mechanismDecider(string(reason))); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -750,9 +804,13 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 		return 0, nil
 	}
 
-	// Выданное снял КАСКАД: здесь, как и в `RevokeFamily`, дописывающих
-	// операторов больше нет — основание принадлежит семейству, а не копии на
-	// ребёнке.
+	// Выданное хранилищем снял КАСКАД: здесь, как и в `RevokeFamily`,
+	// дописывающих операторов больше нет — основание принадлежит семейству, а не
+	// копии на ребёнке. Месту предъявления каскад не виден — ему отсечка по
+	// ключу каждого отозванного семейства, той же транзакцией.
+	if err := writeFamilyCutoffsTx(ctx, tx, families, reason); err != nil {
+		return 0, err
+	}
 	return len(families), nil
 }
 
