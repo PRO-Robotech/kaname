@@ -55,9 +55,16 @@ package check
 //     не подстрока: `database` и `DATABASE_REF` — другое слово, `head` и
 //     `head_ref` — тоже;
 //   - звено, НЕ названное в тексте, — фильтр или индекс выражением, — может
-//     оказаться любым полем. Оно считается чтением базы, если объект слева
-//     неизвестен (результат `)`, другое неизвестное звено) или держит поле
-//     базы (baseHolders); у меток, шагов и выходов оно молчит.
+//     оказаться любым полем своего объекта. Оно считается чтением базы у
+//     ЛЮБОГО объекта, кроме закрытого перечня silentOwners — тех, у кого
+//     выбранное звено базой быть не может: корень `needs` и корень `steps`
+//     (звено выбирает итог задания или шага, а не значение; выход под ним
+//     судится своим звеном) и поле `labels` (у метки поля базы нет). Объект
+//     слева неизвестен — результат `)`, другое неизвестное звено, — тоже
+//     чтение базы. Перечень держит МОЛЧАЩИХ, а не краснеющих: объект, о
+//     котором разбор не знает (`changes`, `outputs`, `inputs`, `event`, поле
+//     формы из `fromJSON`), даёт красное, и неполнота перечня стоит красного,
+//     а не слепоты.
 //
 // Строковый литерал вне `[ ]` звеном не является: `'pull_request.base'` — то, с
 // чем сравнивают. Лексемы различаются так же, как у провайдера (lexer.ts того
@@ -66,8 +73,27 @@ package check
 // числа.
 //
 // Цена надаппроксимации — красное на имени, чьё слово `base` к базе запроса
-// отношения не имеет: задание `base`, переменная `BASE_IMAGE`. Такое имя в
-// условии переименовывается: молчание дороже.
+// отношения не имеет (задание `base`, переменная `BASE_IMAGE`), и на
+// неизвестном звене у объекта вне перечня молчащих, даже если поля базы у
+// него нет (`….requested_reviewers.*`). Такое условие переписывается
+// поимённым полем, либо объект входит в перечень со своей причиной: молчание
+// дороже.
+//
+// # YAML: ПСЕВДОНИМ РАЗРЕШАЕТСЯ ДО СУЖДЕНИЯ
+//
+// Провайдер разрешает псевдоним `*имя` в узел якоря `&имя` в ЛЮБОМ месте
+// объявления (actions/languageservices, workflow-parser yaml-object-reader.ts,
+// ветка isAlias; замер @actions/workflow-parser 0.3.61): `if: *якорь`, задание,
+// `steps` и шаг под псевдонимом исполняются так же, как записанные на месте.
+// Узел yaml.v3 хранит у псевдонима имя якоря, а не значение, и разбор,
+// читающий узел как есть, судил бы имя. Поэтому КАЖДЫЙ псевдоним документа
+// разрешается до всех четырёх осей (resolveAliases), а их число стоит в
+// переписи. Три записи провайдер не принимает — тот же замер: ключ слияния
+// `<<` (`Unexpected value '<<'`), ключ-псевдоним (`Unexpected value
+// 'undefined'`), псевдоним внутрь собственного якоря (`Expected mapping
+// end`), — и разбор на них отказывает, а не молчит. Так же отказывает ось 4
+// на `jobs`, задании, `steps`, шаге и условии, записанных формой, которой
+// провайдер не принимает.
 //
 // # ПОЧЕМУ РАЗБОР УЗЛОВ, А НЕ ПОИСК ПО ПОДСТРОКЕ
 //
@@ -86,12 +112,17 @@ package check
 // сверяет ЗАПИСЬ фильтра с объявленной, а что запись захватывает на origin —
 // замер переписью веток (шапка `on:` в `ci.yml`), то есть свойство вне дерева.
 //
-// По оси 4 граница такая — этого ось НЕ судит. Судится только `if:` заданий и
-// шагов в `.github/workflows`; `if:` составных действий (`.github/actions/**`),
-// `strategy.matrix` и `with:` вызываемого процесса не осматриваются. Не
-// распознаются две записи, в которых ни одно обращение не называет базу и не
-// может ею оказаться. ПСЕВДОНИМ: база, переложенная в `env:`, в выход задания
-// или шага под именем без слова `base`, условию видна как псевдоним. И объект
+// По оси 4 граница такая — этого ось НЕ судит, и её зелёное об этом ничего
+// не говорит. Судится только `if:` заданий и шагов в объявлениях каталога
+// `.github/workflows`. Не осматриваются: многоразовый процесс — `with:`, которым
+// задание `uses:` отдаёт базу вызываемому, и чужой процесс по `владелец/репо`;
+// составные действия — `.github/actions/**` и чужие `uses:` шага — с их `if:`;
+// тела `run:`; выражения вне `if:` — `strategy.matrix`, `continue-on-error`,
+// `with:`, `env:`, `outputs`, `runs-on`, `concurrency`, `environment`, — хотя
+// каждое из них способно дать запросу в линию другой состав или исход; и
+// данные, приходящие в условие не записью YAML. Последних два вида: база,
+// переложенная оболочкой, выходом, входом `inputs` или `fromJSON` в значение
+// под именем без слова `base` (`env.ONLY_MAIN`, `inputs.target`), — и объект
 // выше базы, потреблённый функцией ЦЕЛИКОМ
 // (`contains(toJSON(github.event.pull_request), 'main')`): звена `base` в
 // условии нет — есть объект, внутри которого она лежит.
@@ -126,18 +157,39 @@ func ReviewBaseBranches() []string {
 // ради вердикта линии было бы расширением поверхности, а не триггера.
 const reviewEvent = "pull_request"
 
-// baseHolders — объекты контекста, у которых есть ПОЛЕ базы (имя со словом
-// `base`): `github.base_ref`, `….pull_request.base`, элемент
-// `….pull_requests[N].base`, `….merge_group.base_ref`, окружение с
-// `GITHUB_BASE_REF`. Неизвестное звено у такого объекта может оказаться базой;
-// у метки, шага, выхода задания — нет. Имена в нижнем регистре: провайдер
-// регистра имён не различает.
-var baseHolders = map[string]bool{
-	"github":        true,
-	"pull_request":  true,
-	"pull_requests": true,
-	"merge_group":   true,
-	"env":           true,
+// ownerPlace — где объект перечня молчащих обязан стоять, чтобы молчать:
+// корнем выражения или полем другого объекта. Имя вне своего места — другой
+// объект (`fromJSON(…).steps` — поле произвольной формы, а не контекст шагов).
+type ownerPlace int
+
+const (
+	asContext ownerPlace = iota + 1
+	asField
+)
+
+// silentOwners — ЗАКРЫТЫЙ перечень объектов, у которых неизвестное звено
+// базой запроса оказаться не может; у всякого другого — может (шапка, «ОСЬ 4:
+// СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ»). Каждая запись несёт причину. Имена в нижнем
+// регистре: провайдер регистра имён не различает.
+var silentOwners = map[string]ownerPlace{
+	// Ключи — имена заданий из `needs:`, значение — {outputs, result}: звено
+	// выбирает ИТОГ задания, а не значение. Выход под ним судится своим
+	// звеном: `outputs` в перечень не входит.
+	"needs": asContext,
+	// Ключи — `id` шагов, значение — {outputs, outcome, conclusion}: то же.
+	"steps": asContext,
+	// Метки запроса: у метки поля id, node_id, url, name, description, color,
+	// default — поля базы нет.
+	"labels": asField,
+}
+
+// ownerIsSilent — молчит ли неизвестное звено у названного объекта.
+func ownerIsSilent(on linkOwner) bool {
+	place, ok := silentOwners[strings.ToLower(on.named)]
+	if !ok {
+		return false
+	}
+	return (place == asContext) == on.root
 }
 
 // namesBase — есть ли среди слов звена слово `base`.
@@ -168,10 +220,11 @@ func namesBase(link string) bool {
 }
 
 // linkOwner — объект, к которому применяется следующее обращение: названный
-// (имя, как записано), неизвестный (чем именно — для находки) или никакой
-// (перед этим стоял оператор, литерал, запятая).
+// (имя, как записано; root — стоит корнем выражения), неизвестный (чем именно
+// — для находки) или никакой (перед этим стоял оператор, литерал, запятая).
 type linkOwner struct {
 	named   string
+	root    bool
 	unknown string
 }
 
@@ -181,8 +234,9 @@ type bracketFrame struct {
 	at    int
 }
 
-// conditionReadsBase — читает ли условие базу запроса, и каким звеном (пусто —
-// не читает); второе — сколько звеньев прочитано, для переписи.
+// conditionReadsBase — читает ли условие базу запроса, и какими звеньями —
+// ВСЕМИ, через «; », в порядке разбора (пусто — не читает); второе — сколько
+// звеньев прочитано, для переписи.
 //
 // Разбор идёт по ЛЕКСЕМАМ провайдера и судит каждое обращение отдельно, не
 // спрашивая, что стоит слева (шапка, «ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ»).
@@ -191,14 +245,11 @@ func conditionReadsBase(expr string) (reading string, links int) {
 		owner linkOwner
 		// Точка — обращение, если перед ней имя, `]`, `)` или `*`; иначе это
 		// начало числа (lexer.ts провайдера, та же развилка).
-		access bool
-		open   []bracketFrame
+		access   bool
+		open     []bracketFrame
+		readings []string
 	)
-	found := func(desc string) {
-		if reading == "" {
-			reading = desc
-		}
-	}
+	found := func(desc string) { readings = append(readings, desc) }
 	named := func(link string) {
 		links++
 		if namesBase(link) {
@@ -210,7 +261,7 @@ func conditionReadsBase(expr string) (reading string, links int) {
 		switch {
 		case on.unknown != "":
 			found(fmt.Sprintf("неизвестное звено `%s` у %s", link, on.unknown))
-		case on.named != "" && baseHolders[strings.ToLower(on.named)]:
+		case on.named != "" && !ownerIsSilent(on):
 			found(fmt.Sprintf("неизвестное звено `%s` у `%s`", link, on.named))
 		}
 	}
@@ -281,14 +332,14 @@ func conditionReadsBase(expr string) (reading string, links int) {
 				continue
 			}
 			named(expr[i:j])
-			owner, access, i = linkOwner{named: expr[i:j]}, true, j
+			owner, access, i = linkOwner{named: expr[i:j], root: true}, true, j
 		case isDigit(c) || c == '.' || c == '-' || c == '+':
 			owner, access, i = linkOwner{}, false, scanNumber(expr, i+1)
 		default:
 			owner, access, i = linkOwner{}, false, i+1
 		}
 	}
-	return reading, links
+	return strings.Join(readings, "; "), links
 }
 
 // scanStringLiteral — литерал в одинарных кавычках (удвоенная кавычка внутри —
@@ -353,15 +404,19 @@ type ReviewTriggerCensus struct {
 	// разбор лексем ослеп, и молчание оси 4 сказано ни о чём.
 	Conditions     int
 	ConditionLinks int
+	// Aliases — псевдонимов YAML разрешено до суждения (шапка, «YAML:
+	// ПСЕВДОНИМ РАЗРЕШАЕТСЯ ДО СУЖДЕНИЯ»).
+	Aliases int
 }
 
 // String — перепись одной строкой. «Ноль находок» обязано быть отличимо от
 // «ноль прочитанного», поэтому печатаются все величины.
 func (c ReviewTriggerCensus) String() string {
 	return fmt.Sprintf("объявлений процессов %d · идут на запросе %d · из них с базами {%s} %d · "+
-		"идут по push в ветки %d · условий if: осмотрено %d · звеньев в них прочитано %d",
+		"идут по push в ветки %d · условий if: осмотрено %d · звеньев в них прочитано %d · "+
+		"псевдонимов YAML разрешено %d",
 		c.Files, c.OnReview, strings.Join(ReviewBaseBranches(), ", "), c.ReviewAtLine,
-		c.OnBranchPush, c.Conditions, c.ConditionLinks)
+		c.OnBranchPush, c.Conditions, c.ConditionLinks, c.Aliases)
 }
 
 // eventFilter — фильтр одного события в той форме, в какой он записан.
@@ -416,6 +471,11 @@ func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string,
 		return nil, "", fmt.Errorf("объявление процесса не является отображением верхнего уровня")
 	}
 	doc := root.Content[0]
+	aliases, err := resolveAliases(doc)
+	if err != nil {
+		return nil, "", err
+	}
+	census.Aliases += aliases
 
 	title := scalarOf(mappingValue(doc, "name"))
 	// Ключ `on` в YAML 1.1 — булево true; узел хранит исходную запись, поэтому
@@ -452,8 +512,68 @@ func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string,
 	}
 
 	// (4) — ЗАДАНИЕ НЕ РАЗЛИЧАЕТ БАЗУ.
-	findings = append(findings, auditBaseReadingConditions(mappingValue(doc, "jobs"), census)...)
+	fs, err := auditBaseReadingConditions(mappingValue(doc, "jobs"), census)
+	if err != nil {
+		return nil, title, err
+	}
+	findings = append(findings, fs...)
 	return findings, title, nil
+}
+
+// resolveAliases — заменяет КАЖДЫЙ псевдоним документа узлом его якоря, так
+// же, как это делает провайдер, и возвращает, сколько псевдонимов разрешено.
+//
+// Узлы якорей общие у всех псевдонимов, и каждый разрешается один раз
+// (done): псевдоним на псевдонимы не множит обход. Три записи — отказ, а не
+// молчание (шапка, «YAML: ПСЕВДОНИМ РАЗРЕШАЕТСЯ ДО СУЖДЕНИЯ»).
+func resolveAliases(doc *yaml.Node) (int, error) {
+	var (
+		count  int
+		onPath = map[*yaml.Node]bool{}
+		done   = map[*yaml.Node]bool{}
+		walk   func(n *yaml.Node) (*yaml.Node, error)
+	)
+	walk = func(n *yaml.Node) (*yaml.Node, error) {
+		if n.Kind == yaml.AliasNode {
+			if n.Alias == nil {
+				return nil, fmt.Errorf("псевдоним `*%s` без якоря (строка %d)", n.Value, n.Line)
+			}
+			count++
+			if onPath[n.Alias] {
+				return nil, fmt.Errorf("псевдоним `*%s` (строка %d) ведёт внутрь собственного якоря: "+
+					"провайдер такое объявление не принимает, а разбор не судит бесконечный узел",
+					n.Value, n.Line)
+			}
+			return walk(n.Alias)
+		}
+		if done[n] {
+			return n, nil
+		}
+		onPath[n] = true
+		for i, c := range n.Content {
+			if n.Kind == yaml.MappingNode && i%2 == 0 {
+				switch {
+				case c.Kind == yaml.AliasNode:
+					return nil, fmt.Errorf("ключ отображения записан псевдонимом `*%s` (строка %d): "+
+						"провайдер ключа-псевдонима не разрешает, и разбор не знает, какой ключ судить",
+						c.Value, c.Line)
+				case c.Kind == yaml.ScalarNode && c.Tag == "!!merge":
+					return nil, fmt.Errorf("ключ слияния `<<` (строка %d): провайдер слияния не "+
+						"применяет и объявление не принимает, а разбор не знает, чьи ключи судить", c.Line)
+				}
+			}
+			r, err := walk(c)
+			if err != nil {
+				return nil, err
+			}
+			n.Content[i] = r
+		}
+		delete(onPath, n)
+		done[n] = true
+		return n, nil
+	}
+	_, err := walk(doc)
+	return count, err
 }
 
 // eventsOf — события триггера во ВСЕХ законных записях.
@@ -591,43 +711,68 @@ func auditPushFilter(f eventFilter) ([]string, bool) {
 }
 
 // auditBaseReadingConditions — ось 4: условия `if:` заданий и их шагов.
-func auditBaseReadingConditions(jobs *yaml.Node, census *ReviewTriggerCensus) []string {
-	if jobs == nil || jobs.Kind != yaml.MappingNode {
-		return nil
+//
+// Псевдонимы к этому моменту разрешены (resolveAliases), и узел, записанный
+// формой, которой провайдер не принимает, — отказ, а не пропуск: пропуск
+// молчал бы о задании, которое провайдер исполнит, если форма ему известна
+// лучше, чем разбору.
+func auditBaseReadingConditions(jobs *yaml.Node, census *ReviewTriggerCensus) ([]string, error) {
+	if jobs == nil {
+		return nil, nil
+	}
+	if jobs.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("`jobs:` не отображение (строка %d): ось 4 не знает, где задания", jobs.Line)
 	}
 	var findings []string
-	judge := func(where, cond string) {
+	judge := func(where string, cond *yaml.Node) error {
+		if cond.Kind != yaml.ScalarNode {
+			return fmt.Errorf("%s: условие `if:` не скаляр (строка %d) — провайдер такого не "+
+				"принимает, а разбор не знает, что судить", where, cond.Line)
+		}
 		census.Conditions++
-		reading, links := conditionReadsBase(cond)
+		reading, links := conditionReadsBase(cond.Value)
 		census.ConditionLinks += links
 		if reading != "" {
 			findings = append(findings, fmt.Sprintf("%s: условие %q читает БАЗУ запроса (%s) — "+
 				"на запросе в линию состав заданий другой, чем на запросе в ствол, при том же "+
-				"триггере", where, strings.TrimSpace(cond), reading))
+				"триггере", where, strings.TrimSpace(cond.Value), reading))
 		}
+		return nil
 	}
 	for i := 0; i+1 < len(jobs.Content); i += 2 {
 		jobName, job := jobs.Content[i].Value, jobs.Content[i+1]
+		where := fmt.Sprintf("задание %s", jobName)
 		if job.Kind != yaml.MappingNode {
-			continue
+			return nil, fmt.Errorf("%s не отображение (строка %d): ось 4 не знает, где его условие",
+				where, job.Line)
 		}
 		if cond := mappingValue(job, "if"); cond != nil {
-			judge(fmt.Sprintf("задание %s", jobName), cond.Value)
+			if err := judge(where, cond); err != nil {
+				return nil, err
+			}
 		}
 		steps := mappingValue(job, "steps")
-		if steps == nil || steps.Kind != yaml.SequenceNode {
-			continue
+		if steps == nil {
+			continue // задание `uses:` шагов не несёт
+		}
+		if steps.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("%s: `steps` не последовательность (строка %d): ось 4 не знает, "+
+				"где условия шагов", where, steps.Line)
 		}
 		for si, st := range steps.Content {
+			stepWhere := fmt.Sprintf("%s, шаг %d", where, si+1)
 			if st.Kind != yaml.MappingNode {
-				continue
+				return nil, fmt.Errorf("%s не отображение (строка %d): ось 4 не знает, где его условие",
+					stepWhere, st.Line)
 			}
 			if cond := mappingValue(st, "if"); cond != nil {
-				judge(fmt.Sprintf("задание %s, шаг %d", jobName, si+1), cond.Value)
+				if err := judge(stepWhere, cond); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
-	return findings
+	return findings, nil
 }
 
 // mappingValue — значение ключа отображения, либо nil.

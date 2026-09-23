@@ -320,6 +320,25 @@ func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
 			"неизвестное звено `*` у результата группы или вызова"},
 		{"индекс за индексом выражением", "github.event[matrix.a][matrix.b].ref == 'main'",
 			"неизвестное звено `[matrix.b]` у неизвестного звена"},
+		// ── круг 4: перечень держит МОЛЧАЩИХ, всякий другой объект краснеет ──
+		{"правка запроса поимённо", "github.event.changes.base.ref.from == 'main'", "звено `base`"},
+		{"фильтр у правки запроса", "contains(github.event.changes.*.ref.from, 'main')",
+			"неизвестное звено `*` у `changes`"},
+		{"индекс выражением у правки запроса", "github.event.changes[matrix.k].ref.from == 'main'",
+			"неизвестное звено `[matrix.k]` у `changes`"},
+		{"фильтр у выходов задания", "contains(needs.prep.outputs.*, 'main')",
+			"неизвестное звено `*` у `outputs`"},
+		{"индекс выражением у выходов задания", "needs.prep.outputs[matrix.k] == 'main'",
+			"неизвестное звено `[matrix.k]` у `outputs`"},
+		{"фильтр у выходов шага", "contains(steps.prep.outputs.*, 'main')", "неизвестное звено `*` у `outputs`"},
+		{"фильтр у события", "contains(github.event.*, 'refs/heads/main')", "неизвестное звено `*` у `event`"},
+		{"фильтр у входов", "contains(inputs.*, 'main')", "неизвестное звено `*` у `inputs`"},
+		{"объект, неизвестный разбору", "fromJSON(needs.prep.outputs.event).pr[matrix.k].ref == 'main'",
+			"неизвестное звено `[matrix.k]` у `pr`"},
+		{"`steps` полем, а не корнем", "contains(fromJSON(needs.prep.outputs.cfg).steps.*, 'main')",
+			"неизвестное звено `*` у `steps`"},
+		{"итог задания, затем неизвестные звенья", "needs[matrix.job][matrix.key][matrix.out] == 'main'",
+			"неизвестное звено `[matrix.key]` у неизвестного звена"},
 	}
 	for _, tc := range red {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,6 +402,12 @@ func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
 			"близнец `baseRef`"},
 		{"условие по событию", "github.event_name == 'pull_request'",
 			"событие одинаково у запроса в ствол и в линию"},
+		{"фильтр по итогам заданий", "contains(needs.*.result, 'failure')",
+			"корень `needs`: звено выбирает итог задания, а не значение"},
+		{"индекс выражением по заданиям", "needs[matrix.job].result == 'success'",
+			"близнец итога задания под неизвестным звеном"},
+		{"фильтр по итогам шагов", "contains(steps.*.outcome, 'failure')",
+			"корень `steps`: близнец `steps` полем"},
 	} {
 		t.Run("близнец: "+tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -396,6 +421,181 @@ func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
 		require.Empty(t, withConditionStep(t,
 			"(github.event.pull_request || github.event.merge_group).head.ref == 'lane'"))
 	})
+}
+
+// withJobs — копия ci.yml, где перед `trunkverdict` вставлены задания как
+// есть; третье — отказ разбора, если он был (для половины «отказывает»).
+func withJobs(t *testing.T, jobs string) ([]string, check.ReviewTriggerCensus, error) {
+	t.Helper()
+	corpus := trunkCorpusSource(t)
+	raw, ok := corpus[reviewInjectRel]
+	require.Truef(t, ok, "инъекция беспредметна: %s не прочитан", reviewInjectRel)
+	corpus[reviewInjectRel] = injectOnce(t, raw, "\n  trunkverdict:\n", "\n"+jobs+"  trunkverdict:\n")
+	return check.AuditReviewTriggers(corpus)
+}
+
+// aliasedCondJob — задание, чьё условие (или условие его шага) записано
+// псевдонимом `*onlymain` на якорь в `env:` того же задания. Меняется один
+// факт — текст под якорем.
+func aliasedCondJob(anchored string, onStep bool) string {
+	head := "  onlymain:\n    runs-on: ubuntu-latest\n    env:\n      ONLY_MAIN: &onlymain " + anchored + "\n"
+	if onStep {
+		return head + "    steps:\n      - if: *onlymain\n        run: echo ok\n"
+	}
+	return head + "    if: *onlymain\n    steps:\n      - run: echo ok\n"
+}
+
+// TestReviewTriggerGateResolvesYAMLAliases — псевдоним YAML разрешается ДО
+// суждения, у всех узлов, которые судит ось 4, и у фильтров осей 1–3.
+//
+// Круг 4: `if: *onlymain` на якорь в `env:` зеленел — узел псевдонима хранит
+// имя якоря, и судилось имя; задание, `steps` и шаг под псевдонимом
+// пропускались вовсе и в перепись не попадали. Провайдер все эти записи
+// исполняет (@actions/workflow-parser 0.3.61, замер: `job.if = success() &&
+// (github.base_ref == 'main')`). Якорь стоит в блочной записи `env:`: запись
+// `{ONLY_MAIN: &onlymain ${{ … }}}` в строку не разбирается ни провайдером
+// (`Unexpected flow-map-start`), ни yaml.v3.
+func TestReviewTriggerGateResolvesYAMLAliases(t *testing.T) {
+	t.Parallel()
+	_, control, err := check.AuditReviewTriggers(trunkCorpusSource(t))
+	require.NoError(t, err)
+	require.Zero(t, control.Aliases, "в дереве псевдонимов нет — счёт ниже меряется от нуля")
+
+	const readsBase = "${{ github.base_ref == 'main' }}"
+	const readsHead = "${{ github.head_ref == 'lane' }}"
+
+	for _, tc := range []struct {
+		name   string
+		onStep bool
+		where  string
+	}{
+		{"условие задания псевдонимом", false, "задание onlymain:"},
+		{"условие шага псевдонимом", true, "задание onlymain, шаг 1:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, census, err := withJobs(t, aliasedCondJob(readsBase, tc.onStep))
+			require.NoError(t, err)
+			require.Lenf(t, got, 1, "условие под псевдонимом читает базу, а гейт молчит")
+			require.Contains(t, got[0], tc.where)
+			require.Contains(t, got[0], "звено `base_ref`")
+			require.Equal(t, control.Aliases+1, census.Aliases, "перепись обязана назвать разрешённый псевдоним")
+		})
+		t.Run("близнец: "+tc.name+", под якорем голова", func(t *testing.T) {
+			t.Parallel()
+			got, census, err := withJobs(t, aliasedCondJob(readsHead, tc.onStep))
+			require.NoError(t, err)
+			require.Empty(t, got, "условие под псевдонимом базу не читает")
+			require.Equal(t, control.Conditions+1, census.Conditions, "условие под псевдонимом не осмотрено")
+		})
+	}
+
+	// Задание, `steps` и шаг под псевдонимом: вторая находка — у копии. Без
+	// разрешения копия пропускалась, и находка была бы одна.
+	for _, tc := range []struct {
+		name, jobs string
+		where      []string
+	}{
+		{"задание псевдонимом",
+			"  onlymain: &job\n    runs-on: ubuntu-latest\n    if: COND\n    steps:\n      - run: echo ok\n" +
+				"  onlymaincopy: *job\n",
+			[]string{"задание onlymain:", "задание onlymaincopy:"}},
+		{"steps псевдонимом",
+			"  onlymain:\n    runs-on: ubuntu-latest\n    steps: &steps\n      - if: COND\n        run: echo ok\n" +
+				"  onlymaincopy:\n    runs-on: ubuntu-latest\n    steps: *steps\n",
+			[]string{"задание onlymain, шаг 1:", "задание onlymaincopy, шаг 1:"}},
+		{"шаг псевдонимом",
+			"  onlymain:\n    runs-on: ubuntu-latest\n    steps:\n      - &step\n        if: COND\n        run: echo ok\n" +
+				"  onlymaincopy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo first\n      - *step\n",
+			[]string{"задание onlymain, шаг 1:", "задание onlymaincopy, шаг 2:"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, census, err := withJobs(t, strings.ReplaceAll(tc.jobs, "COND", readsBase))
+			require.NoError(t, err)
+			require.Lenf(t, got, len(tc.where), "копия под псевдонимом не судится: %v", got)
+			for i, w := range tc.where {
+				require.Contains(t, got[i], w)
+			}
+			require.Equal(t, control.Aliases+1, census.Aliases)
+		})
+		t.Run("близнец: "+tc.name+", условие по голове", func(t *testing.T) {
+			t.Parallel()
+			got, census, err := withJobs(t, strings.ReplaceAll(tc.jobs, "COND", readsHead))
+			require.NoError(t, err)
+			require.Empty(t, got)
+			require.Equal(t, control.Conditions+2, census.Conditions,
+				"условие копии под псевдонимом обязано попасть в перепись")
+		})
+	}
+
+	// Оси 1–3: фильтр баз, чей элемент — псевдоним на ветку ствола из `push`.
+	// Прочитанный по имени якоря, он дал бы «лишние {`trunk`}».
+	aliasedBases := func(t *testing.T, review string) ([]string, check.ReviewTriggerCensus) {
+		t.Helper()
+		return reviewAudit(t, func(raw string) string {
+			raw = injectOnce(t, raw, pushBlock, "  push:\n    branches: [&trunk main]\n")
+			return injectOnce(t, raw, reviewBlock, review)
+		})
+	}
+	t.Run("база запроса псевдонимом, линия снята", func(t *testing.T) {
+		t.Parallel()
+		got, census := aliasedBases(t, "  pull_request:\n    branches:\n      - *trunk\n")
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
+		require.NotContains(t, got[0], "лишние", "псевдоним прочитан по имени якоря, а не по значению")
+		require.Equal(t, control.Aliases+1, census.Aliases)
+	})
+	t.Run("близнец: база запроса псевдонимом, линия на месте", func(t *testing.T) {
+		t.Parallel()
+		got, census := aliasedBases(t, "  pull_request:\n    branches:\n      - *trunk\n      - '[0-9]+'\n")
+		require.Empty(t, got)
+		require.Equal(t, census.OnReview, census.ReviewAtLine)
+	})
+}
+
+// TestReviewTriggerGateRefusesAYAMLFormTheProviderRejects — запись, которой
+// провайдер не принимает, — ОТКАЗ разбора, а не молчание и не пропуск.
+//
+// Каждая форма сверена с @actions/workflow-parser 0.3.61 — ровно этими
+// заданиями: ключ слияния (`Unexpected value '<<'`), ключ-псевдоним
+// (`Unexpected value 'undefined'`), псевдоним внутрь собственного якоря
+// (`Expected mapping end`), `if:` отображением (`A mapping was not
+// expected`), задание, `steps` и шаг скаляром (`Unexpected value 'echo'`);
+// то же задание без дефекта — ноль ошибок. Близнец отказа — вся
+// TestReviewTriggerGateResolvesYAMLAliases: законный псевдоним вердикт даёт.
+func TestReviewTriggerGateRefusesAYAMLFormTheProviderRejects(t *testing.T) {
+	t.Parallel()
+	const job = "  onlymain: &job\n    runs-on: ubuntu-latest\n    if: ${{ github.head_ref == 'lane' }}\n" +
+		"    steps:\n      - run: echo ok\n"
+	for _, tc := range []struct {
+		name, jobs, why string
+	}{
+		{"ключ слияния", job + "  onlymaincopy:\n    <<: *job\n", "ключ слияния `<<`"},
+		{"ключ-псевдоним",
+			"  onlymain:\n    runs-on: ubuntu-latest\n    env:\n      K: &ifkey if\n" +
+				"    *ifkey : ${{ github.base_ref == 'main' }}\n    steps:\n      - run: echo ok\n",
+			"ключ отображения записан псевдонимом `*ifkey`"},
+		{"псевдоним внутрь собственного якоря",
+			"  onlymain: &job\n    runs-on: ubuntu-latest\n    services: *job\n    steps:\n      - run: echo ok\n",
+			"ведёт внутрь собственного якоря"},
+		{"условие отображением",
+			"  onlymain:\n    runs-on: ubuntu-latest\n    if: {base: main}\n    steps:\n      - run: echo ok\n",
+			"задание onlymain: условие `if:` не скаляр"},
+		{"задание скаляром", "  onlymain: echo\n", "задание onlymain не отображение"},
+		{"steps скаляром", "  onlymain:\n    runs-on: ubuntu-latest\n    steps: echo\n",
+			"задание onlymain: `steps` не последовательность"},
+		{"шаг скаляром", "  onlymain:\n    runs-on: ubuntu-latest\n    steps:\n      - echo\n",
+			"задание onlymain, шаг 1 не отображение"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := withJobs(t, tc.jobs)
+			require.Errorf(t, err, "форма, которой провайдер не принимает, прошла разбор молча")
+			require.Contains(t, err.Error(), reviewInjectRel)
+			require.Contains(t, err.Error(), tc.why)
+		})
+	}
 }
 
 // TestReviewTriggerGateKnowsEveryLawfulEventForm — распознаватель обязан знать
