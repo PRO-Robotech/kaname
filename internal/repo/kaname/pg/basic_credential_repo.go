@@ -109,7 +109,7 @@ func NewBasicCredentialRepo(pool *pgxpool.Pool, callTimeout time.Duration) (*Bas
 // непредставимым by construction; сверх того интеграционная проба сличает обе
 // полосы на каждом состоянии строки — гейт на случай, если склейку разберут.
 // Склеивается и источник строки вместе с отсечкой владельца
-// ([userCredentialSource]), и решение по ней ([ownerCutoffForbids]).
+// ([userBasicRowSource]), и решение по ней ([ownerCutoffForbids]).
 //
 // Предикатов ЗДЕСЬ ДВА — по одному на носителя, — поэтому и разъезжаются они
 // порознь, и сверка одного носителя о втором не утверждает ничего. Проба
@@ -135,13 +135,13 @@ const liveSACredentialPredicate = `
 // Источник строки удостоверения ЛИЧНОСТИ — вместе с владельцем и его отсечкой
 // отзыва-всех. Объявлен один раз на обе полосы: отсечка, присоединённая только
 // к одной из них, разъехалась бы с другой молча.
-const userCredentialSource = `
+const userBasicRowSource = `
   FROM user_oauth_clients c
   JOIN users u ON u.id = c.user_id
   LEFT JOIN user_token_revocations r ON r.user_id = u.id`
 
 // Источник строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ.
-const saCredentialSource = `
+const saBasicRowSource = `
   FROM service_account_oauth_clients c
   JOIN service_accounts s ON s.id = c.sva_id`
 
@@ -153,7 +153,7 @@ const saCredentialSource = `
 // этом файле не появляется ни в каком виде и хранению не подлежит by construction.
 const resolveUserCredentialSQL = `
 SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name, c.created_at, r.revoke_before` +
-	userCredentialSource + `
+	userBasicRowSource + `
  WHERE c.id = $1` + liveUserCredentialPredicate
 
 // Резолв строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ. На месте отсечки — NULL:
@@ -161,7 +161,7 @@ SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name, c.created_at, r.
 // То же: имя колонки в тексте запроса, не значение.
 const resolveSACredentialSQL = `
 SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::timestamptz` +
-	saCredentialSource + `
+	saBasicRowSource + `
  WHERE c.id = $1` + liveSACredentialPredicate
 
 // ЖИВОСТЬ, СПРОШЕННАЯ ПО ИДЕНТИФИКАТОРУ. Хеш не читается вовсе: спрашивающий
@@ -170,12 +170,12 @@ SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::time
 // что нужно решению об отсечке: момент выдачи и сама отсечка.
 const liveUserCredentialSQL = `
 SELECT c.created_at, r.revoke_before` +
-	userCredentialSource + `
+	userBasicRowSource + `
  WHERE c.id = $1` + liveUserCredentialPredicate
 
 const liveSACredentialSQL = `
 SELECT c.created_at, NULL::timestamptz` +
-	saCredentialSource + `
+	saBasicRowSource + `
  WHERE c.id = $1` + liveSACredentialPredicate
 
 // ownerCutoffForbids — запрещает ли отсечка отзыва-всех владельца
