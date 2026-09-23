@@ -132,6 +132,11 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 		ID:             domain.UserOAuthClientID(ourUserClientID),
 		UserID:         domain.UserID(ownerUser),
 		OAuthClientID:  domain.OAuthClientID(mirrorUser),
+		// Момент выдачи ключа — НЕНУЛЕВОЙ и отличный от часов службы: это якорь,
+		// по которому отсечка отзыва-всех судит ключ. На нулевом значении
+		// «якорь потерян» и «якорь равен нулю» неотличимы, и сверка принципалов
+		// ниже была бы зелена на полосе, якоря не несущей.
+		CreatedAt: fixed.Add(-72 * time.Hour),
 	}
 	user := domain.User{
 		ID:           domain.UserID(ownerUser),
@@ -228,8 +233,23 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 			// Принципал, разрешённый двумя путями, — тот же: состав может
 			// совпасть у путей, разрешивших РАЗНЫХ принципалов, если оба
 			// собраны из одной строки.
-			require.Equal(t, legacyPrincipal.Kind, oursPrincipal.Kind, "путь %s: вид принципала разошёлся", tc.kind)
-			require.Equal(t, legacyPrincipal.UserID, oursPrincipal.UserID, "путь %s: принципал разошёлся", tc.kind)
+			//
+			// Сверяется ЦЕЛИКОМ, а не выборкой полей. Принципал — вход правил,
+			// которые вызывающий применяет ПОСЛЕ сборки состава (отсечка
+			// отзыва-всех судит по нему момент выдачи ключа), и поле, сверенное
+			// выборкой, — это поле, которое одна полоса может потерять молча:
+			// составы совпадут, вид и владелец совпадут, а правило на одной из
+			// полос не будет иметь входа.
+			require.Equal(t, legacyPrincipal, oursPrincipal, "путь %s: разрешённый принципал разошёлся", tc.kind)
+			if tc.kind == domain.AssertionClientUser {
+				// Положительный контроль сверки: у ключа пользователя якорь
+				// ЕСТЬ. Равенство двух пустых якорей зелено и не утверждает
+				// ничего.
+				require.NotNil(t, oursPrincipal.StandingCredentialIssuedAt,
+					"путь %s: принципал ключа пользователя обязан нести момент выдачи ключа", tc.kind)
+				require.True(t, oursPrincipal.StandingCredentialIssuedAt.Equal(uoc.CreatedAt),
+					"путь %s: момент выдачи ключа — это момент строки ключа", tc.kind)
+			}
 		})
 	}
 }

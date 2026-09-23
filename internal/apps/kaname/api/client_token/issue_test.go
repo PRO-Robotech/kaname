@@ -72,7 +72,19 @@ type stubClaims struct {
 	set  map[string]any
 	err  error
 	seen service.TokenHookContext
+	// keyIssuedAt — момент выдачи ключа пользователя, который настоящее
+	// объявление состава берёт из строки ключа. Незаданный — умолчание
+	// фикстуры, а не «якоря нет»: настоящее объявление якорь у ключа
+	// пользователя отдаёт ВСЕГДА, и дублёр, его не отдающий, был бы
+	// снисходительнее продукта ровно в том, что судит отсечка.
+	keyIssuedAt time.Time
+	// dropAnchor — вход ОТРИЦАТЕЛЬНОГО кейса: принципал-человек без якоря.
+	dropAnchor bool
 }
+
+// defaultKeyIssuedAt — момент выдачи ключа фикстуры по умолчанию: в прошлом
+// относительно часов выдачи.
+var defaultKeyIssuedAt = now.Add(-24 * time.Hour)
 
 func (s *stubClaims) ClaimsForAssertionClient(_ context.Context, c domain.AssertionClient, hookCtx service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error) {
 	s.seen = hookCtx
@@ -92,7 +104,15 @@ func (s *stubClaims) ClaimsForAssertionClient(_ context.Context, c domain.Assert
 	case domain.AssertionClientServiceAccount:
 		return out, service.ResolvedPrincipal{Kind: service.PrincipalServiceAccount}, nil
 	case domain.AssertionClientUser:
-		return out, service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: c.OwnerID}, nil
+		p := service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: c.OwnerID}
+		if !s.dropAnchor {
+			issued := s.keyIssuedAt
+			if issued.IsZero() {
+				issued = defaultKeyIssuedAt
+			}
+			p.StandingCredentialIssuedAt = &issued
+		}
+		return out, p, nil
 	default:
 		// Словарь видов ЗАКРЫТ: «прочее» не является корзиной приёма.
 		return nil, service.ResolvedPrincipal{}, fmt.Errorf("stub claims: unknown assertion client kind %q", c.Kind)
@@ -134,7 +154,31 @@ func ofKind(kind domain.AssertionClientKind) func(*domain.AssertionClient) {
 	}
 }
 
+// stubCutoffs — отсечки отзыва-всех. Пустое — «отсечек нет», а не «не
+// спрашивали»: обращения считаются, и проба, утверждающая «для машины не
+// читается», видит это прямо.
+type stubCutoffs struct {
+	at    map[string]time.Time
+	err   error
+	asked []string
+}
+
+func (s *stubCutoffs) UserRevokedBefore(_ context.Context, userID string) (time.Time, bool, error) {
+	s.asked = append(s.asked, userID)
+	if s.err != nil {
+		return time.Time{}, false, s.err
+	}
+	t, ok := s.at[userID]
+	return t, ok, nil
+}
+
 func newUseCase(t *testing.T, mutate ...func(*client_token.Config)) (*client_token.UseCase, *stubClaims) {
+	t.Helper()
+	uc, claims, _ := newUseCaseWithCutoffs(t, mutate...)
+	return uc, claims
+}
+
+func newUseCaseWithCutoffs(t *testing.T, mutate ...func(*client_token.Config)) (*client_token.UseCase, *stubClaims, *stubCutoffs) {
 	t.Helper()
 	cfg := client_token.Config{
 		AllowedAudiences: []string{audResource, audRegistry},
@@ -146,9 +190,10 @@ func newUseCase(t *testing.T, mutate ...func(*client_token.Config)) (*client_tok
 		m(&cfg)
 	}
 	claims := &stubClaims{}
-	uc, err := client_token.New(cfg, newSigner(t), claims)
+	cutoffs := &stubCutoffs{at: map[string]time.Time{}}
+	uc, err := client_token.New(cfg, newSigner(t), claims, cutoffs)
 	require.NoError(t, err)
-	return uc, claims
+	return uc, claims, cutoffs
 }
 
 func client(mutate ...func(*domain.AssertionClient)) domain.AssertionClient {
@@ -442,13 +487,20 @@ func TestUseCaseRefusesToBuildOnDegenerateConfiguration(t *testing.T) {
 		cfg := full
 		cfg.AllowedAudiences = append([]string(nil), full.AllowedAudiences...)
 		brk(&cfg)
-		_, err := client_token.New(cfg, newSigner(t), &stubClaims{})
+		_, err := client_token.New(cfg, newSigner(t), &stubClaims{}, &stubCutoffs{})
 		require.Error(t, err, "вырожденный вход %q обязан отвергнуть построение", name)
 	}
 
+	// Неподанный читатель отсечки — отказ ПОСТРОЕНИЯ, а не выдача без неё:
+	// «читатель не провязан» и «отсечек нет» выглядят одинаково ровно до того
+	// дня, когда человека выводят отовсюду.
+	_, err := client_token.New(full, newSigner(t), &stubClaims{}, nil)
+	require.Error(t, err, "выдача без читателя отсечки обязана отвергнуть построение")
+	require.Contains(t, err.Error(), "revoke-all cutoff")
+
 	// Положительный контроль: полная настройка строится, и запрос БЕЗ адресата
 	// проходит умолчанием — то есть умолчание исполнимо, а не только объявлено.
-	uc, err := client_token.New(full, newSigner(t), &stubClaims{})
+	uc, err := client_token.New(full, newSigner(t), &stubClaims{}, &stubCutoffs{})
 	require.NoError(t, err)
 	_, outcome, err := uc.Issue(context.Background(), client_token.Input{Client: client()})
 	require.NoError(t, err)

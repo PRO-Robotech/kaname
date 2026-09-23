@@ -209,9 +209,9 @@ spec:
             summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
 
         - alert: KanameClientTokenIssuanceBroken
-          # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+          # Отказы НАШЕЙ стороны: реестр, склад однократности, склад отсечек отзыва, подписант.
           expr: |
-            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|revocation-check-failed|issuance-failed"}[10m])) > 0
           for: 5m
           annotations:
             summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"

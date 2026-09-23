@@ -169,7 +169,7 @@ func alertRenders(t *testing.T) []alertRender {
 	return []alertRender{
 		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
 		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
-		{name: "values.prod.yaml+own", chain: prod, sets: []string{identityPostureSet + "=own"}, posture: "own"},
+		{name: "values.prod.yaml+own", chain: prod, sets: ownPostureOverlay, posture: "own"},
 		{name: "values.prod.yaml+external", chain: prod, sets: []string{identityPostureSet + "=external"}, posture: "external"},
 	}
 }

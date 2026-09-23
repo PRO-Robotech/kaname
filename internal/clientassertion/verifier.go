@@ -141,6 +141,18 @@ const (
 	OutcomeClientExpired Outcome = "client-expired"
 	// OutcomeOwnerNotActive — владелец клиента не в состоянии ACTIVE.
 	OutcomeOwnerNotActive Outcome = "owner-not-active"
+	// OutcomeOwnerRevoked — ключ человека выдан не позже записанной отсечки
+	// отзыва-всех его владельца — любой, каким бы действием, выводящим
+	// человека отовсюду, она ни была записана. Отдельный счётчик от «владелец
+	// не активен»:
+	// человек, вышедший отовсюду, остаётся активным, и слитые в один счётчик
+	// эти события неотличимы для того, кто разбирает отказы.
+	OutcomeOwnerRevoked Outcome = "owner-revoked"
+	// OutcomeRevocationCheckFailed — отсечку отзыва-всех владельца спросить не
+	// удалось. Отказ НАШЕЙ стороны, а не предъявителя: слитый с «выпуск не
+	// состоялся» он прятал бы недоступность хранилища отсечек среди сбоев
+	// подписанта.
+	OutcomeRevocationCheckFailed Outcome = "revocation-check-failed"
 	// OutcomeIssuanceFailed — аутентификация прошла, выпуск не состоялся.
 	OutcomeIssuanceFailed Outcome = "issuance-failed"
 )
@@ -185,6 +197,8 @@ func Outcomes() []Outcome {
 		OutcomeAudienceNotAllowed,
 		OutcomeClientExpired,
 		OutcomeOwnerNotActive,
+		OutcomeOwnerRevoked,
+		OutcomeRevocationCheckFailed,
 		OutcomeIssuanceFailed,
 	}
 }
