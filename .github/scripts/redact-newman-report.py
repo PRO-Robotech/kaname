@@ -68,9 +68,10 @@
 близнец рядом (идентификатор, адрес, текст утверждения обязаны выжить), ось
 ОДНОГО КРИТЕРИЯ (всё, что проверка выхода назовёт удостоверением, срез срезает;
 срез отключён — проверка отказывает), оси механики среза (два промежутка и
-перекрытие форм в одной строке; ключ PEM и стандартный base64; тройка,
-заслонённая короткой; один проход до чистого выхода) — они судят отсутствие
-любого куска секрета, а не чистый остаток; пустой обход обязан дать отказ.
+перекрытие форм в одной строке; ключ PEM шести видов заголовка и стандартный
+base64; тройка, заслонённая короткой; один проход до чистого выхода) — они
+судят отсутствие любого куска секрета, а не чистый остаток; пустой обход
+обязан дать отказ.
 """
 
 from __future__ import annotations
@@ -96,6 +97,9 @@ JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]*
 # Цена названа: срезано всё от заголовка до конца строки или файла. Замер по 50
 # JSON newman дерева: такой заголовок стоит один раз — литералом в скрипте
 # коллекции `docker-lane-credential-kind`, и срезается строка этого литерала.
+# Приставка перед PRIVATE (RSA, EC, ENCRYPTED, OPENSSH, PGP) и хвост после KEY
+# (` BLOCK` у PGP) держатся осью `_self_test_pem_headers`: без неё сужение до
+# PKCS8 оставляло самопробу зелёной, а кусок тела уходил наружу.
 PEM_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY[A-Z ]*-----.*?"
                     r"(?:-----END [A-Z ]*PRIVATE KEY[A-Z ]*-----|\Z)", re.DOTALL)
 BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")
@@ -1036,6 +1040,128 @@ def _self_test_pem_and_std_base64() -> None:
            scrub_text(legit).text == legit)
 
 
+def _crc24(data: bytes) -> int:
+    """Контрольная сумма armor OpenPGP (RFC 4880, 6.1) — строка `=XXXX` блока."""
+    crc = 0xB704CE
+    for byte in data:
+        crc ^= byte << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    return crc & 0xFFFFFF
+
+
+def _self_test_pem_headers() -> None:
+    """ОСЬ ЗАГОЛОВКОВ PEM: у каждого вида приватного ключа есть свидетель.
+
+    Ось выше держит только PKCS8 `BEGIN PRIVATE KEY`, поэтому сужение заголовка
+    до него и снятие хвоста после KEY давали зелёную самопробу (102/0), а у
+    ключа OpenSSH ed25519 наружу уходил кусок тела — последняя строка короче
+    порога критерия. Формы замерены на ключах openssl 3.5.5, OpenSSH 10.2 и
+    GnuPG 2.4.8: RSA PKCS1 — тело 1588 знаков по 64; EC P-256 — 164;
+    ENCRYPTED PKCS8 (EC внутри) — 332; OPENSSH ed25519 без комментария — 312
+    по 70; PGP ed25519 — 348 по 64, пустая строка после заголовка и строка
+    контрольной суммы. Структура настоящая, ключевые байты — засеянные. У EC,
+    ENCRYPTED, OPENSSH и PGP последняя строка тела короче сорока, то есть
+    ниже порога критерия по построению, а не по жребию засева.
+
+    Судится то же, что у PKCS8: куска тела нет нигде в выложенном, обрамления
+    нет, соседи выжили. Последнее ловит подвал, который предикат не узнаёт:
+    тогда срез идёт до конца текста и съедает разбор падения. Законный
+    близнец — тот же блок PGP с PUBLIC вместо PRIVATE: его обрамление
+    выживает, то есть ось не держится срезом всего, что начато с BEGIN.
+    """
+    import base64
+    import random
+    import tempfile
+    print("  ── заголовки PEM: RSA, EC, ENCRYPTED, OPENSSH, PGP")
+    rnd = random.Random(4716)
+
+    def sstr(b: bytes) -> bytes:
+        return len(b).to_bytes(4, "big") + b
+
+    pk, seed, check = rnd.randbytes(32), rnd.randbytes(32), rnd.randbytes(4)
+    priv = check + check + sstr(b"ssh-ed25519") + sstr(pk) + sstr(seed + pk) + sstr(b"")
+    priv += bytes(range(1, 1 + (-len(priv)) % 8))
+    openssh = (b"openssh-key-v1\0" + sstr(b"none") + sstr(b"none") + sstr(b"")
+               + (1).to_bytes(4, "big") + sstr(sstr(b"ssh-ed25519") + sstr(pk)) + sstr(priv))
+    kinds = [
+        ("RSA PRIVATE KEY", bytes.fromhex("308204a30201000282010100")
+         + rnd.randbytes(1191 - 12), 64, 1588),
+        ("EC PRIVATE KEY", bytes.fromhex("30770201010420") + rnd.randbytes(32)
+         + bytes.fromhex("a00a06082a8648ce3d030107a14403420004") + rnd.randbytes(64), 64, 164),
+        ("ENCRYPTED PRIVATE KEY", bytes.fromhex("3081f6306106092a864886f70d01050d")
+         + rnd.randbytes(249 - 16), 64, 332),
+        ("OPENSSH PRIVATE KEY", openssh, 70, 312),
+        ("PGP PRIVATE KEY BLOCK", bytes.fromhex("945804") + rnd.randbytes(261 - 3), 64, 348),
+    ]
+    blocks = []
+    for label, der, width, _ in kinds:
+        body = base64.b64encode(der).decode()
+        rows = [body[i:i + width] for i in range(0, len(body), width)]
+        head = f"-----BEGIN {label}-----\n" + ("\n" if label.startswith("PGP") else "")
+        tail = ("\n=" + base64.b64encode(_crc24(der).to_bytes(3, "big")).decode()
+                if label.startswith("PGP") else "")
+        blocks.append((label, body, head + "\n".join(rows) + tail + f"\n-----END {label}-----",
+                       head + "\n".join(rows[:-2])))
+    _c("предпосылка: тела пяти видов — замеренной длины, заголовок не PKCS8",
+       [len(b) for _, b, _, _ in blocks] == [k[3] for k in kinds]
+       and not any("BEGIN PRIVATE KEY" in pem for _, _, pem, _ in blocks),
+       f"{[len(b) for _, b, _, _ in blocks]}")
+
+    before, after = "уровень=ERROR выдан ключ", "уровень=INFO после ключа"
+    clean = True
+    with tempfile.TemporaryDirectory(prefix="redact-pem-kinds-") as td:
+        for n, (label, body, pem, torn) in enumerate(blocks):
+            log = f"{before}\n{pem}\n{after}\n"
+            torn_body = json.dumps({"error": f"parse failed: {torn}", "code": 3})
+            doc = {"environment": {"values": [
+                       {"key": "loginLaneFlowBlob", "value": pem},
+                       {"key": "accountAId", "value": "acc0123456789abcdefgh"}]},
+                   "run": {"executions": [{
+                       "response": {"code": 500, "stream": {"type": "Buffer", "data": list(
+                           (pem + "\n").encode("utf-8"))}}}, {
+                       "response": {"code": 400, "stream": {"type": "Buffer", "data": list(
+                           torn_body.encode("utf-8"))}}},
+                   ]}}
+            context = (log.replace(pem, "") + json.dumps(doc, ensure_ascii=False).replace(
+                json.dumps(pem)[1:-1], "") + "parse failed: " + REDACTED)
+            clean = clean and _fragments_left(context, body) == 0
+            src, dst = pathlib.Path(td) / f"out{n}", pathlib.Path(td) / f"out{n}-public"
+            src.mkdir()
+            (src / "kaname.log").write_text(log, encoding="utf-8")
+            (src / "r.json").write_text(json.dumps(doc), encoding="utf-8")
+            rc, _ = _run_quiet(src, dst)
+            text_log = (dst / "kaname.log").read_text(encoding="utf-8")
+            text_json = (dst / "r.json").read_text(encoding="utf-8")
+            out = json.loads(text_json)
+            bodies = [bytes(ex["response"]["stream"]["data"]).decode("utf-8", "replace")
+                      for ex in out["run"]["executions"]]
+            seen = {"журнал": text_log, "отчёт": text_json,
+                    "тело ответа": bodies[0], "тело с обрывом": bodies[1]}
+            left = {k: _fragments_left(v, body) for k, v in seen.items()}
+            _c(f"{label}: код 0, и ни одного куска тела ключа нигде в выложенном",
+               rc == 0 and not any(left.values()), f"код {rc}, кусков: {left}")
+            _c(f"{label}: обрамления в выложенном нет — блок срезан целиком",
+               not any(f"BEGIN {label}" in v or f"END {label}" in v for v in seen.values()),
+               f"{[k for k, v in seen.items() if f'BEGIN {label}' in v or f'END {label}' in v]}")
+            kept = {"строка до ключа": before in text_log, "строка после ключа": after in text_log,
+                    "имена окружения": [v["key"] for v in out["environment"]["values"]]
+                    == ["loginLaneFlowBlob", "accountAId"],
+                    "код тела": json.loads(bodies[1]).get("code") == 3}
+            _c(f"{label}: соседи блока выжили — строки журнала, имена окружения, код тела",
+               all(kept.values()), f"не выжили: {[k for k, v in kept.items() if not v]}")
+    _c(f"предпосылка: в законном окружении ключей нет ни одного куска тела длиной "
+       f"{SECRET_FRAGMENT_MIN}", clean)
+
+    pgp_public = blocks[-1][2].replace("PGP PRIVATE KEY BLOCK", "PGP PUBLIC KEY BLOCK")
+    cut = scrub_text(f"{before}\n{pgp_public}\n{after}\n").text
+    _c("законный близнец: блок PGP с PUBLIC вместо PRIVATE — обрамление и соседи выжили",
+       all(s in cut for s in ("-----BEGIN PGP PUBLIC KEY BLOCK-----",
+                              "-----END PGP PUBLIC KEY BLOCK-----", before, after)))
+
+
 def _self_test_hidden_triple_and_one_pass() -> None:
     """ОСЬ ПОЛНОТЫ ПОИСКА ТРОЕК И ОДНОГО ПРОХОДА СРЕЗА.
 
@@ -1498,6 +1624,7 @@ def self_test() -> int:
 
     _self_test_cut_mechanics()
     _self_test_pem_and_std_base64()
+    _self_test_pem_headers()
     _self_test_hidden_triple_and_one_pass()
 
     # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
@@ -1508,8 +1635,9 @@ def self_test() -> int:
     # Вторая отключает срез по форме ЦЕЛИКОМ: тогда отказ обязан наступить на
     # ПОВТОРНОМ обходе выхода, а не быть объявлен зелёным. PEM здесь не
     # слепится: его предикат у среза и у проверки — один объект, и второй
-    # взгляд ослепнет вместе со срезом. Его слепоту ловит ось PEM
-    # (`_self_test_pem_and_std_base64`): куска тела ключа в выходе нет.
+    # взгляд ослепнет вместе со срезом. Его слепоту ловят оси PEM
+    # (`_self_test_pem_and_std_base64`, `_self_test_pem_headers`): куска тела
+    # ключа в выходе нет.
     never = re.compile(r"ZZZ_NEVER_MATCHES_ZZZ")
     for inject in ("виды", "срез"):
         with tempfile.TemporaryDirectory(prefix="redact-residue-") as td:
@@ -1602,8 +1730,8 @@ def self_test() -> int:
           "JSON-тела), имена ключей и разбор падения выжили, всё, что проверка выхода "
           "называет удостоверением, срез срезает, отключённый срез отвергается по "
           "остатку, ни одного куска секрета не остаётся ни при двух промежутках и "
-          "перекрытии форм, ни в ключе PEM, ни в стандартном base64, пустой обход — "
-          "отказ.")
+          "перекрытии форм, ни в ключе PEM любого из шести видов заголовка, ни в "
+          "стандартном base64, пустой обход — отказ.")
     return 0
 
 
