@@ -1,0 +1,93 @@
+schema_version: 1
+kind: post_diff_review
+role: go-style-reviewer
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  contract: Ф12 Р7 / Ф3 Р10 редакция 11
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 11b6f723d3cb9dd84f37e694047823268e535a5d
+  digest_predicate: git diff 20a5dcaa11b769cbd19eec033f158e5eac6a5b88..11b6f723d3cb9dd84f37e694047823268e535a5d | sha256sum
+  digest: 227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090
+  committed: false
+  placement_note: >-
+    Каталог предмета уже держит запись security-review под тем же дайджестом; эта запись лежит
+    в подкаталоге роли, чтобы не затереть чужую.
+inspected:
+  diff: 13 файлов, +1683/-14; весь дифф прочитан, Go — 11 файлов (прод 6, пробы 5)
+  base_check: база 20a5dcaa — пустой коммит на 2f2415ec, деревья равны (187df98a)
+verdict: returned
+blocking: true
+deferral_markers_in_diff:
+  textual: 0
+  ledger_relaxation_without_subject_reference: 1
+probes_in_same_change: true
+critical:
+  - id: GS-287-1
+    class: regression-lock-one-sided
+    address:
+      - internal/apps/kaname/api/humansession/second_factor_window_lock_test.go:21
+      - internal/apps/kaname/api/humansession/second_factor_window_lock_test.go:142
+      - internal/apps/kaname/api/humansession/login.go:484
+      - internal/apps/kaname/api/humansession/sf_remove.go:138
+    requirement: >-
+      Положительный близнец на ТОЙ ЖЕ полосе: вход с паролем и кодом у личности с фактором
+      наблюдаемо обнуляет счёт (форма пары Ф12-46, отличие ровно в одном факте). Плюс
+      наблюдаемое утверждение обнуления на успехе кода для глаголов под сессией, идущих через дом.
+      Шапку пробы привести к правде: пара «вход» сегодня отличается двумя фактами.
+    evidence: >-
+      Инъекция в копии дерева head (одна за прогон, go test -p 1 -count=1 пакета humansession):
+      контроль ok 30.3s; вход передаёт дому предъявленное без кода — ok 28.9s; снятие фактора
+      передаёт дому предъявленное без кода — ok 30.7s. Отрицательный контроль, названный
+      приёмкой, на полосе входа не исполняется.
+    return_to: автор диффа (полоса ветки 287)
+  - id: GS-287-2
+    class: relaxation-without-subject-reference
+    address:
+      - internal/check/failure_reset_sole_writer_test.go:63
+    requirement: >-
+      Запись ведомости полосы восстановления ссылается на свой предмет трекера
+      (PRO-Robotech/kaname#305, OPEN, P1 — перемерено gh issue view), предикат снятия — исполнимый.
+    return_to: автор диффа (полоса ветки 287)
+important:
+  - id: GS-287-3
+    class: vestigial-branch-and-untrue-comment
+    address: internal/apps/kaname/api/humansession/completed_login.go:113
+    requirement: >-
+      Ветви logger == nil и methods == nil недостижимы: оба конструктора отвергают пустое
+      хранилище способов и подставляют журнал (login.go:171, second_factor.go:91, :115).
+      Снять ветви вместе с комментарием о полосе без хранилища.
+  - id: GS-287-4
+    class: use-case-imports-server-package
+    address: internal/apps/kaname/api/humansession/completed_login.go:78
+    requirement: >-
+      Новое ребро use-case -> corelib/grpcsrv ради чистой функции ранжирования. Нового класса
+      транзитивной зависимости нет (grpc уже приходит через pkg/api и shared); решается в
+      фундаменте — кандидат ниже.
+  - id: GS-287-5
+    class: premise-probe-guards-other-premise
+    address:
+      - internal/apps/kaname/api/humansession/completed_login.go:64
+      - internal/apps/kaname/api/humansession/completed_login_test.go:68
+    requirement: >-
+      Предикат снятия исключения назван «появился потребитель уровня из утверждения ключа», а
+      проба предпосылки краснеет на ином событии (ключ среди видов способов входа). Привести
+      предикат и пробу к одному событию либо назвать расхождение.
+foundation_candidates:
+  - address: internal/apps/kaname/api/humansession/completed_login.go:78
+    note: >-
+      Ранжирование уровня отдать из пакета фундамента без транспорта, чтобы use-case не
+      импортировал серверный пакет; кросс-репозиторная работа, берётся пином.
+style:
+  - internal/check/failure_reset_sole_writer.go — имя FailureResetCensusTwo (числовой суффикс); callsDom -> callsHome
+  - internal/apps/kaname/api/humansession/completed_login.go:141 — ошибку порта обернуть контекстом операции
+  - internal/apps/kaname/api/humansession/completed_login_test.go:238 — t.Context() вместо context.Background()
+approved:
+  - контекст пробрасывается во все новые вызовы; паники и context.Background в рабочем пути нет
+  - журнал — slog, структурные поля, ErrorContext; личных данных нет (user_id)
+  - чтение заведённого — до открытия транзакции записи, заявление о дисциплине пакета сверено по коду
+  - гейт единственного писателя судит узел разбора, печатает обе переписи, падает на пустых предпосылках
+  - идентификаторы — латиница; маркеров TODO/FIXME в диффе нет
+security_comments_contradicting_code:
+  - internal/apps/kaname/api/humansession/completed_login.go:117 — полоса без хранилища способов не собирается
+  - internal/apps/kaname/api/humansession/second_factor_window_lock_test.go:21 — заявление о паре в один факт и об исполняемом контроле кода на полосе входа (измерено: не исполняется)
