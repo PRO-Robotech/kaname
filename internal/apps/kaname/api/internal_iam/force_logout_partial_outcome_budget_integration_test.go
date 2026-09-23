@@ -33,7 +33,11 @@ package internal_iam_test
 //   - положительный близнец второй сцены: тот же срок, блокировки нет — выход
 //     состоялся. Без него отказ второй сцены мог бы прийти от самого срока;
 //   - срок запроса истекает, пока операция отмечается завершённой, → операция
-//     всё равно завершена: отметка исхода не принадлежит тому, кто ушёл.
+//     всё равно завершена: отметка исхода не принадлежит тому, кто ушёл;
+//   - снятие ПРОШЛО, а срок запроса кончился на отсечке первой транзакции →
+//     откатилось и снятие, и частичный исход ложится так же, как при отказе
+//     снятия; положительный близнец — те же задержки при большом сроке: выход
+//     состоялся.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // КАК ВЫЗВАНО ОЖИДАНИЕ — БАЗОЙ, НА НАСТОЯЩЕМ ПУТИ
@@ -339,5 +343,133 @@ func TestIntegration_ForceLogoutWhoseRequestExpiresWhileTheOperationIsMarkedDone
 	assert.True(t, done,
 		"выход состоялся, а операция не завершена: отметка шла на истёкшем сроке запроса, "+
 			"и опрос будет отвечать «не завершена» о том, что уже произошло")
+	assert.Zero(t, errorCode)
+}
+
+// installTeardownThenSlowCutoff — снятие идёт без задержки и оставляет отметку
+// в последовательности `probe_teardown_done` (последовательность вне
+// транзакции: отметка переживает откат); запись отсечки оставляет отметку в
+// `probe_cutoff_entered` и затем спит `seconds` секунд. По двум отметкам
+// проба знает, ГДЕ кончился срок запроса: после снятия, на отсечке.
+func installTeardownThenSlowCutoff(t *testing.T, ctx context.Context, pool *pgxpool.Pool, seconds string) {
+	t.Helper()
+	for _, q := range []string{
+		`CREATE SEQUENCE kaname.probe_teardown_done`,
+		`CREATE SEQUENCE kaname.probe_cutoff_entered`,
+		`CREATE FUNCTION kaname.probe_mark_teardown_done() RETURNS trigger
+		 LANGUAGE plpgsql AS $$
+		 BEGIN
+			PERFORM nextval('kaname.probe_teardown_done');
+			RETURN NULL;
+		 END $$`,
+		`CREATE TRIGGER probe_mark_teardown_done
+		 AFTER UPDATE OF ended_at ON kaname.human_sessions
+		 FOR EACH STATEMENT EXECUTE FUNCTION kaname.probe_mark_teardown_done()`,
+		`CREATE FUNCTION kaname.probe_slow_cutoff() RETURNS trigger
+		 LANGUAGE plpgsql AS $$
+		 BEGIN
+			PERFORM nextval('kaname.probe_cutoff_entered');
+			PERFORM pg_sleep(` + seconds + `);
+			RETURN NEW;
+		 END $$`,
+		`CREATE TRIGGER probe_slow_cutoff
+		 BEFORE INSERT OR UPDATE ON kaname.user_token_revocations
+		 FOR EACH ROW EXECUTE FUNCTION kaname.probe_slow_cutoff()`,
+	} {
+		_, err := pool.Exec(ctx, q)
+		require.NoError(t, err, "фикстура задержки отсечки: %s", q)
+	}
+}
+
+// probeMarks — сколько раз оператор снятия завершился и сколько раз запись
+// отсечки началась, включая откаченные транзакции.
+func probeMarks(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (teardownDone, cutoffEntered int64) {
+	t.Helper()
+	read := func(seq string) int64 {
+		var n int64
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM kaname.`+seq).Scan(&n))
+		return n
+	}
+	return read("probe_teardown_done"), read("probe_cutoff_entered")
+}
+
+// TestIntegration_ForceLogoutWhoseRequestEndsOnTheCutoffAfterTheTeardownStillRecordsThePartialOutcome
+// — снятие прошло в срок, а срок запроса кончился на записи отсечки первой
+// транзакции. Откатывается вся первая транзакция, снятие в том числе; частичный
+// исход обязан лечь второй, как при отказе самого снятия.
+func TestIntegration_ForceLogoutWhoseRequestEndsOnTheCutoffAfterTheTeardownStillRecordsThePartialOutcome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	_, pool := newForceLogoutHandler(t)
+	h := ownPostureForceLogoutHandler(t, pool)
+	uid := seedForceLogoutUser(t, ctx, pool)
+	digest := freshBearerDigest(t)
+	seedOwnLoginSession(t, ctx, pool, uid, digest)
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	requireLiveBefore(t, ctx, sessions, digest)
+
+	installTeardownThenSlowCutoff(t, ctx, pool, "1.0")
+	t.Cleanup(func() { awaitNoSleepingBackend(t, ctx, pool) })
+
+	reqCtx, cancel := context.WithTimeout(forceLogoutAdminCtx(), 500*time.Millisecond)
+	defer cancel()
+	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{
+		UserId: string(uid),
+		Reason: "admin-force-logout",
+	})
+	require.Error(t, reqCtx.Err(), "срок запроса не истёк — проба судила бы не отказ по сроку")
+	teardownDone, cutoffEntered := probeMarks(t, ctx, pool)
+	require.GreaterOrEqual(t, teardownDone, int64(1),
+		"оператор снятия не завершился — срок кончился ДО снятия, и проба судила бы отказ снятия")
+	require.GreaterOrEqual(t, cutoffEntered, int64(1),
+		"запись отсечки не начиналась — срок кончился не на ней")
+	require.Error(t, err, "откаченное снятие не имеет права читаться как состоявшийся выход")
+
+	requirePartialOutcomeLanded(t, ctx, pool, sessions, uid, digest, err)
+}
+
+// TestIntegration_ForceLogoutWithASlowCutoffUnderTheCallerBudgetEndsTheSession —
+// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: те же задержки, срок вызывающего их вмещает — выход
+// состоялся, запись говорит «снято» и называет одну запись. Без него отказ
+// соседней пробы мог бы прийти от самой фикстуры задержки.
+func TestIntegration_ForceLogoutWithASlowCutoffUnderTheCallerBudgetEndsTheSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	_, pool := newForceLogoutHandler(t)
+	h := ownPostureForceLogoutHandler(t, pool)
+	uid := seedForceLogoutUser(t, ctx, pool)
+	digest := freshBearerDigest(t)
+	seedOwnLoginSession(t, ctx, pool, uid, digest)
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	requireLiveBefore(t, ctx, sessions, digest)
+
+	installTeardownThenSlowCutoff(t, ctx, pool, "1.0")
+	t.Cleanup(func() { awaitNoSleepingBackend(t, ctx, pool) })
+
+	reqCtx, cancel := context.WithTimeout(forceLogoutAdminCtx(), callerBudget)
+	defer cancel()
+	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{
+		UserId: string(uid),
+		Reason: "admin-force-logout",
+	})
+	require.NoError(t, err, "срок вызывающего вмещает задержки — выход обязан состояться")
+	teardownDone, cutoffEntered := probeMarks(t, ctx, pool)
+	assert.Equal(t, int64(1), teardownDone, "снятие — одним оператором")
+	assert.Equal(t, int64(1), cutoffEntered, "отсечка — одной записью")
+
+	assert.Equal(t, humansession.NoSessionEnded, resolveReason(t, ctx, sessions, digest))
+	record := requireOneForceLogoutRecord(t, ctx, pool, uid)
+	assert.Equal(t, "ended", record["session_teardown"], "%v", record)
+	assert.Equal(t, json.Number("1"), record["sessions_ended"], "%v", record)
+	user, minted := cutoffRecords(t, ctx, pool, uid)
+	assert.Equal(t, 1, user)
+	assert.Equal(t, 1, minted)
+	done, errorCode := forceLogoutOperationState(t, ctx, pool)
+	assert.True(t, done)
 	assert.Zero(t, errorCode)
 }

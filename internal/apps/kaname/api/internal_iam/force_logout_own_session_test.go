@@ -56,6 +56,8 @@ type recordingOwnWriter struct {
 	endErr    error
 	onEnd     func(ctx context.Context) error
 	onCutoff  func(ctx context.Context) error
+	onEvent   func(ctx context.Context)
+	onCommit  func(ctx context.Context)
 	cutoffErr error
 	commitErr error
 
@@ -67,6 +69,7 @@ type recordingOwnWriter struct {
 	cutoffs   []domain.UserTokenRevocation
 	cutoffBy  []domain.UserID
 	events    []outboxtypes.AuditEvent
+	commitCtx ctxSnapshot
 	committed bool
 }
 
@@ -111,6 +114,9 @@ func (w *recordingOwnWriter) UpsertCutoff(ctx context.Context, u domain.UserToke
 
 func (w *recordingOwnWriter) EmitAudit(ctx context.Context, ev outboxtypes.AuditEvent) error {
 	w.calls = append(w.calls, "event")
+	if w.onEvent != nil {
+		w.onEvent(ctx)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -120,6 +126,10 @@ func (w *recordingOwnWriter) EmitAudit(ctx context.Context, ev outboxtypes.Audit
 
 func (w *recordingOwnWriter) Commit(ctx context.Context) error {
 	w.calls = append(w.calls, "commit")
+	if w.onCommit != nil {
+		w.onCommit(ctx)
+	}
+	w.commitCtx = snapshotOf(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -476,6 +486,96 @@ func TestForceLogout_OwnStatementCancelledBecauseTheRequestEnded_IsUnavailable(t
 	require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")
 	assert.Equal(t, codes.Unavailable, status.Code(err),
 		"оператор, снятый по концу срока запроса, переведён в %s: %v", status.Code(err), err)
-	assert.Len(t, own.opened, 1, "отказ отсечки — не частичный исход, второй транзакции нет")
+	assert.Len(t, own.opened, 2,
+		"отказ отсечки по концу срока запроса откатил и снятие: частичный исход обязан "+
+			"лечь второй транзакцией, как при отказе самого снятия")
 	assert.Contains(t, ops.calls, "markerror")
+}
+
+// TestForceLogout_OwnRequestEndsAfterTheTeardown_PartialOutcomeStillLands —
+// снятие прошло, а срок запроса кончился на отсечке либо на записи события
+// первой транзакции. Откатывается и снятие, поэтому исход тот же, что при
+// отказе снятия: вторая транзакция на своём сроке кладёт отсечку и запись
+// «снятие не состоялось» без числа, ответ — `Unavailable`, операция отмечена
+// ошибкой.
+//
+// Законный близнец — `TestForceLogout_OwnCutoffFails_NothingLandsAndNoPartialRecord`:
+// тот же отказ отсечки при ЖИВОМ сроке запроса второй транзакции не открывает —
+// она упёрлась бы в тот же отказ.
+func TestForceLogout_OwnRequestEndsAfterTheTeardown_PartialOutcomeStillLands(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		arm        func(first *recordingOwnWriter, cancel context.CancelFunc)
+		firstCalls []string
+	}{
+		{"срок кончился на отсечке", func(first *recordingOwnWriter, cancel context.CancelFunc) {
+			first.onCutoff = func(context.Context) error { cancel(); return nil }
+		}, []string{"end", "cutoff", "rollback"}},
+		{"срок кончился на записи события", func(first *recordingOwnWriter, cancel context.CancelFunc) {
+			first.onEvent = func(context.Context) { cancel() }
+		}, []string{"end", "cutoff", "event", "rollback"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithCancel(adminCtx())
+			defer cancel()
+			first := &recordingOwnWriter{ended: 3}
+			tc.arm(first, cancel)
+			partial := &recordingOwnWriter{}
+			own := ownSessionsScripted(first, partial)
+			h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+
+			_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+			require.Error(t, err, "откаченное снятие не имеет права читаться как состоявшийся выход")
+			require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")
+			assert.Equal(t, codes.Unavailable, status.Code(err))
+			assert.Contains(t, ops.calls, "markerror", "опрос операции обязан увидеть отказ")
+			assert.NotContains(t, ops.calls, "markdone-with-metadata")
+
+			assert.Equal(t, tc.firstCalls, first.calls, "первая транзакция откатывается целиком")
+			assert.False(t, first.committed)
+			require.Len(t, own.opened, 2,
+				"снятие прошло, но откатилось вместе с отсечкой: без второй транзакции не легло "+
+					"НИЧЕГО — ни отсечки, ни записи события")
+			require.Len(t, own.opens, 2)
+			assert.NoError(t, own.opens[1].err,
+				"вторая транзакция открывалась на отменённом контексте запроса")
+			assert.Equal(t, []string{"cutoff", "event", "commit"}, partial.calls)
+			assert.True(t, partial.committed, "частичный исход обязан зафиксироваться")
+			require.Len(t, partial.events, 1)
+			assert.Equal(t, forceLogoutTeardownFailed, partial.events[0].Payload["session_teardown"],
+				"снятие откатилось — запись обязана сказать, что оно не состоялось")
+			_, carriesCount := partial.events[0].Payload["sessions_ended"]
+			assert.False(t, carriesCount,
+				"число, снятое откаченной транзакцией, не снято: в записи его быть не должно")
+		})
+	}
+}
+
+// TestForceLogout_OwnRequestEndsBeforeTheCommit_TheCommitIsNotTheRequests —
+// все операторы первой транзакции прошли, а срок запроса кончился на фиксации.
+// Фиксация сроку запроса не принадлежит: отмена во время `COMMIT` оставила бы
+// её исход неизвестным — транзакция могла зафиксироваться на сервере, — и
+// запись «снятие не состоялось» поверх неё легла бы второй записью события,
+// ложной. Поэтому фиксация идёт на своём ограниченном сроке, и исход — полный.
+func TestForceLogout_OwnRequestEndsBeforeTheCommit_TheCommitIsNotTheRequests(t *testing.T) {
+	reqCtx, cancel := context.WithCancel(adminCtx())
+	defer cancel()
+	first := &recordingOwnWriter{ended: 2, onCommit: func(context.Context) { cancel() }}
+	own := ownSessionsScripted(first)
+	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+
+	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")
+	require.NoError(t, err, "выход зафиксирован — ответ обязан это сказать")
+
+	require.Len(t, own.opened, 1, "полный исход лёг первой транзакцией — второй нет")
+	assert.True(t, first.committed,
+		"фиксация шла на отменённом контексте запроса: её исход неизвестен, "+
+			"а поверх неё легла бы запись «снятие не состоялось»")
+	assert.NoError(t, first.commitCtx.err)
+	assert.True(t, first.commitCtx.hasDeadline, "срок фиксации обязан быть конечным")
+	require.Len(t, first.events, 1)
+	assert.Equal(t, forceLogoutTeardownEnded, first.events[0].Payload["session_teardown"])
+	assert.Equal(t, 2, first.events[0].Payload["sessions_ended"])
+	assert.Contains(t, ops.calls, "markdone-with-metadata")
 }
