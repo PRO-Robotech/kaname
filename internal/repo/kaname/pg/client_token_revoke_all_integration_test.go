@@ -7,18 +7,26 @@
 //
 // # Что здесь утверждается
 //
-// Наблюдаемое, а не «порт спросили»: после того как писатель отсечки
-// закоммитил её, тот же ключ пользователя, предъявленный НАШЕМУ эндпоинту, не
-// получает токена — ответ отказа совпадает с ответом всякого другого отказа, и
-// токена в нём нет.
+// Наблюдаемое, а не «порт спросили»: после того как отсечка владельца
+// закоммичена — любым путём записи, — тот же ключ пользователя, предъявленный
+// НАШЕМУ эндпоинту, не получает токена; ответ отказа совпадает с ответом
+// всякого другого отказа, и токена в нём нет.
 //
-// # Почему писателей ТРИ и почему каждый подан отдельно
+// # Почему каждый путь записи подан отдельно — и откуда их перечень
 //
-// Отсечку пишут принудительный выход, отзыв всех токенов субъекта и завершение
-// восстановления. Строка у них одна, а пути записи разные: два идут
-// транзакцией адаптера отзыва вместе со своей записью аудита, третий — пишущей
-// транзакцией репозитория. Проба, подающая одного, была бы зелена при
-// читателе, понимающем только его форму строки.
+// Утверждается свойство «любая записанная отсечка владельца», а не перечень
+// тех, кто её пишет: вариантов использования, выводящих человека отовсюду,
+// несколько, и их число меняется с продуктом. Строка у них одна и операция
+// записи одна, а ПУТИ записи — функции пакета, исполняющие эту операцию, —
+// разные: транзакция адаптера отзыва вместе с записью аудита, пишущая
+// транзакция репозитория, транзакция сессии человека, запись на пуле. Проба,
+// подающая один путь, была бы зелена при читателе, понимающем только его форму
+// строки.
+//
+// Перечень путей НЕ выписывается здесь как истина: он выводится переписью по
+// дереву (`cutoff_write_paths_census_test.go`), и эта проба требует, чтобы
+// исполненные ею пути совпали с переписью, — путь, заведённый позже и сюда не
+// поданный, краснеет названием, а не остаётся без пробы молча.
 //
 // # Чем проба защищена от собственной снисходительности
 //
@@ -48,22 +56,27 @@ import (
 // revokeAllWriter — один писатель отсечки, названный тем путём записи, которым
 // он пишет её в продукте.
 type revokeAllWriter struct {
-	name  string
+	name string
+	// path — путь записи строки отсечки, которым этот писатель её пишет:
+	// функция пакета, исполняющая операцию записи. Сверяется с переписью путей
+	// по дереву (`cutoff_write_paths_census_test.go`).
+	path  string
 	write func(t *testing.T, f assertionFixture, before time.Time)
 }
 
-// revokeAllWritersUnderTest — перечень писателей отсечки.
+// revokeAllWritersUnderTest — чем проба подаёт отсечку: по одному или больше на
+// каждый путь записи строки.
 //
-// Перечень ВЫПИСАН, и это названо: писатели живут в трёх разных пакетах и
-// общим типом себя не объявляют. Цена — четвёртый писатель, заведённый и сюда
-// не внесённый, останется без пробы; проба печатает число писателей, чтобы это
-// было видно.
+// Полнота этого перечня не утверждается его длиной: её держит сверка с
+// переписью путей по дереву (`TestRevokeAllProbeFeedsEveryWritePathOfTheCutoffRow`
+// и начало пробы ниже).
 func revokeAllWritersUnderTest() []revokeAllWriter {
 	return []revokeAllWriter{
 		{
 			// Принудительный выход пишет отсечку транзакцией адаптера вместе с
 			// записью аудита своего вида.
 			name: "принудительный выход",
+			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
 				t.Helper()
 				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
@@ -74,6 +87,7 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 		{
 			// Отзыв всех токенов субъекта — тем же адаптером, своим видом аудита.
 			name: "отзыв всех токенов",
+			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
 				t.Helper()
 				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
@@ -85,6 +99,7 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 			// Завершение восстановления — пишущей транзакцией репозитория, тем
 			// же оператором, что зовёт его вариант использования.
 			name: "завершение восстановления",
+			path: "writeTx.UpsertUserTokenRevokeAll",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
 				t.Helper()
 				ctx := context.Background()
@@ -96,6 +111,39 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 					Reason:       domain.RevokeReasonPasswordChange,
 				}, ""))
 				require.NoError(t, w.Commit(ctx))
+			},
+		},
+		{
+			// Транзакция сессии человека — путь, которым пишут отсечку выход из
+			// сессии, смена пароля, завершение восстановления нашей полосой и
+			// сброс второго фактора.
+			name: "транзакция сессии человека",
+			path: "humanSessionWriter.UpsertCutoff",
+			write: func(t *testing.T, f assertionFixture, before time.Time) {
+				t.Helper()
+				ctx := context.Background()
+				w, err := kanamepg.NewHumanSessionRepo(f.pool).Writer(ctx)
+				require.NoError(t, err)
+				require.NoError(t, w.UpsertCutoff(ctx, domain.UserTokenRevocation{
+					UserID:       domain.UserID(f.user),
+					RevokeBefore: before,
+					Reason:       domain.RevokeReasonLogout,
+				}, ""))
+				require.NoError(t, w.Commit(ctx))
+			},
+		},
+		{
+			// Запись на пуле, без своей транзакции.
+			name: "запись на пуле",
+			path: "UserTokenRevocationRepo.UpsertRevokeAll",
+			write: func(t *testing.T, f assertionFixture, before time.Time) {
+				t.Helper()
+				require.NoError(t, kanamepg.NewUserTokenRevocationRepo(f.pool).UpsertRevokeAll(
+					context.Background(), domain.UserTokenRevocation{
+						UserID:       domain.UserID(f.user),
+						RevokeBefore: before,
+						Reason:       "admin-revoke",
+					}, ""))
 			},
 		},
 	}
@@ -114,7 +162,7 @@ func userClientIssuedAt(t *testing.T, f assertionFixture, id string) time.Time {
 }
 
 // TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt — по
-// каждому писателю отсечки.
+// каждому пути записи отсечки, выведенному переписью.
 func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -123,8 +171,11 @@ func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *tes
 	// часами базы, по которым датируются ключ и отсечка.
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 
+	// Полнота — сверкой с переписью путей по дереву, а не длиной перечня.
+	inTree, parsed := cutoffWritePathsInTree(t)
+	require.NotEmptyf(t, inTree, "перепись путей записи отсечки пуста среди %d файлов — не выполнилась", parsed)
 	writers := revokeAllWritersUnderTest()
-	require.Len(t, writers, 3, "писателей отсечки три; перечень выписан, и его длина — часть утверждения")
+	executed := map[string]struct{}{}
 
 	for _, w := range writers {
 		t.Run(w.name, func(t *testing.T) {
@@ -176,7 +227,16 @@ func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *tes
 			f.seedSAClient(t, saKeyID, "mirror-revoke-all-sa", sa.publicPEM, tokenpolicy.AlgES256)
 			code, body = ctPost(t, contour.endpoint, ctAssertion(t, sa, saKeyID, "jti-sa", now))
 			require.Equal(t, 200, code, "%s: ключ служебной учётки не затронут отсечкой человека; ответ %v", w.name, body)
+			executed[w.path] = struct{}{}
 		})
 	}
-	t.Logf("перепись: писателей отсечки %d · каждый подан отдельным контуром", len(writers))
+	var unexecuted []string
+	for _, p := range inTree {
+		if _, ok := executed[p]; !ok {
+			unexecuted = append(unexecuted, p)
+		}
+	}
+	t.Logf("перепись: путей записи отсечки по дереву %d · исполнено пробой до конца %d · подач %d",
+		len(inTree), len(executed), len(writers))
+	require.Emptyf(t, unexecuted, "пути записи отсечки, не исполненные пробой до конца: %v", unexecuted)
 }

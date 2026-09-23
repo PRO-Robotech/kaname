@@ -53,11 +53,12 @@ type TokenHookHandler struct {
 // NewTokenHookHandler — constructor.
 //
 // revocations is what makes "log this person out of everything" mean anything
-// at the moment a token is MINTED. Without it the cutoff had three writers and
-// one reader, on the path taken only when an EXISTING token is refreshed — so
-// an administrator's force-logout returned success while the subject's live
-// session kept obtaining fresh tokens on demand, and a personal access token,
-// whose grant has no refresh hook at all, was never re-examined even once.
+// at the moment a token is MINTED. Without it the cutoff was written on every
+// path that logs a person out and read on one — the path taken only when an
+// EXISTING token is refreshed — so an administrator's force-logout returned
+// success while the subject's live session kept obtaining fresh tokens on
+// demand, and a personal access token, whose grant has no refresh hook at all,
+// was never re-examined even once.
 //
 // A nil reader is accepted so an in-process fixture can wire the hook without a
 // revocation store; the composition root has no branch that leaves it out.
@@ -362,8 +363,8 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// provider's subject (an external identity or a client registration,
 	// neither of which the cutoff is keyed on).
 	//
-	// Asked at ISSUANCE, which is the point. The cutoff had three writers and
-	// one reader, on the path taken only when an existing token is refreshed.
+	// Asked at ISSUANCE, which is the point. The cutoff used to be read on one
+	// path only — the one taken when an existing token is refreshed.
 	if denied, reason := h.revokedAtIssuance(ctx, principal, sessionAuthTime); denied {
 		h.denyRevoked(ctx, subject, payload, reason)
 		http.Error(w, `{"error":"invalid_grant"}`, http.StatusForbidden)
