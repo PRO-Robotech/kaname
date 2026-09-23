@@ -374,3 +374,155 @@ func (uc *RegisterUseCase) commit(ctx ctxT, w Writer, user U) error {
 	t.Logf("первая перепись видит %d файлов по порту, вторая — %d полос: регистрация есть только во второй",
 		census.FilesNamingPort, census.LevelWritingFiles)
 }
+
+// ───────────────────────── посылка гейта ─────────────────────────
+//
+// Гейт судит ИМЯ порта; «счёт не обнуляется мимо дома» из этого следует, пока
+// строки счёта удаляются по ключу ТОЛЬКО реализацией порта. Посылка — свойство
+// адаптера, а не разбора, поэтому она судится отдельно: по ключу — только
+// `ResetFailures`, по возрасту — только `SweepAgedFailures`, иными операторами —
+// нигде.
+
+// frAdapterRows — адаптер, на котором посылка ВЫПОЛНЕНА: одно удаление по
+// ключу в реализации порта, одно по возрасту в уборщике, чтение и вставка.
+const frAdapterRows = "package pg\n" +
+	"func (r *HumanSessionRepo) CountFailures(ctx ctxT, scope S, key string, since T) (int, error) {\n" +
+	"	return r.one(ctx, `SELECT count(*) FROM login_failures WHERE scope = $1 AND key = $2 AND failed_at > $3`, scope, key, since)\n" +
+	"}\n" +
+	"func (r *HumanSessionRepo) SweepAgedFailures(ctx ctxT, grace D, batch int) (int64, bool, error) {\n" +
+	"	return r.exec(ctx, `\n" +
+	"		DELETE FROM login_failures\n" +
+	"		 WHERE ctid IN (\n" +
+	"		       SELECT ctid FROM login_failures WHERE failed_at <= now() - $1::interval LIMIT $2)`, grace, batch)\n" +
+	"}\n" +
+	"func (w *humanSessionWriter) RecordFailure(ctx ctxT, scope S, key string, at T) error {\n" +
+	"	return w.exec(ctx, `INSERT INTO login_failures (scope, key, failed_at) VALUES ($1, $2, $3)`, scope, key, at)\n" +
+	"}\n" +
+	"func (w *humanSessionWriter) ResetFailures(ctx ctxT, scope S, key string) error {\n" +
+	"	return w.exec(ctx, `DELETE FROM login_failures WHERE scope = $1 AND key = $2`, scope, key)\n" +
+	"}\n"
+
+const frRowsRel = "internal/repo/kaname/pg/human_session_repo.go"
+
+func frRowsCorpus() check.TreeCorpus {
+	return check.TreeCorpus{frRowsRel: frAdapterRows}
+}
+
+// TestFailureRowRemovalPremiseIsSilentOnTheLawfulAdapter — КОНТРОЛЬ посылки:
+// на законном адаптере молчит и называет обе положительные половины.
+func TestFailureRowRemovalPremiseIsSilentOnTheLawfulAdapter(t *testing.T) {
+	t.Parallel()
+	findings, census, err := check.JudgeFailureRowRemovals(frRowsCorpus())
+	if err != nil {
+		t.Fatalf("вердикт посылки: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("посылка краснеет на ЗАКОННОМ адаптере: %s", strings.Join(findings, "; "))
+	}
+	if census.ByKeyInPort != 1 || census.ByAgeInSweep != 1 || census.Removals != 2 {
+		t.Fatalf("перепись посылки неверна: удалений %d, по ключу в порту %d, по возрасту в уборщике %d (ожидалось 2, 1, 1)",
+			census.Removals, census.ByKeyInPort, census.ByAgeInSweep)
+	}
+}
+
+// TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval — КРАСНОЕ: строки счёта
+// снимаются мимо реализации порта либо мимо уборщика, в каждой форме записи,
+// которую разбор знает; форма, которую он не классифицирует, — тоже находка,
+// а не молчание.
+func TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval(t *testing.T) {
+	t.Parallel()
+	lane := func(body string) string {
+		return "package pg\nfunc (w *humanSessionWriter) EndSession(ctx ctxT, key string) error {\n" + body + "\n}\n"
+	}
+	cases := []struct{ name, src, want string }{
+		{"удаление по ключу в другом методе", lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE scope = $1 AND key = $2`, key)"),
+			"по ключу"},
+		{"удаление по ключу со схемой", lane("	return w.exec(ctx, `delete from kaname.login_failures where key = $1`, key)"),
+			"по ключу"},
+		{"удаление по ключу склейкой литералов", lane(`	return w.exec(ctx, "DELETE FROM " + "login_failures WHERE key = $1", key)`),
+			"по ключу"},
+		{"удаление по ключу внутри CTE", lane("	return w.exec(ctx, `WITH gone AS (DELETE FROM login_failures WHERE key = $1 RETURNING 1) SELECT count(*) FROM gone`, key)"),
+			"по ключу"},
+		{"удаление по возрасту мимо уборщика", lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE failed_at < $1`, key)"),
+			"по возрасту"},
+		{"перенос следа в прошлое оператором UPDATE", lane("	return w.exec(ctx, `UPDATE login_failures SET failed_at = now() - interval '1 day' WHERE key = $1`, key)"),
+			"неизвестным посылке способом"},
+		{"опустошение таблицы", lane("	return w.exec(ctx, `TRUNCATE TABLE login_failures`)"),
+			"неизвестным посылке способом"},
+		{"удаление без условия", lane("	return w.exec(ctx, `DELETE FROM login_failures`)"),
+			"неизвестным посылке способом"},
+		{"удаление по ключу текстом в объявлении пакета", "package pg\nconst wipe = `DELETE FROM login_failures WHERE key = $1`\n",
+			"вне функции"},
+		{"одноимённая свободная функция, а не реализация порта",
+			"package pg\nfunc ResetFailures(ctx ctxT, q Q, key string) error {\n	return q.exec(ctx, `DELETE FROM login_failures WHERE key = $1`, key)\n}\n",
+			"по ключу"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			corpus := frRowsCorpus()
+			corpus["internal/repo/kaname/pg/some_repo.go"] = tc.src
+			findings, census, err := check.JudgeFailureRowRemovals(corpus)
+			if err != nil {
+				t.Fatalf("вердикт посылки: %v", err)
+			}
+			joined := strings.Join(findings, "\n")
+			if len(findings) == 0 {
+				t.Fatalf("посылка НЕ покраснела на форме %q (удалений %d)", tc.name, census.Removals)
+			}
+			if !strings.Contains(joined, tc.want) || !strings.Contains(joined, "some_repo.go") {
+				t.Fatalf("находка не о предмете либо без координаты: ожидалось %q, получено:\n  %s", tc.want, joined)
+			}
+			t.Logf("красное: %s", findings[0])
+		})
+	}
+}
+
+// TestFailureRowRemovalPremiseStaysSilentOnLegitimateTwins — МОЛЧАНИЕ на
+// законных формах того же вида: без этой половины посылка ловила бы слово, а
+// не оператор.
+func TestFailureRowRemovalPremiseStaysSilentOnLegitimateTwins(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, src string }{
+		{"чтение и вставка в другом месте", "package pg\nfunc (r *Repo) Oldest(ctx ctxT) error {\n" +
+			"	_ = `SELECT min(failed_at) FROM login_failures WHERE key = $1`\n" +
+			"	return r.exec(ctx, `INSERT INTO login_failures (scope, key, failed_at) VALUES ($1, $2, $3)`)\n}\n"},
+		{"оператор в прозе строки и в комментарии", "package pg\n" +
+			"// DELETE FROM login_failures WHERE key = $1 — так делает только реализация порта.\n" +
+			"func (r *Repo) Explain() string {\n	return \"refused to delete from login_failures by key outside the port\"\n}\n"},
+		{"удаление по ключу из ДРУГОЙ таблицы", "package pg\nfunc (r *Repo) Purge(ctx ctxT, key string) error {\n" +
+			"	if err := r.exec(ctx, `DELETE FROM login_failures_archive WHERE key = $1`, key); err != nil {\n		return err\n	}\n" +
+			"	return r.exec(ctx, `DELETE FROM recovery_codes WHERE key = $1`, key)\n}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			corpus := frRowsCorpus()
+			corpus["internal/repo/kaname/pg/some_repo.go"] = tc.src
+			findings, _, err := check.JudgeFailureRowRemovals(corpus)
+			if err != nil {
+				t.Fatalf("вердикт посылки: %v", err)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("посылка краснеет на законной форме %q: %s", tc.name, strings.Join(findings, "; "))
+			}
+		})
+	}
+}
+
+// TestFailureRowRemovalPremiseNamesAnEmptyAdapter — «ноль находок» отличим от
+// «ноль прочитанного»: корпус без адаптера даёт нули обеих положительных
+// половин, и проба дерева роняет на них прогон, а не зеленеет.
+func TestFailureRowRemovalPremiseNamesAnEmptyAdapter(t *testing.T) {
+	t.Parallel()
+	findings, census, err := check.JudgeFailureRowRemovals(check.TreeCorpus{
+		"internal/apps/kaname/api/humansession/logout.go": "package humansession\nfunc (uc *LogoutUseCase) Execute() error { return nil }\n",
+	})
+	if err != nil {
+		t.Fatalf("вердикт посылки: %v", err)
+	}
+	if len(findings) != 0 || census.ByKeyInPort != 0 || census.ByAgeInSweep != 0 || census.Files != 1 {
+		t.Fatalf("корпус без адаптера: находок %d, по ключу в порту %d, по возрасту в уборщике %d, файлов %d "+
+			"(ожидалось 0, 0, 0, 1)", len(findings), census.ByKeyInPort, census.ByAgeInSweep, census.Files)
+	}
+}

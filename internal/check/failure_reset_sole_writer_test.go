@@ -142,3 +142,55 @@ func TestFailureResetGoesThroughTheCompletedLoginGuard(t *testing.T) {
 			len(findings), strings.Join(findings, "\n  "), check.FailureResetHomeRel)
 	}
 }
+
+// TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep — ПОСЫЛКА
+// гейта выше, судимая по дереву: строки счёта удаляются по ключу только
+// реализацией порта `ResetFailures`, по возрасту — только уборщиком
+// `SweepAgedFailures`, иными операторами — нигде. Гейт выше судит ИМЯ порта, и
+// его молчание значит «счёт не обнуляется мимо дома» ровно до тех пор, пока
+// эта посылка верна; без пробы она была бы утверждением, а не фактом.
+func TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep(t *testing.T) {
+	t.Parallel()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
+	}
+	root, err := platformtree.ModuleRootFrom(wd)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден: %v", err)
+	}
+	tree, err := treecorpus.NewTree(root)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: состав дерева: %v", err)
+	}
+	corpus, err := check.CorpusFrom(tree, check.ProductionGoFile)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+
+	findings, census, err := check.JudgeFailureRowRemovals(corpus)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	switch {
+	case census.ByKeyInPort == 0:
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: реализация %s не удаляет строк %s по ключу — распознаватель слеп "+
+			"либо таблица переименована; молчание о прочих удалениях сказано ни о чём (прочитано файлов %d, литералов %d)",
+			check.FailureResetPort, check.FailureRowsTable, census.Files, census.StringLiterals)
+	case census.ByAgeInSweep == 0:
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: уборщик %s не удаляет строк %s по возрасту — распознаватель слеп "+
+			"либо уборщик переименован (прочитано файлов %d, литералов %d)",
+			check.FailureRowsSweep, check.FailureRowsTable, census.Files, census.StringLiterals)
+	}
+	t.Logf("перепись посылки: файлов прод-кода прочитано %d, строковых литералов %d; операторов, снимающих строки %s, %d — "+
+		"по ключу в реализации порта %d · по возрасту в уборщике %d",
+		census.Files, census.StringLiterals, check.FailureRowsTable, census.Removals, census.ByKeyInPort, census.ByAgeInSweep)
+
+	if len(findings) != 0 {
+		t.Fatalf("строки счёта снимаются мимо реализации порта и уборщика — %d находок:\n  %s\n\n"+
+			"Гейт единственного писателя судит имя порта %s; такое снятие он не увидит, и его молчание "+
+			"перестаёт значить «счёт не обнуляется мимо дома».",
+			len(findings), strings.Join(findings, "\n  "), check.FailureResetPort)
+	}
+}
