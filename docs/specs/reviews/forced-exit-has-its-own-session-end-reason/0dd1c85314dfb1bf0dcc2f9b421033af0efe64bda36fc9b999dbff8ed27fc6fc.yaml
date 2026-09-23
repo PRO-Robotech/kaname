@@ -1,0 +1,180 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md
+  sha256: 0dd1c85314dfb1bf0dcc2f9b421033af0efe64bda36fc9b999dbff8ed27fc6fc
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Одобрение выводится из внешнего события
+    и этой записи. Номер редакции и строку истории в шапке правил автор тем же изменением,
+    что и тело; слово DRAFT не тронуто.
+  base_commit: 9dc46b4722bea058c3642c803aae6a102ad1f98f
+  content_commit: null
+  content_commit_note: >-
+    Документ НЕ закоммичен. Ветка `334`, HEAD 6c537d4c несёт редакцию 1
+    (`git show HEAD:<путь> | sha256sum` → eff62d6f…) и запись круга 1. Рабочая копия:
+    `git status --short` → ` M` только этот файл. Дерево кода = origin/358 9dc46b47
+    (`git ls-remote origin refs/heads/358` → 9dc46b47; `git diff --stat 9dc46b47 HEAD` →
+    только документ и запись круга 1). Отпечаток снят с файла на диске.
+  branch: '334'
+  pull_request: null
+  task: PRO-Robotech/kaname#334
+  wave: PRO-Robotech/kaname#358
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 782
+  round: 2
+  predecessor_record: >-
+    docs/specs/reviews/forced-exit-has-its-own-session-end-reason/eff62d6f7090bc171f384fa15979cdeacfdd310e3fcc6cfdb31d58870b80b3ef.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md
+    → 0dd1c85314dfb1bf0dcc2f9b421033af0efe64bda36fc9b999dbff8ed27fc6fc. Снят дважды, до
+    чтения и перед записью. Совпал с объявленным в задании.
+  measurement_revisions: >-
+    Дерево службы: 9dc46b47. База линии: cbbac984 = origin/main. Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    (1) Отпечаток, 782 строки, ` M` одного файла, HEAD 6c537d4c, дерево = 9dc46b47:
+    ПОДТВЕРЖДЕНО. (2) «Снятие `AND ended_at IS NULL` в human_session_repo.go:279 краснит
+    хотя бы одно «Тогда» третьей половины». В буквальной формулировке ОПРОВЕРГНУТО, по
+    существу B1 ПОДТВЕРЖДЕНО. 05/3 (гонка) на этом снятии зелёная, посев ниже. Документ
+    говорит о ней то же (§5, таблица, строка 2). Краснеет 05/4, то есть детерминированная
+    половина, которую требовал п.(2) замечания B1. (3) «05/4 отличается от 05/2 одним
+    фактом»: ПОДТВЕРЖДЕНО посевом. Единственное различие — что увидел резолв выхода: в 05/4
+    задержка сработала, в 05/2 не сработала. «Тогда» у двух половин одно.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-23'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  why: >-
+    Блокирующих ноль. B1 закрыт, и это показано опытом. Снятие каждого из двух несущих
+    производителей (:279 и logout.go:83-86) краснит 05/4 по свидетелям вне строки. Снятие :307
+    краснит 05/1. N1, N2 и N4 закрыты, N3 вынесен в kaname#386. Санкция на код открывается
+    внешним событием по этому отпечатку. Правка документа санкцию не переносит.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта против редакции 1 (`git diff`: +269 −57): шапка, §0.1 (абзац о свидетеле), §0.2
+    (число), новый §0.6, §2 (исключение #385), KN-SER-05 (половины 05/1…05/4, дельты), KN-SER-10
+    (проба разбора), §5 (строки 05 и 10, таблица «снят производитель → половина»), §6 пп. 5, 7,
+    9, новый п.12. Незатронутые разделы приняты кругом 1 и не перечитывались.
+  method: experiment_and_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  B1_closure: >-
+    ЗАКРЫТ. (1) Назван независимый от строки производитель исхода (§0.6 пп.1–4): Execute
+    (logout.go:55/:83/:114), событие iam.session.logged_out по session_id (:99, :103), счёт
+    записи отсечки на порту и момент отсечки распорядителя (force_logout.go:278 → :282 и :422,
+    одна переменная `now` внутри ForceLogout). 05/3 переписана на соответствие в каждом раунде,
+    победитель считается по Execute. (2) Заведена 05/4 с принуждённым порядком. Опыт ниже
+    воспроизводит таблицу §5 по строкам 1–3.
+  seed_experiment: >-
+    Одноразовая проба в отдельной отсоединённой рабочей копии от 9dc46b47. После опыта копия
+    снята, в запрос не входит. Обёртка humansession.Store: задержка между резолвом и Writer
+    срабатывает только на SessionFound, запись отсечки считается на порту. Над ней
+    NewLogoutUseCase с часами пробы, ownPostureForceLogoutHandler, seedForceLogoutUser и
+    seedOwnLoginSession. Проверяются только свидетели, не зависящие от нового значения.
+    Результаты:
+    дерево как есть — 05/1, 05/2 и 05/4 зелёные. В 05/4 задержка сработала, в 05/2 нет;
+    ended_at = revoke_before в 05/2 и 05/4; причина `logout`, потому что правки ещё нет;
+    без :279 — 05/4 КРАСНАЯ: Execute=true, событий 1, записей отсечки 1, ended_at = часы
+    выхода ≠ revoke_before; 05/1 и 05/2 зелёные;
+    без ветви logout.go:83-86 — 05/4 КРАСНАЯ: Execute=true, событие 1, запись отсечки 1, при
+    ВЕРНОЙ строке (ended_at = revoke_before). Красный пришёл от свидетелей вне строки. 05/1 и
+    05/2 зелёные;
+    без :307 — 05/1 КРАСНАЯ: ended_at переписан моментом распорядителя; 05/2 и 05/4 зелёные;
+    05/3 без :279 — зелёная в обоих стартах: естественный старт 20:0, сведённый 19:1,
+    расхождений 0.
+    Вывод: у производителя :279 теперь есть сценарий, который краснеет на его снятии, и это
+    05/4. Строки 1–3 таблицы §5 воспроизведены, строки 4 и 5 сверены чтением. Строка 4:
+    Resolve снятой отдаёт пустой Resolved, EndSession(id='') меняет 0 строк; при снятых обеих
+    ветвях UpsertCutoff → Validate отвергает user_id="" (human_session_repo.go:499). Строка 5:
+    на дереве как есть причина `logout` видна в 05/2 и 05/4.
+  twins: >-
+    05/1 и 05/2 различаются порядком актов. 05/4 и 05/2 различаются тем, что увидел резолв (посев
+    подтвердил). 05/1 — положительный близнец счёта записей: там событий 1 и записей отсечки 1,
+    значит счётчик не слеп.
+  constructibility: >-
+    Посеяно 4 из 4 новых «Дано»: 05/1, 05/2, 05/4 и 05/3 (20 раундов). Прочие «Дано» не
+    менялись, их конструируемость показана в круге 1 названными фикстурами.
+  census_section_0_6: >-
+    Каждая команда §0.6 перепрогнана на 9dc46b47, выводы совпали: :55/:83/:114; :25/:26/:99/:103;
+    :53; :140; :282/:422; :239/:240; два файла NewLogoutUseCase, ForceLogout в них 0. Прочитано:
+    force_logout.go:78, hook_pool_adapters.go:196-199 (в составе нет session_id),
+    step_up_journal_integration_test.go:99-102.
+  N1: 'ЗАКРЫТ: `git grep -n RevokeReasonSecondFactorReset` → 4 строки (232, 235, 185, 197).'
+  N2: >-
+    ЗАКРЫТ. Предикат п.7 → 7 (377, 380, 383, 395, 401, 410, 413). Контроль остатка #340 → 1 (434),
+    двоеточие отделяет его верно. Абзац 385-393 верен и после правки.
+  N3: 'Вынесен: PRO-Robotech/kaname#386 OPEN.'
+  N4: >-
+    ЗАКРЫТ. У KN-SER-10 теперь держатель — проба разбора узлов в internal/check/. Форма у
+    соседей существует: TestAssuranceMethodVocabularyIsDeclaredOnce
+    (assurance_method_vocabulary_test.go:67), пара инъекций там же (:36, :95). Довод «текст
+    видит комментарий» воспроизведён: pb.go:808. Селектор domain.RevokeReasonLogout в
+    force_logout.go встречается один раз (:423), это вызов, который правится. Ложной находки
+    после правки не будет.
+  scope_delta: 'Новое исключение §2 — вход внахлёст, kaname#385 OPEN. Over-scope нет.'
+  open_questions: none
+  disclosure: 'Связки «координата + условие + следствие» дельта не вносит.'
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N5
+    kind: measurement
+    where: KN-SER-05, абзац «05/3 — спорный путь без порядка»; §5, таблица, колонка 05/3
+    text: >-
+      «Жребий» 05/3 измерен, и он решается стартом, а не жребием. При естественном старте
+      выход выиграл 20 из 20: ForceLogout до снятия пишет операцию и отсечку. Когда выход
+      отпускается на входе ForceLogout в EndAllSessions, распорядитель выиграл 20 из 20.
+      Значит, утверждение «держит только она путь, где снятие выхода ждёт замка строки» при
+      естественном старте не наблюдалось ни разу, и «красная по жребию» в колонке 05/3 на деле
+      почти «зелёная». Не блокирует: у каждого производителя есть детерминированный держатель
+      (:307 — 05/1, :279 и :83-86 — 05/4). Рекомендация на реализацию: сводить старт на входе
+      OwnSessions.EndAllSessions обёрткой порта и печатать счёт. Либо снять утверждение о
+      единственности.
+
+seed_attempt:
+  performed: true
+  outcome: executed
+  isolation: >-
+    Отдельная отсоединённая рабочая копия от 9dc46b47 в kacho-workspace/tmp. Копия автора не
+    тронута, отпечаток до и после совпал. После опыта копия снята (`git worktree remove`).
+  load: 'load average 6,5–10 на 32 ядрах, доступно 27–30 ГиБ; прогоны по одному, `nice -n 10 go test -p 1 -count=1`'
+  seeded: 4
+  of: 4
+  named_fixture: 0
+
+event_body: >-
+  acceptance-reviewer · APPROVED · PRO-Robotech/kaname
+  docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md · sha256
+  0dd1c85314dfb1bf0dcc2f9b421033af0efe64bda36fc9b999dbff8ed27fc6fc · ревизия дерева 9dc46b47
+  (документ не закоммичен) · блокирующих 0
