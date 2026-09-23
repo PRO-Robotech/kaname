@@ -60,8 +60,9 @@ reviewed_at: '2026-09-23'
 
 # ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-23T09:20:53Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 9 — APPROVED: блокирующих ноль. Дельта против одобренной редакции 11 —
     переадресация трёх отсылок на пробу, существующую в дереве ветки, и строка редакции 12;
@@ -88,6 +89,113 @@ effective_approval:
       дописывается ОТДЕЛЬНЫМ коммитом поверх этой записи — вердикт и разбор задним числом не
       правятся.
 
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    decided_by: acceptance-reviewer
+    decided_at: '2026-09-23'
+    issued_by_event: 5792262830
+    basis: >-
+      change-graph.md §3: вердикт действителен, когда его подтверждает внешнее событие —
+      принадлежащее названной задаче, с допущенным к роли автором, с телом, связывающим точный
+      отпечаток предмета, роль и вердикт. Все четыре условия выполнены и перемерены рецензентом
+      на своей ревизии; ни одно не взято со слов задания или сверки волны.
+    remeasured: >-
+      (1) Отпечаток предмета — `git show
+      11b6f723d3cb9dd84f37e694047823268e535a5d:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+      | sha256sum` → 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939; совпал с именем файла ЭТОЙ записи, с `subject.sha256` и со
+      строкой `subject_sha256` тела события. Ревизия тела — коммит, внёсший эту редакцию вместе с
+      этой записью: обязательство `subject.content_commit_note` исполнено. Ревизия опубликована раньше события: `gh api
+      'repos/PRO-Robotech/kaname/activity?ref=refs/heads/287'` → создание ветки на 11b6f723 в
+      01:17:10Z.
+      (2) Принадлежность задаче — `gh api repos/PRO-Robotech/kacho/issues/comments/5792262830` →
+      `issue_url` указывает на PRO-Robotech/kacho#1281, то есть на `subject.task`.
+      (3) Полномочие — `pointpu` значится в `review_authority.acceptance-reviewer` политики
+      `docs/changes/policy.yaml` воркспейса, `gh api
+      repos/PRO-Robotech/kacho/collaborators/pointpu/permission` → admin, `author_association`
+      ответа → MEMBER; эпоха post-cutover: `git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main` в воркспейсе
+      (origin/main 6eddaa5e) → 0. (4) Тело — пять обязательных строк
+      дословно, каждая ровно одна (`grep -cxF` → 1 по каждой), контроль в другую сторону `grep -cxF
+      'verdict: CHANGES_REQUESTED'` → 0 и строка чужого отпечатка (713ff0bd…) → 0; отпечаток тела
+      `gh api … | jq -j .body | sha256sum` → 201fa744aa211a153f83eea25e10c90fb9ea9241dd2a60b897281e1290774453, совпал с `event.body_sha256`;
+      `created_at == updated_at` ⇒ после публикации тело не правилось.
+    ban1_fact: >-
+      `ban1_lifted: true` — с момента события и для ЭТОЙ редакции. Нового предмета для кода
+      редакция 12 не вводит (`what_the_event_would_lift`): код полосы kaname#287, внесённый до
+      события (первый — 0ffe0c7f3, `git show -s --format=%cI 0ffe0c7f3` →
+      2026-09-23T03:51:17+03:00), стоит под санкцией редакции 11 — событие 5737617038 записи
+      `02b30c2e…`, — а не под этой. Задним числом эта санкция его не покрывает и покрывать не
+      должна.
+    mechanism: >-
+      Правка ЭТОЙ записи на месте, а не новая запись и не правка шапки документа. Отпечаток
+      предмета не менялся, а координата записи ПО ОПРЕДЕЛЕНИЮ есть этот отпечаток
+      (`<sha256>.yaml`), поэтому второй записи о той же редакции не бывает by construction.
+      Запрет change-graph.md §2 («история ревью добавляется, не переписывается») предметом имеет
+      РЕДАКЦИЮ: новая редакция получает СОСЕДНЮЮ запись. Здесь редакция та же; вердикт, разбор,
+      находки, числа, `why` и `publication_pending` не тронуты — они рассуждение на момент
+      вердикта, когда события ещё не было. Тронуты ровно три выводимых поля
+      (issued/issued_at/ban1_lifted), добавлены этот блок и блок `event`. `effective_approval`
+      выводится из СОБЫТИЯ, наступившего позже записи; не привести его к факту значит оставить
+      запись, утверждающую «санкции нет» там, где она выдана.
+    precedent: >-
+      Форма — записи кругов 8 и 6 (`second-factor-…/02b30c2e…`, `login-lane-…/713ff0bd…`; блок
+      `event` — 111a598a7, санкция — d060e6df6). Инвариант каталога на 4ed53c9b: записей 57; с
+      `verdict: APPROVED` и `event.status: performed` — 23, `issued: true` у всех 23; после правки —
+      27 и 27. Контроль в другую сторону, который приводил d060e6df6 (`registration-…/7c81fa29…`:
+      APPROVED при `event.status: not_performed` и `issued: false`), перемером ОПРОВЕРГНУТ: событие
+      на трекере есть (kaname#256, 5731034477), это пятая молчащая запись, а не контроль. Пары, где
+      вердикт и событие расходятся, в каталоге этой ревизии нет вовсе, поэтому «поле следует
+      событию» и «поле следует вердикту» каталог НЕ различает. Правка от различения не зависит: у
+      этой записи вердикт APPROVED и событие состоялось — оба правила дают `issued: true`.
+    divergence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужен PyYAML
+      import glob, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      bad = [p for p, d in rows
+             if (d.get('event') or {}).get('status') == 'performed'
+             and d.get('verdict') == 'APPROVED'
+             and (d.get('effective_approval') or {}).get('issued') is not True]
+      print('осмотрено', len(rows), '· расхождений', len(bad))
+      for p in bad:
+          print(' ', p)
+      PY
+    divergence_predicate_result: >-
+      На 4ed53c9b — «осмотрено 57 · расхождений 0», и это молчание СЛЕПОЕ: предикат судит только
+      запись с блоком `event`, а эта запись его не несла. Промежуточное состояние этой же правки
+      (блоки `event` дописаны, `effective_approval` ещё нет) — «осмотрено 57 · расхождений 4»:
+      краснеет ровно на четырёх записях правки. После — «осмотрено 57 · расхождений 0».
+    silence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужны PyYAML и gh
+      import glob, json, subprocess, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      tasks = sorted({t for _, d in rows for k in ('task', 'edition_task')
+                      if '#' in (t := str((d.get('subject') or {}).get(k) or ''))})
+      com = {t: [c for page in json.loads(subprocess.run(['gh', 'api', '--paginate', '--slurp',
+             'repos/%s/issues/%s/comments?per_page=100' % tuple(t.split('#'))], capture_output=True,
+             text=True, check=True).stdout) for c in page] for t in tasks}
+      silent = [(p, c['id']) for p, d in rows if (d.get('event') or {}).get('status') != 'performed'
+                for k in ('task', 'edition_task') for c in com.get((d.get('subject') or {}).get(k), [])
+                if {'role: acceptance-reviewer', 'subject_sha256: ' + p[-69:-5]} <= set(c['body'].splitlines())]
+      print('записей', len(rows), '· задач', len(tasks), '· комментариев', sum(map(len, com.values())),
+            '· событие есть, запись молчит', len(silent))
+      for p, i in silent:
+          print(' ', p, i)
+      PY
+    silence_predicate_result: >-
+      На 4ed53c9b — «записей 57 · задач 17 · комментариев 94 · событие есть, запись молчит 5»:
+      четыре записи этой правки и `registration-and-its-three-consequences/7c81fa29…` (kaname#256,
+      событие 5731034477) — тот же дефект вне объёма этой правки, назван в её возврате. После —
+      «… молчит 1». Граница названа: опрашиваются только задачи из `subject.task` и
+      `subject.edition_task`; контроль в другую сторону (то же сопоставление по записям С блоком
+      `event`) находит 18 событий из 23 записанных, пять остальных лежат в задачах, названных
+      записью иначе. Число молчащих — нижняя граница, а не перепись.
+    gate: >-
+      ГЕЙТА на это свойство в дереве НЕТ. Замер на 4ed53c9b: `grep -rln 'effective_approval\|publication_pending'
+      internal/ scripts/ Makefile .github` в kaname → 0 файлов; в `scripts/change-graph-gate/` и
+      `scripts/docs-gate/` воркспейса → 0. Каталог `docs/specs/reviews/` читают три пробы
+      `internal/check` (ведомость вершин вопроса об истории, перепись посева) — поля санкции ни одна
+      не судит. Оба предиката выше держатся ВНИМАНИЕМ; держатель класса «событие на трекере есть —
+      запись о нём молчит» — предмет tooling-maintainer, назван сверкой волны 377.
+
 authority:
   mode: versioned_policy_authority
   epoch: post-cutover
@@ -95,6 +203,37 @@ authority:
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
   allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5792262830
+  node_id: IC_kwDOTZqgWM8AAAABWT7qrg
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5792262830
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5792262830
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-23T09:20:53Z'
+  body_sha256: 201fa744aa211a153f83eea25e10c90fb9ea9241dd2a60b897281e1290774453
+  subject_sha256: 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939
+  subject_revision: 11b6f723d3cb9dd84f37e694047823268e535a5d
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента (#378: сверка волны 377 назвала запись
+    молчащей при опубликованном событии), тем же коммитом, что `effective_approval.sanction`;
+    вердикт, разбор, находки и числа задним числом не правлены. Перемерено: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5792262830` (id, node_id, user pointpu, MEMBER,
+    created_at; created_at == updated_at, то есть после публикации тело не правилось); пять строк
+    тела дословно, каждая ровно одна (`grep -cxF` → 1 по каждой); отпечаток тела — `gh api … |
+    jq -j .body | sha256sum` → 201fa744…; форма команды проверена в обе стороны: на этом же
+    теле `jq -r` → 6eae4704… — другое число о другом входе; на событии круга 7 Ф12
+    (`second-factor-…/423f7233…`, 5730853026) `jq -j` → 8409dfc3… как в его записи. Отпечаток предмета снят самостоятельно: `git show
+    11b6f723d3cb9dd84f37e694047823268e535a5d:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md | sha256sum` → 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939, совпал
+    с именем файла записи и со строкой `subject_sha256` тела события.
 
 attribution:
   reviewer_kind: claude_agent
