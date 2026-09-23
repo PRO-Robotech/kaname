@@ -1,0 +1,114 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 3f0dca23af753cc5dffc400306db950f92ac07bc925a9b58ae1bcb9a346d108a
+  static_status: DRAFT
+  static_status_note: >-
+    Токен `DRAFT` в шапке — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (семь) не
+    трогаются — редакция 13 получает соседнюю запись по своему отпечатку.
+  base_commit: 253cf0446c30745a61c98671a34e207069da00ed
+  content_commit: none
+  content_commit_note: >-
+    Редакция 13 на момент круга НЕ закоммичена: рабочая копия ветки `305` @ 253cf044. После
+    коммита `git show <коммит>:<путь> | sha256sum` обязан дать 3f0dca23… дословно.
+  branch: '305'
+  wave_branch: '377'
+  pull_request: pending
+  task: PRO-Robotech/kacho#1269
+  edition_task: PRO-Robotech/kaname#305
+  paired_document:
+    path: docs/engineering/acceptance/recovery-of-access.md
+    sha256: fe558cc810e569f456e9b2da1200c4396afaf39ae52450787484e74beaced170
+    record: docs/specs/reviews/recovery-of-access/fe558cc810e569f456e9b2da1200c4396afaf39ae52450787484e74beaced170.yaml
+  lines: 3451
+  round: 8
+  predecessor_record: docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/68250cdd1f7a618ad25774e96d53f393632805cebc74e709ebb385b4d8e3c99d.yaml
+  predecessor_note: >-
+    Непосредственный предшественник — редакция 12 (68250cdd…, круг 7 APPROVED); она же в HEAD
+    ветки (`git show HEAD:<путь> | sha256sum` → 68250cdd…). Одобрение на редакцию 13 НЕ
+    переносится (change-graph.md §2).
+  fingerprint_predicate: >-
+    sha256sum <путь> в рабочей копии ветки 305 @ 253cf044 → 3f0dca23…, совпал с объявленным;
+    wc -l → 3451.
+  task_premise_remeasured: >-
+    (1) Отпечаток и база — ПОДТВЕРДИЛОСЬ. (2) Абзац совпадает с Ф5 Р5 байт в байт — ПОДТВЕРДИЛОСЬ
+    (29a72272…, 15 строк; на HEAD 0). (3) Состав правки — ПОДТВЕРДИЛОСЬ: `git diff --numstat` →
+    33 2; четыре ломтя — шапка (строка редакции 13), Р10 (новый абзац), §7.2 (строка Ф5 §7),
+    §12 (сводка Р10). Метки Ф3-N: 53 на обеих редакциях.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-23'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 8 — APPROVED: блокирующих ноль. Дельта — один абзац Р10, дословно общий с Ф5 Р5,
+    и две согласующие строки (§7.2, §12); «Дано», «Когда», факты «Тогда», ID и счёт сценариев не
+    тронуты. Санкция этим не выдана (change-graph.md §3); политика воркспейса называет `pointpu`.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#305 (либо kacho#1269) с полями role, verdict, subject,
+      subject_revision (коммит редакции 13), subject_sha256 дословно; блок `event` — отдельным
+      коммитом поверх записи.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакций 12 → 13 целиком, судилась вместе с парой (Ф5, редакция 4). Новый абзац сверен
+    с остальным Р10 этой же редакции: отказ заблокированной уже считается попыткой; обнуляет вход,
+    завершённый до уровня всех заведённых факторов — абзац применяет это правило к завершению, а
+    не вводит второе.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  papers_agree: 'Абзац один в Ф3 Р10 и Ф5 Р5; §7.2 и §12 говорят тот же смысл; строка Ф5 §7 — редакция 4.'
+  scenario_count: 'метки Ф3-N: 53 на обеих редакциях'
+  producer_present_for_every_then: >-
+    Нового «Тогда» в Ф3 нет; наблюдаемое нового абзаца — Ф5-25 в доме Ф5, производитель назван
+    там (kaname#305 плюс Ф3 #1269 по форме отказа Ф3-02, Ф3-28).
+  positive_twin_for_every_negation: 'Не изменилось против круга 7; у Ф5-25 — близнец (б) в самом сценарии.'
+  constructibility: >-
+    Нового «Дано» в Ф3 нет. «Дано» Ф5-25 посеяно рецензентом 3 из 3 (запись пары), «не выполнилось» 0.
+  open_questions: none
+  conventions: 'Контракт, RPC, поля, отказы — не тронуты.'
+  disclosure: 'Уровень свойства; не блокирующее — см. N3 записи пары.'
+
+experiment:
+  reference: >-
+    Посев и прогоны — в записи пары (recovery-of-access, fe558cc8…): до правки полосы замки красные,
+    близнец зелёный; с кандидатной правкой через место решения входа — три зелёных, запись
+    ведомости гейта единственного писателя самоистекает.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N1
+    class: doc-truthfulness
+    text: >-
+      Строка «Статус» («кругов ревью ноль») отстаёт от каталога записей (с этой — восемь). Тот же
+      класс, что N1 круга 7; документ выносит его за объём правки.
+
+seed_attempt:
+  performed: true
+  outcome: green
