@@ -21,6 +21,13 @@
 // глагола, и глагол отвечал бы «уже сделано», не назвав замены, а отказ по
 // ключу менял бы набор.
 //
+// # Предел
+//
+// Вся команда — связь с базой, чтение набора, переход и порождение замены —
+// идёт под одним своим пределом (signingKeyCommandTimeout). Предел запроса у
+// пула ограничивает запрос лишь при живой связи с сервером; зависшая сеть
+// иначе держала бы реакцию на утечку до сигнала без единого кода возврата.
+//
 // Право на действие — обладание настройкой службы: адресом и удостоверением её
 // базы и ключом обёртки. Это то же, что даёт право поднять саму службу, и
 // меньшего здесь не выражается — и не должно.
@@ -32,9 +39,9 @@
 //	   исход утечки: ключ снят, подписывающего нет, замена не заведена
 //	   (повтор довершает);
 //	3  вердикта нет — вызов не разобран, посадка не принята, база или
-//	   ключница недоступны; у утечки также — ключ снят, а подписывает ли
-//	   служба, не установлено (`outcome=signer-unknown`, повтор прочитает и
-//	   при нужде довершит).
+//	   ключница недоступны, истёк предел команды; у утечки также — ключ снят,
+//	   а подписывает ли служба, не установлено (`outcome=signer-unknown`,
+//	   повтор прочитает и при нужде довершит).
 package main
 
 import (
@@ -65,6 +72,26 @@ const (
 // signingKeyCommandName — имя подкоманды процесса.
 const signingKeyCommandName = "signing-key"
 
+// signingKeyCommandTimeout — предел ВСЕЙ команды.
+//
+// Работы у команды не больше, чем у одного прохода обслуживания
+// (signingKeyPassTimeout): одна связь, чтение набора, переход и, если подпись
+// переходит, порождение ключа с его записью. Минута много больше этого — и с
+// порождением ключа RSA — и короче того, что оператор в разгар утечки готов
+// ждать, не зная исхода.
+const signingKeyCommandTimeout = time.Minute
+
+// signingKeyCommandLimitExpired — причина отмены, когда кончился предел САМОЙ
+// команды. Отдельная причина, а не общий срок контекста: отказ хранилища на
+// отменённом запросе приезжает кодом состояния сервера и о сроке не говорит,
+// а оператор обязан узнать, что кончилось ожидание команды, а не что база
+// отказала.
+type signingKeyCommandLimitExpired struct{ limit time.Duration }
+
+func (e signingKeyCommandLimitExpired) Error() string {
+	return fmt.Sprintf("предел команды %s истёк", e.limit)
+}
+
 const signingKeyUsage = "kaname signing-key {compromise|retire} -kid=KID -decided-by=КТО\n" +
 	"  compromise — ключ утёк: покидает набор НЕМЕДЛЕННО, подписанные им токены отвергаются;\n" +
 	"               если он подписывал, подпись переходит к новому ключу\n" +
@@ -77,6 +104,22 @@ const signingKeyUsage = "kaname signing-key {compromise|retire} -kid=KID -decide
 // должно стоить открытия базы, а отказ разбора — «не исполнялось», а не
 // «отказ по ключу».
 func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string, out io.Writer, logger *slog.Logger) int {
+	return runSigningKeyCommandWithin(ctx, signingKeyCommandTimeout, cfg, args, out, logger)
+}
+
+// runSigningKeyCommandWithin — та же команда с пределом на ВХОДЕ.
+//
+// Предел вынесен в вызов по той же причине, что часы у buildTokenSigningAt:
+// проба зависшего хранилища с минутным пределом ждала бы минуту. Производственный
+// вызов один — runSigningKeyCommand, и он подаёт объявленный предел.
+func runSigningKeyCommandWithin(
+	ctx context.Context,
+	limit time.Duration,
+	cfg config.Config,
+	args []string,
+	out io.Writer,
+	logger *slog.Logger,
+) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(out, signingKeyUsage)
 		return signingKeyExitNotRun
@@ -121,9 +164,14 @@ func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string,
 		_, _ = fmt.Fprintf(out, "посадка процесса: %v\n", err)
 		return signingKeyExitNotRun
 	}
+	// Предел — после разбора и стража, ДО первого соединения: всё, что может
+	// зависнуть, идёт под ним.
+	ctx, cancel := context.WithTimeoutCause(ctx, limit, signingKeyCommandLimitExpired{limit: limit})
+	defer cancel()
+
 	pool, err := coredb.NewPool(ctx, cfg.DSN())
 	if err != nil {
-		_, _ = fmt.Fprintf(out, "база: %v\n", err)
+		_, _ = fmt.Fprintf(out, "база: %v\n", underCommandLimit(ctx, err))
 		return signingKeyExitNotRun
 	}
 	defer pool.Close()
@@ -136,7 +184,7 @@ func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string,
 		err = ks.VerifyWrappingKey(ctx)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintln(out, signingKeyCommandKeystoreRefusal(cfg.AuthN, err))
+		_, _ = fmt.Fprintln(out, signingKeyCommandKeystoreRefusal(cfg.AuthN, underCommandLimit(ctx, err)))
 		return signingKeyExitNotRun
 	}
 
@@ -147,7 +195,20 @@ func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string,
 	default:
 		outcome, err = ks.Retire(ctx, kid, *decidedBy)
 	}
-	return reportSigningKeyOutcome(out, action, *decidedBy, outcome, err)
+	return reportSigningKeyOutcome(out, action, *decidedBy, outcome, underCommandLimit(ctx, err))
+}
+
+// underCommandLimit приписывает к отказу, что кончился предел САМОЙ команды,
+// — когда кончился именно он. Иные отказы и успех проходят как есть.
+func underCommandLimit(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	var expired signingKeyCommandLimitExpired
+	if errors.As(context.Cause(ctx), &expired) {
+		return fmt.Errorf("%w: %w", expired, err)
+	}
+	return err
 }
 
 // signingKeyCommandKeystoreRefusal — текст отказа ключницы для ОПЕРАТОРА

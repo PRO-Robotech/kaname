@@ -367,6 +367,79 @@ func TestSigningKeyCommand_RefusalAfterPartialLeavesTheSignerAlone(t *testing.T)
 	require.False(t, svc.signs(t), "отказ не заводит подписывающего")
 }
 
+// TestSigningKeyCommand_OwnLimitEndsAHungStoreWithNoVerdict — хранилище
+// зависло (строку ключа держит чужая транзакция): команда кончается СВОИМ
+// пределом, отвечает «не исполнялось» и называет предел, а набор и
+// подписывающий остаются прежними. Близнец в той же пробе — тот же вызов с тем
+// же пределом, когда строку никто не держит: он исполняется.
+func TestSigningKeyCommand_OwnLimitEndsAHungStoreWithNoVerdict(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	const (
+		limit = 2 * time.Second
+		// bound — сколько проба ждёт возврата. Меньше statement_timeout пула:
+		// иначе возврат по чужому пределу был бы неотличим от возврата по своему.
+		bound = 15 * time.Second
+	)
+	ctx := context.Background()
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	leaked := svc.signedKID(t)
+	pool := storePool(t, cfg)
+
+	// Предпосылка пробы: предел запроса у пула либо не задан, либо длиннее
+	// ожидания пробы. Иначе зависание кончал бы он, и проба не различала бы
+	// команду со своим пределом и команду без него.
+	var statementTimeoutMS int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT setting::bigint FROM pg_settings WHERE name = 'statement_timeout'`).Scan(&statementTimeoutMS))
+	require.Truef(t, statementTimeoutMS == 0 || time.Duration(statementTimeoutMS)*time.Millisecond > bound,
+		"предпосылка пробы не выполняется: statement_timeout пула %dms не длиннее ожидания пробы %s", statementTimeoutMS, bound)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `SELECT kid FROM kaname.token_signing_keys WHERE kid = $1 FOR UPDATE`, string(leaked))
+	require.NoError(t, err)
+
+	type result struct {
+		code int
+		out  string
+	}
+	run := func() <-chan result {
+		done := make(chan result, 1)
+		go func() {
+			var out bytes.Buffer
+			code := runSigningKeyCommandWithin(context.Background(), limit, cfg,
+				[]string{"compromise", "-kid=" + string(leaked), "-decided-by=oncall@example.invalid"}, &out, quietLogger())
+			done <- result{code, out.String()}
+		}()
+		return done
+	}
+	var hung result
+	select {
+	case hung = <-run():
+	case <-time.After(bound):
+		_ = tx.Rollback(ctx)
+		t.Fatalf("команда не вернулась за %s при своём пределе %s", bound, limit)
+	}
+	require.NoError(t, tx.Rollback(ctx))
+	require.Equal(t, signingKeyExitNotRun, hung.code, "вывод команды: %s", hung.out)
+	require.Contains(t, hung.out, "outcome=not-run")
+	require.Contains(t, hung.out, "предел команды "+limit.String()+" истёк", "оператор обязан узнать, что кончился предел самой команды")
+	require.True(t, svc.servedKIDs(t)[leaked], "истёкший предел не трогает набор")
+	require.Equal(t, leaked, svc.signedKID(t), "истёкший предел не трогает подписывающего")
+
+	var free result
+	select {
+	case free = <-run():
+	case <-time.After(bound):
+		t.Fatalf("команда без зависшей строки не вернулась за %s", bound)
+	}
+	require.Equal(t, signingKeyExitDone, free.code, "вывод команды: %s", free.out)
+	require.False(t, svc.servedKIDs(t)[leaked])
+}
+
 // TestSigningKeyCommand_ForeignWrappingKeyIsNotRunAndTouchesNothing — команда
 // с ключом обёртки, который не открывает записанное, не исполняется: замена,
 // порождённая им, была бы нечитаема каждой репликой. Отказ называет ручку и
