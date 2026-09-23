@@ -279,7 +279,9 @@ var configBridge = []bridged{
 	{configKey: "authn.token-signing.algorithm", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "algorithm"}},
 	{configKey: "authn.token-signing.allowed-algorithms", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "allowedAlgorithms"}},
 	{configKey: "authn.token-signing.key-set-path", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keySetPath"}},
-	{configKey: "authn.token-signing.key-lifetime", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keyLifetime"}},
+	// Срок ключа отдан ВЕТВЬЮ (`with`): пустой в файл не попадает, а не
+	// рендерится пустой строкой, которую разбор отверг бы раньше стража (#321).
+	{configKey: "authn.token-signing.key-lifetime", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keyLifetime"}, omitEmpty: true},
 	// ЧИТАТЕЛЬ ПРЕДЪЯВЛЕННОГО УДОСТОВЕРЕНИЯ. Тот же выключатель блока.
 	{configKey: "authn.presented-credential.enabled", gate: presentedCredentialGate, derive: func(*valueReader) any { return true }},
 	{configKey: "authn.presented-credential.audience", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "audience"}},
@@ -447,7 +449,10 @@ var restatedDeliberately = map[string]string{
 		"судится ручками env.KANAME_INTERNALREST_* рядом",
 	// Величина своей чеканки, у которой встроенное умолчание процесса НЕПУСТО и
 	// годно: страж на снятии молчит по построению. Срок ключа отсюда снят
-	// (#321): умолчания у него больше нет, и снятие ручки роняет посадку.
+	// (#321): умолчания у него нет ни у процесса, ни в базовых значениях чарта,
+	// и снятие ручки роняет посадку — и здесь, где ручка снимается из слитого
+	// дерева, и в рендере, где о ней молчит накладка
+	// (`TestProdProfile_RenderedWithoutAKeyLifetimeRefusesStartNamingIt`).
 	"authn.tokenSigning.keySetPath": "встроенное умолчание процесса непусто и годно " +
 		"(/.well-known/kaname/jwks.json), поэтому страж на снятии молчит. Величина объявлена " +
 		"потому, что это АДРЕС, по которому всякий проверяющий наш токен читает набор " +
