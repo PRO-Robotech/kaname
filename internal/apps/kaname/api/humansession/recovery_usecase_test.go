@@ -17,9 +17,11 @@ package humansession_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -301,6 +303,124 @@ func TestRecovery_F5_17_BlockedIdentityGetsTheBlockedLoginRefusal(t *testing.T) 
 	h.mustLogin(t, "r17@example.invalid", "brand-new-password-17")
 }
 
+// TestRecovery_F5_25_CompletionResetsTheAddressCountOnlyAsALoginCompletedToEveryEnrolledFactor —
+// Ф5-25 (Р5, Д13; правило — Ф3 Р10 и Ф12 Р7; задача PRO-Robotech/kaname#305):
+// завершение восстановления решает счёт по адресу тем же местом решения, что
+// вход. Сессия восстановления — «1» (`recovery_code`, Ф11 Р8), поэтому счёт
+// обнуляется только у незаблокированной личности без второго фактора.
+//
+// Три личности, один отличающий факт у каждого замка против близнеца (б):
+//
+//	(а) [замок]   A — второй фактор заведён: счёт НЕ обнулён — второй неверный
+//	              пароль после завершения упирается в частоту;
+//	(б) [близнец] B — без второго фактора: счёт обнулён — оба неверных пароля
+//	              после завершения — отказ входа;
+//	(в) [замок]   C — заблокирована: сессии нет, отказ завершения сосчитан
+//	              попыткой, счёт НЕ обнулён — первый же неверный пароль после
+//	              упирается в частоту.
+//
+// Способность упасть — в обе стороны: обнуление, не связанное с достигнутым
+// уровнем, краснеет на (а) и (в); отсутствие обнуления — на (б).
+func TestRecovery_F5_25_CompletionResetsTheAddressCountOnlyAsALoginCompletedToEveryEnrolledFactor(t *testing.T) {
+	lim := limits()
+	// Дано: профиль, при котором ось источника не вмешивается в замер оси адреса.
+	require.GreaterOrEqual(t, lim.AddressAttempts, 2, "Дано: N_адрес ≥ 2")
+	require.Greater(t, lim.SourceAttempts, lim.AddressAttempts+1, "Дано: N_источник > N_адрес + 1")
+	t.Logf("профиль: N_адрес %d за %v · N_источник %d за %v", lim.AddressAttempts, lim.AddressWindow,
+		lim.SourceAttempts, lim.SourceWindow)
+
+	h := newHarness(t, nil)
+	type person struct {
+		label          string
+		user           domain.User
+		email, source  string
+		factor, locked bool
+	}
+	people := []*person{
+		{label: "(а) A — второй фактор заведён", email: "r25a@example.invalid", source: "203.0.113.251", factor: true},
+		{label: "(б) B — без второго фактора", email: "r25b@example.invalid", source: "203.0.113.252"},
+		{label: "(в) C — заблокирована", email: "r25c@example.invalid", source: "203.0.113.253", locked: true},
+	}
+	for i, p := range people {
+		p.user = h.person(t, fmt.Sprintf("usr-r25%d", i), p.email, "old-password-25", true)
+		if p.factor {
+			// Дано: строка второго фактора в состоянии «заведён» — посевом в
+			// хранилище способов, без церемонии заведения (§7, строка Ф5-25).
+			material, err := domain.NewLoginVerifier("seeded-second-factor-25")
+			require.NoError(t, err)
+			h.store.factors[p.user.ID] = map[domain.LoginMethodKind]*domain.LoginMethod{
+				domain.LoginMethodTOTP: {UserID: p.user.ID, Kind: domain.LoginMethodTOTP, Verifier: material,
+					State: domain.LoginMethodStateActive, CreatedAt: ucBase},
+			}
+		}
+		if p.locked {
+			p.user.InviteStatus = domain.InviteStatusBlocked
+			h.store.users[p.user.ID] = p.user
+		}
+		h.request(t, p.email)
+	}
+
+	wrong := func(p *person) error {
+		_, err := h.login.Execute(context.Background(),
+			humansession.LoginInput{Email: p.email, Password: "not-the-password-25", Source: p.source})
+		return err
+	}
+	isAuthFailed := func(err error) bool { return errors.Is(err, humansession.ErrAuthenticationFailed) }
+	isAddressRate := func(err error) bool {
+		var tma *humansession.TooManyAttemptsError
+		return errors.As(err, &tma) && tma.Scope == humansession.FailureByAddress
+	}
+
+	type outcome struct {
+		completion humansession.CompleteRecoveryOutput
+		err        error
+		after      [2]error
+		count      int
+	}
+	got := map[*person]outcome{}
+	for _, p := range people {
+		// Когда: N_адрес − 1 неверных паролей на входе в одном окне.
+		for i := 0; i < lim.AddressAttempts-1; i++ {
+			require.True(t, isAuthFailed(wrong(p)), "%s: Дано — неверный пароль до завершения есть отказ входа", p.label)
+		}
+		var o outcome
+		o.completion, o.err = h.completeFrom(p.email, h.letterOf(t, p.user.ID), "brand-new-password-25", p.source)
+		o.count, _ = h.store.CountFailures(context.Background(), humansession.FailureByAddress,
+			humansession.AddressKey(p.email), h.clock.Add(-lim.AddressWindow))
+		o.after[0], o.after[1] = wrong(p), wrong(p)
+		got[p] = o
+		t.Logf("%s: завершение %v · счёт по адресу после завершения %d · неверные после: %v, %v",
+			p.label, o.err, o.count, o.after[0], o.after[1])
+	}
+
+	a, b, c := got[people[0]], got[people[1]], got[people[2]]
+
+	// (б) близнец — первым: без него замки ниже краснели бы и на полосе, не
+	// выдающей ничего.
+	require.NoError(t, b.err, "(б): завершение — исход Ф5-03")
+	require.False(t, b.completion.Bearer.IsZero(), "(б): сессия выдана")
+	assert.True(t, isAuthFailed(b.after[0]) && isAuthFailed(b.after[1]),
+		"(б): счёт по адресу обнулён — оба неверных пароля после завершения есть отказ входа, получено %v, %v",
+		b.after[0], b.after[1])
+
+	// (а) замок: заведён второй фактор — «1» не уровень всех её факторов.
+	require.NoError(t, a.err, "(а): завершение — исход Ф5-03")
+	require.False(t, a.completion.Bearer.IsZero(), "(а): сессия выдана")
+	require.Equal(t, []string{"recovery_code"}, a.completion.View.Session.PresentedMethods, "(а): сессия восстановления")
+	require.True(t, isAuthFailed(a.after[0]), "(а): первый неверный пароль после завершения — отказ входа, получено %v", a.after[0])
+	assert.True(t, isAddressRate(a.after[1]),
+		"(а): второй неверный пароль обязан упереться в частоту по адресу — счёт НЕ обнулён завершением, "+
+			"и бюджет подбора кода второго фактора не обновлён; получено %v (счёт после завершения %d)", a.after[1], a.count)
+
+	// (в) замок: заблокирована — сессии нет, вход не завершён, отказ — попытка.
+	require.ErrorIs(t, c.err, humansession.ErrAuthenticationFailed, "(в): тот же отказ, что на входе заблокированной (Ф1-59)")
+	require.True(t, c.completion.Bearer.IsZero(), "(в): сессии нет")
+	assert.True(t, isAddressRate(c.after[0]),
+		"(в): первый неверный пароль после завершения обязан упереться в частоту по адресу — отказ завершения "+
+			"сосчитан N_адрес-й попыткой, счёт НЕ обнулён; получено %v (счёт после завершения %d)", c.after[0], c.count)
+	require.Equal(t, 1, h.obs.recoveryCompletion[humansession.RecoveryCompletionBlocked])
+}
+
 // TestRecovery_PolicyRefusalNamesTheFieldAndDoesNotConsumeTheCode — новый пароль
 // судится правилом Ф1-32…38 ДО применения кода: отказ называет поле, код
 // остаётся годным, и человек не тратит его на негодный пароль.
@@ -358,7 +478,9 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 	h.request(t, "rsf@example.invalid")
 	letter := h.letterOf(t, u.ID)
 
-	for _, op := range []string{"replace", "cutoff", "end-others", "audit", "insert", "commit"} {
+	// "reset-failures" — решение о счёте по адресу местом решения входа: у
+	// личности без второго фактора оно обнуляет счёт той же транзакцией.
+	for _, op := range []string{"replace", "cutoff", "end-others", "reset-failures", "audit", "insert", "commit"} {
 		h.store.failOn = op
 		_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 		require.ErrorIs(t, err, humansession.ErrStoreUnavailable, "отказ на %q", op)
@@ -366,7 +488,7 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 		require.Nil(t, h.store.codesOf(u.ID)[0].ConsumedAt, "код не применён (%s)", op)
 	}
 	h.store.failOn = ""
-	require.Equal(t, 6, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed])
+	require.Equal(t, 7, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed])
 	_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 	require.NoError(t, err)
 }

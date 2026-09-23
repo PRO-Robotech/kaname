@@ -22,15 +22,40 @@ package humansession
 // # Порядок внутри обращения — несущий
 //
 //	форма → частота (обе оси) → правило нового пароля → ЧТЕНИЕ адреса →
-//	ОДНА транзакция: применить код (один оператор) · записать материал ·
-//	снять записи ВСЕХ прежних сессий · отсечка «смена пароля» актором-человеком ·
-//	журнал по ключу потока · событие · выдача сессии (если не заблокирована) ·
-//	сброс счёта по адресу
+//	чтение заведённых способов входа → ОДНА транзакция: применить код (один
+//	оператор) · записать материал · снять записи ВСЕХ прежних сессий · отсечка
+//	«смена пароля» актором-человеком · журнал по ключу потока · событие ·
+//	выдача сессии (если не заблокирована) · решение о счёте по адресу местом
+//	решения входа
 //
 // Правило пароля судится ДО применения кода: негодный пароль называет поле и
 // не тратит код. Чтение адреса и оператор применения исполняются на ОБЕИХ
 // полосах — «адрес есть» и «адреса нет» — одинаково: у второй оператор ищет
-// код у пустой личности и не находит, как не нашёл бы неверный.
+// код у пустой личности и не находит, как не нашёл бы неверный. Чтение
+// заведённых способов — только на полосе «адрес есть»: у второй личности нет,
+// и спрашивать хранилище способов не о ком.
+//
+// # Счёт по адресу решает МЕСТО РЕШЕНИЯ ВХОДА, а не эта полоса
+//
+// Завершение выдаёт сессию и потому завершает вход; обнуляет ли оно счёт по
+// адресу, решает `resetFailuresOnCompletedLogin` (`completed_login.go`) тем же
+// правилом, что вход и церемония (Ф3 Р10, Ф12 Р7, Ф5 Р5; задача
+// PRO-Robotech/kaname#305). Сессия восстановления — «1» (`recovery_code`, Ф11
+// Р8), и исходов поэтому три:
+//
+//	без второго фактора, не заблокирована — счёт обнуляется: «1» и есть
+//	                                        уровень всех её факторов;
+//	второй фактор заведён                 — счёт НЕ обнуляется: это тот же
+//	                                        счёт, что бюджет подбора его кода,
+//	                                        и обнуляет его только вход, доведённый
+//	                                        кодом до «2»;
+//	заблокирована                         — сессии нет, вход не завершён: решения
+//	                                        нет вовсе, а отказ завершения
+//	                                        считается попыткой, как всякий отказ
+//	                                        входа заблокированной (Ф1-59).
+//
+// Заведённое читается ДО открытия транзакции записи (вложенный захват
+// соединения — шапка `completed_login.go`); не прочитано — счёт остаётся.
 //
 // Отказ — ОДИН на все причины предъявления (Ф1 Р3, Ф1-59): «адреса нет», «код
 // не тот», «истёк», «применён», «заблокирована» — наружу уходит тот же
@@ -42,6 +67,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -69,6 +95,7 @@ type CompleteRecoveryOutput struct {
 // CompleteRecoveryUseCase — предъявление кода.
 type CompleteRecoveryUseCase struct {
 	store    Store
+	methods  loginmethod.Store
 	hasher   Hasher
 	rule     *PasswordRule
 	ttl      time.Duration
@@ -78,9 +105,11 @@ type CompleteRecoveryUseCase struct {
 	gate     attemptGate
 }
 
-// CompleteRecoveryDeps — зависимости.
+// CompleteRecoveryDeps — зависимости. Methods — хранилище способов входа: ось
+// «заведено» места решения о счёте по адресу.
 type CompleteRecoveryDeps struct {
 	Store    Store
+	Methods  loginmethod.Store
 	Hasher   Hasher
 	Rule     *PasswordRule
 	Limits   Limits
@@ -95,6 +124,8 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 	switch {
 	case d.Store == nil:
 		return nil, fmt.Errorf("recovery completion: session store required")
+	case d.Methods == nil:
+		return nil, fmt.Errorf("recovery completion: login method store required")
 	case d.Hasher == nil:
 		return nil, fmt.Errorf("recovery completion: password hasher required")
 	case d.Rule == nil:
@@ -115,7 +146,7 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 		d.Logger = slog.Default()
 	}
 	return &CompleteRecoveryUseCase{
-		store: d.Store, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
+		store: d.Store, methods: d.Methods, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer},
 	}, nil
 }
@@ -167,6 +198,13 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	}
 	user := target.User
 
+	// (3а) Заведённые способы входа — ДО транзакции записи: ось «заведено»
+	// места решения о счёте по адресу.
+	var decision completedLogin
+	if found {
+		decision.Enrolled, decision.EnrolledKnown = enrollmentBeforeWrite(ctx, uc.methods, uc.logger, user.ID)
+	}
+
 	// (4) Одна транзакция: применить код одним оператором и — если применён —
 	// все записи завершения.
 	w, err := uc.store.Writer(ctx)
@@ -192,7 +230,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	// Код применён: учётные данные сменяются у ЛЮБОЙ личности, включая
 	// заблокированную (Ф5-17); сессия выдаётся только действующей (Ф1-59).
 	blocked := user.InviteStatus != domain.InviteStatusActive
-	out, err := uc.complete(ctx, w, user, code, fresh, now, blocked, target.EmailVerified)
+	out, err := uc.complete(ctx, w, user, code, fresh, now, blocked, target.EmailVerified, decision)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
@@ -207,10 +245,11 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 }
 
 // complete — записи завершения ОДНИМ исходом на открытой транзакции: материал ·
-// снятие записей всех прежних сессий · отсечка · журнал · событие · выдача.
+// снятие записей всех прежних сессий · отсечка · журнал · событие · выдача ·
+// решение о счёте по адресу местом решения входа (только при выдаче).
 func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
-	now time.Time, blocked, emailVerified bool,
+	now time.Time, blocked, emailVerified bool, decision completedLogin,
 ) (CompleteRecoveryOutput, error) {
 	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil {
@@ -260,9 +299,10 @@ func (uc *CompleteRecoveryUseCase) complete(
 	if !blocked {
 		// Сессия аутентифицирована на единицу разрешения ПОЗЖЕ отсечки: иначе
 		// при включающей границе она была бы негодна (Ф5-19, Ф1 §4.2).
+		methods := []string{assurance.MethodRecoveryCode.String()}
 		s, bearer, err := IssueSession(ctx, w, IssueInput{
 			User:      user,
-			Presented: []assurance.Presentation{assurance.RecoveryCodePresented()},
+			Presented: presentationsOf(methods),
 			At:        now.Add(time.Microsecond),
 			TTL:       uc.ttl,
 		})
@@ -271,13 +311,18 @@ func (uc *CompleteRecoveryUseCase) complete(
 		}
 		payload["session_id"] = string(s.ID)
 		out = CompleteRecoveryOutput{View: SessionView{User: user, Session: s, EmailVerified: emailVerified}, Bearer: bearer}
+		// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых
+		// у личности факторов (Ф3 Р10, Ф12 Р7, Ф5 Р5): сессия восстановления —
+		// «1», и при заведённом втором факторе вход не завершён. У
+		// заблокированной решения нет вовсе — сессии нет.
+		decision.AddressKey, decision.Presented = AddressKey(string(user.Email)), methods
+		if err := resetFailuresOnCompletedLogin(ctx, w, decision); err != nil {
+			return CompleteRecoveryOutput{}, err
+		}
 	}
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType: AuditRecoveryCompleted, TenantAccountID: string(user.AccountID), Payload: payload,
 	}); err != nil {
-		return CompleteRecoveryOutput{}, err
-	}
-	if err := w.ResetFailures(ctx, FailureByAddress, AddressKey(string(user.Email))); err != nil {
 		return CompleteRecoveryOutput{}, err
 	}
 	if err := w.Commit(ctx); err != nil {
