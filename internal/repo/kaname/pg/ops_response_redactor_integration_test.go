@@ -78,10 +78,10 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		Key: &iamv1.ServiceAccountOAuthClient{
 			Id:            "soc_kac164test01",
 			SvaId:         "sva_test",
-			HydraClientId: "hydra_client_kac164",
+			HydraClientId: "provider_client_kac164",
 			CreatedAt:     timestamppb.Now(),
 		},
-		ClientId:     "hydra_client_kac164",
+		ClientId:     "provider_client_kac164",
 		ClientSecret: "topsecret_plaintext_should_be_redacted",
 	}
 	respAny, err := anypb.New(resp)
@@ -101,7 +101,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Equal(t, "topsecret_plaintext_should_be_redacted", out.ClientSecret,
 			"pre-redact baseline: secret present")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId,
+		assert.Equal(t, "provider_client_kac164", out.ClientId,
 			"pre-redact baseline: client_id present")
 	}
 
@@ -119,7 +119,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Empty(t, out.ClientSecret,
 			"post-redact: client_secret must be cleared")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId,
+		assert.Equal(t, "provider_client_kac164", out.ClientId,
 			"post-redact: client_id must be unchanged")
 		require.NotNil(t, out.Key)
 		assert.Equal(t, "soc_kac164test01", out.Key.Id,
@@ -136,7 +136,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		out := &iamv1.IssueSAKeyResponse{}
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Empty(t, out.ClientSecret, "idempotent")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId, "idempotent")
+		assert.Equal(t, "provider_client_kac164", out.ClientId, "idempotent")
 	}
 }
 

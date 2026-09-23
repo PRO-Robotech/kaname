@@ -24,10 +24,12 @@ ls internal/migrations/*.sql | wc -l
 
 **Форма НОВОЙ миграции — метка времени заведения** `YYYYMMDDHHMMSS_<имя>.sql`
 (`date -u +%Y%m%d%H%M%S`). Объявлена она в ОДНОМ месте и здесь НЕ
-переписывается: `docs/architecture/migration-version-namespace.md` — там же
-названо, чем закрыты доводы двух прежних форм. Держит форму гейт
-`internal/repohygiene` `TestNewMigrationOutranksEveryAppliedOne`; он судит
-ТОЛЬКО добавленные относительно ствола файлы. Создают миграции этого каталога:
+переписывается: `docs/engineering/architecture/migration-version-namespace.md` —
+там же названо, чем закрыты доводы прежней формы и что делать, когда часы дали
+метку ниже уже лежащей. Держит форму гейт `internal/check`
+`TestNewMigrationOutranksEveryAppliedOne`
+(`internal/check/migration_version_monotonic_test.go`); он судит ТОЛЬКО
+добавленные относительно ствола файлы. Создают миграции этого каталога:
 
 - core resource model (`operations`, `users`, `accounts`, `projects`,
   `service_accounts`, `groups`, `group_members`, `roles`, `access_bindings`)
@@ -64,6 +66,16 @@ ls internal/migrations/*.sql | wc -l
 > Ключница задачи #897 названа ИНАЧЕ намеренно. Совпадение имён сделало бы стража
 > ведомости дропов красным СПРАВЕДЛИВО: он увидел бы воскресшую таблицу, которую
 > сам же считает снятой.
+
+> [!warning] Гейт формы здесь назывался координатой ЧУЖОГО репозитория
+> Прежняя редакция называла держателем `internal/repohygiene`
+> `TestNewMigrationOutranksEveryAppliedOne`. Гейт с этим именем существует,
+> красным бывает и судит каталоги МОНОРЕПО: `git ls-files -- '*/migrations/*.sql'`
+> в клоне `PRO-Robotech/kacho` даёт **210** файлов и **ноль** путей этой службы.
+> Утверждение было ложным не по тексту, а по ОБЛАСТИ — тот же класс, что и
+> координата предиката выше (kacho#2480). Гейт заведён здесь и судит этот
+> каталог; исторический остаток он печатает числом, потому что применённую
+> миграцию не переименовывают (запрет #5).
 
 CHECK / FK / UNIQUE / partial UNIQUE / триггеры inline в соответствующих
 миграциях. Helper-функции: `labels_valid(jsonb)` (в своде — `kacho_labels_valid`,

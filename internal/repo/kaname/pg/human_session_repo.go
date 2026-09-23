@@ -16,7 +16,8 @@ package pg
 // материала нет.
 //
 // Операцию записи отсечки этот файл тоже не переписывает: она одна на дерево
-// (`upsertRevokeAllSQL`, §4.1 п.17), и три существующих писателя зовут её же.
+// (`subjectCutoffRowSQL`, §4.1 п.17), и зовут её все писатели ОДНОЙ дверью
+// `upsertSubjectCutoff` — она кладёт ОБЕ записи отсечки (kaname#313).
 
 import (
 	"context"
@@ -254,7 +255,24 @@ func (w *humanSessionWriter) FirstAuthentication(ctx context.Context, userID dom
 }
 
 // EndSession — отметка снятия на живой (не снятой) записи; повтор ничего не
-// пишет (Ф1-18).
+// пишет (Ф1-18). Вместе с записью снимается и ВЫДАННОЕ В НЕЙ, той же
+// транзакцией (kaname#313).
+//
+// # ПОЧЕМУ ОТЗЫВ ЗДЕСЬ ОБЯЗАТЕЛЕН
+//
+// Живой вызывающий у этого метода — СОБСТВЕННЫЙ ВЫХОД ЧЕЛОВЕКА. Ротацию
+// обновляющего токена останавливает ровно отзыв семейства: оператор ротации не
+// читает ни отметку окончания сессии, ни одну из отсечек. Значит без отзыва
+// человек выходил сам, запись помечалась окончённой, а выданное в ней
+// продолжало ротироваться в свежие токены — то же, что чинилось для
+// распорядителя.
+//
+// # ПОЧЕМУ ОТЗЫВ СТОИТ ПОД УСЛОВИЕМ СНЯТИЯ
+//
+// Отзывается семейство ровно тогда, когда запись СНЯТА ЭТИМ вызовом. Повторный
+// выход и гонка с параллельным ничего не снимают — и отзывать им нечего:
+// семейство уже отозвал тот, кто снял запись. Безусловный отзыв здесь означал
+// бы, что проигравший гонку переписывает причину отзыва победителя.
 func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error) {
 	tag, err := w.tx.Exec(ctx, `
 		UPDATE human_sessions SET ended_at = $2, ended_reason = $3
@@ -262,20 +280,169 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 	if err != nil {
 		return false, mapErr(err, "HumanSession.End", string(id))
 	}
-	return tag.RowsAffected() == 1, nil
+	ended := tag.RowsAffected() == 1
+	if !ended {
+		return false, nil
+	}
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return false, rerr
+	}
+	return true, nil
 }
+
+// endSessionsOfSQL — ОДНА операция снятия живых записей личности на всё дерево.
+//
+// Выписана константой, потому что исполнителей у неё ДВА: транзакция полосы
+// входа (смена пароля, снятие второго фактора, завершение восстановления) и
+// пул административного принудительного выхода. Две копии одного оператора
+// разошлись бы молча — и разошлись бы та, которую правили последней, — а
+// расхождение здесь означает «по одной полосе человек выведен, по другой нет».
+//
+// `keep` пустой снимает ВСЕ живые записи: пустая строка не равна ни одному
+// идентификатору, поэтому исключать ей нечего. Это не подставное значение, а
+// то же поведение, каким им уже пользуется завершение восстановления.
+const endSessionsOfSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL
+		 RETURNING id`
 
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
 func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	tag, err := w.tx.Exec(ctx, `
-		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
-		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL`, string(userID), string(keep), at, reason)
+	return endSessionsAndRevokeWhatTheyHold(ctx, w.tx, userID, keep, at, reason)
+}
+
+// endSessionsAndRevokeWhatTheyHold — ЕДИНСТВЕННЫЙ способ снять сессии: снимает
+// записи И отзывает выданное в них (задача kaname#313).
+//
+// # ПОЧЕМУ ЭТО ОДИН ОПЕРАТОР, А НЕ ДВА РЯДОМ
+//
+// Ротацию обновляющего токена останавливает РОВНО отзыв семейства: запрос
+// ротации не читает ни отметку окончания сессии, ни одну из отсечек — он судит
+// по `active`, сроку токена и отметке отзыва семейства, и больше ни по чему.
+// Значит сессия, снятая БЕЗ отзыва семейства, снята только в записи: её
+// обновляющий токен продолжает ротироваться в свежие.
+//
+// Пока снятие и отзыв были двумя действиями, «снять и не отозвать» было
+// ПРЕДСТАВИМО — и представилось дважды. Сперва из двух методов, снимающих
+// НЕСКОЛЬКО записей, отзывал один. Затем обнаружился третий — снятие ОДНОЙ
+// записи по идентификатору (`EndSession`), чей живой вызывающий есть
+// собственный выход человека; он не отзывал ничего, а шапка здесь утверждала,
+// что снимающий метод ровно один.
+//
+// УТВЕРЖДЕНИЕ ЭТО БЫЛО ЛОЖНЫМ, и ложным оно было о ЗАЩИТЕ — тот самый класс,
+// который эта полоса чинит везде. Радиус брался по диффу, а надо было по
+// механизму: по операторам, ставящим отметку окончания записи.
+//
+// Теперь отзыв делает КАЖДЫЙ снимающий метод, а их три: снятие одной записи,
+// снятие прочих записей личности и снятие всех её записей. Держит это гейт
+// дерева `TestSessionEndingWritersRevokeWhatTheSessionHolds` — до него у пары
+// «снятие сессии / отзыв семейства» не было ни одного прибора, в отличие от
+// пары записей отсечки.
+//
+// Остатки этой полосы объявлены каждый у своего места и собраны строкой
+// «предмет · причина · предикат» в
+// `tmp/kn-313-own-executor-runs/remnants-as-issue-lines.txt`. Номеров у задач
+// пока нет — заводит их не эта полоса.
+//
+// # ПОЧЕМУ ИДЕНТИФИКАТОРЫ, А НЕ ЧИСЛО
+//
+// Отзыв адресуется снятым записям поимённо. Второй запрос «а какие это были»
+// вернул бы уже снятые строки вперемешку с теми, что сняли до нас, — и отозвал
+// бы выданное в чужих сессиях.
+func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID domain.UserID,
+	keep domain.HumanSessionID, at time.Time, reason string,
+) (int, error) {
+	// Оператор снятия исполняется ЗДЕСЬ, а не в отдельном помощнике, и это
+	// решение: помощник, снимающий записи и не отзывающий выданного, был бы
+	// функцией, делающей ПОЛОВИНУ действия, — то есть ровно тем состоянием,
+	// которое эта дверь и делает непредставимым. Гейт дерева считает такую
+	// функцию находкой, и он прав: сегодня её звала бы только дверь, а завтра
+	// кто угодно.
+	// КУРСОР ЗАКРЫВАЕТСЯ РУКАМИ, А НЕ `defer`, И ЭТО НЕ НЕБРЕЖНОСТЬ: следом на
+	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
+	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
+	// них — то есть слишком поздно.
+	rows, err := tx.Query(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.EndOthers", string(userID))
+		return 0, mapErr(err, "HumanSession.End", string(userID))
 	}
-	return int(tag.RowsAffected()), nil
+	var ended []string
+	for rows.Next() {
+		var id string
+		if serr := rows.Scan(&id); serr != nil {
+			rows.Close()
+			return 0, mapErr(serr, "HumanSession.End", string(userID))
+		}
+		ended = append(ended, id)
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return 0, mapErr(rerr, "HumanSession.End", string(userID))
+	}
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return 0, rerr
+	}
+	return len(ended), nil
+}
+
+// EndAllSessions — ВСЕ живые записи сессии входа личности, снятые на пуле.
+//
+// Читатель у него один — административный принудительный выход, — и приходит он
+// не с полосы входа, а с внутреннего слушателя: своей транзакции у него здесь
+// нет, а отсечка субъекта ложится СВОЕЙ транзакцией до этого вызова.
+//
+// ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ОТ ОТСЕЧКИ ЗАПИСЬ, А НЕ ЕЁ СЛЕДСТВИЕ, И ЧТО ИМЕННО
+// ИЗМЕРЕНО.
+//
+// Отсечка судит ВЫДАЧУ, и судит её НЕ ЗДЕСЬ: резолв нашей сессии отсечку не
+// применяет и говорит это о себе прямо (`humansession/resolve.go`) — строка
+// судится по трём признакам: снята · истекла · личность неактивна. Приёмка Ф3-25
+// ставит отказ предъявленной сессии НА КРАЮ, сравнением момента аутентификации
+// с отсечкой, и эта запись того пути НЕ ЗАМЕЩАЕТ.
+//
+// Измерено ровно одно: без снятия строка остаётся живой, и `Resolve` отвечает
+// «сессия есть» на носитель, выданный до выхода. Следствия этого — три, и все
+// три внутри службы:
+//
+//  1. СИММЕТРИЯ ДВУХ ВЫХОДОВ. Наш собственный выход снимает строку И пишет
+//     отсечку (`humansession/logout.go`). Тот же акт, совершённый
+//     распорядителем, писал только отсечку — то есть один и тот же выход
+//     оставлял разный след;
+//  2. СТРОКА НЕ УБИРАЕТСЯ. Уборка сносит истёкшие и СНЯТЫЕ строки
+//     (`SweepUnservableSessions`); не снятая живёт до своего абсолютного срока;
+//  3. ОТКАЗ ЗАВИСИТ ОТ ВТОРОГО ВОПРОСА. Пока строка жива, «сессии нет» получает
+//     только тот, кто СВЕРХ резолва спросил и отсечку. Снятая строка отвечает
+//     «снята» одним вопросом, и отвечает так всякому читателю.
+//
+// Возвращает ЧИСЛО снятых записей: «снимать было нечего» и «сняли» — разные
+// исходы, и слитые в один они читаются вызывающим одинаково.
+func (r *HumanSessionRepo) EndAllSessions(ctx context.Context, userID domain.UserID, at time.Time, reason string) (int, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.user_id: required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ТОТ ЖЕ единственный оператор, что и у полосы входа: снять записи и
+	// отозвать выданное в них. Привязка семейства к сессии — внешний ключ с
+	// каскадом НА УДАЛЕНИИ строки, а снятие строку не удаляет; без отзыва
+	// обновляющий токен снятой сессии жил бы до порога УДЕРЖАНИЯ — то есть до
+	// настройки хранения, а не до решения о безопасности.
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, tx, userID, "", at, reason)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+	}
+	return ended, nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент
@@ -320,15 +487,19 @@ func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.Hum
 	return nil
 }
 
-// UpsertCutoff — ТА ЖЕ операция, что у трёх существующих писателей (`now`).
+// UpsertCutoff — ТА ЖЕ дверь, что у прочих писателей отсечки: кладёт ОБЕ
+// записи одной транзакцией (`upsertSubjectCutoff`, kaname#313).
+//
+// Здесь стоял прямой вызов оператора ПЕРВОЙ записи, и вторую этот путь не писал
+// вовсе. Читателей у второй — авторитет отзыва на пути запроса, поэтому выход,
+// смена пароля, восстановление и сброс второго фактора снимали доступ на
+// выдаче и НЕ снимали на предъявлении: прежний носитель продолжал
+// аутентифицировать вызовы.
 func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	if err := u.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	if _, err := w.tx.Exec(ctx, upsertRevokeAllSQL, string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy)); err != nil {
-		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
+	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).

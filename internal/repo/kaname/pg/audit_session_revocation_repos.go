@@ -131,22 +131,19 @@ func (r *SessionRevocationRepo) IsRevoked(ctx context.Context, jti string) (bool
 	return true, nil
 }
 
-func (r *SessionRevocationRepo) Insert(ctx context.Context, tx pgx.Tx, s domain.SessionRevocation) (domain.SessionRevocation, error) {
-	const q = `
-		INSERT INTO session_revocations (token_jti, revoked_at, reason, user_id, ttl_expires_at)
-		VALUES ($1, COALESCE($2, now()), $3, $4, $5)
-		RETURNING token_jti, revoked_at, reason, user_id, ttl_expires_at`
-	row := tx.QueryRow(ctx, q,
-		s.TokenJTI, nullableTime(s.RevokedAt), s.Reason, string(s.UserID), s.TTLExpiresAt,
-	)
-	var out domain.SessionRevocation
-	var userID string
-	if err := row.Scan(&out.TokenJTI, &out.RevokedAt, &out.Reason, &userID, &out.TTLExpiresAt); err != nil {
-		return domain.SessionRevocation{}, mapErr(err, "", s.TokenJTI)
-	}
-	out.UserID = domain.UserID(userID)
-	return out, nil
-}
+// ЗДЕСЬ СТОЯЛ `Insert` — ПИСАТЕЛЬ ОТСЕЧКИ БЕЗ ЕДИНОГО ВЫЗЫВАЮЩЕГО
+// (задача kaname#313).
+//
+// Его целиком замещают `RevokeWithAdmin` и `RevokeWithAdminTx`: та же таблица,
+// та же идемпотентная форма, плюс решивший (`revoked_by_user_id`), которого
+// снятый метод записать не умел. Писатель отсечки, которого никто не зовёт, —
+// контроль, существующий в виде кода: отличить его от работающего наблюдением
+// нельзя, потому что «не отозван» и «отзыв не доехал» дают один ответ.
+//
+// Найден гейтом дерева `TestEveryRevocationWriterHasACaller`, и найден по
+// ВТОРОМУ его исходу: имя `Insert` объявлено в дереве одиннадцать раз, поэтому
+// по имени было не разобрать, зовут ли именно его. Гейт считает такую
+// неразличимость находкой, а не молчит о ней, — ровно тем и ловится эта форма.
 
 // DeleteExpired убирает истёкшие строки отзыва — партией и по часам БАЗЫ.
 //
