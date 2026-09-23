@@ -504,7 +504,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Methods: methods, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
 		Observer: rec, Now: time.Now, Logger: logger,
 	})
 	if err != nil {

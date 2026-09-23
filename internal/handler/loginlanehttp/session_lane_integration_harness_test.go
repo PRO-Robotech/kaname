@@ -218,7 +218,7 @@ func newSessionLane(t *testing.T) *sessionLane {
 	})
 	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Methods: methods, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, time.Now)

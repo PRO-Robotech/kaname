@@ -480,7 +480,10 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 
 	// "reset-failures" — решение о счёте по адресу местом решения входа: у
 	// личности без второго фактора оно обнуляет счёт той же транзакцией.
-	for _, op := range []string{"replace", "cutoff", "end-others", "reset-failures", "audit", "insert", "commit"} {
+	// "login-method" — чтение заведённых способов входа ТОЙ ЖЕ транзакцией
+	// после применения кода: его отказ — отказ исхода, как отказ любой записи
+	// в ней (отказ оператора базы обрывает транзакцию, продолжать её нечем).
+	for _, op := range []string{"replace", "cutoff", "end-others", "login-method", "reset-failures", "audit", "insert", "commit"} {
 		h.store.failOn = op
 		_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 		require.ErrorIs(t, err, humansession.ErrStoreUnavailable, "отказ на %q", op)
@@ -488,7 +491,7 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 		require.Nil(t, h.store.codesOf(u.ID)[0].ConsumedAt, "код не применён (%s)", op)
 	}
 	h.store.failOn = ""
-	require.Equal(t, 7, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed])
+	require.Equal(t, 8, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed])
 	_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 	require.NoError(t, err)
 }

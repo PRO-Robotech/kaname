@@ -316,7 +316,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
 func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, presented []string) AssuranceView {
-	enrolled, err := enrolledMethods(ctx, d.Methods, userID)
+	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}

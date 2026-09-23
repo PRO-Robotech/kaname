@@ -267,6 +267,15 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	return true, nil
 }
 
+// LoginMethod — то же чтение, что `fakeMethods.Get`, транзакцией дублёра;
+// отказ по имени "login-method".
+func (w *fakeWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	if err := w.fail("login-method"); err != nil {
+		return domain.LoginMethod{}, err
+	}
+	return fakeMethods{w.store}.Get(ctx, userID, kind)
+}
+
 func (w *fakeWriter) RecordFailure(_ context.Context, scope humansession.FailureScope, key string, at time.Time) error {
 	if err := w.fail("record-failure"); err != nil {
 		return err

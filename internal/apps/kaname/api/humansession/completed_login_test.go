@@ -337,10 +337,6 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 			_, err := NewRegenerateBackupCodesUseCase(SecondFactorDeps{Store: store})
 			return err
 		},
-		"CompleteRecoveryUseCase": func() error {
-			_, err := NewCompleteRecoveryUseCase(CompleteRecoveryDeps{Store: store})
-			return err
-		},
 	}
 
 	readers := enrollmentReaders(t)
