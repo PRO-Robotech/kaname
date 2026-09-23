@@ -45,15 +45,28 @@ type memStore struct {
 	// beforeReplace — вмешательство соседней реплики между чтением
 	// подписывающего и передачей подписи.
 	beforeReplace func()
+	// activeErr — отказ ТОЛЬКО чтения подписывающего: сбой хранилища на этом
+	// чтении, при том что сам подписывающий может и существовать.
+	activeErr error
+	// beforeInsert — то, что случается в момент записи новой строки (например,
+	// кончается срок вызова).
+	beforeInsert func()
 }
 
 func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.SigningKeyRecord{}} }
 
 var errTwoActive = errors.New("memstore: two signing keys would be active")
 
-func (m *memStore) Insert(_ context.Context, rec domain.SigningKeyRecord) error {
+func (m *memStore) Insert(ctx context.Context, rec domain.SigningKeyRecord) error {
+	if m.beforeInsert != nil {
+		m.beforeInsert()
+	}
 	if m.err != nil {
 		return m.err
+	}
+	// Как настоящее хранилище: по оконченному вызову строка не пишется.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if m.insertErr != nil {
 		return m.insertErr
@@ -88,6 +101,9 @@ func (m *memStore) Get(_ context.Context, kid domain.KeyID) (domain.SigningKeyRe
 func (m *memStore) Active(_ context.Context) (domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return domain.SigningKeyRecord{}, m.err
+	}
+	if m.activeErr != nil {
+		return domain.SigningKeyRecord{}, m.activeErr
 	}
 	if kid := m.activeKID(); kid != "" {
 		return m.rows[kid], nil

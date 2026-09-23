@@ -24,9 +24,12 @@
 //
 //	0  сделано — или уже было сделано (повтор команды не отказ);
 //	1  отказ по существу — ключа нет, переход не допускается, либо ЧАСТИЧНЫЙ
-//	   исход утечки: ключ снят, замены нет (повтор довершает);
-//	3  не исполнялось — вызов не разобран, посадка не принята, база или
-//	   ключница недоступны: вердикта о ключе нет вовсе.
+//	   исход утечки: ключ снят, подписывающего нет, замена не заведена
+//	   (повтор довершает);
+//	3  вердикта нет — вызов не разобран, посадка не принята, база или
+//	   ключница недоступны; у утечки также — ключ снят, а подписывает ли
+//	   служба, не установлено (`outcome=signer-unknown`, повтор прочитает и
+//	   при нужде довершит).
 package main
 
 import (
@@ -158,6 +161,13 @@ func reportSigningKeyOutcome(out io.Writer, action, decidedBy string, o signingk
 		_, _ = fmt.Fprintf(out, "%s outcome=partial reason=%q\n"+
 			"ключ снят из набора, но замена не заведена — служба не подписывает; повторите команду\n", line, err.Error())
 		return signingKeyExitRefused
+	case errors.Is(err, signingkeys.ErrSignerUnknownAfterCompromise):
+		// Снятие состоялось, о подписи вердикта нет: «служба не подписывает»
+		// здесь не установлено и потому не печатается.
+		_, _ = fmt.Fprintf(out, "%s outcome=signer-unknown reason=%q\n"+
+			"ключ снят из набора, а подписывает ли служба, не установлено; повторите команду — "+
+			"повтор прочитает подписывающего и при нужде заведёт замену\n", line, err.Error())
+		return signingKeyExitNotRun
 	case errors.Is(err, iamerr.ErrNotFound), errors.Is(err, iamerr.ErrFailedPrecondition):
 		_, _ = fmt.Fprintf(out, "%s outcome=refused reason=%q\n", line, err.Error())
 		return signingKeyExitRefused

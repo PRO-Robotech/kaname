@@ -207,6 +207,55 @@ func TestCompromise_WithoutAReplacementIsNamedAndTheRepeatRestoresTheSigner(t *t
 	require.Equal(t, out.Replacement, activeKID(t, store))
 }
 
+// TestCompromise_AnUnreadSignerIsNotReportedAsNoSigner — снятие состоялось,
+// а чтение подписывающего отказало сбоем хранилища. «Подписывающего нет» при
+// этом НЕ установлено — он есть, — и исход обязан это сказать, а не объявить
+// службу неподписывающей. Близнец — TestCompromise_OfANonSignerDoesNotRotate:
+// тот же ключ, то же снятие, чтение отвечает.
+func TestCompromise_AnUnreadSignerIsNotReportedAsNoSigner(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	signer := activeKID(t, store)
+	spare, err := ks.Generate(ctx)
+	require.NoError(t, err)
+
+	store.activeErr = errors.New("memstore: connection reset")
+	out, err := ks.Compromise(ctx, spare.KID, "oncall")
+	require.NotErrorIs(t, err, signingkeys.ErrNoSignerAfterCompromise,
+		"сбой чтения — не «подписывающего нет»: подписывающий %s существует", signer)
+	require.ErrorIs(t, err, signingkeys.ErrSignerUnknownAfterCompromise)
+	require.Equal(t, domain.SigningKeyCompromised, store.rows[spare.KID].State, "снятие состоялось и не откатывается")
+	require.Empty(t, out.Replacement)
+	store.activeErr = nil
+	require.Equal(t, signer, activeKID(t, store), "подпись не тронута")
+}
+
+// TestCompromise_ACallEndingDuringTheReplacementIsNotReportedAsNoSigner —
+// снятие состоялось, а срок вызова кончился, пока заводилась замена. Исход
+// замены при этом не установлен, и объявлять службу неподписывающей нечем.
+// Близнец — TestCompromise_WithoutAReplacementIsNamedAndTheRepeatRestoresTheSigner:
+// та же запись замены не удаётся, но вызов жив, — там частичный исход законен.
+func TestCompromise_ACallEndingDuringTheReplacementIsNotReportedAsNoSigner(t *testing.T) {
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(context.Background()))
+	leaked := activeKID(t, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store.beforeInsert = cancel
+	out, err := ks.Compromise(ctx, leaked, "oncall")
+	require.NotErrorIs(t, err, signingkeys.ErrNoSignerAfterCompromise,
+		"срок вызова кончился посреди замены — «замены нет» не установлено")
+	require.ErrorIs(t, err, signingkeys.ErrSignerUnknownAfterCompromise)
+	require.Equal(t, domain.SigningKeyCompromised, store.rows[leaked].State, "снятие состоялось и не откатывается")
+	require.Empty(t, out.Replacement)
+}
+
 // ── Ротация до объявленного срока ───────────────────────────────────────────
 
 // TestRotateIfDue_WaitsForTheLeadAndThenHandsSigningOver — объявленный срок

@@ -56,12 +56,23 @@ var ErrWrappingKeyMismatch = errors.New("signingkeys: the wrapping key does not 
 var ErrSignerChanged = errors.New("signingkeys: the signing key changed before the hand-over")
 
 // ErrNoSignerAfterCompromise — ЧАСТИЧНЫЙ исход реакции на утечку: утёкший ключ
-// из набора снят, а завести замену не удалось, и служба не подписывает.
+// из набора снят, подписывающего нет (это ПРОЧИТАНО), а завести замену не
+// удалось, и служба не подписывает.
 //
 // Отдельный сентинел, потому что вызывающий обязан отличить его от отказа
 // снятия: снятие здесь СОСТОЯЛОСЬ и не откатывается, а повтор той же команды
 // довершает замену.
 var ErrNoSignerAfterCompromise = errors.New("signingkeys: the compromised key left the key set, but no replacement signs")
+
+// ErrSignerUnknownAfterCompromise — утёкший ключ из набора снят, а подписывает
+// ли служба, НЕ УСТАНОВЛЕНО: чтение подписывающего отказало сбоем хранилища
+// либо вызов кончился, пока заводилась замена.
+//
+// Отдельный сентинел, а не ErrNoSignerAfterCompromise: «подписывающего нет» и
+// «о подписывающем не известно» чинятся одинаково — повтором, — но говорят
+// оператору разное, и первое при втором было бы ложью о службе, которая,
+// возможно, подписывает. Снятие и здесь СОСТОЯЛОСЬ и не откатывается.
+var ErrSignerUnknownAfterCompromise = errors.New("signingkeys: the compromised key left the key set, but whether a key signs is not established")
 
 // Clock — источник времени ключницы. Вход, а не окружение.
 type Clock func() time.Time
@@ -409,9 +420,13 @@ func (k *Keystore) retireOutcomeAfterRace(ctx context.Context, kid domain.KeyID)
 //
 // Снятие удалось, замена — нет: снятие НЕ откатывается (утёкший ключ в набор не
 // возвращается ни при каком отказе), вызывающий получает
-// ErrNoSignerAfterCompromise, а повтор той же команды отвечает AlreadyDone и
-// довершает замену. Замена заводится, только когда подписывающего нет: утечка
-// не подписывающего ключа подпись не трогает.
+// ErrNoSignerAfterCompromise, а повтор той же команды отвечает AlreadyDone,
+// довершает замену и называет её в Replacement. Замена заводится, только когда
+// подписывающего нет: утечка не подписывающего ключа подпись не трогает.
+//
+// «Подписывающего нет» судится ЧТЕНИЕМ, а не отказом чтения: сбой хранилища на
+// нём и вызов, кончившийся посреди замены, дают ErrSignerUnknownAfterCompromise
+// — о подписи вердикта нет, и называть службу неподписывающей нечем.
 func (k *Keystore) Compromise(ctx context.Context, kid domain.KeyID, decidedBy string) (LifecycleOutcome, error) {
 	out := LifecycleOutcome{KID: kid}
 	if err := requireDecider("declaring a key compromised", decidedBy); err != nil {
@@ -444,10 +459,16 @@ func (k *Keystore) Compromise(ctx context.Context, kid domain.KeyID, decidedBy s
 		return out, nil
 	case !errors.Is(aerr, iamerr.ErrFailedPrecondition):
 		k.failures.Add(1)
-		return out, fmt.Errorf("%w: reading the signing key: %w", ErrNoSignerAfterCompromise, aerr)
+		return out, fmt.Errorf("%w: reading the signing key: %w", ErrSignerUnknownAfterCompromise, aerr)
 	}
 	pub, rerr := k.Rotate(ctx)
 	if rerr != nil {
+		if ctx.Err() != nil {
+			// Вызов кончился посреди замены: запись её могла и лечь. Исход
+			// замены не установлен, и «замены нет» было бы утверждением
+			// без основания.
+			return out, fmt.Errorf("%w: the call ended during the replacement: %w", ErrSignerUnknownAfterCompromise, rerr)
+		}
 		return out, fmt.Errorf("%w: %w", ErrNoSignerAfterCompromise, rerr)
 	}
 	out.Replacement = pub.KID
