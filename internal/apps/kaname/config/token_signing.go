@@ -29,10 +29,6 @@ import (
 	"go.uber.org/multierr"
 )
 
-// dayDuration — сутки. Отдельная величина, чтобы срок ключа читался в тех
-// единицах, в которых о нём думают.
-const dayDuration = 24 * time.Hour
-
 // defaultKeySetPath — путь НАШЕЙ записи публикуемого набора.
 //
 // Собственный, а не канонический well-known: по каноническому пути тот же
@@ -58,7 +54,9 @@ type TokenSigningConfig struct {
 	// KeySetPath — путь нашей записи публикуемого набора. ОБЪЯВЛЯЕТСЯ, а не
 	// выводится из издателя.
 	KeySetPath string `mapstructure:"key-set-path"`
-	// KeyLifetime — срок ключа.
+	// KeyLifetime — срок ключа. Политика ротации — решение установки, поэтому
+	// умолчания у неё нет ни в загрузчике, ни здесь: незаданная величина
+	// доезжает до стража и отвергает пуск (#321). Читается как есть.
 	KeyLifetime time.Duration `mapstructure:"key-lifetime"`
 }
 
@@ -89,14 +87,6 @@ func (c TokenSigningConfig) ResolveKeySetPath() string {
 		return p
 	}
 	return defaultKeySetPath
-}
-
-// ResolveKeyLifetime возвращает срок ключа.
-func (c TokenSigningConfig) ResolveKeyLifetime() time.Duration {
-	if c.KeyLifetime > 0 {
-		return c.KeyLifetime
-	}
-	return 90 * dayDuration
 }
 
 // AllowedAlgorithmList возвращает перечень допустимых алгоритмов приёма.
@@ -154,9 +144,21 @@ func (c TokenSigningConfig) Validate() error {
 				"than resolving the key set to an address derived from the issuer", c.KeySetPath))
 	}
 
-	if c.KeyLifetime < 0 {
+	// Судится СЫРОЕ поле, тем же порядком, что путь набора выше: величину,
+	// подставленную построением, страж отвергнуть не может — он зелен при
+	// любом входе.
+	//
+	// Отказов ДВА, и текст у каждого свой: ноль есть незаданная величина,
+	// отрицательный срок — заданная и негодная. Один текст на оба отправлял бы
+	// оператора, задавшего `-1h`, искать ключ, который он уже задал.
+	switch {
+	case c.KeyLifetime == 0:
 		errs = multierr.Append(errs, fmt.Errorf(
-			"authn.token-signing.key-lifetime must not be negative (got %s)", c.KeyLifetime))
+			"authn.token-signing.key-lifetime is not declared — refusing to start rather "+
+				"than choosing the signing key rotation policy on the operator's behalf"))
+	case c.KeyLifetime < 0:
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.token-signing.key-lifetime must be positive (got %s)", c.KeyLifetime))
 	}
 	return errs
 }

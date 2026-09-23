@@ -591,6 +591,19 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.token-signing.allowed-algorithms has no elements",
 	},
 	{
+		Key:                    "authn.token-signing.key-lifetime",
+		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__KEY_LIFETIME",
+		Supply:                 SupplyEnv,
+		Lanes:                  []IdentityProvider{IdentityProviderOwn},
+		WhenOwnPublicRESTFront: true,
+		Conditional:            true,
+		Sample:                 "2160h",
+		Why: "срок ключа подписи (Go duration) — политика его ротации. Умолчания нет ни у " +
+			"процесса, ни в базовых значениях чарта: срок, выбранный за оператора, он не увидит " +
+			"и не пересмотрит, а страж, судящий подставленную величину, не отказал бы ни разу",
+		Refusal: "authn.token-signing.key-lifetime is not declared",
+	},
+	{
 		Key:                    "authn.presented-credential.enabled",
 		Env:                    "KANAME_AUTHN__PRESENTED_CREDENTIAL__ENABLED",
 		Supply:                 SupplyEnv,
