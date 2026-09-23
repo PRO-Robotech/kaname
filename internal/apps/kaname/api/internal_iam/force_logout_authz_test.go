@@ -47,15 +47,16 @@ func (f *fakeForceLogoutChecker) Check(_ context.Context, subject, relation, obj
 	return f.allow, f.err
 }
 
-func forceLogoutHandlerWithGate(rec sessionRevoker, chk *fakeForceLogoutChecker) *Handler {
+func forceLogoutHandlerWithGate(rec *fakeForceLogoutRecorder, chk *fakeForceLogoutChecker) *Handler {
 	return NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и пробы стража судили бы отказ провязки вместо своего
-		// предмета (kaname#313).
-		WithOwnSessions(&recordingOwnSessions{})
+		// предмета (kaname#313). Под `own` отсечку кладёт его транзакция
+		// (kaname#340), поэтому это та же заглушка, что считает отсечки.
+		WithOwnSessions(rec)
 }
 
 func ctxAdmin(id string) context.Context {

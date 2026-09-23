@@ -163,7 +163,10 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, use
 // RevokeAllUserTokensTx — atomic per-user revoke-all cutoff + durable
 // audit_outbox emit in ONE tx (запрет #10). Shared by the
 // Revoke(revoke_all_user_tokens=true) path (eventType iam.session.all_revoked)
-// and admin ForceLogout (eventType iam.session.force_logout). The cutoff upsert
+// and admin ForceLogout (eventType iam.session.force_logout) on the postures
+// that hold none of our login-session records. Под `own` принудительный выход
+// кладёт отсечку НЕ здесь, а транзакцией снятия наших записей — запись события
+// обязана лечь после снятия и нести его исход (kaname#340). The cutoff upsert
 // is identical to RevokeAllUserTokens (monotonic GREATEST); only the tx
 // ownership + audit row differ. eventType MUST be one of the session taxonomy
 // values that satisfy the audit_outbox_event_type CHECK.

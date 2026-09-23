@@ -15,3 +15,10 @@ const MembersOfGroupsSQL = membersOfGroupsSQL
 
 // MaxMembersInGrantSurface — предел состава, возвращаемого одним перечислением.
 const MaxMembersInGrantSurface = maxMembersInGrantSurface
+
+// SweepUnservableSessionsSQL — оператор, который исполняет SweepUnservableSessions.
+const SweepUnservableSessionsSQL = sweepUnservableSessionsSQL
+
+// EndSessionsOfSQL — оператор снятия живых записей личности, который исполняет
+// EndOtherSessions.
+const EndSessionsOfSQL = endSessionsOfSQL
