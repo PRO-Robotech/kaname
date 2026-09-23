@@ -215,6 +215,88 @@ func TestReviewTriggerGateCanFail(t *testing.T) {
 	})
 }
 
+// withConditionJob — копия ci.yml с ОДНИМ новым заданием, чьё условие `if:`
+// подано как есть. Меняется один факт — текст условия; всё прочее у красной
+// подпробы и её близнеца одинаково.
+func withConditionJob(t *testing.T, cond string) []string {
+	t.Helper()
+	got, _ := reviewAudit(t, func(raw string) string {
+		return injectOnce(t, raw, "\n  trunkverdict:\n",
+			"\n  onlymain:\n    if: "+cond+"\n    runs-on: ubuntu-latest\n"+
+				"    steps:\n      - run: echo ok\n  trunkverdict:\n")
+	})
+	return got
+}
+
+// TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm — ось 4 обязана знать
+// ВСЕ законные записи чтения базы в выражении провайдера, а не одну.
+//
+// Круг 1 искал подстроки `base_ref` и `pull_request.base`, и запись с индексом —
+// `github.event.pull_request['base'].ref` — проходила зелёным: выражение читает
+// ту же базу, а подстроки в тексте нет. Каждая форма ниже — отдельная подпроба,
+// и находка обязана назвать путь ПРИВЕДЁННЫМ, через точку: по нему видно, что
+// распознаватель прочёл именно базу, а не совпал с текстом.
+func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, cond, path string
+	}{
+		{"индекс на одном звене", "github.event.pull_request['base'].ref == 'main'",
+			"github.event.pull_request.base.ref"},
+		{"индекс на каждом звене", "github.event['pull_request']['base']['ref'] == 'main'",
+			"github.event.pull_request.base.ref"},
+		{"индекс у base_ref", "github['base_ref'] == 'main'", "github.base_ref"},
+		{"регистр имён свойств", "GITHUB.EVENT.PULL_REQUEST.BASE.REF == 'main'",
+			"github.event.pull_request.base.ref"},
+		{"регистр ключа индекса и обрамление ${{ }}",
+			"${{ github.event['pull_request']['BASE']['ref'] == 'main' }}",
+			"github.event.pull_request.base.ref"},
+		{"пробелы внутри индекса и между индексами",
+			"github.event[ 'pull_request' ] [ 'base' ].ref == 'main'",
+			"github.event.pull_request.base.ref"},
+		{"фильтр объекта `*` на месте base", "contains(github.event.pull_request.*.ref, 'main')",
+			"github.event.pull_request.*.ref"},
+		{"индекс выражением — звено неизвестно, значит может быть base",
+			"github.event.pull_request[matrix.side].ref == 'main'",
+			"github.event.pull_request.*.ref"},
+		{"чтение у результата функции", "fromJSON(needs.prep.outputs.event).pull_request.base.ref == 'main'",
+			"*.pull_request.base.ref"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := withConditionJob(t, tc.cond)
+			require.Lenf(t, got, 1, "условие %q читает базу, а гейт молчит", tc.cond)
+			require.Contains(t, got[0], "задание onlymain")
+			require.Contains(t, got[0], "читает БАЗУ")
+			require.Containsf(t, got[0], "`"+tc.path+"`",
+				"находка обязана назвать прочитанный путь приведённым к записи через точку")
+		})
+	}
+
+	// ЗАКОННЫЕ БЛИЗНЕЦЫ: та же форма записи, база НЕ читается. Каждый меняет
+	// против красной подпробы один факт.
+	for _, tc := range []struct {
+		name, cond, why string
+	}{
+		{"индекс на head вместо base", "github.event.pull_request['head'].ref == 'lane'",
+			"та же запись с индексом, но читает голову запроса — её состав одинаков на запросе в ствол и в линию"},
+		{"числовой индекс не на base", "github.event.pull_request.labels[0].name == 'ci'",
+			"индекс числом по меткам — путь расходится с базой на четвёртом звене"},
+		{"текст маркера в строковом литерале",
+			"contains(github.event.pull_request.title, 'pull_request.base')",
+			"`pull_request.base` здесь — текст, с которым сравнивают, а не путь, который читают"},
+		{"имя, содержащее base_ref подстрокой", "vars.DATABASE_REF == 'x'",
+			"`database_ref` — другое слово; поиск по подстроке краснел бы здесь"},
+	} {
+		t.Run("близнец: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Emptyf(t, withConditionJob(t, tc.cond), "условие %q объявлено читающим базу: %s",
+				tc.cond, tc.why)
+		})
+	}
+}
+
 // TestReviewTriggerGateKnowsEveryLawfulEventForm — распознаватель обязан знать
 // ВСЕ законные записи события: форма вне наблюдения даёт не красное и не
 // зелёное, а молчание.
