@@ -13,8 +13,9 @@
 //     а не переписанной строкой: значение чеканит тот же `passwordverify.Hasher`
 //     по объявлению из пола `internal/domain`, и база его принимает. Чужой
 //     формат (bcrypt, быстрый хеш, сырой секрет) отвергается ограничением;
-//   - ПУСТОЕ — ЭТО «СЕКРЕТА НЕТ»: публичный клиент законен, а момент установки
-//     стоит ровно тогда, когда значение непусто;
+//   - ПУСТОЕ — ЭТО «СЕКРЕТА НЕТ»: клиент без секрета законен, а момент
+//     установки стоит ровно тогда, когда значение непусто. Публичным клиента
+//     делает способ `none`, а не пустота значения (kaname#317);
 //   - ЗНАЧЕНИЕ НЕ ИДЁТ В СТАТИСТИКУ планировщика;
 //   - ОБРАТНЫЙ ХОД снимается и накатывается снова.
 package migrations_test
@@ -43,12 +44,17 @@ func svDB(t *testing.T) *sql.DB {
 }
 
 // svClient заводит интерактивного клиента и возвращает его id.
+//
+// Клиент объявлен способом СЕКРЕТОМ: материал лежит только у клиента, который
+// секрет предъявляет (`interactive_clients_secret_verifier_method_ck`,
+// kaname#317). У клиента другого способа отказ пришёл бы от этого ограничения,
+// и пробы формы и отметки судили бы не свой предмет.
 func svClient(t *testing.T, db *sql.DB, tag string) string {
 	t.Helper()
 	id := "ic-" + acPad(tag)
 	_, err := db.Exec(`
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id)
-		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3)`,
+		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3, 'client_secret_basic')`,
 		id, "ic-"+tag, "client-"+tag)
 	require.NoError(t, err, "посев клиента %s", tag)
 	return id
@@ -109,8 +115,8 @@ func TestIntegration_ClientSecretVerifierTakesThePasswordProducersValue(t *testi
 	}
 }
 
-// TestIntegration_ClientWithoutSecretIsLegalAndItsStampAgrees — публичный клиент
-// законен, а отметка установки согласована со значением.
+// TestIntegration_ClientWithoutSecretIsLegalAndItsStampAgrees — клиент без
+// секрета законен, а отметка установки согласована со значением.
 func TestIntegration_ClientWithoutSecretIsLegalAndItsStampAgrees(t *testing.T) {
 	db := svDB(t)
 	id := svClient(t, db, "svstamp")

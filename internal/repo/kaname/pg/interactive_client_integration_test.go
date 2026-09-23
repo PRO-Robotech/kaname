@@ -43,7 +43,12 @@ func newInteractiveClient(name string) domain.InteractiveClient {
 		ClientID:               "provider-" + ids.NewHyphenID(ids.PrefixInteractiveClientHyphen),
 		Audiences:              []string{"https://api.example"},
 		GrantTypes:             []string{"authorization_code", "refresh_token"},
-		Status:                 domain.InteractiveClientActive,
+		// Способ — тот, что объявляют оба производителя. Нулевое значение поля
+		// при непустых видах выдачи база отвергает
+		// (`interactive_clients_auth_method_declared_ck`, kaname#317): фикстура
+		// не бывает снисходительнее продукта.
+		TokenEndpointAuthMethod: "none",
+		Status:                  domain.InteractiveClientActive,
 	}
 }
 

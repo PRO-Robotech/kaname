@@ -75,9 +75,13 @@ func TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind(t *t
 		"клиент интерактивного входа обязан быть ПУБЛИЧНЫМ: владение доказывает "+
 			"PKCE, и секрета у него нет — та же форма, что у прежней дороги")
 
+	// Строка объявлена способом СЕКРЕТОМ, а не способом производителя (`none`):
+	// материал лежит только у клиента, который секрет предъявляет
+	// (`interactive_clients_secret_verifier_method_ck`, kaname#317), и
+	// положительный близнец иначе не положил бы материала вовсе.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id)
-		VALUES ($1, $2, ARRAY['https://console.example.test/cb'], $3)`,
+		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		VALUES ($1, $2, ARRAY['https://console.example.test/cb'], $3, 'client_secret_basic')`,
 		"ic-00000000000000001", "own-console", pc.ClientID)
 	require.NoError(t, err, "посев строки реестра")
 
