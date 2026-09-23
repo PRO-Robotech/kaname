@@ -147,10 +147,18 @@ func (c TokenSigningConfig) Validate() error {
 	// Судится СЫРОЕ поле, тем же порядком, что путь набора выше: величину,
 	// подставленную построением, страж отвергнуть не может — он зелен при
 	// любом входе.
-	if c.KeyLifetime <= 0 {
+	//
+	// Отказов ДВА, и текст у каждого свой: ноль есть незаданная величина,
+	// отрицательный срок — заданная и негодная. Один текст на оба отправлял бы
+	// оператора, задавшего `-1h`, искать ключ, который он уже задал.
+	switch {
+	case c.KeyLifetime == 0:
 		errs = multierr.Append(errs, fmt.Errorf(
-			"authn.token-signing.key-lifetime is not declared (got %s) — refusing to start rather "+
-				"than choosing the signing key rotation policy on the operator's behalf", c.KeyLifetime))
+			"authn.token-signing.key-lifetime is not declared — refusing to start rather "+
+				"than choosing the signing key rotation policy on the operator's behalf"))
+	case c.KeyLifetime < 0:
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.token-signing.key-lifetime must be positive (got %s)", c.KeyLifetime))
 	}
 	return errs
 }
