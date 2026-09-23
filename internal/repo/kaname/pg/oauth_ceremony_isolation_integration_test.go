@@ -384,17 +384,34 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 		require.NoError(t, holder.Rollback(ctx), "держатель отпускает победителя")
 		loser = <-loserDone
 	} else {
-		// Близнец: чужой предмет не ждёт победителя — проигравший доезжает, пока
+		// Близнец: свой предмет не ждёт победителя — второй доезжает, пока
 		// победитель ещё стоит посреди своей транзакции. Одновременность
 		// утверждается, а не предполагается.
+		//
+		// Второй, вставший ЗА первым, — не «сцена не построена», а наблюдение о
+		// продукте: реализация сводит разные предметы в одну очередь. Поэтому это
+		// утверждение, а не отказ сцены, и исходы обоих судятся и после него.
+		finished := false
 		select {
 		case loser = <-loserDone:
-		case <-time.After(20 * time.Second):
-			t.Fatal("НЕ ВЫПОЛНИЛОСЬ: вызов по чужому предмету не завершился, пока стоит победитель")
+			finished = true
+		case <-time.After(5 * time.Second):
 		}
-		require.True(t, stillBlockedBy(t, ctx, sh.seed, winnerPID, holderPID),
-			"НЕ ВЫПОЛНИЛОСЬ: победитель обязан стоять посреди транзакции всё время вызова близнеца")
+		assert.True(t, finished,
+			"второй вызов по СВОЕМУ предмету обязан завершиться, пока первый стоит посреди "+
+				"транзакции: он встал за первым")
+		if finished {
+			require.True(t, stillBlockedBy(t, ctx, sh.seed, winnerPID, holderPID),
+				"НЕ ВЫПОЛНИЛОСЬ: первый обязан стоять посреди транзакции всё время вызова второго")
+		}
 		require.NoError(t, holder.Rollback(ctx), "держатель отпускает победителя")
+		if !finished {
+			select {
+			case loser = <-loserDone:
+			case <-time.After(30 * time.Second):
+				t.Fatal("второй вызов не завершился и после снятия держателя")
+			}
+		}
 	}
 	select {
 	case out.winnerErr = <-winnerDone:
@@ -433,6 +450,15 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 				assert.Equal(t, string(subj.reason), out.atLoser.reason, "основание отзыва")
 				assert.False(t, out.atLoser.live, "живость семейства у проигравшего")
 
+				// Транзакция проигравшего ОТКАЧЕНА: считается ДО попытки ротации ниже,
+				// иначе число мерило бы и её.
+				var tokens int
+				require.NoError(t, sh.seed.QueryRow(ctx,
+					`SELECT count(*) FROM kaname.refresh_tokens WHERE family_id = $1`,
+					winner.FamilyID).Scan(&tokens))
+				assert.Equal(t, subj.tokensAfterReplay, tokens,
+					"транзакция проигравшего обязана быть откачена целиком")
+
 				// Выданное победителем СНЯТО: его токен неактивен и не ротируется.
 				var active bool
 				require.NoError(t, sh.seed.QueryRow(ctx,
@@ -447,12 +473,6 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 				})
 				assert.Error(t, rotErr, "токен победителя обязан НЕ ротироваться после повтора")
 
-				var tokens int
-				require.NoError(t, sh.seed.QueryRow(ctx,
-					`SELECT count(*) FROM kaname.refresh_tokens WHERE family_id = $1`,
-					winner.FamilyID).Scan(&tokens))
-				assert.Equal(t, subj.tokensAfterReplay, tokens,
-					"транзакция проигравшего обязана быть откачена целиком")
 			})
 		}
 	}
