@@ -6,12 +6,13 @@
 //
 // # Зачем отдельный пакет сборки
 //
-// Эндпоинт состоит из четырёх частей, и три из них при полусобранной провязке
+// Эндпоинт состоит из пяти частей, и четыре из них при полусобранной провязке
 // выглядят исправными: проверяющий без потолка длительности принимает
 // утверждение с любым сроком; выдача без перечня адресатов выдаёт токен,
 // адресованный чему угодно; чтение реестра без предела времени висит на
-// неотвечающем соседе, пока не кончатся горутины. Ни одно из трёх не
-// проявляется отказом на положительном пути.
+// неотвечающем соседе, пока не кончатся горутины; выдача без читателя отсечки
+// отзыва-всех не отличает «отсечек нет» от «спросить некого». Ни одно из
+// четырёх не проявляется отказом на положительном пути.
 //
 // Поэтому сборка — ОДНО место и ОДИН отказ: неполная провязка не поднимает
 // сервис. Отказ в старте виден оператору сразу и называет величину; отказ на
@@ -89,6 +90,7 @@ func New(
 	replay clientassertion.ReplayGuard,
 	signer client_token.Signer,
 	claims client_token.ClaimSource,
+	revocations client_token.RevocationLookup,
 ) (*clienttokenhttp.Handler, error) {
 	if cfg.PeerTimeout <= 0 {
 		return nil, fmt.Errorf("clienttokenwire: per-call timeout must be declared as a positive number " +
@@ -110,6 +112,11 @@ func New(
 	if replay == nil {
 		return nil, fmt.Errorf("clienttokenwire: replay guard is required")
 	}
+	if revocations == nil {
+		// Отсечка отзыва-всех владельца — не «дополнительная проверка»: без
+		// читателя выдача не отличала бы «отсечек нет» от «спросить некого».
+		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader is required")
+	}
 
 	verifier, err := clientassertion.New(clientassertion.Policy{
 		ExpectedAudience:     cfg.ExpectedAudience,
@@ -130,7 +137,7 @@ func New(
 		DefaultAudience:  cfg.DefaultAudience,
 		TokenTTL:         cfg.TokenTTL,
 		Clock:            cfg.Clock,
-	}, signer, claims)
+	}, signer, claims, WithDeadlineCutoffs(revocations, cfg.PeerTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
 	}
@@ -145,8 +152,12 @@ func New(
 	return h, nil
 }
 
-// FromPool собирает эндпоинт от пула: реестр, способный к утверждению, и
-// хранилище однократности берутся из своей базы.
+// FromPool собирает эндпоинт от пула: реестр, способный к утверждению,
+// хранилище однократности и читатель отсечки отзыва-всех берутся из своей базы.
+//
+// Читатель отсечки — тот же адаптер, что держат полосы хука
+// (`kanamepg.NewSessionRevocationsAdapter`): одна строка, один читатель, и две
+// полосы не могут ответить на один вопрос по-разному из-за разных читателей.
 func FromPool(
 	pool *pgxpool.Pool,
 	cfg BuildConfig,
@@ -160,7 +171,8 @@ func FromPool(
 		kanamepg.NewAssertionClientRepo(pool),
 		kanamepg.NewTrustedIssuerRepo(pool),
 		kanamepg.NewClientAssertionReplayRepo(pool),
-		signer, claims)
+		signer, claims,
+		kanamepg.NewSessionRevocationsAdapter(pool))
 }
 
 // ── предел времени на каждом внешнем вызове ─────────────────────────────────
@@ -227,4 +239,26 @@ func (d deadlineReplay) Redeem(ctx context.Context, clientID, assertionID string
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	return d.inner.Redeem(ctx, clientID, assertionID, expiresAt)
+}
+
+// deadlineCutoffs — чтение отсечки отзыва-всех со СВОИМ пределом времени.
+type deadlineCutoffs struct {
+	inner   client_token.RevocationLookup
+	timeout time.Duration
+}
+
+// WithDeadlineCutoffs оборачивает чтение отсечки собственным пределом.
+//
+// Тот же довод, что у чтения реестра: чтение лежит на пути ВЫДАЧИ и идёт в
+// базу, и без своего предела неотвечающая база вешает горутину — отказ
+// приходит не туда, где причина. Истёкший предел — ошибка чтения, то есть
+// отказ выдачи, а не «отсечки нет».
+func WithDeadlineCutoffs(inner client_token.RevocationLookup, timeout time.Duration) client_token.RevocationLookup {
+	return deadlineCutoffs{inner: inner, timeout: timeout}
+}
+
+func (d deadlineCutoffs) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	return d.inner.UserRevokedBefore(ctx, userID)
 }

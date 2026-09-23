@@ -52,6 +52,12 @@ type UserLookupPort interface {
 // point of enforcement whatsoever. One port, one adapter, one row — the two
 // hooks cannot answer the same question differently.
 //
+// The platform's own token endpoint asks the same question too, through a port
+// of the same shape declared at its own use-case (`client_token.RevocationLookup`)
+// and backed by the same adapter. The verdict itself is decided in one place for
+// all of them (`revocationpolicy`); each lane keeps only its own vocabulary for
+// the refusal.
+//
 // Narrow on purpose. This asks "has this person been logged out of everything,
 // and when?" and nothing else. The port it replaces also declared the write
 // path and a per-token lookup, the latter stated as being there because "the

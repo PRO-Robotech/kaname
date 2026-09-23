@@ -69,6 +69,18 @@ func (r *recordingReplay) Redeem(ctx context.Context, _, _ string, _ time.Time) 
 	return nil
 }
 
+// recordingCutoffs — читатель отсечки отзыва-всех. Как и прочие дублёры, об
+// исходе не утверждает ничего — лишь запоминает, с каким сроком его позвали.
+type recordingCutoffs struct {
+	deadline time.Time
+	had      bool
+}
+
+func (r *recordingCutoffs) UserRevokedBefore(ctx context.Context, _ string) (time.Time, bool, error) {
+	r.deadline, r.had = ctx.Deadline()
+	return time.Time{}, false, nil
+}
+
 type stubClaims struct{}
 
 func (stubClaims) ClaimsForAssertionClient(context.Context, domain.AssertionClient, service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error) {
@@ -99,7 +111,7 @@ func full() clienttokenwire.BuildConfig {
 
 func build(cfg clienttokenwire.BuildConfig) (*recordingResolver, *recordingReplay, error) {
 	res, rep := &recordingResolver{}, &recordingReplay{}
-	_, err := clienttokenwire.New(cfg, res, &recordingIssuers{}, rep, stubSigner{}, stubClaims{})
+	_, err := clienttokenwire.New(cfg, res, &recordingIssuers{}, rep, stubSigner{}, stubClaims{}, &recordingCutoffs{})
 	return res, rep, err
 }
 
@@ -144,23 +156,27 @@ func TestF2_22_CompositionRefusesADegenerateDeclaredNumber(t *testing.T) {
 func TestCompositionRefusesAMissingPort(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"без реестра": func() error {
-			_, err := clienttokenwire.New(full(), nil, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, stubClaims{})
+			_, err := clienttokenwire.New(full(), nil, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, stubClaims{}, &recordingCutoffs{})
 			return err
 		},
 		"без перечня доверенных издателей": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, nil, &recordingReplay{}, stubSigner{}, stubClaims{})
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, nil, &recordingReplay{}, stubSigner{}, stubClaims{}, &recordingCutoffs{})
 			return err
 		},
 		"без однократности": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, nil, stubSigner{}, stubClaims{})
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, nil, stubSigner{}, stubClaims{}, &recordingCutoffs{})
 			return err
 		},
 		"без подписанта": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, nil, stubClaims{})
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, nil, stubClaims{}, &recordingCutoffs{})
+			return err
+		},
+		"без читателя отсечки отзыва-всех": func() error {
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, stubClaims{}, nil)
 			return err
 		},
 		"без источника состава": func() error {
-			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, nil)
+			_, err := clienttokenwire.New(full(), &recordingResolver{}, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, nil, &recordingCutoffs{})
 			return err
 		},
 	} {
@@ -190,6 +206,15 @@ func TestEveryExternalCallOfTheNewPathCarriesItsOwnDeadline(t *testing.T) {
 	require.NoError(t, redeemThrough(ctx, cfg, rep))
 	require.True(t, rep.had, "допуск однократности обязан нести СВОЙ предел времени")
 	require.LessOrEqual(t, time.Until(rep.deadline), cfg.PeerTimeout)
+
+	// Чтение отсечки отзыва-всех лежит на пути ВЫДАЧИ и идёт в базу — тот же
+	// довод, что у реестра: без своего предела неотвечающая база вешает
+	// горутину, и отказ приходит не туда, где причина.
+	cuts := &recordingCutoffs{}
+	_, _, err = clienttokenwire.WithDeadlineCutoffs(cuts, cfg.PeerTimeout).UserRevokedBefore(ctx, "usr_x")
+	require.NoError(t, err)
+	require.True(t, cuts.had, "чтение отсечки отзыва-всех обязано нести СВОЙ предел времени")
+	require.LessOrEqual(t, time.Until(cuts.deadline), cfg.PeerTimeout)
 }
 
 // resolveThrough / redeemThrough зовут порт ЧЕРЕЗ обёртку, которую ставит

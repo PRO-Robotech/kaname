@@ -44,7 +44,7 @@ func TestF2_31_RevokedRegisteredKeyGetsNoToken(t *testing.T) {
 	for _, kind := range kinds {
 		t.Run(string(kind), func(t *testing.T) {
 			f := newAssertionFixture(t)
-			rig := newIssuanceRig(t)
+			rig := newIssuanceRig(t, f.pool)
 
 			var clientID string
 			switch kind {

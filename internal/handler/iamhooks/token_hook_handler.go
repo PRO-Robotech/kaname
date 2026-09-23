@@ -21,6 +21,7 @@ import (
 	"time"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -534,55 +535,43 @@ func unixOrZero(t time.Time) int64 {
 // revokedAtIssuance reports whether a revoke-all cutoff forbids minting for this
 // principal, and the reason to record.
 //
-// What the cutoff is weighed against depends on what the exchange presented,
-// and the three cases are genuinely different questions:
+// The verdict is not decided here. It is decided by the ONE rule every lane that
+// mints a token for a person shares (`revocationpolicy`): this hook and the
+// platform's own token endpoint ask the same question about the same row, and a
+// copy of the rule in each lane is how two lanes come to answer it differently
+// without anyone deciding that they should. What stays here is this lane's
+// vocabulary — the audit reason it records.
 //
-//   - a MACHINE credential (service account) is not a person's session. A user
-//     logged out of everything says nothing about a service account that merely
-//     shares an account with them, and treating it as if it did would take
-//     machine credentials offline as a side effect of an unrelated
-//     administrative act. Its own lifetime bounds it, enforced on its own path;
-//   - an INTERACTIVE session states when it authenticated. At or before the
-//     cutoff is exactly what the cutoff names; after it is the subject proving
-//     themselves again, which is what stops a force-logout from being a
-//     permanent lockout;
-//   - a STANDING personal credential has no session and never re-authenticates,
-//     so its anchor is when it was minted. This is the case with no other point
-//     of enforcement anywhere: its grant has no refresh hook, so a token minted
-//     through it is never re-examined after issuance.
+// What the rule weighs, in short: a machine credential is not a person's
+// session and is not weighed at all; an interactive session is weighed by its
+// own authentication instant; a standing personal credential by its issuance.
+// An unknown instant under a live cutoff, and an unavailable store, are
+// refusals — the rule is authoritative and fails closed.
 //
-// Two unknowns are refusals, not permissions. A cutoff with no instant to weigh
-// against cannot be shown to be satisfied, and an unavailable revocation store
-// is not an answer of "no" — this is an authoritative gate and fails closed,
-// the same discipline the refresh path states for the same read.
+// A nil reader is this constructor's fixture allowance (see
+// NewTokenHookHandler) and is decided before the rule is asked; the rule itself
+// treats a missing reader as undecidable.
 func (h *TokenHookHandler) revokedAtIssuance(ctx context.Context, p service.ResolvedPrincipal, sessionAuthTime time.Time) (bool, string) {
-	if h.revocations == nil || p.Kind != service.PrincipalUser || p.UserID == "" {
+	if h.revocations == nil {
 		return false, ""
 	}
-	cutoff, found, err := h.revocations.UserRevokedBefore(ctx, p.UserID)
-	if err != nil {
+	verdict, err := revocationpolicy.AtIssuance(ctx, h.revocations, p, sessionAuthTime)
+	switch verdict {
+	case revocationpolicy.Allowed:
+		return false, ""
+	case revocationpolicy.Revoked:
+		return true, "user_revoked"
+	case revocationpolicy.Undecidable:
 		h.logger.ErrorContext(ctx, "token_hook: revoke-all lookup failed — failing closed",
 			"user_id", p.UserID, "err", err)
 		return true, "revocation_check_failed"
+	default:
+		// The dictionary is closed: a verdict this switch does not name is a
+		// refusal, not a pass.
+		h.logger.ErrorContext(ctx, "token_hook: revoke-all verdict outside the closed dictionary — failing closed",
+			"user_id", p.UserID, "verdict", string(verdict))
+		return true, "revocation_check_failed"
 	}
-	if !found {
-		return false, ""
-	}
-	anchor := issuanceAnchor(p, sessionAuthTime)
-	if anchor.IsZero() || !anchor.After(cutoff) {
-		return true, "user_revoked"
-	}
-	return false, ""
-}
-
-// issuanceAnchor returns the instant this exchange's authority dates from: the
-// standing credential's issuance when there is one, otherwise the session's own
-// authentication instant. A zero result means the exchange stated neither.
-func issuanceAnchor(p service.ResolvedPrincipal, sessionAuthTime time.Time) time.Time {
-	if p.StandingCredentialIssuedAt != nil {
-		return *p.StandingCredentialIssuedAt
-	}
-	return sessionAuthTime
 }
 
 // denyRevoked records the refusal of a subject logged out of everything.

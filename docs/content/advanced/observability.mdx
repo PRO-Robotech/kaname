@@ -283,8 +283,8 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 
 | `outcome="…"` | Кто чинит |
 |---|---|
-| `registry-unavailable`, `replay-store-unavailable`, `issuance-failed` | наша сторона: реестр, склад однократности, подписант |
-| остальные значения | предъявитель либо его настройка: не тот алгоритм, истёкшее утверждение, недоверенный издатель, неразрешённый адресат |
+| `registry-unavailable`, `replay-store-unavailable`, `revocation-check-failed`, `issuance-failed` | наша сторона: реестр, склад однократности, склад отсечек отзыва, подписант |
+| остальные значения | предъявитель либо его настройка: не тот алгоритм, истёкшее утверждение, недоверенный издатель, неразрешённый адресат, владелец ключа вышел отовсюду после его выдачи (`owner-revoked`) |
 
 **Печатаются все объявленные исходы, включая нулевые.** Поэтому «ноль отказов» отличимо от «полоса
 не исполнялась ни разу»: во втором случае на нуле и `accepted`.
@@ -571,9 +571,9 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
     summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
 
 - alert: KanameClientTokenIssuanceBroken
-  # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+  # Отказы НАШЕЙ стороны: реестр, склад однократности, склад отсечек отзыва, подписант.
   expr: |
-    sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+    sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|revocation-check-failed|issuance-failed"}[10m])) > 0
   for: 5m
   annotations:
     summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"

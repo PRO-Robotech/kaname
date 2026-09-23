@@ -59,6 +59,14 @@ func (wiringClaims) ClaimsForAssertionClient(context.Context, domain.AssertionCl
 	return map[string]any{}, service.ResolvedPrincipal{}, nil
 }
 
+// wiringCutoffs — читатель отсечки отзыва-всех. Отсечек нет: проба утверждает
+// достижимость поверхности, а не исход выдачи.
+type wiringCutoffs struct{}
+
+func (wiringCutoffs) UserRevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
 type wiringSigner struct{}
 
 func (wiringSigner) Sign(context.Context, tokensigner.Request) (tokensigner.Token, error) {
@@ -92,7 +100,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
-	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{})
+	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{}, wiringCutoffs{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)
 	}

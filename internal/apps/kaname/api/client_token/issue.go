@@ -9,7 +9,9 @@
 // К моменту входа сюда клиент УЖЕ аутентифицирован: подпись сошлась с ключом из
 // реестра, утверждение однократно, время в границах. Здесь решается другое —
 // ВЫДАВАТЬ ЛИ ЕМУ, и это отдельный вопрос: аутентифицированный клиент может
-// быть истёкшим, а его владелец — снятым.
+// быть истёкшим, его владелец — снятым, а владелец-человек — вышедшим отовсюду
+// после того, как ключ был выдан (kaname#379). Последнее судит то же правило,
+// что и полоса хука (`revocationpolicy`), а не своя копия.
 //
 // # Почему срок выданного токена ограничен остатком срока клиента
 //
@@ -36,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -53,6 +56,20 @@ type Signer interface {
 // надеждой на то, что он подставит нужное.
 type ClaimSource interface {
 	ClaimsForAssertionClient(ctx context.Context, client domain.AssertionClient, hookCtx service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error)
+}
+
+// RevocationLookup — порт отсечки отзыва-всех человека. Определён здесь, у
+// вызывающего, и по форме совпадает с портом полос хука дословно: обе полосы
+// получают ОДИН читатель одной строки, и совпадение формы — требование к
+// композиционному корню, а не совпадение имён.
+//
+// Отсечку пишут принудительный выход, отзыв всех токенов субъекта и завершение
+// восстановления; эта полоса её только читает — на выдаче, тем же правилом, что
+// полоса хука.
+type RevocationLookup interface {
+	// UserRevokedBefore — отсечка человека и признак её наличия. Ошибка не
+	// сворачивается в «отсечки нет».
+	UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error)
 }
 
 // Config — объявленная настройка выдачи. Каждое поле обязательно.
@@ -108,13 +125,14 @@ type Output struct {
 
 // UseCase — выдача по учётным данным клиента.
 type UseCase struct {
-	cfg    Config
-	signer Signer
-	claims ClaimSource
+	cfg         Config
+	signer      Signer
+	claims      ClaimSource
+	revocations RevocationLookup
 }
 
 // New строит выдачу. Неполная настройка — отказ построения.
-func New(cfg Config, signer Signer, claims ClaimSource) (*UseCase, error) {
+func New(cfg Config, signer Signer, claims ClaimSource, revocations RevocationLookup) (*UseCase, error) {
 	switch {
 	case len(cfg.AllowedAudiences) == 0:
 		return nil, fmt.Errorf("client_token: allowed audiences must be declared (empty means 'any')")
@@ -131,6 +149,11 @@ func New(cfg Config, signer Signer, claims ClaimSource) (*UseCase, error) {
 		return nil, fmt.Errorf("client_token: signer is required")
 	case claims == nil:
 		return nil, fmt.Errorf("client_token: claim source is required")
+	case revocations == nil:
+		// Отказ ПОСТРОЕНИЯ, а не выдача без отсечки: «читатель не провязан» и
+		// «отсечек нет» неразличимы на положительном пути и различаются ровно
+		// в тот день, когда человека выводят отовсюду.
+		return nil, fmt.Errorf("client_token: revoke-all cutoff reader is required")
 	}
 	// Объявленный по умолчанию адресат обязан входить в объявленный перечень:
 	// иначе умолчание отвергалось бы собственной проверкой, и глагол не
@@ -139,7 +162,7 @@ func New(cfg Config, signer Signer, claims ClaimSource) (*UseCase, error) {
 	if !allowed(cfg.AllowedAudiences, cfg.DefaultAudience) {
 		return nil, fmt.Errorf("client_token: default audience %q is not in the declared list", cfg.DefaultAudience)
 	}
-	return &UseCase{cfg: cfg, signer: signer, claims: claims}, nil
+	return &UseCase{cfg: cfg, signer: signer, claims: claims, revocations: revocations}, nil
 }
 
 // Issue выпускает токен.
@@ -193,6 +216,19 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 	if err != nil {
 		return Output{}, clientassertion.OutcomeIssuanceFailed, fmt.Errorf("client_token: claims: %w", err)
 	}
+
+	// (5) Отсечка отзыва-всех владельца — ТЕМ ЖЕ правилом, что на полосе хука
+	// (`revocationpolicy`), по принципалу, который разрешило объявление
+	// состава: по идентификатору человека в таблицах этой службы и по моменту
+	// выдачи ключа. Сессии у этой полосы нет, поэтому момент сессии не
+	// подаётся: якорь — выдача ключа, и только она.
+	//
+	// После состава и ДО подписи: принципал известен только после состава, а
+	// подписанный и затем выброшенный токен — уже выпущенный токен.
+	if outcome, err := u.weighCutoff(ctx, in.Client, principal); err != nil {
+		return Output{}, outcome, err
+	}
+
 	subject := principal.UserID
 	if subject == "" {
 		subject = in.Client.OwnerID
@@ -216,6 +252,32 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		ExpiresIn:   int(tok.ExpiresAt.Sub(tok.IssuedAt).Seconds()),
 		Scope:       in.Scope,
 	}, clientassertion.OutcomeAccepted, nil
+}
+
+// weighCutoff отдаёт отказ, когда отсечка отзыва-всех владельца запрещает
+// выдачу, и nil — когда не запрещает.
+//
+// Исходы три и все три — значения закрытого словаря со своим счётчиком:
+// «выдавать», «владелец вышел отовсюду» и «спросить не удалось». Третий —
+// отказ, а не выдача: правило авторитетно и закрывается на неизвестном. Вердикт,
+// которого развилка не называет, — тоже отказ: словарь закрыт.
+func (u *UseCase) weighCutoff(
+	ctx context.Context, client domain.AssertionClient, principal service.ResolvedPrincipal,
+) (clientassertion.Outcome, error) {
+	verdict, err := revocationpolicy.AtIssuance(ctx, u.revocations, principal, time.Time{})
+	switch verdict {
+	case revocationpolicy.Allowed:
+		return "", nil
+	case revocationpolicy.Revoked:
+		return clientassertion.OutcomeOwnerRevoked,
+			fmt.Errorf("client_token: owner of client %s is logged out of everything no earlier than the key was issued", client.ID)
+	case revocationpolicy.Undecidable:
+		return clientassertion.OutcomeRevocationCheckFailed,
+			fmt.Errorf("client_token: revoke-all cutoff of the owner of client %s: %w", client.ID, err)
+	default:
+		return clientassertion.OutcomeRevocationCheckFailed,
+			fmt.Errorf("client_token: revoke-all verdict %q is outside the closed dictionary", verdict)
+	}
 }
 
 // resolveAudience выбирает адресат выпускаемого токена.

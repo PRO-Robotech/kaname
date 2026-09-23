@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -326,13 +327,11 @@ func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domai
 		if !found {
 			continue
 		}
-		// No auth_time to compare → cannot prove the token post-dates the
-		// revoke-all → deny (fail-safe), never a silent allow.
-		if authTime.IsZero() {
-			return true, "user_revoked", nil
-		}
-		// Session authenticated at-or-before the cutoff → deny.
-		if !authTime.After(cutoff) {
+		// The comparison is the ONE every lane shares (`revocationpolicy`), not
+		// a copy: a session authenticated at-or-before the cutoff is denied,
+		// and so is one that states no instant at all — it cannot be shown to
+		// post-date the revoke-all (fail-safe, never a silent allow).
+		if revocationpolicy.Forbids(cutoff, authTime) {
 			return true, "user_revoked", nil
 		}
 	}
