@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -439,29 +440,54 @@ func TestForceLogout_OwnTeardownEndedByTheRequest_PartialOutcomeRunsOnItsOwnBoun
 // хранилища, вызванный концом контекста (срок или отмена), — состояние, которое
 // проходит, а не поломка службы. Ответ — `Unavailable`, а не `Internal`: в
 // любой из двух транзакций и на любом шаге.
+//
+// Контекст в каждой сцене КОНЧАЕТСЯ НА САМОМ ДЕЛЕ, и дублёр отвечает его
+// ошибкой, как отвечает драйвер: конец судится по контексту шага, и ошибка
+// контекста при живом контексте концом не читается. Сроки — на управляемых
+// часах (`testing/synctest`): дублёр ждёт конца контекста, часы доходят до
+// срока без настоящего ожидания.
 func TestForceLogout_OwnStoreRefusalBecauseTheContextEnded_IsUnavailable(t *testing.T) {
+	waitForEnd := func(ctx context.Context) error {
+		<-ctx.Done()
+		return fmt.Errorf("upsert cutoff: %w", ctx.Err())
+	}
 	for _, tc := range []struct {
-		name    string
-		writers []*recordingOwnWriter
+		name string
+		// requestBudget — срок запроса; ноль — запрос без срока, отменяемый сценой.
+		requestBudget time.Duration
+		writers       func(cancel context.CancelFunc) []*recordingOwnWriter
 	}{
-		{"отсечка первой транзакции — срок", []*recordingOwnWriter{
-			{ended: 1, cutoffErr: fmt.Errorf("upsert cutoff: %w", context.DeadlineExceeded)},
+		{"отсечка первой транзакции — срок", time.Second, func(context.CancelFunc) []*recordingOwnWriter {
+			return []*recordingOwnWriter{{ended: 1, onCutoff: waitForEnd}}
 		}},
-		{"отсечка первой транзакции — отмена", []*recordingOwnWriter{
-			{ended: 1, cutoffErr: fmt.Errorf("upsert cutoff: %w", context.Canceled)},
+		{"отсечка первой транзакции — отмена", 0, func(cancel context.CancelFunc) []*recordingOwnWriter {
+			return []*recordingOwnWriter{{ended: 1, onCutoff: func(ctx context.Context) error {
+				cancel()
+				return fmt.Errorf("upsert cutoff: %w", ctx.Err())
+			}}}
 		}},
-		{"фиксация частичного исхода — срок", []*recordingOwnWriter{
-			{endErr: errors.New("human_sessions: backend down")},
-			{commitErr: fmt.Errorf("commit: %w", context.DeadlineExceeded)},
+		{"фиксация частичного исхода — срок", 0, func(context.CancelFunc) []*recordingOwnWriter {
+			return []*recordingOwnWriter{
+				{endErr: errors.New("human_sessions: backend down")},
+				{onCommit: func(ctx context.Context) { <-ctx.Done() }},
+			}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, ownSessionsScripted(tc.writers...))
-			_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
-			require.Error(t, err)
-			assert.Equal(t, codes.Unavailable, status.Code(err),
-				"конец контекста переведён в %s: %v", status.Code(err), err)
-			assert.Contains(t, ops.calls, "markerror")
+			synctest.Test(t, func(t *testing.T) {
+				reqCtx, cancel := context.WithCancel(adminCtx())
+				if tc.requestBudget > 0 {
+					reqCtx, cancel = context.WithTimeout(adminCtx(), tc.requestBudget)
+				}
+				defer cancel()
+				own := ownSessionsScripted(tc.writers(cancel)...)
+				h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+				_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+				require.Error(t, err)
+				assert.Equal(t, codes.Unavailable, status.Code(err),
+					"конец контекста переведён в %s: %v", status.Code(err), err)
+				assert.Contains(t, ops.calls, "markerror")
+			})
 		})
 	}
 }

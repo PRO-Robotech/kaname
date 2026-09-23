@@ -27,7 +27,6 @@ package internal_iam
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -541,31 +540,110 @@ func forceLogoutRecordContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), forceLogoutRecordBudget)
 }
 
-// refusedByContextEnd — отказ хранилища вызван концом контекста попытки (срок
-// либо отмена).
-//
-// Форм у такого отказа ДВЕ, и различать их по ошибке нельзя: до отправки
-// оператора драйвер отвечает ошибкой контекста, а во время исполнения пул
-// службы доводит отмену до сервера (`CancelRequest`, `corelib/db.NewPool`), и
-// оператор снимается там со строкой состояния `57014`, без ошибки контекста в
-// цепочке. Поэтому вторая форма узнаётся по самому контексту попытки: отказ,
-// пришедший, когда её срок уже кончился.
-func refusedByContextEnd(ctx context.Context, err error) bool {
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || ctx.Err() != nil
+// Шаг транзакции принудительного выхода на посадке `own`, на котором она
+// отказала (kaname#340). Словарь ЗАКРЫТ: шагов ровно пять, и у каждого СВОЙ
+// контекст исполнения — от него и судится, кончился ли срок к моменту отказа.
+type ownForceLogoutStep int
+
+const (
+	// ownStepOpen — открытие транзакции с замком строки личности; контекст попытки.
+	ownStepOpen ownForceLogoutStep = iota + 1
+	// ownStepTeardown — снятие наших записей; контекст попытки.
+	ownStepTeardown
+	// ownStepCutoff — отсечка; контекст попытки.
+	ownStepCutoff
+	// ownStepAudit — запись события; контекст попытки.
+	ownStepAudit
+	// ownStepCommit — фиксация; СВОЙ контекст, отвязанный от попытки
+	// (`forceLogoutRecordContext`).
+	ownStepCommit
+)
+
+// String — имя шага для журнала.
+func (s ownForceLogoutStep) String() string {
+	switch s {
+	case ownStepOpen:
+		return "open"
+	case ownStepTeardown:
+		return "teardown"
+	case ownStepCutoff:
+		return "cutoff"
+	case ownStepAudit:
+		return "audit"
+	case ownStepCommit:
+		return "commit"
+	}
+	return fmt.Sprintf("step(%d)", int(s))
 }
 
-// forceLogoutStoreRefusal — ответ на отказ хранилища в транзакции выхода,
-// исполнявшейся на ctx.
+// ownForceLogoutRefusal — отказ одной транзакции принудительного выхода: шаг,
+// причина и сама ошибка хранилища. На любом шаге, кроме фиксации, транзакция
+// откачена и не легло ничего; у отказа фиксации исход может быть НЕИЗВЕСТЕН —
+// при конце её срока или обрыве соединения транзакция могла зафиксироваться на
+// сервере, пока драйвер отвечал отказом.
+type ownForceLogoutRefusal struct {
+	step ownForceLogoutStep
+	// contextEnded — к моменту отказа кончился контекст, на котором исполнялся
+	// ЭТОТ шаг: у фиксации — её собственный срок, у прочих — контекст попытки.
+	//
+	// Судится по состоянию контекста, а не по ошибке, и форм у такого отказа
+	// ДВЕ: до отправки оператора драйвер отвечает ошибкой контекста, а во время
+	// исполнения пул службы доводит отмену до сервера (`CancelRequest`,
+	// `corelib/db.NewPool`), и оператор снимается там строкой состояния `57014`,
+	// без ошибки контекста в цепочке. Обе формы значат одно: контекст шага
+	// кончился. Ошибка контекста в цепочке без конца контекста шага — не его
+	// срок (так фиксация, исчерпавшая СВОЙ срок, выглядела бы концом запроса),
+	// и признаком конца она не служит.
+	//
+	// Отказ кодом хранилища, пришедший в тот миг, когда контекст шага уже
+	// кончился, читается концом контекста: различить их по ошибке нельзя
+	// (вторая форма сама есть код хранилища), и решение правдиво в обе стороны —
+	// вторая транзакция на своём сроке либо ляжет, либо упрётся в тот же отказ.
+	contextEnded bool
+	err          error
+}
+
+// refusalAt — отказ шага step, судимый по контексту stepCtx, на котором шаг
+// исполнялся.
+func refusalAt(step ownForceLogoutStep, stepCtx context.Context, err error) *ownForceLogoutRefusal {
+	return &ownForceLogoutRefusal{step: step, contextEnded: stepCtx.Err() != nil, err: err}
+}
+
+// warrantsPartialOutcome — ведёт ли отказ ПЕРВОЙ транзакции ко второй: отсечке
+// и записи «снятие не состоялось».
 //
-// Отказ, вызванный концом контекста, — состояние, которое проходит, а не
-// поломка службы: ответ `Unavailable`, а не `Internal`, который дал бы общий
-// перевод. Отказ замка в собственном пределе транзакции (`55P03`) переводит в
-// недоступность уже хранилище. Остальное — общий перевод.
-func forceLogoutStoreRefusal(ctx context.Context, err error) error {
-	if refusedByContextEnd(ctx, err) {
+//	снятие                         — всегда: отказала сама половина, которую
+//	                                 вторая не повторяет;
+//	открытие · отсечка · событие   — только если кончился контекст попытки:
+//	                                 вторая идёт на своём сроке и ляжет; отказ
+//	                                 кодом хранилища она повторила бы;
+//	фиксация                       — никогда: её исход может быть неизвестен, и
+//	                                 вторая запись события легла бы поверх,
+//	                                 возможно, состоявшегося выхода.
+func (r *ownForceLogoutRefusal) warrantsPartialOutcome() bool {
+	switch r.step {
+	case ownStepTeardown:
+		return true
+	case ownStepOpen, ownStepCutoff, ownStepAudit:
+		return r.contextEnded
+	case ownStepCommit:
+		return false
+	}
+	// Нулевого шага не производит ни один путь; неизвестный шаг ко второй
+	// транзакции не ведёт — поверх неизвестного исхода её не кладут.
+	return false
+}
+
+// answer — ответ вызывающему на этот отказ. Конец контекста шага — состояние,
+// которое проходит, а не поломка службы: `Unavailable`, а не `Internal`,
+// который дал бы общий перевод. Отказ замка в собственном пределе транзакции
+// (`55P03`) переводит в недоступность уже хранилище. Остальное — общий перевод
+// кода хранилища.
+func (r *ownForceLogoutRefusal) answer() error {
+	if r.contextEnded {
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
-	return shared.MapRepoErr(err)
+	return shared.MapRepoErr(r.err)
 }
 
 // Исход снятия в записи события принудительного выхода (kaname#340). Словарь
@@ -603,30 +681,23 @@ func forceLogoutAuditEvent(marker domain.UserTokenRevocation, revokedBy domain.U
 	return outboxtypes.AuditEvent{EventType: eventSessionForceLogout, Payload: payload}
 }
 
-// ownForceLogoutAttempt — исход одной транзакции принудительного выхода на
-// посадке `own`. Три исхода различены ТИПОМ, а не значением: зафиксировано ·
-// снятие отказало · отказало остальное. «Снятие отказало» не имеет
-// представления на успешном пути — иначе оно слилось бы с «снимать было нечего».
-type ownForceLogoutAttempt struct {
-	// ended — число снятых записей; значимо, только когда обе ошибки пусты.
-	ended int
-	// teardownErr — отказ СНЯТИЯ; транзакция откачена, не легло ничего.
-	teardownErr error
-	// err — отказ открытия, отсечки, записи события или фиксации; транзакция
-	// откачена, не легло ничего.
-	err error
-}
-
 // commitOwnForceLogout — ОДНА транзакция: [снятие наших записей] → отсечка →
 // запись события → фиксация. withTeardown=false кладёт запись частичного исхода:
 // отсечку и событие «снятие не состоялось».
 //
-// ФИКСАЦИЯ ИДЁТ НА СВОЁМ СРОКЕ, А НЕ НА СРОКЕ ЗАПРОСА. Когда все операторы
+// Отвечает числом снятых и nil либо отказом с его шагом; число значимо только
+// без отказа. Отказ снятия не имеет представления на успешном пути — иначе он
+// слился бы с «снимать было нечего».
+//
+// ФИКСАЦИЯ ИДЁТ НА СВОЁМ СРОКЕ, А НЕ НА СРОКЕ ПОПЫТКИ. Когда все операторы
 // прошли, отмена во время `COMMIT` оставила бы исход неизвестным: транзакция
-// могла зафиксироваться на сервере, пока драйвер отвечал отменой. Запись
-// «снятие не состоялось» поверх такой фиксации легла бы второй записью
-// события, и ложной. Поэтому фиксация отвязана от отмены запроса и ограничена
-// `forceLogoutRecordBudget`, как прочие записи, пережившие вызывающего.
+// могла зафиксироваться на сервере, пока драйвер отвечал отменой. Поэтому
+// фиксация отвязана от отмены попытки и ограничена `forceLogoutRecordBudget`,
+// как прочие записи, пережившие вызывающего, — и её отказ судится по ЭТОМУ
+// сроку. Исход отказавшей фиксации может быть неизвестен (конец её срока,
+// обрыв соединения), поэтому частичного исхода поверх отказа фиксации не
+// кладётся ни при какой его причине (`warrantsPartialOutcome`): запись «снятие
+// не состоялось» легла бы второй записью события, возможно ложной.
 //
 // ПРИЧИНА СНЯТИЯ — `logout`, И ЭТО ЗАПИСАННЫЙ ОСТАТОК, А НЕ РЕШЕНИЕ ПО СУЩЕСТВУ.
 // Словарь `human_sessions_ended_reason_check` ЗАКРЫТ (`logout` · `password-change`
@@ -646,10 +717,10 @@ type ownForceLogoutAttempt struct {
 // `admin-force-logout`, и значение здесь меняется на него ОДНОЙ правкой.
 func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTokenRevocation,
 	revokedBy domain.UserID, withTeardown bool,
-) ownForceLogoutAttempt {
+) (int, *ownForceLogoutRefusal) {
 	w, err := h.ownSessions.ForceLogoutWriter(ctx, marker.UserID, forceLogoutLockWait)
 	if err != nil {
-		return ownForceLogoutAttempt{err: err}
+		return 0, refusalAt(ownStepOpen, ctx, err)
 	}
 	committed := false
 	defer func() {
@@ -662,23 +733,23 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 	if withTeardown {
 		n, terr := w.EndOtherSessions(ctx, marker.UserID, "", marker.RevokeBefore, domain.RevokeReasonLogout)
 		if terr != nil {
-			return ownForceLogoutAttempt{teardownErr: terr}
+			return 0, refusalAt(ownStepTeardown, ctx, terr)
 		}
 		outcome, ended = forceLogoutTeardownEnded, n
 	}
 	if err := w.UpsertCutoff(ctx, marker, revokedBy); err != nil {
-		return ownForceLogoutAttempt{err: err}
+		return 0, refusalAt(ownStepCutoff, ctx, err)
 	}
 	if err := w.EmitAudit(ctx, forceLogoutAuditEvent(marker, revokedBy, outcome, ended)); err != nil {
-		return ownForceLogoutAttempt{err: err}
+		return 0, refusalAt(ownStepAudit, ctx, err)
 	}
 	commitCtx, cancelCommit := forceLogoutRecordContext(ctx)
 	defer cancelCommit()
 	if err := w.Commit(commitCtx); err != nil {
-		return ownForceLogoutAttempt{err: err}
+		return 0, refusalAt(ownStepCommit, commitCtx, err)
 	}
 	committed = true
-	return ownForceLogoutAttempt{ended: ended}
+	return ended, nil
 }
 
 // forceLogoutOwnSessions — принудительный выход на посадке `own`: снятие наших
@@ -703,8 +774,10 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 // отмечается ошибкой: он не должен считать выведенным того, чья сессия стоит.
 //
 // Между двумя транзакциями закоммиченного состояния нет, поэтому отсечка без
-// записи события не существует ни в одном исходе. Если не ложится и вторая, не
-// легло ничего — ни отсечки, ни записи, — и ответ называет её отказ. Повтор
+// записи события не существует ни в одном исходе. Если вторая отказывает до
+// фиксации, не легло ничего — ни отсечки, ни записи; если отказывает её
+// фиксация, легла она целиком либо не легла вовсе, и какое из двух — служба
+// знать не может. Ответ в обоих случаях называет её отказ. Повтор
 // глагола заново накладывает ту же отсечку (монотонно) и заново пробует снятие;
 // каждая попытка оставляет свою запись со своим исходом.
 //
@@ -725,45 +798,58 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 // Снятие могло пройти, а срок запроса — кончиться на отсечке или записи
 // события первой транзакции. Откатывается тогда вся она, снятие в том числе, и
 // положение то же, что при отказе снятия: снятия нет, а защитная половина
-// лечь может — вторая транзакция идёт на своём сроке. Поэтому отказ первой
-// транзакции, вызванный концом срока запроса, ведёт ко второй так же, как
-// отказ снятия: без второй транзакции не ложилось бы ничего — хуже порядка,
-// где отсечка шла первой. Фиксация первой транзакции сроку запроса не
-// принадлежит вовсе (`commitOwnForceLogout`).
+// лечь может — вторая транзакция идёт на своём сроке. Поэтому отказ открытия,
+// отсечки или записи события, пришедший, когда кончился срок запроса, ведёт ко
+// второй так же, как отказ снятия: без второй транзакции не ложилось бы
+// ничего — хуже порядка, где отсечка шла первой.
 //
-// Отказ ОТСЕЧКИ, записи события или фиксации первой транзакции при ЖИВОМ сроке
+// # БЕЗ ЧАСТИЧНОГО ИСХОДА
+//
+// Отказ открытия, отсечки или записи события КОДОМ ХРАНИЛИЩА при живом сроке
 // запроса — не частичный исход: откатывается всё, не ложится ничего, и ответ —
 // перевод отказа хранилища, как на прочих посадках; вторая транзакция упёрлась
-// бы в тот же отказ. Так же — отказ открытия, включая замок строки личности:
-// не выдан он потому, что строку держит удаление личности, а отсечка без того
-// же замка не ложится (её внешний ключ берёт его сам), и вторая транзакция
-// упёрлась бы в ту же строку.
+// бы в тот же отказ. Так и с замком строки личности при открытии: не выдан он
+// потому, что строку держит удаление личности, а отсечка без того же замка не
+// ложится (её внешний ключ берёт его сам), и вторая транзакция упёрлась бы в
+// ту же строку.
+//
+// Отказ ФИКСАЦИИ первой транзакции — не частичный исход ни при какой причине и
+// ни при каком сроке запроса: её исход может быть неизвестен
+// (`commitOwnForceLogout`). Ответ судится по её собственному сроку: конец его —
+// недоступность, отказ кодом хранилища — его перевод. Повтор глагола заново
+// накладывает ту же отсечку и заново пробует снятие.
+//
+// Во всех трёх случаях ответ вызывающему причины не несёт, и её вместе с шагом
+// называет журнал.
 func (h *Handler) forceLogoutOwnSessions(ctx context.Context, opID string,
 	marker domain.UserTokenRevocation, revokedBy domain.UserID,
 ) error {
-	first := h.commitOwnForceLogout(ctx, marker, revokedBy, true)
-	if first.err == nil && first.teardownErr == nil {
+	ended, first := h.commitOwnForceLogout(ctx, marker, revokedBy, true)
+	if first == nil {
 		slog.InfoContext(ctx, "ForceLogout: own login sessions ended",
-			"operation_id", opID, "user_id", string(marker.UserID), "sessions_ended", first.ended)
+			"operation_id", opID, "user_id", string(marker.UserID), "sessions_ended", ended)
 		return nil
 	}
-	cause := first.teardownErr
-	if cause == nil {
-		if !refusedByContextEnd(ctx, first.err) {
-			return h.failForceLogout(ctx, opID, forceLogoutStoreRefusal(ctx, first.err))
-		}
-		cause = first.err
+	if !first.warrantsPartialOutcome() {
+		slog.ErrorContext(ctx, "ForceLogout: own force-logout transaction refused; no partial outcome is recorded",
+			"operation_id", opID, "user_id", string(marker.UserID),
+			"step", first.step.String(), "context_ended", first.contextEnded, "err", first.err.Error())
+		return h.failForceLogout(ctx, opID, first.answer())
 	}
 
 	slog.ErrorContext(ctx, "ForceLogout: own login-session teardown did not land",
-		"operation_id", opID, "user_id", string(marker.UserID), "err", cause.Error())
+		"operation_id", opID, "user_id", string(marker.UserID),
+		"step", first.step.String(), "err", first.err.Error())
 	recordCtx, cancel := forceLogoutRecordContext(ctx)
 	defer cancel()
-	partial := h.commitOwnForceLogout(recordCtx, marker, revokedBy, false)
-	if partial.err != nil {
-		slog.ErrorContext(ctx, "ForceLogout: the partial outcome could not be recorded; nothing was committed",
-			"operation_id", opID, "user_id", string(marker.UserID), "err", partial.err.Error())
-		return h.failForceLogout(ctx, opID, forceLogoutStoreRefusal(recordCtx, partial.err))
+	if _, partial := h.commitOwnForceLogout(recordCtx, marker, revokedBy, false); partial != nil {
+		msg := "ForceLogout: the partial outcome could not be recorded; nothing was committed"
+		if partial.step == ownStepCommit {
+			msg = "ForceLogout: the partial outcome's commit was refused; whether it landed is unknown"
+		}
+		slog.ErrorContext(ctx, msg, "operation_id", opID, "user_id", string(marker.UserID),
+			"step", partial.step.String(), "err", partial.err.Error())
+		return h.failForceLogout(ctx, opID, partial.answer())
 	}
 	return h.failForceLogout(ctx, opID, status.Error(codes.Unavailable, "could not end the login session"))
 }
