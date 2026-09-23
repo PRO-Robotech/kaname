@@ -130,6 +130,7 @@ var deliveryRoster = []string{
 	"templates/prometheusrule.yaml",
 	"templates/service.yaml",
 	"tree_root_test.go",
+	"unset_value_render_test.go",
 	"values.dev.yaml",
 	"values.prod.yaml",
 	"values.yaml",
