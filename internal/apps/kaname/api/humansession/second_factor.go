@@ -367,16 +367,23 @@ func assuranceViewOf(presented []string, enrolled []assurance.Method) AssuranceV
 	return view
 }
 
+// loginMethodRead — строка способа входа по человеку и виду; строки нет —
+// отказ семейства NOT_FOUND. Носителей у чтения два, а правило оси «заведено»
+// одно: пул (`loginmethod.Store.Get`) — у полос, читающих ДО открытия
+// транзакции записи, и соединение самой транзакции (`Writer.LoginMethod`) — у
+// завершения восстановления, читающего ПОСЛЕ применения кода.
+type loginMethodRead func(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
+
 // enrolledMethods — способы, ЗАВЕДЁННЫЕ у личности: пароль — строка `password`,
 // второй фактор — строка `totp` в состоянии `active` (и с ней — набор).
-func enrolledMethods(ctx context.Context, methods loginmethod.Store, userID domain.UserID) ([]assurance.Method, error) {
+func enrolledMethods(ctx context.Context, read loginMethodRead, userID domain.UserID) ([]assurance.Method, error) {
 	var out []assurance.Method
-	if _, err := methods.Get(ctx, userID, domain.LoginMethodPassword); err == nil {
+	if _, err := read(ctx, userID, domain.LoginMethodPassword); err == nil {
 		out = append(out, assurance.MethodPassword)
 	} else if !isNotFound(err) {
 		return nil, err
 	}
-	totp, err := methods.Get(ctx, userID, domain.LoginMethodTOTP)
+	totp, err := read(ctx, userID, domain.LoginMethodTOTP)
 	switch {
 	case err == nil && totp.Enrolled():
 		out = append(out, assurance.MethodTOTP, assurance.MethodLookupSecret)

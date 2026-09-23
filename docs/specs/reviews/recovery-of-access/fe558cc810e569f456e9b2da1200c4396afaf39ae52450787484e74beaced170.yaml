@@ -1,0 +1,162 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: fe558cc810e569f456e9b2da1200c4396afaf39ae52450787484e74beaced170
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (две) не
+    трогаются — редакция 4 получает соседнюю запись по своему отпечатку.
+  base_commit: 253cf0446c30745a61c98671a34e207069da00ed
+  content_commit: none
+  content_commit_note: >-
+    Редакция 4 на момент круга НЕ закоммичена: рабочая копия ветки `305` @ 253cf044, изменены два
+    файла — эта приёмка и её пара (Ф3, редакция 13). После коммита
+    `git show <коммит>:docs/engineering/acceptance/recovery-of-access.md | sha256sum` обязан дать
+    fe558cc8… дословно — иначе запись о другом содержимом.
+  branch: '305'
+  wave_branch: '377'
+  pull_request: pending
+  task: PRO-Robotech/kacho#1271
+  edition_task: PRO-Robotech/kaname#305
+  paired_document:
+    path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+    sha256: 3f0dca23af753cc5dffc400306db950f92ac07bc925a9b58ae1bcb9a346d108a
+    record: docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/3f0dca23af753cc5dffc400306db950f92ac07bc925a9b58ae1bcb9a346d108a.yaml
+  lines: 1237
+  round: 3
+  predecessor_record: docs/specs/reviews/recovery-of-access/5b70cc583c7d4d3fc451dd35758d404ee0897410c449ad46c4c1ac1ce864ce3d.yaml
+  predecessor_note: >-
+    Непосредственный предшественник — редакция 3 (5b70cc58…, круг 2 APPROVED). Она же в HEAD ветки:
+    `git show HEAD:<путь> | sha256sum` → 5b70cc58…. Одобрение редакции 3 на редакцию 4 НЕ
+    переносится (change-graph.md §2).
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в рабочей копии ветки 305 @ 253cf044
+    → fe558cc8…, совпал с объявленным в задании; wc -l → 1237.
+  task_premise_remeasured: >-
+    (1) Отпечатки обеих рабочих копий и обеих баз HEAD — ПОДТВЕРДИЛОСЬ своим sha256sum.
+    (2) «Абзац байт в байт один в Ф3 Р10 и Ф5 Р5» — ПОДТВЕРДИЛОСЬ:
+    `awk '/^\*\*Завершение восстановления доступа решает/,/^$/' <файл> | sha256sum` → 29a72272…
+    в обоих файлах, 15 строк в каждом; на HEAD — 0 строк в обоих. (3) «Правки Ф5 — ровно
+    объявленный состав» — ПОДТВЕРДИЛОСЬ: `git diff --numstat` → 88 13; 18 ломтей, каждый положен
+    на раздел (шапка, §0.2, Р5 ×3, §3 Д4 и Д13, §4.1 п.5, §4.3 ×2, §6 Ф5-25, §7 строка и счёт,
+    §8 инв. 2 и 3, §9, §10 п.5); сценарии Ф5-01…24 не тронуты. Ни одна посылка не опровергнута.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-23'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 3 — APPROVED: блокирующих ноль. Санкция не выдана: роль без внешнего события
+    полномочия не даёт (change-graph.md §3); политика воркспейса (docs/changes/policy.yaml →
+    review_authority.acceptance-reviewer) называет `pointpu`.
+  what_the_event_would_lift: >-
+    ban #1 для Ф5-25 — задача kaname#305, шаг 2 её предмета (полоса завершения решает счёт по
+    адресу через место решения входа; падающая проба до кода).
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#305 с полями role, verdict, subject, subject_revision (коммит
+      редакции 4 после его создания), subject_sha256 дословно; блок `event` дописывается
+      ОТДЕЛЬНЫМ коммитом поверх этой записи.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакций 3 → 4 целиком. Сверено: Ф3 Р10 (правило обнуления, что считается попыткой —
+    включая отказ заблокированной), Ф3-02, Ф3-28 (форма отказа по частоте); Ф12 Р3 (восстановление
+    кода второго фактора не требует), Ф12 Р7, Ф12-31 «б» (N-й неверный — 401, N+1-й — 429; пароль и
+    код — один счёт); Ф11 Р8 и Ф11-07 (сессия восстановления — «1» и при заведённом факторе);
+    Ф5-03, Ф5-17 (отказ завершения заблокированной — тот же, что на входе). Дерево ветки: полоса
+    завершения, место решения обнуления, гейт единственного писателя и его ведомость.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  papers_agree: >-
+    Приёмки больше не расходятся: абзац один (29a72272…) в Ф3 Р10 и Ф5 Р5; строка Ф5 §7 в Ф3 §7.2 и
+    сводка Ф3 §12 говорят тот же смысл; противоречащих строк о завершении и счёте в Ф3, Ф11, Ф12 нет
+    (grep по «восстановлен» × «счёт|обнул|сброс»).
+  scenario_count: 'метки Ф5-N: 25 в §6 и 25 в §7 (предикат документа исполнен); было 24'
+  producer_present_for_every_then: >-
+    25 из 25. Ф5-25: kaname#305 (полоса) плюс Ф3 #1269 (правило, величины, форма отказа);
+    тождество счёта и бюджета подбора кода — Ф12-31 «б» в доме Ф12, здесь не переутверждается.
+    «Место решения одно» держит гейт дерева `internal/check` (единственный писатель обнуления) —
+    существует, запись ведомости kaname#305 в нём есть и самоистекает (см. experiment).
+  positive_twin_for_every_negation: >-
+    Ф5-25 (а) и (в) — замки, близнец (б) в самом сценарии; отличающий факт — один (заведён ли
+    второй фактор / заблокирована ли личность). Различимость показана посевом.
+  constructibility: >-
+    Посеяно 3 из 3 «Дано» Ф5-25 (A — строка второго фактора посевом в хранилище способов, B, C —
+    блокировка признаком личности; профиль N_адрес=3, N_источник=5 удовлетворяет обоим условиям
+    «Дано»), «не выполнилось» 0.
+  dod_measurable: '§9 и §10 п.5 называют пробу, её уровень и предикат снятия записи ведомости — измеримо.'
+  open_questions: none
+  conventions: >-
+    Новой ручки, RPC, поля и отказа нет; коды и форма отказа — существующие (Ф3-02, Ф3-28).
+  disclosure: >-
+    Текст — уровень свойства: абзац называет правило (что обнуляет счёт и что нет), а не состояние
+    дерева до правки. НЕ блокирующее; см. N3.
+
+experiment:
+  isolation: >-
+    Собственный экспорт `git archive 253cf0446` вне деревьев git; файл посева — только в экспорте;
+    экспорт удалён после прогонов. Прогоны по одному, с пониженным приоритетом.
+  seed_before_lane_fix: >-
+    go test -p 1 -count=1 -run '^TestReview_F5_25_Seed$' на 253cf044 → исполнено ветвей 3:
+    близнец (б) зелёный, замки (а) и (в) красные — сценарий способен упасть до правки полосы.
+  seed_after_candidate_fix: >-
+    Кандидатная правка полосы в экспорте: завершение решает счёт через место решения входа
+    (заведённое читается до транзакции, предъявленное — вид сессии восстановления), у
+    заблокированной решения нет. Тот же прогон → 3 из 3 зелёных; пробы восстановления пакета
+    (`^TestRecovery_`) — 13 из 13 зелёных. Сценарий исполним, не самопротиворечив.
+  ledger_self_expiry: >-
+    TestFailureResetGoesThroughTheCompletedLoginGuard на кандидатной правке → красный ровно одной
+    находкой: запись ведомости kaname#305 «больше нечего исключать». Так §9 и предикат снятия
+    kaname#305 и описывают: запись снимается тем же изменением, что правка полосы.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N1
+    class: doc-truthfulness
+    text: >-
+      §4.3: знаменатель радиуса обновлён («из двадцати пяти»), числитель — нет, хотя «Дано» Ф5-25
+      («личность с подтверждённым адресом», код Ф5-01) строится тем же, что Ф5-01. Единица «сценарии,
+      которым Ф5-01 — положительный контроль» унаследована от одобренной редакции 3 и под Ф5-25 не
+      подходит; на исполнимость не влияет (посев — записью в базу, как там же сказано).
+  - id: N2
+    class: doc-truthfulness
+    text: >-
+      Строка «Статус» отстаёт от каталога записей (с этой — три); документ это называет сам и
+      выносит за объём правки. Тот же класс, что N1 круга 7 Ф3: заменить числа предикатом по каталогу.
+  - id: N3
+    class: disclosure
+    text: >-
+      Документ на уровне свойства, но рядом с открытой P1 задачей, чей заголовок называет признак,
+      требование читается как описание текущего поведения. Окно закрывает только посадка полосы —
+      сажать её той же волной, что и документ; тела записи и события держать на уровне
+      «сценарий исполнен в обе стороны», без наблюдаемого до правки.
+
+seed_attempt:
+  performed: true
+  outcome: green
