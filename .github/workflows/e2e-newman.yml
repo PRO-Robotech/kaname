@@ -926,6 +926,188 @@ jobs:
           KUBECONFIG: ${{ runner.temp }}/kaname-stand-chart.kubeconfig
         run: .github/scripts/stand-chart.sh down || true
 
+  # ── СТЕНД ПОСАДКИ `own`: ПОЛОСА ВХОДА ПАРОЛЕМ ──────────────────────────────
+  #
+  # Слушатель формы человека поднимается ТОЛЬКО посадкой `own` и допускает РОВНО
+  # край — по SAN клиентского листа. Задание `stand` стоит на `external` по своему
+  # предмету (служба без края), задание `chart` — на поставляемом профиле; ни одно
+  # из них этой двери не открывает, и набор `kaname-login-lane` там уходит в
+  # «условие не создано» каждым шагом.
+  #
+  # Здесь стенд создаёт все три условия набора сам, кодом дерева, а не руками:
+  # посадку `own` накладкой оператора поверх боевого профиля, клиентский лист с
+  # именем края и человека со способом входа паролем (`stand-chart.sh`, раздел
+  # «ПОСАДКА `own`»). Условие — отдельным шагом со своим исходом: несозданное
+  # условие не подаётся ни вердиктом о продукте, ни зелёным.
+  chart-own:
+    name: стенд посадки own (kind) — полоса входа паролем
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      KANAME_STAND_IDENTITY_PROVIDER: own
+      KANAME_STAND_ALERT_RULES: "off"
+      KANAME_STAND_CLUSTER: kaname-chart-own-ci
+      KANAME_STAND_IMAGE: kaname:stand-own-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Координаты стенда — ВНЕ рабочего дерева и одни на все шаги: каталог
+      # стенда несёт ключи листов, и в дереве им не место.
+      - name: координаты стенда
+        run: |
+          echo "KANAME_STAND_WORKDIR=$RUNNER_TEMP/kaname-stand-own" >> "$GITHUB_ENV"
+          echo "KUBECONFIG=$RUNNER_TEMP/kaname-stand-own.kubeconfig" >> "$GITHUB_ENV"
+
+      # Инструменты — предпосылка, и их отсутствие — третий исход. Версии те же,
+      # что у соседних заданий: одно средство в двух версиях разошлось бы молча.
+      - name: инструменты стенда и прогона (их отсутствие — НЕ находка о дереве)
+        timeout-minutes: 10
+        run: |
+          rc=0
+          go install sigs.k8s.io/kind@v0.33.0 || rc=$?
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          npm install -g newman@6.2.2 >/dev/null 2>&1 || rc=$?
+          missing=""
+          for tool in kind helm kubectl docker openssl newman jq python3; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ] || [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::инструментов нет:$missing (установка rc=$rc) — стенд НЕ поднимался, вердикта о дереве нет"
+            exit 1
+          fi
+          echo "инструменты на месте: kind $(kind --version), helm $(helm version --short), newman $(newman --version)"
+
+      # Каждое различение исходов доказывается ДО того, как его вердикту поверят,
+      # и каждое — своим шагом: код возврата каждой самопроверки читается отдельно.
+      - name: различение исходов подъёма способно упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: .github/scripts/stand-chart.sh --self-test
+
+      - name: посев человека способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/seed_login_lane.py --self-test
+
+      - name: чистка отчёта способна упасть (самопроба по каждой форме)
+        timeout-minutes: 5
+        run: python3 .github/scripts/redact-newman-report.py --self-test
+
+      - name: подъём стенда посадки own (values.prod.yaml + накладка own, kind)
+        timeout-minutes: 25
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh up || rc=$?
+          case "$rc" in
+            0) echo "чарт поставлен в посадке own, выкат дошёл до готовности" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::стенд не поднялся по причине, не относящейся к дереву (кластер, база, образ). Прогон недействителен, это НЕ дефект кода."
+              exit 1 ;;
+            *)
+              echo "::error title=Чарт не поднялся в посадке own::установка либо готовность выката отказали — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      # Провенанс и посадка — по процессу и по базе, а не по «под Ready»: под
+      # `own` к шести осям боевой посадки добавлена `identity_provider=own`.
+      - name: провенанс и посадка сходятся (процесс, база)
+        timeout-minutes: 5
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh assert || rc=$?
+          case "$rc" in
+            0) echo "ревизия и посадка сошлись" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::стенд не опрошен либо исполняет не ту ревизию — вердикта о посадке нет"
+              exit 1 ;;
+            *)
+              echo "::error title=Посадка разошлась с объявленной::вывод выше называет ось"
+              exit "$rc" ;;
+          esac
+
+      # УСЛОВИЕ ПРОГОНА — ОТДЕЛЬНЫМ ШАГОМ. Посев заводит человека глаголом
+      # продукта на полосе и утверждает способность («входит паролем»), а не
+      # наличие строки; три переменные набора он пишет сам.
+      - name: условие создано — человек входит паролем через полосу
+        timeout-minutes: 5
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh seed-login-lane || rc=$?
+          case "$rc" in
+            0) echo "условие создано: loginLaneBaseUrl, loginLaneEmail, loginLanePassword записаны" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::полоса недостижима либо лист края не вынесен — вердикта о продукте нет"
+              exit 1 ;;
+            *)
+              echo "::error title=Посев отвергнут продуктом::посев предъявил всё, чего требует контракт полосы, и получил отказ — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      # ЧИСЛОВОЙ ВЕРДИКТ даёт прогонщик набора: исполненные и неотвеченные
+      # запросы, упавшие утверждения, строка на коллекцию. Лист края и УЦ стенда
+      # — те, что посев вынес из Secret стенда и по которым доказал способность.
+      - name: полоса входа паролем гоняется (числовой вердикт)
+        timeout-minutes: 10
+        run: |
+          cd tests/newman
+          rc=0
+          ./scripts/run.sh --service kaname-login-lane \
+            --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
+            --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
+            --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
+          case "$rc" in
+            0) echo "набор полосы входа зелен" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предполёт снял этот прогон до первого запроса — вердикта о наборе нет"
+              exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+
+      # Артефакт публичного репозитория — только после чистки: окружение
+      # прогона несёт пароль человека и печенья сессии.
+      - name: отчёт прогона вычищен от удостоверений
+        if: always()
+        timeout-minutes: 5
+        run: |
+          mkdir -p tests/newman/out-public
+          if [ ! -d tests/newman/out ]; then
+            echo "::notice title=Отчёта нет::каталог tests/newman/out не создан — прогон коллекции не состоялся, выкладывать нечего"
+            echo 'ОТЧЁТА ПРОГОНА НЕТ: прогон коллекции не состоялся — смотрите шаги подъёма и посева выше. Это НЕ «вычищено до пустоты».' \
+              > tests/newman/out-public/no-report.txt
+            exit 0
+          fi
+          rc=0
+          python3 .github/scripts/redact-newman-report.py --in tests/newman/out --out tests/newman/out-public || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Артефакт НЕ выложен::чистка отчёта не сошлась (код $rc) — выкладывать отчёт с удостоверениями в ПУБЛИЧНЫЙ репозиторий нельзя"
+            rm -rf tests/newman/out-public
+            mkdir -p tests/newman/out-public
+            echo 'ЧИСТКА НЕ СОШЛАСЬ: отчёт НЕ выложен. Шаг чистки выше печатает ПУТИ, где удостоверение осталось, но не сами значения.' \
+              > tests/newman/out-public/redaction-failed.txt
+            exit 1
+          fi
+
+      - name: отчёт прогона полосы входа (вычищенный)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: own-landing-newman-report
+          path: tests/newman/out-public
+          if-no-files-found: error
+
+      - name: журнал стенда
+        if: always()
+        run: |
+          kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname get pods -o wide || true
+          kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname logs -l app.kubernetes.io/name=kaname --tail=200 --all-containers || true
+
+      - name: снос стенда
+        if: always()
+        run: .github/scripts/stand-chart.sh down || true
+
   # ── ВЕРДИКТ СТВОЛА ──────────────────────────────────────────────────────────
   #
   # Держатель живёт в КАЖДОМ процессе, идущем на ствол, а не в одном из них.
@@ -963,6 +1145,7 @@ jobs:
       - stand
       - edgeselftests
       - chart
+      - chart-own
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
@@ -991,7 +1174,8 @@ jobs:
             "${{ needs.suite.result }}" \
             "${{ needs.stand.result }}" \
             "${{ needs.edgeselftests.result }}" \
-            "${{ needs.chart.result }}" || rc=$?
+            "${{ needs.chart.result }}" \
+            "${{ needs.chart-own.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
             1) echo "::error title=СТВОЛ КРАСЕН::держатель заведён либо дополнен в трекере. Пока он открыт, ствол считается красным; закрывать — с артефактом починки"; exit 1 ;;
