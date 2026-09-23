@@ -16,16 +16,25 @@ package clienttokenwire_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
-	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -60,11 +69,13 @@ func (r *recordingIssuers) ResolveTrustedIssuer(ctx context.Context, _, _ string
 }
 
 type recordingReplay struct {
+	called   bool
 	deadline time.Time
 	had      bool
 }
 
 func (r *recordingReplay) Redeem(ctx context.Context, _, _ string, _ time.Time) error {
+	r.called = true
 	r.deadline, r.had = ctx.Deadline()
 	return nil
 }
@@ -72,11 +83,13 @@ func (r *recordingReplay) Redeem(ctx context.Context, _, _ string, _ time.Time) 
 // recordingCutoffs — читатель отсечки отзыва-всех. Как и прочие дублёры, об
 // исходе не утверждает ничего — лишь запоминает, с каким сроком его позвали.
 type recordingCutoffs struct {
+	called   bool
 	deadline time.Time
 	had      bool
 }
 
 func (r *recordingCutoffs) UserRevokedBefore(ctx context.Context, _ string) (time.Time, bool, error) {
+	r.called = true
 	r.deadline, r.had = ctx.Deadline()
 	return time.Time{}, false, nil
 }
@@ -189,47 +202,113 @@ func TestCompositionRefusesAMissingPort(t *testing.T) {
 // Обязательство названо приёмкой отдельно и намеренно без своего сценария:
 // ни одна проба контура не спрашивает, выставлен ли предел, — поэтому он
 // проверяется здесь, на сборке, где предел и выставляется.
+//
+// Запрос идёт в обработчик, СОБРАННЫЙ [clienttokenwire.New], и срок смотрится у
+// дублёров портов — там, куда вызов приходит на живом пути. Проба, зовущая
+// обёртку напрямую, утверждала бы, что обёртка ставит срок, и молчала бы о том,
+// ставит ли её сборка: снятая из сборки обёртка оставила бы её зелёной.
 func TestEveryExternalCallOfTheNewPathCarriesItsOwnDeadline(t *testing.T) {
 	cfg := full()
-	res, rep, err := build(cfg)
+	key, pemKey := newClientKey(t)
+	res := &keyedResolver{client: domain.AssertionClient{
+		ID: deadlineClientID, Kind: domain.AssertionClientUser, OwnerID: deadlineOwnerID,
+		PublicKeyPEM: pemKey, Algorithm: tokenpolicy.AlgES256, OwnerActive: true,
+	}}
+	rep := &recordingReplay{}
+	cuts := &recordingCutoffs{}
+	h, err := clienttokenwire.New(cfg, res, &recordingIssuers{}, rep, stubSigner{}, personClaims{}, cuts)
 	require.NoError(t, err)
 
-	// Контекст БЕЗ срока: если бы предел приезжал от вызывающего, здесь его
-	// не было бы вовсе, и проба это увидит.
-	ctx := context.Background()
+	// Контекст запроса — БЕЗ срока: будь предел у вызывающего, а не у сборки,
+	// его здесь не было бы вовсе.
+	req := assertionRequest(t, key, deadlineClientID, cfg.ExpectedAudience)
+	_, had := req.Context().Deadline()
+	require.False(t, had, "предпосылка: контекст запроса пробы не несёт срока")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
 
-	_, _ = res, rep
-	require.NoError(t, resolveThrough(ctx, cfg, res))
+	// Порт, до которого запрос не дошёл, — не «срок есть», а «не измерено».
+	require.Truef(t, res.called, "запрос не дошёл до реестра (ответ %d %s) — предел не измерен", rec.Code, rec.Body.String())
+	require.Truef(t, rep.called, "запрос не дошёл до однократности (ответ %d %s) — предел не измерен", rec.Code, rec.Body.String())
+	require.Truef(t, cuts.called,
+		"запрос не дошёл до чтения отсечки отзыва-всех (ответ %d %s) — предел не измерен", rec.Code, rec.Body.String())
+
 	require.True(t, res.had, "чтение реестра обязано нести СВОЙ предел времени")
 	require.LessOrEqual(t, time.Until(res.deadline), cfg.PeerTimeout)
 
-	require.NoError(t, redeemThrough(ctx, cfg, rep))
 	require.True(t, rep.had, "допуск однократности обязан нести СВОЙ предел времени")
 	require.LessOrEqual(t, time.Until(rep.deadline), cfg.PeerTimeout)
 
 	// Чтение отсечки отзыва-всех лежит на пути ВЫДАЧИ и идёт в базу — тот же
-	// довод, что у реестра: без своего предела неотвечающая база вешает
-	// горутину, и отказ приходит не туда, где причина.
-	cuts := &recordingCutoffs{}
-	_, _, err = clienttokenwire.WithDeadlineCutoffs(cuts, cfg.PeerTimeout).UserRevokedBefore(ctx, "usr_x")
-	require.NoError(t, err)
+	// довод, что у реестра: без своего предела неотвечающая база держит
+	// обработчик, и отказ приходит не туда, где причина.
 	require.True(t, cuts.had, "чтение отсечки отзыва-всех обязано нести СВОЙ предел времени")
 	require.LessOrEqual(t, time.Until(cuts.deadline), cfg.PeerTimeout)
 }
 
-// resolveThrough / redeemThrough зовут порт ЧЕРЕЗ обёртку, которую ставит
-// сборка, а не напрямую: предмет пробы — обёртка, и вызов в обход неё измерял
-// бы дублёра.
-func resolveThrough(ctx context.Context, cfg clienttokenwire.BuildConfig, res clientassertion.ClientResolver) error {
-	_, err := clienttokenwire.WithDeadlineResolver(res, cfg.PeerTimeout).ResolveAssertionClient(ctx, "uoc_x")
-	if domain.IsAssertionClientUnknown(err) {
-		return nil
+const (
+	deadlineClientID = "uoc_01abcdefghjkmnpqx"
+	deadlineOwnerID  = "usr_01abcdefghjkmnpqx"
+)
+
+// keyedResolver — строка реестра с настоящим открытым ключом: запрос обязан
+// пройти проверку подписи, чтобы дойти до выдачи. Срок вызова запоминается.
+type keyedResolver struct {
+	client   domain.AssertionClient
+	called   bool
+	deadline time.Time
+	had      bool
+}
+
+func (r *keyedResolver) ResolveAssertionClient(ctx context.Context, clientID string) (domain.AssertionClient, error) {
+	r.called = true
+	r.deadline, r.had = ctx.Deadline()
+	if clientID != r.client.ID {
+		return domain.AssertionClient{}, domain.ErrAssertionClientUnknown
 	}
-	return err
+	return r.client, nil
 }
 
-func redeemThrough(ctx context.Context, cfg clienttokenwire.BuildConfig, rep clientassertion.ReplayGuard) error {
-	return clienttokenwire.WithDeadlineReplay(rep, cfg.PeerTimeout).Redeem(ctx, "uoc_x", "jti", time.Now().Add(time.Minute))
+// personClaims — состав, разрешающий принципала-ЧЕЛОВЕКА по ключу: только для
+// него выдача читает отсечку отзыва-всех.
+type personClaims struct{}
+
+func (personClaims) ClaimsForAssertionClient(_ context.Context, c domain.AssertionClient, _ service.TokenHookContext) (
+	map[string]any, service.ResolvedPrincipal, error,
+) {
+	issued := time.Now().Add(-time.Hour)
+	return map[string]any{}, service.ResolvedPrincipal{
+		Kind: service.PrincipalUser, UserID: c.OwnerID, StandingCredentialIssuedAt: &issued,
+	}, nil
 }
 
-var _ = client_token.Input{}
+func newClientKey(t *testing.T) (*ecdsa.PrivateKey, string) {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	require.NoError(t, err)
+	return k, string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+}
+
+// assertionRequest — запрос выдачи по утверждению клиента, подписанному его
+// ключом: издатель и субъект — наш идентификатор строки реестра.
+func assertionRequest(t *testing.T, key *ecdsa.PrivateKey, clientID, audience string) *http.Request {
+	t.Helper()
+	now := time.Now()
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"iss": clientID, "sub": clientID, "aud": audience,
+		"iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "jti-deadline",
+	})
+	tok.Header["typ"] = tokenpolicy.TokenTypeClientAssertion
+	raw, err := tok.SignedString(key)
+	require.NoError(t, err)
+	form := url.Values{
+		"grant_type":            {tokenpolicy.GrantTypeClientCredentials},
+		"client_assertion_type": {tokenpolicy.ClientAssertionType},
+		"client_assertion":      {raw},
+	}
+	req := httptest.NewRequest(http.MethodPost, clienttokenhttp.TokenPath, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req
+}

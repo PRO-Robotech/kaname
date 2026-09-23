@@ -36,13 +36,17 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
-// clientTokenPeerTimeout — предел времени ОДНОГО внешнего вызова этого пути.
+// issuancePeerTimeout — предел времени ОДНОГО внешнего вызова на путях выдачи
+// токена.
 //
-// Назван здесь потому, что путь собирается в этом корне: две величины в двух
-// местах — то, как они расходятся. Предмет предела — чтение реестра и допуск
-// однократности; оба идут в свою базу, и оба обязаны кончаться отказом, а не
-// ожиданием.
-const clientTokenPeerTimeout = 3 * time.Second
+// Назван здесь потому, что эти пути собираются в этом корне: две величины в
+// двух местах — то, как они расходятся. Предмет предела — чтение реестра,
+// допуск однократности и чтение отсечки отзыва-всех на токен-эндпоинте, и то
+// же чтение отсечки на обеих полосах хука поставщика (`hooks_mux.go`,
+// buildIssuanceHooks). Все идут в свою базу, и все обязаны кончаться отказом, а
+// не ожиданием; чтение отсечки — одно и то же на всех полосах и потому несёт
+// один предел.
+const issuancePeerTimeout = 3 * time.Second
 
 // buildClientTokenEndpoint собирает токен-эндпоинт платформы.
 //
@@ -70,10 +74,12 @@ func buildClientTokenEndpoint(
 	// доезжает до всех сторон by construction.
 	claims := newAssertionClaimsComposer(pool, cfg)
 
-	// Отсечку отзыва-всех владельца сборка от пула читает ТЕМ ЖЕ адаптером,
-	// что держат полосы хука (`hooks_mux.go`): одна строка — один читатель, и
-	// две полосы не отвечают на один вопрос по-разному. Посадки без хуков
-	// поставщика это не меняет: читатель строит сборка, а не хуки.
+	// Отсечку отзыва-всех владельца сборка от пула читает адаптером ТОГО ЖЕ
+	// типа, что у полос хука (`hooks_mux.go`), — своим экземпляром над тем же
+	// пулом, потому что эндпоинт собирается и на посадке без хуков поставщика.
+	// Одинаковость ответа полос держат строка и запрос к ней (тип адаптера),
+	// предел на вызов (та же обёртка и тот же issuancePeerTimeout) и правило
+	// вердикта (`revocationpolicy`), а не общий экземпляр.
 	return clienttokenwire.FromPool(pool, clienttokenwire.BuildConfig{
 		Logger: logger,
 		// Ожидаемый адресат утверждения — идентификатор НАШЕГО издателя, а не
@@ -90,7 +96,7 @@ func buildClientTokenEndpoint(
 		DefaultAudience:          cfg.AuthN.ClientToken.DefaultAudience,
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
-		PeerTimeout:              clientTokenPeerTimeout,
+		PeerTimeout:              issuancePeerTimeout,
 	}, signer, claims)
 }
 

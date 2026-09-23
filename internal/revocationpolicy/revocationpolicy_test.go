@@ -212,3 +212,40 @@ func TestVerdictZeroValueIsNoneOfTheThree(t *testing.T) {
 		require.NotEqual(t, zero, v)
 	}
 }
+
+// deadlineCutoffs — читатель, запоминающий срок контекста вызова.
+type deadlineCutoffs struct {
+	called   bool
+	deadline time.Time
+	had      bool
+}
+
+func (d *deadlineCutoffs) UserRevokedBefore(ctx context.Context, _ string) (time.Time, bool, error) {
+	d.called = true
+	d.deadline, d.had = ctx.Deadline()
+	return time.Time{}, false, nil
+}
+
+// TestWithDeadline_EachReadCarriesItsOwnLimitAndAnAbsentReaderStaysAbsent —
+// обёртка ставит свой срок на вызов с контекстом без срока, а неподанный
+// читатель не превращается в поданный.
+func TestWithDeadline_EachReadCarriesItsOwnLimitAndAnAbsentReaderStaysAbsent(t *testing.T) {
+	const limit = 2 * time.Second
+	inner := &deadlineCutoffs{}
+	_, _, err := revocationpolicy.WithDeadline(inner, limit).UserRevokedBefore(context.Background(), "usr_x")
+	require.NoError(t, err)
+	require.True(t, inner.called, "чтение обязано дойти до читателя")
+	require.True(t, inner.had, "чтение обязано нести свой срок и при контексте без срока")
+	require.LessOrEqual(t, time.Until(inner.deadline), limit)
+	require.Positive(t, time.Until(inner.deadline))
+
+	require.Nil(t, revocationpolicy.WithDeadline(nil, limit),
+		"обёртка над неподанным читателем обязана остаться неподанной: иначе «не провязан» неотличим от «провязан»")
+
+	// Неподанный читатель через обёртку — по-прежнему Undecidable, а не паника
+	// и не выдача.
+	v, err := revocationpolicy.AtIssuance(context.Background(), revocationpolicy.WithDeadline(nil, limit),
+		person("usr_x", nil), cutoff)
+	require.Equal(t, revocationpolicy.Undecidable, v)
+	require.ErrorIs(t, err, revocationpolicy.ErrNoLookup)
+}

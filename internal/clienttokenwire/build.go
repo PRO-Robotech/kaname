@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // BuildConfig — вход сборки. Каждая величина обязательна.
@@ -70,7 +71,7 @@ type BuildConfig struct {
 	// BodyCeiling — потолок тела запроса.
 	BodyCeiling int64
 	// PeerTimeout — предел времени КАЖДОГО внешнего вызова этого пути: чтения
-	// реестра и допуска однократности.
+	// реестра, допуска однократности и чтения отсечки отзыва-всех.
 	//
 	// Обязателен, а не «разумное умолчание»: неотвечающий сосед без предела
 	// вешает горутину навсегда, и горутины копятся до исчерпания процесса —
@@ -137,7 +138,12 @@ func New(
 		DefaultAudience:  cfg.DefaultAudience,
 		TokenTTL:         cfg.TokenTTL,
 		Clock:            cfg.Clock,
-	}, signer, claims, WithDeadlineCutoffs(revocations, cfg.PeerTimeout))
+	},
+		signer, claims,
+		// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
+		// объявленным пределом на вызов: одно чтение одной строки несёт один
+		// предел на любой полосе.
+		revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
 	}
@@ -155,9 +161,13 @@ func New(
 // FromPool собирает эндпоинт от пула: реестр, способный к утверждению,
 // хранилище однократности и читатель отсечки отзыва-всех берутся из своей базы.
 //
-// Читатель отсечки — тот же адаптер, что держат полосы хука
-// (`kanamepg.NewSessionRevocationsAdapter`): одна строка, один читатель, и две
-// полосы не могут ответить на один вопрос по-разному из-за разных читателей.
+// Читатель отсечки — адаптер ТОГО ЖЕ типа, что у полос хука
+// (`kanamepg.NewSessionRevocationsAdapter`), но свой экземпляр над тем же пулом:
+// эндпоинт собирается и там, где хуков поставщика нет. Одинаковость ответа
+// полос держит не общий экземпляр, а три вещи, общие по построению: одна строка
+// и один запрос к ней (тип адаптера), один предел времени на вызов (обёртка
+// [revocationpolicy.WithDeadline] с объявленным пределом корня) и одно правило
+// вердикта (`revocationpolicy.AtIssuance`).
 func FromPool(
 	pool *pgxpool.Pool,
 	cfg BuildConfig,
@@ -239,26 +249,4 @@ func (d deadlineReplay) Redeem(ctx context.Context, clientID, assertionID string
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	return d.inner.Redeem(ctx, clientID, assertionID, expiresAt)
-}
-
-// deadlineCutoffs — чтение отсечки отзыва-всех со СВОИМ пределом времени.
-type deadlineCutoffs struct {
-	inner   client_token.RevocationLookup
-	timeout time.Duration
-}
-
-// WithDeadlineCutoffs оборачивает чтение отсечки собственным пределом.
-//
-// Тот же довод, что у чтения реестра: чтение лежит на пути ВЫДАЧИ и идёт в
-// базу, и без своего предела неотвечающая база вешает горутину — отказ
-// приходит не туда, где причина. Истёкший предел — ошибка чтения, то есть
-// отказ выдачи, а не «отсечки нет».
-func WithDeadlineCutoffs(inner client_token.RevocationLookup, timeout time.Duration) client_token.RevocationLookup {
-	return deadlineCutoffs{inner: inner, timeout: timeout}
-}
-
-func (d deadlineCutoffs) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.timeout)
-	defer cancel()
-	return d.inner.UserRevokedBefore(ctx, userID)
 }

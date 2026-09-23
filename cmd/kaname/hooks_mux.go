@@ -24,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 
 	"github.com/PRO-Robotech/corelib/schemaguard"
@@ -94,34 +95,16 @@ func buildHooksMux(
 		service.TokenEnrichmentConfig{Domain: domain, HydraIssuer: hydraIssuer},
 		users,
 	).WithSAPort(saPort).WithUserTokenPort(userTokenPort)
-	tokenHook := handlerinternal.NewTokenHookHandler(
-		handlerinternal.TokenHookConfig{
-			HookSharedSecret: hookSecret,
-			Domain:           domain,
-			HydraIssuer:      hydraIssuer,
-		},
-		tokenEnricher,
-		// The SAME revocation adapter the refresh hook holds. Both hooks ask the
-		// same question about the same row; one reader is what keeps the two
-		// answers from drifting apart.
-		revsPg,
-		auditAdapter,
-		logger,
-	)
-	refreshHook := handlerinternal.NewRefreshHookHandler(
-		handlerinternal.RefreshHookConfig{
-			HookSharedSecret: hookSecret,
-			Domain:           domain,
-			HydraIssuer:      hydraIssuer,
-		},
-		users,
-		// The SAME producer the token hook enriches with. One claim set per
-		// principal, whichever lane asks for it.
-		tokenEnricher,
-		revsPg,
-		auditAdapter,
-		logger,
-	)
+	tokenHook, refreshHook := buildIssuanceHooks(issuanceHookConfig{
+		hookSecret:  hookSecret,
+		domain:      domain,
+		hydraIssuer: hydraIssuer,
+	}, issuanceHookPorts{
+		users:    users,
+		enricher: tokenEnricher,
+		cutoffs:  revsPg,
+		audit:    auditAdapter,
+	}, logger)
 
 	// Provision hook (C4): Kratos registration/login → UpsertFromIdentity.
 	// Reuse the SAME repo/opsRepo/relationStore the gRPC InternalUserService
@@ -314,4 +297,70 @@ func (a *tokenEnrichUserTokenAdapter) LookupByOAuthClientID(ctx context.Context,
 
 func (a *tokenEnrichUserTokenAdapter) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
 	return a.users.GetByID(ctx, id)
+}
+
+// issuanceHookConfig — объявленная настройка обеих полос хука, чеканящих токен
+// человеку. У полос она одна: секрет обратного вызова, домен и издатель.
+type issuanceHookConfig struct {
+	hookSecret  string
+	domain      string
+	hydraIssuer string
+}
+
+// issuanceHookPorts — готовые порты обеих полос хука, чеканящих токен человеку.
+//
+// Порты, а не пул: сборка полос обязана проверяться без базы, и проба сборки
+// подаёт сюда своего читателя отсечки, чтобы увидеть, с чем его позвали.
+type issuanceHookPorts struct {
+	users    handlerinternal.UserLookupPort
+	enricher *service.TokenEnrichmentService
+	cutoffs  revocationpolicy.Lookup
+	audit    handlerinternal.AuditEmitter
+}
+
+// buildIssuanceHooks собирает обе полосы хука, чеканящие токен человеку: хук
+// выпуска и хук обновления.
+//
+// Одна сборка на обе полосы, а не две провязки рядом: читатель отсечки у них
+// ОДИН экземпляр, и производитель состава утверждений — тоже один.
+//
+// Читатель отсечки оборачивается здесь ОДИН раз — той же обёрткой и тем же
+// объявленным пределом на вызов, что у токен-эндпоинта
+// ([revocationpolicy.WithDeadline], [issuancePeerTimeout]). Без неё чтение шло
+// бы с контекстом запроса поставщика, у которого своего предела нет, и одно
+// чтение одной строки несло бы разный предел на разных полосах. Предел
+// закреплён пробой через эту сборку
+// (`TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit`).
+func buildIssuanceHooks(
+	cfg issuanceHookConfig,
+	ports issuanceHookPorts,
+	logger *slog.Logger,
+) (*handlerinternal.TokenHookHandler, *handlerinternal.RefreshHookHandler) {
+	cutoffs := revocationpolicy.WithDeadline(ports.cutoffs, issuancePeerTimeout)
+	tokenHook := handlerinternal.NewTokenHookHandler(
+		handlerinternal.TokenHookConfig{
+			HookSharedSecret: cfg.hookSecret,
+			Domain:           cfg.domain,
+			HydraIssuer:      cfg.hydraIssuer,
+		},
+		ports.enricher,
+		cutoffs,
+		ports.audit,
+		logger,
+	)
+	refreshHook := handlerinternal.NewRefreshHookHandler(
+		handlerinternal.RefreshHookConfig{
+			HookSharedSecret: cfg.hookSecret,
+			Domain:           cfg.domain,
+			HydraIssuer:      cfg.hydraIssuer,
+		},
+		ports.users,
+		// The SAME producer the token hook enriches with. One claim set per
+		// principal, whichever lane asks for it.
+		ports.enricher,
+		cutoffs,
+		ports.audit,
+		logger,
+	)
+	return tokenHook, refreshHook
 }
