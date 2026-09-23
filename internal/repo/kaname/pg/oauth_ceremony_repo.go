@@ -42,7 +42,10 @@ package pg
 //
 // # ЧТО ДЕРЖИТ БАЗА, А НЕ ЭТОТ ФАЙЛ
 //
-//   - неделимость обмена и ротации — условный `UPDATE … RETURNING`;
+//   - неделимость обмена и ротации — условный `UPDATE … RETURNING` на
+//     НАЗВАННОМ уровне изоляции (`ceremonyWriterTx`, решение записано у
+//     оператора обмена): исход проигравшего решает перепроверка условия, и
+//     умолчание сессии его не меняет;
 //   - согласие контекста церемонии между семейством, кодом и токеном —
 //     СОСТАВНОЙ внешний ключ `<t>_family_context_fk` по ПЯТИ столбцам сразу
 //     (`family_id` плюс четыре столбца контекста: клиент, человек, сессия,
@@ -74,6 +77,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/ids"
@@ -309,7 +313,7 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 		return fmt.Errorf("Illegal argument authorization_code.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return wrapPgErr(err, "AuthorizationCode", in.Context.FamilyID)
 	}
@@ -411,8 +415,74 @@ UPDATE kaname.authorization_codes AS c
 RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
           c.redirect_uri, c.code_challenge, c.code_challenge_method`
 
+// ceremonyWriterTx — УРОВЕНЬ ИЗОЛЯЦИИ, на котором исполняется потребление кода
+// (`exchangeCodeSQL` выше) и КАЖДЫЙ другой писатель этого порта (kaname#316).
+//
+// Он НАЗВАН здесь, а не унаследован. Умолчание сессии задаёт не этот файл —
+// конфигурация сервера, `ALTER DATABASE … SET`, `ALTER ROLE … SET`, параметр
+// подключения, — и писатель, чей исход от умолчания зависит, менял бы поведение
+// по чужой настройке, ничем этого не показав.
+//
+// # ПОЧЕМУ READ COMMITTED
+//
+// Одноинструкционный обмен держит строчный замок, и проигравший, СТОЯВШИЙ на
+// строке победителя, после фиксации победителя перепроверяет условие `WHERE` по
+// НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
+// разбирает `refuseCode`, перечитывая помеченную строку, и исход проигравшего —
+// ПОВТОР (LINE-A-1-13, LINE-A-1-17). Перепроверку по новой версии делает ТОЛЬКО
+// этот уровень: при REPEATABLE READ и SERIALIZABLE движок ту же строку не
+// перепроверяет, а отказывает транзакции целиком (40001), и разбору нуля строк
+// вход не достаётся вовсе.
+//
+// Устройство то же у остальных писателей порта, и потому решение одно на всех:
+// ротация, отзыв семейства (второй отзыв — пустой, а не отказ), выдача против
+// снятия сессии, согласие и его отзыв, проверочное значение клиента. Исход
+// каждого под конкуренцией — перепроверка условия, а не отказ сериализации.
+//
+// # ВЕТВИ «40001 → ПОВТОР» НЕТ, И ЭТО РЕШЕНИЕ, А НЕ УПУЩЕНИЕ
+//
+// На названном уровне эти операторы отказа сериализации не дают. 40001 (как и
+// 40P01) разбирает общий `wrapPgErr` — «повторите запрос», — и ни в какой исход
+// церемонии он не отображается: на этом уровне такая ветвь не получала бы входа,
+// а на ином подменяла бы разбор строки догадкой о том, что случилось.
+//
+// Держит решение `oauth_ceremony_isolation_integration_test.go`: каждый писатель
+// исполняется под умолчанием продукта и под `serializable`, и ожидание на строке
+// там доказывается состоянием движка, а не паузой.
+var ceremonyWriterTx = pgx.TxOptions{IsoLevel: pgx.ReadCommitted}
+
+// beginWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя в этом порту.
+func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.BeginTx(ctx, ceremonyWriterTx)
+}
+
+// execWriter — одиночный оператор писателя на названном уровне.
+//
+// Оператор, исполненный пулом без транзакции, шёл бы на умолчании сессии — то
+// есть уровень снова был бы унаследован. Цена названного — начало и фиксация
+// лишними репликами; пути, которые ею платят (согласие, проверочное значение
+// клиента), горячими не являются.
+func (r *OAuthCeremonyRepo) execWriter(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx, err := r.beginWriter(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return tag, nil
+}
+
 // ExchangeAuthorizationCode обменивает код на первое поколение обновляющего
 // токена семейства.
+//
+// Транзакция — на названном уровне (`ceremonyWriterTx`): исход проигравшего
+// одновременного обмена решает именно он.
 //
 // Гашение и выдача идут ОДНОЙ транзакцией: ноль затронутых строк означает
 // откат ВСЕЙ транзакции выдачи — токена в семействе не появляется. Разбор
@@ -430,7 +500,7 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 		return domain.RedeemedCode{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
@@ -554,7 +624,7 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 		return domain.RotatedRefreshToken{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
 	}
@@ -629,7 +699,8 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 // семействе и снятие всего живого, что по нему выдано.
 //
 // Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторный отзыв
-// пустым, а не вторым. Два одновременных обнаружения повтора — обычное дело
+// пустым, а не вторым — на названном уровне (`ceremonyWriterTx`), где второй,
+// стоявший на строке первого, перепроверяет условие, а не получает отказ. Два одновременных обнаружения повтора — обычное дело
 // (проигравших гонку больше одного), и второй из них не вправе ни отказать, ни
 // переписать причину первого.
 func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) error {
@@ -639,7 +710,7 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	if err := reason.Validate(); err != nil {
 		return err
 	}
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return wrapPgErr(err, "TokenFamily", familyID)
 	}
@@ -797,7 +868,7 @@ func (r *OAuthCeremonyRepo) GrantConsent(ctx context.Context, userID, clientID s
 	}
 	// Идентификаторы чеканятся на КАЖДУЮ область, но лягут только те, чья
 	// строка заводится впервые: конфликтующая строка сохраняет свой.
-	if _, err := r.pool.Exec(ctx, `
+	if _, err := r.execWriter(ctx, `
 		INSERT INTO kaname.consent_grants (id, user_id, client_id, scope)
 		SELECT s.id, $2, $3, s.scope
 		  FROM unnest($1::text[], $4::text[]) AS s(id, scope)
@@ -817,7 +888,7 @@ func (r *OAuthCeremonyRepo) WithdrawConsent(ctx context.Context, userID, clientI
 	if userID == "" || clientID == "" || scope == "" {
 		return fmt.Errorf("Illegal argument consent_grant: user_id, client_id and scope are required")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.execWriter(ctx, `
 		UPDATE kaname.consent_grants
 		   SET revoked_at = now()
 		 WHERE user_id = $1 AND client_id = $2 AND scope = $3 AND revoked_at IS NULL`,
@@ -879,7 +950,15 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	if verifier.IsZero() {
 		return fmt.Errorf("Illegal argument interactive_client.secret_verifier: required")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	// Транзакция СВОЯ, а не `execWriter`: материал уходит аргументом ровно
+	// этого оператора, и разрешение гейта удержания стоит на нём, а не на
+	// общем исполнителе, которому материал мог бы прийти откуда угодно.
+	tx, err := r.beginWriter(ctx)
+	if err != nil {
+		return wrapPgErr(err, "InteractiveClient", clientID)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
 		UPDATE kaname.interactive_clients
 		   SET secret_verifier = $2, secret_verifier_set_at = now()
 		 WHERE client_id = $1`, clientID, verifier.Reveal())
@@ -888,6 +967,9 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	}
 	if tag.RowsAffected() == 0 {
 		return refuseNoSuchClient(clientID)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return wrapPgErr(err, "InteractiveClient", clientID)
 	}
 	return nil
 }
@@ -898,7 +980,7 @@ func (r *OAuthCeremonyRepo) ClearClientSecretVerifier(ctx context.Context, clien
 	if clientID == "" {
 		return fmt.Errorf("Illegal argument interactive_client.client_id: required")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.execWriter(ctx, `
 		UPDATE kaname.interactive_clients
 		   SET secret_verifier = '', secret_verifier_set_at = NULL
 		 WHERE client_id = $1`, clientID)
