@@ -63,7 +63,7 @@ func frBaseCorpus() check.TreeCorpus {
 	}
 }
 
-func frJudge(t *testing.T, corpus check.TreeCorpus, ledger map[string]check.FailureResetLedgerEntry) ([]string, check.FailureResetCensusTwo) {
+func frJudge(t *testing.T, corpus check.TreeCorpus, ledger map[string]check.FailureResetLedgerEntry) ([]string, check.FailureResetVerdictCensus) {
 	t.Helper()
 	findings, census, err := check.JudgeFailureReset(corpus, frHome, ledger)
 	if err != nil {

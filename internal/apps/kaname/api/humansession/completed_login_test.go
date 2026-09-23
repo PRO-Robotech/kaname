@@ -235,7 +235,7 @@ func TestResetFailuresRefusesOnUnknownEnrollment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			w := &resetSpyWriter{}
-			if err := resetFailuresOnCompletedLogin(context.Background(), w, tc.in); err != nil {
+			if err := resetFailuresOnCompletedLogin(t.Context(), w, tc.in); err != nil {
 				t.Fatalf("обнуление: %v", err)
 			}
 			if w.called != tc.want {

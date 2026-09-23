@@ -220,12 +220,12 @@ func scanFailureResetBody(root ast.Node, fn string, at func(ast.Node, FailureRes
 	})
 }
 
-// FailureResetCensusTwo — ДВЕ величины, а не одна: полосы, ПИШУЩИЕ уровень
+// FailureResetVerdictCensus — ДВЕ величины, а не одна: полосы, ПИШУЩИЕ уровень
 // сессии, и то, как каждая решает счёт. Одно число (по порту) скрывало бы ровно
 // тот случай, ради которого гейт заведён, — полосу, завершающую вход и не
 // решающую счёт ВОВСЕ: она порт не зовёт, поэтому в перепись по порту не
 // попадает и остаётся невидимой.
-type FailureResetCensusTwo struct {
+type FailureResetVerdictCensus struct {
 	FailureResetCensus
 	// LevelWritingFiles — файлы прод-кода, пишущие уровень сессии.
 	LevelWritingFiles int
@@ -299,13 +299,13 @@ func ScanSessionLevelWrites(path string, src []byte) (writes []FailureResetUse, 
 // дереве эта сборка не исполнялась ни разу — инъекция судила один классификатор.
 func JudgeFailureReset(
 	corpus TreeCorpus, home string, ledger map[string]FailureResetLedgerEntry,
-) ([]string, FailureResetCensusTwo, error) {
+) ([]string, FailureResetVerdictCensus, error) {
 	var (
-		census   FailureResetCensusTwo
-		findings []string
-		resets   = map[string]int{}
-		writers  []string
-		callsDom = map[string]bool{}
+		census    FailureResetVerdictCensus
+		findings  []string
+		resets    = map[string]int{}
+		writers   []string
+		callsHome = map[string]bool{}
 	)
 	for _, rel := range corpus.Rels() {
 		uses, c, err := ScanFailureResetUses(rel, []byte(corpus[rel]))
@@ -333,7 +333,7 @@ func JudgeFailureReset(
 			return nil, census, fmt.Errorf("разбор записи уровня %s: %w", rel, err)
 		}
 		if homeCalls > 0 {
-			callsDom[rel] = true
+			callsHome[rel] = true
 		}
 		if len(writes) == 0 || rel == home {
 			continue
@@ -347,7 +347,7 @@ func JudgeFailureReset(
 	// через дом либо быть названной ведомостью.
 	for _, rel := range writers {
 		switch {
-		case callsDom[rel]:
+		case callsHome[rel]:
 			census.ThroughHome++
 		case ledger[rel].Subject != "":
 			census.InLedger++
@@ -360,7 +360,7 @@ func JudgeFailureReset(
 
 	// Самоистечение — по ЧИСЛУ, а не по наличию файла.
 	for rel, entry := range ledger {
-		inPopulation := callsDom[rel] || resets[rel] > 0
+		inPopulation := callsHome[rel] || resets[rel] > 0
 		for _, w := range writers {
 			if w == rel {
 				inPopulation = true

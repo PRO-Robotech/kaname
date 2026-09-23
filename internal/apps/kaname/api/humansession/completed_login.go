@@ -73,6 +73,7 @@ package humansession
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
@@ -138,7 +139,10 @@ func resetFailuresOnCompletedLogin(ctx context.Context, w Writer, in completedLo
 	if !loginCompletedToEnrolledLevel(in.Presented, in.Enrolled) {
 		return nil
 	}
-	return w.ResetFailures(ctx, FailureByAddress, in.AddressKey)
+	if err := w.ResetFailures(ctx, FailureByAddress, in.AddressKey); err != nil {
+		return fmt.Errorf("failure reset: address counter not reset: %w", err)
+	}
+	return nil
 }
 
 // loginCompletedToEnrolledLevel — доводит ли предъявленное в сессии вход до
