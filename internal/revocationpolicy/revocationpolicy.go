@@ -19,14 +19,16 @@
 // молча: каждая полоса по отдельности выглядела бы исправной, неверной была бы
 // их РАЗНИЦА. Здесь копия одна, и расхождение невозможно by construction — тот
 // же приём, что у `audiencepolicy`.
-// Одна здесь и обёртка предела времени на чтение ([WithDeadline]): предел —
-// тоже часть того, как полоса отвечает.
+// Одна здесь и обёртка предела времени на чтение отсечки отдельным запросом
+// ([WithDeadline]): предел — тоже часть того, как полоса отвечает.
 //
 // Базовый секрет человека принимает полоса предъявления — резолв и вопрос о
 // живости открытого соединения. Отсечку она читает тем же оператором, что
 // строку удостоверения, а судит её тем же сравнением ([Forbids]) с якорем в
 // момент выдачи строки — тем, что [Anchor] называет для долговременного
-// удостоверения.
+// удостоверения. Отдельного запроса отсечки у неё нет, поэтому и обёртки нет:
+// предел у неё — предел самого оператора, поданный авторитету при построении
+// той же величиной, которую корень подаёт обёртке.
 //
 // # Что здесь решается, а что — у вызывающего
 //
@@ -81,6 +83,9 @@ const (
 // ErrNoLookup — читатель отсечки не подан.
 var ErrNoLookup = errors.New("revocationpolicy: revoke-all cutoff reader is not wired")
 
+// ErrUnknownPrincipalKind — вид принципала вне словаря [service.PrincipalKind].
+var ErrUnknownPrincipalKind = errors.New("revocationpolicy: principal kind is outside the closed dictionary")
+
 // ErrPrincipalWithoutID — принципал назван человеком, но без идентификатора,
 // по которому отсечка ключуется.
 var ErrPrincipalWithoutID = errors.New("revocationpolicy: principal is a person but carries no user id")
@@ -113,16 +118,23 @@ func Anchor(p service.ResolvedPrincipal, sessionAuthTime time.Time) time.Time {
 
 // AtIssuance — вердикт отсечки для выдачи токена этому принципалу.
 //
-// Ключ служебной учётки — не сессия человека: отсечка человека о нём ничего
-// не говорит, и читать её для него нечего. Для человека отсечка читается по
-// его идентификатору в таблицах этой службы, а момент полномочия — по
-// [Anchor].
+// Вид принципала судится ЗАКРЫТЫМ словарём. Ключ служебной учётки — не сессия
+// человека, а неразрешённый субъект не назван никем в этой службе: отсечка
+// человека о них ничего не говорит, и читать её для них нечего. Для человека
+// отсечка читается по его идентификатору в таблицах этой службы, а момент
+// полномочия — по [Anchor]. Вид вне словаря — [Undecidable]: вид, заведённый
+// позже рядом с тремя, иначе получал бы выдачу молча — тем же путём, что
+// машина.
 //
 // Ошибка возвращается ровно при [Undecidable] и несёт причину для журнала;
 // наружу она не выходит — это забота вызывающего.
 func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal, sessionAuthTime time.Time) (Verdict, error) {
-	if p.Kind != service.PrincipalUser {
+	switch p.Kind {
+	case service.PrincipalServiceAccount, service.PrincipalUnresolved:
 		return Allowed, nil
+	case service.PrincipalUser:
+	default:
+		return Undecidable, fmt.Errorf("%w: %q", ErrUnknownPrincipalKind, p.Kind)
 	}
 	if cutoffs == nil {
 		return Undecidable, ErrNoLookup

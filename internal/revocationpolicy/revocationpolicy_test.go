@@ -202,6 +202,45 @@ func TestAtIssuance_NoLookupIsUndecidableNotAllowed(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAtIssuance_PrincipalKindIsAClosedDictionary — вид принципала судится
+// закрытым словарём: машина и неразрешённый субъект — не человек, отсечка
+// человека о них не говорит ничего и не читается; человек сверяется; вид вне
+// словаря — «решить нечем», а не «можно».
+//
+// Вид вне словаря — не выдумка пробы: принципала строит вызывающий, и новое
+// значение, заведённое рядом с тремя, без этой развилки получало бы выдачу
+// молча — ровно тем путём, каким её получает машина.
+func TestAtIssuance_PrincipalKindIsAClosedDictionary(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name      string
+		kind      service.PrincipalKind
+		want      revocationpolicy.Verdict
+		wantAsked []string
+	}{
+		{"машина", service.PrincipalServiceAccount, revocationpolicy.Allowed, nil},
+		{"субъект не разрешён", service.PrincipalUnresolved, revocationpolicy.Allowed, nil},
+		// Человек с отсечкой позже выдачи — сверка действительно идёт.
+		{"человек", service.PrincipalUser, revocationpolicy.Revoked, []string{"usr_a"}},
+		{"вид вне словаря", service.PrincipalKind("robot"), revocationpolicy.Undecidable, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := &cutoffs{at: map[string]time.Time{"usr_a": cutoff}}
+			p := person("usr_a", at(cutoff.Add(-time.Hour)))
+			p.Kind = c.kind
+			got, err := revocationpolicy.AtIssuance(ctx, store, p, time.Time{})
+			require.Equal(t, c.want, got)
+			if c.want == revocationpolicy.Undecidable {
+				require.ErrorIs(t, err, revocationpolicy.ErrUnknownPrincipalKind,
+					"«решить нечем» обязано назвать причину для журнала")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, c.wantAsked, store.asked, "хранилище спрошено не тогда")
+		})
+	}
+}
+
 // TestVerdictZeroValueIsNoneOfTheThree — нулевое значение типа не совпадает ни
 // с одним исходом: вызывающий, получивший его, не может принять его за «можно».
 func TestVerdictZeroValueIsNoneOfTheThree(t *testing.T) {
