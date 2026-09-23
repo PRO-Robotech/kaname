@@ -61,7 +61,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 const (
@@ -240,17 +242,30 @@ type FailureResetVerdictCensus struct {
 }
 
 // FailureResetLedgerEntry — запись ведомости: сколько ПРЯМЫХ обращений к порту
-// у этой полосы законно и почему.
+// у этой полосы законно, почему и когда запись снимается.
 //
 // Число несущее. Ключ-файл без числа прощает файл ЦЕЛИКОМ: второй прямой вызов,
 // внесённый в тот же файл, гейт не покраснит, а самоистечение сработает только
 // на нуле. Послабление записывается ПО ФАКТУ, а не потолком.
+//
+// Запись, прощающая хотя бы одно прямое обращение, — ПОСЛАБЛЕНИЕ: условие
+// обнуления решается там мимо дома. Такая запись обязана называть предмет
+// трекера (`Refs`); без него она неотличима от забытой. Предикат снятия
+// (`Removal`) обязателен у всякой записи.
 type FailureResetLedgerEntry struct {
 	// Resets — сколько прямых обращений к порту в этом файле законно.
 	Resets int
-	// Subject — предмет послабления и предикат его снятия.
+	// Subject — почему полоса решает счёт не через дом.
 	Subject string
+	// Refs — предмет трекера в форме «владелец/репозиторий#номер»; обязателен,
+	// если Resets > 0.
+	Refs string
+	// Removal — предикат снятия записи, исполнимый командой.
+	Removal string
 }
+
+// failureResetRefsRe — форма ссылки на предмет трекера.
+var failureResetRefsRe = regexp.MustCompile(`^PRO-Robotech/[A-Za-z0-9._-]+#[1-9][0-9]*$`)
 
 // FailureResetHomeCall — имя, которым полоса зовёт дом.
 const FailureResetHomeCall = "resetFailuresOnCompletedLogin"
@@ -358,7 +373,7 @@ func JudgeFailureReset(
 		}
 	}
 
-	// Самоистечение — по ЧИСЛУ, а не по наличию файла.
+	// Самоистечение — по ЧИСЛУ и по дому, а не по наличию файла.
 	for rel, entry := range ledger {
 		inPopulation := callsHome[rel] || resets[rel] > 0
 		for _, w := range writers {
@@ -370,10 +385,22 @@ func JudgeFailureReset(
 		case !inPopulation:
 			findings = append(findings, fmt.Sprintf("запись ведомости %q (%s) больше нечего исключать: "+
 				"полоса не пишет уровень сессии и порт не зовёт", rel, entry.Subject))
+		case callsHome[rel] && resets[rel] == 0:
+			findings = append(findings, fmt.Sprintf("запись ведомости %q (%s) больше нечего исключать: "+
+				"полоса решает счёт через дом (%s), прямых обращений к порту у неё нет", rel, entry.Subject, home))
 		case resets[rel] != entry.Resets:
 			findings = append(findings, fmt.Sprintf("запись ведомости %q прощает %d прямых обращений к порту, "+
 				"а их %d (%s): послабление записывается ПО ФАКТУ, а не потолком",
 				rel, entry.Resets, resets[rel], entry.Subject))
+		}
+		if entry.Resets > 0 && !failureResetRefsRe.MatchString(entry.Refs) {
+			findings = append(findings, fmt.Sprintf("запись ведомости %q прощает %d прямых обращений к порту без "+
+				"предмета трекера (Refs = %q; форма «владелец/репозиторий#номер»): послабление без предмета "+
+				"неотличимо от забытого", rel, entry.Resets, entry.Refs))
+		}
+		if strings.TrimSpace(entry.Removal) == "" {
+			findings = append(findings, fmt.Sprintf("запись ведомости %q без предиката снятия: запись, у которой "+
+				"не названо, чем она снимается, не истекает ничем, кроме памяти", rel))
 		}
 	}
 	sort.Strings(findings)

@@ -156,7 +156,10 @@ func (uc *CompleteRecoveryUseCase) complete(ctx ctxT, w Writer, user U, key stri
 	twoResets := strings.Replace(oneReset, "	return w.ResetFailures(ctx, FailureByAddress, key)",
 		"	if err := w.ResetFailures(ctx, FailureByAddress, key); err != nil {\n		return err\n	}\n	return w.ResetFailures(ctx, FailureBySource, key)", 1)
 	const rel = "internal/apps/kaname/api/humansession/recovery_complete.go"
-	ledger := map[string]check.FailureResetLedgerEntry{rel: {Resets: 1, Subject: "расхождение приёмок"}}
+	ledger := map[string]check.FailureResetLedgerEntry{rel: {
+		Resets: 1, Subject: "расхождение приёмок", Refs: "PRO-Robotech/kaname#305",
+		Removal: "gh issue view 305 -R PRO-Robotech/kaname --json state -q .state → CLOSED",
+	}}
 
 	t.Run("число сошлось — молчит", func(t *testing.T) {
 		t.Parallel()
@@ -202,13 +205,122 @@ func (uc *RegisterUseCase) commit(ctx ctxT, w Writer, user U) error {
 }
 `
 		findings, census := frJudge(t, corpus, map[string]check.FailureResetLedgerEntry{
-			reg: {Resets: 0, Subject: "регистрация: счёта по новому адресу нет"},
+			reg: {Resets: 0, Subject: "регистрация: счёта по новому адресу нет",
+				Removal: "git grep -nE 'resetFailuresOnCompletedLogin|ResetFailures' -- " + reg + " → непусто"},
 		})
 		if len(findings) != 0 {
 			t.Fatalf("названная ведомостью полоса обязана молчать: %s", strings.Join(findings, "; "))
 		}
 		if census.InLedger != 1 {
 			t.Fatalf("перепись не отнесла полосу к ведомости: %+v", census)
+		}
+	})
+
+	t.Run("полоса из ведомости перешла на дом — находка", func(t *testing.T) {
+		t.Parallel()
+		const reg = "internal/apps/kaname/api/registration/register.go"
+		corpus := frBaseCorpus()
+		corpus[reg] = `package registration
+func (uc *RegisterUseCase) commit(ctx ctxT, w Writer, user U, key string) error {
+	if _, _, err := humansession.IssueSession(ctx, w, humansession.IssueInput{User: user}); err != nil {
+		return err
+	}
+	return resetFailuresOnCompletedLogin(ctx, w, completedLogin{AddressKey: key})
+}
+`
+		findings, _ := frJudge(t, corpus, map[string]check.FailureResetLedgerEntry{
+			reg: {Resets: 0, Subject: "регистрация: счёта по новому адресу нет", Removal: "полоса зовёт дом"},
+		})
+		if len(findings) == 0 {
+			t.Fatalf("запись о полосе, решающей счёт через дом, не истекла: исключать ей нечего")
+		}
+		if !strings.Contains(strings.Join(findings, "\n"), "решает счёт через дом") {
+			t.Fatalf("находка не о самоистечении по дому: %s", strings.Join(findings, "; "))
+		}
+	})
+}
+
+// TestFailureResetLedgerRelaxationNamesItsSubject — запись, прощающая ПРЯМОЕ
+// обращение к порту, есть послабление: условие обнуления решается мимо дома.
+// Такое послабление обязано назвать предмет трекера и исполнимый предикат
+// снятия; без них оно неотличимо от забытого. Запись без прямых обращений
+// (полоса счёта не трогает вовсе — безопасная сторона) предмета трекера не
+// требует, но предикат снятия несёт и она.
+func TestFailureResetLedgerRelaxationNamesItsSubject(t *testing.T) {
+	t.Parallel()
+
+	const rel = "internal/apps/kaname/api/humansession/recovery_complete.go"
+	const direct = `package humansession
+func (uc *CompleteRecoveryUseCase) complete(ctx ctxT, w Writer, user U, key string) error {
+	if _, _, err := IssueSession(ctx, w, IssueInput{User: user}); err != nil {
+		return err
+	}
+	return w.ResetFailures(ctx, FailureByAddress, key)
+}
+`
+	const removal = "gh issue view 305 -R PRO-Robotech/kaname --json state -q .state → CLOSED"
+	cases := []struct {
+		name  string
+		entry check.FailureResetLedgerEntry
+		// want — пусто: запись законна и обязана молчать.
+		want string
+	}{
+		{"прощает обращение, предмет трекера не назван — находка",
+			check.FailureResetLedgerEntry{Resets: 1, Subject: "расхождение приёмок", Removal: removal},
+			"предмета трекера"},
+		{"прощает обращение, ссылка не в форме «владелец/репозиторий#номер» — находка",
+			check.FailureResetLedgerEntry{Resets: 1, Subject: "расхождение приёмок", Refs: "#305", Removal: removal},
+			"предмета трекера"},
+		{"прощает обращение, предиката снятия нет — находка",
+			check.FailureResetLedgerEntry{Resets: 1, Subject: "расхождение приёмок", Refs: "PRO-Robotech/kaname#305"},
+			"предиката снятия"},
+		{"прощает обращение, предмет и предикат названы — молчит",
+			check.FailureResetLedgerEntry{Resets: 1, Subject: "расхождение приёмок", Refs: "PRO-Robotech/kaname#305", Removal: removal},
+			""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			corpus := frBaseCorpus()
+			corpus[rel] = direct
+			findings, _ := frJudge(t, corpus, map[string]check.FailureResetLedgerEntry{rel: tc.entry})
+			joined := strings.Join(findings, "\n")
+			if tc.want == "" {
+				if len(findings) != 0 {
+					t.Fatalf("законная запись обязана молчать: %s", joined)
+				}
+				return
+			}
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("послабление без %q не покраснело либо находка не о предмете:\n  %s", tc.want, joined)
+			}
+			if !strings.Contains(joined, rel) {
+				t.Fatalf("находка без координаты записи: %s", joined)
+			}
+			t.Logf("красное: %s", findings[0])
+		})
+	}
+
+	t.Run("полоса без обращений: предмет трекера не нужен, предикат снятия нужен", func(t *testing.T) {
+		t.Parallel()
+		const reg = "internal/apps/kaname/api/registration/register.go"
+		corpus := frBaseCorpus()
+		corpus[reg] = `package registration
+func (uc *RegisterUseCase) commit(ctx ctxT, w Writer, user U) error {
+	_, _, err := humansession.IssueSession(ctx, w, humansession.IssueInput{User: user})
+	return err
+}
+`
+		if findings, _ := frJudge(t, corpus, map[string]check.FailureResetLedgerEntry{
+			reg: {Resets: 0, Subject: "регистрация", Removal: "полоса начала решать счёт"},
+		}); len(findings) != 0 {
+			t.Fatalf("запись без прямых обращений предмета трекера не требует: %s", strings.Join(findings, "; "))
+		}
+		findings, _ := frJudge(t, corpus, map[string]check.FailureResetLedgerEntry{
+			reg: {Resets: 0, Subject: "регистрация"},
+		})
+		if !strings.Contains(strings.Join(findings, "\n"), "предиката снятия") {
+			t.Fatalf("запись без предиката снятия не покраснела: %s", strings.Join(findings, "; "))
 		}
 	})
 }
