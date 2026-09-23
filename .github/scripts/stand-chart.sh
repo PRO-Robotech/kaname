@@ -679,6 +679,43 @@ self_test() {
 	[ "$(forward_port_of "$log_tmp" 9100)" = "41001" ] || { fail "самопроба: порт IPv4 не распознан"; rc=1; }
 	rm -f "$log_tmp"
 
+	# ── СНОС: ЧУЖОЙ КЛАСТЕР НЕ СНОСИТСЯ ─────────────────────────────────────
+	#
+	# Настоящий `down` против подставных kind/helm/kubectl: они только пишут, что
+	# их позвали. Без метки создания кластер обязан остаться (снимаются релиз и
+	# пространство имён), с меткой — сноситься. Путь разрушительный, и различие
+	# двух миров — ровно один файл.
+	local fake calls
+	fake="$(mktemp -d)"
+	mkdir -p "$fake/bin"
+	for tool in kind helm kubectl; do
+		printf '#!/bin/sh\nif [ "$1 $2" = "get clusters" ]; then echo "%s"; exit 0; fi\necho "%s $*" >> "%s/calls"\n' \
+			"$CLUSTER" "$tool" "$fake" > "$fake/bin/$tool"
+		chmod +x "$fake/bin/$tool"
+	done
+	( PATH="$fake/bin:$PATH"; WORK="$fake/work-borrowed"; mkdir -p "$WORK"
+	  CREATED_MARK="$WORK/cluster-created-by-stand"; LANE_FORWARD_PID="$WORK/none.pid"
+	  down >/dev/null 2>&1 ) || true
+	calls="$(cat "$fake/calls" 2>/dev/null || true)"
+	say "самопроба: кластер без метки создания — не сносится, снят только релиз"
+	case "$calls" in
+		*"kind delete"*) fail "самопроба: down снёс кластер, которого стенд не поднимал"; rc=1 ;;
+		*"helm uninstall"*) ;;
+		*) fail "самопроба: down на чужом кластере не снял и релиза (вызовы: ${calls:-нет})"; rc=1 ;;
+	esac
+	: > "$fake/calls"
+	( PATH="$fake/bin:$PATH"; WORK="$fake/work-own"; mkdir -p "$WORK"
+	  CREATED_MARK="$WORK/cluster-created-by-stand"; : > "$CREATED_MARK"
+	  LANE_FORWARD_PID="$WORK/none.pid"
+	  down >/dev/null 2>&1 ) || true
+	calls="$(cat "$fake/calls" 2>/dev/null || true)"
+	say "самопроба: кластер с меткой создания — сносится"
+	case "$calls" in
+		*"kind delete cluster --name $CLUSTER"*) ;;
+		*) fail "самопроба: down не снёс кластер, который стенд поднял (вызовы: ${calls:-нет})"; rc=1 ;;
+	esac
+	rm -rf "$fake"
+
 	say "самопроба: провенанс — четыре исхода различены"
 	[ "$(revision_outcome abc123def abc123def)" = "сходится" ] \
 		&& [ "$(revision_outcome abc123def 999999999)" = "расходится" ] \
@@ -732,7 +769,7 @@ self_test() {
 	fi
 	RESOLVER_POLL="$saved_poll"
 
-	say "самопроба: утверждений 18 · осей сверки 6 (под own — 7)"
+	say "самопроба: утверждений 20 · осей сверки 6 (под own — 7)"
 	[ "$rc" -eq 0 ] && say "===== самопроба пройдена =====" || fail "самопроба не пройдена"
 	return "$rc"
 }
@@ -984,7 +1021,7 @@ case "${1:-}" in
 		build_image
 		write_overlay
 		install_chart
-		say "===== стенд поднят чартом, без платформы и без поставщика ====="
+		say "===== стенд поднят чартом (посадка личности: ${IDENTITY:-как объявляет профиль}), без платформы и без поставщика ====="
 		;;
 	assert)
 		need_tool kubectl
