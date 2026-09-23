@@ -1058,7 +1058,7 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 }
 
 // saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
-// свою чеканку (задача #1120, подфаза Ф4б эпика #896).
+// свою чеканку (задача kacho#1120, подфаза Ф4б эпика kacho#896).
 //
 // ПРЕДИКАТ — ЭНДПОИНТ ОБМЕНА, А НЕ ПОДПИСАНТ. Ключ служебной учётки предъявляет
 // подписанное утверждение ВНЕШНИЙ вызывающий, и обменивает он его на нашем
@@ -1072,9 +1072,10 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 // целиком (тот же довод, что у выбора полосы обмена докер-токена).
 func saKeyIssuanceIsOurs(cfg config.Config) bool {
 	// Само условие живёт в настройке (`Config.SAKeyIssuanceIsOurs`), а не здесь:
-	// читателей у него два — эта сборка и страж старта над требованием
-	// связанного токена (задача #1137), — и две копии одного условия разошлись
-	// бы молча. Функция остаётся точкой, которую спрашивают, не собирая контур.
+	// читателей у него три — эта сборка, страж старта над требованием
+	// связанного токена (задача kacho#1137) и требование посадки `own` в таблице
+	// полос (задача #337), — и копии одного условия разошлись бы молча. Функция
+	// остаётся точкой, которую спрашивают, не собирая контур.
 	return cfg.SAKeyIssuanceIsOurs()
 }
 
@@ -1093,7 +1094,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
-	// Переведён ли контур выдачи ключей на свою чеканку (задача #1120). Решается
+	// Переведён ли контур выдачи ключей на свою чеканку (задача kacho#1120). Решается
 	// ЗДЕСЬ, в единственном месте сборки: «переведён» — свойство посадки, и
 	// use-case его не выводит.
 	ownIssuance := saKeyIssuanceIsOurs(cfg)

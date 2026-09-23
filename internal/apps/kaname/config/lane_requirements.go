@@ -211,6 +211,30 @@ var LaneRequirements = []LaneRequirement{
 				IdentityProviderSetting, IdentityProviderExternal)
 		},
 	},
+	// СТРОКА КОНТУРА ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337). Непереведённый
+	// контур заводит зеркало клиента у внешнего поставщика, а под `own` его нет:
+	// процесс поднимался бы и отказывал на всякой выдаче ключа. Исполнить такую
+	// комбинацию нечем — ключу без токен-эндпоинта платформы некуда пойти, — и
+	// потому она невозможна. Предикат «переведён» один на всех читателей
+	// (Config.SAKeyIssuanceIsOurs): копия условия здесь разошлась бы со сборкой.
+	{
+		Lanes:   laneOwn,
+		Element: "контур выдачи ключей служебных учёток переведён на свою чеканку",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			if c.SAKeyIssuanceIsOurs() {
+				return nil
+			}
+			return fmt.Errorf(
+				"production mode: %s=%s but authn.client-token.enabled is false — a service-account "+
+					"key is exchanged on the platform token endpoint, and with the endpoint off the "+
+					"key issuance registers the client at an external identity provider, which this "+
+					"posture does not have: the process would start and refuse every key issuance. "+
+					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED), or declare %s=%s",
+				IdentityProviderSetting, IdentityProviderOwn,
+				IdentityProviderSetting, IdentityProviderExternal)
+		},
+	},
 	// ЗДЕСЬ СТОЯЛА СТРОКА «приём предъявленного удостоверения включён», и она
 	// ПЕРЕЕХАЛА, а не исчезла: PresentedCredentialConfig.ValidateBinding.
 	//

@@ -99,6 +99,7 @@ var deliveryRoster = []string{
 	"own_lane_knobs_declared_test.go",
 	"own_lane_memory_ceiling_injection_test.go",
 	"own_lane_memory_ceiling_test.go",
+	"own_posture_needs_client_token_test.go",
 	"provider_anchor_is_its_own_coordinate_injection_test.go",
 	"provider_anchor_is_its_own_coordinate_test.go",
 	"port_knob_moves_its_listener_injection_test.go",
