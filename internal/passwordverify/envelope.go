@@ -123,7 +123,9 @@ const (
 type CostMeter func(class domain.PasswordCostClass, verify func()) time.Duration
 
 // WallClockCostMeter — мера по монотонным часам процесса; её берёт
-// композиционный корень.
+// композиционный корень. Часы читаются до начала прогона и после его конца:
+// мера не короче прогона при любой задержке планировщика
+// (TestWallClockCostMeter_MeasuresTheWholeRunItCalls).
 func WallClockCostMeter(_ domain.PasswordCostClass, verify func()) time.Duration {
 	start := time.Now()
 	verify()
@@ -352,37 +354,49 @@ func (e *Envelope) calibrate(ctx context.Context, class domain.PasswordCostClass
 
 	var cost time.Duration
 	for i := 0; i < calibrationSamples; i++ {
-		release, err := e.verifier.capacity.acquireWait(ctx)
+		elapsed, err := e.calibrationRun(ctx, class, value, wrong)
 		if err != nil {
-			return 0, fmt.Errorf("password_envelope: ёмкость для калибровки класса %s не получена: %w", class.Key(), err)
-		}
-		var res Result
-		runs := 0
-		elapsed := e.meter(class, func() {
-			runs++
-			res = e.verifier.compute(value, wrong)
-		})
-		release()
-		if runs != 1 {
-			// Мера без прогона назначала бы стоимость мимо ёмкости и мимо
-			// исхода; мера двух прогонов отдала бы их сумму за один.
-			return 0, fmt.Errorf("password_envelope: мера стоимости класса %s позвала прогон %d раз вместо одного", class.Key(), runs)
-		}
-		if res.Outcome != OutcomeMismatched {
-			// Синтетическое значение проверяющий обязан читать: иное — наш
-			// дефект построения, а не свойство класса.
-			return 0, fmt.Errorf("password_envelope: синтетическое значение класса %s дало исход %s вместо «не совпал»", class.Key(), res.Outcome)
-		}
-		if elapsed <= 0 {
-			// Потолок из неположительной стоимости не задерживал бы ни одного
-			// исхода: полоса отвечала бы временем проверки.
-			return 0, fmt.Errorf("password_envelope: мера стоимости класса %s отдала %v — стоимость прогона положительна", class.Key(), elapsed)
+			return 0, err
 		}
 		if elapsed > cost {
 			cost = elapsed
 		}
 	}
 	return cost, nil
+}
+
+// calibrationRun — один прогон калибровки: неверный пароль против
+// синтетического значения класса, в месте ёмкости и под мерой огибающей.
+// Место освобождается отложенно: мера — довод вызывающего, и её паника не
+// уносит место ёмкости у полосы входа.
+func (e *Envelope) calibrationRun(ctx context.Context, class domain.PasswordCostClass, value domain.LoginVerifier, wrong string) (time.Duration, error) {
+	release, err := e.verifier.capacity.acquireWait(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("password_envelope: ёмкость для калибровки класса %s не получена: %w", class.Key(), err)
+	}
+	defer release()
+	var res Result
+	runs := 0
+	elapsed := e.meter(class, func() {
+		runs++
+		res = e.verifier.compute(value, wrong)
+	})
+	if runs != 1 {
+		// Мера без прогона назначала бы стоимость мимо ёмкости и мимо
+		// исхода; мера двух прогонов отдала бы их сумму за один.
+		return 0, fmt.Errorf("password_envelope: мера стоимости класса %s позвала прогон %d раз вместо одного", class.Key(), runs)
+	}
+	if res.Outcome != OutcomeMismatched {
+		// Синтетическое значение проверяющий обязан читать: иное — наш
+		// дефект построения, а не свойство класса.
+		return 0, fmt.Errorf("password_envelope: синтетическое значение класса %s дало исход %s вместо «не совпал»", class.Key(), res.Outcome)
+	}
+	if elapsed <= 0 {
+		// Потолок из неположительной стоимости не задерживал бы ни одного
+		// исхода: полоса отвечала бы временем проверки.
+		return 0, fmt.Errorf("password_envelope: мера стоимости класса %s отдала %v — стоимость прогона положительна", class.Key(), elapsed)
+	}
+	return elapsed, nil
 }
 
 func calibrationSecret() (string, error) {

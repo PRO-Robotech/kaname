@@ -22,7 +22,9 @@
 //     обоими форматами и отвергается на чужом;
 //  6. мера стоимости — вход огибающей: без неё огибающая не строится, мера,
 //     не позвавшая прогон ровно один раз либо отдавшая неположительную
-//     стоимость, — отказ, а не потолок.
+//     стоимость, — отказ, а не потолок; паника меры не уносит место ёмкости;
+//  7. мера композиционного корня (настенные часы) мерит САМ прогон: часы
+//     читаются до его начала и после его конца, и мера не короче прогона.
 //
 // Пробы ВЫБОРА (какой класс стал потолком, поднялся ли потолок) идут на мере с
 // назначенной стоимостью (`assignedMeter`), а не на настенных часах: порядок
@@ -315,6 +317,64 @@ func TestNewEnvelope_RequiresACostMeter(t *testing.T) {
 
 	_, err = passwordverify.NewEnvelope(v, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
 	require.NoError(t, err, "законный близнец: мера есть — огибающая строится")
+}
+
+// TestWallClockCostMeter_MeasuresTheWholeRunItCalls — мера композиционного
+// корня мерит САМ прогон: часы читаются до его начала и после его конца, прогон
+// зовётся синхронно ровно один раз. Мера, прочитавшая часы мимо прогона,
+// отдала бы десятки наносекунд, и потолок из них не задерживал бы ни одного
+// исхода: полоса входа отвечала бы временем проверки. Пробы выбора потолка
+// идут на назначенной стоимости и этого не видят — видит только эта.
+//
+// Устойчивость к нагрузке — из порядка чтений, а не из запаса: прогон пробы
+// спит `nap` и сам мерит свою длительность; мера, читающая часы до начала и
+// после конца, не короче её при ЛЮБОЙ задержке планировщика (монотонные часы
+// не убывают). Верхней границы у меры нет: под нагрузкой прогон длиннее, и
+// граница сверху судила бы расписание машины. Мера мимо прогона проходит
+// лишь при задержке между двумя соседними чтениями часов не короче `nap` —
+// в каждом из `samples` замеров подряд.
+func TestWallClockCostMeter_MeasuresTheWholeRunItCalls(t *testing.T) {
+	t.Parallel()
+	const (
+		nap     = 20 * time.Millisecond
+		samples = 3
+	)
+	for i := 0; i < samples; i++ {
+		calls := 0
+		finished := false
+		var inside time.Duration
+		measured := passwordverify.WallClockCostMeter(bcryptClass(4), func() {
+			calls++
+			begin := time.Now()
+			time.Sleep(nap)
+			inside = time.Since(begin)
+			finished = true
+		})
+		require.Equal(t, 1, calls, "замер %d: прогон позван ровно один раз", i)
+		require.True(t, finished, "замер %d: мера вернулась после конца прогона, а не до него", i)
+		require.GreaterOrEqual(t, inside, nap, "замер %d, предпосылка: прогон пробы длится не меньше своего сна", i)
+		require.GreaterOrEqual(t, measured, inside,
+			"замер %d: мера %v короче прогона %v — часы прочитаны мимо прогона", i, measured, inside)
+	}
+}
+
+// TestEnvelope_APanickingMeterReleasesTheCapacitySlot — мера — довод
+// вызывающего, и её паника не уносит место ёмкости: иначе каждая такая
+// калибровка отнимала бы у полосы входа одно место до перезапуска. Законный
+// близнец — та же огибающая: место свободно и до калибровки.
+func TestEnvelope_APanickingMeterReleasesTheCapacitySlot(t *testing.T) {
+	t.Parallel()
+	meter := func(_ domain.PasswordCostClass, verify func()) time.Duration {
+		verify()
+		panic("мера пробы")
+	}
+	e, v, _ := newEnvelopeMeasuredBy(t, 1, meter)
+	require.True(t, v.WithCapacity(func() {}), "предпосылка: место ёмкости свободно до калибровки")
+
+	require.PanicsWithValue(t, "мера пробы", func() {
+		_, _ = e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
+	}, "паника меры доходит до вызывающего, а не глотается огибающей")
+	require.True(t, v.WithCapacity(func() {}), "место ёмкости освобождено и при панике меры")
 }
 
 // TestEnvelope_AMeterThatDoesNotRunTheVerificationOnceIsRefused — мера обязана
