@@ -48,9 +48,12 @@
 // дерево написано сегодня, а не следствие разбора.
 //
 // Эта посылка судится ОТДЕЛЬНО, по дереву, а не утверждается
-// (`JudgeFailureRowRemovals` ниже): строки счёта удаляются по ключу только
-// реализацией порта, по возрасту — только уборщиком `SweepAgedFailures`, иными
-// операторами — нигде. Пока она верна, молчание гейта значит то, что обещает.
+// (`JudgeFailureRowRemovals` ниже), и по признаку, а не по началу оператора:
+// текст, называющий таблицу счёта и несущий изменяющее слово в любом месте,
+// законен ровно в двух местах — удалением по ключу в реализации порта и по
+// возрасту в уборщике `SweepAgedFailures`; всякий иной — находка, как и текст с
+// таблицей, который разбор не классифицирует. Пока посылка верна, молчание гейта
+// значит то, что обещает, — в пределах её границы, названной ниже.
 //
 // Границы остаются, обе названы:
 //
@@ -60,9 +63,14 @@
 //	   второй безусловный путь, заведённый в самом доме, он не увидит — это
 //	   держит таблица решений `completed_login_test.go`, а не он.
 //
-// У посылки своя граница: она читает ТЕКСТ оператора в строковом литерале
-// (и в склейке литералов). Оператор, собранный во время исполнения из имени
-// таблицы, и оператор вне Go (триггер миграции) ей не видны.
+// У посылки своя граница: она судит ЗНАЧЕНИЕ строкового выражения, которое
+// сворачивается при разборе дерева, — литерала, склейки, имени константы либо
+// связанного имени пакета этого модуля. Ей не видны оператор, собранный во
+// время исполнения, — вызовом (`fmt.Sprintf`, `strings.Join`), в переменной
+// функции, присваиванием переменной пакета, из константы чужого модуля (судятся
+// тогда лишь его звенья-литералы, и имя таблицы с изменяющим словом в РАЗНЫХ
+// звеньях не видно), — и оператор вне Go (триггер, правило либо функция
+// миграции).
 package check
 
 import (
@@ -72,7 +80,6 @@ import (
 	"go/token"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -420,20 +427,31 @@ func JudgeFailureReset(
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОСЫЛКА ГЕЙТА: КТО СНИМАЕТ СТРОКИ СЧЁТА
 //
-// Разбор читает строковые литералы прод-кода (и склейку литералов оператором
-// `+`) и находит в них операторы, снимающие либо меняющие строки таблицы
-// счёта: `DELETE FROM`, `UPDATE`, `TRUNCATE` — в начале текста, строки, после
-// `(` (CTE) или `;`. Проза, где те же слова стоят посреди фразы, оператором не
-// считается. Каждый найденный оператор относится к функции, в теле которой
-// стоит его текст, и классифицируется:
+// Разбор читает ЗНАЧЕНИЕ каждого строкового выражения прод-кода, которое
+// сворачивается при разборе: литерал, склейка `+`, имя константы либо
+// связанное имя пакета (своего, другого пакета модуля, локальная константа
+// функции), приведение к строковому типу. Свёртка — общая с гейтом материала
+// способа входа (`newLVIndex`, `login_verifier_containment.go`), лексика SQL —
+// общая с ним же (`sqlTokens`, `sql_relation_name.go`): комментарии `--` и
+// `/* */` не судятся, `--` и `/*` внутри строки SQL комментария не открывают.
 //
-//	по ключу     — условие `key =`: законно ТОЛЬКО в реализации порта;
-//	по возрасту  — условие `failed_at <`: законно ТОЛЬКО в уборщике;
-//	иначе        — `UPDATE`, `TRUNCATE`, `DELETE` без обоих условий либо в
-//	               форме, которую разбор не классифицирует: находка всегда.
+// Судится ПРИЗНАК, а не начало оператора:
 //
-// Форма «не классифицирована» — находка, а не молчание: разбор, не узнавший
-// законную запись удаления, краснеет и требует расширить себя, но не пропускает.
+//  1. текст, где таблица счёта не названа (`SQLNamesRelation`), посылке не
+//     предмет;
+//  2. текст, где она названа и где стоит изменяющее слово — DELETE, UPDATE,
+//     MERGE, TRUNCATE, в любом месте, и внутри строк SQL тоже (тело
+//     `DO $$ … $$`, `EXECUTE '…'`); вставка `ON CONFLICT … DO UPDATE` несёт
+//     UPDATE, — оператор над строками счёта. Законен он ровно в двух формах:
+//     один оператор `DELETE FROM` этой таблицы с условием `key =` в реализации
+//     порта и с условием `failed_at <` в уборщике. Всякий иной — находка, и в
+//     этих двух местах тоже;
+//  3. текст с таблицей без изменяющего слова законен, если это один оператор,
+//     открытый SELECT, WITH либо INSERT, или одно имя таблицы. Всякий иной —
+//     находка: форма, которую разбор не классифицирует, краснеет, а не молчит.
+//
+// Условие и граница оператора читаются по лексемам вне строк: `key =` внутри
+// строки SQL условием не считается, `;` внутри неё операторов не делит.
 
 const (
 	// FailureRowsTable — таблица следов неверных предъявлений: её строки и
@@ -443,7 +461,7 @@ const (
 	FailureRowsSweep = "SweepAgedFailures"
 )
 
-// FailureRowRemovalKind — как оператор снимает строки счёта.
+// FailureRowRemovalKind — как текст обходится со строками счёта.
 type FailureRowRemovalKind string
 
 const (
@@ -451,21 +469,23 @@ const (
 	FailureRowsByKey FailureRowRemovalKind = "по ключу"
 	// FailureRowsByAge — удаление по возрасту: уборка истёкших следов.
 	FailureRowsByAge FailureRowRemovalKind = "по возрасту"
-	// FailureRowsOther — оператор, который посылка не знает.
+	// FailureRowsOther — текст с изменяющим словом, который посылка не знает.
 	FailureRowsOther FailureRowRemovalKind = "неизвестным посылке способом"
+	// FailureRowsUnclassified — текст называет таблицу без изменяющего слова, и
+	// разбор не узнаёт в нём ни чтения, ни вставки, ни имени таблицы.
+	FailureRowsUnclassified FailureRowRemovalKind = "в форме, которую посылка не классифицирует"
 )
 
-// FailureRowRemoval — один оператор над строками счёта с координатой.
+// FailureRowRemoval — один текст над строками счёта с координатой.
 type FailureRowRemoval struct {
 	File string
 	Line int
 	Kind FailureRowRemovalKind
-	// Func — функция, в теле которой стоит текст оператора; пусто — объявление
-	// пакета.
+	// Func — функция, в теле которой стоит текст; пусто — объявление пакета.
 	Func string
 	// Method — функция объявлена методом: реализация порта и уборщик — методы.
 	Method bool
-	// What — начало оператора для текста находки.
+	// What — начало текста для находки.
 	What string
 }
 
@@ -480,10 +500,12 @@ func (r FailureRowRemoval) where() string {
 type FailureRowRemovalCensus struct {
 	// Files — прочитанные файлы.
 	Files int
-	// StringLiterals — строковые значения, прочитанные как текст оператора
-	// (склейка литералов — одно значение).
-	StringLiterals int
-	// Removals — операторы, снимающие либо меняющие строки счёта.
+	// StringValues — свёрнутые строковые значения: литерал, склейка, имя
+	// константы — по одному на наибольшее свёрнутое выражение.
+	StringValues int
+	// NamingTable — из них называют таблицу счёта.
+	NamingTable int
+	// Removals — из них тексты с изменяющим словом.
 	Removals int
 	// ByKeyInPort — из них удаления по ключу в реализации порта.
 	ByKeyInPort int
@@ -491,113 +513,204 @@ type FailureRowRemovalCensus struct {
 	ByAgeInSweep int
 }
 
-var (
-	failureRowMutationRe = regexp.MustCompile(`(?is)(?:^|[\n(;])\s*(delete\s+from|update|truncate(?:\s+table)?)\s+` +
-		`(?:only\s+)?(?:"?[a-z_][a-z0-9_]*"?\.)?"?` + regexp.QuoteMeta(FailureRowsTable) + `(?:"|\b)`)
-	failureRowKeyRe = regexp.MustCompile(`(?i)\bkey\s*=`)
-	failureRowAgeRe = regexp.MustCompile(`(?i)\bfailed_at\s*<`)
-)
+// failureRowMutationWords — изменяющие слова: любое из них в тексте с таблицей
+// делает текст оператором над строками счёта.
+var failureRowMutationWords = map[string]bool{"delete": true, "update": true, "merge": true, "truncate": true}
 
-// classifyFailureRowStatements — операторы над строками счёта в одном тексте.
-func classifyFailureRowStatements(text string) []FailureRowRemovalKind {
-	var kinds []FailureRowRemovalKind
-	for _, m := range failureRowMutationRe.FindAllStringSubmatchIndex(text, -1) {
-		verb := strings.ToLower(strings.Fields(text[m[2]:m[3]])[0])
-		rest := text[m[1]:]
-		if i := strings.IndexByte(rest, ';'); i >= 0 {
-			rest = rest[:i]
-		}
-		switch {
-		case verb != "delete":
-			kinds = append(kinds, FailureRowsOther)
-		case failureRowKeyRe.MatchString(rest):
-			kinds = append(kinds, FailureRowsByKey)
-		case failureRowAgeRe.MatchString(rest):
-			kinds = append(kinds, FailureRowsByAge)
-		default:
-			kinds = append(kinds, FailureRowsOther)
-		}
+// failureRowDeepMutationRe — изменяющее слово в строке глубже sqlMaxNesting,
+// где лексика SQL уже не применяется: лишняя находка возможна, пропуск нет.
+var failureRowDeepMutationRe = regexp.MustCompile(`(?i)\b(?:delete|update|merge|truncate)\b`)
+
+// classifyFailureRowText — судьба строк счёта в одном тексте. named=false —
+// таблица не названа; kind == "" — текст безвреден: чтение, вставка, имя.
+func classifyFailureRowText(text string) (kind FailureRowRemovalKind, named bool) {
+	if !SQLNamesRelation(text, FailureRowsTable) {
+		return "", false
 	}
-	return kinds
+	toks := sqlTokens(text)
+	single := failureRowSingleStatement(toks)
+	words := failureRowMutations(toks, 0)
+	if words == 0 {
+		if single && failureRowOpensWith(toks, "select", "with", "insert") || failureRowNameOnly(toks) {
+			return "", true
+		}
+		return FailureRowsUnclassified, true
+	}
+	if words != 1 || !single || !failureRowDeletesFromTable(toks) {
+		return FailureRowsOther, true
+	}
+	switch {
+	case failureRowCondition(toks, "key", '=', '>'):
+		return FailureRowsByKey, true
+	case failureRowCondition(toks, "failed_at", '<', '>'):
+		return FailureRowsByAge, true
+	}
+	return FailureRowsOther, true
 }
 
-// ScanFailureRowRemovals разбирает один Go-файл: операторы над строками счёта
-// с функцией, в теле которой стоит их текст.
-func ScanFailureRowRemovals(path string, src []byte) ([]FailureRowRemoval, FailureRowRemovalCensus, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, src, 0)
-	if err != nil {
-		return nil, FailureRowRemovalCensus{}, err
+// failureRowIsWord — лексема есть ключевое слово word: имя без кавычек.
+func failureRowIsWord(t sqlTok, word string) bool {
+	return t.kind == sqlTokName && t.form == SQLFormBare && t.name == word
+}
+
+// failureRowMutations — число изменяющих слов в лексемах и в содержимом строк.
+func failureRowMutations(toks []sqlTok, depth int) int {
+	n := 0
+	for _, t := range toks {
+		switch {
+		case t.kind == sqlTokName && t.form == SQLFormBare && failureRowMutationWords[t.name]:
+			n++
+		case t.kind == sqlTokString:
+			most := 0
+			for _, r := range t.readings {
+				k := len(failureRowDeepMutationRe.FindAllString(r, -1))
+				if depth < sqlMaxNesting {
+					k = failureRowMutations(sqlTokens(r), depth+1)
+				}
+				most = max(most, k)
+			}
+			n += most
+		}
 	}
-	census := FailureRowRemovalCensus{Files: 1}
+	return n
+}
+
+// failureRowSingleStatement — лексемы составляют один оператор: `;` только в
+// конце.
+func failureRowSingleStatement(toks []sqlTok) bool {
+	end := len(toks)
+	for end > 0 && toks[end-1].kind == sqlTokOther && toks[end-1].op == ';' {
+		end--
+	}
+	for _, t := range toks[:end] {
+		if t.kind == sqlTokOther && t.op == ';' {
+			return false
+		}
+	}
+	return true
+}
+
+// failureRowOpensWith — оператор открыт одним из слов (скобки перед ним
+// пропускаются).
+func failureRowOpensWith(toks []sqlTok, words ...string) bool {
+	for _, t := range toks {
+		if t.kind == sqlTokOther && t.op == '(' {
+			continue
+		}
+		for _, w := range words {
+			if failureRowIsWord(t, w) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// failureRowNameOnly — текст есть одно имя таблицы, со схемой либо без.
+func failureRowNameOnly(toks []sqlTok) bool {
+	isTable := func(t sqlTok) bool { return t.kind == sqlTokName && t.name == FailureRowsTable }
+	switch len(toks) {
+	case 1:
+		return isTable(toks[0])
+	case 3:
+		return toks[0].kind == sqlTokName && toks[1].kind == sqlTokOther && toks[1].op == '.' && isTable(toks[2])
+	}
+	return false
+}
+
+// failureRowDeletesFromTable — `DELETE FROM [ONLY] [схема.]таблица счёта`.
+func failureRowDeletesFromTable(toks []sqlTok) bool {
+	for i := 0; i+2 < len(toks); i++ {
+		if !failureRowIsWord(toks[i], "delete") || !failureRowIsWord(toks[i+1], "from") {
+			continue
+		}
+		j := i + 2
+		if failureRowIsWord(toks[j], "only") {
+			j++
+		}
+		if j+2 < len(toks) && toks[j].kind == sqlTokName && toks[j+1].kind == sqlTokOther && toks[j+1].op == '.' {
+			j += 2
+		}
+		return j < len(toks) && toks[j].kind == sqlTokName && toks[j].name == FailureRowsTable
+	}
+	return false
+}
+
+// failureRowCondition — имя столбца column, за которым стоит знак op, а за
+// ним не стоит not (`key =>`, `failed_at <>` условием не являются).
+func failureRowCondition(toks []sqlTok, column string, op, not byte) bool {
+	for i := 0; i+1 < len(toks); i++ {
+		if !failureRowIsWord(toks[i], column) || toks[i+1].kind != sqlTokOther || toks[i+1].op != op {
+			continue
+		}
+		if i+2 < len(toks) && toks[i+2].kind == sqlTokOther && toks[i+2].op == not {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// scanFailureRowTexts — тексты над строками счёта в одном файле с функцией, в
+// теле которой они стоят. Судится наибольшее свёрнутое выражение: склейка —
+// одним текстом, а не по звеньям; не свернулось — судятся звенья.
+func scanFailureRowTexts(ix *lvIndex, f *lvFile, census *FailureRowRemovalCensus) []FailureRowRemoval {
 	var out []FailureRowRemoval
-	scan := func(root ast.Node, fn string, method bool) {
+	var visit func(root ast.Node, fn string, method bool)
+	visit = func(root ast.Node, fn string, method bool) {
 		ast.Inspect(root, func(n ast.Node) bool {
+			if vs, ok := n.(*ast.ValueSpec); ok {
+				// Имена объявления — не обращения: судится значение.
+				for _, v := range vs.Values {
+					visit(v, fn, method)
+				}
+				return false
+			}
 			e, ok := n.(ast.Expr)
 			if !ok {
 				return true
 			}
-			text, ok := foldStringExpr(e)
+			text, ok := ix.fold(f, e)
 			if !ok {
+				if sel, isSel := e.(*ast.SelectorExpr); isSel {
+					// Хвост селектора — поле либо метод, а не имя пакета.
+					visit(sel.X, fn, method)
+					return false
+				}
 				return true
 			}
-			census.StringLiterals++
-			for _, kind := range classifyFailureRowStatements(text) {
+			census.StringValues++
+			kind, named := classifyFailureRowText(text)
+			if !named {
+				return false
+			}
+			census.NamingTable++
+			if kind != "" {
 				out = append(out, FailureRowRemoval{
-					File: path, Line: fset.Position(e.Pos()).Line, Kind: kind,
+					File: f.rel, Line: f.fset.Position(e.Pos()).Line, Kind: kind,
 					Func: fn, Method: method, What: failureRowFirstLine(text),
 				})
 			}
 			return false
 		})
 	}
-	for _, d := range f.Decls {
+	for _, d := range f.file.Decls {
 		switch v := d.(type) {
 		case *ast.FuncDecl:
 			if v.Body != nil {
-				scan(v.Body, v.Name.Name, v.Recv != nil)
+				visit(v.Body, v.Name.Name, v.Recv != nil)
 			}
 		case *ast.GenDecl:
 			if v.Tok != token.IMPORT {
-				scan(v, "", false)
+				visit(v, "", false)
 			}
 		}
 	}
-	return out, census, nil
+	return out
 }
 
-// foldStringExpr — значение строкового литерала либо склейки литералов `+`.
-func foldStringExpr(e ast.Expr) (string, bool) {
-	switch v := e.(type) {
-	case *ast.BasicLit:
-		if v.Kind != token.STRING {
-			return "", false
-		}
-		s, err := strconv.Unquote(v.Value)
-		if err != nil {
-			return "", false
-		}
-		return s, true
-	case *ast.ParenExpr:
-		return foldStringExpr(v.X)
-	case *ast.BinaryExpr:
-		if v.Op != token.ADD {
-			return "", false
-		}
-		l, ok := foldStringExpr(v.X)
-		if !ok {
-			return "", false
-		}
-		r, ok := foldStringExpr(v.Y)
-		if !ok {
-			return "", false
-		}
-		return l + r, true
-	}
-	return "", false
-}
-
-// failureRowFirstLine — начало оператора для текста находки.
+// failureRowFirstLine — начало текста для находки.
 func failureRowFirstLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 80 {
@@ -614,15 +727,16 @@ func JudgeFailureRowRemovals(corpus TreeCorpus) ([]string, FailureRowRemovalCens
 		census   FailureRowRemovalCensus
 		findings []string
 	)
-	for _, rel := range corpus.Rels() {
-		removals, c, err := ScanFailureRowRemovals(rel, []byte(corpus[rel]))
-		if err != nil {
-			return nil, census, fmt.Errorf("разбор %s: %w", rel, err)
-		}
-		census.Files += c.Files
-		census.StringLiterals += c.StringLiterals
-		for _, r := range removals {
-			census.Removals++
+	ix, files, _, err := newLVIndex(corpus, FailureRowsTable)
+	if err != nil {
+		return nil, census, err
+	}
+	for _, f := range files {
+		census.Files++
+		for _, r := range scanFailureRowTexts(ix, f, &census) {
+			if r.Kind != FailureRowsUnclassified {
+				census.Removals++
+			}
 			switch {
 			case r.Kind == FailureRowsByKey && r.Method && r.Func == FailureResetPort:
 				census.ByKeyInPort++
@@ -635,9 +749,13 @@ func JudgeFailureRowRemovals(corpus TreeCorpus) ([]string, FailureRowRemovalCens
 			case r.Kind == FailureRowsByAge:
 				findings = append(findings, fmt.Sprintf("%s — строки %s удаляются по возрасту мимо уборщика %s (%q)",
 					r.where(), FailureRowsTable, FailureRowsSweep, r.What))
+			case r.Kind == FailureRowsUnclassified:
+				findings = append(findings, fmt.Sprintf("%s — текст называет таблицу %s %s (%q): изменяющего слова в "+
+					"нём нет, но это ни один оператор чтения либо вставки, ни имя таблицы; форма, которую разбор не "+
+					"узнаёт, — находка, а не молчание", r.where(), FailureRowsTable, r.Kind, r.What))
 			default:
-				findings = append(findings, fmt.Sprintf("%s — строки %s меняются %s (%q): оператор не удаляет их ни "+
-					"по ключу, ни по возрасту, и посылка гейта о нём не знает",
+				findings = append(findings, fmt.Sprintf("%s — строки %s меняются %s (%q): в тексте изменяющее слово, "+
+					"и это не одно удаление ни по ключу в реализации порта, ни по возрасту в уборщике",
 					r.where(), FailureRowsTable, r.Kind, r.What))
 			}
 		}

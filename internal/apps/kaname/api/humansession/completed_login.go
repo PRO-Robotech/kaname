@@ -113,9 +113,11 @@ type completedLogin struct {
 // не разрешало; ронять из-за этого сам вход — цена, которой решение не
 // требовало.
 //
-// Хранилище способов и журнал здесь всегда есть: каждая полоса, которая сюда
-// ходит, без хранилища не собирается, а журнал ей подставляет конструктор
-// (`TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore`).
+// Хранилище способов и журнал здесь всегда есть. Хранилище держит проба
+// `TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore`: полоса, которая
+// сюда ходит, без него не собирается. Журнал проба НЕ держит: пустой `Logger`
+// заменяет `slog.Default()` конструктор полосы — `NewLoginUseCase` и
+// `SecondFactorDeps.validate`.
 func enrollmentBeforeWrite(
 	ctx context.Context, methods loginmethod.Store, logger *slog.Logger, userID domain.UserID,
 ) ([]assurance.Method, bool) {

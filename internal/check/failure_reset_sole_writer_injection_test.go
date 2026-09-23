@@ -15,6 +15,7 @@
 package check_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -379,9 +380,11 @@ func (uc *RegisterUseCase) commit(ctx ctxT, w Writer, user U) error {
 //
 // Гейт судит ИМЯ порта; «счёт не обнуляется мимо дома» из этого следует, пока
 // строки счёта удаляются по ключу ТОЛЬКО реализацией порта. Посылка — свойство
-// адаптера, а не разбора, поэтому она судится отдельно: по ключу — только
-// `ResetFailures`, по возрасту — только `SweepAgedFailures`, иными операторами —
-// нигде.
+// адаптера, а не разбора, поэтому она судится отдельно и по признаку, а не по
+// началу оператора: текст, называющий таблицу счёта и несущий изменяющее слово,
+// законен только удалением по ключу в `ResetFailures` и по возрасту в
+// `SweepAgedFailures`; текст с таблицей, который разбор не классифицирует, —
+// находка.
 
 // frAdapterRows — адаптер, на котором посылка ВЫПОЛНЕНА: одно удаление по
 // ключу в реализации порта, одно по возрасту в уборщике, чтение и вставка.
@@ -408,6 +411,15 @@ func frRowsCorpus() check.TreeCorpus {
 	return check.TreeCorpus{frRowsRel: frAdapterRows}
 }
 
+// frInAdapter — законный адаптер и НОВЫЙ метод humanSessionWriter в нём, рядом
+// с законными операторами; текст оператора стоит на строке frInAdapterLine.
+func frInAdapter(query string) string {
+	return frAdapterRows + "func (w *humanSessionWriter) ForgetAddress(ctx ctxT, key string) error {\n" +
+		"	return w.exec(ctx, `" + query + "`, key)\n}\n"
+}
+
+var frInAdapterLine = strings.Count(frAdapterRows, "\n") + 2
+
 // TestFailureRowRemovalPremiseIsSilentOnTheLawfulAdapter — КОНТРОЛЬ посылки:
 // на законном адаптере молчит и называет обе положительные половины.
 func TestFailureRowRemovalPremiseIsSilentOnTheLawfulAdapter(t *testing.T) {
@@ -419,49 +431,105 @@ func TestFailureRowRemovalPremiseIsSilentOnTheLawfulAdapter(t *testing.T) {
 	if len(findings) != 0 {
 		t.Fatalf("посылка краснеет на ЗАКОННОМ адаптере: %s", strings.Join(findings, "; "))
 	}
-	if census.ByKeyInPort != 1 || census.ByAgeInSweep != 1 || census.Removals != 2 {
-		t.Fatalf("перепись посылки неверна: удалений %d, по ключу в порту %d, по возрасту в уборщике %d (ожидалось 2, 1, 1)",
-			census.Removals, census.ByKeyInPort, census.ByAgeInSweep)
+	if census.ByKeyInPort != 1 || census.ByAgeInSweep != 1 || census.Removals != 2 || census.NamingTable != 4 {
+		t.Fatalf("перепись посылки неверна: называют таблицу %d, удалений %d, по ключу в порту %d, по возрасту в уборщике %d "+
+			"(ожидалось 4, 2, 1, 1)", census.NamingTable, census.Removals, census.ByKeyInPort, census.ByAgeInSweep)
 	}
 }
 
 // TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval — КРАСНОЕ: строки счёта
-// снимаются мимо реализации порта либо мимо уборщика, в каждой форме записи,
-// которую разбор знает; форма, которую он не классифицирует, — тоже находка,
-// а не молчание.
+// снимаются мимо реализации порта либо мимо уборщика, в каждой форме записи;
+// признак — таблица названа и изменяющее слово стоит в ЛЮБОМ месте текста, а не
+// начало оператора. Текст с таблицей, который разбор не классифицирует, — тоже
+// находка, а не молчание.
 func TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval(t *testing.T) {
 	t.Parallel()
 	lane := func(body string) string {
 		return "package pg\nfunc (w *humanSessionWriter) EndSession(ctx ctxT, key string) error {\n" + body + "\n}\n"
 	}
-	cases := []struct{ name, src, want string }{
-		{"удаление по ключу в другом методе", lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE scope = $1 AND key = $2`, key)"),
-			"по ключу"},
-		{"удаление по ключу со схемой", lane("	return w.exec(ctx, `delete from kaname.login_failures where key = $1`, key)"),
-			"по ключу"},
-		{"удаление по ключу склейкой литералов", lane(`	return w.exec(ctx, "DELETE FROM " + "login_failures WHERE key = $1", key)`),
-			"по ключу"},
-		{"удаление по ключу внутри CTE", lane("	return w.exec(ctx, `WITH gone AS (DELETE FROM login_failures WHERE key = $1 RETURNING 1) SELECT count(*) FROM gone`, key)"),
-			"по ключу"},
-		{"удаление по возрасту мимо уборщика", lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE failed_at < $1`, key)"),
-			"по возрасту"},
-		{"перенос следа в прошлое оператором UPDATE", lane("	return w.exec(ctx, `UPDATE login_failures SET failed_at = now() - interval '1 day' WHERE key = $1`, key)"),
-			"неизвестным посылке способом"},
-		{"опустошение таблицы", lane("	return w.exec(ctx, `TRUNCATE TABLE login_failures`)"),
-			"неизвестным посылке способом"},
-		{"удаление без условия", lane("	return w.exec(ctx, `DELETE FROM login_failures`)"),
-			"неизвестным посылке способом"},
-		{"удаление по ключу текстом в объявлении пакета", "package pg\nconst wipe = `DELETE FROM login_failures WHERE key = $1`\n",
-			"вне функции"},
-		{"одноимённая свободная функция, а не реализация порта",
-			"package pg\nfunc ResetFailures(ctx ctxT, q Q, key string) error {\n	return q.exec(ctx, `DELETE FROM login_failures WHERE key = $1`, key)\n}\n",
-			"по ключу"},
+	const other = "internal/repo/kaname/pg/some_repo.go"
+	adapterAt := fmt.Sprintf("%s:%d", frRowsRel, frInAdapterLine)
+	cases := []struct {
+		name string
+		// files — что подаётся поверх законного адаптера; at — координата,
+		// которую обязана назвать находка.
+		files    check.TreeCorpus
+		want, at string
+	}{
+		{"удаление по ключу в другом методе", check.TreeCorpus{other: lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE scope = $1 AND key = $2`, key)")},
+			"по ключу", other},
+		{"удаление по ключу со схемой", check.TreeCorpus{other: lane("	return w.exec(ctx, `delete from kaname.login_failures where key = $1`, key)")},
+			"по ключу", other},
+		{"удаление по ключу склейкой литералов", check.TreeCorpus{other: lane(`	return w.exec(ctx, "DELETE FROM " + "login_failures WHERE key = $1", key)`)},
+			"по ключу", other},
+		{"удаление по ключу внутри CTE", check.TreeCorpus{other: lane("	return w.exec(ctx, `WITH gone AS (DELETE FROM login_failures WHERE key = $1 RETURNING 1) SELECT count(*) FROM gone`, key)")},
+			"по ключу", other},
+		{"удаление по возрасту мимо уборщика", check.TreeCorpus{other: lane("	return w.exec(ctx, `DELETE FROM login_failures WHERE failed_at < $1`, key)")},
+			"по возрасту", other},
+		{"перенос следа в прошлое оператором UPDATE", check.TreeCorpus{other: lane("	return w.exec(ctx, `UPDATE login_failures SET failed_at = now() - interval '1 day' WHERE key = $1`, key)")},
+			"неизвестным посылке способом", other},
+		{"опустошение таблицы", check.TreeCorpus{other: lane("	return w.exec(ctx, `TRUNCATE TABLE login_failures`)")},
+			"неизвестным посылке способом", other},
+		{"удаление без условия", check.TreeCorpus{other: lane("	return w.exec(ctx, `DELETE FROM login_failures`)")},
+			"неизвестным посылке способом", other},
+		{"удаление по ключу текстом в объявлении пакета", check.TreeCorpus{other: "package pg\nconst wipe = `DELETE FROM login_failures WHERE key = $1`\n"},
+			"вне функции", other},
+		{"одноимённая свободная функция, а не реализация порта", check.TreeCorpus{other: "package pg\nfunc ResetFailures(ctx ctxT, q Q, key string) error {\n" +
+			"	return q.exec(ctx, `DELETE FROM login_failures WHERE key = $1`, key)\n}\n"},
+			"по ключу", other},
+
+		// Формы, которые распознаватель по началу оператора не видел ВОВСЕ:
+		// каждая — новый метод humanSessionWriter в самом адаптере.
+		{"CTE перед удалением в одну строку", check.TreeCorpus{frRowsRel: frInAdapter(
+			"WITH k AS (SELECT $1::text AS key) DELETE FROM login_failures f USING k WHERE f.key = k.key")},
+			"по ключу", adapterAt},
+		{"MERGE … WHEN MATCHED THEN DELETE", check.TreeCorpus{frRowsRel: frInAdapter(
+			"MERGE INTO login_failures f USING (SELECT $1::text AS key) s ON f.key = s.key WHEN MATCHED THEN DELETE")},
+			"неизвестным посылке способом", adapterAt},
+		{"блочный комментарий перед удалением", check.TreeCorpus{frRowsRel: frInAdapter(
+			"/* forget the address */ DELETE FROM login_failures WHERE scope = 'address' AND key = $1")},
+			"по ключу", adapterAt},
+		{"EXPLAIN ANALYZE исполняет удаление", check.TreeCorpus{frRowsRel: frInAdapter(
+			"EXPLAIN ANALYZE DELETE FROM login_failures WHERE scope = 'address' AND key = $1")},
+			"по ключу", adapterAt},
+		{"вставка с ON CONFLICT … DO UPDATE", check.TreeCorpus{other: lane("	return w.exec(ctx, `INSERT INTO login_failures (scope, key, failed_at) VALUES ($1, $2, $3) " +
+			"ON CONFLICT (scope, key) DO UPDATE SET failed_at = now() - interval '1 day'`, key)")},
+			"неизвестным посылке способом", other},
+		{"изменяющее слово в прозе строки с таблицей", check.TreeCorpus{other: lane(`	return errors.New("refused to delete from login_failures by key outside the port")`)},
+			"неизвестным посылке способом", other},
+		{"условие по ключу только в комментарии SQL — в методе с именем порта", check.TreeCorpus{other: "package pg\n" +
+			"func (x *otherWriter) ResetFailures(ctx ctxT, key string) error {\n" +
+			"	return x.exec(ctx, \"DELETE FROM login_failures -- WHERE key = $1\\n\", key)\n}\n"},
+			"неизвестным посылке способом", other},
+		{"`--` внутри строки SQL комментария не открывает", check.TreeCorpus{other: lane(
+			"	return w.exec(ctx, `DELETE FROM recovery_codes WHERE note = '--'; DELETE FROM login_failures WHERE key = $1`, key)")},
+			"неизвестным посылке способом", other},
+		{"`/* */` поперёк долларовых строк комментария не открывает", check.TreeCorpus{other: lane(
+			"	return w.exec(ctx, `SELECT $$/*$$; DELETE FROM login_failures WHERE key = $1; SELECT $$*/$$`, key)")},
+			"неизвестным посылке способом", other},
+		{"имя таблицы константой другого файла пакета", check.TreeCorpus{
+			"internal/repo/kaname/pg/tables.go": "package pg\nconst failuresTable = \"login_failures\"\n",
+			other:                               lane(`	return w.exec(ctx, "DELETE FROM " + failuresTable + " WHERE key = $1", key)`)},
+			"по ключу", other},
+		{"имя таблицы локальной константой функции", check.TreeCorpus{other: lane(
+			"	const table = \"login_failures\"\n	return w.exec(ctx, \"DELETE FROM \" + table + \" WHERE key = $1\", key)")},
+			"по ключу", other},
+		{"имя таблицы константой другого пакета модуля", check.TreeCorpus{
+			"internal/apps/kaname/retention/registry.go": "package retention\nconst SubjectLoginFailures = \"login_failures\"\n",
+			other: "package pg\nimport \"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention\"\n" +
+				"func (w *humanSessionWriter) EndSession(ctx ctxT, key string) error {\n" +
+				"	return w.exec(ctx, \"DELETE FROM \" + retention.SubjectLoginFailures + \" WHERE key = $1\", key)\n}\n"},
+			"по ключу", other},
+		{"текст с таблицей, который разбор не классифицирует", check.TreeCorpus{other: lane("	return w.exec(ctx, `COPY login_failures FROM STDIN`)")},
+			"не классифицирует", other},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			corpus := frRowsCorpus()
-			corpus["internal/repo/kaname/pg/some_repo.go"] = tc.src
+			for rel, src := range tc.files {
+				corpus[rel] = src
+			}
 			findings, census, err := check.JudgeFailureRowRemovals(corpus)
 			if err != nil {
 				t.Fatalf("вердикт посылки: %v", err)
@@ -470,8 +538,8 @@ func TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval(t *testing.T) {
 			if len(findings) == 0 {
 				t.Fatalf("посылка НЕ покраснела на форме %q (удалений %d)", tc.name, census.Removals)
 			}
-			if !strings.Contains(joined, tc.want) || !strings.Contains(joined, "some_repo.go") {
-				t.Fatalf("находка не о предмете либо без координаты: ожидалось %q, получено:\n  %s", tc.want, joined)
+			if !strings.Contains(joined, tc.want) || !strings.Contains(joined, tc.at) {
+				t.Fatalf("находка не о предмете либо без координаты: ожидалось %q в %s, получено:\n  %s", tc.want, tc.at, joined)
 			}
 			t.Logf("красное: %s", findings[0])
 		})
@@ -487,9 +555,15 @@ func TestFailureRowRemovalPremiseStaysSilentOnLegitimateTwins(t *testing.T) {
 		{"чтение и вставка в другом месте", "package pg\nfunc (r *Repo) Oldest(ctx ctxT) error {\n" +
 			"	_ = `SELECT min(failed_at) FROM login_failures WHERE key = $1`\n" +
 			"	return r.exec(ctx, `INSERT INTO login_failures (scope, key, failed_at) VALUES ($1, $2, $3)`)\n}\n"},
-		{"оператор в прозе строки и в комментарии", "package pg\n" +
+		{"оператор в комментарии Go", "package pg\n" +
 			"// DELETE FROM login_failures WHERE key = $1 — так делает только реализация порта.\n" +
-			"func (r *Repo) Explain() string {\n	return \"refused to delete from login_failures by key outside the port\"\n}\n"},
+			"func (r *Repo) Explain() string {\n	return \"refused by the port\"\n}\n"},
+		{"изменяющие слова в комментариях SQL чтения", "package pg\nfunc (r *Repo) Count(ctx ctxT, key string) error {\n" +
+			"	return r.exec(ctx, `SELECT count(*) FROM login_failures /* never delete here */ WHERE key = $1 -- no update either`, key)\n}\n"},
+		{"вставка с ON CONFLICT DO NOTHING", "package pg\nfunc (r *Repo) Record(ctx ctxT, key string) error {\n" +
+			"	return r.exec(ctx, `INSERT INTO login_failures (scope, key, failed_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, key)\n}\n"},
+		{"имя таблицы константой — ярлык реестра", "package pg\nconst SubjectLoginFailures = \"login_failures\"\n" +
+			"var registry = []Entry{{Name: SubjectLoginFailures}}\n"},
 		{"удаление по ключу из ДРУГОЙ таблицы", "package pg\nfunc (r *Repo) Purge(ctx ctxT, key string) error {\n" +
 			"	if err := r.exec(ctx, `DELETE FROM login_failures_archive WHERE key = $1`, key); err != nil {\n		return err\n	}\n" +
 			"	return r.exec(ctx, `DELETE FROM recovery_codes WHERE key = $1`, key)\n}\n"},
@@ -505,6 +579,36 @@ func TestFailureRowRemovalPremiseStaysSilentOnLegitimateTwins(t *testing.T) {
 			}
 			if len(findings) != 0 {
 				t.Fatalf("посылка краснеет на законной форме %q: %s", tc.name, strings.Join(findings, "; "))
+			}
+		})
+	}
+
+	// Близнецы форм, которые посылка ловит в самом адаптере: то же место, тот же
+	// новый метод, ровно один факт иной — оператор не снимает строк счёта либо
+	// стоит в реализации порта.
+	adapter := []struct{ name, src string }{
+		{"чтение на том же месте", frInAdapter("SELECT count(*) FROM login_failures WHERE scope = 'address' AND key = $1")},
+		{"удаление из другой таблицы на том же месте", frInAdapter("DELETE FROM recovery_codes WHERE scope = 'address' AND key = $1")},
+		{"удаление по ключу с комментарием SQL — в реализации порта", strings.Replace(frAdapterRows,
+			"`DELETE FROM login_failures WHERE scope = $1 AND key = $2`",
+			"`/* forget the address */ DELETE FROM login_failures WHERE scope = $1 AND key = $2`", 1)},
+	}
+	for _, tc := range adapter {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.src == frAdapterRows {
+				t.Fatalf("близнец не подан: замена в адаптере не нашла своего места")
+			}
+			findings, census, err := check.JudgeFailureRowRemovals(check.TreeCorpus{frRowsRel: tc.src})
+			if err != nil {
+				t.Fatalf("вердикт посылки: %v", err)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("посылка краснеет на законной форме %q: %s", tc.name, strings.Join(findings, "; "))
+			}
+			if census.ByKeyInPort != 1 || census.ByAgeInSweep != 1 {
+				t.Fatalf("близнец %q сдвинул положительные половины: по ключу в порту %d, по возрасту в уборщике %d",
+					tc.name, census.ByKeyInPort, census.ByAgeInSweep)
 			}
 		})
 	}

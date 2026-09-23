@@ -144,11 +144,13 @@ func TestFailureResetGoesThroughTheCompletedLoginGuard(t *testing.T) {
 }
 
 // TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep — ПОСЫЛКА
-// гейта выше, судимая по дереву: строки счёта удаляются по ключу только
-// реализацией порта `ResetFailures`, по возрасту — только уборщиком
-// `SweepAgedFailures`, иными операторами — нигде. Гейт выше судит ИМЯ порта, и
-// его молчание значит «счёт не обнуляется мимо дома» ровно до тех пор, пока
-// эта посылка верна; без пробы она была бы утверждением, а не фактом.
+// гейта выше, судимая по дереву: текст оператора, называющий таблицу счёта и
+// несущий изменяющее слово, законен только удалением по ключу в реализации
+// порта `ResetFailures` и по возрасту в уборщике `SweepAgedFailures`; текст с
+// таблицей, который разбор не классифицирует, — находка. Гейт выше судит ИМЯ
+// порта, и его молчание значит «счёт не обнуляется мимо дома» ровно до тех
+// пор, пока эта посылка верна; без пробы она была бы утверждением, а не
+// фактом. Граница посылки названа в шапке `failure_reset_sole_writer.go`.
 func TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep(t *testing.T) {
 	t.Parallel()
 
@@ -176,16 +178,17 @@ func TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep(t *testing.T
 	switch {
 	case census.ByKeyInPort == 0:
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: реализация %s не удаляет строк %s по ключу — распознаватель слеп "+
-			"либо таблица переименована; молчание о прочих удалениях сказано ни о чём (прочитано файлов %d, литералов %d)",
-			check.FailureResetPort, check.FailureRowsTable, census.Files, census.StringLiterals)
+			"либо таблица переименована; молчание о прочих удалениях сказано ни о чём (прочитано файлов %d, строковых значений %d)",
+			check.FailureResetPort, check.FailureRowsTable, census.Files, census.StringValues)
 	case census.ByAgeInSweep == 0:
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: уборщик %s не удаляет строк %s по возрасту — распознаватель слеп "+
-			"либо уборщик переименован (прочитано файлов %d, литералов %d)",
-			check.FailureRowsSweep, check.FailureRowsTable, census.Files, census.StringLiterals)
+			"либо уборщик переименован (прочитано файлов %d, строковых значений %d)",
+			check.FailureRowsSweep, check.FailureRowsTable, census.Files, census.StringValues)
 	}
-	t.Logf("перепись посылки: файлов прод-кода прочитано %d, строковых литералов %d; операторов, снимающих строки %s, %d — "+
-		"по ключу в реализации порта %d · по возрасту в уборщике %d",
-		census.Files, census.StringLiterals, check.FailureRowsTable, census.Removals, census.ByKeyInPort, census.ByAgeInSweep)
+	t.Logf("перепись посылки: файлов прод-кода прочитано %d, строковых значений %d, из них называют %s %d; "+
+		"с изменяющим словом %d — по ключу в реализации порта %d · по возрасту в уборщике %d",
+		census.Files, census.StringValues, check.FailureRowsTable, census.NamingTable, census.Removals,
+		census.ByKeyInPort, census.ByAgeInSweep)
 
 	if len(findings) != 0 {
 		t.Fatalf("строки счёта снимаются мимо реализации порта и уборщика — %d находок:\n  %s\n\n"+
