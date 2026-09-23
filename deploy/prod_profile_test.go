@@ -285,7 +285,8 @@ var configBridge = []bridged{
 	// ЧИТАТЕЛЬ ПРЕДЪЯВЛЕННОГО УДОСТОВЕРЕНИЯ. Тот же выключатель блока.
 	{configKey: "authn.presented-credential.enabled", gate: presentedCredentialGate, derive: func(*valueReader) any { return true }},
 	{configKey: "authn.presented-credential.audience", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "audience"}},
-	{configKey: "authn.presented-credential.revocation-cache-ttl", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "revocationCacheTtl"}},
+	// Срок кеша отзыва — та же ветвь и по той же причине, что срок ключа выше.
+	{configKey: "authn.presented-credential.revocation-cache-ttl", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "revocationCacheTtl"}, omitEmpty: true},
 }
 
 // Выключатели блоков — названы ОДИН раз: путь, повторённый у каждого ключа
