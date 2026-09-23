@@ -32,7 +32,8 @@ package internal_iam_test
 // Первый участник задерживается одноразовым триггером уровня оператора,
 // держа свои замки: выход — после снятия записей сессии, удаление — после
 // удаления строки личности и её каскада. Второй запускается, когда первый
-// виден спящим, и сцена построена, только когда второй виден ждущим замка.
+// виден спящим, и сцена построена, только когда держатель видел второго
+// ждущим замка (`requireHoldSceneBuilt`).
 
 import (
 	"context"
@@ -187,7 +188,7 @@ func forceLogoutAgainstIdentityDeletion(t *testing.T, deletionFirst bool) {
 			runFL := func() { flDone <- s.forceLogout(target) }
 			runDelete := func() { delDone <- deleteIdentity(ctx, users, target) }
 
-			armOneShotHold(t, ctx, s.pool, hold)
+			armOneShotHold(t, ctx, s.pool, hold, 1)
 			if deletionFirst {
 				go runDelete()
 				awaitSleepingBackend(t, ctx, s.pool)
@@ -197,10 +198,10 @@ func forceLogoutAgainstIdentityDeletion(t *testing.T, deletionFirst bool) {
 				awaitSleepingBackend(t, ctx, s.pool)
 				go runDelete()
 			}
-			awaitLockWaiters(t, ctx, s.pool, 1)
 			flErr := <-flDone
 			delErr := <-delDone
 			disarmOneShotHold(t, ctx, s.pool, hold)
+			requireHoldSceneBuilt(t, ctx, s.pool, hold)
 
 			if delErr != nil && stderrors.Is(delErr, iamerr.ErrAborted) {
 				deletionAborted++
