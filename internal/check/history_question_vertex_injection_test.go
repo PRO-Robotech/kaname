@@ -52,22 +52,6 @@ const trunkVertexTwin = `cmd := exec.Command("git", "-C", root, "merge-base", "-
 // unnamedVertexCallFromTheTree — форма, у которой вершина приходит переменной.
 const unnamedVertexCallFromTheTree = `cmd := exec.Command("git", "-C", root, "merge-base", "--is-ancestor", rev, trunk)`
 
-// digestRecordFromTheTree — запись ревью, чья команда дайджеста стоит в дереве
-// ДОСЛОВНО (`docs/specs/reviews/kaname-287-failure-reset-fix/check-verifier/0028f4ba….yaml`,
-// строка 12; здесь она седьмая). Команда называет базу волны и голову полосы, и
-// ни одна из них не ствол.
-const digestRecordFromTheTree = "schema_version: 1\nkind: check_verification\nsubject:\n" +
-	"  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88\n" +
-	"  head: 749bcd4b589a7a60476535e5a9d3b29c62cef02f\n" +
-	"  digest_predicate: >-\n" +
-	"    git -C <копия> diff 20a5dcaa..749bcd4b5 -- . ':!docs/specs/reviews' | sha256sum\n"
-
-// Пути записей ревью — по одному на каждую форму, которую пишет оснастка ревью.
-const (
-	specRecordPath   = "docs/specs/reviews/kaname-287-failure-reset-fix/check-verifier/0028f4baf5224123ab40b6d581b328f18099e740d531c2c8ae7350be555d6d82.yaml"
-	changeRecordPath = "docs/changes/issue-2713/reviews/post-diff/system-design-reviewer/e248514c58b5916ebd7d146b10e2c8d1fd3e609f2145146127dbc8842870ca6f.yaml"
-)
-
 // goSource собирает файл Go вокруг одной строки тела.
 func goSource(body string) []byte {
 	return []byte("package p\n\nimport \"os/exec\"\n\nfunc f(root, rev, trunk string) {\n\t" +
@@ -165,36 +149,6 @@ func TestHistoryVertexGateCanFail(t *testing.T) {
 		require.Len(t, findings, 1)
 		require.Contains(t, findings[0], "tools/x.py:2")
 	})
-
-	// ЗАКОННЫЙ БЛИЗНЕЦ ИСКЛЮЧЕНИЯ ЗАПИСЕЙ РЕВЬЮ: та же команда дайджеста, тот же
-	// текст файла — отличается ОДИН факт, путь. Вне записи команда есть рецепт,
-	// и её вершина судится как всякая другая. Пути подобраны по границам формы:
-	// скрипт, документ вне записей, сосед корня по префиксу имени, файл другого
-	// рода в самом каталоге записей.
-	t.Run("команда дайджеста ВНЕ записи ревью — находка", func(t *testing.T) {
-		for _, rel := range []string{
-			"tools/digest.sh",
-			"docs/specs/digest.yaml",
-			"docs/specs/reviews-notes/x/digest.yaml",
-			"docs/specs/reviews/kaname-287-failure-reset-fix/digest.sh",
-			"docs/changes/issue-2713/digest.yaml",
-		} {
-			qs, c := scanOne(t, rel, []byte(digestRecordFromTheTree))
-			require.Zerof(t, c.RecordsExcluded, "%s прочитан как запись ревью", rel)
-			require.Equalf(t, 1, c.Unnamed, "%s: команда дайджеста не прочитана как вопрос об истории: %v", rel, qs)
-			findings, _, _ := judgeHistoryVertices(qs, map[string]vertexWaiver{})
-			require.Lenf(t, findings, 1, "%s", rel)
-			require.Contains(t, findings[0], rel+":7:")
-			require.Contains(t, findings[0], "не названа литералом")
-		}
-	})
-
-	t.Run("исключению записей ревью нечего исключать — САМОИСТЕЧЕНИЕ", func(t *testing.T) {
-		_, c := scanOne(t, "tools/digest.sh", []byte(digestRecordFromTheTree))
-		findings := recordExclusionFindings(c)
-		require.Len(t, findings, 1)
-		require.Contains(t, findings[0], "пережило свой предмет")
-	})
 }
 
 // TestHistoryVertexGateCanStaySilent — ПОЛОВИНА «МОЛЧИТ».
@@ -272,29 +226,6 @@ func TestHistoryVertexGateCanStaySilent(t *testing.T) {
 		_, c := scanOne(t, "internal/x/e.go", goSource(
 			`cmd := exec.Command("go", "test", "-run", "TestLog", "HEAD")`))
 		require.Zero(t, c.Questions)
-	})
-
-	// ЗАПИСЬ РЕВЬЮ — СВИДЕТЕЛЬСТВО, А НЕ РЕЦЕПТ. Довод — в шапке разбора
-	// (`history_question_vertex.go`, «ЗАПИСИ РЕВЬЮ»). Молчание обязано быть
-	// СОСЧИТАНО: запись, её форма и вопрос, оставшийся несуженным, — тремя
-	// величинами, иначе исключение неотличимо от слепоты.
-	t.Run("команда дайджеста в записи ревью — молчит, и запись СОСЧИТАНА", func(t *testing.T) {
-		for _, c := range []struct{ rel, form string }{
-			{specRecordPath, "docs/specs/reviews/**"},
-			{changeRecordPath, "docs/changes/**/reviews/**"},
-		} {
-			qs, census := scanOne(t, c.rel, []byte(digestRecordFromTheTree))
-			require.Zerof(t, census.Questions, "%s: запись ревью судится как рецепт: %v", c.rel, qs)
-			require.Equalf(t, 1, census.RecordsExcluded, "%s: исключённая запись не сосчитана", c.rel)
-			require.Equalf(t, 1, census.RecordsByForm[c.form], "%s: форма записи не названа", c.rel)
-			require.Equalf(t, 1, census.RecordQuestions,
-				"%s: вопрос в исключённой записи не сосчитан — слепая зона без числа", c.rel)
-			findings, applied, stale := judgeHistoryVertices(qs, map[string]vertexWaiver{})
-			require.Empty(t, findings)
-			require.Zero(t, applied)
-			require.Empty(t, stale)
-			require.Emptyf(t, recordExclusionFindings(census), "%s: исключение с предметом названо пережившим", c.rel)
-		}
 	})
 
 	// ГЛАГОЛЫ, ВОПРОСА ОБ ИСТОРИИ НЕ ЗАДАЮЩИЕ. Молчание здесь — не пропуск, а

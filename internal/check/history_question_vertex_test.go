@@ -18,13 +18,6 @@
 //     ревизии есть `git log HEAD`) — тогда «судит ствол или вершину» вообще
 //     никем не сказано, и молчание здесь стоит дороже находки.
 //
-// # ЧЕГО ГЕЙТ НЕ СУДИТ: ЗАПИСЕЙ РЕВЬЮ
-//
-// Запись ревью — свидетельство о прошедшем ревью, а не рецепт истории; довод и
-// форма исключения — в шапке разбора («ЗАПИСИ РЕВЬЮ»). Исключение печатается
-// переписью (записей, по формам, вопросов в них) и самоистекает —
-// `recordExclusionFindings`.
-//
 // # ПЕРЕПИСЬ ЗАДАЧИ #63 — ОНА ЖЕ ВЕДОМОСТЬ, А НЕ ВТОРОЕ МЕСТО О НЕЙ
 //
 // Задача просит переписи: «по каждой сказано, судит она ствол или рабочую
@@ -129,6 +122,45 @@ func vertexLedger() map[string]vertexWaiver {
 				"Вершина здесь и есть предмет замера, а ствола `origin/main` в таком дереве " +
 				"нет вовсе — спрашивать о нём было бы вопросом к тому, чего фикстура не заводит",
 		},
+		// ── ЗАПИСИ РЕВЬЮ: предмет вопроса — ветка PR и её сливаемость в линию ────
+		"docs/specs/reviews/passwordless-login-with-access-key/833470690aff167314d54fec332810f34c3aab2e4574a0e3e871ee9184841099.yaml#diff": {Calls: 1,
+			Why: "рецензент сверяет ДВЕ РЕДАКЦИИ одного документа внутри ветки PR (прежняя " +
+				"голова → новая): оба операнда — ревизии полосы by construction, ствол ни " +
+				"одной из них не является — в стволе этой редакции ещё нет"},
+		"docs/specs/reviews/passwordless-login-with-access-key/833470690aff167314d54fec332810f34c3aab2e4574a0e3e871ee9184841099.yaml#merge-base": {Calls: 1,
+			Why: "вопрос о СЛИВАЕМОСТИ ветки PR в накопительную линию: оба операнда названы " +
+				"(`origin/release/iam-lines`, ветка приёмки) и стволом быть не могут — база " +
+				"PR здесь линия, не ствол, по решению владельца об одном MR"},
+		// ── ЗАПИСИ РЕВЬЮ: предмет вопроса — ДЕЛЬТА ДВУХ РЕДАКЦИЙ ОДНОЙ ВЕТКИ ─────
+		"docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/4ee03c398152d87b4cdb74646b2ca34a513476d8d4e31799fec4f453d541cd22.yaml#diff": {Calls: 1,
+			Why: "рецензент сверяет ДВЕ РЕДАКЦИИ одного документа внутри ветки PR (прежняя " +
+				"голова → новая): оба операнда — ревизии полосы by construction, и ствол ни " +
+				"одной из них быть не может — в стволе этой редакции ещё нет. Схлопывание " +
+				"переносит обе в один коммит, и вопрос теряет предмет вместе с ветвью, а не " +
+				"меняет ответ"},
+		// ── ЗАПИСИ РЕВЬЮ: предмет вопроса — ЛЕЖИТ ЛИ РЕДАКЦИЯ В НАКОПИТЕЛЬНОЙ ЛИНИИ ──
+		"docs/specs/reviews/second-factor-totp-and-recovery-codes/06984af979a6d7a1ca384e5d356d075627cb9a2c56a42942dff75a17a5fae1ad.yaml#merge-base": {Calls: 2,
+			Why: "рецензент устанавливает, что редакция 6 (769aa56a) и её реализация (вливание " +
+				"92695c64 PR kaname#228) лежат в накопительной линии `origin/release/iam-lines` — " +
+				"базе ветки полосы по решению владельца об одном MR. Ствол операндом быть не " +
+				"может: в стволе этой редакции ещё нет (тот же документ там — редакция 5, " +
+				"b71c3ff7…), и вопрос стволу отвечен в той же записи отдельной строкой (→ 1). " +
+				"Два вызова — два предмета: редакция и её реализация"},
+		"docs/specs/reviews/second-factor-totp-and-recovery-codes/6bc95772bcb5b9f2f2db0789aefca17513a4d21e626b5827011094313f9176ea.yaml#merge-base": {Calls: 2,
+			Why: "рецензент круга 4 устанавливает провенанс редакции 7 (74a0f1a1): она лежит " +
+				"ПОВЕРХ головы накопительной линии `origin/release/iam-lines` (7c3b493d — её " +
+				"предок) и в самой линии ещё не лежит (PR не открыт). Ни один из двух вопросов " +
+				"стволу не задаётся by construction: ствол несёт редакцию 5, линия — редакцию 6, " +
+				"а редакция 7 — только ветка задачи; вопрос стволу отвечен в той же записи " +
+				"отдельной строкой (→ 1). Два вызова — два предмета: база и линия"},
+		"docs/specs/reviews/second-factor-totp-and-recovery-codes/2582c5e1101c44cda591e7c2745645b8989b595a8f000b32ec8d729927055364.yaml#merge-base": {Calls: 3,
+			Why: "рецензент круга 5 устанавливает провенанс редакции 8 (d5209448): база линии " +
+				"7c3b493d — её предок; запись круга 4 (f4bcc391, черри-пик) — её предок (история " +
+				"ревью добавляется, не переписывается); в линии `origin/release/iam-lines` её " +
+				"ещё нет (PR не открыт). Ни один из трёх вопросов стволу не задаётся by " +
+				"construction: ствол несёт редакцию 5, линия — редакцию 6, редакция 8 — только " +
+				"ветка задачи; вопрос стволу отвечен в той же записи отдельной строкой (→ 1). " +
+				"Три вызова — три предмета: база, предшествующая запись, линия"},
 		"internal/check/probe_home.go#cat-file": {Calls: 1,
 			Why: "судится ЧУЖОЙ дом по НАЗВАННОЙ ревизии, и вершина приходит параметром. " +
 				"Умолчание параметра — ствол чужого дома (`HomeRef` возвращает `origin/main`), " +
@@ -158,12 +190,10 @@ func TestHistoryQuestionsAreAskedOfTheTrunk(t *testing.T) {
 	t.Logf("ОБЪЁМ ОСМОТРЕННОГО: файлов прочитано %d · Go разобрано %d · не разобрано %d · "+
 		"строк комментария снято %d · глагол вне запускателя %d · вопросов об истории %d · "+
 		"ствол %d · рабочая вершина %d · вершина не названа %d · по глаголам %s · "+
-		"записей ревью исключено %d (%s), вопросов в них без суждения %d · "+
 		"записей ведомости %d (применено %d, из них отсрочек %d) · находок %d",
 		c.FilesRead, c.GoParsed, len(c.GoUnparsed), c.LinesStripped, c.VerbOutsideRunner,
-		c.Questions, c.Trunk, c.Head, c.Unnamed, censusByVerb(c),
-		c.RecordsExcluded, censusRecordForms(c), c.RecordQuestions,
-		len(vertexLedger()), applied, countDeferrals(vertexLedger()), len(findings))
+		c.Questions, c.Trunk, c.Head, c.Unnamed, censusByVerb(c), len(vertexLedger()), applied,
+		countDeferrals(vertexLedger()), len(findings))
 
 	// ПРЕДПОСЫЛКИ ГЕЙТА — каждая своим утверждением, а не одной строкой.
 	if len(c.GoUnparsed) > 0 {
@@ -185,9 +215,6 @@ func TestHistoryQuestionsAreAskedOfTheTrunk(t *testing.T) {
 
 	for _, s := range stale {
 		t.Errorf("запись ведомости ПЕРЕЖИЛА свой предмет: %s. Прощать нечего — снимите запись", s)
-	}
-	for _, f := range recordExclusionFindings(c) {
-		t.Error(f)
 	}
 	for _, f := range findings {
 		t.Error(f)
@@ -254,37 +281,6 @@ func judgeHistoryVertices(questions []check.HistoryQuestion,
 	}
 	sort.Strings(stale)
 	return findings, applied, stale
-}
-
-// recordExclusionFindings — САМОИСТЕЧЕНИЕ исключения записей ревью (довод
-// исключения — шапка `history_question_vertex.go`, «ЗАПИСИ РЕВЬЮ»).
-//
-// Истекает исключение ЦЕЛИКОМ, а не по форме: форма — словарь распознавателя,
-// и форма, не давшая записи в этом дереве, видна числом переписи, а не
-// находкой. Предмет исключения — записи ревью вообще; обход, не встретивший ни
-// одной, означает, что каталог записей переехал либо снят, и исключение
-// прощает то, чего нет.
-func recordExclusionFindings(c check.HistoryCensus) []string {
-	if c.RecordsExcluded > 0 {
-		return nil
-	}
-	return []string{"исключение записей ревью пережило свой предмет: обход не встретил НИ ОДНОЙ " +
-		"записи ни в одной форме (" + censusRecordForms(c) + "). Прощать нечего — снимите " +
-		"исключение вместе с его доводом либо назовите форму, в которой записи теперь лежат"}
-}
-
-// censusRecordForms — исключённые записи по формам в порядке словаря.
-func censusRecordForms(c check.HistoryCensus) string {
-	forms := make([]string, 0, len(c.RecordsByForm))
-	for f := range c.RecordsByForm {
-		forms = append(forms, f)
-	}
-	sort.Strings(forms)
-	parts := make([]string, 0, len(forms))
-	for _, f := range forms {
-		parts = append(parts, fmt.Sprintf("%s %d", f, c.RecordsByForm[f]))
-	}
-	return strings.Join(parts, " · ")
 }
 
 // countDeferrals — записей, которые доводом НЕ являются: вершина выбрана неверно,
