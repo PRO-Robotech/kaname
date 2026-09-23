@@ -76,6 +76,10 @@ func startRetentionSweeper(
 			// уборщик платформы требует ключа партиции, а он у этой очереди
 			// пуст намеренно — обоснование в росписи commutativeDrainExempt.
 			kanamepg.NewProviderCompensationSweeper(pool),
+			// Восьмым предметом — записи выпуска токена доступа церемонии
+			// (kaname#319): строку пишет каждый выпуск, и после срока токена с
+			// допуском она ни одного исхода предъявления не меняет.
+			kanamepg.NewOAuthCeremonyRepo(pool),
 		), human),
 		logger.With(slog.String("component", "retention_sweep")),
 	)
