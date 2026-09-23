@@ -1,0 +1,144 @@
+# Пост-дифф ревью Go-кода продукта — роль go-style-reviewer.
+#
+# Имя файла — и есть content_digest: запись самоидентифицируется отпечатком
+# отсуженного содержимого. Прежние записи не правятся; сменился дайджест —
+# новый запуск и новый файл (change-graph §2 «вердикт привязан к ОТПЕЧАТКУ»).
+schema_version: 1
+change_id: kn-341
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+subject: '#341 — ветвь default двери отсечки upsertSubjectCutoff судится внутрипакетной пробой'
+
+# ── отпечаток ──────────────────────────────────────────────────────────────
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: '341'
+  worktree: /home/dk/workspace/github/PRO-Robotech/cloud-demo/kacho-workspace/tmp/kaname-341
+  base: 9dc46b4722bea058c3642c803aae6a102ad1f98f
+  head: 458e4fe37fbe36909dc58da427f2858bdfbdf6bd
+content_digest: sha256:4558258239f74169810b48f59c0f02c4e979d7cb1910b3c5ccafbc2f978b42c0
+names_digest: sha256:123003a26ddf08bc9fcbe3c6e40a1eaed506fa422ce52eaafec38b98a7352192
+digest_definition: >-
+  content_digest — sha256 сырого вывода `git diff 9dc46b47..458e4fe3`
+  (форма из задания); база — предок головы, коммит в диапазоне один, поэтому
+  трёхточечная форма `git diff 9dc46b47...458e4fe3` даёт тот же дайджест
+  (перемерено). names_digest — sha256 вывода
+  `git diff --name-only 9dc46b47..458e4fe3 | sort`. Оба конца взяты из задания
+  и перемерены своей командой в копии; HEAD копии = 458e4fe3, рабочее дерево
+  до записи этого файла было чистым (`git status --porcelain` пуст).
+
+# ── вердикт ────────────────────────────────────────────────────────────────
+verdict: accepted            # ✅ принято
+blocks_landing: false
+timestamp: '2026-09-23T09:23:42Z'
+review_scope: >-
+  полный закоммиченный дифф: 1 файл, +199 / -0, один коммит 458e4fe3; запрет
+  отсрочки и требование проб судятся по всему диффу. Не-тестовое дерево не
+  тронуто — изменение test-only (запрет #13 соблюдён).
+
+files_reviewed:
+  - internal/repo/kaname/pg/subject_cutoff_door_executor_test.go   # +199 (новый, package pg)
+
+# ── посылка задания, проверенная своей командой ────────────────────────────
+premise_checked:
+  digest: >-
+    ПОДТВЕРЖДЕНА. `git -C <копия> diff 9dc46b47..458e4fe3 | sha256sum` =
+    4558258239f74169810b48f59c0f02c4e979d7cb1910b3c5ccafbc2f978b42c0, совпадает
+    с ожидаемым префиксом 4558258239f7.
+  prior_record_absent: >-
+    ПОДТВЕРЖДЕНА. Каталога docs/changes/kn-341 нет ни в копии, ни в корне
+    воркспейса (`find docs/changes -path '*kn-341*'` пуст в обоих местах) —
+    прежняя запись действительно не легла на диск. Этот вердикт вынесен
+    заново по коду, а не перенесён со слов о прошлом круге.
+
+# ── находки ────────────────────────────────────────────────────────────────
+critical: []                 # блокирующих находок по коду нет
+important: []
+foundation_candidates: []    # горизонтального выноса в фундамент изменение не порождает
+style:
+  - at: internal/repo/kaname/pg/subject_cutoff_door_executor_test.go:174
+    note: >-
+      Счётчик `dials` (:174) — простой int, который пишется (:176) в горутине конструктора
+      пула (puddle v2.2.2 pool.go:421-436), а читается в горутине теста.
+      Гонки сегодня нет: запись стоит до отправки в небуферизованный канал,
+      чтение — после приёма из него, а фоновых наборов при MinConns=0 и
+      MinIdleConns=0 пул не делает (pgx v5.10.0 pgxpool/pool.go:334-335).
+      Порядок держится внутренней синхронизацией библиотеки, а не пробой;
+      `atomic.Int32` сделал бы доказательство взятия ветви пула независимым от
+      неё. Не блокирует.
+security_comments_contradicting_code: []
+
+# ── счётчики по всему диффу ────────────────────────────────────────────────
+fresh_deferral_markers: 0    # `git diff … | grep -E '^\+.*\b(TODO|FIXME|XXX|HACK)\b'` → 0
+tests_in_same_pr: true       # изменение и есть проба: единственный файл диффа — _test.go
+
+# ── что проверено и на чём основано ────────────────────────────────────────
+approved:
+  error_assertions: >-
+    полоса отказа судится через `errors.Is(err, iamerr.ErrInternal)`, а не
+    сравнением текста; текст отказа и имя типа утверждаются ДОПОЛНИТЕЛЬНО, как
+    наблюдаемое (hard-regression-asserts-message), и сравниваются с одним
+    выписанным литералом `cutoffDoorRefusalText`, общим для отрицания близнеца
+    пула и утверждения третьего вида
+  lawful_twins_one_fact: >-
+    третий вид и близнец «транзакция» получают один регистратор и один вход и
+    различаются только видом исполнителя; близнец «пул» доказывает взятие
+    своей ветви счётчиком набора адреса (`dials == 0` → Fatal), а не
+    отсутствием слов в тексте отказа
+  fake_cannot_be_green: >-
+    `declaredTxCutoffExecutor` встраивает пустой `pgx.Tx`: любой вызов двери
+    помимо Exec (например, вложенное начало) упадёт на пустом значении громко;
+    регистратор отвечает настоящим CommandTag, контракт Exec не ослаблен
+  no_database_needed: >-
+    ветвь `default` стоит после проверки входа и до первого оператора
+    (user_token_revocations_repo.go:114-154); пакетный TestMain
+    (testmain_test.go:50) поднимает Postgres лишь по первому обращению к
+    pgtest, а новые пробы к нему не обращаются. Внешний адрес пула не
+    набирается: DialFunc подменён и сразу отказывает
+  cleanup: 'пул закрывается `t.Cleanup(pool.Close)` сразу после создания'
+  no_panic_in_prod_path: 'прод-код не тронут; panic/Must*/log.Fatal в диффе нет'
+  context: >-
+    тестам передаётся `context.Background()` — это соглашение пакета:
+    `t.Context()` не использует ни один тест internal/repo/kaname/pg
+    (перемерено `git grep -c 't\.Context()'` → 0 файлов)
+  imports_convention: >-
+    алиас `stderrors "errors"` — соглашение пакета (встречается в прод-файле
+    access_key_repo.go:28 и в 45 тестовых файлах пакета pg на 458e4fe3); все импорты
+    используются
+  layering: >-
+    проба лежит в пакете адаптера repo и импортирует pgx — законно для этого
+    слоя; это не проба use-case, Postgres она не поднимает
+  internal_package_placement: >-
+    внутрипакетная проба (package pg) — законная форма в этом каталоге: таких
+    файлов 32 рядом с 270 файлами package pg_test; нужна она, потому что дверь
+    неэкспортируема, а каждый экспортируемый вызывающий отдаёт ей статически
+    типизированный пул либо pgx.Tx
+  naming_ascii: >-
+    все идентификаторы латиницей (запрет #17): сканер go/scanner по файлу на
+    458e4fe3 прочёл 282 идентификатора, не-ASCII — 0; положительный контроль
+    (введённый `dialsВ`) сканер поймал с координатой :174:2. Кириллица только в
+    комментариях и строках отказа — законно
+  domain_types: 'id входа — domain.UserID из нетипизированных констант, голых string-полей не заведено'
+
+# ── перемеренные основания утверждений в комментариях пробы ─────────────────
+verified_facts:
+  - 'ветвь `default` двери стоит на user_token_revocations_repo.go:152 — как пишет сообщение коммита (grep -n "default:")'
+  - 'порт `cutoffExecutor` несёт ОДИН метод Exec (minted_token_revocation_repo.go:107-109) — как пишет шапка пробы'
+  - 'текст отказа ветви default — "%w: subject cutoff needs a pool or a transaction, got %T" с iamerr.ErrInternal (user_token_revocations_repo.go:153-154) — совпадает с cutoffDoorRefusalText и утверждением об имени типа'
+  - 'ветвь pgx.Tx исполняет writeBothCutoffs: subjectCutoffRowSQL, затем upsertMintedCutoffSQL — ровно порядок, который утверждает близнец «транзакция»'
+  - 'вход пробы проходит validateMintedCutoffInput (субъект и решивший непусты, minted_token_revocation_repo.go:134-142) — ветвь выбора исполнителя достижима, как пишет шапка cutoffDoorInput'
+  - 'все четыре вызывающих двери в прод-дереве (git grep по не-тестовым файлам на 458e4fe3) отдают *pgxpool.Pool (user_token_revocations_repo.go:69) либо pgx.Tx (:185; human_session_repo.go:502 и tx.go:262 — поле `tx pgx.Tx`, human_session_repo.go:212, tx.go:39): из package pg_test третий вид действительно не подать'
+  - 'pgxpool v5.10.0 Acquire возвращает первый отказ без повтора (pgxpool/pool.go:614-617), значит на закрытом наборе адреса ветвь пула даёт ровно один набор'
+
+# ── классы code-authoring ──────────────────────────────────────────────────
+# Предмет классов — новый прод-код; не-тестового файла в диффе нет (`git diff
+# --name-only` → один _test.go), поэтому классы по этому диффу вакуумны.
+
+# ── дисциплина исходов ─────────────────────────────────────────────────────
+# Исход линтера и проб НЕ объявляется: сырой вывод читает landing-reviewer,
+# независимый перемер делает check-verifier. Заявленные в коммите прогон без
+# контейнера и четыре инъекции этой ролью НЕ перемерялись.
+linter_probes_outcome: not-claimed-by-this-role
+
+return_to: null              # блокирующих находок нет — возврата автору диффа не требуется
+next_requested: 'сбор пост-дифф записей: convergence-reviewer либо landing-reviewer'
