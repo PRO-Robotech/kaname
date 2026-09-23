@@ -335,9 +335,12 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 		return nil, status.Error(codes.Unavailable, "operation repository not configured")
 	}
 
+	// Свободная причина отсечки и события. Её умолчание — то же слово, что
+	// причина снятия записи сессии (Р1): предмет у обеих записей один. Но
+	// сама эта переменная в снятие не идёт — см. commitOwnForceLogout.
 	reason := strings.TrimSpace(req.GetReason())
 	if reason == "" {
-		reason = "admin-force-logout"
+		reason = domain.RevokeReasonAdminForceLogout
 	}
 	now := time.Now().UTC()
 
@@ -701,22 +704,20 @@ func forceLogoutAuditEvent(marker domain.UserTokenRevocation, revokedBy domain.U
 // кладётся ни при какой его причине (`warrantsPartialOutcome`): запись «снятие
 // не состоялось» легла бы второй записью события, возможно ложной.
 //
-// ПРИЧИНА СНЯТИЯ — `logout`, И ЭТО ЗАПИСАННЫЙ ОСТАТОК, А НЕ РЕШЕНИЕ ПО СУЩЕСТВУ.
-// Словарь `human_sessions_ended_reason_check` ЗАКРЫТ (`logout` · `password-change`
-// · `second-factor-removed`), значения «выведен распорядителем» в нём нет, а
-// значение вне словаря база отвергла бы — то есть попытка записать более точную
-// причину стоила бы самого снятия.
+// ПРИЧИНА СНЯТИЯ — КОНСТАНТА ДОМЕНА, А НЕ ПРИЧИНА ИЗ ЗАПРОСА (kaname#334, Р2).
+// Словарь `human_sessions_ended_reason_check` закрыт, и перечень его значений
+// живёт только в домене (`domain.HumanSessionEndReasons`). Свободная причина
+// распорядителя (`marker.Reason`) идёт в отсечку и в событие, а в снятие — нет:
+// значение вне словаря база отвергла бы, и всякая причина, отличная от слова
+// словаря, стоила бы самого снятия.
 //
-// Довод «административную природу несёт журнал» ПРОВЕРЕН и верен наполовину:
+// Различение двух выходов несёт САМА СТРОКА СЕССИИ, а не журнал событий:
 // выход человека кладёт событие `iam.session.logged_out`, и его состав НЕСЁТ
 // `session_id` (`humansession/logout.go`); запись принудительного выхода несёт
 // субъекта, причину и исход снятия (`forceLogoutAuditEvent`), а идентификатора
-// сессии в ней НЕТ. Значит от СТРОКИ СЕССИИ к событию дороги нет: обе строки
-// несут `logout`, и различить «человек вышел сам» от «его вывел распорядитель»
-// можно только совпадением моментов.
-//
-// Остаток заведён задачей kaname#334: словарь получает четвёртое значение
-// `admin-force-logout`, и значение здесь меняется на него ОДНОЙ правкой.
+// сессии в ней НЕТ. От строки сессии к событию дороги нет, поэтому «человек
+// вышел сам» от «его вывел распорядитель» отличает причина в самой строке
+// (`ended_reason`).
 func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTokenRevocation,
 	revokedBy domain.UserID, withTeardown bool,
 ) (int, *ownForceLogoutRefusal) {
@@ -733,7 +734,7 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 
 	outcome, ended := forceLogoutTeardownFailed, 0
 	if withTeardown {
-		n, terr := w.EndOtherSessions(ctx, marker.UserID, "", marker.RevokeBefore, domain.RevokeReasonLogout)
+		n, terr := w.EndOtherSessions(ctx, marker.UserID, "", marker.RevokeBefore, domain.RevokeReasonAdminForceLogout)
 		if terr != nil {
 			return 0, refusalAt(ownStepTeardown, ctx, terr)
 		}
