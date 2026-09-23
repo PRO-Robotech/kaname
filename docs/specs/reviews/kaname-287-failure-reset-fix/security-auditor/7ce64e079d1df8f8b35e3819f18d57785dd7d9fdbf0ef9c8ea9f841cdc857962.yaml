@@ -1,0 +1,61 @@
+schema_version: 1
+kind: security_review
+role: security-auditor
+round: 2
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  wave: PRO-Robotech/kaname#377
+  contract: Ф12 Р7 / Ф3 Р10 редакция 11 (строки редакции 12 — переадресация отсылок)
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 770d9c42166cb03c4f2e87f5e88ce8052a0db56a
+  digest_predicate: >-
+    git diff 20a5dcaa11b769cbd19eec033f158e5eac6a5b88..770d9c42166cb03c4f2e87f5e88ce8052a0db56a
+    -- . ':!docs/specs/reviews' | sha256sum
+  digest: 7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962
+  previous_round: 227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090
+  committed: false
+modes: [search-diff-surface, public-text]
+severity_bar: [high, medium]
+inspected:
+  diff: >-
+    20 файлов, +3528/-16 (git diff --stat base..head); Go 14 — прод 8, пробы 6; приёмки 2;
+    записи ревью 4 (из дайджеста исключены)
+  reset_sites: >-
+    git grep ResetFailures @head без _test: вызовов 2 — дом и одна запись ведомости; плюс
+    объявление порта и реализация адаптера
+  gate_census: >-
+    TestFailureResetGoesThroughTheCompletedLoginGuard @head: файлов прод-кода 967, называющих
+    порт 4; вызовов 2; полос, пишущих уровень сессии, 7 — через дом 5, в ведомости 2
+  premise_census: >-
+    TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep @head: литералов 21065,
+    операторов над строками счёта 2 — по ключу в порту 1, по возрасту в уборщике 1
+  controls: >-
+    одноразовый клон на head, go test -p 1 -count=1: internal/check — 18 проб верхнего уровня
+    зелёные; humansession (замок Ф12-46, таблица решений, премисы оси и сборки) — 6 проб
+    верхнего уровня зелёные, ветвей замка 4 и глаголов 3
+  injections: >-
+    по одной за прогон, исходник возвращён после каждой: четыре формы; три красные ровно там,
+    где ждались (замок на полосах, где достижим успех первого фактора; гейт — на обращении мимо
+    дома); одна зелёная — у глагола, достижимого только кодом, где решение от поданного дому не
+    зависит (граница, вреда не несёт)
+lanes:
+  closed: [вход, церемония, подтверждение заведения, перечеканка запасных кодов, снятие фактора]
+  not_resetting: [регистрация]
+  tracked_elsewhere:
+    - lane: восстановление доступа
+      subject: PRO-Robotech/kaname#305
+      state_measured: OPEN (gh issue view 305 -R PRO-Robotech/kaname --json state -q .state)
+ledger_form:
+  refs_form: запись полосы восстановления — PRO-Robotech/kaname#305, форма гейта соблюдена
+  removal_executable: >-
+    обе записи несут команды; исполнены на head: gh → OPEN, git grep -c → 1 (запись стоит),
+    предикат регистрации — пусто, код выхода 1 (запись стоит)
+findings: []
+previous_findings:
+  - id: SA-287-1
+    status: вынесено в предмет PRO-Robotech/kaname#305 той же волны (решение диспетчера); запись ведомости по форме
+public_text:
+  range_commits: 10
+  verdict: высокоуровневы — прежнего поведения не описывают; атрибуции 0; первая строка каждого — «#287 »
+verdict: accepted

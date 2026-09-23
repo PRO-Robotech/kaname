@@ -1,0 +1,104 @@
+schema_version: 1
+kind: check_verification
+role: check-verifier
+round: 3
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 749bcd4b589a7a60476535e5a9d3b29c62cef02f
+  delta_judged: 770d9c42166cb03c4f2e87f5e88ce8052a0db56a..749bcd4b589a7a60476535e5a9d3b29c62cef02f
+  digest_predicate: >-
+    git -C <копия> diff 20a5dcaa..749bcd4b5 -- . ':!docs/specs/reviews' | sha256sum
+  digest: 0028f4baf5224123ab40b6d581b328f18099e740d531c2c8ae7350be555d6d82
+  previous_digest: 7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962
+  committed: false
+mode: приёмка работы-проверки (круг 3, только дельта)
+delta_scope:
+  command: git diff --stat 770d9c42..749bcd4b5
+  files: 6 (435+, 192-)
+  product_file: >-
+    internal/apps/kaname/api/humansession/completed_login.go — изменены только строки комментария:
+    git diff -U0 … | grep '^[+-]' без заголовков и без строк '//' → 0; код продукта дельтой не тронут
+  commit_contents: >-
+    один коммит 749bcd4b5, первая строка «#287 …»; записей ревью в коммите 0
+    (git show --name-only 749bcd4b5 | grep -c docs/specs/reviews → 0)
+isolation: >-
+  отдельный клон kacho-workspace/tmp/cv-287-r3 (git clone --no-checkout копии автора, detach на
+  749bcd4b5); бинарь пробы собран один раз (go test -c), дерево для него — данные; по одной инъекции
+  за прогон, после каждой git checkout -- . и git status --porcelain = 0; клон снят rm -rf
+experiments:
+  control_head: >-
+    посылка и гейт зелёные; перепись посылки: файлов 967, строковых значений 24850, называют
+    login_failures 16, с изменяющим словом 2 — по ключу в порту 1 · по возрасту в уборщике 1
+  cv_287_1_repeated:
+    place: новый метод humanSessionWriter ForgetAddress, human_session_repo.go:388 (как в круге 2)
+    cte_before_delete: краснеет, :388 «по ключу мимо реализации порта», удалений 3
+    merge_then_delete: краснеет, :388 «неизвестным посылке способом», удалений 3
+    block_comment_before_delete: краснеет, :388 «по ключу», удалений 3
+    explain_analyze_delete: краснеет, :388 «по ключу», удалений 3
+  twins_same_place:
+    select_count: молчит, называют 17, удалений 2
+    delete_from_login_failures_archive: молчит, называют 16, удалений 2
+    delete_from_recovery_codes: молчит, называют 16, удалений 2
+  extra_forms:
+    sprintf_table_in_format_literal: >-
+      fmt.Sprintf(`DELETE FROM login_failures WHERE scope = %s AND key = $1`, …) — краснеет, :389 «по ключу»
+    sprintf_table_as_argument: >-
+      fmt.Sprintf(`DELETE FROM %s WHERE … key = $1`, "login_failures") — молчит; это названная в шапке
+      граница «оператор, собранный вызовом», опыт с ней совпал
+    with_update: >-
+      WITH k AS (…) UPDATE login_failures f SET failed_at = … — краснеет, :388 «неизвестным посылке способом»
+    quoted_upper_identifier: DELETE FROM "login_failures" WHERE KEY = $1 — краснеет, :388 «по ключу»
+    escape_in_interpreted_string: >-
+      "DELETE FROM login\x5ffailures …" — краснеет, :388 «по ключу»
+    do_execute_format: >-
+      DO $$ BEGIN EXECUTE format('DELETE FROM %I …', 'login_failures', …) END $$ — краснеет,
+      :388 «неизвестным посылке способом»
+    local_variable_table: >-
+      table := "login_failures"; "DELETE FROM "+table+… — молчит; названная граница «в переменной функции»
+    table_in_generic_reclaimer_registry: >-
+      запись {Table: "login_failures", …} в перечень целей универсального удалителя
+      expired_credential_reclaimer.go (удаление строится fmt.Sprintf по имени таблицы) — молчит,
+      называют 17, удалений 2; та же названная граница, но механизм этой формы в дереве уже есть
+  positive_half:
+    port_delete_unrecognized_form: >-
+      в ResetFailures условие переписано в (scope, key) = ($1, $2) — «проверка НЕ ИСПОЛНЯЛАСЬ: реализация
+      ResetFailures не удаляет строк login_failures по ключу», не зелёное
+numbers_reproduced:
+  - величина: файлов прод-кода 967
+    своё: git ls-files '*.go' | grep -v '_test\.go$' | wc -l → 967
+  - величина: называют login_failures 16
+    своё: >-
+      git grep по прод-Go без строк комментария: операторов-литералов адаптера 5 (строки 117, 130,
+      199–201, 373, 381) + значение и ссылка SubjectLoginFailures 2 + значение и ссылки FailureRowsTable 9 = 16
+  - величина: с изменяющим словом 2
+    своё: из этих текстов изменяющее слово несут human_session_repo.go:199 и :381 → 2
+  - величина: синтетические пробы посылки
+    своё: check.test -test.run '^TestFailureRowRemovalPremise' → 36 PASS (4 верхних, 23 красных формы, 9 близнецов)
+full_package_at_head:
+  check: зелёных 1444 · красных 0 · не выполнилось 1 (TestDeclaredRequiredContextsMatchTheBranch — сетевая ручка не выставлена, веткой не тронута)
+empty_walk: >-
+  не зеленит: ноль положительной половины на дереве роняет прогон «НЕ ИСПОЛНЯЛАСЬ» (замерено выше);
+  синтетика без адаптера — TestFailureRowRemovalPremiseNamesAnEmptyAdapter зелёная с нулями обеих половин
+fakes: >-
+  посылка судит текст дерева, не исполнение: оператор, собранный во время исполнения, и оператор
+  вне Go она не различает — это названо в шапке failure_reset_sole_writer.go:66–73 и подтверждено тремя опытами
+masks_and_relaxations: в дельте новых пропусков, вычетов и ведомостей нет (осмотрены 6 файлов дельты)
+findings: []
+notes:
+  - >-
+    CV-287-1 снята: те же четыре формы в том же месте краснеют с координатой, законные близнецы
+    молчат, формы внесены в TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval
+  - >-
+    названная граница «оператор, собранный вызовом» материальна: в пакете адаптеров есть универсальный
+    удалитель, строящий DELETE через fmt.Sprintf по имени таблицы из перечня; строка login_failures в его
+    перечне посылкой не видна. Не блокирует — граница объявлена и опыт с ней совпал; предмет для
+    отдельного решения, не этой дельты
+premise_of_task:
+  status: подтверждена
+  commands: >-
+    четыре формы CV-287-1 на 749bcd4b5 — красные с :388; git diff --stat 770d9c42..749bcd4b5 — 6 файлов,
+    продуктовый затронут только комментарием
+verdict: accepted
+blocking: false

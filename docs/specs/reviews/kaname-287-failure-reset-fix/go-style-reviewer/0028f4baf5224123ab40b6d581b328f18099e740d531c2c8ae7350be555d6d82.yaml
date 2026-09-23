@@ -1,0 +1,63 @@
+schema_version: 1
+kind: post_diff_review
+role: go-style-reviewer
+round: 3
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 749bcd4b589a7a60476535e5a9d3b29c62cef02f
+  digest_predicate: >-
+    git diff 20a5dcaa..749bcd4b5 -- . ':!docs/specs/reviews' | sha256sum
+  digest: 0028f4baf5224123ab40b6d581b328f18099e740d531c2c8ae7350be555d6d82
+  previous_round:
+    digest: 7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962
+    record: docs/specs/reviews/kaname-287-failure-reset-fix/go-style-reviewer/7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962.yaml
+  committed: false
+inspected:
+  scope: только дельта 770d9c42..749bcd4b5 (круг 3)
+  delta: 1 коммит, 6 файлов, +435/-192; прочитаны целиком
+  product_touch: >-
+    дельта трогает один файл продукта, internal/apps/kaname/api/humansession/completed_login.go
+    (+5/-3), и только комментарий; кода продукта дельта не меняет
+  authorship: автор и коммиттер pointpu, трейлеров атрибуции 0
+verdict: accepted
+blocking: false
+deferral_markers_in_diff: 0
+probes_in_same_change: true
+round_2_findings:
+  GS-287-6:
+    status: closed
+    evidence: >-
+      go test -count=1 -run 'FailureRow|FailureReset|LoginVerifier|SQLNames' ./internal/check/ -> ok;
+      четыре формы круга 2 (CTE перед DELETE, MERGE THEN DELETE, /* */ перед DELETE, EXPLAIN ANALYZE)
+      теперь находки, законные близнецы молчат. Проверил сам временным файлом проб (после прогона удалён):
+      DO/EXECUTE с литералом, с format и %I, со склейкой имени через ||, имя в кавычках, PREPARE AS DELETE,
+      FuncLit на уровне пакета дают находку; FuncLit и локальная константа в реализации порта дают 0
+      находок; условие по ключу в уборщике — находка. Перепись по дереву: файлов 967, строковых значений
+      24850, называют таблицу 16, с изменяющим словом 2, по ключу в порту 1, по возрасту в уборщике 1.
+  GS-287-7:
+    status: open
+    note: дельта completed_login_test.go не трогает; находка важная, посадку не блокирует
+  GS-287-8:
+    status: closed
+    evidence: >-
+      комментарий больше не приписывает пробе журнал; подстановку slog.Default() делают login.go:196
+      (NewLoginUseCase) и second_factor.go:116 (SecondFactorDeps.validate); все пять вызывающих
+      enrollmentBeforeWrite проходят через один из этих конструкторов — прочитано
+critical: []
+important: []
+style:
+  - internal/check/failure_reset_sole_writer.go:534 — в одном условии смешаны && и || без скобок; поставить скобки вокруг первой пары
+  - internal/check/failure_reset_sole_writer.go:566 — регулярное выражение считается всегда и перетирается при depth < sqlMaxNesting; разнести на if/else
+  - >-
+    internal/check/failure_reset_sole_writer.go:508 — счётчик Removals считает выражения, а комментарий
+    называет их текстами: одно удаление через локальную константу в порту даёт ByKeyInPort 2, Removals 3
+    (измерено временной пробой); уточнить единицу в комментарии
+foundation_candidates: []
+approved:
+  - дублирования разбора нет — лексика sqlTokens/SQLNamesRelation и свёртка newLVIndex общие с гейтом материала способа входа
+  - при непонятной форме гейт даёт находку (fail-closed), а не пропускает; нет паники, context.Background, init() и глобального изменяемого состояния
+  - ошибка разбора несёт файл и %w; gofmt и go vet ./internal/check/ — чисто
+  - шапка перечисляет, чего посылка не видит, и совпадает с тем, что делает код
+security_comments_contradicting_code: []

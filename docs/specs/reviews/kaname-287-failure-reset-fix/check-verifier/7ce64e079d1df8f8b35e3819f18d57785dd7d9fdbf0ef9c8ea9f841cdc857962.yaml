@@ -1,0 +1,139 @@
+schema_version: 1
+kind: check_verification
+role: check-verifier
+round: 2
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 770d9c42166cb03c4f2e87f5e88ce8052a0db56a
+  digest_predicate: >-
+    git -C <копия> diff 20a5dcaa..770d9c42166cb03c4f2e87f5e88ce8052a0db56a -- . ':!docs/specs/reviews' | sha256sum
+  digest: 7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962
+  previous_digest: 227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090
+  committed: false
+mode: приёмка работы-проверки
+isolation: >-
+  отдельный клон в kacho-workspace/tmp/cv-287-r2 (git clone --no-checkout копии автора, detach на head);
+  по одной инъекции за прогон точной заменой ровно одного вхождения; после каждого прогона
+  git checkout -- . и git status --porcelain = 0 строк; копия автора не тронута, кроме этой записи
+run_form: >-
+  go test -p 1 -count=1 -v -run '<проба>' <пакет>; TMPDIR — свой каталог клона; по одному тяжёлому прогону
+subjects:
+  - замок Ф12-46: пара «вход» и глаголы под сессией (second_factor_window_lock_test.go)
+  - проба посылки гейта единственного писателя (TestFailureResetPremise_RowsLeaveOnlyThroughThePortAndTheSweep)
+  - попутно: гейт единственного писателя и его ведомость, проба потребителя предъявления ключа
+experiments:
+  lock:
+    control_head: TestF12_46 — 7 подтестов зелёные; наблюдаемое «после успеха принято к сверке» 1/6/1/6 и 6/6/6 при N = 6
+    injection_login_without_code: >-
+      login.go, дому передано предъявленное без кода — краснеет ровно ветвь «вход ПАРОЛЁМ И КОДОМ»
+      (expected 6, actual 1, second_factor_window_lock_test.go:212); законная ветвь «вход ПАРОЛЁМ» молчит
+    twin_login_code_rebuilt: login.go, дому передано «пароль + метод фактора», собранное заново — 7 из 7 зелёные
+    injection_remove_without_code: >-
+      sf_remove.go, дому передано предъявленное сессии без кода — краснеет ровно «снятие фактора»
+      (expected 6, actual 1, second_factor_window_lock_test.go:313)
+    twin_remove_code_rebuilt: sf_remove.go, withMethod(предъявленное сессии, метод фактора) — 7 из 7 зелёные
+    injection_backup_codes_without_code: краснеет ровно «перечеканка запасных кодов»
+    injection_step_up_without_code: краснеет ровно ветвь «церемония КОДОМ»
+    injection_confirm_without_code: молчит — совпадает с названным в шапке замка законным исключением подтверждения заведения
+    injection_home_resets_on_any_success: краснеют ровно ветви «вход ПАРОЛЁМ» и «церемония ПАРОЛЕМ»
+    same_injection_on_previous_head: >-
+      11b6f723, та же инъекция в login.go — зелёная (3 подтеста, пары «вход» с кодом нет): слепота круга 1
+      воспроизведена, на 770d9c42 та же инъекция краснеет
+  premise_probe:
+    control_head: >-
+      зелёная; перепись: файлов прод-кода 967, строковых литералов 21065, операторов над строками
+      login_failures 2 — по ключу в реализации порта 1, по возрасту в уборщике 1
+    key_delete_outside_port: >-
+      новый метод humanSessionWriter в internal/repo/kaname/pg/human_session_repo.go,
+      DELETE FROM login_failures WHERE scope = 'address' AND key = $1 — краснеет, координата :414, «по ключу»
+    age_delete_outside_sweep: >-
+      новый метод HumanSessionRepo, DELETE FROM login_failures WHERE failed_at < $1 — краснеет, координата :414, «по возрасту»
+    twin_select_same_place: тот же метод, SELECT count(*) вместо DELETE — молчит, операторов 2
+    twin_other_table: тот же метод, DELETE из login_failures_archive — молчит, операторов 2
+    positive_half_port_unrecognized: >-
+      текст удаления в ResetFailures в форме (scope, key) = ($1, $2) — «НЕ ИСПОЛНЯЛАСЬ: реализация
+      ResetFailures не удаляет строк login_failures по ключу»
+    positive_half_sweep_renamed: >-
+      уборщик переименован — «НЕ ИСПОЛНЯЛАСЬ: уборщик SweepAgedFailures не удаляет строк»
+    unrecognized_forms_silent: >-
+      четыре законные формы удаления по ключу в том же новом методе — ЗЕЛЁНОЕ, перепись не изменилась
+      (операторов 2): см. находку CV-287-1
+  gate_and_ledger:
+    direct_port_call_in_lane: sf_remove.go, прямой вызов порта — гейт краснеет, координата sf_remove.go:142
+    ledger_entry_without_tracker_subject: Refs записи полосы восстановления опустошён — гейт краснеет «без предмета трекера»
+    removal_predicates_run_verbatim: >-
+      gh issue view 305 -R PRO-Robotech/kaname --json state -q .state → OPEN;
+      git grep -c ResetFailures -- …/recovery_complete.go → 1 (код 0);
+      git grep -nE 'resetFailuresOnCompletedLogin|ResetFailures' -- …/register.go → пусто (код 1)
+  key_presentation_consumer:
+    name_form_in_lane: login.go, имя способа ключа в функции полосы — краснеет, координата login.go:458
+    twin_other_method_name: то же место, имя способа кода — молчит
+    field_form: новая функция в access_keys читает поле Presentation — краснеет, координата finish_assertion.go:210
+numbers_reproduced:
+  - величина: файлов прод-кода 967
+    своё: git ls-files '*.go' | grep -v '_test\.go$' | wc -l → 967
+  - величина: называющих порт 4 · вызовов 2 · объявлений 1 · реализаций 1
+    своё: git grep -nw ResetFailures по прод-Go без строк комментария → код в 4 файлах (строковая константа гейта не узел)
+  - величина: полос, пишущих уровень, 7 — через дом 5, в ведомости 2
+    своё: git grep вызовов IssueSession( и PresentInSession( по прод-Go, без объявления интерфейса → 7 вызовов в 7 файлах
+  - величина: операторов над строками login_failures 2
+    своё: git grep -niE '(delete from|update|truncate) … login_failures' по прод-Go → 2 (human_session_repo.go:199, :381)
+empty_walk:
+  premise_probe: не зеленит — ноль любой положительной половины роняет прогон «НЕ ИСПОЛНЯЛАСЬ» (замерено на дереве)
+  lock: таблица глаголов под сессией с нулём строк роняет прогон; пары выписаны литералом, 4 строки
+full_packages_at_head:
+  humansession: зелёных 110 · красных 0 · не выполнилось 1 (TestLogin_F3_31 — ручная измерительная проба, веткой не тронута)
+  check: зелёных 1425 · красных 0 · не выполнилось 1 (TestDeclaredRequiredContextsMatchTheBranch — сетевая ручка не выставлена, веткой не тронута)
+  vet: go vet обоих пакетов — чисто
+fakes: >-
+  замок судит use-case на харнессе пакета, а не на Postgres: пары и глаголы различают, что
+  передано дому, и не различают, что порт на живой базе удаляет строки; это держит интеграционная
+  проба адаптера, а не замок. Посылка и гейты судят текст дерева, не исполнение.
+masks_and_relaxations: >-
+  в диффе новых пропусков нет; вне этого — только запись ведомости полосы восстановления со
+  ссылкой на PRO-Robotech/kaname#305 (OPEN) и исполнимыми предикатами снятия
+findings:
+  - id: CV-287-1
+    severity: blocking
+    class: recognizer-knows-all-lawful-forms
+    address:
+      - internal/check/failure_reset_sole_writer.go:495
+      - internal/check/failure_reset_sole_writer.go:435
+      - internal/check/failure_reset_sole_writer_test.go:152
+      - internal/check/failure_reset_sole_writer_injection_test.go:432
+    experiment: >-
+      в новый метод humanSessionWriter (internal/repo/kaname/pg/human_session_repo.go), по одной
+      форме за прогон, внесено удаление строк login_failures по ключу мимо реализации порта:
+      (1) WITH k AS (SELECT $1::text AS key) DELETE FROM login_failures f USING k WHERE f.key = k.key;
+      (2) MERGE INTO login_failures f USING (SELECT $1::text AS key) s ON f.key = s.key WHEN MATCHED THEN DELETE;
+      (3) /* forget the address */ DELETE FROM login_failures WHERE scope = 'address' AND key = $1;
+      (4) EXPLAIN ANALYZE DELETE FROM login_failures WHERE scope = 'address' AND key = $1.
+      Посылка и гейт — зелёные на всех четырёх, перепись «операторов 2» не изменилась.
+    why_blocking: >-
+      шапка посылки обещает, что разбор, не узнавший законную запись удаления, краснеет и не
+      пропускает, а сообщение fbbf757a — что неклассифицированная форма находка, а не молчание;
+      все четыре формы — строковые литералы в Go, то есть внутри обещанной области, и молчат, а не
+      краснеют. Пока так, молчание посылки не доказывает «иными операторами — нигде».
+    requirement: >-
+      те же четыре инъекции в том же месте краснеют с координатой; формы входят в
+      TestFailureRowRemovalPremiseRedsOnEveryOtherRemoval; законные близнецы (SELECT на том же месте,
+      удаление из другой таблицы) по-прежнему молчат
+    return_to: автор диффа (полоса ветки 287)
+notes:
+  - >-
+    предикат снятия записи полосы восстановления считает git grep -c и строки комментария: если
+    полоса перейдёт на дом, но упоминание останется в прозе, предикат скажет «не снято»; гейт сам
+    краснеет на самоистечении, поэтому не блокирует
+  - >-
+    у подтверждения заведения замок инъекцию «без кода» не различает — это названное в шапке замка
+    законное исключение, замер с ним совпал
+premise_of_task:
+  status: подтверждена для замка, гейта и ведомости; опровергнута для «инъекция в обе стороны посылки — краснеет» на четырёх формах CV-287-1
+  author_remainder: >-
+    «6 коммитов поверх 11b6f723, head fbbf757a, каталог reviews в коммиты не попал» — верно для
+    6ae42df6..fbbf757a; судимая голова 770d9c42 на 2 коммита дальше и несёт 3 записи ревью
+    (e21b8cb1 — запись приёмки, 770d9c42 — две записи круга 1)
+verdict: returned
+blocking: true
