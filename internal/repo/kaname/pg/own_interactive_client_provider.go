@@ -21,9 +21,10 @@ package pg
 //     кладёт вызывающий (`clientRepo.Insert`) сразу следом — писать её здесь
 //     значило бы завести ВТОРОГО писателя одной строки;
 //   - СНЯТИЕ снимает проверочное значение секрета. Всё остальное, что было
-//     ключено на клиента, сносит СХЕМА: `token_families`, `consent_grants` и,
-//     через составной ключ семейства, `authorization_codes` и `refresh_tokens`
-//     ссылаются на `interactive_clients(client_id)` с `ON DELETE CASCADE`.
+//     ключено на клиента, сносит СХЕМА: `token_families` ссылается на
+//     `interactive_clients(client_id)` с `ON DELETE CASCADE`, а
+//     `authorization_codes` и `refresh_tokens` уходят с семейством через его
+//     составной ключ.
 //     Повторять это запросами значило бы завести второе место об одном
 //     предмете, которое разойдётся со схемой молча.
 //
@@ -165,8 +166,8 @@ func (p *OwnInteractiveClientProvider) Deregister(ctx context.Context, clientID 
 	err := p.clients.ClearClientSecretVerifier(ctx, clientID)
 	if stderrors.Is(err, iamerr.ErrNotFound) {
 		// Строки нет — вместе с ней схема унесла и всё, что было на неё
-		// ключено: семейства выданного, коды авторизации, обновляющие токены и
-		// согласия субъекта. Снимать нечего и незачем.
+		// ключено: семейства выданного, коды авторизации и обновляющие токены.
+		// Снимать нечего и незачем.
 		return nil
 	}
 	return err

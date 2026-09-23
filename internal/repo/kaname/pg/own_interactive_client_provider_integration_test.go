@@ -126,5 +126,5 @@ func TestIntegration_OwnInteractiveClientDeregistrationIsIdempotent(t *testing.T
 	require.NoError(t, provider.Deregister(ctx, "oic-nosuchclient00000"),
 		"снятие отсутствующего клиента обязано быть успехом: строку уносит "+
 			"глагол ресурса, а вместе с ней схема уносит семейства выданного, "+
-			"коды, обновляющие токены и согласия субъекта")
+			"коды и обновляющие токены")
 }

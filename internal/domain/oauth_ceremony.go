@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // oauth_ceremony.go — СОБСТВЕННАЯ ЦЕРЕМОНИЯ OAuth: код авторизации, семейство
-// выданного по нему, обновляющий токен и согласие субъекта (kaname#313).
+// выданного по нему и обновляющий токен (kaname#313).
 //
 // Домен здесь описывает ЗНАЧЕНИЯ и ИСХОДЫ; хранение, свёртки и операторы живут
 // у слоя доступа. Чистый Go, только stdlib.
@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"time"
 )
 
 // ── Исходы обмена и ротации ─────────────────────────────────────────────────
@@ -95,7 +94,9 @@ func IsRefreshTokenReplay(err error) bool { return errors.Is(err, ErrRefreshToke
 
 // FamilyRevocationReason — причина отзыва семейства. Словарь ЗАКРЫТ и совпадает
 // с ограничением `token_families_revoked_reason_ck`: корзины «прочее» у него
-// нет, и значение вне перечня — наша ошибка, а не чужая.
+// нет, и значение вне перечня — наша ошибка, а не чужая. Совпадение в обе
+// стороны держит проба живой схемы
+// `TestIntegration_RevocationVocabularyAgreesWithTheDomain`.
 type FamilyRevocationReason string
 
 const (
@@ -107,8 +108,6 @@ const (
 	FamilyRevokedByLogout FamilyRevocationReason = "logout"
 	// FamilyRevokedBySessionEnd — сессия, в которой шла церемония, снята.
 	FamilyRevokedBySessionEnd FamilyRevocationReason = "session-ended"
-	// FamilyRevokedByConsentWithdrawal — согласие отозвано.
-	FamilyRevokedByConsentWithdrawal FamilyRevocationReason = "consent-withdrawn"
 	// FamilyRevokedByClientRemoval — клиент снят.
 	FamilyRevokedByClientRemoval FamilyRevocationReason = "client-removed"
 )
@@ -118,7 +117,7 @@ const (
 func FamilyRevocationReasons() []FamilyRevocationReason {
 	return []FamilyRevocationReason{
 		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedByLogout,
-		FamilyRevokedBySessionEnd, FamilyRevokedByConsentWithdrawal, FamilyRevokedByClientRemoval,
+		FamilyRevokedBySessionEnd, FamilyRevokedByClientRemoval,
 	}
 }
 
@@ -223,20 +222,3 @@ type RotatedRefreshToken struct {
 	Context    CeremonyContext
 	Generation int32
 }
-
-// ConsentGrant — согласие субъекта на одну область для одного клиента.
-//
-// Отзыв выражен ОТСУТСТВИЕМ момента, представимым отдельно от значения
-// (`*time.Time`): «согласия не было» — строки нет вовсе, «согласие отозвано» —
-// строка есть и момент стоит. Нулевой `time.Time` слил бы эти два ответа.
-type ConsentGrant struct {
-	ID        string
-	UserID    string
-	ClientID  string
-	Scope     string
-	GrantedAt time.Time
-	RevokedAt *time.Time
-}
-
-// IsActive — согласие действует.
-func (g ConsentGrant) IsActive() bool { return g.RevokedAt == nil }

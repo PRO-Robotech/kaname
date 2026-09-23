@@ -18,6 +18,9 @@
 //     ограничением словаря, а близнец, отличающийся ОДНОЙ причиной, проходит;
 //   - СЛОВАРЬ ДОМЕНА И СЛОВАРЬ БАЗЫ СОВПАДАЮТ в обе стороны. Это класс, а не
 //     экземпляр: сузить одно место и забыть второе нельзя ни в какую сторону;
+//   - НАКАТ ОТКАЗЫВАЕТ, пока лежит семейство со снимаемой причиной: целиком,
+//     не сдвигая версию и не переписывая причину. Близнец — та же строка с
+//     законной причиной — проходит;
 //   - ОТКАТ возвращает СТРОЕНИЕ, снятое накатом, ровно таким, каким оно стояло:
 //     сравниваются две базы — поднятая до предмета и откаченная с головы.
 //     Строк откат не возвращает — их неоткуда взять. На откаченной базе сверка
@@ -230,6 +233,47 @@ func TestRevocationVocabularyComparator_SeesBothDirections(t *testing.T) {
 	narrower := revocationVocabularyFindings([]string{"code-replay"}, agreed)
 	require.Len(t, narrower, 1, "база потеряла значение домена — находка ровно одна")
 	require.Contains(t, narrower[0], "logout", "находка обязана назвать потерянное значение")
+}
+
+// TestIntegration_ConsentLeavingRefusesAFamilyCarryingTheWithdrawnReason —
+// строка с причиной, которую накат снимает, ОТКАЗЫВАЕТ накату целиком, а не
+// переписывается в другую причину и не остаётся под ограничением без проверки.
+// Близнец отличается одной причиной у той же строки — и накат проходит.
+func TestIntegration_ConsentLeavingRefusesAFamilyCarryingTheWithdrawnReason(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	own, previous := versionsOf(t, consentLeavesMigration)
+
+	db, err := sql.Open("pgx", pgtest.NewEmptyDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.UpTo(db, ".", previous), "цепочка обязана дойти до версии перед предметом")
+
+	_, _, _, family := acScene(t, db, "cgxrfs")
+	_, err = db.Exec(revokeFamilySQL, family, withdrawnReason)
+	require.NoError(t, err, "до наката снимаемая причина обязана приниматься — иначе отказывать нечему")
+
+	requirePgRefusal(t, goose.UpTo(db, ".", own), "23514", revokedReasonConstraint,
+		"накат обязан отказать, пока лежит строка с причиной, которую он снимает")
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, previous, version, "отказавший накат не вправе сдвинуть версию цепочки")
+	require.Equal(t, 1, kanameRelationCount(t, db, "consent_grants"),
+		"отказавший накат обязан откатиться целиком: таблица согласий на месте")
+	var reason string
+	require.NoError(t, db.QueryRow(
+		`SELECT revoked_reason FROM kaname.token_families WHERE id = $1`, family).Scan(&reason))
+	require.Equal(t, withdrawnReason, reason, "отказавший накат не вправе переписать причину")
+
+	// БЛИЗНЕЦ: та же строка, другая причина — накат проходит.
+	_, err = db.Exec(`UPDATE kaname.token_families SET revoked_reason = $2 WHERE id = $1`,
+		family, string(domain.FamilyRevokedByClientRemoval))
+	require.NoError(t, err)
+	require.NoError(t, goose.UpTo(db, ".", own), "без строки со снимаемой причиной накат обязан проходить")
+	require.Zero(t, kanameRelationCount(t, db, "consent_grants"), "после наката таблицы согласий быть не должно")
 }
 
 // consentStructure — строение, которое снимает накат: столбцы, ограничения,
