@@ -57,7 +57,7 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
@@ -455,7 +455,7 @@ func unreachableFloorsComplaint(w LaneWiring) error {
 	unreachable := 0
 	var levels []string
 	for level, n := range w.CatalogFloors.ByLevel {
-		if grpcsrv.ACRRank(level) <= 0 {
+		if acrlevel.Rank(level) <= 0 {
 			// Уровень, которого платформа не знает, требованием не является —
 			// ровно как в точке решения.
 			continue
@@ -482,7 +482,7 @@ func unreachableFloorsComplaint(w LaneWiring) error {
 // ЕДИНСТВЕННАЯ функция платформы; своей таблицы рангов полоса не заводит.
 func lanePresents(presentable []string, required string) bool {
 	for _, p := range presentable {
-		if grpcsrv.ACRSatisfies(p, required) {
+		if acrlevel.Satisfies(p, required) {
 			return true
 		}
 	}
