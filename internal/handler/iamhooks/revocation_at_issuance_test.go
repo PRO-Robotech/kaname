@@ -6,8 +6,9 @@
 //
 // The bar every case holds is deliberately not "the revocation port was
 // consulted". A handler that reads the cutoff and mints anyway passes that bar,
-// which is how the gap survived: the cutoff was written by three call sites and
-// read by one, on the path taken only when an existing token is REFRESHED. The
+// which is how the gap survived: the cutoff was written on every path that logs a
+// person out and read on one, the path taken only when an existing token is
+// REFRESHED. The
 // assertion is on the observable — after a cutoff, no usable token comes back:
 // the status refuses AND the response carries no claims to mint from.
 //

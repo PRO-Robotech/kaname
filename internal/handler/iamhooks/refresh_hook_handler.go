@@ -15,8 +15,9 @@
 //     вправе аутентифицироваться → 403 user_disabled с причиной user_blocked.
 //     Hydra пропагирует оба как invalid_grant. Тот же вердикт применяет
 //     token-hook, поэтому разойтись они больше не могут.
-//  3. Применяет user-level revoke-all cutoff (ForceLogout / Revoke(revoke_all) /
-//     восстановление пароля), сверяя его с моментом аутентификации сессии.
+//  3. Применяет user-level revoke-all cutoff — любую записанную отсечку, каким
+//     бы действием, выводящим человека отовсюду, она ни была записана, —
+//     сверяя её с моментом аутентификации сессии.
 //  4. Re-injects ext_claims (same as token_hook).
 //  5. Audit emit `authn.refresh.issued` (либо `authn.refresh.denied`).
 //
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -226,13 +228,13 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. User-level revoke-all gate (admin ForceLogout / Revoke(revoke_all) /
-	// password recovery). Deny if ANY of the identity's user-rows has a cutoff at
-	// or after the session's authentication instant: the token's session predates
-	// the revoke-all, so it must not be refreshed. Fail-closed on a lookup error.
-	// An absent instant with a cutoff present is also a denial — we cannot show
-	// the token post-dates the revoke-all, and an unprovable claim is not a
-	// permission.
+	// 2. User-level revoke-all gate — any recorded cutoff, whichever action that
+	// logs a person out of everything wrote it. Deny if ANY of the identity's
+	// user-rows has a cutoff at or after the session's authentication instant:
+	// the token's session predates the revoke-all, so it must not be refreshed.
+	// Fail-closed on a lookup error. An absent instant with a cutoff present is
+	// also a denial — we cannot show the token post-dates the revoke-all, and an
+	// unprovable claim is not a permission.
 	//
 	// This is now THE gate on this path rather than the last of three: the per-jti
 	// gate that used to precede it keyed on a field this body does not carry, so
@@ -326,13 +328,11 @@ func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domai
 		if !found {
 			continue
 		}
-		// No auth_time to compare → cannot prove the token post-dates the
-		// revoke-all → deny (fail-safe), never a silent allow.
-		if authTime.IsZero() {
-			return true, "user_revoked", nil
-		}
-		// Session authenticated at-or-before the cutoff → deny.
-		if !authTime.After(cutoff) {
+		// The comparison is the ONE every lane shares (`revocationpolicy`), not
+		// a copy: a session authenticated at-or-before the cutoff is denied,
+		// and so is one that states no instant at all — it cannot be shown to
+		// post-date the revoke-all (fail-safe, never a silent allow).
+		if revocationpolicy.Forbids(cutoff, authTime) {
 			return true, "user_revoked", nil
 		}
 	}

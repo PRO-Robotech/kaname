@@ -612,6 +612,70 @@ var RequiredSettings = []RequiredSetting{
 			"намеренно — окно, выбранное за оператора, он не увидит и не пересмотрит",
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
+	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
+	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а четыре
+	// его величины — его собственным стражем, то есть только после того, как
+	// эндпоинт включён. Образец перечня адресатов несёт образец адресата
+	// докерной полосы (`api-server.registry-token.service` выше): страж той
+	// полосы требует его внутри перечня, и несогласованные образцы отверг бы он.
+	{
+		Key:    "authn.client-token.enabled",
+		Env:    "KANAME_AUTHN__CLIENT_TOKEN__ENABLED",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "true",
+		Why: "токен-эндпоинт платформы, на котором ключ служебной учётки обменивается на токен. " +
+			"На посадке own внешнего поставщика нет вовсе, а с выключенным эндпоинтом выдача ключа " +
+			"заводит клиента у внешнего поставщика: процесс поднялся бы и отказывал на всякой выдаче " +
+			"ключа. Эндпоинт монтируется на слушателе api-server.registry-token.endpoint, и тот обязан " +
+			"быть поднят",
+		Refusal: "authn.client-token.enabled is false",
+	},
+	{
+		Key:         "authn.client-token.allowed-audiences",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "kacho-registry,https://api.example.invalid",
+		Why: "перечень адресатов, которым платформа вообще чеканит удостоверения (через запятую). " +
+			"Пустой означает «выдаём токен, адресованный чему угодно». Адресат докерной полосы " +
+			"(api-server.registry-token.service) обязан входить в перечень",
+		Refusal: "authn.client-token.allowed-audiences has no elements",
+	},
+	{
+		Key:         "authn.client-token.default-audience",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "https://api.example.invalid",
+		Why: "адресат токена, когда запрос его не назвал; обязан быть членом перечня выше, " +
+			"иначе умолчание отвергалось бы собственной проверкой",
+		Refusal: "authn.client-token.default-audience is empty",
+	},
+	{
+		Key:         "authn.client-token.token-ttl",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "15m",
+		Why: "срок выпускаемого токена, не выше платформенного потолка. Умолчания нет: срок — " +
+			"слагаемое арифметики отсрочки снятия ключа, и выбирает его тот, кто ставит службу",
+		Refusal: "authn.client-token.token-ttl must be declared",
+	},
+	{
+		Key:         "authn.client-token.body-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "65536",
+		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
+			"читал бы сколько прислали",
+		Refusal: "authn.client-token.body-ceiling must be declared",
+	},
 }
 
 // ownCeilingRequirement — строка таблицы обязательных величин, ПОРОЖДЁННАЯ из
