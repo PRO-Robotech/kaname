@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/treeroot"
+	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
 
 // ceremonyRootDir — каталог композиционного корня ОТНОСИТЕЛЬНО корня модуля.
@@ -171,6 +172,38 @@ func TestCeremonySurfaceGatePremiseHolds(t *testing.T) {
 	for _, s := range report.Surfaces {
 		if s.Roots == 0 {
 			t.Errorf("поверхность «%s»: обработчик не прослежен ни до одного значения", s.Name)
+		}
+	}
+
+	// Два производителя одного перечня сверяются МЕЖДУ СОБОЙ: перечень
+	// поверхностей для чарта и документа установки (tools/surfaceroster)
+	// выводится своим разбором. Разошлись — один из двух ослеп, и молча.
+	roster, err := surfaceroster.Read(ceremonyModuleRoot(t))
+	if err != nil {
+		t.Fatalf("перечень поверхностей tools/surfaceroster: %v", err)
+	}
+	reachWord := map[string]string{"external": "ReachExternal", "cluster-internal": "ReachClusterInternal"}
+	want := map[string]string{}
+	for _, s := range roster.Surfaces {
+		if !s.GRPC {
+			want[s.Name] = reachWord[s.Reach]
+		}
+	}
+	got := map[string]string{}
+	for _, s := range report.Surfaces {
+		got[s.Name] = s.Reach
+	}
+	if len(want) == 0 {
+		t.Fatalf("tools/surfaceroster не назвал ни одной HTTP-поверхности — сверять не с чем")
+	}
+	for name, reach := range want {
+		if got[name] != reach {
+			t.Errorf("поверхность «%s» [%s] есть в tools/surfaceroster, у гейта — [%s]", name, reach, got[name])
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("поверхность «%s» выведена гейтом, а tools/surfaceroster её не знает", name)
 		}
 	}
 }
