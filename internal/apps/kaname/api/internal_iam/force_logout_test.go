@@ -27,6 +27,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
 // adminCtx returns a ctx carrying an authenticated admin principal — the
@@ -41,12 +42,19 @@ func adminCtx() context.Context {
 
 var errForceLogoutDown = errors.New("user_token_revocations: backend down")
 
-// fakeForceLogoutRecorder — in-memory sessionRevoker port. Records the
-// user-level RevokeAllUserTokensTx call so a test can prove ForceLogout writes a
-// user-level cutoff (the gate the refresh-hook actually enforces), not just a
-// synthetic per-jti row that can never match. The port is the
-// tx-scoped *Tx variant (cutoff + audit row atomic); allEventType captures the
-// audit taxonomy value passed (expected iam.session.force_logout).
+// fakeForceLogoutRecorder — in-memory cutoff writer. Records the user-level
+// cutoff so a test can prove ForceLogout writes one (the gate the refresh-hook
+// actually enforces), not just a synthetic per-jti row that can never match.
+// allEventType captures the audit taxonomy value of the record committed with
+// the cutoff (expected iam.session.force_logout).
+//
+// Писателей отсечки у глагола ДВА, и посадка выбирает одного (kaname#340): на
+// посадке без наших записей сессии — `sessionRevoker` (RevokeAllUserTokensTx),
+// под `own` — транзакция снятия (`OwnSessions`). Заглушка несёт ОБА порта и
+// пишет в одни и те же поля, поэтому пробы стража, актора и операции судят свой
+// предмет на той посадке, которую провязывает корень, и не зависят от того, чей
+// писатель положил отсечку. Исход самого снятия судит
+// `force_logout_own_session_test.go`.
 type fakeForceLogoutRecorder struct {
 	// User-level revoke-all state.
 	allCnt       int
@@ -67,6 +75,55 @@ func (f *fakeForceLogoutRecorder) RevokeAllUserTokensTx(_ context.Context, userI
 	f.allEventType = eventType
 	return f.allErr
 }
+
+// ForceLogoutWriter — тот же писатель на посадке `own`. Отсечка засчитывается
+// ФИКСАЦИЕЙ, как и в настоящей транзакции: до неё её нет. Снятых записей ноль —
+// предмет проб, провязывающих эту заглушку, не снятие.
+func (f *fakeForceLogoutRecorder) ForceLogoutWriter(context.Context) (OwnSessionsWriter, error) {
+	return &fakeForceLogoutRecorderTx{rec: f}, nil
+}
+
+// fakeForceLogoutRecorderTx — транзакция заглушки: копит отсечку и тип записи
+// события и отдаёт их записывающему только при фиксации.
+type fakeForceLogoutRecorderTx struct {
+	rec       *fakeForceLogoutRecorder
+	cutoff    *domain.UserTokenRevocation
+	cutoffBy  domain.UserID
+	eventType string
+}
+
+func (w *fakeForceLogoutRecorderTx) EndOtherSessions(context.Context, domain.UserID,
+	domain.HumanSessionID, time.Time, string,
+) (int, error) {
+	return 0, nil
+}
+
+func (w *fakeForceLogoutRecorderTx) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+	if w.rec.allErr != nil {
+		return w.rec.allErr
+	}
+	w.cutoff, w.cutoffBy = &u, revokedBy
+	return nil
+}
+
+func (w *fakeForceLogoutRecorderTx) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) error {
+	w.eventType = ev.EventType
+	return nil
+}
+
+func (w *fakeForceLogoutRecorderTx) Commit(context.Context) error {
+	if w.cutoff != nil {
+		w.rec.allCnt++
+		w.rec.allUser = w.cutoff.UserID
+		w.rec.allBefore = w.cutoff.RevokeBefore
+		w.rec.allReason = w.cutoff.Reason
+		w.rec.allBy = w.cutoffBy
+		w.rec.allEventType = w.eventType
+	}
+	return nil
+}
+
+func (w *fakeForceLogoutRecorderTx) Rollback(context.Context) error { return nil }
 
 // recordingForceLogoutOps — operations repo stub recording the transitions
 // ForceLogout drives. Every method the handler touches is stubbed explicitly
@@ -105,14 +162,14 @@ func (f *recordingForceLogoutOps) MarkError(_ context.Context, _ string, st *sta
 	return nil
 }
 
-func forceLogoutHandler(rec sessionRevoker) *Handler {
+func forceLogoutHandler(rec *fakeForceLogoutRecorder) *Handler {
 	h, _ := forceLogoutHandlerWithOps(rec)
 	return h
 }
 
 // forceLogoutHandlerWithOps is forceLogoutHandler plus a handle on the recorded
 // operation transitions.
-func forceLogoutHandlerWithOps(rec sessionRevoker) (*Handler, *recordingForceLogoutOps) {
+func forceLogoutHandlerWithOps(rec *fakeForceLogoutRecorder) (*Handler, *recordingForceLogoutOps) {
 	// An allowing ReBAC checker — these tests exercise the revocation behaviour,
 	// not the authZ gate (gate-specific cases live in force_logout_authz_test.go).
 	ops := &recordingForceLogoutOps{}
@@ -123,7 +180,9 @@ func forceLogoutHandlerWithOps(rec sessionRevoker) (*Handler, *recordingForceLog
 		// Исполнитель снятия сессии провязан ТАК ЖЕ, как его провязывает
 		// композиционный корень: без него глагол отказывает закрыто, и пробы
 		// ниже судили бы отказ провязки вместо своего предмета (kaname#313).
-		WithOwnSessions(&recordingOwnSessions{})
+		// Под `own` отсечку кладёт его транзакция (kaname#340) — поэтому это та
+		// же заглушка, что пишет отсечку.
+		WithOwnSessions(rec)
 	return h, ops
 }
 

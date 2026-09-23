@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -293,11 +294,13 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 
 // endSessionsOfSQL — ОДНА операция снятия живых записей личности на всё дерево.
 //
-// Выписана константой, потому что исполнителей у неё ДВА: транзакция полосы
-// входа (смена пароля, снятие второго фактора, завершение восстановления) и
-// пул административного принудительного выхода. Две копии одного оператора
-// разошлись бы молча — и разошлись бы та, которую правили последней, — а
-// расхождение здесь означает «по одной полосе человек выведен, по другой нет».
+// Выписана константой, потому что вызывающих у неё ДВА: полоса входа (смена
+// пароля, снятие второго фактора, завершение восстановления) и
+// административный принудительный выход (`ForceLogoutWriter`, kaname#340). Оба
+// исполняют её ТРАНЗАКЦИЕЙ писателя сессии, через `EndOtherSessions`. Две копии
+// одного оператора разошлись бы молча — и разошлись бы та, которую правили
+// последней, — а расхождение здесь означает «по одной полосе человек выведен,
+// по другой нет».
 //
 // `keep` пустой снимает ВСЕ живые записи: пустая строка не равна ни одному
 // идентификатору, поэтому исключать ей нечего. Это не подставное значение, а
@@ -336,8 +339,11 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 // который эта полоса чинит везде. Радиус брался по диффу, а надо было по
 // механизму: по операторам, ставящим отметку окончания записи.
 //
-// Теперь отзыв делает КАЖДЫЙ снимающий метод, а их три: снятие одной записи,
-// снятие прочих записей личности и снятие всех её записей. Держит это гейт
+// Теперь отзыв делает КАЖДЫЙ снимающий метод. Их было три: снятие одной
+// записи, снятие прочих записей личности и снятие всех её записей на пуле.
+// Третий снят (kaname#340): административный выход снимает записи транзакцией
+// писателя, вместе с отсечкой и записью события, то есть вторым методом с
+// пустым `keep`. Держит это гейт
 // дерева `TestSessionEndingWritersRevokeWhatTheSessionHolds` — до него у пары
 // «снятие сессии / отзыв семейства» не было ни одного прибора, в отличие от
 // пары записей отсечки.
@@ -389,60 +395,22 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 	return len(ended), nil
 }
 
-// EndAllSessions — ВСЕ живые записи сессии входа личности, снятые на пуле.
+// ForceLogoutWriter — транзакция записи для административного принудительного
+// выхода на посадке `own` (kaname#340): снятие ВСЕХ живых записей личности
+// (`EndOtherSessions` с пустым `keep`), отсечка и запись события — одним
+// коммитом.
 //
-// Читатель у него один — административный принудительный выход, — и приходит он
-// не с полосы входа, а с внутреннего слушателя: своей транзакции у него здесь
-// нет, а отсечка субъекта ложится СВОЕЙ транзакцией до этого вызова.
-//
-// ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ОТ ОТСЕЧКИ ЗАПИСЬ, А НЕ ЕЁ СЛЕДСТВИЕ, И ЧТО ИМЕННО
-// ИЗМЕРЕНО.
-//
-// Отсечка судит ВЫДАЧУ, и судит её НЕ ЗДЕСЬ: резолв нашей сессии отсечку не
-// применяет и говорит это о себе прямо (`humansession/resolve.go`) — строка
-// судится по трём признакам: снята · истекла · личность неактивна. Приёмка Ф3-25
-// ставит отказ предъявленной сессии НА КРАЮ, сравнением момента аутентификации
-// с отсечкой, и эта запись того пути НЕ ЗАМЕЩАЕТ.
-//
-// Измерено ровно одно: без снятия строка остаётся живой, и `Resolve` отвечает
-// «сессия есть» на носитель, выданный до выхода. Следствия этого — три, и все
-// три внутри службы:
-//
-//  1. СИММЕТРИЯ ДВУХ ВЫХОДОВ. Наш собственный выход снимает строку И пишет
-//     отсечку (`humansession/logout.go`). Тот же акт, совершённый
-//     распорядителем, писал только отсечку — то есть один и тот же выход
-//     оставлял разный след;
-//  2. СТРОКА НЕ УБИРАЕТСЯ. Уборка сносит истёкшие и СНЯТЫЕ строки
-//     (`SweepUnservableSessions`); не снятая живёт до своего абсолютного срока;
-//  3. ОТКАЗ ЗАВИСИТ ОТ ВТОРОГО ВОПРОСА. Пока строка жива, «сессии нет» получает
-//     только тот, кто СВЕРХ резолва спросил и отсечку. Снятая строка отвечает
-//     «снята» одним вопросом, и отвечает так всякому читателю.
-//
-// Возвращает ЧИСЛО снятых записей: «снимать было нечего» и «сняли» — разные
-// исходы, и слитые в один они читаются вызывающим одинаково.
-func (r *HumanSessionRepo) EndAllSessions(ctx context.Context, userID domain.UserID, at time.Time, reason string) (int, error) {
-	if userID == "" {
-		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.user_id: required")
-	}
-	tx, err := r.pool.Begin(ctx)
+// Это ТОТ ЖЕ писатель, что у полосы входа, а не отдельный путь: прежде снятие
+// шло своей транзакцией на пуле ПОСЛЕ транзакции отсечки, и запись события,
+// положенная транзакцией отсечки, ложилась до снятия — числа снятых она нести
+// не могла. Порядок операторов внутри транзакции задаёт вызывающий; он тот же,
+// что у собственного выхода человека: снятие, отсечка, событие.
+func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context) (internaliam.OwnSessionsWriter, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
+		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// ТОТ ЖЕ единственный оператор, что и у полосы входа: снять записи и
-	// отозвать выданное в них. Привязка семейства к сессии — внешний ключ с
-	// каскадом НА УДАЛЕНИИ строки, а снятие строку не удаляет; без отзыва
-	// обновляющий токен снятой сессии жил бы до порога УДЕРЖАНИЯ — то есть до
-	// настройки хранения, а не до решения о безопасности.
-	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, tx, userID, "", at, reason)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, mapErr(err, "HumanSession.EndAll", string(userID))
-	}
-	return ended, nil
+	return &humanSessionWriter{tx: tx}, nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент
@@ -575,8 +543,10 @@ func (w *humanSessionWriter) Rollback(ctx context.Context) error {
 }
 
 var (
-	_ humansession.Store          = (*HumanSessionRepo)(nil)
-	_ humansession.Writer         = (*humanSessionWriter)(nil)
-	_ humansession.SessionSweeper = (*HumanSessionRepo)(nil)
-	_ humansession.FailureSweeper = (*HumanSessionRepo)(nil)
+	_ internaliam.OwnSessions       = (*HumanSessionRepo)(nil)
+	_ internaliam.OwnSessionsWriter = (*humanSessionWriter)(nil)
+	_ humansession.Store            = (*HumanSessionRepo)(nil)
+	_ humansession.Writer           = (*humanSessionWriter)(nil)
+	_ humansession.SessionSweeper   = (*HumanSessionRepo)(nil)
+	_ humansession.FailureSweeper   = (*HumanSessionRepo)(nil)
 )

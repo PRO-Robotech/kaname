@@ -11,12 +11,14 @@
 // Operation, done=true). The earlier per-jti synthetic-jti write was inert — a
 // synthetic jti can never match the target's real live-token jti.
 //
-// СНЯТИЕ САМОЙ СЕССИИ ВХОДА ИДЁТ ВТОРЫМ ДЕЙСТВИЕМ, и ЧЬЮ сессию снимать, решает
+// СНЯТИЕ САМОЙ СЕССИИ ВХОДА — второе действие, и ЧЬЮ сессию снимать, решает
 // посадка (kaname#313): под `external` — сессию у внешнего поставщика
-// (`ProviderSessions`), под `own` — НАШУ строку `human_sessions`
-// (`OwnSessions`). Провязан ровно один из двух: провязать оба значило бы на
-// каждой посадке звать одного впустую, а под `own` — звать дорогу, которой нет,
-// и отказывать всему глаголу за её отсутствием.
+// (`ProviderSessions`), после транзакции отсечки; под `own` — НАШУ строку
+// `human_sessions` (`OwnSessions`), в ОДНОЙ транзакции с отсечкой и записью
+// события, которая несёт исход снятия (kaname#340). Провязан ровно один из
+// двух: провязать оба значило бы на каждой посадке звать одного впустую, а под
+// `own` — звать дорогу, которой нет, и отказывать всему глаголу за её
+// отсутствием.
 //
 // ForceLogout was advertised (caller_policy + permission_catalog) but
 // Unimplemented before this fix — an advertised-but-Unimplemented RPC is a
@@ -42,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
 // sessionRevoker — narrow write port for ForceLogout.
@@ -58,6 +61,12 @@ import (
 // iam.session.force_logout audit_outbox row in ONE transaction
 // (commit-together-or-rollback-together, запрет #10). eventType selects the
 // audit taxonomy value (force_logout for this RPC).
+//
+// ForceLogout зовёт его там, где НАШИХ записей сессии нет, — на посадке
+// `external` и там, где исполнитель снятия не провязан вовсе. Под `own` отсечку
+// кладёт транзакция снятия (`OwnSessionsWriter`, kaname#340): запись события
+// обязана лечь ПОСЛЕ снятия и нести его исход, а транзакция этого порта снятия
+// не видит.
 type sessionRevoker interface {
 	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID, eventType string) error
 }
@@ -154,11 +163,40 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 // срока; и «сессии нет» получал только тот читатель, кто сверх резолва спросил
 // ещё и отсечку.
 //
-// Реализуется `*repo/kaname/pg.HumanSessionRepo` — ТЕМ ЖЕ адаптером, которым
-// снимает свои записи полоса входа. Два писателя одной таблицы зовут один
+// # ПОЧЕМУ ПОРТ ОТДАЁТ ТРАНЗАКЦИЮ, А НЕ ГЛАГОЛ «СНЯТЬ» (kaname#340)
+//
+// Долговременная запись принудительного выхода обязана нести его ИСХОД — число
+// снятых записей, — а число это существует только ПОСЛЕ снятия. Пока снятие шло
+// своей транзакцией вслед за отсечкой, запись события ложилась транзакцией
+// отсечки, то есть ДО снятия, и «сняли три» от «снимать было нечем» в ней не
+// отличалось. Теперь снятие, отсечка и запись события ложатся ОДНОЙ
+// транзакцией этого порта.
+//
+// Порядок в ней — тот же, что у собственного выхода человека, у смены пароля и
+// у завершения восстановления: снятие записей, затем отсечка, затем событие.
+// Это и порядок захвата строк: писатели, берущие строки сессии и строку
+// отсечки в разном порядке, взаимно блокировали бы друг друга.
+//
+// Реализуется `*repo/kaname/pg.HumanSessionRepo` — ТОЙ ЖЕ транзакцией записи,
+// которой снимает свои записи полоса входа. Два писателя одной таблицы зовут один
 // оператор (`endSessionsOfSQL`).
 type OwnSessions interface {
-	EndAllSessions(ctx context.Context, userID domain.UserID, at time.Time, reason string) (int, error)
+	ForceLogoutWriter(ctx context.Context) (OwnSessionsWriter, error)
+}
+
+// OwnSessionsWriter — ОДНА транзакция принудительного выхода на посадке `own`:
+// снятие наших записей, отсечка, запись события. Вызывающий обязан Commit либо
+// Rollback.
+type OwnSessionsWriter interface {
+	// EndOtherSessions снимает живые записи личности, кроме keep, и отзывает
+	// выданное в них; пустой keep снимает ВСЕ. Отвечает числом снятых.
+	EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error)
+	// UpsertCutoff — обе записи отсечки субъекта одной дверью.
+	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
+	// EmitAudit — запись события в очередь аудита той же транзакцией.
+	EmitAudit(ctx context.Context, ev outboxtypes.AuditEvent) error
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
 }
 
 // WithOwnSessions — привязывает снятие НАШИХ записей сессии входа.
@@ -264,7 +302,10 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if userID == "" {
 		return nil, shared.InvalidArg("user_id", "required")
 	}
-	if h.sessionRevoker == nil {
+	// Писатель отсечки выбирается посадкой: под `own` её кладёт транзакция
+	// снятия наших записей (kaname#340), на прочих — `sessionRevoker`. Отказ
+	// здесь — ровно тогда, когда нет НИ ОДНОГО из двух.
+	if h.ownSessions == nil && h.sessionRevoker == nil {
 		return nil, status.Error(codes.Unavailable, "session revocation writer not configured")
 	}
 	if h.operations == nil {
@@ -317,137 +358,57 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 		return nil, fmt.Errorf("persist operation: %w", err)
 	}
 
-	if err := h.sessionRevoker.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionForceLogout); err != nil {
-		// Record the terminal failure on the already-persisted op so a poll sees
-		// a real error, not NotFound; still surface the gRPC error to the caller.
-		gerr := shared.MapRepoErr(err)
-		if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
-			slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
-				"operation_id", op.ID, "err", merr.Error())
-		}
-		return nil, gerr
-	}
-
-	// НИ ОДНОГО ИСПОЛНИТЕЛЯ СНЯТИЯ — ЗАКРЫТЫЙ ОТКАЗ, А НЕ МОЛЧАЛИВОЕ
-	// НИЧЕГОНЕДЕЛАНИЕ (задача kaname#313).
+	// ЧЕЙ ПИСАТЕЛЬ КЛАДЁТ ОТСЕЧКУ, РЕШАЕТ ПОСАДКА (kaname#340).
 	//
-	// Исполнителей снятия два, и посадка выбирает РОВНО ОДНОГО: под `own` —
-	// наши записи, под `external` — сессию у поставщика. Ни одного не провязано
-	// — значит глагол пишет отсечку и НЕ СНИМАЕТ НИЧЕГО, отвечая успехом.
-	// Регрессия провязки в этом состоянии неотличима от исправной работы: тот
-	// же код ответа, то же тело операции, та же запись журнала, — и увидеть
-	// разницу можно только запросом в базу.
-	//
-	// Довод тот же, которым закрыт читатель отсечки у соседа: непровязка,
-	// отвечающая успехом, молча снимает контроль.
-	//
-	// СТОИТ ЗДЕСЬ, А НЕ ВЫШЕ, НАМЕРЕННО: отсечка уже закоммичена и остаётся —
-	// она защитна сама по себе и идемпотентна. Теряется только ложное
-	// «выведен», а повтор глагола после починки провязки доснимет сессию.
-	//
-	// ОДНА НОГА ЭТОГО ДОВОДА НЕ ПЕРЕМЕРЕНА ЗДЕСЬ, и сказано это затем, чтобы
-	// через месяц довод не прочли как доказанный целиком. «Отсечка защитна сама
-	// по себе» опирается на то, ЧТО С НЕЙ ДЕЛАЮТ ЧИТАТЕЛИ: хуки выдачи и край.
-	// Край живёт в другом доме, и настоящий дифф его поведения не измеряет —
-	// измерено здесь только то, что записи кладутся и что по ним судит
-	// авторитет отзыва на пути запроса. Если читатель отсечку не применит,
-	// защитной она не будет, и этот довод рухнет вместе с ним.
-	//
-	// ПРЕДИКАТ ПРОВЕРКИ: сквозная проба, предъявляющая носитель КРАЮ до и после
-	// глагола. Её здесь нет и быть не может — дом другой.
-	if h.ownSessions == nil && h.providerSessions == nil {
-		gerr := status.Error(codes.Unavailable,
-			"no login-session teardown is wired: the cutoff alone does not end a session")
-		slog.ErrorContext(ctx, "ForceLogout: no login-session teardown is wired",
-			"operation_id", op.ID, "user_id", userID)
-		if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
-			slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
-				"operation_id", op.ID, "err", merr.Error())
-		}
-		return nil, gerr
-	}
-
-	// СНЯТЬ НАШУ ЗАПИСЬ СЕССИИ ВХОДА, теперь когда отсечка устойчива
-	// (kaname#313).
-	//
-	// Порядок тот же и по той же причине, что у снятия у чужого поставщика:
-	// отсечка идёт первой, потому что держится без чьего-либо содействия;
-	// снятие следует, потому что оно и превращает вечный отказ в выход.
-	//
-	// ПРИЧИНА СНЯТИЯ — `logout`, И ЭТО ЗАПИСАННЫЙ ОСТАТОК, А НЕ РЕШЕНИЕ ПО
-	// СУЩЕСТВУ. Словарь `human_sessions_ended_reason_check` ЗАКРЫТ (`logout` ·
-	// `password-change` · `second-factor-removed`), значения «выведен
-	// распорядителем» в нём нет, а значение вне словаря база отвергла бы — то
-	// есть попытка записать более точную причину стоила бы самого выхода.
-	//
-	// # ЧЕТВЁРТОЕ ЗНАЧЕНИЕ НУЖНО, И ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЧТЕНО
-	//
-	// Довод «административную природу несёт журнал» ПРОВЕРЕН и оказался неверен
-	// ровно наполовину — в той половине, которая нужна расследованию:
-	//
-	//   · выход человека кладёт событие `iam.session.logged_out`, и его состав
-	//     НЕСЁТ `session_id` (`humansession/logout.go`);
-	//   · принудительный выход кладёт `iam.session.force_logout`, и его состав —
-	//     `actor`, `subject_type`, `subject_id`, `reason`
-	//     (`pg.SessionRevocationsAdapter.RevokeAllUserTokensTx`). Идентификатора
-	//     сессии в нём НЕТ.
-	//
-	// Значит от СТРОКИ СЕССИИ к событию дороги нет: обе записи несут `logout`,
-	// и различить «человек вышел сам» от «его вывел распорядитель» можно только
-	// совпадением моментов. Совпадение моментов — не свидетельство, а догадка, и
-	// расследование инцидента платит эту цену ровно тогда, когда вопрос стоит
-	// «кто оборвал эту сессию».
-	//
-	// РЕШЕНО: нужна миграция, добавляющая в словарь `admin-force-logout`.
-	// Довод — безопасность, а не удобство: недозапись ПРИВИЛЕГИРОВАННОГО
-	// действия над чужой сессией есть та сторона ошибки, которая подводит именно
-	// в разборе происшествия. Сейчас она к тому же дёшева и однозначна:
-	// значение ДОБАВЛЯЕТСЯ, обратное заполнение не нужно и не осмысленно — до
-	// этой полосы принудительный выход не писал в эту колонку ВООБЩЕ, поэтому ни
-	// одна лежащая строка не помечена неверно. Отложенная, та же миграция
-	// потребует решения о прошлом, у которого верного ответа не будет.
-	//
-	// НОМЕРА У ЗАДАЧИ ПОКА НЕТ: задачи заводит не эта полоса, и до заведения
-	// адресом остатка служит эта координата.
-	//
-	// ПРЕДИКАТ СНЯТИЯ ОСТАТКА: словарь
-	// `human_sessions_ended_reason_check` несёт `admin-force-logout` — тогда
-	// значение здесь меняется на него ОДНОЙ правкой, и пробы этого файла
-	// краснеют, пока она не сделана.
-	//
-	// Ноль снятых записей — законный исход, а не отказ: у человека могло не быть
-	// ни одной живой сессии, и требовать её значило бы отказывать в выходе тому,
-	// кто уже вышел.
+	// Под `own` отсечку, снятие наших записей и запись события кладёт ОДНА
+	// транзакция (`forceLogoutOwnSessions`): запись события обязана лечь ПОСЛЕ
+	// снятия и нести его исход. На прочих посадках наших записей нет, и отсечку
+	// вместе с записью события кладёт `sessionRevoker` — как и прежде, до снятия
+	// у поставщика: исход снятия у поставщика числом не выражается.
 	if h.ownSessions != nil {
-		ended, err := h.ownSessions.EndAllSessions(ctx, marker.UserID, now,
-			domain.RevokeReasonLogout)
-		if err == nil {
-			// ЧИСЛО СНЯТОГО НАЗЫВАЕТСЯ НА УСПЕШНОМ ПУТИ (задача kaname#313).
-			//
-			// Без него «сняли три» и «снимать было нечем» наблюдаются
-			// одинаково: тело операции несёт объявленную контрактом величину
-			// ЗАПИСЕЙ ОТЗЫВА, а не число сессий, и по нему регрессию не видно.
-			// Строка журнала — единственное место, где это число сегодня
-			// наблюдаемо, и потому она стоит на успешном пути, а не только на
-			// отказе.
-			//
-			// ОСТАТОК НАЗВАН, НОМЕРА У ЗАДАЧИ ПОКА НЕТ (заводит не эта полоса;
-			// до заведения адресом служит эта координата): запись события
-			// кладётся транзакцией отсечки, то
-			// есть ДО снятия, и числа в себе не несёт. Свести их — менять
-			// порядок, в котором отсечка идёт первой; это свой предмет.
-			slog.InfoContext(ctx, "ForceLogout: own login sessions ended",
-				"operation_id", op.ID, "user_id", userID, "sessions_ended", ended)
+		if err := h.forceLogoutOwnSessions(ctx, op.ID, marker, revokedBy); err != nil {
+			return nil, err
 		}
-		if err != nil {
-			gerr := status.Error(codes.Unavailable, "could not end the login session")
-			slog.ErrorContext(ctx, "ForceLogout: own login-session teardown failed",
-				"operation_id", op.ID, "user_id", userID, "err", err.Error())
-			if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
-				slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
-					"operation_id", op.ID, "err", merr.Error())
-			}
-			return nil, gerr
+	} else {
+		if err := h.sessionRevoker.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionForceLogout); err != nil {
+			// Record the terminal failure on the already-persisted op so a poll sees
+			// a real error, not NotFound; still surface the gRPC error to the caller.
+			return nil, h.failForceLogout(ctx, op.ID, shared.MapRepoErr(err))
+		}
+
+		// НИ ОДНОГО ИСПОЛНИТЕЛЯ СНЯТИЯ — ЗАКРЫТЫЙ ОТКАЗ, А НЕ МОЛЧАЛИВОЕ
+		// НИЧЕГОНЕДЕЛАНИЕ (задача kaname#313).
+		//
+		// Исполнителей снятия два, и посадка выбирает РОВНО ОДНОГО: под `own` —
+		// наши записи, под `external` — сессию у поставщика. Ни одного не провязано
+		// — значит глагол пишет отсечку и НЕ СНИМАЕТ НИЧЕГО, отвечая успехом.
+		// Регрессия провязки в этом состоянии неотличима от исправной работы: тот
+		// же код ответа, то же тело операции, та же запись журнала, — и увидеть
+		// разницу можно только запросом в базу.
+		//
+		// Довод тот же, которым закрыт читатель отсечки у соседа: непровязка,
+		// отвечающая успехом, молча снимает контроль.
+		//
+		// СТОИТ ЗДЕСЬ, А НЕ ВЫШЕ, НАМЕРЕННО: отсечка уже закоммичена и остаётся —
+		// она защитна сама по себе и идемпотентна. Теряется только ложное
+		// «выведен», а повтор глагола после починки провязки доснимет сессию.
+		//
+		// ОДНА НОГА ЭТОГО ДОВОДА НЕ ПЕРЕМЕРЕНА ЗДЕСЬ, и сказано это затем, чтобы
+		// через месяц довод не прочли как доказанный целиком. «Отсечка защитна сама
+		// по себе» опирается на то, ЧТО С НЕЙ ДЕЛАЮТ ЧИТАТЕЛИ: хуки выдачи и край.
+		// Край живёт в другом доме, и настоящий дифф его поведения не измеряет —
+		// измерено здесь только то, что записи кладутся и что по ним судит
+		// авторитет отзыва на пути запроса. Если читатель отсечку не применит,
+		// защитной она не будет, и этот довод рухнет вместе с ним.
+		//
+		// ПРЕДИКАТ ПРОВЕРКИ: сквозная проба, предъявляющая носитель КРАЮ до и после
+		// глагола. Её здесь нет и быть не может — дом другой.
+		if h.providerSessions == nil {
+			gerr := status.Error(codes.Unavailable,
+				"no login-session teardown is wired: the cutoff alone does not end a session")
+			slog.ErrorContext(ctx, "ForceLogout: no login-session teardown is wired",
+				"operation_id", op.ID, "user_id", userID)
+			return nil, h.failForceLogout(ctx, op.ID, gerr)
 		}
 	}
 
@@ -465,11 +426,7 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 			gerr := status.Error(codes.Unavailable, "could not end the session at the identity provider")
 			slog.ErrorContext(ctx, "ForceLogout: provider session teardown failed",
 				"operation_id", op.ID, "user_id", userID, "err", err.Error())
-			if merr := h.operations.MarkError(ctx, op.ID, status.Convert(gerr).Proto()); merr != nil {
-				slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
-					"operation_id", op.ID, "err", merr.Error())
-			}
-			return nil, gerr
+			return nil, h.failForceLogout(ctx, op.ID, gerr)
 		}
 	}
 
@@ -501,6 +458,174 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	op.Response = resp
 
 	return shared.OperationToProto(&op), nil
+}
+
+// failForceLogout — терминальный отказ на уже сохранённой операции: опрос видит
+// настоящую ошибку, а не NotFound и не вечное done=false. Возвращает ту же
+// ошибку для ответа вызывающему; сбой самой отметки пишется в журнал громко.
+func (h *Handler) failForceLogout(ctx context.Context, opID string, gerr error) error {
+	if merr := h.operations.MarkError(ctx, opID, status.Convert(gerr).Proto()); merr != nil {
+		slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
+			"operation_id", opID, "err", merr.Error())
+	}
+	return gerr
+}
+
+// Исход снятия в записи события принудительного выхода (kaname#340). Словарь
+// ЗАКРЫТ и несёт ровно два слова: запись кладётся только там, где снятие
+// пробовали, и третьего исхода — «не спрашивали» — у неё нет.
+const (
+	// forceLogoutTeardownEnded — снятие состоялось; число снятых названо рядом,
+	// и ноль — законное значение: у человека могло не быть живой сессии.
+	forceLogoutTeardownEnded = "ended"
+	// forceLogoutTeardownFailed — снятие отказало; отсечка легла, числа нет.
+	forceLogoutTeardownFailed = "failed"
+)
+
+// forceLogoutAuditEvent — запись события принудительного выхода на посадке `own`.
+//
+// Состав — те же четыре величины, что кладёт транзакция отсечки на прочих
+// посадках (актор · вид субъекта · субъект · причина), и сверх них ИСХОД
+// снятия. Число снятых кладётся ТОЛЬКО при исходе «снято»: его отсутствие и есть
+// утверждение «не дошло», а ноль остаётся отличимым от него значением. Материала
+// удостоверений здесь нет — ни носителей, ни их свёрток.
+func forceLogoutAuditEvent(marker domain.UserTokenRevocation, revokedBy domain.UserID,
+	teardown string, ended int,
+) outboxtypes.AuditEvent {
+	payload := map[string]any{
+		"actor":            string(revokedBy),
+		"subject_type":     "user",
+		"subject_id":       string(marker.UserID),
+		"reason":           marker.Reason,
+		"session_teardown": teardown,
+	}
+	if teardown == forceLogoutTeardownEnded {
+		payload["sessions_ended"] = ended
+	}
+	return outboxtypes.AuditEvent{EventType: eventSessionForceLogout, Payload: payload}
+}
+
+// ownForceLogoutAttempt — исход одной транзакции принудительного выхода на
+// посадке `own`. Три исхода различены ТИПОМ, а не значением: зафиксировано ·
+// снятие отказало · отказало остальное. «Снятие отказало» не имеет
+// представления на успешном пути — иначе оно слилось бы с «снимать было нечего».
+type ownForceLogoutAttempt struct {
+	// ended — число снятых записей; значимо, только когда обе ошибки пусты.
+	ended int
+	// teardownErr — отказ СНЯТИЯ; транзакция откачена, не легло ничего.
+	teardownErr error
+	// err — отказ открытия, отсечки, записи события или фиксации; транзакция
+	// откачена, не легло ничего.
+	err error
+}
+
+// commitOwnForceLogout — ОДНА транзакция: [снятие наших записей] → отсечка →
+// запись события → фиксация. withTeardown=false кладёт запись частичного исхода:
+// отсечку и событие «снятие не состоялось».
+//
+// ПРИЧИНА СНЯТИЯ — `logout`, И ЭТО ЗАПИСАННЫЙ ОСТАТОК, А НЕ РЕШЕНИЕ ПО СУЩЕСТВУ.
+// Словарь `human_sessions_ended_reason_check` ЗАКРЫТ (`logout` · `password-change`
+// · `second-factor-removed`), значения «выведен распорядителем» в нём нет, а
+// значение вне словаря база отвергла бы — то есть попытка записать более точную
+// причину стоила бы самого снятия.
+//
+// Довод «административную природу несёт журнал» ПРОВЕРЕН и верен наполовину:
+// выход человека кладёт событие `iam.session.logged_out`, и его состав НЕСЁТ
+// `session_id` (`humansession/logout.go`); запись принудительного выхода несёт
+// субъекта, причину и исход снятия (`forceLogoutAuditEvent`), а идентификатора
+// сессии в ней НЕТ. Значит от СТРОКИ СЕССИИ к событию дороги нет: обе строки
+// несут `logout`, и различить «человек вышел сам» от «его вывел распорядитель»
+// можно только совпадением моментов.
+//
+// Остаток заведён задачей kaname#334: словарь получает четвёртое значение
+// `admin-force-logout`, и значение здесь меняется на него ОДНОЙ правкой.
+func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTokenRevocation,
+	revokedBy domain.UserID, withTeardown bool,
+) ownForceLogoutAttempt {
+	w, err := h.ownSessions.ForceLogoutWriter(ctx)
+	if err != nil {
+		return ownForceLogoutAttempt{err: err}
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = w.Rollback(ctx)
+		}
+	}()
+
+	outcome, ended := forceLogoutTeardownFailed, 0
+	if withTeardown {
+		n, terr := w.EndOtherSessions(ctx, marker.UserID, "", marker.RevokeBefore, domain.RevokeReasonLogout)
+		if terr != nil {
+			return ownForceLogoutAttempt{teardownErr: terr}
+		}
+		outcome, ended = forceLogoutTeardownEnded, n
+	}
+	if err := w.UpsertCutoff(ctx, marker, revokedBy); err != nil {
+		return ownForceLogoutAttempt{err: err}
+	}
+	if err := w.EmitAudit(ctx, forceLogoutAuditEvent(marker, revokedBy, outcome, ended)); err != nil {
+		return ownForceLogoutAttempt{err: err}
+	}
+	if err := w.Commit(ctx); err != nil {
+		return ownForceLogoutAttempt{err: err}
+	}
+	committed = true
+	return ownForceLogoutAttempt{ended: ended}
+}
+
+// forceLogoutOwnSessions — принудительный выход на посадке `own`: снятие наших
+// записей сессии входа, отсечка и запись события с ИСХОДОМ снятия (kaname#340).
+// nil — выход состоялся; иначе — ошибка для ответа, уже отмеченная на операции.
+//
+// # ПОРЯДОК: ЗАПИСЬ СОБЫТИЯ — ПОСЛЕ СНЯТИЯ, ВСЁ — ОДНОЙ ТРАНЗАКЦИЕЙ
+//
+// Снятие и отсечка лежат в ОДНОЙ базе, и делить их на две транзакции незачем:
+// запись события, положенная транзакцией отсечки, ложилась до снятия и исхода
+// нести не могла. Одна транзакция делает «сняли N» и «записано, что сняли N»
+// одним фактом — и не оставляет закоммиченной отсечки без записи события.
+//
+// # РЕШЕНИЕ О ЧАСТИЧНОМ ИСХОДЕ: СНЯТИЕ ОТКАЗАЛО
+//
+// Отсечка ОСТАЁТСЯ. Это прежнее решение и прежний довод: она держится без
+// чьего-либо содействия и идемпотентна, а откатить её вслед за снятием значило
+// бы превратить отказ одной половины в отказ обеих — ровно в том случае, когда
+// защита нужнее всего. Поэтому после отката первой транзакции ложится ВТОРАЯ:
+// отсечка и запись события «снятие не состоялось» (`session_teardown: failed`,
+// числа нет). Распорядителю отвечается отказом, а не «выведен», и операция
+// отмечается ошибкой: он не должен считать выведенным того, чья сессия стоит.
+//
+// Между двумя транзакциями закоммиченного состояния нет, поэтому отсечка без
+// записи события не существует ни в одном исходе. Если не ложится и вторая, не
+// легло ничего — ни отсечки, ни записи, — и ответ называет её отказ. Повтор
+// глагола заново накладывает ту же отсечку (монотонно) и заново пробует снятие;
+// каждая попытка оставляет свою запись со своим исходом.
+//
+// Отказ ОТСЕЧКИ, записи события или фиксации в первой транзакции — не
+// частичный исход: откатывается всё, не ложится ничего, и ответ — перевод
+// отказа хранилища, как на прочих посадках.
+func (h *Handler) forceLogoutOwnSessions(ctx context.Context, opID string,
+	marker domain.UserTokenRevocation, revokedBy domain.UserID,
+) error {
+	first := h.commitOwnForceLogout(ctx, marker, revokedBy, true)
+	if first.err != nil {
+		return h.failForceLogout(ctx, opID, shared.MapRepoErr(first.err))
+	}
+	if first.teardownErr == nil {
+		slog.InfoContext(ctx, "ForceLogout: own login sessions ended",
+			"operation_id", opID, "user_id", string(marker.UserID), "sessions_ended", first.ended)
+		return nil
+	}
+
+	slog.ErrorContext(ctx, "ForceLogout: own login-session teardown failed",
+		"operation_id", opID, "user_id", string(marker.UserID), "err", first.teardownErr.Error())
+	partial := h.commitOwnForceLogout(ctx, marker, revokedBy, false)
+	if partial.err != nil {
+		slog.ErrorContext(ctx, "ForceLogout: the partial outcome could not be recorded; nothing was committed",
+			"operation_id", opID, "user_id", string(marker.UserID), "err", partial.err.Error())
+		return h.failForceLogout(ctx, opID, shared.MapRepoErr(partial.err))
+	}
+	return h.failForceLogout(ctx, opID, status.Error(codes.Unavailable, "could not end the login session"))
 }
 
 // forceLogoutOperationPayload — the terminal (metadata, response) pair declared

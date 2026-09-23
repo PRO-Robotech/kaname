@@ -71,11 +71,15 @@ func TestIntegration_EndingSessionsRevokesTheirTokenFamilies(t *testing.T) {
 		ceremonyDigest(9002)).Scan(&refreshActive))
 	require.True(t, refreshActive, "обновляющий токен неактивен ДО снятия сессии")
 
-	// ПРЕДМЕТ.
+	// ПРЕДМЕТ — снятие ВСЕХ записей личности той транзакцией, которой снимает
+	// административный принудительный выход (kaname#340).
 	sessions := kanamepg.NewHumanSessionRepo(pool)
-	ended, err := sessions.EndAllSessions(ctx, domain.UserID(scene.UserID),
+	w, err := sessions.ForceLogoutWriter(ctx)
+	require.NoError(t, err, "транзакция снятия")
+	ended, err := w.EndOtherSessions(ctx, domain.UserID(scene.UserID), "",
 		time.Now().UTC(), domain.RevokeReasonLogout)
 	require.NoError(t, err, "снятие сессий")
+	require.NoError(t, w.Commit(ctx), "фиксация снятия")
 	require.Equal(t, 1, ended, "снята обязана быть ровно одна живая сессия посева")
 
 	require.NoError(t, pool.QueryRow(ctx,

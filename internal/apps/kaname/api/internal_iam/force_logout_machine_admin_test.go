@@ -71,7 +71,8 @@ func TestForceLogout_ServiceAccountAdminIsAskedAsServiceAccount(t *testing.T) {
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
-		WithOwnSessions(&recordingOwnSessions{})
+		// Под `own` отсечку кладёт его транзакция (kaname#340).
+		WithOwnSessions(rec)
 
 	_, err := h.ForceLogout(ctxPrincipal("service_account", saID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -100,7 +101,8 @@ func TestForceLogout_UserAdminIsAskedAsUser(t *testing.T) {
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
-		WithOwnSessions(&recordingOwnSessions{})
+		// Под `own` отсечку кладёт его транзакция (kaname#340).
+		WithOwnSessions(rec)
 
 	_, err := h.ForceLogout(ctxPrincipal("user", usrID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -123,7 +125,8 @@ func TestForceLogout_UnnameablePrincipalIsRefusedWithoutAsking(t *testing.T) {
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
-		WithOwnSessions(&recordingOwnSessions{})
+		// Под `own` отсечку кладёт его транзакция (kaname#340).
+		WithOwnSessions(rec)
 
 	_, err := h.ForceLogout(ctxPrincipal("banana", "whatever"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
