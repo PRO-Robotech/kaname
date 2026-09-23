@@ -20,10 +20,15 @@
 //   - фиксация отказала кодом хранилища, а срок запроса кончился, пока она шла;
 //   - законный близнец обеих: фиксация отказала кодом хранилища при живом
 //     запросе и живом сроке фиксации.
+//
+// Сверх них — журнал: отказ, к частичному исходу не ведущий, называет в нём
+// свой шаг и причину, потому что вызывающему уходит фиксированный текст.
 package internal_iam
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 	"testing/synctest"
 
@@ -36,9 +41,9 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// storeCommitRefusal — отказ фиксации кодом хранилища (не концом контекста):
+// storeCodeRefusal — отказ шага кодом хранилища (не концом контекста):
 // так приходит незнакомая переводу строка состояния.
-func storeCommitRefusal() error {
+func storeCodeRefusal() error {
 	return iamerr.Wrapf(iamerr.ErrInternal, "database error: sqlstate XX000")
 }
 
@@ -90,7 +95,7 @@ func TestForceLogout_OwnCommitRefusedAfterTheRequestEnded_IsNotAPartialOutcome(t
 	reqCtx, cancel := context.WithCancel(adminCtx())
 	defer cancel()
 	first := &recordingOwnWriter{ended: 2, onCommit: func(context.Context) { cancel() },
-		commitErr: storeCommitRefusal()}
+		commitErr: storeCodeRefusal()}
 	own := ownSessionsScripted(first)
 	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
 
@@ -111,7 +116,7 @@ func TestForceLogout_OwnCommitRefusedAfterTheRequestEnded_IsNotAPartialOutcome(t
 // фиксации, от второй — только состоянием запроса.
 func TestForceLogout_OwnCommitRefusedWhileTheRequestLives_IsNotAPartialOutcome(t *testing.T) {
 	reqCtx := adminCtx()
-	first := &recordingOwnWriter{ended: 2, commitErr: storeCommitRefusal()}
+	first := &recordingOwnWriter{ended: 2, commitErr: storeCodeRefusal()}
 	own := ownSessionsScripted(first)
 	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
 
@@ -123,4 +128,49 @@ func TestForceLogout_OwnCommitRefusedWhileTheRequestLives_IsNotAPartialOutcome(t
 	assertNoPartialOutcomeAfterCommitRefusal(t, own, first, ops)
 	assert.Equal(t, codes.Internal, status.Code(err))
 	assert.Equal(t, "internal error", status.Convert(err).Message())
+}
+
+// captureForceLogoutErrorLog — журнал ошибок обработчика в буфер. Обработчик
+// пишет пакетным `slog.ErrorContext`, поэтому подменяется логгер по умолчанию;
+// параллельные пробы пакета (`t.Parallel`) стоят на паузе, пока идут
+// последовательные, так что подмена чужих записей не ловит.
+func captureForceLogoutErrorLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// TestForceLogout_OwnRefusalWithoutPartialOutcome_LogsItsCause — отказ первой
+// транзакции, НЕ ведущий к частичному исходу, уходит вызывающему переводом, в
+// котором причины нет (текст отказа фиксирован). Значит причину обязан назвать
+// журнал — шаг, на котором отказ пришёл, и сам отказ хранилища, — иначе её не
+// назовёт никто.
+func TestForceLogout_OwnRefusalWithoutPartialOutcome_LogsItsCause(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first *recordingOwnWriter
+		step  string
+	}{
+		{"отсечка", &recordingOwnWriter{ended: 1, cutoffErr: storeCodeRefusal()}, "cutoff"},
+		{"фиксация", &recordingOwnWriter{ended: 1, commitErr: storeCodeRefusal()}, "commit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logBuf := captureForceLogoutErrorLog(t)
+			own := ownSessionsScripted(tc.first)
+			h, _ := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+
+			_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+			require.Error(t, err)
+			require.Len(t, own.opened, 1, "фикстура: отказ этого шага к частичному исходу не ведёт")
+			assert.Equal(t, "internal error", status.Convert(err).Message(),
+				"фикстура: причина до вызывающего не доходит — её несёт только журнал")
+
+			logged := logBuf.String()
+			assert.Contains(t, logged, "sqlstate XX000", "причина отказа в журнал не записана")
+			assert.Contains(t, logged, `"step":"`+tc.step+`"`, "шаг отказа в журнал не записан")
+		})
+	}
 }
