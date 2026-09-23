@@ -326,9 +326,9 @@ type issuanceHookPorts struct {
 //
 // Читатель отсечки оборачивается здесь ОДИН раз — той же обёрткой и тем же
 // объявленным пределом на вызов, что у токен-эндпоинта
-// ([revocationpolicy.WithDeadline], [issuancePeerTimeout]). Без неё чтение шло
-// бы с контекстом запроса поставщика, у которого своего предела нет, и одно
-// чтение одной строки несло бы разный предел на разных полосах. Предел
+// ([revocationpolicy.WithDeadline], [credentialLanePeerTimeout]). Без неё
+// чтение шло бы с контекстом запроса поставщика, у которого своего предела нет,
+// и одно чтение одной строки несло бы разный предел на разных полосах. Предел
 // закреплён пробой через эту сборку
 // (`TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit`).
 func buildIssuanceHooks(
@@ -336,7 +336,7 @@ func buildIssuanceHooks(
 	ports issuanceHookPorts,
 	logger *slog.Logger,
 ) (*handlerinternal.TokenHookHandler, *handlerinternal.RefreshHookHandler) {
-	cutoffs := revocationpolicy.WithDeadline(ports.cutoffs, issuancePeerTimeout)
+	cutoffs := revocationpolicy.WithDeadline(ports.cutoffs, credentialLanePeerTimeout)
 	tokenHook := handlerinternal.NewTokenHookHandler(
 		handlerinternal.TokenHookConfig{
 			HookSharedSecret: cfg.hookSecret,

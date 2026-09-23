@@ -337,10 +337,11 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 | `kaname_jwks_mirror_outcomes_total` | `outcome` | обслуживание внутреннего зеркала ключей: `served`, `unavailable`, `misconfigured`. **`served` считается наравне с отказами** — иначе «ни разу не отказал» неотличимо от «ни разу не спросили»; неверный адрес — своя клетка, потому что сам не заживёт |
 | `kaname_presented_credential_outcomes_total` | `outcome` | чтение удостоверения, ПРЕДЪЯВЛЕННОГО на публичном слушателе: `accepted`, `refused`, `unavailable`. Отказ никогда не называет, какая именно проверка не прошла, — это сказало бы предъявителю, какую половину подбирать. `unavailable` — ТРЕТИЙ исход, а не оттенок отказа: негодное удостоверение чинит предъявитель, недоступный авторитет — оператор |
 | `kaname_registry_token_credential_kind_total` | `outcome` | исходы докерной полосы выдачи токена по виду предъявленного удостоверения |
+| `kaname_basic_credential_outcomes_total` | `verb`, `outcome` | исходы полосы базового секрета внутреннего слушателя: `verb` — `resolve` (предъявленный секрет) либо `liveness` (открытое соединение спрашивает по идентификатору); `outcome` — `accepted`, по одному значению на каждую причину отказа (`malformed`, `not-found`, `secret-mismatch`, `owner-revoked`), `reason-unnamed` и `unavailable`. Наружу любая причина отказа — один и тот же ответ; `owner-revoked` — удостоверение выдано не позже отсечки отзыва-всех его владельца. `reason-unnamed` у исправной службы всегда ноль |
 
-Два ряда этой таблицы — `kaname_jwks_mirror_outcomes_total` и
-`kaname_presented_credential_outcomes_total` — заведены ради требования «ноль отказов за
-всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
+Три ряда этой таблицы — `kaname_jwks_mirror_outcomes_total`,
+`kaname_presented_credential_outcomes_total` и `kaname_basic_credential_outcomes_total` —
+заведены ради требования «ноль отказов за всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
 дежурный их не увидит.
 
 ## Приглашения и посев администратора

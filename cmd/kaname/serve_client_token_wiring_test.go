@@ -82,8 +82,9 @@ func (wiringSigner) Issuer() string { return "https://kaname.kacho.local" }
 // наступают до любого обращения к базе, поэтому поверхность проверяется без неё.
 func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) {
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
-		Realm:   "https://api.kacho.local/iam/token",
-		Service: "registry.kacho.local",
+		Realm:                  "https://api.kacho.local/iam/token",
+		Service:                "registry.kacho.local",
+		BasicCredentialTimeout: credentialLanePeerTimeout,
 	})
 	if err != nil {
 		t.Fatalf("сборка поверхности выдачи: %v", err)

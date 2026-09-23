@@ -55,7 +55,6 @@ import (
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // basicCredLane — ПОЛОСА УДОСТОВЕРЕНИЯ, сверяемая на каждом состоянии строки.
@@ -208,7 +207,7 @@ func basicCredStates(l basicCredLane, hashHex string) []basicCredState {
 func TestBCL1450_LivenessByIdAgreesWithLivenessBySecretOnEveryState(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	lanes := basicCredLanesUnderTest()
@@ -293,7 +292,7 @@ func TestBCL1450_LivenessByIdAgreesWithLivenessBySecretOnEveryState(t *testing.T
 func TestBCL1450_LivenessIsAskedWithoutTheSecret(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	const human = "uoc_0000000000000cx02"
@@ -317,7 +316,7 @@ func TestBCL1450_LivenessIsAskedWithoutTheSecret(t *testing.T) {
 func TestBCL1450_LivenessRefusalIsSingleAndIsNoOracle(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	const revoked = "uoc_0000000000000cx05"
@@ -362,7 +361,7 @@ func TestBCL1450_LivenessRefusalIsSingleAndIsNoOracle(t *testing.T) {
 func TestBCL1450_PresentedStringIsNotAcceptedAsAnIdentifier(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	const credID = "uoc_0000000000000cx08"

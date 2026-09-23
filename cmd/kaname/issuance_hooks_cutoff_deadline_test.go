@@ -122,8 +122,8 @@ func capturedHookBody(t *testing.T, name string) []byte {
 // TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit — обе полосы хука,
 // собранные корнем, читают отсечку под объявленным пределом на вызов.
 func TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit(t *testing.T) {
-	if issuancePeerTimeout <= 0 {
-		t.Fatalf("предпосылка: объявленный предел на вызов обязан быть положительным, объявлено %s", issuancePeerTimeout)
+	if credentialLanePeerTimeout <= 0 {
+		t.Fatalf("предпосылка: объявленный предел на вызов обязан быть положительным, объявлено %s", credentialLanePeerTimeout)
 	}
 	users := deadlineHookUsers{user: domain.User{
 		ID:           "usr_01abcdefghjkmnpqx",
@@ -183,9 +183,9 @@ func TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit(t *testing.T) {
 					"держит обработчик сколько угодно", l.name, i+1)
 				continue
 			}
-			if c.remaining <= 0 || c.remaining > issuancePeerTimeout {
+			if c.remaining <= 0 || c.remaining > credentialLanePeerTimeout {
 				t.Errorf("%s: чтение отсечки #%d несёт срок %s, а объявленный предел на вызов — %s",
-					l.name, i+1, c.remaining, issuancePeerTimeout)
+					l.name, i+1, c.remaining, credentialLanePeerTimeout)
 				continue
 			}
 			lane++
@@ -195,5 +195,5 @@ func TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit(t *testing.T) {
 		}
 	}
 	t.Logf("перепись: полос хука собрано %d · дошли до чтения отсечки %d · читают под пределом %s — %d",
-		len(lanes), reached, issuancePeerTimeout, bounded)
+		len(lanes), reached, credentialLanePeerTimeout, bounded)
 }

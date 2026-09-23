@@ -142,7 +142,9 @@ func New(
 		signer, claims,
 		// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
 		// объявленным пределом на вызов: одно чтение одной строки несёт один
-		// предел на любой полосе.
+		// предел на любой полосе (полоса базового секрета читает ту же строку
+		// в одном операторе со своей и несёт ту же величину пределом
+		// оператора).
 		revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)

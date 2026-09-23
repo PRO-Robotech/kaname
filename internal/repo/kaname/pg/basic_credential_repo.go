@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,14 +60,40 @@ import (
 // хешем и состоянием владельца. Сама сверка идёт `subtle.ConstantTimeCompare`:
 // сравнение в предикате базы постоянного времени не даёт и дало бы измеримую
 // разницу между «строки нет» и «строка есть, хеш не тот». Наблюдаемый исход у
-// обоих случаев ОДИН И ТОТ ЖЕ — `domain.ErrBasicCredentialRefused`.
+// обоих случаев ОДИН И ТОТ ЖЕ — `domain.ErrBasicCredentialRefused`. Причину
+// отказ несёт ВНУТРЬ ([domain.RefuseBasicCredential]): «строки нет», «секрет не
+// тот» и отсечка владельца различимы для счётчика и журнала вызывающего и
+// неразличимы ни текстом ошибки, ни ответом на проводе.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПРЕДЕЛ ОБРАЩЕНИЯ К БАЗЕ — У ОПЕРАТОРА, А НЕ У ВЫЗЫВАЮЩЕГО (задача kaname#379)
+//
+// Вызывающих у авторитета больше одного: глаголы внутреннего слушателя и полоса
+// докер-реестра. Предел, выставленный у каждого по отдельности, у одного из них
+// рано или поздно не появится — молча, потому что отсутствие предела выглядит
+// как его наличие ровно до того дня, когда база перестаёт отвечать. Поэтому
+// предел подаётся конструктору, без него авторитет не собирается, и КАЖДОЕ
+// обращение к базе идёт под ним. Величину объявляет композиционный корень —
+// та же, что у полос выдачи токена: оператор полосы для строки человека читает
+// и отсечку отзыва-всех, а одно чтение одной строки несёт один предел на любой
+// полосе.
 type BasicCredentialRepo struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	callTimeout time.Duration
 }
 
-// NewBasicCredentialRepo конструирует.
-func NewBasicCredentialRepo(pool *pgxpool.Pool) *BasicCredentialRepo {
-	return &BasicCredentialRepo{pool: pool}
+// NewBasicCredentialRepo конструирует авторитет с объявленным пределом ОДНОГО
+// обращения к базе.
+//
+// Непредставленный предел — отказ построения, а не «разумное умолчание»:
+// авторитет без предела висит на неотвечающей базе, пока не кончатся
+// горутины вызывающего, и узнаётся это не на старте, а на первом отказе базы.
+func NewBasicCredentialRepo(pool *pgxpool.Pool, callTimeout time.Duration) (*BasicCredentialRepo, error) {
+	if callTimeout <= 0 {
+		return nil, fmt.Errorf("pg: basic credential authority: the per-call limit of a database round trip "+
+			"must be declared as a positive duration, got %s", callTimeout)
+	}
+	return &BasicCredentialRepo{pool: pool, callTimeout: callTimeout}, nil
 }
 
 // ПРЕДИКАТ ЖИВОСТИ ОБЪЯВЛЕН ОДИН РАЗ НА ПОЛОСУ (задача #1450).
@@ -200,12 +227,12 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 	// запросом.
 	p, err := credsecret.Parse(presented)
 	if err != nil {
-		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalMalformed)
 	}
 
 	lane, known := laneOfCredentialID(p.CredentialID)
 	if !known {
-		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalMalformed)
 	}
 	query, principalType := lane.resolveSQL, lane.principalType
 
@@ -218,14 +245,16 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 		issuedAt    time.Time
 		ownerCutoff sql.NullTime
 	)
-	err = r.pool.QueryRow(ctx, query, p.CredentialID).
+	qctx, cancel := context.WithTimeout(ctx, r.callTimeout)
+	defer cancel()
+	err = r.pool.QueryRow(qctx, query, p.CredentialID).
 		Scan(&credID, &storedHash, &expiresAt, &principalID, &displayName, &issuedAt, &ownerCutoff)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// Строки нет: отозвано, истекло, владелец неактивен либо её не было
 		// никогда. Наружу — ОДИН отказ; различать эти случаи значило бы
 		// завести оракул.
-		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalNotFound)
 	case err != nil:
 		// Недоступность авторитета — ОТДЕЛЬНЫЙ исход, и он не подменяется
 		// отказом в удостоверении: вызывающему нечего исправлять сменой
@@ -234,14 +263,14 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 	}
 
 	if !credsecret.Verify(p.CredentialID, p.SecretPart, storedHash) {
-		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalSecretMismatch)
 	}
 
 	// Отсечка владельца судится ПОСЛЕ сверки хеша: не знающему секрета она не
 	// сообщает о себе ничего, даже временем ответа. Исход — тот же единый отказ,
-	// что у отозванного и истёкшего.
+	// что у отозванного и истёкшего; своя у него только причина внутри.
 	if ownerCutoffForbids(ownerCutoff, issuedAt) {
-		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalOwnerRevoked)
 	}
 
 	var exp time.Time
@@ -281,32 +310,36 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 // nil — живо. domain.ErrBasicCredentialRefused — не живо, и ЕДИНЫМ отказом:
 // неизвестный идентификатор, чужой префикс, мусор, отозванное, истёкшее,
 // неактивный владелец, отсечка владельца не раньше выдачи — один исход, иначе
-// по различию узнают, существует ли удостоверение. Любая иная ошибка —
-// авторитет не смог ответить; это НЕ «не живо», и подменять одно другим
-// значило бы закрывать соединения на собственной неисправности.
+// по различию узнают, существует ли удостоверение; причина едет внутрь
+// значением отказа и наружу не выходит. Любая иная ошибка, в том числе
+// истёкший предел обращения, — авторитет не смог ответить; это НЕ «не живо», и
+// подменять одно другим значило бы закрывать соединения на собственной
+// неисправности.
 func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID string) error {
 	// Уровень 1 отсева: полоса. Пустое, мусор и чужой префикс не оплачиваются
 	// обращением к базе.
 	lane, known := laneOfCredentialID(credentialID)
 	if !known {
-		return domain.ErrBasicCredentialRefused
+		return domain.RefuseBasicCredential(domain.BasicRefusalMalformed)
 	}
 
 	var (
 		issuedAt    time.Time
 		ownerCutoff sql.NullTime
 	)
-	err := r.pool.QueryRow(ctx, lane.liveSQL, credentialID).Scan(&issuedAt, &ownerCutoff)
+	qctx, cancel := context.WithTimeout(ctx, r.callTimeout)
+	defer cancel()
+	err := r.pool.QueryRow(qctx, lane.liveSQL, credentialID).Scan(&issuedAt, &ownerCutoff)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return domain.ErrBasicCredentialRefused
+		return domain.RefuseBasicCredential(domain.BasicRefusalNotFound)
 	case err != nil:
 		// Недоступность авторитета — ОТДЕЛЬНЫЙ исход. Слить её с отказом значило
 		// бы закрывать открытые соединения каждый раз, когда база моргнула.
 		return err
 	}
 	if ownerCutoffForbids(ownerCutoff, issuedAt) {
-		return domain.ErrBasicCredentialRefused
+		return domain.RefuseBasicCredential(domain.BasicRefusalOwnerRevoked)
 	}
 	return nil
 }
@@ -325,7 +358,9 @@ func (r *BasicCredentialRepo) TouchLastUsed(ctx context.Context, credentialID st
 	default:
 		return nil
 	}
-	_, err := r.pool.Exec(ctx,
+	ectx, cancel := context.WithTimeout(ctx, r.callTimeout)
+	defer cancel()
+	_, err := r.pool.Exec(ectx,
 		`UPDATE `+table+` SET last_used_at = now()
 		  WHERE id = $1
 		    AND (last_used_at IS NULL OR last_used_at < now() - $2::interval)`,

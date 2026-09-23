@@ -51,26 +51,30 @@ func (h *Handler) WithBasicCredentialResolver(r basicCredentialResolver) *Handle
 // ОТКАЗ ЕДИНЫЙ (§10 приёмки BAT-1). Неизвестный идентификатор, неверный секрет,
 // истёкший срок, отозванное удостоверение, неактивный владелец, отсечка
 // отзыва-всех владельца не раньше выдачи — один и тот же код и один и тот же
-// текст. Различимость живёт ВНУТРЬ: в счётчике причин и в журнале, не в том,
-// что видит предъявитель.
+// текст. Различимость живёт ВНУТРЬ: в переписи исходов по причине и в
+// структурной записи журнала ([Handler.refuseBasic]), не в том, что видит
+// предъявитель.
 func (h *Handler) ResolveBasicCredential(
 	ctx context.Context, req *iamv1.ResolveBasicCredentialRequest,
 ) (*iamv1.ResolveBasicCredentialResponse, error) {
 	if h.basicCredentials == nil {
+		h.countBasic(BasicCredentialResolve, BasicOutcomeUnavailable)
 		return nil, status.Error(codes.Unavailable, "basic credential authority is not wired")
 	}
 	if req.GetPresented() == "" {
 		// Пустой вход отвергается тем же единым отказом: «поле не заполнено» и
 		// «удостоверение негодно» различимы для клиента только тем, что первое
 		// подсказывает форму — а форму подсказывать нечему, вход и есть строка.
-		return nil, status.Error(codes.Unauthenticated, refusalText)
+		return nil, h.refuseBasic(ctx, BasicCredentialResolve,
+			domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
 	}
 
 	cred, err := h.basicCredentials.ResolveBasic(ctx, req.GetPresented())
 	switch {
 	case errors.Is(err, domain.ErrBasicCredentialRefused):
-		return nil, status.Error(codes.Unauthenticated, refusalText)
+		return nil, h.refuseBasic(ctx, BasicCredentialResolve, err)
 	case err != nil:
+		h.countBasic(BasicCredentialResolve, BasicOutcomeUnavailable)
 		// Недоступность авторитета — ОТДЕЛЬНЫЙ исход и наружу тоже. Сырой текст
 		// драйвера не течёт: он ЛОГИРУЕТСЯ, а на провод уходит фиксированное.
 		if h.logger != nil {
@@ -88,6 +92,7 @@ func (h *Handler) ResolveBasicCredential(
 		h.logger.WarnContext(ctx, "last-used touch failed", slog.Any("error", terr))
 	}
 
+	h.countBasic(BasicCredentialResolve, BasicOutcomeAccepted)
 	resp := &iamv1.ResolveBasicCredentialResponse{
 		PrincipalType: cred.PrincipalType,
 		PrincipalId:   cred.PrincipalID,

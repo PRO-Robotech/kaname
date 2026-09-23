@@ -60,9 +60,10 @@ const basicLaneStrangerID = "uoc_rvkb0000000000099"
 
 // basicLaneHandler — обработчик полосы над НАСТОЯЩИМ авторитетом, так, как его
 // провязывает композиционный корень.
-func basicLaneHandler(pool *pgxpool.Pool) *internaliam.Handler {
+func basicLaneHandler(t testing.TB, pool *pgxpool.Pool) *internaliam.Handler {
+	t.Helper()
 	return internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithBasicCredentialResolver(kanamepg.NewBasicCredentialRepo(pool))
+		WithBasicCredentialResolver(newBasicAuthority(t, pool))
 }
 
 // mintUserSecret кладёт живой базовый секрет человека стенда и возвращает
@@ -146,7 +147,7 @@ func basicLive(t *testing.T, ctx context.Context, h *internaliam.Handler, creden
 func basicLaneAcrossCutoff(t *testing.T, f assertionFixture, subject string, write func(t *testing.T, issued time.Time)) {
 	t.Helper()
 	ctx := context.Background()
-	h := basicLaneHandler(f.pool)
+	h := basicLaneHandler(t, f.pool)
 	const (
 		beforeID = "uoc_rvkb0000000000001"
 		afterID  = "uoc_rvkb0000000000002"
@@ -297,7 +298,7 @@ func TestBasicLane_CutoffThatCannotBeReadIsNotAGrant(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	f := newAssertionFixture(t)
-	h := basicLaneHandler(f.pool)
+	h := basicLaneHandler(t, f.pool)
 	ctx := context.Background()
 	const (
 		humanID   = "uoc_rvkd0000000000001"
@@ -324,24 +325,28 @@ func TestBasicLane_CutoffThatCannotBeReadIsNotAGrant(t *testing.T) {
 	_, err = lock.Exec(ctx, `LOCK TABLE kaname.user_token_revocations IN ACCESS EXCLUSIVE MODE`)
 	require.NoError(t, err)
 
-	bounded := func() context.Context {
-		c, cancel := context.WithTimeout(ctx, 2*time.Second)
-		t.Cleanup(cancel)
-		return c
-	}
-	got := basicResolve(t, bounded(), h, human)
+	// Вопросы задаются контекстом БЕЗ срока: предел обязан стоять у самого
+	// авторитета. Будь он у вызывающего, запертая таблица держала бы глагол,
+	// пока помеху не снимут, — и сторож ниже назвал бы это, а не повис.
+	got := withinOwnLimit(t, "резолв человека", func(c context.Context) error {
+		_, err := h.ResolveBasicCredential(c, &iamv1.ResolveBasicCredentialRequest{Presented: human})
+		return err
+	})
 	require.Equalf(t, codes.Unavailable, got.code,
-		"отсечку прочитать нельзя, а резолв ответил %s (принципал %q) — не «состояние не установлено»", got.code, got.principal)
+		"отсечку прочитать нельзя, а резолв ответил %s — не «состояние не установлено»", got.code)
 	require.Equal(t, ref.wire, got.wire, "исход «состояние не установлено» различим по тексту")
-	live := basicLive(t, bounded(), h, humanID)
+	live := withinOwnLimit(t, "живость человека", func(c context.Context) error {
+		_, err := h.CheckBasicCredentialLive(c, &iamv1.CheckBasicCredentialLiveRequest{CredentialId: humanID})
+		return err
+	})
 	require.Equalf(t, codes.Unavailable, live.code,
 		"отсечку прочитать нельзя, а живость ответила %s — не «состояние не установлено»", live.code)
 	require.Equal(t, ref.wire, live.wire, "исход «состояние не установлено» у живости различим по тексту")
 
 	// Машина под той же помехой: отсечка человека о ней не спрашивается.
-	require.Equal(t, codes.OK, basicResolve(t, bounded(), h, machine).code,
+	require.Equal(t, codes.OK, basicResolve(t, ctx, h, machine).code,
 		"секрет машины споткнулся о таблицу отсечек человека")
-	require.Equal(t, codes.OK, basicLive(t, bounded(), h, machineID).code,
+	require.Equal(t, codes.OK, basicLive(t, ctx, h, machineID).code,
 		"живость машины споткнулась о таблицу отсечек человека")
 
 	// Помеха снята — тот же секрет снова проходит: исход выше дала она.
@@ -375,7 +380,7 @@ func TestRevokeAllCutoff_BasicSecretLaneAgreesWithTheKeyLane(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	f := newAssertionFixture(t)
 	contour := ctBuild(t, f, now)
-	h := basicLaneHandler(f.pool)
+	h := basicLaneHandler(t, f.pool)
 
 	const (
 		userKeyID    = "uoc_rvkc0000000000001"
@@ -506,4 +511,31 @@ ON CONFLICT (user_id) DO UPDATE SET revoke_before = EXCLUDED.revoke_before`, f.u
 	require.Equalf(t, ran, honoring,
 		"исполнилось полос %d, а вердикт отсечка сменила у %d: полоса, чей вердикт от отсечки не меняется, отсечку не читает",
 		ran, honoring)
+}
+
+// withinOwnLimit задаёт глаголу вопрос контекстом без срока и ждёт ответа не
+// дольше собственного предела авторитета с запасом.
+//
+// Вопрос задаётся в своей горутине, а утверждения — здесь: проверки пробы из
+// чужой горутины не останавливают её. Не дождавшись, сторож падает с именем
+// предмета: глагол, повисший на помехе, есть ровно тот дефект, который он
+// ловит, и виснуть вместе с ним проба не вправе. Горутина освобождается
+// снятием помехи в очистке пробы.
+func withinOwnLimit(t *testing.T, name string, ask func(context.Context) error) basicAnswer {
+	t.Helper()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- ask(context.Background()) }()
+	select {
+	case err := <-done:
+		code, wire := statusWire(t, err)
+		t.Logf("%s: ответ за %s при пределе авторитета %s", name, time.Since(start).Round(time.Millisecond),
+			basicAuthorityCallLimit)
+		return basicAnswer{code: code, wire: wire}
+	case <-time.After(basicAuthorityCallLimit + 10*time.Second):
+		t.Fatalf("%s: глагол не ответил за %s при пределе авторитета %s — обращение к базе идёт без "+
+			"своего предела и держит глагол, пока помеху не снимут", name,
+			basicAuthorityCallLimit+10*time.Second, basicAuthorityCallLimit)
+		return basicAnswer{}
+	}
 }
