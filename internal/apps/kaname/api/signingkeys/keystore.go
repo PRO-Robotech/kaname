@@ -56,8 +56,8 @@ var ErrWrappingKeyMismatch = errors.New("signingkeys: the wrapping key does not 
 var ErrSignerChanged = errors.New("signingkeys: the signing key changed before the hand-over")
 
 // ErrNoSignerAfterCompromise — ЧАСТИЧНЫЙ исход реакции на утечку: утёкший ключ
-// из набора снят, подписывающего нет (это ПРОЧИТАНО), а завести замену не
-// удалось, и служба не подписывает.
+// из набора снят, завести замену не удалось, и подписывающего нет — это
+// ПРОЧИТАНО после отказа замены, а не выведено из него, — служба не подписывает.
 //
 // Отдельный сентинел, потому что вызывающий обязан отличить его от отказа
 // снятия: снятие здесь СОСТОЯЛОСЬ и не откатывается, а повтор той же команды
@@ -329,6 +329,12 @@ type LifecycleOutcome struct {
 	// Replacement — ключ, к которому перешла подпись; пусто — подпись не
 	// переходила.
 	Replacement domain.KeyID
+	// Signer — подписывающий, УСТАНОВЛЕННЫЙ ЧТЕНИЕМ после того, как замена,
+	// заводимая этим вызовом, не легла. Кем он поставлен, вызов не знает:
+	// соседней репликой на старте, вторым оператором с тем же повтором либо
+	// записью самого вызова, чья фиксация отказала неоднозначно. Пусто — такого
+	// чтения не было.
+	Signer domain.KeyID
 	// AlreadyDone — ключ уже был в целевом состоянии: повтор команды не отказ
 	// и не второе действие.
 	AlreadyDone bool
@@ -424,9 +430,13 @@ func (k *Keystore) retireOutcomeAfterRace(ctx context.Context, kid domain.KeyID)
 // довершает замену и называет её в Replacement. Замена заводится, только когда
 // подписывающего нет: утечка не подписывающего ключа подпись не трогает.
 //
-// «Подписывающего нет» судится ЧТЕНИЕМ, а не отказом чтения: сбой хранилища на
-// нём и вызов, кончившийся посреди замены, дают ErrSignerUnknownAfterCompromise
-// — о подписи вердикта нет, и называть службу неподписывающей нечем.
+// «Подписывающего нет» судится ЧТЕНИЕМ, а не отказом чтения и не отказом
+// записи: сбой хранилища на чтении и вызов, кончившийся посреди замены, дают
+// ErrSignerUnknownAfterCompromise — о подписи вердикта нет, и называть службу
+// неподписывающей нечем. Не легшая замена при живом вызове сама ничего о подписи
+// не говорит, поэтому подписывающий ПЕРЕЧИТЫВАЕТСЯ после неё: прочитан —
+// исход без отказа и с подписывающим в Signer; прочитано, что его нет, —
+// ErrNoSignerAfterCompromise; чтение отказало — ErrSignerUnknownAfterCompromise.
 func (k *Keystore) Compromise(ctx context.Context, kid domain.KeyID, decidedBy string) (LifecycleOutcome, error) {
 	out := LifecycleOutcome{KID: kid}
 	if err := requireDecider("declaring a key compromised", decidedBy); err != nil {
@@ -469,12 +479,45 @@ func (k *Keystore) Compromise(ctx context.Context, kid domain.KeyID, decidedBy s
 			// без основания.
 			return out, fmt.Errorf("%w: the call ended during the replacement: %w", ErrSignerUnknownAfterCompromise, rerr)
 		}
-		return out, fmt.Errorf("%w: %w", ErrNoSignerAfterCompromise, rerr)
+		return k.compromiseOutcomeAfterFailedReplacement(ctx, out, decidedBy, rerr)
 	}
 	out.Replacement = pub.KID
 	k.logger.Warn("signing handed over after a compromise", "compromised_kid", string(kid),
 		"kid", string(pub.KID), "decided_by", decidedBy)
 	return out, nil
+}
+
+// compromiseOutcomeAfterFailedReplacement выбирает исход утечки, когда замена,
+// заводимая этим вызовом, не легла, — по подписывающему, ПЕРЕЧИТАННОМУ после
+// отказа, а не по чтению, сделанному до него.
+//
+// Отказ замены о подписи не говорит ничего: повышение отказывает и тогда, когда
+// подписывающим успел стать чужой ключ (реплика обеспечила подписывающего на
+// старте, второй оператор гнал тот же повтор), и тогда, когда фиксация
+// отказала неоднозначно. Исходов три, и у каждого своё основание: подписывающий
+// прочитан — отказа нет, он назван; прочитано, что его нет, — частичный исход;
+// чтение отказало — о подписи вердикта нет.
+func (k *Keystore) compromiseOutcomeAfterFailedReplacement(
+	ctx context.Context,
+	out LifecycleOutcome,
+	decidedBy string,
+	replaceErr error,
+) (LifecycleOutcome, error) {
+	rec, aerr := k.reader.Active(ctx)
+	switch {
+	case aerr == nil:
+		out.Signer = rec.KID
+		k.logger.Warn("the replacement after a compromise failed, and the signing key read after the failure signs",
+			"compromised_kid", string(out.KID), "kid", string(rec.KID), "decided_by", decidedBy,
+			"replacement_err", replaceErr.Error())
+		return out, nil
+	case errors.Is(aerr, iamerr.ErrFailedPrecondition):
+		return out, fmt.Errorf("%w: %w", ErrNoSignerAfterCompromise, replaceErr)
+	default:
+		k.failures.Add(1)
+		return out, fmt.Errorf("%w: reading the signing key after the failed replacement: %w (replacement: %w)",
+			ErrSignerUnknownAfterCompromise, aerr, replaceErr)
+	}
 }
 
 // RotateIfDue передаёт подпись новому ключу, когда до объявленного срока

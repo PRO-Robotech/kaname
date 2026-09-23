@@ -51,6 +51,12 @@ type memStore struct {
 	// beforeInsert — то, что случается в момент записи новой строки (например,
 	// кончается срок вызова).
 	beforeInsert func()
+	// beforeActivate — то, что случается, пока повышение ключа в подпись ждёт
+	// чужого замка: соседняя транзакция повышает СВОЙ ключ и фиксируется
+	// первой. Настоящее хранилище отвечает на это нарушением уникальности
+	// подписывающего, а не понижением соседа, — поэтому не-nil из хука есть
+	// отказ повышения, а не повод повысить.
+	beforeActivate func() error
 }
 
 func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.SigningKeyRecord{}} }
@@ -157,6 +163,11 @@ func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) 
 func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) error {
 	if m.err != nil {
 		return m.err
+	}
+	if m.beforeActivate != nil {
+		if err := m.beforeActivate(); err != nil {
+			return err
+		}
 	}
 	r, ok := m.rows[kid]
 	if !ok || !r.State.CanActivate() {

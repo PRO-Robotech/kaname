@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 )
 
@@ -254,6 +256,105 @@ func TestCompromise_ACallEndingDuringTheReplacementIsNotReportedAsNoSigner(t *te
 	require.ErrorIs(t, err, signingkeys.ErrSignerUnknownAfterCompromise)
 	require.Equal(t, domain.SigningKeyCompromised, store.rows[leaked].State, "снятие состоялось и не откатывается")
 	require.Empty(t, out.Replacement)
+}
+
+// failActivationAfter — повышение замены отказывает так, как отказывает
+// настоящее хранилище, когда подписывающим успел стать ЧУЖОЙ ключ: соседняя
+// транзакция зафиксировала своё повышение, пока наше ждало её замка. Перед
+// отказом исполняется `meanwhile` — то, что успело случиться у соседа.
+func failActivationAfter(store *memStore, meanwhile func()) {
+	store.beforeActivate = func() error {
+		store.beforeActivate = nil
+		meanwhile()
+		return fmt.Errorf("%w: SigningKey already exists", iamerr.ErrAlreadyExists)
+	}
+}
+
+// promoteElsewhere — соседняя реплика (старт с обеспечением подписывающего) либо
+// второй оператор с тем же повтором поставили подписывающим свой ключ.
+func promoteElsewhere(t *testing.T, store *memStore, kid domain.KeyID, at time.Time) {
+	t.Helper()
+	require.NoError(t, store.set(kid, domain.SigningKeyActive, &at, func(r *domain.SigningKeyRecord) { r.ActivatedAt = &at }))
+}
+
+// TestCompromise_AFailedReplacementUnderASignerPlacedElsewhereNamesThatSigner —
+// утёкший ключ снят, замена этим вызовом не легла, потому что подписывающим
+// успел стать ключ соседа. Служба при этом ПОДПИСЫВАЕТ, и исход обязан это
+// сказать — назвать подписывающего, прочитанного после отказа, — а не объявить
+// её неподписывающей по чтению, сделанному до неудавшейся записи. Законный
+// близнец — TestCompromise_AFailedActivationUnderNoSignerIsPartial: тот же отказ
+// повышения, но подписывающего никто не поставил.
+func TestCompromise_AFailedReplacementUnderASignerPlacedElsewhereNamesThatSigner(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	leaked := activeKID(t, store)
+	neighbour, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	failActivationAfter(store, func() { promoteElsewhere(t, store, neighbour.KID, now) })
+
+	out, err := ks.Compromise(ctx, leaked, "oncall")
+	require.NotErrorIs(t, err, signingkeys.ErrNoSignerAfterCompromise,
+		"подписывающий %s существует — «подписывающего нет» ложно", neighbour.KID)
+	require.NoError(t, err, "служба подписывает: снятие состоялось, отказа по существу нет")
+	require.Equal(t, neighbour.KID, out.Signer, "исход называет подписывающего, прочитанного ПОСЛЕ отказа замены")
+	require.Empty(t, out.Replacement, "замена, заводимая этим вызовом, не легла")
+	require.Equal(t, neighbour.KID, activeKID(t, store))
+	require.Equal(t, domain.SigningKeyCompromised, store.rows[leaked].State, "снятие состоялось и не откатывается")
+	for kid, r := range store.rows {
+		require.NotEqualf(t, domain.SigningKeyPublished, r.State,
+			"ключ %s, порождённый для не легшей замены, не остаётся опубликованным без будущего", kid)
+	}
+}
+
+// TestCompromise_AFailedActivationUnderNoSignerIsPartial — законный близнец
+// пробы выше, отличие в одном факте: повышение отказывает тем же отказом, а
+// подписывающего не поставил никто. Отсутствие ПРОЧИТАНО после отказа — и
+// частичный исход законен.
+func TestCompromise_AFailedActivationUnderNoSignerIsPartial(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	leaked := activeKID(t, store)
+	_, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	failActivationAfter(store, func() {})
+
+	out, err := ks.Compromise(ctx, leaked, "oncall")
+	require.ErrorIs(t, err, signingkeys.ErrNoSignerAfterCompromise)
+	require.Empty(t, out.Signer, "подписывающего нет — называть некого")
+	require.Empty(t, out.Replacement)
+	_, aerr := store.Active(ctx)
+	require.ErrorIs(t, aerr, iamerr.ErrFailedPrecondition, "частичный исход: подписывающего действительно нет")
+}
+
+// TestCompromise_AFailedReplacementWhoseSignerCannotBeReadIsSignerUnknown —
+// повышение замены отказало, а перечитать подписывающего не удалось: сбой
+// хранилища на чтении. Подписывает ли служба, не установлено, и «подписывающего
+// нет» было бы утверждением без основания. Близнец —
+// TestCompromise_AFailedActivationUnderNoSignerIsPartial: то же, но чтение отвечает.
+func TestCompromise_AFailedReplacementWhoseSignerCannotBeReadIsSignerUnknown(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	leaked := activeKID(t, store)
+	_, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	failActivationAfter(store, func() { store.activeErr = errors.New("memstore: connection reset") })
+
+	out, err := ks.Compromise(ctx, leaked, "oncall")
+	require.NotErrorIs(t, err, signingkeys.ErrNoSignerAfterCompromise,
+		"подписывающий не прочитан — «подписывающего нет» не установлено")
+	require.ErrorIs(t, err, signingkeys.ErrSignerUnknownAfterCompromise)
+	require.ErrorContains(t, err, "connection reset", "причина чтения доезжает до вызывающего")
+	require.Empty(t, out.Signer)
+	require.Equal(t, domain.SigningKeyCompromised, store.rows[leaked].State, "снятие состоялось и не откатывается")
 }
 
 // ── Ротация до объявленного срока ───────────────────────────────────────────

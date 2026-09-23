@@ -367,6 +367,94 @@ func TestSigningKeyCommand_RefusalAfterPartialLeavesTheSignerAlone(t *testing.T)
 	require.False(t, svc.signs(t), "отказ не заводит подписывающего")
 }
 
+// awaitLockWaiter — ждёт, пока обслуживающий процесс базы не встанет в
+// ожидание замка. Не дождался — сцена конкуренции не построена: это отказ
+// фикстуры, а не вердикт о предмете.
+func awaitLockWaiter(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			 WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting))
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ни один процесс базы не ждёт замка за 10 с — сцена конкуренции не построена")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestSigningKeyCommand_RepeatUnderAConcurrentSignerNamesItAndDoesNotClaimAStoppedService —
+// после частичного исхода утечки повтор команды заводит замену, а в это время
+// подписывающим становится ключ соседа (реплика стартует и обеспечивает
+// подписывающего, второй оператор гонит тот же повтор). Повышение замены
+// отказывает нарушением уникальности подписывающего, но служба ПОДПИСЫВАЕТ — и
+// команда обязана это сказать: исход без отказа, подписывающий назван, «служба
+// не подписывает» не печатается. Законный близнец —
+// TestSigningKeyCommand_RepeatAfterPartialNamesTheReplacement: тот же повтор без
+// соседа, и там подпись переходит к замене этого вызова.
+func TestSigningKeyCommand_RepeatUnderAConcurrentSignerNamesItAndDoesNotClaimAStoppedService(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	const bound = 15 * time.Second
+	ctx := context.Background()
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	leaked := svc.signedKID(t)
+	pool := storePool(t, cfg)
+	allow := refuseKeyInserts(t, pool)
+	code, out := runCommand(t, cfg, "compromise", "-kid="+string(leaked), "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitRefused, code, "предпосылка — частичный исход; вывод команды: %s", out)
+	require.False(t, svc.signs(t), "предпосылка — служба не подписывает")
+	allow()
+
+	// Сосед: его ключ опубликован и повышается в подпись транзакцией, которая
+	// ещё не зафиксирована, — повтор команды его подписывающим не видит.
+	neighbour, err := svc.ks.Generate(ctx)
+	require.NoError(t, err)
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	_, err = tx.Exec(ctx, `UPDATE kaname.token_signing_keys SET state = 'ACTIVE', activated_at = now()
+		WHERE kid = $1 AND state = 'PUBLISHED'`, string(neighbour.KID))
+	require.NoError(t, err)
+
+	type result struct {
+		code int
+		out  string
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, out := runCommand(t, cfg, "compromise", "-kid="+string(leaked), "-decided-by=oncall@example.invalid")
+		done <- result{code, out}
+	}()
+	// Повышение замены ждёт замка соседа — и сосед фиксируется первым.
+	awaitLockWaiter(t, pool)
+	require.NoError(t, tx.Commit(ctx))
+
+	var repeat result
+	select {
+	case repeat = <-done:
+	case <-time.After(bound):
+		t.Fatalf("повтор команды не вернулся за %s", bound)
+	}
+	require.Equal(t, signingKeyExitDone, repeat.code, "служба подписывает — отказа по существу нет; вывод команды: %s", repeat.out)
+	require.Contains(t, repeat.out, "outcome=already-done")
+	require.Contains(t, repeat.out, "signer="+string(neighbour.KID), "оператор обязан узнать, каким ключом служба подписывает")
+	require.NotContains(t, repeat.out, "служба не подписывает", "служба подписывает ключом соседа")
+	require.NotContains(t, repeat.out, "replacement=", "замена этим вызовом не легла")
+	require.Equal(t, neighbour.KID, svc.signedKID(t), "служба подписывает ключом соседа")
+	served := svc.servedKIDs(t)
+	require.True(t, served[neighbour.KID])
+	require.False(t, served[leaked], "утёкший ключ в набор не вернулся")
+}
+
 // TestSigningKeyCommand_OwnLimitEndsAHungStoreWithNoVerdict — хранилище
 // зависло (строку ключа держит чужая транзакция): команда кончается СВОИМ
 // пределом, отвечает «не исполнялось» и называет предел, а набор и
