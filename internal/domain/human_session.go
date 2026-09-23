@@ -215,25 +215,65 @@ func (s HumanSession) Validate() error {
 // срока сессии уже нет.
 func (s HumanSession) Expired(now time.Time) bool { return !now.Before(s.ExpiresAt) }
 
-// Причины отсечки, которые пишут ДВА новых писателя этой фазы (Р4, Р6, Р9).
+// Слова причин ДВУХ записей — одним объявлением (Ф3 Р4, Р6, Р9).
+//
+// Константы ниже служат двум словарям. Закрытый — причина СНЯТИЯ записи
+// сессии: ограничение `human_sessions_ended_reason_check`, его перечень в
+// домене — HumanSessionEndReasons. Открытый — причина ОТСЕЧКИ
+// (`user_token_revocations.reason`, ограничена только длиной). Какой записи
+// служит каждая константа, сказано у неё. Слово, которое пишут обе записи,
+// объявлено один раз: второе написание разошлось бы с первым молча.
 //
 // `password-change` — ТО ЖЕ значение, что пишет существующий хук завершения
-// восстановления (`internal/apps/kaname/api/user`): объявление одно, второе
-// разошлось бы с первым молча. `logout` — своё: журнал обязан отличать выход
-// от смены пароля (Ф1-63).
+// восстановления (`internal/apps/kaname/api/user`). `logout` — своё: журнал
+// обязан отличать выход от смены пароля (Ф1-63).
 const (
-	RevokeReasonLogout         = "logout"
+	// RevokeReasonLogout — собственный выход человека: причина снятия его
+	// записи сессии и причина отсечки.
+	RevokeReasonLogout = "logout"
+	// RevokeReasonPasswordChange — смена пароля и завершение восстановления:
+	// причина снятия прочих записей сессии и причина отсечки.
 	RevokeReasonPasswordChange = "password-change"
 	// RevokeReasonSecondFactorRemoved — снятие второго фактора самим человеком
 	// гасит ПРОЧИЕ его сессии (Ф12 Р9, kacho#1281): журнал отличает это от
-	// выхода и от смены пароля. Третье значение словаря
-	// `human_sessions_ended_reason_check`.
+	// выхода и от смены пароля. Причина снятия записи сессии.
 	RevokeReasonSecondFactorRemoved = "second-factor-removed"
 	// RevokeReasonSecondFactorReset — причина отсечки, которую пишет сброс
 	// второго фактора распорядителем (Ф12 Р10): все сессии человека покрыты
-	// отсечкой `now` существующим писателем принудительного выхода.
+	// отсечкой `now` существующим писателем принудительного выхода. В словарь
+	// снятия сессии НЕ входит: ни одному снимающему методу она не передаётся.
 	RevokeReasonSecondFactorReset = "second-factor-reset"
+	// RevokeReasonAdminForceLogout — выход, произведённый распорядителем
+	// (`InternalIAMService.ForceLogout`; kaname#334, приёмка
+	// `forced-exit-has-its-own-session-end-reason.md`, Р1, Р3). Роли у слова
+	// ДВЕ, и объявлено оно одно:
+	//   - причина снятия НАШИХ записей сессии входа принудительным выходом.
+	//     Это слово закрытого словаря, и из запроса оно не берётся (Р2):
+	//     свободная причина распорядителя в запись сессии не идёт;
+	//   - умолчание СВОБОДНОЙ причины отсечки и события, когда запрос
+	//     причины не несёт. Совпадение намеренное: предмет у обеих записей
+	//     один — принудительный выход.
+	RevokeReasonAdminForceLogout = "admin-force-logout"
 )
+
+// HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
+// сессии: ровно те значения, что принимает `human_sessions_ended_reason_check`.
+// Причина отсечки RevokeReasonSecondFactorReset в него не входит — она не
+// снимает ни одной записи.
+//
+// Функция, а не переменная: каждый вызов отдаёт СВЕЖИЙ срез, и вызывающий,
+// дописавший в него, словаря не меняет. Элементы — константы по имени, а не
+// литералы: слово объявлено один раз. Совпадение перечня с ограничением базы в
+// обе стороны держит проба KN-SER-07
+// (`internal/migrations/human_session_forced_exit_reason_integration_test.go`).
+func HumanSessionEndReasons() []string {
+	return []string{
+		RevokeReasonLogout,
+		RevokeReasonPasswordChange,
+		RevokeReasonSecondFactorRemoved,
+		RevokeReasonAdminForceLogout,
+	}
+}
 
 // FormKind — вид формы, к которому привязан признак защиты от подделки
 // запроса (Р12). Перечень ЗАКРЫТ и объявлен один раз; Ф4 и Ф5 дописывают свои
