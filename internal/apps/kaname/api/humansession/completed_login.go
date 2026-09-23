@@ -108,19 +108,13 @@ type completedLogin struct {
 // окном сам, а сброшенный по незнанию открыл бы окно подбора, которого решение
 // не разрешало; ронять из-за этого сам вход — цена, которой решение не
 // требовало.
+//
+// Хранилище способов и журнал здесь всегда есть: каждая полоса, которая сюда
+// ходит, без хранилища не собирается, а журнал ей подставляет конструктор
+// (`TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore`).
 func enrollmentBeforeWrite(
 	ctx context.Context, methods loginmethod.Store, logger *slog.Logger, userID domain.UserID,
 ) ([]assurance.Method, bool) {
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
-	}
-	if methods == nil {
-		// Полоса, собранная без хранилища способов: заведённое неизвестно, и
-		// «неизвестно» здесь fail-closed, а не паника на первом же входе.
-		logger.ErrorContext(ctx, "failure reset: login-method store is absent — the address counter is left standing",
-			"user_id", string(userID))
-		return nil, false
-	}
 	enrolled, err := enrolledMethods(ctx, methods, userID)
 	if err != nil {
 		logger.ErrorContext(ctx, "failure reset: enrolled login methods unreadable — the address counter is left standing",

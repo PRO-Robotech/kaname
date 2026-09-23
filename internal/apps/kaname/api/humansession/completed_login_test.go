@@ -18,6 +18,12 @@ package humansession
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -243,4 +249,121 @@ func TestResetFailuresRefusesOnUnknownEnrollment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// absentMethodsStore и absentUsers — непустые значения портов, которые никто не
+// зовёт: сборка обязана отказать РАНЬШЕ, на пустом хранилище способов входа.
+type (
+	absentMethodsStore struct{ Store }
+	absentUsers        struct{ UserDirectory }
+)
+
+// enrollmentReaders — полосы пакета, зовущие `enrollmentBeforeWrite`: имена
+// типов-приёмников, выведенные РАЗБОРОМ исходников пакета, а не выписанные.
+func enrollmentReaders(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог пакета не прочитан: %v", err)
+	}
+	readers := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: разбор %s: %v", name, err)
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil || fd.Recv == nil || len(fd.Recv.List) != 1 {
+				continue
+			}
+			calls := false
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "enrollmentBeforeWrite" {
+						calls = true
+					}
+				}
+				return !calls
+			})
+			if !calls {
+				continue
+			}
+			recv := fd.Recv.List[0].Type
+			if star, ok := recv.(*ast.StarExpr); ok {
+				recv = star.X
+			}
+			if id, ok := recv.(*ast.Ident); ok {
+				readers[id.Name] = true
+			}
+		}
+	}
+	return readers
+}
+
+// TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore — ПОСЫЛКА того,
+// что у `enrollmentBeforeWrite` нет ветви «хранилища способов нет»: всякая
+// полоса, которая его зовёт, без хранилища способов входа НЕ СОБИРАЕТСЯ, а
+// журнал ей подставляет конструктор. Перечень полос выводится разбором пакета:
+// новый вызывающий без строки сборки здесь роняет пробу, строка без
+// вызывающего — тоже.
+func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) {
+	t.Parallel()
+	store := absentMethodsStore{}
+	build := map[string]func() error{
+		"LoginUseCase": func() error {
+			_, err := NewLoginUseCase(LoginDeps{Store: store, Users: absentUsers{}})
+			return err
+		},
+		"StepUpUseCase": func() error {
+			_, err := NewStepUpUseCase(SecondFactorDeps{Store: store})
+			return err
+		},
+		"ConfirmSecondFactorUseCase": func() error {
+			_, err := NewConfirmSecondFactorUseCase(SecondFactorDeps{Store: store})
+			return err
+		},
+		"RemoveSecondFactorUseCase": func() error {
+			_, err := NewRemoveSecondFactorUseCase(SecondFactorDeps{Store: store})
+			return err
+		},
+		"RegenerateBackupCodesUseCase": func() error {
+			_, err := NewRegenerateBackupCodesUseCase(SecondFactorDeps{Store: store})
+			return err
+		},
+	}
+
+	readers := enrollmentReaders(t)
+	if len(readers) == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: полос, зовущих enrollmentBeforeWrite, разбором найдено 0")
+	}
+	names := make([]string, 0, len(readers))
+	for name := range readers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		b, ok := build[name]
+		if !ok {
+			t.Fatalf("полоса %s зовёт enrollmentBeforeWrite, а строки «сборка без хранилища способов» у неё здесь нет: "+
+				"посылка снятой ветви о ней не проверена", name)
+		}
+		err := b()
+		if err == nil || !strings.Contains(err.Error(), "login method store required") {
+			t.Fatalf("полоса %s собирается без хранилища способов входа (ошибка сборки: %v) — ветвь "+
+				"«хранилища нет» у enrollmentBeforeWrite снова достижима", name, err)
+		}
+	}
+	for name := range build {
+		if !readers[name] {
+			t.Fatalf("строке %s больше нечего проверять: полоса не зовёт enrollmentBeforeWrite", name)
+		}
+	}
+	t.Logf("перепись: полос, читающих заведённое до транзакции, %d (%s) — все отказывают в сборке без хранилища способов",
+		len(names), strings.Join(names, ", "))
 }
