@@ -66,6 +66,33 @@ package check
 // В Go комментарий узлом-вызовом не является by construction; в прочих языках
 // строка комментария снимается до разбора, и снятое СЧИТАЕТСЯ отдельной
 // величиной.
+//
+// # ЗАПИСИ РЕВЬЮ НЕ СУДЯТСЯ — И ПОЧЕМУ ЭТО ИСКЛЮЧЕНИЕ, А НЕ ЗАПИСИ ВЕДОМОСТИ
+//
+// Запись ревью — СВИДЕТЕЛЬСТВО, а не рецепт: она сохраняет, какую команду
+// рецензент исполнил и что получил, о дереве, существовавшем в момент ревью. Её
+// не исполняет ни один прогон, и после посадки она не судит ничего — поэтому
+// вопрос «переносится ли её вердикт на ствол» к ней не относится.
+//
+// Команда дайджеста в записи ПО ПОСТРОЕНИЮ называет базу волны и голову полосы:
+// предмет ревью — дельта между ними, и стволом ни один операнд быть не может, в
+// стволе этой дельты ещё нет. Значит каждая новая запись давала бы находку, и ни
+// одного законного исхода у находки не было бы: перевести вершину на ствол —
+// значит переписать свидетельство; записать довод в ведомость — значит заводить
+// запись ведомости на каждую запись ревью с одним и тем же доводом, верным by
+// construction, и довод перестал бы отличать одно от другого.
+//
+// Замер, ради которого исключение: к ревизии `98c749461` ведомость несла шесть
+// записей о записях ревью, все шесть с доводом «операнды — ревизии полосы», и
+// следующий же круг ревью одной задачи дал ещё пять находок того же рода.
+//
+// ИСКЛЮЧЕНИЕ УЗКОЕ: судится ФОРМА ПУТИ, а не слово. Запись — файл `.yaml` под
+// одним из корней `reviewRecordForms`; скрипт в каталоге записей, документ вне
+// его и сосед корня по префиксу имени судятся как всякий другой файл.
+// Исключённое СЧИТАЕТСЯ — записей, по формам, и вопросов в них, оставшихся без
+// суждения, — иначе исключение неотличимо от слепоты. Исключение самоистекает:
+// обход, не встретивший ни одной записи, называет его пережившим свой предмет
+// (`recordExclusionFindings` в пробе гейта).
 
 import (
 	"fmt"
@@ -177,6 +204,53 @@ type HistoryCensus struct {
 	// ByVerb — сколько вопросов задал каждый глагол. Глагол, давший ноль,
 	// означает, что этой формы в дереве нет, а не что разбор её не знает.
 	ByVerb map[string]int
+	// RecordsExcluded — записей ревью, исключённых из суждения (см. шапку,
+	// «ЗАПИСИ РЕВЬЮ»). Входят в FilesRead: прочитаны они, не судятся.
+	RecordsExcluded int
+	// RecordsByForm — исключённых записей по форме пути; каждая форма
+	// `reviewRecordForms` присутствует ключом и с нулём, чтобы форма, не
+	// давшая ни одной записи, была видна числом.
+	RecordsByForm map[string]int
+	// RecordQuestions — вопросов об истории в исключённых записях. Их вершины
+	// не судятся, но их число печатается: слепая зона исключения — величина, а
+	// не умолчание.
+	RecordQuestions int
+}
+
+// reviewRecordForms — формы пути записи ревью, которые пишет оснастка ревью:
+// приёмочная (`docs/specs/reviews/<документ>/…`) и по изменению
+// (`docs/changes/<изменение>/reviews/…`). Имя формы — её глоб; `**` — ноль и
+// более сегментов.
+var reviewRecordForms = []string{
+	"docs/specs/reviews/**",
+	"docs/changes/**/reviews/**",
+}
+
+// ReviewRecordForm — форма записи ревью, которой отвечает путь, либо "" — путь
+// записью ревью не является. Запись — только файл `.yaml`: иной файл в том же
+// каталоге свидетельством не является и судится.
+func ReviewRecordForm(rel string) string {
+	if !strings.HasSuffix(rel, ".yaml") {
+		return ""
+	}
+	segs := strings.Split(rel, "/")
+	if len(segs) < 4 || segs[0] != "docs" {
+		return ""
+	}
+	switch segs[1] {
+	case "specs":
+		if segs[2] == "reviews" {
+			return reviewRecordForms[0]
+		}
+	case "changes":
+		// Последний сегмент — имя файла, поэтому `reviews` ищется до него.
+		for _, s := range segs[2 : len(segs)-1] {
+			if s == "reviews" {
+				return reviewRecordForms[1]
+			}
+		}
+	}
+	return ""
 }
 
 // ScanHistoryQuestions — все вопросы об истории в названном корпусе.
@@ -188,7 +262,10 @@ type HistoryCensus struct {
 // параметр, а не константа: иначе ось «ствол назван» нечем подать синтетике, и
 // она осталась бы без доказательства падучести.
 func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]HistoryQuestion, HistoryCensus) {
-	census := HistoryCensus{ByVerb: map[string]int{}}
+	census := HistoryCensus{ByVerb: map[string]int{}, RecordsByForm: map[string]int{}}
+	for _, form := range reviewRecordForms {
+		census.RecordsByForm[form] = 0
+	}
 	var out []HistoryQuestion
 	outside := 0
 
@@ -201,6 +278,13 @@ func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]Histo
 	for _, rel := range rels {
 		census.FilesRead++
 		src := corpus[rel]
+		if form := ReviewRecordForm(rel); form != "" {
+			census.RecordsExcluded++
+			census.RecordsByForm[form]++
+			qs, _ := lineHistoryQuestions(rel, src, trunkRefs)
+			census.RecordQuestions += len(qs)
+			continue
+		}
 		var qs []HistoryQuestion
 		switch {
 		case strings.HasSuffix(rel, ".go"):
