@@ -187,6 +187,17 @@ func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.U
 	return w, nil
 }
 
+// sweepUnservableSessionsSQL — оператор уборки записей сессии, которые
+// `Resolve` уже не обслужит: истёкшие и снятые старше порога ($1), партией не
+// больше $2.
+const sweepUnservableSessionsSQL = `
+		DELETE FROM human_sessions
+		 WHERE ctid IN (
+		       SELECT ctid FROM human_sessions
+		        WHERE (expires_at <= now() - $1::interval)
+		           OR (ended_at IS NOT NULL AND ended_at <= now() - $1::interval)
+		        LIMIT $2)`
+
 // SweepUnservableSessions — уборка (форма Ф-ж): строки, которые `Resolve` уже
 // не обслужит ни при каком носителе — истёкшие и снятые, — старше порога.
 // Партия ограничена `ctid`-подзапросом; full=true — партия заполнена, звать ещё.
@@ -194,13 +205,7 @@ func (r *HumanSessionRepo) SweepUnservableSessions(ctx context.Context, grace ti
 	if batch <= 0 {
 		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
 	}
-	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM human_sessions
-		 WHERE ctid IN (
-		       SELECT ctid FROM human_sessions
-		        WHERE (expires_at <= now() - $1::interval)
-		           OR (ended_at IS NOT NULL AND ended_at <= now() - $1::interval)
-		        LIMIT $2)`, grace, batch)
+	tag, err := r.pool.Exec(ctx, sweepUnservableSessionsSQL, grace, batch)
 	if err != nil {
 		return 0, false, mapErr(err, "HumanSession.Sweep", "")
 	}
