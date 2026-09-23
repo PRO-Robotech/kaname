@@ -119,10 +119,22 @@ lane_tag() {
 }
 LANE="$(lane_tag "$ROOT_EARLY")"
 
-CLUSTER="${KANAME_STAND_CLUSTER:-kaname-chart-$LANE}"
+# УМОЛЧАНИЕ И ФАКТ — РАЗНЫЕ ВЕЛИЧИНЫ, и у каждой своё имя.
+#
+# Умолчание — то, на чём стенд встаёт, когда координату НЕ назвали; факт — то, на
+# чём он стоит сейчас. Названное снаружи законно (задание конвейера задаёт свои
+# имена на все шаги), и самопроба «признак полосы входит в каждое умолчание»
+# судит УМОЛЧАНИЯ: судя факт, она краснела на всяком задании с названными
+# координатами — находкой о дереве, которого никто не ломал (kaname#183, задание
+# `chart-own`), — и в нём же ничего не спрашивала о самих умолчаниях.
+DEFAULT_CLUSTER="kaname-chart-$LANE"
+DEFAULT_IMAGE="kaname:stand-$LANE"
+DEFAULT_WORK="${TMPDIR:-/tmp}/kaname-stand-chart-$LANE"
+
+CLUSTER="${KANAME_STAND_CLUSTER:-$DEFAULT_CLUSTER}"
 NS="${KANAME_STAND_NS:-kaname}"
 RELEASE="${KANAME_STAND_RELEASE:-kaname}"
-IMAGE="${KANAME_STAND_IMAGE:-kaname:stand-$LANE}"
+IMAGE="${KANAME_STAND_IMAGE:-$DEFAULT_IMAGE}"
 DOMAIN="${KANAME_STAND_DOMAIN:-kaname.local}"
 PG_PASSWORD="${KANAME_STAND_PG_PASSWORD:-standpassword}"
 ALERT_RULES="${KANAME_STAND_ALERT_RULES:-on}"
@@ -160,7 +172,7 @@ REVISION="${KANAME_STAND_REVISION:-$(git -C "$ROOT_EARLY" rev-parse HEAD 2>/dev/
 
 SCRIPT_DIR="$SCRIPT_DIR_EARLY"
 ROOT="$ROOT_EARLY"
-WORK="${KANAME_STAND_WORKDIR:-${TMPDIR:-/tmp}/kaname-stand-chart-$LANE}"
+WORK="${KANAME_STAND_WORKDIR:-$DEFAULT_WORK}"
 PKI="$WORK/pki"
 
 # Кластер, который поднял ЭТОТ стенд, помечается файлом в рабочем каталоге, и
@@ -729,7 +741,7 @@ self_test() {
 	# признак полосы разошёлся. Законный близнец рядом: тот же путь даёт тот же
 	# признак, иначе имена кластера гуляли бы от вызова к вызову и `down` сносил
 	# бы не то, что поднял `up`.
-	local a b
+	local a b name fact want
 	a="$(lane_tag /полоса/один)"
 	b="$(lane_tag /полоса/два)"
 	say "самопроба: две рабочие копии — признак полосы обязан разойтись"
@@ -738,12 +750,29 @@ self_test() {
 	[ "$a" = "$(lane_tag /полоса/один)" ] || { fail "самопроба: один путь дал два признака — down сносил бы не то, что поднял up"; rc=1; }
 	# КАЖДОЕ умолчание проверяется ОТДЕЛЬНО: склейка трёх в одну строку
 	# зеленела бы, когда признак вошёл в одну из них, — а делят полосы все три.
+	#
+	# Судятся УМОЛЧАНИЯ, а не факты (шапка, «Умолчание и факт»): вердикт этой
+	# пробы не зависит от того, назвал ли вызывающий свои координаты, — и в
+	# задании, которое их назвало, умолчание без признака полосы по-прежнему
+	# красное.
 	say "самопроба: признак полосы входит в КАЖДОЕ из трёх умолчаний"
-	for pair in "кластер=$CLUSTER" "образ=$IMAGE" "каталог=$WORK"; do
+	for pair in "кластер=$DEFAULT_CLUSTER" "образ=$DEFAULT_IMAGE" "каталог=$DEFAULT_WORK"; do
 		case "${pair#*=}" in
 			*"$LANE"*) ;;
 			*) fail "самопроба: признак полосы не вошёл в умолчание ${pair%%=*} (${pair#*=}) — полосы делили бы его"; rc=1 ;;
 		esac
+	done
+	# Законный близнец и связь умолчания с фактом: координата стенда — либо
+	# названная снаружи, либо РОВНО умолчание. Без этой пробы факт, выведенный
+	# мимо умолчания, оставил бы предыдущую пробу судить величину, которой никто
+	# не пользуется.
+	say "самопроба: координата стенда — названная снаружи либо ровно её умолчание"
+	for pair in "кластер|$CLUSTER|${KANAME_STAND_CLUSTER:-$DEFAULT_CLUSTER}" \
+		"образ|$IMAGE|${KANAME_STAND_IMAGE:-$DEFAULT_IMAGE}" \
+		"каталог|$WORK|${KANAME_STAND_WORKDIR:-$DEFAULT_WORK}"; do
+		IFS='|' read -r name fact want <<<"$pair"
+		[ "$fact" = "$want" ] || {
+			fail "самопроба: $name стенда «$fact», а ждали «$want» (названное снаружи, иначе умолчание) — координата выведена в обход них"; rc=1; }
 	done
 	say "самопроба: KUBECONFIG у скрипта свой"
 	[ -n "${KUBECONFIG:-}" ] || { fail "самопроба: KUBECONFIG не задан — kind писал бы в общий файл и уводил kubectl соседа"; rc=1; }
@@ -769,7 +798,7 @@ self_test() {
 	fi
 	RESOLVER_POLL="$saved_poll"
 
-	say "самопроба: утверждений 20 · осей сверки 6 (под own — 7)"
+	say "самопроба: утверждений 21 · осей сверки 6 (под own — 7)"
 	[ "$rc" -eq 0 ] && say "===== самопроба пройдена =====" || fail "самопроба не пройдена"
 	return "$rc"
 }
