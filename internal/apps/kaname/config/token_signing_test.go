@@ -153,6 +153,34 @@ func TestUnsetSigningKeyLifetimeRefusesStart(t *testing.T) {
 	}
 }
 
+// TestSigningKeyLifetimeRefusalNamesItsCause — отказ называет ПРИЧИНУ, а не
+// только ключ: нулевой срок — «не объявлен», отрицательный — объявлен негодным.
+//
+// Оператор, задавший `-1h`, прочитав «is not declared», ищет ключ, который уже
+// задал, и не находит ошибки: текст отказа обязан вести к следующему шагу.
+func TestSigningKeyLifetimeRefusalNamesItsCause(t *testing.T) {
+	const notDeclared = "authn.token-signing.key-lifetime is not declared"
+	const mustBePositive = "authn.token-signing.key-lifetime must be positive"
+
+	zero := fullSigningConfig()
+	zero.KeyLifetime = 0
+	err := zero.Validate()
+	if err == nil || !strings.Contains(err.Error(), notDeclared) || strings.Contains(err.Error(), mustBePositive) {
+		t.Fatalf("нулевой срок обязан отвергаться как НЕОБЪЯВЛЕННЫЙ, получено: %v", err)
+	}
+
+	negative := fullSigningConfig()
+	negative.KeyLifetime = -time.Hour
+	err = negative.Validate()
+	if err == nil || !strings.Contains(err.Error(), mustBePositive) || strings.Contains(err.Error(), notDeclared) {
+		t.Fatalf("отрицательный срок объявлен — отказ обязан называть его негодным, а не "+
+			"необъявленным; получено: %v", err)
+	}
+	if !strings.Contains(err.Error(), "-1h0m0s") {
+		t.Fatalf("отказ обязан называть объявленную величину, получено: %v", err)
+	}
+}
+
 func TestTokenSigningDisabledIsNotValidatedIntoOblivion(t *testing.T) {
 	// Пока своя чеканка выключена, её настройки не требуются: страж, требующий
 	// того, чем не пользуются, — отказ в старте без предмета.
