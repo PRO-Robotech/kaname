@@ -283,7 +283,12 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 			tag:  "frr",
 			twin: true,
 			apply: func(t *testing.T, f familyRig, a codeScene) string {
+				// rt-1 законно ротирован в rt-2 (LINE-A-1-20), затем повторён.
 				_, err := f.ceremony.RotateRefreshToken(context.Background(), kanamepg.RefreshRotation{
+					PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x7e56), TTL: time.Hour,
+				})
+				require.NoError(t, err, "законная ротация rt-1 → rt-2")
+				_, err = f.ceremony.RotateRefreshToken(context.Background(), kanamepg.RefreshRotation{
 					PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x7e57), TTL: time.Hour,
 				})
 				require.True(t, domain.IsRefreshTokenReplay(err), "повтор обязан быть опознан: %v", err)
@@ -399,7 +404,7 @@ func TestLINE_A_1_20_LawfulRotationRevokesNothing(t *testing.T) {
 		PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x3002), TTL: time.Hour,
 	})
 	require.NoError(t, err, "законная ротация")
-	require.Equal(t, 1, rotated.Generation, "ротация обязана дать следующее поколение")
+	require.EqualValues(t, 1, rotated.Generation, "ротация обязана дать следующее поколение")
 	after := f.issueIn(t, scene)
 
 	f.requireAccepted(t, a.at, "выпуск до законной ротации")
