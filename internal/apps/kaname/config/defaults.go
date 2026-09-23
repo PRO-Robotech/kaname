@@ -226,16 +226,19 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
 	v.SetDefault("authn.self-service-freshness", time.Duration(0))
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
-	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
-	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.
-	// У издателя и алгоритма умолчаний НЕТ — подпись умолчанием была бы
-	// решением, принятым за оператора.
+	// Своя чеканка токенов (задача #897). Умолчание задано ТОЛЬКО у величины,
+	// у которой оно осмысленно: путь нашей записи набора. У издателя и
+	// алгоритма умолчаний НЕТ — подпись умолчанием была бы решением, принятым
+	// за оператора. Срок ключа регистрируется ВЫРОЖДЕННЫМ (#321): это политика
+	// ротации, решение установки, и незаданная она обязана доехать до стража
+	// незаданной — подставленная здесь, она делала бы страж зелёным при любом
+	// входе. Регистрация нужна затем, чтобы переменная окружения разрешалась.
 	v.SetDefault("authn.token-signing.enabled", false)
 	v.SetDefault("authn.token-signing.issuer", "")
 	v.SetDefault("authn.token-signing.algorithm", "")
 	v.SetDefault("authn.token-signing.allowed-algorithms", "")
 	v.SetDefault("authn.token-signing.key-set-path", defaultKeySetPath)
-	v.SetDefault("authn.token-signing.key-lifetime", "2160h")
+	v.SetDefault("authn.token-signing.key-lifetime", time.Duration(0))
 
 	// Приём предъявленного удостоверения (#2077). Умолчания ПУСТЫЕ намеренно:
 	// «выключено» — единственное безопасное состояние, а адресат и окно отзыва
