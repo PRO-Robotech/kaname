@@ -1,0 +1,155 @@
+# Пост-дифф ревью Go-кода продукта — роль go-style-reviewer.
+#
+# Имя файла — content_digest. Прежние записи не правятся; сменился дайджест —
+# новый запуск и новый файл (change-graph §2). Запись не коммитится (задание).
+# Текст — на уровне свойства: репозиторий публичен; разбор адресуется диффом фикса.
+schema_version: 1
+change_id: kn-379
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+subject: >-
+  kaname#379 — полосы выдачи токена человеку сверяют отсечку отзыва-всех одним
+  правилом (revocationpolicy); читатель отсечки — обязательный порт сборки
+  эндпоинта со своим пределом времени.
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: '379'            # локальная, upstream не задан
+  worktree: /home/dk/workspace/github/PRO-Robotech/cloud-demo/kacho-workspace/tmp/kaname-379
+  base: a889f108f22e1e42782b822677a4225467f3bdfc   # origin/365 == git ls-remote refs/heads/365
+  head: 1f73660b36ffe47189b5246499c5e7736801627f
+content_digest: sha256:8b3736280d839266fb063f1f351fdad4df931373d35145b78984ee615f148c3f
+digest_definition: >-
+  `git diff origin/365...1f73660b | sha256sum` и `git diff a889f108..1f73660b | sha256sum`
+  дают одно значение (база — предок головы); рабочее дерево копии чистое.
+
+verdict: returned            # ⛔ возврат
+blocks_landing: true
+timestamp: '2026-09-23T12:10:00Z'
+review_scope: >-
+  полный закоммиченный дифф: 25 файлов, +1250/-93; 9 не-тестовых .go, 13 тестовых.
+  Скил evgeniy §13 и чек-лист роли применены ко всему диффу.
+
+critical:
+  - id: HOOK-LANE-CUTOFF-READ-UNBOUNDED
+    coord: internal/handler/iamhooks/token_hook_handler.go:558
+    related:
+      - internal/revocationpolicy/revocationpolicy.go:121
+      - internal/handler/iamhooks/refresh_hook_handler.go:323
+      - cmd/kaname/hooks_mux.go:80
+      - internal/clienttokenwire/build.go:140
+    property: >-
+      Чтение отсечки отзыва-всех на полосах хука идёт с контекстом запроса без
+      собственного предела времени на вызов; у полосы эндпоинта тот же читатель
+      обёрнут объявленным пределом. Вызов на полосе хука переписан этим диффом
+      (переход на revocationpolicy.AtIssuance). Одно чтение одного механизма
+      несёт разный предел в зависимости от полосы (architecture.md
+      arch-per-call-deadline; arch-lanes-compare-norm).
+    requirement: >-
+      Дать чтению отсечки на полосах хука тот же объявленный предел на вызов, что
+      у эндпоинта: обернуть общий читатель один раз в композиционном корне хуков
+      (тот же вид обёртки, что WithDeadlineCutoffs), чтобы оба хука и эндпоинт
+      читали строку под одним пределом. Предел закрепить пробой, которая идёт
+      через сборку, а не через обёртку напрямую (см. important
+      DEADLINE-PROBE-BYPASSES-COMPOSITION).
+    predicate: >-
+      @1f73660b: `grep -l "context.WithTimeout\|context.WithDeadline"
+      $(ls internal/handler/iamhooks/*.go | grep -v _test) cmd/kaname/hooks_mux.go
+      internal/revocationpolicy/revocationpolicy.go | wc -l` → 0 (осмотрено 13 файлов);
+      контроль `grep -c context.WithTimeout internal/clienttokenwire/build.go` → 4.
+      Путь: token_hook_handler.go:253 `ctx := r.Context()` → :367 → :558 →
+      revocationpolicy.go:121 → UserTokenRevocationRepo.RevokedBefore (QueryRow(ctx)).
+    return_to: автор диффа (полоса #379)
+
+important:
+  - id: PRINCIPAL-KIND-OPEN-ELSE
+    coord: internal/revocationpolicy/revocationpolicy.go:112
+    property: >-
+      Вход правила — вид принципала — классифицируется открытой ветвью
+      (`!= PrincipalUser` → Allowed), тогда как документ пакета объявляет закрытый
+      словарь без корзины «прочее». Сегодня значений три, и два не-человеческих
+      вида разобраны намеренно (проба «принципал не разрешён» это закрепляет).
+    requirement: >-
+      switch по виду: PrincipalServiceAccount и PrincipalUnresolved → Allowed,
+      PrincipalUser → сверка, default → Undecidable; проба на значение вне перечня.
+  - id: DEADLINE-PROBE-BYPASSES-COMPOSITION
+    coord: internal/clienttokenwire/build_test.go:214
+    property: >-
+      Проба предела зовёт WithDeadlineCutoffs напрямую и не удерживает то, что
+      сборка New его ставит.
+    measured: >-
+      Мутация в отдельном worktree @1f73660b: build.go:140
+      `WithDeadlineCutoffs(revocations, cfg.PeerTimeout)` → `revocations`;
+      `go test -count=1 -short -v ./internal/clienttokenwire/` — PASS 3/3, в том
+      числе TestEveryExternalCallOfTheNewPathCarriesItsOwnDeadline;
+      `go test -short ./cmd/kaname/ -run 'Deadline|Composition|ClientToken|F2_45'` — ok.
+      Мутация снята, worktree удалён. Та же форма у проб реестра и однократности
+      (было до диффа).
+    requirement: >-
+      Утверждать срок у читателя, полученного через New/FromPool (вызов Issue
+      через собранный обработчик с записывающим читателем), а не у обёртки.
+  - id: CENSUS-PRINTS-LITERALS
+    coord: internal/handler/iamhooks/revocation_lanes_agree_test.go:216
+    related:
+      - internal/repo/kaname/pg/client_token_revoke_all_integration_test.go:127
+    property: >-
+      Перепись печатает выписанные числа («полос 2 · сверяют отсечку 2»), а не
+      выведенные из прогона; require.Len на собственном литеральном перечне
+      писателей тавтологичен. Шапка пробы обещает, что перепись покажет забытую
+      полосу, — литерал этого не может.
+    requirement: >-
+      Печатать len(lanes) и число полос, чей вердикт сменился от отсечки;
+      либо снять обещание из шапки. Длину выписанного перечня не выдавать за
+      утверждение.
+
+foundation_candidates: []    # горизонтального, нужного второму продукту, дифф не заводит
+
+style:
+  - id: SAME-ADAPTER-WORDING
+    coord: cmd/kaname/client_token.go:73
+    related:
+      - internal/clienttokenwire/build.go:158
+      - internal/handler/iamhooks/ports.go:57
+    note: >-
+      «ТЕМ ЖЕ адаптером» — у эндпоинта отдельный экземпляр того же типа
+      (FromPool строит свой), у хуков — общий экземпляр hooks_mux.go:80. Поведение
+      чтения совпадает; слова о «не могут ответить по-разному» станут верны после
+      critical HOOK-LANE-CUTOFF-READ-UNBOUNDED.
+  - id: LANES-AGREE-DENY-NOT-TIED-TO-CAUSE
+    coord: internal/handler/iamhooks/revocation_lanes_agree_test.go
+    note: >-
+      На сравнительной пробе отказ полосы считается по любому err/403, без
+      сверки причины; причину держат пробы use-case (OutcomeOwnerRevoked /
+      OutcomeRevocationCheckFailed). Не блокирует.
+  - id: ENDPOINT-REFUSAL-LOG-LEVEL
+    coord: internal/handler/clienttokenhttp/handler.go:314
+    note: >-
+      Вне диффа: refuse() пишет все исходы на Warn без ctx, включая отказы нашей
+      стороны; у хука тот же отказ хранилища — ErrorContext. Новый исход
+      унаследовал уровень. Кандидат в отдельную задачу.
+
+security_comments_contradicting_code:
+  - coord: cmd/kaname/client_token.go:73
+    note: >-
+      Утверждает, что полосы не отвечают на один вопрос по-разному; предел
+      времени у чтения есть только у полосы эндпоинта. Снимается тем же фиксом,
+      что critical.
+  - coord: internal/clienttokenwire/build.go:158
+    note: то же утверждение о едином читателе.
+
+out_of_diff:
+  - >-
+    Прочие чтения базы на полосе хука (состав, аудит) также идут с контекстом
+    запроса без своего предела; радиус шире этого диффа — отдельная задача.
+
+fresh_deferral_markers: 0     # 1143 добавленных строки; TODO/FIXME/XXX/HACK — 0 (контроль по дереву находит 2 файла)
+tests_in_same_pr: true        # 13 тестовых файлов в диффе на 9 не-тестовых .go
+
+approved:
+  - обёртка ошибок %w с содержательным контекстом; отказ наружу — фиксированный ответ, текст ошибки только в журнал
+  - ctx первым аргументом, не хранится в структурах; context.Background только в пробах
+  - нет panic/must*/init() в рабочем пути; журнал — log/slog со структурными полями, PII не пишется
+  - закрытый словарь вердикта с default → отказ на обеих полосах; отказ построения при неподанном читателе
+  - сверка отсечки после состава и до подписи; обработчик не тронут, логика в use-case и политике
+  - новый пакет revocationpolicy не добавляет рёбер: use-case уже импортировал internal/service
+  - якорь ключа человека на своей полосе — момент строки ключа, как на полосе хука; принципал сверяется целиком
