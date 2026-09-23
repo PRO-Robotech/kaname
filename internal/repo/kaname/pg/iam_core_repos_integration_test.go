@@ -393,13 +393,13 @@ func TestIamExtRepos_6_6_6_SAOAuth_Insert_Happy(t *testing.T) {
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID(sid),
-		OAuthClientID:   domain.OAuthClientID("hydra-client-66-001"),
+		OAuthClientID:   domain.OAuthClientID("provider-client-66-001"),
 		Description:     domain.Description("CI builder OAuth client"),
 		CreatedByUserID: domain.UserID(uid),
 	})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
-	assert.Equal(t, domain.OAuthClientID("hydra-client-66-001"), out.OAuthClientID)
+	assert.Equal(t, domain.OAuthClientID("provider-client-66-001"), out.OAuthClientID)
 	assert.Nil(t, out.LastUsedAt)
 }
 

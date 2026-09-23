@@ -34,7 +34,7 @@ func TestIssue_BindDPoP_RegistersBoundClient(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if !h.hydra.gotReq.DPoPBoundAccessTokens {
+	if !h.provider.gotReq.DPoPBoundAccessTokens {
 		t.Error("the registered client must demand DPoP-bound access tokens — " +
 			"without it the provider mints plain bearers and edge enforcement can only reject")
 	}
@@ -51,7 +51,7 @@ func TestIssue_BindDPoPOff_RegistersUnboundClient(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if h.hydra.gotReq.DPoPBoundAccessTokens {
+	if h.provider.gotReq.DPoPBoundAccessTokens {
 		t.Error("binding must be opt-in; an un-migrated deployment must be unchanged")
 	}
 }
@@ -78,7 +78,7 @@ func TestIssue_Federated_BindDPoP_RegistersBoundClient(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if !h.hydra.gotReq.DPoPBoundAccessTokens {
+	if !h.provider.gotReq.DPoPBoundAccessTokens {
 		t.Error("the federated client must be bound too — otherwise federation is the unbound path in")
 	}
 }
@@ -95,10 +95,10 @@ func TestIssue_BindDPoP_IndependentOfLifespan(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if !h.hydra.gotReq.DPoPBoundAccessTokens {
+	if !h.provider.gotReq.DPoPBoundAccessTokens {
 		t.Error("binding must be set")
 	}
-	if got := h.hydra.gotReq.AccessTokenLifespan; got != (15 * time.Minute).String() {
+	if got := h.provider.gotReq.AccessTokenLifespan; got != (15 * time.Minute).String() {
 		t.Errorf("access_token_lifespan = %q; want it preserved alongside binding", got)
 	}
 }

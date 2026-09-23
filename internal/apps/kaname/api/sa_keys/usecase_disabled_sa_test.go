@@ -29,7 +29,7 @@ import (
 func TestIssue_DisabledServiceAccount_Refused(t *testing.T) {
 	repo := &stubSAClientRepo{disabled: true}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000001",
@@ -59,7 +59,7 @@ func TestIssue_DisabledServiceAccount_Refused(t *testing.T) {
 func TestIssue_EnabledServiceAccount_StillIssues(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	if _, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000001",
@@ -91,7 +91,7 @@ func TestRevoke_DisabledServiceAccount_StillRevokes(t *testing.T) {
 		SvaID:          "sva00000000000000001",
 	}
 	ops := &stubOpsRepo{}
-	uc := NewRevokeSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewRevokeSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	if _, err := uc.Execute(context.Background(), RevokeInput{
 		ServiceAccountID: "sva00000000000000001",

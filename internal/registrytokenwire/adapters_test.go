@@ -17,14 +17,14 @@ import (
 // обмен у прежнего издателя — им пользуется АНОНИМНЫЙ поток на контуре, ещё не
 // переведённом на нашу чеканку.
 
-// fakeHydraTokenClient — a scripted Hydra public token endpoint.
-type fakeHydraTokenClient struct {
+// fakeProviderTokenClient — a scripted provider public token endpoint.
+type fakeProviderTokenClient struct {
 	out clients.TokenResponse
 	err error
 	got clients.ClientCredentialsRequest
 }
 
-func (f *fakeHydraTokenClient) ClientCredentials(_ context.Context, req clients.ClientCredentialsRequest) (clients.TokenResponse, error) {
+func (f *fakeProviderTokenClient) ClientCredentials(_ context.Context, req clients.ClientCredentialsRequest) (clients.TokenResponse, error) {
 	f.got = req
 	return f.out, f.err
 }
@@ -32,14 +32,14 @@ func (f *fakeHydraTokenClient) ClientCredentials(_ context.Context, req clients.
 // TestHydraExchange_Happy — the adapter forwards the exchange and returns Hydra's
 // access_token.
 func TestHydraExchange_Happy(t *testing.T) {
-	fc := &fakeHydraTokenClient{out: clients.TokenResponse{AccessToken: "hydra-jwt", ExpiresIn: 3600}}
+	fc := &fakeProviderTokenClient{out: clients.TokenResponse{AccessToken: "provider-jwt", ExpiresIn: 3600}}
 	out, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{
 		ClientAssertion: "assertion", Audience: "registry.kacho.local", Scope: "reg",
 	})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
-	if out.AccessToken != "hydra-jwt" || out.ExpiresIn != 3600 {
+	if out.AccessToken != "provider-jwt" || out.ExpiresIn != 3600 {
 		t.Fatalf("out = %+v", out)
 	}
 	if fc.got.ClientAssertion != "assertion" || fc.got.Audience != "registry.kacho.local" || fc.got.Scope != "reg" {
@@ -50,7 +50,7 @@ func TestHydraExchange_Happy(t *testing.T) {
 // TestHydraExchange_UnavailableMapsToIssuerUnavailable — a Hydra-unavailable
 // client error maps to the use-case's fail-closed 503 sentinel.
 func TestHydraExchange_UnavailableMapsToIssuerUnavailable(t *testing.T) {
-	fc := &fakeHydraTokenClient{err: clients.ErrHydraUnavailable}
+	fc := &fakeProviderTokenClient{err: clients.ErrHydraUnavailable}
 	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
 	if !errors.Is(err, registrytokenuc.ErrIssuerUnavailable) {
 		t.Fatalf("err = %v; want ErrIssuerUnavailable", err)
@@ -60,7 +60,7 @@ func TestHydraExchange_UnavailableMapsToIssuerUnavailable(t *testing.T) {
 // TestHydraExchange_RejectedMapsToInvalidCredentials — a Hydra rejection maps to
 // the credential-invalid sentinel (→ 401 challenge upstream), not a 503.
 func TestHydraExchange_RejectedMapsToInvalidCredentials(t *testing.T) {
-	fc := &fakeHydraTokenClient{err: clients.ErrHydraRejected}
+	fc := &fakeProviderTokenClient{err: clients.ErrHydraRejected}
 	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
 	if !errors.Is(err, registrytokenuc.ErrInvalidCredentials) {
 		t.Fatalf("err = %v; want ErrInvalidCredentials", err)

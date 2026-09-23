@@ -49,7 +49,7 @@ func minimalClaimsFor(t *testing.T, subject string) map[string]any {
 // a human who has been through no second factor — and whose kacho identity we
 // cannot even name yet — clears an assurance floor by claiming to be a machine.
 func TestMinimalClaims_DoesNotBuyTheMachineExemption(t *testing.T) {
-	claims := minimalClaimsFor(t, "kratos-identity-just-registered")
+	claims := minimalClaimsFor(t, "external-identity-just-registered")
 
 	principalType, _ := claims["kaname_principal_type"].(string)
 	verdict := grpcsrv.EvaluateStepUp(grpcsrv.StepUpInput{
@@ -73,7 +73,7 @@ func TestMinimalClaims_DoesNotBuyTheMachineExemption(t *testing.T) {
 // subject it substitutes for a claim set that names nobody — so which value
 // this is, is the contract; "anything but one value" would leave that open.
 func TestMinimalClaims_IsTypedAsAPerson(t *testing.T) {
-	claims := minimalClaimsFor(t, "kratos-identity-just-registered")
+	claims := minimalClaimsFor(t, "external-identity-just-registered")
 
 	assert.Equal(t, "user", claims["kaname_principal_type"],
 		"a person whose mirror has not committed yet is a person")
@@ -97,7 +97,7 @@ func TestMinimalClaims_IsTypedAsAPerson(t *testing.T) {
 // полосе, которой нет. Перечень обязан оставаться ТОЧНЫМ: имя лишнее делает
 // пробу зелёной по причине, к её предмету не относящейся.
 func TestMinimalClaims_NameNoPrincipal(t *testing.T) {
-	claims := minimalClaimsFor(t, "kratos-identity-just-registered")
+	claims := minimalClaimsFor(t, "external-identity-just-registered")
 
 	for _, key := range []string{
 		"kaname_principal_id",
@@ -106,6 +106,6 @@ func TestMinimalClaims_NameNoPrincipal(t *testing.T) {
 		assert.Empty(t, claims[key],
 			"%s is one of the keys a subject is resolved from; the reduced set must name no principal", key)
 	}
-	assert.Equal(t, "kratos-identity-just-registered", claims["kaname_external_id"],
+	assert.Equal(t, "external-identity-just-registered", claims["kaname_external_id"],
 		"the external subject is carried for correlation only — it is not a kacho identity")
 }

@@ -254,6 +254,13 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	case "57P03": // cannot_connect_now — сервер ещё поднимается
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+	// Замок строки не выдан в пределе ожидания, который транзакция назначила
+	// себе сама (`lock_timeout`; ставит его писатель принудительного выхода,
+	// `HumanSessionRepo.ForceLogoutWriter`, kaname#340). Это состояние ЧУЖОЙ
+	// транзакции, держащей строку, а не поломка службы: оно проходит, как только
+	// та зафиксируется, и повтор осмыслен.
+	case "55P03": // lock_not_available
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "row lock not granted within the transaction's own wait")
 	}
 	// Unmapped SQLSTATE — never return the raw *pgconn.PgError: its Error()
 	// carries table/constraint/column/SQLSTATE and would surface verbatim as the

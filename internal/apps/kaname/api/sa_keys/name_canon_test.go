@@ -18,7 +18,7 @@ func issueSAKeyNamed(t *testing.T, name string) domain.ServiceAccountOAuthClient
 	t.Helper()
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000001",
@@ -75,7 +75,7 @@ func TestIssueSAKey_MalformedName_Rejected(t *testing.T) {
 		{"дефис последним символом", "trail-"},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
-			uc := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+			uc := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, &stubOAuthClientAdmin{}, &stubOpsRepo{})
 			_, err := uc.Execute(context.Background(), IssueInput{
 				ServiceAccountID: "sva00000000000000001",
 				CreatedByUserID:  "usr00000000000000001",

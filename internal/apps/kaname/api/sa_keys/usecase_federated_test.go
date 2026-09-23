@@ -76,18 +76,18 @@ func (s *stubSAClientRepo) List(ctx context.Context, svaID domain.ServiceAccount
 	return nil, "", nil
 }
 
-type stubHydra struct {
+type stubOAuthClientAdmin struct {
 	gotReq          clients.CreateOAuthClientRequest
 	created         bool
 	deletedClientID string
 }
 
-func (s *stubHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
+func (s *stubOAuthClientAdmin) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
 	s.gotReq = req
 	s.created = true
-	return clients.HydraOAuthClient{ClientID: "hydra-cli-fake"}, nil
+	return clients.HydraOAuthClient{ClientID: "provider-cli-fake"}, nil
 }
-func (s *stubHydra) DeleteOAuthClient(ctx context.Context, clientID string) error {
+func (s *stubOAuthClientAdmin) DeleteOAuthClient(ctx context.Context, clientID string) error {
 	s.deletedClientID = clientID
 	return nil
 }
@@ -177,14 +177,14 @@ func anyUnmarshalTo(a *anypb.Any, m proto.Message) error {
 
 // ---- Tests ----
 
-// TestIssue_FederatedPath_HydraRequestShape verifies the federated path
+// TestIssue_FederatedPath_ProviderRequestShape verifies the federated path
 // registers the Hydra client with jwt-bearer + no JWKS, and the response
 // carries NO key material.
-func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
+func TestIssue_FederatedPath_ProviderRequestShape(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 	u.HydraClientNamePrefix = "kaname-sak-"
 	u.AudiencePrefix = "https://example/api"
@@ -211,20 +211,20 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if !hydra.created {
-		t.Fatal("Hydra CreateOAuthClient never called")
+	if !provider.created {
+		t.Fatal("provider CreateOAuthClient never called")
 	}
-	if got, want := hydra.gotReq.TokenEndpointAuthMethod, "none"; got != want {
+	if got, want := provider.gotReq.TokenEndpointAuthMethod, "none"; got != want {
 		t.Errorf("TokenEndpointAuthMethod = %q, want %q", got, want)
 	}
-	if len(hydra.gotReq.GrantTypes) != 1 || hydra.gotReq.GrantTypes[0] != "urn:ietf:params:oauth:grant-type:jwt-bearer" {
-		t.Errorf("GrantTypes = %v, want [urn:ietf:params:oauth:grant-type:jwt-bearer]", hydra.gotReq.GrantTypes)
+	if len(provider.gotReq.GrantTypes) != 1 || provider.gotReq.GrantTypes[0] != "urn:ietf:params:oauth:grant-type:jwt-bearer" {
+		t.Errorf("GrantTypes = %v, want [urn:ietf:params:oauth:grant-type:jwt-bearer]", provider.gotReq.GrantTypes)
 	}
-	if hydra.gotReq.JWKS != nil {
-		t.Errorf("federated client must NOT carry JWKS, got %+v", hydra.gotReq.JWKS)
+	if provider.gotReq.JWKS != nil {
+		t.Errorf("federated client must NOT carry JWKS, got %+v", provider.gotReq.JWKS)
 	}
-	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "https://example/api/sa/sva_test000000000000" {
-		t.Errorf("Audience = %v", hydra.gotReq.Audience)
+	if len(provider.gotReq.Audience) != 1 || provider.gotReq.Audience[0] != "https://example/api/sa/sva_test000000000000" {
+		t.Errorf("Audience = %v", provider.gotReq.Audience)
 	}
 
 	if !repo.insertOK {
@@ -248,7 +248,7 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 		t.Errorf("federated response must omit key material; got priv-len=%d pub-len=%d alg=%q",
 			len(resp.PrivateKeyPem), len(resp.PublicKeyPem), resp.Algorithm)
 	}
-	if resp.ClientId != "hydra-cli-fake" {
+	if resp.ClientId != "provider-cli-fake" {
 		t.Errorf("ClientId = %q", resp.ClientId)
 	}
 }
@@ -257,9 +257,9 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 // surface as InvalidArgument before any Hydra/DB call.
 func TestIssue_FederatedPath_InvalidTrustedSubject_Rejected(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 
 	_, err := u.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva_test000000000000",
@@ -271,8 +271,8 @@ func TestIssue_FederatedPath_InvalidTrustedSubject_Rejected(t *testing.T) {
 	if grpcstatus.Code(err) != codes.InvalidArgument {
 		t.Fatalf("want InvalidArgument, got %v", err)
 	}
-	if hydra.created {
-		t.Error("Hydra must not be called on validation failure")
+	if provider.created {
+		t.Error("the provider must not be called on validation failure")
 	}
 	if repo.insertOK {
 		t.Error("repo must not be called on validation failure")
@@ -283,9 +283,9 @@ func TestIssue_FederatedPath_InvalidTrustedSubject_Rejected(t *testing.T) {
 // TrustedSubjects keeps legacy private_key_jwt behaviour intact.
 func TestIssue_PrivateKeyJWT_Path_StillWorks(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 
 	_, err := u.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva_test000000000000",
@@ -296,10 +296,10 @@ func TestIssue_PrivateKeyJWT_Path_StillWorks(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if hydra.gotReq.TokenEndpointAuthMethod != "private_key_jwt" {
-		t.Errorf("legacy path must use private_key_jwt, got %q", hydra.gotReq.TokenEndpointAuthMethod)
+	if provider.gotReq.TokenEndpointAuthMethod != "private_key_jwt" {
+		t.Errorf("legacy path must use private_key_jwt, got %q", provider.gotReq.TokenEndpointAuthMethod)
 	}
-	if hydra.gotReq.JWKS == nil {
+	if provider.gotReq.JWKS == nil {
 		t.Fatal("legacy path must carry JWKS")
 	}
 	if repo.inserted.PublicKeyPEM == "" || repo.inserted.KeyAlgorithm != "ES256" {

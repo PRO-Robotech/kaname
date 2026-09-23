@@ -71,15 +71,19 @@ func sessionAwareHandler(rec sessionRevoker, sess *recordingSessions, ext *stati
 // EXTERNAL subject of the named user.
 func TestForceLogout_EndsTheProviderSession(t *testing.T) {
 	sess := &recordingSessions{}
-	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "kratos-uuid-victim"}}
-	h, _ := sessionAwareHandler(&fakeForceLogoutRecorder{}, sess, ext)
+	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "external-uuid-victim"}}
+	rec := &fakeForceLogoutRecorder{}
+	h, _ := sessionAwareHandler(rec, sess, ext)
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
 	require.True(t, op.GetDone())
 
-	require.Equal(t, []string{"kratos-uuid-victim"}, sess.subjects,
+	require.Equal(t, []string{"external-uuid-victim"}, sess.subjects,
 		"the session must be ended for the identity the provider knows, not the kacho user id")
+	require.Equal(t, 1, rec.allCnt,
+		"without our own session records the cutoff and its record are written by the session revoker")
+	require.Equal(t, eventSessionForceLogout, rec.allEventType)
 }
 
 // TestForceLogout_ProviderUnreachable_FailsTheMutation — the administrator must
@@ -90,7 +94,7 @@ func TestForceLogout_EndsTheProviderSession(t *testing.T) {
 // teardown. What must not happen is a success report.
 func TestForceLogout_ProviderUnreachable_FailsTheMutation(t *testing.T) {
 	sess := &recordingSessions{err: errors.New("provider unreachable")}
-	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "kratos-uuid-victim"}}
+	ext := &staticExternalIDs{byID: map[domain.UserID]string{"usr_victim": "external-uuid-victim"}}
 	rec := &fakeForceLogoutRecorder{}
 	h, ops := sessionAwareHandler(rec, sess, ext)
 
@@ -103,16 +107,24 @@ func TestForceLogout_ProviderUnreachable_FailsTheMutation(t *testing.T) {
 		"a poll of the operation must see the failure, not a success")
 }
 
-// TestForceLogout_SessionsNotWired_StillRecordsTheCutoff — a deployment without
-// the provider-admin surface configured keeps the behaviour it had. The cutoff
-// is the authoritative half and is now enforced at issuance; the teardown is
-// what makes the refusal recoverable.
-func TestForceLogout_SessionsNotWired_StillRecordsTheCutoff(t *testing.T) {
+// TestForceLogout_ProviderSessionsNotWired_OwnTeardownStillRuns — посадка без
+// поверхности поставщика снимает сессию СВОИМ исполнителем.
+//
+// Здесь утверждалось, что такая посадка «сохраняет поведение, которое у неё
+// было», то есть пишет отсечку и не снимает ничего. Исполнителей снятия теперь
+// два, и посадка выбирает одного; «ни одного» стало закрытым отказом
+// (`TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff`), а эта проба
+// судит то, ради чего второй исполнитель и заведён.
+func TestForceLogout_ProviderSessionsNotWired_OwnTeardownStillRuns(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
-	h := forceLogoutHandler(rec)
+	tx := &recordingOwnWriter{ended: 1}
+	h, _ := ownSessionHandler(rec, ownSessionsScripted(tx))
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
 	require.True(t, op.GetDone())
-	assert.Equal(t, 1, rec.allCnt)
+	assert.Equal(t, []domain.UserID{"usr_victim"}, tx.users,
+		"своя полоса снятия обязана исполниться и без поверхности поставщика")
+	assert.Len(t, tx.cutoffs, 1, "отсечку на этой посадке кладёт транзакция снятия (kaname#340)")
+	assert.True(t, tx.committed)
 }
