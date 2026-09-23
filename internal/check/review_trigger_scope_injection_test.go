@@ -61,6 +61,7 @@ func TestReviewTriggerGateCanStaySilent(t *testing.T) {
 	require.GreaterOrEqual(t, census.OnReview, 2)
 	require.Equal(t, census.OnReview, census.ReviewAtLine)
 	require.Positive(t, census.Conditions, "условий `if:` ноль — ось 4 проверялась бы вырожденно")
+	require.Positive(t, census.ConditionLinks, "условия есть, а звеньев в них ноль — разбор лексем слеп")
 }
 
 // TestReviewTriggerGateCanFail — половина «КРАСНЕЕТ», по оси на подпробу, и
@@ -228,66 +229,160 @@ func withConditionJob(t *testing.T, cond string) []string {
 	return got
 }
 
+// withConditionStep — то же, но условие стоит у ШАГА: ось 4 судит оба этажа.
+func withConditionStep(t *testing.T, cond string) []string {
+	t.Helper()
+	got, _ := reviewAudit(t, func(raw string) string {
+		return injectOnce(t, raw, "\n  trunkverdict:\n",
+			"\n  onlymain:\n    runs-on: ubuntu-latest\n    steps:\n"+
+				"      - if: "+cond+"\n        run: echo ok\n  trunkverdict:\n")
+	})
+	return got
+}
+
+// baseReadingForm — запись условия, читающая базу, и звено, которое находка
+// обязана назвать: по нему видно, ЧТО распознаватель счёл чтением базы.
+type baseReadingForm struct {
+	name, cond, link string
+}
+
 // TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm — ось 4 обязана знать
-// ВСЕ законные записи чтения базы в выражении провайдера, а не одну.
+// ВСЕ законные записи чтения базы в выражении провайдера, а не перечень.
 //
-// Круг 1 искал подстроки `base_ref` и `pull_request.base`, и запись с индексом —
-// `github.event.pull_request['base'].ref` — проходила зелёным: выражение читает
-// ту же базу, а подстроки в тексте нет. Каждая форма ниже — отдельная подпроба,
-// и находка обязана назвать путь ПРИВЕДЁННЫМ, через точку: по нему видно, что
-// распознаватель прочёл именно базу, а не совпал с текстом.
+// Круг 1 искал подстроки и не видел записи с индексом. Круг 2 разбирал путь
+// от корня и не видел звена `base` после `)` — у группы и у вызова. Оба раза
+// слепой оказывалась ЛЕВАЯ часть обращения. Здесь стоят формы обоих кругов и
+// формы, которые грамматика допускает сверх них; у каждой красной — близнец,
+// меняющий один факт, на котором гейт обязан молчать.
 func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		name, cond, path string
-	}{
-		{"индекс на одном звене", "github.event.pull_request['base'].ref == 'main'",
-			"github.event.pull_request.base.ref"},
-		{"индекс на каждом звене", "github.event['pull_request']['base']['ref'] == 'main'",
-			"github.event.pull_request.base.ref"},
-		{"индекс у base_ref", "github['base_ref'] == 'main'", "github.base_ref"},
-		{"регистр имён свойств", "GITHUB.EVENT.PULL_REQUEST.BASE.REF == 'main'",
-			"github.event.pull_request.base.ref"},
+	red := []baseReadingForm{
+		// ── звено названо в тексте: точкой ─────────────────────────────────
+		{"через точку", "github.event.pull_request.base.ref == 'main'", "звено `base`"},
+		{"base.sha", "github.event.pull_request.base.sha != ''", "звено `base`"},
+		{"регистр имён свойств", "GITHUB.EVENT.PULL_REQUEST.BASE.REF == 'main'", "звено `BASE`"},
+		{"регистр внутри звена", "github.event.pull_request.bAse.ref == 'main'", "звено `bAse`"},
+		{"база события очереди слияния", "github.event.merge_group.base_ref == 'refs/heads/main'",
+			"звено `base_ref`"},
+		{"двойные кавычки YAML", "\"github.event.pull_request.base.ref == 'main'\"", "звено `base`"},
+		// ── звено названо в тексте: литералом индекса ──────────────────────
+		{"индекс на одном звене", "github.event.pull_request['base'].ref == 'main'", "звено `base`"},
+		{"индекс на каждом звене", "github.event['pull_request']['base']['ref'] == 'main'", "звено `base`"},
+		{"индекс у base_ref", "github['base_ref'] == 'main'", "звено `base_ref`"},
+		{"индекс у корня события", "github['event'].pull_request.base.ref == 'main'", "звено `base`"},
 		{"регистр ключа индекса и обрамление ${{ }}",
-			"${{ github.event['pull_request']['BASE']['ref'] == 'main' }}",
-			"github.event.pull_request.base.ref"},
+			"${{ github.event['pull_request']['BASE']['ref'] == 'main' }}", "звено `BASE`"},
 		{"пробелы внутри индекса и между индексами",
-			"github.event[ 'pull_request' ] [ 'base' ].ref == 'main'",
-			"github.event.pull_request.base.ref"},
-		{"фильтр объекта `*` на месте base", "contains(github.event.pull_request.*.ref, 'main')",
-			"github.event.pull_request.*.ref"},
-		{"индекс выражением — звено неизвестно, значит может быть base",
-			"github.event.pull_request[matrix.side].ref == 'main'",
-			"github.event.pull_request.*.ref"},
-		{"чтение у результата функции", "fromJSON(needs.prep.outputs.event).pull_request.base.ref == 'main'",
-			"*.pull_request.base.ref"},
-	} {
+			"github.event[ 'pull_request' ] [ 'base' ].ref == 'main'", "звено `base`"},
+		// ── звено названо в тексте, слева — группа или вызов (круг 3) ──────
+		{"группа, затем точка", "(github.event.pull_request).base.ref == 'main'", "звено `base`"},
+		{"группа, затем индекс", "(github.event.pull_request)['base'].ref == 'main'", "звено `base`"},
+		{"группа с ИЛИ, затем точка",
+			"(github.event.pull_request || github.event.merge_group).base.ref == 'main'", "звено `base`"},
+		{"вызов от целого объекта запроса", "fromJSON(toJSON(github.event.pull_request)).base.ref == 'main'",
+			"звено `base`"},
+		{"вызов от целого события", "fromJSON(toJSON(github.event)).pull_request.base.ref == 'main'",
+			"звено `base`"},
+		{"вызов от выхода задания", "fromJSON(needs.prep.outputs.event).pull_request.base.ref == 'main'",
+			"звено `base`"},
+		{"группа у корня события", "(github.event).pull_request.base.ref == 'main'", "звено `base`"},
+		{"группа кончается на base", "(github.event.pull_request.base).ref == 'main'", "звено `base`"},
+		{"группа вокруг всего пути", "(github.event.pull_request.base.ref) == 'main'", "звено `base`"},
+		{"фильтр перед base", "contains(github.event.*.base.ref, 'main')", "звено `base`"},
+		{"база внутри индекса-выражения", "github.event.pull_request.labels[github.base_ref].name == 'x'",
+			"звено `base_ref`"},
+		// ── окружение и псевдоним со словом base ───────────────────────────
+		{"окружение", "env.GITHUB_BASE_REF == 'main'", "звено `GITHUB_BASE_REF`"},
+		{"выход задания верблюжьей записью", "needs.prep.outputs.baseRef == 'main'", "звено `baseRef`"},
+		{"выход задания через дефис", "needs.prep.outputs.pr-base == 'main'", "звено `pr-base`"},
+		// ── звено НЕ названо в тексте: фильтр и индекс выражением ──────────
+		{"фильтр `.*` на месте base", "contains(github.event.pull_request.*.ref, 'main')",
+			"неизвестное звено `*` у `pull_request`"},
+		{"фильтр `[*]` на месте base", "contains(github.event.pull_request[*].ref, 'main')",
+			"неизвестное звено `[*]` у `pull_request`"},
+		{"фильтр у корня", "contains(github.*, 'main')", "неизвестное звено `*` у `github`"},
+		{"фильтр у окружения", "contains(env.*, 'main')", "неизвестное звено `*` у `env`"},
+		{"фильтр у очереди слияния", "contains(github.event.merge_group.*, 'refs/heads/main')",
+			"неизвестное звено `*` у `merge_group`"},
+		{"фильтр у элемента списка запросов",
+			"contains(github.event.workflow_run.pull_requests[0].*.ref, 'main')",
+			"неизвестное звено `*` у `pull_requests`"},
+		{"индекс выражением", "github.event.pull_request[matrix.side].ref == 'main'",
+			"неизвестное звено `[matrix.side]` у `pull_request`"},
+		{"индекс вызовом", "github.event.pull_request[format('{0}', 'base')].ref == 'main'",
+			"неизвестное звено `[format('{0}', 'base')]` у `pull_request`"},
+		{"индекс группой литерала", "github.event.pull_request[('base')].ref == 'main'",
+			"неизвестное звено `[('base')]` у `pull_request`"},
+		{"индекс выражением у группы", "(github.event.pull_request)[matrix.k].ref == 'main'",
+			"неизвестное звено `[matrix.k]` у результата группы или вызова"},
+		{"фильтр у группы", "contains((github.event.pull_request).*.ref, 'main')",
+			"неизвестное звено `*` у результата группы или вызова"},
+		{"индекс за индексом выражением", "github.event[matrix.a][matrix.b].ref == 'main'",
+			"неизвестное звено `[matrix.b]` у неизвестного звена"},
+	}
+	for _, tc := range red {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := withConditionJob(t, tc.cond)
 			require.Lenf(t, got, 1, "условие %q читает базу, а гейт молчит", tc.cond)
-			require.Contains(t, got[0], "задание onlymain")
+			require.Contains(t, got[0], "задание onlymain:")
 			require.Contains(t, got[0], "читает БАЗУ")
-			require.Containsf(t, got[0], "`"+tc.path+"`",
-				"находка обязана назвать прочитанный путь приведённым к записи через точку")
+			require.Containsf(t, got[0], tc.link, "находка обязана назвать звено, которое читает базу")
 		})
 	}
 
+	// Круг 3: та же группа в условии ШАГА. Ось 4 судит оба этажа одним
+	// распознавателем, и форма, слепая у задания, была слепа и у шага.
+	t.Run("группа с ИЛИ в условии шага", func(t *testing.T) {
+		t.Parallel()
+		got := withConditionStep(t, "(github.event.pull_request || github.event.merge_group).base.ref == 'main'")
+		require.Len(t, got, 1, "условие шага читает базу, а гейт молчит")
+		require.Contains(t, got[0], "задание onlymain, шаг 1:")
+		require.Contains(t, got[0], "звено `base`")
+	})
+
 	// ЗАКОННЫЕ БЛИЗНЕЦЫ: та же форма записи, база НЕ читается. Каждый меняет
-	// против красной подпробы один факт.
+	// против своей красной подпробы один факт.
 	for _, tc := range []struct {
 		name, cond, why string
 	}{
+		{"head через точку", "github.event.pull_request.head.ref == 'lane'",
+			"голова запроса одинакова на запросе в ствол и в линию"},
+		{"github.head_ref", "github.head_ref == 'lane'", "`head_ref` — слово head, не base"},
 		{"индекс на head вместо base", "github.event.pull_request['head'].ref == 'lane'",
-			"та же запись с индексом, но читает голову запроса — её состав одинаков на запросе в ствол и в линию"},
+			"та же запись с индексом, но читает голову"},
+		{"группа, затем head", "(github.event.pull_request).head.ref == 'lane'",
+			"близнец круга 3: группа слева, звено справа — head"},
+		{"группа, затем индекс head", "(github.event.pull_request)['head'].ref == 'lane'",
+			"близнец круга 3 с индексом"},
+		{"группа с ИЛИ, затем head",
+			"(github.event.pull_request || github.event.merge_group).head.ref == 'lane'",
+			"близнец круга 3 с ИЛИ"},
+		{"вызов от целого объекта, затем head", "fromJSON(toJSON(github.event.pull_request)).head.ref == 'lane'",
+			"близнец круга 3 с вызовом"},
 		{"числовой индекс не на base", "github.event.pull_request.labels[0].name == 'ci'",
-			"индекс числом по меткам — путь расходится с базой на четвёртом звене"},
+			"индекс числом по меткам"},
+		{"фильтр у меток", "contains(github.event.pull_request.labels.*.name, 'ci')",
+			"`*` у меток: у метки нет поля базы"},
+		{"фильтр у элемента меток", "contains(github.event.pull_request.labels[0].*, 'ci')",
+			"близнец фильтра у элемента списка запросов"},
+		{"индекс выражением у меток", "github.event.pull_request.labels[matrix.i].name == 'ci'",
+			"близнец индекса выражением: объект — метки"},
 		{"текст маркера в строковом литерале",
 			"contains(github.event.pull_request.title, 'pull_request.base')",
-			"`pull_request.base` здесь — текст, с которым сравнивают, а не путь, который читают"},
+			"`pull_request.base` здесь — текст, с которым сравнивают"},
+		{"литерал с удвоенной кавычкой и индексом внутри",
+			"contains(github.event.pull_request.title, 'it''s [''base'']')",
+			"`['base']` стоит внутри литерала: удвоенная кавычка литерал не закрывает"},
+		{"ключ индекса с удвоенной кавычкой", "github.event.pull_request['head''s'].ref == 'lane'",
+			"удвоенная кавычка — часть ключа `head's`, а не конец литерала: индекс не выражение"},
 		{"имя, содержащее base_ref подстрокой", "vars.DATABASE_REF == 'x'",
-			"`database_ref` — другое слово; поиск по подстроке краснел бы здесь"},
+			"`database` — другое слово"},
+		{"выход задания head верблюжьей записью", "needs.prep.outputs.headRef == 'lane'",
+			"близнец `baseRef`"},
+		{"условие по событию", "github.event_name == 'pull_request'",
+			"событие одинаково у запроса в ствол и в линию"},
 	} {
 		t.Run("близнец: "+tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -295,6 +390,12 @@ func TestReviewTriggerGateKnowsEveryLawfulBaseReadingForm(t *testing.T) {
 				tc.cond, tc.why)
 		})
 	}
+
+	t.Run("близнец: группа с ИЛИ, затем head, в условии шага", func(t *testing.T) {
+		t.Parallel()
+		require.Empty(t, withConditionStep(t,
+			"(github.event.pull_request || github.event.merge_group).head.ref == 'lane'"))
+	})
 }
 
 // TestReviewTriggerGateKnowsEveryLawfulEventForm — распознаватель обязан знать

@@ -33,14 +33,41 @@ package check
 //     красного, и слияние стоит;
 //  4. ЗАДАНИЕ НЕ РАЗЛИЧАЕТ БАЗУ. Условие `if:` задания или шага, читающее базу
 //     запроса, даёт запросу в линию ДРУГОЙ состав заданий при том же триггере —
-//     ровно то, что запрещает ось 1, этажом ниже. Условие разбирается как
-//     ВЫРАЖЕНИЕ провайдера, а не как текст: пути, которые оно читает, приводятся
-//     к одной записи (contextPaths), и `github.event.pull_request['base'].ref`,
-//     `github.event['pull_request']['base']['ref']`, `GITHUB.BASE_REF`, фильтр
-//     `github.event.pull_request.*.ref` и индекс выражением читают базу так же,
-//     как запись через точку. Поиск по подстроке (круг 1) этих записей не видел,
-//     а текст `'pull_request.base'` в литерале и имя `DATABASE_REF` принимал за
-//     чтение базы.
+//     ровно то, что запрещает ось 1, этажом ниже. Как это распознаётся — в
+//     разделе «ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ».
+//
+// # ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ
+//
+// У провайдера обращение к полю — всегда одно из трёх: `.имя`, фильтр `.*` или
+// `[*]`, индекс `[выражение]`. Применяется оно к ЛЮБОМУ значению слева: к корню
+// контекста, к другому обращению, к группе `(…)`, к вызову функции
+// (actions/languageservices, expressions/src/parser.ts:184 @656a821a: `index()`
+// принимает `Grouping`, `FunctionCall` и `ContextAccess`). Имя поля несёт само
+// обращение, и только оно; левая часть даёт значение, но поля не называет.
+// Круг 1 искал подстроку, круг 2 разбирал путь от корня — и оба слепли на
+// записи ЛЕВОЙ части: сначала на индексе, затем на группе и вызове. Поэтому
+// разбор идёт по лексемам (conditionReadsBase) и судит каждое обращение, не
+// спрашивая, что стоит слева, — и новая запись левой части слепоты не даёт:
+//
+//   - звено, НАЗВАННОЕ в тексте, — имя после точки или литерал в `[ ]`, —
+//     читает базу, если среди его слов есть слово `base` (namesBase): `base`,
+//     `base_ref`, `base_sha`, `GITHUB_BASE_REF`, `baseRef`, `pr-base`. Слово, а
+//     не подстрока: `database` и `DATABASE_REF` — другое слово, `head` и
+//     `head_ref` — тоже;
+//   - звено, НЕ названное в тексте, — фильтр или индекс выражением, — может
+//     оказаться любым полем. Оно считается чтением базы, если объект слева
+//     неизвестен (результат `)`, другое неизвестное звено) или держит поле
+//     базы (baseHolders); у меток, шагов и выходов оно молчит.
+//
+// Строковый литерал вне `[ ]` звеном не является: `'pull_request.base'` — то, с
+// чем сравнивают. Лексемы различаются так же, как у провайдера (lexer.ts того
+// же среза): литерал в одинарных кавычках, удвоенная кавычка внутри его не
+// закрывает; точка после имени, `]`, `)` или `*` — обращение, иначе — начало
+// числа.
+//
+// Цена надаппроксимации — красное на имени, чьё слово `base` к базе запроса
+// отношения не имеет: задание `base`, переменная `BASE_IMAGE`. Такое имя в
+// условии переименовывается: молчание дороже.
 //
 // # ПОЧЕМУ РАЗБОР УЗЛОВ, А НЕ ПОИСК ПО ПОДСТРОКЕ
 //
@@ -59,18 +86,21 @@ package check
 // сверяет ЗАПИСЬ фильтра с объявленной, а что запись захватывает на origin —
 // замер переписью веток (шапка `on:` в `ci.yml`), то есть свойство вне дерева.
 //
-// По оси 4 граница такая. Судится только `if:` заданий и шагов в
-// `.github/workflows`; `if:` составных действий (`.github/actions/**`),
-// `strategy.matrix` и `with:` вызываемого процесса не осматриваются. База,
-// переложенная в ПСЕВДОНИМ — `env:`, выход задания, выход шага — под именем
-// без слов `base` и `ref`, условию видна как псевдоним и чтением базы не
-// считается. Объект, переданный ЦЕЛИКОМ выше базы (`toJSON(github.event)`),
-// тоже: путь кончается раньше звена `base`.
+// По оси 4 граница такая — этого ось НЕ судит. Судится только `if:` заданий и
+// шагов в `.github/workflows`; `if:` составных действий (`.github/actions/**`),
+// `strategy.matrix` и `with:` вызываемого процесса не осматриваются. Не
+// распознаются две записи, в которых ни одно обращение не называет базу и не
+// может ею оказаться. ПСЕВДОНИМ: база, переложенная в `env:`, в выход задания
+// или шага под именем без слова `base`, условию видна как псевдоним. И объект
+// выше базы, потреблённый функцией ЦЕЛИКОМ
+// (`contains(toJSON(github.event.pull_request), 'main')`): звена `base` в
+// условии нет — есть объект, внутри которого она лежит.
 
 import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -96,143 +126,169 @@ func ReviewBaseBranches() []string {
 // ради вердикта линии было бы расширением поверхности, а не триггера.
 const reviewEvent = "pull_request"
 
-// baseReadingRoots — пути контекста от КОРНЯ, чтение которых есть чтение базы
-// запроса, в приведённой форме (см. contextPaths). Сверяются с учётом `*`:
-// звено `*` в прочитанном пути может оказаться любым, в том числе базой.
-var baseReadingRoots = [][]string{
-	{"github", "base_ref"},
-	{"github", "event", "pull_request", "base"},
+// baseHolders — объекты контекста, у которых есть ПОЛЕ базы (имя со словом
+// `base`): `github.base_ref`, `….pull_request.base`, элемент
+// `….pull_requests[N].base`, `….merge_group.base_ref`, окружение с
+// `GITHUB_BASE_REF`. Неизвестное звено у такого объекта может оказаться базой;
+// у метки, шага, выхода задания — нет. Имена в нижнем регистре: провайдер
+// регистра имён не различает.
+var baseHolders = map[string]bool{
+	"github":        true,
+	"pull_request":  true,
+	"pull_requests": true,
+	"merge_group":   true,
+	"env":           true,
 }
 
-// readsBase — читает ли приведённый путь базу запроса.
+// namesBase — есть ли среди слов звена слово `base`.
 //
-// Три признака. (1) Путь от корня совпадает с baseReadingRoots, `*` — с любым
-// звеном. (2) Звено, в чьём имени стоят слова `base` и `ref` подряд
-// (`base_ref`, `GITHUB_BASE_REF`, выход задания `base-ref`): это имя базы под
-// любым корнем — окружением, выходом задания, полем события другого вида.
-// Словами, а не подстрокой: `database_ref` базой не является. (3) Звенья
-// `pull_request` и `base` подряд под любым корнем, например у результата
-// функции.
-func readsBase(path []string) bool {
-	for _, root := range baseReadingRoots {
-		if len(path) < len(root) {
-			continue
-		}
-		matched := true
-		for i, seg := range root {
-			if path[i] != seg && path[i] != "*" {
-				matched = false
-				break
+// Слова разделены любым знаком, кроме буквы и цифры; вторым разбором — ещё и
+// сменой строчной буквы заглавной (`baseRef`). Регистр снят: `bAse` у
+// провайдера то же поле, что `base`. Слово, а не подстрока: `database` и
+// `DATABASE_REF` базой не являются.
+func namesBase(link string) bool {
+	for _, camel := range []bool{false, true} {
+		var word []rune
+		prevLower := false
+		for _, r := range link + " " {
+			alnum := unicode.IsLetter(r) || unicode.IsDigit(r)
+			if !alnum || (camel && prevLower && unicode.IsUpper(r)) {
+				if strings.EqualFold(string(word), "base") {
+					return true
+				}
+				word = word[:0]
 			}
-		}
-		if matched {
-			return true
-		}
-	}
-	for i, seg := range path {
-		words := strings.FieldsFunc(seg, func(r rune) bool { return r == '_' || r == '-' })
-		for w := 0; w+1 < len(words); w++ {
-			if words[w] == "base" && words[w+1] == "ref" {
-				return true
+			if alnum {
+				word = append(word, r)
 			}
-		}
-		if seg == "pull_request" && i+1 < len(path) && path[i+1] == "base" {
-			return true
+			prevLower = unicode.IsLower(r)
 		}
 	}
 	return false
 }
 
-// contextPaths — пути контекста, которые выражение провайдера ЧИТАЕТ, в
-// приведённой форме: запись с индексом `a['b']` приводится к `a.b`, регистр
-// снимается (имена свойств у провайдера регистра не различают), пробелы
-// между звеньями не значат ничего. Индекс, ключ которого не литерал, даёт
-// звено `*` — оно неизвестно, значит может быть любым, — а пути внутри такого
-// индекса разбираются сами. Обращение к результату функции (`fromJSON(x).a`)
-// начинается со звена `*`. Строковый литерал путём не является: текст
-// `'pull_request.base'` — то, с чем сравнивают, а не то, что читают.
-func contextPaths(expr string) [][]string {
-	var out [][]string
-	afterCall := false // предыдущий значимый знак — `)`: `.x` и `[..]` читают результат функции
+// linkOwner — объект, к которому применяется следующее обращение: названный
+// (имя, как записано), неизвестный (чем именно — для находки) или никакой
+// (перед этим стоял оператор, литерал, запятая).
+type linkOwner struct {
+	named   string
+	unknown string
+}
+
+// bracketFrame — открытый индекс-выражение: у какого объекта и где начат.
+type bracketFrame struct {
+	owner linkOwner
+	at    int
+}
+
+// conditionReadsBase — читает ли условие базу запроса, и каким звеном (пусто —
+// не читает); второе — сколько звеньев прочитано, для переписи.
+//
+// Разбор идёт по ЛЕКСЕМАМ провайдера и судит каждое обращение отдельно, не
+// спрашивая, что стоит слева (шапка, «ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ»).
+func conditionReadsBase(expr string) (reading string, links int) {
+	var (
+		owner linkOwner
+		// Точка — обращение, если перед ней имя, `]`, `)` или `*`; иначе это
+		// начало числа (lexer.ts провайдера, та же развилка).
+		access bool
+		open   []bracketFrame
+	)
+	found := func(desc string) {
+		if reading == "" {
+			reading = desc
+		}
+	}
+	named := func(link string) {
+		links++
+		if namesBase(link) {
+			found(fmt.Sprintf("звено `%s`", link))
+		}
+	}
+	unknownAt := func(on linkOwner, link string) {
+		links++
+		switch {
+		case on.unknown != "":
+			found(fmt.Sprintf("неизвестное звено `%s` у %s", link, on.unknown))
+		case on.named != "" && baseHolders[strings.ToLower(on.named)]:
+			found(fmt.Sprintf("неизвестное звено `%s` у `%s`", link, on.named))
+		}
+	}
+	unknownLink := linkOwner{unknown: "неизвестного звена"}
+
 	for i := 0; i < len(expr); {
 		c := expr[i]
 		switch {
+		case isExprSpace(c):
+			i++ // пробел лексемой не является и прежней не отменяет
 		case c == '\'':
 			_, i = scanStringLiteral(expr, i)
-			afterCall = false
-		case isExprSpace(c):
-			i++
+			owner, access = linkOwner{}, false
+		case c == '.' && access:
+			k := skipExprSpaces(expr, i+1)
+			switch {
+			case k < len(expr) && expr[k] == '*':
+				unknownAt(owner, "*")
+				owner, access, i = unknownLink, true, k+1
+			case k < len(expr) && isIdentStart(expr[k]):
+				j := scanIdentChars(expr, k)
+				named(expr[k:j])
+				owner, access, i = linkOwner{named: expr[k:j]}, true, j
+			default:
+				owner, access, i = linkOwner{}, false, k
+			}
+		case c == '[':
+			k := skipExprSpaces(expr, i+1)
+			if k < len(expr) && expr[k] == '\'' {
+				lit, e := scanStringLiteral(expr, k)
+				if e = skipExprSpaces(expr, e); e < len(expr) && expr[e] == ']' {
+					named(lit)
+					owner, access, i = linkOwner{named: lit}, true, e+1
+					continue
+				}
+			}
+			if k < len(expr) && expr[k] == '*' {
+				if e := skipExprSpaces(expr, k+1); e < len(expr) && expr[e] == ']' {
+					unknownAt(owner, "[*]")
+					owner, access, i = unknownLink, true, e+1
+					continue
+				}
+			}
+			if k < len(expr) && (isDigit(expr[k]) || expr[k] == '-' || expr[k] == '+') {
+				if e := skipExprSpaces(expr, scanNumber(expr, k+1)); e < len(expr) && expr[e] == ']' {
+					// Элемент списка судится по имени списка: у элемента
+					// `pull_requests` поле базы есть, у элемента меток — нет.
+					links++
+					access, i = true, e+1
+					continue
+				}
+			}
+			open = append(open, bracketFrame{owner: owner, at: i})
+			owner, access, i = linkOwner{}, false, i+1
+		case c == ']':
+			if n := len(open); n > 0 {
+				unknownAt(open[n-1].owner, expr[open[n-1].at:i+1])
+				open = open[:n-1]
+			}
+			owner, access, i = unknownLink, true, i+1
+		case c == ')':
+			owner, access, i = linkOwner{unknown: "результата группы или вызова"}, true, i+1
 		case isIdentStart(c):
 			j := scanIdentChars(expr, i)
 			if k := skipExprSpaces(expr, j); k < len(expr) && expr[k] == '(' {
-				// Имя функции путём не является; её аргументы разбираются дальше.
-				i, afterCall = j, false
+				// Имя функции звеном не является; её аргументы разбираются дальше.
+				owner, access, i = linkOwner{}, false, j
 				continue
 			}
-			path, nested, end := scanAccessors(expr, j, []string{strings.ToLower(expr[i:j])})
-			out = append(append(out, path), nested...)
-			i, afterCall = end, false
-		case isDigit(c):
-			i, afterCall = scanNumber(expr, i), false
-		case (c == '.' || c == '[') && afterCall:
-			path, nested, end := scanAccessors(expr, i, []string{"*"})
-			out = append(append(out, path), nested...)
-			i, afterCall = end, false
-		case c == ')':
-			i, afterCall = i+1, true
+			named(expr[i:j])
+			owner, access, i = linkOwner{named: expr[i:j]}, true, j
+		case isDigit(c) || c == '.' || c == '-' || c == '+':
+			owner, access, i = linkOwner{}, false, scanNumber(expr, i+1)
 		default:
-			i, afterCall = i+1, false
+			owner, access, i = linkOwner{}, false, i+1
 		}
 	}
-	return out
-}
-
-// scanAccessors — звенья пути после корня: `.имя`, `.*`, `['ключ']`, `[число]`,
-// `[выражение]`. Возвращает путь, пути из индексов-выражений и позицию, где
-// путь кончился.
-func scanAccessors(s string, i int, path []string) ([]string, [][]string, int) {
-	var nested [][]string
-	for {
-		k := skipExprSpaces(s, i)
-		if k >= len(s) {
-			return path, nested, k
-		}
-		switch s[k] {
-		case '.':
-			k = skipExprSpaces(s, k+1)
-			switch {
-			case k < len(s) && s[k] == '*':
-				path, i = append(path, "*"), k+1
-			case k < len(s) && isIdentChar(s[k]):
-				j := scanIdentChars(s, k)
-				path, i = append(path, strings.ToLower(s[k:j])), j
-			default:
-				return path, nested, k
-			}
-		case '[':
-			open := k
-			k = skipExprSpaces(s, k+1)
-			if k < len(s) && s[k] == '\'' {
-				lit, e := scanStringLiteral(s, k)
-				if e = skipExprSpaces(s, e); e < len(s) && s[e] == ']' {
-					path, i = append(path, strings.ToLower(lit)), e+1
-					continue
-				}
-			}
-			if k < len(s) && isDigit(s[k]) {
-				e := scanNumber(s, k)
-				if e2 := skipExprSpaces(s, e); e2 < len(s) && s[e2] == ']' {
-					path, i = append(path, s[k:e]), e2+1
-					continue
-				}
-			}
-			end := matchingBracket(s, open)
-			nested = append(nested, contextPaths(s[open+1:end])...)
-			path, i = append(path, "*"), min(end+1, len(s))
-		default:
-			return path, nested, i
-		}
-	}
+	return reading, links
 }
 
 // scanStringLiteral — литерал в одинарных кавычках (удвоенная кавычка внутри —
@@ -253,27 +309,6 @@ func scanStringLiteral(s string, i int) (string, int) {
 		return b.String(), j + 1
 	}
 	return b.String(), len(s)
-}
-
-// matchingBracket — позиция `]`, закрывающей `[` в open, с учётом вложенности
-// и литералов; нет такой — длина выражения.
-func matchingBracket(s string, open int) int {
-	depth := 0
-	for j := open; j < len(s); j++ {
-		switch s[j] {
-		case '\'':
-			_, e := scanStringLiteral(s, j)
-			j = e - 1
-		case '[':
-			depth++
-		case ']':
-			depth--
-			if depth == 0 {
-				return j
-			}
-		}
-	}
-	return len(s)
 }
 
 func scanIdentChars(s string, i int) int {
@@ -313,17 +348,20 @@ type ReviewTriggerCensus struct {
 	ReviewAtLine int
 	// OnBranchPush — идущих по `push` в ветки (не только в метки).
 	OnBranchPush int
-	// Conditions — условий `if:` осмотрено (заданий и шагов вместе).
-	Conditions int
+	// Conditions — условий `if:` осмотрено (заданий и шагов вместе);
+	// ConditionLinks — звеньев в них прочитано. Условия есть, а звеньев ноль —
+	// разбор лексем ослеп, и молчание оси 4 сказано ни о чём.
+	Conditions     int
+	ConditionLinks int
 }
 
 // String — перепись одной строкой. «Ноль находок» обязано быть отличимо от
 // «ноль прочитанного», поэтому печатаются все величины.
 func (c ReviewTriggerCensus) String() string {
 	return fmt.Sprintf("объявлений процессов %d · идут на запросе %d · из них с базами {%s} %d · "+
-		"идут по push в ветки %d · условий if: осмотрено %d",
+		"идут по push в ветки %d · условий if: осмотрено %d · звеньев в них прочитано %d",
 		c.Files, c.OnReview, strings.Join(ReviewBaseBranches(), ", "), c.ReviewAtLine,
-		c.OnBranchPush, c.Conditions)
+		c.OnBranchPush, c.Conditions, c.ConditionLinks)
 }
 
 // eventFilter — фильтр одного события в той форме, в какой он записан.
@@ -560,13 +598,12 @@ func auditBaseReadingConditions(jobs *yaml.Node, census *ReviewTriggerCensus) []
 	var findings []string
 	judge := func(where, cond string) {
 		census.Conditions++
-		for _, p := range contextPaths(cond) {
-			if readsBase(p) {
-				findings = append(findings, fmt.Sprintf("%s: условие %q читает БАЗУ запроса (`%s`) — "+
-					"на запросе в линию состав заданий другой, чем на запросе в ствол, при том же "+
-					"триггере", where, strings.TrimSpace(cond), strings.Join(p, ".")))
-				return
-			}
+		reading, links := conditionReadsBase(cond)
+		census.ConditionLinks += links
+		if reading != "" {
+			findings = append(findings, fmt.Sprintf("%s: условие %q читает БАЗУ запроса (%s) — "+
+				"на запросе в линию состав заданий другой, чем на запросе в ствол, при том же "+
+				"триггере", where, strings.TrimSpace(cond), reading))
 		}
 	}
 	for i := 0; i+1 < len(jobs.Content); i += 2 {
