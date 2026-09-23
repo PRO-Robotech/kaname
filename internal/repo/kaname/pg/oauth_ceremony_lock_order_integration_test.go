@@ -112,9 +112,11 @@ func lockOrderScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, n int
 		session, user, ceremonyDigest(0x500000+n))
 	require.NoError(t, err, "посев сессии")
 
+	// Способ объявлен: клиента без способа схема не принимает
+	// (`interactive_clients_auth_method_ck`, kaname#317).
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id)
-		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3)`,
+		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3, 'none')`,
 		"ic-"+ceremonyPad(tag), "ic-"+tag, client)
 	require.NoError(t, err, "посев клиента")
 
