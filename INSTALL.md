@@ -94,14 +94,17 @@ ensure CRDs are installed first
 `external`, и профиля с `own` в поставке нет: перевод — накладка оператора
 `authn.identityProvider: own` поверх боевого профиля (kacho#2699). Та же
 накладка включает токен-эндпоинт платформы — блок `authn.clientToken` чарта
-(`enabled: true` и четыре величины §3 `authn.client-token.*`): без него страж
-посадки `own` не поднимает, потому что ключ служебной учётки обменивается на
-токен именно там, а внешнего поставщика у этой посадки нет (kaname#337).
-Проверить на своей ревизии:
+(`enabled: true` и четыре величины §3 `authn.client-token.*`): ключ служебной
+учётки на этой посадке обменивается на токен именно там, и другого исполнителя
+выдачи у неё нет (kaname#337). Без эндпоинта посадку `own` не собирает сам чарт
+— отказ `helm install` называет `authn.identityProvider` и
+`authn.clientToken.enabled`, — а включённый эндпоинт без любой из четырёх
+величин отвергается рендером одним перечнем. Согласованность заданных величин
+судит страж старта. Проверить на своей ревизии:
 
 ```sh
 go test ./cmd/kaname/ -run TestEveryLaneIsEitherProfiledOrProvablyUnreachable -v
-go test ./deploy/ -run 'OwnLaneMemory|StandChartCreatesEverySecretKey' -v
+go test ./deploy/ -run 'OwnLaneMemory|StandChartCreatesEverySecretKey|ClientToken' -v
 grep -n 'identityProvider:' deploy/values.prod.yaml
 ```
 
