@@ -407,6 +407,24 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 // не могла. Порядок операторов внутри транзакции задаёт вызывающий: снятие,
 // отсечка, событие.
 //
+// # СТРОКА ЛИЧНОСТИ БЕРЁТСЯ ПЕРВОЙ, ДО ЛЮБОЙ СТРОКИ СЕССИИ
+//
+// Удаление личности идёт по каскаду сверху вниз: строка `users` (`FOR UPDATE`
+// самим удалением), затем её записи сессии. Без этого замка выход брал строку
+// личности ПОСЛЕ строк сессии — проверкой внешнего ключа отсечки, — то есть
+// навстречу удалению. Измерено сценой «выход × удаление личности»
+// (`force_logout_identity_deletion_race_integration_test.go`): на форме без
+// замка 6 взаимных блокировок из 6 прогонов, жертвой каждый раз удаление
+// (`pg_stat_database.deadlocks` = 6); с замком — 0 из 6, обе транзакции
+// зафиксированы. Правило то же, что у выдачи кода авторизации: родители
+// внешних ключей берутся НЕ ПОЗЖЕ строки сессии (`lockUserForKeySQL`, раздел
+// «Порядок замков заведения»).
+//
+// Сила замка — `FOR KEY SHARE`, та, что взяла бы сама проверка внешнего ключа:
+// он конфликтует ровно с удалением строки и совместим с остальными писателями
+// личности. Строки может не быть вовсе — тогда держать нечего, и об отсутствии
+// личности судит внешний ключ отсечки, как и прежде.
+//
 // # ОЖИДАНИЕ ЗАМКОВ ОГРАНИЧЕНО `lockWait`
 //
 // Предел ставится самой транзакции (`lock_timeout`, локально), а не берётся из
@@ -426,7 +444,9 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 // записался бы нулём. Такой предел отвергается до открытия транзакции, а не
 // подставляется: величину даёт служба, а не вызывающий, и её негодность —
 // дефект службы, который обязан звучать, а не молча снимать ограничение.
-func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (internaliam.OwnSessionsWriter, error) {
+func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, subject domain.UserID,
+	lockWait time.Duration,
+) (internaliam.OwnSessionsWriter, error) {
 	if lockWait < time.Millisecond {
 		return nil, iamerr.Wrapf(iamerr.ErrInternal,
 			"force-logout writer: lock wait %s is not representable in lock_timeout", lockWait)
@@ -439,6 +459,10 @@ func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, lockWait time.
 		fmt.Sprintf("%dms", lockWait.Milliseconds())); err != nil {
 		_ = tx.Rollback(ctx)
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
+	}
+	if _, err := tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, mapErr(err, "User", string(subject))
 	}
 	return &humanSessionWriter{tx: tx}, nil
 }

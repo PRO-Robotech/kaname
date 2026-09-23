@@ -79,7 +79,7 @@ func (f *fakeForceLogoutRecorder) RevokeAllUserTokensTx(_ context.Context, userI
 // ForceLogoutWriter — тот же писатель на посадке `own`. Отсечка засчитывается
 // ФИКСАЦИЕЙ, как и в настоящей транзакции: до неё её нет. Снятых записей ноль —
 // предмет проб, провязывающих эту заглушку, не снятие.
-func (f *fakeForceLogoutRecorder) ForceLogoutWriter(context.Context, time.Duration) (OwnSessionsWriter, error) {
+func (f *fakeForceLogoutRecorder) ForceLogoutWriter(context.Context, domain.UserID, time.Duration) (OwnSessionsWriter, error) {
 	return &fakeForceLogoutRecorderTx{rec: f}, nil
 }
 

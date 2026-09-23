@@ -212,6 +212,9 @@ type RefreshRotation struct {
 // назначается: он предмет отдельного ревью распределённых свойств, и решать его
 // перестановкой этих строк нельзя.
 //
+// Замок человека (`lockUserForKeySQL`) берёт и транзакция принудительного
+// выхода — первым оператором, до строк сессии, по тому же правилу порядка.
+//
 // Сессия берётся `FOR SHARE`, и это измерено, а не выбрано: `ended_at` не входит
 // ни в один уникальный индекс (у таблицы их два — `human_sessions_pkey` и
 // `human_sessions_bearer_digest_uniq`), поэтому снятие сессии берёт
@@ -220,7 +223,7 @@ type RefreshRotation struct {
 // 2002 мс до `lock_timeout`). `FOR UPDATE` держал бы тоже, но развёл бы заодно
 // две одновременные выдачи в одной сессии, которым расходиться незачем.
 const (
-	lockCeremonyUserSQL = `
+	lockUserForKeySQL = `
 SELECT 1 FROM kaname.users WHERE id = $1 FOR KEY SHARE`
 
 	lockCeremonyClientSQL = `
@@ -314,7 +317,7 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	// родители внешних ключей берутся НЕ ПОЗЖЕ строки сессии, иначе выдача идёт
 	// навстречу удалению человека и даёт с ним цикл (см. раздел выше).
 	// Переставить их местами нельзя.
-	if _, err = tx.Exec(ctx, lockCeremonyUserSQL, in.Context.UserID); err != nil {
+	if _, err = tx.Exec(ctx, lockUserForKeySQL, in.Context.UserID); err != nil {
 		return wrapPgErr(err, "User", in.Context.UserID)
 	}
 	if _, err = tx.Exec(ctx, lockCeremonyClientSQL, in.Context.ClientID); err != nil {

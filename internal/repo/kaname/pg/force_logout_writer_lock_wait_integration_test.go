@@ -49,7 +49,7 @@ func TestIntegration_ForceLogoutWriterWaitsForARowLockNoLongerThanItsOwnLimit(t 
 	require.Equal(t, 1, held, "замок на строке сессии не взят — сцена не построена")
 
 	const limit = 300 * time.Millisecond
-	w, err := kanamepg.NewHumanSessionRepo(pool).ForceLogoutWriter(ctx, limit)
+	w, err := kanamepg.NewHumanSessionRepo(pool).ForceLogoutWriter(ctx, domain.UserID(scene.UserID), limit)
 	require.NoError(t, err, "транзакция выхода")
 	defer func() { _ = w.Rollback(ctx) }()
 
@@ -72,10 +72,11 @@ func TestIntegration_ForceLogoutWriterRefusesALimitThatWouldMeanNoLimit(t *testi
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+	scene := ceremonyScene(t, ctx, pool, "fxzer")
 	repo := kanamepg.NewHumanSessionRepo(pool)
 
 	for _, wait := range []time.Duration{0, -time.Second, 500 * time.Microsecond} {
-		w, err := repo.ForceLogoutWriter(ctx, wait)
+		w, err := repo.ForceLogoutWriter(ctx, domain.UserID(scene.UserID), wait)
 		if w != nil {
 			_ = w.Rollback(ctx)
 		}
@@ -84,7 +85,7 @@ func TestIntegration_ForceLogoutWriterRefusesALimitThatWouldMeanNoLimit(t *testi
 	}
 
 	// Положительный близнец: законный предел транзакцию открывает.
-	w, err := repo.ForceLogoutWriter(ctx, time.Millisecond)
+	w, err := repo.ForceLogoutWriter(ctx, domain.UserID(scene.UserID), time.Millisecond)
 	require.NoError(t, err, "предел в одну миллисекунду законен")
 	require.NoError(t, w.Rollback(ctx))
 }

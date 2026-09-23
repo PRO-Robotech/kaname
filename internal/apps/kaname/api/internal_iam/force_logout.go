@@ -173,10 +173,17 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 // отличалось. Теперь снятие, отсечка и запись события ложатся ОДНОЙ
 // транзакцией этого порта.
 //
-// Порядок в ней — тот же, что у собственного выхода человека, у смены пароля и
-// у завершения восстановления: снятие записей, затем отсечка, затем событие.
-// Это и порядок захвата строк: писатели, берущие строки сессии и строку
-// отсечки в разном порядке, взаимно блокировали бы друг друга.
+// Операторы в ней идут так: снятие записей, затем отсечка, затем событие.
+//
+// # ПОРЯДОК ЗАХВАТА СТРОК: ЛИЧНОСТЬ → СЕССИИ → ОТСЕЧКА
+//
+// Транзакция открывается УЖЕ держащей строку личности (`FOR KEY SHARE`) — до
+// любой строки сессии. Это порядок каскада удаления личности: удаление берёт
+// строку `users` и затем её записи сессии. Без этого замка строку личности брала
+// проверка внешнего ключа отсечки — ПОСЛЕ строк сессии, то есть навстречу
+// удалению, и сцена «выход × удаление личности» давала взаимную блокировку в
+// 6 прогонах из 6, жертвой каждый раз удаление
+// (`force_logout_identity_deletion_race_integration_test.go`).
 //
 // Ожидание замков в транзакции ограничено `lockWait` — пределом самой
 // транзакции, а не сроком вызова.
@@ -185,7 +192,7 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 // которой снимает свои записи полоса входа. Два писателя одной таблицы зовут один
 // оператор (`endSessionsOfSQL`).
 type OwnSessions interface {
-	ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (OwnSessionsWriter, error)
+	ForceLogoutWriter(ctx context.Context, subject domain.UserID, lockWait time.Duration) (OwnSessionsWriter, error)
 }
 
 // OwnSessionsWriter — ОДНА транзакция принудительного выхода на посадке `own`:
@@ -610,7 +617,7 @@ type ownForceLogoutAttempt struct {
 func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTokenRevocation,
 	revokedBy domain.UserID, withTeardown bool,
 ) ownForceLogoutAttempt {
-	w, err := h.ownSessions.ForceLogoutWriter(ctx, forceLogoutLockWait)
+	w, err := h.ownSessions.ForceLogoutWriter(ctx, marker.UserID, forceLogoutLockWait)
 	if err != nil {
 		return ownForceLogoutAttempt{err: err}
 	}
@@ -682,7 +689,10 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 //
 // Отказ ОТСЕЧКИ, записи события или фиксации в первой транзакции — не
 // частичный исход: откатывается всё, не ложится ничего, и ответ — перевод
-// отказа хранилища, как на прочих посадках. Так же — отказ открытия.
+// отказа хранилища, как на прочих посадках. Так же — отказ открытия, включая
+// замок строки личности: не выдан он потому, что строку держит удаление
+// личности, а отсечка без того же замка не ложится (её внешний ключ берёт его
+// сам), и вторая транзакция упёрлась бы в ту же строку.
 func (h *Handler) forceLogoutOwnSessions(ctx context.Context, opID string,
 	marker domain.UserTokenRevocation, revokedBy domain.UserID,
 ) error {

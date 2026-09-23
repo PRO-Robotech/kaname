@@ -144,11 +144,15 @@ type recordingOwnSessions struct {
 	script    []*recordingOwnWriter
 	opened    []*recordingOwnWriter
 	opens     []ctxSnapshot
+	subjects  []domain.UserID
 	lockWaits []time.Duration
 }
 
-func (r *recordingOwnSessions) ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (OwnSessionsWriter, error) {
+func (r *recordingOwnSessions) ForceLogoutWriter(ctx context.Context, subject domain.UserID,
+	lockWait time.Duration,
+) (OwnSessionsWriter, error) {
 	r.opens = append(r.opens, snapshotOf(ctx))
+	r.subjects = append(r.subjects, subject)
 	r.lockWaits = append(r.lockWaits, lockWait)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -212,6 +216,10 @@ func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *t
 	require.NoError(t, err)
 
 	require.Len(t, own.opened, 1, "выход обязан лечь ОДНОЙ транзакцией")
+	assert.Equal(t, []domain.UserID{"usr_victim"}, own.subjects,
+		"транзакция открывается держащей строку ТОЙ личности, чьи сессии снимает: "+
+			"иначе строку личности возьмёт внешний ключ отсечки — после строк сессии, "+
+			"навстречу удалению личности")
 	if assert.Len(t, own.lockWaits, 1) {
 		assert.Positive(t, own.lockWaits[0], "ожидание замков обязано быть ограничено")
 		assert.Less(t, own.lockWaits[0], forceLogoutRecordBudget,
@@ -220,8 +228,7 @@ func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *t
 	tx := own.opened[0]
 	require.Equal(t, []string{"end", "cutoff", "event", "commit"}, tx.calls,
 		"запись события обязана лечь ПОСЛЕ снятия — иначе исхода ей не знать; "+
-			"снятие идёт ДО отсечки — тем же порядком захвата строк, что у "+
-			"собственного выхода человека")
+			"строку сессии снятие берёт до строки отсечки")
 	assert.Zero(t, rec.allCnt,
 		"под `own` отсечку кладёт транзакция снятия: второй писатель положил бы "+
 			"вторую запись события — намерение отдельно от исхода")
