@@ -15,6 +15,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // BasicCredentialRepo — АВТОРИТЕТ О ПРЕДЪЯВЛЕННОМ БАЗОВОМ СЕКРЕТЕ
@@ -31,6 +32,25 @@ import (
 // владельца, снятие участия, каскад по внешнему ключу. Перечень ОБЯЗАННЫХ
 // ПИСАТЬ разошёлся бы с деревом молча; повод, привязанный к самому снятию, —
 // нет.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ОТСЕЧКА ВЛАДЕЛЬЦА — ЧАСТЬ ТОГО ЖЕ ОПЕРАТОРА (задача kaname#379)
+//
+// Один повод строку НЕ снимает: человек, выведенный отовсюду, получает отсечку
+// отзыва-всех, а его удостоверения остаются лежать. Долговременное
+// удостоверение, выданное не позже отсечки, есть ровно то, что «выйти отовсюду»
+// обязано прекратить, — поэтому отсечка владельца читается ТЕМ ЖЕ оператором,
+// что строка удостоверения. Второй запрос дал бы то же окно, что и состояние
+// владельца вторым запросом.
+//
+// Решение — не своё сравнение, а общее правило полос удостоверений человека
+// (`revocationpolicy.Forbids`) с якорем в момент выдачи строки: граница
+// включительна, и расхождение с полосами выдачи токена непредставимо. Нет
+// отсечки — нет запрета. Отсечку прочитать не удалось — оператор не выполнился
+// целиком, и это исход «авторитет не ответил», а не отказ и не пропуск.
+//
+// У служебной учётки отсечки человека нет by construction: её операторы
+// отдают на месте отсечки NULL, и решение для обоих носителей одно.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ СВЕРКА ХЕША В Go, А НЕ В ПРЕДИКАТЕ ОПЕРАТОРА
@@ -61,6 +81,8 @@ func NewBasicCredentialRepo(pool *pgxpool.Pool) *BasicCredentialRepo {
 // Поэтому предикат СКЛЕИВАЕТСЯ, а не переписывается. Расхождение становится
 // непредставимым by construction; сверх того интеграционная проба сличает обе
 // полосы на каждом состоянии строки — гейт на случай, если склейку разберут.
+// Склеивается и источник строки вместе с отсечкой владельца
+// ([userCredentialSource]), и решение по ней ([ownerCutoffForbids]).
 //
 // Предикатов ЗДЕСЬ ДВА — по одному на носителя, — поэтому и разъезжаются они
 // порознь, и сверка одного носителя о втором не утверждает ничего. Проба
@@ -83,39 +105,62 @@ const liveSACredentialPredicate = `
    AND c.expires_at > now()
    AND s.enabled = true`
 
+// Источник строки удостоверения ЛИЧНОСТИ — вместе с владельцем и его отсечкой
+// отзыва-всех. Объявлен один раз на обе полосы: отсечка, присоединённая только
+// к одной из них, разъехалась бы с другой молча.
+const userCredentialSource = `
+  FROM user_oauth_clients c
+  JOIN users u ON u.id = c.user_id
+  LEFT JOIN user_token_revocations r ON r.user_id = u.id`
+
+// Источник строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ.
+const saCredentialSource = `
+  FROM service_account_oauth_clients c
+  JOIN service_accounts s ON s.id = c.sva_id`
+
 // Резолв строки удостоверения ЛИЧНОСТИ. Состояние владельца — часть ЭТОГО ЖЕ
 // оператора: вторым запросом оно дало бы окно, в котором человек уже заблокирован,
-// а его секрет ещё проходит.
+// а его секрет ещё проходит. Две последние колонки — момент выдачи строки и
+// отсечка владельца (NULL — отсечки нет).
 // Слово `secret_hash` здесь — ИМЯ КОЛОНКИ, в которой лежит хеш. Сам секрет в
 // этом файле не появляется ни в каком виде и хранению не подлежит by construction.
 const resolveUserCredentialSQL = `
-SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name
-  FROM user_oauth_clients c
-  JOIN users u ON u.id = c.user_id
+SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name, c.created_at, r.revoke_before` +
+	userCredentialSource + `
  WHERE c.id = $1` + liveUserCredentialPredicate
 
-// Резолв строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ.
+// Резолв строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ. На месте отсечки — NULL:
+// отсечка человека о ключе машины не говорит ничего.
 // То же: имя колонки в тексте запроса, не значение.
 const resolveSACredentialSQL = `
-SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name
-  FROM service_account_oauth_clients c
-  JOIN service_accounts s ON s.id = c.sva_id
+SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::timestamptz` +
+	saCredentialSource + `
  WHERE c.id = $1` + liveSACredentialPredicate
 
 // ЖИВОСТЬ, СПРОШЕННАЯ ПО ИДЕНТИФИКАТОРУ. Хеш не читается вовсе: спрашивающий
 // секрета не предъявляет и предъявить не может, а лишняя колонка в проекции —
-// это значение, которое кто-нибудь однажды вернёт наружу.
+// это значение, которое кто-нибудь однажды вернёт наружу. Читается ровно то,
+// что нужно решению об отсечке: момент выдачи и сама отсечка.
 const liveUserCredentialSQL = `
-SELECT 1
-  FROM user_oauth_clients c
-  JOIN users u ON u.id = c.user_id
+SELECT c.created_at, r.revoke_before` +
+	userCredentialSource + `
  WHERE c.id = $1` + liveUserCredentialPredicate
 
 const liveSACredentialSQL = `
-SELECT 1
-  FROM service_account_oauth_clients c
-  JOIN service_accounts s ON s.id = c.sva_id
+SELECT c.created_at, NULL::timestamptz` +
+	saCredentialSource + `
  WHERE c.id = $1` + liveSACredentialPredicate
+
+// ownerCutoffForbids — запрещает ли отсечка отзыва-всех владельца
+// удостоверение, выданное в момент issuedAt. Одно решение на обе полосы и оба
+// носителя.
+//
+// Сравнение — общее правило полос удостоверений человека, а не своё:
+// [revocationpolicy.Forbids], граница включительна. Отсутствие отсечки
+// (NULL) — не запрет: её нет, пока человека никто не выводил отовсюду.
+func ownerCutoffForbids(cutoff sql.NullTime, issuedAt time.Time) bool {
+	return cutoff.Valid && revocationpolicy.Forbids(cutoff.Time, issuedAt)
+}
 
 // credentialLane — куда идти с этим идентификатором и как назвать принципала.
 type credentialLane struct {
@@ -170,9 +215,11 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 		expiresAt   sql.NullTime
 		principalID string
 		displayName string
+		issuedAt    time.Time
+		ownerCutoff sql.NullTime
 	)
 	err = r.pool.QueryRow(ctx, query, p.CredentialID).
-		Scan(&credID, &storedHash, &expiresAt, &principalID, &displayName)
+		Scan(&credID, &storedHash, &expiresAt, &principalID, &displayName, &issuedAt, &ownerCutoff)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// Строки нет: отозвано, истекло, владелец неактивен либо её не было
@@ -187,6 +234,13 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 	}
 
 	if !credsecret.Verify(p.CredentialID, p.SecretPart, storedHash) {
+		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+	}
+
+	// Отсечка владельца судится ПОСЛЕ сверки хеша: не знающему секрета она не
+	// сообщает о себе ничего, даже временем ответа. Исход — тот же единый отказ,
+	// что у отозванного и истёкшего.
+	if ownerCutoffForbids(ownerCutoff, issuedAt) {
 		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
 	}
 
@@ -226,10 +280,10 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 //
 // nil — живо. domain.ErrBasicCredentialRefused — не живо, и ЕДИНЫМ отказом:
 // неизвестный идентификатор, чужой префикс, мусор, отозванное, истёкшее,
-// неактивный владелец — один исход, иначе по различию узнают, существует ли
-// удостоверение. Любая иная ошибка — авторитет не смог ответить; это НЕ «не
-// живо», и подменять одно другим значило бы закрывать соединения на собственной
-// неисправности.
+// неактивный владелец, отсечка владельца не раньше выдачи — один исход, иначе
+// по различию узнают, существует ли удостоверение. Любая иная ошибка —
+// авторитет не смог ответить; это НЕ «не живо», и подменять одно другим
+// значило бы закрывать соединения на собственной неисправности.
 func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID string) error {
 	// Уровень 1 отсева: полоса. Пустое, мусор и чужой префикс не оплачиваются
 	// обращением к базе.
@@ -238,8 +292,11 @@ func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID s
 		return domain.ErrBasicCredentialRefused
 	}
 
-	var one int
-	err := r.pool.QueryRow(ctx, lane.liveSQL, credentialID).Scan(&one)
+	var (
+		issuedAt    time.Time
+		ownerCutoff sql.NullTime
+	)
+	err := r.pool.QueryRow(ctx, lane.liveSQL, credentialID).Scan(&issuedAt, &ownerCutoff)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return domain.ErrBasicCredentialRefused
@@ -247,6 +304,9 @@ func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID s
 		// Недоступность авторитета — ОТДЕЛЬНЫЙ исход. Слить её с отказом значило
 		// бы закрывать открытые соединения каждый раз, когда база моргнула.
 		return err
+	}
+	if ownerCutoffForbids(ownerCutoff, issuedAt) {
+		return domain.ErrBasicCredentialRefused
 	}
 	return nil
 }

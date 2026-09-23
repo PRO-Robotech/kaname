@@ -25,6 +25,11 @@
 // (приглашение против выключателя). Значит и разъезжаются они порознь: сверка
 // одной полосы о второй не утверждает НИЧЕГО.
 //
+// Состояние владельца включает и его отсечку отзыва-всех (задача kaname#379):
+// строку она не снимает, и обе полосы обязаны видеть её одинаково — полоса
+// идентификатора, не видящая отсечки, держала бы открытым соединение, которое
+// «выйти отовсюду» обязано закрыть.
+//
 // Перечень носителей секретного удостоверения не выписывается, а спрашивается у
 // схемы: носитель — таблица, несущая и вид удостоверения, и его хеш. Третий
 // носитель, заведённый позже без своей полосы здесь, обязан стать находкой, а не
@@ -74,6 +79,11 @@ type basicCredLane struct {
 	// проба, которая не проверяет ничего.
 	kindAwayExtra string
 	kindBackExtra string
+	// Чья отсечка отзыва-всех ставится на состояниях отсечки и запрещает ли она
+	// ЭТУ полосу. Отсечка — о человеке: у полосы личности это её владелец, у
+	// полосы служебной учётки — человек того же аккаунта, и её он не касается.
+	cutoffUser    string
+	cutoffForbids bool
 }
 
 // basicCredState — состояние строки: как его создать и живо ли удостоверение
@@ -89,15 +99,17 @@ type basicCredState struct {
 func basicCredLanesUnderTest() []basicCredLane {
 	return []basicCredLane{
 		{
-			table:      "user_oauth_clients",
-			name:       "личность",
-			credID:     "uoc_0000000000000cx01",
-			ownerID:    "usr0000000000000bat1",
-			mint:       mintUserCredential,
-			ownerTable: "users",
-			ownerCol:   "invite_status",
-			ownerDead:  "'BLOCKED'",
-			ownerAlive: "'ACTIVE'",
+			table:         "user_oauth_clients",
+			name:          "личность",
+			credID:        "uoc_0000000000000cx01",
+			ownerID:       "usr0000000000000bat1",
+			mint:          mintUserCredential,
+			ownerTable:    "users",
+			ownerCol:      "invite_status",
+			ownerDead:     "'BLOCKED'",
+			ownerAlive:    "'ACTIVE'",
+			cutoffUser:    "usr0000000000000bat1",
+			cutoffForbids: true,
 		},
 		{
 			table:         "service_account_oauth_clients",
@@ -111,6 +123,8 @@ func basicCredLanesUnderTest() []basicCredLane {
 			ownerAlive:    "true",
 			kindAwayExtra: ", hydra_client_id = 'hyd-cx-1450'",
 			kindBackExtra: ", hydra_client_id = NULL",
+			cutoffUser:    "usr0000000000000bat1",
+			cutoffForbids: false,
 		},
 	}
 }
@@ -161,6 +175,25 @@ func basicCredStates(l basicCredLane, hashHex string) []basicCredState {
 		{"вид снова SECRET", fmt.Sprintf(
 			`UPDATE %s SET credential_kind = 'SECRET', secret_hash = decode('%s', 'hex')%s WHERE id = '%s'`,
 			l.table, hashHex, l.kindBackExtra, l.credID), true},
+		// Отсечка отзыва-всех человека — состояние владельца, которое строку не
+		// снимает. Сличение ставит её и назад, поэтому пишет строку прямо:
+		// оператор записи продукта монотонен.
+		{"человек вышел отовсюду после выдачи", fmt.Sprintf(
+			`INSERT INTO user_token_revocations (user_id, revoke_before) VALUES ('%s', now())
+			 ON CONFLICT (user_id) DO UPDATE SET revoke_before = EXCLUDED.revoke_before`, l.cutoffUser),
+			!l.cutoffForbids},
+		{"отсечка раньше выдачи", fmt.Sprintf(
+			`INSERT INTO user_token_revocations (user_id, revoke_before)
+			 SELECT '%s', created_at - interval '1 hour' FROM %s WHERE id = '%s'
+			 ON CONFLICT (user_id) DO UPDATE SET revoke_before = EXCLUDED.revoke_before`,
+			l.cutoffUser, l.table, l.credID), true},
+		{"отсечка ровно в момент выдачи", fmt.Sprintf(
+			`INSERT INTO user_token_revocations (user_id, revoke_before)
+			 SELECT '%s', created_at FROM %s WHERE id = '%s'
+			 ON CONFLICT (user_id) DO UPDATE SET revoke_before = EXCLUDED.revoke_before`,
+			l.cutoffUser, l.table, l.credID), !l.cutoffForbids},
+		{"отсечки снова нет", fmt.Sprintf(
+			`DELETE FROM user_token_revocations WHERE user_id = '%s'`, l.cutoffUser), true},
 		{"строка снята", fmt.Sprintf(`DELETE FROM %s WHERE id = '%s'`, l.table, l.credID), false},
 	}
 }
