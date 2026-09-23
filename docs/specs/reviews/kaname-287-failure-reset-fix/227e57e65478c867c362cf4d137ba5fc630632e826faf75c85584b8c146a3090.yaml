@@ -1,0 +1,47 @@
+schema_version: 1
+kind: security_review
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  contract: Ф12 Р7 / Ф3 Р10 редакция 11
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 11b6f723d3cb9dd84f37e694047823268e535a5d
+  digest_predicate: git diff 20a5dcaa11b769cbd19eec033f158e5eac6a5b88..11b6f723d3cb9dd84f37e694047823268e535a5d | sha256sum
+  digest: 227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090
+  committed: false
+modes: [search-diff-surface, public-text]
+severity_bar: [high, medium]
+inspected:
+  diff: 13 файлов, +1683/−14 (git diff --stat base..head)
+  gate_census: >-
+    TestFailureResetGoesThroughTheCompletedLoginGuard @ head: файлов прод-кода 966, называющих
+    порт 4; вызовов 2, значений-методов 0, объявлений 1, реализаций 1, в доме 1; полос, пишущих
+    уровень сессии, 7 — через дом 5, в ведомости 2
+  reset_sites: >-
+    git grep -n 'ResetFailures' <rev> -- '*.go' без _test: base — 6 прямых вызовов; head — 2
+    (дом и одна запись ведомости), плюс объявление и реализация
+  injections: >-
+    одноразовый клон на head, по одной форме за прогон: контроль зелёный; красные — прямой
+    вызов, второй вызов в файле ведомости (по числу), значение-метод, отложенный вызов, вызов из
+    другого пакета, новая полоса записи уровня без решения, полоса, сменившая вызов дома на
+    обёртку, снятие прощённого вызова (самоистечение); зелёная — никем не вызываемая обёртка в доме
+    (названная граница гейта)
+  lock_probe: >-
+    TestF12_46_OnlyCodeSuccessOpensTheWindow на дереве base: 2 из 3 ветвей красные (обе ветви
+    первого фактора), ветвь кода зелёная; на head — зелёные все
+  packages: go test ./internal/apps/kaname/api/humansession/ ok; go test ./internal/check/ ok; go vet обоих — чисто
+findings:
+  - id: SA-287-1
+    severity: medium
+    kind: связь сохраняется на полосе вне дома единственного писателя
+    address:
+      - internal/apps/kaname/api/humansession/recovery_complete.go (строка обнуления)
+      - internal/check/failure_reset_sole_writer_test.go (запись ведомости этой полосы)
+    note: >-
+      Разрешение — за приёмкой: recovery-of-access.md Р5 ред. 3 и дом счёта Ф3 Р10 ред. 11
+      говорят о полосе разное; запись ведомости не ссылается на предмет трекера
+      (PRO-Robotech/kaname#305), а её предикат снятия не исполним командой.
+public_text:
+  range_commits: 2
+  verdict: высокоуровневы — прежнего поведения не описывают, координаты с условием не связывают; атрибуции нет
+verdict: returned

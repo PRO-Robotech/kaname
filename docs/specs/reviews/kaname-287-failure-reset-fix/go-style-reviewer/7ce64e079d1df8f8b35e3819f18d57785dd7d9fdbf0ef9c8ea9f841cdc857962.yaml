@@ -1,0 +1,120 @@
+schema_version: 1
+kind: post_diff_review
+role: go-style-reviewer
+round: 2
+subject:
+  repository: PRO-Robotech/kaname
+  task: PRO-Robotech/kaname#287
+  contract: Ф12 Р7 / Ф3 Р10 редакция 11
+  base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  head: 770d9c42166cb03c4f2e87f5e88ce8052a0db56a
+  digest_predicate: >-
+    git diff 20a5dcaa..770d9c42166cb03c4f2e87f5e88ce8052a0db56a -- . ':!docs/specs/reviews' | sha256sum
+  digest: 7ce64e079d1df8f8b35e3819f18d57785dd7d9fdbf0ef9c8ea9f841cdc857962
+  digest_rechecked: одноразовый клон на head, тот же предикат, то же значение
+  previous_round:
+    digest: 227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090
+    record: docs/specs/reviews/kaname-287-failure-reset-fix/go-style-reviewer/227e57e65478c867c362cf4d137ba5fc630632e826faf75c85584b8c146a3090.yaml
+  committed: false
+inspected:
+  full_diff: 20 файлов, +3528/-16; Go — 14 файлов (без проб 8, пробы 6), прочитаны целиком
+  delta_since_round_1: 11b6f723..770d9c42 — 8 коммитов, 13 файлов, +1929/-86
+  head_note: >-
+    head на два коммита дальше названного автором fbbf757a; оба трогают только документы
+    (приёмка Ф3 и записи ревью круга 1), Go не меняют (git diff --stat fbbf757a..770d9c42)
+  authorship: 8 коммитов дельты — автор и коммиттер pointpu, трейлеров атрибуции 0
+verdict: returned
+blocking: true
+deferral_markers_in_diff:
+  textual: 0
+  ledger_relaxation_without_subject_reference: 0
+probes_in_same_change: true
+round_1_findings:
+  GS-287-1:
+    status: closed
+    evidence: >-
+      go test -p 1 -count=1 -run TestF12_46 пакета humansession, одна инъекция за прогон:
+      контроль — 7 ветвей зелёные; вход передаёт дому предъявленное без кода — красная ТОЛЬКО
+      ветвь «вход паролём и кодом» (ожидалось 6, получено 1); снятие фактора передаёт дому
+      предъявленное без кода — красный ТОЛЬКО глагол снятия (6 против 1); прежнее безусловное
+      обнуление — красные обе ветви первого фактора. Замок двусторонний.
+  GS-287-2:
+    status: closed
+    evidence: >-
+      Refs = PRO-Robotech/kaname#305; предикаты снятия исполнены дословно: gh issue view → OPEN,
+      git grep -c по файлу полосы → 1, предикат регистрации → пусто (код 1)
+  GS-287-3:
+    status: closed-with-gaps
+    note: ветви сняты, у посылки есть проба; её охват уже заявленного — GS-287-7, GS-287-8
+  GS-287-4:
+    status: open-foundation-candidate
+    note: >-
+      ребро use-case -> corelib/grpcsrv остаётся; прецедент на базе уже был
+      (internal/apps/kaname/api/authorize/caller_authority.go), класс не новый — не блокирует
+  GS-287-5:
+    status: closed
+    note: предикат снятия и проба говорят об одном событии; проба оси переописана как иная
+  style: закрыты все четыре (имя переписи, callsHome, контекст ошибки порта, t.Context())
+critical:
+  - id: GS-287-6
+    class: premise-recognizer-narrower-than-its-header
+    address:
+      - internal/check/failure_reset_sole_writer.go:50
+      - internal/check/failure_reset_sole_writer.go:63
+      - internal/check/failure_reset_sole_writer.go:435
+      - internal/check/failure_reset_sole_writer.go:495
+    requirement: >-
+      Шапка утверждает, что посылка судится по дереву, а формы, не распознанные разбором,
+      краснеют; границами названы только текст, собранный во время исполнения, и текст вне Go.
+      Измерено: три законные формы удаления строк счёта в строковом литерале Go разбор не
+      видит ВОВСЕ (удалений 0, находок 0). Одно из двух: разбор узнаёт каждую форму — по
+      инъекции на форму и законному близнецу, — либо каждая форма названа границей, а
+      строки 50–53 и 435–436 приведены к правде.
+    evidence: >-
+      Одноразовый клон на head, синтетический корпус в JudgeFailureRowRemovals, по форме за
+      вызов: удаление внутри CTE — найдено (1); WITH … ) DELETE в одну строку — 0; то же с
+      переводом строки перед DELETE — найдено (1); MERGE … WHEN MATCHED THEN DELETE — 0;
+      DELETE после блочного комментария в той же строке — 0. Литерал прочитан во всех пяти
+      (literals=1). Пара «пробел против перевода строки» отличается одним фактом.
+    return_to: автор диффа (полоса ветки 287)
+important:
+  - id: GS-287-7
+    class: premise-probe-skips-a-caller-form
+    address:
+      - internal/apps/kaname/api/humansession/completed_login_test.go:283
+      - internal/apps/kaname/api/humansession/completed_login_test.go:314
+    requirement: >-
+      Перепись вызывающих enrollmentBeforeWrite пропускает функции без приёмника, а шапка
+      пробы обещает красное на любом новом вызывающем без строки сборки. Свободная функция —
+      находка (либо своя строка), с инъекцией.
+    evidence: >-
+      Инъекция свободной функции, зовущей enrollmentBeforeWrite с пустым журналом: проба
+      зелёная, перепись по-прежнему 5 полос.
+  - id: GS-287-8
+    class: comment-attributes-to-probe-what-it-does-not-hold
+    address:
+      - internal/apps/kaname/api/humansession/completed_login.go:116
+    requirement: >-
+      Скобка называет пробу держателем и хранилища, и журнала; проба утверждает только
+      хранилище. Добавить в пробу утверждение «журнал подставлен» либо снять журнал из
+      атрибуции.
+    evidence: >-
+      Инъекция: из SecondFactorDeps.validate снята подстановка журнала — весь пакет humansession
+      зелёный (go test -p 1 -count=1, ok 41.4s).
+foundation_candidates:
+  - address: internal/apps/kaname/api/humansession/completed_login.go:83
+    note: >-
+      Ранжирование уровня — из пакета фундамента без транспорта; кросс-репозиторная работа,
+      берётся пином, копией в дерево платформы нельзя.
+style:
+  - internal/check/key_presentation_consumer.go:63 — экспортируемый изменяемый срез KeyPresentationNames; функция либо неэкспортируемое значение
+approved:
+  - ctx первым аргументом и пробрасывается во все новые вызовы; context.Background и паники в рабочем пути нет
+  - ошибки обёрнуты %w с содержательным контекстом; журнал — slog, структурные поля, личных данных нет
+  - handler не тронут; решение — в use-case, запись — через порт Writer
+  - замок Ф12-46 двусторонний на обеих полосах, где успех первого фактора достижим; глаголы под сессией закреплены наблюдаемым
+  - ведомость единственного писателя ключуется файлом и числом, послабление несёт предмет трекера и исполнимый предикат
+  - gofmt по 14 Go-файлам диффа — чисто; go vet обоих пакетов — чисто; маркеров отсрочки в добавленных строках 0
+security_comments_contradicting_code:
+  - internal/check/failure_reset_sole_writer.go:50 и :435 — охват посылки (GS-287-6)
+evidence_dir: kacho-workspace/tmp/gsr-287-r2-ev (вне дерева продукта)
