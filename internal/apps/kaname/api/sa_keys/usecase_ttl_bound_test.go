@@ -35,24 +35,24 @@ import (
 // ttlHarness — the shared stub set with a pinned clock, so an expiry assertion
 // compares against a known instant rather than racing wall-clock.
 type ttlHarness struct {
-	uc    *IssueSAKeyUseCase
-	repo  *stubSAClientRepo
-	hydra *stubHydra
-	ops   *stubOpsRepo
-	trust *fakeTrustedIssuers
-	now   time.Time
+	uc       *IssueSAKeyUseCase
+	repo     *stubSAClientRepo
+	provider *stubOAuthClientAdmin
+	ops      *stubOpsRepo
+	trust    *fakeTrustedIssuers
+	now      time.Time
 }
 
 func newTTLHarness(t *testing.T) *ttlHarness {
 	t.Helper()
 	h := &ttlHarness{
-		repo:  &stubSAClientRepo{},
-		hydra: &stubHydra{},
-		ops:   &stubOpsRepo{},
-		trust: &fakeTrustedIssuers{},
-		now:   time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
+		repo:     &stubSAClientRepo{},
+		provider: &stubOAuthClientAdmin{},
+		ops:      &stubOpsRepo{},
+		trust:    &fakeTrustedIssuers{},
+		now:      time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
 	}
-	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.hydra, h.ops).WithTrustedIssuerWriter(h.trust)
+	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.provider, h.ops).WithTrustedIssuerWriter(h.trust)
 	h.uc.now = func() time.Time { return h.now }
 	return h
 }
@@ -83,8 +83,8 @@ func TestIssue_TTLAboveMax_Rejected(t *testing.T) {
 	if msg := status.Convert(err).Message(); msg == "" || !contains(msg, "ttl_seconds") {
 		t.Errorf("message = %q; must name the offending field", msg)
 	}
-	if h.hydra.created {
-		t.Error("a rejected TTL must not reach Hydra — no client is registered for a refused key")
+	if h.provider.created {
+		t.Error("a rejected TTL must not reach the provider — no client is registered for a refused key")
 	}
 	if h.repo.insertOK {
 		t.Error("a rejected TTL must not persist a key row")
@@ -206,10 +206,10 @@ func TestIssue_RegistersClientWithAccessTokenLifespan(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if !h.hydra.created {
+	if !h.provider.created {
 		t.Fatal("the OAuth2 client must be registered")
 	}
-	if got, want := h.hydra.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
+	if got, want := h.provider.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
 		t.Errorf("access_token_lifespan = %q; want %q — the registered client must pin its own lifespan", got, want)
 	}
 }
@@ -235,7 +235,7 @@ func TestIssue_Federated_RegistersClientWithAccessTokenLifespan(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if got, want := h.hydra.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
+	if got, want := h.provider.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
 		t.Errorf("federated access_token_lifespan = %q; want %q", got, want)
 	}
 }
@@ -252,7 +252,7 @@ func TestIssue_AccessTokenLifespanUnset_LeavesFieldEmpty(t *testing.T) {
 	}
 	waitForOp(t, h.ops)
 
-	if got := h.hydra.gotReq.AccessTokenLifespan; got != "" {
+	if got := h.provider.gotReq.AccessTokenLifespan; got != "" {
 		t.Errorf("access_token_lifespan = %q; want empty when unconfigured", got)
 	}
 }

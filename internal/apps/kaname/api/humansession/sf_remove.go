@@ -96,7 +96,9 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 
-	w, err := uc.deps.Store.Writer(ctx)
+	// Транзакция снимает прочие записи сессии, поэтому строку личности она
+	// берёт первой — раньше строк фактора (`SessionSetWriter`, kaname#340).
+	w, err := uc.deps.Store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}

@@ -58,7 +58,12 @@ func newForceLogoutHandler(t *testing.T) (*internaliam.Handler, *pgxpool.Pool) {
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
 		WithAdminChecker(allowAdmin{}).
-		WithOperations(operations.NewRepo(pool, "kaname"))
+		WithOperations(operations.NewRepo(pool, "kaname")).
+		// Исполнитель снятия сессии — ТОТ ЖЕ, что провязывает композиционный
+		// корень под `own`. Без него глагол отказывает закрыто, и пробы
+		// контракта операции судили бы отказ провязки вместо своего предмета
+		// (kaname#313).
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
 	return h, pool
 }
 

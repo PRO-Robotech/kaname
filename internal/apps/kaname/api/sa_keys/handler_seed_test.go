@@ -29,7 +29,7 @@ import (
 
 // newSeedIssueUC builds an IssueSAKeyUseCase over the unit stubs.
 func newSeedIssueUC(repo *stubSAClientRepo, ops *stubOpsRepo) *IssueSAKeyUseCase {
-	return NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	return NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 }
 
 func TestHandlerIssue_SAPrincipal_CreatedByIsAccountOwner(t *testing.T) {

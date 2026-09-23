@@ -13,7 +13,7 @@
 //
 // Backwards-compat: Audience empty falls back to AudiencePrefix-built
 // internal audience (already covered by TestResolveAudience and
-// TestIssue_FederatedPath_HydraRequestShape).
+// TestIssue_FederatedPath_ProviderRequestShape).
 package sa_keys
 
 import (
@@ -31,9 +31,9 @@ import (
 // and echo it in IssueSAKeyResponse.Audiences.
 func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 	u.AudiencePrefix = "https://internal.example/iam"
 
 	in := IssueInput{
@@ -48,12 +48,12 @@ func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if !hydra.created {
-		t.Fatal("Hydra CreateOAuthClient never called")
+	if !provider.created {
+		t.Fatal("provider CreateOAuthClient never called")
 	}
-	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "sts.example.com" {
-		t.Fatalf("Hydra audience = %v, want [sts.example.com] (caller override, NOT %s/sa/sva_ext0000000000000)",
-			hydra.gotReq.Audience, u.AudiencePrefix)
+	if len(provider.gotReq.Audience) != 1 || provider.gotReq.Audience[0] != "sts.example.com" {
+		t.Fatalf("provider audience = %v, want [sts.example.com] (caller override, NOT %s/sa/sva_ext0000000000000)",
+			provider.gotReq.Audience, u.AudiencePrefix)
 	}
 
 	if ops.lastResp == nil {
@@ -76,9 +76,9 @@ func TestIssue_PrivateKeyJWT_AudienceOverridesPrefix(t *testing.T) {
 // in the response.
 func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 	u.AudiencePrefix = "https://internal.example/iam"
 
@@ -104,12 +104,12 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if !hydra.created {
-		t.Fatal("Hydra CreateOAuthClient never called")
+	if !provider.created {
+		t.Fatal("provider CreateOAuthClient never called")
 	}
 	want := "//idp.example.com/pools/p/providers/x"
-	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != want {
-		t.Fatalf("Hydra audience = %v, want [%s]", hydra.gotReq.Audience, want)
+	if len(provider.gotReq.Audience) != 1 || provider.gotReq.Audience[0] != want {
+		t.Fatalf("provider audience = %v, want [%s]", provider.gotReq.Audience, want)
 	}
 
 	resp := &iamv1.IssueSAKeyResponse{}
@@ -128,9 +128,9 @@ func TestIssue_Federated_AudienceOverridesPrefix(t *testing.T) {
 // duplicates + empty entries is sanitized before reaching Hydra.
 func TestIssue_AudienceDedupAndEmptyDrop(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 
 	_, err := u.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva_abc0000000000000",
@@ -142,7 +142,7 @@ func TestIssue_AudienceDedupAndEmptyDrop(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	got := hydra.gotReq.Audience
+	got := provider.gotReq.Audience
 	if len(got) != 2 || got[0] != "a.example" || got[1] != "b.example" {
 		t.Fatalf("audience not sanitized: %v", got)
 	}

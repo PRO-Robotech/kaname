@@ -1789,20 +1789,31 @@ func runServe(cfg config.Config) error {
 		_ = internalListener.Close()
 		return fmt.Errorf("provider compensation drainer wiring: %w", cerr)
 	}
-	tasks = append(tasks, func() (err error) {
-		// Мёртвый дренаж не должен оставлять под тихо работающим: очередь без
-		// исполнителя копит намерения, а занятое у провайдера не освобождается.
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("provider compensation drainer panicked", "panic", r)
-				err = fmt.Errorf("provider compensation drainer panic: %v", r)
-			}
-			if err != nil {
-				triggerShutdown()
-			}
-		}()
-		return compensationDrainerTask(taskCtx)
-	})
+	// ЗАДАЧИ МОЖЕТ НЕ БЫТЬ, И ЭТО НЕ ОТКАЗ: на посадке без внешнего поставщика
+	// дренировать нечего и некуда — разбор в шапке сборщика (kaname#313).
+	// Проверка обязательна: поставленная в очередь nil-задача уронила бы под
+	// разыменованием, то есть отсутствие дороги пришло бы паникой.
+	if compensationDrainerTask == nil {
+		logger.Info("дренаж очереди компенсаций не поднят: на этой посадке нет " +
+			"внешнего поставщика, и снимать у него нечего — у очереди нет ни одного " +
+			"производителя. Перепись очереди поднимается отдельно и продолжает " +
+			"показывать глубину и возраст строк, переживших перевод посадки")
+	} else {
+		tasks = append(tasks, func() (err error) {
+			// Мёртвый дренаж не должен оставлять под тихо работающим: очередь без
+			// исполнителя копит намерения, а занятое у провайдера не освобождается.
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("provider compensation drainer panicked", "panic", r)
+					err = fmt.Errorf("provider compensation drainer panic: %v", r)
+				}
+				if err != nil {
+					triggerShutdown()
+				}
+			}()
+			return compensationDrainerTask(taskCtx)
+		})
+	}
 	// Наблюдаемость очереди: глубина, возраст самой старой недоставленной
 	// строки, число отравленных. Скан не мутирует таблицу и не может уронить
 	// под — ошибки логируются.

@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Хук отправки: быстрые проверки конвейера — локально, ДО двадцати минут ожидания.
+#
+# ЭКЗЕМПЛЯР СВОЙ, НЕ КОПИЯ соседнего продукта (PRO-Robotech/kacho, тот же
+# scripts/hooks/pre-push). Дерево там — монорепо с группами по составу диффа
+# (proto/go/terraform/helm/ui) и отдельным ci-local.sh; здесь — один Go-модуль
+# и три готовые цели Makefile (`vet`, `lint` с версией-пином, `test-short`),
+# делить прогон на группы нечему. Поэтому хук зовёт `make` напрямую, а не
+# отдельный прогонщик: заводить его копией второго файла было бы неверно —
+# предмета для деления на группы здесь нет (`git ls-files '*.go' | xargs -n1
+# dirname | sort -u | wc -l` — один модуль на дереве, `go.mod` в корне, второго
+# нет).
+#
+# ЧТО ГОНЯЕТСЯ И ПОЧЕМУ РОВНО ЭТО. `make vet` (4с), `gofmt -l` по индексу
+# (0.2с), `make lint` (пин golangci-lint сверяется целью, ~14с) — измерено на
+# этом дереве. `make test-short` — НЕ гонится здесь: цель делегирует прогон по
+# нескольким каталогам дерева (`delegate_to_tree`), и её время не измерено как
+# «быстрое»; конвейер её проверит первым. Это НАЗВАНО, а не спрятано молчаливым
+# урезанием: «локально зелено» здесь означает ровно build+vet+gofmt+lint.
+#
+# КАК ОБОЙТИ И ПОЧЕМУ ЭТО ЗАКОННО. `git push --no-verify` либо
+# `KANAME_SKIP_PREPUSH=1`. Черновик-ветка на обсуждение имеет право уехать без
+# проверки — но не незаметно.
+#
+# Установка: `make install-hooks` кладёт в `.git/hooks` переходник,
+# исполняющий ЭТОТ файл из той рабочей копии, из которой идёт отправка.
+# Проверить провязку: `make check-hooks`.
+set -uo pipefail
+
+if [ "${KANAME_SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "pre-push: пропущен по KANAME_SKIP_PREPUSH=1 — локальные проверки НЕ выполнялись" >&2
+    exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Окружение git не наследуется проверками — тот же класс, что у соседнего
+# продукта (GIT_DIR сильнее рабочего каталога и подставляет чужой индекс
+# синтетическим фикстурам git-репозиториев внутри проб, если такие появятся).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+case "$branch" in
+    wip/*|tmp/*)
+        echo "pre-push: ветка «$branch» объявлена черновиком — проверки пропущены" >&2
+        exit 0
+        ;;
+esac
+
+cd "$ROOT" || exit 1
+
+echo "== pre-push (kaname): локальные проверки перед отправкой ветки «$branch»"
+echo "   (обойти: git push --no-verify — но тогда конвейер станет первым читателем)"
+echo "   гонится: vet · gofmt · lint (пин)   пропущено: test-short — см. шапку файла"
+
+fails=()
+
+run() {
+    local name="$1"; shift
+    echo ""
+    echo "-- $name --"
+    if "$@"; then
+        echo "ok"
+    else
+        fails+=("$name")
+        echo "КРАСНОЕ: $name"
+    fi
+}
+
+run "make vet" make vet
+
+files=$(git ls-files '*.go')
+if [ -z "$files" ]; then
+    echo ""
+    echo "-- gofmt --"
+    echo "ОТКАЗ: обход пуст — ни одного файла Go не прочитано." >&2
+    fails+=("gofmt (обход пуст)")
+else
+    echo ""
+    echo "-- gofmt --"
+    unformatted=$(gofmt -l $files || true)
+    if [ -n "$unformatted" ]; then
+        echo "требуется gofmt:"; echo "$unformatted"
+        fails+=("gofmt")
+    else
+        echo "ok ($(printf '%s\n' "$files" | wc -l) файлов прочитано)"
+    fi
+fi
+
+run "make lint" make lint
+
+echo ""
+echo "== итог: отказов ${#fails[@]}"
+echo "   Здесь НЕ проверялось: make test-short (см. шапку), сборка образа, стенд."
+if [ "${#fails[@]}" -gt 0 ]; then
+    cat >&2 <<MSG
+
+pre-push ОТКАЗ: локальные проверки красные — отправка остановлена: ${fails[*]}
+
+Три исхода, четвёртого нет: почините найденное; либо отправьте черновик явно —
+git push --no-verify, зная, что конвейер станет первым читателем.
+MSG
+    exit 1
+fi
+
+echo "== pre-push (kaname): локальные проверки зелёные — отправляю"

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -59,24 +60,104 @@ func (r *MintedTokenRevocationRepo) RevokedBefore(ctx context.Context, subject s
 // оператором, а не проверкой-перед-записью: под конкуренцией «прочитать,
 // сравнить, записать» дало бы откат границы.
 func (r *MintedTokenRevocationRepo) Revoke(ctx context.Context, subject string, before time.Time, reason, decidedBy string) error {
+	return upsertMintedCutoff(ctx, r.pool, subject, before, reason, decidedBy)
+}
+
+// upsertMintedCutoffSQL — ОДНА операция записи этой отсечки на всё дерево.
+//
+// Выписана константой, потому что исполнителей у неё двое: пул (глагол выше) и
+// ТРАНЗАКЦИЯ вызывающего, которому эта отсечка нужна неделимо с соседней
+// (`SessionRevocationsAdapter.RevokeAllUserTokensTx`). Две копии одного
+// оператора разошлись бы молча — и разошлась бы та, которую правили последней, —
+// а расхождение здесь означает «по одной записи отозван, по другой нет».
+//
+// # МОМЕНТ МОНОТОНЕН, А ПРИЧИНА И АКТОР ПРИНАДЛЕЖАТ СТОЯЩЕМУ МОМЕНТУ
+//
+// Монотонный `GREATEST` одинаков у всех писателей этой строки. Но одного его
+// мало, и прежняя редакция этим и ограничивалась: причина и актор
+// переписывались БЕЗУСЛОВНО. Следствие наступило ровно тогда, когда обе записи
+// стали класться одной дверью: полоса входа несёт СВОЙ момент (он бывает раньше
+// стоящего), администратор — текущий. На проигравшей записи соседняя строка
+// сохраняет причину и актора администратора, а эта — принимала чужие. Итог:
+// строка, по которой судит авторитет отзыва НА ПУТИ ЗАПРОСА, называла неверного
+// принявшего решение.
+//
+// Теперь замок тот же, что у соседней строки: причина и актор переписываются
+// ТОЛЬКО вместе с принятым моментом, на равных стоит последняя запись.
+// Отброшенный момент не переносит сюда ничего.
+//
+// ЧТО ОСТАЁТСЯ РАСХОЖДЕНИЕМ И ГДЕ ОНО ЖИВЁТ: схемные писатели этой же строки
+// (`kaname.minted_cutoff_on_*`) переписывают причину и актора безусловно — они
+// SQL, и правит их миграция, то есть другая полоса. Номера у задачи пока нет:
+// заводит её не эта полоса, и до заведения адресом служит эта координата.
+// Предикат снятия: у функций
+// `minted_cutoff_on_*` стоит тот же `CASE WHEN` по моменту, что и здесь.
+const upsertMintedCutoffSQL = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (subject) DO UPDATE
+		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
+		       reason        = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN EXCLUDED.reason ELSE kaname.minted_token_revocations.reason END,
+		       revoked_by    = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN EXCLUDED.revoked_by ELSE kaname.minted_token_revocations.revoked_by END,
+		       updated_at    = CASE WHEN EXCLUDED.revoke_before >= kaname.minted_token_revocations.revoke_before
+		                            THEN now() ELSE kaname.minted_token_revocations.updated_at END`
+
+// cutoffExecutor — пул либо транзакция. Операторы отсечки одни, исполнителей двое.
+type cutoffExecutor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// upsertMintedCutoff — запись отсечки ЛЮБЫМ исполнителем.
+//
+// Проверки входа стоят ЗДЕСЬ, а не у каждого вызывающего: субъект без имени и
+// решение без принявшего — строки, которые невозможно ни прочесть, ни оспорить,
+// и пропустить их один раз достаточно, чтобы отсечка стала неадресуемой.
+func upsertMintedCutoff(ctx context.Context, ex cutoffExecutor,
+	subject string, before time.Time, reason, decidedBy string,
+) error {
+	if err := validateMintedCutoffInput(subject, decidedBy); err != nil {
+		return err
+	}
+	if _, err := ex.Exec(ctx, upsertMintedCutoffSQL, subject, before, reason, decidedBy); err != nil {
+		return wrapPgErr(err, "TokenRevocation", subject)
+	}
+	return nil
+}
+
+// validateMintedCutoffInput — проверки входа ОТДЕЛЬНО от исполнения.
+//
+// Отдельно затем, чтобы их мог позвать писатель ПАРЫ записей — ДО первого
+// оператора. Проверка, стоящая после исполнения соседней записи, отвергает вход
+// тогда, когда половина уже записана: вызывающий получает отказ, а состояние
+// изменено.
+func validateMintedCutoffInput(subject, decidedBy string) error {
 	if strings.TrimSpace(subject) == "" {
 		return fmt.Errorf("%w: revocation must name its subject", iamerr.ErrInvalidArg)
 	}
 	if strings.TrimSpace(decidedBy) == "" {
 		return fmt.Errorf("%w: revocation must name who decided it", iamerr.ErrInvalidArg)
 	}
-	const q = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (subject) DO UPDATE
-		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
-		       reason        = EXCLUDED.reason,
-		       revoked_by    = EXCLUDED.revoked_by,
-		       updated_at    = now()`
-	if _, err := r.pool.Exec(ctx, q, subject, before, reason, decidedBy); err != nil {
-		return wrapPgErr(err, "TokenRevocation", subject)
-	}
 	return nil
 }
+
+// ЗДЕСЬ СТОЯЛ ПРИЗНАК «УМЕЕТ ОТКРЫТЬ ТРАНЗАКЦИЮ», И ОН НЕ РАЗЛИЧАЛ
+// ИСПОЛНИТЕЛЕЙ (kaname#313).
+//
+// Признак опирался на наличие метода начала транзакции — и метод этот есть И У
+// ТРАНЗАКЦИИ: `pgx.Tx` объявляет ВЛОЖЕННОЕ начало (точка сохранения).
+// Доказывается это не рассуждением, а сборкой: утверждение
+// `var _ cutoffTxBeginner = (pgx.Tx)(nil)` компилировалось.
+//
+// Следствие было не в целости пары — она держалась, — а в трёх других вещах:
+// ветвь «пула» бралась на ВСЕХ вызывающих, включая транзакционных; шапка
+// утверждала, что вложенной транзакции быть не может, ровно там, где она
+// открывалась; и поведение при отказе менялось молча — откат к точке сохранения
+// вместо отравления внешней транзакции.
+//
+// Исполнители теперь различаются ПО ТИПУ, а не по форме интерфейса, и перечень
+// их ЗАКРЫТ: пул либо транзакция, третьего дверь не принимает. Неизвестный
+// исполнитель не получает молча неатомарной полосы — он получает отказ.
 
 // SweepStaleCutoffs убирает отсечки, ставшие БЕССМЫСЛЕННЫМИ, — партией и по
 // часам БАЗЫ.
