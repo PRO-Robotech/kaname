@@ -1273,6 +1273,10 @@ func runServe(cfg config.Config) error {
 			// Провязывается безусловно: дорога строится лишь на непереведённом
 			// контуре, и на переведённом счётчик обязан молчать сам.
 			ProviderRoadObserver: metricsReg.ProviderRoadRecorder(),
+			// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
+			// же, что у полос выдачи токена: оператор этой полосы для строки
+			// человека читает и отсечку отзыва-всех (kaname#379).
+			BasicCredentialTimeout: credentialLanePeerTimeout,
 		})
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)

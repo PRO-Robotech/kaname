@@ -43,14 +43,23 @@ type UserLookupPort interface {
 // UserRevocationLookup — the revoke-all cutoff. Read by BOTH hooks: once where a
 // token is MINTED, and again where one is refreshed.
 //
-// Both is the point. The cutoff is written by an administrator forcing a user
-// out, by a user revoking all of their own tokens, and by password recovery —
-// and it used to be read only on the refresh path, so a live session kept
-// obtaining brand-new tokens straight through a force-logout that had reported
-// success. Worse for a personal access token: its grant has no refresh hook at
-// all, so nothing minted through it was ever re-examined and the cutoff had no
-// point of enforcement whatsoever. One port, one adapter, one row — the two
-// hooks cannot answer the same question differently.
+// Both is the point. The cutoff is written by every action that logs a person
+// out of everything — whichever that action is; the row is one per person and
+// the reader does not care who wrote it — and it used to be read only on the
+// refresh path, so a live session kept obtaining brand-new tokens straight
+// through a force-logout that had reported success. Worse for a personal
+// access token: its grant has no refresh hook at all, so nothing minted through
+// it was ever re-examined and the cutoff had no point of enforcement
+// whatsoever. One port, one reader instance (wrapped once with its per-call
+// limit by the composition root), one row — the two hooks cannot answer the
+// same question differently.
+//
+// The platform's own token endpoint asks the same question too, through a port
+// of the same shape declared at its own use-case (`client_token.RevocationLookup`)
+// and backed by its own instance of the same adapter type, under the same
+// wrapper and the same declared limit. The verdict itself is decided in one
+// place for all of them (`revocationpolicy`); each lane keeps only its own
+// vocabulary for the refusal.
 //
 // Narrow on purpose. This asks "has this person been logged out of everything,
 // and when?" and nothing else. The port it replaces also declared the write

@@ -243,6 +243,56 @@ kaname-svc.requireNoRetiredPortKnobs — СНЯТЫЙ КЛЮЧ ПОСАДКИ О
 {{- end -}}
 {{- end -}}
 
+{{/*
+kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН-ЭНДПОИНТА
+ПЛАТФОРМЫ И ВКЛЮЧЁННЫЙ ЭНДПОИНТ БЕЗ ЕГО ВЕЛИЧИН НЕ СОБИРАЮТСЯ (задача #337).
+
+ЧТО ОН ЗАПРЕЩАЕТ. Первое — комбинацию ручек посадки, которую страж старта
+процесса не поднимает: `authn.identityProvider: own` при невключённом
+`authn.clientToken`. Ключ служебной учётки на этой посадке обменивается на токен
+именно эндпоинтом, и другого исполнителя выдачи у неё нет. Собранная чартом, она
+отказывала бы уже в кластере, после выкатки; здесь — на установке, с теми же
+двумя ручками в тексте, что называет страж процесса.
+
+Второе — включённый эндпоинт без его величин. Профиля `own` в поставке нет
+(INSTALL.md §1): перевод есть накладка оператора, и объявить величины, кроме
+неё, негде. Недостающие называются ОДНИМ ПЕРЕЧНЕМ, а не `required` на каждой, —
+тот же довод, что у перечня координат выше.
+
+ОБЛАСТЬ НАЗВАНА: судится только ОБЪЯВЛЕННОСТЬ величин. Их согласованность
+(адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
+тела положителен) судит страж старта (`ClientTokenConfig.Validate`), и второго
+места о ней здесь не заводится. Популяцию величин держит проба
+`own_posture_needs_client_token_test.go`: она берёт её у таблицы стража и
+требует, чтобы отказ называл каждую строку.
+*/}}
+{{- define "kaname-svc.requireClientTokenEndpoint" -}}
+{{- $authn := .Values.authn | default dict -}}
+{{- $ct := $authn.clientToken | default dict -}}
+{{- $posture := $authn.identityProvider -}}
+{{- if and $posture (eq (toString $posture) "own") (not $ct.enabled) -}}
+{{- fail "чарт службы прав не ставится: authn.identityProvider=own при невключённом authn.clientToken.enabled.\n\nНа посадке own ключ служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у этой посадки нет. Страж старта процесса такую посадку не поднимает (authn.identity-provider=own при authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его четыре величины (INSTALL.md §1, §3), — либо объявите authn.identityProvider=external." -}}
+{{- end -}}
+{{- if $ct.enabled -}}
+{{- $missing := list -}}
+{{- if not $ct.allowedAudiences -}}
+{{- $missing = append $missing "  authn.clientToken.allowedAudiences — authn.client-token.allowed-audiences: перечень адресатов,\n                                       которым платформа чеканит удостоверения, через запятую; адресат\n                                       докерной полосы (apiServer.registryToken.service) обязан в него входить." -}}
+{{- end -}}
+{{- if not $ct.defaultAudience -}}
+{{- $missing = append $missing "  authn.clientToken.defaultAudience  — authn.client-token.default-audience: адресат, когда запрос\n                                       его не назвал; член перечня выше." -}}
+{{- end -}}
+{{- if not $ct.tokenTtl -}}
+{{- $missing = append $missing "  authn.clientToken.tokenTtl         — authn.client-token.token-ttl: срок выпускаемого токена\n                                       (длительность Go), не выше потолка платформы." -}}
+{{- end -}}
+{{- if not $ct.bodyCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.bodyCeiling      — authn.client-token.body-ceiling: потолок тела запроса к\n                                       эндпоинту, байт; положительное целое — ноль величиной не является." -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "чарт службы прав не ставится: токен-эндпоинт платформы включён (authn.clientToken.enabled=true), а его величины не названы — %d.\n\nУмолчаний у них нет намеренно: каждую выбирает тот, кто ставит, и без любой из них страж старта процесса службу не поднимает.\n\n%s\n\nЧТО СДЕЛАТЬ: назовите их профилю — накладкой `-f` либо `--set`; образцы величин — INSTALL.md §3." (len $missing) (join "\n\n" $missing)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "kaname-svc.processDefaultPort" -}}
 {{- $ports := dict "hooks" "9092" "metrics" "9095" "registryToken" "9096" "jwksProxy" "9097" -}}
 {{- $port := index $ports . -}}

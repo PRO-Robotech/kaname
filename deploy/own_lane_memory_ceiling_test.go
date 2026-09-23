@@ -36,8 +36,10 @@
 //	    арифметики здесь не заводится намеренно — она разошлась бы со стражем
 //	    молча, на первой же смене потолка формата записи пароля.
 //
-// Р2 рендерится с накладкой `authn.identityProvider=own`: судится тот вход,
-// который получит установка, переведённая на `own` поверх боевого профиля.
+// Р2 рендерится с накладкой `own` (`ownPostureOverlay`: посадка, включённый
+// токен-эндпоинт и его величины — без эндпоинта чарт `own` не собирает, задача
+// #337): судится тот вход, который получит установка, переведённая на `own`
+// поверх боевого профиля.
 // Оба вердикта берутся с РЕНДЕРА, а не с текста профиля: ключ, стоящий под
 // условием, в тексте есть, а в рендере его может не быть.
 //
@@ -62,9 +64,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
-
-// ownPostureSet — накладка, переводящая поставляемую цепочку на посадку `own`.
-const ownPostureSet = "authn.identityProvider=own"
 
 // memoryLimitOfServiceContainer — предел памяти контейнера службы из рендера.
 //
@@ -215,7 +214,7 @@ func TestDeliveredChartDeclaresTheServiceContainerMemoryLimit(t *testing.T) {
 
 // TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard — Р2.
 func TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard(t *testing.T) {
-	sets := append([]string{ownPostureSet}, minimalOperatorCoordinates...)
+	sets := withOwnPosture(minimalOperatorCoordinates...)
 	rendered := renderStandaloneChart(t, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	login := loginLaneOfRender(t, rendered)

@@ -23,7 +23,13 @@
 // (F2-42), поэтому здесь оно не переизмеряется.
 //
 // Всё остальное — настоящее: разрешение клиента, подписант, хранилище отсечек,
-// авторитет отзыва.
+// авторитет отзыва, читатель отсечки отзыва-всех владельца.
+//
+// Дублёр состава НЕ несёт момента выдачи ключа пользователя, который несёт
+// настоящее объявление. Это СТРОЖЕ продукта, а не снисходительнее: при живой
+// отсечке владельца принципал без якоря получает отказ. Пробы этой оснастки
+// отсечек владельца не ставят; полоса с отсечкой закреплена своей пробой на
+// настоящем составе (`client_token_revoke_all_integration_test.go`).
 package pg_test
 
 import (
@@ -31,11 +37,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -116,7 +124,9 @@ type issuanceRig struct {
 	issuedAt time.Time
 }
 
-func newIssuanceRig(t *testing.T) issuanceRig {
+// newIssuanceRig собирает выдачу против базы `pool`: отсечку отзыва-всех она
+// читает НАСТОЯЩИМ читателем той же базы, что и полосы хука.
+func newIssuanceRig(t *testing.T, pool *pgxpool.Pool) issuanceRig {
 	t.Helper()
 	mat, err := signingkeygen.Generate(domain.SigningAlgES256)
 	require.NoError(t, err, "порождение ключа подписанта")
@@ -140,7 +150,7 @@ func newIssuanceRig(t *testing.T) issuanceRig {
 		DefaultAudience:  assertionAudience,
 		TokenTTL:         assertionTokenTTL,
 		Clock:            func() time.Time { return issuedAt },
-	}, signer, issuanceClaims{})
+	}, signer, issuanceClaims{}, kanamepg.NewSessionRevocationsAdapter(pool))
 	require.NoError(t, err)
 
 	return issuanceRig{uc: uc, keys: keys, issuedAt: issuedAt}
