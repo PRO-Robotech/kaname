@@ -129,7 +129,7 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: recordingStore{inner: h.store, j: h.journal}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+		Store: recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
 		Observer: h.obs, Now: now, Logger: logger,
 	})
 	require.NoError(t, err)

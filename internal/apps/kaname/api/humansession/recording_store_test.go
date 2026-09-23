@@ -4,10 +4,17 @@
 package humansession_test
 
 // recording_store_test.go — ЖУРНАЛ РАБОТЫ ХРАНИЛИЩА: обёртки портов,
-// записывающие каждое обращение полосы в один ряд (вид операции и её порядок).
-// Предмет — «сколько и какой работы хранилища полоса сделала до исхода»:
-// полосы, обязанные быть неразличимыми по времени, а пробы времени не имеющие,
-// судятся равенством этих рядов.
+// записывающие каждое обращение полосы в один ряд (вид операции, её порядок и
+// число операторов базы, которое она исполнила). Предмет — «сколько и какой
+// работы хранилища полоса сделала до исхода»: полосы, обязанные быть
+// неразличимыми по времени, а пробы времени не имеющие, судятся равенством
+// этих рядов.
+//
+// Обращение к порту — ещё не работа базы: вход, который адаптер отвергает
+// аргументом, до базы не доходит. Поэтому у каждой записи есть `Trips` —
+// разность счётчика операторов дублёра (`fakeStore.trips`) до и после
+// обращения; что дублёр считает их как адаптер, держит сверка
+// `store_double_parity_integration_test.go`.
 //
 // Обёртки НЕ встраивают порт: каждый метод написан явно и пишет запись. Метод,
 // добавленный в порт, без записи не соберётся — журнал не может молча
@@ -15,6 +22,7 @@ package humansession_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -32,9 +40,21 @@ type storeOp struct {
 	// LoginMethodRead — обращение читает строку способа входа (ось «заведено»
 	// места решения о счёте), каким бы портом оно ни шло.
 	LoginMethodRead bool
+	// Trips — операторов базы, исполненных обращением: 0 — вход отвергнут
+	// аргументом, до базы не дойдя.
+	Trips int64
 }
 
-func (o storeOp) String() string { return o.Port + "." + o.Name }
+func (o storeOp) String() string { return fmt.Sprintf("%s.%s/%d", o.Port, o.Name, o.Trips) }
+
+// tripsOf — операторов базы во всём ряду.
+func tripsOf(ops []storeOp) int64 {
+	var n int64
+	for _, op := range ops {
+		n += op.Trips
+	}
+	return n
+}
 
 // storeJournal — ряд обращений одной полосы.
 type storeJournal struct {
@@ -57,191 +77,208 @@ func (j *storeJournal) take() []storeOp {
 	return out
 }
 
-// recordingStore — humansession.Store с журналом.
+// recordingStore — humansession.Store с журналом; meter — счётчик операторов
+// базы дублёра под обёрткой.
 type recordingStore struct {
 	inner humansession.Store
 	j     *storeJournal
+	meter func() int64
 }
 
 var _ humansession.Store = recordingStore{}
 
-func (s recordingStore) rec(name string) { s.j.note(storeOp{Port: "store", Name: name}) }
+// record — запись обращения ПО ЕГО ЗАВЕРШЕНИИ: число операторов — разность
+// счётчика до и после. Зовётся `defer rec(...)()`.
+func record(j *storeJournal, meter func() int64, op storeOp) func() {
+	before := meter()
+	return func() {
+		op.Trips = meter() - before
+		j.note(op)
+	}
+}
+
+func (s recordingStore) rec(name string) func() {
+	return record(s.j, s.meter, storeOp{Port: "store", Name: name})
+}
 
 func (s recordingStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
-	s.rec("Resolve")
+	defer s.rec("Resolve")()
 	return s.inner.Resolve(ctx, digest, now)
 }
 
 func (s recordingStore) CountFailures(ctx context.Context, scope humansession.FailureScope, key string, since time.Time) (int, error) {
-	s.rec("CountFailures")
+	defer s.rec("CountFailures")()
 	return s.inner.CountFailures(ctx, scope, key, since)
 }
 
 func (s recordingStore) OldestFailureSince(ctx context.Context, scope humansession.FailureScope, key string, since time.Time) (time.Time, bool, error) {
-	s.rec("OldestFailureSince")
+	defer s.rec("OldestFailureSince")()
 	return s.inner.OldestFailureSince(ctx, scope, key, since)
 }
 
 func (s recordingStore) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
-	s.rec("FirstAuthentication")
+	defer s.rec("FirstAuthentication")()
 	return s.inner.FirstAuthentication(ctx, userID)
 }
 
 func (s recordingStore) RecoveryTarget(ctx context.Context, email domain.Email) (humansession.RecoveryTarget, bool, error) {
-	s.rec("RecoveryTarget")
+	defer s.rec("RecoveryTarget")()
 	return s.inner.RecoveryTarget(ctx, email)
 }
 
 func (s recordingStore) Writer(ctx context.Context) (humansession.Writer, error) {
-	s.rec("Writer")
+	defer s.rec("Writer")()
 	w, err := s.inner.Writer(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return recordingWriter{inner: w, j: s.j}, nil
+	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
 }
 
 // recordingWriter — humansession.Writer с журналом.
 type recordingWriter struct {
 	inner humansession.Writer
 	j     *storeJournal
+	meter func() int64
 }
 
 var _ humansession.Writer = recordingWriter{}
 
-func (w recordingWriter) rec(name string) { w.j.note(storeOp{Port: "writer", Name: name}) }
+func (w recordingWriter) rec(name string) func() {
+	return record(w.j, w.meter, storeOp{Port: "writer", Name: name})
+}
 
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
-	w.rec("InsertSession")
+	defer w.rec("InsertSession")()
 	return w.inner.InsertSession(ctx, s, digest)
 }
 
 func (w recordingWriter) RememberFirstAuthentication(ctx context.Context, userID domain.UserID, at time.Time) error {
-	w.rec("RememberFirstAuthentication")
+	defer w.rec("RememberFirstAuthentication")()
 	return w.inner.RememberFirstAuthentication(ctx, userID, at)
 }
 
 func (w recordingWriter) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
-	w.rec("FirstAuthentication")
+	defer w.rec("FirstAuthentication")()
 	return w.inner.FirstAuthentication(ctx, userID)
 }
 
 func (w recordingWriter) EndSession(ctx context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error) {
-	w.rec("EndSession")
+	defer w.rec("EndSession")()
 	return w.inner.EndSession(ctx, id, at, reason)
 }
 
 func (w recordingWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	w.rec("EndOtherSessions")
+	defer w.rec("EndOtherSessions")()
 	return w.inner.EndOtherSessions(ctx, userID, keep, at, reason)
 }
 
 func (w recordingWriter) RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {
-	w.rec("RotateBearer")
+	defer w.rec("RotateBearer")()
 	return w.inner.RotateBearer(ctx, id, digest, presentedAt)
 }
 
 func (w recordingWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
-	w.rec("PresentInSession")
+	defer w.rec("PresentInSession")()
 	return w.inner.PresentInSession(ctx, id, methods, level, digest, presentedAt)
 }
 
 func (w recordingWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
-	w.rec("UpsertCutoff")
+	defer w.rec("UpsertCutoff")()
 	return w.inner.UpsertCutoff(ctx, u, revokedBy)
 }
 
 func (w recordingWriter) ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
-	w.rec("ReplaceLoginVerifier")
+	defer w.rec("ReplaceLoginVerifier")()
 	return w.inner.ReplaceLoginVerifier(ctx, m)
 }
 
 func (w recordingWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
-	w.j.note(storeOp{Port: "writer", Name: "LoginMethod(" + string(kind) + ")", LoginMethodRead: true})
+	defer record(w.j, w.meter, storeOp{Port: "writer", Name: "LoginMethod(" + string(kind) + ")", LoginMethodRead: true})()
 	return w.inner.LoginMethod(ctx, userID, kind)
 }
 
 func (w recordingWriter) RecordFailure(ctx context.Context, scope humansession.FailureScope, key string, at time.Time) error {
-	w.rec("RecordFailure")
+	defer w.rec("RecordFailure")()
 	return w.inner.RecordFailure(ctx, scope, key, at)
 }
 
 func (w recordingWriter) ResetFailures(ctx context.Context, scope humansession.FailureScope, key string) error {
-	w.rec("ResetFailures")
+	defer w.rec("ResetFailures")()
 	return w.inner.ResetFailures(ctx, scope, key)
 }
 
 func (w recordingWriter) EmitAudit(ctx context.Context, ev outboxtypes.AuditEvent) error {
-	w.rec("EmitAudit")
+	defer w.rec("EmitAudit")()
 	return w.inner.EmitAudit(ctx, ev)
 }
 
 func (w recordingWriter) InsertRecoveryCode(ctx context.Context, c domain.RecoveryCode) error {
-	w.rec("InsertRecoveryCode")
+	defer w.rec("InsertRecoveryCode")()
 	return w.inner.InsertRecoveryCode(ctx, c)
 }
 
 func (w recordingWriter) SupersedeRecoveryCodes(ctx context.Context, userID domain.UserID) (int, error) {
-	w.rec("SupersedeRecoveryCodes")
+	defer w.rec("SupersedeRecoveryCodes")()
 	return w.inner.SupersedeRecoveryCodes(ctx, userID)
 }
 
 func (w recordingWriter) ConsumeRecoveryCode(ctx context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time) (domain.RecoveryCode, bool, error) {
-	w.rec("ConsumeRecoveryCode")
+	defer w.rec("ConsumeRecoveryCode")()
 	return w.inner.ConsumeRecoveryCode(ctx, userID, digest, now)
 }
 
 func (w recordingWriter) EmitRecoveryMail(ctx context.Context, in humansession.RecoveryMailIntent) error {
-	w.rec("EmitRecoveryMail")
+	defer w.rec("EmitRecoveryMail")()
 	return w.inner.EmitRecoveryMail(ctx, in)
 }
 
 func (w recordingWriter) InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (bool, error) {
-	w.rec("InsertRecoveryCompletion")
+	defer w.rec("InsertRecoveryCompletion")()
 	return w.inner.InsertRecoveryCompletion(ctx, rc)
 }
 
 func (w recordingWriter) UpsertPendingTOTP(ctx context.Context, m domain.LoginMethod) (bool, error) {
-	w.rec("UpsertPendingTOTP")
+	defer w.rec("UpsertPendingTOTP")()
 	return w.inner.UpsertPendingTOTP(ctx, m)
 }
 
 func (w recordingWriter) ActivateTOTP(ctx context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (bool, error) {
-	w.rec("ActivateTOTP")
+	defer w.rec("ActivateTOTP")()
 	return w.inner.ActivateTOTP(ctx, userID, pendingSince, step, at)
 }
 
 func (w recordingWriter) ReplaceLookupSet(ctx context.Context, m domain.LoginMethod) error {
-	w.rec("ReplaceLookupSet")
+	defer w.rec("ReplaceLookupSet")()
 	return w.inner.ReplaceLookupSet(ctx, m)
 }
 
 func (w recordingWriter) LockLookupSet(ctx context.Context, userID domain.UserID) (domain.LoginMethod, bool, error) {
-	w.rec("LockLookupSet")
+	defer w.rec("LockLookupSet")()
 	return w.inner.LockLookupSet(ctx, userID)
 }
 
 func (w recordingWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (bool, error) {
-	w.rec("ConsumeLookupElement")
+	defer w.rec("ConsumeLookupElement")()
 	return w.inner.ConsumeLookupElement(ctx, userID, element)
 }
 
 func (w recordingWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (bool, error) {
-	w.rec("RecordAcceptedStep")
+	defer w.rec("RecordAcceptedStep")()
 	return w.inner.RecordAcceptedStep(ctx, userID, step)
 }
 
 func (w recordingWriter) RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error) {
-	w.rec("RemoveSecondFactor")
+	defer w.rec("RemoveSecondFactor")()
 	return w.inner.RemoveSecondFactor(ctx, userID)
 }
 
 func (w recordingWriter) Commit(ctx context.Context) error {
-	w.rec("Commit")
+	defer w.rec("Commit")()
 	return w.inner.Commit(ctx)
 }
 
 func (w recordingWriter) Rollback(ctx context.Context) error {
-	w.rec("Rollback")
+	defer w.rec("Rollback")()
 	return w.inner.Rollback(ctx)
 }
