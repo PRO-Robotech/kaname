@@ -67,6 +67,12 @@ func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
 		// числом: [outbox.DeliveredRetention] выведен из читателя доставленной
 		// строки — оператора, разбирающего «доехало ли снятие».
 		SubjectProviderCompensationOutbox: outbox.DeliveredRetention,
+		// Восьмой предмет — записи выпуска токена доступа церемонии
+		// (kaname#319). Строку читают поверхности предъявления, и каждая из них
+		// отвергает истёкший токен по его сроку с допуском ClockSkew; запас на
+		// расхождение источников часов — RemovalSlack. После этого строка ни
+		// одного исхода не меняет. Имя предмета — имя таблицы.
+		"access_tokens": tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
 	}
 
 	if len(subjects) != len(want) {
