@@ -50,6 +50,8 @@ type countingReader struct {
 }
 
 func (r *countingReader) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+func (r *countingReader) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 func (r *countingReader) GetByJTI(context.Context, string) (domain.SessionRevocation, error) {
 	return domain.SessionRevocation{}, nil
 }

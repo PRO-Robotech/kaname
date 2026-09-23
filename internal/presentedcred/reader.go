@@ -166,7 +166,9 @@ type KeySetSource interface {
 	PublishedSet(ctx context.Context) ([]domain.PublishedKey, error)
 }
 
-// RevocationReader — хранилище отсечек отзыва.
+// RevocationReader — хранилище отзыва: отсечки по ключам и принадлежность
+// выпуска семейству. Порт правила, а не своя копия: ответ о семействе приходит
+// тем же вопросом к тому же правилу, с тем же окном кеша (kaname#319).
 type RevocationReader = tokenrevocation.Reader
 
 // Config — настройка читателя. Каждое поле ОБЯЗАТЕЛЬНО: незаданное здесь

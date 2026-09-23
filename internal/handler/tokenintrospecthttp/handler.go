@@ -72,14 +72,14 @@ type KeySetSource interface {
 	PublishedSet(ctx context.Context) ([]domain.PublishedKey, error)
 }
 
-// RevocationReader — хранилище отзывов субъектов.
+// RevocationReader — хранилище отзывов: отсечки по ключам и принадлежность
+// выпуска семейству.
 //
-// Отвечает «с какого момента токены субъекта недействительны». Отсутствие
-// записи — законный ответ «отзыва нет», а НЕ ошибка: пустое обязано означать
-// пусто.
-type RevocationReader interface {
-	RevokedBefore(ctx context.Context, subject string) (time.Time, bool, error)
-}
+// ТОТ ЖЕ порт, что у правила (`tokenrevocation.Reader`), а не своя копия:
+// копия с одной половиной порта собиралась бы, отвечая только об отсечках, и
+// авторитет — место, куда край идёт на пути запроса за нашим токеном, —
+// принимал бы выпуск отозванного семейства до его срока (kaname#319).
+type RevocationReader = tokenrevocation.Reader
 
 // Config — настройка авторитета.
 type Config struct {
@@ -265,6 +265,10 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 	// Токен без отметки выпуска правило считает отозванным: он не сопоставим ни с
 	// какой отсечкой, и принять его значило бы завести материал, который отозвать
 	// нечем.
+	//
+	// Отзыв СЕМЕЙСТВА выпуска правило судит тем же вызовом (kaname#319): край
+	// спрашивает о нашем токене ровно здесь, и отдельного вопроса о семействе он
+	// не задаёт.
 	revoked, err := tokenrevocation.Revoked(ctx, h.cfg.Revocations, claims)
 	if err != nil {
 		// Недоступность источника отсечек НЕ ЕСТЬ «не отозван»: это третий
