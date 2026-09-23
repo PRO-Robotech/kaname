@@ -206,9 +206,13 @@ func TestForceLogout_EndsOurOwnLoginSession(t *testing.T) {
 			"а не внешним субъектом, которого на этой посадке не существует")
 	require.Equal(t, []domain.HumanSessionID{""}, tx.keeps,
 		"принудительный выход снимает ВСЕ записи: сохранять здесь нечего")
-	require.Equal(t, []string{domain.RevokeReasonLogout}, tx.reasons,
-		"причина обязана быть словом ЗАКРЫТОГО словаря human_sessions_ended_reason_check: "+
-			"значение вне его база отвергнет, и выход откажет на всяком входе")
+	// Слово — дословно из приёмки (KN-SER-01, Р1), а не из объявления домена:
+	// проба утверждает значение, которое база обязана принять, и константа с
+	// другим значением должна её ронять, а не тянуть за собой.
+	require.Equal(t, []string{"admin-force-logout"}, tx.reasons,
+		"принудительный выход пишет в запись сессии СВОЁ слово закрытого словаря "+
+			"human_sessions_ended_reason_check — не `logout` собственного выхода: журнал "+
+			"обязан называть, кто снял запись (kaname#334, KN-SER-01)")
 }
 
 // TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction — на
