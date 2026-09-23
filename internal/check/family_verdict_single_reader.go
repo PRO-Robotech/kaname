@@ -72,9 +72,9 @@ const familyVerdictPortMethod = "FamilyRevoked"
 // спрашивает о семействе: общее правило отзыва и его половина по семейству.
 var familyVerdictRuleFuncs = map[string]bool{"Revoked": true, "FamilyRevoked": true}
 
-// accessTokenTableMarkers — признаки таблицы выпусков в литерале. Имя
+// issuanceTableMarkers — признаки таблицы выпусков в литерале. Имя
 // принимается и со схемой, и без неё.
-var accessTokenTableMarkers = []string{"kaname.access_tokens", " access_tokens"}
+var issuanceTableMarkers = []string{"kaname.access_tokens", " access_tokens"}
 
 // FamilyVerdictSite — координата находки или узла переписи.
 type FamilyVerdictSite struct {
@@ -128,7 +128,7 @@ func FamilyVerdict(files map[string]string) (FamilyVerdictCensus, error) {
 				if uerr != nil {
 					text = node.Value
 				}
-				if readsAccessTokens(text) {
+				if readsIssuances(text) {
 					out.Readers = append(out.Readers, FamilyVerdictSite{
 						File: name, Line: fset.Position(node.Pos()).Line,
 					})
@@ -192,14 +192,14 @@ func FamilyVerdictFindings(c FamilyVerdictCensus, surfaces []string) []string {
 	return found
 }
 
-// readsAccessTokens — открывается ли литерал словом чтения и называет ли он
+// readsIssuances — открывается ли литерал словом чтения и называет ли он
 // таблицу выпусков.
-func readsAccessTokens(lit string) bool {
+func readsIssuances(lit string) bool {
 	head := strings.ToUpper(strings.TrimSpace(lit))
 	if !strings.HasPrefix(head, "SELECT") && !strings.HasPrefix(head, "WITH") {
 		return false
 	}
-	for _, m := range accessTokenTableMarkers {
+	for _, m := range issuanceTableMarkers {
 		if strings.Contains(lit, m) {
 			return true
 		}

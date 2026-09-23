@@ -39,13 +39,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// accessTokenFamilyFK — ограничение, которым база отвергает выпуск в
+// issuanceFamilyFK — ограничение, которым база отвергает выпуск в
 // неизвестное либо отозванное семейство.
-const accessTokenFamilyFK = "access_tokens_family_fk"
+const issuanceFamilyFK = "access_tokens_family_fk"
 
-// recordAccessTokenSQL — заведение записи выпуска. Живости семейства оператор
+// recordIssuanceSQL — заведение записи выпуска. Живости семейства оператор
 // НЕ пишет: её берёт умолчание, и ключ сверяет его с живым семейством.
-const recordAccessTokenSQL = `
+const recordIssuanceSQL = `
 INSERT INTO kaname.access_tokens (jti, family_id, issued_at, expires_at)
 VALUES ($1, $2, $3, $4)`
 
@@ -60,9 +60,9 @@ VALUES ($1, $2, $3, $4)`
 // допуском его токенов.
 const familyRevokedOfIssuanceSQL = `SELECT family_live IS NOT TRUE FROM kaname.access_tokens WHERE jti = $1`
 
-// sweepExpiredAccessTokensSQL — уборка записей, чей токен уже не примет ни одна
+// sweepExpiredIssuancesSQL — уборка записей, чей токен уже не примет ни одна
 // поверхность. Партией и по часам БАЗЫ, как у соседних уборщиков.
-const sweepExpiredAccessTokensSQL = `
+const sweepExpiredIssuancesSQL = `
 DELETE FROM kaname.access_tokens
  WHERE ctid IN (
      SELECT ctid FROM kaname.access_tokens
@@ -93,8 +93,8 @@ func (r *OAuthCeremonyRepo) RecordAccessToken(ctx context.Context, jti, familyID
 	if !expiresAt.After(issuedAt) {
 		return fmt.Errorf("Illegal argument access_token.expires_at: must be after issued_at")
 	}
-	if _, err := r.pool.Exec(ctx, recordAccessTokenSQL, jti, familyID, issuedAt, expiresAt); err != nil {
-		if f := pgfault.Classify(err); f.Class == pgfault.ForeignKey && f.Constraint == accessTokenFamilyFK {
+	if _, err := r.pool.Exec(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
+		if f := pgfault.Classify(err); f.Class == pgfault.ForeignKey && f.Constraint == issuanceFamilyFK {
 			return fmt.Errorf("%w: family %s", domain.ErrAccessTokenFamilyNotLive, familyID)
 		}
 		return wrapPgErr(err, "AccessToken", familyID)
@@ -114,7 +114,7 @@ func (r *OAuthCeremonyRepo) SweepExpiredAccessTokens(ctx context.Context, grace 
 	if batch <= 0 {
 		return 0, false, fmt.Errorf("Illegal argument access_token sweep batch: must be positive")
 	}
-	tag, err := r.pool.Exec(ctx, sweepExpiredAccessTokensSQL, grace.Seconds(), batch)
+	tag, err := r.pool.Exec(ctx, sweepExpiredIssuancesSQL, grace.Seconds(), batch)
 	if err != nil {
 		return 0, false, wrapPgErr(err, "AccessToken", "")
 	}

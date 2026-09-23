@@ -38,8 +38,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
-// accessTokenMigration — файл, заводящий предмет этих проб.
-const accessTokenMigration = "20260923231545_access_token_belongs_to_its_family.sql"
+// issuanceMigration — файл, заводящий предмет этих проб.
+const issuanceMigration = "20260923231545_access_token_belongs_to_its_family.sql"
 
 // atJTI — идентификатор выпуска объявленной формы: `tok` и 17 знаков
 // crockford-base32 — та же форма, что чеканит подписант (`ids.NewID("tok")`).
@@ -237,7 +237,7 @@ func TestIntegration_AccessTokenMigrationRollsBackAndForward(t *testing.T) {
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 
-	own, previous := versionsOf(t, accessTokenMigration)
+	own, previous := versionsOf(t, issuanceMigration)
 	require.NoError(t, goose.DownTo(db, ".", previous), "обратный ход обязан снять предмет")
 
 	var present bool

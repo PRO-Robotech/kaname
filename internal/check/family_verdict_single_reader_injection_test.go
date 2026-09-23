@@ -24,8 +24,8 @@ const (
 const familyRevokedOfIssuanceSQL = ` + "`" + `SELECT family_live IS NOT TRUE FROM kaname.access_tokens WHERE jti = $1` + "`" + `
 
 // Законные близнецы: вставка и уборка открываются не словом чтения.
-const recordAccessTokenSQL = ` + "`" + `INSERT INTO kaname.access_tokens (jti, family_id, issued_at, expires_at) VALUES ($1,$2,$3,$4)` + "`" + `
-const sweepAccessTokensSQL = ` + "`" + `DELETE FROM kaname.access_tokens WHERE ctid IN (SELECT ctid FROM kaname.access_tokens LIMIT 1)` + "`" + `
+const recordIssuanceSQL = ` + "`" + `INSERT INTO kaname.access_tokens (jti, family_id, issued_at, expires_at) VALUES ($1,$2,$3,$4)` + "`" + `
+const sweepIssuancesSQL = ` + "`" + `DELETE FROM kaname.access_tokens WHERE ctid IN (SELECT ctid FROM kaname.access_tokens LIMIT 1)` + "`" + `
 
 // SELECT family_live FROM kaname.access_tokens — упоминание в комментарии.
 
@@ -155,7 +155,7 @@ func TestFamilyVerdictGate_NoReaderIsFound(t *testing.T) {
 	files := fvLawfulTree()
 	files["internal/repo/kaname/pg/access_token.go"] = `package pg
 
-const recordAccessTokenSQL = ` + "`" + `INSERT INTO kaname.access_tokens (jti) VALUES ($1)` + "`" + `
+const recordIssuanceSQL = ` + "`" + `INSERT INTO kaname.access_tokens (jti) VALUES ($1)` + "`" + `
 `
 	_, found := fvFindings(t, files)
 	if len(found) != 1 || !strings.Contains(found[0], "НОЛЬ") {
