@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
@@ -99,6 +100,25 @@ func (s servingSide) servedKIDs(t *testing.T) map[domain.KeyID]bool {
 		out[domain.KeyID(k.KID)] = true
 	}
 	return out
+}
+
+// servedKIDsOrEmpty — то же, что servedKIDs, для состояния, в котором
+// законно ключей нет вовсе (утёкший ключ снят, замены нет). Публикатор отвечает
+// тогда не пустым набором, а НАЗВАННЫМ отказом; любой иной ответ — поломка.
+func (s servingSide) servedKIDsOrEmpty(t *testing.T) map[domain.KeyID]bool {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.keySet.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/kaname/jwks.json", nil))
+	if rec.Code == http.StatusOK {
+		return s.servedKIDs(t)
+	}
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &refusal), "ответ публикатора: %s", rec.Body.String())
+	require.Equal(t, "jwks_keyset_empty", refusal.Error, "публикатор обязан либо отдать набор, либо назвать его пустым: %d %s",
+		rec.Code, rec.Body.String())
+	return map[domain.KeyID]bool{}
 }
 
 // signedKID — ключ, которым служба подписывает СЕЙЧАС: читается у выданного
@@ -252,4 +272,121 @@ func TestStartSigningKeyMaintenance_FirstPassRunsAtStart(t *testing.T) {
 
 	startSigningKeyMaintenance(ctx, svc.ks, quietLogger())
 	require.Equal(t, uint64(1), svc.ks.Stats().Sweeps, "первый проход обязан завершиться до возврата старта")
+}
+
+// signs — подписывает ли служба СЕЙЧАС: читается попыткой выдать токен, а не
+// строкой ключницы.
+func (s servingSide) signs(t *testing.T) bool {
+	t.Helper()
+	_, err := s.signer.Sign(context.Background(), tokensigner.Request{
+		Subject: "sva-signing-command", Audience: []string{"registry.kacho.local"},
+		TokenType: "at+jwt", TTL: 5 * time.Minute,
+	})
+	return err == nil
+}
+
+// storePool — пул к базе службы для того, что в пробе делает НЕ команда:
+// держит замок, отказывает в записи. Строится тем же построением, что у
+// команды, поэтому и его настройки сессии — те же.
+func storePool(t *testing.T, cfg config.Config) *pgxpool.Pool {
+	t.Helper()
+	pool, err := coredb.NewPool(context.Background(), cfg.DSN())
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+	return pool
+}
+
+// refuseKeyInserts — хранилище отказывает в записи НОВОГО ключа, а переходы
+// существующих принимает: так получается частичный исход утечки («снять
+// удалось, завести замену — нет») настоящим отказом базы, а не дублёром.
+func refuseKeyInserts(t *testing.T, pool *pgxpool.Pool) (allow func()) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `CREATE FUNCTION kaname.probe_refuse_signing_key_insert() RETURNS trigger
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'probe: signing key insert refused'; END $$`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `CREATE TRIGGER probe_refuse_signing_key_insert BEFORE INSERT
+		ON kaname.token_signing_keys FOR EACH ROW EXECUTE FUNCTION kaname.probe_refuse_signing_key_insert()`)
+	require.NoError(t, err)
+	return func() {
+		_, err := pool.Exec(ctx, `DROP TRIGGER probe_refuse_signing_key_insert ON kaname.token_signing_keys`)
+		require.NoError(t, err)
+	}
+}
+
+// TestSigningKeyCommand_RepeatAfterPartialNamesTheReplacement — после
+// частичного исхода утечки (ключ снят, замену завести не удалось) повтор той же
+// команды довершает замену И НАЗЫВАЕТ её: подпись перешла внутри этого вызова,
+// и оператор обязан узнать, к какому ключу.
+func TestSigningKeyCommand_RepeatAfterPartialNamesTheReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	leaked := svc.signedKID(t)
+	allow := refuseKeyInserts(t, storePool(t, cfg))
+
+	code, out := runCommand(t, cfg, "compromise", "-kid="+string(leaked), "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitRefused, code, "вывод команды: %s", out)
+	require.Contains(t, out, "outcome=partial")
+	require.False(t, svc.servedKIDsOrEmpty(t)[leaked], "снятие состоялось")
+	require.False(t, svc.signs(t), "частичный исход: служба не подписывает")
+
+	allow()
+	code, out = runCommand(t, cfg, "compromise", "-kid="+string(leaked), "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitDone, code, "вывод команды: %s", out)
+	require.Contains(t, out, "outcome=already-done")
+	next := svc.signedKID(t)
+	require.Contains(t, out, "replacement="+string(next), "повтор обязан назвать ключ, к которому перешла подпись")
+	served := svc.servedKIDs(t)
+	require.True(t, served[next])
+	require.False(t, served[leaked])
+}
+
+// TestSigningKeyCommand_RefusalAfterPartialLeavesTheSignerAlone — отказ команды
+// не трогает подпись и тогда, когда подписывающего нет: команда, отказавшая по
+// ключу, не заводит подписывающего мимо глагола. Близнец — повтор утечки в
+// пробе выше: тот же вызов с существующим ключом замену заводит.
+func TestSigningKeyCommand_RefusalAfterPartialLeavesTheSignerAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	leaked := svc.signedKID(t)
+	allow := refuseKeyInserts(t, storePool(t, cfg))
+	code, out := runCommand(t, cfg, "compromise", "-kid="+string(leaked), "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitRefused, code, "вывод команды: %s", out)
+	allow()
+	before := svc.servedKIDsOrEmpty(t)
+
+	code, out = runCommand(t, cfg, "compromise", "-kid=kaname-no-such-key", "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitRefused, code, "вывод команды: %s", out)
+	require.Equal(t, before, svc.servedKIDsOrEmpty(t), "отказ не трогает набор")
+	require.False(t, svc.signs(t), "отказ не заводит подписывающего")
+}
+
+// TestSigningKeyCommand_ForeignWrappingKeyIsNotRunAndTouchesNothing — команда
+// с ключом обёртки, который не открывает записанное, не исполняется: замена,
+// порождённая им, была бы нечитаема каждой репликой. Отказ называет ручку и
+// говорит о команде, а не о старте службы.
+func TestSigningKeyCommand_ForeignWrappingKeyIsNotRunAndTouchesNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	signer := svc.signedKID(t)
+	before := svc.servedKIDs(t)
+
+	foreign := cfg
+	foreign.AuthN.JWKSEncryptionKeyHex = strings.Repeat("cd", 32)
+	code, out := runCommand(t, foreign, "compromise", "-kid="+string(signer), "-decided-by=oncall@example.invalid")
+	require.Equal(t, signingKeyExitNotRun, code, "вывод команды: %s", out)
+	require.Contains(t, out, "authn.jwks-encryption-key-hex")
+	require.Contains(t, out, "команда не исполнялась")
+	require.NotContains(t, out, "стартовать", "отказ команды не выдаёт себя за отказ старта службы")
+	require.Equal(t, before, svc.servedKIDs(t), "отказ не трогает набор")
+	require.Equal(t, signer, svc.signedKID(t), "отказ не трогает подписывающего")
 }

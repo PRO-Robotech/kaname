@@ -62,51 +62,9 @@ func buildTokenSigningAt(
 	if !ts.Enabled {
 		return nil, nil, nil
 	}
-
-	// Ключ обёртки приватной половины — та же ручка, что требует страж старта.
-	// Второй ручки об этом предмете в дереве нет; ручка принимает ПЕРЕЧЕНЬ —
-	// первый ключ оборачивает, все открывают (задача #1065), поэтому смена
-	// ключа не требует ни простоя, ни переписывания хранилища.
-	wrapKeys, err := cfg.AuthN.ResolveJWKSEncryptionKeys()
+	keystore, err := buildKeystoreAt(pool, cfg, clock, logger)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ключ обёртки приватной половины: %w", err)
-	}
-	wrapper, err := keywrap.New(wrapKeys...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("обёртка приватной половины: %w", err)
-	}
-	// Число названных ключей печатается ВСЕГДА, включая единицу: перечень
-	// растёт с каждой сменой и сам не убывает, а «названо шесть ключей» иначе
-	// невидимо ниоткуда — то есть работу по выводу прежних некому начать. Оно
-	// же и первое, что нужно оператору, если старт откажет на нечитаемом
-	// наборе: перечень мог приехать без прежнего ключа.
-	logger.Info("private-half wrapping keys declared",
-		slog.Int("keys", wrapper.KeyCount()),
-		slog.String("knob", "authn.jwks-encryption-key-hex"),
-		slog.String("env", cfg.AuthN.JWKSEncryptionKeyEnvName()))
-
-	alg, err := domain.ParseSigningAlgorithm(ts.Algorithm)
-	if err != nil {
-		return nil, nil, fmt.Errorf("алгоритм подписи: %w", err)
-	}
-
-	repo := kanamepg.NewSigningKeyRepo(pool)
-	keystore, err := signingkeys.New(signingkeys.Config{
-		Algorithm:   alg,
-		KeyLifetime: ts.ResolveKeyLifetime(),
-		// Отсрочка снятия ВЫЧИСЛЕНА из объявленных слагаемых, а не выбрана
-		// здесь: смена любого из них без пересмотра отсрочки роняет гейт.
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: signingKeyRotationLead,
-		Clock:        clock,
-		Logger:       logger.With(slog.String("component", "signing_keystore")),
-	}, repo, repo, wrapper)
-	if err != nil {
-		// Срок ключа, не превышающий запаса ротации, отвергается здесь, а не
-		// стражем настройки: запас — величина этого корня. Имя ручки
-		// приписывается, чтобы оператору было что править.
-		return nil, nil, fmt.Errorf("ключница (authn.token-signing.key-lifetime=%s, запас ротации %s): %w",
-			ts.KeyLifetime, signingKeyRotationLead, err)
+		return nil, nil, err
 	}
 
 	// Подписывающий ключ обеспечивается ПРИ СТАРТЕ. Порядок «в наборе →
@@ -135,11 +93,76 @@ func buildTokenSigningAt(
 
 	logger.Info("own token signing is on",
 		slog.String("issuer", ts.Issuer),
-		slog.String("algorithm", string(alg)),
+		slog.String("algorithm", ts.Algorithm),
 		slog.String("key_set_path", ts.ResolveKeySetPath()),
 		slog.String("max_token_ttl", tokenpolicy.MaxTokenTTL.String()),
 		slog.String("key_removal_grace", tokenpolicy.KeyRemovalGrace.String()))
 	return keystore, signer, nil
+}
+
+// buildKeystoreAt собирает ключницу — и ТОЛЬКО её: ни одного обращения к
+// базе, ни подписывающего, ни подписанта.
+//
+// Отдельно от buildTokenSigningAt, потому что ключница нужна двум
+// вызывающим с разным правом: служба на старте обеспечивает подписывающего,
+// а команда оператора (signing_key_command.go) этого делать НЕ вправе —
+// подпись, вылеченная до глагола, прячет от глагола то, что он обязан
+// сделать и назвать. Своя чеканка обязана быть включена: выключенную
+// вызывающий отсекает сам.
+func buildKeystoreAt(
+	pool *pgxpool.Pool,
+	cfg config.Config,
+	clock signingkeys.Clock,
+	logger *slog.Logger,
+) (*signingkeys.Keystore, error) {
+	ts := cfg.AuthN.TokenSigning
+
+	// Ключ обёртки приватной половины — та же ручка, что требует страж старта.
+	// Второй ручки об этом предмете в дереве нет; ручка принимает ПЕРЕЧЕНЬ —
+	// первый ключ оборачивает, все открывают (задача #1065), поэтому смена
+	// ключа не требует ни простоя, ни переписывания хранилища.
+	wrapKeys, err := cfg.AuthN.ResolveJWKSEncryptionKeys()
+	if err != nil {
+		return nil, fmt.Errorf("ключ обёртки приватной половины: %w", err)
+	}
+	wrapper, err := keywrap.New(wrapKeys...)
+	if err != nil {
+		return nil, fmt.Errorf("обёртка приватной половины: %w", err)
+	}
+	// Число названных ключей печатается ВСЕГДА, включая единицу: перечень
+	// растёт с каждой сменой и сам не убывает, а «названо шесть ключей» иначе
+	// невидимо ниоткуда — то есть работу по выводу прежних некому начать. Оно
+	// же и первое, что нужно оператору, если старт откажет на нечитаемом
+	// наборе: перечень мог приехать без прежнего ключа.
+	logger.Info("private-half wrapping keys declared",
+		slog.Int("keys", wrapper.KeyCount()),
+		slog.String("knob", "authn.jwks-encryption-key-hex"),
+		slog.String("env", cfg.AuthN.JWKSEncryptionKeyEnvName()))
+
+	alg, err := domain.ParseSigningAlgorithm(ts.Algorithm)
+	if err != nil {
+		return nil, fmt.Errorf("алгоритм подписи: %w", err)
+	}
+
+	repo := kanamepg.NewSigningKeyRepo(pool)
+	keystore, err := signingkeys.New(signingkeys.Config{
+		Algorithm:   alg,
+		KeyLifetime: ts.ResolveKeyLifetime(),
+		// Отсрочка снятия ВЫЧИСЛЕНА из объявленных слагаемых, а не выбрана
+		// здесь: смена любого из них без пересмотра отсрочки роняет гейт.
+		RemovalGrace: tokenpolicy.KeyRemovalGrace,
+		RotationLead: signingKeyRotationLead,
+		Clock:        clock,
+		Logger:       logger.With(slog.String("component", "signing_keystore")),
+	}, repo, repo, wrapper)
+	if err != nil {
+		// Срок ключа, не превышающий запаса ротации, отвергается здесь, а не
+		// стражем настройки: запас — величина этого корня. Имя ручки
+		// приписывается, чтобы оператору было что править.
+		return nil, fmt.Errorf("ключница (authn.token-signing.key-lifetime=%s, запас ротации %s): %w",
+			ts.KeyLifetime, signingKeyRotationLead, err)
+	}
+	return keystore, nil
 }
 
 // startSigningKeyMaintenance поднимает обслуживание ключницы: ротацию до

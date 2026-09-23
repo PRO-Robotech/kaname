@@ -562,19 +562,11 @@ func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 // новый, служба поднимается, набор отвечает — а каждый ранее выданный токен
 // уже непроверяем, и ни одного сообщения о потере нет.
 func (k *Keystore) EnsureSigningKey(ctx context.Context) error {
-	set, err := k.reader.KeySet(ctx)
-	if err != nil {
-		k.failures.Add(1)
-		// Недоступное хранилище — НЕ «ключница пуста»: порождение здесь дало бы
-		// новый ключ на каждой реплике при первом же сбое сети.
-		return fmt.Errorf("signingkeys: read the key set: %w", err)
-	}
-	if err := k.assertWrappingKeyOpens(set); err != nil {
+	// Недоступное хранилище — НЕ «ключница пуста»: порождение здесь дало бы
+	// новый ключ на каждой реплике при первом же сбое сети.
+	if err := k.VerifyWrappingKey(ctx); err != nil {
 		return err
 	}
-	// Величина печатается ВСЕГДА, включая ноль: «ключ обёртки проверен на нуле
-	// ключей» обязано быть отличимо от «проверка не исполнялась».
-	k.logger.Info("wrapping key opens the stored key set", "keys_in_set", len(set))
 
 	rec, aerr := k.reader.Active(ctx)
 	if aerr == nil {
@@ -586,6 +578,29 @@ func (k *Keystore) EnsureSigningKey(ctx context.Context) error {
 		return fmt.Errorf("signingkeys: no signing key and none could be created: %w", gerr)
 	}
 	k.logger.Info("signing key bootstrapped", "kid", string(pub.KID))
+	return nil
+}
+
+// VerifyWrappingKey доказывает, что предъявленный ключ обёртки открывает уже
+// записанное, и НИЧЕГО не меняет.
+//
+// Отдельно от EnsureSigningKey, потому что нужен и тому, кто подписывающего
+// заводить НЕ вправе: действие оператора над ключом (#314) может породить
+// замену, и порождённая с чужим ключом обёртки она была бы нечитаема каждой
+// репликой, — а лечить подпись до глагола оно не должно, иначе глагол не видит
+// того, что сделал, и отказ по ключу меняет набор.
+func (k *Keystore) VerifyWrappingKey(ctx context.Context) error {
+	set, err := k.reader.KeySet(ctx)
+	if err != nil {
+		k.failures.Add(1)
+		return fmt.Errorf("signingkeys: read the key set: %w", err)
+	}
+	if err := k.assertWrappingKeyOpens(set); err != nil {
+		return err
+	}
+	// Величина печатается ВСЕГДА, включая ноль: «ключ обёртки проверен на нуле
+	// ключей» обязано быть отличимо от «проверка не исполнялась».
+	k.logger.Info("wrapping key opens the stored key set", "keys_in_set", len(set))
 	return nil
 }
 

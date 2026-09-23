@@ -16,6 +16,11 @@
 // читают публикатор и подписант каждой реплики. Своей копии набора у реплик нет,
 // поэтому снятый ключ уходит из ответа публикатора со следующим запросом.
 //
+// Одно отличие от старта службы НЕСУЩЕЕ: команда подписывающего до глагола не
+// заводит. Иначе повтор после частичного исхода утечки лечил бы подпись раньше
+// глагола, и глагол отвечал бы «уже сделано», не назвав замены, а отказ по
+// ключу менял бы набор.
+//
 // Право на действие — обладание настройкой службы: адресом и удостоверением её
 // базы и ключом обёртки. Это то же, что даёт право поднять саму службу, и
 // меньшего здесь не выражается — и не должно.
@@ -40,6 +45,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 
@@ -121,12 +127,16 @@ func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string,
 		return signingKeyExitNotRun
 	}
 	defer pool.Close()
-	// Ключница — ТЕМ ЖЕ построением, что у службы: оно же доказывает, что
-	// предъявленный ключ обёртки открывает записанное. Иначе замена, порождённая
-	// с чужим ключом обёртки, была бы нечитаема каждой репликой.
-	ks, _, err := buildTokenSigning(ctx, pool, cfg, logger)
+	// Ключница — ТЕМ ЖЕ построением, что у службы, и с той же проверкой, что
+	// предъявленный ключ обёртки открывает записанное: замена, порождённая с
+	// чужим ключом обёртки, была бы нечитаема каждой репликой. Подписывающего
+	// команда здесь НЕ заводит — это дело глагола (шапка файла).
+	ks, err := buildKeystoreAt(pool, cfg, time.Now, logger)
+	if err == nil {
+		err = ks.VerifyWrappingKey(ctx)
+	}
 	if err != nil {
-		_, _ = fmt.Fprintf(out, "ключница: %v\n", err)
+		_, _ = fmt.Fprintln(out, signingKeyCommandKeystoreRefusal(cfg.AuthN, err))
 		return signingKeyExitNotRun
 	}
 
@@ -138,6 +148,22 @@ func runSigningKeyCommand(ctx context.Context, cfg config.Config, args []string,
 		outcome, err = ks.Retire(ctx, kid, *decidedBy)
 	}
 	return reportSigningKeyOutcome(out, action, *decidedBy, outcome, err)
+}
+
+// signingKeyCommandKeystoreRefusal — текст отказа ключницы для ОПЕРАТОРА
+// команды.
+//
+// Свой, а не signingKeyStartupRefusal: тот говорит, что служба отказывается
+// стартовать, а здесь не стартует ничего — не исполняется команда. Имя ручки и
+// переменной берётся из той же настройки: чинить оператору то же самое.
+func signingKeyCommandKeystoreRefusal(authn config.AuthNConfig, err error) string {
+	if errors.Is(err, signingkeys.ErrWrappingKeyMismatch) {
+		return fmt.Sprintf("ключница: ручка authn.jwks-encryption-key-hex (ENV %s) не открывает уже записанные "+
+			"подписные ключи — команда не исполнялась: замена, порождённая этим ключом обёртки, была бы "+
+			"нечитаема каждой репликой службы. Команде нужна та же настройка, что у службы: %v",
+			authn.JWKSEncryptionKeyEnvName(), err)
+	}
+	return fmt.Sprintf("ключница: %v", err)
 }
 
 // reportSigningKeyOutcome печатает исход строкой «ключ=значение» и выбирает код.
