@@ -1,0 +1,123 @@
+# Пост-дифф ревью СХЕМЫ И REPO-СЛОЯ — роль db-architect-reviewer, круг 4.
+#
+# Имя файла — content_digest. Запись НЕ КОММИТИТСЯ (задание: путь в копии).
+# Уровень СВОЙСТВА: какие свойства проверены, чем держатся и с каким
+# исходом. Механизмы, координаты и сцены отказа здесь не собраны.
+schema_version: 1
+change_id: kn-340
+holder: post-diff/db-architect-reviewer
+owner: db-architect-reviewer
+mode: review
+round: 4
+previous_record: null      # прежние записи роли в дерево не легли
+subject: >-
+  Принудительный выход и прочие писатели нескольких записей сессии одного
+  человека: общий порядок захвата, уборка сессий рядом с ними, отображение
+  кодов хранилища в ответ.
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: '340'
+  base: 9dc46b4722bea058c3642c803aae6a102ad1f98f
+  head: 075fe4cbcc3362aa2a202f78ec44a4cce5eca530
+  head_tree: 2d23ada9cf3d3c979dab15e3c4b1673a73befad0
+  code_tree_note: >-
+    По дереву без docs/changes голова совпадает с d2bfdd67
+    (дерево b690c5c861b7d35c92fc86147b9744504eb62219): дифф кода между ними
+    пуст, поэтому дайджест у обоих один.
+  files_touched: 29          # без docs/changes
+  trailers_of_attribution: 0
+
+content_digest: sha256:17b655ab2544fda24c24fbe81cd994d87b6784f5b620f36bf320ce219d2a5f28
+digest_command: >-
+  git diff --full-index 9dc46b47..075fe4cb -- . ':!docs/changes' | sha256sum
+digest_note: перемерено своей командой, совпадает с заданием
+
+verdict: accepted            # ✅ принято
+blocks_landing: false
+timestamp: '2026-09-23T15:45:00+03:00'
+return_to: '—'
+
+migrations_touched: 0
+migrations_touched_predicate: >-
+  файлов .sql в диффе 0, файлов в каталоге миграций 0. Прод-файлов
+  repo-слоя тронуто 4, поэтому роль применима.
+
+properties:
+  - property: >-
+      Писатели нескольких записей сессии одного человека (принудительный
+      выход, смена пароля, снятие второго фактора, завершение
+      восстановления) захватывают строки в одном общем порядке, первой берут
+      строку личности. Взаимной блокировки между ними и с удалением личности
+      нет, и каждая запись сессии снимается ровно один раз.
+    status: held
+    evidence:
+      - TestIntegration_EndingSeveralSessionsHoldsThePersonRowFirst
+      - TestIntegration_OneTransactionDoesNotSerializeOnTwoPersons
+      - TestIntegration_ConcurrentForceLogoutsEndEachSessionOnce
+      - TestIntegration_ForceLogoutThenPasswordChangeEndsEachSessionOnce
+      - TestIntegration_PasswordChangeThenForceLogoutEndsEachSessionOnce
+      - TestIntegration_SecondFactorRemovalThenForceLogoutEndsEachSessionOnce
+      - TestIntegration_ForceLogoutAndIdentityDeletionDoNotDeadlock
+      - TestIntegration_PasswordChangeAndIdentityDeletionDoNotDeadlock
+      - TestIntegration_ForceLogoutThenIdentityDeletionLeavesACoherentEnd
+      - TestIntegration_IdentityDeletionThenForceLogoutLeavesACoherentEnd
+      - TestChangePassword_TransactionHoldsThePersonFirst
+      - TestRemoveSecondFactor_TransactionHoldsThePersonFirst
+      - TestCompleteRecovery_TransactionHoldsThePersonFirst
+  - property: >-
+      Сериализация на строке личности не останавливает вход человека. Одна
+      транзакция не держит строк двух личностей.
+    status: held
+    evidence:
+      - TestIntegration_EndingSeveralSessionsHoldsThePersonRowFirst
+      - TestIntegration_OneTransactionDoesNotSerializeOnTwoPersons
+  - property: >-
+      Уборка сессий встречно с писателями не ждёт. Строку, занятую
+      писателем, она пропускает, и эту строку берёт следующий проход. Общий
+      порядок через строку личности уборке не нужен.
+    status: held
+    evidence:
+      - TestIntegration_SessionSweepDoesNotWaitOnRowsATeardownHolds
+  - property: >-
+      Ожидание замка у писателя выхода ограничено его собственным пределом.
+      Предел, который означал бы «без предела», отвергается.
+    status: held
+    evidence:
+      - TestIntegration_ForceLogoutWriterWaitsForARowLockNoLongerThanItsOwnLimit
+      - TestIntegration_ForceLogoutWriterRefusesALimitThatWouldMeanNoLimit
+  - property: >-
+      Отображение кодов хранилища решается в одном доме. Отказ выдать замок
+      в пределе ожидания — повторяемый Unavailable. Взаимная блокировка и
+      сбой сериализации — Aborted. Неотображённый код не выпускает текст
+      драйвера наружу.
+    status: held
+    evidence:
+      - TestWrapPgErr_LockNotAvailable_IsUnavailable
+      - TestWrapPgErr_Deadlock_Aborted
+      - TestWrapPgErr_SerializationFailure_Aborted
+      - TestWrapPgErr_NoLeak_OnUnmappedConstraints
+      - TestWrapPgErr_UnmappedSqlstate_KeepsTheCodeForTheLog
+  - property: >-
+      Внешних ключей через границу сервиса нет. ORM нет. OFFSET нет.
+      Применённые миграции не тронуты.
+    status: held
+    evidence: перепись путей диффа
+
+critical: []
+important: []
+orders: []
+
+runs:
+  - scope: модульные пробы порядка захвата у писателей сессии (humansession)
+    rev: 075fe4cb (дерево 2d23ada9)
+    result: 'зелёных 3 · красных 0 · не выполнилось 0'
+  - scope: пробы repo-слоя с базой и отображение кодов хранилища (pg)
+    rev: 075fe4cb (дерево 2d23ada9)
+    result: 'зелёных 31 · красных 0 · не выполнилось 0 (верхнего уровня; с подпробами 56)'
+  - scope: пробы с конкурирующими транзакциями на принудительный выход (internal_iam)
+    rev: 075fe4cb (дерево 2d23ada9)
+    result: 'зелёных 8 · красных 0 · не выполнилось 0'
+
+overlaps:
+  distributed_properties: false
