@@ -231,10 +231,10 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 2. User-level revoke-all gate — any recorded cutoff, whichever action that
 	// logs a person out of everything wrote it. Deny if ANY of the identity's
 	// user-rows has a cutoff at or after the session's authentication instant:
-	// the token's session predates the revoke-all, so it must not be refreshed. Fail-closed on a lookup error.
-	// An absent instant with a cutoff present is also a denial — we cannot show
-	// the token post-dates the revoke-all, and an unprovable claim is not a
-	// permission.
+	// the token's session predates the revoke-all, so it must not be refreshed.
+	// Fail-closed on a lookup error. An absent instant with a cutoff present is
+	// also a denial — we cannot show the token post-dates the revoke-all, and an
+	// unprovable claim is not a permission.
 	//
 	// This is now THE gate on this path rather than the last of three: the per-jti
 	// gate that used to precede it keyed on a field this body does not carry, so
