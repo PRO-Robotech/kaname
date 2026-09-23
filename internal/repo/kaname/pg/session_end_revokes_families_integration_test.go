@@ -74,7 +74,7 @@ func TestIntegration_EndingSessionsRevokesTheirTokenFamilies(t *testing.T) {
 	// ПРЕДМЕТ — снятие ВСЕХ записей личности той транзакцией, которой снимает
 	// административный принудительный выход (kaname#340).
 	sessions := kanamepg.NewHumanSessionRepo(pool)
-	w, err := sessions.ForceLogoutWriter(ctx)
+	w, err := sessions.ForceLogoutWriter(ctx, time.Second)
 	require.NoError(t, err, "транзакция снятия")
 	ended, err := w.EndOtherSessions(ctx, domain.UserID(scene.UserID), "",
 		time.Now().UTC(), domain.RevokeReasonLogout)

@@ -27,6 +27,7 @@ package internal_iam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -177,11 +178,14 @@ func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver)
 // Это и порядок захвата строк: писатели, берущие строки сессии и строку
 // отсечки в разном порядке, взаимно блокировали бы друг друга.
 //
+// Ожидание замков в транзакции ограничено `lockWait` — пределом самой
+// транзакции, а не сроком вызова.
+//
 // Реализуется `*repo/kaname/pg.HumanSessionRepo` — ТОЙ ЖЕ транзакцией записи,
 // которой снимает свои записи полоса входа. Два писателя одной таблицы зовут один
 // оператор (`endSessionsOfSQL`).
 type OwnSessions interface {
-	ForceLogoutWriter(ctx context.Context) (OwnSessionsWriter, error)
+	ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (OwnSessionsWriter, error)
 }
 
 // OwnSessionsWriter — ОДНА транзакция принудительного выхода на посадке `own`:
@@ -446,7 +450,12 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if merr != nil {
 		return nil, merr
 	}
-	if err := h.operations.MarkDoneWithMetadata(ctx, op.ID, meta, resp); err != nil {
+	// Отметка идёт на контексте, отвязанном от отмены запроса и ограниченном
+	// своим сроком (`forceLogoutRecordBudget`): выход уже зафиксирован, и уход
+	// вызывающего после этого не вправе оставить операцию вечно незавершённой.
+	markCtx, cancelMark := forceLogoutRecordContext(ctx)
+	defer cancelMark()
+	if err := h.operations.MarkDoneWithMetadata(markCtx, op.ID, meta, resp); err != nil {
 		// Non-fatal for the caller: the cutoff committed and the row exists, so
 		// a poll answers (done=false) and never NotFound. Nothing finishes it
 		// afterwards, so it is logged loudly, never swallowed (CWE-390).
@@ -463,12 +472,71 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 // failForceLogout — терминальный отказ на уже сохранённой операции: опрос видит
 // настоящую ошибку, а не NotFound и не вечное done=false. Возвращает ту же
 // ошибку для ответа вызывающему; сбой самой отметки пишется в журнал громко.
+//
+// Отметка идёт на контексте, отвязанном от отмены запроса: отказ, вызванный
+// концом срока запроса, иначе не отмечался бы НИКОГДА — отметка на том же
+// истёкшем сроке не доходит до базы.
 func (h *Handler) failForceLogout(ctx context.Context, opID string, gerr error) error {
-	if merr := h.operations.MarkError(ctx, opID, status.Convert(gerr).Proto()); merr != nil {
+	markCtx, cancel := forceLogoutRecordContext(ctx)
+	defer cancel()
+	if merr := h.operations.MarkError(markCtx, opID, status.Convert(gerr).Proto()); merr != nil {
 		slog.ErrorContext(ctx, "ForceLogout: operation error-mark failed",
 			"operation_id", opID, "err", merr.Error())
 	}
 	return gerr
+}
+
+// Сроки принудительного выхода на посадке `own` (kaname#340). Их два, и
+// отношение между ними несущее.
+const (
+	// forceLogoutLockWait — предел ожидания замка строки в каждой транзакции
+	// выхода (`lock_timeout`). Строку сессии держат короткие транзакции — выдача
+	// кода, перепредъявление, уборка, свой выход; операторы выдачи идут около
+	// миллисекунды (замер у `lockUserForKeySQL`, `oauth_ceremony_repo.go`).
+	//
+	// Предел короче пяти секунд — срока одного вызова, который край ставит своим
+	// обращениям к службе (`callTimeout` клиента субъектов и `backendCallTimeout`
+	// посредника операций, `kacho/gateway`), — настолько, чтобы после отказа
+	// снятия в тот же срок поместилась и запись частичного исхода. Вызывающего
+	// самого принудительного выхода этот дом не знает, и срока у него может не
+	// быть вовсе: тогда без своего предела ожидание ограничивал бы только потолок
+	// оператора пула (30 с), а при сроке — сам срок, и ответа вызывающий не
+	// дождался бы.
+	forceLogoutLockWait = 2 * time.Second
+	// forceLogoutRecordBudget — срок записей, отвязанных от отмены запроса:
+	// частичного исхода и отметок операции. Отвязка снимает отмену, но не время:
+	// повисшая база иначе держала бы обработчик без предела. Величина — та же,
+	// что у прочих отвязанных записей службы (`refusalWriteBudget`,
+	// `providerReleaseTimeout`), и каждая запись получает её целиком, а не
+	// остаток.
+	forceLogoutRecordBudget = 5 * time.Second
+)
+
+// forceLogoutRecordContext — контекст записи, отвязанный от отмены запроса и
+// ограниченный `forceLogoutRecordBudget`. Значения запроса (принципал, след)
+// сохраняются.
+func forceLogoutRecordContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), forceLogoutRecordBudget)
+}
+
+// forceLogoutStoreRefusal — ответ на отказ хранилища в транзакции выхода,
+// исполнявшейся на ctx.
+//
+// Отказ, вызванный концом контекста (срок либо отмена), — состояние, которое
+// проходит, а не поломка службы: ответ `Unavailable`, а не `Internal`, который
+// дал бы общий перевод. Форм у такого отказа ДВЕ, и различать их по ошибке
+// нельзя: до отправки оператора драйвер отвечает ошибкой контекста, а во время
+// исполнения пул службы доводит отмену до сервера (`CancelRequest`,
+// `corelib/db.NewPool`), и оператор снимается там со строкой состояния
+// `57014`, без ошибки контекста в цепочке. Поэтому вторая форма узнаётся по
+// самому контексту попытки: отказ, пришедший, когда её срок уже кончился.
+// Отказ замка в собственном пределе транзакции (`55P03`) переводит в
+// недоступность уже хранилище. Остальное — общий перевод.
+func forceLogoutStoreRefusal(ctx context.Context, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	}
+	return shared.MapRepoErr(err)
 }
 
 // Исход снятия в записи события принудительного выхода (kaname#340). Словарь
@@ -542,7 +610,7 @@ type ownForceLogoutAttempt struct {
 func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTokenRevocation,
 	revokedBy domain.UserID, withTeardown bool,
 ) ownForceLogoutAttempt {
-	w, err := h.ownSessions.ForceLogoutWriter(ctx)
+	w, err := h.ownSessions.ForceLogoutWriter(ctx, forceLogoutLockWait)
 	if err != nil {
 		return ownForceLogoutAttempt{err: err}
 	}
@@ -601,15 +669,26 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 // глагола заново накладывает ту же отсечку (монотонно) и заново пробует снятие;
 // каждая попытка оставляет свою запись со своим исходом.
 //
+// # ВТОРАЯ ТРАНЗАКЦИЯ НЕ ПРИНАДЛЕЖИТ СРОКУ ЗАПРОСА
+//
+// Снятие отказывает и оттого, что кончился срок самого запроса: оно ждало замка
+// строки сессии или шло дольше, чем вызывающий готов ждать. Вторая транзакция
+// на том же истёкшем сроке не открылась бы вовсе, и не легло бы НИЧЕГО — хуже
+// прежнего порядка, где отсечка фиксировалась до снятия. Поэтому она идёт на
+// контексте, отвязанном от отмены запроса и ограниченном своим сроком
+// (`forceLogoutRecordBudget`), — при ЛЮБОЙ причине отказа снятия. Ожидание
+// самого снятия ограничено пределом транзакции (`forceLogoutLockWait`), который
+// короче срока вызывающего: в сцене блокировки ответ приходит в его срок.
+//
 // Отказ ОТСЕЧКИ, записи события или фиксации в первой транзакции — не
 // частичный исход: откатывается всё, не ложится ничего, и ответ — перевод
-// отказа хранилища, как на прочих посадках.
+// отказа хранилища, как на прочих посадках. Так же — отказ открытия.
 func (h *Handler) forceLogoutOwnSessions(ctx context.Context, opID string,
 	marker domain.UserTokenRevocation, revokedBy domain.UserID,
 ) error {
 	first := h.commitOwnForceLogout(ctx, marker, revokedBy, true)
 	if first.err != nil {
-		return h.failForceLogout(ctx, opID, shared.MapRepoErr(first.err))
+		return h.failForceLogout(ctx, opID, forceLogoutStoreRefusal(ctx, first.err))
 	}
 	if first.teardownErr == nil {
 		slog.InfoContext(ctx, "ForceLogout: own login sessions ended",
@@ -619,11 +698,13 @@ func (h *Handler) forceLogoutOwnSessions(ctx context.Context, opID string,
 
 	slog.ErrorContext(ctx, "ForceLogout: own login-session teardown failed",
 		"operation_id", opID, "user_id", string(marker.UserID), "err", first.teardownErr.Error())
-	partial := h.commitOwnForceLogout(ctx, marker, revokedBy, false)
+	recordCtx, cancel := forceLogoutRecordContext(ctx)
+	defer cancel()
+	partial := h.commitOwnForceLogout(recordCtx, marker, revokedBy, false)
 	if partial.err != nil {
 		slog.ErrorContext(ctx, "ForceLogout: the partial outcome could not be recorded; nothing was committed",
 			"operation_id", opID, "user_id", string(marker.UserID), "err", partial.err.Error())
-		return h.failForceLogout(ctx, opID, shared.MapRepoErr(partial.err))
+		return h.failForceLogout(ctx, opID, forceLogoutStoreRefusal(recordCtx, partial.err))
 	}
 	return h.failForceLogout(ctx, opID, status.Error(codes.Unavailable, "could not end the login session"))
 }

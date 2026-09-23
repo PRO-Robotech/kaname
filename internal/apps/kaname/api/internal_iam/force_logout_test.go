@@ -79,7 +79,7 @@ func (f *fakeForceLogoutRecorder) RevokeAllUserTokensTx(_ context.Context, userI
 // ForceLogoutWriter — тот же писатель на посадке `own`. Отсечка засчитывается
 // ФИКСАЦИЕЙ, как и в настоящей транзакции: до неё её нет. Снятых записей ноль —
 // предмет проб, провязывающих эту заглушку, не снятие.
-func (f *fakeForceLogoutRecorder) ForceLogoutWriter(context.Context) (OwnSessionsWriter, error) {
+func (f *fakeForceLogoutRecorder) ForceLogoutWriter(context.Context, time.Duration) (OwnSessionsWriter, error) {
 	return &fakeForceLogoutRecorderTx{rec: f}, nil
 }
 
@@ -137,6 +137,10 @@ type recordingForceLogoutOps struct {
 	doneMeta  *anypb.Any
 	doneResp  *anypb.Any
 	errStatus *statuspb.Status
+
+	// Состояние контекста в момент отметки — ошибкой и завершением.
+	markErrorCtx ctxSnapshot
+	markDoneCtx  ctxSnapshot
 }
 
 func (f *recordingForceLogoutOps) Create(_ context.Context, op operations.Operation) error {
@@ -150,14 +154,16 @@ func (f *recordingForceLogoutOps) MarkDone(context.Context, string, *anypb.Any) 
 	return nil
 }
 
-func (f *recordingForceLogoutOps) MarkDoneWithMetadata(_ context.Context, _ string, meta, resp *anypb.Any) error {
+func (f *recordingForceLogoutOps) MarkDoneWithMetadata(ctx context.Context, _ string, meta, resp *anypb.Any) error {
 	f.calls = append(f.calls, "markdone-with-metadata")
+	f.markDoneCtx = snapshotOf(ctx)
 	f.doneMeta, f.doneResp = meta, resp
 	return nil
 }
 
-func (f *recordingForceLogoutOps) MarkError(_ context.Context, _ string, st *statuspb.Status) error {
+func (f *recordingForceLogoutOps) MarkError(ctx context.Context, _ string, st *statuspb.Status) error {
 	f.calls = append(f.calls, "markerror")
+	f.markErrorCtx = snapshotOf(ctx)
 	f.errStatus = st
 	return nil
 }

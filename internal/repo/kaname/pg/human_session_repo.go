@@ -22,6 +22,7 @@ package pg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -403,11 +404,40 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 // Это ТОТ ЖЕ писатель, что у полосы входа, а не отдельный путь: прежде снятие
 // шло своей транзакцией на пуле ПОСЛЕ транзакции отсечки, и запись события,
 // положенная транзакцией отсечки, ложилась до снятия — числа снятых она нести
-// не могла. Порядок операторов внутри транзакции задаёт вызывающий; он тот же,
-// что у собственного выхода человека: снятие, отсечка, событие.
-func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context) (internaliam.OwnSessionsWriter, error) {
+// не могла. Порядок операторов внутри транзакции задаёт вызывающий: снятие,
+// отсечка, событие.
+//
+// # ОЖИДАНИЕ ЗАМКОВ ОГРАНИЧЕНО `lockWait`
+//
+// Предел ставится самой транзакции (`lock_timeout`, локально), а не берётся из
+// срока вызова. Срока у вызова может не быть вовсе, и тогда ожидание замка
+// ограничивал бы только потолок одного оператора пула (`statement_timeout`,
+// 30 с); а когда он есть, ожидание кончалось бы вместе с ним — то есть ответ
+// приходил бы тогда, когда вызывающий ждать уже перестал, и на запись
+// частичного исхода времени у него не оставалось бы. Свой предел короче
+// срока вызывающего и даёт отказ `55P03` на живом соединении; хранилище
+// переводит его в недоступность.
+//
+// Пул сам `lock_timeout` не ставит намеренно (`corelib/db.NewPool`): на всех
+// путях всех служб он завёл бы класс `55P03`, который их переводы отказов не
+// знают. Здесь предел локален одной транзакции, и перевод его знает.
+//
+// Ноль у `lock_timeout` означает «без предела», а предел короче миллисекунды
+// записался бы нулём. Такой предел отвергается до открытия транзакции, а не
+// подставляется: величину даёт служба, а не вызывающий, и её негодность —
+// дефект службы, который обязан звучать, а не молча снимать ограничение.
+func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (internaliam.OwnSessionsWriter, error) {
+	if lockWait < time.Millisecond {
+		return nil, iamerr.Wrapf(iamerr.ErrInternal,
+			"force-logout writer: lock wait %s is not representable in lock_timeout", lockWait)
+	}
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
+		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`,
+		fmt.Sprintf("%dms", lockWait.Milliseconds())); err != nil {
+		_ = tx.Rollback(ctx)
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
 	return &humanSessionWriter{tx: tx}, nil

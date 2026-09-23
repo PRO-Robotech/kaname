@@ -15,6 +15,7 @@ package internal_iam
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,12 +29,33 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
+// ctxSnapshot — состояние контекста В МОМЕНТ вызова. Сам контекст хранить
+// нельзя: отвязанный срок снимается `defer cancel()` вызывающего, и после
+// возврата любой записанный контекст выглядел бы отменённым.
+type ctxSnapshot struct {
+	err         error
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func snapshotOf(ctx context.Context) ctxSnapshot {
+	d, ok := ctx.Deadline()
+	return ctxSnapshot{err: ctx.Err(), deadline: d, hasDeadline: ok}
+}
+
 // recordingOwnWriter — одна транзакция снятия: что в ней исполнено, в каком
 // порядке, и чем она кончилась.
+//
+// Контракт настоящей транзакции соблюдается и здесь: оператор на законченном
+// контексте отказывает его ошибкой, как отказывает драйвер. Дублёр, принимающий
+// оператор на истёкшем сроке, зеленил бы ровно тот дефект, который пробы ниже
+// ловят.
 type recordingOwnWriter struct {
 	// Сценарий.
 	ended     int
 	endErr    error
+	onEnd     func(ctx context.Context) error
+	onCutoff  func(ctx context.Context) error
 	cutoffErr error
 	commitErr error
 
@@ -48,21 +70,37 @@ type recordingOwnWriter struct {
 	committed bool
 }
 
-func (w *recordingOwnWriter) EndOtherSessions(_ context.Context, userID domain.UserID,
+func (w *recordingOwnWriter) EndOtherSessions(ctx context.Context, userID domain.UserID,
 	keep domain.HumanSessionID, _ time.Time, reason string,
 ) (int, error) {
 	w.calls = append(w.calls, "end")
 	w.users = append(w.users, userID)
 	w.keeps = append(w.keeps, keep)
 	w.reasons = append(w.reasons, reason)
+	if w.onEnd != nil {
+		if err := w.onEnd(ctx); err != nil {
+			return 0, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if w.endErr != nil {
 		return 0, w.endErr
 	}
 	return w.ended, nil
 }
 
-func (w *recordingOwnWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+func (w *recordingOwnWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	w.calls = append(w.calls, "cutoff")
+	if w.onCutoff != nil {
+		if err := w.onCutoff(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if w.cutoffErr != nil {
 		return w.cutoffErr
 	}
@@ -71,14 +109,20 @@ func (w *recordingOwnWriter) UpsertCutoff(_ context.Context, u domain.UserTokenR
 	return nil
 }
 
-func (w *recordingOwnWriter) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) error {
+func (w *recordingOwnWriter) EmitAudit(ctx context.Context, ev outboxtypes.AuditEvent) error {
 	w.calls = append(w.calls, "event")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	w.events = append(w.events, ev)
 	return nil
 }
 
-func (w *recordingOwnWriter) Commit(context.Context) error {
+func (w *recordingOwnWriter) Commit(ctx context.Context) error {
 	w.calls = append(w.calls, "commit")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if w.commitErr != nil {
 		return w.commitErr
 	}
@@ -93,13 +137,22 @@ func (w *recordingOwnWriter) Rollback(context.Context) error {
 
 // recordingOwnSessions — хранилище, выдающее транзакции по сценарию: i-я
 // открытая транзакция — i-я из `script`, сверх сценария — пустая. Все
-// открытые остаются в `opened`: число транзакций — часть утверждения.
+// открытые остаются в `opened`: число транзакций — часть утверждения. Каждая
+// ПОПЫТКА открыть оставляет в `opens` состояние своего контекста; на
+// законченном контексте открытие отказывает, как отказывает пул.
 type recordingOwnSessions struct {
-	script []*recordingOwnWriter
-	opened []*recordingOwnWriter
+	script    []*recordingOwnWriter
+	opened    []*recordingOwnWriter
+	opens     []ctxSnapshot
+	lockWaits []time.Duration
 }
 
-func (r *recordingOwnSessions) ForceLogoutWriter(context.Context) (OwnSessionsWriter, error) {
+func (r *recordingOwnSessions) ForceLogoutWriter(ctx context.Context, lockWait time.Duration) (OwnSessionsWriter, error) {
+	r.opens = append(r.opens, snapshotOf(ctx))
+	r.lockWaits = append(r.lockWaits, lockWait)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	w := &recordingOwnWriter{}
 	if i := len(r.opened); i < len(r.script) {
 		w = r.script[i]
@@ -159,6 +212,11 @@ func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *t
 	require.NoError(t, err)
 
 	require.Len(t, own.opened, 1, "выход обязан лечь ОДНОЙ транзакцией")
+	if assert.Len(t, own.lockWaits, 1) {
+		assert.Positive(t, own.lockWaits[0], "ожидание замков обязано быть ограничено")
+		assert.Less(t, own.lockWaits[0], forceLogoutRecordBudget,
+			"предел ожидания замка короче срока записи частичного исхода")
+	}
 	tx := own.opened[0]
 	require.Equal(t, []string{"end", "cutoff", "event", "commit"}, tx.calls,
 		"запись события обязана лечь ПОСЛЕ снятия — иначе исхода ей не знать; "+
@@ -317,4 +375,100 @@ func TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff(t *testing.T) {
 	assert.Equal(t, 1, rec.allCnt, "отсечка остаётся — она защитна и идемпотентна")
 	assert.Contains(t, ops.calls, "markerror",
 		"опрос операции обязан увидеть отказ, а не успех")
+}
+
+// TestForceLogout_OwnTeardownEndedByTheRequest_PartialOutcomeRunsOnItsOwnBoundedContext
+// — снятие отказало потому, что кончился сам запрос (вызывающий ушёл, пока
+// снятие шло). Запись частичного исхода и отметка ошибки операции обязаны идти
+// на контексте, ОТВЯЗАННОМ от отмены запроса, и при этом ОГРАНИЧЕННОМ своим
+// сроком: отвязка снимает отмену, но не время — повисшая база иначе держала бы
+// обработчик без предела.
+func TestForceLogout_OwnTeardownEndedByTheRequest_PartialOutcomeRunsOnItsOwnBoundedContext(t *testing.T) {
+	reqCtx, cancel := context.WithCancel(adminCtx())
+	defer cancel()
+	first := &recordingOwnWriter{onEnd: func(context.Context) error {
+		cancel()
+		return nil
+	}}
+	partial := &recordingOwnWriter{}
+	own := ownSessionsScripted(first, partial)
+	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+
+	before := time.Now()
+	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.Error(t, err)
+	require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+
+	require.Len(t, own.opens, 2, "частичный исход обязан быть ПОПЫТАН второй транзакцией")
+	second := own.opens[1]
+	assert.NoError(t, second.err,
+		"запись частичного исхода открывалась на отменённом контексте запроса — "+
+			"она не откроется никогда, и не ляжет ни отсечка, ни запись события")
+	if assert.True(t, second.hasDeadline, "отвязанный контекст обязан нести свой срок") {
+		assert.WithinDuration(t, before, second.deadline, 30*time.Second,
+			"срок записи частичного исхода обязан быть конечным и коротким")
+	}
+	assert.Equal(t, []string{"cutoff", "event", "commit"}, partial.calls)
+	assert.True(t, partial.committed, "частичный исход обязан зафиксироваться")
+
+	assert.NoError(t, ops.markErrorCtx.err,
+		"отметка ошибки операции шла на отменённом контексте запроса — опрос "+
+			"будет вечно отвечать «не завершена»")
+	assert.True(t, ops.markErrorCtx.hasDeadline, "отметка ошибки обязана нести свой срок")
+}
+
+// TestForceLogout_OwnStoreRefusalBecauseTheContextEnded_IsUnavailable — отказ
+// хранилища, вызванный концом контекста (срок или отмена), — состояние, которое
+// проходит, а не поломка службы. Ответ — `Unavailable`, а не `Internal`: в
+// любой из двух транзакций и на любом шаге.
+func TestForceLogout_OwnStoreRefusalBecauseTheContextEnded_IsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		writers []*recordingOwnWriter
+	}{
+		{"отсечка первой транзакции — срок", []*recordingOwnWriter{
+			{ended: 1, cutoffErr: fmt.Errorf("upsert cutoff: %w", context.DeadlineExceeded)},
+		}},
+		{"отсечка первой транзакции — отмена", []*recordingOwnWriter{
+			{ended: 1, cutoffErr: fmt.Errorf("upsert cutoff: %w", context.Canceled)},
+		}},
+		{"фиксация частичного исхода — срок", []*recordingOwnWriter{
+			{endErr: errors.New("human_sessions: backend down")},
+			{commitErr: fmt.Errorf("commit: %w", context.DeadlineExceeded)},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, ownSessionsScripted(tc.writers...))
+			_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+			require.Error(t, err)
+			assert.Equal(t, codes.Unavailable, status.Code(err),
+				"конец контекста переведён в %s: %v", status.Code(err), err)
+			assert.Contains(t, ops.calls, "markerror")
+		})
+	}
+}
+
+// TestForceLogout_OwnStatementCancelledBecauseTheRequestEnded_IsUnavailable —
+// конец срока запроса приходит от хранилища НЕ ошибкой контекста: пул службы
+// доводит отмену до сервера (`CancelRequest`), и оператор снимается там со
+// строкой состояния `57014`, которую общий перевод отдаёт `Internal`. Отказ,
+// пришедший, когда срок попытки уже кончился, обязан читаться отказом по сроку.
+func TestForceLogout_OwnStatementCancelledBecauseTheRequestEnded_IsUnavailable(t *testing.T) {
+	reqCtx, cancel := context.WithCancel(adminCtx())
+	defer cancel()
+	first := &recordingOwnWriter{ended: 1, onCutoff: func(context.Context) error {
+		cancel()
+		return errors.New("internal: database error: sqlstate 57014")
+	}}
+	own := ownSessionsScripted(first)
+	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+
+	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
+	require.Error(t, err)
+	require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")
+	assert.Equal(t, codes.Unavailable, status.Code(err),
+		"оператор, снятый по концу срока запроса, переведён в %s: %v", status.Code(err), err)
+	assert.Len(t, own.opened, 1, "отказ отсечки — не частичный исход, второй транзакции нет")
+	assert.Contains(t, ops.calls, "markerror")
 }
