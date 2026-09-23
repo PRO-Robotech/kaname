@@ -33,7 +33,8 @@ package internal_iam_test
 //
 // Сцены строятся тем же набором, что соседние: одноразовая задержка
 // триггером, запуск второго участника, когда первый виден спящим, и сцена
-// считается построенной, только когда второй виден ждущим ЗАМКА.
+// считается построенной, только когда держатель видел второго ждущим ЗАМКА
+// (`requireHoldSceneBuilt`).
 
 import (
 	"context"
@@ -113,17 +114,17 @@ func TestIntegration_SecondFactorRemovalThenForceLogoutEndsEachSessionOnce(t *te
 		}
 		sfDone := make(chan sfOutcome, 1)
 		flDone := make(chan error, 1)
-		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold, 1)
 		go func() {
 			n, err := secondFactorRemovalSessionWrites(ctx, s.sessions, uid, keep, rotated)
 			sfDone <- sfOutcome{n, err}
 		}()
 		awaitSleepingBackend(t, ctx, s.pool)
 		go func() { flDone <- s.forceLogout(uid) }()
-		lockWaiters += awaitLockWaiters(t, ctx, s.pool, 1)
 		sf := <-sfDone
 		flErr := <-flDone
 		disarmOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		lockWaiters += requireHoldSceneBuilt(t, ctx, s.pool, concurrentTeardownHold)
 
 		records := forceLogoutRecords(t, ctx, s.pool, uid)
 		flEnded, flFailed := endedSessionsOfRecords(t, records)
@@ -287,7 +288,7 @@ func TestIntegration_PasswordChangeAndIdentityDeletionDoNotDeadlock(t *testing.T
 
 		changeDone := make(chan error, 1)
 		deleteDone := make(chan error, 1)
-		armOneShotHold(t, ctx, s.pool, verifierReplacedHold)
+		armOneShotHold(t, ctx, s.pool, verifierReplacedHold, 1)
 		go func() {
 			_, err := change.Execute(ctx, humansession.ChangePasswordInput{
 				Bearer: bearer, CurrentPassword: passwordScenePassword,
@@ -297,10 +298,10 @@ func TestIntegration_PasswordChangeAndIdentityDeletionDoNotDeadlock(t *testing.T
 		}()
 		awaitSleepingBackend(t, ctx, s.pool)
 		go func() { deleteDone <- deletePerson(ctx, users, uid) }()
-		lockWaiters += awaitLockWaiters(t, ctx, s.pool, 1)
 		changeErr := <-changeDone
 		deleteErr := <-deleteDone
 		disarmOneShotHold(t, ctx, s.pool, verifierReplacedHold)
+		lockWaiters += requireHoldSceneBuilt(t, ctx, s.pool, verifierReplacedHold)
 
 		if changeErr != nil {
 			changeFailures++

@@ -28,14 +28,16 @@ package internal_iam_test
 // КАК ПОСТРОЕНА КОНКУРЕНЦИЯ — ЗАМКОМ, А НЕ ВРЕМЕНЕМ
 //
 // Первая транзакция сцены после своего оператора снятия задерживается
-// триггером уровня оператора на одну секунду, держа замки снятых строк.
+// триггером уровня оператора, держа замки снятых строк, и держит их, ПОКА САМА
+// НЕ УВИДИТ ждущих, сколько велено сценой, — либо до общего срока сцены.
 // Задержка ОДНОРАЗОВАЯ на прогон (последовательность, сбрасываемая перед
 // прогоном): задерживается ровно первый оператор, остальные идут без неё, и
 // ожидания не складываются в цепочку, упирающуюся в предел ожидания замка
 // выхода. Вторые участники запускаются, когда первая видна спящей
-// (`pg_stat_activity`), и сцена считается построенной, только когда каждый из
-// них виден ждущим ЗАМКА. Иначе проба судила бы участников, прошедших друг
-// за другом, а не конкуренцию.
+// (`pg_stat_activity`), и сцена считается построенной, только когда держатель
+// видел ждущими ЗАМКА их всех. Иначе проба судила бы участников, прошедших друг
+// за другом, а не конкуренцию. Устройство задержки и почему она не мерится
+// временем — у `installOneShotHold`.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕМ СЧИТАЕТСЯ ВЗАИМНАЯ БЛОКИРОВКА — ДВУМЯ РАЗНЫМИ ПРИБОРАМИ
@@ -203,25 +205,97 @@ func (s *concurrencyScene) forceLogout(uid domain.UserID) error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Одноразовая задержка: первый оператор, поднявший триггер после сброса,
-// спит `holdSeconds`, держа свои замки; прочие идут без задержки.
+// Одноразовая задержка: первый оператор, поднявший триггер после взвода,
+// держит свои замки, пока САМ не увидит ждущих замка, сколько велено сценой,
+// либо до общего срока сцены; прочие идут без задержки.
+//
+// ПОЧЕМУ ДЕРЖАТЕЛЬ НЕ СПИТ ЗАДАННОЕ ВРЕМЯ (kaname#397). Здесь стояла выдержка
+// на секунду, а сцену судил наблюдатель, ждавший ждущих до 10 с через ПУЛ
+// СЦЕНЫ. Пул — умолчание драйвера, max(4, число ядер): на исполнителе с 4
+// ядрами — 4 соединения. Держатель и трое ждущих выходов занимали его целиком,
+// наблюдатель получал соединение лишь после ухода держателя и видел «ждущих 0
+// из 3» до конца срока. Замер в контейнере проб: `--cpuset-cpus=0-3` и `0` —
+// отказ 3 из 3 и 1 из 1 тем же текстом, что на исполнителе; `0-4` (пул 5) и
+// `--cpus=0.5` без сужения набора ядер (пул 32) — зелено 1 из 1 и 3 из 3.
+// Выдержка временем — та же ставка на скорость: ждущий, пришедший позже неё,
+// сцены не строит.
+//
+// Теперь ждущих считает сам держатель — своим обслуживающим процессом, без
+// соединения пула, — и отпускает замки по наблюдению. Исход он кладёт в
+// последовательности: они вне транзакции и переживают её откат. Судится сцена
+// по ним, когда участники уже вернулись (`requireHoldSceneBuilt`), — судящему
+// соединение во время сцены не нужно вовсе.
+//
+// ОБЩИЙ СРОК И ЕГО ВЕРХНЯЯ ГРАНИЦА. Срок один на сцену: он отсчитывается от
+// ВХОДА ДЕРЖАТЕЛЯ В ЗАДЕРЖКУ и лежит в базе; держатель его соблюдает, а
+// судящий отказ по нему называет. Задержка не длится дольше срока, и каждый
+// ждущий приходит после входа в неё, значит ни один не ждёт дольше срока и
+// операторов держателя после отпуска. Срок — доля предела одного ожидания
+// замка выхода (`lock_timeout`): ждущий выход, простоявший дольше предела,
+// отказал бы исходом продукта, который вызвала сама сцена, и проба судила бы
+// его как предмет. Остаток предела — на операторы держателя после отпуска.
+//
+// Отсчёт не от взвода, и это замерено: дорога держателя от взвода до задержки
+// у смены пароля — проверка и выработка свёртки пароля (argon2id, 64 МиБ); под
+// урезанием процессора (`--cpus=0.5 --cpuset-cpus=0`) — 911–1118 мс в 9 сценах
+// при сроке 1,5 с. При отсчёте от взвода дорога съедала срок, и сцена «смена
+// пароля × удаление личности» не строилась в 4 из 20 прогонов («выход не вошёл
+// в окно за 10 с»). Сколько держатель шёл до задержки, судящий печатает.
 
-const holdSeconds = "1.0"
+// holdSceneBudget — общий срок сцены от входа держателя в задержку: три
+// четверти предела одного ожидания замка выхода.
+const holdSceneBudget = internaliam.ForceLogoutLockWait * 3 / 4
 
 // installOneShotHold — триггер уровня ОПЕРАТОРА на `table` для `event`
 // ("UPDATE OF ended_at" либо "DELETE"). Имя задаёт вызывающий: в одной базе
 // могут стоять две задержки.
+//
+// Состояние задержки — объекты с префиксом имени: взвод (`_seq`), что велено
+// (`_scene`: сколько ждущих, срок и момент взвода) и исход держателя —
+// `_seen` (сколько ждущих он видел, отпуская), `_held_ms` (сколько держал) и
+// `_reach_ms` (сколько шёл от взвода до задержки). Ждущие — обслуживающие
+// процессы базы пробы, ждущие ЗАМКА. Снимок `pg_stat_activity` живёт до конца
+// транзакции, поэтому держатель сбрасывает его на каждом шаге.
 func installOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name, table, event string) {
 	t.Helper()
-	_, err := pool.Exec(ctx, `CREATE SEQUENCE kaname.`+name+`_seq`)
-	require.NoError(t, err, "последовательность задержки %s", name)
-	_, err = pool.Exec(ctx, `
+	for _, q := range []string{
+		`CREATE SEQUENCE kaname.` + name + `_seq`,
+		`CREATE SEQUENCE kaname.` + name + `_seen MINVALUE 0`,
+		`CREATE SEQUENCE kaname.` + name + `_held_ms MINVALUE 0`,
+		`CREATE SEQUENCE kaname.` + name + `_reach_ms MINVALUE 0`,
+		`CREATE TABLE kaname.` + name + `_scene (want int NOT NULL, budget interval NOT NULL, armed_at timestamptz NOT NULL)`,
+		`INSERT INTO kaname.` + name + `_scene VALUES (0, interval '0', clock_timestamp())`,
+	} {
+		_, err := pool.Exec(ctx, q)
+		require.NoError(t, err, "состояние задержки %s: %s", name, q)
+	}
+	_, err := pool.Exec(ctx, `
 		CREATE FUNCTION kaname.`+name+`() RETURNS trigger
 		LANGUAGE plpgsql AS $$
+		DECLARE
+			v_want     int;
+			v_deadline timestamptz;
+			v_armed_at timestamptz;
+			v_seen     int;
+			v_started  timestamptz := clock_timestamp();
 		BEGIN
-			IF nextval('kaname.`+name+`_seq') = 1 THEN
-				PERFORM pg_sleep(`+holdSeconds+`);
+			IF nextval('kaname.`+name+`_seq') <> 1 THEN
+				RETURN NULL;
 			END IF;
+			SELECT s.want, v_started + s.budget, s.armed_at INTO v_want, v_deadline, v_armed_at
+			  FROM kaname.`+name+`_scene s;
+			LOOP
+				PERFORM pg_stat_clear_snapshot();
+				SELECT count(*) INTO v_seen FROM pg_stat_activity
+				 WHERE datname = current_database() AND wait_event_type = 'Lock';
+				EXIT WHEN v_seen >= v_want OR clock_timestamp() >= v_deadline;
+				PERFORM pg_sleep(0.005);
+			END LOOP;
+			PERFORM setval('kaname.`+name+`_seen', v_seen, true);
+			PERFORM setval('kaname.`+name+`_held_ms',
+				(extract(epoch FROM clock_timestamp() - v_started) * 1000)::bigint, true);
+			PERFORM setval('kaname.`+name+`_reach_ms',
+				greatest(0, (extract(epoch FROM v_started - v_armed_at) * 1000)::bigint), true);
 			RETURN NULL;
 		END $$`)
 	require.NoError(t, err, "функция задержки %s", name)
@@ -232,10 +306,25 @@ func installOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, n
 	disarmOneShotHold(t, ctx, pool, name)
 }
 
-// armOneShotHold — следующий оператор, поднявший триггер, задержится.
-func armOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) {
+// armOneShotHold — следующий оператор, поднявший триггер, задержится и будет
+// держать замки, пока не увидит want ждущих, но не дольше общего срока
+// (`holdSceneBudget` от входа в задержку). Исход прошлого взвода стирается.
+func armOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string, want int) {
 	t.Helper()
-	_, err := pool.Exec(ctx, `SELECT setval('kaname.`+name+`_seq', 1, false)`)
+	require.Positive(t, want, "фикстура: сцене задержки нужен хотя бы один ждущий")
+	for _, q := range []string{
+		`SELECT setval('kaname.` + name + `_seen', 0, false)`,
+		`SELECT setval('kaname.` + name + `_held_ms', 0, false)`,
+		`SELECT setval('kaname.` + name + `_reach_ms', 0, false)`,
+	} {
+		_, err := pool.Exec(ctx, q)
+		require.NoError(t, err, "сбросить исход задержки %s", name)
+	}
+	_, err := pool.Exec(ctx,
+		`UPDATE kaname.`+name+`_scene SET want = $1, budget = make_interval(secs => $2), armed_at = clock_timestamp()`,
+		want, holdSceneBudget.Seconds())
+	require.NoError(t, err, "велеть сцену задержки %s", name)
+	_, err = pool.Exec(ctx, `SELECT setval('kaname.`+name+`_seq', 1, false)`)
 	require.NoError(t, err, "взвести задержку %s", name)
 }
 
@@ -246,25 +335,35 @@ func disarmOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, na
 	require.NoError(t, err, "снять задержку %s", name)
 }
 
-// awaitLockWaiters — ждёт, пока ЖДУЩИХ ЗАМКА обслуживающих процессов базы не
-// станет want. Возвращает наблюдённое число. Не дождался — сцена конкуренции
-// не построена, и это отказ фикстуры, а не вердикт о предмете.
-func awaitLockWaiters(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want int) int {
+// requireHoldSceneBuilt — исход держателя взведённой задержки; зовётся, когда
+// участники сцены вернулись. Отвечает, сколько ждущих держатель видел, отпуская
+// замки. Держатель до задержки не дошёл либо отпустил по общему сроку, не
+// увидев всех, — сцена конкуренции не построена: это ОТКАЗ ФИКСТУРЫ, и проба
+// кончается на нём, не вынося вердикта о предмете по исходам участников.
+func requireHoldSceneBuilt(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) int {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var waiting int
-		require.NoError(t, pool.QueryRow(ctx, `
-			SELECT count(*) FROM pg_stat_activity
-			 WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting))
-		if waiting >= want {
-			return waiting
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("ждущих замка %d из %d за 10 с — сцена конкуренции не построена", waiting, want)
-		}
-		time.Sleep(10 * time.Millisecond)
+	var decided bool
+	var seen, heldMs, reachMs int64
+	var want int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT is_called, last_value FROM kaname.`+name+`_seen`).Scan(&decided, &seen))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT last_value FROM kaname.`+name+`_held_ms`).Scan(&heldMs))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT last_value FROM kaname.`+name+`_reach_ms`).Scan(&reachMs))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT want FROM kaname.`+name+`_scene`).Scan(&want))
+	if !decided {
+		t.Fatalf("отказ фикстуры: держатель задержки %s до неё не дошёл — сцена конкуренции не построена, "+
+			"вердикта о предмете нет", name)
 	}
+	if seen < int64(want) {
+		t.Fatalf("отказ фикстуры: держатель задержки %s отпустил замки по общему сроку %s, видя ждущих замка "+
+			"%d из %d, — сцена конкуренции не построена, вердикта о предмете нет", name, holdSceneBudget, seen, want)
+	}
+	t.Logf("сцена %s построена: держатель шёл до задержки %d мс от взвода, видел ждущих замка %d из %d, "+
+		"держал %d мс при общем сроке %s", name, reachMs, seen, want, heldMs, holdSceneBudget)
+	return int(seen)
 }
 
 // deadlocksAfterPoolClose — счётчик взаимных блокировок базы, прочитанный
@@ -373,14 +472,13 @@ func TestIntegration_ConcurrentForceLogoutsEndEachSessionOnce(t *testing.T) {
 		require.Equal(t, sessionsPerPerson, live, "прогон %d: знаменатель сцены", round)
 		denominator += live
 
-		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold, logoutsAtOnce-1)
 		results := make(chan error, logoutsAtOnce)
 		go func() { results <- s.forceLogout(uid) }()
 		awaitSleepingBackend(t, ctx, s.pool)
 		for i := 1; i < logoutsAtOnce; i++ {
 			go func() { results <- s.forceLogout(uid) }()
 		}
-		lockWaiters += awaitLockWaiters(t, ctx, s.pool, logoutsAtOnce-1)
 
 		for i := 0; i < logoutsAtOnce; i++ {
 			if err := <-results; err != nil {
@@ -389,6 +487,7 @@ func TestIntegration_ConcurrentForceLogoutsEndEachSessionOnce(t *testing.T) {
 			}
 		}
 		disarmOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		lockWaiters += requireHoldSceneBuilt(t, ctx, s.pool, concurrentTeardownHold)
 
 		records := forceLogoutRecords(t, ctx, s.pool, uid)
 		ended, failed := endedSessionsOfRecords(t, records)
@@ -517,7 +616,7 @@ func forceLogoutAgainstPasswordChange(t *testing.T, passwordChangeFirst bool) {
 		}
 		runFL := func() { flDone <- s.forceLogout(uid) }
 
-		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		armOneShotHold(t, ctx, s.pool, concurrentTeardownHold, 1)
 		if passwordChangeFirst {
 			go runPC()
 			awaitSleepingBackend(t, ctx, s.pool)
@@ -527,10 +626,10 @@ func forceLogoutAgainstPasswordChange(t *testing.T, passwordChangeFirst bool) {
 			awaitSleepingBackend(t, ctx, s.pool)
 			go runPC()
 		}
-		lockWaiters += awaitLockWaiters(t, ctx, s.pool, 1)
 		pc := <-pcDone
 		flErr := <-flDone
 		disarmOneShotHold(t, ctx, s.pool, concurrentTeardownHold)
+		lockWaiters += requireHoldSceneBuilt(t, ctx, s.pool, concurrentTeardownHold)
 
 		records := forceLogoutRecords(t, ctx, s.pool, uid)
 		flEnded, flFailed := endedSessionsOfRecords(t, records)
