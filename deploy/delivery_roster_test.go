@@ -70,6 +70,8 @@ var deliveryRoster = []string{
 	"alert_rules_delivered_test.go",
 	"chart_raise_has_a_holder_injection_test.go",
 	"chart_raise_has_a_holder_test.go",
+	"boot_guard_base_values_injection_test.go",
+	"boot_guard_base_values_test.go",
 	"boot_guard_defaults_injection_test.go",
 	"boot_guard_defaults_test.go",
 	"defaultless_keys_injection_test.go",
