@@ -63,6 +63,9 @@ type fakeStore struct {
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
 	failOn string
+	// opened — каждая открытая транзакция, в порядке открытия: чем она открыта
+	// и чьи записи сессии в ней сняты — часть утверждений о порядке замков.
+	opened []*fakeWriter
 }
 
 var errFakePort = errors.New("fake store: port failure")
@@ -133,10 +136,25 @@ func (f *fakeStore) FirstAuthentication(_ context.Context, userID domain.UserID)
 }
 
 func (f *fakeStore) Writer(context.Context) (humansession.Writer, error) {
+	return f.open("")
+}
+
+// SessionSetWriter — транзакция, открытая ДЕРЖАЩЕЙ строку личности: дублёр
+// замков не моделирует и лишь запоминает, чьей строкой транзакция открыта, —
+// до первого её оператора.
+func (f *fakeStore) SessionSetWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	return f.open(userID)
+}
+
+func (f *fakeStore) open(lockedFor domain.UserID) (humansession.Writer, error) {
 	if f.failOn == "writer" {
 		return nil, errFakePort
 	}
-	return &fakeWriter{store: f}, nil
+	w := &fakeWriter{store: f, lockedFor: lockedFor}
+	f.mu.Lock()
+	f.opened = append(f.opened, w)
+	f.mu.Unlock()
+	return w, nil
 }
 
 // fakeWriter — транзакция дублёра: записи копятся и применяются на Commit;
@@ -145,6 +163,11 @@ type fakeWriter struct {
 	store *fakeStore
 	ops   []func()
 	done  bool
+	// lockedFor — личность, чьей строкой транзакция открыта (`SessionSetWriter`);
+	// пусто — открыта `Writer`.
+	lockedFor domain.UserID
+	// endedOthersOf — чьи записи сессии сняты `EndOtherSessions`, по вызову.
+	endedOthersOf []domain.UserID
 }
 
 func (w *fakeWriter) fail(op string) error {
@@ -194,6 +217,7 @@ func (w *fakeWriter) EndSession(_ context.Context, id domain.HumanSessionID, at 
 }
 
 func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
+	w.endedOthersOf = append(w.endedOthersOf, userID)
 	if err := w.fail("end-others"); err != nil {
 		return 0, err
 	}
