@@ -186,7 +186,7 @@ type surfaceFlow struct {
 	ifaceRegs  map[*ast.CallExpr]*surfaceReg
 	dispatched map[*ast.CallExpr]bool
 	// состояние каждого вызова метода интерфейса на последнем вычислении:
-	// все ли получатели разрешились
+	// все ли получатели разрешились и несут ли аргументы мультиплексор
 	ifaceCalls map[*ast.CallExpr]*ifaceCall
 	// переменные, объявленные без значения (нулевое значение), и функция
 	// объявления: нулевое значение своего типа с методами — место рождения
@@ -1327,13 +1327,16 @@ type ifaceCall struct {
 	// unresolved — хоть у одного значения получателя (или при пустом
 	// множестве значений) реализация не найдена.
 	unresolved bool
+	// muxArg — аргументы несут мультиплексор (сам или его метод значением).
+	muxArg bool
 }
 
 // dispatchCall — вызов метода интерфейса fn над получателями recvs. Метод
 // регистрации через интерфейс, который реализует мультиплексор, без
 // реализации хоть у одного получателя — кандидат в непрослеженные: значения до
 // получателя не дотекли (пустой интерфейс, чужой код), а молчать об этом
-// нельзя, даже когда другие получатели разрешились.
+// нельзя, даже когда другие получатели разрешились. Мультиплексор, переданный
+// такому вызову аргументом, уходит туда, где гейт регистраций не видит.
 func (a *surfaceFlow) dispatchCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, fn *types.Func, recvs avSet) []surfaceCallee {
 	out, unresolved := a.dispatchVals(recvs, fn, map[dispatchKey]bool{})
 	if len(out) > 0 {
@@ -1345,6 +1348,7 @@ func (a *surfaceFlow) dispatchCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExp
 		a.ifaceCalls[call] = st
 	}
 	st.unresolved = unresolved || len(recvs) == 0
+	st.muxArg = a.carriesMux(sp, fk, call.Args)
 	if _, ok := a.ifaceRegs[call]; !ok {
 		if k := a.ifaceRegKind(fn, len(call.Args)); k != 0 {
 			reg := a.newReg(k, call.Args)
@@ -1413,6 +1417,25 @@ func (a *surfaceFlow) dispatchVals(recvs avSet, fn *types.Func, seen map[dispatc
 		out = append(out, surfaceCallee{fn: m.Origin(), recvVals: avSet{v: {}}, embed: embed})
 	}
 	return out, unresolved
+}
+
+// carriesMux — аргументы несут мультиплексор: сам или его метод значением.
+func (a *surfaceFlow) carriesMux(sp *surfaceSrcPkg, fk fkey, args []ast.Expr) bool {
+	for _, arg := range args {
+		for v := range a.eval(sp, fk, arg) {
+			switch v.kind {
+			case avHTTPMux, avGatewayMux:
+				return true
+			case avBound:
+				for r := range a.boundRecv[v] {
+					if r.kind == avHTTPMux || r.kind == avGatewayMux {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // embedPath — встроенные поля на пути выбора метода: все индексы, кроме

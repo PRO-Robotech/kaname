@@ -164,7 +164,7 @@ func (c CeremonySurfaceCensus) Summary() string {
 		"пакетов исходником %d · файлов %d · файлов корня %d · объявлений поверхности %d · "+
 		"элементов среза подъёма %d · построителей %d · мультиплексоров net/http %d · шлюза %d · "+
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
-		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у чужого кода %d · "+
+		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у ненаблюдаемого кода %d · "+
 		"чтений пути запроса %d · носителей пути %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
 		"координат без производителя %d · положительных контролей %d · формы пути: %s",
 		c.SolveRounds, CeremonySolveRoundLimit, c.ResolveSteps, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
@@ -673,6 +673,7 @@ func (j *surfaceJudge) registrations() {
 		j.find("мультиплексор уходит в чужой код %s (%s): регистрации, сделанные там, гейт не наблюдает",
 			e.name, position(j.a.prog.fset, pos))
 	}
+	j.ifaceEscapes()
 	for _, n := range j.a.pathReads {
 		if j.reachableFk(n.fk) {
 			c.URLPathReads++
@@ -686,6 +687,25 @@ func (j *surfaceJudge) registrations() {
 		j.find("маршрут решается по пути запроса в теле обработчика — %s (%s): регистрацию на мультиплексоре "+
 			"гейт видит, решение в теле обработчика — нет; такая форма монтажа координаты осталась бы незамеченной",
 			m.form, j.pos(m.node.node))
+	}
+}
+
+// ifaceEscapes — мультиплексор, переданный аргументом методу интерфейса, у
+// которого хоть один получатель без найденной реализации: регистрации,
+// которые сделает непрослеженная реализация, гейт не наблюдает.
+func (j *surfaceJudge) ifaceEscapes() {
+	var calls []*ifaceCall
+	for _, st := range j.a.ifaceCalls {
+		if st.unresolved && st.muxArg && j.reachableFk(st.node.fk) {
+			calls = append(calls, st)
+		}
+	}
+	sort.Slice(calls, func(x, y int) bool { return calls[x].node.node.Pos() < calls[y].node.node.Pos() })
+	for _, st := range calls {
+		name := "метод интерфейса " + fnName(st.fn)
+		j.census.Escapes = append(j.census.Escapes, name)
+		j.find("мультиплексор передан методу интерфейса %s (%s), а реализация хоть у одного получателя не "+
+			"прослежена: регистрации, сделанные там, гейт не наблюдает", fnName(st.fn), j.pos(st.node.node))
 	}
 }
 
