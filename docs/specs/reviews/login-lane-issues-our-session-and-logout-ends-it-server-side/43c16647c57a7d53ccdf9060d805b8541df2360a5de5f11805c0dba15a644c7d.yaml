@@ -78,15 +78,51 @@ authority:
   authorized_actors: [pointpu]
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Рецензент событий не публикует; публикует курьер.
+  type: issue_comment
+  status: performed
+  database_id: 5810637843
+  node_id: IC_kwDOTZqgWM8AAAABWldMEw
+  url: https://github.com/PRO-Robotech/kacho/issues/1269#issuecomment-5810637843
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5810637843
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-24T08:28:17Z'
+  body_sha256: 76b08486b1c683a7696a78c82ee158cea81f781c33f5c2375d8b52bb32c0eb63
+  subject_sha256: 43c16647c57a7d53ccdf9060d805b8541df2360a5de5f11805c0dba15a644c7d
+  subject_revision: 7ef9067caae81f6626a6be3824fd5650775f0df6
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; ревизия тела — коммит 7ef9067c, внёсший
+    редакцию 15 вместе с этой записью, и она опубликована раньше события: `gh api
+    'repos/PRO-Robotech/kaname/activity?ref=refs/heads/295'` → создание ветки на 7ef9067c в
+    08:27:58Z, событие — 08:28:17Z. Прежний блок `event` этой записи (`type: none`, `status:
+    not_performed`, причина «ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Рецензент событий не публикует;
+    публикует курьер.») заменён этим: он описывал момент вердикта, когда события ещё не было. В
+    `attribution` к факту публикации приведены два поля — `publishing_actor` (было null) и
+    `publication_mode` (было record_only). Вердикт, разбор, находки, числа и `effective_approval`
+    (issued/ban1_lifted) НЕ тронуты: дописывающий — `git-operator`, вердикта о санкции он не
+    выносит. Запись поэтому по-прежнему объявляет `issued: false` при состоявшемся событии; снять
+    расхождение — решение того, кто выпускает effective approval.
+    Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5810637843` (id, node_id, user pointpu, MEMBER,
+    `issue_url` → kacho#1269, то есть `subject.task`; created_at == updated_at, то есть после
+    публикации тело не правилось); пять строк тела дословно, каждая ровно одна (`grep -cxF` → 1
+    по каждой), контроль в другую сторону `grep -cxF 'verdict: CHANGES_REQUESTED'` → 0; отпечаток
+    тела — `gh api … | jq -j .body | sha256sum` → 76b08486…; форма команды проверена в обе
+    стороны: на этом же теле `jq -r` → ae802c15… — другое число о другом входе; на событии круга 8
+    (5797646739) `jq -j` → faa7dffc… как в его записи. Отпечаток предмета снят самостоятельно: `git
+    show 7ef9067caae81f6626a6be3824fd5650775f0df6:docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+    | sha256sum` → 43c16647c57a7d53ccdf9060d805b8541df2360a5de5f11805c0dba15a644c7d, совпал с
+    именем файла записи и со строкой `subject_sha256` тела события.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: record_only
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 scope:
