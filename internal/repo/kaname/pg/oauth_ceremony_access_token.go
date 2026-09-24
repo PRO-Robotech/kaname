@@ -87,15 +87,14 @@ const issuanceBackstopMessage = "access token issuance record refused a value th
 
 // RecordAccessToken записывает выпуск токена доступа в его семейство.
 //
-// # КТО ОБЯЗАН ЗВАТЬ — И ЧТО ВЫЗЫВАЮЩЕГО ПОКА НЕТ
+// # КТО ЗОВЁТ
 //
-// Звать обязан выпуск токена доступа церемонии — реализация порта выпуска
-// фундамента (`oauthceremony.AccessTokenIssuer` либо
-// `oauthceremony.AccessTokenVault.StoreAccessToken`, подпись которого и есть
-// `jti`; пакет `corelib/oauthceremony`, порты есть с тега v1.10.0-rc.1).
-// Провязку ведёт kaname#396. На этой ревизии не-тестового вызывающего
-// НЕТ: выпуска токена доступа церемонии в дереве ещё нет, и записей не пишет
-// никто.
+// Выпуск токена доступа церемонии — адаптер порта выпуска фундамента
+// (`ceremonyport.AccessTokens.IssueAccessToken`, порт
+// `oauthceremony.AccessTokenIssuer` пакета `corelib/oauthceremony`) через свой
+// порт `ceremonyport.IssuanceRecorder`. Сама церемония в композиционном корне
+// службы ещё не собрана (kaname#407): до сборки записей на пути запроса не
+// пишет никто.
 //
 // Обязанность выпуска, а не пожелание:
 //
