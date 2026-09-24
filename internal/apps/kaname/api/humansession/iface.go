@@ -145,6 +145,11 @@ type Writer interface {
 	// ReplaceLoginVerifier замещает материал способа входа одним оператором
 	// (ID-PW-1 PWV-10): replaced=false — строки способа нет.
 	ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (replaced bool, err error)
+	// LoginMethod — строка способа входа человека данного вида, прочитанная
+	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
+	// строки нет), но соединением открытой транзакции, а не вторым из пула —
+	// вложенного захвата соединения у него нет (шапка `completed_login.go`).
+	LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
 	// RecordFailure — одно неверное предъявление по оси и ключу.
 	RecordFailure(ctx context.Context, scope FailureScope, key string, at time.Time) error
 	// ResetFailures снимает счёт по оси и ключу (успешный вход обнуляет счёт по

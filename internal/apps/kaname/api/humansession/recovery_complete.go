@@ -22,15 +22,51 @@ package humansession
 // # Порядок внутри обращения — несущий
 //
 //	форма → частота (обе оси) → правило нового пароля → ЧТЕНИЕ адреса →
-//	ОДНА транзакция: применить код (один оператор) · записать материал ·
-//	снять записи ВСЕХ прежних сессий · отсечка «смена пароля» актором-человеком ·
-//	журнал по ключу потока · событие · выдача сессии (если не заблокирована) ·
-//	сброс счёта по адресу
+//	ОДНА транзакция: применить код (один оператор) — ТОЧКА РЕШЕНИЯ; дальше
+//	только у применённого кода: записать материал · снять записи ВСЕХ прежних
+//	сессий · отсечка «смена пароля» актором-человеком · журнал по ключу потока ·
+//	у незаблокированной — выдача сессии, чтение заведённых способов входа ЭТОЙ
+//	ЖЕ транзакцией и решение о счёте по адресу местом решения входа · событие ·
+//	фиксация
 //
 // Правило пароля судится ДО применения кода: негодный пароль называет поле и
-// не тратит код. Чтение адреса и оператор применения исполняются на ОБЕИХ
-// полосах — «адрес есть» и «адреса нет» — одинаково: у второй оператор ищет
-// код у пустой личности и не находит, как не нашёл бы неверный.
+// не тратит код. До точки решения полосы «адрес есть» и «адреса нет» делают
+// ОДНУ И ТУ ЖЕ работу хранилища — чтение адреса, открытие транзакции, оператор
+// применения, отказ: у второй оператор ищет код у пустой личности и не находит,
+// как не нашёл бы неверный (Р5, Р7, §8 инв. 4). Поэтому работа, нужная только
+// найденной личности, — чтение заведённых способов входа в том числе — стоит
+// ПОСЛЕ точки решения: до неё она удлиняла бы полосу «адрес есть» на обходы
+// базы, и время отказа называло бы, существует ли адрес. Проб времени у полосы
+// завершения нет (Ф5-20…22 меряют запрос кода), поэтому равенство держит ряд
+// обращений к портам хранилища —
+// `TestRecovery_WrongCodeRefusalDoesTheSameStoreWorkForNobodyAndForSomeone`.
+//
+// # Счёт по адресу решает МЕСТО РЕШЕНИЯ ВХОДА, а не эта полоса
+//
+// Завершение выдаёт сессию и потому завершает вход; обнуляет ли оно счёт по
+// адресу, решает `resetFailuresOnCompletedLogin` (`completed_login.go`) тем же
+// правилом, что вход и церемония (Ф3 Р10, Ф12 Р7, Ф5 Р5; задача
+// PRO-Robotech/kaname#305). Сессия восстановления — «1» (`recovery_code`, Ф11
+// Р8), и исходов поэтому три:
+//
+//	без второго фактора, не заблокирована — счёт обнуляется: «1» и есть
+//	                                        уровень всех её факторов;
+//	второй фактор заведён                 — счёт НЕ обнуляется: это тот же
+//	                                        счёт, что бюджет подбора его кода,
+//	                                        и обнуляет его только вход, доведённый
+//	                                        кодом до «2»;
+//	заблокирована                         — сессии нет, вход не завершён: решения
+//	                                        нет вовсе, а отказ завершения
+//	                                        считается попыткой, как всякий отказ
+//	                                        входа заблокированной (Ф1-59).
+//
+// Заведённое читается ПОСЛЕ применения кода соединением самой транзакции
+// записи (`Writer.LoginMethod`): чтение пулом изнутри открытой транзакции дало
+// бы вложенный захват соединения (шапка `completed_login.go`), а чтение ДО
+// транзакции стояло бы до точки решения (выше). Отказ этого чтения — отказ
+// исхода, как отказ любой записи той же транзакции: отказ оператора базы её
+// обрывает, и продолжать её нечем. Исход откатывается целиком — код остаётся
+// годным, учётные данные и счёт по адресу прежние.
 //
 // Отказ — ОДИН на все причины предъявления (Ф1 Р3, Ф1-59): «адреса нет», «код
 // не тот», «истёк», «применён», «заблокирована» — наружу уходит тот же
@@ -78,7 +114,9 @@ type CompleteRecoveryUseCase struct {
 	gate     attemptGate
 }
 
-// CompleteRecoveryDeps — зависимости.
+// CompleteRecoveryDeps — зависимости. Хранилища способов входа среди них нет:
+// ось «заведено» места решения о счёте по адресу читается транзакцией записи
+// (`Writer.LoginMethod`), после применения кода.
 type CompleteRecoveryDeps struct {
 	Store    Store
 	Hasher   Hasher
@@ -159,7 +197,8 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	}
 	now := uc.now().UTC()
 
-	// (3) Адрес — одно чтение на обеих полосах.
+	// (3) Адрес — одно чтение на обеих полосах. До точки решения (4) обе
+	// полосы делают одну и ту же работу хранилища (шапка).
 	target, found, err := uc.store.RecoveryTarget(ctx, domain.Email(addressKey))
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
@@ -167,8 +206,8 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	}
 	user := target.User
 
-	// (4) Одна транзакция: применить код одним оператором и — если применён —
-	// все записи завершения.
+	// (4) Одна транзакция: применить код одним оператором — ТОЧКА РЕШЕНИЯ — и,
+	// если применён, все записи завершения.
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
@@ -206,8 +245,10 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	return out, nil
 }
 
-// complete — записи завершения ОДНИМ исходом на открытой транзакции: материал ·
-// снятие записей всех прежних сессий · отсечка · журнал · событие · выдача.
+// complete — записи завершения ОДНИМ исходом на открытой транзакции, после точки
+// решения: материал · снятие записей всех прежних сессий · отсечка · журнал ·
+// у незаблокированной — выдача, чтение заведённых способов этой транзакцией и
+// решение о счёте по адресу местом решения входа · событие · фиксация.
 func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
 	now time.Time, blocked, emailVerified bool,
@@ -260,9 +301,10 @@ func (uc *CompleteRecoveryUseCase) complete(
 	if !blocked {
 		// Сессия аутентифицирована на единицу разрешения ПОЗЖЕ отсечки: иначе
 		// при включающей границе она была бы негодна (Ф5-19, Ф1 §4.2).
+		methods := []string{assurance.MethodRecoveryCode.String()}
 		s, bearer, err := IssueSession(ctx, w, IssueInput{
 			User:      user,
-			Presented: []assurance.Presentation{assurance.RecoveryCodePresented()},
+			Presented: presentationsOf(methods),
 			At:        now.Add(time.Microsecond),
 			TTL:       uc.ttl,
 		})
@@ -271,13 +313,27 @@ func (uc *CompleteRecoveryUseCase) complete(
 		}
 		payload["session_id"] = string(s.ID)
 		out = CompleteRecoveryOutput{View: SessionView{User: user, Session: s, EmailVerified: emailVerified}, Bearer: bearer}
+		// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых
+		// у личности факторов (Ф3 Р10, Ф12 Р7, Ф5 Р5): сессия восстановления —
+		// «1», и при заведённом втором факторе вход не завершён. У
+		// заблокированной решения нет вовсе — сессии нет. Заведённое читается
+		// ЭТОЙ транзакцией и только здесь, после точки решения (шапка).
+		enrolled, err := enrolledMethods(ctx, w.LoginMethod, user.ID)
+		if err != nil {
+			uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
+				"user_id", string(user.ID), "err", err.Error())
+			return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: enrolled login methods unreadable: %w", err)
+		}
+		if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+			Enrolled: enrolled, EnrolledKnown: true,
+			AddressKey: AddressKey(string(user.Email)), Presented: methods,
+		}); err != nil {
+			return CompleteRecoveryOutput{}, err
+		}
 	}
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType: AuditRecoveryCompleted, TenantAccountID: string(user.AccountID), Payload: payload,
 	}); err != nil {
-		return CompleteRecoveryOutput{}, err
-	}
-	if err := w.ResetFailures(ctx, FailureByAddress, AddressKey(string(user.Email))); err != nil {
 		return CompleteRecoveryOutput{}, err
 	}
 	if err := w.Commit(ctx); err != nil {

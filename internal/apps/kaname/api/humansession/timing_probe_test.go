@@ -166,7 +166,7 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	}
 	// Огибающая — как в композиционном корне: перепись классов хранилища
 	// (здесь она известна пробе) плюс класс ручки, каждый — калибровкой.
-	envelope, err := passwordverify.NewEnvelope(h.verifier, passwordverify.NopEnvelopeObserver{})
+	envelope, err := passwordverify.NewEnvelope(h.verifier, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
 	require.NoError(t, err)
 	population := []domain.PasswordCostClass{
 		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, uint32(bcrypt.MinCost)),

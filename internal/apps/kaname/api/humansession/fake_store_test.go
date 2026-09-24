@@ -8,12 +8,24 @@ package humansession_test
 // (снятие — отметка; замещение — только существующей строки; счёт — по оси и
 // окну); подставные отказы — по имени операции, чтобы проба «одним исходом»
 // могла уронить любую из записей.
+//
+// # Работа базы — тоже семантика
+//
+// Каждый метод повторяет у адаптера не только исход, но и РАБОТУ: вход,
+// который адаптер отвергает аргументом, не доходя до базы, дублёр отвергает тем
+// же классом отказа и без обхода; дошедший до базы — считает один оператор
+// (`trips`). Порядок в каждом методе поэтому один: отказы аргументом адаптера →
+// оператор (`trip`) → подставной отказ → семантика. Число читают журнал работы
+// хранилища (`recording_store_test.go`) и замок равенства работы полос отказа;
+// что дублёр на осях полос отвечает и работает как адаптер, держит сверка с
+// настоящим адаптером над Postgres (`store_double_parity_integration_test.go`).
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -63,7 +75,19 @@ type fakeStore struct {
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
 	failOn string
+	// trips — операторы базы, которые исполнил бы адаптер (шапка файла).
+	trips atomic.Int64
 }
+
+// trip — один оператор базы: обращение, дошедшее до неё.
+func (f *fakeStore) trip() { f.trips.Add(1) }
+
+// tripCount — операторов базы с начала жизни дублёра.
+func (f *fakeStore) tripCount() int64 { return f.trips.Load() }
+
+// errFakeArg — отказ аргументом в форме адаптера: класс INVALID_ARGUMENT, базы
+// обращение не касается.
+func errFakeArg(text string) error { return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", text) }
 
 var errFakePort = errors.New("fake store: port failure")
 
@@ -78,6 +102,11 @@ func newFakeStore() *fakeStore {
 }
 
 func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	if digest == "" {
+		// Адаптер: пустой свёртке строки не бывает — ответ без обхода базы.
+		return humansession.Resolved{}, humansession.NoSessionUnknown, nil
+	}
+	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failOn == "resolve" {
@@ -101,6 +130,7 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 }
 
 func (f *fakeStore) CountFailures(_ context.Context, scope humansession.FailureScope, key string, since time.Time) (int, error) {
+	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
@@ -113,6 +143,7 @@ func (f *fakeStore) CountFailures(_ context.Context, scope humansession.FailureS
 }
 
 func (f *fakeStore) OldestFailureSince(_ context.Context, scope humansession.FailureScope, key string, since time.Time) (time.Time, bool, error) {
+	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var oldest time.Time
@@ -126,6 +157,13 @@ func (f *fakeStore) OldestFailureSince(_ context.Context, scope humansession.Fai
 }
 
 func (f *fakeStore) FirstAuthentication(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
+	f.trip()
+	return f.firstAuthentication(userID)
+}
+
+// firstAuthentication — чтение памяти первой аутентификации; оператор считает
+// вызывающий (пул либо транзакция — оператор один).
+func (f *fakeStore) firstAuthentication(userID domain.UserID) (time.Time, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	at, ok := f.first[userID]
@@ -133,6 +171,7 @@ func (f *fakeStore) FirstAuthentication(_ context.Context, userID domain.UserID)
 }
 
 func (f *fakeStore) Writer(context.Context) (humansession.Writer, error) {
+	f.trip()
 	if f.failOn == "writer" {
 		return nil, errFakePort
 	}
@@ -141,10 +180,12 @@ func (f *fakeStore) Writer(context.Context) (humansession.Writer, error) {
 
 // fakeWriter — транзакция дублёра: записи копятся и применяются на Commit;
 // Rollback их сбрасывает. Отказ по имени операции — на самой операции.
+// Закрытая транзакция (зафиксирована либо откачена) откат базе не шлёт, как у
+// адаптера.
 type fakeWriter struct {
-	store *fakeStore
-	ops   []func()
-	done  bool
+	store  *fakeStore
+	ops    []func()
+	closed bool
 }
 
 func (w *fakeWriter) fail(op string) error {
@@ -156,8 +197,12 @@ func (w *fakeWriter) fail(op string) error {
 
 func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	if err := s.Validate(); err != nil {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+		return errFakeArg(err.Error())
 	}
+	if digest == "" {
+		return errFakeArg("Illegal argument human_session.bearer_digest: required")
+	}
+	w.store.trip()
 	if err := w.fail("insert"); err != nil {
 		return err
 	}
@@ -166,6 +211,10 @@ func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, dig
 }
 
 func (w *fakeWriter) RememberFirstAuthentication(_ context.Context, userID domain.UserID, at time.Time) error {
+	if userID == "" || at.IsZero() {
+		return errFakeArg("Illegal argument first_authentication: user_id and moment required")
+	}
+	w.store.trip()
 	if err := w.fail("remember"); err != nil {
 		return err
 	}
@@ -177,11 +226,13 @@ func (w *fakeWriter) RememberFirstAuthentication(_ context.Context, userID domai
 	return nil
 }
 
-func (w *fakeWriter) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
-	return w.store.FirstAuthentication(ctx, userID)
+func (w *fakeWriter) FirstAuthentication(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
+	w.store.trip()
+	return w.store.firstAuthentication(userID)
 }
 
 func (w *fakeWriter) EndSession(_ context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error) {
+	w.store.trip()
 	if err := w.fail("end"); err != nil {
 		return false, err
 	}
@@ -194,6 +245,7 @@ func (w *fakeWriter) EndSession(_ context.Context, id domain.HumanSessionID, at 
 }
 
 func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
+	w.store.trip()
 	if err := w.fail("end-others"); err != nil {
 		return 0, err
 	}
@@ -209,6 +261,10 @@ func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, k
 }
 
 func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {
+	if digest == "" {
+		return errFakeArg("Illegal argument human_session.bearer_digest: required")
+	}
+	w.store.trip()
 	if err := w.fail("rotate"); err != nil {
 		return err
 	}
@@ -223,6 +279,13 @@ func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, d
 // PresentInSession — предъявление способа внутри сессии (Ф12): множество,
 // уровень, носитель и момент — одной записью на живой строке.
 func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+	if digest == "" {
+		return errFakeArg("Illegal argument human_session.bearer_digest: required")
+	}
+	if len(methods) == 0 {
+		return errFakeArg("Illegal argument human_session.presented_methods: required")
+	}
+	w.store.trip()
 	if err := w.fail("present"); err != nil {
 		return err
 	}
@@ -244,6 +307,10 @@ func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionI
 }
 
 func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+	if err := u.Validate(); err != nil {
+		return errFakeArg(err.Error())
+	}
+	w.store.trip()
 	if err := w.fail("cutoff"); err != nil {
 		return err
 	}
@@ -257,6 +324,10 @@ func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocatio
 }
 
 func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, errFakeArg(err.Error())
+	}
+	w.store.trip()
 	if err := w.fail("replace"); err != nil {
 		return false, err
 	}
@@ -267,7 +338,28 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	return true, nil
 }
 
+// LoginMethod — то же чтение, что `fakeMethods.Get`, транзакцией дублёра;
+// отказ по имени "login-method". Пустую личность и вид вне словаря адаптер
+// отвергает аргументом, до базы (`getLoginMethod`).
+func (w *fakeWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	if userID == "" {
+		return domain.LoginMethod{}, errFakeArg("Illegal argument login_method.user_id: required")
+	}
+	if err := kind.Validate(); err != nil {
+		return domain.LoginMethod{}, errFakeArg(err.Error())
+	}
+	w.store.trip()
+	if err := w.fail("login-method"); err != nil {
+		return domain.LoginMethod{}, err
+	}
+	return fakeMethods{w.store}.Get(ctx, userID, kind)
+}
+
 func (w *fakeWriter) RecordFailure(_ context.Context, scope humansession.FailureScope, key string, at time.Time) error {
+	if key == "" {
+		return errFakeArg("Illegal argument login_failure.key: required")
+	}
+	w.store.trip()
 	if err := w.fail("record-failure"); err != nil {
 		return err
 	}
@@ -276,6 +368,7 @@ func (w *fakeWriter) RecordFailure(_ context.Context, scope humansession.Failure
 }
 
 func (w *fakeWriter) ResetFailures(_ context.Context, scope humansession.FailureScope, key string) error {
+	w.store.trip()
 	if err := w.fail("reset-failures"); err != nil {
 		return err
 	}
@@ -292,6 +385,11 @@ func (w *fakeWriter) ResetFailures(_ context.Context, scope humansession.Failure
 }
 
 func (w *fakeWriter) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) error {
+	if ev.EventType == "" {
+		// Адаптер: отказ записи события — без класса словаря, до базы.
+		return errors.New("emit audit_outbox: event_type required")
+	}
+	w.store.trip()
 	if err := w.fail("audit"); err != nil {
 		return err
 	}
@@ -299,7 +397,18 @@ func (w *fakeWriter) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) err
 	return nil
 }
 
+// errFakeTxClosed — фиксация закрытой транзакции: у адаптера отказ без класса
+// словаря и без обращения к базе.
+var errFakeTxClosed = errors.New("fake store: tx is closed")
+
+// Commit — фиксация закрывает транзакцию и при отказе: так закрывает её и
+// соединение адаптера.
 func (w *fakeWriter) Commit(context.Context) error {
+	if w.closed {
+		return errFakeTxClosed
+	}
+	w.store.trip()
+	w.closed = true
 	if err := w.fail("commit"); err != nil {
 		return err
 	}
@@ -308,11 +417,19 @@ func (w *fakeWriter) Commit(context.Context) error {
 	for _, op := range w.ops {
 		op()
 	}
-	w.done = true
 	return nil
 }
 
-func (w *fakeWriter) Rollback(context.Context) error { w.ops = nil; return nil }
+// Rollback — у закрытой транзакции ничего не делает и базе ничего не шлёт.
+func (w *fakeWriter) Rollback(context.Context) error {
+	if w.closed {
+		return nil
+	}
+	w.store.trip()
+	w.closed = true
+	w.ops = nil
+	return nil
+}
 
 // --- второй фактор (Ф12): семантика операторов адаптера, не снисходительнее ---
 
@@ -331,8 +448,12 @@ func (w *fakeWriter) putFactor(m domain.LoginMethod) {
 
 func (w *fakeWriter) UpsertPendingTOTP(_ context.Context, m domain.LoginMethod) (bool, error) {
 	if err := m.Validate(); err != nil {
-		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+		return false, errFakeArg(err.Error())
 	}
+	if m.Kind != domain.LoginMethodTOTP || m.State != domain.LoginMethodStatePending || m.CreatedAt.IsZero() {
+		return false, errFakeArg("Illegal argument login_method: enrollment row must be a pending totp row with its moment")
+	}
+	w.store.trip()
 	if err := w.fail("enroll"); err != nil {
 		return false, err
 	}
@@ -346,6 +467,10 @@ func (w *fakeWriter) UpsertPendingTOTP(_ context.Context, m domain.LoginMethod) 
 }
 
 func (w *fakeWriter) ActivateTOTP(_ context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (bool, error) {
+	if userID == "" || pendingSince.IsZero() || at.IsZero() {
+		return false, errFakeArg("Illegal argument login_method: user, enrollment moment and confirmation moment required")
+	}
+	w.store.trip()
 	if err := w.fail("activate"); err != nil {
 		return false, err
 	}
@@ -365,8 +490,12 @@ func (w *fakeWriter) ActivateTOTP(_ context.Context, userID domain.UserID, pendi
 
 func (w *fakeWriter) ReplaceLookupSet(_ context.Context, m domain.LoginMethod) error {
 	if err := m.Validate(); err != nil {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+		return errFakeArg(err.Error())
 	}
+	if m.Kind != domain.LoginMethodLookupSecret || m.CreatedAt.IsZero() {
+		return errFakeArg("Illegal argument login_method: lookup set row must be a lookup_secret row with its moment")
+	}
+	w.store.trip()
 	if err := w.fail("replace-set"); err != nil {
 		return err
 	}
@@ -377,6 +506,10 @@ func (w *fakeWriter) ReplaceLookupSet(_ context.Context, m domain.LoginMethod) e
 }
 
 func (w *fakeWriter) LockLookupSet(_ context.Context, userID domain.UserID) (domain.LoginMethod, bool, error) {
+	if userID == "" {
+		return domain.LoginMethod{}, false, errFakeArg("Illegal argument login_method.user_id: required")
+	}
+	w.store.trip()
 	if err := w.fail("lock-set"); err != nil {
 		return domain.LoginMethod{}, false, err
 	}
@@ -390,6 +523,10 @@ func (w *fakeWriter) LockLookupSet(_ context.Context, userID domain.UserID) (dom
 }
 
 func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserID, element string) (bool, error) {
+	if userID == "" || element == "" || strings.ContainsRune(element, ',') {
+		return false, errFakeArg("Illegal argument lookup element: required and without a separator")
+	}
+	w.store.trip()
 	if err := w.fail("consume"); err != nil {
 		return false, err
 	}
@@ -413,6 +550,10 @@ func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserI
 }
 
 func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID, step int64) (bool, error) {
+	if userID == "" {
+		return false, errFakeArg("Illegal argument login_method.user_id: required")
+	}
+	w.store.trip()
 	if err := w.fail("record-step"); err != nil {
 		return false, err
 	}
@@ -431,6 +572,10 @@ func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID,
 }
 
 func (w *fakeWriter) RemoveSecondFactor(_ context.Context, userID domain.UserID) (bool, error) {
+	if userID == "" {
+		return false, errFakeArg("Illegal argument login_method.user_id: required")
+	}
+	w.store.trip()
 	if err := w.fail("remove-factor"); err != nil {
 		return false, err
 	}
