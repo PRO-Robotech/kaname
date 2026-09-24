@@ -296,6 +296,7 @@ CAPTURED_OTHER = {
             "PR PRO-Robotech/kaname#164. Перепись на стволе: «в",
 }
 SUBJECT_SHA = "fe558cc810e569f456e9b2da1200c4396afaf39ae52450787484e74beaced170"
+SIBLING_SHA = "5b70cc583c7d4d3fc451dd35758d404ee0897410c449ad46c4c1ac1ce864ce3d"
 RECORD_PATH = "%s/recovery-of-access/%s.yaml" % (REVIEWS, SUBJECT_SHA)
 
 
@@ -367,8 +368,32 @@ def self_test() -> int:
         stranger = dict(CAPTURED_EVENT, id=2, user={"login": "someone-else"})
         prose_only = fixture("fx-prose", [CAPTURED_OTHER, prose])
         stranger_only = fixture("fx-stranger", [CAPTURED_OTHER, stranger])
+        # У каждого свойства разбора, объявленного в ПРЕДМЕТЕ, — свой близнец, тоже
+        # отличающийся от захваченного события ОДНИМ фактом:
+        #   отпечаток сверяется — событие той же учётки в той же задаче о СОСЕДНЕЙ
+        #     редакции (такое в kacho#1271 есть: 5b70cc58…, комментарий 5707963723);
+        #   заголовок кончается первой `---` — поле ниже черты заголовком не является;
+        #   нужны все пять полей — по близнецу без каждого из них.
+        head, sep, tail = CAPTURED_EVENT["body"].partition("\n---\n")
+
+        def header_without(field: str) -> str:
+            return "\n".join(ln for ln in head.split("\n") if not ln.startswith(field + ":")) + sep + tail
+
+        sibling = dict(CAPTURED_EVENT, id=3, body=CAPTURED_EVENT["body"].replace(SUBJECT_SHA, SIBLING_SHA))
+        below = dict(CAPTURED_EVENT, id=4, body=header_without("subject_sha256") + "subject_sha256: %s\n" % SUBJECT_SHA)
+        sibling_only = fixture("fx-sibling", [CAPTURED_OTHER, sibling])
+        below_only = fixture("fx-below", [CAPTURED_OTHER, below])
 
         silent = repo("silent", {RECORD_PATH: silent_record()})
+        case("законный близнец: та же учётка, та же задача, событие о другом отпечатке", silent, sibling_only, GREEN,
+             ("расхождений              : 0", "событий полномочия распознано : 1"))
+        case("законный близнец: subject_sha256 ниже черты `---`, в заголовке его нет", silent, below_only, GREEN,
+             ("расхождений              : 0", "событий полномочия распознано : 0"))
+        for field in REQUIRED_EVENT_FIELDS:
+            partial = dict(CAPTURED_EVENT, id=5, body=header_without(field))
+            case("законный близнец: в заголовке нет поля %s" % field, silent,
+                 fixture("fx-without-" + field, [CAPTURED_OTHER, partial]), GREEN,
+                 ("расхождений              : 0", "событий полномочия распознано : 0"))
         case("инъекция: без блока event при опубликованном событии", silent, with_event, RED,
              (RECORD_PATH, CAPTURED_EVENT["html_url"], "без блока event", "расхождений              : 1"))
         case("законный близнец: та же запись, в ответе события с этим отпечатком нет", silent, without_event, GREEN,
@@ -381,6 +406,10 @@ def self_test() -> int:
             "event:\n  type: issue_comment\n  status: not_performed\n")})
         case("инъекция второй формы: event.status: not_performed при опубликованном событии", np_rec, with_event, RED,
              (RECORD_PATH, "event.status: not_performed"))
+        none_rec = repo("type-none", {RECORD_PATH: silent_record(
+            "event:\n  type: none\n  status: not_performed\n")})
+        case("инъекция третьей формы: event.type: none при опубликованном событии", none_rec, with_event, RED,
+             (RECORD_PATH, "event.type: none"))
         perf = repo("performed", {RECORD_PATH: silent_record(
             "event:\n  type: issue_comment\n  status: performed\n")})
         case("вне предмета: исполненное событие судит #302, здесь молчание", perf, with_event, GREEN,
