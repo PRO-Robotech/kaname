@@ -226,11 +226,15 @@ func (x *IsRevokedRequest) GetTokenJti() string {
 // IsRevokedResponse — sync hot-path response.
 type IsRevokedResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// True if a non-expired row exists in `session_revocations`.
+	// True if a non-expired row exists in `session_revocations` for the `jti`,
+	// or the family the token's issuance belongs to is revoked or removed.
 	Revoked bool `protobuf:"varint,1,opt,name=revoked,proto3" json:"revoked,omitempty"`
-	// When the revocation row was inserted.
+	// When the revocation row was inserted. Empty when the token is revoked by
+	// its family alone: a family revocation writes no row for the `jti`.
 	RevokedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
-	// Reason recorded at insertion (echo of SessionRevocation.reason).
+	// Reason recorded at insertion (echo of SessionRevocation.reason). Empty
+	// when the token is revoked by its family alone; the family's own reason is
+	// not disclosed here.
 	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
