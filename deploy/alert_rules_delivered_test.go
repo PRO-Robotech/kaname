@@ -51,6 +51,7 @@
 package deploy_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -327,22 +328,35 @@ func TestAlertRulesObjectCanBeSwitchedOff(t *testing.T) {
 // страницей держит TestDeliveredAlertRulesMatchThePublishedPage, производителя
 // ряда — TestAlertSelectorsNameAContractTheTreeProduces; здесь — только наличие.
 func TestSigningKeySweeperSilenceIsAlerted(t *testing.T) {
-	const series = `kaname_signing_key_events_total{event="swept"}`
+	series, err := sweepPassSeriesFrom(nil)
+	require.NoError(t, err)
 	renders := alertRenders(t)
 	require.NotEmpty(t, renders, "перепись посадок пуста — проверять нечего, это не зелёное")
 	for _, r := range renders {
 		t.Run(r.name, func(t *testing.T) {
 			rules, objects := chartAlertRules(t, renderStandaloneChart(t, r.chain, r.sets...))
 			require.Positive(t, objects, "объект правил не отрендерился — вердикта о правиле нет")
-			var found []string
-			for _, rule := range rules {
-				expr := strings.Join(strings.Fields(rule.Expr), " ")
-				if strings.Contains(expr, series) && strings.Contains(expr, "== 0") {
-					found = append(found, rule.Alert)
-				}
-			}
+			found := sweeperSilenceAlerts(rules, series)
 			t.Logf("перепись: правил в объекте %d · звонящих на ноль проходов сметателя %d %v", len(rules), len(found), found)
 			require.Len(t, found, 1, "ноль проходов сметателя обязан звонить ровно одним правилом")
 		})
 	}
+}
+
+// sweeperSilenceAlerts — правила, звонящие на НОЛЬ проходов: выражение несёт
+// ряд прохода и сравнение с нулём.
+func sweeperSilenceAlerts(rules []alertRule, series string) []string {
+	var found []string
+	for _, rule := range rules {
+		expr := strings.Join(strings.Fields(rule.Expr), " ")
+		if strings.Contains(expr, series) && strings.Contains(expr, "== 0") {
+			found = append(found, rule.Alert)
+		}
+	}
+	return found
+}
+
+// sweepPassSeriesFrom — ряд прохода сметателя.
+func sweepPassSeriesFrom(_ http.Handler) (string, error) {
+	return `kaname_signing_key_events_total{event="swept"}`, nil
 }
