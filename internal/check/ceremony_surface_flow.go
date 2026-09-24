@@ -1067,6 +1067,13 @@ func (a *surfaceFlow) varVals(v *types.Var) avSet {
 	if v.Pkg() != nil && v.Pkg().Path() == "net/http" && v.Name() == "DefaultServeMux" {
 		return avSet{a.defMux: {}}
 	}
+	if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr && isNamed(v.Type(), "net/http", "ServeMux") {
+		// Переменная типа http.ServeMux (не указатель) — сама место рождения:
+		// нулевое значение мультиплексора годно к регистрации.
+		out := avSet{a.intern(avKey{kind: avHTTPMux, site: v.Pos()}, fkey{}, nil, nil): {}}
+		out.addAll(a.vars[v])
+		return out
+	}
 	return a.vars[v]
 }
 
@@ -1084,6 +1091,10 @@ func (a *surfaceFlow) evalComposite(sp *surfaceSrcPkg, fk fkey, lit *ast.Composi
 	under := types.Unalias(t)
 	if p, ok := under.Underlying().(*types.Pointer); ok {
 		under = p.Elem()
+	}
+	if isNamed(under, "net/http", "ServeMux") {
+		// http.ServeMux{} — место рождения мультиплексора, как NewServeMux.
+		return avSet{a.intern(avKey{kind: avHTTPMux, site: lit.Pos()}, fk, nil, sp): {}}
 	}
 	switch u := under.Underlying().(type) {
 	case *types.Struct:
@@ -1200,6 +1211,9 @@ func (a *surfaceFlow) builtin(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, b 
 	case "new":
 		if len(call.Args) == 1 {
 			if t := a.typeOf(sp, call.Args[0]); t != nil {
+				if isNamed(t, "net/http", "ServeMux") {
+					return avSet{a.intern(avKey{kind: avHTTPMux, site: call.Pos()}, fk, nil, sp): {}}
+				}
 				if _, ok := t.Underlying().(*types.Struct); ok {
 					return avSet{a.intern(avKey{kind: avStruct, site: call.Pos()}, fk, t, sp): {}}
 				}

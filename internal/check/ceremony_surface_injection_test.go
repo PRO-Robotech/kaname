@@ -834,6 +834,72 @@ func ceremonyInjections() []ceremonyInjection {
 			serve(f, anchorMetrics, "metricsMux.Handle(cfg.AuthN.TokenSigning.ResolveKeySetPath(), authorizehttp.New())")
 		}, []string{"не сводится к значению", "KeySetPath", "cmd/kaname/serve.go:"}},
 
+		// X11–X20 — формы рождения мультиплексора, регистрации и пути из
+		// опытов приёмки проверки, круг 1.
+		{"X11_zero_value_mux_on_a_new_surface", func(f *ceremonyFixture) {
+			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
+				"var ceremonyMux http.ServeMux\nceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
+					ceremonySurfaceBlock("ceremonyExtraSurface", "&ceremonyMux"))
+			f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "лишняя поверхность пробы"}},
+
+		{"X12_new_builtin_mux_on_a_new_surface", func(f *ceremonyFixture) {
+			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
+				"ceremonyMux := new(http.ServeMux)\nceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
+					ceremonySurfaceBlock("ceremonyExtraSurface", "ceremonyMux"))
+			f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "лишняя поверхность пробы"}},
+
+		{"X12b_composite_literal_mux_on_a_new_surface", func(f *ceremonyFixture) {
+			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
+				"ceremonyMux := &http.ServeMux{}\nceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
+					ceremonySurfaceBlock("ceremonyExtraSurface", "ceremonyMux"))
+			f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "лишняя поверхность пробы"}},
+
+		{"X13_registration_in_a_goroutine", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "go jwksMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X14_registration_in_a_closure", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "func() { jwksMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New()) }()")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X15_path_from_a_function_return", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_path.go", ceremonyImportLine,
+				"func ceremonyAuthorizePath() string { return authorizehttp.AuthorizePath }")
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyAuthorizePath(), authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X16_path_from_a_package_var", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_path.go", ceremonyImportLine, "var ceremonyPath = authorizehttp.AuthorizePath")
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyPath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X17_path_join", func(f *ceremonyFixture) {
+			f.addImport(ceremonyRootDir, "serve.go", `"path"`)
+			serve(f, anchorIntrospect, `jwksMux.Handle(path.Join("/iam/v1", "authorize"), authorizehttp.New())`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X18_mount_helper_in_the_ceremony_package", func(f *ceremonyFixture) {
+			f.add(fixtureCeremonyPkg, "mount.go", "package authorizehttp\n\nimport \"net/http\"\n\n"+
+				"// Mount — помощник монтажа.\nfunc Mount(m *http.ServeMux) { m.Handle(AuthorizePath, New()) }\n")
+			serve(f, anchorIntrospect, "authorizehttp.Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X19_typed_string_const", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_path.go",
+				"package main\n\ntype ceremonyRoute string\n\nconst ceremonyRouteAuthorize ceremonyRoute = \"/iam/v1/authorize\"\n")
+			serve(f, anchorIntrospect, "jwksMux.Handle(string(ceremonyRouteAuthorize), authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X20_registrar_struct_method", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_reg.go", "\t\"net/http\""+ceremonyImportLine,
+				"type ceremonyRegistrar struct{ mux *http.ServeMux }\n\n"+
+					"func (r ceremonyRegistrar) add() { r.mux.Handle(authorizehttp.AuthorizePath, authorizehttp.New()) }")
+			serve(f, anchorIntrospect, "ceremonyRegistrar{mux: jwksMux}.add()")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
 		{"I36_delegation_deeper_than_the_limit", func(f *ceremonyFixture) {
 			n := check.CeremonyResolveDepthLimit + 4
 			f.add(ceremonyRootDir, "ceremony_probe_layers.go", ceremonyLayersSource(n))
