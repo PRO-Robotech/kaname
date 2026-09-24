@@ -98,6 +98,12 @@ type CeremonySurfaceSpec struct {
 }
 
 // CeremonySolveRoundLimit — предел раундов неподвижной точки разбора.
+//
+// Страж, а не условие сходимости: прослеживание монотонно на конечной решётке
+// (места рождения, копии по местам вызова без повторов, поля, результаты), и
+// неподвижная точка наступает всегда. Предел ловит рост сверх разумного, и его
+// достижение — «гейт не исполнился» с числом раундов, а не вердикт по
+// недособранному разбору. Замер: живое дерево — 5 раундов.
 const CeremonySolveRoundLimit = 200
 
 // CeremonyResolveDepthLimit — предел глубины прохождения запроса.
@@ -196,7 +202,8 @@ type CeremonySurfaceReport struct {
 
 // JudgeCeremonySurfaces судит, на скольких поверхностях резолвится каждая
 // координата. Ошибка — гейт НЕ ИСПОЛНИЛСЯ (радиус не собран, файл не
-// разобрался): это не зелёное и не находка.
+// разобрался, разбор не дошёл до неподвижной точки): это не зелёное и не
+// находка.
 func JudgeCeremonySurfaces(spec CeremonySurfaceSpec, coords []CeremonyCoordinate) (CeremonySurfaceReport, error) {
 	l, err := listingFor(spec.ModuleRoot, spec.RootPackage)
 	if err != nil {
@@ -210,7 +217,12 @@ func JudgeCeremonySurfaces(spec CeremonySurfaceSpec, coords []CeremonyCoordinate
 	}
 	a := newSurfaceFlow(prog)
 	a.collect()
-	rounds := a.solve()
+	rounds, converged := a.solve(CeremonySolveRoundLimit)
+	if !converged {
+		return CeremonySurfaceReport{}, fmt.Errorf("разбор не дошёл до неподвижной точки за %d раундов "+
+			"(предел CeremonySolveRoundLimit): значения, не дотёкшие до регистраций, неотличимы от отсутствующих — "+
+			"вердикт по недособранному разбору не выносится", rounds)
+	}
 	j := &surfaceJudge{a: a, spec: spec, res: newStrResolver(a), reach: a.reachable()}
 	j.census.SolveRounds = rounds
 	return j.run(coords), nil
