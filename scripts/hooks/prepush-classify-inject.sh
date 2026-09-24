@@ -68,7 +68,9 @@ CLASSIFY="$ROOT/scripts/hooks/prepush-classify.sh"
 HOOK="$ROOT/scripts/hooks/pre-push"
 INSTALL="$ROOT/scripts/hooks/install.sh"
 RUNNER="$ROOT/.github/scripts/go-test-verdict.py"
-for f in "$CLASSIFY" "$HOOK" "$INSTALL" "$RUNNER"; do
+RULE_LIB="$ROOT/scripts/hooks/branch-rule.sh"
+RULE_GUARD="$ROOT/scripts/hooks/prepush-rule.sh"
+for f in "$CLASSIFY" "$HOOK" "$INSTALL" "$RUNNER" "$RULE_LIB" "$RULE_GUARD"; do
     [ -f "$f" ] || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — нет $f" >&2; exit 2; }
 done
 
@@ -139,6 +141,15 @@ MARK='УСЛОВИЕ НЕ СОЗДАНО'
 
 work="$(mktemp -d)" || { echo "prepush-classify-inject: НЕ ИСПОЛНЯЛОСЬ — нет временного каталога" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
+
+# КОРНЕВАЯ УЧЁТНАЯ ЗАПИСЬ ФИКСТУРЫ — СВОЯ. Хук первым зовёт страж правила ветки
+# и коммита, а тот сверяет подпись с `git config --global user.*`: у конвейера
+# её нет вовсе, у человека она своя. Поэтому глобальный файл настройки git
+# подменяется файлом фикстуры, а коммит и ветка фикстуры идут по правилу —
+# первая строка `#1 `, ветка `1`: предмет этого опыта не правило, и страж
+# обязан его пропустить.
+export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
 # Спрашивается ФИЗИЧЕСКИЙ путь: подъём по `dirname` идёт по тексту, и TMPDIR,
 # заданный символьной ссылкой внутрь репозитория, прошёл бы молча. Дыра была
@@ -225,6 +236,9 @@ build_module() { # build_module <каталог> <тело пробы>
     cp "$RUNNER" "$d/.github/scripts/go-test-verdict.py" || return 1
     cp "$HOOK" "$d/scripts/hooks/pre-push" || return 1
     cp "$CLASSIFY" "$d/scripts/hooks/prepush-classify.sh" || return 1
+    # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
+    cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
+    cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/mask\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/mask_test.go" <<GO
@@ -248,8 +262,8 @@ audit-list-filter:
 	@echo "ok"
 MK
     git -C "$d" init -q .
-    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe add -A
-    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe commit -q -m "фикстура опыта"
+    git -C "$d" add -A
+    git -C "$d" commit -q -m "#1 фикстура опыта"
     git init --bare -q "$d.git"
     git -C "$d" remote add origin "$d.git"
     ( cd "$d" && bash "$INSTALL" install ) >/dev/null 2>&1
@@ -260,7 +274,7 @@ run_case() { # run_case <имя> <тело пробы> <ожидаемый ис�
     local d out rc
     d="$work/$name"
     if ! build_module "$d" "$body"; then bad "$what — фикстура не собрана, опыт НЕ ИСПОЛНЯЛСЯ"; return; fi
-    out="$(git -C "$d" push origin HEAD:refs/heads/probe 2>&1)"
+    out="$(git -C "$d" push origin HEAD:refs/heads/1 2>&1)"
     rc=$?
     if [ "$want" = pass ]; then
         if [ "$rc" -eq 0 ]; then ok "$what — отправка прошла"

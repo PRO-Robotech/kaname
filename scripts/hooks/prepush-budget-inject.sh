@@ -56,7 +56,9 @@ HOOK="$ROOT/scripts/hooks/pre-push"
 CLASSIFY="$ROOT/scripts/hooks/prepush-classify.sh"
 INSTALL="$ROOT/scripts/hooks/install.sh"
 RUNNER="$ROOT/.github/scripts/go-test-verdict.py"
-for f in "$HOOK" "$CLASSIFY" "$INSTALL" "$RUNNER"; do
+RULE_LIB="$ROOT/scripts/hooks/branch-rule.sh"
+RULE_GUARD="$ROOT/scripts/hooks/prepush-rule.sh"
+for f in "$HOOK" "$CLASSIFY" "$INSTALL" "$RUNNER" "$RULE_LIB" "$RULE_GUARD"; do
     [ -f "$f" ] || { echo "prepush-budget-inject: НЕ ИСПОЛНЯЛОСЬ — нет $f" >&2; exit 2; }
 done
 
@@ -111,6 +113,15 @@ REAL_GO="$(command -v go)"
 
 work="$(mktemp -d)" || { echo "prepush-budget-inject: НЕ ИСПОЛНЯЛОСЬ — нет временного каталога" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
+
+# КОРНЕВАЯ УЧЁТНАЯ ЗАПИСЬ ФИКСТУРЫ — СВОЯ. Хук первым зовёт страж правила ветки
+# и коммита, а тот сверяет подпись с `git config --global user.*`: у конвейера
+# её нет вовсе, у человека она своя. Поэтому глобальный файл настройки git
+# подменяется файлом фикстуры, а коммит и ветка фикстуры идут по правилу —
+# первая строка `#1 `, ветка `1`: предмет этого опыта не правило, и страж
+# обязан его пропустить.
+export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
 # Временный каталог вне всякого репозитория — физическим путём (форма та же,
 # что у хука и соседних проб: подъём по тексту пропустил бы символьную ссылку).
@@ -175,6 +186,9 @@ build_module() {
     cp "$RUNNER" "$d/.github/scripts/go-test-verdict.py" || return 1
     cp "$HOOK" "$d/scripts/hooks/pre-push" || return 1
     cp "$CLASSIFY" "$d/scripts/hooks/prepush-classify.sh" || return 1
+    # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
+    cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
+    cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/budget\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/budget_test.go" <<GO
@@ -201,8 +215,8 @@ print-golangci-pin:
 MK
     : > "$d.lint.log"
     git -C "$d" init -q .
-    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe add -A
-    git -C "$d" -c user.email=probe@example.invalid -c user.name=probe commit -q -m "фикстура опыта"
+    git -C "$d" add -A
+    git -C "$d" commit -q -m "#1 фикстура опыта"
     git init --bare -q "$d.git"
     git -C "$d" remote add origin "$d.git"
     ( cd "$d" && bash "$INSTALL" install ) >/dev/null 2>&1
@@ -213,7 +227,7 @@ push_case() {
     d="$work/$1"; b="$work/$1.bin"
     make_bin "$b" "$2" || return 1
     build_module "$d" "$3" || return 1
-    out="$(PATH="$b:$PATH" git -C "$d" push origin HEAD:refs/heads/probe 2>&1)"
+    out="$(PATH="$b:$PATH" git -C "$d" push origin HEAD:refs/heads/1 2>&1)"
     rc=$?
 }
 
