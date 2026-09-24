@@ -13,12 +13,15 @@
 событие опубликовано, запись обязана нести блок `event` со `status: performed`,
 а `effective_approval` — быть приведено к факту события.
 
-Держатель задачи PRO-Robotech/kaname#302 судит запись, у которой блок `event`
-УЖЕ есть (`performed` ⇒ `issued: true`). К записи без блока он слеп по
-построению: в дереве о событии не сказано ничего, а событие живёт на трекере.
-Поэтому этот гейт читает ТРЕКЕР. Измерено (kaname#402): на ревизии `4ed53c9b`
-перепись #302 печатала «расхождений 0», а четыре записи с `verdict: APPROVED`,
-`issued: false` и без блока `event` молчали о событиях, уже опубликованных.
+Запись, у которой блок `event` УЖЕ есть, несёт второй инвариант —
+`performed` ⇒ `issued: true`; это предмет задачи PRO-Robotech/kaname#302, и
+этот гейт его не судит. Любая проверка, читающая только дерево, к записи без
+блока слепа по построению: в дереве о событии не сказано ничего, а событие
+живёт на трекере. Поэтому этот гейт читает ТРЕКЕР. Измерено (kaname#402): на
+ревизии `4ed53c9b` перепись #378 (команда
+`effective_approval.sanction.divergence_predicate` в её записях) печатала
+«расхождений 0», а четыре записи с `verdict: APPROVED`, `issued: false` и без
+блока `event` молчали о событиях, уже опубликованных.
 
 ЧТО СУДИТСЯ
 -----------
@@ -229,7 +232,8 @@ def judge(root: str, rev: str, fixture: str | None):
     tasks = len(tracker.cache)
     out.append("%s: ревизия %s" % (NAME, sha[:12]))
     out.append("осмотрено записей        : %d  (прочих файлов под %s: %d)" % (len(records), REVIEWS, other))
-    out.append("  с исполненным событием : %d  (event.status: performed — судит держатель #302)" % performed)
+    out.append("  с исполненным событием : %d  (event.status: performed — вне предмета: "
+               "инвариант performed ⇒ issued — задача kaname#302)" % performed)
     out.append("  без исполненного       : %d" % (len(records) - performed))
     out.append("    судимо               : %d  (названы задача и учётка)" % len(judged))
     out.append("    задача не названа    : %d  (вердикт без санкции; в вердикт не входит)" % len(untasked_other))
@@ -412,7 +416,7 @@ def self_test() -> int:
              (RECORD_PATH, "event.type: none"))
         perf = repo("performed", {RECORD_PATH: silent_record(
             "event:\n  type: issue_comment\n  status: performed\n")})
-        case("вне предмета: исполненное событие судит #302, здесь молчание", perf, with_event, GREEN,
+        case("вне предмета: исполненное событие здесь не судится (инвариант — kaname#302)", perf, with_event, GREEN,
              ("с исполненным событием : 1", "судимо               : 0"))
         case("трекер недоступен — не выполнилось, а не зелёное", silent, no_answer, UNMET, ("трекер недоступен",))
         empty = repo("empty", {"README": "нет записей\n"})
