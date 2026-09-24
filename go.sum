@@ -6,8 +6,8 @@ github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c h1:udKWzYgxTojEK
 github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
-github.com/PRO-Robotech/corelib v1.10.0-rc.1 h1:7NxOpfzJm1ZpcKRCAAMdqGU3SO7ye7+c2yB13sqorJc=
-github.com/PRO-Robotech/corelib v1.10.0-rc.1/go.mod h1:u6gUI6RxMwoFRPNuEOTNnchMPsqYZd7m9O88jgqDzo8=
+github.com/PRO-Robotech/corelib v1.10.0-rc.2 h1:yF9amaZrWw1KbJ/UvZjAo2//gIx95MSbs3719F3/E3M=
+github.com/PRO-Robotech/corelib v1.10.0-rc.2/go.mod h1:u6gUI6RxMwoFRPNuEOTNnchMPsqYZd7m9O88jgqDzo8=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2/go.mod h1:WaHUgvxTVq04UNunO+XhnAqY/wQc+bxr74GqbsZ/Jqw=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=

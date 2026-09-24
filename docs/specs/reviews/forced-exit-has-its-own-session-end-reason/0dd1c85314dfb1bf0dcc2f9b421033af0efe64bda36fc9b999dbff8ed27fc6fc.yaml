@@ -50,6 +50,7 @@ reviewed_at: '2026-09-23'
 
 effective_approval:
   issued: true
+  issued_at: '2026-09-23T10:52:58Z'
   ban1_lifted: true
   why: >-
     Блокирующих ноль. B1 закрыт, и это показано опытом. Снятие каждого из двух несущих
@@ -70,6 +71,37 @@ authority:
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
   allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5793544046
+  node_id: IC_kwDOUO26pM8AAAABWVJ3bg
+  url: https://github.com/PRO-Robotech/kaname/issues/334#issuecomment-5793544046
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5793544046
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/334
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-23T10:52:58Z'
+  body_sha256: 5fa8575189c1c16f1e84d18e8c6886aa976debe6e226c81f8965d60f3fb04f1b
+  subject_sha256: 0dd1c85314dfb1bf0dcc2f9b421033af0efe64bda36fc9b999dbff8ed27fc6fc
+  subject_revision: 2f69d90ab424c67b40a97a5779e2b3afba658fed
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента (kaname#402: гейт
+    `.github/scripts/review-event-silence.py` нашёл запись молчащей об опубликованном событии);
+    вердикт, разбор, числа и `why` не тронуты. `effective_approval.issued: true` выставил
+    рецензент; добавлено одно выводимое поле — `issued_at`, момент события. Перемерено
+    дописывающим 2026-09-24: поля события — `gh api
+    repos/PRO-Robotech/kaname/issues/comments/5793544046` (id, node_id, user pointpu, MEMBER,
+    created_at == updated_at, то есть после публикации тело не правилось; `issue_url` → kaname#334,
+    то есть `subject.task`); пять полей заголовка тела до первой `---`, каждое ровно одной строкой
+    (`grep -c '^<поле>: '` → 1 по каждому), `grep -cxF 'verdict: CHANGES_REQUESTED'` → 0;
+    отпечаток тела — `gh api … | jq -j .body | sha256sum` → 5fa85751…; отпечаток предмета —
+    `git show 2f69d90a:docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md |
+    sha256sum` → 0dd1c853…, совпал с именем файла записи и со строкой `subject_sha256` тела.
 
 attribution:
   reviewer_kind: claude_agent
