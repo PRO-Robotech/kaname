@@ -82,7 +82,7 @@ func newResolveIndex() *resolveIndex {
 }
 
 func (ix *resolveIndex) write(sp *surfaceSrcPkg, lhs ast.Expr, src valueSrc) {
-	switch l := unparen(lhs).(type) {
+	switch l := ast.Unparen(lhs).(type) {
 	case *ast.Ident:
 		if v, ok := sp.info.ObjectOf(l).(*types.Var); ok {
 			ix.varWrites[v] = append(ix.varWrites[v], src)
@@ -113,7 +113,7 @@ func (ix *resolveIndex) assign(sp *surfaceSrcPkg, fk fkey, n *ast.AssignStmt) {
 		case len(n.Lhs) == len(n.Rhs):
 			src.expr = n.Rhs[i]
 		case len(n.Rhs) == 1:
-			if call, ok := unparen(n.Rhs[0]).(*ast.CallExpr); ok {
+			if call, ok := ast.Unparen(n.Rhs[0]).(*ast.CallExpr); ok {
 				src.expr, src.tuple = call, i
 			} else if i == 0 {
 				src.expr = n.Rhs[0]
@@ -134,7 +134,7 @@ func (ix *resolveIndex) valueSpec(sp *surfaceSrcPkg, fk fkey, n *ast.ValueSpec) 
 		case len(n.Values) == len(n.Names):
 			src.expr = n.Values[i]
 		case len(n.Values) == 1:
-			if call, ok := unparen(n.Values[0]).(*ast.CallExpr); ok {
+			if call, ok := ast.Unparen(n.Values[0]).(*ast.CallExpr); ok {
 				src.expr, src.tuple = call, i
 			} else {
 				continue
@@ -167,7 +167,7 @@ func (ix *resolveIndex) ret(sp *surfaceSrcPkg, fk fkey, n *ast.ReturnStmt, nres 
 		}
 	case len(n.Results) == 1 && nres > 1:
 		// return f() — кортеж результатов вызванной функции.
-		if call, ok := unparen(n.Results[0]).(*ast.CallExpr); ok {
+		if call, ok := ast.Unparen(n.Results[0]).(*ast.CallExpr); ok {
 			for i := 0; i < nres; i++ {
 				rs[i] = append(rs[i], valueSrc{pkg: sp, fk: fk, expr: call, tuple: i})
 			}
@@ -178,7 +178,7 @@ func (ix *resolveIndex) ret(sp *surfaceSrcPkg, fk fkey, n *ast.ReturnStmt, nres 
 
 func (ix *resolveIndex) call(sp *surfaceSrcPkg, fk fkey, n *ast.CallExpr) {
 	var fn *types.Func
-	switch f := unparen(n.Fun).(type) {
+	switch f := ast.Unparen(n.Fun).(type) {
 	case *ast.Ident:
 		fn, _ = sp.info.Uses[f].(*types.Func)
 	case *ast.SelectorExpr:
@@ -296,7 +296,7 @@ func (ix *resolveIndex) addressOf(sp *surfaceSrcPkg, n *ast.UnaryExpr) {
 	if n.Op != token.AND {
 		return
 	}
-	switch x := unparen(n.X).(type) {
+	switch x := ast.Unparen(n.X).(type) {
 	case *ast.Ident:
 		if v, ok := sp.info.ObjectOf(x).(*types.Var); ok {
 			ix.addrTaken[v] = true
@@ -406,7 +406,7 @@ func (r *strResolver) str(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
 }
 
 func (r *strResolver) strNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
-	switch x := unparen(e).(type) {
+	switch x := ast.Unparen(e).(type) {
 	case *ast.Ident:
 		if v, ok := sp.info.ObjectOf(x).(*types.Var); ok {
 			return r.variable(v, fk)
@@ -547,7 +547,7 @@ func (r *strResolver) src(w valueSrc) *strRes {
 	case w.rangeKey:
 		return r.elemsOf(w.pkg, w.fk, w.expr, true)
 	case w.tuple >= 0:
-		if call, ok := unparen(w.expr).(*ast.CallExpr); ok {
+		if call, ok := ast.Unparen(w.expr).(*ast.CallExpr); ok {
 			return r.callStr(w.pkg, w.fk, call, w.tuple)
 		}
 	}
@@ -556,7 +556,7 @@ func (r *strResolver) src(w valueSrc) *strRes {
 
 // callStr — значения результата вызова.
 func (r *strResolver) callStr(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, idx int) *strRes {
-	fun := unparen(call.Fun)
+	fun := ast.Unparen(call.Fun)
 	if tv, ok := sp.info.Types[fun]; ok && tv.IsType() && len(call.Args) == 1 {
 		return r.str(sp, fk, call.Args[0])
 	}
@@ -683,7 +683,7 @@ func (r *strResolver) elemsOf(sp *surfaceSrcPkg, fk fkey, e ast.Expr, keys bool)
 
 func (r *strResolver) elemsNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr, keys bool) *strRes {
 	ix := r.a.idx
-	switch x := unparen(e).(type) {
+	switch x := ast.Unparen(e).(type) {
 	case *ast.CompositeLit:
 		res := newStrRes()
 		for _, el := range x.Elts {
@@ -737,7 +737,7 @@ func (r *strResolver) elemsNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr, keys bool
 		}
 		return res
 	case *ast.CallExpr:
-		if id, ok := unparen(x.Fun).(*ast.Ident); ok {
+		if id, ok := ast.Unparen(x.Fun).(*ast.Ident); ok {
 			if b, ok := sp.info.Uses[id].(*types.Builtin); ok && b.Name() == "append" && len(x.Args) > 0 {
 				res := r.elemsOf(sp, fk, x.Args[0], keys)
 				out := newStrRes()
@@ -784,7 +784,7 @@ func (r *strResolver) pattern(sp *surfaceSrcPkg, fk fkey, e ast.Expr) patRes {
 			out.leaves["образец шлюза: слишком глубокая цепочка"] = true
 			return
 		}
-		switch x := unparen(e).(type) {
+		switch x := ast.Unparen(e).(type) {
 		case *ast.Ident, *ast.SelectorExpr:
 			var v *types.Var
 			if id, ok := x.(*ast.Ident); ok {
@@ -831,7 +831,7 @@ func (r *strResolver) pattern(sp *surfaceSrcPkg, fk fkey, e ast.Expr) patRes {
 }
 
 func calleeFunc(sp *surfaceSrcPkg, call *ast.CallExpr) *types.Func {
-	switch f := unparen(call.Fun).(type) {
+	switch f := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
 		fn, _ := sp.info.Uses[f].(*types.Func)
 		return fn
@@ -854,7 +854,7 @@ func (r *strResolver) newPattern(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr)
 	if !ok {
 		return gwPattern{}, false
 	}
-	opsLit, ok := unparen(call.Args[1]).(*ast.CompositeLit)
+	opsLit, ok := ast.Unparen(call.Args[1]).(*ast.CompositeLit)
 	if !ok {
 		return gwPattern{}, false
 	}
@@ -866,7 +866,7 @@ func (r *strResolver) newPattern(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr)
 		}
 		ops = append(ops, n)
 	}
-	poolLit, ok := unparen(call.Args[2]).(*ast.CompositeLit)
+	poolLit, ok := ast.Unparen(call.Args[2]).(*ast.CompositeLit)
 	if !ok {
 		return gwPattern{}, false
 	}

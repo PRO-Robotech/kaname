@@ -531,9 +531,9 @@ func (a *surfaceFlow) resultsInteresting(fk fkey) bool {
 // r.URL.EscapedPath(), r.RequestURI, где r — *http.Request. Путь адреса из
 // настройки (url.URL, разобранный из строки профиля) маршрутом не является.
 func isURLPath(sp *surfaceSrcPkg, e ast.Expr) bool {
-	switch x := unparen(e).(type) {
+	switch x := ast.Unparen(e).(type) {
 	case *ast.CallExpr:
-		sel, ok := unparen(x.Fun).(*ast.SelectorExpr)
+		sel, ok := ast.Unparen(x.Fun).(*ast.SelectorExpr)
 		return ok && sel.Sel.Name == "EscapedPath" && isRequestField(sp, sel.X, "URL")
 	case *ast.SelectorExpr:
 		if isRequestField(sp, x, "RequestURI") {
@@ -552,7 +552,7 @@ func isURLPath(sp *surfaceSrcPkg, e ast.Expr) bool {
 
 // isRequestField — выбор поля name у *http.Request.
 func isRequestField(sp *surfaceSrcPkg, e ast.Expr, name string) bool {
-	sel, ok := unparen(e).(*ast.SelectorExpr)
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != name {
 		return false
 	}
@@ -637,7 +637,7 @@ func (a *surfaceFlow) callInteresting(sp *surfaceSrcPkg, call *ast.CallExpr) boo
 	if a.interesting(t) {
 		return true
 	}
-	if sel, ok := unparen(call.Fun).(*ast.SelectorExpr); ok {
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
 		if s, ok := sp.info.Selections[sel]; ok && a.interesting(s.Recv()) {
 			return true
 		}
@@ -657,16 +657,6 @@ func (a *surfaceFlow) edge(from, to fkey) {
 		a.edges[from] = m
 	}
 	m[to] = true
-}
-
-func unparen(e ast.Expr) ast.Expr {
-	for {
-		p, ok := e.(*ast.ParenExpr)
-		if !ok {
-			return e
-		}
-		e = p.X
-	}
 }
 
 // ─── неподвижная точка ──────────────────────────────────────────────────────
@@ -744,7 +734,7 @@ func (a *surfaceFlow) apply(n flowNode) {
 			return
 		}
 		if len(x.Rhs) == 1 {
-			if call, ok := unparen(x.Rhs[0]).(*ast.CallExpr); ok {
+			if call, ok := ast.Unparen(x.Rhs[0]).(*ast.CallExpr); ok {
 				for i := range x.Lhs {
 					a.assignTo(sp, fk, x.Lhs[i], a.evalCall(sp, fk, call, i))
 				}
@@ -759,7 +749,7 @@ func (a *surfaceFlow) apply(n flowNode) {
 				a.assignTo(sp, fk, id, a.eval(sp, fk, x.Values[i]))
 			}
 		} else if len(x.Values) == 1 {
-			if call, ok := unparen(x.Values[0]).(*ast.CallExpr); ok {
+			if call, ok := ast.Unparen(x.Values[0]).(*ast.CallExpr); ok {
 				for i, id := range x.Names {
 					a.assignTo(sp, fk, id, a.evalCall(sp, fk, call, i))
 				}
@@ -786,7 +776,7 @@ func (a *surfaceFlow) apply(n flowNode) {
 				}
 			}
 		} else if len(x.Results) == 1 && nres > 1 {
-			if call, ok := unparen(x.Results[0]).(*ast.CallExpr); ok {
+			if call, ok := ast.Unparen(x.Results[0]).(*ast.CallExpr); ok {
 				for i := 0; i < nres; i++ {
 					if a.interesting(sig.Results().At(i).Type()) {
 						a.setResult(fk, i, nres, a.evalCall(sp, fk, call, i))
@@ -869,7 +859,7 @@ func (a *surfaceFlow) assignTo(sp *surfaceSrcPkg, fk fkey, lhs ast.Expr, s avSet
 	if len(s) == 0 {
 		return
 	}
-	switch l := unparen(lhs).(type) {
+	switch l := ast.Unparen(lhs).(type) {
 	case *ast.Ident:
 		if l.Name == "_" {
 			return
@@ -1094,7 +1084,7 @@ type surfaceCallee struct {
 func (c surfaceCallee) key() fkey { return fkey{fn: c.fn, lit: c.lit} }
 
 func (a *surfaceFlow) evalCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, idx int) avSet {
-	fun := unparen(call.Fun)
+	fun := ast.Unparen(call.Fun)
 	if tv, ok := sp.info.Types[fun]; ok && tv.IsType() {
 		if len(call.Args) == 1 {
 			return a.eval(sp, fk, call.Args[0])
@@ -1167,7 +1157,7 @@ func (a *surfaceFlow) builtin(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, b 
 }
 
 func (a *surfaceFlow) callees(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) []surfaceCallee {
-	switch f := unparen(call.Fun).(type) {
+	switch f := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
 		if fn, ok := sp.info.Uses[f].(*types.Func); ok {
 			return []surfaceCallee{{fn: fn.Origin()}}
@@ -1350,7 +1340,7 @@ func (a *surfaceFlow) external(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, f
 // ─── регистрации ────────────────────────────────────────────────────────────
 
 func (a *surfaceFlow) maybeRegister(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) {
-	sel, ok := unparen(call.Fun).(*ast.SelectorExpr)
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	if !ok {
 		return
 	}
@@ -1523,7 +1513,7 @@ func (a *surfaceFlow) targets(sp *surfaceSrcPkg, fk fkey, body *ast.BlockStmt, r
 			return true
 		}
 		var target ast.Expr
-		switch f := unparen(call.Fun).(type) {
+		switch f := ast.Unparen(call.Fun).(type) {
 		case *ast.SelectorExpr:
 			if f.Sel.Name == "ServeHTTP" {
 				if s, ok := sp.info.Selections[f]; ok && s.Kind() == types.MethodVal {
@@ -1555,14 +1545,14 @@ func (a *surfaceFlow) targets(sp *surfaceSrcPkg, fk fkey, body *ast.BlockStmt, r
 // readFromSelf — выбор полей, начатый с получателя метода, у одного значения.
 func (a *surfaceFlow) readFromSelf(sp *surfaceSrcPkg, e ast.Expr, recv *types.Var, self *absVal) (avSet, bool) {
 	var chain []*ast.SelectorExpr
-	cur := unparen(e)
+	cur := ast.Unparen(e)
 	for {
 		sel, ok := cur.(*ast.SelectorExpr)
 		if !ok {
 			break
 		}
 		chain = append([]*ast.SelectorExpr{sel}, chain...)
-		cur = unparen(sel.X)
+		cur = ast.Unparen(sel.X)
 	}
 	id, ok := cur.(*ast.Ident)
 	if !ok || len(chain) == 0 || sp.info.Uses[id] != recv {

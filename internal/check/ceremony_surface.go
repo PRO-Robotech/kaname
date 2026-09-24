@@ -652,7 +652,7 @@ func (j *surfaceJudge) form(in *regInfo) {
 		(*f)["общий мультиплексор процесса"]++
 	}
 	sp := in.reg.pkg
-	switch x := unparen(in.reg.path).(type) {
+	switch x := ast.Unparen(in.reg.path).(type) {
 	case *ast.BasicLit:
 		(*f)["литерал"]++
 	case *ast.Ident:
@@ -1216,7 +1216,7 @@ func (j *surfaceJudge) sinks(union avSet) {
 
 // fromSurfaceDecl — выражение читает поле Handler объявления поверхности.
 func (j *surfaceJudge) fromSurfaceDecl(sp *surfaceSrcPkg, e ast.Expr) bool {
-	sel, ok := unparen(e).(*ast.SelectorExpr)
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Handler" {
 		return false
 	}
