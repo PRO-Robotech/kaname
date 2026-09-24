@@ -688,14 +688,35 @@ func isURLPath(sp *surfaceSrcPkg, e ast.Expr) bool {
 	return false
 }
 
-// isRequestField — выбор поля name у *http.Request.
+// isRequestField — выбор поля name, принадлежащего http.Request: прямо у
+// *http.Request и сквозь его встраивание в свой тип (cr.URL, где cr —
+// struct{ *http.Request }).
 func isRequestField(sp *surfaceSrcPkg, e ast.Expr, name string) bool {
 	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != name {
 		return false
 	}
 	s, ok := sp.info.Selections[sel]
-	return ok && s.Kind() == types.FieldVal && isNamed(s.Recv(), "net/http", "Request")
+	return ok && s.Kind() == types.FieldVal && isNamed(fieldOwner(s), "net/http", "Request")
+}
+
+// fieldOwner — тип, которому принадлежит выбранное поле, с продвижением через
+// встроенные поля; nil — путь выбора не сквозь структуры.
+func fieldOwner(s *types.Selection) types.Type {
+	t := s.Recv()
+	index := s.Index()
+	for _, i := range index[:len(index)-1] {
+		t = types.Unalias(t)
+		if p, ok := t.Underlying().(*types.Pointer); ok {
+			t = p.Elem()
+		}
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok || i >= st.NumFields() {
+			return nil
+		}
+		t = st.Field(i).Type()
+	}
+	return t
 }
 
 // noteCall — построители поверхности и отдача обработчика серверу.
