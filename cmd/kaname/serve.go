@@ -517,7 +517,7 @@ func runServe(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("своя чеканка токенов: %w", err)
 	}
-	startSigningKeySweeper(ctx, signingKeystore, logger)
+	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
 	// Уборка ресурсного журнала подписки — своим уборщиком (см.
 	// `subscription_wiring.go`, там же довод, почему не предметом общего).
@@ -814,7 +814,7 @@ func runServe(cfg config.Config) error {
 	// with acr_min>0 (InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
 	// ListAdmins} already carry acr_min=2) is not acr-enforced internally. This
 	// floor closes that arm: for each gateway-fronted RPC whose catalog acr_min>0
-	// it enforces `acr >= acr_min` (the SAME grpcsrv.ACRSatisfies ranking the
+	// it enforces `acr >= acr_min` (the SAME acrlevel.Satisfies ranking the
 	// gateway uses), reading the acr from the FD-4-trusted ctx (forwarded only on
 	// the mTLS-verified gateway→iam edge). Service-caller module SAs (vpc/compute
 	// fgaproxy) are acr-EXEMPT (not user principals) — and internalCallerPolicy
@@ -1434,6 +1434,7 @@ func runServe(cfg config.Config) error {
 				return metrics.SigningKeyCounts{
 					Generated: st.Generated, Activated: st.Activated, Retired: st.Retired,
 					Removed: st.Removed, Compromised: st.Compromised, Failures: st.Failures,
+					Sweeps: st.Sweeps,
 				}
 			})
 			records = append(records, jwksproxyhttp.Record{

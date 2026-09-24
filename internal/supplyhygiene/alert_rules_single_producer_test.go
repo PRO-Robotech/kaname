@@ -57,8 +57,11 @@
 // неотличим от необойдённого.
 //
 // ЧЕГО ЭТА ПРОВЕРКА НЕ ЗАКРЫВАЕТ: верность самих выражений и совпадение объекта
-// со страницей. Первое держит `TestObservabilityPagePromisesOnlyWhatTheServiceProduces`
-// и `TestAlertSelectorsNameAContractTheTreeProduces`, второе —
+// со страницей. Первое держится по частям: имя ряда —
+// `TestObservabilityPagePromisesOnlyWhatTheServiceProduces`, отбор по имени
+// контракта — `TestAlertSelectorsNameAContractTheTreeProduces`, отбор по исходу
+// у рядов её таблицы — `TestAlertOutcomeSelectorsNameValuesTheTreeProduces`, ряд
+// прохода сметателя ключей — `TestSigningKeySweeperSilenceIsAlerted`. Второе —
 // `TestDeliveredAlertRulesMatchThePublishedPage`.
 package supplyhygiene
 

@@ -333,7 +333,7 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 |---|---|---|
 | `kaname_own_keyset_outcomes_total` | `outcome` | обслуживание НАШЕГО набора ключей проверки: `served`, `unavailable`, `empty`. Пустой набор — отдельная клетка: в отличие от недоступности, ожидание его не лечит |
 | `kaname_token_introspection_outcomes_total` | `outcome` | ответы на вопрос «жив ли предъявленный токен»: `active`, `inactive`, `unavailable`. Третий исход отдельно от `inactive` — иначе отказ базы неотличим от отзыва |
-| `kaname_signing_key_events_total` | `event` | события жизненного цикла подписного ключа: `generated`, `activated`, `retired`, `removed`, `compromised`, `failure` |
+| `kaname_signing_key_events_total` | `event` | события жизненного цикла подписного ключа: `generated`, `activated`, `retired`, `removed`, `compromised`, `failure`, `swept`. **`swept` — завершённый проход сметателя**, включая проходы без единого снятия: ноль снятий один не различает «снимать нечего» и «сметатель не ходит», ноль проходов — различает, и на него звонит `KanameSigningKeySweeperSilent` |
 | `kaname_jwks_mirror_outcomes_total` | `outcome` | обслуживание внутреннего зеркала ключей: `served`, `unavailable`, `misconfigured`. **`served` считается наравне с отказами** — иначе «ни разу не отказал» неотличимо от «ни разу не спросили»; неверный адрес — своя клетка, потому что сам не заживёт |
 | `kaname_presented_credential_outcomes_total` | `outcome` | чтение удостоверения, ПРЕДЪЯВЛЕННОГО на публичном слушателе: `accepted`, `refused`, `unavailable`. Отказ никогда не называет, какая именно проверка не прошла, — это сказало бы предъявителю, какую половину подбирать. `unavailable` — ТРЕТИЙ исход, а не оттенок отказа: негодное удостоверение чинит предъявитель, недоступный авторитет — оператор |
 | `kaname_registry_token_credential_kind_total` | `outcome` | исходы докерной полосы выдачи токена по виду предъявленного удостоверения |
@@ -562,6 +562,13 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
+
+- alert: KanameSigningKeySweeperSilent
+  # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
+  expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+  for: 30m
+  annotations:
+    summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"
 
 - alert: KanameClientTokenRefusalRate
   expr: |

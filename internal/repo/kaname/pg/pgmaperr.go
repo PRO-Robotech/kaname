@@ -167,6 +167,16 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 				return iamerr.ErrInternal
 			}
 		}
+		// Таблица клиентов: идентификатор, состояние, способ аутентификации и
+		// материал секрета вызывающий не присылает — их производят служба и
+		// производитель клиента (kaname#317). Срабатывание — их дефект, и отказ
+		// не обвиняет вызывающего. `Detail` этого отказа несёт строку с
+		// материалом и в журнал не идёт (`f.LogAttrs` его не несёт).
+		if isInteractiveClientProducedValueCheck(f.Table, f.Constraint) {
+			slog.Error("interactive client backstop fired: service or client producer made a value the schema refuses",
+				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
 		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
 		// «чьё это значение» (задача #718, здесь — #1279).
 		//
