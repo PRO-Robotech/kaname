@@ -1444,7 +1444,18 @@ CASES.append(Case(
     priority="P0",
     steps=[
         *_invite_probe("blkPendingId", "blockprobe"),
+        # ОКНО ПРАВ НА СВЕЖЕМ ПРИГЛАШЕНИИ ЗАКРЫВАЕТ ЧТЕНИЕ, а не повтор отрицания
+        # (kaname#393): цель проверки прав — сам человек, и до материализации его
+        # связи с аккаунтом шлюз ответил бы 403 вместо отказа состоянием. Отказ
+        # ниже уходит один раз и читается с первого ответа.
         retry_until_authorized(Step(
+            name="block-pending-warm-read",
+            method="GET",
+            path="/iam/v1/users/{{blkPendingId}}",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        Step(
             name="block-pending",
             method="POST",
             path="/iam/v1/users/{{blkPendingId}}:block",
@@ -1488,7 +1499,7 @@ CASES.append(Case(
                 "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
                 "});",
             ],
-        ), budget=20, interval_ms=500, retry_on=(403,)),
+        ),
         # Состояние не изменилось: отказ, у которого остался эффект, — не отказ.
         Step(
             name="pending-still-pending",
@@ -1521,7 +1532,18 @@ CASES.append(Case(
     priority="P1",
     steps=[
         *_invite_probe("ubkPendingId", "unblockprobe"),
+        # ОКНО ПРАВ НА СВЕЖЕМ ПРИГЛАШЕНИИ ЗАКРЫВАЕТ ЧТЕНИЕ, а не повтор отрицания
+        # (kaname#393): цель проверки прав — сам человек, и до материализации его
+        # связи с аккаунтом шлюз ответил бы 403 вместо отказа состоянием. Отказ
+        # ниже уходит один раз и читается с первого ответа.
         retry_until_authorized(Step(
+            name="unblock-pending-warm-read",
+            method="GET",
+            path="/iam/v1/users/{{ubkPendingId}}",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        ), budget=20, interval_ms=500, retry_on=(403,)),
+        Step(
             name="unblock-pending",
             method="POST",
             path="/iam/v1/users/{{ubkPendingId}}:unblock",
@@ -1542,7 +1564,7 @@ CASES.append(Case(
                 "  pm.expect(j.message || '', JSON.stringify(j)).to.include('is not active');",
                 "});",
             ],
-        ), budget=20, interval_ms=500, retry_on=(403,)),
+        ),
     ],
 ))
 
