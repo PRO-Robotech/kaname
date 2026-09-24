@@ -185,6 +185,9 @@ type surfaceFlow struct {
 	// мультиплексор, и нашлась ли для них хоть одна реализация
 	ifaceRegs  map[*ast.CallExpr]*surfaceReg
 	dispatched map[*ast.CallExpr]bool
+	// состояние каждого вызова метода интерфейса на последнем вычислении:
+	// все ли получатели разрешились
+	ifaceCalls map[*ast.CallExpr]*ifaceCall
 
 	// объявления, собранные проходом (судит ceremony_surface.go)
 	surfaceLits []flowNode
@@ -221,6 +224,7 @@ func newSurfaceFlow(prog *surfaceProgram) *surfaceFlow {
 		boundRecv:  map[*absVal]avSet{},
 		ifaceRegs:  map[*ast.CallExpr]*surfaceReg{},
 		dispatched: map[*ast.CallExpr]bool{},
+		ifaceCalls: map[*ast.CallExpr]*ifaceCall{},
 	}
 	a.handler = lookupHandlerIface(prog)
 	a.httpMuxT = lookupMuxPtr(prog, "net/http")
@@ -1273,15 +1277,31 @@ func (a *surfaceFlow) callees(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) []
 	return out
 }
 
+// ifaceCall — вызов метода интерфейса на последнем вычислении.
+type ifaceCall struct {
+	node flowNode
+	fn   *types.Func
+	// unresolved — хоть у одного значения получателя (или при пустом
+	// множестве значений) реализация не найдена.
+	unresolved bool
+}
+
 // dispatchCall — вызов метода интерфейса fn над получателями recvs. Метод
-// регистрации через интерфейс, который реализует мультиплексор, без единой
-// найденной реализации — кандидат в непрослеженные: значения до получателя
-// не дотекли (пустой интерфейс, чужой код), а молчать об этом нельзя.
+// регистрации через интерфейс, который реализует мультиплексор, без
+// реализации хоть у одного получателя — кандидат в непрослеженные: значения до
+// получателя не дотекли (пустой интерфейс, чужой код), а молчать об этом
+// нельзя, даже когда другие получатели разрешились.
 func (a *surfaceFlow) dispatchCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, fn *types.Func, recvs avSet) []surfaceCallee {
-	out := a.dispatchVals(recvs, fn, 0)
+	out, unresolved := a.dispatchVals(recvs, fn, map[dispatchKey]bool{})
 	if len(out) > 0 {
 		a.dispatched[call] = true
 	}
+	st, ok := a.ifaceCalls[call]
+	if !ok {
+		st = &ifaceCall{node: flowNode{sp, fk, call}, fn: fn}
+		a.ifaceCalls[call] = st
+	}
+	st.unresolved = unresolved || len(recvs) == 0
 	if _, ok := a.ifaceRegs[call]; !ok {
 		if k := a.ifaceRegKind(fn, len(call.Args)); k != 0 {
 			reg := a.newReg(k, call.Args)
@@ -1292,11 +1312,29 @@ func (a *surfaceFlow) dispatchCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExp
 	return out
 }
 
+// dispatchKey — пара (значение, метод), уже пройденная диспетчеризацией одного
+// вызова.
+type dispatchKey struct {
+	v  *absVal
+	fn *types.Func
+}
+
 // dispatchVals — реализации метода интерфейса fn у значений-получателей:
-// структуры (с продвижением через встроенные поля) и мультиплексоры.
-func (a *surfaceFlow) dispatchVals(recvs avSet, fn *types.Func, depth int) []surfaceCallee {
-	var out []surfaceCallee
+// значения своего типа (с продвижением через встроенные поля) и
+// мультиплексоры.
+//
+// Цикл встраивания (слой, встроивший значение, в котором он сам) отличает
+// множество пройденных пар (значение, метод), а не глубина: пара проходится
+// один раз, и обход конечен при любой глубине вложения. unresolved — у
+// значения реализации нет (не своего типа, метод продвинут из встроенного
+// интерфейса без единого значения).
+func (a *surfaceFlow) dispatchVals(recvs avSet, fn *types.Func, seen map[dispatchKey]bool) (out []surfaceCallee, unresolved bool) {
 	for _, v := range recvs.sorted() {
+		k := dispatchKey{v: v, fn: fn}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
 		var t types.Type
 		switch v.kind {
 		case avStruct:
@@ -1307,29 +1345,32 @@ func (a *surfaceFlow) dispatchVals(recvs avSet, fn *types.Func, depth int) []sur
 			t = a.gwMuxT
 		}
 		if t == nil {
+			unresolved = true
 			continue
 		}
 		obj, index, _ := types.LookupFieldOrMethod(t, true, fn.Pkg(), fn.Name())
 		m, ok := obj.(*types.Func)
 		if !ok {
+			unresolved = true
 			continue
 		}
 		embed := embedPath(t, index)
 		if isIfaceMethod(m) {
 			// Продвинут из встроенного интерфейса — диспетчеризация дальше.
-			if depth < maxEmbeddedDispatch {
-				out = append(out, a.dispatchVals(a.throughEmbedded(avSet{v: {}}, embed), m, depth+1)...)
+			inner := a.throughEmbedded(avSet{v: {}}, embed)
+			if len(inner) == 0 {
+				unresolved = true
+				continue
 			}
+			more, un := a.dispatchVals(inner, m, seen)
+			out = append(out, more...)
+			unresolved = unresolved || un
 			continue
 		}
 		out = append(out, surfaceCallee{fn: m.Origin(), recvVals: avSet{v: {}}, embed: embed})
 	}
-	return out
+	return out, unresolved
 }
-
-// maxEmbeddedDispatch — глубина продвижения метода сквозь встроенные
-// интерфейсы при диспетчеризации: страж от цикла встраивания.
-const maxEmbeddedDispatch = 4
 
 // embedPath — встроенные поля на пути выбора метода: все индексы, кроме
 // последнего (он — номер метода).

@@ -605,19 +605,26 @@ func (j *surfaceJudge) registrations() {
 		}
 	}
 	var untraced []*surfaceReg
+	inUntraced := map[*ast.CallExpr]bool{}
 	for call, reg := range j.a.untraced {
 		if !counted[call] && j.reachableFk(reg.fk) {
 			untraced = append(untraced, reg)
+			inUntraced[call] = true
 		}
 	}
-	// Метод регистрации через интерфейс, который реализует мультиплексор, без
-	// единой реализации у значений получателя: значения не дотекли, и
-	// регистрацию не приписать ни одной поверхности.
+	// Метод регистрации через интерфейс, который реализует мультиплексор, у
+	// которого хоть одно значение получателя без реализации: значения не
+	// дотекли, и регистрацию не приписать поверхности — даже если другие
+	// получатели разрешились (разрешившиеся уже насчитаны на своих
+	// мультиплексорах).
 	for call, reg := range j.a.ifaceRegs {
-		if _, dup := j.a.untraced[call]; dup || counted[call] || j.a.dispatched[call] || !j.reachableFk(reg.fk) {
+		st := j.a.ifaceCalls[call]
+		partial := st != nil && st.unresolved
+		if inUntraced[call] || (!partial && (counted[call] || j.a.dispatched[call])) || !j.reachableFk(reg.fk) {
 			continue
 		}
 		untraced = append(untraced, reg)
+		inUntraced[call] = true
 	}
 	sort.Slice(untraced, func(x, y int) bool { return untraced[x].call.Pos() < untraced[y].call.Pos() })
 	for _, reg := range untraced {
