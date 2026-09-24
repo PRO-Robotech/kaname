@@ -144,10 +144,11 @@ func TestIntegration_AccessTokenRecordRefusalLanes(t *testing.T) {
 
 	// БЛИЗНЕЦ доменного исхода: семейства нет — не дефект службы, а исход
 	// заведения. Отличается от случая формы одним фактом: семейство названо
-	// законной формой, но не существует.
+	// законной формой, но не существует. Идентификатор выпуска — тот же, что у
+	// случая формы: тот отвергнут и не записан, повтора ключа здесь нет.
 	t.Run("семейства нет", func(t *testing.T) {
 		logBuf.Reset()
-		err := repo.RecordAccessToken(ctx, jti("rc3"), "tfm-"+ceremonyPad("atrecnf"), issued, expires)
+		err := repo.RecordAccessToken(ctx, jti("rc2"), "tfm-"+ceremonyPad("atrecnf"), issued, expires)
 		require.True(t, stderrors.Is(err, domain.ErrAccessTokenFamilyNotLive), "want ErrAccessTokenFamilyNotLive, got %v", err)
 		require.False(t, stderrors.Is(err, iamerr.ErrInternal), "исход семейства выдан за дефект службы: %v", err)
 		require.NotContains(t, logBuf.String(), issuanceBackstopLine, "исход семейства записи о рубеже не пишет")
