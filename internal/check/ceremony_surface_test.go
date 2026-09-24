@@ -175,6 +175,8 @@ func TestCeremonySurfaceGatePremiseHolds(t *testing.T) {
 		{"регистраций на мультиплексорах net/http", c.HTTPRegistrations},
 		{"регистраций на мультиплексорах шлюза", c.GatewayRegistrations},
 		{"стоков HTTP-сервера (подъём объявленных поверхностей)", c.Sinks},
+		{"конечных точек координат (суд о монтаже обработчика)", c.CoordinateEndpoints},
+		{"конечных точек поверхностей (с чем сверяется обработчик)", c.SurfaceEndpoints},
 	} {
 		if p.got == 0 {
 			t.Errorf("%s: 0 — разбор ослеп, а не дерево опустело: корень без поверхностей не поднимается", p.what)
@@ -247,6 +249,13 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 	if token.Surfaces[0].Reach != servicecontract.ReachExternal.String() {
 		t.Errorf("токен-эндпоинт резолвится на поверхности с досягаемостью %s", token.Surfaces[0].Reach)
 	}
+	// Обработчик якоря прослежен до значения: иначе суд о монтаже того же
+	// эндпоинта под чужим путём на другой поверхности молчал бы по слепоте.
+	if len(token.Endpoints) == 0 {
+		t.Errorf("обработчик токен-эндпоинта не прослежен ни до одного значения — монтаж под чужим путём "+
+			"не судится: %s", token.Summary())
+	}
+	t.Logf("конечные точки токен-эндпоинта: %s", strings.Join(token.Endpoints, "; "))
 
 	// Т14: у эндпоинта авторизации и обнаружения производителя нет — это
 	// отдельная категория переписи, и в положительный контроль она не идёт.
