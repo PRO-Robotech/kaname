@@ -604,13 +604,23 @@ func (j *surfaceJudge) registrations() {
 			}
 		}
 	}
+	// Регистрация без прослеженного мультиплексора попадает в перепись так же,
+	// как прослеженная: в недостижимом коде — графой «в недостижимом коде», в
+	// достижимом — непрослеженной и находкой. Иначе число регистраций лгало бы
+	// о прочитанном: вызов, который разбор видел, не стоял бы ни в одной графе.
 	var untraced []*surfaceReg
 	inUntraced := map[*ast.CallExpr]bool{}
 	for call, reg := range j.a.untraced {
-		if !counted[call] && j.reachableFk(reg.fk) {
-			untraced = append(untraced, reg)
-			inUntraced[call] = true
+		if counted[call] {
+			continue
 		}
+		counted[call] = true
+		if !j.reachableFk(reg.fk) {
+			c.UnreachableRegistrations++
+			continue
+		}
+		untraced = append(untraced, reg)
+		inUntraced[call] = true
 	}
 	// Метод регистрации через интерфейс, который реализует мультиплексор, у
 	// которого хоть одно значение получателя без реализации: значения не
@@ -620,7 +630,14 @@ func (j *surfaceJudge) registrations() {
 	for call, reg := range j.a.ifaceRegs {
 		st := j.a.ifaceCalls[call]
 		partial := st != nil && st.unresolved
-		if inUntraced[call] || (!partial && (counted[call] || j.a.dispatched[call])) || !j.reachableFk(reg.fk) {
+		if inUntraced[call] || (!partial && (counted[call] || j.a.dispatched[call])) {
+			continue
+		}
+		if !j.reachableFk(reg.fk) {
+			if !counted[call] {
+				counted[call] = true
+				c.UnreachableRegistrations++
+			}
 			continue
 		}
 		untraced = append(untraced, reg)
