@@ -58,7 +58,8 @@ func TestReviewTriggerGateCanStaySilent(t *testing.T) {
 	findings, census, err := check.AuditReviewTriggers(trunkCorpusSource(t))
 	require.NoError(t, err)
 	require.Emptyf(t, findings, "на дереве как есть гейт нашёл %d: %v", len(findings), findings)
-	require.GreaterOrEqual(t, census.OnReview, 2)
+	require.Positive(t, census.OnBranchPush, "процессов ствола ноль — ось 1 о них сказана ни о чём")
+	require.Zero(t, census.OnReviewTarget)
 	require.Equal(t, census.OnReview, census.ReviewAtLine)
 	require.Positive(t, census.Conditions, "условий `if:` ноль — ось 4 проверялась бы вырожденно")
 	require.Positive(t, census.ConditionLinks, "условия есть, а звеньев в них ноль — разбор лексем слеп")
@@ -638,14 +639,124 @@ func TestReviewTriggerGateKnowsEveryLawfulEventForm(t *testing.T) {
 		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
 	})
 
-	// ЗАКОННЫЙ БЛИЗНЕЦ: процесс, не идущий на запросе, предметом не является —
-	// он не идёт ни на запросе в ствол, ни на запросе в линию, то есть состав
-	// обоих запросов одинаков. Перепись обязана его ПОСЧИТАТЬ, а не пропустить.
+	// ЗАКОННЫЙ БЛИЗНЕЦ: процесс, не идущий ни на запросе, ни по push в ветки,
+	// предметом не является — он не идёт ни на запросе в ствол, ни на запросе
+	// в линию, ни на стволе, то есть состав всех трёх одинаков. Перепись
+	// обязана его ПОСЧИТАТЬ, а не пропустить.
 	t.Run("процесс без запроса — не находка, но в переписи", func(t *testing.T) {
 		got, before, after := withProcess(t, "name: новый\non: workflow_dispatch\n"+jobs)
 		require.Empty(t, got)
 		require.Equal(t, before.Files+1, after.Files)
 		require.Equal(t, before.OnReview, after.OnReview)
+	})
+}
+
+// TestReviewTriggerGateJudgesTheRequestEvent — событие запроса: процесс ствола
+// идёт на запросе, и идёт на нём событием `pull_request`, и только им.
+//
+// Возврат приёмки (круг 5): `pull_request` в процессе ствола, сменённый на
+// `pull_request_target`, зеленел — и с базами {main}, и с базами {main,
+// [0-9]+}; процесс выпадал из переписи («идут на запросе 2» при трёх), а пол
+// переписи `OnReview < 2` падения с 3 до 2 не замечал. Тем же зелёным
+// проходило и снятие события запроса у процесса ствола целиком.
+func TestReviewTriggerGateJudgesTheRequestEvent(t *testing.T) {
+	t.Parallel()
+	_, control, err := check.AuditReviewTriggers(trunkCorpusSource(t))
+	require.NoError(t, err)
+
+	for _, tc := range []struct{ name, block string }{
+		{"pull_request_target с базой ствола", "  pull_request_target:\n    branches: [main]\n"},
+		{"pull_request_target с базами ствола и линии",
+			"  pull_request_target:\n    branches:\n      - main\n      - '[0-9]+'\n"},
+		{"pull_request_target без тела", "  pull_request_target:\n"},
+	} {
+		t.Run(tc.name+" вместо pull_request", func(t *testing.T) {
+			got, census := reviewAudit(t, func(raw string) string {
+				return injectOnce(t, raw, reviewBlock, tc.block)
+			})
+			require.Len(t, got, 1, "фильтр баз не делает событие законным: находка одна, о событии")
+			require.Contains(t, got[0], reviewInjectRel)
+			require.Contains(t, got[0], "`pull_request_target`")
+			require.Contains(t, got[0], "расширение поверхности")
+			require.Equal(t, control.OnReview, census.OnReview,
+				"процесс на pull_request_target идёт на запросе и обязан стоять в переписи")
+			require.Equal(t, control.ReviewAtLine-1, census.ReviewAtLine,
+				"базы у pull_request_target вердикта линии не дают")
+			require.Contains(t, census.String(), "из них на pull_request_target 1")
+		})
+	}
+
+	t.Run("pull_request_target рядом с pull_request", func(t *testing.T) {
+		got, census := reviewAudit(t, func(raw string) string {
+			return injectOnce(t, raw, reviewBlock, reviewBlock+"  pull_request_target:\n    branches: [main]\n")
+		})
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], "`pull_request_target`")
+		require.Equal(t, control.OnReview, census.OnReview, "процесс считается один раз")
+		require.Equal(t, control.ReviewAtLine, census.ReviewAtLine, "ось 1 о `pull_request` не задета")
+	})
+
+	// Снятие события запроса у процесса ствола — то падение 3 → 2, которого
+	// пол переписи не замечал.
+	t.Run("процесс ствола без события запроса", func(t *testing.T) {
+		got, census := reviewAudit(t, func(raw string) string {
+			return injectOnce(t, raw, reviewBlock, "")
+		})
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], reviewInjectRel)
+		require.Contains(t, got[0], "на запросе не идёт")
+		require.Equal(t, control.OnReview-1, census.OnReview)
+		require.Equal(t, control.OnBranchPush, census.OnBranchPush)
+	})
+
+	const jobs = "jobs:\n  work:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n"
+	withProcess := func(t *testing.T, raw string) ([]string, check.ReviewTriggerCensus) {
+		t.Helper()
+		corpus := trunkCorpusSource(t)
+		corpus["newflow.yml"] = raw
+		findings, census, err := check.AuditReviewTriggers(corpus)
+		require.NoError(t, err)
+		return findings, census
+	}
+
+	t.Run("on: pull_request_target скаляром", func(t *testing.T) {
+		got, census := withProcess(t, "name: новый\non: pull_request_target\n"+jobs)
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], "newflow.yml")
+		require.Contains(t, got[0], "`pull_request_target`")
+		require.Equal(t, control.OnReview+1, census.OnReview)
+	})
+
+	t.Run("on: [push, pull_request_target] последовательностью", func(t *testing.T) {
+		got, census := withProcess(t, "name: новый\non: [push, pull_request_target]\n"+jobs)
+		require.Len(t, got, 2, "находка о событии и находка оси 2; о процессе без запроса — нет")
+		joined := strings.Join(got, "\n")
+		require.Contains(t, joined, "`pull_request_target`")
+		require.Contains(t, joined, "`push` не сужен по ветке")
+		require.Equal(t, control.OnReview+1, census.OnReview)
+	})
+
+	t.Run("процесс только по push в ствол", func(t *testing.T) {
+		got, _ := withProcess(t, "name: новый\non:\n  push:\n    branches: [main]\n"+jobs)
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], "на запросе не идёт")
+	})
+
+	// ЗАКОННЫЕ БЛИЗНЕЦЫ: процесс, не идущий по push в ветки, предметом этого
+	// требования не является — выпуск по меткам версий судит не ствол.
+	t.Run("близнец: процесс по push только в метки, без запроса", func(t *testing.T) {
+		got, census := withProcess(t, "name: новый\non:\n  push:\n    tags: ['v[0-9]+.[0-9]+.[0-9]+']\n"+jobs)
+		require.Empty(t, got)
+		require.Equal(t, control.OnReview, census.OnReview)
+		require.Equal(t, control.OnBranchPush, census.OnBranchPush)
+	})
+
+	t.Run("близнец: процесс ствола на pull_request", func(t *testing.T) {
+		got, census := withProcess(t, "name: новый\non:\n  push:\n    branches: [main]\n"+
+			"  pull_request:\n    branches: [main, '[0-9]+']\n"+jobs)
+		require.Empty(t, got)
+		require.Equal(t, control.OnReview+1, census.OnReview)
+		require.Equal(t, control.ReviewAtLine+1, census.ReviewAtLine)
 	})
 }
 

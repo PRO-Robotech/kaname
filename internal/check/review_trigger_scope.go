@@ -19,11 +19,17 @@ package check
 //
 // # ЧЕТЫРЕ ОСИ, И КАЖДАЯ ЛОМАЕТСЯ СВОИМ СПОСОБОМ, МОЛЧА
 //
-//  1. БАЗЫ ЗАПРОСА. `on.pull_request.branches` КАЖДОГО процесса, идущего на
-//     запросе, РАВЕН множеству ReviewBaseBranches: ни уже (запрос в линию без
-//     вердикта), ни шире (прогон на запросе в ветку полосы, ревью, спасения —
-//     тот расход, ради которого фильтр и заведён). Сверяется РАВЕНСТВО, а не
-//     вхождение: вхождение молчало бы на `'**'`;
+//  1. СОБЫТИЕ И БАЗЫ ЗАПРОСА. КАЖДЫЙ процесс ствола — идущий по `push` в
+//     ветки — идёт и на запросе: вердикт линии даёт её запрос (ось 2), и
+//     процесс без запроса оставляет линию без своего вердикта вовсе, а ствол —
+//     без него до вливания. На запросе процесс идёт событием `pull_request`, и
+//     только им: `pull_request_target` (reviewTargetEvent) — процесс идёт на
+//     запросе и в перепись входит, но это находка, а его фильтр баз не
+//     судится — законным событие он не делает. `on.pull_request.branches`
+//     КАЖДОГО процесса, идущего на запросе, РАВЕН множеству ReviewBaseBranches:
+//     ни уже (запрос в линию без вердикта), ни шире (прогон на запросе в ветку
+//     полосы, ревью, спасения — тот расход, ради которого фильтр и заведён).
+//     Сверяется РАВЕНСТВО, а не вхождение: вхождение молчало бы на `'**'`;
 //  2. СТВОЛ ПО `push`. `on.push.branches` равен {main}: вердикт линии даёт её
 //     ЗАПРОС, а не каждая отправка в неё. Держатель `trunkverdict` сужен по
 //     стволу своим условием и судится своим гейтом (trunk_verdict_holder.go),
@@ -106,8 +112,10 @@ package check
 //
 // # ЧЕГО ЭТОТ РАЗБОР НЕ СУДИТ — СКАЗАНО ПРЯМО
 //
-// Тела `run:`: база, прочитанная оболочкой из окружения, разбору условий не
-// видна. Настройки защиты ветки: перечень обязательных контекстов живёт вне
+// События, которые идут не на голове запроса и в перепись «идут на запросе»
+// не входят: `pull_request_review`, `pull_request_review_comment`,
+// `merge_group`, `workflow_run`. Тела `run:`: база, прочитанная оболочкой из
+// окружения, разбору условий не видна. Настройки защиты ветки: перечень обязательных контекстов живёт вне
 // дерева (`.github/TRUNK-VERDICT.md`). И СЕМАНТИКУ глоба у провайдера: разбор
 // сверяет ЗАПИСЬ фильтра с объявленной, а что запись захватывает на origin —
 // замер переписью веток (шапка `on:` в `ci.yml`), то есть свойство вне дерева.
@@ -152,10 +160,15 @@ func ReviewBaseBranches() []string {
 	return []string{TrunkBranch, LineBranchPattern}
 }
 
-// reviewEvent — событие запроса. `pull_request_target` сюда НЕ входит: у него
-// другой контекст исполнения (права базы на чужой голове), и объявление его
-// ради вердикта линии было бы расширением поверхности, а не триггера.
+// reviewEvent — событие запроса, на котором процесс ОБЯЗАН идти, и только оно.
 const reviewEvent = "pull_request"
+
+// reviewTargetEvent — второе событие, на котором процесс идёт на запросе. У
+// него другой контекст исполнения (права базы на чужой голове), и объявление
+// его ради вердикта линии — расширение поверхности, а не триггера. Процесс на
+// нём в перепись «идут на запросе» ВХОДИТ и даёт находку: молчание на нём
+// выводило процесс из переписи, и её падение читалось как «процессов меньше».
+const reviewTargetEvent = "pull_request_target"
 
 // ownerPlace — где объект перечня молчащих обязан стоять, чтобы молчать:
 // корнем выражения или полем другого объекта. Имя вне своего места — другой
@@ -392,11 +405,14 @@ func isIdentChar(c byte) bool { return isIdentStart(c) || isDigit(c) || c == '-'
 
 // ReviewTriggerCensus — объём осмотренного.
 type ReviewTriggerCensus struct {
-	// Files — объявлений прочитано; OnReview — из них идущих на запросе;
-	// ReviewAtLine — из идущих на запросе тех, чей фильтр баз РАВЕН объявленному.
-	Files        int
-	OnReview     int
-	ReviewAtLine int
+	// Files — объявлений прочитано; OnReview — из них идущих на запросе
+	// любым из двух событий; OnReviewTarget — из идущих на запросе тех, что
+	// идут на `pull_request_target`; ReviewAtLine — из идущих на запросе тех,
+	// у кого фильтр баз `pull_request` РАВЕН объявленному.
+	Files          int
+	OnReview       int
+	OnReviewTarget int
+	ReviewAtLine   int
 	// OnBranchPush — идущих по `push` в ветки (не только в метки).
 	OnBranchPush int
 	// Conditions — условий `if:` осмотрено (заданий и шагов вместе);
@@ -412,10 +428,11 @@ type ReviewTriggerCensus struct {
 // String — перепись одной строкой. «Ноль находок» обязано быть отличимо от
 // «ноль прочитанного», поэтому печатаются все величины.
 func (c ReviewTriggerCensus) String() string {
-	return fmt.Sprintf("объявлений процессов %d · идут на запросе %d · из них с базами {%s} %d · "+
-		"идут по push в ветки %d · условий if: осмотрено %d · звеньев в них прочитано %d · "+
-		"псевдонимов YAML разрешено %d",
-		c.Files, c.OnReview, strings.Join(ReviewBaseBranches(), ", "), c.ReviewAtLine,
+	return fmt.Sprintf("объявлений процессов %d · идут на запросе %d · из них на %s %d · "+
+		"из них с базами {%s} %d · идут по push в ветки %d · условий if: осмотрено %d · "+
+		"звеньев в них прочитано %d · псевдонимов YAML разрешено %d",
+		c.Files, c.OnReview, reviewTargetEvent, c.OnReviewTarget,
+		strings.Join(ReviewBaseBranches(), ", "), c.ReviewAtLine,
 		c.OnBranchPush, c.Conditions, c.ConditionLinks, c.Aliases)
 }
 
@@ -456,8 +473,8 @@ func AuditReviewTriggers(corpus map[string]string) ([]string, ReviewTriggerCensu
 
 	if census.OnReview == 0 {
 		return nil, census, fmt.Errorf(
-			"процессов, идущих на запросе (%s), не найдено ни одного: детектор события "+
-				"молчит, и его ноль означает «не искали», а не «их нет»", reviewEvent)
+			"процессов, идущих на запросе (%s, %s), не найдено ни одного: детектор события "+
+				"молчит, и его ноль означает «не искали», а не «их нет»", reviewEvent, reviewTargetEvent)
 	}
 	return findings, census, nil
 }
@@ -492,9 +509,20 @@ func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string,
 
 	var findings []string
 
-	// (1) и (3) — БАЗЫ ЗАПРОСА И ПУТИ.
-	if pr, ok := events[reviewEvent]; ok {
+	// (1) и (3) — СОБЫТИЕ, БАЗЫ ЗАПРОСА И ПУТИ.
+	pr, onPR := events[reviewEvent]
+	_, onTarget := events[reviewTargetEvent]
+	if onPR || onTarget {
 		census.OnReview++
+	}
+	if onTarget {
+		census.OnReviewTarget++
+		findings = append(findings, fmt.Sprintf("процесс идёт на запросе событием `%s`: оно "+
+			"исполняет процесс в контексте базы, а не запроса, — расширение поверхности, а не "+
+			"триггера; вердикт запроса в ствол и линию даёт `%s` с базами {%s}",
+			reviewTargetEvent, reviewEvent, strings.Join(ReviewBaseBranches(), ", ")))
+	}
+	if onPR {
 		fs, atLine := auditReviewFilter(pr)
 		if atLine {
 			census.ReviewAtLine++
@@ -502,11 +530,17 @@ func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string,
 		findings = append(findings, fs...)
 	}
 
-	// (2) — СТВОЛ ПО `push`.
+	// (2) — СТВОЛ ПО `push`; процесс ствола без запроса — ось 1.
 	if push, ok := events["push"]; ok {
 		fs, onBranches := auditPushFilter(push)
 		if onBranches {
 			census.OnBranchPush++
+			if !onPR && !onTarget {
+				fs = append(fs, fmt.Sprintf("процесс идёт по `push` в ветки, а на запросе не идёт: "+
+					"вердикт линии даёт её ЗАПРОС, и у линии вердикта этого процесса нет вовсе, а "+
+					"ствол узнаёт его красное только после вливания — нужен `%s` с базами {%s}",
+					reviewEvent, strings.Join(ReviewBaseBranches(), ", ")))
+			}
 		}
 		findings = append(findings, fs...)
 	}
