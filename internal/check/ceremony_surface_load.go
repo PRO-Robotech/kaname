@@ -31,6 +31,7 @@ package check
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,9 +132,15 @@ func listingFor(moduleRoot, rootPkg string) (*surfaceListing, error) {
 }
 
 // surfaceListTimeout — срок `go list`, называющего радиус.
-const surfaceListTimeout = 10 * time.Minute
+//
+// Без своего срока зависший `go list` (сеть модулей, блокировка кэша) съел
+// бы весь бюджет прогона, и пакет проб оборвался бы паникой без причины.
+// Замер: холодная сборка данных экспорта радиуса под -race (пустой GOCACHE,
+// 4 ядра, 605 пакетов) — 29 с. Срок в 10 раз выше замера и в 5 раз ниже
+// бюджета прогона конвейера (-timeout 25m).
+const surfaceListTimeout = 5 * time.Minute
 
-func newListing(moduleRoot, rootPkg string, _ time.Duration) (*surfaceListing, error) {
+func newListing(moduleRoot, rootPkg string, timeout time.Duration) (*surfaceListing, error) {
 	if rootPkg == "" {
 		return nil, errors.New("радиус: композиционный корень не назван")
 	}
@@ -143,11 +150,16 @@ func newListing(moduleRoot, rootPkg string, _ time.Duration) (*surfaceListing, e
 		args = append(args, "-race")
 	}
 	args = append(args, rootPkg)
-	cmd := exec.Command("go", args...) // #nosec G204 -- путь пакета приходит из пробы дерева, не из запроса
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", args...) // #nosec G204 -- путь пакета приходит из пробы дерева, не из запроса
 	cmd.Dir = moduleRoot
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("радиус: go list -deps %s в %s не уложился в срок %s: %w", rootPkg, moduleRoot, timeout, ctx.Err())
+	}
 	if err != nil {
 		return nil, fmt.Errorf("радиус: go list -deps %s в %s: %w\n%s", rootPkg, moduleRoot, err, strings.TrimSpace(stderr.String()))
 	}
