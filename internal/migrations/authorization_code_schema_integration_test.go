@@ -144,9 +144,12 @@ func acScene(t *testing.T, db *sql.DB, tag string) (clientID, userID, sessionID,
 		sessionID, userID, acDigest(len(tag)*7919+1))
 	require.NoError(t, err, "посев сессии %s", tag)
 
+	// Способ объявлен: клиента без способа схема не принимает
+	// (`interactive_clients_auth_method_ck`, kaname#317), и фикстура не бывает
+	// снисходительнее продукта.
 	_, err = db.Exec(`
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id)
-		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3)`,
+		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3, 'none')`,
 		"ic-"+acPad(tag), "ic-"+tag, clientID)
 	require.NoError(t, err, "посев клиента %s", tag)
 

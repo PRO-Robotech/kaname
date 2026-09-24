@@ -39,6 +39,8 @@ func domainCfg(domain string) config.Config {
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.TokenSigning = ownMintingSettings()
+	cfg.APIServer.RegistryToken = registryTokenLaneSettings()
+	cfg.AuthN.ClientToken = clientTokenLaneSettings()
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
 	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.AccessKeys = accessKeySettings()

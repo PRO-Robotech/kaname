@@ -105,6 +105,10 @@ type Handler struct {
 	// nil → глагол fail-closed Unavailable.
 	basicCredentials basicCredentialResolver
 
+	// basicOutcomes — перепись исходов полосы базового секрета по глаголу и
+	// исходу (kaname#379). Нулевое значение готово к работе.
+	basicOutcomes basicCredentialCensus
+
 	// logger — поверхность НАБЛЮДАЕМОСТИ отказов. Различимость причин отказа
 	// живёт здесь, а не в том, что видит предъявитель: «ноль отказов за всю
 	// жизнь контроля» обязано быть заметно, иначе мёртвый контроль невидим.

@@ -130,12 +130,13 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 				Name: "interactive_clients",
 				Row: func(name string, seq int) (string, []any) {
 					// id обязан отвечать `^ic-[0-9a-hjkmnp-tv-z]{17}$`, список
-					// адресов возврата — быть непустым и https: обе проверки
-					// стоят рядом с формой имени, и строка, спотыкающаяся о них,
-					// до неё бы не дошла.
+					// адресов возврата — быть непустым и https, способ
+					// аутентификации — объявлен (kaname#317): эти проверки стоят
+					// рядом с формой имени, и строка, спотыкающаяся о них, до
+					// неё бы не дошла.
 					return `INSERT INTO kaname.interactive_clients
-					            (id, client_id, name, redirect_uris)
-					        VALUES ($1, $2, $3, ARRAY['https://console.example/cb'])`,
+					            (id, client_id, name, redirect_uris, token_endpoint_auth_method)
+					        VALUES ($1, $2, $3, ARRAY['https://console.example/cb'], 'none')`,
 						[]any{
 							fmt.Sprintf("ic-%017d", seq),
 							fmt.Sprintf("hydra-ic-%d", seq),

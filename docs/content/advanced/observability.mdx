@@ -283,8 +283,8 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 
 | `outcome="…"` | Кто чинит |
 |---|---|
-| `registry-unavailable`, `replay-store-unavailable`, `issuance-failed` | наша сторона: реестр, склад однократности, подписант |
-| остальные значения | предъявитель либо его настройка: не тот алгоритм, истёкшее утверждение, недоверенный издатель, неразрешённый адресат |
+| `registry-unavailable`, `replay-store-unavailable`, `revocation-check-failed`, `issuance-failed` | наша сторона: реестр, склад однократности, склад отсечек отзыва, подписант |
+| остальные значения | предъявитель либо его настройка: не тот алгоритм, истёкшее утверждение, недоверенный издатель, неразрешённый адресат, владелец ключа вышел отовсюду после его выдачи (`owner-revoked`) |
 
 **Печатаются все объявленные исходы, включая нулевые.** Поэтому «ноль отказов» отличимо от «полоса
 не исполнялась ни разу»: во втором случае на нуле и `accepted`.
@@ -333,14 +333,15 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 |---|---|---|
 | `kaname_own_keyset_outcomes_total` | `outcome` | обслуживание НАШЕГО набора ключей проверки: `served`, `unavailable`, `empty`. Пустой набор — отдельная клетка: в отличие от недоступности, ожидание его не лечит |
 | `kaname_token_introspection_outcomes_total` | `outcome` | ответы на вопрос «жив ли предъявленный токен»: `active`, `inactive`, `unavailable`. Третий исход отдельно от `inactive` — иначе отказ базы неотличим от отзыва |
-| `kaname_signing_key_events_total` | `event` | события жизненного цикла подписного ключа: `generated`, `activated`, `retired`, `removed`, `compromised`, `failure` |
+| `kaname_signing_key_events_total` | `event` | события жизненного цикла подписного ключа: `generated`, `activated`, `retired`, `removed`, `compromised`, `failure`, `swept`. **`swept` — завершённый проход сметателя**, включая проходы без единого снятия: ноль снятий один не различает «снимать нечего» и «сметатель не ходит», ноль проходов — различает, и на него звонит `KanameSigningKeySweeperSilent` |
 | `kaname_jwks_mirror_outcomes_total` | `outcome` | обслуживание внутреннего зеркала ключей: `served`, `unavailable`, `misconfigured`. **`served` считается наравне с отказами** — иначе «ни разу не отказал» неотличимо от «ни разу не спросили»; неверный адрес — своя клетка, потому что сам не заживёт |
 | `kaname_presented_credential_outcomes_total` | `outcome` | чтение удостоверения, ПРЕДЪЯВЛЕННОГО на публичном слушателе: `accepted`, `refused`, `unavailable`. Отказ никогда не называет, какая именно проверка не прошла, — это сказало бы предъявителю, какую половину подбирать. `unavailable` — ТРЕТИЙ исход, а не оттенок отказа: негодное удостоверение чинит предъявитель, недоступный авторитет — оператор |
 | `kaname_registry_token_credential_kind_total` | `outcome` | исходы докерной полосы выдачи токена по виду предъявленного удостоверения |
+| `kaname_basic_credential_outcomes_total` | `verb`, `outcome` | исходы полосы базового секрета внутреннего слушателя: `verb` — `resolve` (предъявленный секрет) либо `liveness` (открытое соединение спрашивает по идентификатору); `outcome` — `accepted`, по одному значению на каждую причину отказа (`malformed`, `not-found`, `secret-mismatch`, `owner-revoked`), `reason-unnamed` и `unavailable`. Наружу любая причина отказа — один и тот же ответ; `owner-revoked` — удостоверение выдано не позже отсечки отзыва-всех его владельца. `reason-unnamed` у исправной службы всегда ноль |
 
-Два ряда этой таблицы — `kaname_jwks_mirror_outcomes_total` и
-`kaname_presented_credential_outcomes_total` — заведены ради требования «ноль отказов за
-всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
+Три ряда этой таблицы — `kaname_jwks_mirror_outcomes_total`,
+`kaname_presented_credential_outcomes_total` и `kaname_basic_credential_outcomes_total` —
+заведены ради требования «ноль отказов за всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
 дежурный их не увидит.
 
 ## Приглашения и посев администратора
@@ -562,6 +563,13 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   annotations:
     summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
 
+- alert: KanameSigningKeySweeperSilent
+  # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
+  expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+  for: 30m
+  annotations:
+    summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"
+
 - alert: KanameClientTokenRefusalRate
   expr: |
     sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
@@ -571,9 +579,9 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
     summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
 
 - alert: KanameClientTokenIssuanceBroken
-  # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+  # Отказы НАШЕЙ стороны: реестр, склад однократности, склад отсечек отзыва, подписант.
   expr: |
-    sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+    sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|revocation-check-failed|issuance-failed"}[10m])) > 0
   for: 5m
   annotations:
     summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"

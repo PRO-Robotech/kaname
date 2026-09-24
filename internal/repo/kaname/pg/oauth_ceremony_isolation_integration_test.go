@@ -42,8 +42,8 @@ package pg_test
 //
 // # Чего проба НЕ различает
 //
-//   - одиночные ЧИТАТЕЛИ порта (`ConsentedScopes`, `ClientSecretVerifier`, разбор
-//     нуля строк): у одного оператора снимок один при любом уровне, и его исход
+//   - одиночные ЧИТАТЕЛИ порта (`ClientSecretVerifier`, разбор нуля строк): у
+//     одного оператора снимок один при любом уровне, и его исход
 //     уровнем не решается; проба их не судит — перечень держит
 //     `ceremonyPortClassification`;
 //   - писателя, пишущего ЧИТАЮЩИМ оператором пула (`QueryRow`/`Query` с
@@ -101,11 +101,8 @@ var ceremonyPortClassification = map[string]string{
 	"ExchangeAuthorizationCode": "writer",
 	"RotateRefreshToken":        "writer",
 	"RevokeFamily":              "writer",
-	"GrantConsent":              "writer",
-	"WithdrawConsent":           "writer",
 	"SetClientSecretVerifier":   "writer",
 	"ClearClientSecretVerifier": "writer",
-	"ConsentedScopes":           "reader",
 	"ClientSecretVerifier":      "reader",
 }
 
@@ -260,17 +257,25 @@ func holdRefreshDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 }
 
 // familyState — состояние семейства, прочитанное в момент наблюдения.
+//
+// Состояние — ОБЕ записи отзыва: отметка на семействе и отсечка по его ключу
+// для места предъявления (`writeFamilyCutoffsTx`, kaname#396). Обе кладёт одна
+// транзакция писателя; отметка без отсечки — отзыв, исполненный наполовину, и
+// судится своим утверждением.
 type familyState struct {
 	revoked bool
 	reason  string
 	live    bool
+	cutoff  bool
 }
 
 func readFamily(ctx context.Context, pool *pgxpool.Pool, familyID string) (familyState, error) {
 	var st familyState
 	err := pool.QueryRow(ctx, `
-		SELECT revoked_at IS NOT NULL, coalesce(revoked_reason, ''), live
-		  FROM kaname.token_families WHERE id = $1`, familyID).Scan(&st.revoked, &st.reason, &st.live)
+		SELECT f.revoked_at IS NOT NULL, coalesce(f.revoked_reason, ''), f.live,
+		       EXISTS (SELECT 1 FROM kaname.minted_token_revocations r WHERE r.subject = f.id)
+		  FROM kaname.token_families f WHERE f.id = $1`, familyID).
+		Scan(&st.revoked, &st.reason, &st.live, &st.cutoff)
 	return st, err
 }
 
@@ -471,6 +476,9 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 						"исходом не является (LINE-A-1-13)")
 				assert.Equal(t, string(subj.reason), out.atLoser.reason, "основание отзыва")
 				assert.False(t, out.atLoser.live, "живость семейства у проигравшего")
+				assert.True(t, out.atLoser.cutoff,
+					"к возврату проигравшего отсечка семейства обязана лежать: отзыв, не дошедший "+
+						"до места предъявления, исполнен наполовину")
 
 				// Транзакция проигравшего ОТКАЧЕНА: считается ДО попытки ротации ниже,
 				// иначе число мерило бы и её.
@@ -521,6 +529,7 @@ func TestOAuthCeremonyConcurrentPresentationsOfDifferentSubjectsBothPass(t *test
 				assert.NoError(t, out.loserErr, "второй, предъявивший СВОЙ предмет, обязан пройти")
 				require.NoError(t, out.atLoserErr)
 				assert.False(t, out.atLoser.revoked, "семейство второго обязано остаться живым")
+				assert.False(t, out.atLoser.cutoff, "у живого семейства второго отсечки быть не может")
 
 				repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
 				for j, fam := range []struct {
@@ -601,21 +610,35 @@ var heldWriterCases = []heldWriterCase{
 			code := issueCeremonyCode(t, ctx, repo, sc, n)
 			childPID, releaseChild := holdingTx(t, ctx, sh.seed, "строка ребёнка",
 				`SELECT 1 FROM kaname.authorization_codes WHERE code_digest = $1 FOR SHARE`, code)
-			firstDone := make(chan error, 1)
-			go func() { firstDone <- repo.RevokeFamily(ctx, sc.FamilyID, domain.FamilyRevokedByCodeReplay) }()
+			type revoked struct {
+				rows int64
+				err  error
+			}
+			firstDone := make(chan revoked, 1)
+			go func() {
+				rows, err := repo.RevokeFamily(ctx, sc.FamilyID, domain.FamilyRevokedByCodeReplay)
+				firstDone <- revoked{rows, err}
+			}()
 			firstPID := awaitBlockedBy(t, ctx, sh.seed, childPID, "первый отзыв")
 			return firstPID, func() {
 				releaseChild()
 				select {
-				case err := <-firstDone:
-					require.NoError(t, err, "первый отзыв обязан пройти")
+				case first := <-firstDone:
+					require.NoError(t, first.err, "первый отзыв обязан пройти")
+					require.EqualValues(t, 1, first.rows, "первый отзыв обязан отметить семейство")
 				case <-time.After(30 * time.Second):
 					t.Fatal("первый отзыв не завершился после снятия держателя")
 				}
 			}
 		},
 		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
-			return repo.RevokeFamily(ctx, sc.FamilyID, domain.FamilyRevokedByRefreshReplay)
+			rows, err := repo.RevokeFamily(ctx, sc.FamilyID, domain.FamilyRevokedByRefreshReplay)
+			if err == nil && rows != 0 {
+				// Отметка второго — не отказ, но и не пустой отзыв: исход судится
+				// тем же утверждением, что отказ.
+				return fmt.Errorf("второй отзыв отметил строк %d вместо нуля: отзыв не идемпотентен", rows)
+			}
+			return err
 		},
 		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, err error) {
@@ -625,49 +648,7 @@ var heldWriterCases = []heldWriterCase{
 			assert.True(t, st.revoked, "семейство отозвано")
 			assert.Equal(t, string(domain.FamilyRevokedByCodeReplay), st.reason,
 				"второй отзыв не вправе переписать причину первого")
-		},
-	},
-	{
-		// Два согласия на одну тройку: держатель вставил строку, писатель стоит
-		// на уникальном ключе. Исход — «согласие уже стоит», а не отказ.
-		name: "GrantConsent",
-		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, n int) (int, func()) {
-			return holdingTx(t, ctx, sh.seed, "встречное согласие", `
-				INSERT INTO kaname.consent_grants (id, user_id, client_id, scope)
-				VALUES ($1, $2, $3, 'openid')`,
-				"cg-"+ceremonyPad(fmt.Sprintf("kn%05d", n)), sc.UserID, sc.ClientID)
-		},
-		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
-			return repo.GrantConsent(ctx, sc.UserID, sc.ClientID, []string{"openid"})
-		},
-		check: func(t *testing.T, ctx context.Context, _ ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, err error) {
-			assert.NoError(t, err, "повторное согласие на ту же тройку — не отказ")
-			granted, gErr := repo.ConsentedScopes(ctx, sc.UserID, sc.ClientID)
-			require.NoError(t, gErr)
-			assert.Equal(t, []string{"openid"}, granted)
-		},
-	},
-	{
-		// Два отзыва одного согласия: второй обязан быть пустым, а не отказом.
-		name: "WithdrawConsent",
-		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, _ int) (int, func()) {
-			require.NoError(t, repo.GrantConsent(ctx, sc.UserID, sc.ClientID, []string{"openid"}), "посев согласия")
-			return holdingTx(t, ctx, sh.seed, "встречный отзыв согласия", `
-				UPDATE kaname.consent_grants SET revoked_at = now()
-				 WHERE user_id = $1 AND client_id = $2 AND scope = 'openid'`, sc.UserID, sc.ClientID)
-		},
-		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
-			return repo.WithdrawConsent(ctx, sc.UserID, sc.ClientID, "openid")
-		},
-		check: func(t *testing.T, ctx context.Context, _ ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, err error) {
-			assert.NoError(t, err, "второй отзыв того же согласия — не отказ")
-			granted, gErr := repo.ConsentedScopes(ctx, sc.UserID, sc.ClientID)
-			require.NoError(t, gErr)
-			assert.Empty(t, granted)
+			assert.True(t, st.cutoff, "отсечка семейства обязана лежать после обоих отзывов")
 		},
 	},
 	{
@@ -1002,6 +983,8 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					"семейство, заведённое выдачей, на которой стояло снятие, обязано быть ОТОЗВАНО")
 				assert.Equal(t, string(domain.FamilyRevokedBySessionEnd), st.reason, "основание отзыва")
 				assert.False(t, st.live, "живость семейства после снятия сессии")
+				assert.True(t, st.cutoff,
+					"отсечка семейства, заведённого выдачей, обязана лечь той же транзакцией снятия")
 			})
 		}
 	}
