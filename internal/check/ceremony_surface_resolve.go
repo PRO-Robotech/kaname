@@ -354,6 +354,12 @@ func (r *strRes) sortedVals() []string {
 // valueCeiling — потолок декартова произведения при склейке.
 const valueCeiling = 256
 
+// resolveStepBudget — предел шагов обратного разбора одного прогона: страж
+// от перебора, а не условие точности. Исчерпание — «гейт не исполнился»:
+// значения путей, не досчитанные до конца, неотличимы от отсутствующих.
+// Сколько шагов ушло, печатает перепись.
+const resolveStepBudget = 2_000_000
+
 // resKind — что сводится к значениям: само выражение, элементы или ключи
 // контейнера.
 type resKind uint8
@@ -394,6 +400,8 @@ type strResolver struct {
 	frames  []resFrame
 	xform   int
 	steps   int
+	// exhausted — бюджет шагов исчерпан: исход прогона не вердикт.
+	exhausted bool
 }
 
 func newStrResolver(a *surfaceFlow) *strResolver {
@@ -412,6 +420,10 @@ func (r *strResolver) memoized(k resKey, compute func() *strRes) *strRes {
 		if top := &r.frames[len(r.frames)-1]; i < top.low {
 			top.low = i
 		}
+		return newStrRes()
+	}
+	if r.steps >= resolveStepBudget {
+		r.exhausted = true
 		return newStrRes()
 	}
 	r.steps++

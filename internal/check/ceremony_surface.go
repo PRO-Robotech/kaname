@@ -160,14 +160,14 @@ func (c CeremonySurfaceCensus) Summary() string {
 		forms = append(forms, fmt.Sprintf("%s %d", k, v))
 	}
 	sort.Strings(forms)
-	return fmt.Sprintf("раундов разбора %d из предела %d · шагов обратного разбора пути %d · "+
+	return fmt.Sprintf("раундов разбора %d из предела %d · шагов обратного разбора пути %d из бюджета %d · "+
 		"пакетов исходником %d · файлов %d · файлов корня %d · объявлений поверхности %d · "+
 		"элементов среза подъёма %d · построителей %d · мультиплексоров net/http %d · шлюза %d · "+
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
 		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у ненаблюдаемого кода %d · "+
 		"чтений пути запроса %d · носителей пути %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
 		"координат без производителя %d · положительных контролей %d · формы пути: %s",
-		c.SolveRounds, CeremonySolveRoundLimit, c.ResolveSteps, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
+		c.SolveRounds, CeremonySolveRoundLimit, c.ResolveSteps, resolveStepBudget, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
 		c.HTTPMuxes, c.GatewayMuxes, c.HTTPRegistrations, c.GatewayRegistrations, c.DefaultRegistrations,
 		c.UnreachableRegistrations, c.UntracedRegistrations, len(c.Unresolved), strings.Join(c.Unresolved, "; "),
 		len(c.Escapes), c.URLPathReads, c.PathCarriers, len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
@@ -220,8 +220,8 @@ type CeremonySurfaceReport struct {
 
 // JudgeCeremonySurfaces судит, на скольких поверхностях резолвится каждая
 // координата. Ошибка — гейт НЕ ИСПОЛНИЛСЯ (радиус не собран, файл не
-// разобрался, разбор не дошёл до неподвижной точки): это не зелёное и не
-// находка. ctx ограничивает сбор радиуса (`go list`) вместе с его сроком.
+// разобрался, разбор не дошёл до неподвижной точки, обратный разбор путей
+// исчерпал бюджет шагов): это не зелёное и не находка. ctx ограничивает сбор радиуса (`go list`) вместе с его сроком.
 func JudgeCeremonySurfaces(ctx context.Context, spec CeremonySurfaceSpec, coords []CeremonyCoordinate) (CeremonySurfaceReport, error) {
 	l, err := listingFor(ctx, spec.ModuleRoot, spec.RootPackage)
 	if err != nil {
@@ -243,7 +243,12 @@ func JudgeCeremonySurfaces(ctx context.Context, spec CeremonySurfaceSpec, coords
 	}
 	j := &surfaceJudge{a: a, spec: spec, res: newStrResolver(a), reach: a.reachable()}
 	j.census.SolveRounds = rounds
-	return j.run(coords), nil
+	report := j.run(coords)
+	if j.res.exhausted {
+		return CeremonySurfaceReport{}, fmt.Errorf("обратный разбор путей исчерпал бюджет %d шагов (resolveStepBudget): "+
+			"значения путей, не досчитанные до конца, неотличимы от отсутствующих — вердикт не выносится", resolveStepBudget)
+	}
+	return report, nil
 }
 
 // ─── судья ──────────────────────────────────────────────────────────────────
