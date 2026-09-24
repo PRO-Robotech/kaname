@@ -1,0 +1,269 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md
+  sha256: 964a8751d3e967f1fd6d4d98eb074748d9480fe448bcddd53379224169af6d50
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Одобрение выводится из внешнего события
+    и записи. У этой редакции вердикт — возврат, событие одобрения по ней не выпускается.
+    Прежних записей в каталоге нет, эта первая.
+  base_commit: f4c6537ac4add4989faa9f28fb503b90a1531f12
+  content_commit: b73503ac80784330b592a4d2ee4b1fe4d25fa2bb
+  content_commit_note: >-
+    Документ закоммичен в `acc-385` на b73503ac8, родитель f4c6537ac (вершина ветки волны 358
+    на момент написания). `git show HEAD:<путь> | sha256sum` равен отпечатку файла на диске.
+    С тех пор origin/358 ушла на 196bf9664, это +13 коммитов. Ни одного файла, на который
+    ссылается документ, они не трогают: `git diff --stat HEAD^ origin/358 --` по humansession,
+    pg, internal_iam, loginlanehttp, observability, session_revocations и migrations → пусто.
+  branch: acc-385
+  pull_request: null
+  task: PRO-Robotech/kaname#385
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 720
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md
+    → 964a8751d3e967f1fd6d4d98eb074748d9480fe448bcddd53379224169af6d50. Снят с файла на диске
+    и с блоба коммита, значения совпали.
+  measurement_revisions: >-
+    Дерево службы: f4c6537ac (код) и b73503ac8 (плюс документ). База линии: cbbac984 =
+    origin/main (`git ls-remote origin refs/heads/main`). Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    (1) «Код #340 уже в 358» — ПОДТВЕРЖДЕНО: `git merge-base --is-ancestor 3a6ceed43
+    origin/358` → 0. (2) «Документа приёмки нет» устарело: документ теперь лежит в дереве
+    ветки acc-385. (3) Дом приёмки — docs/engineering/acceptance/, как у соседей, дом записей —
+    docs/specs/reviews/<имя>/ — ПОДТВЕРЖДЕНО листингом. (4) Трейлеров в коммите автора нет:
+    `git log -1 --format=%B | grep -ciE 'co-authored|claude-session|generated with'` → 0.
+    (5) Перепись §0 воспроизведена целиком: каждая команда §0.1, 0.2, 0.3, 0.6 и 0.7
+    перепрогнана и дала написанное. Координаты §0.3, 0.4, 0.8, 0.9 сверены чтением. Пять
+    имён проб из DoD п.7 и шесть файлов-соседей существуют.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-25'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Возврат. Блокирующих три, роды CONSTRUCTIBILITY, COVERAGE и NEGATIVE. «Дано» KN-OVL-09
+    при общей посылке §4 не строится, и это показано посевом. Включающая граница проверена
+    только в разрешении, которого нет у боевых часов входа. У новой операции захвата и
+    чтения отсечки не назван исход отказа. Остальное принимается. Scope совпадает с
+    задачей kaname#385, перепись §0 воспроизведена, производитель у «Тогда» назван 9 из 9,
+    близнец у отрицаний 9 из 9. Санкции на код нет (ban #1). Правка сменит отпечаток и
+    потребует соседней записи.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Редакция 1 целиком: шапка, §0 (перепись), §1–§3 (Р1–Р6), KN-OVL-01…09, §5 (обе таблицы),
+    §6 DoD пп. 1–11. Сверено с задачей kaname#385 (тело, предикат снятия, DoD) и с кодом:
+    humansession/login.go, issue.go, sf_present.go, logout.go (revocationMoment),
+    recovery_complete.go, resolve.go; internal_iam/force_logout.go;
+    session_revocations/session_cutoff.go; pg/human_session_repo.go, oauth_ceremony_repo.go,
+    user_token_revocations_repo.go, user_repo.go (Delete); user/mirror_tx.go;
+    registration/register.go; cmd/kaname/loginlane.go (часы входа в корне); миграции (внешние
+    ключи на users).
+  method: experiment_and_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  scope: >-
+    Совпадает с kaname#385. Решение о границе записано (§3), проба при любом порядке старта
+    есть (KN-OVL-05), контроли названы, красное до правки разведено (§6 п.5). Over-scope нет:
+    правило края, завершение восстановления и посадка external выведены в §2. Спеки 00..04 у
+    службы нет, источник scope — задача.
+  census_section_0: >-
+    Воспроизведено всё. login.go:280, :466, :469; Writer :399, :450, :528; отсечка в
+    login.go и issue.go — 0; human_session_repo.go:341; force_logout.go:345, :349;
+    IssueSession — 4 строки; NewLoginUseCase в пробах — 6 файлов; ForceLogout и отсечка в них
+    — 0; LoginOutcomes — 11 значений. Расхождений нет.
+  producers: >-
+    9 из 9 сценариев имеют строку в §5 с координатой. У каждого «заводится» назван
+    сценарий, который краснеет, пока производителя нет. Сверены строки таблицы «снят → что
+    краснеет» 1–4 и 9. Дефекта производителя нет. Но у новой операции захвата и чтения
+    отсечки не назван исход её отказа, это B3.
+  twins: >-
+    01↔02: где момент входа против момента выхода. 02↔03: где выход против выдачи. 03↔04:
+    зафиксирована ли выдача. 02↔06: верен ли пароль. 02↔07: кто положил отсечку. 07/1↔07/2:
+    одна микросекунда. 02↔08: есть ли код фактора. 09/1↔09/2: кто первым взял строку
+    личности. Каждая пара отличается одним фактом. У B2 и B3 близнецы названы в
+    required_change.
+  constructibility: >-
+    Посеяно 2 «Дано» из 9, одно из них опровергнуто. KN-OVL-09 при общей посылке §4 не
+    строится (B1). Резолюция хранилища посеяна, это B2. Остальные «Дано» строятся
+    названными фикстурами. Личность и S0 — регистрацией полосой (newSessionLane). Второй
+    фактор — глаголами Ф12 над secondFactor стенда. Отсечка с чужой причиной — UpsertCutoff
+    писателя. Отсечка монотонна (GREATEST), у свежей личности её нет, поэтому m и m−1 мкс
+    ложатся как заданы. Задержки З1/З2 ставит обёртка Store, форма взята из KN-SER-05.
+    Ожидание на замке — pg_stat_activity. Остальные посевом не исполнены.
+  dod: >-
+    Пп. 1–11 измеримы. П.5 верно разводит красные и контроли на дереве, где операция
+    объявлена, но не зовётся: каждое ожидание сверено с кодом. Пп. 5 и 10 опираются на 09/1
+    и 09/2 и падают вместе с B1.
+  open_questions: none
+  conventions: >-
+    ban #5 и #10 не тронуты: схемы нет, сериализация на уровне базы замком. ban #6 не
+    тронут: ForceLogout только внутренний. ban #9 не тронут. ban #12 — п.5. Ответ 401
+    `UNAUTHENTICATED` — таблица края, handler.go:858-859.
+  disclosure: >-
+    Предмет документа — правдивость записи и ответа, а не доступ: край отсечённую сессию не
+    пропускает (§1.2). Связки «координата + условие + следствие» дефекта защиты нет.
+
+blocking_findings:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    where: KN-OVL-09 (09/1, 09/2); §4 «Общее», п.1; §6 пп. 5, 10
+    text: >-
+      «Дано» KN-OVL-09 требует удалить личность P писателем полосы удаления. По общей
+      посылке §4 P заведена регистрацией полосой пароля. Такая личность не удаляется.
+      Зеркало регистрации (user/mirror_tx.go:90-117, вставки :222, :254) кладёт личный
+      аккаунт с P владельцем и две привязки с P субъектом. Первая из них с
+      DeletionProtection. `UsersW().Delete` (pg/user_repo.go:812-851) отвергает строку
+      охраной NOT EXISTS по привязкам и отвечает FAILED_PRECONDITION, строки не беря.
+      Значит «удаление стоит на замке» не наступает, а «удаление зафиксировано; личности P
+      нет» не наступает вовсе. Сосед, взятый формой, пишет это прямо
+      (force_logout_identity_deletion_race_integration_test.go:54-56: «Владелец аккаунта не
+      удаляется вовсе») и удаляет не владельца. ПОСЕВ (стенд newSessionLane, testcontainers
+      Postgres, дерево f4c6537ac, проба не закоммичена): у P, заведённой регистрацией,
+      bindings-as-subject=2 и accounts-owned=1. `Delete(P)` → «failed precondition: User …
+      has active access bindings and cannot be deleted». Контроль — не-владелец в том же
+      аккаунте: `Delete` → nil.
+    required_change: >-
+      Для KN-OVL-09 назвать и посеять другую личность: не-владельца без привязок в чужом
+      аккаунте, как seedAccountMember. У неё строка пароля заведена писателем продукта, а
+      второй фактор — глаголами Ф12 после входа полосой. Сказать, что общая посылка §4 для
+      09 не действует и S0 у этой личности нет. Посев показать выводом. Пересчитать §6 пп.
+      5, 10 и строку 2 таблицы под §5 на этой фикстуре.
+  - id: B2
+    kind: COVERAGE
+    where: Р1, Р4 (последняя позиция «Сравнение — в варианте использования входа»); §4 «Общее» («момент усечён до микросекунды»); KN-OVL-07
+    text: >-
+      Край судит пару в разрешении хранилища. Отсечка отдаётся неусечённой
+      (session_cutoff.go:95-103), момент аутентификации — из строки (resolve.go:100). В
+      строку момент входа ложится усечённым до микросекунды: pgx v5 при записи отбрасывает
+      наносекунды, InsertSession (human_session_repo.go:383-389) момент не нормирует. Боевые
+      часы входа — time.Now (cmd/kaname/loginlane.go:464), у них наносекунды. Р4 ставит
+      сравнение на значение часов в памяти. Реализация «m.After(отсечки) — выдать» пройдёт
+      все девять сценариев, потому что §4 подаёт часы уже усечёнными. Но когда m и T стоят
+      в одной микросекунде, она выдаст сессию, которую край отвергнет: в строке m станет
+      равен T. Это то самое несогласие записи с краем, которое запрещает Р2, на той самой
+      включающей границе, которую документ держит. ПОСЕВ (тот же стенд): X = …00.000005Z,
+      m = X + 500 нс. Записано и прочитано …00.000005Z. m.After(X) = true, записанное.After(X) =
+      false. Прецедент понимания разрешения в дереве уже есть: восстановление выдаёт на единицу
+      разрешения позже своей отсечки (recovery_complete.go:264-269), а выход датирует отсечку
+      на единицу разрешения раньше первой аутентификации (logout.go:117-140).
+    required_change: >-
+      В Р1 и Р4 назвать разрешение сравнения: сравнивается значение, которое ляжет в
+      authenticated_at. Либо момент входа усекается до разрешения хранилища до сравнения и до
+      выдачи, либо сравнение идёт в этом разрешении. Завести сценарий KN-OVL-07/3: отсечка
+      дверью записи = X (целая микросекунда), часы входа дают X + 500 нс. Тогда тот же
+      один отказ, входом ничего не записано, клетка `before-cutoff` +1. Близнец — 07/2
+      (отсечка ниже, вход 200), отличие одно — где момент входа внутри микросекунды. В
+      таблицу под §5 добавить строку «сравнение по значению часов в памяти» → краснеет 07/3.
+  - id: B3
+    kind: NEGATIVE
+    where: Р3, Р4 («Захват — отдельная операция писателя сессии»); §4; §5
+    text: >-
+      Изменение заводит операцию, которая берёт строку личности и отвечает стоящей
+      отсечкой. У операции есть исход отказа: ошибка хранилища, отмена, обрыв. Документ этот
+      исход не называет, и ни один сценарий его не утверждает. Реализация, которая считает
+      отказ чтения за «отсечки нет» и выдаёт, зелена на всех девяти сценариях. Она выдаёт
+      сессию, отсечку которой не прочла, то есть оставляет в записи тот же разлад, что
+      предмет документа. Контракт должен закрываться при отказе на мутации, чек-лист
+      требует исход UNAVAILABLE. У входа он уже есть: ErrStoreUnavailable → 503
+      `UNAVAILABLE` (handler.go:885-886), клетка `store-failed`.
+    required_change: >-
+      В Р3 или Р4 записать исход отказа операции захвата и чтения: 503 `UNAVAILABLE`, клетка
+      `store-failed`, транзакция выдачи откатывается целиком (нет записи сессии, нет события
+      выдачи, нет следа попытки, код второго фактора не потреблён), `before-cutoff` не растёт.
+      Завести сценарий: обёртка хранилища отвечает ошибкой на входе в захват (точка З3).
+      Близнец — KN-OVL-01, отличие одно: ответила ли операция. Добавить строку таблицы под §5
+      «отказ чтения отсечки принят за её отсутствие» → краснеет новый сценарий.
+
+non_blocking_findings:
+  - id: N1
+    kind: FORMAT
+    where: KN-OVL-01…09, «Когда» входа
+    text: >-
+      «Вход паролем» не показывает тела запроса. Назвать camelCase-тело `POST
+      /iam/v1/auth/login` явно: `email`, `password` и для 08 и 09 — `secondFactor` с `method`
+      = `lookup_secret` и `code`. Способ второго фактора — закрытый перечень totp|lookup_secret
+      (sf_present.go:151).
+  - id: N2
+    kind: SCOPE
+    where: §2, «Завершение восстановления… — свой предмет»; §0.6
+    text: >-
+      «Свой предмет» ни на что не указывает. Поиск трекера kaname по «восстановлени
+      принудительным выходом» → [], задачи нет. Граница «завершение восстановления против
+      принудительного выхода» — тот же класс на третьем выдающем глаголе. ban #11 требует
+      завести её предметом с причиной и предикатом снятия и сослаться на номер из §2.
+  - id: N3
+    kind: DoD
+    where: §0 шапка «Ревизия измерения»; §6 пп. 1, 2
+    text: >-
+      Предикаты пп. 1–2 судят `origin/358...HEAD`. origin/358 уже ушла на +13 коммитов
+      (196bf9664), кода документа они не касаются. Перед заходом полосы кода перемерить
+      предикаты на свежей вершине волны.
+
+seed_attempt:
+  performed: true
+  outcome: executed
+  isolation: >-
+    Рабочая копия tmp/kaname-385-acc. Временная проба в internal/handler/loginlanehttp
+    исполнена и удалена, `git status --short` после — пусто. Запуск под замком
+    ~/.cache/heavy-slots/interim.lock, свободной памяти ≥27 ГиБ, systemd-run
+    MemoryMax=10G.
+  command: >-
+    go test -count=1 -run TestReview385Seed_DeleteLaneRegisteredIdentity -v
+    ./internal/handler/loginlanehttp/
+  observed: >-
+    SEED lane-registered P: bindings-as-subject=2 accounts-owned=1 · SEED delete
+    lane-registered P: err=failed precondition: User … has active access bindings and cannot
+    be deleted · SEED delete non-owner member (control): err=<nil> · SEED resolution:
+    m=…00.0000055Z stored=…00.000005Z m.After(X)=true stored.After(X)=false · PASS 3.05s.
+  seeded: 2
+  of: 9
+  refuted: 1
+  named_fixture: 7
+
+route_signals:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+event_body: >-
+  acceptance-reviewer · CHANGES_REQUESTED · PRO-Robotech/kaname
+  docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md · sha256
+  964a8751d3e967f1fd6d4d98eb074748d9480fe448bcddd53379224169af6d50 · ревизия b73503ac8 ·
+  блокирующих 3 (CONSTRUCTIBILITY, COVERAGE, NEGATIVE)
