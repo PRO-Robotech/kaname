@@ -15,8 +15,10 @@ package session_revocations
 // кэша и две политики на неответ об одном решении.
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,4 +73,44 @@ func TestIsRevoked_FamilyStoreFailureIsAFixedInternal(t *testing.T) {
 	require.Equal(t, "session revocation lookup failed", status.Convert(err).Message(),
 		"текст отказа обязан быть фиксированным")
 	require.NotContains(t, err.Error(), "10.0.0.7", "текст хранилища утёк наружу")
+}
+
+// TestIsRevoked_StoreFailureIsLoggedWithoutTheIdentifier — сбой хранилища
+// отказывает фиксированным текстом, а причину узнаёт оператор: запись в
+// журнале называет, какая половина ответа не ответила, и несёт текст
+// хранилища. Идентификатор удостоверения в журнал не идёт.
+//
+// Половины две, и каждая подаётся отдельным входом: запись отзыва по
+// идентификатору и семейство выпуска. Реализация, пишущая журнал на одной из
+// них, зелена на половине класса.
+func TestIsRevoked_StoreFailureIsLoggedWithoutTheIdentifier(t *testing.T) {
+	const jti = "tokaaaaaaaaaaaaaaaaa"
+	storeErr := errors.New("dial tcp 10.0.0.7:5432: connection refused")
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	for _, c := range []struct {
+		part string
+		r    *fakeReader
+	}{
+		{"record", &fakeReader{isRevErr: storeErr}},
+		{"family", &fakeReader{familyErr: storeErr}},
+	} {
+		t.Run(c.part, func(t *testing.T) {
+			buf.Reset()
+			_, err := newHandler(&fakeRevoker{}, c.r).IsRevoked(context.Background(),
+				&iamv1.IsRevokedRequest{TokenJti: jti})
+			require.Equal(t, codes.Internal, status.Code(err))
+			require.Equal(t, "session revocation lookup failed", status.Convert(err).Message())
+
+			logged := buf.String()
+			require.Contains(t, logged, "session revocation lookup failed", "оператор обязан узнать о сбое")
+			require.Contains(t, logged, "part="+c.part, "запись называет половину ответа")
+			require.Contains(t, logged, "10.0.0.7", "запись несёт причину — текст хранилища")
+			require.NotContains(t, logged, jti, "идентификатор удостоверения в журнал не идёт")
+		})
+	}
 }
