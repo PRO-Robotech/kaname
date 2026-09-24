@@ -42,6 +42,8 @@ type EnvelopeObserver interface{}
 
 type Admission struct{ Cost time.Duration }
 
+type EnvelopeTrigger string
+
 // CostMeter — мера одного прогона.
 type CostMeter func(class string, verify func()) time.Duration
 
@@ -63,8 +65,29 @@ func NewEnvelope(verifier *Verifier, observer EnvelopeObserver, meter CostMeter)
 
 func (e *Envelope) Floor() time.Duration { return 0 }
 
-func (e *Envelope) Admit(ctx context.Context, class string) (Admission, error) { return Admission{}, nil }
+func (e *Envelope) Admit(ctx context.Context, class string, trigger EnvelopeTrigger) (Admission, error) {
+	return Admission{}, nil
+}
 `
+
+// envPort — порт, которым полоса входа принимает огибающую, в той же форме, что
+// у настоящего порта.
+const envPort = `package humansession
+
+import (
+	"context"
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+)
+
+type TimingEnvelope interface {
+	Floor() time.Duration
+	Admit(ctx context.Context, class string, trigger passwordverify.EnvelopeTrigger) (passwordverify.Admission, error)
+}
+`
+
+const envPortRel = "internal/apps/kaname/api/humansession/login.go"
 
 // envRoot — законный корень: одно построение на мере настенных часов.
 const envRoot = `package main
@@ -84,6 +107,7 @@ func envBase() map[string]string {
 		"go.mod":                              envGoMod,
 		"internal/passwordverify/envelope.go": envHome,
 		envRootRel:                            envRoot,
+		envPortRel:                            envPort,
 	}
 }
 
@@ -155,7 +179,7 @@ func TestEnvelopeRootGate_LawfulTreeIsSilentAndNamesItsSite(t *testing.T) {
 	envRequireSilent(t, v)
 	require.Equal(t, envRootRel, v.Sites[0].Rel)
 	require.Equal(t, 6, v.Sites[0].Line)
-	require.Equal(t, 2, v.Census.Examined, "разобраны оба не-тестовых файла")
+	require.Equal(t, 3, v.Census.Examined, "разобраны все три не-тестовых файла: дом, корень, порт")
 	require.Equal(t, 3, v.Census.MeterParam, "позиция меры выведена из объявления")
 	require.Contains(t, v.Summary(), "построений 1")
 }
@@ -165,12 +189,31 @@ func TestEnvelopeRootGate_LawfulTreeIsSilentAndNamesItsSite(t *testing.T) {
 // литералом функции — красное с координатой настоящей строки построения (G1).
 func TestEnvelopeRootGate_RealRootAndHomeWithOneChangedFact(t *testing.T) {
 	t.Parallel()
+	files := envRealInput(t)
+	control := envMustJudge(t, files)
+	envRequireSilent(t, control)
+	line := control.Sites[0].Line
+
+	const wall = "passwordverify.WallClockCostMeter)"
+	rootBody := files[envRootRel]
+	require.Equal(t, 1, strings.Count(rootBody, wall), "предпосылка: в настоящем корне мера записана одним местом — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	files[envRootRel] = strings.Replace(rootBody, wall,
+		"func(_ domain.PasswordCostClass, verify func()) time.Duration { verify(); return time.Millisecond })", 1)
+	injected := envMustJudge(t, files)
+	envRequireFinding(t, injected, fmt.Sprintf("%s:%d", envRootRel, line), "мера огибающей `(func(", "literal)`")
+	require.Len(t, injected.Sites, 1)
+}
+
+// envRealInput — настоящий вход из этого дерева: go.mod, файл корня, порт и все
+// не-тестовые файлы дома.
+func envRealInput(t *testing.T) map[string]string {
+	t.Helper()
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	root, err := platformtree.ModuleRootFrom(wd)
 	require.NoError(t, err)
 	files := map[string]string{}
-	for _, rel := range []string{"go.mod", envRootRel} {
+	for _, rel := range []string{"go.mod", envRootRel, envPortRel} {
 		body, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoError(t, err, "настоящий вход %s не прочитан — инъекция НЕ ИСПОЛНЯЛАСЬ", rel)
 		files[rel] = string(body)
@@ -185,19 +228,7 @@ func TestEnvelopeRootGate_RealRootAndHomeWithOneChangedFact(t *testing.T) {
 		require.NoError(t, err)
 		files["internal/passwordverify/"+filepath.Base(p)] = string(body)
 	}
-
-	control := envMustJudge(t, files)
-	envRequireSilent(t, control)
-	line := control.Sites[0].Line
-
-	const wall = "passwordverify.WallClockCostMeter)"
-	rootBody := files[envRootRel]
-	require.Equal(t, 1, strings.Count(rootBody, wall), "предпосылка: в настоящем корне мера записана одним местом — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
-	files[envRootRel] = strings.Replace(rootBody, wall,
-		"func(_ domain.PasswordCostClass, verify func()) time.Duration { verify(); return time.Millisecond })", 1)
-	injected := envMustJudge(t, files)
-	envRequireFinding(t, injected, fmt.Sprintf("%s:%d", envRootRel, line), "мера огибающей `(func(", "literal)`")
-	require.Len(t, injected.Sites, 1)
+	return files
 }
 
 // TestEnvelopeRootGate_AnotherMeterInTheRootIsFound — иная мера в корне: литерал
@@ -347,7 +378,7 @@ func TestEnvelopeRootGate_NoConstructionIsAFindingNotAnEmptyWalk(t *testing.T) {
 	t.Parallel()
 	v := envMustJudge(t, envWith(map[string]string{envRootRel: "package main\n\nfunc main() {}\n"}))
 	require.Empty(t, v.Sites)
-	require.Equal(t, 2, v.Census.Examined, "обход НЕ пуст — находка о дереве, а не о чтении")
+	require.Equal(t, 3, v.Census.Examined, "обход НЕ пуст — находка о дереве, а не о чтении")
 	envRequireFinding(t, v, "построений 0")
 }
 
@@ -593,7 +624,7 @@ func use(e *passwordverify.Envelope, byValue passwordverify.Envelope, all []*pas
 }
 `}))
 	envRequireSilent(t, v)
-	require.Equal(t, 3, v.Census.ReferringHome)
+	require.Equal(t, 4, v.Census.ReferringHome)
 }
 
 // TestEnvelopeRootGate_APortImplementationOutsideTheHomeIsFound — тип вне дома,
@@ -614,13 +645,14 @@ type zeroEnvelope struct{}
 
 func (zeroEnvelope) Floor() time.Duration { return 0 }
 
-func (zeroEnvelope) Admit(ctx context.Context, class string) (passwordverify.Admission, error) {
+func (zeroEnvelope) Admit(ctx context.Context, class string, trigger passwordverify.EnvelopeTrigger) (passwordverify.Admission, error) {
 	return passwordverify.Admission{}, nil
 }
 `
 	const rel = "internal/apps/kaname/api/humansession/zero.go"
 	red := envMustJudge(t, envWith(map[string]string{rel: impl}))
-	envRequireFinding(t, red, rel+":14", "реализация порта огибающей вне её дома", "zeroEnvelope", "passwordverify.Admission")
+	envRequireFinding(t, red, rel+":12", "реализация порта огибающей вне её дома", "метод Floor типа zeroEnvelope", "humansession.TimingEnvelope")
+	envRequireFinding(t, red, rel+":14", "реализация порта огибающей вне её дома", "метод Admit типа zeroEnvelope", "humansession.TimingEnvelope")
 
 	envRequireSilent(t, envMustJudge(t, envWith(map[string]string{"internal/apps/kaname/api/humansession/zero_test.go": impl})))
 
@@ -649,7 +681,467 @@ import "github.com/PRO-Robotech/kaname/internal/passwordverify"
 func build() { _, _ = passwordverify.NewEnvelope(nil, nil, nil) }
 `}))
 	envRequireSilent(t, v)
-	require.Equal(t, 3, v.Census.ProductionGo)
+	require.Equal(t, 4, v.Census.ProductionGo)
 	require.Equal(t, 1, v.Census.OutsideTraversal)
 	require.Contains(t, v.Summary(), "из них вне области обхода 1")
+}
+
+// envHomeWith — синтетический дом с дописанным файлом рядом с огибающей.
+func envHomeWith(rel, body string, edits map[string]string) map[string]string {
+	all := map[string]string{"internal/passwordverify/" + rel: body}
+	for k, v := range edits {
+		all[k] = v
+	}
+	return envWith(all)
+}
+
+// envRootSetting — корень, меняющий меру огибающей после законного построения.
+const envRootSetting = `package main
+
+import (
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+)
+
+func buildEnvelope(v *passwordverify.Verifier, rec passwordverify.EnvelopeObserver) (*passwordverify.Envelope, error) {
+	e, err := passwordverify.NewEnvelope(v, rec, passwordverify.WallClockCostMeter)
+	e.SetMeter(func(_ string, verify func()) time.Duration { verify(); return time.Millisecond })
+	return e, err
+}
+`
+
+// TestEnvelopeRootGate_AMeterWrittenAfterConstructionIsFound — мера подменена
+// после законного построения (CV-295-1, SA-295-1): запись в поле меры вне
+// конструктора — сеттер присваиванием под любым именем получателя, взятие
+// адреса поля, присваивание кортежем, запись в копию, запись в литерале функции
+// внутри конструктора — красное с координатой и выражением записи. Законный
+// близнец — чтение поля меры в доме: молчание.
+func TestEnvelopeRootGate_AMeterWrittenAfterConstructionIsFound(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body string
+		parts      []string
+	}{
+		{"сеттер присваиванием (B1)", `package passwordverify
+
+func (e *Envelope) SetMeter(m CostMeter) { e.meter = m }
+`, []string{"internal/passwordverify/setter.go:3", "запись в поле меры `meter` огибающей вне конструктора NewEnvelope", "присваивание `e.meter = m`"}},
+		{"метод с иным получателем (B2c)", `package passwordverify
+
+func (p *Envelope) UseMeter(m CostMeter) {
+	p.meter = m
+}
+
+func (e *Envelope) SetMeter(m CostMeter) { e.UseMeter(m) }
+`, []string{"internal/passwordverify/setter.go:4", "запись в поле меры `meter`", "присваивание `p.meter = m`"}},
+		{"взятие адреса поля", `package passwordverify
+
+func (e *Envelope) meterSlot() *CostMeter { return &e.meter }
+
+func (e *Envelope) SetMeter(m CostMeter) { *e.meterSlot() = m }
+`, []string{"internal/passwordverify/setter.go:3", "запись в поле меры `meter`", "взятие адреса `&e.meter`"}},
+		{"присваивание кортежем", `package passwordverify
+
+func (e *Envelope) SetMeter(m CostMeter) {
+	var old CostMeter
+	old, e.meter = e.meter, m
+	_ = old
+}
+`, []string{"internal/passwordverify/setter.go:5", "запись в поле меры `meter`", "присваивание `old, e.meter = e.meter, m`"}},
+		{"запись в копию", `package passwordverify
+
+func (e *Envelope) SetMeter(m CostMeter) {
+	c := *e
+	c.meter = m
+	*e = c
+}
+`, []string{"internal/passwordverify/setter.go:5", "присваивание `c.meter = m`"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := envMustJudge(t, envHomeWith("setter.go", tc.body, map[string]string{envRootRel: envRootSetting}))
+			envRequireFinding(t, v, tc.parts...)
+		})
+	}
+
+	// Литерал функции в теле конструктора исполняется ПОСЛЕ построения: его
+	// запись законной записью конструктора не считается.
+	deferred := strings.Replace(envHome,
+		"\treturn &Envelope{verifier: verifier, observer: observer, meter: meter}, nil\n",
+		"\te := &Envelope{verifier: verifier, observer: observer, meter: meter}\n\tresetMeter = func(m CostMeter) { e.meter = m }\n\treturn e, nil\n", 1)
+	require.NotEqual(t, envHome, deferred, "предпосылка: тело конструктора найдено — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	v := envMustJudge(t, envWith(map[string]string{
+		"internal/passwordverify/envelope.go": deferred + "\nvar resetMeter func(CostMeter)\n",
+	}))
+	envRequireFinding(t, v, "internal/passwordverify/envelope.go:33", "запись в поле меры `meter` огибающей в литерале функции внутри конструктора NewEnvelope", "присваивание `e.meter = m`")
+
+	// Тем же доводом значение огибающей в литерале функции внутри конструктора —
+	// значение мимо конструктора: литерал заменяет огибающую после построения.
+	zeroing := strings.Replace(envHome,
+		"\treturn &Envelope{verifier: verifier, observer: observer, meter: meter}, nil\n",
+		"\te := &Envelope{verifier: verifier, observer: observer, meter: meter}\n\tresetEnvelope = func() { *e = Envelope{} }\n\treturn e, nil\n", 1)
+	require.NotEqual(t, envHome, zeroing, "предпосылка: тело конструктора найдено — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	z := envMustJudge(t, envWith(map[string]string{
+		"internal/passwordverify/envelope.go": zeroing + "\nvar resetEnvelope func()\n",
+	}))
+	envRequireFinding(t, z, "internal/passwordverify/envelope.go:33", "значение огибающей мимо конструктора `Envelope{…}`")
+
+	// Законный близнец: поле меры в доме ЧИТАЕТСЯ — вызовом и значением.
+	envRequireSilent(t, envMustJudge(t, envHomeWith("reader.go", `package passwordverify
+
+import "time"
+
+func (e *Envelope) cost(class string) time.Duration {
+	m := e.meter
+	_ = m
+	return e.meter(class, func() {})
+}
+`, nil)))
+}
+
+// TestEnvelopeRootGate_TheConstructorStoresOnlyItsMeterArgument — законная
+// запись поля меры одна: довод меры конструктора в его собственном теле.
+// Конструктор, кладущий в поле иное, переписывающий свой довод либо не кладущий
+// его вовсе, — красное; позиционный литерал с доводом на месте поля — молчание.
+func TestEnvelopeRootGate_TheConstructorStoresOnlyItsMeterArgument(t *testing.T) {
+	t.Parallel()
+	const lawful = "\treturn &Envelope{verifier: verifier, observer: observer, meter: meter}, nil\n"
+	require.Equal(t, 1, strings.Count(envHome, lawful), "предпосылка: законная запись найдена одним местом — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	for _, tc := range []struct {
+		name, ctor string
+		parts      []string
+	}{
+		{"иная мера в поле", "\treturn &Envelope{verifier: verifier, observer: observer, meter: WallClockCostMeter}, nil\n",
+			[]string{"internal/passwordverify/envelope.go:32", "в конструкторе NewEnvelope значением `WallClockCostMeter`, а не довода меры `meter`"}},
+		{"довод переписан", "\tmeter = func(_ string, verify func()) time.Duration { verify(); return time.Millisecond }\n" + lawful,
+			[]string{"internal/passwordverify/envelope.go:32", "довод меры `meter` конструктора NewEnvelope переписан в его теле", "присваивание `meter = (func(_ string, verify func()) time.Duration literal)`"}},
+		{"довод затенён", "\t{\n\t\tmeter := CostMeter(WallClockCostMeter)\n\t\t_ = meter\n\t}\n" + lawful,
+			[]string{"internal/passwordverify/envelope.go:33", "довод меры `meter` конструктора NewEnvelope переписан в его теле", "объявление `meter`"}},
+		{"довод не положен", "\treturn &Envelope{verifier: verifier, observer: observer}, nil\n",
+			[]string{"internal/passwordverify/envelope.go:31", "конструктор NewEnvelope не кладёт свой довод меры `meter` в поле меры `meter`"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := envMustJudge(t, envWith(map[string]string{"internal/passwordverify/envelope.go": strings.Replace(envHome, lawful, tc.ctor, 1)}))
+			envRequireFinding(t, v, tc.parts...)
+		})
+	}
+
+	positional := envMustJudge(t, envWith(map[string]string{"internal/passwordverify/envelope.go": strings.Replace(envHome, lawful,
+		"\treturn &Envelope{verifier, observer, meter}, nil\n", 1)}))
+	envRequireSilent(t, positional)
+	require.Len(t, positional.Census.LawfulMeterWrites, 1)
+	foreign := envMustJudge(t, envWith(map[string]string{"internal/passwordverify/envelope.go": strings.Replace(envHome, lawful,
+		"\treturn &Envelope{verifier, observer, WallClockCostMeter}, nil\n", 1)}))
+	envRequireFinding(t, foreign, "internal/passwordverify/envelope.go:32", "значением `WallClockCostMeter`")
+}
+
+// TestEnvelopeRootGate_AMeterFieldPremiseIsARefusal — поле меры выводится из
+// объявления огибающей; неоднозначное либо экспортированное — отказ посылки, а
+// не молчание: разбор записи по имени поля верен, только пока имя однозначно и
+// вне дома недоступно.
+func TestEnvelopeRootGate_AMeterFieldPremiseIsARefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, home, want string }{
+		{"два поля типа меры", strings.Replace(envHome, "\tmeter    CostMeter\n", "\tmeter    CostMeter\n\tspare    CostMeter\n", 1),
+			"полей типа CostMeter у огибающей Envelope 2, а не ровно одно"},
+		{"поля типа меры нет", strings.Replace(envHome, "\tmeter    CostMeter\n", "\tmeter    func(string, func()) time.Duration\n", 1),
+			"полей типа CostMeter у огибающей Envelope 0, а не ровно одно"},
+		{"поле меры экспортировано", strings.NewReplacer("\tmeter    CostMeter\n", "\tMeter    CostMeter\n", "meter: meter}", "Meter: meter}").Replace(envHome),
+			"поле меры Meter экспортировано"},
+		{"имя поля меры у второй структуры", envHome + "\ntype probe struct{ meter CostMeter }\n",
+			"имя поля меры meter несут в доме 2 поля"},
+		{"тип меры не функциональный", strings.Replace(envHome, "type CostMeter func(class string, verify func()) time.Duration\n",
+			"type CostMeter interface{ Measure(class string, verify func()) time.Duration }\n", 1),
+			"тип меры CostMeter — не функциональный"},
+		{"довод меры без имени", strings.NewReplacer("meter CostMeter) (*Envelope", "_ CostMeter) (*Envelope", "meter: meter}", "meter: nil}").Replace(envHome),
+			"довод меры конструктора NewEnvelope без имени"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := envJudge(t, envWith(map[string]string{"internal/passwordverify/envelope.go": tc.home}))
+			require.Error(t, err)
+			require.True(t, errors.Is(err, check.ErrEnvelopeRootPremise), "отказ посылки, а не иной: %v", err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestEnvelopeRootGate_APortSubstituteIsFound — подставной тип на месте порта
+// (CV-295-2, SA-295-2): метод порта с псевдонимом исхода, встраивание огибающей
+// по указателю и по значению с подменой метода, встраивание самого порта с
+// подменой метода, тип дома помимо огибающей — красное с координатой. Законные
+// близнецы: поле огибающей по указателю с именем, метод того же имени иной
+// арности, подставной тип в файле пробы — молчание.
+func TestEnvelopeRootGate_APortSubstituteIsFound(t *testing.T) {
+	t.Parallel()
+	const aliased = `package envelopewire
+
+import (
+	"context"
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+)
+
+type Adm = passwordverify.Admission
+
+type Fast struct{}
+
+func (Fast) Floor() time.Duration { return time.Millisecond }
+
+func (Fast) Admit(ctx context.Context, class string, trigger passwordverify.EnvelopeTrigger) (Adm, error) {
+	return Adm{}, nil
+}
+
+var _ humansession.TimingEnvelope = Fast{}
+`
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		parts [][]string
+	}{
+		{"псевдоним исхода допуска (B5c)", map[string]string{"internal/envelopewire/x.go": aliased}, [][]string{
+			{"internal/envelopewire/x.go:15", "реализация порта огибающей вне её дома", "метод Floor типа Fast"},
+			{"internal/envelopewire/x.go:17", "метод Admit типа Fast", "humansession.TimingEnvelope"},
+		}},
+		{"псевдоним исхода из третьего пакета", map[string]string{
+			"internal/admalias/a.go": "package admalias\n\nimport \"github.com/PRO-Robotech/kaname/internal/passwordverify\"\n\ntype Adm = passwordverify.Admission\n",
+			"internal/envelopewire/x.go": `package envelopewire
+
+import (
+	"context"
+
+	"github.com/PRO-Robotech/kaname/internal/admalias"
+)
+
+type Slow struct{}
+
+func (*Slow) Admit(_ context.Context, _ string, _ string) (admalias.Adm, error) { return admalias.Adm{}, nil }
+`,
+		}, [][]string{{"internal/envelopewire/x.go:11", "метод Admit типа Slow"}}},
+		{"встраивание по указателю с подменой потолка (SA-295-2)", map[string]string{"cmd/kaname/capped.go": `package main
+
+import (
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+)
+
+type cappedEnvelope struct{ *passwordverify.Envelope }
+
+func (cappedEnvelope) Floor() time.Duration { return time.Millisecond }
+`}, [][]string{
+			{"cmd/kaname/capped.go:9", "встраивание огибающей `*passwordverify.Envelope` в тип cappedEnvelope"},
+			{"cmd/kaname/capped.go:11", "метод Floor типа cappedEnvelope"},
+		}},
+		{"встраивание по значению", map[string]string{"cmd/kaname/capped.go": `package main
+
+import "github.com/PRO-Robotech/kaname/internal/passwordverify"
+
+type heldEnvelope struct {
+	passwordverify.Envelope
+}
+`}, [][]string{{"cmd/kaname/capped.go:6", "встраивание огибающей `passwordverify.Envelope` в тип heldEnvelope"}}},
+		{"встраивание порта с подменой потолка", map[string]string{"cmd/kaname/capped.go": `package main
+
+import (
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+)
+
+type capped struct{ humansession.TimingEnvelope }
+
+func (c capped) Floor() time.Duration { return c.TimingEnvelope.Floor() / 1000 }
+`}, [][]string{{"cmd/kaname/capped.go:11", "метод Floor типа capped"}}},
+		{"тип дома помимо огибающей", map[string]string{"internal/passwordverify/capped.go": `package passwordverify
+
+import "time"
+
+type Capped struct{ *Envelope }
+
+func (Capped) Floor() time.Duration { return time.Millisecond }
+`}, [][]string{
+			{"internal/passwordverify/capped.go:5", "встраивание огибающей `*Envelope` в тип Capped"},
+			{"internal/passwordverify/capped.go:7", "метод Floor типа Capped"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := envMustJudge(t, envWith(tc.files))
+			for _, parts := range tc.parts {
+				envRequireFinding(t, v, parts...)
+			}
+		})
+	}
+
+	for _, tc := range []struct{ name, rel, body string }{
+		{"поле огибающей по указателю с именем", "cmd/kaname/holder.go", `package main
+
+import "github.com/PRO-Robotech/kaname/internal/passwordverify"
+
+type lane struct{ envelope *passwordverify.Envelope }
+`},
+		{"метод потолка иной арности", "internal/mathx/floor.go", `package mathx
+
+type Rounding struct{}
+
+func (Rounding) Floor(x float64) float64 { return x }
+
+func (Rounding) Admit(n int) bool { return n > 0 }
+`},
+		{"подставной тип в файле пробы", "internal/envelopewire/x_test.go", aliased},
+	} {
+		t.Run("близнец: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			envRequireSilent(t, envMustJudge(t, envWith(map[string]string{tc.rel: tc.body})))
+		})
+	}
+}
+
+// TestEnvelopeRootGate_APortPremiseIsARefusal — порт выводится из объявления;
+// порт, которого нет, порт со встроенным интерфейсом и порт, который огибающая
+// дома не исполняет по имени и арности, — отказ посылки.
+func TestEnvelopeRootGate_APortPremiseIsARefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"порта нет", envWith(map[string]string{envPortRel: ""}), "порт TimingEnvelope в internal/apps/kaname/api/humansession объявлен 0 раз(а)"},
+		{"порт встраивает интерфейс", envWith(map[string]string{envPortRel: strings.Replace(envPort, "\tFloor() time.Duration\n", "\tfloorer\n", 1) +
+			"\ntype floorer interface{ Floor() time.Duration }\n"}), "порт TimingEnvelope встраивает интерфейс"},
+		{"метода порта у огибающей нет", envWith(map[string]string{envPortRel: strings.Replace(envPort, "\tFloor() time.Duration\n", "\tFloor() time.Duration\n\tCeiling() bool\n", 1)}),
+			"метод Ceiling порта TimingEnvelope у огибающей дома не объявлен"},
+		{"арность метода порта иная", envWith(map[string]string{envPortRel: strings.Replace(envPort, "\tFloor() time.Duration\n", "\tFloor(strict bool) time.Duration\n", 1)}),
+			"метод Floor порта TimingEnvelope у огибающей дома иной арности"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := envJudge(t, tc.files)
+			require.Error(t, err)
+			require.True(t, errors.Is(err, check.ErrEnvelopeRootPremise), "отказ посылки, а не иной: %v", err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestEnvelopeRootGate_TypeSystemBypassNextToTheHomeIsFound — запись поля меры
+// мимо системы типов: `unsafe` в файле, обращающемся к дому, и директива
+// связывания с символом дома — красное; `unsafe` в файле, к дому не
+// обращающемся, — молчание.
+func TestEnvelopeRootGate_TypeSystemBypassNextToTheHomeIsFound(t *testing.T) {
+	t.Parallel()
+	unsafeRoot := strings.Replace(envRoot, "import \"github.com/PRO-Robotech/kaname/internal/passwordverify\"\n",
+		"import (\n\t_ \"unsafe\"\n\n\t\"github.com/PRO-Robotech/kaname/internal/passwordverify\"\n)\n", 1)
+	v := envMustJudge(t, envWith(map[string]string{envRootRel: unsafeRoot}))
+	envRequireFinding(t, v, envRootRel+":4", "импорт unsafe в файле, обращающемся к дому огибающей")
+
+	home := envMustJudge(t, envHomeWith("raw.go", "package passwordverify\n\nimport \"unsafe\"\n\nvar _ = unsafe.Sizeof(0)\n", nil))
+	envRequireFinding(t, home, "internal/passwordverify/raw.go:3", "импорт unsafe")
+
+	linked := envMustJudge(t, envWith(map[string]string{"internal/linked/l.go": `package linked
+
+import _ "unsafe"
+
+//go:linkname wall github.com/PRO-Robotech/kaname/internal/passwordverify.WallClockCostMeter
+func wall(string, func()) int64
+`}))
+	envRequireFinding(t, linked, "internal/linked/l.go:5", "директива `//go:linkname wall github.com/PRO-Robotech/kaname/internal/passwordverify.WallClockCostMeter` называет символ дома")
+
+	envRequireSilent(t, envMustJudge(t, envWith(map[string]string{"pkg/api/generated.pb.go": `package api
+
+import "unsafe"
+
+// go:linkname в прозе директивой не является: github.com/PRO-Robotech/kaname/internal/passwordverify.X
+var _ = unsafe.Sizeof(0)
+`})))
+}
+
+// TestEnvelopeRootGate_RealHomeAndRootWithASubstitute — настоящий вход с одним
+// изменённым фактом для новых форм: сеттер меры в настоящем доме, позванный
+// настоящим корнем (B1), и огибающая корня, встроенная по указателю с подменой
+// потолка и отданная полосе (SA-295-2), — красное с координатой; без правки —
+// молчание, законная запись поля меры найдена ровно одна.
+func TestEnvelopeRootGate_RealHomeAndRootWithASubstitute(t *testing.T) {
+	t.Parallel()
+	control := envMustJudge(t, envRealInput(t))
+	envRequireSilent(t, control)
+	require.Len(t, control.Census.LawfulMeterWrites, 1, "положительный контроль: законная запись поля меры в настоящем конструкторе узнана")
+
+	const call = "envelope, err := passwordverify.NewEnvelope(verifier, rec, passwordverify.WallClockCostMeter)\n"
+	const home = "internal/passwordverify/envelope.go"
+	setter := envRealInput(t)
+	require.Equal(t, 1, strings.Count(setter[envRootRel], call), "предпосылка: построение в корне записано одним местом — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	setter[envRootRel] = strings.Replace(setter[envRootRel], call,
+		call+"\tenvelope.SetMeter(func(_ domain.PasswordCostClass, verify func()) time.Duration { verify(); return time.Millisecond })\n", 1)
+	line := strings.Count(setter[home], "\n") + 2
+	setter[home] += "\nfunc (e *Envelope) SetMeter(m CostMeter) { e.meter = m }\n"
+	envRequireFinding(t, envMustJudge(t, setter), fmt.Sprintf("%s:%d", home, line), "запись в поле меры `meter`", "присваивание `e.meter = m`")
+
+	const lane = "Envelope: envelope,"
+	capped := envRealInput(t)
+	require.Equal(t, 1, strings.Count(capped[envRootRel], lane), "предпосылка: огибающая отдана полосе одним местом — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+	capped[envRootRel] = strings.Replace(capped[envRootRel], lane, "Envelope: cappedEnvelope{envelope},", 1)
+	capped["cmd/kaname/capped.go"] = `package main
+
+import (
+	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+)
+
+type cappedEnvelope struct{ *passwordverify.Envelope }
+
+func (cappedEnvelope) Floor() time.Duration { return time.Millisecond }
+`
+	v := envMustJudge(t, capped)
+	envRequireFinding(t, v, "cmd/kaname/capped.go:9", "встраивание огибающей `*passwordverify.Envelope` в тип cappedEnvelope")
+	envRequireFinding(t, v, "cmd/kaname/capped.go:11", "метод Floor типа cappedEnvelope", "humansession.TimingEnvelope")
+}
+
+// TestEnvelopeRootGate_ASecondCarrierOfTheMeterTypeInTheHomeIsFound — носитель
+// типа меры в доме помимо поля огибающей и довода конструктора — переменная
+// пакета, которую корень пишет после построения, довод сеттера, исход геттера —
+// красное с координатой: мера доходит до прогона мимо довода, который судит
+// страж. Законный близнец — дом с одним полем и одним доводом: молчание.
+func TestEnvelopeRootGate_ASecondCarrierOfTheMeterTypeInTheHomeIsFound(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body string
+		parts      []string
+	}{
+		{"переменная пакета, записанная корнем", "package passwordverify\n\nvar Override CostMeter\n",
+			[]string{"internal/passwordverify/override.go:3", "тип меры `CostMeter` в доме помимо поля меры огибающей и довода конструктора", "объявление пакета"}},
+		{"довод сеттера", "package passwordverify\n\nfunc SetOverride(m CostMeter) { _ = m }\n",
+			[]string{"internal/passwordverify/override.go:3", "тип меры `CostMeter` в доме помимо", "SetOverride"}},
+		{"исход геттера", "package passwordverify\n\nfunc (e *Envelope) Meter() CostMeter { return nil }\n",
+			[]string{"internal/passwordverify/override.go:3", "тип меры `CostMeter` в доме помимо", "Meter"}},
+		{"переменная подписи меры без имени типа", "package passwordverify\n\nimport \"time\"\n\nvar Override func(c string, run func()) time.Duration\n",
+			[]string{"internal/passwordverify/override.go:5", "подпись меры `func(string, func()) time.Duration` в доме помимо поля меры огибающей и довода конструктора", "объявление пакета"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := strings.Replace(envRoot, "\treturn passwordverify.NewEnvelope(v, rec, passwordverify.WallClockCostMeter)\n",
+				"\tpasswordverify.Override = nil\n\treturn passwordverify.NewEnvelope(v, rec, passwordverify.WallClockCostMeter)\n", 1)
+			require.NotEqual(t, envRoot, root, "предпосылка: построение корня найдено — иначе инъекция НЕ ИСПОЛНЯЛАСЬ")
+			v := envMustJudge(t, envHomeWith("override.go", tc.body, map[string]string{envRootRel: root}))
+			envRequireFinding(t, v, tc.parts...)
+		})
+	}
+
+	// Законные близнецы подписи: объявленная функция той же подписи (мера
+	// настенных часов — такая) и литерал иной подписи — молчание.
+	envRequireSilent(t, envMustJudge(t, envHomeWith("shape.go", `package passwordverify
+
+import "time"
+
+func FixedCostMeter(_ string, verify func()) time.Duration { verify(); return time.Millisecond }
+
+func run(verify func()) { go func() { verify() }() }
+`, nil)))
 }
