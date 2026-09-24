@@ -79,17 +79,6 @@ var subjectClaims = []string{
 // отвергает токен, когда бы он ни был выпущен; её момент служит только уборке.
 const FamilyKeyClaim = "kaname_token_family_id"
 
-// Keys возвращает ВСЕ ключи отсечки для состава утверждений: субъект, каждое
-// имя закрытого перечня и ключ семейства — те, что в составе присутствуют
-// непустыми.
-func Keys(claims jwt.MapClaims) []string {
-	out := forwardKeys(claims)
-	if family := familyKey(claims); family != "" {
-		out = append(out, family)
-	}
-	return out
-}
-
 // forwardKeys — ключи, чья отсечка действует ВПЕРЁД: субъект и закрытый
 // перечень клиентов.
 func forwardKeys(claims jwt.MapClaims) []string {
@@ -124,7 +113,8 @@ func Revoked(ctx context.Context, r Reader, claims jwt.MapClaims) (bool, error) 
 	if err != nil || issued == nil {
 		return true, nil
 	}
-	if len(Keys(claims)) == 0 {
+	family, forward := familyKey(claims), forwardKeys(claims)
+	if family == "" && len(forward) == 0 {
 		// Материал, у которого НЕТ НИ ОДНОГО ключа отсечки, отозвать нечем — тем
 		// же доводом, что и материал без отметки выпуска. Принять его значило бы
 		// завести удостоверение, которое нельзя снять ни сейчас, ни потом.
@@ -134,7 +124,7 @@ func Revoked(ctx context.Context, r Reader, claims jwt.MapClaims) (bool, error) 
 		// не несёт, и держалось бы правило свойством ЧУЖОГО пакета.
 		return true, nil
 	}
-	if family := familyKey(claims); family != "" {
+	if family != "" {
 		// Ключ семейства — ПЕРВЫМ и без сравнения моментов (см. FamilyKeyClaim).
 		_, found, err := r.RevokedBefore(ctx, family)
 		if err != nil {
@@ -144,7 +134,7 @@ func Revoked(ctx context.Context, r Reader, claims jwt.MapClaims) (bool, error) 
 			return true, nil
 		}
 	}
-	for _, key := range forwardKeys(claims) {
+	for _, key := range forward {
 		cutoff, found, err := r.RevokedBefore(ctx, key)
 		if err != nil {
 			return false, err

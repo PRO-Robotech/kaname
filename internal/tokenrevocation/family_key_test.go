@@ -26,18 +26,40 @@ const (
 	otherFamily  = "tfm-zyxwvtsrqpnmkjhgf"
 )
 
-// Ключ семейства входит в перечень ключей отсечки: иначе отсечку по нему не
-// спросил бы ни один читатель, и отзыв семейства не доехал бы до предъявления.
-func TestKeys_FamilyKeyIsACutoffKey(t *testing.T) {
-	c := claims(map[string]any{
-		"sub": "usr-alice", "iat": float64(1), tokenrevocation.FamilyKeyClaim: familyOfTest,
-	})
-	keys := tokenrevocation.Keys(c)
-	if !slices.Contains(keys, familyOfTest) {
-		t.Fatalf("ключ семейства %q не входит в ключи отсечки %v", familyOfTest, keys)
+// Ключ семейства — ключ отсечки сам по себе: токен, у которого из ключей
+// только он, судится по нему, а не отвергается как материал, который нечем
+// отозвать. Иначе отсечку по нему не спросил бы ни один читатель, и отзыв
+// семейства не доехал бы до предъявления. Близнец отличается одним фактом —
+// ключа семейства нет, и токен без единого ключа отвергается.
+func TestRevoked_FamilyKeyAloneIsACutoffKey(t *testing.T) {
+	cutoff := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	iat := float64(cutoff.Add(-time.Minute).Unix())
+
+	live := &stubReader{before: map[string]time.Time{}}
+	revoked, err := tokenrevocation.Revoked(context.Background(), live, claims(map[string]any{
+		"iat": iat, tokenrevocation.FamilyKeyClaim: familyOfTest,
+	}))
+	if err != nil {
+		t.Fatalf("ошибка: %v", err)
 	}
-	if !slices.Contains(keys, "usr-alice") {
-		t.Fatalf("субъект выпал из ключей отсечки при ключе семейства: %v", keys)
+	if revoked {
+		t.Fatal("токен неотозванного семейства без иных ключей объявлен отозванным: ключ семейства не засчитан ключом")
+	}
+	if !slices.Contains(live.asked, familyOfTest) {
+		t.Fatalf("отсечку по ключу семейства не спросили; спрошены %v", live.asked)
+	}
+
+	cut := &stubReader{before: map[string]time.Time{familyOfTest: cutoff}}
+	revoked, err = tokenrevocation.Revoked(context.Background(), cut, claims(map[string]any{
+		"iat": iat, tokenrevocation.FamilyKeyClaim: familyOfTest,
+	}))
+	if err != nil || !revoked {
+		t.Fatalf("токен отозванного семейства без иных ключей принят (revoked=%v, err=%v)", revoked, err)
+	}
+
+	revoked, err = tokenrevocation.Revoked(context.Background(), live, claims(map[string]any{"iat": iat}))
+	if err != nil || !revoked {
+		t.Fatalf("близнец: токен без единого ключа отсечки принят (revoked=%v, err=%v)", revoked, err)
 	}
 }
 
