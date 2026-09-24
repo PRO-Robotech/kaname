@@ -159,8 +159,11 @@ func newListing(ctx context.Context, moduleRoot, rootPkg string, timeout time.Du
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
-	if ctx.Err() != nil {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return nil, fmt.Errorf("радиус: go list -deps %s в %s не уложился в срок %s: %w", rootPkg, moduleRoot, timeout, ctx.Err())
+	case ctx.Err() != nil:
+		return nil, fmt.Errorf("радиус: go list -deps %s в %s отменён вызывающим: %w", rootPkg, moduleRoot, ctx.Err())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("радиус: go list -deps %s в %s: %w\n%s", rootPkg, moduleRoot, err, strings.TrimSpace(stderr.String()))
