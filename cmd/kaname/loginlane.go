@@ -401,7 +401,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	// хранилища ∪ класс ручки, каждый — калибровкой прогоном проверяющего.
 	// Перепись не удалась — отказ старта: огибающая только по классу ручки
 	// оставила бы популяцию переноса отличимой по времени.
-	envelope, err := passwordverify.NewEnvelope(verifier, rec)
+	envelope, err := passwordverify.NewEnvelope(verifier, rec, passwordverify.WallClockCostMeter)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
