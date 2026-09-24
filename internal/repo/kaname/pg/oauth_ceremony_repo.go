@@ -892,8 +892,9 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	return nil
 }
 
-// ClearClientSecretVerifier снимает проверочное значение: клиент становится
-// публичным, и секрета у него нет.
+// ClearClientSecretVerifier снимает проверочное значение: секрета у клиента
+// больше нет. Способ аутентификации при этом НЕ меняется — публичным клиента
+// делает способ `none`, а не пустота значения (kaname#317).
 func (r *OAuthCeremonyRepo) ClearClientSecretVerifier(ctx context.Context, clientID string) error {
 	if clientID == "" {
 		return fmt.Errorf("Illegal argument interactive_client.client_id: required")

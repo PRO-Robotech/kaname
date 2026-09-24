@@ -27,6 +27,51 @@ const interactiveClientCols = `id, created_at, name, description, labels,
 	redirect_uris, post_logout_redirect_uris,
 	client_id, audiences, grant_types, token_endpoint_auth_method, status`
 
+// interactiveClientsTable — имя таблицы реестра клиентов, как его называет
+// сервер в отказе. Переводчик отказов сверяет таблицу, а не одно имя
+// ограничения.
+const interactiveClientsTable = "interactive_clients"
+
+// interactiveClientProducedValueChecks — ограничения-проверки таблицы клиентов,
+// судящие значения, которых вызывающий НЕ присылает (kaname#317). Срабатывание
+// любого из них — дефект службы либо производителя клиента: отказ ввода
+// обвинял бы вызывающего в том, чего он не делал и не может исправить.
+//
+// Решение принято по вопросу «чьё это значение», по каждому ограничению:
+//
+//   - id_form_ck — идентификатор чеканит служба;
+//   - status_ck — состояние ставит служба;
+//   - auth_method_ck — способ приходит от производителя клиента, поле
+//     output-only и неизменяемо;
+//   - secret_verifier_method_ck, secret_verifier_form_ck,
+//     secret_verifier_stamp_ck — материал секрета и момент его установки
+//     производит служба, способ — производитель.
+//
+// Остальные проверки таблицы решены иначе, и решение названо: форму имени
+// отводит в ту же полосу платформенный предикат (`pgfault.CheckLaneOf`), а
+// перечни адресов возврата присылает вызывающий — они остаются полосой ввода.
+// Полноту перечня против живой схемы судит проба
+// `TestIntegration_InteractiveClientChecksAreAllAdjudicated`: проверка,
+// заведённая без решения, её краснит.
+var interactiveClientProducedValueChecks = map[string]struct{}{
+	"interactive_clients_id_form_ck":                {},
+	"interactive_clients_status_ck":                 {},
+	"interactive_clients_auth_method_ck":            {},
+	"interactive_clients_secret_verifier_method_ck": {},
+	"interactive_clients_secret_verifier_form_ck":   {},
+	"interactive_clients_secret_verifier_stamp_ck":  {},
+}
+
+// isInteractiveClientProducedValueCheck — «отказ таблицы клиентов по значению,
+// которого вызывающий не присылал?».
+func isInteractiveClientProducedValueCheck(table, constraint string) bool {
+	if table != interactiveClientsTable {
+		return false
+	}
+	_, ok := interactiveClientProducedValueChecks[constraint]
+	return ok
+}
+
 // InteractiveClientRepo — reads and writes kaname.interactive_clients.
 type InteractiveClientRepo struct {
 	pool *pgxpool.Pool
