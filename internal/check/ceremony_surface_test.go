@@ -80,6 +80,7 @@ func liveUnresolvedLedger() []check.UnresolvedPathEntry {
 	return []check.UnresolvedPathEntry{{
 		Leaf: "поле github.com/PRO-Robotech/kaname/internal/apps/kaname/config.TokenSigningConfig.KeySetPath " +
 			"(заполняется декодером настройки)",
+		Where: "github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp.NewMux",
 		// Граница, а не пропуск. Путь НАШЕЙ записи публикуемого набора ключей
 		// объявляет оператор (`key-set-path`); регистрирует его петля записей
 		// набора на поверхности ключей (jwksproxyhttp/binding.go). Страж
@@ -121,11 +122,17 @@ func ceremonyModulePath(t *testing.T, root string) string {
 // judgeLiveCeremony — прогон гейта по живому дереву.
 func judgeLiveCeremony(t *testing.T) check.CeremonySurfaceReport {
 	t.Helper()
+	return judgeLiveCeremonyWith(t, liveUnresolvedLedger())
+}
+
+// judgeLiveCeremonyWith — прогон по живому дереву с данной ведомостью листов.
+func judgeLiveCeremonyWith(t *testing.T, ledger []check.UnresolvedPathEntry) check.CeremonySurfaceReport {
+	t.Helper()
 	root := ceremonyModuleRoot(t)
 	report, err := check.JudgeCeremonySurfaces(check.CeremonySurfaceSpec{
 		ModuleRoot:  root,
 		RootPackage: ceremonyModulePath(t, root) + "/" + ceremonyRootDir,
-		Unresolved:  liveUnresolvedLedger(),
+		Unresolved:  ledger,
 	}, liveCeremonyCoordinates())
 	if err != nil {
 		t.Fatalf("гейт НЕ ИСПОЛНИЛСЯ — это не зелёное и не находка: %v", err)
@@ -275,6 +282,16 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 		t.Errorf("правила шлюза /iam/v1/authorize:* видны на %d поверхностях, ожидалось 2 (оба REST-фронта)", gatewayAuthorize)
 	}
 
+	// Чтения пути запроса живого дерева (журнал) видны распознавателю ручной
+	// маршрутизации и рассужены им: чтений больше нуля, решений маршрута — 0.
+	if report.Census.URLPathReads == 0 {
+		t.Errorf("чтений пути запроса 0 — распознаватель ручной маршрутизации ослеп: живое дерево пишет путь в журнал")
+	}
+	if len(report.Census.ManualRouting) != 0 {
+		t.Errorf("живое дерево решает маршрут по пути запроса: %v", report.Census.ManualRouting)
+	}
+	t.Logf("чтений пути запроса %d, решений маршрута по нему %d", report.Census.URLPathReads, len(report.Census.ManualRouting))
+
 	// Т6 и Т7: полоса входа и набор ключей видны своими маршрутами.
 	for _, want := range []string{"/iam/v1/auth/login", "/.well-known/jwks.json", "/iam/token", "/metrics"} {
 		var seen bool
@@ -289,4 +306,34 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 			t.Errorf("маршрут %s не попал ни в одну выведенную таблицу — близнец молчит по слепоте", want)
 		}
 	}
+}
+
+// TestCeremonySurfaceLedgerIsExactByPlace — L1: ведомость листов пути точна
+// по МЕСТУ регистрации, а не по листу. Запись без предмета — находка; лист на
+// месте, которого запись не называет, — находка, даже если сам лист объявлен.
+func TestCeremonySurfaceLedgerIsExactByPlace(t *testing.T) {
+	live := liveUnresolvedLedger()
+
+	t.Run("entry_without_subject", func(t *testing.T) {
+		ledger := append(liveUnresolvedLedger(), check.UnresolvedPathEntry{
+			Leaf: "поле пробы (заполняется декодером настройки)", Where: live[0].Where, Why: "проба",
+		})
+		report := judgeLiveCeremonyWith(t, ledger)
+		requireFinding(t, report, "без предмета", "поле пробы")
+	})
+
+	t.Run("declared_leaf_at_an_undeclared_place", func(t *testing.T) {
+		report := judgeLiveCeremonyWith(t, []check.UnresolvedPathEntry{{
+			Leaf: live[0].Leaf, Where: "github.com/PRO-Robotech/kaname/cmd/kaname.ceremonyNowhere", Why: "проба",
+		}})
+		requireFinding(t, report, "без предмета", "ceremonyNowhere")
+		requireFinding(t, report, "не сводится к значению", "KeySetPath", "jwksproxyhttp/binding.go:")
+	})
+
+	t.Run("exact_ledger_is_silent", func(t *testing.T) {
+		report := judgeLiveCeremonyWith(t, liveUnresolvedLedger())
+		if len(report.Findings) > 0 {
+			t.Fatalf("точная ведомость дала находки:\n%s", strings.Join(report.Findings, "\n"))
+		}
+	})
 }

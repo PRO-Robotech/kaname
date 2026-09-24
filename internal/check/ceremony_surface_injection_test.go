@@ -454,22 +454,6 @@ func ceremonyProbeWrap(next http.Handler) http.Handler {
 }
 `
 
-// ceremonyManualRouteSource — обёртка, решающая маршрут сравнением пути (I29).
-const ceremonyManualRouteSource = `package main
-
-import "net/http"
-
-func ceremonyProbeManual(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/iam/v1/authorize" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-`
-
 // ceremonyChainSelfSource — рекурсивная фабрика мультиплексора: значение
 // рождается на дне и возвращается СКВОЗЬ самовызов. Регистрация —
 // параметр: близнец регистрирует путь пробы заглушкой, инъекция — координату
@@ -563,6 +547,26 @@ func ceremonyEighthSurface(f *ceremonyFixture) {
 			"ceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
 			ceremonySurfaceBlock("ceremonyExtraSurface", "ceremonyMux"))
 	f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
+}
+
+// ceremonyManualSource — обёртка, решающая маршрут по пути запроса в своём
+// теле: pre — операторы до обработчика, cond — условие, onHit — ответ.
+func ceremonyManualSource(imports, pre, cond, onHit string) string {
+	return "package main\n\nimport (\n\t\"net/http\"" + imports + "\n)\n\n" +
+		"func ceremonyProbeManual(next http.Handler) http.Handler {\n" + pre +
+		"\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n" +
+		"\t\t" + cond + " {\n\t\t\t" + onHit + "\n\t\t\treturn\n\t\t}\n\t\tnext.ServeHTTP(w, r)\n\t})\n}\n"
+}
+
+// ceremonyManualOnMetrics — обёртка ceremonyProbeManual на поверхности диагностики.
+func ceremonyManualOnMetrics(f *ceremonyFixture, src string) {
+	f.add(ceremonyRootDir, "ceremony_probe_manual.go", src)
+	f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux", "Handler: ceremonyProbeManual(metricsMux)")
+}
+
+// ceremonyRootFile — файл корня пробы с импортами и телом.
+func ceremonyRootFile(f *ceremonyFixture, name, imports, body string) {
+	f.add(ceremonyRootDir, name, "package main\n\nimport (\n"+imports+"\n)\n\n"+body+"\n")
 }
 
 // ceremonyInjection — одна инъекция: ровно один факт F-cer.
@@ -690,9 +694,9 @@ func ceremonyInjections() []ceremonyInjection {
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		{"I29_manual_routing_by_path", func(f *ceremonyFixture) {
-			f.add(ceremonyRootDir, "ceremony_probe_manual.go", ceremonyManualRouteSource)
-			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux", "Handler: ceremonyProbeManual(metricsMux)")
-		}, []string{"сравнением пути"}},
+			ceremonyManualOnMetrics(f, ceremonyManualSource("", "",
+				`if r.URL.Path == "/iam/v1/authorize"`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
 
 		{"I30_unknown_foreign_wrapper", func(f *ceremonyFixture) {
 			f.addImport(ceremonyRootDir, "serve.go", `"github.com/prometheus/client_golang/prometheus/promhttp"`)
@@ -736,6 +740,69 @@ func ceremonyInjections() []ceremonyInjection {
 					"authorizehttp.New()"))
 			serve(f, anchorMetrics, `metricsMux.Handle("/iam/v1/", ceremonyChainEven(1))`)
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "диагностика (/metrics)"}},
+
+		// X1–X10 — формы, на которых гейт круга 1 молчал (приёмка проверки,
+		// круг 1). Регистрация опознаётся по ВЫЗЫВАЕМОМУ методу, а не по
+		// синтаксису вызова.
+		{"X1_method_value", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "ceremonyReg := jwksMux.Handle\n"+
+				"ceremonyReg(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X2_method_expression", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "(*http.ServeMux).Handle(jwksMux, authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X3_interface_registrar", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "var ceremonyReg interface{ Handle(string, http.Handler) } = jwksMux\n"+
+				"ceremonyReg.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X4_embedded_mux_promoted_method", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_router.go", `"net/http"`, "type ceremonyRouter struct{ *http.ServeMux }")
+			serve(f, anchorIntrospect, "ceremonyR := ceremonyRouter{jwksMux}\n"+
+				"ceremonyR.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X5_interface_dispatched_mounter", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_mounter.go", "\t\"net/http\""+ceremonyImportLine,
+				"type ceremonyMounter interface{ Mount(*http.ServeMux) }\n\ntype ceremonyAuthorizeMount struct{}\n\n"+
+					"func (ceremonyAuthorizeMount) Mount(m *http.ServeMux) {\n"+
+					"\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+			serve(f, anchorIntrospect, "var ceremonyM ceremonyMounter = ceremonyAuthorizeMount{}\nceremonyM.Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X6_generic_registrar", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_generic.go", "\t\"net/http\""+ceremonyImportLine,
+				"func ceremonyMount[M interface{ Handle(string, http.Handler) }](m M) {\n"+
+					"\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+			serve(f, anchorIntrospect, "ceremonyMount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"X7_manual_routing_through_local_var", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource("", "",
+				`if p := r.URL.Path; p == "/iam/v1/authorize"`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
+
+		{"X8_manual_routing_map_lookup", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource(ceremonyImportLine,
+				"\troutes := map[string]http.Handler{authorizehttp.AuthorizePath: authorizehttp.New()}\n",
+				"if h, ok := routes[r.URL.Path]; ok", "h.ServeHTTP(w, r)"))
+		}, []string{"по пути запроса в теле обработчика", "выбор из карты по пути"}},
+
+		{"X9_manual_routing_path_base", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource("\n\t\"path\"", "",
+				`if path.Base(r.URL.Path) == "authorize"`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
+
+		{"X9b_manual_routing_to_lower", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource("\n\t\"strings\"", "",
+				`if strings.ToLower(r.URL.Path) == "/iam/v1/authorize"`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
+
+		{"X10_declared_leaf_on_a_second_place", func(f *ceremonyFixture) {
+			serve(f, anchorMetrics, "metricsMux.Handle(cfg.AuthN.TokenSigning.ResolveKeySetPath(), authorizehttp.New())")
+		}, []string{"не сводится к значению", "KeySetPath", "cmd/kaname/serve.go:"}},
 
 		{"I36_delegation_deeper_than_the_limit", func(f *ceremonyFixture) {
 			n := check.CeremonyResolveDepthLimit + 4
@@ -998,6 +1065,30 @@ func ceremonyTwins() []ceremonyTwin {
 		// Одна обёртка, вложенная в саму себя: значение обёртки течёт в её же
 		// параметр, и прохождение запроса встречает цикл. Цикл нового маршрута
 		// не даёт — и не обрезается как «слишком глубоко».
+		// Y1–Y5 — законные близнецы приёмки проверки, круг 1.
+		{"Y1_method_pattern_second_registration_on_the_issuing_mux", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				`mux.Handle("POST "+authorizehttp.AuthorizePath, authorizehttp.New())`)
+		}},
+		{"Y2_client_side_use_of_the_coordinate", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				`_, _ = http.NewRequest(http.MethodGet, "https://kaname.invalid"+authorizehttp.AuthorizePath, nil)`)
+		}},
+		{"Y3_registration_in_an_unreached_function", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_dead.go", "\t\"net/http\""+ceremonyImportLine,
+				"func ceremonyUnused() {\n\tm := http.NewServeMux()\n\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+		}},
+		{"Y4_neighbour_path_on_an_internal_mux", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				`jwksMux.Handle("/iam/v1/authorizex", authorizehttp.New())`)
+		}},
+		{"Y5_compare_of_a_configured_url_path", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_urlcmp.go", "\t\"net/url\"",
+				"func ceremonyIsAuthorize(raw string) bool {\n\tu, err := url.Parse(raw)\n"+
+					"\treturn err == nil && u.Path == \"/iam/v1/authorize\"\n}")
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				`_ = ceremonyIsAuthorize("https://kaname.invalid/iam/v1/authorize")`)
+		}},
 		{"T16_wrapper_nested_into_itself", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_wrap.go", ceremonyWrapSource)
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux",

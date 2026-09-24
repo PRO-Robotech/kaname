@@ -81,6 +81,8 @@ type CeremonyCoordinate struct {
 type UnresolvedPathEntry struct {
 	// Leaf — ключ листа в том виде, в каком его печатает перепись.
 	Leaf string
+	// Where — объявленная функция, в которой стоит регистрация с этим листом.
+	Where string
 	// Why — причина и предикат снятия.
 	Why string
 }
@@ -132,6 +134,7 @@ type CeremonySurfaceCensus struct {
 	Unresolved               []string
 	Escapes                  []string
 	ManualRouting            []string
+	URLPathReads             int
 	Sinks                    int
 	UnmountedMuxes           int
 	WithoutProducer          int
