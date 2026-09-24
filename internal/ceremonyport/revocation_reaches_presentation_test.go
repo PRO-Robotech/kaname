@@ -330,8 +330,10 @@ func newFlowRig(t *testing.T) *flowRig {
 	t.Helper()
 	rig := &flowRig{}
 	ring := newKeyRing(t, testKID)
-	tokens := newAccessTokens(t, ring, time.Now)
 	families := newMemFamilies()
+	// Выпуск пишет запись в ТО ЖЕ хранилище семейств, от отметки которого
+	// читается ответ о выпуске, — как у службы.
+	tokens := newRecordingAccessTokens(t, ring, time.Now, families)
 	grants, err := ceremonyport.NewGrants(families)
 	require.NoError(t, err)
 	vaults := newMemVaults(families)
