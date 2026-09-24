@@ -88,7 +88,9 @@ type CeremonyCoordinate struct {
 type UnresolvedPathEntry struct {
 	// Leaf — ключ листа в том виде, в каком его печатает перепись.
 	Leaf string
-	// Where — объявленная функция, в которой стоит регистрация с этим листом.
+	// Where — полное имя объявленной функции, в которой стоит регистрация с
+	// этим листом. Ведомость точна по МЕСТУ: тот же лист на месте, которого
+	// запись не называет, — находка.
 	Where string
 	// Why — причина и предикат снятия.
 	Why string
@@ -103,8 +105,9 @@ type CeremonySurfaceSpec struct {
 	// Overlay — путь импорта → каталог, чьи не-тестовые .go заменяют пакет
 	// (или заводят новый).
 	Overlay map[string]string
-	// Unresolved — ведомость листов пути, не сводимых к значению. Точная:
-	// лист вне ведомости — находка, запись без листа — находка.
+	// Unresolved — ведомость листов пути, не сводимых к значению. Точная по
+	// листу И месту: лист на неназванном месте — находка, запись без листа на
+	// своём месте — находка.
 	Unresolved []UnresolvedPathEntry
 }
 
@@ -545,11 +548,17 @@ func surfaceExprText(e ast.Expr) string {
 	return fmt.Sprintf("%T", e)
 }
 
+// leafPlace — лист пути на месте регистрации (объявленная функция).
+type leafPlace struct {
+	leaf  string
+	where string
+}
+
 // registrations — перепись регистраций, их форм и листов; отказ на
 // непрослеженных и неразрешённых.
 func (j *surfaceJudge) registrations() {
 	c := &j.census
-	leafSites := map[string][]string{}
+	leafSites := map[leafPlace][]string{}
 	counted := map[*ast.CallExpr]bool{}
 	var muxes []*absVal
 	for m := range j.a.regs {
@@ -577,8 +586,10 @@ func (j *surfaceJudge) registrations() {
 			}
 			in := j.info(reg)
 			j.form(in)
+			where := j.res.funcLabel(j.topOf(reg.fk))
 			for l := range in.leaves {
-				leafSites[l] = append(leafSites[l], in.site+" "+in.text)
+				k := leafPlace{leaf: l, where: where}
+				leafSites[k] = append(leafSites[k], in.site+" "+in.text)
 			}
 		}
 		key := fmt.Sprint(m.kind, m.site)
@@ -613,25 +624,31 @@ func (j *surfaceJudge) registrations() {
 		j.find("регистрация %s %s: мультиплексор не прослежен до места рождения — маршрут не приписать "+
 			"ни одной поверхности", j.pos(call), printedCall(reg))
 	}
-	declared := map[string]bool{}
+	declared := map[leafPlace]bool{}
 	for _, e := range j.spec.Unresolved {
-		declared[e.Leaf] = true
-		if _, ok := leafSites[e.Leaf]; !ok {
-			j.find("запись ведомости листов пути «%s» без предмета — такого листа разбор больше не "+
-				"встречает; снять запись вместе с причиной", e.Leaf)
+		k := leafPlace{leaf: e.Leaf, where: e.Where}
+		declared[k] = true
+		if _, ok := leafSites[k]; !ok {
+			j.find("запись ведомости листов пути «%s» в %s без предмета — на этом месте такого листа разбор "+
+				"больше не встречает; снять запись вместе с причиной", e.Leaf, e.Where)
 		}
 	}
-	var leaves []string
-	for l := range leafSites {
-		leaves = append(leaves, l)
+	var places []leafPlace
+	for k := range leafSites {
+		places = append(places, k)
 	}
-	sort.Strings(leaves)
-	for _, l := range leaves {
-		c.Unresolved = append(c.Unresolved, l)
-		if !declared[l] {
-			j.find("путь регистрации не сводится к значению: лист «%s» (%s) — гейт не может сказать, на "+
+	sort.Slice(places, func(x, y int) bool {
+		if places[x].leaf != places[y].leaf {
+			return places[x].leaf < places[y].leaf
+		}
+		return places[x].where < places[y].where
+	})
+	for _, k := range places {
+		c.Unresolved = append(c.Unresolved, k.leaf+" в "+k.where)
+		if !declared[k] {
+			j.find("путь регистрации не сводится к значению: лист «%s» в %s (%s) — гейт не может сказать, на "+
 				"скольких поверхностях резолвится координата; сверни путь к постоянной либо объяви лист "+
-				"в ведомости с причиной и предикатом снятия", l, strings.Join(leafSites[l], "; "))
+				"на этом месте в ведомости с причиной и предикатом снятия", k.leaf, k.where, strings.Join(leafSites[k], "; "))
 		}
 	}
 	var escapes []token.Pos

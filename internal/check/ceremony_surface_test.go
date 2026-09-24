@@ -74,8 +74,9 @@ func liveCeremonyCoordinates() []check.CeremonyCoordinate {
 }
 
 // liveUnresolvedLedger — листы путей регистрации, которые разбор НЕ сводит к
-// значению на живом дереве. Точная ведомость, а не потолок: новый лист —
-// находка, запись без листа — находка.
+// значению на живом дереве, с МЕСТОМ регистрации. Точная ведомость, а не
+// потолок: новый лист — находка, тот же лист на другом месте — находка,
+// запись без листа на своём месте — находка.
 func liveUnresolvedLedger() []check.UnresolvedPathEntry {
 	return []check.UnresolvedPathEntry{{
 		Leaf: "поле github.com/PRO-Robotech/kaname/internal/apps/kaname/config.TokenSigningConfig.KeySetPath " +
