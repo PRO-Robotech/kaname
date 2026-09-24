@@ -53,12 +53,20 @@ const (
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
 //     internal_iam_service.proto; it shares this service's writer and records a
 //     user-level cutoff, not a row here).
-//   - Revocation of a token family of the service's own authorization
-//     ceremony: a replayed authorization code, a replayed refresh token, the
-//     end of the session the ceremony ran in, and removal of the family
-//     together with its client, its user or its session. This writes no row
-//     here either: the family carries the mark, and `IsRevoked` reads it for
-//     every token whose issuance is recorded as belonging to that family.
+//
+// Revocation of a token family of the service's own authorization ceremony is
+// judged by `IsRevoked` too, but it is NOT produced at this revision, and that
+// is why it stands outside the list. Its writers are in the tree — a replayed
+// authorization code, a replayed refresh token, the end of the session the
+// ceremony ran in, and removal of the family together with its client, its
+// user or its session — and none of them writes a row here: the family carries
+// the mark, and `IsRevoked` reads it for every token whose issuance is recorded
+// as belonging to that family. At this revision the ceremony runs on no request
+// path: nothing creates a family and nothing records an issuance, so no token
+// belongs to a family and no answer is decided by one. Recording the issuance
+// is the obligation of the issuance port adapter (kaname#396). When it lands,
+// this source joins the list above; a test of this contract fails until it
+// does.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -232,12 +240,20 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
 //     internal_iam_service.proto; it shares this service's writer and records a
 //     user-level cutoff, not a row here).
-//   - Revocation of a token family of the service's own authorization
-//     ceremony: a replayed authorization code, a replayed refresh token, the
-//     end of the session the ceremony ran in, and removal of the family
-//     together with its client, its user or its session. This writes no row
-//     here either: the family carries the mark, and `IsRevoked` reads it for
-//     every token whose issuance is recorded as belonging to that family.
+//
+// Revocation of a token family of the service's own authorization ceremony is
+// judged by `IsRevoked` too, but it is NOT produced at this revision, and that
+// is why it stands outside the list. Its writers are in the tree — a replayed
+// authorization code, a replayed refresh token, the end of the session the
+// ceremony ran in, and removal of the family together with its client, its
+// user or its session — and none of them writes a row here: the family carries
+// the mark, and `IsRevoked` reads it for every token whose issuance is recorded
+// as belonging to that family. At this revision the ceremony runs on no request
+// path: nothing creates a family and nothing records an issuance, so no token
+// belongs to a family and no answer is decided by one. Recording the issuance
+// is the obligation of the issuance port adapter (kaname#396). When it lands,
+// this source joins the list above; a test of this contract fails until it
+// does.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
