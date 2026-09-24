@@ -20,6 +20,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,13 +44,25 @@ func TestIsRevoked_LINE_A_1_21_AnswersForTheFamilyOfTheIssuance(t *testing.T) {
 	})
 
 	t.Run("семейство отозвано — отозван", func(t *testing.T) {
-		r := &fakeReader{families: map[string]bool{jti: true}}
+		// Запись по идентификатору не действует, но след у неё есть: чтение по
+		// идентификатору её отдаёт (запись истекла). Ответ по семейству обязан
+		// остаться без revoked_at и reason — ни из этого следа, ни из отзыва
+		// семейства, чья причина наружу не раскрывается.
+		r := &fakeReader{
+			families: map[string]bool{jti: true},
+			revAt:    time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
+			reason:   "logout",
+		}
 		resp, err := newHandler(&fakeRevoker{}, r).IsRevoked(context.Background(),
 			&iamv1.IsRevokedRequest{TokenJti: jti})
 		require.NoError(t, err)
 		assert.True(t, resp.GetRevoked(),
 			"выпуск отозванного семейства назван неотозванным: о семействе не спросили "+
 				"(спрошено %v) — край получил бы «жив» о снятом удостоверении", r.familyAsked)
+		assert.Nil(t, resp.GetRevokedAt(),
+			"ответ по семейству несёт revoked_at — контракт обещает пустое поле")
+		assert.Empty(t, resp.GetReason(),
+			"ответ по семейству несёт reason — контракт обещает пустое поле и не раскрывает причину")
 	})
 
 	t.Run("T2 близнец: отозвано другое семейство — не отозван", func(t *testing.T) {
