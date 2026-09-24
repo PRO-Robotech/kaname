@@ -37,11 +37,41 @@ func familyRevokedOf(string) (bool, error) { return false, nil }
 `
 	fvRuleSrc = `package tokenrevocation
 
+import "github.com/golang-jwt/jwt/v5"
+
 type FamilyReader interface{ FamilyRevoked(jti string) (bool, error) }
+
+// Утверждения — ключи отсечки: закрытый перечень клиентов.
+var subjectClaims = []string{"kaname_user_token_id", "kaname_sa_key_id"}
+
+func Keys(claims jwt.MapClaims) []string {
+	var out []string
+	if sub, _ := claims["sub"].(string); sub != "" {
+		out = append(out, sub)
+	}
+	for _, name := range subjectClaims {
+		if v, _ := claims[name].(string); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
 
 func FamilyRevoked(r FamilyReader, jti string) (bool, error) { return r.FamilyRevoked(jti) }
 
-func Revoked(r FamilyReader, jti string) (bool, error) { return FamilyRevoked(r, jti) }
+func Revoked(r FamilyReader, claims jwt.MapClaims) (bool, error) {
+	_ = Keys(claims)
+	jti, _ := claims["jti"].(string)
+	return FamilyRevoked(r, jti)
+}
+`
+	// fvWriterSrc — объявление писателя записи выпуска: предмет оси «выпуск
+	// пишет запись».
+	fvWriterSrc = `package pg
+
+type OAuthCeremonyRepo struct{}
+
+func (r *OAuthCeremonyRepo) RecordAccessToken(jti, familyID string) error { return nil }
 `
 	fvIsRevokedSrc = `package session_revocations
 
@@ -74,6 +104,7 @@ func fvLawfulTree() map[string]string {
 		"internal/apps/kaname/api/session_revocations/handler.go": fvIsRevokedSrc,
 		"internal/handler/tokenintrospecthttp/handler.go":         fvIntrospectSrc,
 		"internal/presentedcred/reader.go":                        fvPresentedSrc,
+		"internal/repo/kaname/pg/access_token_writer.go":          fvWriterSrc,
 	}
 }
 
@@ -169,5 +200,135 @@ func TestFamilyVerdictGate_EmptyWalkIsNotGreen(t *testing.T) {
 	_, found := fvFindings(t, map[string]string{})
 	if len(found) == 0 {
 		t.Fatal("пустой обход дал «находок ноль» — неотличимо от чистого дерева")
+	}
+}
+
+// ── Ось «решение о семействе не имеет второго хранилища» ─────────────────────
+//
+// Правило читает утверждения токена. Каждое прочитанное утверждение решено:
+// ключ отсечки субъекта или клиента либо идентификатор выпуска — единственный
+// вход к записи выпуска. Утверждение, несущее семейство, превратило бы отсечку
+// по ключу во ВТОРОЕ хранилище решения о семействе (К10, вариант А: семейство
+// судит только запись выпуска по jti).
+
+// fvRuleWith — правило законной формы плюс файл с добавочным чтением.
+func fvRuleWith(extra string) map[string]string {
+	files := fvLawfulTree()
+	files["internal/tokenrevocation/family_key.go"] = extra
+	return files
+}
+
+// TestFamilyVerdictGate_FamilyKeyAmongCutoffKeysIsFound — I4, вариант «в
+// правиле свой ключ семейства»: утверждение семейства читается через
+// константу и уходит в отсечку.
+func TestFamilyVerdictGate_FamilyKeyAmongCutoffKeysIsFound(t *testing.T) {
+	t.Parallel()
+	_, found := fvFindings(t, fvRuleWith(`package tokenrevocation
+
+import "github.com/golang-jwt/jwt/v5"
+
+const FamilyKeyClaim = "kaname_token_family_id"
+
+func familyKey(claims jwt.MapClaims) string {
+	family, _ := claims[FamilyKeyClaim].(string)
+	return family
+}
+`))
+	if len(found) != 1 || !strings.Contains(found[0], "kaname_token_family_id") ||
+		!strings.Contains(found[0], "tokenrevocation/family_key.go") {
+		t.Fatalf("ключ семейства среди ключей отсечки обязан дать ОДНУ находку с именем и координатой, получено %v", found)
+	}
+}
+
+// TestFamilyVerdictGate_UndecidedClaimByLiteralIsFound — то же чтение прямым
+// литералом, без константы.
+func TestFamilyVerdictGate_UndecidedClaimByLiteralIsFound(t *testing.T) {
+	t.Parallel()
+	_, found := fvFindings(t, fvRuleWith(`package tokenrevocation
+
+import "github.com/golang-jwt/jwt/v5"
+
+func grantKey(claims jwt.MapClaims) string {
+	g, _ := claims["kaname_grant_id"].(string)
+	return g
+}
+`))
+	if len(found) != 1 || !strings.Contains(found[0], "kaname_grant_id") {
+		t.Fatalf("нерешённое утверждение обязано дать ОДНУ находку с именем, получено %v", found)
+	}
+}
+
+// TestFamilyVerdictGate_RuleThatStopsAskingTheIssuanceIsFound — I1 на уровне
+// узлов: правило перестало читать идентификатор выпуска — о семействе оно не
+// спрашивает вовсе.
+func TestFamilyVerdictGate_RuleThatStopsAskingTheIssuanceIsFound(t *testing.T) {
+	t.Parallel()
+	files := fvLawfulTree()
+	files["internal/tokenrevocation/rule.go"] = strings.Replace(fvRuleSrc,
+		"jti, _ := claims[\"jti\"].(string)", "jti := \"\"", 1)
+	if files["internal/tokenrevocation/rule.go"] == fvRuleSrc {
+		t.Fatal("проверка НЕ ИСПОЛНЯЛАСЬ: инъекция не внесена")
+	}
+	_, found := fvFindings(t, files)
+	if len(found) != 1 || !strings.Contains(found[0], "\"jti\"") {
+		t.Fatalf("правило без вопроса о выпуске обязано дать ОДНУ находку, получено %v", found)
+	}
+}
+
+// ── Ось «выпуск пишет запись выпуска» ────────────────────────────────────────
+//
+// Отсутствие записи правило читает как «семейству не принадлежит». Значит
+// выпуск церемонии, не пишущий запись, выпускает токен, который отзыв
+// семейства не снимает. Реализация порта выпуска фундамента
+// (`IssueAccessToken` либо `StoreAccessToken`) без единого вызова писателя в
+// дереве — находка.
+
+const fvIssuerSrc = `package ceremonyport
+
+type AccessTokens struct{}
+
+func (a *AccessTokens) IssueAccessToken(grant string) (string, error) { return "tok", nil }
+`
+
+// TestFamilyVerdictGate_IssuanceWithoutRecordIsFound — выпуск есть, писатель
+// записи не позван нигде.
+func TestFamilyVerdictGate_IssuanceWithoutRecordIsFound(t *testing.T) {
+	t.Parallel()
+	files := fvLawfulTree()
+	files["internal/ceremonyport/access_tokens.go"] = fvIssuerSrc
+	_, found := fvFindings(t, files)
+	if len(found) != 1 || !strings.Contains(found[0], "ceremonyport/access_tokens.go") ||
+		!strings.Contains(found[0], "RecordAccessToken") {
+		t.Fatalf("выпуск без записи обязан дать ОДНУ находку с координатой, получено %v", found)
+	}
+}
+
+// TestFamilyVerdictGate_IssuanceThatRecordsIsSilent — близнец: тот же выпуск,
+// и писатель позван.
+func TestFamilyVerdictGate_IssuanceThatRecordsIsSilent(t *testing.T) {
+	t.Parallel()
+	files := fvLawfulTree()
+	files["internal/ceremonyport/access_tokens.go"] = `package ceremonyport
+
+type recorder interface{ RecordAccessToken(jti, familyID string) error }
+
+type AccessTokens struct{ rec recorder }
+
+func (a *AccessTokens) StoreAccessToken(jti, family string) error { return a.rec.RecordAccessToken(jti, family) }
+`
+	if _, found := fvFindings(t, files); len(found) != 0 {
+		t.Fatalf("выпуск, пишущий запись, дал находки: %v", found)
+	}
+}
+
+// TestFamilyVerdictGate_WriterLostIsFound — предпосылка оси: объявления
+// писателя в дереве нет — ось потеряла предмет, и это сказано, а не умолчано.
+func TestFamilyVerdictGate_WriterLostIsFound(t *testing.T) {
+	t.Parallel()
+	files := fvLawfulTree()
+	delete(files, "internal/repo/kaname/pg/access_token_writer.go")
+	_, found := fvFindings(t, files)
+	if len(found) != 1 || !strings.Contains(found[0], "RecordAccessToken") {
+		t.Fatalf("потерянный писатель обязан дать ОДНУ находку, получено %v", found)
 	}
 }
