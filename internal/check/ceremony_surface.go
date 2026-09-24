@@ -53,11 +53,13 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strings"
 
+	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 )
 
@@ -369,7 +371,7 @@ func (j *surfaceJudge) surfaces() []*surfaceDecl {
 					d.name = strings.Join(r.sortedVals(), " | ")
 				}
 			case "Reach":
-				d.reach = constName(n.pkg, kv.Value)
+				d.reach = reachWord(n.pkg, kv.Value)
 			case "Handler":
 				d.handler = kv.Value
 			}
@@ -383,24 +385,20 @@ func (j *surfaceJudge) surfaces() []*surfaceDecl {
 	return out
 }
 
-// constName — имя постоянной, которой выражение названо.
-func constName(sp *surfaceSrcPkg, e ast.Expr) string {
-	var id *ast.Ident
-	switch x := unparen(e).(type) {
-	case *ast.Ident:
-		id = x
-	case *ast.SelectorExpr:
-		id = x.Sel
+// reachWord — досягаемость поверхности словом фундамента
+// (servicecontract.SurfaceReach.String) — тем же, что несут журнал и
+// tools/surfaceroster. Судится ЗНАЧЕНИЕ постоянной, а не её имя: своего
+// написания досягаемости у гейта нет.
+func reachWord(sp *surfaceSrcPkg, e ast.Expr) string {
+	tv, ok := sp.info.Types[e]
+	if !ok || tv.Value == nil || !isServiceContract(tv.Type, "SurfaceReach") {
+		return "<досягаемость не постоянная>"
 	}
-	if id != nil {
-		if c, ok := sp.info.Uses[id].(*types.Const); ok {
-			return c.Name()
-		}
+	u, exact := constant.Uint64Val(tv.Value)
+	if !exact || u > math.MaxUint8 {
+		return "<досягаемость вне своего типа>"
 	}
-	if tv, ok := sp.info.Types[e]; ok && tv.Value != nil {
-		return tv.Value.ExactString()
-	}
-	return "<досягаемость не постоянная>"
+	return servicecontract.SurfaceReach(uint8(u)).String()
 }
 
 // premise — предпосылки: корень разобран, объявления сходятся с подъёмом,
@@ -1096,7 +1094,7 @@ func (j *surfaceJudge) coordinates(surfaces []*surfaceDecl, coords []CeremonyCoo
 		case len(v.Surfaces) != 1:
 			j.find("координата-якорь «%s» (%s) резолвится на %d поверхностях — положительный контроль не "+
 				"выполнен: поверхность выдачи из дерева не выводится%s", c.Name, c.Path, len(v.Surfaces), hitsText(v.Surfaces))
-		case v.Surfaces[0].Reach != "ReachExternal":
+		case v.Surfaces[0].Reach != servicecontract.ReachExternal.String():
 			j.find("координата-якорь «%s» (%s) резолвится на «%s» [%s] — поверхность выдачи обязана быть внешней",
 				c.Name, c.Path, v.Surfaces[0].Name, v.Surfaces[0].Reach)
 		default:
