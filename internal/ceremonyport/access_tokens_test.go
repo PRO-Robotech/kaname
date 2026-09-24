@@ -23,7 +23,6 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
 // unverifiedClaims разбирает выпущенный токен БЕЗ проверки подписи — пробе
@@ -41,6 +40,10 @@ func unverifiedClaims(t *testing.T, raw string) (map[string]any, jwt.MapClaims) 
 // Утверждения о доступе берутся ТОЛЬКО из выданного: согласие уже просьбы —
 // в токене выданное; протокольные поля запроса, запрошенное и утверждения
 // сеанса в токен не идут. Состав ЗАКРЫТ: утверждение сверх перечня — находка.
+//
+// Семейства в составе нет: семейство выпуска служба знает по ЗАПИСИ выпуска
+// (jti → семейство, kaname#319, решение К10 вариант А), и утверждение,
+// несущее его, было бы вторым хранилищем решения о семействе.
 func TestIssue_K2_ClaimsComeOnlyFromWhatWasGranted(t *testing.T) {
 	ring := newKeyRing(t, testKID)
 	a := newAccessTokens(t, ring, time.Now)
@@ -53,13 +56,10 @@ func TestIssue_K2_ClaimsComeOnlyFromWhatWasGranted(t *testing.T) {
 	require.Equal(t, tokenpolicy.TokenTypeAccess, header["typ"])
 	require.Equal(t, testSubject, claims["sub"], "субъект — не субъект сеанса гранта")
 	require.Equal(t, testClientID, claims["client_id"], "клиент — не клиент гранта")
-	require.Equal(t, testFamily, claims[tokenrevocation.FamilyKeyClaim],
-		"токен не несёт ключа семейства — отзыв семейства он пережил бы до exp")
 	require.Equal(t, "openid offline", claims["scope"], "область — не выданная")
 	require.ElementsMatch(t, []any{testAudience}, claims["aud"], "получатели — не выданные")
 
-	allowed := []string{"iss", "sub", "aud", "iat", "nbf", "exp", "jti", "client_id", "scope",
-		tokenrevocation.FamilyKeyClaim}
+	allowed := []string{"iss", "sub", "aud", "iat", "nbf", "exp", "jti", "client_id", "scope"}
 	for name := range claims {
 		require.Truef(t, slices.Contains(allowed, name),
 			"утверждение %q вне закрытого состава выпуска %v", name, allowed)
@@ -160,7 +160,6 @@ func genuineClaims(iat time.Time) jwt.MapClaims {
 		"iss": testIssuer, "sub": testSubject, "aud": []string{testAudience},
 		"iat": iat.Unix(), "nbf": iat.Unix(), "exp": iat.Add(5 * time.Minute).Unix(),
 		"jti": "tok0123456789abcdefg", "client_id": testClientID,
-		tokenrevocation.FamilyKeyClaim: testFamily,
 	}
 }
 
