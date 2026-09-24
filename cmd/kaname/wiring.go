@@ -738,6 +738,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	if metricsReg != nil {
 		checkAuthz = metrics.NewInstrumentedAuthorizer(authzServices.authorizeSvc, metricsReg)
 	}
+	// Авторитет о предъявленном базовом секрете (#1142) — с объявленным пределом
+	// на обращение к базе (kaname#379). Сборка — basic_credential_lane.go.
+	basicAuthority, basicAuthorityErr := newBasicCredentialAuthority(pool)
+	if basicAuthorityErr != nil {
+		log.Fatalf("basic credential authority: %v", basicAuthorityErr)
+	}
 	internalIAMHandler := internaliamapp.NewHandler(lookupSubject, checkAuthz).
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
@@ -754,7 +760,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// #1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
 		// промахе своего кэша вердикта; отзыв доходит до предъявления тем, что
 		// резолв не находит СНЯТОЙ строки.
-		WithBasicCredentialResolver(kanamepg.NewBasicCredentialRepo(pool)).
+		WithBasicCredentialResolver(basicAuthority).
 		WithLogger(logger).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
@@ -786,6 +792,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// F5 (IAM-1-13): GetRoleCompiled — Internal-only compiled-permission
 		// projection (two-projection; public RoleService carries only rules[]).
 		WithRoleCompiledReader(roleapp.NewGetRoleCompiledUseCase(kanameRepo))
+	// ЧИТАТЕЛЬ ПЕРЕПИСИ ИСХОДОВ ПОЛОСЫ БАЗОВОГО СЕКРЕТА — вплотную к построению
+	// (kaname#379). Наружу полоса отвечает одним отказом на любую причину;
+	// отсечка отзыва-всех, «строки нет» и «секрет не тот» различимы только в
+	// этой переписи и в журнале, и без читателя перепись осталась бы в памяти
+	// процесса. Держит `basic_credential_outcomes_wiring_test.go`.
+	metricsReg.NewBasicCredentialOutcomeCollector(
+		basicCredentialCells(), basicCredentialOutcomeReader(internalIAMHandler))
 
 	// ── InternalSessionRevocationsService ─────────────────────────────────
 	// Revoke (logout / force-logout) + IsRevoked (api-gateway hot-path) +
@@ -1152,7 +1165,7 @@ func forceLogoutOwnSessions(cfg config.Config, pool *pgxpool.Pool) internaliamap
 }
 
 // saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
-// свою чеканку (задача #1120, подфаза Ф4б эпика #896).
+// свою чеканку (задача kacho#1120, подфаза Ф4б эпика kacho#896).
 //
 // ПРЕДИКАТ — ЭНДПОИНТ ОБМЕНА, А НЕ ПОДПИСАНТ. Ключ служебной учётки предъявляет
 // подписанное утверждение ВНЕШНИЙ вызывающий, и обменивает он его на нашем
@@ -1166,9 +1179,10 @@ func forceLogoutOwnSessions(cfg config.Config, pool *pgxpool.Pool) internaliamap
 // целиком (тот же довод, что у выбора полосы обмена докер-токена).
 func saKeyIssuanceIsOurs(cfg config.Config) bool {
 	// Само условие живёт в настройке (`Config.SAKeyIssuanceIsOurs`), а не здесь:
-	// читателей у него два — эта сборка и страж старта над требованием
-	// связанного токена (задача #1137), — и две копии одного условия разошлись
-	// бы молча. Функция остаётся точкой, которую спрашивают, не собирая контур.
+	// читателей у него три — эта сборка, страж старта над требованием
+	// связанного токена (задача kacho#1137) и требование посадки `own` в таблице
+	// полос (задача #337), — и копии одного условия разошлись бы молча. Функция
+	// остаётся точкой, которую спрашивают, не собирая контур.
 	return cfg.SAKeyIssuanceIsOurs()
 }
 
@@ -1228,7 +1242,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
-	// Переведён ли контур выдачи ключей на свою чеканку (задача #1120). Решается
+	// Переведён ли контур выдачи ключей на свою чеканку (задача kacho#1120). Решается
 	// ЗДЕСЬ, в единственном месте сборки: «переведён» — свойство посадки, и
 	// use-case его не выводит.
 	ownIssuance := saKeyIssuanceIsOurs(cfg)

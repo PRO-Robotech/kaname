@@ -116,7 +116,7 @@ func TestF2_32_RevocationReachesBothIssuanceAndPresentation(t *testing.T) {
 		for _, cause := range causes {
 			t.Run(string(kind)+"/"+cause.name, func(t *testing.T) {
 				f := newAssertionFixture(t)
-				rig := newIssuanceRig(t)
+				rig := newIssuanceRig(t, f.pool)
 				revocations := kanamepg.NewMintedTokenRevocationRepo(f.pool)
 				h := newIntrospectAuthority(rig, revocations)
 
@@ -177,7 +177,7 @@ func TestF2_32_UnavailableRevocationAuthorityRefuses(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newAssertionFixture(t)
-	rig := newIssuanceRig(t)
+	rig := newIssuanceRig(t, f.pool)
 
 	clientID, _ := seedAssertionClientOfKind(t, f, domain.AssertionClientUser)
 	row, err := f.repo.ResolveAssertionClient(ctx, clientID)

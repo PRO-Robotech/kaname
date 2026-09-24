@@ -175,7 +175,7 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		DefaultAudience:  audRegistry,
 		TokenTTL:         15 * time.Minute,
 		Clock:            func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
-	}, newSigner(t), stubClaims{})
+	}, newSigner(t), stubClaims{}, noCutoffs{})
 	require.NoError(t, err)
 
 	var want []string
@@ -192,6 +192,14 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		RequestedAudience: want,
 	})
 	return err
+}
+
+// noCutoffs — отсечек отзыва-всех нет. Предмет этой пробы — адресат, и
+// принципал здесь машинный: отсечка человека для него не читается вовсе.
+type noCutoffs struct{}
+
+func (noCutoffs) UserRevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
 }
 
 // stubClaims — источник состава утверждений. Дублёр НЕ снисходительнее
