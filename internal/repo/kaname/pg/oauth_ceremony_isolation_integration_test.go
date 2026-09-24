@@ -657,6 +657,7 @@ var heldWriterCases = []heldWriterCase{
 		name: "SetClientSecretVerifier",
 		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, _ int) (int, func()) {
+			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
 			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
 				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
 				 WHERE client_id = $1`, sc.ClientID)
@@ -676,6 +677,7 @@ var heldWriterCases = []heldWriterCase{
 		name: "ClearClientSecretVerifier",
 		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, _ int) (int, func()) {
+			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
 			require.NoError(t, repo.SetClientSecretVerifier(ctx, sc.ClientID, verifierForCases), "посев значения")
 			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
 				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
@@ -692,6 +694,20 @@ var heldWriterCases = []heldWriterCase{
 			assert.False(t, has, "у клиента не обязано остаться секрета")
 		},
 	},
+}
+
+// declareSecretClient — клиент сцены объявляется способом СЕКРЕТОМ до сцен
+// проверочного значения. Сцена заводит клиента публичным (`none`), а материал
+// лежит только у клиента, предъявляющего секрет
+// (`interactive_clients_secret_verifier_method_ck`, kaname#317): без этого
+// посева писатель получал бы отказ схемы, а не свой исход под конкуренцией.
+func declareSecretClient(t *testing.T, ctx context.Context, seed *pgxpool.Pool, clientID string) {
+	t.Helper()
+	tag, err := seed.Exec(ctx, `
+		UPDATE kaname.interactive_clients SET token_endpoint_auth_method = 'client_secret_basic'
+		 WHERE client_id = $1`, clientID)
+	require.NoError(t, err, "посев способа секретом")
+	require.EqualValues(t, 1, tag.RowsAffected(), "посев способа секретом: клиента сцены нет")
 }
 
 // verifierForCases — проверочное значение объявленной формы.
