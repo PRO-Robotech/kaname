@@ -57,10 +57,11 @@ func (r *recordingFamilies) RevokeFamily(_ context.Context, familyID string, rea
 //
 // `client-revoke`: слова нет ни в `domain.FamilyRevocationReasons()`, ни в
 // ограничении `token_families_revoked_reason_ck`; оба заводятся одним
-// изменением со своей приёмкой и миграцией. До тех пор отзыв клиентом отказывает
-// операцией, не тронув семейства (`TestK1_ClientRevokeRefusesLoudlyWhileTheWordIsMissing`).
+// изменением со своей приёмкой и миграцией — задачей PRO-Robotech/kaname#406.
+// До тех пор отзыв клиентом отказывает операцией, не тронув семейства
+// (`TestK1_ClientRevokeRefusesLoudlyWhileTheWordIsMissing`).
 var reasonsAwaitingAServiceWord = map[oauthceremony.RevocationReason]string{
-	oauthceremony.RevocationClientRevoke: "PRO-Robotech/kaname#396 (K1, путь отзыва клиентом)",
+	oauthceremony.RevocationClientRevoke: "PRO-Robotech/kaname#406 (K1, путь отзыва клиентом)",
 }
 
 // issueRef — ссылка на задачу службы.
