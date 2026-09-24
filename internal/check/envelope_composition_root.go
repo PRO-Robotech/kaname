@@ -145,6 +145,9 @@ type EnvelopeSite struct {
 	Form EnvelopeSiteForm
 	// Expr — выражение места; Meter — довод меры (только у вызова).
 	Expr, Meter string
+	// MeterFrom — путь импорта пакета, которым квалифицирован довод меры
+	// (пусто — довод не селектор импортированного пакета).
+	MeterFrom string
 	// WallClock — довод меры вызова есть мера настенных часов дома.
 	WallClock bool
 }
@@ -170,6 +173,8 @@ type EnvelopeRootCensus struct {
 	TreeFiles, ProductionGo, OutsideTraversal, Examined int
 	// ReferringHome — файлов дома и файлов, импортирующих дом.
 	ReferringHome int
+	// HomeImport — путь импорта дома, выведенный из go.mod корня дерева.
+	HomeImport string
 	// MeterParam — позиция довода меры у конструктора, с единицы.
 	MeterParam int
 	// ConstructorAt, WallClockAt — координаты объявлений в доме.
@@ -178,8 +183,8 @@ type EnvelopeRootCensus struct {
 
 func (c EnvelopeRootCensus) String() string {
 	return fmt.Sprintf("файлов дерева %d · не-тестовых .go %d, из них вне области обхода %d · разобрано %d · "+
-		"обращаются к дому %d · посылка: мера — довод №%d конструктора %s, мера настенных часов %s",
-		c.TreeFiles, c.ProductionGo, c.OutsideTraversal, c.Examined, c.ReferringHome,
+		"обращаются к дому %s %d · посылка: мера — довод №%d конструктора %s, мера настенных часов %s",
+		c.TreeFiles, c.ProductionGo, c.OutsideTraversal, c.Examined, c.HomeImport, c.ReferringHome,
 		c.MeterParam, c.ConstructorAt, c.WallClockAt)
 }
 
@@ -225,6 +230,7 @@ func JudgeEnvelopeCompositionRoot(tree *treecorpus.Tree, spec EnvelopeRootSpec) 
 	if err != nil {
 		return v, err
 	}
+	v.Census.HomeImport = homeImport
 
 	fset := token.NewFileSet()
 	files := make(map[string]*ast.File, len(corpus))
@@ -253,7 +259,7 @@ func JudgeEnvelopeCompositionRoot(tree *treecorpus.Tree, spec EnvelopeRootSpec) 
 			continue
 		}
 		v.Census.ReferringHome++
-		r := &envRootResolver{spec: spec, names: names, unqualified: inHome || dot}
+		r := &envRootResolver{spec: spec, names: names, unqualified: inHome || dot, imports: envRootImports(f)}
 		v.Sites = append(v.Sites, r.sites(fset, rel, f, inHome, premise.meterIndex)...)
 		v.PortImpls = append(v.PortImpls, r.portImpls(fset, rel, f, inHome)...)
 	}
@@ -410,6 +416,43 @@ type envRootResolver struct {
 	// unqualified — имена дома пишутся без квалификатора: файл дома либо
 	// импорт с точкой.
 	unqualified bool
+	// imports — местное имя импорта → путь: только для текста находки о мере.
+	imports map[string]string
+}
+
+// envRootImports — местные имена импортов файла. Имя без псевдонима — последний
+// сегмент пути: оно служит тексту находки, узнавание дома идёт по пути.
+func envRootImports(f *ast.File) map[string]string {
+	out := map[string]string{}
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		name := path.Base(p)
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		out[name] = p
+	}
+	return out
+}
+
+// meterFrom — путь импорта, которым квалифицирован довод меры.
+func (r *envRootResolver) meterFrom(e ast.Expr) string {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		e = p.X
+	}
+	if sel, ok := e.(*ast.SelectorExpr); ok {
+		if id, ok := sel.X.(*ast.Ident); ok {
+			return r.imports[id.Name]
+		}
+	}
+	return ""
 }
 
 // homeName — имя дома, которое называет выражение (скобки сняты).
@@ -484,6 +527,7 @@ func (r *envRootResolver) sites(fset *token.FileSet, rel string, f *ast.File, in
 				site := EnvelopeSite{Rel: rel, Line: at(call), Form: EnvelopeSiteCall, Expr: types.ExprString(call.Fun), Meter: "<довода меры нет>"}
 				if meterIndex < len(call.Args) && !call.Ellipsis.IsValid() {
 					site.Meter = types.ExprString(call.Args[meterIndex])
+					site.MeterFrom = r.meterFrom(call.Args[meterIndex])
 					site.WallClock = r.isWallClock(call.Args[meterIndex])
 				}
 				out = append(out, site)
@@ -566,8 +610,13 @@ func envRootFindings(v EnvelopeRootVerdict, spec EnvelopeRootSpec, homePkg strin
 		switch s.Form {
 		case EnvelopeSiteCall:
 			if !s.WallClock {
-				out = append(out, fmt.Sprintf("%s:%d — мера огибающей `%s`, а не %s.%s: в не-тестовом файле огибающую меряют только "+
-					"настенные часы, назначенная стоимость живёт в файлах проб", s.Rel, s.Line, s.Meter, homePkg, spec.WallClock))
+				from := ""
+				if s.MeterFrom != "" && s.MeterFrom != v.Census.HomeImport {
+					from = " из " + s.MeterFrom
+				}
+				out = append(out, fmt.Sprintf("%s:%d — мера огибающей `%s`%s, а не %s.%s дома %s: в не-тестовом файле огибающую "+
+					"меряют только настенные часы, назначенная стоимость живёт в файлах проб",
+					s.Rel, s.Line, s.Meter, from, homePkg, spec.WallClock, v.Census.HomeImport))
 			}
 		case EnvelopeSiteConstructorValue:
 			out = append(out, fmt.Sprintf("%s:%d — конструктор огибающей взят значением `%s`: мера у места построения не видна", s.Rel, s.Line, s.Expr))

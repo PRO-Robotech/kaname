@@ -559,7 +559,8 @@ import (
 
 func build(v *pv.Verifier, rec pv.EnvelopeObserver) { _, _ = pv.NewEnvelope(v, rec, passwordverify.WallClockCostMeter) }
 `}))
-	envRequireFinding(t, foreignMeter, envRootRel+":8", "мера огибающей `passwordverify.WallClockCostMeter`")
+	envRequireFinding(t, foreignMeter, envRootRel+":8", "мера огибающей `passwordverify.WallClockCostMeter` из example.com/impostor/passwordverify",
+		"дома github.com/PRO-Robotech/kaname/internal/passwordverify")
 
 	foreignCtor := envMustJudge(t, envWith(map[string]string{"internal/other/impostor.go": `package other
 
