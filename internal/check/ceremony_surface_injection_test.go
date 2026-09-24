@@ -589,6 +589,27 @@ func ceremonyLayeredRegistrar(f *ceremonyFixture, n int, nop bool, inner string)
 	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, code)
 }
 
+// ceremonyRegAdapterDecls — регистратор за слоями и адаптер: функциональный
+// тип, чей метод Handle зовёт саму функцию. Значение адаптера над методом
+// мультиплексора — получатель не своего типа-структуры: реализация метода у
+// него не выводится.
+const ceremonyRegAdapterDecls = ceremonyLayersRegDecls + "\n\ntype ceremonyRegFunc func(string, http.Handler)\n\n" +
+	"func (f ceremonyRegFunc) Handle(p string, h http.Handler) { f(p, h) }"
+
+// ceremonyAdaptedRegistrar — вызов регистрации через переменную с пустышкой и
+// адаптером над jwksMux.Handle за n слоями; adapter=false — адаптер объявлен,
+// но переменной не отдан (близнец: у вызова одна пустышка).
+func ceremonyAdaptedRegistrar(f *ceremonyFixture, n int, adapter bool) {
+	ceremonyRootFile(f, "ceremony_probe_layers_reg.go", "\t\"net/http\"", ceremonyRegAdapterDecls)
+	code := "var ceremonyX ceremonyReg = ceremonyNop{}\n"
+	if adapter {
+		code += "ceremonyX = " + strings.Repeat("ceremonyLayer{", n) + "ceremonyRegFunc(jwksMux.Handle)" +
+			strings.Repeat("}", n) + "\n"
+	}
+	code += "ceremonyX.Handle(authorizehttp.AuthorizePath, authorizehttp.New())"
+	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, code)
+}
+
 // ceremonyMounterIface и ceremonyMountBody — монтировщик за интерфейсом:
 // метод получает мультиплексор и регистрирует на нём координату.
 const (
@@ -997,6 +1018,18 @@ func ceremonyInjections() []ceremonyInjection {
 		{"D6_registrar_through_an_empty_interface_next_to_a_no_op", func(f *ceremonyFixture) {
 			ceremonyLayeredRegistrar(f, 1, true, "ceremonyAny.(ceremonyReg)")
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, "var ceremonyAny any = jwksMux")
+		}, []string{"не прослежен", "ceremonyX.Handle"}},
+
+		// D9, D10 — остальные ветки отказа диспетчеризации под той же
+		// пустышкой: получатель не своего типа (адаптер над методом
+		// мультиплексора) — прямо и за слоем, где отказ приходит из вложенной
+		// диспетчеризации. D6 держит лишь слой без значений.
+		{"D9_registrar_adapter_over_a_mux_method_next_to_a_no_op", func(f *ceremonyFixture) {
+			ceremonyAdaptedRegistrar(f, 0, true)
+		}, []string{"не прослежен", "ceremonyX.Handle"}},
+
+		{"D10_registrar_adapter_behind_a_layer_next_to_a_no_op", func(f *ceremonyFixture) {
+			ceremonyAdaptedRegistrar(f, 1, true)
 		}, []string{"не прослежен", "ceremonyX.Handle"}},
 
 		// Z — монтировщик за интерфейсом, чей получатель рождён не литералом
@@ -1473,6 +1506,10 @@ func ceremonyTwins() []ceremonyTwin {
 		// разбор сходится.
 		{"D8_layer_embedding_itself", func(f *ceremonyFixture) {
 			ceremonyLayeredRegistrar(f, 1, true, "ceremonyX")
+		}},
+		// Близнец D9 и D10 на один факт: адаптер объявлен, переменной не отдан.
+		{"D9t_registrar_adapter_declared_not_assigned", func(f *ceremonyFixture) {
+			ceremonyAdaptedRegistrar(f, 0, false)
 		}},
 		// Монтировщик за интерфейсом с получателем-приведением монтирует
 		// координату с методом на поверхности ВЫДАЧИ: получатель выведен, и
