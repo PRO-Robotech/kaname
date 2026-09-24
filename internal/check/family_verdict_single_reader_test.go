@@ -12,10 +12,7 @@ package check_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 )
@@ -34,29 +31,12 @@ var familyVerdictSurfaces = []string{
 }
 
 // prodGoFiles — непроверочные исходники каталогов internal и cmd модуля: путь
-// относительно корня в косой записи → текст.
+// относительно корня в косой записи → текст (`check.ProdGoFiles`).
 func prodGoFiles(t *testing.T, root string) map[string]string {
 	t.Helper()
-	files := map[string]string{}
-	for _, d := range []string{"internal", "cmd"} {
-		paths, err := treecorpus.UnderWithSuffix(filepath.Join(root, d), ".go")
-		if err != nil {
-			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: обход %s: %v", d, err)
-		}
-		for _, p := range paths {
-			if strings.HasSuffix(p, "_test.go") {
-				continue
-			}
-			b, err := os.ReadFile(p) // #nosec G304 -- путь из состава дерева этого модуля
-			if err != nil {
-				t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: чтение %s: %v", p, err)
-			}
-			rel, err := filepath.Rel(root, p)
-			if err != nil {
-				t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: относительный путь %s: %v", p, err)
-			}
-			files[filepath.ToSlash(rel)] = string(b)
-		}
+	files, err := check.ProdGoFiles(root)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
 	return files
 }
