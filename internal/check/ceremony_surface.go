@@ -287,6 +287,7 @@ type surfaceJudge struct {
 	https    map[*absVal]*httpSim
 	gws      map[*absVal]*gwSim
 	problems map[string]bool
+	onPath   map[resolveKey]bool
 	hosts    []string
 	census   CeremonySurfaceCensus
 	findings []string
@@ -309,6 +310,7 @@ func (j *surfaceJudge) run(coords []CeremonyCoordinate) CeremonySurfaceReport {
 	j.https = map[*absVal]*httpSim{}
 	j.gws = map[*absVal]*gwSim{}
 	j.problems = map[string]bool{}
+	j.onPath = map[resolveKey]bool{}
 	j.census.PathForms = map[string]int{}
 	prog := j.a.prog
 	j.census.Packages = len(prog.pkgs)
@@ -827,70 +829,107 @@ func (j *surfaceJudge) gwOf(m *absVal) *gwSim {
 
 // ─── прохождение запроса ────────────────────────────────────────────────────
 
+// resolveKey — значение, которое запрос проходит на текущем пути.
+type resolveKey struct {
+	v  *absVal
+	rq probeReq
+}
+
 // resolve — цепочки, по которым запрос доходит до конечной точки.
+//
+// Значение, которое ТОТ ЖЕ запрос уже проходит выше по пути, — цикл
+// (обёртка, вложенная в саму себя; мультиплексор рекурсивной фабрики,
+// смонтированный в себя): прохождение детерминировано, и цикл нового маршрута
+// не даёт — второй раз он не обходится. Путь без цикла длиннее
+// CeremonyResolveDepthLimit не обрезается молча: глубже гейт не смотрит, и
+// это находка — сколько поверхностей резолвят координату, не установлено.
 func (j *surfaceJudge) resolve(set avSet, rq probeReq, depth int) [][]string {
-	if depth > CeremonyResolveDepthLimit {
-		return nil
-	}
 	var out [][]string
 	for _, v := range set.sorted() {
-		switch v.kind {
-		case avHTTPMux:
-			sim := j.httpOf(v)
-			req := httptest.NewRequest(rq.method, "http://"+rq.host+rq.path, nil)
-			h, pat := sim.mux.Handler(req)
-			if pat == "" {
-				continue
-			}
-			var route *simRoute
-			redirect := false
-			if mk, ok := h.(probeMarker); ok {
-				route = sim.routes[mk.pattern]
-			} else {
-				route, redirect = sim.routes[pat], true
-			}
-			if route == nil {
-				continue
-			}
-			step := fmt.Sprintf("регистрация %s %s образец «%s»", route.info.site, route.info.text, route.pattern)
-			if redirect {
-				out = append(out, []string{step + " (мультиплексор отвечает перенаправлением — путь резолвится)"})
-				continue
-			}
-			out = append(out, j.through(step, route.info.handlers, rq, depth)...)
-		case avGatewayMux:
-			sim := j.gwOf(v)
-			sim.hit = -1
-			req := httptest.NewRequest(rq.method, "http://"+rq.host+rq.path, nil)
-			sim.mux.ServeHTTP(httptest.NewRecorder(), req)
-			if sim.hit < 0 {
-				continue
-			}
-			route := sim.routes[sim.hit]
-			step := fmt.Sprintf("регистрация шлюза %s %s образец «%s»", route.info.site, route.info.text, route.pattern)
-			out = append(out, j.through(step, route.info.handlers, rq, depth)...)
-		case avNotFound:
+		k := resolveKey{v: v, rq: rq}
+		if j.onPath[k] {
 			continue
-		case avOpaque:
-			out = append(out, []string{"конечная точка " + fnName(v.fn)})
-		case avExtWrap:
-			out = append(out, j.external(v, rq, depth)...)
-		default:
-			kids, isHandler, desc := j.a.delegates(v)
-			if !isHandler {
-				continue
-			}
-			if len(kids) == 0 {
-				out = append(out, []string{})
-				continue
-			}
-			for _, c := range j.resolve(kids, rq, depth+1) {
-				if desc != "" {
-					c = append([]string{desc}, c...)
-				}
-				out = append(out, c)
-			}
 		}
+		if depth > CeremonyResolveDepthLimit {
+			j.problems[fmt.Sprintf("прохождение запроса обрезано на глубине %d (предел CeremonyResolveDepthLimit) "+
+				"у %s: глубже гейт не смотрит — на скольких поверхностях резолвится координата, не установлено",
+				CeremonyResolveDepthLimit, j.valueLabel(v))] = true
+			continue
+		}
+		j.onPath[k] = true
+		out = append(out, j.resolveOne(v, rq, depth)...)
+		delete(j.onPath, k)
+	}
+	return out
+}
+
+// valueLabel — значение словом для находки: вид и место рождения.
+func (j *surfaceJudge) valueLabel(v *absVal) string {
+	if v.site.IsValid() {
+		return "значения, рождённого " + position(j.a.prog.fset, v.site)
+	}
+	if v.fn != nil {
+		return "функции " + fnName(v.fn)
+	}
+	return "общего мультиплексора процесса"
+}
+
+// resolveOne — прохождение запроса через одно значение.
+func (j *surfaceJudge) resolveOne(v *absVal, rq probeReq, depth int) [][]string {
+	switch v.kind {
+	case avHTTPMux:
+		sim := j.httpOf(v)
+		req := httptest.NewRequest(rq.method, "http://"+rq.host+rq.path, nil)
+		h, pat := sim.mux.Handler(req)
+		if pat == "" {
+			return nil
+		}
+		var route *simRoute
+		redirect := false
+		if mk, ok := h.(probeMarker); ok {
+			route = sim.routes[mk.pattern]
+		} else {
+			route, redirect = sim.routes[pat], true
+		}
+		if route == nil {
+			return nil
+		}
+		step := fmt.Sprintf("регистрация %s %s образец «%s»", route.info.site, route.info.text, route.pattern)
+		if redirect {
+			return [][]string{{step + " (мультиплексор отвечает перенаправлением — путь резолвится)"}}
+		}
+		return j.through(step, route.info.handlers, rq, depth)
+	case avGatewayMux:
+		sim := j.gwOf(v)
+		sim.hit = -1
+		req := httptest.NewRequest(rq.method, "http://"+rq.host+rq.path, nil)
+		sim.mux.ServeHTTP(httptest.NewRecorder(), req)
+		if sim.hit < 0 {
+			return nil
+		}
+		route := sim.routes[sim.hit]
+		step := fmt.Sprintf("регистрация шлюза %s %s образец «%s»", route.info.site, route.info.text, route.pattern)
+		return j.through(step, route.info.handlers, rq, depth)
+	case avNotFound:
+		return nil
+	case avOpaque:
+		return [][]string{{"конечная точка " + fnName(v.fn)}}
+	case avExtWrap:
+		return j.external(v, rq, depth)
+	}
+	kids, isHandler, desc := j.a.delegates(v)
+	if !isHandler {
+		return nil
+	}
+	if len(kids) == 0 {
+		return [][]string{{}}
+	}
+	var out [][]string
+	for _, c := range j.resolve(kids, rq, depth+1) {
+		if desc != "" {
+			c = append([]string{desc}, c...)
+		}
+		out = append(out, c)
 	}
 	return out
 }
