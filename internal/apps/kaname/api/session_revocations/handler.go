@@ -46,6 +46,7 @@ package session_revocations
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -216,7 +217,7 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 	}
 	revoked, err := h.read.IsRevoked(ctx, jti)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "session revocation lookup failed")
+		return nil, isRevokedLookupFailed(ctx, "record", err)
 	}
 	if !revoked {
 		// Семейство выпуска — тем же правилом, что у поверхностей предъявления.
@@ -224,7 +225,7 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 		// есть «не отозван».
 		familyRevoked, ferr := tokenrevocation.FamilyRevoked(ctx, h.read, jti)
 		if ferr != nil {
-			return nil, status.Error(codes.Internal, "session revocation lookup failed")
+			return nil, isRevokedLookupFailed(ctx, "family", ferr)
 		}
 		return &iamv1.IsRevokedResponse{Revoked: familyRevoked}, nil
 	}
@@ -236,6 +237,17 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 		resp.Reason = rev.Reason
 	}
 	return resp, nil
+}
+
+// isRevokedLookupFailed — сбой хранилища на `IsRevoked`: спрашивающему —
+// фиксированный текст без текста хранилища, оператору — запись с половиной
+// ответа, которая не ответила (`record` — запись отзыва по идентификатору,
+// `family` — семейство выпуска), и причиной. Идентификатор удостоверения в
+// журнал не идёт: коррелировать сбой хранилища с ним незачем.
+func isRevokedLookupFailed(ctx context.Context, part string, err error) error {
+	slog.ErrorContext(ctx, "session revocation lookup failed",
+		slog.String("part", part), slog.String("err", err.Error()))
+	return status.Error(codes.Internal, "session revocation lookup failed")
 }
 
 // ListByUser — sync admin/audit enumeration of active revocations for a user,
