@@ -27,6 +27,9 @@ steps»), и правило наборов тоже (`ryw-retry-never-on-negativ
 предмета разошёлся бы с генератором молча); поверхность — метка
 `require_env_url` в пред-скрипте шага.
 
+ПРЕДПОСЫЛКА (0): множество поверхностей без окна объявляет генератор
+(`NO_AUTHZ_WINDOW_SURFACES`); нет его там — отказ, своей копии здесь нет.
+
 ИНЪЕКЦИЯ В ОБЕ СТОРОНЫ И НА ДВУХ УРОВНЯХ:
   (а) перепись: обёрнутое отрицание — находка с именем шага; обёрнутое
       положительное первое обращение — молчание; обёрнутый шаг поверхности без
@@ -47,6 +50,7 @@ import json
 import re
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -58,8 +62,13 @@ COLLECTIONS = Path(__file__).resolve().parents[1] / "collections"
 # Метка поверхности — та, что ставит `require_env_url` первой строкой своего блока.
 _SURFACE_RE = re.compile(r"^// HARNESS-CONFIG GUARD — ([A-Za-z_][A-Za-z0-9_]*) is injected")
 # Поверхности, у которых окна материализации прав нет: берутся у генератора, а не
-# выписываются здесь второй раз.
-NO_WINDOW = getattr(gen, "NO_AUTHZ_WINDOW_SURFACES", frozenset({"loginLaneBaseUrl"}))
+# выписываются здесь второй раз. Нет множества у генератора — пусто, и проверка
+# предпосылки в `main` отказывает, а своей копии перепись не подставляет.
+def _no_window_surfaces(mod) -> frozenset:
+    return getattr(mod, "NO_AUTHZ_WINDOW_SURFACES", frozenset())
+
+
+NO_WINDOW = _no_window_surfaces(gen)
 
 
 def _items(node):
@@ -180,6 +189,13 @@ def _wrapped(step) -> bool:
 
 
 def main() -> int:
+    print("(0) предпосылка: поверхности без окна объявляет генератор")
+    check("генератор объявляет поверхности без окна (`NO_AUTHZ_WINDOW_SURFACES`)", bool(NO_WINDOW),
+          "в gen.py множества нет — ось поверхности у переписи слепа")
+    check("ИНЪЕКЦИЯ: у модуля без множества перепись не берёт своей копии",
+          _no_window_surfaces(types.SimpleNamespace()) == frozenset(),
+          f"взято {sorted(_no_window_surfaces(types.SimpleNamespace()))} — копия вместо генератора")
+
     print("(а) перепись: обе стороны каждой оси")
     rc, out = _census_of(_item("CASE-X :: neg", [*_WRAPPED, "pm.response.to.have.status(404);",
                                                  "pm.test('s', () => pm.expect(pm.response.code).to.eql(404));"]))
