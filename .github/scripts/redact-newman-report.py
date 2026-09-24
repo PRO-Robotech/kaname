@@ -1236,6 +1236,168 @@ def _self_test_hidden_triple_and_one_pass() -> None:
        stuck == 0, f"{stuck} из {hit}")
 
 
+class _SeenPairs:
+    """Объект выложенного JSON глазами САМОПРОБЫ: каждая копия повторённого
+    имени на своём месте. Разбор свой, а не чистильщика: иначе копию, которую
+    не видит чистильщик, не увидела бы и проба."""
+
+    def __init__(self, pairs: list[tuple[str, object]]) -> None:
+        self.pairs = pairs
+
+
+def _published(dst: pathlib.Path) -> str:
+    """Всё выложенное одним текстом: файлы как есть, имена членов и КАЖДЫЙ
+    байтовый массив декодированным — по всем копиям повторённых имён."""
+    parts: list[str] = []
+
+    def walk(n: object) -> None:
+        if isinstance(n, _SeenPairs):
+            buffer = any(k == "type" and v == "Buffer" for k, v in n.pairs)
+            for k, v in n.pairs:
+                parts.append(k)
+                if buffer and k == "data" and isinstance(v, list) \
+                        and all(isinstance(b, int) for b in v):
+                    parts.append(bytes(b & 0xFF for b in v).decode("utf-8", "replace"))
+                walk(v)
+        elif isinstance(n, list):
+            for v in n:
+                walk(v)
+        elif isinstance(n, (str, int, float)) and not isinstance(n, bool):
+            parts.append(str(n))
+
+    for f in sorted(dst.iterdir()):
+        text = f.read_text(encoding="utf-8")
+        parts.append(text)
+        if f.suffix == ".json":
+            walk(json.loads(text, object_pairs_hook=_SeenPairs))
+    return "\n".join(parts)
+
+
+def _buffer(text: str) -> dict:
+    return {"type": "Buffer", "data": list(text.encode("utf-8"))}
+
+
+def _self_test_every_part() -> None:
+    """ОСЬ ПОЛНОТЫ ПО ЧАСТЯМ ДОКУМЕНТА (kaname#399): секрет не доходит до
+    выхода, в какой бы части документа он ни стоял.
+
+    Части перечислены по устройству JSON, а не по опыту: имя члена объекта
+    (узла отчёта и внутри тела), значение-строка, значение-число под именем
+    секрета, каждая копия повторённого имени (первая, последняя, вложенная),
+    член байтового массива сверх `type` и `data`, байтовый массив не из чисел,
+    тело с отметкой порядка байтов перед JSON. Рядом — две формы значения,
+    которые ловит ТОЛЬКО видовой срез: предъявление Bearer и JWT короче порогов
+    критерия; без них снятие видового среза проходило самопробу зелёной.
+
+    Каждая пара — одно-фактная: близнец — тот же документ с безобидным текстом
+    на том же месте. Инъекция: код 0 и ни одного знака метки нигде в
+    выложенном, включая имена членов и декодированные массивы по всем копиям.
+    Близнец: код 0, вырезано ноль, безобидный текст выжил.
+    """
+    import tempfile
+    print("  ── полнота по частям документа")
+    probe = {"item": {"name": "probe-part"}}
+
+    def execution(**response: object) -> dict:
+        return {"run": {"executions": [dict(probe, response=dict(code=200, **response))]}}
+
+    def raw_body(raw: str) -> dict:
+        return {"run": {"executions": [dict(probe, request={"body": {"mode": "raw", "raw": raw}})]}}
+
+    member = _url_mark("kaname#399 member name inside body")
+    bearer_token, bearer_twin = "kt_short_2Fx9_bear", 'WWW-Authenticate: Bearer error="invalid_token"'
+    short_jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJLSldUIn0."
+    _c("предпосылка: имя члена в теле — удостоверение критерия, не видовое",
+       residue_shaped(member) is not None and shaped_credential(member) is None)
+    _c("предпосылка: токен предъявления и короткий JWT критерию НЕ видны (ось — про вид)",
+       residue_shaped(f"Bearer {bearer_token}") is None and residue_shaped(short_jwt) is None)
+    _c("предпосылка: близнец предъявления видовому срезу не подпадает",
+       BEARER_RE.search(bearer_twin) is None and JWT_RE.search("eyJ.kept") is None)
+
+    # (часть, файлы инъекции, файлы близнеца, метка, безобидный текст близнеца)
+    cases: list[tuple[str, dict[str, str], dict[str, str], str, str]] = []
+
+    def json_case(part: str, inj: dict, twin: dict, mark: str, kept: str) -> None:
+        cases.append((part, {"r.json": json.dumps(inj)}, {"r.json": json.dumps(twin)}, mark, kept))
+
+    json_case("имя члена узла отчёта",
+              execution(trailerMap={_jwt("KNOD"): "present"}),
+              execution(trailerMap={"x-trace-kept": "present"}), "KNOD", "x-trace-kept")
+    json_case("имя члена в теле ответа (байтовый массив)",
+              execution(stream=_buffer(json.dumps({"sessions": {member: {"ok": True}}}))),
+              execution(stream=_buffer(json.dumps({"sessions": {"sess-kept-name": {"ok": True}}}))),
+              member, "sess-kept-name")
+    json_case("имя члена в теле запроса (строка)",
+              raw_body(json.dumps({_jwt("KRAW"): 1})), raw_body(json.dumps({"kept-raw-name": 1})),
+              "KRAW", "kept-raw-name")
+    json_case("число под именем секрета в теле",
+              execution(stream=_buffer('{"password":31415926,"attempts":3}')),
+              execution(stream=_buffer('{"lockoutAfter":31415926,"attempts":3}')),
+              "31415926", "31415926")
+    json_case("число под именем секрета в окружении",
+              {"environment": {"values": [{"key": "loginLanePassword", "value": 27182818}]}, **probe},
+              {"environment": {"values": [{"key": "loginLaneAttempts", "value": 27182818}]}, **probe},
+              "27182818", "27182818")
+    json_case("первая копия повторённого имени в теле ответа",
+              execution(stream=_buffer('{"secret":"kt_short_2Fx9_copy","secret":""}')),
+              execution(stream=_buffer('{"note":"kept-copy-text","note":""}')),
+              "kt_short_2Fx9_copy", "kept-copy-text")
+    json_case("последняя копия повторённого имени в теле ответа",
+              execution(stream=_buffer('{"secret":"","secret":"kt_short_2Fx9_last"}')),
+              execution(stream=_buffer('{"note":"","note":"kept-last-text"}')),
+              "kt_short_2Fx9_last", "kept-last-text")
+    json_case("копия-объект повторённого имени в теле ответа",
+              execution(stream=_buffer('{"grant":{"token":"kt_short_2Fx9_nest"},"grant":{}}')),
+              execution(stream=_buffer('{"grant":{"label":"kept-nest-text"},"grant":{}}')),
+              "kt_short_2Fx9_nest", "kept-nest-text")
+    json_case("копия повторённого имени в теле запроса (строка)",
+              raw_body('{"clientSecret":"kt_short_2Fx9_rawc","clientSecret":null}'),
+              raw_body('{"clientNote":"kept-raw-copy","clientNote":null}'),
+              "kt_short_2Fx9_rawc", "kept-raw-copy")
+    json_case("член байтового массива сверх type и data",
+              execution(stream=dict(_buffer("{}"), note=_jwt("KBXT"))),
+              execution(stream=dict(_buffer("{}"), note="kept-extra-member")),
+              "KBXT", "kept-extra-member")
+    json_case("байтовый массив не из чисел",
+              execution(stream={"type": "Buffer", "data": [_jwt("KBST")]}),
+              execution(stream={"type": "Buffer", "data": ["kept-data-item"]}),
+              "KBST", "kept-data-item")
+    json_case("тело с отметкой порядка байтов перед JSON",
+              execution(stream=_buffer('﻿{"secret":"kt_short_2Fx9_bom"}')),
+              execution(stream=_buffer('﻿{"note":"kept-bom-text"}')),
+              "kt_short_2Fx9_bom", "kept-bom-text")
+    cases.append(("предъявление Bearer короче порога критерия",
+                  {"r.json": json.dumps({"environment": {"values": [
+                      {"key": "loginLaneHint", "value": f"Bearer {bearer_token}"}]}}),
+                   "r.cli": f"GET /iam/v1/me\n  Authorization: Bearer {bearer_token}\n"},
+                  {"r.json": json.dumps({"environment": {"values": [
+                      {"key": "loginLaneHint", "value": bearer_twin}]}}),
+                   "r.cli": f"GET /iam/v1/me\n  {bearer_twin}\n"},
+                  bearer_token, bearer_twin))
+    json_case("JWT короче порогов критерия",
+              {"environment": {"values": [{"key": "loginLaneHint", "value": short_jwt}]}},
+              {"environment": {"values": [{"key": "loginLaneHint", "value": "eyJ.kept"}]}},
+              "eyJhbGciOiJub25lIn0", "eyJ.kept")
+
+    with tempfile.TemporaryDirectory(prefix="redact-parts-") as td:
+        for n, (part, inj, twin, mark, kept) in enumerate(cases):
+            for side, files in (("инъекция", inj), ("близнец", twin)):
+                src = pathlib.Path(td) / f"{n}-{side}"
+                dst = pathlib.Path(td) / f"{n}-{side}-public"
+                src.mkdir()
+                for name, text in files.items():
+                    (src / name).write_text(text, encoding="utf-8")
+                rc, out = _run_quiet(src, dst)
+                seen = _published(dst) if dst.is_dir() else ""
+                if side == "инъекция":
+                    _c(f"{part}: код 0, и метки нет нигде в выложенном",
+                       rc == 0 and mark not in seen, f"код {rc}, метка в выходе: {mark in seen}")
+                else:
+                    _c(f"{part}: близнец — код 0, вырезано ноль, безобидный текст выжил",
+                       rc == 0 and "ВСЕГО вырезано:          0" in out and kept in seen,
+                       f"код {rc}, выжил: {kept in seen}\n{out[-300:]}")
+
+
 def self_test() -> int:
     import contextlib
     import io
@@ -1626,6 +1788,7 @@ def self_test() -> int:
     _self_test_pem_and_std_base64()
     _self_test_pem_headers()
     _self_test_hidden_triple_and_one_pass()
+    _self_test_every_part()
 
     # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
     #
