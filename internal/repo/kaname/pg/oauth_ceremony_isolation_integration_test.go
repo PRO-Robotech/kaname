@@ -24,10 +24,18 @@ package pg_test
 //
 // # Ожидание ДОКАЗЫВАЕТСЯ, а не предполагается
 //
-// Различие уровней наблюдается ровно в одном чередовании: писатель уже СТОИТ на
-// строчном замке, а держатель фиксирует ИЗМЕНЕНИЕ этой строки. Писатель,
-// пришедший после фиксации, видит новую версию при любом уровне и различия не
-// даёт. Поэтому каждая сцена строит чередование руками и УТВЕРЖДАЕТ его по
+// Различие уровней наблюдается в двух чередованиях, и оба начинаются с того,
+// что писатель уже СТОИТ на строчном замке держателя:
+//
+//   - держатель фиксирует ИЗМЕНЕНИЕ строки, на которой писатель стоит (сцены
+//     спора и `heldWriterCases`);
+//   - держатель строку, на которой писатель стоит, только ДЕРЖИТ, а фиксирует
+//     ДРУГУЮ строку, которую писатель прочтёт следующим оператором (обратная
+//     сцена снятия сессии): новый снимок у следующего оператора есть лишь на
+//     одном из уровней.
+//
+// Писатель, пришедший после фиксации, видит новое при любом уровне и различия
+// не даёт. Поэтому каждая сцена строит чередование руками и УТВЕРЖДАЕТ его по
 // состоянию движка: ждущий опознаётся по `pg_blocking_pids`, то есть по тому,
 // КОГО он ждёт, а не по паузе. Не встал — сцена не построена, и это «не
 // выполнилось», а не зелёное.
@@ -38,11 +46,24 @@ package pg_test
 //     нуля строк): у одного оператора снимок один при любом уровне, и его исход
 //     уровнем не решается; проба их не судит — перечень держит
 //     `ceremonyPortClassification`;
-//   - `revokeFamiliesOfSessionsTx`: он исполняется в транзакции ВЫЗЫВАЮЩЕГО, и
-//     уровень её называет вызывающий, а не этот порт;
-//   - умолчание `repeatable read` отдельным плечом не гоняется: для этих
-//     операторов оно отказывает тем же 40001, что и `serializable`, а названный
-//     уровень перекрывает любое умолчание одной и той же инструкцией начала.
+//   - писателя, пишущего ЧИТАЮЩИМ оператором пула (`QueryRow`/`Query` с
+//     `UPDATE … RETURNING`): перепись открытий
+//     (`TestCeremonyWriterTransactionsOpenOnTheNamedLevel`) судит обращения
+//     порта к пулу по имени метода, а не по тексту оператора, и такой писатель,
+//     занесённый в перечень читателем, ушёл бы от сцен молча;
+//   - умолчание `repeatable read` отдельным плечом не гоняется. Исход под ним
+//     у разных пар РАЗНЫЙ: писатель, стоявший на строке, которую держатель
+//     ИЗМЕНИЛ, получает 40001, как под `serializable`; снятие сессии, стоявшее
+//     на выдаче, которая строку сессии только ДЕРЖАЛА, отказа не получает и
+//     заведённого ею семейства не видит (снимок взят до фиксации выдачи). Плечо
+//     S доказывает, что умолчание до транзакции писателя не доходит вовсе, а
+//     перекрывает его одна и та же инструкция начала — какое бы оно ни было.
+//
+// Снятие сессии отзывает семейства оператором `revokeFamiliesOfSessionsTx`
+// НЕ в транзакции этого порта, а в транзакции писателя сессии. Её двери
+// (`sessionEnderDoors`) судятся обратной сценой
+// (`TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily`), а их перечень
+// сверяется с деревом переписью открытий.
 
 import (
 	"context"
@@ -429,6 +450,7 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	require.NotEmpty(t, contendedSubjects, "предметов спора нет — подпроб ноль, и вердикта нет")
 	ctx, shoulders := ceremonyShoulders(t)
 	for _, sh := range shoulders {
 		for i, subj := range contendedSubjects {
@@ -486,6 +508,7 @@ func TestOAuthCeremonyConcurrentPresentationsOfDifferentSubjectsBothPass(t *test
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	require.NotEmpty(t, contendedSubjects, "предметов спора нет — подпроб ноль, и вердикта нет")
 	ctx, shoulders := ceremonyShoulders(t)
 	for _, sh := range shoulders {
 		for i, subj := range contendedSubjects {
@@ -756,6 +779,229 @@ func TestOAuthCeremonyWritersKeepTheirOutcomeUnderEitherDefault(t *testing.T) {
 				}
 				t.Logf("плечо %s: %s → %v", sh.name, c.name, err)
 				c.check(t, ctx, sh, repo, sc, err)
+			})
+		}
+	}
+}
+
+// ── Обратная сцена: снятие сессии стоит на выдаче ──────────────────────────
+
+// holdCodeDigest — держатель, ОСТАНАВЛИВАЮЩИЙ выдачу ПОСЛЕ заведения её
+// семейства: незафиксированная строка кода с той свёрткой, которую выдача
+// вставит следом за семейством. К этому моменту выдача уже держит строку
+// сессии (`FOR SHARE`) и завела в ней семейство — ровно это и нужно снятию.
+//
+// Строка держателя лежит в семействе ЧУЖОЙ сцены (`other`): ни строки сессии,
+// ни человека, ни клиента сцены держатель не касается, и выдача ждёт его
+// только на первичном ключе свёртки. Держатель ОТКАТЫВАЕТСЯ: откат снимает
+// конфликт, и выдача доезжает до фиксации своим же путём.
+func holdCodeDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
+	other domain.CeremonyContext, digest string,
+) (pgx.Tx, int) {
+	t.Helper()
+	tx, err := seed.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
+		VALUES ($1, $2, $3, $4, $5)`,
+		other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope)
+	require.NoError(t, err, "держатель: семейство чужой сцены")
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kaname.authorization_codes
+		       (code_digest, family_id, client_id, user_id, session_id, scope, redirect_uri,
+		        code_challenge, code_challenge_method, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'https://app.example.test/cb', $7, 'S256',
+		        now() + interval '5 minutes')`,
+		digest, other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope,
+		ceremonyChallenge)
+	require.NoError(t, err, "держатель свёртки кода выдачи")
+	return tx, backendPID(t, ctx, tx)
+}
+
+// sessionEnderDoor — дверь, выдающая транзакцию писателя сессии, и снятие
+// записи сессии через неё. Снятие отзывает выданное в сессии оператором
+// `revokeFamiliesOfSessionsTx` в ТОЙ ЖЕ транзакции, и исход пары «выдача
+// против снятия» решает уровень, на котором эту транзакцию открыла дверь.
+//
+// Имя — «Тип.Метод» двери, как его называет перепись открытий
+// (`TestCeremonyWriterTransactionsOpenOnTheNamedLevel`): дверь дерева без сцены
+// здесь и сцена без двери в дереве — находки, а не молчание.
+type sessionEnderDoor struct {
+	name string
+	// end открывает транзакцию двери на пуле порта, снимает запись сессии сцены,
+	// фиксирует и отвечает числом снятых записей.
+	end func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error)
+}
+
+// endOneSession — снятие одной записи по идентификатору и фиксация.
+func endOneSession(ctx context.Context, w interface {
+	EndSession(ctx context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}, sc domain.CeremonyContext) (int, error) {
+	defer func() { _ = w.Rollback(ctx) }()
+	ended, err := w.EndSession(ctx, domain.HumanSessionID(sc.SessionID), time.Now(), domain.RevokeReasonLogout)
+	if err != nil {
+		return 0, err
+	}
+	if err = w.Commit(ctx); err != nil {
+		return 0, err
+	}
+	if !ended {
+		return 0, nil
+	}
+	return 1, nil
+}
+
+// endAllSessionsOf — снятие всех записей человека сцены и фиксация.
+func endAllSessionsOf(ctx context.Context, w interface {
+	EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}, sc domain.CeremonyContext, reason string) (int, error) {
+	defer func() { _ = w.Rollback(ctx) }()
+	n, err := w.EndOtherSessions(ctx, domain.UserID(sc.UserID), "", time.Now(), reason)
+	if err != nil {
+		return 0, err
+	}
+	if err = w.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+var sessionEnderDoors = []sessionEnderDoor{
+	{
+		// Собственный выход человека.
+		name: "HumanSessionRepo.Writer",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).Writer(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
+		// Смена пароля, снятие второго фактора, завершение восстановления.
+		name: "HumanSessionRepo.SessionSetWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).SessionSetWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonPasswordChange)
+		},
+	},
+	{
+		// Административный принудительный выход.
+		name: "HumanSessionRepo.ForceLogoutWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).ForceLogoutWriter(ctx, domain.UserID(sc.UserID), 20*time.Second)
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonAdminForceLogout)
+		},
+	},
+	{
+		// Регистрация несёт писателя сессии встроенным, и снятие ей
+		// представимо той же транзакцией: живого вызывающего у него нет, но
+		// судится дверь, а не вызывающий.
+		name: "RegistrationStore.Writer",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewRegistrationStore(pool).Writer(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+}
+
+// TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily — ОБРАТНАЯ сцена пары
+// «выдача против снятия сессии»: выдача держит строку сессии и уже завела в ней
+// семейство, снятие сессии СТОИТ на ней. После фиксации выдачи снятие обязано
+// отозвать заведённое ею семейство — в обоих плечах и через каждую дверь
+// транзакции писателя сессии. Плечо RC — законный близнец плеча S.
+//
+// Прямая сцена той же пары (выдача стоит на снятии) — случай
+// `IssueAuthorizationCode` в `heldWriterCases`.
+func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	require.NotEmpty(t, sessionEnderDoors, "дверей писателя сессии нет — подпроб ноль, и вердикта нет")
+	ctx, shoulders := ceremonyShoulders(t)
+	for _, sh := range shoulders {
+		for i, door := range sessionEnderDoors {
+			t.Run(sh.name+"/"+door.name, func(t *testing.T) {
+				repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
+				n := 400 + 2*i
+				sc := lockOrderScene(t, ctx, sh.seed, n)
+				other := lockOrderScene(t, ctx, sh.seed, n+1)
+				code := ceremonyDigest(0x31d000 + n)
+				holder, holderPID := holdCodeDigest(t, ctx, sh.seed, other, code)
+
+				callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				issued := make(chan error, 1)
+				go func() {
+					issued <- repo.IssueAuthorizationCode(callCtx, kanamepg.NewAuthorizationCode{
+						Context: sc, CodeDigest: code, RedirectURI: "https://app.example.test/cb",
+						CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256,
+						TTL: time.Minute,
+					})
+				}()
+				// Выдача стоит на свёртке кода, то есть ПОСЛЕ своего семейства:
+				// ждать держателя ей больше не на чем.
+				issuerPID := awaitBlockedBy(t, ctx, sh.seed, holderPID, "выдача")
+
+				type endOutcome struct {
+					ended int
+					err   error
+				}
+				ended := make(chan endOutcome, 1)
+				go func() {
+					k, err := door.end(callCtx, sh.pool, sc)
+					ended <- endOutcome{k, err}
+				}()
+				// Снятие обязано ВСТАТЬ на строке сессии, которую держит выдача.
+				awaitBlockedBy(t, ctx, sh.seed, issuerPID, "снятие сессии "+door.name)
+				require.NoError(t, holder.Rollback(ctx), "держатель отпускает выдачу")
+
+				select {
+				case err := <-issued:
+					require.NoError(t, err, "выдача, взявшая строку сессии раньше снятия, обязана пройти")
+				case <-time.After(30 * time.Second):
+					t.Fatal("выдача не завершилась после снятия держателя")
+				}
+				var out endOutcome
+				select {
+				case out = <-ended:
+				case <-time.After(30 * time.Second):
+					t.Fatal("снятие сессии не завершилось после фиксации выдачи")
+				}
+
+				st, famErr := readFamily(ctx, sh.seed, sc.FamilyID)
+				var sessionEnded bool
+				require.NoError(t, sh.seed.QueryRow(ctx,
+					`SELECT ended_at IS NOT NULL FROM kaname.human_sessions WHERE id = $1`,
+					sc.SessionID).Scan(&sessionEnded))
+				t.Logf("плечо %s: %s → снято %d, %v · сессия снята %v · семейство %+v",
+					sh.name, door.name, out.ended, out.err, sessionEnded, st)
+
+				// Каждое утверждение ниже — СВОЁ: исход снятия, отметка сессии и
+				// состояние семейства краснеют независимо друг от друга.
+				require.NoError(t, out.err, "снятие сессии, стоявшее на выдаче, обязано пройти")
+				assert.Equal(t, 1, out.ended, "снята ровно запись сцены")
+				assert.True(t, sessionEnded, "запись сессии обязана быть снята")
+				require.NoError(t, famErr, "семейство, заведённое выдачей, обязано существовать")
+				assert.True(t, st.revoked,
+					"семейство, заведённое выдачей, на которой стояло снятие, обязано быть ОТОЗВАНО")
+				assert.Equal(t, string(domain.FamilyRevokedBySessionEnd), st.reason, "основание отзыва")
+				assert.False(t, st.live, "живость семейства после снятия сессии")
 			})
 		}
 	}
