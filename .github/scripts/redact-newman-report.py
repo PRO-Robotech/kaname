@@ -1481,9 +1481,11 @@ def _self_test_every_part() -> None:
     (узла отчёта и внутри тела), значение-строка, значение-число под именем
     секрета, каждая копия повторённого имени (первая, последняя, вложенная),
     член байтового массива сверх `type` и `data`, байтовый массив не из чисел,
-    тело с отметкой порядка байтов перед JSON. Рядом — две формы значения,
-    которые ловит ТОЛЬКО видовой срез: предъявление Bearer и JWT короче порогов
-    критерия; без них снятие видового среза проходило самопробу зелёной.
+    тело с отметкой порядка байтов перед JSON, тело — JSON-строка верхнего
+    уровня (и строка в такой строке), чей текст сам есть JSON. Рядом — две
+    формы значения, которые ловит ТОЛЬКО видовой срез: предъявление Bearer и
+    JWT короче порогов критерия; без них снятие видового среза проходило
+    самопробу зелёной.
 
     Каждая пара — одно-фактная: близнец — тот же документ с безобидным текстом
     на том же месте. Инъекция: код 0 и ни одного знака метки нигде в
@@ -1562,6 +1564,21 @@ def _self_test_every_part() -> None:
               execution(stream=_buffer('\ufeff{"secret":"kt_short_2Fx9_bom"}')),
               execution(stream=_buffer('\ufeff{"note":"kept-bom-text"}')),
               "kt_short_2Fx9_bom", "kept-bom-text")
+    # Тело — JSON-строка верхнего уровня: текст строки сам есть JSON с именами.
+    json_case("тело ответа — JSON-строка верхнего уровня (байтовый массив)",
+              execution(stream=_buffer(json.dumps(json.dumps({"secret": "kt_short_2Fx9_jstr"})))),
+              execution(stream=_buffer(json.dumps(json.dumps({"note": "kept-jstr-text"})))),
+              "kt_short_2Fx9_jstr", "kept-jstr-text")
+    json_case("тело запроса — JSON-строка верхнего уровня (строка)",
+              raw_body(json.dumps(json.dumps({"clientSecret": "kt_short_2Fx9_rjst"}))),
+              raw_body(json.dumps(json.dumps({"clientNote": "kept-rjst-text"}))),
+              "kt_short_2Fx9_rjst", "kept-rjst-text")
+    json_case("JSON-строка в JSON-строке верхнего уровня",
+              execution(stream=_buffer(json.dumps(json.dumps(json.dumps(
+                  {"token": "kt_short_2Fx9_j2st"}))))),
+              execution(stream=_buffer(json.dumps(json.dumps(json.dumps(
+                  {"label": "kept-j2st-text"}))))),
+              "kt_short_2Fx9_j2st", "kept-j2st-text")
     cases.append(("предъявление Bearer короче порога критерия",
                   {"r.json": json.dumps({"environment": {"values": [
                       {"key": "loginLaneHint", "value": f"Bearer {bearer_token}"}]}}),
@@ -2159,6 +2176,8 @@ def _self_test_second_look() -> None:
          {"r.json": execution(request={"body": {"mode": "raw",
                                                 "raw": '{"secret":"kt_short_2Fx9_raw8"}'}})},
          ".raw[JSON].secret — значение", "kt_short_2Fx9_raw8"),
+        (CUT_JSON_BODY, {"r.json": stream(json.dumps(json.dumps({"secret": "kt_short_2Fx9_sl8s"})))},
+         "[байтовый массив, JSON][JSON].secret — значение", "kt_short_2Fx9_sl8s"),
         (CUT_TEXT_FILE,
          {"r.json": json.dumps(probe), "r.cli": f"GET /iam/v1/me\n  token {_jwt('KCLI')}\n"},
          "r.cli:2 — ", "KCLI"),
