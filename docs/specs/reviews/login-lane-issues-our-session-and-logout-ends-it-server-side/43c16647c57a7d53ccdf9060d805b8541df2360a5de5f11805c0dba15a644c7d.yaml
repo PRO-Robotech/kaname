@@ -1,0 +1,219 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 43c16647c57a7d53ccdf9060d805b8541df2360a5de5f11805c0dba15a644c7d
+  static_status: DRAFT
+  static_status_note: >-
+    Токен `DRAFT` в шапке — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (девять) не
+    трогаются — редакция 15 получает соседнюю запись по своему отпечатку.
+  base_commit: 4edbb2821f029306f871f1d5338b5e2f366e8c84
+  content_commit: none
+  content_commit_note: >-
+    Редакция 15 на момент круга НЕ закоммичена: рабочая копия ветки `295` @ 4edbb2821
+    (= origin/377); `git status --short` → документ (M) и запись круга 9 (??). После коммита
+    `git show <коммит>:<путь> | sha256sum` обязан дать 43c16647… дословно; вердикт этой записи —
+    только о нём.
+  branch: '295'
+  wave_branch: '377'
+  pull_request: none
+  task: PRO-Robotech/kacho#1269
+  edition_task: PRO-Robotech/kaname#295
+  lines: 3803
+  round: 10
+  predecessor_record: docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/572416018fe6d2d25fb94bbb49d30df8cc88142c67b928a96b563ab6dcbe02a0.yaml
+  predecessor_note: >-
+    Непосредственный предшественник — редакция 14 (57241601…, круг 9 CHANGES_REQUESTED: Б1
+    COVERAGE, Б2 PRODUCER). Последняя одобренная — редакция 13 (3f0dca23…, круг 8, событие
+    5797646739 на kacho#1269; она же в HEAD копии). Одобрение редакции 13 на редакцию 15 НЕ
+    переносится (change-graph.md §2).
+  fingerprint_predicate: >-
+    sha256sum <путь> в рабочей копии ветки 295 @ 4edbb2821 → 43c16647…, совпал с объявленным
+    заданием; wc -l → 3803; к HEAD (ред. 13) `git diff --numstat` → 405 53; к ред. 14
+    (отпечаток 57241601… перемерен у копии автора) → 167 33.
+  task_premise_remeasured: >-
+    (1) Отпечаток и база — ПОДТВЕРЖДЕНО. (2) Событие одобрения ред. 13 — ПОДТВЕРЖДЕНО: `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5797646739` → pointpu, kacho#1269, APPROVED,
+    subject_sha256 3f0dca23…. (3) Заказ на kaname#295 — ПОДТВЕРЖДЕНО: комментарий 5810411157
+    (pointpu, 2026-09-24T08:12:53Z, created == updated) называет оба держателя, красное каждого и
+    дополнение предиката снятия. (4) Число «16 из 200» в довод перевода (д) — ОПРОВЕРГНУТО
+    повторно: документ его не утверждает (в нём 5 из 200 на базе, 8 из 200 у #334, 3 из 40 на
+    стволе, с атрибуцией); собственный повтор этого круга — 9 из 200 на базе. Довод
+    «недетерминирована под нагрузкой» от числа не зависит и подтверждён.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-24'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 10 — APPROVED: блокирующих ноль. Б1 круга 9 закрыт: (м) дописано, (м′) и (м″)
+    заведены, каждое со своим «Тогда», держателем и поимённым отрицательным контролем; опыт
+    рецензента показал, что сегодняшний производитель краснеет ровно на (м′) и (м″), а набросок
+    исправления их исполняет. Б2 закрыт: носитель заказа на трекере есть, предикат наличия §20
+    даёт 1 и 1. Санкция этой записью не выдана: действует после внешнего события
+    (change-graph.md §3). Запрет #1 для исправления огибающей и проб (м′), (м″), стража корня
+    снимается событием, не этой записью.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#295 либо kacho#1269 с полями role, verdict, subject,
+      subject_revision (коммит, внёсший редакцию 15 и эту запись), subject_sha256 дословно:
+      role: acceptance-reviewer · verdict: APPROVED · subject:
+      PRO-Robotech/kaname:docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+      · subject_revision: <коммит ред. 15> · subject_sha256:
+      43c16647c57a7d53ccdf9060d805b8541df2360a5de5f11805c0dba15a644c7d. Ревизия обязана быть
+      опубликована раньше события.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Рецензент событий не публикует; публикует курьер.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: record_only
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакций 14 → 15 целиком: шапка (строка редакции 15), Р17 (абзац «Мера прогона» —
+    паника меры и носитель заказа; «Что это НЕ решает»; пометка к перечню строк без держателя),
+    Ф3-31 (держатели двух строк), Ф3-53 («Дано», «Когда» (м′), (м″), «Тогда» (м), (м′), (м″),
+    строка стража), §7, §8 инв. 2, §9, §10, §12, §17, §19, новый §20 — против производителя на
+    4edbb2821 (internal/passwordverify/envelope.go, envelope_test.go, cmd/kaname/loginlane.go,
+    loginlane_envelope_test.go, humansession/login_envelope_test.go, timing_probe_test.go) и
+    трекера (kaname#295, #220, #223; kacho#1269).
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  scenario_count: 'метки Ф3-N — 53 (из них 52 живых), новых ID нет; (м′), (м″) — буквы внутри Ф3-53'
+  producer_present_for_every_then: >-
+    Да. (а)…(л), (н) — держатели в дереве и зелёны на 4edbb2821 (огибающая 13 PASS, корень 4
+    PASS). (м) первая половина — TestEnvelope_APanickingMeterReleasesTheCapacitySlot (в дереве).
+    (м) вторая половина, (м′), (м″) — будущая проба TestEnvelope_APanickingMeterLeavesNoCalibrationInFlight
+    с исправлением огибающей; страж корня — будущий гейт
+    TestTheEnvelopeIsBuiltOnlyByTheCompositionRootOnTheWallClockMeter; оба названы поимённо в
+    комментарии-заказе 5810411157 на kaname#295 (OPEN, status:in-progress; открытого PR с
+    ключевым словом закрытия #295 нет), и §10 держит их третьей категорией до посадки. Ф3-31: две
+    строки, заказанные закрытой #220, держатели имеют — belowFloor стоит до критерия пар в
+    timing_probe_test.go, TestLogin_F3_31_TheCapacitySlotIsFreeDuringTheWait несёт обе половины
+    и отрицательный контроль «slot held through the wait»; инъекция Ф1-49 — #223 (OPEN).
+  positive_twin_for_every_negation: >-
+    (м′) — назван (ж); близнец годен как страж «ждущие отказаны всегда», но отличается больше чем
+    одним фактом (см. N1). (м″) — положительное утверждение; различие с (м) одно, отрицательный
+    контроль — сегодняшний производитель. Прочие близнецы не менялись и подтверждены кругом 9.
+  constructibility: >-
+    Посеяно 3 из 3 новых форм «Дано» (проба рецензента, подложенная `go test -overlay` новым
+    файлом пакета passwordverify; дерево не тронуто): (м) вторая половина — после паники классов
+    нет, потолок 0, приёмник пуст, место ёмкости свободно; (м′) — ждущий допуск поставлен в
+    ожидание детерминированно (`testing/synctest`, `synctest.Wait()` до закрытия паузы меры);
+    (м″) — мера паникует на первом прогоне, дальше 1 мс. «Не выполнилось» 0.
+    На 4edbb2821: (м′) КРАСНАЯ «ожидание калибровки класса 2a cost=4: context deadline exceeded»
+    ровно по сроку 5 с; (м″) КРАСНАЯ тем же текстом через 2,008 с; (м) вторая половина, близнец
+    (м′) и другой класс после паники — зелёные. Поверх наброска исправления автора (снятие
+    калибровки, прерванной паникой, отложенно в Admit): все пять зелёные — (м′) «калибровка класса
+    2a cost=4 прервана паникой меры» за 0 с поддельного времени, (м″) стоимость 1 мс, потолок
+    1,25 мс, приёмник извещён один раз; весь пакет — 42 PASS · 0 FAIL. Исполнимость контракта без
+    смены устройства Р17 подтверждена.
+  determinism_of_m_prime: >-
+    Под нагрузкой одного ядра (два нагрузчика того же ядра, -test.cpu 1, count 200) поверх
+    наброска: детерминированная постановка (synctest) — 200 · 0; постановка сном 50 мс (набросок
+    автора) — 200 · 0. Сон не покраснел на этой нагрузке, но гонкой остаётся по построению (N2).
+  d_moved_to_accepted: >-
+    ПОДТВЕРЖДЕНО повтором этого круга тем же приёмом: база 8ba158e48 —
+    TestLoginLane_188_EnvelopeIsCalibratedOnThePopulationAndTheKnob 191 · 9, во всех девяти
+    потолком вышел «2a cost=4» вместо «2a cost=6»; голова 4edbb2821 — четыре корневые пробы
+    800 · 0. Абзац довода между редакциями 14 и 15 не менялся.
+  boundary_assigned_meter_only_in_probes: >-
+    Верна по предикату: `git grep -n 'NewEnvelope(' 4edbb2821 -- '*.go' ':!*_test.go' | grep -v
+    'func NewEnvelope('` → 1 строка, cmd/kaname/loginlane.go:404, WallClockCostMeter. Гейта нет
+    (`git grep -l 'WallClockCostMeter\|APanickingMeterLeavesNoCalibrationInFlight' 4edbb2821 --
+    internal/check/` → 0) — документ это и говорит, держатель заказан.
+  order_carrier: >-
+    Предикат наличия §20 на трекере: `grep -c 'страж корня композиции'` → 1; `grep -c 'прервана
+    паникой меры'` → 1; имена обоих держателей → 1 и 1. Текст заказа совпадает с §20 (1)…(3).
+  open_questions: none
+  conventions: 'Контракт, RPC, поля, отказы наружу, миграции — не тронуты. Отказ допуска полоса входа только журналирует (login.go admitClass) — наружу текст не уходит.'
+  disclosure: >-
+    Уровень свойства и проб. Условие находки (паника меры) посторонним не задаётся: в боевом корне
+    мера — настенные часы над прогоном синтетического значения, построенного огибающей. Пути,
+    которым посторонний вызвал бы условие, текст не собирает.
+  doc_gates: >-
+    `go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure'`
+    на правленом дереве → 62 PASS · 0 FAIL · 0 SKIP.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N1
+    class: TWIN
+    where: Ф3-53 «Тогда» (м′); §8 инв. 2, строка «время»
+    text: >-
+      Положительный близнец (м′) назван как (ж), а (ж) отличается от (м′) больше чем одним
+      фактом: ёмкость (держатель (ж) строит 4, (м′) — 1), мера (настенные часы против меры пробы),
+      форма ожидания (четыре одновременных допуска против одного ждущего за приостановленной
+      калибровкой). Как страж «ждущие отказаны всегда» (ж) годен, поэтому не блокирует (та же
+      форма, что (к) — (а), принята кругами 8 и 9). Близнец в один факт существует и посеян:
+      та же приостановленная калибровка, мера отдаёт 1 мс вместо паники — ждавший получает
+      стоимость 1 мс, Calibrated=false (зелёно и сегодня, и на наброске). Держателю
+      TestEnvelope_APanickingMeterLeavesNoCalibrationInFlight уместно нести его.
+  - id: N2
+    class: FORMAT
+    where: Ф3-53 «Тогда» (м′), «Когда» (м′)
+    text: >-
+      Текст отказа (м′) не закреплён дословно, а сегодняшний отказ тоже называет класс. Отличает их
+      только «не дожидаясь своего срока», поэтому держатель обязан утверждать и
+      `!errors.Is(err, context.DeadlineExceeded)`, и время отказа меньше срока — иначе проба
+      зелена на сегодняшнем производителе. «В момент паники ждёт» строится детерминированно через
+      `testing/synctest` (go 1.26 в go.mod); постановка сном — гонка по построению, и в полосе,
+      чей предмет — флейк, это стоит учесть.
+
+predicates_run:
+  - where: tmp/kaname-295a (ветка 295 @ 4edbb2821, документ правлен)
+    command: "sha256sum <путь>; wc -l; git diff --numstat; git diff --no-index --numstat <ред. 14> <путь>"
+    got: "43c16647… · 3803 · 405 53 к ред. 13 · 167 33 к ред. 14"
+  - where: PRO-Robotech/kaname@4edbb2821 + проба рецензента (overlay, новый файл пакета)
+    command: "go test -overlay … ./internal/passwordverify/ -run 'TestR15_' -count=1 -v"
+    got: "3 PASS · 2 FAIL — красные ровно (м′) и (м″), текст «ожидание калибровки класса 2a cost=4: context deadline exceeded»"
+  - where: PRO-Robotech/kaname@4edbb2821 + проба рецензента + набросок исправления автора (overlay)
+    command: "go test -overlay … ./internal/passwordverify/ -count=1 -v"
+    got: "TestR15_ 5 PASS · 0 FAIL; пакет 42 PASS · 0 FAIL"
+  - where: тот же двоичный файл, одно ядро + два нагрузчика того же ядра
+    command: "load.sh <ядро> <бинарь> '^TestR15_Mprime_' 200; то же для постановки сном"
+    got: "synctest 200 · 0; сон 50 мс 200 · 0"
+  - where: git archive 8ba158e48 и 4edbb2821, одно ядро + два нагрузчика
+    command: "load.sh <ядро> <бинарь> <проба 188> 200"
+    got: "база 191 · 9 (все девять — cost=4 вместо cost=6); голова _188_ 800 · 0"
+  - where: PRO-Robotech/kaname@4edbb2821
+    command: "go test ./internal/passwordverify/ -run 'Envelope|WallClock|NewEnvelope|ParseCostClassPrefix' -count=1 -v; go test ./cmd/kaname/ -run '_188_' -count=1 -v"
+    got: "13 PASS; 4 PASS"
+  - where: tmp/kaname-295a (правленое дерево)
+    command: "go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure' -count=1 -v"
+    got: "62 PASS · 0 FAIL · 0 SKIP"
+  - where: GitHub
+    command: "gh api issues/comments/5810411157; gh api --paginate issues/295/comments | grep -c <две фразы §20>; gh issue view 295/223; gh api kacho issues/comments/5797646739; gh pr list --state open (ключ закрытия #295)"
+    got: "заказ есть (1 · 1); #295 OPEN status:in-progress; #223 OPEN; событие ред. 13 — APPROVED 3f0dca23…; открытых PR, закрывающих #295, — 0"
+
+seed_attempt:
+  performed: true
+  outcome: green
+  note: >-
+    Посев «Дано» — 3 из 3; красное на сегодняшнем производителе — ожидаемый поимённый
+    отрицательный контроль (м′), (м″), а не дефект контракта.
