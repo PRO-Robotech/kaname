@@ -10,7 +10,6 @@ package session_revocations
 // от инъекции ровно этим фактом.
 
 import (
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,8 +27,6 @@ func cloneFacts(f isRevokedContractFacts) isRevokedContractFacts {
 	return out
 }
 
-var familyWord = regexp.MustCompile(`(?i)\bfamil(y|ies)\b`)
-
 // TestIsRevokedContractGate_FallsOnEachSide — порча по одному факту.
 func TestIsRevokedContractGate_FallsOnEachSide(t *testing.T) {
 	tree := treeContractFacts(t)
@@ -39,7 +36,7 @@ func TestIsRevokedContractGate_FallsOnEachSide(t *testing.T) {
 	for name := range contractClaims {
 		t.Run("контракт молчит о семействе: "+name, func(t *testing.T) {
 			f := cloneFacts(tree)
-			f.Texts[name] = familyWord.ReplaceAllString(f.Texts[name], "row")
+			f.Texts[name] = sourceMarker[sourceFamily].ReplaceAllString(f.Texts[name], "row")
 			require.Contains(t, auditIsRevokedContract(f),
 				name+": ответ судит источник «family», а контракт его не называет")
 		})
@@ -57,8 +54,7 @@ func TestIsRevokedContractGate_FallsOnEachSide(t *testing.T) {
 
 	t.Run("контракт молчит о записи по идентификатору", func(t *testing.T) {
 		f := cloneFacts(tree)
-		f.Texts[textRPC] = regexp.MustCompile(`\bsession_revocations\b`).
-			ReplaceAllString(f.Texts[textRPC], "the table")
+		f.Texts[textRPC] = sourceMarker[sourceRecord].ReplaceAllString(f.Texts[textRPC], "the table")
 		require.Contains(t, auditIsRevokedContract(f),
 			textRPC+": ответ судит источник «record», а контракт его не называет")
 	})
@@ -77,7 +73,7 @@ func TestIsRevokedContractGate_SilentOnTwins(t *testing.T) {
 		f := cloneFacts(tree)
 		delete(f.Judged, sourceFamily)
 		for name := range f.Texts {
-			f.Texts[name] = familyWord.ReplaceAllString(f.Texts[name], "row")
+			f.Texts[name] = sourceMarker[sourceFamily].ReplaceAllString(f.Texts[name], "row")
 		}
 		require.Empty(t, auditIsRevokedContract(f))
 	})
@@ -117,5 +113,5 @@ type IsRevokedResponse struct {
 }`
 	texts := contractTexts(t, map[string]any{"stub.go": stub})
 	require.Equal(t, "A row in the table.\n", texts[textRevoked])
-	require.False(t, familyWord.MatchString(texts[textRevoked]))
+	require.False(t, sourceMarker[sourceFamily].MatchString(texts[textRevoked]))
 }
