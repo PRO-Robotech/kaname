@@ -97,8 +97,15 @@ type CeremonySurfaceSpec struct {
 	Unresolved []UnresolvedPathEntry
 }
 
+// CeremonySolveRoundLimit — предел раундов неподвижной точки разбора.
+const CeremonySolveRoundLimit = 200
+
+// CeremonyResolveDepthLimit — предел глубины прохождения запроса.
+const CeremonyResolveDepthLimit = 16
+
 // CeremonySurfaceCensus — объём осмотренного.
 type CeremonySurfaceCensus struct {
+	SolveRounds              int
 	Packages                 int
 	Files                    int
 	RootFiles                int
@@ -129,13 +136,14 @@ func (c CeremonySurfaceCensus) Summary() string {
 		forms = append(forms, fmt.Sprintf("%s %d", k, v))
 	}
 	sort.Strings(forms)
-	return fmt.Sprintf("пакетов исходником %d · файлов %d · файлов корня %d · объявлений поверхности %d · "+
+	return fmt.Sprintf("раундов разбора %d из предела %d · "+
+		"пакетов исходником %d · файлов %d · файлов корня %d · объявлений поверхности %d · "+
 		"элементов среза подъёма %d · построителей %d · мультиплексоров net/http %d · шлюза %d · "+
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
 		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у чужого кода %d · "+
 		"сравнений пути %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
 		"координат без производителя %d · положительных контролей %d · формы пути: %s",
-		c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
+		c.SolveRounds, CeremonySolveRoundLimit, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
 		c.HTTPMuxes, c.GatewayMuxes, c.HTTPRegistrations, c.GatewayRegistrations, c.DefaultRegistrations,
 		c.UnreachableRegistrations, c.UntracedRegistrations, len(c.Unresolved), strings.Join(c.Unresolved, "; "),
 		len(c.Escapes), len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
@@ -202,8 +210,9 @@ func JudgeCeremonySurfaces(spec CeremonySurfaceSpec, coords []CeremonyCoordinate
 	}
 	a := newSurfaceFlow(prog)
 	a.collect()
-	a.solve()
+	rounds := a.solve()
 	j := &surfaceJudge{a: a, spec: spec, res: newStrResolver(a), reach: a.reachable()}
+	j.census.SolveRounds = rounds
 	return j.run(coords), nil
 }
 
@@ -807,7 +816,7 @@ func (j *surfaceJudge) gwOf(m *absVal) *gwSim {
 
 // resolve — цепочки, по которым запрос доходит до конечной точки.
 func (j *surfaceJudge) resolve(set avSet, rq probeReq, depth int) [][]string {
-	if depth > 16 {
+	if depth > CeremonyResolveDepthLimit {
 		return nil
 	}
 	var out [][]string

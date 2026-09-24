@@ -47,6 +47,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // surfaceListed — одна строка `go list -deps -export -json`.
@@ -121,7 +122,7 @@ func listingFor(moduleRoot, rootPkg string) (*surfaceListing, error) {
 	if l, ok := surfaceListings[key]; ok {
 		return l, nil
 	}
-	l, err := newListing(moduleRoot, rootPkg)
+	l, err := newListing(moduleRoot, rootPkg, surfaceListTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +130,10 @@ func listingFor(moduleRoot, rootPkg string) (*surfaceListing, error) {
 	return l, nil
 }
 
-func newListing(moduleRoot, rootPkg string) (*surfaceListing, error) {
+// surfaceListTimeout — срок `go list`, называющего радиус.
+const surfaceListTimeout = 10 * time.Minute
+
+func newListing(moduleRoot, rootPkg string, _ time.Duration) (*surfaceListing, error) {
 	if rootPkg == "" {
 		return nil, errors.New("радиус: композиционный корень не назван")
 	}

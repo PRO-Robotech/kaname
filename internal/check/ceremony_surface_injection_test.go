@@ -384,11 +384,16 @@ func requireFinding(t *testing.T, report check.CeremonySurfaceReport, want ...st
 	return ""
 }
 
-// requireSilent — близнец молчит, и молчит не по слепоте: перепись непуста.
+// requireSilent — близнец молчит, и молчит не по слепоте: перепись непуста,
+// а разбор дошёл до неподвижной точки.
 func requireSilent(t *testing.T, report check.CeremonySurfaceReport) {
 	t.Helper()
 	if report.Census.Files == 0 || report.Census.SurfaceDecls == 0 {
 		t.Fatalf("близнец «молчит» на пустом обходе — это не вердикт: %s", report.Census.Summary())
+	}
+	if r := report.Census.SolveRounds; r == 0 || r >= check.CeremonySolveRoundLimit {
+		t.Fatalf("близнец «молчит» на разборе, не дошедшем до неподвижной точки (раундов %d при пределе %d) — "+
+			"это не вердикт: %s", r, check.CeremonySolveRoundLimit, report.Census.Summary())
 	}
 	if len(report.Findings) > 0 {
 		t.Fatalf("законный близнец дал находки (%d):\n%s", len(report.Findings), strings.Join(report.Findings, "\n"))
@@ -465,6 +470,101 @@ func ceremonyProbeManual(next http.Handler) http.Handler {
 }
 `
 
+// ceremonyChainSelfSource — рекурсивная фабрика мультиплексора: значение
+// рождается на дне и возвращается СКВОЗЬ самовызов. Регистрация —
+// параметр: близнец регистрирует путь пробы заглушкой, инъекция — координату
+// конечной точкой церемонии.
+func ceremonyChainSelfSource(imports, path, handler string) string {
+	return `package main
+
+import (
+	"net/http"` + imports + `
+)
+
+func ceremonyChainSelf(depth int) *http.ServeMux {
+	if depth == 0 {
+		mux := http.NewServeMux()
+		mux.Handle(` + path + `, ` + handler + `)
+		return mux
+	}
+	return ceremonyChainSelf(depth - 1)
+}
+`
+}
+
+// ceremonyChainMutualSource — то же сквозь ВЗАИМНЫЙ вызов: мультиплексор
+// рождается в Even, а регистрацию несёт Odd — на значении, пришедшем к нему
+// из рекурсии.
+func ceremonyChainMutualSource(imports, basePath, oddPath, oddHandler string) string {
+	return `package main
+
+import (
+	"net/http"` + imports + `
+)
+
+func ceremonyChainEven(depth int) *http.ServeMux {
+	if depth == 0 {
+		mux := http.NewServeMux()
+		mux.Handle(` + basePath + `, http.NotFoundHandler())
+		return mux
+	}
+	return ceremonyChainOdd(depth - 1)
+}
+
+func ceremonyChainOdd(depth int) *http.ServeMux {
+	mux := ceremonyChainEven(depth)
+	mux.Handle(` + oddPath + `, ` + oddHandler + `)
+	return mux
+}
+`
+}
+
+// ceremonyImportLine — импорт синтетического пакета для исходников пробы.
+const ceremonyImportLine = "\n\t" + anchorCeremonyImp
+
+// ceremonyDeepChainSource — цепочка из n функций, каждая возвращает результат
+// следующей; мультиплексор рождается в последней. Объявлены сверху вниз:
+// разбор продвигает значение на одно звено за раунд.
+func ceremonyDeepChainSource(n int) string {
+	var b strings.Builder
+	b.WriteString("package main\n\nimport \"net/http\"\n\n")
+	for i := 0; i < n-1; i++ {
+		fmt.Fprintf(&b, "func ceremonyDeep%d() *http.ServeMux { return ceremonyDeep%d() }\n\n", i, i+1)
+	}
+	fmt.Fprintf(&b, "func ceremonyDeep%d() *http.ServeMux {\n\tmux := http.NewServeMux()\n"+
+		"\tmux.Handle(\"/probe-deep/x\", http.NotFoundHandler())\n\treturn mux\n}\n", n-1)
+	return b.String()
+}
+
+// ceremonyLayersSource — n РАЗНЫХ обёрток, каждая делегирует дальше.
+func ceremonyLayersSource(n int) string {
+	var b strings.Builder
+	b.WriteString("package main\n\nimport \"net/http\"\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "\nfunc ceremonyLayer%d(next http.Handler) http.Handler {\n"+
+			"\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, r) })\n}\n", i)
+	}
+	return b.String()
+}
+
+// ceremonyLayersCall — вложение n обёрток вокруг inner.
+func ceremonyLayersCall(n int, inner string) string {
+	out := inner
+	for i := n - 1; i >= 0; i-- {
+		out = fmt.Sprintf("ceremonyLayer%d(%s)", i, out)
+	}
+	return out
+}
+
+// ceremonyEighthSurface — I3: восьмая поверхность со своим мультиплексором.
+func ceremonyEighthSurface(f *ceremonyFixture) {
+	f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
+		"ceremonyMux := http.NewServeMux()\n"+
+			"ceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
+			ceremonySurfaceBlock("ceremonyExtraSurface", "ceremonyMux"))
+	f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
+}
+
 // ceremonyInjection — одна инъекция: ровно один факт F-cer.
 type ceremonyInjection struct {
 	id   string
@@ -479,7 +579,7 @@ func ceremonyInjections() []ceremonyInjection {
 	return []ceremonyInjection{
 		{"I1_second_mount_on_internal_mux", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, "jwksMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "ReachClusterInternal"}},
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		{"I2_second_external_surface_rest_front", func(f *ceremonyFixture) {
 			f.addImport("internal/restfront", "front.go", anchorCeremonyImp)
@@ -488,13 +588,8 @@ func ceremonyInjections() []ceremonyInjection {
 					"func(w http.ResponseWriter, _ *http.Request, _ map[string]string) { w.WriteHeader(http.StatusOK) })")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "собственный публичный REST-фронт"}},
 
-		{"I3_eighth_surface", func(f *ceremonyFixture) {
-			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
-				"ceremonyMux := http.NewServeMux()\n"+
-					"ceremonyMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n"+
-					ceremonySurfaceBlock("ceremonyExtraSurface", "ceremonyMux"))
-			f.appendRaised("{knobMetrics, ceremonyExtraSurface}")
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "лишняя поверхность пробы"}},
+		{"I3_eighth_surface", ceremonyEighthSurface,
+			[]string{"эндпоинт авторизации", "2 поверхностях", "лишняя поверхность пробы"}},
 
 		{"I4_same_handler_two_surfaces", func(f *ceremonyFixture) {
 			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorSurfaces,
@@ -559,7 +654,7 @@ func ceremonyInjections() []ceremonyInjection {
 
 		{"I15_discovery_alone", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, "jwksMux.Handle(authorizehttp.DiscoveryPath, authorizehttp.New())")
-		}, []string{"метаданные обнаружения", "2 поверхностях", "ReachClusterInternal"}},
+		}, []string{"метаданные обнаружения", "2 поверхностях", reachInternalMark}},
 
 		{"I17_built_not_mounted", func(f *ceremonyFixture) {
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", "mux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())",
@@ -580,7 +675,7 @@ func ceremonyInjections() []ceremonyInjection {
 
 		{"I25_sprintf_of_constants", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, `jwksMux.Handle(fmt.Sprintf("%s/authorize", "/iam/v1"), authorizehttp.New())`)
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "ReachClusterInternal"}},
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		{"I26_default_serve_mux", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, "http.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
@@ -592,7 +687,7 @@ func ceremonyInjections() []ceremonyInjection {
 
 		{"I28_runtime_concatenation", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, "ceremonyBase := \"/iam/v1\"\njwksMux.Handle(ceremonyBase+\"/authorize\", authorizehttp.New())")
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "ReachClusterInternal"}},
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		{"I29_manual_routing_by_path", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_manual.go", ceremonyManualRouteSource)
@@ -628,6 +723,26 @@ func ceremonyInjections() []ceremonyInjection {
 		{"I31_conflicting_registration", func(f *ceremonyFixture) {
 			serve(f, anchorTokenMount, "mux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
 		}, []string{"мультиплексор отказал бы в регистрации"}},
+
+		{"I35a_recursive_factory_through_self_call", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_chain.go",
+				ceremonyChainSelfSource(ceremonyImportLine, "authorizehttp.AuthorizePath", "authorizehttp.New()"))
+			serve(f, anchorMetrics, `metricsMux.Handle("/iam/v1/", ceremonyChainSelf(3))`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "диагностика (/metrics)"}},
+
+		{"I35b_recursive_factory_through_mutual_call", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_chain.go",
+				ceremonyChainMutualSource(ceremonyImportLine, `"/probe-chain/x"`, "authorizehttp.AuthorizePath",
+					"authorizehttp.New()"))
+			serve(f, anchorMetrics, `metricsMux.Handle("/iam/v1/", ceremonyChainEven(1))`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "диагностика (/metrics)"}},
+
+		{"I36_delegation_deeper_than_the_limit", func(f *ceremonyFixture) {
+			n := check.CeremonyResolveDepthLimit + 4
+			f.add(ceremonyRootDir, "ceremony_probe_layers.go", ceremonyLayersSource(n))
+			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux",
+				"Handler: "+ceremonyLayersCall(n, "metricsMux"))
+		}, []string{"обрезано на глубине", fmt.Sprint(check.CeremonyResolveDepthLimit)}},
 	}
 }
 
@@ -641,11 +756,94 @@ func TestCeremonySurfaceInjections(t *testing.T) {
 			report := f.mustJudge(fixtureCeremonyCoordinates())
 			got := requireFinding(t, report, inj.want...)
 			t.Logf("находок %d; своя: %s", len(report.Findings), got)
-			if inj.id == "I3_eighth_surface" && (report.Census.SurfaceDecls != 8 || report.Census.RaisedSurfaces != 8) {
-				t.Errorf("перепись I3: объявлений %d, поднимается %d — ожидалось 8 и 8",
-					report.Census.SurfaceDecls, report.Census.RaisedSurfaces)
+		})
+	}
+}
+
+// TestCeremonySurfaceInjectionEighthSurfaceIsCensused — перепись I3: восьмая
+// поверхность насчитана и объявлением, и элементом среза подъёма.
+func TestCeremonySurfaceInjectionEighthSurfaceIsCensused(t *testing.T) {
+	f := newCeremonyFixture(t)
+	ceremonyEighthSurface(f)
+	c := f.mustJudge(fixtureCeremonyCoordinates()).Census
+	if c.SurfaceDecls != 8 || c.RaisedSurfaces != 8 {
+		t.Errorf("перепись I3: объявлений %d, поднимается %d — ожидалось 8 и 8", c.SurfaceDecls, c.RaisedSurfaces)
+	}
+}
+
+// TestCeremonySurfaceRecursiveFactoryIsJudgedToTheFixedPoint — законная
+// рекурсивная фабрика мультиплексора (самовызов и взаимный вызов): разбор
+// доходит до неподвижной точки раньше предела, близнец молчит, и молчит,
+// ВИДЯ маршруты фабрики, а не по слепоте.
+func TestCeremonySurfaceRecursiveFactoryIsJudgedToTheFixedPoint(t *testing.T) {
+	for _, tc := range []struct {
+		id     string
+		source string
+		mount  string
+		routes []string
+	}{
+		{"self_call", ceremonyChainSelfSource("", `"/probe-chain/x"`, "http.NotFoundHandler()"),
+			`metricsMux.Handle("/probe-chain/", ceremonyChainSelf(3))`, []string{"/probe-chain/x"}},
+		{"mutual_call", ceremonyChainMutualSource("", `"/probe-chain/x"`, `"/probe-chain/y"`, "http.NotFoundHandler()"),
+			`metricsMux.Handle("/probe-chain/", ceremonyChainEven(1))`, []string{"/probe-chain/x", "/probe-chain/y"}},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			f := newCeremonyFixture(t)
+			f.add(ceremonyRootDir, "ceremony_probe_chain.go", tc.source)
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorMetrics, tc.mount)
+			report, err := f.judge(fixtureCeremonyCoordinates())
+			if err != nil {
+				t.Fatalf("законная рекурсивная фабрика: гейт не исполнился — разбор обязан сходиться на ней: %v", err)
+			}
+			t.Logf("%s", report.Census.Summary())
+			requireSilent(t, report)
+			for _, want := range tc.routes {
+				if !surfaceHasRoute(report, "диагностика (/metrics)", want) {
+					t.Errorf("маршрут фабрики %s не попал в таблицу поверхности диагностики — близнец молчит по слепоте", want)
+				}
 			}
 		})
+	}
+}
+
+// surfaceHasRoute — выведенная таблица поверхности несёт образец.
+func surfaceHasRoute(report check.CeremonySurfaceReport, surface, pattern string) bool {
+	for _, s := range report.Surfaces {
+		if s.Name != surface {
+			continue
+		}
+		for _, p := range s.Patterns {
+			if p == pattern {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestCeremonySurfaceUnconvergedFlowIsNotAVerdict — разбор, не дошедший до
+// неподвижной точки за предел раундов, — «гейт не исполнился», а не вердикт.
+//
+// Вход — законная цепочка возвратов длиннее предела: разбор продвигает
+// значение на одно звено за раунд и за предел не доходит до дна.
+func TestCeremonySurfaceUnconvergedFlowIsNotAVerdict(t *testing.T) {
+	f := newCeremonyFixture(t)
+	f.add(ceremonyRootDir, "ceremony_probe_deep.go", ceremonyDeepChainSource(check.CeremonySolveRoundLimit+8))
+	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorMetrics, `metricsMux.Handle("/probe-deep/", ceremonyDeep0())`)
+	report, err := f.judge(fixtureCeremonyCoordinates())
+	if err == nil {
+		if report.Census.SolveRounds < check.CeremonySolveRoundLimit {
+			t.Fatalf("условие не создано: цепочка сошлась за %d раундов при пределе %d — удлини её",
+				report.Census.SolveRounds, check.CeremonySolveRoundLimit)
+		}
+		t.Fatalf("ИНЪЕКЦИЯ НЕ ПОЙМАНА: разбор не дошёл до неподвижной точки (раундов %d при пределе %d), а гейт "+
+			"выдал вердикт — находок %d; перепись: %s", report.Census.SolveRounds, check.CeremonySolveRoundLimit,
+			len(report.Findings), report.Census.Summary())
+	}
+	for _, want := range []string{"неподвижн", fmt.Sprint(check.CeremonySolveRoundLimit)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("отказ не называет причину («%s»): %v", want, err)
+		}
 	}
 }
 
@@ -671,8 +869,8 @@ func TestCeremonySurfaceFindingNamesBothRegistrations(t *testing.T) {
 	report := f.mustJudge(fixtureCeremonyCoordinates())
 	requireFinding(t, report,
 		fixtureAuthorizePath,
-		"«выдача токенов (/iam/token, /iam/v1/token)» [ReachExternal]",
-		"«зеркало публичных ключей проверки (/.well-known/jwks.json)» [ReachClusterInternal]",
+		"«выдача токенов (/iam/token, /iam/v1/token)» "+reachExternalMark,
+		"«зеркало публичных ключей проверки (/.well-known/jwks.json)» "+reachInternalMark,
 		fmt.Sprintf("cmd/kaname/serve.go:%d", mountLine),
 		fmt.Sprintf("cmd/kaname/serve.go:%d", injLine))
 }
@@ -796,6 +994,14 @@ func ceremonyTwins() []ceremonyTwin {
 		}},
 		{"T13_issuing_surface_disabled_on_this_landing", func(f *ceremonyFixture) {
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", `registryTokenAddr != ""`, "false")
+		}},
+		// Одна обёртка, вложенная в саму себя: значение обёртки течёт в её же
+		// параметр, и прохождение запроса встречает цикл. Цикл нового маршрута
+		// не даёт — и не обрезается как «слишком глубоко».
+		{"T16_wrapper_nested_into_itself", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_wrap.go", ceremonyWrapSource)
+			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux",
+				"Handler: ceremonyProbeWrap(ceremonyProbeWrap(metricsMux))")
 		}},
 	}
 }

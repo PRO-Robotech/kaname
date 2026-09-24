@@ -655,9 +655,9 @@ func unparen(e ast.Expr) ast.Expr {
 
 // ─── неподвижная точка ──────────────────────────────────────────────────────
 
-// solve гоняет узлы до неподвижной точки.
-func (a *surfaceFlow) solve() {
-	for round := 0; round < 200; round++ {
+// solve гоняет узлы до неподвижной точки; возвращает число раундов.
+func (a *surfaceFlow) solve() int {
+	for round := 0; round < CeremonySolveRoundLimit; round++ {
 		a.changed = false
 		for _, n := range a.nodes {
 			a.apply(n)
@@ -666,9 +666,10 @@ func (a *surfaceFlow) solve() {
 			a.namedResults(n)
 		}
 		if !a.changed {
-			return
+			return round + 1
 		}
 	}
+	return CeremonySolveRoundLimit
 }
 
 func (a *surfaceFlow) setVar(v *types.Var, s avSet) {

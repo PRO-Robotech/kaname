@@ -33,6 +33,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/corelib/servicecontract"
 	"golang.org/x/mod/modfile"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
@@ -47,6 +48,14 @@ import (
 // ВХОД обхода, а не его итог: всё остальное выводится из того, что линкуется
 // в этот бинарь.
 const ceremonyRootDir = "cmd/kaname"
+
+// Досягаемость в находке и в выведенной таблице пишется словом фундамента
+// (servicecontract.SurfaceReach.String) — тем же, что несут журнал и
+// tools/surfaceroster; своего написания у гейта нет.
+var (
+	reachExternalMark = "[" + servicecontract.ReachExternal.String() + "]"
+	reachInternalMark = "[" + servicecontract.ReachClusterInternal.String() + "]"
+)
 
 // liveCeremonyCoordinates — координаты, которые судит живой прогон.
 //
@@ -182,11 +191,10 @@ func TestCeremonySurfaceGatePremiseHolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("перечень поверхностей tools/surfaceroster: %v", err)
 	}
-	reachWord := map[string]string{"external": "ReachExternal", "cluster-internal": "ReachClusterInternal"}
 	want := map[string]string{}
 	for _, s := range roster.Surfaces {
 		if !s.GRPC {
-			want[s.Name] = reachWord[s.Reach]
+			want[s.Name] = s.Reach
 		}
 	}
 	got := map[string]string{}
@@ -228,7 +236,7 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 	if len(token.Surfaces) != 1 {
 		t.Fatalf("токен-эндпоинт резолвится на %d поверхностях, ожидалась одна: %s", len(token.Surfaces), token.Summary())
 	}
-	if token.Surfaces[0].Reach != "ReachExternal" {
+	if token.Surfaces[0].Reach != servicecontract.ReachExternal.String() {
 		t.Errorf("токен-эндпоинт резолвится на поверхности с досягаемостью %s", token.Surfaces[0].Reach)
 	}
 
