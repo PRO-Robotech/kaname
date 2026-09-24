@@ -30,6 +30,8 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/corelib/db/pgfault"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // issuanceFamilyFK — ограничение, которым база отвергает выпуск в
@@ -72,34 +75,80 @@ DELETE FROM kaname.access_tokens
       FOR UPDATE SKIP LOCKED
  )`
 
+// issuanceTable — таблица записей выпуска так, как её называет сервер в
+// отказе.
+const issuanceTable = "access_tokens"
+
+// issuanceBackstopMessage — запись журнала о сработавшем рубеже писателя
+// выпуска.
+const issuanceBackstopMessage = "access token issuance record refused a value the service produced"
+
 // RecordAccessToken записывает выпуск токена доступа в его семейство.
 //
 // Зовёт его выпуск токена доступа церемонии — ПОСЛЕ подписи и ДО того, как
 // токен уедет клиенту: токен, чья запись не легла, отзывом семейства не
 // снимается, поэтому отказ записи обязан ронять выдачу.
 //
+// # ИСХОДОВ ДВА
+//
 // Семейства нет либо оно отозвано — `domain.ErrAccessTokenFamilyNotLive`: это
-// решает ключ базы, а не проверка перед вставкой.
+// решает ключ базы, а не проверка перед вставкой, и это исход ЗАВЕДЕНИЯ — выдача
+// не состоится, но служба исправна.
+//
+// Любой другой отказ — ДЕФЕКТ СЛУЖБЫ: каждое значение записи производит она
+// сама (подписант чеканит `jti`, `iat`, `exp`, церемония называет семейство), и
+// вызывающий точки выдачи ни одного из них не присылает. Отказ ввода обвинял бы
+// клиента в том, чего он не делал и не может исправить. Поэтому —
+// фиксированный `iamerr.ErrInternal` и запись в журнале с координатами; ни
+// идентификатор выпуска, ни строка отказа (`Detail`) в журнал не идут.
 func (r *OAuthCeremonyRepo) RecordAccessToken(ctx context.Context, jti, familyID string, issuedAt, expiresAt time.Time) error {
-	if jti == "" {
-		return fmt.Errorf("Illegal argument access_token.jti: required")
-	}
-	if familyID == "" {
-		return fmt.Errorf("Illegal argument access_token.family_id: required")
-	}
-	if issuedAt.IsZero() || expiresAt.IsZero() {
-		return fmt.Errorf("Illegal argument access_token: issued_at and expires_at are required")
-	}
-	if !expiresAt.After(issuedAt) {
-		return fmt.Errorf("Illegal argument access_token.expires_at: must be after issued_at")
+	switch {
+	case jti == "":
+		return issuanceDefect(ctx, familyID, "jti", "required")
+	case familyID == "":
+		return issuanceDefect(ctx, familyID, "family_id", "required")
+	case issuedAt.IsZero():
+		return issuanceDefect(ctx, familyID, "issued_at", "required")
+	case expiresAt.IsZero():
+		return issuanceDefect(ctx, familyID, "expires_at", "required")
+	case !expiresAt.After(issuedAt):
+		return issuanceDefect(ctx, familyID, "expires_at", "must be after issued_at")
 	}
 	if _, err := r.pool.Exec(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
-		if f := pgfault.Classify(err); f.Class == pgfault.ForeignKey && f.Constraint == issuanceFamilyFK {
-			return fmt.Errorf("%w: family %s", domain.ErrAccessTokenFamilyNotLive, familyID)
-		}
-		return wrapPgErr(err, "AccessToken", familyID)
+		return issuanceRefusal(ctx, err, jti, familyID)
 	}
 	return nil
+}
+
+// issuanceDefect — отказ проверки писателя до базы: полоса дефекта службы.
+func issuanceDefect(ctx context.Context, familyID, field, rule string) error {
+	slog.ErrorContext(ctx, issuanceBackstopMessage,
+		slog.String("kind", "AccessToken"), slog.String("family", familyID),
+		slog.String("field", field), slog.String("rule", rule))
+	return iamerr.ErrInternal
+}
+
+// issuanceRefusal разбирает отказ базы на заведении записи выпуска.
+//
+// Полоса дефекта судится КЛАССОМ, а не перечнем имён: любой отказ целостности
+// (SQLSTATE класса 23) нашей таблицы, кроме ключа семейства, — значение службы,
+// которое схема не приняла. Ограничение, заведённое позже, попадает в ту же
+// полосу без правки здесь; решение по каждому ограничению выписано в переписи
+// integration-пробы `TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated`.
+//
+// Отказ без строки состояния (сервер не ответил) и прочие классы остаются общему
+// переводчику: «не дозвонились» — не дефект значения.
+func issuanceRefusal(ctx context.Context, err error, jti, familyID string) error {
+	f := pgfault.Classify(err)
+	if f.Class == pgfault.ForeignKey && f.Constraint == issuanceFamilyFK {
+		return fmt.Errorf("%w: family %s", domain.ErrAccessTokenFamilyNotLive, familyID)
+	}
+	if f.FromDatabase() && f.Table == issuanceTable && strings.HasPrefix(f.SQLState, "23") {
+		slog.ErrorContext(ctx, issuanceBackstopMessage,
+			append([]any{slog.String("kind", "AccessToken"), slog.String("family", familyID)}, f.LogAttrs()...)...)
+		return iamerr.ErrInternal
+	}
+	return wrapPgErr(err, "AccessToken", jti)
 }
 
 // SweepExpiredAccessTokens снимает записи выпуска, чей срок вышел раньше, чем
