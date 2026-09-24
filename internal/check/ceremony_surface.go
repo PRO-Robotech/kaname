@@ -7,11 +7,21 @@
 //
 // # Что судится
 //
-// Для каждой координаты — на скольких ПОВЕРХНОСТЯХ процесса она резолвится.
-// Не сколько раз её упомянули и не сколько вызовов Handle её назвали:
-// обработчик, отданный двум поверхностям, регистрируется один раз и
-// резолвится дважды; делегирование поддерева («/iam/v1/» → чужой
-// мультиплексор) не называет координату вовсе и резолвит её.
+// Два свойства, и «НИГДЕ больше» держат только оба вместе.
+//
+//   - ПУТЬ: для каждой координаты — на скольких ПОВЕРХНОСТЯХ процесса она
+//     резолвится. Не сколько раз её упомянули и не сколько вызовов Handle её
+//     назвали: обработчик, отданный двум поверхностям, регистрируется один
+//     раз и резолвится дважды; делегирование поддерева («/iam/v1/» → чужой
+//     мультиплексор) не называет координату вовсе и резолвит её.
+//   - ОБРАБОТЧИК: конечная точка, до которой координата доходит на своей
+//     поверхности, не достижима ни на одной другой поверхности ни под каким
+//     путём. Эндпоинт выдачи, смонтированный на внутренней поверхности под
+//     путём «/internal/client-token», путём координаты там не резолвится —
+//     и всё же смонтирован. Тождество конечной точки — место рождения её
+//     значения, без копий по местам вызова: второй экземпляр того же
+//     конструктора на чужой поверхности — тот же эндпоинт. Обработчик
+//     координаты, не прослеженный до значения, — находка, а не молчание.
 //
 // # Как выводится, а не выписывается
 //
@@ -59,6 +69,14 @@
 //   - Маршруты, которые заводят варианты конструктора мультиплексора шлюза
 //     (runtime.With…), не наблюдаются: вариант — чужой код без переданного
 //     ему мультиплексора. Сегодня варианты корня маршрутов не заводят.
+//   - Обработчик судится по ЗНАЧЕНИЮ, а не по поведению: та же церемония,
+//     реализованная заново другим типом или другим конструктором, — другое
+//     значение, и её второй монтаж гейт не видит: это копия кода, а не
+//     второй монтаж того же эндпоинта.
+//   - Монтаж обработчика на чужой поверхности судится по ВСЕМ её маршрутам,
+//     без учёта пути: эндпоинт за мультиплексором, до образцов которого
+//     запрос с этой поверхности не дойдёт, тоже считается смонтированным.
+//     Это перебор, а не недобор: гейт краснеет, а не молчит.
 package check
 
 import (
@@ -160,6 +178,12 @@ type CeremonySurfaceCensus struct {
 	UnmountedMuxes           int
 	WithoutProducer          int
 	PositiveControls         int
+	// CoordinateEndpoints — конечных точек, до которых доходят координаты на
+	// своих поверхностях (по месту рождения значения).
+	CoordinateEndpoints int
+	// SurfaceEndpoints — конечных точек, до которых доходят поверхности по
+	// любому пути: с ними сверяется обработчик каждой координаты.
+	SurfaceEndpoints int
 }
 
 // Summary — перепись одной строкой.
@@ -175,12 +199,13 @@ func (c CeremonySurfaceCensus) Summary() string {
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
 		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у ненаблюдаемого кода %d · "+
 		"чтений пути запроса %d · носителей пути %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
-		"координат без производителя %d · положительных контролей %d · формы пути: %s",
+		"координат без производителя %d · положительных контролей %d · "+
+		"конечных точек координат %d · конечных точек поверхностей %d · формы пути: %s",
 		c.SolveRounds, CeremonySolveRoundLimit, c.ResolveSteps, resolveStepBudget, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
 		c.HTTPMuxes, c.GatewayMuxes, c.HTTPRegistrations, c.GatewayRegistrations, c.DefaultRegistrations,
 		c.UnreachableRegistrations, c.UntracedRegistrations, len(c.Unresolved), strings.Join(c.Unresolved, "; "),
 		len(c.Escapes), c.URLPathReads, c.PathCarriers, len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
-		c.PositiveControls, strings.Join(forms, ", "))
+		c.PositiveControls, c.CoordinateEndpoints, c.SurfaceEndpoints, strings.Join(forms, ", "))
 }
 
 // SurfaceHit — поверхность, на которой резолвится координата, и путь до
@@ -198,6 +223,9 @@ type CoordinateVerdict struct {
 	Path      string
 	Surfaces  []SurfaceHit
 	Producers []string
+	// Endpoints — конечные точки, до которых координата доходит на своих
+	// поверхностях: место рождения значения обработчика.
+	Endpoints []string
 }
 
 // Summary — исход координаты одной строкой.
@@ -206,8 +234,8 @@ func (c CoordinateVerdict) Summary() string {
 	for _, s := range c.Surfaces {
 		names = append(names, fmt.Sprintf("«%s» [%s] ← %s", s.Name, s.Reach, strings.Join(s.Via, " · ")))
 	}
-	return fmt.Sprintf("«%s» (%s): поверхностей %d, производителей %d [%s]",
-		c.Name, c.Path, len(c.Surfaces), len(c.Producers), strings.Join(names, "; "))
+	return fmt.Sprintf("«%s» (%s): поверхностей %d, производителей %d, конечных точек %d [%s]",
+		c.Name, c.Path, len(c.Surfaces), len(c.Producers), len(c.Endpoints), strings.Join(names, "; "))
 }
 
 // SurfaceRoutes — выведенная таблица маршрутов одной поверхности.
@@ -323,6 +351,13 @@ type surfaceJudge struct {
 	hosts    []string
 	census   CeremonySurfaceCensus
 	findings []string
+
+	// Сбор конечных точек прохождения: nil — не собирается. endsUntraced —
+	// хоть одна цепочка дошла до регистрации, чей обработчик не прослежен.
+	ends         avSet
+	endsUntraced bool
+	// конечные точки поверхности по любому пути, по объявлению поверхности
+	surfaceEnds map[string]map[*absVal][]string
 }
 
 var probeMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
@@ -998,6 +1033,7 @@ func (j *surfaceJudge) resolveOne(v *absVal, rq probeReq, depth int) [][]string 
 		}
 		step := fmt.Sprintf("регистрация %s %s образец «%s»", route.info.site, route.info.text, route.pattern)
 		if redirect {
+			j.redirectEnds(route, rq, depth)
 			return [][]string{{step + " (мультиплексор отвечает перенаправлением — путь резолвится)"}}
 		}
 		return j.through(step, route.info.handlers, rq, depth)
@@ -1015,6 +1051,7 @@ func (j *surfaceJudge) resolveOne(v *absVal, rq probeReq, depth int) [][]string 
 	case avNotFound:
 		return nil
 	case avOpaque:
+		j.endAt(v)
 		return [][]string{{"конечная точка " + fnName(v.fn)}}
 	case avExtWrap:
 		return j.external(v, rq, depth)
@@ -1024,6 +1061,7 @@ func (j *surfaceJudge) resolveOne(v *absVal, rq probeReq, depth int) [][]string 
 		return nil
 	}
 	if len(kids) == 0 {
+		j.endAt(v)
 		return [][]string{{}}
 	}
 	var out [][]string
@@ -1039,6 +1077,9 @@ func (j *surfaceJudge) resolveOne(v *absVal, rq probeReq, depth int) [][]string 
 // through — маршрут найден; запрос идёт в его обработчик.
 func (j *surfaceJudge) through(step string, handlers avSet, rq probeReq, depth int) [][]string {
 	if len(handlers) == 0 {
+		if j.ends != nil {
+			j.endsUntraced = true
+		}
 		return [][]string{{step}}
 	}
 	var out [][]string
@@ -1178,16 +1219,26 @@ func (j *surfaceJudge) producers(path string) []string {
 
 func (j *surfaceJudge) coordinates(surfaces []*surfaceDecl, coords []CeremonyCoordinate) []CoordinateVerdict {
 	var verdicts []CoordinateVerdict
-	for _, c := range coords {
+	homeEnds := make([]avSet, len(coords))
+	untraced := make([]bool, len(coords))
+	for i, c := range coords {
 		v := CoordinateVerdict{Name: c.Name, Path: c.Path, Producers: j.producers(c.Path)}
+		homeEnds[i] = avSet{}
 		for _, s := range surfaces {
+			j.ends, j.endsUntraced = avSet{}, false
 			via := j.surfaceHits(s.roots, c.Path)
 			if len(via) > 0 {
 				v.Surfaces = append(v.Surfaces, SurfaceHit{Name: s.name, Reach: s.reach, Decl: s.decl, Via: via})
+				for e := range j.ends {
+					homeEnds[i].add(endpointRoot(e))
+				}
+				untraced[i] = untraced[i] || j.endsUntraced
 			}
 		}
+		j.ends = nil
 		verdicts = append(verdicts, v)
 	}
+	j.endpointMounts(surfaces, coords, verdicts, homeEnds, untraced)
 	var issuing *SurfaceHit
 	for i, c := range coords {
 		v := verdicts[i]
@@ -1243,6 +1294,140 @@ func (j *surfaceJudge) coordinates(surfaces []*surfaceDecl, coords []CeremonyCoo
 		}
 	}
 	return verdicts
+}
+
+// ─── обработчик координаты ──────────────────────────────────────────────────
+
+// endAt — прохождение запроса дошло до конечной точки v (при сборе).
+func (j *surfaceJudge) endAt(v *absVal) {
+	if j.ends != nil {
+		j.ends.add(v)
+	}
+}
+
+// redirectEnds — мультиплексор отвечает на путь координаты перенаправлением
+// на образец-поддерево: обслужит координату обработчик этого образца, и
+// конечная точка — та, до которой дойдёт перенаправленный запрос (путь с
+// хвостовым слэшем). Не дошёл — обработчик координаты не прослежен.
+func (j *surfaceJudge) redirectEnds(route *simRoute, rq probeReq, depth int) {
+	if j.ends == nil {
+		return
+	}
+	rq.path += "/"
+	if len(j.through("", route.info.handlers, rq, depth)) == 0 {
+		j.endsUntraced = true
+	}
+}
+
+// endpointRoot — тождество конечной точки: место её рождения без копий по
+// местам вызова. Две копии одного рождения — один эндпоинт, собранный дважды:
+// второй экземпляр на чужой поверхности — тот же эндпоинт, смонтированный там.
+func endpointRoot(v *absVal) *absVal {
+	for v.parent != nil {
+		v = v.parent
+	}
+	return v
+}
+
+// endsOn — конечные точки, до которых поверхность доходит по ЛЮБОМУ маршруту,
+// без учёта пути запроса, с регистрациями, через которые дошла. Перебор, а не
+// недобор: эндпоинт за мультиплексором, чьи образцы запрос с этой поверхности
+// не пропустят, тоже считается смонтированным.
+func (j *surfaceJudge) endsOn(s *surfaceDecl) map[*absVal][]string {
+	if out, ok := j.surfaceEnds[s.decl]; ok {
+		return out
+	}
+	out := map[*absVal][]string{}
+	seen := map[*absVal]bool{}
+	var walk func(set avSet, via string)
+	walk = func(set avSet, via string) {
+		for _, v := range set.sorted() {
+			if seen[v] {
+				continue
+			}
+			seen[v] = true
+			if v.kind == avHTTPMux || v.kind == avGatewayMux {
+				for _, in := range j.reachableRegs(v) {
+					walk(in.handlers, regLabel(in))
+				}
+				continue
+			}
+			kids, isHandler, _ := j.a.delegates(v)
+			switch {
+			case !isHandler:
+			case len(kids) == 0:
+				r := endpointRoot(v)
+				out[r] = append(out[r], via)
+			default:
+				walk(kids, via)
+			}
+		}
+	}
+	walk(s.roots, "обработчик поверхности, "+s.decl)
+	if j.surfaceEnds == nil {
+		j.surfaceEnds = map[string]map[*absVal][]string{}
+	}
+	j.surfaceEnds[s.decl] = out
+	return out
+}
+
+// regLabel — регистрация словом для находки: место, вызов и образцы.
+func regLabel(in *regInfo) string {
+	pats := append([]string(nil), in.patterns...)
+	for _, gp := range in.gw {
+		if p, err := runtime.NewPattern(gp.version, gp.ops, gp.pool, gp.verb); err == nil {
+			pats = append(pats, p.String())
+		}
+	}
+	return fmt.Sprintf("регистрация %s %s образцы «%s»", in.site, in.text, strings.Join(pats, " | "))
+}
+
+// endpointMounts — обработчик координаты не смонтирован ни на одной
+// поверхности, кроме тех, где резолвится сама координата, — ни под своим
+// путём, ни под чужим. Путь судит coordinates; здесь судится МОНТАЖ
+// эндпоинта: тот же обработчик под другим путём на внутренней поверхности
+// путём координаты не резолвится, а эндпоинт там есть.
+func (j *surfaceJudge) endpointMounts(surfaces []*surfaceDecl, coords []CeremonyCoordinate,
+	verdicts []CoordinateVerdict, homeEnds []avSet, untraced []bool) {
+	counted := avSet{}
+	for i, c := range coords {
+		v := &verdicts[i]
+		if len(v.Surfaces) == 0 {
+			continue
+		}
+		ends := homeEnds[i].sorted()
+		for _, e := range ends {
+			counted.add(e)
+			v.Endpoints = append(v.Endpoints, j.valueLabel(e))
+		}
+		if untraced[i] || len(ends) == 0 {
+			j.find("координата «%s» (%s) резолвится, а её обработчик не прослежен до значения хотя бы на одном "+
+				"пути — смонтирован ли тот же эндпоинт под другим путём на другой поверхности, гейт сказать не может:%s",
+				c.Name, c.Path, hitsText(v.Surfaces))
+		}
+		home := map[string]bool{}
+		for _, h := range v.Surfaces {
+			home[h.Decl] = true
+		}
+		for _, s := range surfaces {
+			if home[s.decl] {
+				continue
+			}
+			on := j.endsOn(s)
+			for _, e := range ends {
+				if via, ok := on[e]; ok {
+					j.find("обработчик координаты «%s» (%s) — %s — смонтирован и на поверхности «%s» [%s] "+
+						"(объявлена %s), где путь координаты не резолвится: %s — эндпоинт живёт на поверхности "+
+						"выдачи и НИГДЕ больше, ни под своим путём, ни под чужим",
+						c.Name, c.Path, j.valueLabel(e), s.name, s.reach, s.decl, strings.Join(via, "; "))
+				}
+			}
+		}
+	}
+	j.census.CoordinateEndpoints = len(counted)
+	for _, s := range surfaces {
+		j.census.SurfaceEndpoints += len(j.endsOn(s))
+	}
 }
 
 func hitsText(hits []SurfaceHit) string {

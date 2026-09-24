@@ -1117,10 +1117,11 @@ func ceremonyInjections() []ceremonyInjection {
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		// Z11: срезанный префикс приводит запрос координаты к регистрации
-		// внутреннего мультиплексора — положительная пара близнеца W7.
+		// внутреннего мультиплексора — положительная пара близнеца W7. Обработчик
+		// нейтральный, как у W7: пара различается только путём.
 		{"Z11_strip_prefix_onto_the_coordinate", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, "ceremonyInner := http.NewServeMux()\n"+
-				"ceremonyInner.Handle(\"/v1/authorize\", authorizehttp.New())\n"+
+				"ceremonyInner.Handle(\"/v1/authorize\", "+ceremonyNeutralHandler+")\n"+
 				"jwksMux.Handle(\"/iam/\", http.StripPrefix(\"/iam\", ceremonyInner))")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
@@ -1136,15 +1137,16 @@ func ceremonyInjections() []ceremonyInjection {
 		// S1 — путь регистрации сквозь цикл записей P → Q → S → P. Первой
 		// сводится регистрация по P (безвредная: координата в ней с хвостом),
 		// второй — по S. Значение S не зависит от того, кого свели первым.
+		// Обработчик нейтральный, как у близнеца S1t: предмет — путь.
 		{"S1_path_through_a_write_cycle_resolved_second", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
-			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyP+\"/probe-x\", authorizehttp.New())\n"+
-				"jwksMux.Handle(ceremonyS, authorizehttp.New())")
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyP+\"/probe-x\", "+ceremonyNeutralHandler+")\n"+
+				"jwksMux.Handle(ceremonyS, "+ceremonyNeutralHandler+")")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		{"S1c_path_through_a_write_cycle_alone", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
-			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyS, authorizehttp.New())")
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyS, "+ceremonyNeutralHandler+")")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
 		// TY1 — течёт ли значение типа, не зависит от того, о каком типе цикла
@@ -1168,8 +1170,45 @@ func ceremonyInjections() []ceremonyInjection {
 			f.add(ceremonyRootDir, "ceremony_probe_types.go", ceremonyCycleTypesSource(false))
 			serve(f, anchorIntrospect, ceremonyThroughCycleTypes)
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// H — ОБРАБОТЧИК координаты под ЧУЖИМ путём (приёмка проверки, круг 3,
+		// опыт H1). Путь координаты на второй поверхности не резолвится, а
+		// эндпоинт смонтирован — «НИГДЕ больше» нарушено не путём, а монтажом.
+		// H1 — опыт дословно: живой обработчик выдачи на поверхности
+		// диагностики.
+		{"H1_issuing_handler_under_another_path_on_the_metrics_surface", func(f *ceremonyFixture) {
+			serve(f, anchorTokenMount, `metricsMux.Handle("/internal/client-token", clientTokenHandler)`)
+		}, []string{"токен-эндпоинт", "обработчик координаты", "диагностика (/metrics)", "/internal/client-token"}},
+
+		// H2 — второй экземпляр эндпоинта (тот же конструктор, другой вызов)
+		// под соседним путём на внутреннем зеркале.
+		{"H2_ceremony_handler_under_a_neighbour_path_on_an_internal_mux", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, `jwksMux.Handle("/iam/v1/authorizex", authorizehttp.New())`)
+		}, []string{"эндпоинт авторизации", "обработчик координаты", reachInternalMark, "/iam/v1/authorizex"}},
+
+		// H4 — обработчик координаты прошёл через пустой интерфейс: координата
+		// резолвится, а до какого значения — нет. Где ещё смонтирован тот же
+		// эндпоинт, гейт сказать не может, и это находка, а не молчание.
+		{"H4_coordinate_handler_through_an_empty_interface", func(f *ceremonyFixture) {
+			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				"var ceremonyAnyHandler any = clientTokenHandler")
+			f.replaceExpr(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				"mux.Handle(clienttokenhttp.TokenPath, ceremonyAnyHandler.(http.Handler))")
+		}, []string{"токен-эндпоинт", "обработчик не прослежен"}},
+
+		// Y4i — пара близнеца Y4 на один факт (путь): нейтральный обработчик
+		// РЕЗОЛВИТ координату. Без неё молчание Y4 могло бы держаться
+		// обработчиком, который запрос не обслуживает, а не точностью пути.
+		{"Y4i_neutral_handler_on_the_coordinate_on_an_internal_mux", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, `jwksMux.Handle("/iam/v1/authorize", `+ceremonyNeutralHandler+`)`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 	}
 }
+
+// ceremonyNeutralHandler — обработчик, который обслуживает запрос и НЕ
+// является эндпоинтом церемонии: у близнецов, чей предмет — путь, обработчик
+// не должен быть вторым фактом.
+const ceremonyNeutralHandler = "http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})"
 
 // TestCeremonySurfaceInjections — новая инъекция: каждая краснеет, и
 // находка называет свою причину.
@@ -1514,9 +1553,13 @@ func ceremonyTwins() []ceremonyTwin {
 			ceremonyRootFile(f, "ceremony_probe_dead.go", "\t\"net/http\""+ceremonyImportLine,
 				"func ceremonyUnused() {\n\tm := http.NewServeMux()\n\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
 		}},
+		// Предмет Y4 — точность ПУТИ, и обработчик у него нейтральный: эндпоинт
+		// церемонии под соседним путём на внутренней поверхности — уже не
+		// близнец, а находка (инъекция H2). Нейтральный обработчик координату
+		// резолвит — пара на один факт, Y4i.
 		{"Y4_neighbour_path_on_an_internal_mux", func(f *ceremonyFixture) {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
-				`jwksMux.Handle("/iam/v1/authorizex", authorizehttp.New())`)
+				`jwksMux.Handle("/iam/v1/authorizex", `+ceremonyNeutralHandler+`)`)
 		}},
 		{"Y5_compare_of_a_configured_url_path", func(f *ceremonyFixture) {
 			ceremonyRootFile(f, "ceremony_probe_urlcmp.go", "\t\"net/url\"",
@@ -1566,9 +1609,10 @@ func ceremonyTwins() []ceremonyTwin {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
 				"ceremonyReg := mux.Handle\nceremonyReg(\"POST \"+authorizehttp.AuthorizePath, authorizehttp.New())")
 		}},
+		// W7 и S1t — предмет путь, обработчик нейтральный (см. Y4).
 		{"W7_strip_prefix_onto_a_neighbour_only", func(f *ceremonyFixture) {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
-				"ceremonyInner := http.NewServeMux()\nceremonyInner.Handle(\"/v1/other\", authorizehttp.New())\n"+
+				"ceremonyInner := http.NewServeMux()\nceremonyInner.Handle(\"/v1/other\", "+ceremonyNeutralHandler+")\n"+
 					"jwksMux.Handle(\"/iam/\", http.StripPrefix(\"/iam\", ceremonyInner))")
 		}},
 		// Близнец Z6 на один факт: общий мультиплексор отдан поддереву, а
@@ -1600,12 +1644,23 @@ func ceremonyTwins() []ceremonyTwin {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
 				"var ceremonyM ceremonyMounter = ceremonyIntMount(0)\nceremonyM.Mount(mux)")
 		}},
+		// Близнецы H1 на один факт. H1t_a — тот же обработчик выдачи под
+		// другим путём, но на САМОЙ поверхности выдачи. H1t_b — тот же путь на
+		// поверхности диагностики, но обработчик не церемонии.
+		{"H1t_a_issuing_handler_under_another_path_on_the_issuing_surface", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				`mux.Handle("/internal/client-token", clientTokenHandler)`)
+		}},
+		{"H1t_b_other_handler_under_the_same_path_on_the_metrics_surface", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				`metricsMux.Handle("/internal/client-token", `+ceremonyNeutralHandler+`)`)
+		}},
 		// Регистрация по P из цикла записей в одиночку: координата в ней с
 		// хвостом и координату не резолвит.
 		{"S1t_path_through_a_write_cycle_with_a_tail", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
-				"jwksMux.Handle(ceremonyP+\"/probe-x\", authorizehttp.New())")
+				"jwksMux.Handle(ceremonyP+\"/probe-x\", "+ceremonyNeutralHandler+")")
 		}},
 	}
 }
