@@ -40,9 +40,11 @@
 //     шлюза; её сверку с контрактом держит задание конвейера generate-diff.
 //   - Путь, который задаёт оператор (поле, заполняемое декодером настройки),
 //     значения не имеет: он — лист ведомости с причиной, не пропуск.
-//   - Маршрут, решаемый сравнением пути в теле обработчика, и мультиплексор,
-//     отданный чужому коду, гейт не моделирует — и потому краснеет на них,
-//     а не молчит.
+//   - Маршрут, решаемый по пути запроса в теле обработчика (сравнение,
+//     switch, выбор из карты, функция сопоставления над путём и над всем, что
+//     из него выведено строкой; ceremony_surface_manual.go), и мультиплексор,
+//     отданный чужому коду, гейт не моделирует — и потому краснеет на них, а
+//     не молчит.
 //   - Значения, прошедшие через пустой интерфейс, не прослеживаются; вызов
 //     метода регистрации через интерфейс, который реализует мультиплексор, без
 //     единой найденной реализации — находка «не прослежен», а не молчание.
@@ -158,12 +160,12 @@ func (c CeremonySurfaceCensus) Summary() string {
 		"элементов среза подъёма %d · построителей %d · мультиплексоров net/http %d · шлюза %d · "+
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
 		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у чужого кода %d · "+
-		"сравнений пути %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
+		"чтений пути запроса %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
 		"координат без производителя %d · положительных контролей %d · формы пути: %s",
 		c.SolveRounds, CeremonySolveRoundLimit, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
 		c.HTTPMuxes, c.GatewayMuxes, c.HTTPRegistrations, c.GatewayRegistrations, c.DefaultRegistrations,
 		c.UnreachableRegistrations, c.UntracedRegistrations, len(c.Unresolved), strings.Join(c.Unresolved, "; "),
-		len(c.Escapes), len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
+		len(c.Escapes), c.URLPathReads, len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
 		c.PositiveControls, strings.Join(forms, ", "))
 }
 
@@ -645,14 +647,19 @@ func (j *surfaceJudge) registrations() {
 		j.find("мультиплексор уходит в чужой код %s (%s): регистрации, сделанные там, гейт не наблюдает",
 			e.name, position(j.a.prog.fset, pos))
 	}
-	for _, n := range j.a.manual {
-		if !j.reachableFk(n.fk) {
+	for _, n := range j.a.pathReads {
+		if j.reachableFk(n.fk) {
+			c.URLPathReads++
+		}
+	}
+	for _, m := range j.a.manual {
+		if !j.reachableFk(m.node.fk) {
 			continue
 		}
-		c.ManualRouting = append(c.ManualRouting, j.pos(n.node))
-		j.find("маршрут решается сравнением пути запроса (%s): регистрацию на мультиплексоре гейт видит, "+
-			"условие в теле обработчика — нет; такая форма монтажа координаты осталась бы незамеченной",
-			j.pos(n.node))
+		c.ManualRouting = append(c.ManualRouting, j.pos(m.node.node))
+		j.find("маршрут решается по пути запроса в теле обработчика — %s (%s): регистрацию на мультиплексоре "+
+			"гейт видит, решение в теле обработчика — нет; такая форма монтажа координаты осталась бы незамеченной",
+			m.form, j.pos(m.node.node))
 	}
 }
 

@@ -809,6 +809,27 @@ func ceremonyInjections() []ceremonyInjection {
 				`if strings.ToLower(r.URL.Path) == "/iam/v1/authorize"`, "w.WriteHeader(http.StatusOK)"))
 		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
 
+		// Остальные формы решения о маршруте по пути: switch, функция
+		// сопоставления и путь адреса запроса, взятого значением.
+		{"X9c_manual_routing_switch_on_a_derived_path", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, "package main\n\nimport (\n\t\"net/http\"\n\t\"strings\"\n)\n\n"+
+				"func ceremonyProbeManual(next http.Handler) http.Handler {\n"+
+				"\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n"+
+				"\t\tswitch p := strings.TrimSuffix(r.URL.Path, \"/\"); p {\n"+
+				"\t\tcase \"/iam/v1/authorize\":\n\t\t\tw.WriteHeader(http.StatusOK)\n"+
+				"\t\tdefault:\n\t\t\tnext.ServeHTTP(w, r)\n\t\t}\n\t})\n}\n")
+		}, []string{"по пути запроса в теле обработчика", "switch по пути"}},
+
+		{"X9d_manual_routing_prefix_match", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource("\n\t\"strings\"", "",
+				`if strings.HasPrefix(r.URL.Path, "/iam/v1/auth")`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сопоставление пути функцией strings.HasPrefix"}},
+
+		{"X9e_manual_routing_through_the_request_url_value", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, ceremonyManualSource("", "",
+				`if u := r.URL; u.Path == "/iam/v1/authorize"`, "w.WriteHeader(http.StatusOK)"))
+		}, []string{"по пути запроса в теле обработчика", "сравнение пути"}},
+
 		{"X10_declared_leaf_on_a_second_place", func(f *ceremonyFixture) {
 			serve(f, anchorMetrics, "metricsMux.Handle(cfg.AuthN.TokenSigning.ResolveKeySetPath(), authorizehttp.New())")
 		}, []string{"не сводится к значению", "KeySetPath", "cmd/kaname/serve.go:"}},
@@ -1097,6 +1118,15 @@ func ceremonyTwins() []ceremonyTwin {
 					"\treturn err == nil && u.Path == \"/iam/v1/authorize\"\n}")
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
 				`_ = ceremonyIsAuthorize("https://kaname.invalid/iam/v1/authorize")`)
+		}},
+		// Путь запроса, прочитанный для проверки ввода (длина) и для журнала,
+		// маршрута не выбирает.
+		{"T18_request_path_length_check_and_log", func(f *ceremonyFixture) {
+			ceremonyManualOnMetrics(f, "package main\n\nimport (\n\t\"log/slog\"\n\t\"net/http\"\n)\n\n"+
+				"func ceremonyProbeManual(next http.Handler) http.Handler {\n"+
+				"\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n"+
+				"\t\tif len(r.URL.Path) > 4096 {\n\t\t\tw.WriteHeader(http.StatusRequestURITooLong)\n\t\t\treturn\n\t\t}\n"+
+				"\t\tslog.Info(\"запрос\", \"path\", r.URL.Path)\n\t\tnext.ServeHTTP(w, r)\n\t})\n}\n")
 		}},
 		// Метод ServeHTTP мультиплексора, взятый значением, делегирует ЭТОМУ
 		// мультиплексору, а не становится конечной точкой: поддерево /iam/v1/

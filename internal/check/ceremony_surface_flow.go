@@ -188,7 +188,9 @@ type surfaceFlow struct {
 	raisedLits  []flowNode
 	builders    []flowNode
 	sinks       []sinkRef
-	manual      []flowNode
+	manual      []manualRef
+	pathReads   []flowNode
+	pathCands   []pathCand
 
 	// индексы обратного разбора (ceremony_surface_resolve.go)
 	idx *resolveIndex
@@ -472,6 +474,7 @@ func (a *surfaceFlow) collect() {
 			a.idx.structTags(sp, f)
 		}
 	}
+	a.judgePathCands()
 }
 
 // walk собирает узлы одного тела, помня ближайшую функцию.
@@ -489,6 +492,7 @@ func (a *surfaceFlow) walk(sp *surfaceSrcPkg, top fkey, root ast.Node) {
 		}
 		nodes = append(nodes, n)
 		fk := stack[len(stack)-1]
+		a.notePathNode(sp, fk, n)
 		switch n := n.(type) {
 		case *ast.FuncLit:
 			a.litPkg[n] = sp
@@ -528,14 +532,6 @@ func (a *surfaceFlow) walk(sp *surfaceSrcPkg, top fkey, root ast.Node) {
 			a.idx.composite(sp, fk, n)
 			a.keep(sp, fk, n, a.interesting(a.typeOf(sp, n)))
 			a.noteComposite(sp, fk, n)
-		case *ast.BinaryExpr:
-			if (n.Op == token.EQL || n.Op == token.NEQ) && (isURLPath(sp, n.X) || isURLPath(sp, n.Y)) {
-				a.manual = append(a.manual, flowNode{sp, fk, n})
-			}
-		case *ast.SwitchStmt:
-			if n.Tag != nil && isURLPath(sp, n.Tag) {
-				a.manual = append(a.manual, flowNode{sp, fk, n})
-			}
 		case *ast.SendStmt:
 			a.keep(sp, fk, n, a.interesting(a.typeOf(sp, n.Value)))
 		case *ast.TypeSwitchStmt:
@@ -610,8 +606,7 @@ func isRequestField(sp *surfaceSrcPkg, e ast.Expr, name string) bool {
 	return ok && s.Kind() == types.FieldVal && isNamed(s.Recv(), "net/http", "Request")
 }
 
-// noteCall — построители поверхности, отдача обработчика серверу, сравнение
-// пути функцией строк.
+// noteCall — построители поверхности и отдача обработчика серверу.
 func (a *surfaceFlow) noteCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) {
 	fn := calleeFunc(sp, call)
 	if fn == nil || fn.Pkg() == nil {
@@ -625,11 +620,6 @@ func (a *surfaceFlow) noteCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) {
 		a.sinks = append(a.sinks, sinkRef{flowNode{sp, fk, call}, call.Args[len(call.Args)-1]})
 	case pkg == "net/http" && (name == "Serve" || name == "ServeTLS") && len(call.Args) >= 2:
 		a.sinks = append(a.sinks, sinkRef{flowNode{sp, fk, call}, call.Args[1]})
-	case (pkg == "strings" || pkg == "path") && len(call.Args) > 0 && isURLPath(sp, call.Args[0]):
-		switch name {
-		case "HasPrefix", "HasSuffix", "TrimPrefix", "TrimSuffix", "CutPrefix", "CutSuffix", "Contains", "EqualFold", "Compare", "Index", "Match", "Split", "SplitN", "Fields":
-			a.manual = append(a.manual, flowNode{sp, fk, call})
-		}
 	}
 }
 
