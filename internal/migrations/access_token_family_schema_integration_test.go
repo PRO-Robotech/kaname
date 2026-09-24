@@ -177,6 +177,12 @@ func TestIntegration_AccessTokenFormsAreClosed(t *testing.T) {
 	requirePgRefusal(t, atInsert(db, "jti-not-our-form", family),
 		"23514", "access_tokens_jti_form_ck", "идентификатор не нашей формы")
 
+	// Семейство не нашей формы отвергает ПРОВЕРКА, а не ключ: она исполняется
+	// раньше ключа, и у записи с пустой живостью ключ не судит вовсе — здесь она
+	// последний рубеж формы.
+	requirePgRefusal(t, atInsert(db, atJTI("f3"), "tfm-not-our-form"),
+		"23514", "access_tokens_family_form_ck", "семейство не нашей формы")
+
 	_, err := db.Exec(`
 		INSERT INTO kaname.access_tokens (jti, family_id, issued_at, expires_at)
 		VALUES ($1, $2, now(), now())`, atJTI("f2"), family)
