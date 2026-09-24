@@ -814,7 +814,7 @@ func runServe(cfg config.Config) error {
 	// with acr_min>0 (InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
 	// ListAdmins} already carry acr_min=2) is not acr-enforced internally. This
 	// floor closes that arm: for each gateway-fronted RPC whose catalog acr_min>0
-	// it enforces `acr >= acr_min` (the SAME grpcsrv.ACRSatisfies ranking the
+	// it enforces `acr >= acr_min` (the SAME acrlevel.Satisfies ranking the
 	// gateway uses), reading the acr from the FD-4-trusted ctx (forwarded only on
 	// the mTLS-verified gateway→iam edge). Service-caller module SAs (vpc/compute
 	// fgaproxy) are acr-EXEMPT (not user principals) — and internalCallerPolicy

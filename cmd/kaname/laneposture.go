@@ -26,7 +26,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -122,7 +122,7 @@ func readCatalogFloors(ctx context.Context, logger *slog.Logger) config.CatalogF
 func laneWiringCensus(w config.LaneWiring) []any {
 	demanded := 0
 	for level, n := range w.CatalogFloors.ByLevel {
-		if grpcsrv.ACRRank(level) > 0 {
+		if acrlevel.Rank(level) > 0 {
 			demanded += n
 		}
 	}
