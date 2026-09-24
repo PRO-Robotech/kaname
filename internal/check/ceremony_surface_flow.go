@@ -205,6 +205,9 @@ type surfaceFlow struct {
 	manual      []manualRef
 	pathReads   []flowNode
 	pathCands   []flowNode
+	// переменные, параметры и поля, несущие путь запроса (выведение ручной
+	// маршрутизации)
+	pathCarriers int
 
 	// индексы обратного разбора (ceremony_surface_resolve.go)
 	idx *resolveIndex

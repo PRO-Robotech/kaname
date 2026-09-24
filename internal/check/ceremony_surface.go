@@ -702,6 +702,7 @@ func (j *surfaceJudge) registrations() {
 			c.URLPathReads++
 		}
 	}
+	c.PathCarriers = j.a.pathCarriers
 	for _, m := range j.a.manual {
 		if !j.reachableFk(m.node.fk) {
 			continue
