@@ -89,8 +89,8 @@ note_check() {
     fi
 }
 
-AXIS_NAME=(1 2 3 4 5 5а 6 7 8 9)
-AXIS_CHECKS=(2 4 5 1 4 3 2 2 1 2)
+AXIS_NAME=(1 2 3 4 5 5а 6 7 8 9 10)
+AXIS_CHECKS=(2 4 5 1 4 3 2 2 1 2 5)
 AXES_DECLARED=${#AXIS_CHECKS[@]}
 axes_executed=0
 expected_checks=0
@@ -307,7 +307,10 @@ V1
         fi
     fi
     ( cd "$c" && bash "$INSTALL" install ) > "$c/.install2.log" 2>&1
-    if grep -q 'kaname-hook-stub v2' "$c/.git/hooks/pre-push"; then
+    # Редакция берётся у ПРОИЗВОДИТЕЛЯ, а не выписывается литералом: литерал
+    # устаревал бы при каждой смене редакции и судил бы прошлую.
+    current_marker="$(bash "$INSTALL" stub pre-push 2>/dev/null | sed -n 's/^# \(kaname-hook-stub v[0-9][0-9]*\)$/\1/p')"
+    if [ -n "$current_marker" ] && grep -qx "# $current_marker" "$c/.git/hooks/pre-push"; then
         ok "установка ПЕРЕПИСАЛА устаревший переходник"
     else
         bad "устаревший переходник пережил установку"
@@ -425,6 +428,76 @@ else
     fi
 fi
 axis_done 10
+
+echo "── ось 10: ОБЩИЙ КАТАЛОГ ХУКОВ — ПРОВЯЗКА ОДНОЙ КОПИИ НЕ ОСТАНАВЛИВАЕТ СОСЕДНЮЮ"
+current_axis=11
+#
+# git ищет хуки в <общий каталог>/hooks — ОДНОМ на все рабочие копии клона.
+# Провязка из одной копии кладёт переходник каждой соседней, и переходник v2
+# отказывал во всякой копии, чьё дерево адресата не несёт: коммит полосы,
+# открытой до хука, останавливала провязка, которой полоса не делала
+# (воспроизведено на сборке 412: копий в клоне 104, без commit-msg 102).
+#
+# Фикстура повторяет ту форму: копия «shared» несёт pre-push и commit-msg и
+# провязана; соседняя «shared-old» стоит на ревизии, где commit-msg ещё нет.
+# Законный близнец — ТА ЖЕ ревизия в копии, заявившей провязку: там отсутствие
+# адресата остаётся отказом. Разница ровно в одном факте — заявлении копии.
+c="$work/shared"
+o="$work/shared-old"
+G=(-c user.email=probe@example.invalid -c user.name=probe)
+if ! new_clone "$c"; then
+    axis_unmet 11 "фикстура не собрана"
+else
+    base="$(git -C "$c" rev-parse HEAD)"
+    cat > "$c/scripts/hooks/commit-msg" <<'STAND'
+#!/usr/bin/env bash
+set -uo pipefail
+top="$(git rev-parse --show-toplevel)"
+printf 'исполнен\n' > "$top/.stand-in-commit-ran"
+exit 0
+STAND
+    chmod +x "$c/scripts/hooks/commit-msg"
+    if ! git -C "$c" "${G[@]}" add scripts/hooks/commit-msg ||
+       ! git -C "$c" "${G[@]}" commit -q -m "хук коммита" ||
+       ! git -C "$c" worktree add -q --detach "$o" "$base"; then
+        axis_unmet 11 "соседняя копия не собрана"
+    else
+        ( cd "$c" && bash "$INSTALL" install ) > "$c/.install.log" 2>&1
+        out="$(git -C "$o" "${G[@]}" commit -q --allow-empty -m "работа полосы" 2>&1)"
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+            ok "соседняя копия без commit-msg КОММИТИТ: чужая провязка её не останавливает"
+        else
+            bad "соседняя копия без commit-msg не коммитит (код $rc) — провязка одной копии остановила другую: $out"
+        fi
+        if printf '%s' "$out" | grep -q 'проверок НЕ БЫЛО'; then
+            ok "проход соседней копии НАЗВАН: проверок не было — это не зелёное"
+        else
+            bad "соседняя копия прошла молча либо без переходника — третий исход не назван: $out"
+        fi
+        out="$( cd "$o" && bash "$INSTALL" check 2>&1 )"
+        rc=$?
+        if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qE '^[[:space:]]*УСЛОВИЕ НЕ СОЗДАНО'; then
+            ok "check в соседней копии не объявляет её провязанной — метка третьего исхода на месте"
+        else
+            bad "check в соседней копии (код $rc) объявил провязку, которой копия не заявляла: $out"
+        fi
+        if out="$(push_probe "$o")" && [ -f "$o/.stand-in-ran" ]; then
+            ok "адресат, который соседняя копия НЕСЁТ, исполнен — её проверки не выключены"
+        else
+            bad "pre-push соседней копии не исполнен — лекарство выключило чужие проверки: $out"
+        fi
+        git -C "$c" checkout -q --detach "$base"
+        out="$(git -C "$c" "${G[@]}" commit -q --allow-empty -m "копия заявила провязку" 2>&1)"
+        rc=$?
+        if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'scripts/hooks/commit-msg'; then
+            ok "законный близнец: копия, ЗАЯВИВШАЯ провязку, на той же ревизии отказывает и называет адресата"
+        else
+            bad "копия, заявившая провязку, без адресата не отказала (код $rc) — отказ на ненайденном адресате потерян: $out"
+        fi
+    fi
+    axis_done 11
+fi
 
 echo
 echo "=== install-inject: перепись ==="
