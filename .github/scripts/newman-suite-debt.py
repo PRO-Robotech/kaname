@@ -601,49 +601,64 @@ _HOLDER_CEREMONY = (
 _HOLDER_EDGE_HALF = (
     "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
     "расщепить коллекцию либо переутвердить по фактическому производителю")
+# Четырнадцать коллекций C и D: производитель их утверждений — край платформы
+# либо чужой домен, а копий в платформе нет (набор iam снят оттуда 2026-09-12).
+_HOLDER_PLATFORM_HOME = (
+    "PRO-Robotech/kaname#415 — дом по предмету и шаг конвейера этого дома: "
+    "переутвердить по фактическому производителю, перенести в платформу "
+    "расщеплением либо снять вместе с предметом")
+# Две коллекции производителя-службы, которые адресуются краю: у каждой своё
+# условие стенда, а задача одна.
+_HOLDER_SERVICE_ON_EDGE = (
+    "PRO-Robotech/kaname#416 — прогон на стенде с адресом и посевом: членство — "
+    "собственным фронтом в задании `stand`, интерактивный клиент — на посадке "
+    "`own` поверх своей выдачи клиента (kaname#313)")
+_HOLDER_SECOND_FACTOR = (
+    "PRO-Robotech/kaname#417 — срез отчёта знает удостоверения полосы второго "
+    "фактора, и задание `chart-own` гоняет набор")
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек", _HOLDER_CEREMONY),
-    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", ""),
-    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", ""),
+    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", _HOLDER_PLATFORM_HOME),
+    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", _HOLDER_PLATFORM_HOME),
     "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
     "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
-    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль", ""),
+    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль", _HOLDER_PLATFORM_HOME),
     "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
     "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
     "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
     "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction", _HOLDER_CEREMONY),
     "iam-account-redesign": ("B", "7 человеческих предъявителей из 10", _HOLDER_CEREMONY),
-    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`", ""),
+    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`", _HOLDER_PLATFORM_HOME),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
-    "iam-group": ("C", "2 утверждения читают `md.resource`", ""),
-    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", ""),
-    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", ""),
+    "iam-group": ("C", "2 утверждения читают `md.resource`", _HOLDER_PLATFORM_HOME),
+    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", _HOLDER_SERVICE_ON_EDGE),
+    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", _HOLDER_PLATFORM_HOME),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
     "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
-    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", ""),
+    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", _HOLDER_SERVICE_ON_EDGE),
     "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается", _HOLDER_CEREMONY),
     "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем", _HOLDER_CEREMONY),
     "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
     "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
-    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", ""),
+    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", _HOLDER_PLATFORM_HOME),
     "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
     "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт", ""),
     "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC", ""),
     "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»", _HOLDER_CEREMONY),
-    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)", ""),
+    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)", _HOLDER_PLATFORM_HOME),
     "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция", ""),
-    "iam-service-account": ("C", "2 утверждения читают `md.resource`", ""),
+    "iam-service-account": ("C", "2 утверждения читают `md.resource`", _HOLDER_PLATFORM_HOME),
     "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`", ""),
     "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи", ""),
-    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", ""),
-    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B", ""),
+    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", _HOLDER_PLATFORM_HOME),
+    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B", _HOLDER_PLATFORM_HOME),
     "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`", _HOLDER_CEREMONY),
     "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль", ""),
-    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", ""),
-    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", ""),
-    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", ""),
+    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", _HOLDER_PLATFORM_HOME),
+    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", _HOLDER_PLATFORM_HOME),
+    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", _HOLDER_PLATFORM_HOME),
     "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов", _HOLDER_CEREMONY),
     "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`", _HOLDER_CEREMONY),
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
@@ -666,7 +681,7 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     # что у полосы входа; код по времени вычисляет сам посев из секрета ответа.
     # Задание `chart-own` его НЕ гоняет, хотя условие создаёт: шаг прогона
     # заводится вместе с тем, что его выход готов к публикации, — держатель ниже.
-    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев", ""),
+    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев", _HOLDER_SECOND_FACTOR),
 }
 
 
