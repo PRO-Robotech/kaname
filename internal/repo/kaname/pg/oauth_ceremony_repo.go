@@ -4,11 +4,10 @@
 package pg
 
 // oauth_ceremony_repo.go — слой доступа СОБСТВЕННОЙ ЦЕРЕМОНИИ OAuth: код
-// авторизации, семейство выданного по нему, обновляющий токен и согласие
-// субъекта (задача PRO-Robotech/kaname#313; миграции
+// авторизации, семейство выданного по нему и обновляющий токен (задача
+// PRO-Robotech/kaname#313; миграции
 // `20260920175117_authorization_code_is_our_record.sql`,
-// `20260920175118_interactive_client_carries_its_secret_verifier.sql`,
-// `20260920175119_consent_is_our_record.sql`).
+// `20260920175118_interactive_client_carries_its_secret_verifier.sql`).
 //
 // # ОДНА ИНСТРУКЦИЯ — ЭТО ИНВАРИАНТ, А НЕ АККУРАТНОСТЬ
 //
@@ -63,8 +62,6 @@ package pg
 //     встречный порядок с каскадом отзыва даёт цикл, жертвой которого движок
 //     выбирал сам отзыв;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
-//   - «одно согласие на тройку субъект-клиент-область» —
-//     `consent_grants_subject_client_scope_uk`;
 //   - форма свёрток, испытания PKCE и словари причин — ограничения схемы.
 
 import (
@@ -76,15 +73,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/corelib/ids"
-
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
-
-// consentIDPrefix — префикс идентификатора согласия; форма закрыта
-// ограничением `consent_grants_id_form_ck`.
-const consentIDPrefix = "cg"
 
 // refuseNoSuchClient — ЕДИНСТВЕННЫЙ производитель отказа «интерактивного
 // клиента с таким идентификатором в реестре нет».
@@ -754,111 +745,6 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 	// операторов больше нет — основание принадлежит семейству, а не копии на
 	// ребёнке.
 	return len(families), nil
-}
-
-// ── Согласие ────────────────────────────────────────────────────────────────
-
-// GrantConsent записывает согласие человека клиенту на перечисленные области.
-//
-// ИДЕМПОТЕНТНО и ОДНИМ оператором на весь перечень: уникальность тройки держит
-// `consent_grants_subject_client_scope_uk`, и конфликт по ней — не отказ, а
-// «согласие уже стоит»: отметка отзыва снимается, момент согласия обновляется
-// на ТОЙ ЖЕ строке. Пара «посмотреть, есть ли согласие — записать» дала бы под
-// гонкой две строки на одну тройку, после чего отзыв снимал бы ОДНУ из них.
-func (r *OAuthCeremonyRepo) GrantConsent(ctx context.Context, userID, clientID string, scopes []string) error {
-	if userID == "" {
-		return fmt.Errorf("Illegal argument consent_grant.user_id: required")
-	}
-	if clientID == "" {
-		return fmt.Errorf("Illegal argument consent_grant.client_id: required")
-	}
-	if len(scopes) == 0 {
-		return fmt.Errorf("Illegal argument consent_grant.scope: required")
-	}
-	// Повтор области в перечне — ОДНА область, а не две: `ON CONFLICT DO UPDATE`
-	// не вправе задеть одну и ту же строку дважды в одном операторе и ответил бы
-	// отказом хранилища на то, что отказом не является. Свёртка повторов идёт
-	// здесь, ДО оператора, а не разбором его отказа.
-	unique := make([]string, 0, len(scopes))
-	seen := make(map[string]bool, len(scopes))
-	for i, s := range scopes {
-		if s == "" {
-			return fmt.Errorf("Illegal argument consent_grant.scope[%d]: must not be empty", i)
-		}
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
-		unique = append(unique, s)
-	}
-	rowIDs := make([]string, 0, len(unique))
-	for range unique {
-		rowIDs = append(rowIDs, ids.NewHyphenID(consentIDPrefix))
-	}
-	// Идентификаторы чеканятся на КАЖДУЮ область, но лягут только те, чья
-	// строка заводится впервые: конфликтующая строка сохраняет свой.
-	if _, err := r.pool.Exec(ctx, `
-		INSERT INTO kaname.consent_grants (id, user_id, client_id, scope)
-		SELECT s.id, $2, $3, s.scope
-		  FROM unnest($1::text[], $4::text[]) AS s(id, scope)
-		ON CONFLICT (user_id, client_id, scope)
-		DO UPDATE SET revoked_at = NULL, granted_at = now()`,
-		rowIDs, userID, clientID, unique); err != nil {
-		return wrapPgErr(err, "ConsentGrant", userID)
-	}
-	return nil
-}
-
-// WithdrawConsent отзывает согласие на одну область: ОТМЕТКА на той же строке.
-//
-// Строка остаётся: «согласия не было» и «согласие отозвано» — разные ответы, и
-// удалённая строка их не различает.
-func (r *OAuthCeremonyRepo) WithdrawConsent(ctx context.Context, userID, clientID, scope string) error {
-	if userID == "" || clientID == "" || scope == "" {
-		return fmt.Errorf("Illegal argument consent_grant: user_id, client_id and scope are required")
-	}
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE kaname.consent_grants
-		   SET revoked_at = now()
-		 WHERE user_id = $1 AND client_id = $2 AND scope = $3 AND revoked_at IS NULL`,
-		userID, clientID, scope)
-	if err != nil {
-		return wrapPgErr(err, "ConsentGrant", userID)
-	}
-	if tag.RowsAffected() == 0 {
-		// Отзывать нечего — и это НЕ отказ: согласия либо не было, либо оно уже
-		// отозвано, и в обоих случаях состояние ровно то, которого просили.
-		return nil
-	}
-	return nil
-}
-
-// ConsentedScopes — области, на которые согласие ДЕЙСТВУЕТ, в устойчивом
-// порядке. Отозванные не попадают: отметка отзыва и есть предикат.
-func (r *OAuthCeremonyRepo) ConsentedScopes(ctx context.Context, userID, clientID string) ([]string, error) {
-	if userID == "" || clientID == "" {
-		return nil, fmt.Errorf("Illegal argument consent_grant: user_id and client_id are required")
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT scope FROM kaname.consent_grants
-		 WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL
-		 ORDER BY scope`, userID, clientID)
-	if err != nil {
-		return nil, wrapPgErr(err, "ConsentGrant", userID)
-	}
-	defer rows.Close()
-	out := make([]string, 0, 8)
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, wrapPgErr(err, "ConsentGrant", userID)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, wrapPgErr(err, "ConsentGrant", userID)
-	}
-	return out, nil
 }
 
 // ── Проверочное значение секрета интерактивного клиента ─────────────────────
