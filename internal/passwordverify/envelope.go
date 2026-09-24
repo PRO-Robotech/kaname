@@ -36,6 +36,14 @@ package passwordverify
 // Величины названы с причиной у констант; держит их измерительная проба Ф3-31:
 // медиана самой дорогой полосы выше потолка — числа выбраны неверно.
 //
+// Мера прогона — ВХОД огибающей (`CostMeter`), а не её внутренность:
+// композиционный корень меряет настенными часами процесса
+// (`WallClockCostMeter`), пробы ВЫБОРА потолка — стоимостью, которую назначает
+// сама проба. Порядок стоимостей разных классов, измеренный часами,
+// переворачивается одной задержкой планировщика в замере дешёвого класса, и
+// проба, судящая по такому порядку, какой класс стал потолком, судила бы
+// расписание машины, а не выбор.
+//
 // # Ёмкость и приёмник
 //
 // Калибровка идёт В ёмкости проверяющего: страж старта сверил с пределом памяти
@@ -107,6 +115,22 @@ const (
 	// неверного пароля прогона: ни тот ни другой никому не известен.
 	calibrationSecretLen = 32
 )
+
+// CostMeter — мера ОДНОГО прогона калибровки: зовёт verify синхронно ровно
+// один раз и отдаёт стоимость этого прогона. Прогон исполняется в ёмкости
+// проверяющего. Класс — довод меры, а не её результат: настенные часы его не
+// читают, мера пробы по нему назначает стоимость.
+type CostMeter func(class domain.PasswordCostClass, verify func()) time.Duration
+
+// WallClockCostMeter — мера по монотонным часам процесса; её берёт
+// композиционный корень. Часы читаются до начала прогона и после его конца:
+// мера не короче прогона при любой задержке планировщика
+// (TestWallClockCostMeter_MeasuresTheWholeRunItCalls).
+func WallClockCostMeter(_ domain.PasswordCostClass, verify func()) time.Duration {
+	start := time.Now()
+	verify()
+	return time.Since(start)
+}
 
 // EnvelopeTrigger — повод калибровки класса.
 type EnvelopeTrigger string
@@ -180,6 +204,7 @@ type flight struct {
 type Envelope struct {
 	verifier *Verifier
 	observer EnvelopeObserver
+	meter    CostMeter
 
 	// floor — потолок; читается полосой входа без замка.
 	floor atomic.Int64
@@ -191,17 +216,21 @@ type Envelope struct {
 	hasCeil  bool
 }
 
-// NewEnvelope — огибающая над проверяющим. Оба довода обязательны: без
-// проверяющего калибровать нечем, без приёмника потолок невидим.
-func NewEnvelope(verifier *Verifier, observer EnvelopeObserver) (*Envelope, error) {
+// NewEnvelope — огибающая над проверяющим. Все три довода обязательны: без
+// проверяющего калибровать нечем, без приёмника потолок невидим, без меры
+// стоимость класса нечем узнать.
+func NewEnvelope(verifier *Verifier, observer EnvelopeObserver, meter CostMeter) (*Envelope, error) {
 	if verifier == nil {
 		return nil, fmt.Errorf("password_envelope.verifier: required — калибровать нечем")
 	}
 	if observer == nil {
 		return nil, fmt.Errorf("password_envelope.observer: required — потолок без приёмника невидим оператору")
 	}
+	if meter == nil {
+		return nil, fmt.Errorf("password_envelope.meter: required — стоимость класса нечем мерить, а умолчание выбрало бы меру за вызывающего")
+	}
 	return &Envelope{
-		verifier: verifier, observer: observer,
+		verifier: verifier, observer: observer, meter: meter,
 		classes: map[string]CalibratedClass{}, inflight: map[string]*flight{},
 	}, nil
 }
@@ -297,7 +326,7 @@ func (e *Envelope) Admit(ctx context.Context, class domain.PasswordCostClass, tr
 
 // calibrate — стоимость класса на этом железе: максимум из
 // `calibrationSamples` прогонов неверного пароля против синтетического
-// значения класса, каждый — в ёмкости проверяющего.
+// значения класса, каждый — в ёмкости проверяющего и под мерой огибающей.
 func (e *Envelope) calibrate(ctx context.Context, class domain.PasswordCostClass) (time.Duration, error) {
 	// Читаемость судится ДО построения значения — разбором синтаксической
 	// формы без вычисления: построить значение класса выше потолка значило бы
@@ -325,24 +354,49 @@ func (e *Envelope) calibrate(ctx context.Context, class domain.PasswordCostClass
 
 	var cost time.Duration
 	for i := 0; i < calibrationSamples; i++ {
-		release, err := e.verifier.capacity.acquireWait(ctx)
+		elapsed, err := e.calibrationRun(ctx, class, value, wrong)
 		if err != nil {
-			return 0, fmt.Errorf("password_envelope: ёмкость для калибровки класса %s не получена: %w", class.Key(), err)
-		}
-		start := time.Now()
-		res := e.verifier.compute(value, wrong)
-		elapsed := time.Since(start)
-		release()
-		if res.Outcome != OutcomeMismatched {
-			// Синтетическое значение проверяющий обязан читать: иное — наш
-			// дефект построения, а не свойство класса.
-			return 0, fmt.Errorf("password_envelope: синтетическое значение класса %s дало исход %s вместо «не совпал»", class.Key(), res.Outcome)
+			return 0, err
 		}
 		if elapsed > cost {
 			cost = elapsed
 		}
 	}
 	return cost, nil
+}
+
+// calibrationRun — один прогон калибровки: неверный пароль против
+// синтетического значения класса, в месте ёмкости и под мерой огибающей.
+// Место освобождается отложенно: мера — довод вызывающего, и её паника не
+// уносит место ёмкости у полосы входа.
+func (e *Envelope) calibrationRun(ctx context.Context, class domain.PasswordCostClass, value domain.LoginVerifier, wrong string) (time.Duration, error) {
+	release, err := e.verifier.capacity.acquireWait(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("password_envelope: ёмкость для калибровки класса %s не получена: %w", class.Key(), err)
+	}
+	defer release()
+	var res Result
+	runs := 0
+	elapsed := e.meter(class, func() {
+		runs++
+		res = e.verifier.compute(value, wrong)
+	})
+	if runs != 1 {
+		// Мера без прогона назначала бы стоимость мимо ёмкости и мимо
+		// исхода; мера двух прогонов отдала бы их сумму за один.
+		return 0, fmt.Errorf("password_envelope: мера стоимости класса %s позвала прогон %d раз вместо одного", class.Key(), runs)
+	}
+	if res.Outcome != OutcomeMismatched {
+		// Синтетическое значение проверяющий обязан читать: иное — наш
+		// дефект построения, а не свойство класса.
+		return 0, fmt.Errorf("password_envelope: синтетическое значение класса %s дало исход %s вместо «не совпал»", class.Key(), res.Outcome)
+	}
+	if elapsed <= 0 {
+		// Потолок из неположительной стоимости не задерживал бы ни одного
+		// исхода: полоса отвечала бы временем проверки.
+		return 0, fmt.Errorf("password_envelope: мера стоимости класса %s отдала %v — стоимость прогона положительна", class.Key(), elapsed)
+	}
+	return elapsed, nil
 }
 
 func calibrationSecret() (string, error) {

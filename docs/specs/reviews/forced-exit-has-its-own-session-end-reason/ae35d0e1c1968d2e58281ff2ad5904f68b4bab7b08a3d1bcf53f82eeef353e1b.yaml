@@ -1,0 +1,182 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md
+  sha256: ae35d0e1c1968d2e58281ff2ad5904f68b4bab7b08a3d1bcf53f82eeef353e1b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Одобрение выводится из внешнего события
+    и этой записи. Номер редакции, строку истории круга 2 и запись «ред. 3» в журнале правил
+    автор тем же изменением, что и координаты; слово DRAFT не тронуто.
+  base_commit: 90fdc237f310d338bb81b72c98951f187529ee29
+  content_commit: null
+  content_commit_note: >-
+    Документ НЕ закоммичен. Ветка `334`, HEAD 90fdc237f — слияние «#334 merge #358», родители
+    2f69d90a (редакция 2: `git show HEAD:<путь> | sha256sum` → 0dd1c853…) и cca75858
+    (= `git ls-remote origin refs/heads/358`). В origin слияние не отправлено: origin/334 =
+    6c537d4c. `git diff --name-only cca75858 HEAD` → только документ и две записи ревью, то есть
+    дерево кода = вершина волны. `git status --short` → ` M` один файл. Отпечаток снят с файла
+    на диске.
+  branch: '334'
+  pull_request: null
+  task: PRO-Robotech/kaname#334
+  wave: PRO-Robotech/kaname#358
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 824
+  round: 3
+  predecessor_record: >-
+    docs/specs/reviews/forced-exit-has-its-own-session-end-reason/0dd1c85314dfb1bf0dcc2f9b421033af0efe64bda36fc9b999dbff8ed27fc6fc.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md
+    → ae35d0e1c1968d2e58281ff2ad5904f68b4bab7b08a3d1bcf53f82eeef353e1b. Снят до чтения и после
+    опыта. Совпал с объявленным в задании.
+  measurement_revisions: >-
+    Дерево службы: 90fdc237f (код = cca75858). База линии: cbbac984 = origin/main службы.
+    Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА. (1) Отпечаток, 824 строки, ` M` одного файла, родители слияния, отсутствие
+    трейлеров (`git log -1 --format=%B | grep -ciE 'co-authored|claude-session|generated with'`
+    → 0). (2) «Сценарии и решения по существу не менялись»: `git diff -U0 | grep -cE '^[+-]>'`
+    → 0, ни одна строка блоков Дано/Когда/Тогда не тронута; дельта +104 −62 в 38 кусках.
+    (3) «Все координаты перемерены»: 25 команд документа перепрогнаны на слиянии, выводы
+    совпали с написанным; прочие координаты сверены чтением.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-23'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  why: >-
+    Блокирующих ноль. Редакция правит только координаты, и каждая сверена на дереве после
+    вливания #340. Опыт на том же дереве воспроизвёл строки 1–3 таблицы §5 (ниже). Санкция на
+    код открывается внешним событием по этому отпечатку. Одобрение круга 2 остаётся вердиктом о
+    редакции 2 и сюда не переносится.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Только дельта против редакции 2: шапка (статус, история, журнал «ред. 3», ревизия
+    измерения), §0.1, §0.3, §0.5, §0.6 пп.2, 3, 4, 6, §2 п.1, производители KN-SER-01, 02, 04,
+    05, KN-SER-10, §5 (обе таблицы), §6 пп.3, 4, 7. Незатронутые разделы приняты кругами 1–2 и
+    не перечитывались.
+  method: experiment_and_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  coordinates: >-
+    ВСЕ СОВПАЛИ. §0.1: операторы human_session_repo.go:417/:447, условия :418/:448; места вызова
+    logout:78, change_password:197, recovery_complete:234, sf_remove:125, force_logout:736; на
+    cbbac984 — четыре, без force_logout (197→196, 234→231, 125→123 на базе);
+    `git grep -c EndAllSessions -- '*.go'` → 0; предикат «ствол против волны» → 0 на cbbac984
+    (файл на базе есть, 344 строки, снимает через RevokeAllUserTokensTx:252 — ноль не пустой) и
+    1 на слиянии. §0.3: 4 строки (force_logout:705, human_session.go:230, два SET); resolveSQL
+    51-59, ветвь «снята» 90-92, уборка :227; `ended_at IS NULL` — 418, 448, 635, 659. §0.5:
+    литерал force_logout:340, pb.go:808. §0.6: событие :87; forceLogoutAuditEvent 670-683 без
+    session_id; UpsertCutoff human_session_repo:677 → upsertSubjectCutoff
+    (user_token_revocations_repo.go:104) → оператор :49-59; момент :342, маркер :346, снятие
+    :736, отсечка :742, событие :745 после снятия; HumanSessionRepo исполняет humansession.Store
+    на :759; force_logout_own_session_integration_test.go:68 — свой экземпляр репозитория (файл
+    вливанием не тронут). §5: :347 причина маркера, :677 причина в составе события, 338-341
+    умолчание. KN-SER-02: на посадке own ветка h.ownSessions (force_logout.go:391) идёт в
+    forceLogoutOwnSessions, RevokeAllUserTokensTx — только в else (:396). KN-SER-05: четыре
+    файла проб #340 существуют, `\.EndSession(` в них 0; NewLogoutUseCase — два файла,
+    ForceLogout в них 0. §6 п.3: RevokeReasonLogout — 1 (:736). п.4: литерал — 1 (:340). п.7:
+    предикат → 4 (704, 706, 716, 718), контроль → 1 (711). Ответ операции и proto вливанием не
+    тронуты (ForceLogoutResult{RevokedCount: 1}, force_logout.go:867).
+  seed_experiment: >-
+    Одноразовая проба в отдельной отсоединённой рабочей копии от 90fdc237f в
+    kacho-workspace/tmp. Копия автора не тронута, отпечаток до и после совпал; после опыта копия
+    снята (`git worktree remove`). Обёртка humansession.Store: задержка на SessionFound, счёт
+    UpsertCutoff на писателе выхода. Выход — NewLogoutUseCase с часами пробы; распорядитель —
+    ownPostureForceLogoutHandler; посев — seedForceLogoutUser и seedOwnLoginSession.
+    Дерево как есть: 05/1, 05/2, 05/4 зелёные; в 05/4 задержка сработала, Execute=false,
+    событий 0, записей отсечки 0, ended_at = revoke_before; причина `logout` (правки ещё нет).
+    Без :418 — 05/4 КРАСНАЯ (Execute=true, событие 1, запись отсечки 1, ended_at = часы выхода ≠
+    revoke_before), 05/1 и 05/2 зелёные. Без :448 — 05/1 КРАСНАЯ (ended_at переписан моментом
+    распорядителя), 05/2 и 05/4 зелёные. Без logout.go:83-86 — 05/4 КРАСНАЯ (Execute=true,
+    событие 1, запись 1) при верной строке, 05/1 и 05/2 зелёные. Строки 1–3 таблицы §5
+    воспроизведены на новой базе.
+    Сверх того: TestForceLogout_EndsOurOwnLoginSession и
+    TestIntegration_ForceLogoutEndsOurOwnLoginSession — зелёные; первая по-прежнему утверждает
+    domain.RevokeReasonLogout (force_logout_own_session_test.go:209), то есть красный KN-SER-01
+    до правки на месте.
+  twins: 'Не менялись. 05/4 против 05/2 — одним фактом (что увидел резолв), посев подтвердил.'
+  constructibility: >-
+    Посеяно 3 из 4 «Дано» KN-SER-05 на новой базе (05/1, 05/2, 05/4). 05/3 — названной
+    фикстурой: та же пара ownPostureForceLogoutHandler / seedOwnLoginSession, не тронутая
+    вливанием. «Дано» KN-SER-01 построено пробой дерева (зелёная).
+  scope_delta: 'Нет. §2 п.1 переписан под состав события после #340, исключение прежнее.'
+  open_questions: none
+  disclosure: 'Связки «координата + условие + следствие» дельта не вносит.'
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N6
+    kind: wording
+    where: §6 п.7, абзац после контроля
+    text: >-
+      «Ложен только вывод того же абзаца (строки 714-716)» верно лишь с 714 «обе строки несут»:
+      первая половина 714 («от строки сессии к событию дороги нет») остаётся верной и после
+      правки. И наоборот: строка 705 (перечень закрытого словаря из трёх значений) после правки
+      ложна, но ловится только по соседям 704/706 того же абзаца. Реализации: снимать абзац
+      704-708 целиком.
+  - id: N7
+    kind: premise
+    where: KN-SER-05, 05/3 «отказов нет»
+    text: >-
+      На новой базе у принудительного выхода появился свой источник отказа — предел ожидания
+      замка 2 с (force_logout.go:528, lock_timeout в ForceLogoutWriter). Взаимной блокировки с
+      выходом по чтению нет: выход берёт строку сессии → семейства → отсечку, распорядитель —
+      строку личности (KEY SHARE → NO KEY UPDATE, с ключевым замком внешнего ключа совместим) →
+      строки сессии → семейства → отсечку. Отказ возможен только при удержании строки сессии
+      выходом дольше 2 с. 05/3 на новой базе не перепрогонялась. Реализации: печатать число
+      отказов по раундам, чтобы «отказов нет» было счётом, а не молчанием.
+
+out_of_scope_observations:
+  - >-
+    Вливание cca75858 принесло в дерево продукта
+    docs/changes/kn-341/reviews/post-diff/go-style-reviewer/bcdb913a….yaml, а записи пост-дифф
+    ревью живут в воркспейсе. К приёмке отношения не имеет; это предмет ветки волны.
+
+seed_attempt:
+  performed: true
+  outcome: executed
+  isolation: >-
+    Отсоединённая рабочая копия от 90fdc237f в kacho-workspace/tmp, TMPDIR вне git-деревьев.
+    Копия снята после опыта.
+  load: 'MemAvailable 37 ГБ, load average 3,1–5,3, чужих golangci-lint и pre-push нет; прогоны по одному, `nice -n 10 go test -p 1 -count=1`'
+  seeded: 3
+  of: 4
+  named_fixture: 1
+
+event_body: >-
+  acceptance-reviewer · APPROVED · PRO-Robotech/kaname
+  docs/engineering/acceptance/forced-exit-has-its-own-session-end-reason.md · sha256
+  ae35d0e1c1968d2e58281ff2ad5904f68b4bab7b08a3d1bcf53f82eeef353e1b · ревизия дерева 90fdc237f
+  (документ не закоммичен) · блокирующих 0

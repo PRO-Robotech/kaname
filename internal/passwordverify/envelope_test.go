@@ -19,7 +19,19 @@
 //     памяти ровно `ёмкость × память проверки`, и прогон мимо ёмкости вышел бы
 //     за бюджет;
 //  5. префикс класса, каким его отдаёт перепись хранилища, разбирается в класс
-//     обоими форматами и отвергается на чужом.
+//     обоими форматами и отвергается на чужом;
+//  6. мера стоимости — вход огибающей: без неё огибающая не строится, мера,
+//     не позвавшая прогон ровно один раз либо отдавшая неположительную
+//     стоимость, — отказ, а не потолок; паника меры не уносит место ёмкости;
+//  7. мера композиционного корня (настенные часы) мерит САМ прогон: часы
+//     читаются до его начала и после его конца, и мера не короче прогона.
+//
+// Пробы ВЫБОРА (какой класс стал потолком, поднялся ли потолок) идут на мере с
+// назначенной стоимостью (`assignedMeter`), а не на настенных часах: порядок
+// стоимостей, измеренный часами, переворачивается одной задержкой
+// планировщика, и проба выбора по нему судила бы расписание машины.
+// Настенные часы остаются у проб одного класса, чьи утверждения устойчивы к
+// любой задержке (стоимость положительна, запас над ней есть).
 package passwordverify_test
 
 import (
@@ -68,13 +80,55 @@ func (o *recordingEnvelopeObserver) EnvelopeFloorObserved(floor time.Duration, _
 	o.floors = append(o.floors, floor)
 }
 
+// newEnvelope — огибающая на настенных часах процесса, как в композиционном
+// корне. Только для проб, чьи утверждения не зависят от порядка стоимостей
+// разных классов.
 func newEnvelope(t *testing.T, capacity int) (*passwordverify.Envelope, *passwordverify.Verifier, *recordingEnvelopeObserver) {
+	t.Helper()
+	return newEnvelopeMeasuredBy(t, capacity, passwordverify.WallClockCostMeter)
+}
+
+func newEnvelopeMeasuredBy(t *testing.T, capacity int, meter passwordverify.CostMeter) (*passwordverify.Envelope, *passwordverify.Verifier, *recordingEnvelopeObserver) {
 	t.Helper()
 	v := newVerifier(t, capacity, newRecordingObserver())
 	obs := &recordingEnvelopeObserver{}
-	e, err := passwordverify.NewEnvelope(v, obs)
+	e, err := passwordverify.NewEnvelope(v, obs, meter)
 	require.NoError(t, err)
 	return e, v, obs
+}
+
+// assignedMeter — мера пробы: стоимость класса НАЗНАЧЕНА пробой, а не взята у
+// планировщика машины. Прогон проверяющего исполняется по-настоящему (в
+// ёмкости, с исходом «не совпал») — отброшено только его время. Класс, которому
+// стоимость не назначена, — провал пробы, а не нулевая стоимость.
+type assignedMeter struct {
+	t     *testing.T
+	mu    sync.Mutex
+	costs map[string]time.Duration
+	runs  map[string]int
+}
+
+// newAssignedMeter — мера со стоимостями по ключу класса (`PasswordCostClass.Key`).
+func newAssignedMeter(t *testing.T, costs map[string]time.Duration) *assignedMeter {
+	return &assignedMeter{t: t, costs: costs, runs: map[string]int{}}
+}
+
+func (m *assignedMeter) measure(class domain.PasswordCostClass, verify func()) time.Duration {
+	verify()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cost, ok := m.costs[class.Key()]
+	if !ok {
+		m.t.Errorf("мера пробы: стоимость класса %s не назначена", class.Key())
+	}
+	m.runs[class.Key()]++
+	return cost
+}
+
+func (m *assignedMeter) runsOf(class domain.PasswordCostClass) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.runs[class.Key()]
 }
 
 // TestEnvelope_AdmitCalibratesTheClassAndRaisesTheFloor — пустая огибающая
@@ -106,18 +160,28 @@ func TestEnvelope_AdmitCalibratesTheClassAndRaisesTheFloor(t *testing.T) {
 
 // TestEnvelope_ADearerClassRaisesTheFloorACheaperOneDoesNot — второй класс
 // дороже первого поднимает потолок на себя; третий, дешевле обоих,
-// калибруется, но потолка не трогает.
+// калибруется, но потолка не трогает. Стоимости назначены мерой пробы
+// (соотношение — как у настоящих классов: bcrypt вдвое на единицу стоимости,
+// argon2id на 8 КиБ — десятки микросекунд): предмет пробы — ВЫБОР потолка, а
+// порядок, измеренный часами, переворачивается одной задержкой планировщика.
 func TestEnvelope_ADearerClassRaisesTheFloorACheaperOneDoesNot(t *testing.T) {
-	e, _, obs := newEnvelope(t, 2)
+	meter := newAssignedMeter(t, map[string]time.Duration{
+		bcryptClass(4).Key():       time.Millisecond,
+		bcryptClass(8).Key():       16 * time.Millisecond,
+		argon2Class(8, 1, 1).Key(): 50 * time.Microsecond,
+	})
+	e, _, obs := newEnvelopeMeasuredBy(t, 2, meter.measure)
 	ctx := context.Background()
 	cheap, err := e.Admit(ctx, bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
 	require.NoError(t, err)
+	require.Equal(t, time.Millisecond, cheap.Cost, "стоимость класса — число меры, а не иное")
+	require.Equal(t, time.Millisecond+time.Millisecond/4, cheap.Floor, "потолок — стоимость с запасом в четверть")
 
 	dear, err := e.Admit(ctx, bcryptClass(8), passwordverify.EnvelopeTriggerStartup)
 	require.NoError(t, err)
 	require.True(t, dear.Calibrated)
-	require.Greater(t, dear.Cost, cheap.Cost, "стоимость 8 дороже стоимости 4 (вдвое на единицу)")
-	require.Greater(t, dear.Floor, cheap.Floor, "потолок поднялся")
+	require.Equal(t, 16*time.Millisecond, dear.Cost)
+	require.Equal(t, 20*time.Millisecond, dear.Floor, "потолок поднялся на дорогой класс")
 	ceiling, ok := e.Ceiling()
 	require.True(t, ok)
 	require.Equal(t, bcryptClass(8).Key(), ceiling.Class.Key())
@@ -125,10 +189,14 @@ func TestEnvelope_ADearerClassRaisesTheFloorACheaperOneDoesNot(t *testing.T) {
 	cheaper, err := e.Admit(ctx, argon2Class(8, 1, 1), passwordverify.EnvelopeTriggerRead)
 	require.NoError(t, err)
 	require.True(t, cheaper.Calibrated, "класс калибруется, даже когда потолка не поднимает: его стоимость — факт огибающей")
+	require.Equal(t, 50*time.Microsecond, cheaper.Cost)
 	require.Equal(t, dear.Floor, cheaper.Floor, "потолок не опустился")
 	require.Equal(t, dear.Floor, e.Floor())
 	ceiling, _ = e.Ceiling()
 	require.Equal(t, bcryptClass(8).Key(), ceiling.Class.Key(), "потолок — по-прежнему самый дорогой класс")
+	for _, class := range []domain.PasswordCostClass{bcryptClass(4), bcryptClass(8), argon2Class(8, 1, 1)} {
+		require.Positive(t, meter.runsOf(class), "класс %s калиброван ПРОГОНОМ через меру, а не назначен мимо неё", class.Key())
+	}
 
 	classes := e.Classes()
 	require.Len(t, classes, 3, "перепись огибающей несёт КАЖДЫЙ калиброванный класс, не только потолок")
@@ -236,6 +304,130 @@ func TestEnvelope_ConcurrentAdmitsOfOneClassCalibrateOnce(t *testing.T) {
 	}
 	require.Equal(t, 1, calibrated, "калибровка одна на класс")
 	require.Len(t, obs.calibrated, 1)
+}
+
+// TestNewEnvelope_RequiresACostMeter — огибающая без меры не строится: стоимость
+// класса нечем узнать, а умолчание выбирало бы меру за вызывающего молча.
+func TestNewEnvelope_RequiresACostMeter(t *testing.T) {
+	t.Parallel()
+	v := newVerifier(t, 1, newRecordingObserver())
+	_, err := passwordverify.NewEnvelope(v, passwordverify.NopEnvelopeObserver{}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "meter")
+
+	_, err = passwordverify.NewEnvelope(v, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
+	require.NoError(t, err, "законный близнец: мера есть — огибающая строится")
+}
+
+// TestWallClockCostMeter_MeasuresTheWholeRunItCalls — мера композиционного
+// корня мерит САМ прогон: часы читаются до его начала и после его конца, прогон
+// зовётся синхронно ровно один раз. Мера, прочитавшая часы мимо прогона,
+// отдала бы десятки наносекунд, и потолок из них не задерживал бы ни одного
+// исхода: полоса входа отвечала бы временем проверки. Пробы выбора потолка
+// идут на назначенной стоимости и этого не видят — видит только эта.
+//
+// Устойчивость к нагрузке — из порядка чтений, а не из запаса: прогон пробы
+// спит `nap` и сам мерит свою длительность; мера, читающая часы до начала и
+// после конца, не короче её при ЛЮБОЙ задержке планировщика (монотонные часы
+// не убывают). Верхней границы у меры нет: под нагрузкой прогон длиннее, и
+// граница сверху судила бы расписание машины. Мера мимо прогона проходит
+// лишь при задержке между двумя соседними чтениями часов не короче `nap` —
+// в каждом из `samples` замеров подряд.
+func TestWallClockCostMeter_MeasuresTheWholeRunItCalls(t *testing.T) {
+	t.Parallel()
+	const (
+		nap     = 20 * time.Millisecond
+		samples = 3
+	)
+	for i := 0; i < samples; i++ {
+		calls := 0
+		finished := false
+		var inside time.Duration
+		measured := passwordverify.WallClockCostMeter(bcryptClass(4), func() {
+			calls++
+			begin := time.Now()
+			time.Sleep(nap)
+			inside = time.Since(begin)
+			finished = true
+		})
+		require.Equal(t, 1, calls, "замер %d: прогон позван ровно один раз", i)
+		require.True(t, finished, "замер %d: мера вернулась после конца прогона, а не до него", i)
+		require.GreaterOrEqual(t, inside, nap, "замер %d, предпосылка: прогон пробы длится не меньше своего сна", i)
+		require.GreaterOrEqual(t, measured, inside,
+			"замер %d: мера %v короче прогона %v — часы прочитаны мимо прогона", i, measured, inside)
+	}
+}
+
+// TestEnvelope_APanickingMeterReleasesTheCapacitySlot — мера — довод
+// вызывающего, и её паника не уносит место ёмкости: иначе каждая такая
+// калибровка отнимала бы у полосы входа одно место до перезапуска. Законный
+// близнец — та же огибающая: место свободно и до калибровки.
+func TestEnvelope_APanickingMeterReleasesTheCapacitySlot(t *testing.T) {
+	t.Parallel()
+	meter := func(_ domain.PasswordCostClass, verify func()) time.Duration {
+		verify()
+		panic("мера пробы")
+	}
+	e, v, _ := newEnvelopeMeasuredBy(t, 1, meter)
+	require.True(t, v.WithCapacity(func() {}), "предпосылка: место ёмкости свободно до калибровки")
+
+	require.PanicsWithValue(t, "мера пробы", func() {
+		_, _ = e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
+	}, "паника меры доходит до вызывающего, а не глотается огибающей")
+	require.True(t, v.WithCapacity(func() {}), "место ёмкости освобождено и при панике меры")
+}
+
+// TestEnvelope_AMeterThatDoesNotRunTheVerificationOnceIsRefused — мера обязана
+// позвать прогон проверяющего РОВНО один раз: мера, вернувшая число без
+// прогона, назначала бы стоимость мимо ёмкости и мимо исхода «не совпал», а
+// позвавшая дважды мерила бы два прогона как один. Отказ называет меру, потолок
+// не выставлен.
+func TestEnvelope_AMeterThatDoesNotRunTheVerificationOnceIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		calls int
+	}{{"ни разу", 0}, {"дважды", 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			meter := func(_ domain.PasswordCostClass, verify func()) time.Duration {
+				for i := 0; i < tc.calls; i++ {
+					verify()
+				}
+				return time.Millisecond
+			}
+			e, _, obs := newEnvelopeMeasuredBy(t, 1, meter)
+			_, err := e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "мера стоимости класса "+bcryptClass(4).Key())
+			require.Zero(t, e.Floor(), "потолок из непрогнанной меры не выставлен")
+			require.Empty(t, e.Classes())
+			require.Empty(t, obs.calibrated)
+		})
+	}
+}
+
+// TestEnvelope_ANonPositiveCostIsRefused — неположительная стоимость — отказ, а
+// не потолок: потолок, выставленный из нуля, не задерживал бы ни одного исхода,
+// и полоса входа отвечала бы временем проверки. Законный близнец —
+// положительная стоимость той же меры.
+func TestEnvelope_ANonPositiveCostIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, cost := range []time.Duration{0, -time.Millisecond} {
+		meter := newAssignedMeter(t, map[string]time.Duration{bcryptClass(4).Key(): cost})
+		e, _, _ := newEnvelopeMeasuredBy(t, 1, meter.measure)
+		_, err := e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
+		require.Errorf(t, err, "стоимость %v обязана быть отвергнута", cost)
+		require.Contains(t, err.Error(), "мера стоимости класса "+bcryptClass(4).Key())
+		require.Zero(t, e.Floor())
+		require.Empty(t, e.Classes())
+	}
+
+	meter := newAssignedMeter(t, map[string]time.Duration{bcryptClass(4).Key(): time.Nanosecond})
+	e, _, _ := newEnvelopeMeasuredBy(t, 1, meter.measure)
+	adm, err := e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
+	require.NoError(t, err, "законный близнец: наименьшая положительная стоимость принимается")
+	require.Equal(t, time.Nanosecond, adm.Cost)
 }
 
 // TestParseCostClassPrefix_ReadsBothFormatsAndRefusesTheRest — префикс класса,
