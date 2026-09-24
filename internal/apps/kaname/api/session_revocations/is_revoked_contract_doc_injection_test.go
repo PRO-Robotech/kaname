@@ -10,6 +10,7 @@ package session_revocations
 // от инъекции ровно этим фактом.
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,12 @@ func cloneFacts(f isRevokedContractFacts) isRevokedContractFacts {
 	}
 	return out
 }
+
+// recordClaimants — тексты, обязанные называть запись по идентификатору.
+// Перечень выписан ЗДЕСЬ, а не выведен из contractClaims: выведенный перечень
+// терял бы текст вместе с парой, и снятая пара проходила бы молча. С
+// contractClaims он сверяется отдельным утверждением.
+var recordClaimants = []string{textRPC, textRevoked}
 
 // TestIsRevokedContractGate_FallsOnEachSide — порча по одному факту.
 func TestIsRevokedContractGate_FallsOnEachSide(t *testing.T) {
@@ -52,11 +59,29 @@ func TestIsRevokedContractGate_FallsOnEachSide(t *testing.T) {
 		}
 	})
 
-	t.Run("контракт молчит о записи по идентификатору", func(t *testing.T) {
-		f := cloneFacts(tree)
-		f.Texts[textRPC] = sourceMarker[sourceRecord].ReplaceAllString(f.Texts[textRPC], "the table")
-		require.Contains(t, auditIsRevokedContract(f),
-			textRPC+": ответ судит источник «record», а контракт его не называет")
+	for _, name := range recordClaimants {
+		t.Run("контракт молчит о записи по идентификатору: "+name, func(t *testing.T) {
+			f := cloneFacts(tree)
+			f.Texts[name] = sourceMarker[sourceRecord].ReplaceAllString(f.Texts[name], "the table")
+			require.Contains(t, auditIsRevokedContract(f),
+				name+": ответ судит источник «record», а контракт его не называет")
+		})
+	}
+
+	t.Run("перечень опыта совпадает с парами записи в contractClaims", func(t *testing.T) {
+		var claimed []string
+		for name, srcs := range contractClaims {
+			for _, s := range srcs {
+				if s == sourceRecord {
+					claimed = append(claimed, name)
+				}
+			}
+		}
+		want := append([]string(nil), recordClaimants...)
+		sort.Strings(claimed)
+		sort.Strings(want)
+		require.Equal(t, want, claimed, "пары «текст — запись по идентификатору» разошлись с "+
+			"перечнем опыта: снятая пара прошла бы без находки, новая — без инъекции")
 	})
 }
 
