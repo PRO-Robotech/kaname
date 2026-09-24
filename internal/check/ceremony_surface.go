@@ -359,6 +359,7 @@ func (j *surfaceJudge) run(coords []CeremonyCoordinate) CeremonySurfaceReport {
 	}
 	sort.Strings(probs)
 	j.findings = append(j.findings, probs...)
+	j.census.ResolveSteps = j.res.steps
 	report.Census = j.census
 	report.Findings = j.findings
 	return report

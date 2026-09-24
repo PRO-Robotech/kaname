@@ -354,15 +354,87 @@ func (r *strRes) sortedVals() []string {
 // valueCeiling — потолок декартова произведения при склейке.
 const valueCeiling = 256
 
+// resKind — что сводится к значениям: само выражение, элементы или ключи
+// контейнера.
+type resKind uint8
+
+const (
+	resValue resKind = iota
+	resElems
+	resKeys
+)
+
+type resKey struct {
+	e    ast.Expr
+	kind resKind
+}
+
+// resFrame — сводимое выражение на стеке разбора: low — самый глубокий
+// (ближайший к дну стека) узел, на котором обрезан цикл под этим кадром;
+// xform — сколько преобразований значения было открыто при входе.
+type resFrame struct {
+	low   int
+	xform int
+}
+
+// strResolver — обратный разбор строк.
+//
+// Цикл записей (P = Q, Q = S, S = P) обрезается на узле, который уже на
+// стеке. Результат узла, посчитанный при обрезке цикла ВЫШЕ него, неполон и в
+// память не кладётся: иначе значение переменной зависело бы от того, какую
+// регистрацию свели первой (kaname#320, круг 3). Окончательным становится
+// результат узла, под которым все обрезки — на нём самом или ниже: для цикла
+// копирований он и есть объединение всех записей цикла. Цикл, проходящий
+// сквозь ПРЕОБРАЗОВАНИЕ значения (склейка, форматирование, функция строк), даёт
+// неограниченное множество значений, и это лист, а не молчаливое усечение.
 type strResolver struct {
-	a     *surfaceFlow
-	memo  map[ast.Expr]*strRes
-	elems map[ast.Expr]*strRes
-	busy  map[ast.Expr]bool
+	a       *surfaceFlow
+	done    map[resKey]*strRes
+	onStack map[resKey]int
+	frames  []resFrame
+	xform   int
+	steps   int
 }
 
 func newStrResolver(a *surfaceFlow) *strResolver {
-	return &strResolver{a: a, memo: map[ast.Expr]*strRes{}, elems: map[ast.Expr]*strRes{}, busy: map[ast.Expr]bool{}}
+	return &strResolver{a: a, done: map[resKey]*strRes{}, onStack: map[resKey]int{}}
+}
+
+// memoized — сводит k вычислением compute с учётом циклов (см. strResolver).
+func (r *strResolver) memoized(k resKey, compute func() *strRes) *strRes {
+	if res, ok := r.done[k]; ok {
+		return res
+	}
+	if i, ok := r.onStack[k]; ok {
+		if r.xform > r.frames[i].xform {
+			return leaf("значение пути выводится из самого себя через преобразование — множество значений не ограничено")
+		}
+		if top := &r.frames[len(r.frames)-1]; i < top.low {
+			top.low = i
+		}
+		return newStrRes()
+	}
+	r.steps++
+	i := len(r.frames)
+	r.frames = append(r.frames, resFrame{low: i, xform: r.xform})
+	r.onStack[k] = i
+	res := compute()
+	low := r.frames[i].low
+	r.frames = r.frames[:i]
+	delete(r.onStack, k)
+	if low >= i {
+		r.done[k] = res
+	} else if low < r.frames[i-1].low {
+		r.frames[i-1].low = low
+	}
+	return res
+}
+
+// transform — вычисление, преобразующее значение (не копирование).
+func (r *strResolver) transform(f func() *strRes) *strRes {
+	r.xform++
+	defer func() { r.xform-- }()
+	return f()
 }
 
 func (r *strResolver) funcLabel(fk fkey) string {
@@ -392,17 +464,7 @@ func (r *strResolver) str(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
 		}
 		return res
 	}
-	if res, ok := r.memo[e]; ok {
-		return res
-	}
-	if r.busy[e] {
-		return newStrRes()
-	}
-	r.busy[e] = true
-	res := r.strNow(sp, fk, e)
-	delete(r.busy, e)
-	r.memo[e] = res
-	return res
+	return r.memoized(resKey{e: e, kind: resValue}, func() *strRes { return r.strNow(sp, fk, e) })
 }
 
 func (r *strResolver) strNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
@@ -424,7 +486,7 @@ func (r *strResolver) strNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
 		}
 	case *ast.BinaryExpr:
 		if x.Op == token.ADD {
-			return concat(r.str(sp, fk, x.X), r.str(sp, fk, x.Y))
+			return r.transform(func() *strRes { return concat(r.str(sp, fk, x.X), r.str(sp, fk, x.Y)) })
 		}
 	case *ast.CallExpr:
 		return r.callStr(sp, fk, x, 0)
@@ -596,9 +658,11 @@ func (r *strResolver) callStr(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, id
 func (r *strResolver) pure(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, fn *types.Func) *strRes {
 	name := fnName(fn)
 	args := make([]*strRes, len(call.Args))
+	r.xform++
 	for i, a := range call.Args {
 		args[i] = r.str(sp, fk, a)
 	}
+	r.xform--
 	apply := func(f func(vals []string) string) *strRes {
 		out := newStrRes()
 		combos := [][]string{{}}
@@ -666,19 +730,11 @@ func (r *strResolver) pure(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, fn *t
 
 // elemsOf — значения элементов контейнера (или ключей).
 func (r *strResolver) elemsOf(sp *surfaceSrcPkg, fk fkey, e ast.Expr, keys bool) *strRes {
-	if res, ok := r.elems[e]; ok && !keys {
-		return res
+	kind := resElems
+	if keys {
+		kind = resKeys
 	}
-	if r.busy[e] {
-		return newStrRes()
-	}
-	r.busy[e] = true
-	res := r.elemsNow(sp, fk, e, keys)
-	delete(r.busy, e)
-	if !keys {
-		r.elems[e] = res
-	}
-	return res
+	return r.memoized(resKey{e: e, kind: kind}, func() *strRes { return r.elemsNow(sp, fk, e, keys) })
 }
 
 func (r *strResolver) elemsNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr, keys bool) *strRes {
