@@ -43,14 +43,21 @@
 //
 // Она судит СОВПАДЕНИЕ объекта со страницей, а не верность самих выражений.
 // Что каждый названный ряд имеет производителя, держит соседняя проба
-// (`TestObservabilityPagePromisesOnlyWhatTheServiceProduces`); что отбор внутри
-// ряда называет живой контракт — `TestAlertSelectorsNameAContractTheTreeProduces`.
-// Объект попадает в ИХ популяцию ЧЕРЕЗ совпадение, доказанное здесь: страница
-// осмотрена обеими, а объект ей равен. Цепочка держится, пока зелены все три —
-// и рвётся заметно, потому что рвётся она красным.
+// (`TestObservabilityPagePromisesOnlyWhatTheServiceProduces`); что отбор по
+// имени контракта (`grpc_service`) называет живой контракт —
+// `TestAlertSelectorsNameAContractTheTreeProduces`; что отбор по исходу
+// называет значение из словаря — `TestAlertOutcomeSelectorsNameValuesTheTreeProduces`,
+// и только у рядов, чей словарь несёт её таблица. Объект попадает в ИХ
+// популяцию ЧЕРЕЗ совпадение, доказанное здесь: страница осмотрена ими, а
+// объект ей равен. Отбор по ЗНАЧЕНИЮ метки ряда, которого нет ни в одной из
+// этих популяций, цепочкой не судится: ряд прохода сметателя поэтому судит
+// `TestSigningKeySweeperSilenceIsAlerted`, беря его у производителя.
 package deploy_test
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,6 +68,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
 
@@ -169,7 +177,7 @@ func alertRenders(t *testing.T) []alertRender {
 	return []alertRender{
 		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
 		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
-		{name: "values.prod.yaml+own", chain: prod, sets: []string{identityPostureSet + "=own"}, posture: "own"},
+		{name: "values.prod.yaml+own", chain: prod, sets: ownPostureOverlay, posture: "own"},
 		{name: "values.prod.yaml+external", chain: prod, sets: []string{identityPostureSet + "=external"}, posture: "external"},
 	}
 }
@@ -315,4 +323,94 @@ func TestAlertRulesObjectCanBeSwitchedOff(t *testing.T) {
 		alertRulesToggle)
 	require.NotContains(t, off, "PrometheusRule",
 		"выключенный объект оставил след в рендере — выключение обязано быть полным")
+}
+
+// TestSigningKeySweeperSilenceIsAlerted — ноль проходов сметателя выведенных
+// ключей читается правилом тревоги как СИГНАЛ, а не как тишина (#314).
+//
+// Сметатель, переставший ходить, не отказывает — он молчит: выведенные ключи
+// остаются в наборе дольше отсрочки, и ни одна проба положительного пути этого
+// не видит. Поэтому предмет — правило, звонящее на ОТСУТСТВИЕ прохода, в
+// объекте, который поставляет чарт, на каждой посадке. Совпадение объекта со
+// страницей держит TestDeliveredAlertRulesMatchThePublishedPage.
+//
+// Производителя ряда держит САМА проба: ряд берётся с выдачи коллектора
+// ключницы ([sweepPassSeries]), а не литералом. Литерал пережил опыт S1 —
+// значение клетки прохода переименовано у производителя, и ни одна проба не
+// покраснела, а правило ждало ряд, которого нет. Способность упасть на этом
+// доказывают TestSweeperSilenceInjection_*.
+func TestSigningKeySweeperSilenceIsAlerted(t *testing.T) {
+	series := sweepPassSeries(t)
+	t.Logf("ряд прохода у производителя: %s", series)
+	renders := alertRenders(t)
+	require.NotEmpty(t, renders, "перепись посадок пуста — проверять нечего, это не зелёное")
+	for _, r := range renders {
+		t.Run(r.name, func(t *testing.T) {
+			rules, objects := chartAlertRules(t, renderStandaloneChart(t, r.chain, r.sets...))
+			require.Positive(t, objects, "объект правил не отрендерился — вердикта о правиле нет")
+			found := sweeperSilenceAlerts(rules, series)
+			t.Logf("перепись: правил в объекте %d · звонящих на ноль проходов сметателя %d %v", len(rules), len(found), found)
+			require.Lenf(t, found, 1, "ноль проходов сметателя обязан звонить ровно одним правилом, "+
+				"читающим ряд %s, как его печатает производитель; ноль таких правил — правило "+
+				"ждёт ряд, которого производитель не печатает, и не зазвонит никогда", series)
+		})
+	}
+}
+
+// sweeperSilenceAlerts — правила, звонящие на НОЛЬ проходов: выражение несёт
+// ряд прохода и сравнение с нулём.
+func sweeperSilenceAlerts(rules []alertRule, series string) []string {
+	var found []string
+	for _, rule := range rules {
+		expr := strings.Join(strings.Fields(rule.Expr), " ")
+		if strings.Contains(expr, series) && strings.Contains(expr, "== 0") {
+			found = append(found, rule.Alert)
+		}
+	}
+	return found
+}
+
+// sweepPassSeries — ряд прохода сметателя, как его печатает НАСТОЯЩИЙ
+// производитель: коллектор ключницы, которому источник сообщил ровно один
+// проход и ни одного иного события.
+func sweepPassSeries(t *testing.T) string {
+	t.Helper()
+	reg := metrics.NewRegistry()
+	reg.NewSigningKeyCollector(func() metrics.SigningKeyCounts {
+		return metrics.SigningKeyCounts{Sweeps: 1}
+	})
+	series, err := sweepPassSeriesFrom(reg.Handler())
+	require.NoError(t, err, "ряд прохода у производителя не читается — судить правило не с чем")
+	return series
+}
+
+// exposedCellRe — клетка ряда в текстовой выдаче: имя, отбор меток, величина.
+var exposedCellRe = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\} (\S+)$`)
+
+// sweepPassSeriesFrom — клетка ряда событий ключницы, несущая ровно один
+// проход, в той записи, в какой её отбирает правило: `имя{метка="значение"}`.
+//
+// Ряд читается с ВЫДАЧИ, а не с констант: переименование значения, метки или
+// перепутанная провязка клетки меняют то, что видит Prometheus, и проба видит
+// то же самое. Клеток с проходом не одна — отказ, а не пустая строка: пустой
+// отбор «совпал» бы с любым выражением.
+func sweepPassSeriesFrom(producer http.Handler) (string, error) {
+	rec := httptest.NewRecorder()
+	producer.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		return "", fmt.Errorf("выдача производителя ответила %d", rec.Code)
+	}
+	var cells []string
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		m := exposedCellRe.FindStringSubmatch(line)
+		if m == nil || m[1] != metrics.SigningKeyEventsMetric || m[3] != "1" {
+			continue
+		}
+		cells = append(cells, m[1]+"{"+m[2]+"}")
+	}
+	if len(cells) != 1 {
+		return "", fmt.Errorf("в выдаче %s клеток с одним проходом %d %v, а ожидается ровно одна",
+			metrics.SigningKeyEventsMetric, len(cells), cells)
+	}
+	return cells[0], nil
 }

@@ -45,14 +45,8 @@ package presentedcred
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -73,6 +67,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/publishedkey"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
@@ -497,11 +492,6 @@ func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, 
 	}
 
 	claims := jwt.MapClaims{}
-	var (
-		headerType          string
-		ownKeyBroken        error
-		registryUnavailable error
-	)
 	parser := jwt.NewParser(
 		// Перечень принимаемых подписей — ОБЪЯВЛЕННЫЙ УСТАНОВКОЙ, а не словарь
 		// платформы: решение принимается по нему, а не по тому, что заявлено в
@@ -518,66 +508,37 @@ func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, 
 		jwt.WithLeeway(tokenpolicy.ClockSkew),
 		jwt.WithTimeFunc(r.now),
 	)
-	tok, err := parser.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		// Форма идентификатора ограничивается ДО поиска по реестру, до повода
-		// обновить снимок и до журнала: негодная форма не должна доезжать ни
-		// до одного из трёх.
-		if !domain.ValidKeyIDForm(kid) {
-			return nil, errors.New("key id has illegal form")
+	// Ключ проверки выбирает правило набора (`publishedkey`): форма `kid` —
+	// ДО поиска, до повода обновить снимок и до журнала; ключ по `kid`;
+	// алгоритм, закреплённый за ключом; критичные параметры заголовка;
+	// открытая половина. Поиск — свой: у снимка ДВА повода обновиться.
+	lookup := func(kid string) (domain.PublishedKey, bool, error) {
+		if pub, ok := byKID[kid]; ok {
+			return pub, true, nil
 		}
+		// ВТОРОЙ повод обновить снимок: подписант назвал ключ, которого в
+		// снимке нет. Так выглядит ротация, и ждать по ней срока годности
+		// значило бы отвергать живой токен всё окно.
+		fresh, ferr := r.keySnapshot(ctx, true)
+		if ferr != nil {
+			return domain.PublishedKey{}, false, ferr
+		}
+		byKID = fresh
 		pub, ok := byKID[kid]
-		if !ok {
-			// ВТОРОЙ повод обновить снимок: подписант назвал ключ, которого в
-			// снимке нет. Так выглядит ротация, и ждать по ней срока годности
-			// значило бы отвергать живой токен всё окно.
-			fresh, ferr := r.keySnapshot(ctx, true)
-			if ferr != nil {
-				registryUnavailable = ferr
-				return nil, ferr
-			}
-			byKID = fresh
-			if pub, ok = byKID[kid]; !ok {
-				return nil, errors.New("key id does not resolve in our own registry")
-			}
-		}
-		// Способ проверки подписи выбирает КЛЮЧ, а не заголовок: значение из
-		// заголовка служит только сверке и никогда — выбором.
-		if t.Method.Alg() != string(pub.Algorithm) {
-			return nil, errors.New("header algorithm is not the one bound to the key")
-		}
-		// Параметр, помеченный отправителем обязательным к пониманию, мы обязаны
-		// либо исполнить, либо отвергнуть токен ЦЕЛИКОМ. Обратная сторона того
-		// же требования — НЕ помеченное неизвестное игнорируется; на этом
-		// держится совместимость, поэтому прочие неизвестные поля разбор молча
-		// пропускает.
-		if ok, name := tokenpolicy.CriticalHeadersUnderstood(critHeaders(t.Header)); !ok {
-			return nil, fmt.Errorf("critical header %q is not understood", name)
-		}
-		headerType, _ = t.Header["typ"].(string)
-		key, perr := parsePublicKey(pub.PublicKeyPEM)
-		if perr != nil {
-			// Ключ ИЗ НАШЕГО реестра не разобрался — это НАША поломка, а не
-			// негодный вход. Отметка ставится здесь, потому что выше по стеку
-			// отказ разбора неотличим от отказа подписи, и испорченный ключ
-			// отвергал бы всё, наращивая ряд «отвергнуто»: оператор пошёл бы
-			// разбираться с клиентами.
-			ownKeyBroken = perr
-		}
-		return key, perr
-	})
+		return pub, ok, nil
+	}
+	tok, err := publishedkey.Parse(parser, raw, claims, lookup)
+	if errors.Is(err, publishedkey.ErrUnavailable) {
+		// Реестр не ответил либо ключ ИЗ НАШЕГО реестра не разобрался — НАША
+		// поломка, а не негодный вход: испорченный ключ отвергал бы всё,
+		// наращивая ряд «отвергнуто», и оператор пошёл бы разбираться с
+		// клиентами.
+		return operations.Principal{}, "", r.unavail("key registry", err)
+	}
 	if err != nil {
-		if ownKeyBroken != nil {
-			return operations.Principal{}, "", r.unavail("key registry", ownKeyBroken)
-		}
-		if registryUnavailable != nil {
-			return operations.Principal{}, "", r.unavail("key registry", registryUnavailable)
-		}
 		return operations.Principal{}, "", r.refuse("token did not verify: " + err.Error())
 	}
-	if !tok.Valid {
-		return operations.Principal{}, "", r.refuse("token did not verify")
-	}
+	headerType, _ := tok.Header["typ"].(string)
 
 	// Тип объявляет, для какой поверхности токен выпущен, и сверяет его та
 	// поверхность. ОТСУТСТВИЕ типа и НЕСОВПАДЕНИЕ дают один исход: «тип не
@@ -849,50 +810,6 @@ func principalFrom(claims jwt.MapClaims) (operations.Principal, bool) {
 func verdictKey(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
-}
-
-// critHeaders приводит `crit` к перечню имён.
-//
-// Разбор отдаёт заголовок как произвольный JSON, поэтому годятся ровно два вида:
-// список строк и его отсутствие. Всё прочее — не перечень имён, и принимать по
-// нему решение нельзя; такой вход даёт одно ЗАВЕДОМО неизвестное имя, то есть
-// отказ. Молчаливый пропуск здесь означал бы «параметр помечен обязательным, а
-// мы не разобрали его форму и приняли токен».
-func critHeaders(h map[string]any) []string {
-	raw, ok := h["crit"]
-	if !ok {
-		return nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return []string{"<crit is not a list>"}
-	}
-	out := make([]string, 0, len(list))
-	for _, v := range list {
-		name, ok := v.(string)
-		if !ok {
-			return []string{"<crit entry is not a string>"}
-		}
-		out = append(out, name)
-	}
-	return out
-}
-
-func parsePublicKey(pemStr string) (crypto.PublicKey, error) {
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		return nil, errors.New("public half is not PEM")
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return nil, errors.New("public half does not parse")
-	}
-	switch pub.(type) {
-	case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-		return pub, nil
-	default:
-		return nil, errors.New("unsupported public key type")
-	}
 }
 
 // wrappedStream подменяет контекст стрима на тот, в котором назван вызывающий.

@@ -4,11 +4,10 @@
 package pg
 
 // oauth_ceremony_repo.go — слой доступа СОБСТВЕННОЙ ЦЕРЕМОНИИ OAuth: код
-// авторизации, семейство выданного по нему, обновляющий токен и согласие
-// субъекта (задача PRO-Robotech/kaname#313; миграции
+// авторизации, семейство выданного по нему и обновляющий токен (задача
+// PRO-Robotech/kaname#313; миграции
 // `20260920175117_authorization_code_is_our_record.sql`,
-// `20260920175118_interactive_client_carries_its_secret_verifier.sql`,
-// `20260920175119_consent_is_our_record.sql`).
+// `20260920175118_interactive_client_carries_its_secret_verifier.sql`).
 //
 // # ОДНА ИНСТРУКЦИЯ — ЭТО ИНВАРИАНТ, А НЕ АККУРАТНОСТЬ
 //
@@ -63,8 +62,6 @@ package pg
 //     встречный порядок с каскадом отзыва даёт цикл, жертвой которого движок
 //     выбирал сам отзыв;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
-//   - «одно согласие на тройку субъект-клиент-область» —
-//     `consent_grants_subject_client_scope_uk`;
 //   - форма свёрток, испытания PKCE и словари причин — ограничения схемы.
 
 import (
@@ -76,15 +73,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/corelib/ids"
-
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
-
-// consentIDPrefix — префикс идентификатора согласия; форма закрыта
-// ограничением `consent_grants_id_form_ck`.
-const consentIDPrefix = "cg"
 
 // refuseNoSuchClient — ЕДИНСТВЕННЫЙ производитель отказа «интерактивного
 // клиента с таким идентификатором в реестре нет».
@@ -506,7 +497,7 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 		// ПОВТОР. Отзыв семейства — следствие, неотделимое от решения: вернуть
 		// «повтор», не отозвав, значило бы объявить похищение и ничего по нему
 		// не сделать.
-		if rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
+		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
 			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
@@ -613,7 +604,7 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 	}
 	switch {
 	case !active:
-		if rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
+		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
 			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
@@ -626,33 +617,42 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 }
 
 // RevokeFamily отзывает семейство целиком ОДНОЙ транзакцией: отметка на
-// семействе и снятие всего живого, что по нему выдано.
+// семействе, снятие всего живого, что по нему выдано, и отсечка по ключу
+// семейства для места предъявления (`writeFamilyCutoffsTx`).
 //
-// Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторный отзыв
-// пустым, а не вторым. Два одновременных обнаружения повтора — обычное дело
+// Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторную отметку
+// пустой, а не второй. Два одновременных обнаружения повтора — обычное дело
 // (проигравших гонку больше одного), и второй из них не вправе ни отказать, ни
-// переписать причину первого.
-func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) error {
+// переписать причину первого. Отсечка же пишется БЕЗУСЛОВНО — и при нуле строк
+// отметки: семейство, отмеченное писателем мимо этой двери, получает её на
+// первом же отзыве дверью, а монотонная запись повтору безвредна.
+//
+// Возвращается число строк отметки: 1 — отозвано этим вызовом, 0 — уже было.
+func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) (int64, error) {
 	if familyID == "" {
-		return fmt.Errorf("Illegal argument token_family.id: required")
+		return 0, fmt.Errorf("Illegal argument token_family.id: required")
 	}
 	if err := reason.Validate(); err != nil {
-		return err
+		return 0, err
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// `live` идёт В ТОМ ЖЕ операторе, что отметка: пара держится ограничением
 	// `token_families_live_pair_ck`, и оператор, тронувший одну половину, второй
 	// попытки не получает. Именно эта колонка делает отзыв обновлением КЛЮЧА.
-	if _, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE kaname.token_families
 		   SET revoked_at = now(), revoked_reason = $2, live = false
-		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason)); err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		 WHERE id = $1 AND revoked_at IS NULL`, familyID, string(reason))
+	if err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
+	}
+	if err = writeFamilyCutoffsTx(ctx, tx, []string{familyID}, reason); err != nil {
+		return 0, err
 	}
 	// ВЫДАННОЕ СНЯЛ КАСКАД, И БОЛЬШЕ ЗДЕСЬ ДЕЛАТЬ НЕЧЕГО.
 	//
@@ -670,7 +670,60 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	// который снёс каскад. Своя отметка `deactivated_at` осталась означать
 	// СОБСТВЕННОЕ событие строки: погашение либо ротацию.
 	if err = tx.Commit(ctx); err != nil {
-		return wrapPgErr(err, "TokenFamily", familyID)
+		return 0, wrapPgErr(err, "TokenFamily", familyID)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// writeFamilyCutoffsTx кладёт отсечку по ключу КАЖДОГО названного семейства —
+// в транзакции вызывающего, той же, что ставит отметку отзыва (задача
+// PRO-Robotech/kaname#396, K1).
+//
+// # Зачем отзыву семейства отсечка
+//
+// Токен доступа сверяют по ключам издателя, без записи семейства: место,
+// принимающее его, спрашивает только отсечку (`tokenrevocation`), а отметка
+// `token_families.revoked_at` снимает лишь выданное хранилищем. Без отсечки
+// отзыв семейства снимал бы токен обновления, а токен доступа того же семейства
+// жил бы при предъявлении до своего `exp`. Писатель отзыва, дошедший до одной
+// записи и не дошедший до второй, — контроль, исполненный наполовину и
+// выглядящий исполненным целиком; поэтому обе записи кладёт одна транзакция, и
+// писателей отзыва семейства — двое, оба через эту функцию.
+//
+// # Момент отсечки служит только уборке
+//
+// Правило отвергает токен семейства при ЛЮБОЙ отметке выпуска
+// (`tokenrevocation.FamilyKeyClaim`), и момент строки сравнения не несёт. Его
+// читает уборка отсечек: строка снимается после `revoke_before + MaxTokenTTL +
+// ClockSkew + RemovalSlack`. Момент — начало транзакции (`now()` — тот же, что у
+// `revoked_at` отметки).
+//
+// Запас строки — `RemovalSlack`, а не `ClockSkew + RemovalSlack`: токен живёт не
+// дольше `MaxTokenTTL` от выпуска, а читатель принимает его до `exp +
+// ClockSkew`, то есть допуск часов уже потрачен на приём ПОСЛЕ срока. Строка
+// поэтому переживает приём всякого токена семейства, выпущенного не позже
+// `RemovalSlack` после отметки. Позже отметки выпуск ложится только в операции
+// церемонии, прочитавшей семейство живым ДО неё (начатую после отметки выборка
+// отозванного семейства отвергает), — в пределах срока этой операции
+// (`oauthceremony.Config.OperationTimeout`) и расхождения часов церемонии и
+// базы. Запас исчерпывается, только если эти две величины вместе достигнут
+// `RemovalSlack`.
+//
+// Строка ложится той же дверью, что отсечка субъекта (`upsertMintedCutoff`):
+// момент монотонен, причина и решивший принадлежат стоящему моменту. Решивший —
+// механизм, названный причиной отзыва.
+func writeFamilyCutoffsTx(ctx context.Context, tx pgx.Tx, familyIDs []string, reason domain.FamilyRevocationReason) error {
+	if len(familyIDs) == 0 {
+		return nil
+	}
+	var at time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&at); err != nil {
+		return wrapPgErr(err, "TokenFamily", "")
+	}
+	for _, id := range familyIDs {
+		if err := upsertMintedCutoff(ctx, tx, id, at, string(reason), mechanismDecider(string(reason))); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -750,115 +803,14 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 		return 0, nil
 	}
 
-	// Выданное снял КАСКАД: здесь, как и в `RevokeFamily`, дописывающих
-	// операторов больше нет — основание принадлежит семейству, а не копии на
-	// ребёнке.
+	// Выданное хранилищем снял КАСКАД: здесь, как и в `RevokeFamily`,
+	// дописывающих операторов больше нет — основание принадлежит семейству, а не
+	// копии на ребёнке. Месту предъявления каскад не виден — ему отсечка по
+	// ключу каждого отозванного семейства, той же транзакцией.
+	if err := writeFamilyCutoffsTx(ctx, tx, families, reason); err != nil {
+		return 0, err
+	}
 	return len(families), nil
-}
-
-// ── Согласие ────────────────────────────────────────────────────────────────
-
-// GrantConsent записывает согласие человека клиенту на перечисленные области.
-//
-// ИДЕМПОТЕНТНО и ОДНИМ оператором на весь перечень: уникальность тройки держит
-// `consent_grants_subject_client_scope_uk`, и конфликт по ней — не отказ, а
-// «согласие уже стоит»: отметка отзыва снимается, момент согласия обновляется
-// на ТОЙ ЖЕ строке. Пара «посмотреть, есть ли согласие — записать» дала бы под
-// гонкой две строки на одну тройку, после чего отзыв снимал бы ОДНУ из них.
-func (r *OAuthCeremonyRepo) GrantConsent(ctx context.Context, userID, clientID string, scopes []string) error {
-	if userID == "" {
-		return fmt.Errorf("Illegal argument consent_grant.user_id: required")
-	}
-	if clientID == "" {
-		return fmt.Errorf("Illegal argument consent_grant.client_id: required")
-	}
-	if len(scopes) == 0 {
-		return fmt.Errorf("Illegal argument consent_grant.scope: required")
-	}
-	// Повтор области в перечне — ОДНА область, а не две: `ON CONFLICT DO UPDATE`
-	// не вправе задеть одну и ту же строку дважды в одном операторе и ответил бы
-	// отказом хранилища на то, что отказом не является. Свёртка повторов идёт
-	// здесь, ДО оператора, а не разбором его отказа.
-	unique := make([]string, 0, len(scopes))
-	seen := make(map[string]bool, len(scopes))
-	for i, s := range scopes {
-		if s == "" {
-			return fmt.Errorf("Illegal argument consent_grant.scope[%d]: must not be empty", i)
-		}
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
-		unique = append(unique, s)
-	}
-	rowIDs := make([]string, 0, len(unique))
-	for range unique {
-		rowIDs = append(rowIDs, ids.NewHyphenID(consentIDPrefix))
-	}
-	// Идентификаторы чеканятся на КАЖДУЮ область, но лягут только те, чья
-	// строка заводится впервые: конфликтующая строка сохраняет свой.
-	if _, err := r.pool.Exec(ctx, `
-		INSERT INTO kaname.consent_grants (id, user_id, client_id, scope)
-		SELECT s.id, $2, $3, s.scope
-		  FROM unnest($1::text[], $4::text[]) AS s(id, scope)
-		ON CONFLICT (user_id, client_id, scope)
-		DO UPDATE SET revoked_at = NULL, granted_at = now()`,
-		rowIDs, userID, clientID, unique); err != nil {
-		return wrapPgErr(err, "ConsentGrant", userID)
-	}
-	return nil
-}
-
-// WithdrawConsent отзывает согласие на одну область: ОТМЕТКА на той же строке.
-//
-// Строка остаётся: «согласия не было» и «согласие отозвано» — разные ответы, и
-// удалённая строка их не различает.
-func (r *OAuthCeremonyRepo) WithdrawConsent(ctx context.Context, userID, clientID, scope string) error {
-	if userID == "" || clientID == "" || scope == "" {
-		return fmt.Errorf("Illegal argument consent_grant: user_id, client_id and scope are required")
-	}
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE kaname.consent_grants
-		   SET revoked_at = now()
-		 WHERE user_id = $1 AND client_id = $2 AND scope = $3 AND revoked_at IS NULL`,
-		userID, clientID, scope)
-	if err != nil {
-		return wrapPgErr(err, "ConsentGrant", userID)
-	}
-	if tag.RowsAffected() == 0 {
-		// Отзывать нечего — и это НЕ отказ: согласия либо не было, либо оно уже
-		// отозвано, и в обоих случаях состояние ровно то, которого просили.
-		return nil
-	}
-	return nil
-}
-
-// ConsentedScopes — области, на которые согласие ДЕЙСТВУЕТ, в устойчивом
-// порядке. Отозванные не попадают: отметка отзыва и есть предикат.
-func (r *OAuthCeremonyRepo) ConsentedScopes(ctx context.Context, userID, clientID string) ([]string, error) {
-	if userID == "" || clientID == "" {
-		return nil, fmt.Errorf("Illegal argument consent_grant: user_id and client_id are required")
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT scope FROM kaname.consent_grants
-		 WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL
-		 ORDER BY scope`, userID, clientID)
-	if err != nil {
-		return nil, wrapPgErr(err, "ConsentGrant", userID)
-	}
-	defer rows.Close()
-	out := make([]string, 0, 8)
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, wrapPgErr(err, "ConsentGrant", userID)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, wrapPgErr(err, "ConsentGrant", userID)
-	}
-	return out, nil
 }
 
 // ── Проверочное значение секрета интерактивного клиента ─────────────────────
@@ -892,8 +844,9 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	return nil
 }
 
-// ClearClientSecretVerifier снимает проверочное значение: клиент становится
-// публичным, и секрета у него нет.
+// ClearClientSecretVerifier снимает проверочное значение: секрета у клиента
+// больше нет. Способ аутентификации при этом НЕ меняется — публичным клиента
+// делает способ `none`, а не пустота значения (kaname#317).
 func (r *OAuthCeremonyRepo) ClearClientSecretVerifier(ctx context.Context, clientID string) error {
 	if clientID == "" {
 		return fmt.Errorf("Illegal argument interactive_client.client_id: required")

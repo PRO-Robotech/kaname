@@ -98,7 +98,7 @@ type familyRig struct {
 
 func newFamilyRig(t *testing.T, pool *pgxpool.Pool) familyRig {
 	t.Helper()
-	rig := newIssuanceRig(t)
+	rig := newIssuanceRig(t, pool)
 	signer, err := tokensigner.New(tokensigner.Config{
 		Issuer: assertionIssuer,
 		// Выпуск в прошлом относительно часов базы: отметка выпуска секундной
@@ -351,7 +351,8 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 			tag:  "fv" + strconv.Itoa(i),
 			twin: true,
 			apply: func(t *testing.T, f familyRig, a codeScene) string {
-				require.NoError(t, f.ceremony.RevokeFamily(context.Background(), a.ctx.FamilyID, reason))
+				_, err := f.ceremony.RevokeFamily(context.Background(), a.ctx.FamilyID, reason)
+				require.NoError(t, err)
 				return string(reason)
 			},
 		})

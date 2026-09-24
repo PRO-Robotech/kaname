@@ -43,8 +43,8 @@ import (
 // ceremonyDigest — свёртка объявленной формы из счётчика.
 func ceremonyDigest(n int) string { return fmt.Sprintf("%064x", n) }
 
-// ceremonyPad — 17 знаков crockford-base32: формы `ic-…`, `tfm-…`, `cg-…`
-// закрыты ограничениями схемы.
+// ceremonyPad — 17 знаков crockford-base32: формы `ic-…`, `tfm-…` закрыты
+// ограничениями схемы.
 func ceremonyPad(tag string) string {
 	out := tag
 	for len(out) < 17 {
@@ -87,9 +87,11 @@ func ceremonyScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tag st
 		session, user, ceremonyDigest(len(tag)*104729+7))
 	require.NoError(t, err, "посев сессии")
 
+	// Способ объявлен: клиента без способа схема не принимает
+	// (`interactive_clients_auth_method_ck`, kaname#317).
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id)
-		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3)`,
+		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		VALUES ($1, $2, ARRAY['https://app.example.test/cb'], $3, 'none')`,
 		"ic-"+ceremonyPad(tag), "ic-"+tag, client)
 	require.NoError(t, err, "посев клиента")
 
@@ -345,65 +347,4 @@ func TestOAuthCeremonyDistinguishesUnknownFromInactive(t *testing.T) {
 	})
 	require.ErrorIs(t, err, domain.ErrAuthorizationCodeReplayed,
 		"второе предъявление ТОГО ЖЕ кода обязано быть ПОВТОРОМ, а не «неизвестен»")
-}
-
-// TestOAuthConsentIsUniqueByItsTriple — согласие ложится на тройку, и
-// уникальность держит база: N одновременных согласий дают одну строку.
-func TestOAuthConsentIsUniqueByItsTriple(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx, pool := catalogPool(t)
-	repo := kanamepg.NewOAuthCeremonyRepo(pool)
-	scene := ceremonyScene(t, ctx, pool, "cercnst")
-
-	const racers = 16
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	failures := make([]string, racers)
-	for i := 0; i < racers; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			c, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			// Перечень несёт ПОВТОР области намеренно: повтор — одна область, а
-			// не две, и свести его обязан вызываемый, а не отказ хранилища.
-			if err := repo.GrantConsent(c, scene.UserID, scene.ClientID,
-				[]string{"openid", "profile", "openid"}); err != nil {
-				failures[i] = err.Error()
-			}
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-
-	var failed []string
-	for _, f := range failures {
-		if f != "" {
-			failed = append(failed, f)
-		}
-	}
-	assert.Empty(t, failed,
-		"согласие идемпотентно: повторное согласие на ту же тройку — не отказ, а та же "+
-			"строка. Отказы: %v", failed)
-
-	granted, err := repo.ConsentedScopes(ctx, scene.UserID, scene.ClientID)
-	require.NoError(t, err)
-	t.Logf("перепись: гонщиков %d, отказов %d, областей согласия %d", racers, len(failed), len(granted))
-	assert.Equal(t, []string{"openid", "profile"}, granted,
-		"областей согласия обязано быть ровно две: строка на тройку, а не на попытку")
-
-	require.NoError(t, repo.WithdrawConsent(ctx, scene.UserID, scene.ClientID, "profile"))
-	granted, err = repo.ConsentedScopes(ctx, scene.UserID, scene.ClientID)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"openid"}, granted, "отозванная область обязана уйти из согласия")
-
-	// «Согласия не было» и «согласие отозвано» РАЗЛИЧАЮТСЯ: строка на месте.
-	var rows int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.consent_grants WHERE user_id = $1 AND client_id = $2`,
-		scene.UserID, scene.ClientID).Scan(&rows))
-	assert.Equal(t, 2, rows, "отозванное согласие обязано остаться строкой с отметкой, строк %d", rows)
 }

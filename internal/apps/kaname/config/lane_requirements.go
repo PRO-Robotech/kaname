@@ -57,7 +57,7 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
@@ -207,6 +207,30 @@ var LaneRequirements = []LaneRequirement{
 					"has no identity provider to fall back to, so with our own minting off the "+
 					"process would start and be unable to issue a single token. Enable it, or "+
 					"declare %s=%s",
+				IdentityProviderSetting, IdentityProviderOwn,
+				IdentityProviderSetting, IdentityProviderExternal)
+		},
+	},
+	// СТРОКА КОНТУРА ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337). Непереведённый
+	// контур заводит зеркало клиента у внешнего поставщика, а под `own` его нет:
+	// процесс поднимался бы и отказывал на всякой выдаче ключа. Исполнить такую
+	// комбинацию нечем — ключу без токен-эндпоинта платформы некуда пойти, — и
+	// потому она невозможна. Предикат «переведён» один на всех читателей
+	// (Config.SAKeyIssuanceIsOurs): копия условия здесь разошлась бы со сборкой.
+	{
+		Lanes:   laneOwn,
+		Element: "контур выдачи ключей служебных учёток переведён на свою чеканку",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			if c.SAKeyIssuanceIsOurs() {
+				return nil
+			}
+			return fmt.Errorf(
+				"production mode: %s=%s but authn.client-token.enabled is false — a service-account "+
+					"key is exchanged on the platform token endpoint, and with the endpoint off the "+
+					"key issuance registers the client at an external identity provider, which this "+
+					"posture does not have: the process would start and refuse every key issuance. "+
+					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED), or declare %s=%s",
 				IdentityProviderSetting, IdentityProviderOwn,
 				IdentityProviderSetting, IdentityProviderExternal)
 		},
@@ -455,7 +479,7 @@ func unreachableFloorsComplaint(w LaneWiring) error {
 	unreachable := 0
 	var levels []string
 	for level, n := range w.CatalogFloors.ByLevel {
-		if grpcsrv.ACRRank(level) <= 0 {
+		if acrlevel.Rank(level) <= 0 {
 			// Уровень, которого платформа не знает, требованием не является —
 			// ровно как в точке решения.
 			continue
@@ -482,7 +506,7 @@ func unreachableFloorsComplaint(w LaneWiring) error {
 // ЕДИНСТВЕННАЯ функция платформы; своей таблицы рангов полоса не заводит.
 func lanePresents(presentable []string, required string) bool {
 	for _, p := range presentable {
-		if grpcsrv.ACRSatisfies(p, required) {
+		if acrlevel.Satisfies(p, required) {
 			return true
 		}
 	}
