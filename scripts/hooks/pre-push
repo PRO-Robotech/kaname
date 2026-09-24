@@ -108,7 +108,9 @@
 # КАК ОБОЙТИ — ПЕРЕЧЕНЬ ПОЛНЫЙ, И ЭТО ЕГО СВОЙСТВО
 #
 # Обход ОДИН: `KANAME_SKIP_PREPUSH=1 git push`. Он печатает строку и перечень
-# непроверенного — обойти, не заметив, нельзя.
+# непроверенного — обойти, не заметив, нельзя. Снимает он только ПРОВЕРКИ:
+# страж правила ветки и коммита (scripts/hooks/prepush-rule.sh) идёт первым и
+# обходом не снимается — это держит проба scripts/hooks/branch-rule-inject.sh.
 #
 # Обхода ПО ИМЕНИ ВЕТКИ здесь НЕТ, и это снято намеренно. Прежняя редакция
 # пропускала `wip/*` и `tmp/*`, не называя этого в перечне обходов, а причиной
@@ -153,10 +155,6 @@ finish() {
     printf '%s\n' "$@" >&2
     exit "$code"
 }
-
-if [ "${KANAME_SKIP_PREPUSH:-0}" = "1" ]; then
-    finish 0 "pre-push: пропущен по KANAME_SKIP_PREPUSH=1 — локальные проверки НЕ выполнялись"
-fi
 
 # ── ПОТОЛОК ПАМЯТИ ──────────────────────────────────────────────────────────
 #
@@ -218,6 +216,34 @@ export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=$GO_PARALLEL"
 
 cd "$ROOT" || finish 2 "pre-push: ОТКАЗ — в корень рабочей копии не перейти: $ROOT"
 
+# Вход git читается ОДИН раз: его судят и страж правила, и перепись ссылок ниже.
+push_input="$(cat)"
+
+# ── СТРАЖ ПРАВИЛА ВЕТКИ И КОММИТА — ПЕРВЫМ, ДО ОБХОДА ПРОВЕРОК ──────────────
+#
+# Имя ветки, первая строка, подпись и атрибуция отправляемых коммитов
+# (scripts/hooks/prepush-rule.sh, предикат — branch-rule.sh). Обход проверок
+# `KANAME_SKIP_PREPUSH=1` стоит ПОСЛЕ стража и его не снимает: обход заведён для
+# проверок, цена которых — время, а у правила ветки цены нет. Нет стража —
+# отказ: хук без него пропускал бы нарушение молча.
+rule_guard="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/prepush-rule.sh"
+if [ ! -f "$rule_guard" ]; then
+    finish 1 "pre-push ОТКАЗ: нет $rule_guard — правило ветки и коммита судить нечем"
+fi
+rule_out="$(bash "$rule_guard" "${1:-origin}" <<< "$push_input" 2>&1)"
+rule_rc=$?
+printf '%s\n' "$rule_out" >&2
+if [ "$rule_rc" -eq 2 ]; then
+    finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — страж правила ветки и коммита не смог судить; отправка остановлена"
+fi
+if [ "$rule_rc" -ne 0 ]; then
+    finish 1 "pre-push ОТКАЗ: правило ветки и коммита нарушено — отправка остановлена"
+fi
+
+if [ "${KANAME_SKIP_PREPUSH:-0}" = "1" ]; then
+    finish 0 "pre-push: проверки пропущены по KANAME_SKIP_PREPUSH=1 — страж правила исполнен, локальные проверки НЕ выполнялись"
+fi
+
 CLASSIFY="$ROOT/scripts/hooks/prepush-classify.sh"
 [ -x "$CLASSIFY" ] || finish 2 \
     "pre-push: ОТКАЗ — не найден определитель категории: $CLASSIFY" \
@@ -246,7 +272,7 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
         continue
     fi
     refs_live=$((refs_live + 1))
-done
+done <<< "$push_input"
 
 if [ "$refs_total" -gt 0 ] && [ "$refs_live" -eq 0 ]; then
     finish 0 \
