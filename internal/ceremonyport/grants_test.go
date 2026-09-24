@@ -8,6 +8,8 @@ package ceremonyport_test
 import (
 	"context"
 	"errors"
+	"go/parser"
+	"go/token"
 	"regexp"
 	"testing"
 
@@ -61,6 +63,26 @@ var reasonsAwaitingAServiceWord = map[oauthceremony.RevocationReason]string{
 	oauthceremony.RevocationClientRevoke: "PRO-Robotech/kaname#396 (K1, путь отзыва клиентом)",
 }
 
+// issueRef — ссылка на задачу службы.
+var issueRef = regexp.MustCompile(`PRO-Robotech/kaname#[0-9]+`)
+
+// adaptersIssue — задача, которую закрывают сами адаптеры: её называет первая
+// ссылка шапки пакета (`doc.go`). Выведена разбором шапки, а не выписана здесь:
+// шапка сменит задачу — проба пойдёт за ней.
+//
+// Запись ожидания, названная этой задачей, — отсрочка, чьим владельцем стоит
+// изменение, которое её и закрывает: после посадки маркер «пока слова нет»
+// остаётся без предмета, и гейт перечня зеленеет на закрытой задаче.
+func adaptersIssue(t *testing.T) string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), "doc.go", nil, parser.ParseComments|parser.PackageClauseOnly)
+	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: шапка пакета не разобрана")
+	require.NotNil(t, f.Doc, "НЕ ВЫПОЛНИЛОСЬ: у пакета нет шапки")
+	own := issueRef.FindString(f.Doc.Text())
+	require.NotEmpty(t, own, "НЕ ВЫПОЛНИЛОСЬ: шапка пакета не называет своей задачи")
+	return own
+}
+
 // Всякая причина закрытого словаря фундамента имеет слово в закрытом словаре
 // службы — ТЕМ ЖЕ написанием (фундамент сопрягает словари по значению), —
 // либо названа перечнем ожидающих с предметом.
@@ -83,8 +105,13 @@ func TestGrants_EveryCeremonyReasonHasAFamilyWordOrANamedSubject(t *testing.T) {
 			require.NoErrorf(t, word.Validate(), "слово %q вне закрытого словаря службы", word)
 		}
 	}
-	for r := range reasonsAwaitingAServiceWord {
+	own := adaptersIssue(t)
+	for r, subject := range reasonsAwaitingAServiceWord {
 		require.Truef(t, r.Declared(), "запись ожидания %q не называет причины фундамента", r)
+		ref := issueRef.FindString(subject)
+		require.NotEmptyf(t, ref, "запись ожидания %q не называет задачу формой PRO-Robotech/kaname#N: %q", r, subject)
+		require.NotEqualf(t, own, ref, "запись ожидания %q названа задачей самих адаптеров (%s): после её "+
+			"закрытия у неисполненного пути отзыва не останется владельца", r, own)
 	}
 	t.Logf("осмотрено: причин фундамента %d · сопряжено %d · ожидают слова %d",
 		len(reasons), mapped, len(reasonsAwaitingAServiceWord))

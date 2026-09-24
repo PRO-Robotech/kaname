@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
@@ -167,13 +168,21 @@ func genuineClaims(iat time.Time) jwt.MapClaims {
 
 func signES(t *testing.T, ring *keyRing, kid string, claims jwt.MapClaims, typ string) string {
 	t.Helper()
+	return signESShaped(t, ring, kid, claims, func(h map[string]any) {
+		if typ != "" {
+			h["typ"] = typ
+		}
+	})
+}
+
+// signESShaped — то же, но заголовок правит shape до подписи.
+func signESShaped(t *testing.T, ring *keyRing, kid string, claims jwt.MapClaims, shape func(map[string]any)) string {
+	t.Helper()
 	key, err := jwt.ParseECPrivateKeyFromPEM(ring.mat.PrivateKeyPEM)
 	require.NoError(t, err)
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["kid"] = kid
-	if typ != "" {
-		tok.Header["typ"] = typ
-	}
+	shape(tok.Header)
 	raw, err := tok.SignedString(key)
 	require.NoError(t, err)
 	return raw
@@ -277,6 +286,69 @@ func TestIdentify_K3_EveryCaseBesideItsTwin(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Ветви выбора ключа, у которых на НАСТОЯЩЕМ наборе исхода нет: подпись нашим
+// ключом с помеченным непонятым параметром; запись набора, закрепившая за
+// ключом иной алгоритм, чем вид её материала; идентификатор негодной формы,
+// который набор всё же несёт. Каждая — рядом с близнецом, отличным ОДНИМ
+// фактом. Без них снятие любой из трёх ветвей не роняло ни одной пробы
+// адаптера: отказ давала библиотека либо промах поиска, а не сама ветвь.
+func TestIdentify_K3_KeySelectionBranchesBesideTheirTwins(t *testing.T) {
+	now := time.Now()
+	notOurs := func(t *testing.T, a interface {
+		IdentifyAccessToken(context.Context, string) (string, error)
+	}, raw string) {
+		t.Helper()
+		got, err := a.IdentifyAccessToken(context.Background(), raw)
+		require.ErrorIs(t, err, oauthceremony.ErrGrantNotFound, "случай выбора ключа не назван «не наш»: %v", err)
+		require.Empty(t, got)
+	}
+	ours := func(t *testing.T, a interface {
+		IdentifyAccessToken(context.Context, string) (string, error)
+	}, raw string) {
+		t.Helper()
+		got, err := a.IdentifyAccessToken(context.Background(), raw)
+		require.NoError(t, err, "близнец не опознан")
+		require.Equal(t, "tok0123456789abcdefg", got)
+	}
+
+	t.Run("наш ключ, помечен непонятый параметр заголовка", func(t *testing.T) {
+		ring := newKeyRing(t, testKID)
+		a := newAccessTokens(t, ring, time.Now)
+		notOurs(t, a, signESShaped(t, ring, testKID, genuineClaims(now), func(h map[string]any) {
+			h["typ"] = tokenpolicy.TokenTypeAccess
+			h["crit"] = []string{"kaname-not-implemented"}
+			h["kaname-not-implemented"] = "whatever"
+		}))
+		// Близнец: тот же параметр без пометки обязательным.
+		ours(t, a, signESShaped(t, ring, testKID, genuineClaims(now), func(h map[string]any) {
+			h["typ"] = tokenpolicy.TokenTypeAccess
+			h["kaname-not-implemented"] = "whatever"
+		}))
+	})
+
+	t.Run("набор закрепил за ключом иной алгоритм", func(t *testing.T) {
+		ring := newKeyRing(t, testKID)
+		a := newAccessTokens(t, ring, time.Now)
+		raw := signES(t, ring, testKID, genuineClaims(now), tokenpolicy.TokenTypeAccess)
+		ring.published[0].Algorithm = domain.SigningAlgRS256
+		notOurs(t, a, raw)
+		// Близнец: запись закрепляет алгоритм заголовка.
+		ring.published[0].Algorithm = domain.SigningAlgES256
+		ours(t, a, raw)
+	})
+
+	t.Run("идентификатор ключа негодной формы, хотя набор его несёт", func(t *testing.T) {
+		const illegal = "kaname a"
+		ring := newKeyRing(t, illegal)
+		notOurs(t, newAccessTokens(t, ring, time.Now),
+			signES(t, ring, illegal, genuineClaims(now), tokenpolicy.TokenTypeAccess))
+		// Близнец: та же запись под идентификатором законной формы.
+		legal := newKeyRing(t, testKID)
+		ours(t, newAccessTokens(t, legal, time.Now),
+			signES(t, legal, testKID, genuineClaims(now), tokenpolicy.TokenTypeAccess))
+	})
 }
 
 // Опознание, которое не состоялось, не вправе стать «не наш»: отзыв ответил бы
