@@ -324,7 +324,18 @@ CASES.append(Case(
     steps=[
         *_seed_role("im", "rdRoleIm"),
         *_create_binding("cr-for-immutable", _acb_body("rdRoleIm", {"allInScope": {}}), "rdAcbIm"),
+        # ОКНО ПРАВ НА СВЕЖЕЙ ВЫДАЧЕ ЗАКРЫВАЕТ ЧТЕНИЕ, А НЕ ПОВТОР ОТРИЦАНИЯ
+        # (kaname#393): у правки цель проверки прав — сама выдача, и до
+        # материализации её прав владельца шлюз ответил бы 403 вместо 400
+        # предмета. Отрицание ниже уходит один раз и читается с первого ответа.
         retry_until_authorized(Step(
+            name="get-for-immutable",
+            method="GET",
+            path="/iam/v1/accessBindings/{{rdAcbIm}}",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        )),
+        Step(
             name="up-scopeid-immutable",
             method="PATCH",
             path="/iam/v1/accessBindings/{{rdAcbIm}}",
@@ -338,7 +349,7 @@ CASES.append(Case(
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
                 "pm.test('scopeId immutable text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('scopeId is immutable after AccessBinding.Create'));",
             ],
-        )),
+        ),
         Step(
             name="up-subjects-immutable",
             method="PATCH",
