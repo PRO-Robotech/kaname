@@ -5,12 +5,6 @@ package ceremonyport
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/publishedkey"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -157,15 +152,6 @@ func (a *AccessTokens) IdentifyAccessToken(ctx context.Context, token string) (s
 	if err != nil {
 		return "", fmt.Errorf("ceremonyport: identify access token: the published key set is unavailable: %w", err)
 	}
-	byKID := make(map[string]domain.PublishedKey, len(keys))
-	for _, k := range keys {
-		byKID[string(k.KID)] = k
-	}
-
-	var (
-		ownKeyBroken error
-		headerType   string
-	)
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(
 		// «Без подписи» и подпись общим секретом отвергаются закрытым словарём
@@ -174,85 +160,21 @@ func (a *AccessTokens) IdentifyAccessToken(ctx context.Context, token string) (s
 		// Срок и прочие утверждения времени здесь не судятся — см. шапку.
 		jwt.WithoutClaimsValidation(),
 	)
-	_, err = parser.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		if !domain.ValidKeyIDForm(kid) {
-			return nil, errNotOurs
-		}
-		pub, ok := byKID[kid]
-		if !ok {
-			return nil, errNotOurs
-		}
-		// Способ проверки выбирает КЛЮЧ, а не заголовок.
-		if t.Method.Alg() != string(pub.Algorithm) {
-			return nil, errNotOurs
-		}
-		if ok, _ := tokenpolicy.CriticalHeadersUnderstood(critHeaders(t.Header)); !ok {
-			return nil, errNotOurs
-		}
-		headerType, _ = t.Header["typ"].(string)
-		key, perr := parsePublicKey(pub.PublicKeyPEM)
-		if perr != nil {
-			// Ключ ИЗ НАШЕГО набора не разобрался — наша поломка, а не чужой
-			// токен.
-			ownKeyBroken = perr
-		}
-		return key, perr
-	})
-	if ownKeyBroken != nil {
-		return "", fmt.Errorf("ceremonyport: identify access token: a key of the published set does not parse: %w", ownKeyBroken)
+	// Ключ проверки выбирает правило набора — то же, что у читателя
+	// предъявленного и интроспекции (`publishedkey`).
+	tok, err := publishedkey.Parse(parser, token, claims, publishedkey.SetLookup(keys))
+	if errors.Is(err, publishedkey.ErrUnavailable) {
+		// Ключ ИЗ НАШЕГО набора не разобрался — наша поломка, а не чужой токен.
+		return "", fmt.Errorf("ceremonyport: identify access token: %w", err)
 	}
 	if err != nil {
 		return "", oauthceremony.ErrGrantNotFound
 	}
+	headerType, _ := tok.Header["typ"].(string)
 	iss, _ := claims["iss"].(string)
 	jti, _ := claims["jti"].(string)
 	if iss != a.signer.Issuer() || headerType != tokenpolicy.TokenTypeAccess || jti == "" {
 		return "", oauthceremony.ErrGrantNotFound
 	}
 	return jti, nil
-}
-
-// errNotOurs — внутренний признак «ключ не наш»: наружу не уходит, отказ
-// опознания — ErrGrantNotFound.
-var errNotOurs = errors.New("ceremonyport: not signed by a key of the published set")
-
-// critHeaders приводит `crit` к перечню имён. Годятся ровно два вида: список
-// строк и его отсутствие; всё прочее даёт заведомо неизвестное имя, то есть
-// отказ.
-func critHeaders(h map[string]any) []string {
-	raw, ok := h["crit"]
-	if !ok {
-		return nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return []string{"<crit is not a list>"}
-	}
-	out := make([]string, 0, len(list))
-	for _, v := range list {
-		name, ok := v.(string)
-		if !ok {
-			return []string{"<crit entry is not a string>"}
-		}
-		out = append(out, name)
-	}
-	return out
-}
-
-func parsePublicKey(pemStr string) (crypto.PublicKey, error) {
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		return nil, errors.New("public half is not PEM")
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return nil, errors.New("public half does not parse")
-	}
-	switch pub.(type) {
-	case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-		return pub, nil
-	default:
-		return nil, errors.New("unsupported public key type")
-	}
 }
