@@ -188,6 +188,9 @@ type surfaceFlow struct {
 	// состояние каждого вызова метода интерфейса на последнем вычислении:
 	// все ли получатели разрешились
 	ifaceCalls map[*ast.CallExpr]*ifaceCall
+	// переменные, объявленные без значения (нулевое значение), и функция
+	// объявления: нулевое значение своего типа с методами — место рождения
+	zeroVars map[*types.Var]fkey
 
 	// объявления, собранные проходом (судит ceremony_surface.go)
 	surfaceLits []flowNode
@@ -225,6 +228,7 @@ func newSurfaceFlow(prog *surfaceProgram) *surfaceFlow {
 		ifaceRegs:  map[*ast.CallExpr]*surfaceReg{},
 		dispatched: map[*ast.CallExpr]bool{},
 		ifaceCalls: map[*ast.CallExpr]*ifaceCall{},
+		zeroVars:   map[*types.Var]fkey{},
 	}
 	a.handler = lookupHandlerIface(prog)
 	a.httpMuxT = lookupMuxPtr(prog, "net/http")
@@ -520,6 +524,9 @@ func (a *surfaceFlow) walk(sp *surfaceSrcPkg, top fkey, root ast.Node) {
 			for _, id := range n.Names {
 				if a.interesting(a.typeOf(sp, id)) {
 					keep = true
+				}
+				if v, ok := sp.info.Defs[id].(*types.Var); ok && len(n.Values) == 0 {
+					a.zeroVars[v] = fk
 				}
 			}
 			a.keep(sp, fk, n, keep)
@@ -1081,7 +1088,36 @@ func (a *surfaceFlow) varVals(v *types.Var) avSet {
 		out.addAll(a.vars[v])
 		return out
 	}
+	if fk, zero := a.zeroVars[v]; zero {
+		// `var s T` — нулевое значение своего типа с методами само место
+		// рождения: получатель метода выбирается по ТИПУ, и монтировщик,
+		// вызванный через интерфейс, диспетчеризуется на него.
+		if b := a.typedBirth(v.Type(), v.Pos(), fk); b != nil {
+			out := avSet{b: {}}
+			out.addAll(a.vars[v])
+			return out
+		}
+	}
 	return a.vars[v]
+}
+
+// typedBirth — место рождения значения именованного типа радиуса, у которого
+// есть методы: приведение `T(x)` без прослеженного значения и нулевое значение
+// переменной. Интерфейсы, функции и указатели сюда не входят: у первых нет
+// своего значения, вторые текут значением функции, третьи нулевые.
+func (a *surfaceFlow) typedBirth(t types.Type, site token.Pos, fk fkey) *absVal {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil || a.prog.byPath[n.Obj().Pkg().Path()] == nil {
+		return nil
+	}
+	switch n.Underlying().(type) {
+	case *types.Interface, *types.Signature, *types.Pointer:
+		return nil
+	}
+	if types.NewMethodSet(n).Len() == 0 && types.NewMethodSet(types.NewPointer(n)).Len() == 0 {
+		return nil
+	}
+	return a.intern(avKey{kind: avStruct, site: site}, fk, n, a.prog.byPath[n.Obj().Pkg().Path()])
 }
 
 func (a *surfaceFlow) funcVal(fk fkey, fn *types.Func) avSet {
@@ -1154,10 +1190,17 @@ func (c surfaceCallee) key() fkey { return fkey{fn: c.fn, lit: c.lit} }
 func (a *surfaceFlow) evalCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, idx int) avSet {
 	fun := ast.Unparen(call.Fun)
 	if tv, ok := sp.info.Types[fun]; ok && tv.IsType() {
-		if len(call.Args) == 1 {
-			return a.eval(sp, fk, call.Args[0])
+		if len(call.Args) != 1 {
+			return nil
 		}
-		return nil
+		vals := a.eval(sp, fk, call.Args[0])
+		if len(vals) == 0 {
+			// cv2IntMount(0) — значение своего типа рождено приведением.
+			if b := a.typedBirth(tv.Type, call.Pos(), fk); b != nil {
+				return avSet{b: {}}
+			}
+		}
+		return vals
 	}
 	if id, ok := fun.(*ast.Ident); ok {
 		if b, ok := sp.info.Uses[id].(*types.Builtin); ok {
