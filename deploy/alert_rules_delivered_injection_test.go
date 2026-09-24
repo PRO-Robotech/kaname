@@ -272,8 +272,9 @@ func TestSweeperSilenceInjection_ControlProducerIsHeard(t *testing.T) {
 	series, err := sweepPassSeriesFrom(fakeSigningKeyProducer("event", metrics.SigningKeyEventSwept, 1))
 	require.NoError(t, err)
 	require.Equal(t, metrics.SigningKeyEventsMetric+`{event="`+metrics.SigningKeyEventSwept+`"}`, series)
-	require.Len(t, sweeperSilenceAlerts(deliveredRules(t), series), 1,
-		"контроль красный: проба не находит правила там, где производитель и чарт согласны")
+	require.Lenf(t, sweeperSilenceAlerts(deliveredRules(t), series), 1,
+		"контроль красный: клетку %s поставляемое правило не читает — либо значение "+
+			"разошлось у производителя и чарта, либо разбор выдачи ослеп", series)
 }
 
 // TestSweeperSilenceInjection_ValueRenamedAtTheProducer — S1: у производителя
