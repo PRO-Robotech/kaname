@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"net/http"
 	"net/http/httptest"
@@ -554,10 +555,15 @@ func (j *surfaceJudge) registrations() {
 			}
 		}
 	}
+	var untraced []*surfaceReg
 	for call, reg := range j.a.untraced {
-		if counted[call] || !j.reachableFk(reg.fk) {
-			continue
+		if !counted[call] && j.reachableFk(reg.fk) {
+			untraced = append(untraced, reg)
 		}
+	}
+	sort.Slice(untraced, func(x, y int) bool { return untraced[x].call.Pos() < untraced[y].call.Pos() })
+	for _, reg := range untraced {
+		call := reg.call
 		c.UntracedRegistrations++
 		j.find("регистрация %s %s: мультиплексор не прослежен до места рождения — маршрут не приписать "+
 			"ни одной поверхности", j.pos(call), printedCall(reg))
@@ -583,10 +589,15 @@ func (j *surfaceJudge) registrations() {
 				"в ведомости с причиной и предикатом снятия", l, strings.Join(leafSites[l], "; "))
 		}
 	}
+	var escapes []token.Pos
 	for pos, e := range j.a.escapes {
-		if !j.reachableFk(e.fk) {
-			continue
+		if j.reachableFk(e.fk) {
+			escapes = append(escapes, pos)
 		}
+	}
+	sort.Slice(escapes, func(x, y int) bool { return escapes[x] < escapes[y] })
+	for _, pos := range escapes {
+		e := j.a.escapes[pos]
 		c.Escapes = append(c.Escapes, e.name)
 		j.find("мультиплексор уходит в чужой код %s (%s): регистрации, сделанные там, гейт не наблюдает",
 			e.name, position(j.a.prog.fset, pos))
