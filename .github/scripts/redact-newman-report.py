@@ -51,9 +51,30 @@
     разбирается и судится теми же правилами — по имени и по форме. Захвачено на
     автономном стенде (задача #19): два остатка в 47 файлах, оба этой формы.
 
+ЧАСТИ ДОКУМЕНТА СУДЯТСЯ ВСЕ, И ПЕРЕЧЕНЬ ИХ ВЗЯТ ИЗ УСТРОЙСТВА JSON, А НЕ ИЗ
+ОПЫТА (kaname#399). Позиции выше — где newman кладёт удостоверение; части —
+где оно МОЖЕТ стоять в любом JSON, который отчёт несёт:
+
+  · имя члена объекта — формой и критерием, как значение без имени: у имени
+    своего имени нет. Узел отчёта и тело судятся одинаково;
+  · значение-строка — именем ближайшего члена и формой;
+  · значение-число — именем ближайшего члена: число под именем секрета
+    (пароль числом в отрицательном кейсе) срезается;
+  · логическое и null — нести удостоверение нечем, считаются и не судятся;
+  · КАЖДАЯ копия повторённого имени — на своём месте: разбор хранит объект
+    последовательностью членов (`Members`), а не словарём, у которого копия
+    одна; выход несёт все копии, срезанное — срезанным;
+  · байтовый массив — `data` из чисел декодируется и судится телом, прочие
+    члены того же объекта — как члены; `data` не из чисел — как список;
+  · тело с отметкой порядка байтов или пробелами перед JSON — разбирается.
+
+У каждой части ДВА суда — срез и проверка выхода, — и у каждого суда есть
+свидетель в самопробе (см. «СУДЫ» ниже): снятие любого краснит её.
+
 ЧТО ОСТАЁТСЯ. Имена ключей, имена заголовков, пути запросов, коды, тексты
 утверждений, числа и времена — то есть РАЗБОР ПАДЕНИЯ. Чистка, съедающая имя
-ключа, неотличима от удаления файла, и проба требует обратного прямо.
+ключа, неотличима от удаления файла, и проба требует обратного прямо. Имя
+члена срезается, только если оно само удостоверение по форме или критерию.
 
 ИСХОДЫ:
     0  — вычищено, и ОСТАТОК ПРОВЕРЕН: повторный обход выхода не нашёл ничего;
@@ -70,19 +91,78 @@
 срез отключён — проверка отказывает), оси механики среза (два промежутка и
 перекрытие форм в одной строке; ключ PEM шести видов заголовка и стандартный
 base64; тройка, заслонённая короткой; один проход до чистого выхода) — они
-судят отсутствие любого куска секрета, а не чистый остаток; пустой обход
-обязан дать отказ.
+судят отсутствие любого куска секрета, а не чистый остаток; ось полноты по
+частям документа (инъекция в каждую часть и близнец) и второго взгляда по
+ним; перепись судов — у каждого свидетель; пустой обход обязан дать отказ.
 """
 
 from __future__ import annotations
 
 import argparse
 import bisect
+import contextlib
 import json
 import pathlib
 import re
 import sys
-from typing import NamedTuple
+from typing import Iterable, Iterator, NamedTuple
+
+# ── СУДЫ ЧИСТИЛЬЩИКА: ПЕРЕЧЕНЬ ИМЕНОВАННЫЙ, У КАЖДОГО ЕСТЬ СВИДЕТЕЛЬ ─────────
+#
+# Суд — место, где чистильщик решает о части документа: СРЕЗ вырезает,
+# ПРОВЕРКА выхода называет остаток. Каждый суд спрашивает `_on(<имя>)`, и
+# самопроба снимает их по одному (`_self_test_witness_census`): снятие любого
+# обязано покраснить хотя бы одну её ось. Суд без свидетеля — место, где
+# правка, снявшая его, прошла бы самопробу зелёной.
+#
+# Перечень замкнут с обеих сторон разбором этого файла: каждое имя, которое
+# спрашивает код, есть в `JUDGMENTS`, и каждое из `JUDGMENTS` код спрашивает;
+# `REDACTED` выпускается в теле `if _on(…)` либо функцией, которую зовут только
+# из такого тела. Снять суд умеет только самопроба — ни флага, ни переменной
+# окружения у чистильщика нет.
+CUT_KIND_JWT = "срез: вид JWT"
+CUT_KIND_BEARER = "срез: вид Bearer"
+CUT_QUERY = "срез: параметр адреса"
+CUT_CRITERION = "срез: критерий проверки выхода"
+CUT_NAMED_STRING = "срез: строка под именем секрета"
+CUT_NAMED_NUMBER = "срез: число под именем секрета"
+CUT_MEMBER_NAME = "срез: имя члена объекта"
+CUT_EVERY_COPY = "срез: каждая копия повторённого имени"
+CUT_JSON_BODY = "срез: тело, разобранное как JSON"
+CUT_BYTES = "срез: байтовый массив тела"
+CUT_TEXT_FILE = "срез: текстовый файл"
+CHECK_NAMED_STRING = "проверка: строка под именем секрета"
+CHECK_NAMED_NUMBER = "проверка: число под именем секрета"
+CHECK_SHAPE = "проверка: форма значения"
+CHECK_MEMBER_NAME = "проверка: имя члена объекта"
+CHECK_EVERY_COPY = "проверка: каждая копия повторённого имени"
+CHECK_JSON_BODY = "проверка: тело, разобранное как JSON"
+CHECK_BYTES = "проверка: байтовый массив тела"
+CHECK_TEXT_FILE = "проверка: текстовый файл"
+JUDGMENTS = (
+    CUT_KIND_JWT, CUT_KIND_BEARER, CUT_QUERY, CUT_CRITERION, CUT_NAMED_STRING,
+    CUT_NAMED_NUMBER, CUT_MEMBER_NAME, CUT_EVERY_COPY, CUT_JSON_BODY, CUT_BYTES,
+    CUT_TEXT_FILE, CHECK_NAMED_STRING, CHECK_NAMED_NUMBER, CHECK_SHAPE,
+    CHECK_MEMBER_NAME, CHECK_EVERY_COPY, CHECK_JSON_BODY, CHECK_BYTES, CHECK_TEXT_FILE,
+)
+
+_OFF: set[str] = set()
+
+
+def _on(judgment: str) -> bool:
+    """Суд действует? Снятым он бывает только внутри самопробы."""
+    return judgment not in _OFF
+
+
+@contextlib.contextmanager
+def _switched_off(*judgments: str) -> Iterator[None]:
+    """Снять суды на время блока; вложенное снятие возвращает только своё."""
+    added = [j for j in judgments if j not in _OFF]
+    _OFF.update(added)
+    try:
+        yield
+    finally:
+        _OFF.difference_update(added)
 
 # ── ПРЕДИКАТ ФОРМЫ ЗНАЧЕНИЯ ──────────────────────────────────────────────────
 #
@@ -159,7 +239,10 @@ def shaped_credential(text: str) -> str | None:
 class Scrubbed(NamedTuple):
     """Итог среза по форме: текст и сколько вырезано — видовыми предикатами и
     критерием проверки выхода. `by_criterion` печатается отдельной строкой
-    переписи: это цена ложной находки критерия, и она обязана быть видна."""
+    переписи: в ней и цена ложной находки критерия, и она обязана быть видна.
+    Ключ PEM считается здесь же: его вид у среза и у проверки — один объект
+    (`credential_spans`), отдельный видовой срез PEM срезал бы только то, что
+    критерий срезает и без него, и потому свидетеля иметь не мог."""
     text: str
     by_kind: int
     by_criterion: int
@@ -172,11 +255,13 @@ class Scrubbed(NamedTuple):
 def scrub_text(text: str) -> Scrubbed:
     """Вырезать удостоверения ИЗ ТЕКСТА, оставив остальное.
 
-    Видовые предикаты (PEM, JWT, Bearer, параметр адреса) режут первыми: у них
-    есть что сохранить — имя параметра, слово `Bearer`. Последним режет
-    КРИТЕРИЙ ПРОВЕРКИ ВЫХОДА (`credential_spans`), тот же объект, которым
-    судит `residue`: всё, что проверка назовёт удостоверением, срез срезает, и
-    расхождения «проверка знает форму, срез — нет» не бывает по построению.
+    Видовые предикаты (JWT, Bearer, параметр адреса) режут первыми: у них
+    есть что сохранить — имя параметра, слово `Bearer` — и они видят то, что
+    критерию не видно: JWT и токен предъявления КОРОЧЕ его порогов (у каждого
+    свой свидетель в самопробе). Последним режет КРИТЕРИЙ ПРОВЕРКИ ВЫХОДА
+    (`credential_spans`), тот же объект, которым судит `residue`: всё, что
+    проверка назовёт удостоверением, срез срезает, и расхождения «проверка
+    знает форму, срез — нет» не бывает по построению.
     """
     n = 0
 
@@ -189,9 +274,11 @@ def scrub_text(text: str) -> Scrubbed:
             return REDACTED
         return pattern.sub(one, src)
 
-    out = sub(PEM_RE, text)
-    out = sub(JWT_RE, out)
-    out = sub(BEARER_RE, out)
+    out = text
+    if _on(CUT_KIND_JWT):
+        out = sub(JWT_RE, out)
+    if _on(CUT_KIND_BEARER):
+        out = sub(BEARER_RE, out)
 
     # Имя параметра ОСТАЁТСЯ, вырезается только значение: `?access_token=<…>`
     # читается как координата отказа, а `?<…>` — уже нет.
@@ -199,18 +286,29 @@ def scrub_text(text: str) -> Scrubbed:
         nonlocal n
         n += 1
         return m.group(1) + REDACTED
-    out = QUERY_SECRET_RE.sub(one_param, out)
-    out, k = _cut_by_criterion(out)
+    if _on(CUT_QUERY):
+        out = QUERY_SECRET_RE.sub(one_param, out)
+    k = 0
+    if _on(CUT_CRITERION):
+        out, k = _cut_by_criterion(out)
     return Scrubbed(out, n, k)
 
 
 class Census:
     """Перепись обхода. Печатается ВСЕГДА: «ноль вырезанного» обязано быть
-    отличимо от «ноль прочитанного»."""
+    отличимо от «ноль прочитанного» — и по каждой части документа отдельно:
+    часть, которую обход не читает, видна нулём в своей строке."""
 
     def __init__(self) -> None:
         self.nodes = 0
+        self.names = 0
+        self.names_cut = 0
+        self.copies = 0
         self.strings = 0
+        self.numbers = 0
+        self.numbers_cut = 0
+        self.flags = 0
+        self.lines = 0
         self.buffers = 0
         self.redacted_by_name = 0
         self.redacted_by_shape = 0
@@ -226,8 +324,62 @@ class Census:
     def redacted(self) -> int:
         return self.redacted_by_name + self.redacted_by_shape
 
+    @property
+    def read(self) -> int:
+        """Сколько частей прочитано: имена, значения и строки текстовых файлов."""
+        return self.names + self.strings + self.numbers + self.flags + self.lines
 
-def _embedded_json(text: str) -> object | None:
+
+class Members:
+    """Объект JSON как ПОСЛЕДОВАТЕЛЬНОСТЬ членов (имя, значение).
+
+    У словаря копия имени одна, и разбор словарём оставляет последнюю: прочие
+    копии обходу не видны, хотя в тексте тела они есть и уйдут в выход, если
+    тело выводится как было. Здесь каждая копия стоит на своём месте, судится
+    на своём месте и выводится на своём месте (`_dump`)."""
+
+    __slots__ = ("pairs",)
+
+    def __init__(self, pairs: Iterable[tuple[str, object]]) -> None:
+        self.pairs: list[tuple[str, object]] = list(pairs)
+
+
+def _load_json(text: str, judgment: str) -> object:
+    """Разобрать JSON так, что каждая копия повторённого имени остаётся.
+
+    `judgment` — суд, которому служит разбор (срез или проверка выхода). Снятым
+    он бывает только в самопробе, и тогда разбор — словарём, с одной копией."""
+    if _on(judgment):
+        return json.loads(text, object_pairs_hook=Members)
+    return json.loads(text, object_pairs_hook=lambda pairs: Members(dict(pairs).items()))
+
+
+def _dump(node: object, indent: int | None = None, level: int = 0) -> str:
+    """Вывести разобранное: разделители те же, что у `json.dumps`
+    (`ensure_ascii=False`), и каждая копия повторённого имени на своём месте."""
+    if isinstance(node, Members):
+        parts = [json.dumps(k, ensure_ascii=False) + ": " + _dump(v, indent, level + 1)
+                 for k, v in node.pairs]
+        return _join("{", "}", parts, indent, level)
+    if isinstance(node, list):
+        return _join("[", "]", [_dump(v, indent, level + 1) for v in node], indent, level)
+    return json.dumps(node, ensure_ascii=False)
+
+
+def _join(opening: str, closing: str, parts: list[str], indent: int | None, level: int) -> str:
+    if not parts:
+        return opening + closing
+    if indent is None:
+        return opening + ", ".join(parts) + closing
+    inner = "\n" + " " * (indent * (level + 1))
+    return opening + inner + ("," + inner).join(parts) + "\n" + " " * (indent * level) + closing
+
+
+# Что может стоять перед JSON тела: пробелы JSON и отметка порядка байтов.
+JSON_LEAD = " \t\r\n\ufeff"
+
+
+def _embedded_json(text: str, judgment: str) -> object | None:
     """Текст, который сам есть JSON-объект или массив, — иначе None.
 
     ФОРМА 8: ТЕЛО ЗАПРОСА И ТЕЛО ОТВЕТА — ТЕКСТ, А ВНУТРИ ТЕКСТА ЕСТЬ ИМЕНА.
@@ -242,15 +394,17 @@ def _embedded_json(text: str) -> object | None:
 
     Разбирается ТОЛЬКО объект или массив: голая строка в кавычках и число телом
     не являются, и «вычищенное» число ничем не отличалось бы от исходного.
+    Пробелы и отметка порядка байтов перед телом снимаются до разбора: иначе
+    тело с ними судилось бы только формой, без имён внутри.
     """
-    stripped = text.lstrip()
-    if not stripped or stripped[0] not in "{[":
+    body = text.lstrip(JSON_LEAD)
+    if not body or body[0] not in "{[":
         return None
     try:
-        parsed = json.loads(text)
+        parsed = _load_json(body, judgment)
     except ValueError:
         return None
-    return parsed if isinstance(parsed, (dict, list)) else None
+    return parsed if isinstance(parsed, (Members, list)) else None
 
 
 def _scrub_body(text: str, c: Census) -> str:
@@ -260,54 +414,107 @@ def _scrub_body(text: str, c: Census) -> str:
     форме, ровно как у узлов отчёта. Тело, разобранное как JSON, собирается
     обратно ТОЛЬКО если из него что-то вырезано: иначе байты остаются исходными,
     и «вычищенный» файл не отличается от исходного ничем, кроме вырезанного.
+    Исходный текст выводится как был только потому, что судилась КАЖДАЯ копия
+    каждого имени: разбор словарём увидел бы одну.
     """
-    parsed = _embedded_json(text)
+    parsed = _embedded_json(text, CUT_EVERY_COPY) if _on(CUT_JSON_BODY) else None
     if parsed is not None:
         before = c.redacted
         cleaned = _walk(parsed, None, c)
         if c.redacted != before:
-            return json.dumps(cleaned, ensure_ascii=False)
+            return _dump(cleaned)
         return text
     s = scrub_text(text)
     c.add(s)
     return s.text
 
 
+def _pair_name(node: Members) -> str | None:
+    """Имя пары `{"key": …, "value": …}` — окружение, заголовок, параметр адреса.
+    Копий `key` может быть несколько: значение судится именем секрета, если
+    секретом названа ЛЮБАЯ из них."""
+    names = [v for k, v in node.pairs if k == "key" and isinstance(v, str)]
+    return next((n for n in names if _named_secret(n)), names[-1] if names else None)
+
+
+def _byte_array(node: Members, name: str, value: object) -> bytes | None:
+    """Член `data` объекта `{"type": "Buffer", …}` из одних чисел — байты тела.
+    Иначе None: такой член судится как обычный список."""
+    if name != "data" or not isinstance(value, list):
+        return None
+    if not any(k == "type" and v == "Buffer" for k, v in node.pairs):
+        return None
+    if not all(isinstance(b, int) and not isinstance(b, bool) for b in value):
+        return None
+    return bytes(b & 0xFF for b in value)
+
+
+def _cut_member_name(name: str, c: Census) -> str:
+    """Имя члена судится формой и критерием — как значение без имени."""
+    c.names += 1
+    if not _on(CUT_MEMBER_NAME):
+        return name
+    s = scrub_text(name)
+    if s.cut:
+        c.add(s)
+        c.names_cut += 1
+    return s.text
+
+
+def _walk_members(node: Members, c: Census) -> Members:
+    pair_name = _pair_name(node)
+    seen: set[str] = set()
+    out: list[tuple[str, object]] = []
+    for k, v in node.pairs:
+        if k in seen:
+            c.copies += 1
+        seen.add(k)
+        name = _cut_member_name(k, c)
+        raw = _byte_array(node, k, v)
+        if raw is not None:
+            # Байтовый массив: декодировать → вычистить → собрать обратно. Без
+            # этого тело ответа уезжает в артефакт целиком, и текстовый греп его
+            # не видит. Прочие члены того же объекта судятся как члены.
+            c.buffers += 1
+            if _on(CUT_BYTES):
+                text = raw.decode("utf-8", "replace")
+                clean = _scrub_body(text, c)
+                v = list(clean.encode("utf-8")) if clean != text else v
+            out.append((name, v))
+            continue
+        # Форма `{"key": …, "value": …}` — окружение, заголовок, параметр адреса.
+        # Имя ключа остаётся, значение чистится ПО ИМЕНИ, даже если формы нет.
+        hint = pair_name if (k == "value" and pair_name) else k
+        out.append((name, _walk(v, hint, c)))
+    return Members(out)
+
+
 def _walk(node: object, key_hint: str | None, c: Census) -> object:
     """Обойти ВЕСЬ документ. Перечня позиций здесь нет намеренно: неизвестная
     форма покрывается обходом, а перечень разошёлся бы с newman молча."""
     c.nodes += 1
-    if isinstance(node, dict):
-        # Форма `{"key": …, "value": …}` — окружение, заголовок, параметр адреса.
-        # Имя ключа остаётся, значение чистится ПО ИМЕНИ, даже если формы нет.
-        name = node.get("key") if isinstance(node.get("key"), str) else None
-        # Байтовый массив: декодировать → вычистить → собрать обратно. Без этого
-        # тело ответа уезжает в артефакт целиком, и текстовый греп его не видит.
-        if node.get("type") == "Buffer" and isinstance(node.get("data"), list):
-            c.buffers += 1
-            try:
-                raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
-            except (TypeError, ValueError):
-                return node
-            clean = _scrub_body(raw, c)
-            if clean != raw:
-                return {"type": "Buffer", "data": list(clean.encode("utf-8"))}
-            return node
-        out: dict = {}
-        for k, v in node.items():
-            hint = name if (k == "value" and name) else (k if isinstance(k, str) else None)
-            out[k] = _walk(v, hint, c)
-        return out
+    if isinstance(node, Members):
+        return _walk_members(node, c)
     if isinstance(node, list):
         return [_walk(v, key_hint, c) for v in node]
     if isinstance(node, str):
         c.strings += 1
-        if _named_secret(key_hint) and node:
+        if _on(CUT_NAMED_STRING) and _named_secret(key_hint) and node:
             c.redacted_by_name += 1
             return REDACTED
         # Строка, которая сама есть JSON (тело запроса `body.raw`), несёт имена
         # ВНУТРИ себя — форма 8, та же, что у байтового массива тела ответа.
         return _scrub_body(node, c)
+    if isinstance(node, bool) or node is None:
+        c.flags += 1
+        return node
+    # Число. Под именем секрета оно — значение секрета (пароль числом в
+    # отрицательном кейсе), и срезается так же, как строка.
+    c.numbers += 1
+    if _on(CUT_NAMED_NUMBER) and _named_secret(key_hint):
+        c.redacted_by_name += 1
+        c.numbers_cut += 1
+        return REDACTED
     return node
 
 
@@ -602,31 +809,52 @@ def residue_shaped(text: str) -> str | None:
     return spans[0][2] if spans else None
 
 
+def _printable(name: str | None) -> str:
+    return "«имя-удостоверение»" if name and residue_shaped(name) else repr(name)
+
+
+def _residue_body(text: str, path: str, label: str | None, found: list[str]) -> None:
+    """Текст значения или тела: JSON судится по именам внутри себя — второй
+    взгляд обязан видеть форму 8 сам, иначе ослепший разбор тела у чистки прошёл
+    бы молча, — по каждой копии каждого имени. Прочий текст — по форме."""
+    parsed = _embedded_json(text, CHECK_EVERY_COPY) if _on(CHECK_JSON_BODY) else None
+    if parsed is not None:
+        residue(parsed, f"{path}[{label + ', ' if label else ''}JSON]", found)
+        return
+    if _on(CHECK_SHAPE):
+        form = residue_shaped(text)
+        if form:
+            found.append(f"{path}{'[' + label + ']' if label else ''} — {form} "
+                         f"(длина {len(text)})")
+
+
 def residue(node: object, path: str, found: list[str],
             key_hint: str | None = None) -> None:
-    """Пути (НЕ значения!) мест, где удостоверение осталось."""
-    if isinstance(node, dict):
-        if node.get("type") == "Buffer" and isinstance(node.get("data"), list):
-            try:
-                raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
-            except (TypeError, ValueError):
-                raw = ""
-            # Тело, разбираемое как JSON, судится ПО ИМЕНАМ внутри себя — второй
-            # взгляд обязан видеть форму 8 сам, иначе ослепший разбор тела у
-            # чистки прошёл бы молча. Неразбираемое тело судится по форме целиком.
-            parsed = _embedded_json(raw)
-            if parsed is not None:
-                residue(parsed, f"{path}[байтовый массив, JSON]", found)
-                return
-            form = residue_shaped(raw)
-            if form:
-                found.append(f"{path}[байтовый массив] — {form}")
-            return
-        name = node.get("key") if isinstance(node.get("key"), str) else None
-        for k, v in node.items():
-            residue(v, f"{path}.{k}", found,
-                    name if (k == "value" and name) else
-                    (k if isinstance(k, str) else None))
+    """Пути (НЕ значения!) мест, где удостоверение осталось. Судится каждая
+    часть документа — имя члена, строка, число, каждая копия имени, байтовый
+    массив, — тем же критерием и тем же перечнем имён, что у среза."""
+    if isinstance(node, Members):
+        pair_name = _pair_name(node)
+        buffer = any(k == "type" and v == "Buffer" for k, v in node.pairs)
+        for i, (k, v) in enumerate(node.pairs):
+            # Имя, которое критерий зовёт удостоверением, в путь НЕ попадает —
+            # вместо него номер члена: отказ печатает путь, и имя-удостоверение
+            # уехало бы в журнал прогона, откуда его и убирали. Эта осторожность
+            # не снимается вместе с судом: печать — не суд.
+            form = residue_shaped(k)
+            step = path + (f".{{член №{i}}}" if form else f".{k}")
+            if form and _on(CHECK_MEMBER_NAME):
+                found.append(f"{step} — имя члена: {form} (длина {len(k)})")
+            if buffer and k == "data" and isinstance(v, list) and _on(CHECK_BYTES):
+                # Декодируются ВСЕ числа массива, даже если рядом стоит не число:
+                # срез такой массив не декодирует, и тогда отказ — единственное,
+                # что не даст байтам тела уехать наружу.
+                ints = [b for b in v if isinstance(b, int) and not isinstance(b, bool)]
+                raw = bytes(b & 0xFF for b in ints).decode("utf-8", "replace")
+                _residue_body(raw, step, "байтовый массив", found)
+                if len(ints) == len(v):
+                    continue
+            residue(v, step, found, pair_name if (k == "value" and pair_name) else k)
         return
     if isinstance(node, list):
         for i, v in enumerate(node):
@@ -635,50 +863,53 @@ def residue(node: object, path: str, found: list[str],
     if isinstance(node, str):
         # Имя ключа названо секретом, а значение не вырезано — остаток по ИМЕНИ.
         # Эта половина ловит секрет без формы: у общего секрета хука формы нет.
-        if _named_secret(key_hint) and node and node != REDACTED:
-            found.append(f"{path} — значение ключа {key_hint!r} не вырезано "
+        if _on(CHECK_NAMED_STRING) and _named_secret(key_hint) and node and node != REDACTED:
+            found.append(f"{path} — значение ключа {_printable(key_hint)} не вырезано "
                          f"(длина {len(node)})")
             return
         # Строка-тело (`body.raw`), разбираемая как JSON, — та же форма 8.
-        parsed = _embedded_json(node)
-        if parsed is not None:
-            residue(parsed, f"{path}[JSON]", found)
-            return
-        form = residue_shaped(node)
-        if form:
-            found.append(f"{path} — {form} (длина {len(node)})")
+        _residue_body(node, path, None, found)
+        return
+    if isinstance(node, (int, float)) and not isinstance(node, bool):
+        if _on(CHECK_NAMED_NUMBER) and _named_secret(key_hint):
+            found.append(f"{path} — число под ключом {_printable(key_hint)} не вырезано")
 
 
 # ── ФАЙЛЫ ────────────────────────────────────────────────────────────────────
 
 
 def process(src: pathlib.Path, dst: pathlib.Path, c: Census) -> list[str]:
-    """Вычистить один файл. Возвращает остаток (пути), найденный В ВЫХОДЕ."""
+    """Вычистить один файл. Возвращает остаток (пути), найденный В ВЫХОДЕ.
+
+    Выход JSON судится по ЗАПИСАННОМУ тексту, разобранному заново, а не по
+    разобранному в памяти: второй взгляд видит ровно то, что будет выложено."""
     c.files += 1
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.suffix == ".json":
-        doc = json.loads(src.read_text(encoding="utf-8"))
+        doc = _load_json(src.read_text(encoding="utf-8"), CUT_EVERY_COPY)
         clean = redact_document(doc, c)
-        dst.write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
+        written = _dump(clean, indent=1)
+        dst.write_text(written, encoding="utf-8")
         found: list[str] = []
-        residue(clean, src.name, found)
+        residue(_load_json(written, CHECK_EVERY_COPY), src.name, found)
         return found
     # Текстовые выходы прогонщика (`.cli`, `summary.txt`, `coverage.txt`): у них
     # структуры нет, поэтому чистится текст. Греп по ним и был бы достаточен,
     # если бы у отчёта не было формы 6.
     raw = src.read_text(encoding="utf-8", errors="replace")
-    s = scrub_text(raw)
+    s = scrub_text(raw) if _on(CUT_TEXT_FILE) else Scrubbed(raw, 0, 0)
     clean = s.text
     # Единица счёта у текстового файла — СТРОКА, а не файл: «строк осмотрено 1» на
     # журнале из ста двенадцати строк называет объём, которого не читали.
-    c.strings += len(raw.splitlines()) or 1
+    c.lines += len(raw.splitlines()) or 1
     c.add(s)
     dst.write_text(clean, encoding="utf-8")
     found = []
-    for lineno, line in enumerate(clean.splitlines(), 1):
-        form = residue_shaped(line)
-        if form:
-            found.append(f"{src.name}:{lineno} — {form}")
+    if _on(CHECK_TEXT_FILE):
+        for lineno, line in enumerate(clean.splitlines(), 1):
+            form = residue_shaped(line)
+            if form:
+                found.append(f"{src.name}:{lineno} — {form}")
     return found
 
 
@@ -699,7 +930,14 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
     print("===== чистка отчёта прогона перед публикацией =====")
     print(f"файлов прочитано:        {c.files}")
     print(f"узлов обойдено:          {c.nodes}")
-    print(f"строк осмотрено:         {c.strings}")
+    print("осмотрено по частям документа:")
+    print(f"  имён членов объектов:  {c.names} (срезано {c.names_cut})")
+    print(f"  копий повторённых имён: {c.copies} (каждая судится на своём месте)")
+    print(f"  значений-строк:        {c.strings}")
+    print(f"  значений-чисел:        {c.numbers} (под именем секрета срезано {c.numbers_cut})")
+    print(f"  логических и null:     {c.flags} (удостоверение нести нечем)")
+    print(f"  строк текстовых файлов: {c.lines}")
+    print(f"строк осмотрено:         {c.strings + c.lines}")
     print(f"байтовых массивов:       {c.buffers}")
     print(f"вырезано по имени ключа: {c.redacted_by_name}")
     print(f"вырезано по форме:       {c.redacted_by_shape}")
@@ -709,10 +947,10 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
           + (f" — {', '.join(skipped)}" if skipped else ""))
     print(f"выход:                   {dst_dir}")
 
-    if not c.files or not c.strings:
-        print("ОТКАЗ: обход пуст — прочитано ноль строк. «Ничего не нашлось» здесь "
-              "означает «ничего не читалось», и выкладывать вывод нельзя.",
-              file=sys.stderr)
+    if not c.files or not c.read:
+        print("ОТКАЗ: обход пуст — прочитано ноль частей документа и строк. «Ничего "
+              "не нашлось» здесь означает «ничего не читалось», и выкладывать вывод "
+              "нельзя.", file=sys.stderr)
         return 1
     if leftovers:
         print(f"ОТКАЗ: в ВЫХОДЕ осталось {len(leftovers)} удостоверени(й) — "
@@ -1020,16 +1258,6 @@ def _self_test_pem_and_std_base64() -> None:
     _c("предпосылка: без знаков + и / в алфавите пробега тело срезалось бы НЕ целиком",
        url_only < len(body), f"{url_only} из {len(body)}")
 
-    # Нижняя граница на засеянной выборке стандартного base64 длиной 40 — как у
-    # base64url выше: условие слов не вправе терять больше замеренного.
-    rnd = random.Random(1624)
-    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    sample = ["".join(rnd.choice(std_alpha) for _ in range(40)) for _ in range(20000)]
-    caught = sum(1 for t in sample if residue_shaped(t) is not None)
-    print(f"  выборка пробегов стандартного base64 длиной 40: поймано {caught} из {len(sample)}")
-    _c("случайные пробеги стандартного base64 длиной 40 ловятся не хуже 99,7 %",
-       caught >= 19940, f"поймано {caught} из {len(sample)}")
-
     # Законные близнецы стандартного алфавита: `/` в нём — знак, и путь с
     # идентификатором или метод службы — один пробег 40+. Оба захвачены из
     # дерева: метод — из каталога прав, путь — форма адреса отчёта.
@@ -1170,9 +1398,9 @@ def _self_test_hidden_triple_and_one_pass() -> None:
     ни проверка: критерий один и слеп одинаково. Прежняя редакция держала ради
     этого случая цикл до неподвижной точки, но цикл его не находил: короткая
     тройка не промежуток, срезать нечего. Свойство «после ОДНОГО прохода выход
-    чист для критерия» держит засеянная выборка склеек всех форм.
+    чист для критерия» держит засеянная выборка склеек всех форм
+    (`_self_test_seeded_samples`).
     """
-    import random
     print("  ── полнота поиска троек и один проход среза")
     s1, s2, s3 = (_alnum(f"kaname#183 short triple {i}", 16) for i in range(3))
     t4, t5 = (_alnum(f"kaname#183 long triple {i}", 30) for i in range(2))
@@ -1202,38 +1430,6 @@ def _self_test_hidden_triple_and_one_pass() -> None:
     left = [_fragments_left(once, p) for p in (r2, r3, r4)]
     _c("подвал PEM вплотную к короткой тройке: после ОДНОГО прохода чисто, кусков нет",
        not credential_spans(once) and not any(left), f"кусков: {left}")
-
-    # Засеянная выборка склеек: пробеги обоих алфавитов разных длин, обрамление
-    # PEM, тройки, разделители и имена генератора — вплотную и через знак.
-    # Утверждение одно: после одного прохода критерий не находит ничего.
-    rnd = random.Random(183)
-    url_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    fixed = ["-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----", "KEY-----",
-             "InternalAddressService/AllocateExternalIPv6", "_poll200_started_teardown_",
-             "acc0123456789abcdefgh", "Bearer ", "eyJhbGciOiJSUzI1NiJ9"]
-    seps = ["", "", ".", ".", " ", "\n", "=", "&", "?", "/", "+", "-", "_", "=="]
-
-    def token() -> str:
-        k = rnd.random()
-        if k < 0.35:
-            return "".join(rnd.choice(url_alpha) for _ in range(rnd.randint(6, 48)))
-        if k < 0.65:
-            return "".join(rnd.choice(std_alpha) for _ in range(rnd.randint(6, 70)))
-        if k < 0.8:
-            return "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(rnd.randint(3, 20)))
-        return rnd.choice(fixed)
-
-    corpus = ["".join(token() + rnd.choice(seps) for _ in range(rnd.randint(2, 14)))
-              for _ in range(4000)]
-    hit = sum(1 for t in corpus if credential_spans(t))
-    stuck = sum(1 for t in corpus if credential_spans(_cut_by_criterion(t)[0]))
-    print(f"  выборка склеек: {len(corpus)}, с находкой критерия {hit}, "
-          f"после одного прохода найдено снова {stuck}")
-    _c("предпосылка: выборка несёт находки критерия (не пустая по построению)",
-       hit >= len(corpus) // 2, f"{hit} из {len(corpus)}")
-    _c("после ОДНОГО прохода среза критерий не находит в выходе ничего",
-       stuck == 0, f"{stuck} из {hit}")
 
 
 class _SeenPairs:
@@ -1363,8 +1559,8 @@ def _self_test_every_part() -> None:
               execution(stream={"type": "Buffer", "data": ["kept-data-item"]}),
               "KBST", "kept-data-item")
     json_case("тело с отметкой порядка байтов перед JSON",
-              execution(stream=_buffer('﻿{"secret":"kt_short_2Fx9_bom"}')),
-              execution(stream=_buffer('﻿{"note":"kept-bom-text"}')),
+              execution(stream=_buffer('\ufeff{"secret":"kt_short_2Fx9_bom"}')),
+              execution(stream=_buffer('\ufeff{"note":"kept-bom-text"}')),
               "kt_short_2Fx9_bom", "kept-bom-text")
     cases.append(("предъявление Bearer короче порога критерия",
                   {"r.json": json.dumps({"environment": {"values": [
@@ -1398,11 +1594,9 @@ def _self_test_every_part() -> None:
                        f"код {rc}, выжил: {kept in seen}\n{out[-300:]}")
 
 
-def self_test() -> int:
-    import contextlib
-    import io
+def _self_test_forms() -> None:
+    """ОСИ ВОСЬМИ ЗАМЕРЕННЫХ ФОРМ: удостоверения в выходе нет, разбор падения выжил."""
     import tempfile
-    print("redact-newman-report: доказательство способности упасть")
     marks = ("ENVV", "REQH", "RESH", "BODY", "QUER", "STRM", "SCRP")
     doc = _report(*marks)
 
@@ -1516,6 +1710,12 @@ def self_test() -> int:
         _c("а строка про упавшее утверждение в нём осталась",
            "1 assertion failed" in cli, cli)
 
+
+def _self_test_query_and_log() -> None:
+    """ОСИ ПАРАМЕТРА АДРЕСА В ЦЕЛЬНОЙ СТРОКЕ И ЖУРНАЛА СЛУЖБЫ."""
+    import contextlib
+    import io
+    import tempfile
     # ── ОСЬ: ПАРАМЕТР АДРЕСА В ЦЕЛЬНОЙ СТРОКЕ — БЕЗ ФОРМЫ И БЕЗ ИМЕНИ УЗЛА ──
     #
     # Удостоверение вида JWT в `url.raw` ловится формой; НЕПРОЗРАЧНОЕ — нет, и имени
@@ -1560,6 +1760,12 @@ def self_test() -> int:
         _c("и он НАЗВАН в переписи, а не выпал молча",
            "wrapping.key" in out and "В АРТЕФАКТ НЕ ПОПАДУТ" in out, out[:600])
 
+
+def _self_test_one_criterion() -> None:
+    """ОСИ ЗАКОННЫХ ДЛИННЫХ ПРОБЕГОВ И ОДНОГО КРИТЕРИЯ СРЕЗА И ПРОВЕРКИ."""
+    import contextlib
+    import io
+    import tempfile
     # ── ОСЬ: ЗАКОННЫЙ ДЛИННЫЙ ПРОБЕГ ПРОТИВ НЕПРОЗРАЧНОГО УДОСТОВЕРЕНИЯ ─────
     #
     # Вход ЗАХВАЧЕН, а не придуман: строка журнала — из артефакта прогона
@@ -1590,17 +1796,6 @@ def self_test() -> int:
     glued = case_id_line.replace("02-catalog", "02catalog")
     _c("тот же идентификатор, цифра ВПЛОТНУЮ к букве — удостоверение",
        residue_shaped(glued) is not None, f"{residue_shaped(glued)}")
-
-    # Нижняя граница на засеянной выборке: уточнение не вправе потерять больше,
-    # чем замерено. Выборка детерминирована, поэтому число воспроизводится.
-    import random
-    rnd = random.Random(1814)
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    sample = ["".join(rnd.choice(alphabet) for _ in range(40)) for _ in range(20000)]
-    caught = sum(1 for t in sample if residue_shaped(t) is not None)
-    print(f"  выборка непрозрачных пробегов длиной 40: поймано {caught} из {len(sample)}")
-    _c("случайные пробеги base64url длиной 40 ловятся не хуже 99,8 %",
-       caught >= 19960, f"поймано {caught} из {len(sample)}")
 
     # ── ОСЬ: ИМЯ, ПОСТРОЕННОЕ ГЕНЕРАТОРОМ, — НЕ УДОСТОВЕРЕНИЕ ───────────────
     #
@@ -1692,16 +1887,6 @@ def self_test() -> int:
        "043fb46d1a93" not in cut_pinned and "actions/upload-artifact@" in cut_pinned
        and "# v7" in cut_pinned and residue_shaped(cut_pinned) is None, cut_pinned)
 
-    # Засеянная выборка — то же свойство на двадцати тысячах входов: каждый
-    # пробег, который проверка назвала удостоверением, после среза проверке
-    # чист. Это определение «одного критерия», а не пример к нему.
-    leaked = sum(1 for t in sample
-                 if residue_shaped(t) is not None
-                 and residue_shaped(scrub_text(t)[0]) is not None)
-    print(f"  выборка: пойманных проверкой и НЕ срезанных срезом — {leaked} из {caught}")
-    _c("каждый пробег, названный проверкой удостоверением, срез срезает",
-       leaked == 0, f"не срезано {leaked} из {caught}")
-
     # Самопроба инъекцией, вход — форма захваченного отказа: переменная
     # окружения с БЕЗОБИДНЫМ именем и значением-пробегом 43 знака. Значение
     # детерминировано и не взято ни из какого прогона.
@@ -1725,17 +1910,13 @@ def self_test() -> int:
             src, dst = tmp / "out", tmp / "out-public"
             src.mkdir()
             (src / "kaname-login-lane.json").write_text(json.dumps(env_doc), encoding="utf-8")
-            saved_scrub = globals()["scrub_text"]
-            if not cut_on:
-                # СРЕЗ ПО ФОРМЕ ОТКЛЮЧЁН ЦЕЛИКОМ: у проверки выхода свой обход,
-                # и отказ обязан наступить на нём, а не у среза.
-                globals()["scrub_text"] = lambda text: Scrubbed(text, 0, 0)
+            # Срез ПО ФОРМЕ снят целиком: у проверки выхода свой обход, и отказ
+            # обязан наступить на нём, а не у среза.
+            off = () if cut_on else SHAPE_CUTS
             buf = io.StringIO()
-            try:
-                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                    rc = run(src, dst)
-            finally:
-                globals()["scrub_text"] = saved_scrub
+            with _switched_off(*off), contextlib.redirect_stdout(buf), \
+                    contextlib.redirect_stderr(buf):
+                rc = run(src, dst)
             out = buf.getvalue()
             if cut_on:
                 published = (dst / "kaname-login-lane.json").read_text(encoding="utf-8")
@@ -1784,12 +1965,82 @@ def self_test() -> int:
        "csrf-short-2Fx9" not in cut_url and "&csrf=" in cut_url
        and "/iam/v1/auth/csrf?form=login&" in cut_url, cut_url)
 
-    _self_test_cut_mechanics()
-    _self_test_pem_and_std_base64()
-    _self_test_pem_headers()
-    _self_test_hidden_triple_and_one_pass()
-    _self_test_every_part()
 
+def _self_test_seeded_samples() -> None:
+    """ЗАСЕЯННЫЕ ВЫБОРКИ: нижние границы критерия и один проход среза.
+
+    Самая долгая часть самопробы; в переписи свидетелей не гоняется — её
+    утверждения о порогах критерия, а не о снятии суда.
+    """
+    import random
+    # Нижняя граница на засеянной выборке: уточнение не вправе потерять больше,
+    # чем замерено. Выборка детерминирована, поэтому число воспроизводится.
+    rnd = random.Random(1814)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    sample = ["".join(rnd.choice(alphabet) for _ in range(40)) for _ in range(20000)]
+    caught = sum(1 for t in sample if residue_shaped(t) is not None)
+    print(f"  выборка непрозрачных пробегов длиной 40: поймано {caught} из {len(sample)}")
+    _c("случайные пробеги base64url длиной 40 ловятся не хуже 99,8 %",
+       caught >= 19960, f"поймано {caught} из {len(sample)}")
+
+    # Засеянная выборка — то же свойство на двадцати тысячах входов: каждый
+    # пробег, который проверка назвала удостоверением, после среза проверке
+    # чист. Это определение «одного критерия», а не пример к нему.
+    leaked = sum(1 for t in sample
+                 if residue_shaped(t) is not None
+                 and residue_shaped(scrub_text(t)[0]) is not None)
+    print(f"  выборка: пойманных проверкой и НЕ срезанных срезом — {leaked} из {caught}")
+    _c("каждый пробег, названный проверкой удостоверением, срез срезает",
+       leaked == 0, f"не срезано {leaked} из {caught}")
+
+    # Нижняя граница на засеянной выборке стандартного base64 длиной 40 — как у
+    # base64url выше: условие слов не вправе терять больше замеренного.
+    rnd = random.Random(1624)
+    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    sample = ["".join(rnd.choice(std_alpha) for _ in range(40)) for _ in range(20000)]
+    caught = sum(1 for t in sample if residue_shaped(t) is not None)
+    print(f"  выборка пробегов стандартного base64 длиной 40: поймано {caught} из {len(sample)}")
+    _c("случайные пробеги стандартного base64 длиной 40 ловятся не хуже 99,7 %",
+       caught >= 19940, f"поймано {caught} из {len(sample)}")
+
+    # Засеянная выборка склеек: пробеги обоих алфавитов разных длин, обрамление
+    # PEM, тройки, разделители и имена генератора — вплотную и через знак.
+    # Утверждение одно: после одного прохода критерий не находит ничего.
+    rnd = random.Random(183)
+    url_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    fixed = ["-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----", "KEY-----",
+             "InternalAddressService/AllocateExternalIPv6", "_poll200_started_teardown_",
+             "acc0123456789abcdefgh", "Bearer ", "eyJhbGciOiJSUzI1NiJ9"]
+    seps = ["", "", ".", ".", " ", "\n", "=", "&", "?", "/", "+", "-", "_", "=="]
+
+    def token() -> str:
+        k = rnd.random()
+        if k < 0.35:
+            return "".join(rnd.choice(url_alpha) for _ in range(rnd.randint(6, 48)))
+        if k < 0.65:
+            return "".join(rnd.choice(std_alpha) for _ in range(rnd.randint(6, 70)))
+        if k < 0.8:
+            return "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(rnd.randint(3, 20)))
+        return rnd.choice(fixed)
+
+    corpus = ["".join(token() + rnd.choice(seps) for _ in range(rnd.randint(2, 14)))
+              for _ in range(4000)]
+    hit = sum(1 for t in corpus if credential_spans(t))
+    stuck = sum(1 for t in corpus if credential_spans(_cut_by_criterion(t)[0]))
+    print(f"  выборка склеек: {len(corpus)}, с находкой критерия {hit}, "
+          f"после одного прохода найдено снова {stuck}")
+    _c("предпосылка: выборка несёт находки критерия (не пустая по построению)",
+       hit >= len(corpus) // 2, f"{hit} из {len(corpus)}")
+    _c("после ОДНОГО прохода среза критерий не находит в выходе ничего",
+       stuck == 0, f"{stuck} из {hit}")
+
+
+def _self_test_residue_injections() -> None:
+    """ОСИ ОСТАТКА: снятый срез — отказ по остатку, а не зелёное."""
+    import contextlib
+    import io
+    import tempfile
     # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
     #
     # Две инъекции, и каждая про своё. Первая слепит ВИДОВЫЕ предикаты среза
@@ -1801,7 +2052,6 @@ def self_test() -> int:
     # взгляд ослепнет вместе со срезом. Его слепоту ловят оси PEM
     # (`_self_test_pem_and_std_base64`, `_self_test_pem_headers`): куска тела
     # ключа в выходе нет.
-    never = re.compile(r"ZZZ_NEVER_MATCHES_ZZZ")
     for inject in ("виды", "срез"):
         with tempfile.TemporaryDirectory(prefix="redact-residue-") as td:
             tmp = pathlib.Path(td)
@@ -1809,16 +2059,11 @@ def self_test() -> int:
             src.mkdir()
             (src / "r.json").write_text(json.dumps(
                 {"run": {"executions": [{"leftover": _jwt("LEFT")}]}}), encoding="utf-8")
-            names = ("JWT_RE", "BEARER_RE") if inject == "виды" else ("scrub_text",)
-            saved = {k: globals()[k] for k in names}
-            for k in saved:
-                globals()[k] = never if inject == "виды" else (lambda text: Scrubbed(text, 0, 0))
+            off = (CUT_KIND_JWT, CUT_KIND_BEARER) if inject == "виды" else SHAPE_CUTS
             buf = io.StringIO()
-            try:
-                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                    rc = run(src, dst)
-            finally:
-                globals().update(saved)
+            with _switched_off(*off), contextlib.redirect_stdout(buf), \
+                    contextlib.redirect_stderr(buf):
+                rc = run(src, dst)
             if inject == "виды":
                 left = (dst / "r.json").read_text(encoding="utf-8")
                 _c("видовые предикаты среза ослеплены — общий критерий срезал то же (код 0)",
@@ -1838,29 +2083,20 @@ def self_test() -> int:
             tmp = pathlib.Path(td)
             src, dst = tmp / "out", tmp / "out-public"
             src.mkdir()
-            # Рядом с телом — обычная строка узла: без неё обход насчитал бы ноль
-            # строк и отказал бы «обход пуст», то есть по ДРУГОЙ причине, и код 1
-            # доказывал бы не то, что назван.
+            # Рядом с телом — обычная строка узла, и утверждение ниже требует
+            # отказа именно по остатку, а не «обход пуст»: код 1 по ДРУГОЙ
+            # причине доказывал бы не то, что назван.
             (src / "r.json").write_text(json.dumps({"run": {"executions": [{
                 "item": {"name": "probe-short-secret"},
                 "response": {"stream": {"type": "Buffer",
                                         "data": list(short_secret.encode("utf-8"))}}}]}}),
                 encoding="utf-8")
-            saved_body = globals()["_scrub_body"]
-            if blinded:
-                def _shape_only(text: str, c: Census) -> str:
-                    s = scrub_text(text)
-                    c.add(s)
-                    return s.text
-                globals()["_scrub_body"] = _shape_only
             buf = io.StringIO()
-            try:
-                # Остаток печатается в stderr — читаем оба потока, иначе «путь
-                # назван» проверялось бы по потоку, в котором его нет by construction.
-                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                    rc = run(src, dst)
-            finally:
-                globals()["_scrub_body"] = saved_body
+            # Остаток печатается в stderr — читаем оба потока, иначе «путь
+            # назван» проверялось бы по потоку, в котором его нет by construction.
+            with _switched_off(*((CUT_JSON_BODY,) if blinded else ())), \
+                    contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = run(src, dst)
             out = buf.getvalue()
             if blinded:
                 _c("форма 8: разбор тела у чистки ослеплён, секрет короткий и без формы — "
@@ -1874,6 +2110,10 @@ def self_test() -> int:
                 _c("форма 8: тот же вход при живой чистке — код 0 (близнец)",
                    rc == want, out[-400:])
 
+
+def _self_test_empty_walk() -> None:
+    """ОСЬ ПУСТОГО ОБХОДА: отказ, а не «чисто»."""
+    import tempfile
     # ── ОСЬ: ПУСТОЙ ОБХОД — ОТКАЗ, А НЕ «ЧИСТО» ────────────────────────────
     with tempfile.TemporaryDirectory(prefix="redact-empty-") as td:
         tmp = pathlib.Path(td)
@@ -1884,17 +2124,284 @@ def self_test() -> int:
         rc = run(tmp / "нет-такого", dst)
         _c("каталога нет — код 1, а НЕ «чисто»", rc == 1)
 
+
+# Срез ПО ФОРМЕ целиком: видовые предикаты и критерий.
+SHAPE_CUTS = (CUT_KIND_JWT, CUT_KIND_BEARER, CUT_QUERY, CUT_CRITERION)
+
+
+def _self_test_second_look() -> None:
+    """ОСЬ ВТОРОГО ВЗГЛЯДА ПО ЧАСТЯМ ДОКУМЕНТА (kaname#399).
+
+    Срез части снят — проверка выхода обязана отказать (код 1), назвать ПУТЬ и
+    не напечатать ни значения, ни имени-удостоверения: печать остатка уходит в
+    журнал прогона, туда же, откуда его убирали. Близнец — тот же вход при
+    живом срезе: код 0. Пара отличается ровно одним фактом — снятым срезом.
+    """
+    import tempfile
+    print("  ── второй взгляд по частям документа")
+    probe = {"item": {"name": "probe-second-look"}}
+
+    def execution(**parts: object) -> str:
+        return json.dumps({"run": {"executions": [dict(probe, **parts)]}})
+
+    def stream(body: str) -> str:
+        return execution(response={"code": 200, "stream": _buffer(body)})
+
+    cases = (
+        (CUT_MEMBER_NAME,
+         {"r.json": execution(response={"code": 200, "trailerMap": {_jwt("KNAM"): "present"}})},
+         ".trailerMap.{член №0} — имя члена", "KNAM"),
+        (CUT_NAMED_NUMBER, {"r.json": stream('{"password":31415926}')},
+         "[байтовый массив, JSON].password — число", "31415926"),
+        (CUT_EVERY_COPY, {"r.json": stream('{"secret":"kt_short_2Fx9_copy","secret":""}')},
+         "[байтовый массив, JSON].secret — значение", "kt_short_2Fx9_copy"),
+        (CUT_JSON_BODY,
+         {"r.json": execution(request={"body": {"mode": "raw",
+                                                "raw": '{"secret":"kt_short_2Fx9_raw8"}'}})},
+         ".raw[JSON].secret — значение", "kt_short_2Fx9_raw8"),
+        (CUT_TEXT_FILE,
+         {"r.json": json.dumps(probe), "r.cli": f"GET /iam/v1/me\n  token {_jwt('KCLI')}\n"},
+         "r.cli:2 — ", "KCLI"),
+    )
+    with tempfile.TemporaryDirectory(prefix="redact-second-look-") as td:
+        for n, (cut, files, where, mark) in enumerate(cases):
+            for off in (True, False):
+                src = pathlib.Path(td) / f"{n}-{off}"
+                dst = pathlib.Path(td) / f"{n}-{off}-public"
+                src.mkdir()
+                for name, text in files.items():
+                    (src / name).write_text(text, encoding="utf-8")
+                with _switched_off(*((cut,) if off else ())):
+                    rc, out = _run_quiet(src, dst)
+                # Деталь отказа печатается, только если в ней нет метки.
+                detail = f"код {rc}" if mark in out else f"код {rc}\n{out[-500:]}"
+                if off:
+                    _c(f"{cut} снят — отказ по остатку, путь назван, значение не напечатано",
+                       rc == 1 and where in out and mark not in out, detail)
+                else:
+                    _c(f"{cut} на месте — тот же вход выкладывается (код 0)", rc == 0, detail)
+
+
+def _axes(light: bool) -> None:
+    """Все оси самопробы. Ось, упавшая исключением, — красная, а не пропавшая."""
+    axes = [_self_test_forms, _self_test_query_and_log, _self_test_one_criterion,
+            _self_test_cut_mechanics, _self_test_pem_and_std_base64, _self_test_pem_headers,
+            _self_test_hidden_triple_and_one_pass, _self_test_every_part,
+            _self_test_second_look, _self_test_residue_injections, _self_test_empty_walk]
+    if not light:
+        axes.append(_self_test_seeded_samples)
+    for axis in axes:
+        try:
+            axis()
+        except Exception as e:  # noqa: BLE001 — исход оси, а не её пропажа
+            _c(f"ось {axis.__name__} упала исключением ({type(e).__name__})", False, str(e)[:300])
+
+
+def _witness_run(judgment: str | None) -> int:
+    """Прогнать облегчённую самопробу со снятым судом; сколько осей покраснело."""
+    import io
+    saved = _F[:]
+    del _F[:]
+    try:
+        with _switched_off(*((judgment,) if judgment else ())), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            _axes(light=True)
+        return len(_F)
+    finally:
+        _F[:] = saved
+
+
+def _region_functions() -> tuple[list, list[str]]:
+    """Функции чистильщика (до начала самопробы) — разбором этого файла."""
+    import ast
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    boundary = next((n.lineno for n in tree.body if isinstance(n, ast.AnnAssign)
+                     and isinstance(n.target, ast.Name) and n.target.id == "_F"), None)
+    if boundary is None:
+        return [], ["граница самопробы `_F` не найдена"]
+    return [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.lineno < boundary], []
+
+
+def _unguarded_producers(region: list) -> tuple[set[str], list[str]]:
+    """Где `REDACTED` выпускается вне суда. Выпуск под судом — внутри тела
+    `if`, чьё условие зовёт `_on`. Функция, выпускающая вне такого `if`, —
+    выпускающая: каждое её упоминание обязано стоять под судом, иначе
+    выпускающей становится и упоминающая, до неподвижной точки. Выпускающая,
+    которую в чистильщике не упоминает никто, — выпуск мимо суда.
+    Возвращает (выпускающие, выпускающие мимо суда)."""
+    import ast
+    parents: dict = {}
+    for f in region:
+        for p in ast.walk(f):
+            for ch in ast.iter_child_nodes(p):
+                parents[ch] = p
+
+    def enclosing(n: object) -> object:
+        p = parents.get(n)
+        while p is not None and not isinstance(p, ast.FunctionDef):
+            p = parents.get(p)
+        return p
+
+    def guarded(n: object) -> bool:
+        child, p = n, parents.get(n)
+        while p is not None and not isinstance(p, ast.FunctionDef):
+            if isinstance(p, ast.If) and child in p.body and any(
+                    isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_on"
+                    for c in ast.walk(p.test)):
+                return True
+            if isinstance(p, ast.Compare):
+                return True  # сравнение с вырезанным — не выпуск
+            child, p = p, parents.get(p)
+        return False
+
+    # Имя разрешается по областям видимости, как у интерпретатора: параметр,
+    # присвоенное и вложенная функция — локальны; прочее — функция модуля.
+    # Совпадение по слову здесь не годится: параметр `run` у `_opaque_run` —
+    # не функция `run`.
+    funcs = [n for f in region for n in ast.walk(f) if isinstance(n, ast.FunctionDef)]
+    bound: dict[int, set[str]] = {}
+    for g in funcs:
+        a = g.args
+        bound[id(g)] = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
+        bound[id(g)] |= {x.arg for x in (a.vararg, a.kwarg) if x is not None}
+    nested: dict[tuple[int, str], object] = {}
+    for f in region:
+        for n in ast.walk(f):
+            g = enclosing(n)
+            if g is None:
+                continue
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                bound[id(g)].add(n.id)
+            elif isinstance(n, ast.FunctionDef):
+                nested[(id(g), n.name)] = n
+                bound[id(g)].add(n.name)
+    top = {f.name: f for f in region}
+
+    def resolve(n: ast.Name) -> object:
+        g = enclosing(n)
+        while g is not None:
+            if n.id in bound[id(g)]:
+                return nested.get((id(g), n.id))
+            g = enclosing(g)
+        return top.get(n.id)
+
+    producers: dict[int, str] = {}
+    queue: list[object] = []
+
+    def mark(n: object) -> None:
+        fn = enclosing(n)
+        if fn is not None and not guarded(n) and id(fn) not in producers:
+            producers[id(fn)] = fn.name
+            queue.append(fn)
+
+    names = [n for f in region for n in ast.walk(f) if isinstance(n, ast.Name)
+             and isinstance(n.ctx, ast.Load)]
+    for n in names:
+        if n.id == "REDACTED" and resolve(n) is None:
+            mark(n)
+    unguarded: list[str] = []
+    while queue:
+        fn = queue.pop()
+        refs = [n for n in names if n.id == fn.name and resolve(n) is fn]
+        if not refs:
+            unguarded.append(fn.name)
+        for r in refs:
+            mark(r)
+    return set(producers.values()), unguarded
+
+
+def _self_test_witness_census() -> None:
+    """ПЕРЕПИСЬ СУДОВ: у каждого есть свидетель (kaname#399).
+
+    Суд, снятие которого не краснит ни одной оси, — место, где правка,
+    снявшая срез или проверку, прошла бы самопробу зелёной. Перепись снимает
+    суды перечня `JUDGMENTS` по одному и гоняет облегчённую самопробу (без
+    засеянных выборок: их утверждения — о порогах критерия, а не о снятии).
+
+    Перечень сверен с кодом РАЗБОРОМ этого файла, а не памятью: каждый суд
+    перечня код называет; каждый вызов `_on` называет суд перечня либо
+    передаёт параметр, и все вызывающие передают в него суд перечня;
+    `REDACTED` выпускается в теле `if _on(…)` либо функцией, которую зовут
+    только из такого тела (`_unguarded_producers`). Контроль переписи —
+    облегчённая самопроба без снятия зелёная: иначе «свидетель есть у всех»
+    значило бы «красно всё».
+    """
+    import ast
+    print("  ── перепись судов: у каждого свидетель")
+    region, problems = _region_functions()
+    _c("предпосылка: функции чистильщика найдены разбором", not problems and bool(region),
+       f"{problems}")
+    consts = {k for k, v in globals().items() if k.isupper() and isinstance(v, str) and v in JUDGMENTS}
+
+    def calls(f: ast.FunctionDef, name: str) -> list[ast.Call]:
+        return [n for n in ast.walk(f) if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name) and n.func.id == name]
+
+    mentioned = {globals()[n.id] for f in region for n in ast.walk(f)
+                 if isinstance(n, ast.Name) and n.id in consts}
+    missing = [j for j in JUDGMENTS if j not in mentioned]
+    _c(f"каждый суд перечня код называет: {len(mentioned)} из {len(JUDGMENTS)}",
+       not missing and len(set(JUDGMENTS)) == len(JUDGMENTS), f"не названы: {missing}")
+
+    # Носитель — функция, передающая в `_on` свой параметр; до неподвижной точки.
+    carriers: dict[str, int] = {"_on": 0}
+    grew = True
+    while grew:
+        grew = False
+        for f in region:
+            params = [a.arg for a in f.args.args]
+            for name, pos in list(carriers.items()):
+                for call in calls(f, name):
+                    arg = call.args[pos] if len(call.args) > pos else None
+                    if isinstance(arg, ast.Name) and arg.id in params and f.name not in carriers:
+                        carriers[f.name] = params.index(arg.id)
+                        grew = True
+    stray = []
+    for f in region:
+        params = [a.arg for a in f.args.args]
+        for name, pos in carriers.items():
+            for call in calls(f, name):
+                arg = call.args[pos] if len(call.args) > pos else None
+                if not (isinstance(arg, ast.Name) and (arg.id in consts
+                        or (f.name in carriers and arg.id == params[carriers[f.name]]))):
+                    stray.append(f"{f.name}:{call.lineno}")
+    print(f"  носителей суда: {len(carriers)} ({', '.join(sorted(carriers))})")
+    _c("каждый вызов `_on` и его носителей называет суд перечня", not stray, f"{stray}")
+
+    producers, unguarded = _unguarded_producers(region)
+    print(f"  выпускающих вырезанное вне своего `if _on(…)`: {len(producers)} "
+          f"({', '.join(sorted(producers))})")
+    _c("вырезанное выпускается только под судом: каждую выпускающую зовут под судом",
+       bool(producers) and not unguarded, f"зовут мимо суда: {unguarded}")
+
+    control = _witness_run(None)
+    _c("контроль: облегчённая самопроба без снятого суда зелёная", control == 0,
+       f"красных осей {control}")
+    witnessed = {j: _witness_run(j) for j in JUDGMENTS}
+    print(f"  судов {len(JUDGMENTS)} · со свидетелем {sum(1 for n in witnessed.values() if n)}")
+    for j, n in witnessed.items():
+        _c(f"{j}: снятие краснит самопробу (красных осей {n})", n > 0)
+
+
+def self_test() -> int:
+    print("redact-newman-report: доказательство способности упасть")
+    _axes(light=False)
+    _self_test_witness_census()
+
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
         return 1
     print("ДОКАЗАНО: все восемь замеренных форм вычищены (включая байтовый массив "
           "тела ответа, невидимый текстовому грепу, и секрет под именем ключа внутри "
-          "JSON-тела), имена ключей и разбор падения выжили, всё, что проверка выхода "
-          "называет удостоверением, срез срезает, отключённый срез отвергается по "
-          "остатку, ни одного куска секрета не остаётся ни при двух промежутках и "
+          "JSON-тела), секрет не доходит до выхода ни из одной части документа (имя "
+          "члена, число под именем секрета, каждая копия повторённого имени, член "
+          "байтового массива), имена ключей и разбор падения выжили, всё, что проверка "
+          "выхода называет удостоверением, срез срезает, отключённый срез отвергается "
+          "по остатку, ни одного куска секрета не остаётся ни при двух промежутках и "
           "перекрытии форм, ни в ключе PEM любого из шести видов заголовка, ни в "
-          "стандартном base64, пустой обход — отказ.")
+          f"стандартном base64, у каждого из {len(JUDGMENTS)} судов есть свидетель, "
+          "пустой обход — отказ.")
     return 0
 
 
