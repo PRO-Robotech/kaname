@@ -35,13 +35,13 @@ func TestSurfaceListingRefusesPastItsDeadline(t *testing.T) {
 	}
 	rootPkg := modfile.ModulePath(data) + "/cmd/kaname"
 
-	if _, err := newListing(root, rootPkg, time.Nanosecond); err == nil {
+	if _, err := newListing(t.Context(), root, rootPkg, time.Nanosecond); err == nil {
 		t.Fatalf("радиус собран за наносекунду срока — срок не действует")
 	} else if !strings.Contains(err.Error(), "не уложился") {
 		t.Fatalf("отказ по сроку не называет срок причиной: %v", err)
 	}
 
-	if _, err := newListing(root, rootPkg, surfaceListTimeout); err != nil {
+	if _, err := newListing(t.Context(), root, rootPkg, surfaceListTimeout); err != nil {
 		t.Fatalf("законный близнец: радиус не собран за штатный срок %s: %v", surfaceListTimeout, err)
 	}
 }

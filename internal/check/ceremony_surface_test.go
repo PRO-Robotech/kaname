@@ -130,7 +130,7 @@ func judgeLiveCeremony(t *testing.T) check.CeremonySurfaceReport {
 func judgeLiveCeremonyWith(t *testing.T, ledger []check.UnresolvedPathEntry) check.CeremonySurfaceReport {
 	t.Helper()
 	root := ceremonyModuleRoot(t)
-	report, err := check.JudgeCeremonySurfaces(check.CeremonySurfaceSpec{
+	report, err := check.JudgeCeremonySurfaces(t.Context(), check.CeremonySurfaceSpec{
 		ModuleRoot:  root,
 		RootPackage: ceremonyModulePath(t, root) + "/" + ceremonyRootDir,
 		Unresolved:  ledger,

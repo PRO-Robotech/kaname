@@ -116,14 +116,14 @@ func ownerPrefixOf(modulePath string) string {
 }
 
 // listingFor — перечень бинаря для корня (разбирается один раз на процесс).
-func listingFor(moduleRoot, rootPkg string) (*surfaceListing, error) {
+func listingFor(ctx context.Context, moduleRoot, rootPkg string) (*surfaceListing, error) {
 	key := moduleRoot + "\x00" + rootPkg
 	surfaceListingsMu.Lock()
 	defer surfaceListingsMu.Unlock()
 	if l, ok := surfaceListings[key]; ok {
 		return l, nil
 	}
-	l, err := newListing(moduleRoot, rootPkg, surfaceListTimeout)
+	l, err := newListing(ctx, moduleRoot, rootPkg, surfaceListTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func listingFor(moduleRoot, rootPkg string) (*surfaceListing, error) {
 // бюджета прогона конвейера (-timeout 25m).
 const surfaceListTimeout = 5 * time.Minute
 
-func newListing(moduleRoot, rootPkg string, timeout time.Duration) (*surfaceListing, error) {
+func newListing(ctx context.Context, moduleRoot, rootPkg string, timeout time.Duration) (*surfaceListing, error) {
 	if rootPkg == "" {
 		return nil, errors.New("радиус: композиционный корень не назван")
 	}
@@ -150,7 +150,7 @@ func newListing(moduleRoot, rootPkg string, timeout time.Duration) (*surfaceList
 		args = append(args, "-race")
 	}
 	args = append(args, rootPkg)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...) // #nosec G204 -- путь пакета приходит из пробы дерева, не из запроса
 	cmd.Dir = moduleRoot

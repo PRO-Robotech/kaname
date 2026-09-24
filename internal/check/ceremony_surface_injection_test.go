@@ -346,7 +346,7 @@ func (f *ceremonyFixture) judge(coords []check.CeremonyCoordinate) (check.Ceremo
 		}
 		overlay[f.modulePath+"/"+rel] = dir
 	}
-	return check.JudgeCeremonySurfaces(check.CeremonySurfaceSpec{
+	return check.JudgeCeremonySurfaces(f.t.Context(), check.CeremonySurfaceSpec{
 		ModuleRoot:  f.root,
 		RootPackage: f.modulePath + "/" + ceremonyRootDir,
 		Overlay:     overlay,
@@ -1055,7 +1055,7 @@ func TestCeremonySurfacePremiseRedsOnAnEmptyWalk(t *testing.T) {
 // TestCeremonySurfacePremiseRedsOnAForeignRoot — I18: неверный корень модуля
 // — «не исполнилось», а не зелёное.
 func TestCeremonySurfacePremiseRedsOnAForeignRoot(t *testing.T) {
-	_, err := check.JudgeCeremonySurfaces(check.CeremonySurfaceSpec{
+	_, err := check.JudgeCeremonySurfaces(t.Context(), check.CeremonySurfaceSpec{
 		ModuleRoot:  t.TempDir(),
 		RootPackage: "github.com/PRO-Robotech/kaname/cmd/kaname",
 	}, liveCeremonyCoordinates())

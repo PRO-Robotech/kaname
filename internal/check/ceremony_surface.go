@@ -219,9 +219,9 @@ type CeremonySurfaceReport struct {
 // JudgeCeremonySurfaces судит, на скольких поверхностях резолвится каждая
 // координата. Ошибка — гейт НЕ ИСПОЛНИЛСЯ (радиус не собран, файл не
 // разобрался, разбор не дошёл до неподвижной точки): это не зелёное и не
-// находка.
-func JudgeCeremonySurfaces(spec CeremonySurfaceSpec, coords []CeremonyCoordinate) (CeremonySurfaceReport, error) {
-	l, err := listingFor(spec.ModuleRoot, spec.RootPackage)
+// находка. ctx ограничивает сбор радиуса (`go list`) вместе с его сроком.
+func JudgeCeremonySurfaces(ctx context.Context, spec CeremonySurfaceSpec, coords []CeremonyCoordinate) (CeremonySurfaceReport, error) {
+	l, err := listingFor(ctx, spec.ModuleRoot, spec.RootPackage)
 	if err != nil {
 		return CeremonySurfaceReport{}, err
 	}
