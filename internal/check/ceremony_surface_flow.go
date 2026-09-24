@@ -191,6 +191,9 @@ type surfaceFlow struct {
 	// переменные, объявленные без значения (нулевое значение), и функция
 	// объявления: нулевое значение своего типа с методами — место рождения
 	zeroVars map[*types.Var]fkey
+	// именованные типы, упомянутые в теле функции (приведение, литерал,
+	// объявление переменной): их методы достижимы вместе с функцией
+	typeUses map[fkey][]*types.TypeName
 
 	// объявления, собранные проходом (судит ceremony_surface.go)
 	surfaceLits []flowNode
@@ -229,6 +232,7 @@ func newSurfaceFlow(prog *surfaceProgram) *surfaceFlow {
 		dispatched: map[*ast.CallExpr]bool{},
 		ifaceCalls: map[*ast.CallExpr]*ifaceCall{},
 		zeroVars:   map[*types.Var]fkey{},
+		typeUses:   map[fkey][]*types.TypeName{},
 	}
 	a.handler = lookupHandlerIface(prog)
 	a.httpMuxT = lookupMuxPtr(prog, "net/http")
@@ -479,7 +483,9 @@ func (a *surfaceFlow) collect() {
 						a.walk(sp, fkey{fn: fn}, d.Body)
 					}
 				case *ast.GenDecl:
-					a.walk(sp, fkey{}, d)
+					if d.Tok == token.VAR || d.Tok == token.CONST {
+						a.walk(sp, fkey{}, d)
+					}
 				}
 			}
 			a.idx.structTags(sp, f)
@@ -500,6 +506,11 @@ func (a *surfaceFlow) walk(sp *surfaceSrcPkg, top fkey, root ast.Node) {
 				stack = stack[:len(stack)-1]
 			}
 			return true
+		}
+		if _, ok := n.(*ast.TypeSpec); ok {
+			// Объявление типа — не употребление: упомянутые в нём типы
+			// значений не рождают (их рождает употребление самого типа).
+			return false
 		}
 		nodes = append(nodes, n)
 		fk := stack[len(stack)-1]
@@ -557,8 +568,11 @@ func (a *surfaceFlow) walk(sp *surfaceSrcPkg, top fkey, root ast.Node) {
 			// взятие значением. Не только у тех, что текут: достижимость
 			// регистрации решает путь от входа процесса, а он идёт через
 			// вызовы, чьи значения гейту неважны.
-			if fn, ok := sp.info.Uses[n].(*types.Func); ok {
-				a.edge(fk, fkey{fn: fn.Origin()})
+			switch obj := sp.info.Uses[n].(type) {
+			case *types.Func:
+				a.edge(fk, fkey{fn: obj.Origin()})
+			case *types.TypeName:
+				a.typeUses[fk] = append(a.typeUses[fk], obj)
 			}
 		}
 		return true
@@ -1782,8 +1796,11 @@ func (a *surfaceFlow) effectiveRegs(m *absVal) []*surfaceReg {
 // ─── достижимость ───────────────────────────────────────────────────────────
 
 // reachable — функции, достижимые от входа процесса: main, init, инициализация
-// пакетов; методы типа, чья структура рождена в достижимом коде, достижимы
-// все (их зовёт чужой код — сервер, маршрутизатор).
+// пакетов; методы типа, чьё значение рождено или чей тип употреблён в
+// достижимом коде (литерал, приведение, объявление переменной, new), достижимы
+// все: их зовёт чужой код — сервер, маршрутизатор — и вызов через интерфейс.
+// Употреблённый тип несёт нулевые значения своих полей, и их методы тоже
+// достижимы.
 func (a *surfaceFlow) reachable() map[fkey]bool {
 	seen := map[fkey]bool{{}: true}
 	var work []fkey
@@ -1805,14 +1822,17 @@ func (a *surfaceFlow) reachable() map[fkey]bool {
 			structsOf[v.origin] = append(structsOf[v.origin], v)
 		}
 	}
-	for len(work) > 0 {
-		k := work[len(work)-1]
-		work = work[:len(work)-1]
-		for to := range a.edges[k] {
-			push(to)
+	used := map[types.Type]bool{}
+	var useType func(t types.Type)
+	useType = func(t types.Type) {
+		t = types.Unalias(t)
+		if t == nil || used[t] {
+			return
 		}
-		for _, v := range structsOf[k] {
-			for _, tt := range []types.Type{v.typ, types.NewPointer(v.typ)} {
+		used[t] = true
+		switch u := t.(type) {
+		case *types.Named:
+			for _, tt := range []types.Type{u, types.NewPointer(u)} {
 				ms := types.NewMethodSet(tt)
 				for i := 0; i < ms.Len(); i++ {
 					if fn, ok := ms.At(i).Obj().(*types.Func); ok {
@@ -1820,6 +1840,28 @@ func (a *surfaceFlow) reachable() map[fkey]bool {
 					}
 				}
 			}
+			useType(u.Underlying())
+		case *types.Pointer:
+			useType(u.Elem())
+		case *types.Array:
+			useType(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				useType(u.Field(i).Type())
+			}
+		}
+	}
+	for len(work) > 0 {
+		k := work[len(work)-1]
+		work = work[:len(work)-1]
+		for to := range a.edges[k] {
+			push(to)
+		}
+		for _, v := range structsOf[k] {
+			useType(v.typ)
+		}
+		for _, tn := range a.typeUses[k] {
+			useType(tn.Type())
 		}
 	}
 	return seen
