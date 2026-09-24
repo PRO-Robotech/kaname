@@ -184,7 +184,7 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				time.Sleep(scene.revokeLate)
-				revokeErr = repo.RevokeFamily(ctx, base.FamilyID, domain.FamilyRevokedByLogout)
+				_, revokeErr = repo.RevokeFamily(ctx, base.FamilyID, domain.FamilyRevokedByLogout)
 			}()
 			wg.Wait()
 
