@@ -43,6 +43,17 @@ func manualInjections() []manualInjection {
 			manualCond("", "", `if cr := (ceremonyReq{r}); cr.URL.Path == "/iam/v1/authorize"`)(f)
 		}, []string{decided, "сравнение пути", "ceremony_probe_manual.go:"}},
 
+		// Z15, Z18 — функции сопоставления из опытов приёмки проверки, круг 2:
+		// путь, приведённый к байтам, в чужой функции-признаке, и strings.Cut —
+		// признак среди результатов кортежа, названный шапкой распознавателя.
+		{"Z15_bytes_equal_over_the_path", manualCond("\n\t\"bytes\"", "",
+			`if bytes.Equal([]byte(r.URL.Path), []byte("/iam/v1/authorize"))`),
+			[]string{decided, "сопоставление пути функцией bytes.Equal", "ceremony_probe_manual.go:"}},
+
+		{"Z18_strings_cut_of_the_path", manualCond("\n\t\"strings\"", "",
+			`if _, rest, ok := strings.Cut(r.URL.Path, "/iam/v1/"); ok && rest == "authorize"`),
+			[]string{decided, "сопоставление пути функцией strings.Cut", "ceremony_probe_manual.go:"}},
+
 		{"Z16_named_helper_with_a_boolean_result", func(f *ceremonyFixture) {
 			ceremonyRootFile(f, "ceremony_probe_is.go", "",
 				"func ceremonyIsAuthorize(p string) bool { return p == \"/iam/v1/authorize\" }")

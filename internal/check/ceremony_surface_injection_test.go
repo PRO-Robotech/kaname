@@ -1059,6 +1059,80 @@ func ceremonyInjections() []ceremonyInjection {
 			serve(f, anchorIntrospect, "var ceremonyD ceremonyDeps\nvar ceremonyM ceremonyMounter = ceremonyD.am\nceremonyM.Mount(jwksMux)")
 		}, []string{"передан методу интерфейса", "ceremonyMounter.Mount"}},
 
+		// Z3–Z12 — формы опытов приёмки проверки, круг 2, на которых гейт
+		// краснел и без правки: в перечне они затем, чтобы красное держала
+		// проба, а не опыт одноразовой копии. Основание — у каждой.
+		//
+		// Z3: получатель монтировщика — функция своего типа, реализации у него
+		// нет; мультиплексор, отданный такому вызову, уходит из наблюдения.
+		{"Z3_mounter_behind_an_interface_func_adapter", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_mounter.go", "\t\"net/http\"", ceremonyMounterIface+
+				"type ceremonyMountFunc func(*http.ServeMux)\n\nfunc (fn ceremonyMountFunc) Mount(m *http.ServeMux) { fn(m) }")
+			serve(f, anchorIntrospect, "var ceremonyM ceremonyMounter = ceremonyMountFunc(func(m *http.ServeMux) "+
+				ceremonyMountBody+")\nceremonyM.Mount(jwksMux)")
+		}, []string{"передан методу интерфейса", "ceremonyMounter.Mount"}},
+
+		// Z4, Z5: метод мультиплексора значением течёт в параметр функции и в
+		// поле структуры — X1 держит лишь локальную переменную.
+		{"Z4_mux_method_value_passed_as_an_argument", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_with.go", "\t\"net/http\""+ceremonyImportLine,
+				"func ceremonyWith(reg func(string, http.Handler)) {\n\treg(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+			serve(f, anchorIntrospect, "ceremonyWith(jwksMux.Handle)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z5_mux_method_value_in_a_struct_field", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_holder.go", "\t\"net/http\"",
+				"type ceremonyHolder struct{ reg func(string, http.Handler) }")
+			serve(f, anchorIntrospect, "ceremonyH := ceremonyHolder{reg: jwksMux.Handle}\n"+
+				"ceremonyH.reg(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Z6: функция регистрации на общем мультиплексоре процесса, взятая
+		// значением; общий мультиплексор отдан поддереву зеркала. Прямой вызов
+		// держит I26, делегирование без регистрации — близнец Z6t.
+		{"Z6_default_mux_function_value", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "jwksMux.Handle(\"/iam/v1/\", http.DefaultServeMux)\n"+
+				"ceremonyHandle := http.Handle\nceremonyHandle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Z7, Z8: регистрация в литерале функции, отданном чужому коду
+		// (sync.Once), и отложенным вызовом — X13 и X14 держат go и вызов на
+		// месте.
+		{"Z7_registration_in_sync_once", func(f *ceremonyFixture) {
+			f.addImport(ceremonyRootDir, "serve.go", `"sync"`)
+			serve(f, anchorIntrospect, "var ceremonyOnce sync.Once\n"+
+				"ceremonyOnce.Do(func() { jwksMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New()) })")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z8_deferred_registration", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "defer jwksMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Z9: мультиплексор рождён переменной пакета, регистрация — в init.
+		{"Z9_package_mux_registered_in_init", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_global.go", "\t\"net/http\""+ceremonyImportLine,
+				"var ceremonyGlobalMux = http.NewServeMux()\n\n"+
+					"func init() {\n\tceremonyGlobalMux.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+			serve(f, anchorIntrospect, `jwksMux.Handle("/iam/v1/", ceremonyGlobalMux)`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Z11: срезанный префикс приводит запрос координаты к регистрации
+		// внутреннего мультиплексора — положительная пара близнеца W7.
+		{"Z11_strip_prefix_onto_the_coordinate", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "ceremonyInner := http.NewServeMux()\n"+
+				"ceremonyInner.Handle(\"/v1/authorize\", authorizehttp.New())\n"+
+				"jwksMux.Handle(\"/iam/\", http.StripPrefix(\"/iam\", ceremonyInner))")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Z12: HandlePath мультиплексора шлюза значением — I2 держит прямой
+		// вызов.
+		{"Z12_gateway_handle_path_method_value", func(f *ceremonyFixture) {
+			f.addImport("internal/restfront", "front.go", anchorCeremonyImp)
+			f.insertAfter("internal/restfront", "front.go", "NewPublic", "mux := newMux()",
+				"ceremonyHandlePath := mux.HandlePath\n_ = ceremonyHandlePath(http.MethodGet, authorizehttp.AuthorizePath, "+
+					"func(w http.ResponseWriter, _ *http.Request, _ map[string]string) { w.WriteHeader(http.StatusOK) })")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "собственный публичный REST-фронт"}},
+
 		// S1 — путь регистрации сквозь цикл записей P → Q → S → P. Первой
 		// сводится регистрация по P (безвредная: координата в ней с хвостом),
 		// второй — по S. Значение S не зависит от того, кого свели первым.
@@ -1496,6 +1570,11 @@ func ceremonyTwins() []ceremonyTwin {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
 				"ceremonyInner := http.NewServeMux()\nceremonyInner.Handle(\"/v1/other\", authorizehttp.New())\n"+
 					"jwksMux.Handle(\"/iam/\", http.StripPrefix(\"/iam\", ceremonyInner))")
+		}},
+		// Близнец Z6 на один факт: общий мультиплексор отдан поддереву, а
+		// координата на нём не зарегистрирована.
+		{"Z6t_default_mux_delegated_without_a_registration", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, `jwksMux.Handle("/iam/v1/", http.DefaultServeMux)`)
 		}},
 		// Регистратор за шестью слоями вокруг пустышки, а не мультиплексора:
 		// глубина встраивания сама по себе не находка.
