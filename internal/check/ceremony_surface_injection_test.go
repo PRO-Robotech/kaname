@@ -758,6 +758,15 @@ func ceremonyInjections() []ceremonyInjection {
 				"ceremonyReg.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 
+		{"X3b_interface_registrar_through_an_empty_interface", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "var ceremonyAny any = jwksMux\n"+
+				"ceremonyAny.(interface{ Handle(string, http.Handler) }).Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}, []string{"мультиплексор не прослежен", "authorizehttp.AuthorizePath"}},
+
+		{"X1b_bound_serve_http_of_the_issuing_handler", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, `jwksMux.Handle("/iam/v1/", http.HandlerFunc(registryTokenHandler.ServeHTTP))`)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
 		{"X4_embedded_mux_promoted_method", func(f *ceremonyFixture) {
 			ceremonyRootFile(f, "ceremony_probe_router.go", `"net/http"`, "type ceremonyRouter struct{ *http.ServeMux }")
 			serve(f, anchorIntrospect, "ceremonyR := ceremonyRouter{jwksMux}\n"+
@@ -1088,6 +1097,15 @@ func ceremonyTwins() []ceremonyTwin {
 					"\treturn err == nil && u.Path == \"/iam/v1/authorize\"\n}")
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
 				`_ = ceremonyIsAuthorize("https://kaname.invalid/iam/v1/authorize")`)
+		}},
+		// Метод ServeHTTP мультиплексора, взятый значением, делегирует ЭТОМУ
+		// мультиплексору, а не становится конечной точкой: поддерево /iam/v1/
+		// на внутреннем зеркале отдано мультиплексору без координат.
+		{"T17_bound_serve_http_of_a_mux_without_the_coordinate", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				"ceremonyOther := http.NewServeMux()\n"+
+					`ceremonyOther.Handle("/iam/v1/other", http.NotFoundHandler())`+"\n"+
+					`jwksMux.Handle("/iam/v1/", http.HandlerFunc(ceremonyOther.ServeHTTP))`)
 		}},
 		{"T16_wrapper_nested_into_itself", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_wrap.go", ceremonyWrapSource)

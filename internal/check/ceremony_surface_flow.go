@@ -46,6 +46,10 @@ const (
 	avOpaque
 	avExtWrap
 	avNotFound
+	// avBound — метод мультиплексора, взятый значением вместе с получателем
+	// (mux.Handle, mux.ServeHTTP, метод интерфейса, который мультиплексор
+	// реализует): вызов такого значения — вызов метода ЭТОГО получателя.
+	avBound
 )
 
 // fkey — функция: объявленная либо литерал; нулевое значение — инициализация пакета.
@@ -169,6 +173,16 @@ type surfaceFlow struct {
 	extCalls map[*absVal]flowNode
 	defMux   *absVal
 
+	// получатели значений-методов (avBound)
+	boundRecv map[*absVal]avSet
+	// типы мультиплексоров, как их видит проверка типов (для диспетчеризации)
+	httpMuxT types.Type
+	gwMuxT   types.Type
+	// вызовы метода регистрации через интерфейс, который реализует
+	// мультиплексор, и нашлась ли для них хоть одна реализация
+	ifaceRegs  map[*ast.CallExpr]*surfaceReg
+	dispatched map[*ast.CallExpr]bool
+
 	// объявления, собранные проходом (судит ceremony_surface.go)
 	surfaceLits []flowNode
 	raisedLits  []flowNode
@@ -198,8 +212,14 @@ func newSurfaceFlow(prog *surfaceProgram) *surfaceFlow {
 		edges:    map[fkey]map[fkey]bool{},
 		escapes:  map[token.Pos]escapeRef{},
 		extCalls: map[*absVal]flowNode{},
+
+		boundRecv:  map[*absVal]avSet{},
+		ifaceRegs:  map[*ast.CallExpr]*surfaceReg{},
+		dispatched: map[*ast.CallExpr]bool{},
 	}
 	a.handler = lookupHandlerIface(prog)
+	a.httpMuxT = lookupMuxPtr(prog, "net/http")
+	a.gwMuxT = lookupMuxPtr(prog, gatewayRuntimePkg)
 	a.defMux = a.intern(avKey{kind: avHTTPMux}, fkey{}, nil, nil)
 	return a
 }
@@ -214,6 +234,22 @@ type escapeRef struct {
 type sinkRef struct {
 	node flowNode
 	expr ast.Expr
+}
+
+// lookupMuxPtr — указатель на тип ServeMux пакета path, как его видит
+// проверка типов; nil — пакет в радиус не импортирован.
+func lookupMuxPtr(prog *surfaceProgram, path string) types.Type {
+	for _, sp := range prog.pkgs {
+		for _, imp := range sp.types.Imports() {
+			if imp.Path() != path {
+				continue
+			}
+			if tn, ok := imp.Scope().Lookup("ServeMux").(*types.TypeName); ok {
+				return types.NewPointer(tn.Type())
+			}
+		}
+	}
+	return nil
 }
 
 // lookupHandlerIface — интерфейс http.Handler, как его видит проверка типов.
@@ -370,7 +406,21 @@ func (a *surfaceFlow) interestingNow(t types.Type) bool {
 		}
 		return false
 	case *types.Interface:
-		return u.NumMethods() > 0 && a.isHandlerType(u)
+		// Интерфейс течёт, если течёт хоть одна подпись его методов (регистратор
+		// Handle(string, http.Handler), монтировщик Mount(*http.ServeMux)) либо
+		// он — обработчик.
+		if u.NumMethods() == 0 {
+			return false
+		}
+		if a.isHandlerType(u) {
+			return true
+		}
+		for i := 0; i < u.NumMethods(); i++ {
+			if a.interesting(u.Method(i).Type()) {
+				return true
+			}
+		}
+		return false
 	case *types.TypeParam:
 		return true
 	case *types.Tuple:
@@ -972,9 +1022,16 @@ func (a *surfaceFlow) eval(sp *surfaceSrcPkg, fk fkey, e ast.Expr) avSet {
 					return nil
 				}
 				fn = fn.Origin()
-				if !types.IsInterface(sel.Recv()) {
+				recvs := a.throughEmbedded(a.eval(sp, fk, x.X), embedPath(sel.Recv(), sel.Index()))
+				if a.boundKind(fn) {
+					v := a.intern(avKey{kind: avBound, site: x.Pos(), fn: fn}, fk, nil, sp)
+					a.addBound(v, recvs)
+					a.edge(fk, fkey{fn: fn})
+					return avSet{v: {}}
+				}
+				if !isIfaceMethod(fn) {
 					if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil && a.interesting(sig.Recv().Type()) {
-						a.setVar(sig.Recv(), a.eval(sp, fk, x.X))
+						a.setVar(sig.Recv(), recvs)
 					}
 				}
 				return a.funcVal(fk, fn)
@@ -1079,6 +1136,9 @@ type surfaceCallee struct {
 	recv     ast.Expr
 	recvVals avSet
 	shift    bool
+	// embed — встроенные поля от выражения получателя до получателя метода
+	// (метод, продвинутый из встроенного мультиплексора или структуры).
+	embed []*types.Var
 }
 
 func (c surfaceCallee) key() fkey { return fkey{fn: c.fn, lit: c.lit} }
@@ -1096,11 +1156,14 @@ func (a *surfaceFlow) evalCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, i
 			return a.builtin(sp, fk, call, b)
 		}
 	}
-	a.maybeRegister(sp, fk, call)
 	out := avSet{}
 	for _, c := range a.callees(sp, fk, call) {
 		if c.fn != nil {
 			a.edge(fk, fkey{fn: c.fn})
+		}
+		if k := a.regKindOf(c, call); k != 0 {
+			a.register(sp, fk, call, c, k)
+			continue
 		}
 		if a.hasBody(c) {
 			a.bind(sp, fk, call, c)
@@ -1170,10 +1233,11 @@ func (a *surfaceFlow) callees(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) []
 				if fn == nil {
 					return nil
 				}
-				if types.IsInterface(sel.Recv()) {
-					return a.dispatch(sp, fk, f.X, fn.Name())
+				embed := embedPath(sel.Recv(), sel.Index())
+				if isIfaceMethod(fn) {
+					return a.dispatchCall(sp, fk, call, fn, a.throughEmbedded(a.eval(sp, fk, f.X), embed))
 				}
-				return []surfaceCallee{{fn: fn.Origin(), recv: f.X}}
+				return []surfaceCallee{{fn: fn.Origin(), recv: f.X, embed: embed}}
 			case types.MethodExpr:
 				if fn, ok := sel.Obj().(*types.Func); ok {
 					return []surfaceCallee{{fn: fn.Origin(), shift: true}}
@@ -1191,23 +1255,163 @@ func (a *surfaceFlow) callees(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) []
 			out = append(out, surfaceCallee{fn: v.fn})
 		case avClosure:
 			out = append(out, surfaceCallee{lit: v.lit})
+		case avBound:
+			if isIfaceMethod(v.fn) {
+				out = append(out, a.dispatchCall(sp, fk, call, v.fn, a.boundRecv[v])...)
+				continue
+			}
+			out = append(out, surfaceCallee{fn: v.fn, recvVals: a.boundRecv[v]})
 		}
 	}
 	return out
 }
 
-// dispatch — вызов метода интерфейса: по значениям-структурам получателя.
-func (a *surfaceFlow) dispatch(sp *surfaceSrcPkg, fk fkey, recv ast.Expr, name string) []surfaceCallee {
-	var out []surfaceCallee
-	for _, v := range a.eval(sp, fk, recv).sorted() {
-		if v.kind != avStruct || v.typ == nil {
-			continue
-		}
-		if m := methodOf(v.typ, name); m != nil {
-			out = append(out, surfaceCallee{fn: m.Origin(), recvVals: avSet{v: {}}})
+// dispatchCall — вызов метода интерфейса fn над получателями recvs. Метод
+// регистрации через интерфейс, который реализует мультиплексор, без единой
+// найденной реализации — кандидат в непрослеженные: значения до получателя
+// не дотекли (пустой интерфейс, чужой код), а молчать об этом нельзя.
+func (a *surfaceFlow) dispatchCall(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, fn *types.Func, recvs avSet) []surfaceCallee {
+	out := a.dispatchVals(recvs, fn, 0)
+	if len(out) > 0 {
+		a.dispatched[call] = true
+	}
+	if _, ok := a.ifaceRegs[call]; !ok {
+		if k := a.ifaceRegKind(fn, len(call.Args)); k != 0 {
+			reg := a.newReg(k, call.Args)
+			reg.call, reg.pkg, reg.fk = call, sp, fk
+			a.ifaceRegs[call] = reg
 		}
 	}
 	return out
+}
+
+// dispatchVals — реализации метода интерфейса fn у значений-получателей:
+// структуры (с продвижением через встроенные поля) и мультиплексоры.
+func (a *surfaceFlow) dispatchVals(recvs avSet, fn *types.Func, depth int) []surfaceCallee {
+	var out []surfaceCallee
+	for _, v := range recvs.sorted() {
+		var t types.Type
+		switch v.kind {
+		case avStruct:
+			t = v.typ
+		case avHTTPMux:
+			t = a.httpMuxT
+		case avGatewayMux:
+			t = a.gwMuxT
+		}
+		if t == nil {
+			continue
+		}
+		obj, index, _ := types.LookupFieldOrMethod(t, true, fn.Pkg(), fn.Name())
+		m, ok := obj.(*types.Func)
+		if !ok {
+			continue
+		}
+		embed := embedPath(t, index)
+		if isIfaceMethod(m) {
+			// Продвинут из встроенного интерфейса — диспетчеризация дальше.
+			if depth < maxEmbeddedDispatch {
+				out = append(out, a.dispatchVals(a.throughEmbedded(avSet{v: {}}, embed), m, depth+1)...)
+			}
+			continue
+		}
+		out = append(out, surfaceCallee{fn: m.Origin(), recvVals: avSet{v: {}}, embed: embed})
+	}
+	return out
+}
+
+// maxEmbeddedDispatch — глубина продвижения метода сквозь встроенные
+// интерфейсы при диспетчеризации: страж от цикла встраивания.
+const maxEmbeddedDispatch = 4
+
+// embedPath — встроенные поля на пути выбора метода: все индексы, кроме
+// последнего (он — номер метода).
+func embedPath(t types.Type, index []int) []*types.Var {
+	var out []*types.Var
+	for k := 0; k+1 < len(index); k++ {
+		t = types.Unalias(t)
+		if p, ok := t.(*types.Pointer); ok {
+			t = types.Unalias(p.Elem())
+		}
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok || index[k] >= st.NumFields() {
+			return out
+		}
+		f := st.Field(index[k])
+		out = append(out, f)
+		t = f.Type()
+	}
+	return out
+}
+
+// throughEmbedded — значения встроенных полей по пути embed.
+func (a *surfaceFlow) throughEmbedded(vals avSet, embed []*types.Var) avSet {
+	for _, f := range embed {
+		vals = a.readFrom(vals, f)
+	}
+	return vals
+}
+
+// receivers — значения получателя вызываемого метода.
+func (a *surfaceFlow) receivers(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, c surfaceCallee) avSet {
+	var vals avSet
+	switch {
+	case c.recvVals != nil:
+		vals = c.recvVals
+	case c.recv != nil:
+		vals = a.eval(sp, fk, c.recv)
+	case c.shift && len(call.Args) > 0:
+		vals = a.eval(sp, fk, call.Args[0])
+	}
+	return a.throughEmbedded(vals, c.embed)
+}
+
+// isIfaceMethod — метод, объявленный интерфейсом (в том числе ограничением
+// параметра типа): реализация выбирается по значению получателя.
+func isIfaceMethod(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	return ok && sig.Recv() != nil && types.IsInterface(sig.Recv().Type())
+}
+
+// isMuxMethod — метод мультиплексора net/http либо шлюза.
+func (a *surfaceFlow) isMuxMethod(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	return ok && sig.Recv() != nil && (a.isHTTPMuxType(sig.Recv().Type()) || a.isGatewayMuxType(sig.Recv().Type()))
+}
+
+// muxImplements — реализует ли мультиплексор интерфейс, объявивший метод fn.
+func (a *surfaceFlow) muxImplements(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	it, ok := sig.Recv().Type().Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	for _, t := range []types.Type{a.httpMuxT, a.gwMuxT} {
+		if t != nil && types.Implements(t, it) {
+			return true
+		}
+	}
+	return false
+}
+
+// boundKind — метод, который берётся значением ВМЕСТЕ с получателем: метод
+// мультиплексора и метод интерфейса, который мультиплексор реализует.
+func (a *surfaceFlow) boundKind(fn *types.Func) bool {
+	return a.isMuxMethod(fn) || (isIfaceMethod(fn) && a.muxImplements(fn))
+}
+
+func (a *surfaceFlow) addBound(v *absVal, recvs avSet) {
+	cur, ok := a.boundRecv[v]
+	if !ok {
+		cur = avSet{}
+		a.boundRecv[v] = cur
+	}
+	if cur.addAll(recvs) {
+		a.changed = true
+	}
 }
 
 func methodOf(t types.Type, name string) *types.Func {
@@ -1236,14 +1440,7 @@ func (a *surfaceFlow) bind(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, c sur
 	}
 	args := call.Args
 	if sig.Recv() != nil && a.interesting(sig.Recv().Type()) {
-		switch {
-		case c.recv != nil:
-			a.setVar(sig.Recv(), a.eval(sp, fk, c.recv))
-		case c.recvVals != nil:
-			a.setVar(sig.Recv(), c.recvVals)
-		case c.shift && len(args) > 0:
-			a.setVar(sig.Recv(), a.eval(sp, fk, args[0]))
-		}
+		a.setVar(sig.Recv(), a.receivers(sp, fk, call, c))
 	}
 	if c.shift && len(args) > 0 {
 		args = args[1:]
@@ -1301,6 +1498,13 @@ func (a *surfaceFlow) external(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, f
 			case avHTTPMux, avGatewayMux:
 				muxEscapes = true
 				kids.add(v)
+			case avBound:
+				kids.add(v)
+				for r := range a.boundRecv[v] {
+					if r.kind == avHTTPMux || r.kind == avGatewayMux {
+						muxEscapes = true
+					}
+				}
 			case avStruct, avFunc, avClosure, avOpaque, avExtWrap, avNotFound:
 				kids.add(v)
 			}
@@ -1339,38 +1543,92 @@ func (a *surfaceFlow) external(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, f
 
 // ─── регистрации ────────────────────────────────────────────────────────────
 
-func (a *surfaceFlow) maybeRegister(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr) {
-	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
-	if !ok {
-		return
+// regKindOf — регистрация ли вызов callee и какого вида. Судит ВЫЗЫВАЕМЫЙ
+// метод, а не синтаксис вызова: прямой выбор, значение метода, выражение
+// метода, метод интерфейса и параметра типа, продвинутый из встроенного поля
+// метод сводятся к одному и тому же методу мультиплексора.
+func (a *surfaceFlow) regKindOf(c surfaceCallee, call *ast.CallExpr) regKind {
+	if c.fn == nil || c.fn.Pkg() == nil {
+		return 0
 	}
-	var reg *surfaceReg
-	var muxes avSet
-	if s, ok := sp.info.Selections[sel]; ok && s.Kind() == types.MethodVal {
-		switch {
-		case a.isHTTPMuxType(s.Recv()) && (sel.Sel.Name == "Handle" || sel.Sel.Name == "HandleFunc") && len(call.Args) == 2:
-			reg = &surfaceReg{kind: regHTTP, path: call.Args[0], handler: call.Args[1]}
-		case a.isGatewayMuxType(s.Recv()) && sel.Sel.Name == "Handle" && len(call.Args) == 3:
-			reg = &surfaceReg{kind: regGatewayPattern, method: call.Args[0], path: call.Args[1], handler: call.Args[2]}
-		case a.isGatewayMuxType(s.Recv()) && sel.Sel.Name == "HandlePath" && len(call.Args) == 3:
-			reg = &surfaceReg{kind: regGatewayPath, method: call.Args[0], path: call.Args[1], handler: call.Args[2]}
-		default:
-			return
+	nargs := len(call.Args)
+	if c.shift {
+		nargs--
+	}
+	sig, ok := c.fn.Type().(*types.Signature)
+	if !ok {
+		return 0
+	}
+	name := c.fn.Name()
+	switch {
+	case sig.Recv() == nil:
+		if c.fn.Pkg().Path() == "net/http" && (name == "Handle" || name == "HandleFunc") && nargs == 2 {
+			return regDefault
 		}
-		muxes = avSet{}
-		for v := range a.eval(sp, fk, sel.X) {
+	case a.isHTTPMuxType(sig.Recv().Type()):
+		if (name == "Handle" || name == "HandleFunc") && nargs == 2 {
+			return regHTTP
+		}
+	case a.isGatewayMuxType(sig.Recv().Type()):
+		switch {
+		case name == "Handle" && nargs == 3:
+			return regGatewayPattern
+		case name == "HandlePath" && nargs == 3:
+			return regGatewayPath
+		}
+	}
+	return 0
+}
+
+// ifaceRegKind — вид регистрации, которой был бы вызов метода интерфейса,
+// окажись получателем мультиплексор.
+func (a *surfaceFlow) ifaceRegKind(fn *types.Func, nargs int) regKind {
+	if !isIfaceMethod(fn) {
+		return 0
+	}
+	it, _ := fn.Type().(*types.Signature).Recv().Type().Underlying().(*types.Interface)
+	if it == nil {
+		return 0
+	}
+	name := fn.Name()
+	switch {
+	case a.httpMuxT != nil && types.Implements(a.httpMuxT, it) && (name == "Handle" || name == "HandleFunc") && nargs == 2:
+		return regHTTP
+	case a.gwMuxT != nil && types.Implements(a.gwMuxT, it) && name == "Handle" && nargs == 3:
+		return regGatewayPattern
+	case a.gwMuxT != nil && types.Implements(a.gwMuxT, it) && name == "HandlePath" && nargs == 3:
+		return regGatewayPath
+	}
+	return 0
+}
+
+// newReg — регистрация вида k по аргументам (без получателя).
+func (a *surfaceFlow) newReg(k regKind, args []ast.Expr) *surfaceReg {
+	switch k {
+	case regGatewayPattern, regGatewayPath:
+		return &surfaceReg{kind: k, method: args[0], path: args[1], handler: args[2]}
+	}
+	return &surfaceReg{kind: k, path: args[0], handler: args[1]}
+}
+
+// register — регистрация на мультиплексорах-получателях вызова.
+func (a *surfaceFlow) register(sp *surfaceSrcPkg, fk fkey, call *ast.CallExpr, c surfaceCallee, k regKind) {
+	args := call.Args
+	if c.shift {
+		args = args[1:]
+	}
+	reg := a.newReg(k, args)
+	reg.call, reg.pkg, reg.fk = call, sp, fk
+	muxes := avSet{}
+	if k == regDefault {
+		muxes.add(a.defMux)
+	} else {
+		for v := range a.receivers(sp, fk, call, c) {
 			if v.kind == avHTTPMux || v.kind == avGatewayMux {
 				muxes.add(v)
 			}
 		}
-	} else if fn, ok := sp.info.Uses[sel.Sel].(*types.Func); ok && fn.Pkg() != nil && fn.Pkg().Path() == "net/http" &&
-		(fn.Name() == "Handle" || fn.Name() == "HandleFunc") && len(call.Args) == 2 {
-		reg = &surfaceReg{kind: regDefault, path: call.Args[0], handler: call.Args[1]}
-		muxes = avSet{a.defMux: {}}
-	} else {
-		return
 	}
-	reg.call, reg.pkg, reg.fk = call, sp, fk
 	if len(muxes) == 0 {
 		if _, ok := a.untraced[call]; !ok {
 			a.untraced[call] = reg
@@ -1495,6 +1753,11 @@ func (a *surfaceFlow) delegates(v *absVal) (kids avSet, isHandler bool, desc str
 		return a.extKids[v], true, "чужая обёртка " + fnName(v.fn)
 	case avHTTPMux, avGatewayMux:
 		return nil, true, ""
+	case avBound:
+		if v.fn.Name() == "ServeHTTP" {
+			return a.boundRecv[v], true, "метод " + fnName(v.fn) + " получателя"
+		}
+		return nil, false, ""
 	}
 	return nil, false, ""
 }
