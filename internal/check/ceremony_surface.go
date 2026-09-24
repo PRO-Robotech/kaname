@@ -127,6 +127,7 @@ const CeremonyResolveDepthLimit = 16
 // CeremonySurfaceCensus — объём осмотренного.
 type CeremonySurfaceCensus struct {
 	SolveRounds              int
+	ResolveSteps             int
 	Packages                 int
 	Files                    int
 	RootFiles                int
@@ -145,6 +146,7 @@ type CeremonySurfaceCensus struct {
 	Escapes                  []string
 	ManualRouting            []string
 	URLPathReads             int
+	PathCarriers             int
 	Sinks                    int
 	UnmountedMuxes           int
 	WithoutProducer          int
@@ -158,17 +160,17 @@ func (c CeremonySurfaceCensus) Summary() string {
 		forms = append(forms, fmt.Sprintf("%s %d", k, v))
 	}
 	sort.Strings(forms)
-	return fmt.Sprintf("раундов разбора %d из предела %d · "+
+	return fmt.Sprintf("раундов разбора %d из предела %d · шагов обратного разбора пути %d · "+
 		"пакетов исходником %d · файлов %d · файлов корня %d · объявлений поверхности %d · "+
 		"элементов среза подъёма %d · построителей %d · мультиплексоров net/http %d · шлюза %d · "+
 		"регистраций net/http %d · шлюза %d · на общем мультиплексоре %d · в недостижимом коде %d · "+
 		"непрослеженных %d · листов пути %d [%s] · мультиплексоров у чужого кода %d · "+
-		"чтений пути запроса %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
+		"чтений пути запроса %d · носителей пути %d · решений маршрута по нему %d · стоков сервера %d · мультиплексоров без поверхности %d · "+
 		"координат без производителя %d · положительных контролей %d · формы пути: %s",
-		c.SolveRounds, CeremonySolveRoundLimit, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
+		c.SolveRounds, CeremonySolveRoundLimit, c.ResolveSteps, c.Packages, c.Files, c.RootFiles, c.SurfaceDecls, c.RaisedSurfaces, c.SurfaceBuilders,
 		c.HTTPMuxes, c.GatewayMuxes, c.HTTPRegistrations, c.GatewayRegistrations, c.DefaultRegistrations,
 		c.UnreachableRegistrations, c.UntracedRegistrations, len(c.Unresolved), strings.Join(c.Unresolved, "; "),
-		len(c.Escapes), c.URLPathReads, len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
+		len(c.Escapes), c.URLPathReads, c.PathCarriers, len(c.ManualRouting), c.Sinks, c.UnmountedMuxes, c.WithoutProducer,
 		c.PositiveControls, strings.Join(forms, ", "))
 }
 

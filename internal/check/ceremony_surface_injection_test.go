@@ -569,6 +569,79 @@ func ceremonyRootFile(f *ceremonyFixture, name, imports, body string) {
 	f.add(ceremonyRootDir, name, "package main\n\nimport (\n"+imports+"\n)\n\n"+body+"\n")
 }
 
+// ceremonyLayersRegDecls — регистратор за встроенными интерфейсами: слой
+// встраивает интерфейс регистратора, пустышка его реализует, ничего не
+// регистрируя.
+const ceremonyLayersRegDecls = "type ceremonyReg interface{ Handle(string, http.Handler) }\n\n" +
+	"type ceremonyLayer struct{ ceremonyReg }\n\n" +
+	"type ceremonyNop struct{}\n\nfunc (ceremonyNop) Handle(string, http.Handler) {}"
+
+// ceremonyLayeredRegistrar — вызов регистрации через n слоёв вокруг inner;
+// nop — у той же переменной есть и пустышка.
+func ceremonyLayeredRegistrar(f *ceremonyFixture, n int, nop bool, inner string) {
+	ceremonyRootFile(f, "ceremony_probe_layers_reg.go", "\t\"net/http\"", ceremonyLayersRegDecls)
+	layers := strings.Repeat("ceremonyLayer{", n) + inner + strings.Repeat("}", n)
+	code := "var ceremonyX ceremonyReg = " + layers + "\n"
+	if nop {
+		code = "var ceremonyX ceremonyReg = ceremonyNop{}\nceremonyX = " + layers + "\n"
+	}
+	code += "ceremonyX.Handle(authorizehttp.AuthorizePath, authorizehttp.New())"
+	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, code)
+}
+
+// ceremonyMounterIface и ceremonyMountBody — монтировщик за интерфейсом:
+// метод получает мультиплексор и регистрирует на нём координату.
+const (
+	ceremonyMounterIface = "type ceremonyMounter interface{ Mount(*http.ServeMux) }\n\n"
+	ceremonyMountBody    = "{\n\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}"
+)
+
+// ceremonyMounter — файл монтировщика с типом decl и его методом Mount.
+func ceremonyMounter(f *ceremonyFixture, decl, recv string) {
+	ceremonyRootFile(f, "ceremony_probe_mounter.go", "\t\"net/http\""+ceremonyImportLine,
+		ceremonyMounterIface+decl+"\n\nfunc ("+recv+") Mount(m *http.ServeMux) "+ceremonyMountBody)
+}
+
+// ceremonyCycleVarsSource — цикл записей строковых переменных пакета
+// P → Q → S → P; в Q записана координата, в P — путь пробы.
+const ceremonyCycleVarsSource = `package main
+
+import "github.com/PRO-Robotech/kaname/internal/handler/authorizehttp"
+
+var ceremonyP, ceremonyQ, ceremonyS string
+
+func init() {
+	ceremonyP = ceremonyQ
+	ceremonyQ = ceremonyS
+	ceremonyS = ceremonyP
+	ceremonyQ = authorizehttp.AuthorizePath
+	ceremonyP = "/probe-p"
+}
+`
+
+// ceremonyCycleTypesSource — типы с циклом через указатели: TA несёт
+// мультиплексор и указатель на TB, TB — указатель на TA. first — переменная
+// пакета, первой спрашивающая о TA.
+func ceremonyCycleTypesSource(first bool) string {
+	src := "package main\n\nimport \"net/http\"\n\n" +
+		"type ceremonyTA struct {\n\tb *ceremonyTB\n\tm *http.ServeMux\n}\n\n" +
+		"type ceremonyTB struct{ a *ceremonyTA }\n"
+	if first {
+		src += "\nvar ceremonyFirst ceremonyTA\n"
+	}
+	return src
+}
+
+// ceremonyThroughCycleTypes — мультиплексор внутреннего зеркала течёт в
+// переменную сквозь значение TB; у той же переменной есть мультиплексор-
+// пустышка, смонтированный на соседнем поддереве.
+const ceremonyThroughCycleTypes = "ceremonyDummy := http.NewServeMux()\n" +
+	"jwksMux.Handle(\"/probe-dummy/\", ceremonyDummy)\n" +
+	"ceremonyB0 := ceremonyTB{a: &ceremonyTA{m: jwksMux}}\n" +
+	"ceremonyR := ceremonyDummy\n" +
+	"ceremonyR = ceremonyB0.a.m\n" +
+	"ceremonyR.Handle(authorizehttp.AuthorizePath, authorizehttp.New())"
+
 // ceremonyInjection — одна инъекция: ровно один факт F-cer.
 type ceremonyInjection struct {
 	id   string
@@ -906,6 +979,88 @@ func ceremonyInjections() []ceremonyInjection {
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux",
 				"Handler: "+ceremonyLayersCall(n, "metricsMux"))
 		}, []string{"обрезано на глубине", fmt.Sprint(check.CeremonyResolveDepthLimit)}},
+
+		// D — регистратор за встроенными интерфейсами (рецензия стиля, круг 2).
+		// Цикл встраивания отличает множество пройденных пар (значение, метод),
+		// а не глубина: пятый слой не отбрасывается молча, даже когда у той же
+		// переменной нашлась пустышка.
+		{"D4n_registrar_behind_four_layers_next_to_a_no_op", func(f *ceremonyFixture) {
+			ceremonyLayeredRegistrar(f, 4, true, "jwksMux")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"D5n_registrar_behind_five_layers_next_to_a_no_op", func(f *ceremonyFixture) {
+			ceremonyLayeredRegistrar(f, 5, true, "jwksMux")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// Часть получателей не прослежена (регистратор пришёл сквозь пустой
+		// интерфейс), часть — пустышка: вызов «не прослежен», а не молчание.
+		{"D6_registrar_through_an_empty_interface_next_to_a_no_op", func(f *ceremonyFixture) {
+			ceremonyLayeredRegistrar(f, 1, true, "ceremonyAny.(ceremonyReg)")
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, "var ceremonyAny any = jwksMux")
+		}, []string{"не прослежен", "ceremonyX.Handle"}},
+
+		// Z — монтировщик за интерфейсом, чей получатель рождён не литералом
+		// структуры (приёмка проверки, круг 2).
+		{"Z1_mounter_behind_an_interface_named_non_struct_receiver", func(f *ceremonyFixture) {
+			ceremonyMounter(f, "type ceremonyIntMount int", "ceremonyIntMount")
+			serve(f, anchorIntrospect, "var ceremonyM ceremonyMounter = ceremonyIntMount(0)\nceremonyM.Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z1c_same_receiver_called_directly", func(f *ceremonyFixture) {
+			ceremonyMounter(f, "type ceremonyIntMount int", "ceremonyIntMount")
+			serve(f, anchorIntrospect, "ceremonyIntMount(0).Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z2_mounter_behind_an_interface_zero_value_struct", func(f *ceremonyFixture) {
+			ceremonyMounter(f, "type ceremonyStructMount struct{}", "ceremonyStructMount")
+			serve(f, anchorIntrospect, "var ceremonyS ceremonyStructMount\nvar ceremonyM ceremonyMounter = ceremonyS\nceremonyM.Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z2b_mounter_behind_an_interface_new_struct", func(f *ceremonyFixture) {
+			ceremonyMounter(f, "type ceremonyStructMount struct{}", "*ceremonyStructMount")
+			serve(f, anchorIntrospect, "var ceremonyM ceremonyMounter = new(ceremonyStructMount)\nceremonyM.Mount(jwksMux)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"Z2c_mounter_behind_an_interface_zero_field_of_a_holder", func(f *ceremonyFixture) {
+			ceremonyMounter(f, "type ceremonyStructMount struct{}\n\ntype ceremonyDeps struct{ am ceremonyStructMount }", "ceremonyStructMount")
+			serve(f, anchorIntrospect, "var ceremonyD ceremonyDeps\nvar ceremonyM ceremonyMounter = ceremonyD.am\nceremonyM.Mount(jwksMux)")
+		}, []string{"передан методу интерфейса", "ceremonyMounter.Mount"}},
+
+		// S1 — путь регистрации сквозь цикл записей P → Q → S → P. Первой
+		// сводится регистрация по P (безвредная: координата в ней с хвостом),
+		// второй — по S. Значение S не зависит от того, кого свели первым.
+		{"S1_path_through_a_write_cycle_resolved_second", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyP+\"/probe-x\", authorizehttp.New())\n"+
+				"jwksMux.Handle(ceremonyS, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		{"S1c_path_through_a_write_cycle_alone", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
+			serve(f, anchorIntrospect, "jwksMux.Handle(ceremonyS, authorizehttp.New())")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// TY1 — течёт ли значение типа, не зависит от того, о каком типе цикла
+		// спросили первым.
+		{"TY1_value_type_asked_second_in_a_type_cycle", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_types.go", ceremonyCycleTypesSource(true))
+			serve(f, anchorIntrospect, ceremonyThroughCycleTypes)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
+
+		// I40 — путь, выведенный из самого себя склейкой в цикле: координата
+		// рождается лишь на третьем проходе, и одна развёртка её не видит.
+		// Множество значений не ограничено — это лист, а не усечение.
+		{"I40_path_derived_from_itself_by_concatenation", func(f *ceremonyFixture) {
+			serve(f, anchorIntrospect, "ceremonyPath := \"\"\n"+
+				"for _, ceremonySeg := range []string{\"/iam\", \"/v1\", \"/authorize\"} {\n"+
+				"\tceremonyPath = ceremonyPath + ceremonySeg\n}\n"+
+				"jwksMux.Handle(ceremonyPath, authorizehttp.New())")
+		}, []string{"не сводится к значению", "выводится из самого себя"}},
+
+		{"TY1c_value_type_asked_first_in_a_type_cycle", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_types.go", ceremonyCycleTypesSource(false))
+			serve(f, anchorIntrospect, ceremonyThroughCycleTypes)
+		}, []string{"эндпоинт авторизации", "2 поверхностях", reachInternalMark}},
 	}
 }
 
@@ -1010,6 +1165,41 @@ func TestCeremonySurfaceUnconvergedFlowIsNotAVerdict(t *testing.T) {
 	}
 }
 
+// TestCeremonySurfaceResolveBudgetIsNotAVerdict — обратный разбор пути,
+// исчерпавший бюджет шагов, — «гейт не исполнился», а не вердикт.
+//
+// Вход — законный, но переборный: n строковых переменных, каждая записана из
+// каждой другой. Цикл копирований обрезается на узле стека, и результаты под
+// обрезкой не кэшируются как окончательные — число путей растёт как (n-1)!.
+func TestCeremonySurfaceResolveBudgetIsNotAVerdict(t *testing.T) {
+	const n = 11
+	var b strings.Builder
+	b.WriteString("package main\n\nvar (\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "\tceremonyV%d string\n", i)
+	}
+	b.WriteString(")\n\nfunc init() {\n")
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if i != j {
+				fmt.Fprintf(&b, "\tceremonyV%d = ceremonyV%d\n", i, j)
+			}
+		}
+	}
+	b.WriteString("\tceremonyV0 = \"/probe-budget\"\n}\n")
+	f := newCeremonyFixture(t)
+	f.add(ceremonyRootDir, "ceremony_probe_budget.go", b.String())
+	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorMetrics, "metricsMux.Handle(ceremonyV1, http.NotFoundHandler())")
+	report, err := f.judge(fixtureCeremonyCoordinates())
+	if err == nil {
+		t.Fatalf("ИНЪЕКЦИЯ НЕ ПОЙМАНА: обратный разбор (шагов %d) выдал вердикт — находок %d; перепись: %s",
+			report.Census.ResolveSteps, len(report.Findings), report.Census.Summary())
+	}
+	if !strings.Contains(err.Error(), "бюджет") {
+		t.Fatalf("отказ не называет причину (бюджет шагов обратного разбора): %v", err)
+	}
+}
+
 // TestCeremonySurfaceInjectionLiveCoordinate — старая инъекция (I16): вторая
 // регистрация ЖИВОЙ координаты на копии живого корня.
 func TestCeremonySurfaceInjectionLiveCoordinate(t *testing.T) {
@@ -1054,14 +1244,60 @@ func TestCeremonySurfacePremiseRedsOnAnEmptyWalk(t *testing.T) {
 
 // TestCeremonySurfacePremiseRedsOnAForeignRoot — I18: неверный корень модуля
 // — «не исполнилось», а не зелёное.
+//
+// Отказ держит ГЕЙТ, а не окружение go: при GOFLAGS=-mod=mod `go list` вне
+// модуля способен назвать пакет из кэша модулей, и тогда судилась бы чужая
+// ревизия. Поэтому корень пакета обязан быть главным модулем, лежащим ровно
+// в названном корне; подкаталог модуля — тоже чужой корень.
 func TestCeremonySurfacePremiseRedsOnAForeignRoot(t *testing.T) {
-	_, err := check.JudgeCeremonySurfaces(t.Context(), check.CeremonySurfaceSpec{
-		ModuleRoot:  t.TempDir(),
-		RootPackage: "github.com/PRO-Robotech/kaname/cmd/kaname",
-	}, liveCeremonyCoordinates())
-	if err == nil {
-		t.Fatalf("гейт на каталоге без модуля вернул вердикт — обязан был отказаться исполняться")
+	judge := func(t *testing.T, root string) error {
+		t.Helper()
+		_, err := check.JudgeCeremonySurfaces(t.Context(), check.CeremonySurfaceSpec{
+			ModuleRoot:  root,
+			RootPackage: ceremonyModulePath(t, ceremonyModuleRoot(t)) + "/" + ceremonyRootDir,
+		}, liveCeremonyCoordinates())
+		return err
 	}
+	t.Run("directory_without_a_module", func(t *testing.T) {
+		if err := judge(t, t.TempDir()); err == nil {
+			t.Fatalf("гейт на каталоге без модуля вернул вердикт — обязан был отказаться исполняться")
+		}
+	})
+	t.Run("directory_without_a_module_under_mod_mod", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-mod=mod")
+		t.Setenv("GOPROXY", "off")
+		if err := judge(t, t.TempDir()); err == nil {
+			t.Fatalf("гейт на каталоге без модуля под GOFLAGS=-mod=mod вернул вердикт — обязан был отказаться")
+		}
+	})
+	t.Run("subdirectory_of_the_module", func(t *testing.T) {
+		err := judge(t, filepath.Join(ceremonyModuleRoot(t), "internal"))
+		if err == nil {
+			t.Fatalf("гейт на подкаталоге модуля вернул вердикт — судился бы модуль, а не названный корень")
+		}
+		if !strings.Contains(err.Error(), "корень модуля") {
+			t.Fatalf("отказ не называет расхождение корня модуля: %v", err)
+		}
+	})
+}
+
+// TestCeremonySurfaceCensusCountsEveryRegistration — регистрация, которую
+// разбор видит, попадает в графу переписи, даже если её мультиплексор не
+// прослежен и сама она недостижима: иначе «регистраций столько-то» лжёт о
+// прочитанном.
+func TestCeremonySurfaceCensusCountsEveryRegistration(t *testing.T) {
+	control := newCeremonyFixture(t).mustJudge(fixtureCeremonyCoordinates()).Census
+	f := newCeremonyFixture(t)
+	ceremonyRootFile(f, "ceremony_probe_dead.go", "\t\"net/http\""+ceremonyImportLine,
+		"func ceremonyUnusedMount(m *http.ServeMux) {\n\tm.Handle(authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+	report := f.mustJudge(fixtureCeremonyCoordinates())
+	requireSilent(t, report)
+	got := report.Census
+	if got.UnreachableRegistrations != control.UnreachableRegistrations+1 {
+		t.Errorf("регистрация в недостижимой функции на непрослеженном мультиплексоре не насчитана: "+
+			"в недостижимом коде %d, в контроле %d", got.UnreachableRegistrations, control.UnreachableRegistrations)
+	}
+	t.Logf("контроль: %s", control.Summary())
 }
 
 // TestCeremonySurfacePremiseRedsOnABypassedBuilder — I19: поверхность,
@@ -1158,9 +1394,6 @@ func ceremonyTwins() []ceremonyTwin {
 		{"T13_issuing_surface_disabled_on_this_landing", func(f *ceremonyFixture) {
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", `registryTokenAddr != ""`, "false")
 		}},
-		// Одна обёртка, вложенная в саму себя: значение обёртки течёт в её же
-		// параметр, и прохождение запроса встречает цикл. Цикл нового маршрута
-		// не даёт — и не обрезается как «слишком глубоко».
 		// Y1–Y5 — законные близнецы приёмки проверки, круг 1.
 		{"Y1_method_pattern_second_registration_on_the_issuing_mux", func(f *ceremonyFixture) {
 			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
@@ -1203,10 +1436,60 @@ func ceremonyTwins() []ceremonyTwin {
 					`ceremonyOther.Handle("/iam/v1/other", http.NotFoundHandler())`+"\n"+
 					`jwksMux.Handle("/iam/v1/", http.HandlerFunc(ceremonyOther.ServeHTTP))`)
 		}},
+		// Одна обёртка, вложенная в саму себя: значение обёртки течёт в её же
+		// параметр, и прохождение запроса встречает цикл. Цикл нового маршрута
+		// не даёт — и не обрезается как «слишком глубоко».
 		{"T16_wrapper_nested_into_itself", func(f *ceremonyFixture) {
 			f.add(ceremonyRootDir, "ceremony_probe_wrap.go", ceremonyWrapSource)
 			f.replaceExpr(ceremonyRootDir, "serve.go", "", "Handler: metricsMux",
 				"Handler: ceremonyProbeWrap(ceremonyProbeWrap(metricsMux))")
+		}},
+		// W1–W3, W7 — законные близнецы приёмки проверки, круг 2.
+		{"W1_interface_registrar_with_an_own_recorder", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_rec.go", "\t\"net/http\"",
+				"type ceremonyRec struct{}\n\nfunc (ceremonyRec) Handle(string, http.Handler) {}")
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				"var ceremonyRecV interface{ Handle(string, http.Handler) } = ceremonyRec{}\n"+
+					"ceremonyRecV.Handle(authorizehttp.AuthorizePath, authorizehttp.New())")
+		}},
+		{"W2_mux_method_value_taken_not_called", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect, "_ = jwksMux.Handle")
+		}},
+		{"W3_method_value_on_the_issuing_mux", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				"ceremonyReg := mux.Handle\nceremonyReg(\"POST \"+authorizehttp.AuthorizePath, authorizehttp.New())")
+		}},
+		{"W7_strip_prefix_onto_a_neighbour_only", func(f *ceremonyFixture) {
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				"ceremonyInner := http.NewServeMux()\nceremonyInner.Handle(\"/v1/other\", authorizehttp.New())\n"+
+					"jwksMux.Handle(\"/iam/\", http.StripPrefix(\"/iam\", ceremonyInner))")
+		}},
+		// Регистратор за шестью слоями вокруг пустышки, а не мультиплексора:
+		// глубина встраивания сама по себе не находка.
+		{"D7_registrar_behind_six_layers_around_a_no_op", func(f *ceremonyFixture) {
+			ceremonyLayeredRegistrar(f, 6, false, "ceremonyNop{}")
+		}},
+		// Слой, встроивший сам себя: цикл встраивания обходится один раз, и
+		// разбор сходится.
+		{"D8_layer_embedding_itself", func(f *ceremonyFixture) {
+			ceremonyLayeredRegistrar(f, 1, true, "ceremonyX")
+		}},
+		// Монтировщик за интерфейсом с получателем-приведением монтирует
+		// координату с методом на поверхности ВЫДАЧИ: получатель выведен, и
+		// гейт молчит по существу, а не отказом «не прослежен».
+		{"Z1t_mounter_behind_an_interface_on_the_issuing_mux", func(f *ceremonyFixture) {
+			ceremonyRootFile(f, "ceremony_probe_mounter.go", "\t\"net/http\""+ceremonyImportLine,
+				ceremonyMounterIface+"type ceremonyIntMount int\n\nfunc (ceremonyIntMount) Mount(m *http.ServeMux) "+
+					"{\n\tm.Handle(\"POST \"+authorizehttp.AuthorizePath, authorizehttp.New())\n}")
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
+				"var ceremonyM ceremonyMounter = ceremonyIntMount(0)\nceremonyM.Mount(mux)")
+		}},
+		// Регистрация по P из цикла записей в одиночку: координата в ней с
+		// хвостом и координату не резолвит.
+		{"S1t_path_through_a_write_cycle_with_a_tail", func(f *ceremonyFixture) {
+			f.add(ceremonyRootDir, "ceremony_probe_cycle.go", ceremonyCycleVarsSource)
+			f.insertAfter(ceremonyRootDir, "serve.go", "", anchorIntrospect,
+				"jwksMux.Handle(ceremonyP+\"/probe-x\", authorizehttp.New())")
 		}},
 	}
 }
