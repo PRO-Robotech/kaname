@@ -65,6 +65,8 @@ type surfaceListed struct {
 	Module     *struct {
 		Path      string
 		GoVersion string
+		Main      bool
+		Dir       string
 	}
 	Error *struct{ Err string }
 }
@@ -183,6 +185,14 @@ func newListing(ctx context.Context, moduleRoot, rootPkg string, timeout time.Du
 	if !ok || root.DepOnly || root.Module == nil {
 		return nil, fmt.Errorf("радиус: go list не назвал корень %s пакетом главного модуля", rootPkg)
 	}
+	// Судится ровно названный корень модуля. Вне модуля `go list` под
+	// GOFLAGS=-mod=mod способен назвать пакет из кэша модулей (чужая ревизия),
+	// из подкаталога — модуль выше него: и то и другое — не то, что названо.
+	if !root.Module.Main || !sameDir(root.Module.Dir, moduleRoot) {
+		return nil, fmt.Errorf("радиус: корень модуля %s не тот, что назван: go list назвал пакет %s модулем %s "+
+			"в %s (главный модуль: %v) — судилось бы не это дерево", moduleRoot, rootPkg, root.Module.Path,
+			root.Module.Dir, root.Module.Main)
+	}
 	l.modulePath = root.Module.Path
 	l.ownerPrefix = ownerPrefixOf(l.modulePath)
 	l.gc = importer.ForCompiler(l.fset, "gc", func(path string) (io.ReadCloser, error) {
@@ -193,6 +203,21 @@ func newListing(ctx context.Context, moduleRoot, rootPkg string, timeout time.Du
 		return os.Open(p.Export)
 	})
 	return l, nil
+}
+
+// sameDir — два пути называют один каталог (после приведения к абсолютному
+// и раскрытия ссылок).
+func sameDir(a, b string) bool {
+	norm := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
+		}
+		return filepath.Clean(p)
+	}
+	return a != "" && b != "" && norm(a) == norm(b)
 }
 
 // inRadius — читается ли пакет исходником.
