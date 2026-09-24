@@ -64,12 +64,10 @@ func TestIssue_K2_ClaimsComeOnlyFromWhatWasGranted(t *testing.T) {
 		require.Truef(t, slices.Contains(allowed, name),
 			"утверждение %q вне закрытого состава выпуска %v", name, allowed)
 	}
-	raw := issued.Token
-	_, payload := unverifiedClaims(t, raw)
 	for _, leaked := range []string{"requested-only-scope", "requested-only.kacho.local",
 		"form-only-marker", "form-only-challenge-value", "session-only-username",
 		"session-only-value", "session_only_claim"} {
-		for name, v := range payload {
+		for name, v := range claims {
 			require.NotContainsf(t, strings.ToLower(asText(v)), leaked,
 				"утверждение %q несёт %q — не выданное, а запрошенное или протокольное", name, leaked)
 		}
