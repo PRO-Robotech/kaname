@@ -105,7 +105,7 @@ include provenance.mk
 # ПРОХОДИТ, а ветвь с меткой не исполняется ни разу. Исход законный при
 # любом порядке, но держателем метки соседство целей быть не может —
 # держит её ось 5а в scripts/hooks/install-inject.sh, на своей фикстуре.
-.PHONY: install-hooks check-hooks hooks-notice print-golangci-pin
+.PHONY: install-hooks check-hooks hooks-notice
 
 ## install-hooks — провязать хуки git из scripts/hooks в этот клон (проверить: make check-hooks)
 install-hooks:
@@ -114,13 +114,6 @@ install-hooks:
 ## check-hooks — провязаны ли хуки этого клона; непровязанный клон — третий исход, чужой хук и переходник прежней редакции — находки
 check-hooks:
 	@bash scripts/hooks/install.sh check
-
-## print-golangci-pin — версия линтера, которой судит рецепт (одно написание на дерево)
-##
-## Нужна ХУКУ ОТПРАВКИ: он проверяет предпосылку группы `lint` сам, а не читает
-## текст отказа цели, и берёт пин ОТСЮДА, чтобы второго написания не завелось.
-print-golangci-pin:
-	@printf '%s\n' '$(GOLANGCI_LINT_VERSION)'
 
 # hooks-notice — та же проверка, ничего не роняющая: одна строка в stderr, когда
 # провязки нет. Висит на целях, которые гоняют ПЕРЕД отправкой ветки, потому что

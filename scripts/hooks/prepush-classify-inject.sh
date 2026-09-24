@@ -237,19 +237,15 @@ $body
 }
 GO
     gofmt -w "$d/mask_test.go" || return 1
-    # Цели рецепта — настоящие по форме, но пустые по содержанию: предмет опыта
-    # не они. Пин линтера пуст намеренно — хук объявит группу lint третьим
-    # исходом, и опыт перестанет зависеть от того, стоит ли линтер на машине.
+    # Цели рецепта — ровно те, что зовёт хук, настоящие по форме и пустые по
+    # содержанию: предмет опыта не они. Линтер хук не зовёт (бюджет памяти —
+    # опыт `prepush-budget-inject.sh`), поэтому цели `lint` у фикстуры нет.
     cat > "$d/Makefile" <<'MK'
-.PHONY: vet lint audit-list-filter print-golangci-pin
+.PHONY: vet audit-list-filter
 vet:
 	@go vet ./...
-lint:
-	@echo "линтер в опыте не зовётся"
 audit-list-filter:
 	@echo "ok"
-print-golangci-pin:
-	@printf ''
 MK
     git -C "$d" init -q .
     git -C "$d" -c user.email=probe@example.invalid -c user.name=probe add -A
