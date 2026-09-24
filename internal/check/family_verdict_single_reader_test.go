@@ -81,9 +81,13 @@ func TestFamilyVerdictHasOneReaderAndEverySurfaceAsksTheRule(t *testing.T) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
 	t.Logf("перепись: файлов %d · литералов %d · вызовов %d · читателей записи выпуска %d · "+
-		"вызовов порта мимо правила %d · каталогов, зовущих правило, %d",
+		"вызовов порта мимо правила %d · каталогов, зовущих правило, %d · утверждений, читаемых "+
+		"правилом, %d (неразрешённых %d) · реализаций порта выпуска %d · объявлений писателя "+
+		"записи %d · вызовов писателя %d",
 		census.FilesParsed, census.LiteralsSeen, census.CallsSeen, len(census.Readers),
-		len(census.Bypasses), len(census.RuleCallers))
+		len(census.Bypasses), len(census.RuleCallers), len(census.ClaimsRead),
+		len(census.UnresolvedClaims), len(census.IssuancePorts), len(census.WriterDecls),
+		len(census.WriterCalls))
 	for _, f := range check.FamilyVerdictFindings(census, familyVerdictSurfaces) {
 		t.Error(f)
 	}
