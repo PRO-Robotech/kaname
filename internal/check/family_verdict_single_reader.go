@@ -33,7 +33,8 @@
 //   - у решения нет ПУСТОГО хранилища. Отсутствие записи правило читает как
 //     «семейству не принадлежит», поэтому выпуск церемонии, не пишущий запись,
 //     выпускает токен, который отзыв семейства не снимает. Реализация порта
-//     выпуска фундамента (`IssueAccessToken` либо `StoreAccessToken`) при нуле
+//     выпуска фундамента (`IssueAccessToken` либо `StoreAccessToken` из
+//     `corelib/oauthceremony`, порты есть с тега v1.10.0-rc.1) при нуле
 //     вызовов писателя записи в дереве — находка. Реализаций на этой ревизии
 //     ноль, и это законно: печатается переписью. Предпосылка оси — объявление
 //     писателя в дереве: без него ось ослепла бы молча.
@@ -72,7 +73,8 @@
 //  6. что писатель позван ИМЕННО на пути выдачи и ДО ответа: ось судит, что
 //     вызов в дереве есть, а порядок держит сквозная проба выпуска (kaname#396);
 //  7. порт выпуска под другим именем метода: имена взяты из фундамента
-//     (`corelib/oauthceremony`), и переименование там ослепило бы ось.
+//     (`corelib/oauthceremony`, порты есть с тега v1.10.0-rc.1), и
+//     переименование там ослепило бы ось.
 //
 // Перечень границ, названный не полностью, хуже отсутствующего: он создаёт
 // уверенность.
@@ -122,9 +124,9 @@ var familyVerdictClaimDecisions = map[string]string{
 const issuanceWriterMethod = "RecordAccessToken"
 
 // issuancePortMethods — методы портов выпуска фундамента
-// (`corelib/oauthceremony`: `AccessTokenIssuer.IssueAccessToken`,
-// `AccessTokenVault.StoreAccessToken`), реализация которых выпускает либо
-// кладёт токен доступа церемонии.
+// (`corelib/oauthceremony` с тега v1.10.0-rc.1:
+// `AccessTokenIssuer.IssueAccessToken`, `AccessTokenVault.StoreAccessToken`),
+// реализация которых выпускает либо кладёт токен доступа церемонии.
 var issuancePortMethods = map[string]bool{"IssueAccessToken": true, "StoreAccessToken": true}
 
 // FamilyVerdictSite — координата находки или узла переписи.
