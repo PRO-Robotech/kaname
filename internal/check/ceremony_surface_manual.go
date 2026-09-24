@@ -99,20 +99,24 @@ func (a *surfaceFlow) judgePathCands() {
 	}
 }
 
-// matchesByResult — функция, чей результат выбирает ветку: признак либо
-// позиция (strings.HasPrefix, strings.Compare, strings.Index, path.Match,
-// (*regexp.Regexp).MatchString). Функция, возвращающая лишь строки, —
-// преобразование, а не решение: её результат судится там, где его сравнят.
+// matchesByResult — функция, чей результат выбирает ветку: признак (булево
+// среди результатов) либо позиция (единственный целый результат). Счёт
+// записанных байтов (int, error) и функция, возвращающая лишь строки, —
+// не решение: результат второй судится там, где его сравнят.
 func matchesByResult(fn *types.Func) bool {
 	sig, ok := fn.Type().(*types.Signature)
 	if !ok {
 		return false
 	}
-	for i := 0; i < sig.Results().Len(); i++ {
-		b, ok := sig.Results().At(i).Type().Underlying().(*types.Basic)
-		if ok && (b.Info()&types.IsBoolean != 0 || b.Info()&types.IsInteger != 0) {
+	res := sig.Results()
+	for i := 0; i < res.Len(); i++ {
+		if b, ok := res.At(i).Type().Underlying().(*types.Basic); ok && b.Info()&types.IsBoolean != 0 {
 			return true
 		}
+	}
+	if res.Len() == 1 {
+		b, ok := res.At(0).Type().Underlying().(*types.Basic)
+		return ok && b.Info()&types.IsInteger != 0
 	}
 	return false
 }
