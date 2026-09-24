@@ -74,6 +74,16 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 коллекции встречается в комментариях объявления десятки раз, и проверка по
 подстроке считала бы собственное объяснение.
 
+У КАЖДОЙ КОЛЛЕКЦИИ ЕСТЬ ПРОИЗВОДИТЕЛЬ В КОНВЕЙЕРЕ: шаг, который её гоняет, либо
+ДЕРЖАТЕЛЬ — третье поле записи ведомости, задача, которая её прогонит. Прежде
+запись несла категорию и довод, и «не гоняется» было концом записи: причина
+печаталась, а кто снимет препятствие, не было записано нигде. Замер на `d22123ba`:
+коллекций 47, гоняют шаги 17, у тридцати остальных держателя не было ни одного.
+Сверка идёт В ОБЕ СТОРОНЫ: негоняемая коллекция без держателя роняет перепись, и
+держатель у коллекции, которую шаг уже гоняет, роняет её же — запись пережила
+свой предмет и истекает вместе с препятствием, а не остаётся ведомостью прощения.
+Форма держателя закрыта (`HOLDER_RE`): адрес задачи и то, что она сделает.
+
 ИСХОДЫ:
     0  — перепись напечатана (долг — не отказ: он именно объявляется);
     1  — перепись беспредметна: коллекций либо шаблона окружения нет, разбор дал
@@ -548,7 +558,7 @@ def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, li
 
 # ─────────────────── ВЕДОМОСТЬ ПРОИЗВОДИТЕЛЯ: РЕШЕНИЕ, А НЕ ВЫВОД ───────────
 #
-# Ключ — стебель коллекции, значение — (категория, довод). Источник решения —
+# Ключ — стебель коллекции, значение — (категория, довод, держатель). Источник решения —
 # разрез #24, читавший ПРОДУКТ: какие свойства утверждает коллекция и чей
 # производитель их даёт. Адрес, по которому она сегодня стучится, решения не
 # определяет: генератор приписывает переменную края каждому шагу сам.
@@ -562,6 +572,13 @@ def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, li
 # ВЕДОМОСТЬ СВЕРЯЕТСЯ С ДЕРЕВОМ В ОБЕ СТОРОНЫ, и это то, чем снят довод против
 # второго списка: коллекция без записи роняет перепись, запись без коллекции
 # роняет её же. Перечень поэтому не может ни отстать от дерева, ни пережить его.
+#
+# ДЕРЖАТЕЛЬ — ТРЕТЬЕ ПОЛЕ, и оно пусто ровно у тех коллекций, которые гоняет шаг
+# конвейера: производитель у них уже есть. У остальных держатель — задача, которая
+# коллекцию прогонит, в закрытой форме `HOLDER_RE`. Категория говорит, ЧЕЙ
+# производитель отвечает на утверждения; держатель — КТО снимет препятствие.
+# Это разные вопросы: у одной категории бывают разные держатели (B — церемония
+# либо недостижимый сосед, #156), а одна задача держит коллекции разных категорий.
 PRODUCER_CATEGORIES = {
     "A": "служба",
     "B": "служба + человеческий предъявитель",
@@ -569,69 +586,87 @@ PRODUCER_CATEGORIES = {
     "D": "чужой домен",
 }
 
-PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
-    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек"),
-    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит"),
-    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)"),
-    "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155"),
-    "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра"),
-    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль"),
-    "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
-    "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
-    "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль"),
-    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction"),
-    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10"),
-    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`"),
-    "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается"),
-    "iam-group": ("C", "2 утверждения читают `md.resource`"),
-    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…"),
-    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»"),
-    "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam"),
-    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор"),
-    "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200"),
-    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)"),
-    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается"),
-    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем"),
-    "iam-permission-catalog": ("A", "каталог прав — данные службы"),
-    "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь"),
-    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)"),
-    "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200"),
-    "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт"),
-    "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC"),
-    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»"),
-    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)"),
-    "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция"),
-    "iam-service-account": ("C", "2 утверждения читают `md.resource`"),
-    "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`"),
-    "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи"),
-    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…"),
-    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B"),
-    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`"),
-    "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль"),
-    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена"),
-    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`"),
-    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc"),
-    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов"),
-    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`"),
+# ФОРМА ДЕРЖАТЕЛЯ ЗАКРЫТА: адрес задачи и, через тире, что она сделает. Адрес —
+# с владельцем и репозиторием, потому что держатель бывает и в дереве платформы, а
+# голый `#N` читался бы номером того репозитория, где его прочли. Состояние задачи
+# в трекере перепись НЕ сверяет — сверка сетевая; это названо строкой вывода.
+HOLDER_RE = re.compile(r"^PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]* — \S")
+HOLDER_REF_RE = re.compile(r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]*)")
+
+# Держатели, общие нескольким позициям, — ИМЕНОВАННЫЕ ВЕЛИЧИНЫ, а не текст в
+# одиннадцати местах: разойдись копии, свод по держателю посчитал бы две задачи.
+_HOLDER_CEREMONY = (
+    "PRO-Robotech/kaname#398 — объявление и посев волны церемонии в дереве службы: "
+    "человеческий предъявитель на стенде, прогон волны `run-ceremony.sh`")
+_HOLDER_EDGE_HALF = (
+    "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
+    "расщепить коллекцию либо переутвердить по фактическому производителю")
+
+PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
+    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек", _HOLDER_CEREMONY),
+    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", ""),
+    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", ""),
+    "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
+    "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
+    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль", ""),
+    "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
+    "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
+    "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
+    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction", _HOLDER_CEREMONY),
+    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10", _HOLDER_CEREMONY),
+    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`", ""),
+    "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
+    "iam-group": ("C", "2 утверждения читают `md.resource`", ""),
+    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", ""),
+    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", ""),
+    "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
+    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
+    "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
+    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", ""),
+    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается", _HOLDER_CEREMONY),
+    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем", _HOLDER_CEREMONY),
+    "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
+    "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
+    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", ""),
+    "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
+    "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт", ""),
+    "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC", ""),
+    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»", _HOLDER_CEREMONY),
+    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)", ""),
+    "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция", ""),
+    "iam-service-account": ("C", "2 утверждения читают `md.resource`", ""),
+    "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`", ""),
+    "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи", ""),
+    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", ""),
+    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B", ""),
+    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`", _HOLDER_CEREMONY),
+    "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль", ""),
+    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", ""),
+    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", ""),
+    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", ""),
+    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов", _HOLDER_CEREMONY),
+    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`", _HOLDER_CEREMONY),
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
     # разрезом #24 не судилась — судить было нечего.
-    "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность"),
+    "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность", ""),
     # Полоса входа паролем (Ф3, kacho#1269): собственный слушатель формы службы,
     # предъявителя-JWT не читает вовсе — человек предъявляет пароль, а сессию
     # выдаёт сама служба. Условие стенда — посадка `own`, лист с SAN края и посев
     # человека со способом входа: их создаёт задание `chart-own` (стенд чарта
     # посадки `own` и `seed_login_lane.py`); без них — третья категория.
-    "kaname-login-lane": ("A", "собственный слушатель формы службы (Р7, Р16): вход, выход, признак формы, смена пароля — всё производит служба; ни одного `jwt…` ключа не читает, человек предъявляет пароль"),
+    "kaname-login-lane": ("A", "собственный слушатель формы службы (Р7, Р16): вход, выход, признак формы, смена пароля — всё производит служба; ни одного `jwt…` ключа не читает, человек предъявляет пароль", ""),
     # Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на ТОМ ЖЕ
     # слушателе формы, что вход (`internal/handler/loginlanehttp`), те же две
     # переменные (`loginLaneBaseUrl`, `loginLaneEmail`) и то же условие стенда —
     # посадка `own`; без неё каждый шаг уходит в третью категорию помеченным
     # утверждением. Счастливого завершения с настоящим кодом набор не несёт: код
     # уходит письмом, и его наблюдает стенд с почтой (ID-MAIL-1 MAIL-04), не край.
-    "kaname-recovery-lane": ("A", "собственный слушатель формы службы, полоса входа (Ф5-01, Ф5-02, Ф5-04): один ответ на запрос кода для существующего и несуществующего адреса, один отказ на неверный код без носителя, форма без признака — поле названо; всё производит служба, ни одного `jwt…` ключа не читает"),
+    "kaname-recovery-lane": ("A", "собственный слушатель формы службы, полоса входа (Ф5-01, Ф5-02, Ф5-04): один ответ на запрос кода для существующего и несуществующего адреса, один отказ на неверный код без носителя, форма без признака — поле названо; всё производит служба, ни одного `jwt…` ключа не читает", ""),
     # Второй фактор (Ф12, kacho#1281): те же слушатель, посадка и условие стенда,
     # что у полосы входа; код по времени вычисляет сам посев из секрета ответа.
-    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев"),
+    # Задание `chart-own` его НЕ гоняет, хотя условие создаёт: шаг прогона
+    # заводится вместе с тем, что его выход готов к публикации, — держатель ниже.
+    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев", ""),
 }
 
 
@@ -643,19 +678,57 @@ def _surface_of_stem(stem, runnable, blocked) -> str:
     return ""
 
 
-def producer_of(stem: str, ledger: dict[str, tuple[str, str]] | None = None) -> tuple[str, str]:
+Ledger = dict[str, tuple[str, str, str]]
+
+
+def producer_of(stem: str, ledger: Ledger | None = None) -> tuple[str, str]:
     """Решение о производителе — ЧИТАЕТСЯ, а не выводится.
 
     Ведомость — ПАРАМЕТР, а не глобаль: самопроверка судит синтетические деревья,
     и подставить им объявленный перечень значило бы требовать записи о коллекциях,
     которых в дереве нет. Умолчание — объявленная ведомость.
     """
-    cat, why = (PRODUCER_LEDGER if ledger is None else ledger)[stem]
+    cat, why, _holder = (PRODUCER_LEDGER if ledger is None else ledger)[stem]
     return cat, why
 
 
+def holder_of(stem: str, ledger: Ledger | None = None) -> str:
+    """Держатель позиции: задача, которая её прогонит. Пусто — держателя нет."""
+    return (PRODUCER_LEDGER if ledger is None else ledger)[stem][2]
+
+
+def reconcile_holders(stems: set[str], runs: dict[str, list[str]],
+                      ledger: Ledger | None = None) -> list[str]:
+    """Производитель в конвейере — шаг ЛИБО держатель, и сверка идёт В ОБЕ СТОРОНЫ.
+
+    Негоняемая коллекция без держателя — долг без читателя: причина напечатана, а
+    кто её снимет, не записано нигде. Держатель у коллекции, которую шаг уже
+    гоняет, — запись, пережившая свой предмет: она обязана уйти тем же изменением,
+    что завело шаг, иначе ведомость держателей стала бы ведомостью прощения.
+    Позиция без записи ведомости здесь не судится — её называет
+    `reconcile_producer_ledger`, и второй раз она не считается.
+    """
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out = []
+    for stem in sorted(stems & set(ledger)):
+        holder = ledger[stem][2]
+        where = runs.get(stem, [])
+        if where and holder:
+            out.append(f"держатель коллекции {stem} ({holder}) пережил предмет: её уже "
+                       f"гоняет {'; '.join(where)} — запись снимается тем же изменением, "
+                       f"что завело шаг")
+        if not where and not holder:
+            out.append(f"коллекция {stem} не гоняется ни одним шагом конвейера, а "
+                       f"держателя в ведомости нет — кто снимет препятствие, не "
+                       f"записано нигде")
+        if holder and not HOLDER_RE.match(holder):
+            out.append(f"держатель коллекции {stem} вне закрытой формы "
+                       f"«PRO-Robotech/<репозиторий>#<номер> — <что сделает>»: {holder!r}")
+    return out
+
+
 def reconcile_producer_ledger(stems: set[str],
-                              ledger: dict[str, tuple[str, str]] | None = None) -> list[str]:
+                              ledger: Ledger | None = None) -> list[str]:
     """Сверка ведомости с деревом В ОБЕ СТОРОНЫ."""
     ledger = PRODUCER_LEDGER if ledger is None else ledger
     out = []
@@ -665,7 +738,7 @@ def reconcile_producer_ledger(stems: set[str],
     for stem in sorted(set(ledger) - stems):
         out.append(f"запись про {stem} пережила свой предмет — такой коллекции в "
                    f"дереве нет, и прощать/объявлять нечего")
-    for stem, (cat, why) in sorted(ledger.items()):
+    for stem, (cat, why, _holder) in sorted(ledger.items()):
         if cat not in PRODUCER_CATEGORIES:
             out.append(f"запись про {stem} называет категорию {cat!r} вне закрытого "
                        f"словаря {sorted(PRODUCER_CATEGORIES)}")
@@ -676,7 +749,7 @@ def reconcile_producer_ledger(stems: set[str],
 
 
 def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
-                            ledger: dict[str, tuple[str, str]] | None = None
+                            ledger: Ledger | None = None
                             ) -> list[str]:
     """Категория A у коллекции, требующей ЦЕРЕМОНИИ ЧЕЛОВЕКА, — находка.
 
@@ -701,7 +774,7 @@ def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
 
 
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-        ledger: dict[str, tuple[str, str]] | None = None) -> int:
+        ledger: Ledger | None = None) -> int:
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
@@ -728,6 +801,12 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     # Цена названа: такая запись переносит коллекцию в план переезда, где её
     # нельзя закрыть ничем, и мера работы становится недостижимой.
     drift += ledger_matches_ceremony(ceremony_need, ledger)
+    # ПРОИЗВОДИТЕЛЬ В КОНВЕЙЕРЕ: шаг либо держатель, по каждой позиции и в обе
+    # стороны (`reconcile_holders`). Судится по объявлению конвейера (`runs`), а не
+    # по половинам переписи: у гоняемой шагом коллекции бывают и препятствия — их
+    # расхождение со шагом держит `pipeline_claims_test.py`.
+    all_stems = {stem for stem, *_ in [*runnable, *blocked]}
+    drift += reconcile_holders(all_stems, runs, ledger)
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
@@ -748,6 +827,20 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print(f"коллекций гоняют шаги конвейера: {len(runs)}")
     for stem, where in sorted(runs.items()):
         print(f"  · {stem} ← {'; '.join(where)}")
+    # ОСТАТОК И ЕГО ДЕРЖАТЕЛИ — ТЕМ ЖЕ ВЫВОДОМ: предикат «каждая из M−N названа
+    # с держателем» читается здесь, а не прочтением ведомости. Сверка выше
+    # уже отказала бы на позиции без держателя, поэтому «назван у K» при K < M−N
+    # здесь не печатается никогда — строка есть свидетель, а не второй суд.
+    unrun = sorted(all_stems - set(runs))
+    by_holder: dict[str, list[str]] = {}
+    for stem in unrun:
+        m = HOLDER_REF_RE.match(holder_of(stem, ledger))
+        by_holder.setdefault(m.group(1) if m else "—", []).append(stem)
+    held_n = sum(len(v) for k, v in by_holder.items() if k != "—")
+    print(f"НЕ гоняет ни один шаг: {len(unrun)} — держатель назван у {held_n}")
+    print("по ДЕРЖАТЕЛЮ (задача, которая прогонит; состояние в трекере здесь НЕ сверяется):")
+    for ref, stems in sorted(by_holder.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        print(f"  · {ref}: {len(stems)} ({', '.join(stems)})")
     print()
     print("по АДРЕСАЦИИ (к чьему базовому адресу стучатся шаги):")
     for s, n in sorted(by_surface.items(), key=lambda kv: -kv[1]):
@@ -808,6 +901,9 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
               f"{cat} ({PRODUCER_CATEGORIES[cat]})] — {why}")
         for b in bl:
             print(f"      — {b}")
+        holder = holder_of(stem, ledger)
+        if holder:
+            print(f"      держатель: {holder}")
     print()
     print("ЧТО ЭТОТ ДОЛГ ЗНАЧИТ, СКАЗАНО ПРЯМО:")
     print("  · прогон автономного стенда проверяет свойства, чей производитель —")
@@ -864,16 +960,24 @@ def _wf(tmp: pathlib.Path, runs: list[str]) -> pathlib.Path:
     return wf
 
 
-def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
+def _st_ledger(newman: pathlib.Path, workflows: pathlib.Path | None) -> Ledger:
     """Синтетическая ведомость для синтетического дерева: одна запись на коллекцию.
 
     Самопроверка судит ДРУГИЕ оси; требовать от неё объявленных решений о
     коллекциях, которых в дереве нет, значило бы уронить её на предмете, к
     которому она не относится. Сверку самой ведомости держат оси 10 и 11 ниже —
-    там расхождение вносится НАМЕРЕННО.
+    там расхождение вносится НАМЕРЕННО; сверку держателя — ось 16.
+
+    Держатель ставится ровно там, где его требует сверка: у коллекции, которую
+    шаг синтетического конвейера не гоняет. Иначе оси о посеве и адресации падали
+    бы на держателе, к которому они не относятся.
     """
     declared = template_keys(newman)
-    out: dict[str, tuple[str, str]] = {}
+    try:
+        runs = pipeline_runs(workflows) if workflows is not None else {}
+    except (Unmet, ModuleNotFoundError):
+        runs = {}
+    out: Ledger = {}
     for p in sorted((newman / "collections").glob("*.postman_collection.json")):
         stem = p.name.replace(".postman_collection.json", "")
         text = p.read_text(encoding="utf-8")
@@ -884,14 +988,15 @@ def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
         # этого не становится вакуумной — её ось ниже подаёт ведомость ЯВНО.
         cer = any(key_state(k, declared, own) is not None and is_ceremony_key(k)
                   for k in used_keys(text))
-        out[stem] = ("B" if cer else "A", "синтетика самопроверки")
+        holder = "" if runs.get(stem) else "PRO-Robotech/kaname#1 — синтетика самопроверки"
+        out[stem] = ("B" if cer else "A", "синтетика самопроверки", holder)
     return out
 
 
 def _st_run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-            ledger: dict[str, tuple[str, str]] | None = None) -> int:
+            ledger: Ledger | None = None) -> int:
     return run(newman, workflows=workflows,
-               ledger=_st_ledger(newman) if ledger is None else ledger)
+               ledger=_st_ledger(newman, workflows) if ledger is None else ledger)
 
 
 def self_test() -> int:
@@ -1381,7 +1486,7 @@ def self_test() -> int:
         wf15 = _wf(base, runs=["misfiled"])
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(t15, workflows=wf15, ledger={"misfiled": ("A", "довод")})
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("A", "довод", "")})
         _c("A при требовании церемонии — код 1", rc == 1, f"код {rc}")
         _c("и находка называет коллекцию и ключ",
            "misfiled" in err.getvalue()
@@ -1389,7 +1494,7 @@ def self_test() -> int:
 
         # ЗАКОННЫЙ БЛИЗНЕЦ ПЕРВЫЙ: та же коллекция, категория B — молчание.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            rc = run(t15, workflows=wf15, ledger={"misfiled": ("B", "довод")})
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("B", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: та же коллекция как B — код 0", rc == 0, f"код {rc}")
 
         # ЗАКОННЫЙ БЛИЗНЕЦ ВТОРОЙ: категория A у коллекции БЕЗ церемонии —
@@ -1404,7 +1509,7 @@ def self_test() -> int:
                     "jwtAccountAdminA": "", "runId": ""})
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rc = run(t15b, workflows=_wf(base, runs=["filed-ok"]),
-                     ledger={"filed-ok": ("A", "довод")})
+                     ledger={"filed-ok": ("A", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: A без церемонии — код 0", rc == 0, f"код {rc}")
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
@@ -1442,7 +1547,7 @@ def self_test() -> int:
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             rc = run(lt, workflows=lwf,
-                     ledger={"edge-only": ("C", "довод"), "ушедшая": ("A", "довод")})
+                     ledger={"edge-only": ("C", "довод", ""), "ушедшая": ("A", "довод", "")})
         _c("запись БЕЗ коллекции роняет перепись — перечень не переживает предмет",
            rc == 1, f"код {rc}")
         _c("и находка называет запись",
@@ -1451,18 +1556,18 @@ def self_test() -> int:
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "довод")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: ведомость сходится с деревом — перепись печатается",
            rc == 0, f"код {rc}")
 
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("Z", "довод")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("Z", "довод", "")})
         _c("категория вне закрытого словаря — находка", rc == 1, f"код {rc}")
 
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "   ")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "   ", "")})
         _c("категория БЕЗ довода — находка: это мнение, а не решение",
            rc == 1, f"код {rc}")
 
@@ -1474,7 +1579,7 @@ def self_test() -> int:
         # ничего не добавляла бы к выводу из адреса.
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(lt, workflows=lwf, ledger={"edge-only": ("A", "предмет службы")})
+            run(lt, workflows=lwf, ledger={"edge-only": ("A", "предмет службы", "")})
         out = buf.getvalue()
         _c("адресация и производитель напечатаны ОБЕ",
            f"адресация: {SURFACE_EDGE}" in out and "производитель: A" in out,
@@ -1484,7 +1589,7 @@ def self_test() -> int:
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(lt, workflows=lwf, ledger={"edge-only": ("C", "предмет края")})
+            run(lt, workflows=lwf, ledger={"edge-only": ("C", "предмет края", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: производитель края — расхождения ноль",
            "адресуется к краю, а производитель — служба: 0" in buf.getvalue(),
            buf.getvalue()[:900])
@@ -1492,6 +1597,55 @@ def self_test() -> int:
         # Ось 5: ОБЕ величины печатаются всегда — и когда вторая ноль.
         _c("печатаются обе величины, а не только одна",
            "гоняется здесь:" in out and "НЕ гоняется здесь:" in out)
+
+        # ── Ось 16: У НЕГОНЯЕМОЙ КОЛЛЕКЦИИ ЕСТЬ ДЕРЖАТЕЛЬ, У ГОНЯЕМОЙ — НЕТ ─────
+        #
+        # Производитель коллекции — шаг конвейера, который её гоняет, либо
+        # ДЕРЖАТЕЛЬ в ведомости: задача, которая её прогонит. Без третьего поля
+        # «не гоняется» было концом записи: причина печаталась, а кто снимет
+        # препятствие, не было записано нигде, и долг стоял без читателя.
+        #
+        # Пара по каждой стороне, различие ровно в одном факте. Сторона первая:
+        # коллекция не гоняется, держателя нет — находка; тот же вход с
+        # держателем по форме — молчание. Сторона вторая, САМОИСТЕЧЕНИЕ: шаг её
+        # гоняет, а держатель записан — запись пережила свой предмет; тот же
+        # шаг без держателя — молчание.
+        hdir = tmp / "holder"
+        held = _mk(hdir, {"edge-only": edge}, {"baseUrl": "http://x", "runId": ""})
+        hwf_none = _wf(hdir / "none", runs=[])
+        hwf_runs = _wf(hdir / "runs", runs=["edge-only"])
+        holder = "PRO-Robotech/kaname#1 — синтетика: прогонит на своём стенде"
+        for label, wf16, entry, want_rc, want_text in (
+                ("не гоняется, держателя нет — находка",
+                 hwf_none, ("C", "довод", ""), 1, "держателя"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: не гоняется, держатель по форме — молчание",
+                 hwf_none, ("C", "довод", holder), 0, ""),
+                ("гоняется шагом, а держатель записан — запись пережила предмет",
+                 hwf_runs, ("C", "довод", holder), 1, "пережил"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: гоняется шагом, держателя нет — молчание",
+                 hwf_runs, ("C", "довод", ""), 0, ""),
+                ("держатель вне закрытой формы — находка",
+                 hwf_none, ("C", "довод", "когда-нибудь прогоним"), 1, "форм")):
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(held, workflows=wf16, ledger={"edge-only": entry})
+            _c(f"держатель: {label} (код {want_rc})",
+               rc == want_rc and (not want_text or (
+                   want_text in err.getvalue() and "edge-only" in err.getvalue())),
+               f"код {rc}; {err.getvalue()[:300]}")
+
+        # Держатель ПЕЧАТАЕТСЯ рядом с позицией и сводится по задаче: предикат
+        # задачи читается выводом переписи, а не прочтением ведомости.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(held, workflows=hwf_none, ledger={"edge-only": ("C", "довод", holder)})
+        out16 = buf.getvalue()
+        _c("строка позиции называет держателя",
+           f"держатель: {holder}" in out16, out16[-900:])
+        _c("свод по держателю назван числом",
+           "по ДЕРЖАТЕЛЮ" in out16 and "PRO-Robotech/kaname#1: 1" in out16, out16[-900:])
+        _c("негоняемые с держателем названы числом",
+           "НЕ гоняет ни один шаг: 1 — держатель назван у 1" in out16, out16[-900:])
 
     print()
     if _F:
