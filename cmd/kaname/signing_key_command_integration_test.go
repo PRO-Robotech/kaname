@@ -33,6 +33,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -550,4 +551,139 @@ func TestSigningKeyCommand_ForeignWrappingKeyIsNotRunAndTouchesNothing(t *testin
 	require.NotContains(t, out, "стартовать", "отказ команды не выдаёт себя за отказ старта службы")
 	require.Equal(t, before, svc.servedKIDs(t), "отказ не трогает набор")
 	require.Equal(t, signer, svc.signedKID(t), "отказ не трогает подписывающего")
+}
+
+// keyState — состояние строки ключа в базе службы.
+func keyState(t *testing.T, pool *pgxpool.Pool, kid domain.KeyID) domain.SigningKeyState {
+	t.Helper()
+	var state string
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT state FROM kaname.token_signing_keys WHERE kid = $1`, string(kid)).Scan(&state))
+	return domain.SigningKeyState(state)
+}
+
+// countPublishedKeys — сколько ключей опубликовано и не подписывает.
+func countPublishedKeys(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM kaname.token_signing_keys WHERE state = 'PUBLISHED'`).Scan(&n))
+	return n
+}
+
+// TestSigningKeyCommand_RetireEndedByItsLimitRetiresTheKeyItGenerated — вывод
+// подписывающего с поверхности оператора: команда породила замену, а передача
+// подписи ждёт замка строки подписывающего, и команда кончается СВОИМ пределом.
+// Подписывающий прежний, отказ — «не исполнялось», и порождённая замена ВЫВЕДЕНА,
+// а не оставлена опубликованной без будущего. Законный близнец в той же пробе —
+// тот же вызов, когда строку никто не держит: подпись переходит.
+func TestSigningKeyCommand_RetireEndedByItsLimitRetiresTheKeyItGenerated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	const (
+		limit = 2 * time.Second
+		// bound — сколько проба ждёт возврата; меньше statement_timeout пула.
+		bound = 15 * time.Second
+	)
+	ctx := context.Background()
+	cfg := signingCommandCfg(t)
+	svc := startServingSide(t, cfg)
+	signer := svc.signedKID(t)
+	pool := storePool(t, cfg)
+
+	var statementTimeoutMS int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT setting::bigint FROM pg_settings WHERE name = 'statement_timeout'`).Scan(&statementTimeoutMS))
+	require.Truef(t, statementTimeoutMS == 0 || time.Duration(statementTimeoutMS)*time.Millisecond > bound,
+		"предпосылка пробы не выполняется: statement_timeout пула %dms не длиннее ожидания пробы %s", statementTimeoutMS, bound)
+
+	run := func() (int, string) {
+		t.Helper()
+		type result struct {
+			code int
+			out  string
+		}
+		done := make(chan result, 1)
+		go func() {
+			var out bytes.Buffer
+			code := runSigningKeyCommandWithin(context.Background(), limit, cfg,
+				[]string{"retire", "-kid=" + string(signer), "-decided-by=oncall@example.invalid"}, &out, quietLogger())
+			done <- result{code, out.String()}
+		}()
+		select {
+		case r := <-done:
+			return r.code, r.out
+		case <-time.After(bound):
+			t.Fatalf("команда не вернулась за %s при своём пределе %s", bound, limit)
+			return 0, ""
+		}
+	}
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `SELECT kid FROM kaname.token_signing_keys WHERE kid = $1 FOR UPDATE`, string(signer))
+	require.NoError(t, err)
+	code, out := run()
+	require.NoError(t, tx.Rollback(ctx))
+
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.token_signing_keys`).Scan(&rows))
+	require.Equal(t, 2, rows, "предпосылка: команда породила замену до передачи")
+	require.Equal(t, signingKeyExitNotRun, code, "вывод команды: %s", out)
+	require.Contains(t, out, "предел команды "+limit.String()+" истёк", "предпосылка: команду кончил её предел")
+	require.Equal(t, signer, svc.signedKID(t), "оборванная передача не трогает подписывающего")
+	require.Zero(t, countPublishedKeys(t, pool),
+		"замена, порождённая для оборванной передачи, не остаётся опубликованной без будущего")
+
+	code, out = run()
+	require.Equal(t, signingKeyExitDone, code, "без замка тот же вызов исполняется; вывод команды: %s", out)
+	next := svc.signedKID(t)
+	require.NotEqual(t, signer, next)
+	require.Contains(t, out, "replacement="+string(next))
+	require.Zero(t, countPublishedKeys(t, pool))
+}
+
+// TestSigningKeyMaintenancePass_TheNextPassRetiresAKeyStrandedBeforeItsHandOver —
+// передачу, которую никто не довёл, доделывает СЛЕДУЮЩИЙ проход обслуживания:
+// ключ порождён, а до передачи процесс не дожил (убит, выселен с узла) — вывести
+// его было некому. Проход через интервал выводит его, а через отсрочку — снимает
+// из набора. Законный близнец — проход в тот же момент: передача, которая могла
+// бы ещё идти, не трогается.
+func TestSigningKeyMaintenancePass_TheNextPassRetiresAKeyStrandedBeforeItsHandOver(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	cfg := signingCommandCfg(t)
+	pool, err := coredb.NewPool(ctx, cfg.DSN())
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+
+	t0 := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	now := t0
+	ks, _, err := buildTokenSigningAt(ctx, pool, cfg, func() time.Time { return now }, quietLogger())
+	require.NoError(t, err)
+	var signer domain.KeyID
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT kid FROM kaname.token_signing_keys WHERE state = 'ACTIVE'`).Scan(&signer))
+	stranded, err := ks.Generate(ctx)
+	require.NoError(t, err)
+
+	now = t0.Add(time.Second)
+	signingKeyMaintenancePass(ctx, ks, quietLogger())
+	require.Equal(t, domain.SigningKeyPublished, keyState(t, pool, stranded.KID),
+		"ключ, чья передача могла бы ещё идти, не трогается")
+
+	now = t0.Add(signingKeySweepInterval)
+	signingKeyMaintenancePass(ctx, ks, quietLogger())
+	require.Equal(t, domain.SigningKeyRetired, keyState(t, pool, stranded.KID),
+		"следующий проход доделывает прерванную передачу: застрявший ключ выведен")
+	require.Equal(t, domain.SigningKeyActive, keyState(t, pool, signer), "вывод застрявшего не трогает подписывающего")
+	require.Equal(t, uint64(2), ks.Stats().Sweeps)
+
+	now = t0.Add(signingKeySweepInterval + tokenpolicy.KeyRemovalGrace + signingKeySweepInterval)
+	signingKeyMaintenancePass(ctx, ks, quietLogger())
+	require.Equal(t, domain.SigningKeyRemoved, keyState(t, pool, stranded.KID), "через отсрочку он снят из набора")
+	require.Zero(t, countPublishedKeys(t, pool))
 }

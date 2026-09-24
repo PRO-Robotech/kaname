@@ -34,6 +34,12 @@ import (
 const (
 	lifecycleLifetime = 48 * time.Hour
 	lifecycleLead     = time.Hour
+	// lifecycleHandoverLimit — предел пути «порождение → передача подписи»,
+	// который ключница ставит сама.
+	lifecycleHandoverLimit = 5 * time.Minute
+	// lifecycleStrandedAfter — возраст опубликованного ключа, после которого
+	// сметатель выводит его как застрявший.
+	lifecycleStrandedAfter = 2 * lifecycleHandoverLimit
 )
 
 // lifecycleKeystore — ключница над дублёром с УПРАВЛЯЕМЫМИ часами: момент
@@ -464,4 +470,184 @@ func TestSweepRemovable_CountsEveryCompletedPass(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, uint64(1), ks.Stats().Sweeps, "сорванный проход проходом не считается")
 	require.NotZero(t, ks.Stats().Failures)
+}
+
+// ── Передача, оборванная концом вызова, и застрявший ключ ───────────────────
+
+func countPublished(store *memStore) int {
+	n := 0
+	for _, r := range store.rows {
+		if r.State == domain.SigningKeyPublished {
+			n++
+		}
+	}
+	return n
+}
+
+// writeContext — каким был контекст записи В МОМЕНТ вызова.
+type writeContext struct {
+	seen        bool
+	err         error
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func recordWrites(store *memStore) map[string]*writeContext {
+	seen := map[string]*writeContext{}
+	store.onWrite = func(op string, ctx context.Context) {
+		w := &writeContext{seen: true, err: ctx.Err()}
+		w.deadline, w.hasDeadline = ctx.Deadline()
+		seen[op] = w
+	}
+	return seen
+}
+
+// TestRotateIfDue_AHandOverEndedByTheCallStillRetiresTheKeyItGenerated — проход
+// кончился (предел прохода, сигнал остановки), пока передача подписи ждала
+// замка. Ключ, порождённый для неё, выводится ВСЁ РАВНО: под своим живым и
+// ограниченным контекстом, а не под тем, чей конец и вызвал отказ, — иначе он
+// навсегда оставался бы опубликованным и доверенным. Законный близнец —
+// TestRotateIfDue_WaitsForTheLeadAndThenHandsSigningOver: тот же проход без
+// оборванного вызова передаёт подпись.
+func TestRotateIfDue_AHandOverEndedByTheCallStillRetiresTheKeyItGenerated(t *testing.T) {
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(context.Background()))
+	first := activeKID(t, store)
+	now = store.rows[first].NotAfter.Add(-lifecycleLead)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store.beforeReplace = func() { store.beforeReplace = nil; cancel() }
+	writes := recordWrites(store)
+
+	rotated, err := ks.RotateIfDue(ctx)
+	require.Error(t, err, "предпосылка: передача оборвана концом вызова")
+	require.False(t, rotated)
+	require.Len(t, store.rows, 2, "предпосылка: ключ для передачи порождён")
+	require.Equal(t, first, activeKID(t, store), "оборванная передача не трогает подписывающего")
+	require.Zero(t, countPublished(store),
+		"ключ, порождённый для оборванной передачи, не остаётся опубликованным без будущего")
+
+	retire := writes["Retire"]
+	require.NotNil(t, retire, "порождённый ключ обязан выводиться")
+	require.NoError(t, retire.err, "вывод идёт под живым контекстом, а не под оконченным вызовом")
+	require.True(t, retire.hasDeadline, "и под своим сроком: вывод, ждущий вечно, держал бы остановку процесса")
+}
+
+// TestRotate_TheHandOverRunsUnderTheKeystoresOwnLimit — путь «порождение →
+// передача» ограничен пределом САМОЙ ключницы, и тогда, когда у вызывающего
+// предела нет (обеспечение подписывающего при старте). Это и делает
+// застрявший ключ определимым: опубликованный ключ старше предела передачу
+// уже не получит. Порождение идёт под тем же пределом, что передача: время
+// порождения — отсчёт, от которого сметатель судит возраст.
+func TestRotate_TheHandOverRunsUnderTheKeystoresOwnLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		handOver string
+		run      func(ks *signingkeys.Keystore, store *memStore, now *time.Time) error
+	}{
+		{"обеспечение подписывающего при старте", "Activate", func(ks *signingkeys.Keystore, _ *memStore, _ *time.Time) error {
+			return ks.EnsureSigningKey(context.Background())
+		}},
+		{"ротация по сроку", "ReplaceActive", func(ks *signingkeys.Keystore, store *memStore, now *time.Time) error {
+			*now = store.rows[activeKID(t, store)].NotAfter.Add(-lifecycleLead)
+			_, err := ks.RotateIfDue(context.Background())
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+			store := newMemStore()
+			ks := lifecycleKeystore(t, store, &now)
+			if tc.handOver == "ReplaceActive" {
+				require.NoError(t, ks.EnsureSigningKey(context.Background()))
+			}
+			writes := recordWrites(store)
+
+			before := time.Now()
+			require.NoError(t, tc.run(ks, store, &now))
+			after := time.Now()
+
+			insert, handOver := writes["Insert"], writes[tc.handOver]
+			require.NotNil(t, insert, "предпосылка: ключ порождён")
+			require.NotNil(t, handOver, "предпосылка: подпись передана")
+			require.True(t, handOver.hasDeadline, "передача ограничена пределом ключницы и без предела вызывающего")
+			require.False(t, handOver.deadline.Before(before.Add(lifecycleHandoverLimit)), "срок передачи — предел ключницы, а не короче")
+			require.False(t, handOver.deadline.After(after.Add(lifecycleHandoverLimit)), "срок передачи — предел ключницы, а не длиннее")
+			require.True(t, insert.hasDeadline)
+			require.Equal(t, handOver.deadline, insert.deadline, "порождение и передача — под одним пределом")
+		})
+	}
+}
+
+// TestSweepRemovable_RetiresAPublishedKeyOnlyOnceItIsOlderThanAnyHandOver —
+// передача, которую никто не довёл (процесс убит между порождением и передачей,
+// вывод порождённого ключа отказал), доделывается сметателем: опубликованный
+// ключ старше возраста застревания выводится. Младше — нет: его передача,
+// возможно, ещё идёт, и вывод отнял бы у неё ключ.
+func TestSweepRemovable_RetiresAPublishedKeyOnlyOnceItIsOlderThanAnyHandOver(t *testing.T) {
+	ctx := context.Background()
+	t0 := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	now := t0
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	signer := activeKID(t, store)
+	stranded, err := ks.Generate(ctx)
+	require.NoError(t, err)
+	retiredBefore := ks.Stats().Retired
+
+	now = t0.Add(lifecycleStrandedAfter - time.Second)
+	_, err = ks.SweepRemovable(ctx)
+	require.NoError(t, err)
+	require.Equal(t, domain.SigningKeyPublished, store.rows[stranded.KID].State,
+		"ключ младше возраста застревания не трогается: его передача, возможно, ещё идёт")
+
+	now = t0.Add(lifecycleStrandedAfter)
+	n, err := ks.SweepRemovable(ctx)
+	require.NoError(t, err)
+	require.Zero(t, n, "застрявший ключ выводится, а не снимается: снятие — через отсрочку")
+	got := store.rows[stranded.KID]
+	require.Equal(t, domain.SigningKeyRetired, got.State, "застрявший ключ выводится сметателем")
+	require.NotNil(t, got.RetiredAt)
+	require.Equal(t, now, *got.RetiredAt, "отсрочка снятия отсчитывается от вывода")
+	require.Equal(t, signer, activeKID(t, store), "вывод застрявшего не трогает подписывающего")
+	require.Equal(t, retiredBefore+1, ks.Stats().Retired, "вывод застрявшего считается выводом")
+	require.Zero(t, ks.Stats().Failures)
+	require.Equal(t, uint64(2), ks.Stats().Sweeps)
+}
+
+// TestSweepRemovable_AStrandedKeyWhoseHandOverLandsMeanwhileKeepsSigning —
+// вывод застрявшего условен так же, как всякий переход: если передача этому
+// ключу легла между чтением набора и выводом, вывод получает невыполненное
+// предусловие, ключ подписывает дальше, а проход не срывается и отказом не
+// считается. Близнец — проба выше: без легшей передачи ключ выводится.
+func TestSweepRemovable_AStrandedKeyWhoseHandOverLandsMeanwhileKeepsSigning(t *testing.T) {
+	ctx := context.Background()
+	t0 := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	now := t0
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(ctx))
+	first := activeKID(t, store)
+	late, err := ks.Generate(ctx)
+	require.NoError(t, err)
+
+	attempted := false
+	store.beforeRetire = func(kid domain.KeyID) {
+		if kid != late.KID {
+			return
+		}
+		attempted = true
+		require.NoError(t, store.ReplaceActive(ctx, late.KID, first, now))
+	}
+	now = t0.Add(lifecycleStrandedAfter)
+	_, err = ks.SweepRemovable(ctx)
+	require.True(t, attempted, "ключ старше возраста застревания сметатель обязан пытаться вывести")
+	require.NoError(t, err, "проигранный вывод — не отказ прохода")
+	require.Equal(t, late.KID, activeKID(t, store), "легшая передача не отменяется выводом")
+	require.Zero(t, ks.Stats().Failures)
+	require.Equal(t, uint64(1), ks.Stats().Sweeps)
 }

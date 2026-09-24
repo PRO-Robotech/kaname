@@ -57,6 +57,24 @@ type memStore struct {
 	// подписывающего, а не понижением соседа, — поэтому не-nil из хука есть
 	// отказ повышения, а не повод повысить.
 	beforeActivate func() error
+	// beforeRetire — то, что случается между чтением набора сметателем и его
+	// выводом ключа: передача подписи этому ключу успевает лечь у соседа.
+	beforeRetire func(kid domain.KeyID)
+	// onWrite — каким контекстом пришла запись: живым ли и с каким сроком.
+	// Снимается в МОМЕНТ вызова, а не после возврата — после возврата свой
+	// контекст вызывающий уже отменил.
+	onWrite func(op string, ctx context.Context)
+}
+
+// refuseEnded — как настоящее хранилище: по оконченному вызову ни чтения, ни
+// записи. Дублёр, принимающий запись по оконченному вызову, прятал бы ровно тот
+// дефект, при котором очистку ведут под контекстом, чей конец её и вызвал.
+func refuseEnded(ctx context.Context) error { return ctx.Err() }
+
+func (m *memStore) sawWrite(op string, ctx context.Context) {
+	if m.onWrite != nil {
+		m.onWrite(op, ctx)
+	}
 }
 
 func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.SigningKeyRecord{}} }
@@ -64,6 +82,7 @@ func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.Si
 var errTwoActive = errors.New("memstore: two signing keys would be active")
 
 func (m *memStore) Insert(ctx context.Context, rec domain.SigningKeyRecord) error {
+	m.sawWrite("Insert", ctx)
 	if m.beforeInsert != nil {
 		m.beforeInsert()
 	}
@@ -71,7 +90,7 @@ func (m *memStore) Insert(ctx context.Context, rec domain.SigningKeyRecord) erro
 		return m.err
 	}
 	// Как настоящее хранилище: по оконченному вызову строка не пишется.
-	if err := ctx.Err(); err != nil {
+	if err := refuseEnded(ctx); err != nil {
 		return err
 	}
 	if m.insertErr != nil {
@@ -93,9 +112,12 @@ func (m *memStore) activeKID() domain.KeyID {
 	return ""
 }
 
-func (m *memStore) Get(_ context.Context, kid domain.KeyID) (domain.SigningKeyRecord, error) {
+func (m *memStore) Get(ctx context.Context, kid domain.KeyID) (domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return domain.SigningKeyRecord{}, m.err
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return domain.SigningKeyRecord{}, err
 	}
 	r, ok := m.rows[kid]
 	if !ok {
@@ -104,9 +126,12 @@ func (m *memStore) Get(_ context.Context, kid domain.KeyID) (domain.SigningKeyRe
 	return r, nil
 }
 
-func (m *memStore) Active(_ context.Context) (domain.SigningKeyRecord, error) {
+func (m *memStore) Active(ctx context.Context) (domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return domain.SigningKeyRecord{}, m.err
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return domain.SigningKeyRecord{}, err
 	}
 	if m.activeErr != nil {
 		return domain.SigningKeyRecord{}, m.activeErr
@@ -123,12 +148,17 @@ func (m *memStore) Active(_ context.Context) (domain.SigningKeyRecord, error) {
 // ReplaceActive — передача подписи УСЛОВНО на ожидаемого подписывающего, с
 // тем же контрактом, что у настоящего хранилища: ожидаемый обязан быть
 // подписывающим, следующий — опубликованным; иначе невыполненное предусловие.
-func (m *memStore) ReplaceActive(_ context.Context, next, expected domain.KeyID, at time.Time) error {
+func (m *memStore) ReplaceActive(ctx context.Context, next, expected domain.KeyID, at time.Time) error {
+	m.sawWrite("ReplaceActive", ctx)
 	if m.err != nil {
 		return m.err
 	}
 	if m.beforeReplace != nil {
 		m.beforeReplace()
+	}
+	// После вмешательства: вызов мог кончиться, пока передача ждала замка.
+	if err := refuseEnded(ctx); err != nil {
+		return err
 	}
 	cur, ok := m.rows[expected]
 	if !ok || cur.State != domain.SigningKeyActive {
@@ -147,9 +177,12 @@ func (m *memStore) ReplaceActive(_ context.Context, next, expected domain.KeyID,
 	return nil
 }
 
-func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) {
+func (m *memStore) KeySet(ctx context.Context) ([]domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return nil, err
 	}
 	var out []domain.SigningKeyRecord
 	for _, r := range m.rows {
@@ -160,7 +193,8 @@ func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) 
 	return out, nil
 }
 
-func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Activate(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Activate", ctx)
 	if m.err != nil {
 		return m.err
 	}
@@ -168,6 +202,9 @@ func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) e
 		if err := m.beforeActivate(); err != nil {
 			return err
 		}
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return err
 	}
 	r, ok := m.rows[kid]
 	if !ok || !r.State.CanActivate() {
@@ -185,7 +222,14 @@ func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) e
 	return nil
 }
 
-func (m *memStore) Retire(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Retire(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Retire", ctx)
+	if m.beforeRetire != nil {
+		m.beforeRetire(kid)
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
 	// Предусловие перехода — то же, что у настоящего хранилища: выводится
 	// только опубликованный; подписывающий уходит передачей преемнику.
 	if r, ok := m.rows[kid]; ok && r.State != domain.SigningKeyPublished {
@@ -194,11 +238,19 @@ func (m *memStore) Retire(_ context.Context, kid domain.KeyID, at time.Time) err
 	return m.set(kid, domain.SigningKeyRetired, &at, func(r *domain.SigningKeyRecord) { r.RetiredAt = &at })
 }
 
-func (m *memStore) Remove(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Remove(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Remove", ctx)
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
 	return m.set(kid, domain.SigningKeyRemoved, &at, func(r *domain.SigningKeyRecord) { r.RemovedAt = &at })
 }
 
-func (m *memStore) Compromise(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Compromise(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Compromise", ctx)
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
 	if r, ok := m.rows[kid]; ok && r.State == domain.SigningKeyCompromised {
 		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
 	}
