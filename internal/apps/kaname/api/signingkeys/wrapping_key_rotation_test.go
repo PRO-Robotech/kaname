@@ -51,11 +51,13 @@ func keystoreOver(t *testing.T, store *memStore, at time.Time, wrapKeys ...[]byt
 	wrapper, err := keywrap.New(wrapKeys...)
 	require.NoError(t, err)
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        fixedClock(at),
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(at),
 	}, store, store, wrapper)
 	require.NoError(t, err)
 	return ks

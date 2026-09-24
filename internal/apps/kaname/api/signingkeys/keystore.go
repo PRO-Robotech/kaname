@@ -118,8 +118,40 @@ type Config struct {
 	// переходит к новому ключу (RotateIfDue). Строго меньше срока ключа:
 	// иначе ключ ротировался бы на каждом проходе.
 	RotationLead time.Duration
-	Clock        Clock
-	Logger       *slog.Logger
+	// HandoverLimit — предел пути «порождение ключа → передача ему подписи»
+	// (Rotate и передача от подписывающего). Ключница ставит его САМА, поверх
+	// предела вызывающего: у обеспечения подписывающего при старте своего
+	// предела нет, а без предела у передачи «застрявший ключ» неопределим.
+	HandoverLimit time.Duration
+	// StrandedAfter — возраст опубликованного ключа, после которого сметатель
+	// выводит его как застрявший: передача ему подписи уже не состоится.
+	// Строго больше HandoverLimit — запас покрывает расхождение часов реплик
+	// (время порождения пишет одна, судит другая) и фиксацию, дошедшую до
+	// сервера позже отмены у клиента. Опубликованный ключ иного будущего, чем
+	// передача в пределах HandoverLimit, не имеет: заблаговременной публикации
+	// ключа до его подписи здесь нет, и заводящий её обязан учесть её здесь.
+	StrandedAfter time.Duration
+	Clock         Clock
+	Logger        *slog.Logger
+}
+
+// abandonLimit — предел вывода ключа, так и не вступившего в подпись.
+//
+// Свой и ОТСОЕДИНЁННЫЙ от вызывающего: вывод нужен ровно тогда, когда вызов
+// кончился — пределом прохода или команды, сигналом остановки, — и под тем же
+// контекстом он отказывал бы сразу. Работа — одна условная запись по ключу:
+// десять секунд много больше её обычной длительности и меньше срока
+// корректной остановки процесса. Не уложился — ключ выводит сметатель, когда
+// тот станет старше StrandedAfter.
+const abandonLimit = 10 * time.Second
+
+// handoverLimitExpired — причина отмены, когда кончился предел передачи САМОЙ
+// ключницы, а не вызывающего: отказ хранилища на отменённом запросе приезжает
+// кодом состояния сервера и о сроке не говорит.
+type handoverLimitExpired struct{ limit time.Duration }
+
+func (e handoverLimitExpired) Error() string {
+	return fmt.Sprintf("signingkeys: the hand-over limit %s expired", e.limit)
 }
 
 // Stats — наблюдаемость ключницы: по счётчику на каждый исход.
@@ -181,6 +213,11 @@ func New(cfg Config, reader KeyReader, writer KeyWriter, wrapper Wrapper) (*Keys
 	case cfg.KeyLifetime <= cfg.RotationLead:
 		return nil, fmt.Errorf("signingkeys: key lifetime %s must exceed the rotation lead %s — "+
 			"otherwise every pass would rotate the signing key", cfg.KeyLifetime, cfg.RotationLead)
+	case cfg.HandoverLimit <= 0:
+		return nil, fmt.Errorf("signingkeys: hand-over limit must be declared as a positive number")
+	case cfg.StrandedAfter <= cfg.HandoverLimit:
+		return nil, fmt.Errorf("signingkeys: stranded age %s must exceed the hand-over limit %s — "+
+			"otherwise the sweeper could retire a key whose hand-over is still under way", cfg.StrandedAfter, cfg.HandoverLimit)
 	case cfg.Clock == nil:
 		return nil, fmt.Errorf("signingkeys: clock is required (time source is an input, not the environment)")
 	case reader == nil || writer == nil || wrapper == nil:
@@ -269,30 +306,51 @@ func (k *Keystore) Activate(ctx context.Context, kid domain.KeyID) error {
 //
 // Порядок здесь ЕДИНСТВЕННЫЙ возможный: порождение кладёт ключ в набор, и лишь
 // потом он вступает в подпись. Обратный порядок не выражается — активировать
-// нечего, пока строки нет.
+// нечего, пока строки нет. Порождение и передача идут под пределом передачи.
 func (k *Keystore) Rotate(ctx context.Context) (domain.PublishedKey, error) {
+	ctx, cancel := k.handoverContext(ctx)
+	defer cancel()
 	pub, err := k.Generate(ctx)
 	if err != nil {
-		return domain.PublishedKey{}, err
+		return domain.PublishedKey{}, underHandoverLimit(ctx, err)
 	}
 	if err := k.Activate(ctx, pub.KID); err != nil {
 		k.abandon(ctx, pub.KID)
-		return domain.PublishedKey{}, err
+		return domain.PublishedKey{}, underHandoverLimit(ctx, err)
 	}
 	return pub, nil
+}
+
+// handoverContext — контекст пути «порождение → передача»: предел ключницы
+// поверх предела вызывающего. Создаётся ДО порождения: время порождения —
+// отсчёт, от которого сметатель судит возраст ключа.
+func (k *Keystore) handoverContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeoutCause(ctx, k.cfg.HandoverLimit, handoverLimitExpired{limit: k.cfg.HandoverLimit})
+}
+
+// underHandoverLimit приписывает к отказу, что кончился предел передачи САМОЙ
+// ключницы, — когда кончился именно он. Иные отказы проходят как есть.
+func underHandoverLimit(ctx context.Context, err error) error {
+	var expired handoverLimitExpired
+	if errors.As(context.Cause(ctx), &expired) {
+		return fmt.Errorf("%w: %w", expired, err)
+	}
+	return err
 }
 
 // rotateReplacing порождает ключ и передаёт ему подпись от `expected` —
 // УСЛОВНО на то, что `expected` всё ещё подписывает.
 //
 // Порождение идёт первым по той же причине, что в Rotate: ключ рождается
-// опубликованным и лишь потом вступает в подпись. Ключ, проигравший передачу,
-// выводится сразу (abandon): иначе он остался бы в наборе опубликованным без
-// будущего — сметатель снимает только выведенные.
+// опубликованным и лишь потом вступает в подпись, — и под тем же пределом
+// передачи. Ключ, проигравший передачу, выводится сразу (abandon), а если и
+// это не удалось — сметателем по возрасту.
 func (k *Keystore) rotateReplacing(ctx context.Context, expected domain.KeyID) (domain.PublishedKey, error) {
+	ctx, cancel := k.handoverContext(ctx)
+	defer cancel()
 	pub, err := k.Generate(ctx)
 	if err != nil {
-		return domain.PublishedKey{}, err
+		return domain.PublishedKey{}, underHandoverLimit(ctx, err)
 	}
 	if err := k.writer.ReplaceActive(ctx, pub.KID, expected, k.now()); err != nil {
 		k.abandon(ctx, pub.KID)
@@ -300,7 +358,7 @@ func (k *Keystore) rotateReplacing(ctx context.Context, expected domain.KeyID) (
 			return domain.PublishedKey{}, fmt.Errorf("%w: %w", ErrSignerChanged, err)
 		}
 		k.failures.Add(1)
-		return domain.PublishedKey{}, err
+		return domain.PublishedKey{}, underHandoverLimit(ctx, err)
 	}
 	k.activated.Add(1)
 	k.retired.Add(1)
@@ -309,17 +367,33 @@ func (k *Keystore) rotateReplacing(ctx context.Context, expected domain.KeyID) (
 	return pub, nil
 }
 
-// abandon выводит порождённый ключ, так и не вступивший в подпись. Отказ здесь
-// не прерывает вызывающего — его исход уже решён, — но звучит: ключ, оставшийся
-// опубликованным, есть лишняя запись набора без срока снятия.
+// abandon выводит порождённый ключ, так и не вступивший в подпись.
+//
+// Под СВОИМ контекстом (abandonLimit), отсоединённым от вызывающего: передачу
+// обрывает чаще всего конец самого вызова, и вывод под тем же контекстом
+// отказывал бы сразу — ключ оставался бы опубликованным и доверенным.
+//
+// Отказ здесь не прерывает вызывающего — его исход уже решён, — но звучит.
+// Невыполненное предусловие отказом ключницы не считается: ключ больше не
+// опубликован, то есть передача ему легла, хотя вызов получил отказ (фиксация
+// дошла до сервера, ответ — нет), либо его уже вывели. Иной отказ оставляет
+// ключ опубликованным до сметателя (StrandedAfter).
 func (k *Keystore) abandon(ctx context.Context, kid domain.KeyID) {
-	if err := k.writer.Retire(ctx, kid, k.now()); err != nil {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), abandonLimit)
+	defer cancel()
+	err := k.writer.Retire(actx, kid, k.now())
+	switch {
+	case err == nil:
+		k.retired.Add(1)
+	case errors.Is(err, iamerr.ErrFailedPrecondition):
+		k.logger.Warn("signing key generated for a hand-over that reported a failure is no longer published — "+
+			"the hand-over may have landed", "kid", string(kid), "err", err.Error())
+	default:
 		k.failures.Add(1)
-		k.logger.Warn("signing key generated for a hand-over that did not happen could not be retired",
-			"kid", string(kid), "err", err.Error())
-		return
+		k.logger.Warn("signing key generated for a hand-over that did not happen could not be retired — "+
+			"the sweeper retires it once it is older than stranded_after",
+			"kid", string(kid), "stranded_after", k.cfg.StrandedAfter.String(), "err", err.Error())
 	}
-	k.retired.Add(1)
 }
 
 // LifecycleOutcome — исход действия оператора над ключом.
@@ -552,11 +626,19 @@ func (k *Keystore) RotateIfDue(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// SweepRemovable снимает из набора выведенные ключи, чья отсрочка истекла.
+// SweepRemovable — сметатель ключей без будущего. Возвращает число СНЯТЫХ.
 //
-// Отсрочка ВЫЧИСЛЕНА и передана настройкой; здесь она только применяется.
-// Ключ снимается не «когда решили», а когда истёк последний подписанный им
-// токен плюс потолок кэша самого медленного потребителя.
+// Выведенный ключ, чья отсрочка истекла, снимается из набора. Отсрочка
+// ВЫЧИСЛЕНА и передана настройкой; здесь она только применяется: ключ
+// снимается не «когда решили», а когда истёк последний подписанный им токен
+// плюс потолок кэша самого медленного потребителя.
+//
+// Опубликованный ключ старше StrandedAfter ВЫВОДИТСЯ — это передача, которую
+// никто не довёл: процесс не дожил до неё либо не смог вывести порождённый
+// ключ. Иначе такой ключ оставался бы в наборе доверенным навсегда. Вывод
+// условен, как всякий переход: легла передача раньше — вывод получает
+// невыполненное предусловие, и это не отказ. Выведенный здесь снимается через
+// отсрочку, как всякий выведенный, и звучит журналом и счётчиком выводов.
 func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 	set, err := k.reader.KeySet(ctx)
 	if err != nil {
@@ -566,6 +648,12 @@ func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 	now := k.now()
 	var n int
 	for _, rec := range set {
+		if rec.State == domain.SigningKeyPublished {
+			if err := k.retireStranded(ctx, rec, now); err != nil {
+				return n, err
+			}
+			continue
+		}
 		if rec.State != domain.SigningKeyRetired || rec.RetiredAt == nil {
 			continue
 		}
@@ -589,6 +677,28 @@ func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 	}
 	k.sweeps.Add(1)
 	return n, nil
+}
+
+// retireStranded выводит опубликованный ключ, передача которому уже не
+// состоится, — и только такой: младший ключ, возможно, ещё ждёт своей передачи.
+func (k *Keystore) retireStranded(ctx context.Context, rec domain.SigningKeyRecord, now time.Time) error {
+	if now.Before(rec.CreatedAt.Add(k.cfg.StrandedAfter)) {
+		return nil
+	}
+	if err := k.writer.Retire(ctx, rec.KID, now); err != nil {
+		if errors.Is(err, iamerr.ErrFailedPrecondition) {
+			// Передача легла раньше либо ключ вывел соседний сметатель: ни то
+			// ни другое не отказ, и обход остальных ключей продолжается.
+			return nil
+		}
+		k.failures.Add(1)
+		return err
+	}
+	k.retired.Add(1)
+	k.logger.Warn("signing key stranded before its hand-over retired by the sweeper", "kid", string(rec.KID),
+		"created_at", rec.CreatedAt.UTC().Format(time.RFC3339), "stranded_after", k.cfg.StrandedAfter.String(),
+		"removable_after", now.Add(k.cfg.RemovalGrace).Format(time.RFC3339))
+	return nil
 }
 
 // EnsureSigningKey обеспечивает наличие подписывающего ключа при старте.

@@ -150,10 +150,12 @@ func buildKeystoreAt(
 		KeyLifetime: ts.KeyLifetime,
 		// Отсрочка снятия ВЫЧИСЛЕНА из объявленных слагаемых, а не выбрана
 		// здесь: смена любого из них без пересмотра отсрочки роняет гейт.
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: signingKeyRotationLead,
-		Clock:        clock,
-		Logger:       logger.With(slog.String("component", "signing_keystore")),
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  signingKeyRotationLead,
+		HandoverLimit: signingKeyHandoverLimit,
+		StrandedAfter: signingKeyStrandedAfter,
+		Clock:         clock,
+		Logger:        logger.With(slog.String("component", "signing_keystore")),
 	}, repo, repo, wrapper)
 	if err != nil {
 		// Срок ключа, не превышающий запаса ротации, отвергается здесь, а не
@@ -178,11 +180,13 @@ func buildKeystoreAt(
 // наступил, пока служба стояла, ждала бы его же.
 //
 // РЕПЛИКИ: на-реплику — петля идёт в каждой реплике, и дубль безвреден не по
-// намерению, а по СВОЙСТВУ ОПЕРАТОРОВ: снятие выражено переходом из
-// определённого состояния (`WHERE state = 'RETIRED'`), а передача подписи —
-// условно на ожидаемого подписывающего, поэтому второй исполнитель получает
-// ноль строк, а не отменяет работу первого. Проигравший ротацию выводит свой
-// порождённый ключ сам (signingkeys.RotateIfDue).
+// намерению, а по СВОЙСТВУ ОПЕРАТОРОВ: снятие и вывод застрявшего выражены
+// переходом из определённого состояния (`WHERE state = 'RETIRED'` и
+// `'PUBLISHED'`), а передача подписи — условно на ожидаемого подписывающего,
+// поэтому второй исполнитель получает ноль строк, а не отменяет работу
+// первого. Проигравший ротацию выводит свой порождённый ключ сам
+// (signingkeys.RotateIfDue); ключ, которого не вывел никто (процесс не дожил
+// до передачи), выводит сметатель по возрасту.
 func startSigningKeyMaintenance(ctx context.Context, ks *signingkeys.Keystore, logger *slog.Logger) {
 	if ks == nil {
 		return
@@ -254,6 +258,24 @@ const signingKeyRotationLead = 4 * signingKeySweepInterval
 // передача подписи и обход набора. Много больше их обычной длительности и
 // меньше интервала, чтобы зависший проход не наложился на следующий.
 const signingKeyPassTimeout = 2 * time.Minute
+
+// signingKeyHandoverLimit — предел пути «порождение ключа → передача ему
+// подписи», который ключница ставит сама поверх предела вызывающего.
+//
+// Равен длиннейшему из пределов вызывающих — прохода обслуживания и команды
+// оператора: ни у одного из них передача не обрывается им раньше собственного
+// предела, а обеспечение подписывающего при старте, у которого своего предела
+// нет, получает этот.
+const signingKeyHandoverLimit = max(signingKeyPassTimeout, signingKeyCommandTimeout)
+
+// signingKeyStrandedAfter — возраст опубликованного ключа, после которого
+// сметатель выводит его как застрявший: передача ему подписи уже не состоится.
+//
+// Запас сверх предела передачи равен самому пределу: он покрывает расхождение
+// часов реплик и фиксацию, дошедшую до сервера позже отмены у клиента, — обе
+// много меньше минут. Не длиннее интервала прохода: ключ, оставленный
+// прерванным проходом, выводит СЛЕДУЮЩИЙ проход.
+const signingKeyStrandedAfter = 2 * signingKeyHandoverLimit
 
 // signingKeyStartupRefusal облекает отказ обеспечения подписывающего ключа в
 // текст, который видит ОПЕРАТОР, поднимающий стенд.

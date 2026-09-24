@@ -284,12 +284,14 @@ func mustKeystore(t *testing.T, store *memStore, logBuf *bytes.Buffer) *signingk
 		logger = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        fixedClock(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
-		Logger:       logger,
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
+		Logger:        logger,
 	}, store, store, wrapper)
 	require.NoError(t, err)
 	return ks
@@ -302,11 +304,13 @@ func TestKeystore_F1_01_AlgorithmComesFromConfigurationAndBindsToTheKey(t *testi
 		wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
 		require.NoError(t, err)
 		ks, err := signingkeys.New(signingkeys.Config{
-			Algorithm:    alg,
-			KeyLifetime:  time.Hour,
-			RemovalGrace: tokenpolicy.KeyRemovalGrace,
-			RotationLead: time.Minute,
-			Clock:        fixedClock(time.Now()),
+			Algorithm:     alg,
+			KeyLifetime:   time.Hour,
+			RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+			RotationLead:  time.Minute,
+			HandoverLimit: time.Minute,
+			StrandedAfter: 2 * time.Minute,
+			Clock:         fixedClock(time.Now()),
 		}, store, store, wrapper)
 		require.NoError(t, err)
 
@@ -426,25 +430,30 @@ func TestKeystore_F1_05_PublishedFormCannotCarryThePrivateHalf(t *testing.T) {
 	require.Equal(t, published, rec.Published())
 }
 
-// TestKeystore_RefusesToBuildIncomplete — часы, алгоритм, срок ключа и
-// отсрочка — входы, а не умолчания.
+// TestKeystore_RefusesToBuildIncomplete — часы, алгоритм, срок ключа,
+// отсрочка, предел передачи и возраст застревания — входы, а не умолчания.
 func TestKeystore_RefusesToBuildIncomplete(t *testing.T) {
 	store := newMemStore()
 	wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
 	require.NoError(t, err)
 	full := signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        fixedClock(time.Now()),
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(time.Now()),
 	}
 	for name, mutate := range map[string]func(*signingkeys.Config){
-		"без алгоритма":  func(c *signingkeys.Config) { c.Algorithm = "" },
-		"чужой алгоритм": func(c *signingkeys.Config) { c.Algorithm = "HS256" },
-		"без часов":      func(c *signingkeys.Config) { c.Clock = nil },
-		"без срока":      func(c *signingkeys.Config) { c.KeyLifetime = 0 },
-		"без отсрочки":   func(c *signingkeys.Config) { c.RemovalGrace = 0 },
+		"без алгоритма":        func(c *signingkeys.Config) { c.Algorithm = "" },
+		"чужой алгоритм":       func(c *signingkeys.Config) { c.Algorithm = "HS256" },
+		"без часов":            func(c *signingkeys.Config) { c.Clock = nil },
+		"без срока":            func(c *signingkeys.Config) { c.KeyLifetime = 0 },
+		"без отсрочки":         func(c *signingkeys.Config) { c.RemovalGrace = 0 },
+		"без предела передачи": func(c *signingkeys.Config) { c.HandoverLimit = 0 },
+		// Сметатель выводил бы ключ, чья передача ещё идёт.
+		"застревание не длиннее передачи": func(c *signingkeys.Config) { c.StrandedAfter = c.HandoverLimit },
 	} {
 		cfg := full
 		mutate(&cfg)
@@ -493,11 +502,13 @@ func TestKeystore_F1_30_SweepRemovesOnlyAfterTheComputedGrace(t *testing.T) {
 
 	clockAt := at
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        func() time.Time { return clockAt },
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         func() time.Time { return clockAt },
 	}, store, store, wrapper)
 	require.NoError(t, err)
 

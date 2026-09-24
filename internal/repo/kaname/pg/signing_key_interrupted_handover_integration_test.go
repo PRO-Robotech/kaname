@@ -79,6 +79,7 @@ func TestSigningKey_RotationEndedByItsPassLimitRetiresTheKeyItGenerated(t *testi
 				ks, err := signingkeys.New(signingkeys.Config{
 					Algorithm: domain.SigningAlgES256, KeyLifetime: lifetime,
 					RemovalGrace: tokenpolicy.KeyRemovalGrace, RotationLead: lead,
+					HandoverLimit: time.Minute, StrandedAfter: 2 * time.Minute,
 					Clock: func() time.Time { return at },
 				}, repo, repo, wrapper)
 				require.NoError(t, err)

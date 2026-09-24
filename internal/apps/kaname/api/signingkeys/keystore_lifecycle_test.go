@@ -50,11 +50,13 @@ func lifecycleKeystore(t *testing.T, store *memStore, clock *time.Time) *signing
 	wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
 	require.NoError(t, err)
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgES256,
-		KeyLifetime:  lifecycleLifetime,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: lifecycleLead,
-		Clock:        func() time.Time { return *clock },
+		Algorithm:     domain.SigningAlgES256,
+		KeyLifetime:   lifecycleLifetime,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  lifecycleLead,
+		HandoverLimit: lifecycleHandoverLimit,
+		StrandedAfter: lifecycleStrandedAfter,
+		Clock:         func() time.Time { return *clock },
 	}, store, store, wrapper)
 	require.NoError(t, err)
 	return ks
@@ -435,11 +437,13 @@ func TestNew_RefusesALifetimeWithinTheRotationLead(t *testing.T) {
 	build := func(lifetime, lead time.Duration) error {
 		store := newMemStore()
 		_, err := signingkeys.New(signingkeys.Config{
-			Algorithm:    domain.SigningAlgES256,
-			KeyLifetime:  lifetime,
-			RemovalGrace: tokenpolicy.KeyRemovalGrace,
-			RotationLead: lead,
-			Clock:        time.Now,
+			Algorithm:     domain.SigningAlgES256,
+			KeyLifetime:   lifetime,
+			RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+			RotationLead:  lead,
+			HandoverLimit: time.Minute,
+			StrandedAfter: 2 * time.Minute,
+			Clock:         time.Now,
 		}, store, store, wrapper)
 		return err
 	}
@@ -650,4 +654,79 @@ func TestSweepRemovable_AStrandedKeyWhoseHandOverLandsMeanwhileKeepsSigning(t *t
 	require.Equal(t, late.KID, activeKID(t, store), "легшая передача не отменяется выводом")
 	require.Zero(t, ks.Stats().Failures)
 	require.Equal(t, uint64(1), ks.Stats().Sweeps)
+}
+
+// TestEnsureSigningKey_AHandOverOutlivingTheKeystoreLimitEndsNamedAndRetiresItsKey —
+// у обеспечения подписывающего при старте своего предела нет, а передача
+// зависла (хранилище не отвечает на повышение). Её кончает предел ключницы:
+// отказ НАЗЫВАЕТ, что кончился именно он, — код состояния сервера об этом не
+// говорит, — а порождённый ключ выведен, а не оставлен опубликованным.
+// Законный близнец — TestRotate_TheHandOverRunsUnderTheKeystoresOwnLimit: та же
+// передача без зависания ложится под тем же пределом.
+func TestEnsureSigningKey_AHandOverOutlivingTheKeystoreLimitEndsNamedAndRetiresItsKey(t *testing.T) {
+	const limit = 50 * time.Millisecond
+	wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
+	require.NoError(t, err)
+	store := newMemStore()
+	ks, err := signingkeys.New(signingkeys.Config{
+		Algorithm:     domain.SigningAlgES256,
+		KeyLifetime:   lifecycleLifetime,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  lifecycleLead,
+		HandoverLimit: limit,
+		StrandedAfter: 2 * limit,
+		Clock:         fixedClock(time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)),
+	}, store, store, wrapper)
+	require.NoError(t, err)
+	// Повышение ждёт, пока его вызов не кончится: так выглядит зависшее хранилище.
+	store.onWrite = func(op string, ctx context.Context) {
+		if op == "Activate" {
+			<-ctx.Done()
+		}
+	}
+
+	err = ks.EnsureSigningKey(context.Background())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "the hand-over limit "+limit.String()+" expired",
+		"отказ называет, что кончился предел передачи ключницы")
+	require.Len(t, store.rows, 1, "предпосылка: ключ для передачи порождён")
+	require.Zero(t, countPublished(store), "ключ зависшей передачи выведен, а не оставлен опубликованным")
+}
+
+// TestRotateIfDue_AHandOverThatLandedDespiteItsRefusalIsNotACleanupFailure —
+// передача ЛЕГЛА, а вызов получил отказ: фиксация дошла до сервера, ответ —
+// нет. Вывод порождённого ключа после этого получает невыполненное
+// предусловие — ключ подписывает, — и это не отказ ключницы: отказов ровно
+// один, сам отказ передачи. Близнец —
+// TestRotateIfDue_AHandOverEndedByTheCallStillRetiresTheKeyItGenerated: там
+// передача не легла, и ключ выводится.
+func TestRotateIfDue_AHandOverThatLandedDespiteItsRefusalIsNotACleanupFailure(t *testing.T) {
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	ks := lifecycleKeystore(t, store, &now)
+	require.NoError(t, ks.EnsureSigningKey(context.Background()))
+	first := activeKID(t, store)
+	now = store.rows[first].NotAfter.Add(-lifecycleLead)
+	failuresBefore := ks.Stats().Failures
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var landed domain.KeyID
+	store.beforeReplace = func() {
+		store.beforeReplace = nil
+		for kid, r := range store.rows {
+			if r.State == domain.SigningKeyPublished {
+				landed = kid
+			}
+		}
+		require.NoError(t, store.ReplaceActive(context.Background(), landed, first, now))
+		cancel()
+	}
+
+	_, err := ks.RotateIfDue(ctx)
+	require.Error(t, err, "предпосылка: вызов получил отказ")
+	require.NotEmpty(t, landed, "предпосылка: передача легла")
+	require.Equal(t, landed, activeKID(t, store), "легшая передача не отменяется выводом")
+	require.Zero(t, countPublished(store))
+	require.Equal(t, failuresBefore+1, ks.Stats().Failures, "отказ один — сама передача; вывод легшего ключа отказом не считается")
 }

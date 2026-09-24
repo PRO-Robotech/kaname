@@ -44,12 +44,14 @@ func keystoreWrappedWith(t *testing.T, store *memStore, keyByte byte, logBuf *by
 		logger = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        fixedClock(time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)),
-		Logger:       logger,
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)),
+		Logger:        logger,
 	}, store, store, wrapper)
 	require.NoError(t, err)
 	return ks

@@ -61,11 +61,13 @@ func TestTokenContour_MintedTokenVerifiesAgainstOurPublishedSet(t *testing.T) {
 	require.NoError(t, err)
 	repo := kanamepg.NewSigningKeyRepo(pool)
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgES256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		RotationLead: time.Minute,
-		Clock:        clock,
+		Algorithm:     domain.SigningAlgES256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         clock,
 	}, repo, repo, wrapper)
 	require.NoError(t, err)
 	require.NoError(t, ks.EnsureSigningKey(ctx))
