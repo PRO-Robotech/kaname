@@ -398,6 +398,9 @@ func (l *surfaceListing) check(path, overlayDir string, imp types.Importer) (*su
 		goVersion = l.byPath[l.rootPkg].Module.GoVersion
 	}
 	for _, name := range names {
+		// #nosec G304 -- каталог и имя назвал `go list` радиуса судимого модуля
+		// (или перечень каталога наложения, заданного вызывающим гейта): гейт
+		// читает исходник своего же дерева, пути снаружи сюда не доходят.
 		src, rerr := os.ReadFile(filepath.Join(dir, name))
 		if rerr != nil {
 			return nil, fmt.Errorf("радиус: %s/%s: %w", display, name, rerr)
