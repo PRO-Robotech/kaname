@@ -283,41 +283,63 @@ func TestFamilyVerdictGate_RuleThatStopsAskingTheIssuanceIsFound(t *testing.T) {
 // (`IssueAccessToken` либо `StoreAccessToken`) без единого вызова писателя в
 // дереве — находка.
 
-const fvIssuerSrc = `package ceremonyport
+// fvIssuancePortMethods — методы портов выпуска фундамента, по каждому из
+// которых ось обязана уметь упасть: `AccessTokenIssuer.IssueAccessToken` и
+// `AccessTokenVault.StoreAccessToken` (`corelib/oauthceremony`, с тега
+// v1.10.0-rc.1). Перечень выписан ЗДЕСЬ, а не взят из гейта: имя, выпавшее из
+// набора гейта, иначе выпало бы и из опыта, и ось по нему смолкла бы без
+// единого красного.
+var fvIssuancePortMethods = []string{"IssueAccessToken", "StoreAccessToken"}
 
-type AccessTokens struct{}
-
-func (a *AccessTokens) IssueAccessToken(grant string) (string, error) { return "tok", nil }
-`
-
-// TestFamilyVerdictGate_IssuanceWithoutRecordIsFound — выпуск есть, писатель
-// записи не позван нигде.
-func TestFamilyVerdictGate_IssuanceWithoutRecordIsFound(t *testing.T) {
-	t.Parallel()
-	files := fvLawfulTree()
-	files["internal/ceremonyport/access_tokens.go"] = fvIssuerSrc
-	_, found := fvFindings(t, files)
-	if len(found) != 1 || !strings.Contains(found[0], "ceremonyport/access_tokens.go") ||
-		!strings.Contains(found[0], "RecordAccessToken") {
-		t.Fatalf("выпуск без записи обязан дать ОДНУ находку с координатой, получено %v", found)
+// fvIssuanceSrc — адаптер порта выпуска методом method; records — зовёт ли он
+// писателя записи выпуска. Вход и его близнец отличаются ровно этим вызовом.
+func fvIssuanceSrc(method string, records bool) string {
+	body := "return nil"
+	if records {
+		body = "return a.rec.RecordAccessToken(jti, family)"
 	}
-}
-
-// TestFamilyVerdictGate_IssuanceThatRecordsIsSilent — близнец: тот же выпуск,
-// и писатель позван.
-func TestFamilyVerdictGate_IssuanceThatRecordsIsSilent(t *testing.T) {
-	t.Parallel()
-	files := fvLawfulTree()
-	files["internal/ceremonyport/access_tokens.go"] = `package ceremonyport
+	return `package ceremonyport
 
 type recorder interface{ RecordAccessToken(jti, familyID string) error }
 
 type AccessTokens struct{ rec recorder }
 
-func (a *AccessTokens) StoreAccessToken(jti, family string) error { return a.rec.RecordAccessToken(jti, family) }
+func (a *AccessTokens) ` + method + `(jti, family string) error { ` + body + ` }
 `
-	if _, found := fvFindings(t, files); len(found) != 0 {
-		t.Fatalf("выпуск, пишущий запись, дал находки: %v", found)
+}
+
+// TestFamilyVerdictGate_IssuanceWithoutRecordIsFound — по каждому методу порта
+// выпуска: выпуск есть, писатель записи не позван нигде.
+func TestFamilyVerdictGate_IssuanceWithoutRecordIsFound(t *testing.T) {
+	t.Parallel()
+	for _, method := range fvIssuancePortMethods {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			files := fvLawfulTree()
+			files["internal/ceremonyport/access_tokens.go"] = fvIssuanceSrc(method, false)
+			_, found := fvFindings(t, files)
+			if len(found) != 1 || !strings.Contains(found[0], "ceremonyport/access_tokens.go") ||
+				!strings.Contains(found[0], "RecordAccessToken") {
+				t.Fatalf("выпуск %s без записи обязан дать ОДНУ находку с координатой, получено %v",
+					method, found)
+			}
+		})
+	}
+}
+
+// TestFamilyVerdictGate_IssuanceThatRecordsIsSilent — близнец по каждому методу:
+// тот же выпуск, и писатель позван.
+func TestFamilyVerdictGate_IssuanceThatRecordsIsSilent(t *testing.T) {
+	t.Parallel()
+	for _, method := range fvIssuancePortMethods {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			files := fvLawfulTree()
+			files["internal/ceremonyport/access_tokens.go"] = fvIssuanceSrc(method, true)
+			if _, found := fvFindings(t, files); len(found) != 0 {
+				t.Fatalf("выпуск %s, пишущий запись, дал находки: %v", method, found)
+			}
+		})
 	}
 }
 
