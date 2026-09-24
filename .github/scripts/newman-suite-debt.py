@@ -72,7 +72,10 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 
 Объявление читается РАЗОБРАННЫМ (`yaml.safe_load`), а не подстрокой: имя
 коллекции встречается в комментариях объявления десятки раз, и проверка по
-подстроке считала бы собственное объяснение.
+подстроке считала бы собственное объяснение. Тело шага `run:` тоже читается
+разобранным — как программа bash: прогон засчитывается команде прогонщика, а флаг
+`--service` в комментарии тела, в строковом литерале и в данных heredoc прогоном
+не является (`shell_commands`, `runner_stems`).
 
 У КАЖДОЙ КОЛЛЕКЦИИ ЕСТЬ ПРОИЗВОДИТЕЛЬ В КОНВЕЙЕРЕ: шаг, который её гоняет, либо
 ДЕРЖАТЕЛЬ — третье поле записи ведомости, задача, которая её прогонит. Прежде
@@ -373,8 +376,278 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
     return out, census
 
 
-# Коллекция, которую гоняет шаг конвейера: `run.sh --service <stem>`.
-SERVICE_ARG_RE = re.compile(r"--service\s+([A-Za-z0-9._-]+)")
+# ─────────────── ПРОГОН — ЭТО КОМАНДА ПРОГОНЩИКА, А НЕ ТЕКСТ ТЕЛА ─────────────
+#
+# Коллекцию гоняет шаг, чьё тело `run:` ВЫЗЫВАЕТ прогонщик набора
+# (`tests/newman/scripts/run.sh`) с аргументом `--service <stem>`. Прежний
+# распознаватель искал образец `--service <stem>` по всему телу и потому
+# засчитывал прогоном флаг в комментарии тела, в строковом литерале `echo` и в
+# данных heredoc: шаг, у которого прогон сняли, а упоминание оставили, числился
+# гоняющим, и держателя у такой коллекции перепись не требовала.
+#
+# Тело разбирается как программа bash — оболочка шагов дерева (`defaults.run.shell:
+# bash`, у GitHub-исполнителя она же по умолчанию): слова, кавычки, продолжение
+# строки, комментарий с начала слова, разделители команд, перенаправления,
+# heredoc и подстановка команды. Прогоном считается простая команда, чьё слово
+# команды — путь к прогонщику, после необязательных присваиваний окружения,
+# служебных слов (`if`, `then`, `!`, `exec`, …) и интерпретатора `bash`/`sh`;
+# `bash -c '<строка>'` разбирается как вложенная программа. Шаг с иной
+# оболочкой (`shell: python`, `pwsh`) не читается вовсе: его тело — не bash.
+#
+# ГРАНИЦА НАЗВАНА: судится команда, а не достижимость. Команда в теле функции
+# или в ветке, которая не исполнится, засчитывается; условие `if:` шага и
+# задания не вычисляется. Пропуск в обратную сторону — громкий: имя коллекции,
+# вычисляемое во время прогона (`--service "$s"`), прогоном не засчитывается, и
+# перепись потребует у такой коллекции держателя.
+RUNNER_RE = re.compile(r"(?:^|/)scripts/run\.sh$")
+STEM_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PREFIX_WORDS = frozenset({"if", "then", "elif", "else", "do", "while", "until",
+                           "!", "{", "time", "exec", "command", "env"})
+_SHELLS = frozenset({"bash", "sh"})
+# Операторы, отсортированные по длине: первым совпадает самый длинный.
+_SEP_OPS = ("&&", "||", ";;&", ";;", ";&", "|&", ";", "&", "|")
+_REDIR_OPS = ("<<<", "<<-", "&>>", "<<", ">>", "<&", ">&", "&>", "<>", ">|",
+              "<", ">")
+_OPS = tuple(sorted(_SEP_OPS + _REDIR_OPS, key=len, reverse=True))
+
+
+class _ShellEOF(Exception):
+    """Кавычка либо подстановка не закрыта до конца тела: bash отказал бы."""
+
+
+def _braced(s: str, i: int, word: list[str]) -> int:
+    """`${…}` целиком — одно слово: внутри бывают пробел и `}` вложенной формы."""
+    depth, j = 0, i
+    while j < len(s):
+        if s[j] == "{":
+            depth += 1
+        elif s[j] == "}":
+            depth -= 1
+            if depth == 0:
+                word.append("$" + s[i:j + 1])
+                return j + 1
+        j += 1
+    raise _ShellEOF
+
+
+def _dquoted(s: str, i: int, word: list[str], cmds: list[list[str]]) -> int:
+    """Тело двойных кавычек с позиции после `"`; подстановки внутри — команды."""
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            return i + 1
+        if c == "\\" and i + 1 < len(s) and s[i + 1] in '$`"\\\n':
+            if s[i + 1] != "\n":
+                word.append(s[i + 1])
+            i += 2
+        elif c == "$" and s.startswith("$(", i):
+            inner, i = _shell_list(s, i + 2, ")")
+            cmds.extend(inner)
+            word.append("$(…)")
+        elif c == "`":
+            inner, i = _shell_list(s, i + 1, "`")
+            cmds.extend(inner)
+            word.append("`…`")
+        elif c == "$" and s.startswith("${", i):
+            i = _braced(s, i + 1, word)
+        else:
+            word.append(c)
+            i += 1
+    raise _ShellEOF
+
+
+def _skip_heredocs(s: str, i: int, pending: list[tuple[str, bool]]) -> int:
+    """С позиции после перевода строки пропускает тела heredoc — это данные."""
+    for delim, strip_tabs in pending:
+        while i < len(s):
+            end = s.find("\n", i)
+            line = s[i:] if end < 0 else s[i:end]
+            i = len(s) if end < 0 else end + 1
+            if (line.lstrip("\t") if strip_tabs else line) == delim:
+                break
+    pending.clear()
+    return i
+
+
+def _shell_list(s: str, i: int, closer: str | None) -> tuple[list[list[str]], int]:
+    """Простые команды программы bash с позиции `i` до `closer` (либо до конца).
+
+    Команда — список слов после снятия кавычек. Возвращает команды и позицию
+    после закрывающего знака. Незакрытая кавычка либо подстановка внутри
+    вложенного разбора — `_ShellEOF` вызывающему; на верхнем уровне
+    (`closer is None`) недописанная команда отбрасывается вместе с подстановками
+    внутри неё, как отбросил бы её bash, а завершённые до неё сохраняются — их
+    bash уже исполнил.
+    """
+    cmds: list[list[str]] = []
+    cur: list[str] = []
+    word: list[str] | None = None
+    target: str | None = None      # "delim<-" | "delim" | "skip" — судьба слова
+    pending: list[tuple[str, bool]] = []
+    depth = 0
+    mark = 0                       # len(cmds) после последней завершённой команды
+
+    def end_word() -> None:
+        nonlocal word, target
+        if word is None:
+            return
+        w = "".join(word)
+        word = None
+        if target in ("delim", "delim<-"):
+            pending.append((w, target == "delim<-"))
+        elif target != "skip":
+            cur.append(w)
+        target = None
+
+    def end_cmd() -> None:
+        nonlocal cur, target, mark
+        end_word()
+        # Перенаправление не переходит границу команды: `<(` открывает новую.
+        target = None
+        if cur:
+            cmds.append(cur)
+        cur = []
+        mark = len(cmds)
+
+    n = len(s)
+    try:
+        while i < n:
+            c = s[i]
+            if closer == "`" and c == "`":
+                end_cmd()
+                return cmds, i + 1
+            if closer == ")" and c == ")" and depth == 0:
+                end_cmd()
+                return cmds, i + 1
+            if c == "\\":
+                if s.startswith("\\\n", i):
+                    i += 2
+                    continue
+                word = (word or []) + [s[i + 1:i + 2]]
+                i += 2
+                continue
+            if c == "'":
+                j = s.find("'", i + 1)
+                if j < 0:
+                    raise _ShellEOF
+                word = (word or []) + [s[i + 1:j]]
+                i = j + 1
+                continue
+            if c == '"':
+                word = word or []
+                i = _dquoted(s, i + 1, word, cmds)
+                continue
+            if c == "$" and s.startswith("$'", i):
+                j, buf = i + 2, []
+                while j < n and s[j] != "'":
+                    esc = s[j] == "\\" and j + 1 < n
+                    buf.append(s[j + 1] if esc else s[j])
+                    j += 2 if esc else 1
+                if j >= n:
+                    raise _ShellEOF
+                word = (word or []) + buf
+                i = j + 1
+                continue
+            if c == "$" and s.startswith("$(", i):
+                inner, i = _shell_list(s, i + 2, ")")
+                cmds.extend(inner)
+                word = (word or []) + ["$(…)"]
+                continue
+            if c == "`":
+                inner, i = _shell_list(s, i + 1, "`")
+                cmds.extend(inner)
+                word = (word or []) + ["`…`"]
+                continue
+            if c == "$" and s.startswith("${", i):
+                word = word or []
+                i = _braced(s, i + 1, word)
+                continue
+            if c == "#" and word is None:
+                j = s.find("\n", i)
+                i = n if j < 0 else j
+                continue
+            if c in " \t":
+                end_word()
+                i += 1
+                continue
+            if c == "\n":
+                end_cmd()
+                i = _skip_heredocs(s, i + 1, pending)
+                continue
+            if c in "()":
+                end_cmd()
+                depth += 1 if c == "(" else -1
+                i += 1
+                continue
+            op = next((o for o in _OPS if s.startswith(o, i)), None)
+            if op is None:
+                word = (word or []) + [c]
+                i += 1
+                continue
+            if op in _SEP_OPS:
+                end_cmd()
+            else:
+                # Номер дескриптора перед перенаправлением (`2>&1`) — не слово.
+                if word is not None and "".join(word).isdigit():
+                    word = None
+                end_word()
+                target = {"<<": "delim", "<<-": "delim<-"}.get(op, "skip")
+            i += len(op)
+        if closer is not None:
+            raise _ShellEOF
+        end_cmd()
+        return cmds, i
+    except _ShellEOF:
+        if closer is not None:
+            raise
+        del cmds[mark:]
+        return cmds, n
+
+
+def shell_commands(body: str) -> list[list[str]]:
+    """Простые команды тела шага `run:` — разбором, а не поиском по тексту."""
+    return _shell_list(body, 0, None)[0]
+
+
+def runner_stems(argv: list[str]) -> list[str]:
+    """Коллекции, которые называет ОДНА простая команда, — если она прогонщик."""
+    k = 0
+    while k < len(argv) and (argv[k] in _PREFIX_WORDS or _ASSIGN_RE.match(argv[k])):
+        k += 1
+    if k < len(argv) and argv[k].rsplit("/", 1)[-1] in _SHELLS:
+        k += 1
+        while k < len(argv) and argv[k].startswith("-"):
+            if argv[k] == "-c" and k + 1 < len(argv):
+                return [st for sub in shell_commands(argv[k + 1])
+                        for st in runner_stems(sub)]
+            k += 1
+    if k >= len(argv) or not RUNNER_RE.search(argv[k]):
+        return []
+    out: list[str] = []
+    j = k + 1
+    while j < len(argv):
+        # Та же грамматика, что у разбора прогонщика: `--service` берёт следующее
+        # слово целиком. Имя, собранное во время прогона, не литерал — и не счёт.
+        if argv[j] == "--service" and j + 1 < len(argv):
+            if STEM_RE.match(argv[j + 1]):
+                out.append(argv[j + 1])
+            j += 2
+            continue
+        j += 1
+    return out
+
+
+def _step_shell(step: dict, job: dict, doc: dict) -> str:
+    """Оболочка шага: шаг → `defaults.run` задания → процесса → bash исполнителя."""
+    def run_defaults(owner: dict) -> object:
+        d = owner.get("defaults")
+        return d.get("run") if isinstance(d, dict) else None
+
+    for holder in (step, run_defaults(job), run_defaults(doc)):
+        if isinstance(holder, dict) and isinstance(holder.get("shell"), str):
+            return holder["shell"]
+    return "bash"
 
 
 def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
@@ -383,7 +656,9 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
     Читается РАЗОБРАННЫЙ YAML: ключи `jobs:`, их `steps[]`, тело `run:`. Имя
     коллекции стоит в комментариях объявления десятки раз, поэтому подстрочный
     предикат считал бы собственное объяснение — тот же порядок, что требует ban #17
-    от гейта на кириллический ключ задания.
+    от гейта на кириллический ключ задания. Тело `run:` тоже читается РАЗОБРАННЫМ —
+    как программа bash (`shell_commands`), и прогоном засчитывается только
+    команда прогонщика (`runner_stems`), а не упоминание флага в её тексте.
 
     Пустой словарь означает РОВНО «ни один шаг не гоняет ни одной коллекции».
     Отличить это от «объявлений не прочитано» — забота вызывающего: он спрашивает
@@ -411,9 +686,13 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
                 body = stepv.get("run")
                 if not isinstance(body, str):
                     continue
+                shell = _step_shell(stepv, job, doc).split()
+                if not shell or shell[0].rsplit("/", 1)[-1] not in _SHELLS:
+                    continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
-                for stem in SERVICE_ARG_RE.findall(body):
-                    out.setdefault(stem, []).append(label)
+                for argv in shell_commands(body):
+                    for stem in runner_stems(argv):
+                        out.setdefault(stem, []).append(label)
     return out
 
 
@@ -1204,6 +1483,98 @@ def self_test() -> int:
         out = buf.getvalue()
         _c("`--service` только в комментарии — НЕ шаг прогона",
            "гоняется здесь:    0" in out, out[:500])
+
+        # ── Ось 6г: ВНУТРИ ТЕЛА `run:` ПРОГОН — ЭТО КОМАНДА, А НЕ ТЕКСТ ─────
+        #
+        # Ось 6б держит комментарий ВНЕ тела шага; эта — внутри. Флаг в
+        # комментарии тела, в строковом литерале, в аргументах чужой команды и в
+        # данных heredoc — не прогон: шаг, которому оставили только такое
+        # упоминание, коллекцию не гоняет, и перепись обязана потребовать у неё
+        # держателя. Пара у каждой формы — та же строка КОМАНДОЙ прогонщика, в
+        # том числе в формах, которыми дерево её пишет (продолжение строки и
+        # `|| rc=$?` у шага chart-own). Каждая форма судится обоими признаками:
+        # ответом разборщика и половиной переписи.
+        def _wf_body(base: pathlib.Path, body: str,
+                     shell: str | None = None) -> pathlib.Path:
+            wfb = base / ".github" / "workflows"
+            wfb.mkdir(parents=True, exist_ok=True)
+            block = "".join(f"          {ln}\n" if ln else "\n"
+                            for ln in body.split("\n"))
+            (wfb / "e2e-newman.yml").write_text(
+                "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n"
+                "      - name: шаг с упоминанием прогонщика\n"
+                + (f"        shell: {shell}\n" if shell else "")
+                + "        run: |\n" + block, encoding="utf-8")
+            return wfb
+
+        body_forms = (
+            ("комментарий тела", False,
+             "cd tests/newman\n# снято до #999: ./scripts/run.sh --service own-only"),
+            ("хвост-комментарий после команды", False,
+             "cd tests/newman\ntrue  # ./scripts/run.sh --service own-only"),
+            # Комментарий с разделителем команд: без разбора комментария `;`
+            # отделил бы упоминание в самостоятельную команду.
+            ("комментарий тела с разделителем команд", False,
+             "cd tests/newman\n# снято до #999; ./scripts/run.sh --service own-only"),
+            ("литерал echo в кавычках", False,
+             'cd tests/newman\necho "снято: ./scripts/run.sh --service own-only"'),
+            ("аргументы echo без кавычек", False,
+             "cd tests/newman\necho снято: ./scripts/run.sh --service own-only"),
+            ("литерал аргумента чужой команды", False,
+             "printf '%s\\n' './scripts/run.sh --service own-only'"),
+            ("данные heredoc", False,
+             "cat <<'NOTE'\n./scripts/run.sh --service own-only\nNOTE"),
+            ("та же строка командой", True,
+             "cd tests/newman\n./scripts/run.sh --service own-only"),
+            ("командой с продолжением строки и `|| rc=$?`", True,
+             "cd tests/newman\nrc=0\n./scripts/run.sh \\\n  --service own-only \\\n"
+             '  --ssl-client-cert "$W/edge.crt" || rc=$?'),
+            # Продолжение строки посреди слова снимается целиком, как у bash:
+            # имя коллекции склеивается, а не рвётся на два слова.
+            ("командой с продолжением строки посреди имени", True,
+             "./scripts/run.sh --service own-\\\nonly"),
+            ("командой в условии if", True,
+             "if ./scripts/run.sh --service own-only; then echo ok; fi"),
+            ("командой внутри подстановки в кавычках", True,
+             'out="$(./scripts/run.sh --service own-only)"'),
+            # Апостроф в комментарии кавычки не открывает: иначе она проглотила
+            # бы команду ниже, и настоящий прогон выпал бы из счёта.
+            ("командой после комментария с апострофом", True,
+             "# it's the recovery lane\n./scripts/run.sh --service own-only"),
+            ("командой после heredoc", True,
+             "cat <<'NOTE'\nничего\nNOTE\n./scripts/run.sh --service own-only"),
+            ("командой через bash -c", True,
+             "bash -c './scripts/run.sh --service own-only'"),
+        )
+        for k, (label, runs_it, body) in enumerate(body_forms):
+            base = tmp / f"pipeline-body-{k}"
+            t6g = _mk(base, {"own-only": clean},
+                      {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            wfb = _wf_body(base, body)
+            parsed = pipeline_runs(wfb)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t6g, workflows=wfb)
+            out = buf.getvalue()
+            want = 1 if runs_it else 0
+            _c(f"`--service` в теле `run:` — {label}: "
+               f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
+               bool(parsed.get("own-only")) == runs_it
+               and f"гоняется здесь:    {want}" in out,
+               f"разборщик: {parsed}; перепись: {out[:300]}")
+
+        # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
+        # похожая на команду прогонщика, прогоном не засчитывается. Близнец —
+        # то же тело под `shell: bash`: различие ровно в оболочке шага.
+        same = "./scripts/run.sh --service own-only"
+        for k, (shell, runs_it) in enumerate((("python {0}", False),
+                                              ("bash {0}", True))):
+            base = tmp / f"pipeline-shell-{k}"
+            wfb = _wf_body(base, same, shell=shell)
+            parsed = pipeline_runs(wfb)
+            _c(f"та же строка под `shell: {shell}` — "
+               f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
+               bool(parsed.get("own-only")) == runs_it, f"разборщик: {parsed}")
 
         # Ось 6в: объявлений конвейера НЕТ — третий исход, а не «гоняется 0».
         base = tmp / "pipeline-absent"
