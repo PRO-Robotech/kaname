@@ -336,7 +336,6 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 		},
 	}
 	for i, reason := range domain.FamilyRevocationReasons() {
-		reason := reason
 		causes = append(causes, cause{
 			name: "прямой отзыв семейства: " + string(reason),
 			tag:  "fv" + string(rune('0'+i)),
@@ -349,7 +348,6 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 	}
 
 	for _, c := range causes {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			f := newFamilyRig(t, pool)
