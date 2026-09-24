@@ -104,10 +104,11 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	const laneService = "registry.probe.local"
 
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
-		Realm:             tok.TokenIssuer(),
-		Service:           laneService,
-		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
-		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+		Realm:                  tok.TokenIssuer(),
+		Service:                laneService,
+		BasicCredentialTimeout: credentialLanePeerTimeout,
+		HydraTokenURL:          cfg.AuthN.ResolveHydraTokenURL(),
+		AssertionAudience:      cfg.AuthN.ResolveHydraTokenEndpoint(),
 	})
 	if err != nil {
 		t.Fatalf("registrytokenwire.Build: %v", err)

@@ -327,6 +327,11 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 		clientassertion.OutcomeAudienceNotAllowed,
 		clientassertion.OutcomeClientExpired,
 		clientassertion.OutcomeOwnerNotActive,
+		// Отсечка отзыва-всех владельца (kaname#379): отказ по ней выглядит
+		// снаружи так же, как всякий другой, — различимый отказ сообщал бы
+		// предъявителю, что владелец вышел отовсюду.
+		clientassertion.OutcomeOwnerRevoked,
+		clientassertion.OutcomeRevocationCheckFailed,
 		clientassertion.OutcomeIssuanceFailed,
 	}
 

@@ -65,17 +65,24 @@
 убирали.
 
 САМОПРОВЕРКА — `--self-test`: по одной оси на каждую из восьми форм, законный
-близнец рядом (идентификатор, адрес, текст утверждения обязаны выжить), пустой
-обход обязан дать отказ.
+близнец рядом (идентификатор, адрес, текст утверждения обязаны выжить), ось
+ОДНОГО КРИТЕРИЯ (всё, что проверка выхода назовёт удостоверением, срез срезает;
+срез отключён — проверка отказывает), оси механики среза (два промежутка и
+перекрытие форм в одной строке; ключ PEM шести видов заголовка и стандартный
+base64; тройка, заслонённая короткой; один проход до чистого выхода) — они
+судят отсутствие любого куска секрета, а не чистый остаток; пустой обход
+обязан дать отказ.
 """
 
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import pathlib
 import re
 import sys
+from typing import NamedTuple
 
 # ── ПРЕДИКАТ ФОРМЫ ЗНАЧЕНИЯ ──────────────────────────────────────────────────
 #
@@ -84,16 +91,37 @@ import sys
 # (тело ответа, текст утверждения); имя ловит секрет, у которого формы нет вовсе
 # — общий секрет хука `stand-hook-secret-0123456789` не отличим от слова.
 JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]*)?")
-PEM_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
-                    re.DOTALL)
+# Приватный ключ PEM — от заголовка до подвала ЛИБО ДО КОНЦА ТЕКСТА: блок без
+# подвала (тело, усечённое прогонщиком; журнал, оборванный на середине) всё равно
+# несёт тело ключа, и без второй ветви оно уезжало бы в артефакт целиком.
+# Цена названа: срезано всё от заголовка до конца строки или файла. Замер по 50
+# JSON newman дерева: такой заголовок стоит один раз — литералом в скрипте
+# коллекции `docker-lane-credential-kind`, и срезается строка этого литерала.
+# Приставка перед PRIVATE (RSA, EC, ENCRYPTED, OPENSSH, PGP) и хвост после KEY
+# (` BLOCK` у PGP) держатся осью `_self_test_pem_headers`: без неё сужение до
+# PKCS8 оставляло самопробу зелёной, а кусок тела уходил наружу.
+PEM_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY[A-Z ]*-----.*?"
+                    r"(?:-----END [A-Z ]*PRIVATE KEY[A-Z ]*-----|\Z)", re.DOTALL)
 BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")
 
 # Имя ключа/заголовка/параметра, чьё значение есть удостоверение. Регистр не
 # значим: заголовки приходят и `Authorization`, и `authorization`.
+#
+# `csrf`/`xsrf` — признак формы, привязанный к контексту входа: с печеньем
+# контекста он и есть право отправить форму от имени человека. Захвачено в
+# прогоне 35895962909: `loginLaneCsrfLogin` и `loginLaneCsrfLogout` перечень не
+# знал, а `loginLaneCsrfPassword` резался только потому, что в имени стоит
+# `password`, — то есть случайно.
 SECRET_NAME_RE = re.compile(
     r"(?i)(jwt|token|secret|password|passwd|apikey|api[-_]?key|assertion|"
     r"credential|bearer|authorization|privatekey|private[-_]?key|keypem|"
-    r"key[-_]?pem|cookie|signature|clientsecret)")
+    r"key[-_]?pem|cookie|signature|clientsecret|csrf|xsrf)")
+
+
+def _named_secret(key_hint: str | None) -> bool:
+    """Имя называет значение секретом? ОДИН предикат для среза и для проверки
+    выхода: разойдись они здесь — срез оставил бы то, что проверка назовёт."""
+    return bool(key_hint) and SECRET_NAME_RE.search(key_hint) is not None
 
 REDACTED = "«ВЫРЕЗАНО ПЕРЕД ПУБЛИКАЦИЕЙ»"
 
@@ -106,7 +134,7 @@ REDACTED = "«ВЫРЕЗАНО ПЕРЕД ПУБЛИКАЦИЕЙ»"
 # имени у строки нет. Поэтому имя берётся из САМОЙ строки — из ключа параметра.
 QUERY_SECRET_RE = re.compile(
     r"(?i)([?&][A-Za-z0-9_.\[\]-]*"
-    r"(?:token|secret|key|assertion|password|passwd|jwt|credential|signature)"
+    r"(?:token|secret|key|assertion|password|passwd|jwt|credential|signature|csrf|xsrf)"
     r"[A-Za-z0-9_.\[\]-]*=)([^&\s\"'<>]+)")
 
 # ВИДЫ ФАЙЛОВ, КОТОРЫЕ ЧИСТКА БЕРЁТСЯ ПРОЧЕСТЬ. Перечень, а не «всё подряд»:
@@ -128,8 +156,28 @@ def shaped_credential(text: str) -> str | None:
     return None
 
 
-def scrub_text(text: str) -> tuple[str, int]:
-    """Вырезать удостоверения ИЗ ТЕКСТА, оставив остальное. (текст, сколько)."""
+class Scrubbed(NamedTuple):
+    """Итог среза по форме: текст и сколько вырезано — видовыми предикатами и
+    критерием проверки выхода. `by_criterion` печатается отдельной строкой
+    переписи: это цена ложной находки критерия, и она обязана быть видна."""
+    text: str
+    by_kind: int
+    by_criterion: int
+
+    @property
+    def cut(self) -> int:
+        return self.by_kind + self.by_criterion
+
+
+def scrub_text(text: str) -> Scrubbed:
+    """Вырезать удостоверения ИЗ ТЕКСТА, оставив остальное.
+
+    Видовые предикаты (PEM, JWT, Bearer, параметр адреса) режут первыми: у них
+    есть что сохранить — имя параметра, слово `Bearer`. Последним режет
+    КРИТЕРИЙ ПРОВЕРКИ ВЫХОДА (`credential_spans`), тот же объект, которым
+    судит `residue`: всё, что проверка назовёт удостоверением, срез срезает, и
+    расхождения «проверка знает форму, срез — нет» не бывает по построению.
+    """
     n = 0
 
     def sub(pattern: "re.Pattern[str]", src: str) -> str:
@@ -152,7 +200,8 @@ def scrub_text(text: str) -> tuple[str, int]:
         n += 1
         return m.group(1) + REDACTED
     out = QUERY_SECRET_RE.sub(one_param, out)
-    return out, n
+    out, k = _cut_by_criterion(out)
+    return Scrubbed(out, n, k)
 
 
 class Census:
@@ -165,7 +214,13 @@ class Census:
         self.buffers = 0
         self.redacted_by_name = 0
         self.redacted_by_shape = 0
+        # Часть `redacted_by_shape`, срезанная критерием проверки выхода.
+        self.redacted_by_criterion = 0
         self.files = 0
+
+    def add(self, s: Scrubbed) -> None:
+        self.redacted_by_shape += s.cut
+        self.redacted_by_criterion += s.by_criterion
 
     @property
     def redacted(self) -> int:
@@ -213,10 +268,9 @@ def _scrub_body(text: str, c: Census) -> str:
         if c.redacted != before:
             return json.dumps(cleaned, ensure_ascii=False)
         return text
-    clean, n = scrub_text(text)
-    if n:
-        c.redacted_by_shape += n
-    return clean
+    s = scrub_text(text)
+    c.add(s)
+    return s.text
 
 
 def _walk(node: object, key_hint: str | None, c: Census) -> object:
@@ -248,7 +302,7 @@ def _walk(node: object, key_hint: str | None, c: Census) -> object:
         return [_walk(v, key_hint, c) for v in node]
     if isinstance(node, str):
         c.strings += 1
-        if key_hint and SECRET_NAME_RE.search(key_hint) and node:
+        if _named_secret(key_hint) and node:
             c.redacted_by_name += 1
             return REDACTED
         # Строка, которая сама есть JSON (тело запроса `body.raw`), несёт имена
@@ -261,31 +315,65 @@ def redact_document(doc: object, c: Census) -> object:
     return _walk(doc, None, c)
 
 
-# ── ПОВТОРНЫЙ ОБХОД ВЫХОДА: ОСТАТОК ИЩЕТСЯ НЕЗАВИСИМЫМ ПРЕДИКАТОМ ──────────
+# ── КРИТЕРИЙ УДОСТОВЕРЕНИЯ: ОДИН ДЛЯ СРЕЗА И ДЛЯ ПОВТОРНОГО ОБХОДА ВЫХОДА ───
 #
-# ВТОРОЙ ВЗГЛЯД ОБЯЗАН БЫТЬ ВТОРЫМ. Если остаток искать тем же предикатом, каким
-# чистили, он не найдёт НИЧЕГО по построению: форма, неизвестная чистке,
-# неизвестна и проверке, и «чисто» будет значить «мы искали ровно то, что уже
-# вырезали». Это ловится инъекцией — ослепи предикат чистки, и проверка обязана
-# всё равно покраснеть, — и первая редакция здесь именно провалилась.
+# КРИТЕРИЙ ГРУБЕЕ ВИДОВЫХ ПРЕДИКАТОВ: не «похоже на JWT нашей чеканки», а «в
+# тексте стоит длинная непрерывная строка из алфавита секретов». Он не знает ни
+# приставки `eyJ`, ни слова `Bearer` — и потому ловит форму, которой видовые
+# предикаты не знают.
 #
-# Поэтому у остатка СВОЙ предикат, и он грубее: не «похоже на JWT нашей чеканки»,
-# а «в тексте стоит длинная непрерывная строка из алфавита секретов». Он не знает
-# ни приставки `eyJ`, ни слова `Bearer`.
+# ПРЕЖНЯЯ РЕДАКЦИЯ ДЕРЖАЛА ЕГО ТОЛЬКО У ПРОВЕРКИ, И ЭТО БЫЛ КЛАСС (kaname#183).
+# Проверка знала пробег 40+ и тройку через точку, срез — нет; всё, что лежало
+# между ними, превращало ЗЕЛЁНЫЙ прогон в невыложенный артефакт, и каждая
+# следующая переменная без имени из перечня повторяла отказ. Захвачено: прогон
+# 35895962909, два признака формы полосы входа по 43 знака, «вырезано по форме:
+# 0». Поэтому критерий один, и им режет срез (`scrub_text`, последним шагом).
 #
-# ЦЕНА НАЗВАНА: предикат заведомо даёт ложные находки на законной длинной строке
-# (отпечаток образа; идентификатор, где буква стоит вплотную к цифре). Исход
-# такой находки — отказ шага и
-# НЕВЫЛОЖЕННЫЙ артефакт, то есть громко и починяемо. Обратный выбор — тихая
-# публикация — необратим: выложенное опубликовано.
+# ВТОРОЙ ВЗГЛЯД ОСТАЁТСЯ ВТОРЫМ — по ОБХОДУ, а не по критерию. Проверка читает
+# ВЫХОД своим обходом, а не счётчики среза, и потому краснеет на сломанном или
+# отключённом срезе. Это держится инъекцией: срез по форме отключён — отказ по
+# остатку; видовые предикаты среза ослеплены — общий критерий срезает то же.
+#
+# ЧЕГО ВТОРОЙ ВЗГЛЯД НЕ ВИДИТ ПО ПОСТРОЕНИЮ: всего, чего не видит сам критерий,
+# — куска секрета короче порога и формы, которую критерий потерял (ослеплённый
+# PEM общий у среза и у проверки). Поэтому механика среза и ветка PEM держатся
+# не отказом по остатку, а осями самопробы, утверждающими отсутствие ЛЮБОГО
+# куска секрета в выложенном.
+#
+# ЦЕНА НАЗВАНА: критерий заведомо срабатывает на законной длинной строке
+# (шестнадцатеричный отпечаток; идентификатор, где буква стоит вплотную к
+# цифре). Исход такой находки теперь — ВЫРЕЗАННОЕ значение в выложенном
+# артефакте, посчитанное отдельной строкой переписи. Это безопасно: срез не
+# публикует ничего, и прежний исход того же входа — отказ выложить артефакт
+# целиком — был строго хуже для разбора падения, ради которого артефакт и есть.
+
+FORM_PEM = "приватный ключ PEM"
+FORM_DOTTED = "тройка через точку с длинными частями"
+FORM_OPAQUE = "непрерывный пробег алфавита секретов (40+, буквы и цифры)"
+FORM_STD_B64 = "непрерывный пробег стандартного base64 (40+, со знаками + и /)"
 
 # Тройка, разделённая точками, с длинными частями: форма подписанного
 # удостоверения БЕЗ знания его приставки. Границы длин выбраны так, чтобы имя
 # файла (`kaname-own-rest-front.postman_collection.json`) под неё не подпадало.
+#
+# ТРОЙКИ ИЩУТСЯ С КАЖДОГО НАЧАЛА ПРОБЕГА, А НЕ ПОДРЯД. Поиск подряд (`finditer`
+# по самой тройке) съедает найденное: короткая тройка `a.b.c` (ниже порога 60,
+# потому не промежуток) поглощает начало длинной `c.d.e`, и длинную не видят
+# ни срез, ни проверка — один критерий слеп одинаково у обоих. Заглядывание
+# вперёд с начала каждого пробега находит все тройки, включая перекрытые;
+# тройка, начатая внутри пробега, — часть тройки, начатой с его начала, и
+# длиннее её не бывает, поэтому других начал не нужно.
 DOTTED_TRIPLE_RE = re.compile(
-    r"[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}")
+    r"(?<![A-Za-z0-9_-])(?=([A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}))")
+DOTTED_TRIPLE_MIN = 60
 # Непрерывный пробег алфавита секретов: непрозрачное удостоверение без точек.
 LONG_OPAQUE_RE = re.compile(r"[A-Za-z0-9_-]{40,}")
+# Пробег СТАНДАРТНОГО base64: `+` и `/` — знаки его алфавита, а не разделители.
+# Алфавит base64url их не знает, и стандартный base64 рвётся на куски короче 40
+# — замер проверяющего круга 2 (kaname#183) на ключе RSA-2048 PKCS8 с
+# ослеплённым PEM: из 1624 знаков тела после среза оставалось 856. Хвост `=` —
+# выравнивание, он срезается вместе с пробегом.
+LONG_STD_B64_RE = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 DIGIT_RE = re.compile(r"[0-9]")
 LETTER_RE = re.compile(r"[A-Za-z]")
 # Буква ВПЛОТНУЮ к цифре — внутри сегмента без разделителя.
@@ -304,8 +392,9 @@ OPAQUE_SEGMENT_LEN = 11
 OPAQUE_CASE_MIX = 4
 
 
-def _opaque_credential(text: str) -> bool:
-    """Пробег 40+ ЕСТЬ удостоверение? Требуется смешение букв и цифр.
+def _opaque_run(run: str) -> bool:
+    """Пробег 40+ (целиком, как его отдал `LONG_OPAQUE_RE`) ЕСТЬ удостоверение?
+    Требуется смешение букв и цифр.
 
     ПОРОГ ОДНОЙ ДЛИНЫ НЕ РАБОТАЕТ, И ЭТО ЗАМЕР, А НЕ ОПАСЕНИЕ. Первая редакция
     считала удостоверением любой пробег 40+ и покраснела на ПЕРВОМ ЖЕ прогоне
@@ -318,7 +407,7 @@ def _opaque_credential(text: str) -> bool:
     Что различает: у непрозрачного удостоверения алфавит смешан. Шанс, что в 40
     знаках base64url не встретится ни одной цифры, — около 0,25 %; имя поля и
     путь, напротив, цифр обычно не несут вовсе. Предикат поэтому требует И букву,
-    И цифру, оставаясь независимым от предикатов ЧИСТКИ (ни `eyJ`, ни `Bearer`).
+    И цифру, оставаясь независимым от ВИДОВЫХ предикатов (ни `eyJ`, ни `Bearer`).
 
     СМЕШЕНИЕ ТРЕБУЕТСЯ ВПЛОТНУЮ, А НЕ ГДЕ-НИБУДЬ В ПРОБЕГЕ — второй замер того же
     рода. Вторая редакция («есть буква и есть цифра») покраснела на идентификаторе
@@ -362,41 +451,155 @@ def _opaque_credential(text: str) -> bool:
     близнецы — на обоих признаках: снятый разделитель (сегмент стал длинным) и
     поднятый регистр одной буквы (заглавных стало четыре).
 
-    ЦЕНА ОСТАЁТСЯ И НАЗВАНА: длинный шестнадцатеричный отпечаток в журнале
-    (например `sha256:` и 64 знака) под этот предикат подпадёт — сегмент длинный,
-    буква соседствует с цифрой. Исход — отказ шага и НЕВЫЛОЖЕННЫЙ артефакт, то
-    есть громко; список прощённых не заводится, потому что каждая его запись —
-    место, куда секрет проедет незамеченным.
+    ЦЕНА ОСТАЁТСЯ И НАЗВАНА: длинный шестнадцатеричный отпечаток (закреплённая
+    ревизия, `sha256:` и 64 знака) под этот предикат подпадёт — сегмент длинный,
+    буква соседствует с цифрой, — и ФОРМОЙ он неотличим от шестнадцатеричного
+    секрета. Исход — отпечаток СРЕЗАН и посчитан строкой переписи; список
+    прощённых не заводится, потому что каждая его запись — место, куда секрет
+    проедет незамеченным.
     """
-    for m in LONG_OPAQUE_RE.finditer(text):
-        run = m.group(0)
-        if not MIXED_ADJACENT_RE.search(run):
+    if not MIXED_ADJACENT_RE.search(run):
+        return False
+    # ПРИЗНАК ПЕРВЫЙ: длинный сегмент со смешением. Ловит удостоверение,
+    # у которого регистра нет вовсе (шестнадцатеричный пробег, крокфорд).
+    if any(len(seg) >= OPAQUE_SEGMENT_LEN and MIXED_ADJACENT_RE.search(seg)
+           for seg in NAME_SEPARATOR_RE.split(run)):
+        return True
+    # ПРИЗНАК ВТОРОЙ: густое смешение регистров. Ловит плотное удостоверение,
+    # разорванное разделителями на короткие куски. Ни один признак не
+    # покрывает другого — потому они и объединены, а не заменяют друг друга.
+    return _dense_case_mix(run)
+
+
+def _dense_case_mix(run: str) -> bool:
+    uppers = sum(1 for c in run if c.isupper())
+    lowers = sum(1 for c in run if c.islower())
+    return uppers >= OPAQUE_CASE_MIX and lowers >= OPAQUE_CASE_MIX
+
+
+# Окно пробега стандартного base64 и «слово» внутри него: четыре и больше
+# строчных подряд. Окно, в котором словами занято больше STD_B64_WORDED_MAX
+# знаков из сорока, — составное имя, а не base64.
+STD_B64_WINDOW = 40
+STD_B64_WORD_STRETCH = 4
+STD_B64_WORDED_MAX = 19
+LOWER_STRETCH_RE = re.compile(r"[a-z]+")
+
+
+def _std_b64_run(run: str) -> bool:
+    """Пробег стандартного base64 (целиком, как его отдал `LONG_STD_B64_RE`) ЕСТЬ
+    удостоверение? Да, если в нём есть ОКНО из сорока знаков подряд, где буква
+    стоит вплотную к цифре, заглавных и строчных не меньше OPAQUE_CASE_MIX и
+    словами занято не больше STD_B64_WORDED_MAX знаков.
+
+    ПРИЗНАКИ `_opaque_run` ЦЕЛИКОМ ЗДЕСЬ НЕ ГОДЯТСЯ, И ЭТО ЗАМЕР. У стандартного
+    base64 `/` — знак алфавита, поэтому путь `9098/iam/v1/accounts/acc0…` — один
+    пробег, а идентификатор в нём — длинный сегмент с цифрой вплотную к букве:
+    первый признак резал бы путь запроса. Второй (густое смешение регистров)
+    резал бы метод `InternalAddressService/AllocateExternalIPv6` из каталога прав
+    дерева. Путь и метод — разбор падения. Отличает их доля слов: у base64
+    строчная идёт с вероятностью 26/64, и четыре строчных подряд редки; у имени
+    из слов они и есть почти всё имя.
+
+    ОКНО, А НЕ ПРОБЕГ ЦЕЛИКОМ. Доля слов по всему пробегу пропустила бы секрет,
+    приклеенный через `/` к длинному имени: доля слов у склейки высока, куски
+    секрета короче сорока. Окно судится только своими знаками, поэтому признак
+    «есть такое окно» от удлинения пробега не пропадает, а от укорочения не
+    появляется — на этом держится один проход среза (`_cut_by_criterion`).
+
+    ЦЕНА ИЗМЕРЕНА: на 200 000 случайных пробегов стандартного base64 без условия
+    слов ловится 99,865 % при длине 40, с ним — 99,835 % (потеря 60); при 43 —
+    99,941 % и 99,927 %; при 64 — 99,997 % и 99,9965 % (потеря 1); при 88 — все.
+    В дереве сверх прежнего критерия это условие оставляет находки только у
+    настоящих отпечатков base64 (контрольные суммы модулей и пакетов) — это та
+    же названная цена, что и у шестнадцатеричного отпечатка.
+    """
+    body = run.rstrip("=")
+    n, w = len(body), STD_B64_WINDOW
+    if n < w or not MIXED_ADJACENT_RE.search(body) or not _dense_case_mix(body):
+        # У окна нет того, чего нет у пробега целиком.
+        return False
+    ups, lows, mixed = [0], [0], [0]
+    for c in body:
+        ups.append(ups[-1] + c.isupper())
+        lows.append(lows[-1] + c.islower())
+    for a, b in zip(body, body[1:]):
+        mixed.append(mixed[-1] + bool(MIXED_ADJACENT_RE.fullmatch(a + b)))
+    stretches = [(m.start(), m.end()) for m in LOWER_STRETCH_RE.finditer(body)]
+    ends = [e for _, e in stretches]
+    for s in range(n - w + 1):
+        e = s + w
+        if ups[e] - ups[s] < OPAQUE_CASE_MIX or lows[e] - lows[s] < OPAQUE_CASE_MIX:
             continue
-        # ПРИЗНАК ПЕРВЫЙ: длинный сегмент со смешением. Ловит удостоверение,
-        # у которого регистра нет вовсе (шестнадцатеричный пробег, крокфорд).
-        if any(len(seg) >= OPAQUE_SEGMENT_LEN and MIXED_ADJACENT_RE.search(seg)
-               for seg in NAME_SEPARATOR_RE.split(run)):
-            return True
-        # ПРИЗНАК ВТОРОЙ: густое смешение регистров. Ловит плотное удостоверение,
-        # разорванное разделителями на короткие куски. Ни один признак не
-        # покрывает другого — потому они и объединены, а не заменяют друг друга.
-        uppers = sum(1 for c in run if c.isupper())
-        lowers = sum(1 for c in run if c.islower())
-        if uppers >= OPAQUE_CASE_MIX and lowers >= OPAQUE_CASE_MIX:
+        # Пары (i, i+1) целиком внутри окна: i от s до e-2.
+        if mixed[e - 1] == mixed[s]:
+            continue
+        worded = 0
+        k = bisect.bisect_right(ends, s)
+        while k < len(stretches) and stretches[k][0] < e:
+            part = min(stretches[k][1], e) - max(stretches[k][0], s)
+            if part >= STD_B64_WORD_STRETCH:
+                worded += part
+            k += 1
+        if worded <= STD_B64_WORDED_MAX:
             return True
     return False
 
 
+def credential_spans(text: str) -> list[tuple[int, int, str]]:
+    """КРИТЕРИЙ: где в тексте стоит удостоверение — (начало, конец, форма).
+
+    Один объект на два потребителя: срез вырезает эти промежутки, проверка
+    выхода называет их остатком. Порядок форм — порядок имени в отказе.
+    """
+    spans = [(m.start(), m.end(), FORM_PEM) for m in PEM_RE.finditer(text)]
+    spans += [(m.start(1), m.end(1), FORM_DOTTED) for m in DOTTED_TRIPLE_RE.finditer(text)
+              if len(m.group(1)) >= DOTTED_TRIPLE_MIN]
+    spans += [(m.start(), m.end(), FORM_OPAQUE) for m in LONG_OPAQUE_RE.finditer(text)
+              if _opaque_run(m.group(0))]
+    spans += [(m.start(), m.end(), FORM_STD_B64) for m in LONG_STD_B64_RE.finditer(text)
+              if _std_b64_run(m.group(0))]
+    return spans
+
+
+def _cut_by_criterion(text: str) -> tuple[str, int]:
+    """Вырезать всё, что критерий называет удостоверением. (текст, сколько).
+
+    Промежутки разных форм ПЕРЕКРЫВАЮТСЯ (тройка через точку и пробег
+    стандартного base64, начатый в её последней части), поэтому они сливаются,
+    а режутся С КОНЦА: замена короче или длиннее вырезанного, и срез с начала
+    сдвинул бы все следующие границы — кусок секрета уехал бы наружу.
+
+    ОДНОГО ПРОХОДА ДОСТАТОЧНО, и это следствие устройства критерия, а не
+    надежда. Замена не несёт ни знака алфавита секретов, ни точки, поэтому
+    каждый пробег выхода — кусок пробега входа. Пробеговые признаки (40+,
+    смешение, регистры, окно стандартного base64) от укорочения не
+    появляются; тройки ищутся с начала
+    каждого пробега, поэтому тройка выхода — часть тройки входа, уже найденной;
+    PEM ищется до подвала или конца текста. Прежняя редакция держала здесь
+    цикл до неподвижной точки ради «короткой тройки, съевшей начало длинной» —
+    но такую тройку цикл не находил: короткая не промежуток, срезать нечего.
+    Слепоту снял поиск с каждого начала; одно свойство — выход чист для
+    критерия после одного прохода — держит самопроба на засеянной выборке
+    (замер автора 2026-09-23 шире её: 300 000 склеек всех форм, один проход
+    разошёлся с неподвижной точкой на 0).
+    """
+    spans = sorted((s, e) for s, e, _ in credential_spans(text))
+    merged: list[list[int]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    for s, e in reversed(merged):
+        text = text[:s] + REDACTED + text[e:]
+    return text, len(merged)
+
+
 def residue_shaped(text: str) -> str | None:
-    """НЕЗАВИСИМЫЙ предикат остатка. Возвращает имя формы или None."""
-    if PEM_RE.search(text):
-        return "приватный ключ PEM"
-    m = DOTTED_TRIPLE_RE.search(text)
-    if m and len(m.group(0)) >= 60:
-        return "тройка через точку с длинными частями"
-    if _opaque_credential(text):
-        return "непрерывный пробег алфавита секретов (40+, буквы и цифры)"
-    return None
+    """Проверка выхода по форме — тем же критерием, каким режет срез."""
+    spans = credential_spans(text)
+    return spans[0][2] if spans else None
 
 
 def residue(node: object, path: str, found: list[str],
@@ -432,7 +635,7 @@ def residue(node: object, path: str, found: list[str],
     if isinstance(node, str):
         # Имя ключа названо секретом, а значение не вырезано — остаток по ИМЕНИ.
         # Эта половина ловит секрет без формы: у общего секрета хука формы нет.
-        if key_hint and SECRET_NAME_RE.search(key_hint) and node and node != REDACTED:
+        if _named_secret(key_hint) and node and node != REDACTED:
             found.append(f"{path} — значение ключа {key_hint!r} не вырезано "
                          f"(длина {len(node)})")
             return
@@ -464,11 +667,12 @@ def process(src: pathlib.Path, dst: pathlib.Path, c: Census) -> list[str]:
     # структуры нет, поэтому чистится текст. Греп по ним и был бы достаточен,
     # если бы у отчёта не было формы 6.
     raw = src.read_text(encoding="utf-8", errors="replace")
-    clean, n = scrub_text(raw)
+    s = scrub_text(raw)
+    clean = s.text
     # Единица счёта у текстового файла — СТРОКА, а не файл: «строк осмотрено 1» на
     # журнале из ста двенадцати строк называет объём, которого не читали.
     c.strings += len(raw.splitlines()) or 1
-    c.redacted_by_shape += n
+    c.add(s)
     dst.write_text(clean, encoding="utf-8")
     found = []
     for lineno, line in enumerate(clean.splitlines(), 1):
@@ -499,6 +703,7 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
     print(f"байтовых массивов:       {c.buffers}")
     print(f"вырезано по имени ключа: {c.redacted_by_name}")
     print(f"вырезано по форме:       {c.redacted_by_shape}")
+    print(f"  из них критерием проверки выхода: {c.redacted_by_criterion}")
     print(f"ВСЕГО вырезано:          {c.redacted}")
     print(f"пропущено (вид неизвестен, В АРТЕФАКТ НЕ ПОПАДУТ): {len(skipped)}"
           + (f" — {', '.join(skipped)}" if skipped else ""))
@@ -533,6 +738,29 @@ def _c(label: str, ok: bool, detail: str = "") -> None:
         _F.append(label)
         if detail:
             print(f"       {detail}")
+
+
+# Длина куска секрета, отсутствие которого утверждают оси механики среза.
+# Остаток судится критерием, а критерию кусок короче сорока не виден по
+# построению, поэтому эти оси судят не «остаток чист», а «ни одной подстроки
+# секрета такой длины в выходе нет». Законный остаток каждой такой оси
+# проверяется ПРЕДПОСЫЛКОЙ: в нём этих подстрок нет, и находка — утечка.
+SECRET_FRAGMENT_MIN = 4
+
+
+def _fragments_left(out: str, secret: str) -> int:
+    """Сколько подстрок секрета длиной SECRET_FRAGMENT_MIN стоит в выходе."""
+    m = SECRET_FRAGMENT_MIN
+    return sum(1 for i in range(len(secret) - m + 1) if secret[i:i + m] in out)
+
+
+def _run_quiet(src: pathlib.Path, dst: pathlib.Path) -> tuple[int, str]:
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        rc = run(src, dst)
+    return rc, buf.getvalue()
 
 
 # Маркеры вида JWT: настоящая форма, а не слово. Первая часть обязана начинаться
@@ -634,6 +862,378 @@ def _report(mark_env: str, mark_reqh: str, mark_resh: str, mark_body: str,
             }],
         },
     }
+
+
+def _alnum(label: str, n: int) -> str:
+    """Детерминированный пробег букв и цифр длиной n — не взят ни из какого прогона."""
+    import base64
+    import hashlib
+    raw = base64.b64encode(hashlib.sha512(label.encode()).digest() * 4).decode()
+    return "".join(c for c in raw if c.isalnum())[:n]
+
+
+def _url_mark(label: str) -> str:
+    """Детерминированный пробег base64url 43 знака — форма захваченного отказа."""
+    import base64
+    import hashlib
+    return base64.urlsafe_b64encode(hashlib.sha256(label.encode()).digest()).rstrip(b"=").decode()
+
+
+def _self_test_cut_mechanics() -> None:
+    """ОСЬ МЕХАНИКИ СРЕЗА: два раздельных промежутка и перекрытие двух форм в
+    ОДНОЙ строке. Судит отсутствие ЛЮБОГО куска секрета, а не «чистый остаток».
+
+    Остаток судится тем же критерием, которым режет срез, и кусок короче порога
+    сорока ему не виден по построению. Поэтому «проверка выхода молчит» здесь
+    не доказывает ничего: срез, режущий с начала (замена короче вырезанного, и
+    граница второго промежутка уезжает), оставлял наружу пятнадцать знаков
+    второго секрета при коде 0; срез одного первого промежутка оставлял второй
+    целиком. Вход: две метки под безобидными именами параметров и склейка, где
+    тройка через точку и пробег стандартного base64 перекрыты — тройка кончается
+    на `+`, пробег base64 начат в её последней части.
+    """
+    import tempfile
+    print("  ── механика среза: два промежутка и перекрытие форм в одной строке")
+    v1, v2 = _url_mark("kaname#183 span one"), _url_mark("kaname#183 span two")
+    p1, p2, p3 = (_alnum(f"kaname#183 dotted part {i}", 20) for i in range(3))
+    tail = _alnum("kaname#183 std tail", 30)
+    glued = f"{p1}.{p2}.{p3}+{tail}"
+    line = f"GET /iam/v1/accounts?a={v1}&b={v2} trace={glued} end"
+    want = f"GET /iam/v1/accounts?a={REDACTED}&b={REDACTED} trace={REDACTED} end"
+    pieces = (v1, v2, p1, p2, p3, tail)
+
+    _c("предпосылка: каждая метка — удостоверение критерия",
+       residue_shaped(v1) is not None and residue_shaped(v2) is not None)
+    spans = credential_spans(glued)
+    dotted = [(s, e) for s, e, f in spans if f == FORM_DOTTED]
+    std = [(s, e) for s, e, f in spans if f == FORM_STD_B64]
+    _c("предпосылка: в склейке тройка и пробег base64 ПЕРЕКРЫТЫ, а не вложены",
+       len(dotted) == 1 and len(std) == 1
+       and dotted[0][0] < std[0][0] < dotted[0][1] < std[0][1],
+       f"тройка {dotted}, base64 {std}")
+    _c(f"предпосылка: в законном остатке строки нет ни одного куска секрета "
+       f"длиной {SECRET_FRAGMENT_MIN}", all(_fragments_left(want, p) == 0 for p in pieces))
+
+    cut = scrub_text(line)
+    left = [_fragments_left(cut.text, p) for p in pieces]
+    _c(f"ни одного куска секрета длиной {SECRET_FRAGMENT_MIN} в выходе (две метки и склейка)",
+       not any(left), f"кусков по секретам: {left}")
+    _c("выход — ровно законный остаток: границы не сдвинуты, соседи не съедены",
+       cut.text == want and cut.by_criterion == 3,
+       f"совпал: {cut.text == want}, промежутков {cut.by_criterion}")
+
+    # Тот же вход через обход отчёта и текстовый вывод прогонщика: снаружи видны
+    # только код и выложенные файлы — утечка куска при коде 0 и есть дефект.
+    with tempfile.TemporaryDirectory(prefix="redact-spans-") as td:
+        tmp = pathlib.Path(td)
+        src, dst = tmp / "out", tmp / "out-public"
+        src.mkdir()
+        (src / "r.json").write_text(json.dumps({"run": {"executions": [{
+            "request": {"url": {"raw": line, "path": ["iam", "v1", "accounts"]}}}]}}),
+            encoding="utf-8")
+        (src / "r.cli").write_text(f"→ probe\n  {line}\n  1 assertion failed\n", encoding="utf-8")
+        rc, _ = _run_quiet(src, dst)
+        published = "".join((dst / n).read_text(encoding="utf-8") for n in ("r.json", "r.cli"))
+        left = [_fragments_left(published, p) for p in pieces]
+        _c("отчёт и вывод прогонщика: код 0 и ни одного куска секрета в выложенном",
+           rc == 0 and not any(left), f"код {rc}, кусков по секретам: {left}")
+
+
+def _self_test_pem_and_std_base64() -> None:
+    """ОСЬ PEM И СТАНДАРТНОГО BASE64: у ветки PEM критерия есть свидетель.
+
+    Ключ — форма RSA-2048 PKCS8 (приставка DER настоящая, остальное — засеянные
+    байты): тело 1624 знака, строки по 64. PEM у среза и у проверки — один
+    объект, поэтому его слепоту второй взгляд не видит; видит её эта ось — куска
+    тела ключа в выложенном нет. Близнецы: тот же ключ БЕЗ подвала (обрыв) и то
+    же тело одной строкой без обрамления — его режет пробег стандартного base64,
+    а в алфавите base64url оно рвётся на куски короче сорока.
+    """
+    import base64
+    import random
+    import tempfile
+    print("  ── PEM и стандартный base64")
+    der = (bytes.fromhex("308204be020100300d06092a864886f70d0101010500048204a8")
+           + random.Random(2048).randbytes(1218 - 26))
+    body = base64.b64encode(der).decode()
+    rows = [body[i:i + 64] for i in range(0, len(body), 64)]
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(rows) + "\n-----END PRIVATE KEY-----"
+    torn = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(rows[:-3])
+    _c("предпосылка: тело ключа 1624 знака, последняя строка короче сорока",
+       len(body) == 1624 and len(rows[-1]) < 40, f"{len(body)} знаков, хвост {len(rows[-1])}")
+
+    log = f"уровень=ERROR выдан ключ\n{pem}\nуровень=INFO после ключа\n"
+    doc = {"environment": {"values": [
+               {"key": "ownRestBaseUrl", "value": "https://localhost:9098"},
+               {"key": "loginLaneFlowBlob", "value": pem},
+               {"key": "accountAId", "value": "acc0123456789abcdefgh"}]},
+           "run": {"executions": [{
+               "response": {"code": 500, "stream": {"type": "Buffer", "data": list(
+                   (pem + "\n").encode("utf-8"))}}}, {
+               "response": {"code": 400, "stream": {"type": "Buffer", "data": list(
+                   json.dumps({"error": f"parse failed: {torn}", "code": 3}).encode("utf-8"))}}},
+           ]}}
+    _c("предпосылка: безобидное имя перечнем имён НЕ ловится (иначе ось про имя)",
+       not SECRET_NAME_RE.search("loginLaneFlowBlob"))
+    context = (log.replace(pem, "") + json.dumps(doc, ensure_ascii=False).replace(
+        json.dumps(pem)[1:-1], "") + "parse failed: " + REDACTED)
+    _c(f"предпосылка: в законном окружении ключа нет ни одного куска тела длиной "
+       f"{SECRET_FRAGMENT_MIN}", _fragments_left(context, body) == 0)
+
+    with tempfile.TemporaryDirectory(prefix="redact-pem-") as td:
+        tmp = pathlib.Path(td)
+        src, dst = tmp / "out", tmp / "out-public"
+        src.mkdir()
+        (src / "kaname.log").write_text(log, encoding="utf-8")
+        (src / "r.json").write_text(json.dumps(doc), encoding="utf-8")
+        rc, _ = _run_quiet(src, dst)
+        text_log = (dst / "kaname.log").read_text(encoding="utf-8")
+        text_json = (dst / "r.json").read_text(encoding="utf-8")
+        out = json.loads(text_json)
+        bodies = [bytes(ex["response"]["stream"]["data"]).decode("utf-8", "replace")
+                  for ex in out["run"]["executions"]]
+        seen = {"журнал": text_log, "отчёт": text_json,
+                "тело ответа": bodies[0], "тело с обрывом": bodies[1]}
+        left = {k: _fragments_left(v, body) for k, v in seen.items()}
+        _c("код 0, и ни одного куска тела ключа нигде в выложенном",
+           rc == 0 and not any(left.values()), f"код {rc}, кусков: {left}")
+        _c("обрамления ключа в выложенном нет — блок срезан целиком",
+           not any("PRIVATE KEY" in v for v in seen.values()),
+           f"{[k for k, v in seen.items() if 'PRIVATE KEY' in v]}")
+        _c("соседи ключа выжили: строки журнала, имена и значения окружения, код тела",
+           "уровень=ERROR выдан ключ" in text_log and "уровень=INFO после ключа" in text_log
+           and [v["key"] for v in out["environment"]["values"]]
+           == ["ownRestBaseUrl", "loginLaneFlowBlob", "accountAId"]
+           and out["environment"]["values"][2]["value"] == "acc0123456789abcdefgh"
+           and json.loads(bodies[1]).get("code") == 3, text_log[:200])
+
+    # Тело ОДНОЙ СТРОКОЙ, без обрамления: PEM его не узнаёт, режет пробег
+    # стандартного base64. Одно-фактный близнец — алфавит base64url: `+` и `/`
+    # рвут тело на куски, и пробег 40+ с проверкой смешения срезал бы не всё.
+    cut_body = scrub_text(f"blob={body} end").text
+    _c("тело ключа одной строкой — срезано целиком (пробег стандартного base64)",
+       _fragments_left(cut_body, body) == 0 and cut_body == f"blob={REDACTED} end",
+       f"кусков: {_fragments_left(cut_body, body)}")
+    url_only = sum(e - s for s, e in ((m.start(), m.end()) for m in LONG_OPAQUE_RE.finditer(body)
+                                      if _opaque_run(m.group(0))))
+    print(f"  в алфавите base64url то же тело срезалось бы на {url_only} из {len(body)} знаков")
+    _c("предпосылка: без знаков + и / в алфавите пробега тело срезалось бы НЕ целиком",
+       url_only < len(body), f"{url_only} из {len(body)}")
+
+    # Нижняя граница на засеянной выборке стандартного base64 длиной 40 — как у
+    # base64url выше: условие слов не вправе терять больше замеренного.
+    rnd = random.Random(1624)
+    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    sample = ["".join(rnd.choice(std_alpha) for _ in range(40)) for _ in range(20000)]
+    caught = sum(1 for t in sample if residue_shaped(t) is not None)
+    print(f"  выборка пробегов стандартного base64 длиной 40: поймано {caught} из {len(sample)}")
+    _c("случайные пробеги стандартного base64 длиной 40 ловятся не хуже 99,7 %",
+       caught >= 19940, f"поймано {caught} из {len(sample)}")
+
+    # Законные близнецы стандартного алфавита: `/` в нём — знак, и путь с
+    # идентификатором или метод службы — один пробег 40+. Оба захвачены из
+    # дерева: метод — из каталога прав, путь — форма адреса отчёта.
+    for legit in ("https://localhost:9098/iam/v1/accounts/acc0123456789abcdefgh/projects",
+                  "kacho.cloud.vpc.v1.InternalAddressService/AllocateExternalIPv6",
+                  "/kacho.cloud.vpc.v1.InternalAddressService/AllocateInternalIPv6 denied"):
+        _c(f"законный близнец стандартного алфавита выжил: {legit[-40:]}",
+           scrub_text(legit).text == legit)
+
+
+def _crc24(data: bytes) -> int:
+    """Контрольная сумма armor OpenPGP (RFC 4880, 6.1) — строка `=XXXX` блока."""
+    crc = 0xB704CE
+    for byte in data:
+        crc ^= byte << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    return crc & 0xFFFFFF
+
+
+def _self_test_pem_headers() -> None:
+    """ОСЬ ЗАГОЛОВКОВ PEM: у каждого вида приватного ключа есть свидетель.
+
+    Ось выше держит только PKCS8 `BEGIN PRIVATE KEY`, поэтому сужение заголовка
+    до него и снятие хвоста после KEY давали зелёную самопробу (102/0), а у
+    ключа OpenSSH ed25519 наружу уходил кусок тела — последняя строка короче
+    порога критерия. Формы замерены на ключах openssl 3.5.5, OpenSSH 10.2 и
+    GnuPG 2.4.8: RSA PKCS1 — тело 1588 знаков по 64; EC P-256 — 164;
+    ENCRYPTED PKCS8 (EC внутри) — 332; OPENSSH ed25519 без комментария — 312
+    по 70; PGP ed25519 — 348 по 64, пустая строка после заголовка и строка
+    контрольной суммы. Структура настоящая, ключевые байты — засеянные. У EC,
+    ENCRYPTED, OPENSSH и PGP последняя строка тела короче сорока, то есть
+    ниже порога критерия по построению, а не по жребию засева.
+
+    Судится то же, что у PKCS8: куска тела нет нигде в выложенном, обрамления
+    нет, соседи выжили. Последнее ловит подвал, который предикат не узнаёт:
+    тогда срез идёт до конца текста и съедает разбор падения. Законный
+    близнец — тот же блок PGP с PUBLIC вместо PRIVATE: его обрамление
+    выживает, то есть ось не держится срезом всего, что начато с BEGIN.
+    """
+    import base64
+    import random
+    import tempfile
+    print("  ── заголовки PEM: RSA, EC, ENCRYPTED, OPENSSH, PGP")
+    rnd = random.Random(4716)
+
+    def sstr(b: bytes) -> bytes:
+        return len(b).to_bytes(4, "big") + b
+
+    pk, seed, check = rnd.randbytes(32), rnd.randbytes(32), rnd.randbytes(4)
+    priv = check + check + sstr(b"ssh-ed25519") + sstr(pk) + sstr(seed + pk) + sstr(b"")
+    priv += bytes(range(1, 1 + (-len(priv)) % 8))
+    openssh = (b"openssh-key-v1\0" + sstr(b"none") + sstr(b"none") + sstr(b"")
+               + (1).to_bytes(4, "big") + sstr(sstr(b"ssh-ed25519") + sstr(pk)) + sstr(priv))
+    kinds = [
+        ("RSA PRIVATE KEY", bytes.fromhex("308204a30201000282010100")
+         + rnd.randbytes(1191 - 12), 64, 1588),
+        ("EC PRIVATE KEY", bytes.fromhex("30770201010420") + rnd.randbytes(32)
+         + bytes.fromhex("a00a06082a8648ce3d030107a14403420004") + rnd.randbytes(64), 64, 164),
+        ("ENCRYPTED PRIVATE KEY", bytes.fromhex("3081f6306106092a864886f70d01050d")
+         + rnd.randbytes(249 - 16), 64, 332),
+        ("OPENSSH PRIVATE KEY", openssh, 70, 312),
+        ("PGP PRIVATE KEY BLOCK", bytes.fromhex("945804") + rnd.randbytes(261 - 3), 64, 348),
+    ]
+    blocks = []
+    for label, der, width, _ in kinds:
+        body = base64.b64encode(der).decode()
+        rows = [body[i:i + width] for i in range(0, len(body), width)]
+        head = f"-----BEGIN {label}-----\n" + ("\n" if label.startswith("PGP") else "")
+        tail = ("\n=" + base64.b64encode(_crc24(der).to_bytes(3, "big")).decode()
+                if label.startswith("PGP") else "")
+        blocks.append((label, body, head + "\n".join(rows) + tail + f"\n-----END {label}-----",
+                       head + "\n".join(rows[:-2])))
+    _c("предпосылка: тела пяти видов — замеренной длины, заголовок не PKCS8",
+       [len(b) for _, b, _, _ in blocks] == [k[3] for k in kinds]
+       and not any("BEGIN PRIVATE KEY" in pem for _, _, pem, _ in blocks),
+       f"{[len(b) for _, b, _, _ in blocks]}")
+
+    before, after = "уровень=ERROR выдан ключ", "уровень=INFO после ключа"
+    clean = True
+    with tempfile.TemporaryDirectory(prefix="redact-pem-kinds-") as td:
+        for n, (label, body, pem, torn) in enumerate(blocks):
+            log = f"{before}\n{pem}\n{after}\n"
+            torn_body = json.dumps({"error": f"parse failed: {torn}", "code": 3})
+            doc = {"environment": {"values": [
+                       {"key": "loginLaneFlowBlob", "value": pem},
+                       {"key": "accountAId", "value": "acc0123456789abcdefgh"}]},
+                   "run": {"executions": [{
+                       "response": {"code": 500, "stream": {"type": "Buffer", "data": list(
+                           (pem + "\n").encode("utf-8"))}}}, {
+                       "response": {"code": 400, "stream": {"type": "Buffer", "data": list(
+                           torn_body.encode("utf-8"))}}},
+                   ]}}
+            context = (log.replace(pem, "") + json.dumps(doc, ensure_ascii=False).replace(
+                json.dumps(pem)[1:-1], "") + "parse failed: " + REDACTED)
+            clean = clean and _fragments_left(context, body) == 0
+            src, dst = pathlib.Path(td) / f"out{n}", pathlib.Path(td) / f"out{n}-public"
+            src.mkdir()
+            (src / "kaname.log").write_text(log, encoding="utf-8")
+            (src / "r.json").write_text(json.dumps(doc), encoding="utf-8")
+            rc, _ = _run_quiet(src, dst)
+            text_log = (dst / "kaname.log").read_text(encoding="utf-8")
+            text_json = (dst / "r.json").read_text(encoding="utf-8")
+            out = json.loads(text_json)
+            bodies = [bytes(ex["response"]["stream"]["data"]).decode("utf-8", "replace")
+                      for ex in out["run"]["executions"]]
+            seen = {"журнал": text_log, "отчёт": text_json,
+                    "тело ответа": bodies[0], "тело с обрывом": bodies[1]}
+            left = {k: _fragments_left(v, body) for k, v in seen.items()}
+            _c(f"{label}: код 0, и ни одного куска тела ключа нигде в выложенном",
+               rc == 0 and not any(left.values()), f"код {rc}, кусков: {left}")
+            _c(f"{label}: обрамления в выложенном нет — блок срезан целиком",
+               not any(f"BEGIN {label}" in v or f"END {label}" in v for v in seen.values()),
+               f"{[k for k, v in seen.items() if f'BEGIN {label}' in v or f'END {label}' in v]}")
+            kept = {"строка до ключа": before in text_log, "строка после ключа": after in text_log,
+                    "имена окружения": [v["key"] for v in out["environment"]["values"]]
+                    == ["loginLaneFlowBlob", "accountAId"],
+                    "код тела": json.loads(bodies[1]).get("code") == 3}
+            _c(f"{label}: соседи блока выжили — строки журнала, имена окружения, код тела",
+               all(kept.values()), f"не выжили: {[k for k, v in kept.items() if not v]}")
+    _c(f"предпосылка: в законном окружении ключей нет ни одного куска тела длиной "
+       f"{SECRET_FRAGMENT_MIN}", clean)
+
+    pgp_public = blocks[-1][2].replace("PGP PRIVATE KEY BLOCK", "PGP PUBLIC KEY BLOCK")
+    cut = scrub_text(f"{before}\n{pgp_public}\n{after}\n").text
+    _c("законный близнец: блок PGP с PUBLIC вместо PRIVATE — обрамление и соседи выжили",
+       all(s in cut for s in ("-----BEGIN PGP PUBLIC KEY BLOCK-----",
+                              "-----END PGP PUBLIC KEY BLOCK-----", before, after)))
+
+
+def _self_test_hidden_triple_and_one_pass() -> None:
+    """ОСЬ ПОЛНОТЫ ПОИСКА ТРОЕК И ОДНОГО ПРОХОДА СРЕЗА.
+
+    Короткая тройка `s1.s2.s3` (50 знаков, ниже порога) стоит перед длинной
+    `s3.t4.t5` (78). Поиск подряд съедал короткую и длинной не видел — ни срез,
+    ни проверка: критерий один и слеп одинаково. Прежняя редакция держала ради
+    этого случая цикл до неподвижной точки, но цикл его не находил: короткая
+    тройка не промежуток, срезать нечего. Свойство «после ОДНОГО прохода выход
+    чист для критерия» держит засеянная выборка склеек всех форм.
+    """
+    import random
+    print("  ── полнота поиска троек и один проход среза")
+    s1, s2, s3 = (_alnum(f"kaname#183 short triple {i}", 16) for i in range(3))
+    t4, t5 = (_alnum(f"kaname#183 long triple {i}", 30) for i in range(2))
+    line = f"host {s1}.{s2}.{s3}.{t4}.{t5} end"
+    consecutive = [m for m in re.finditer(
+        r"[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}", line)
+        if len(m.group(0)) >= DOTTED_TRIPLE_MIN]
+    _c("предпосылка: поиском подряд длинная тройка в этой строке НЕ видна",
+       consecutive == [], f"{len(consecutive)} троек")
+    _c("проверка выхода видит заслонённую тройку", residue_shaped(line) == FORM_DOTTED,
+       f"{residue_shaped(line)}")
+    cut = scrub_text(line).text
+    left = [_fragments_left(cut, p) for p in (t4, t5)]
+    _c("и срез её режет: ни одного куска длинной тройки в выходе",
+       not any(left) and cut == f"host {s1}.{REDACTED} end", f"кусков: {left}")
+
+    # СВИДЕТЕЛЬ, РАДИ КОТОРОГО ПРЕЖНЕЙ РЕДАКЦИИ БЫЛ НУЖЕН ЦИКЛ: подвал PEM вплотную
+    # к короткой тройке. `KEY-----q` — первая часть короткой тройки, и поиск
+    # подряд, съев её, не видел длинной `r2.r3.r4`; срез PEM укорачивал первую
+    # часть, и длинная появлялась лишь на втором проходе — один проход оставлял
+    # находку (выход не выкладывался). Поиск с каждого начала видит её сразу.
+    q, r2, r3 = _alnum("kaname#183 footer q", 8), *(
+        _alnum(f"kaname#183 footer r{i}", 16) for i in (2, 3))
+    r4 = _alnum("kaname#183 footer r4", 26)
+    footer = f"-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----{q}.{r2}.{r3}.{r4}"
+    once = _cut_by_criterion(footer)[0]
+    left = [_fragments_left(once, p) for p in (r2, r3, r4)]
+    _c("подвал PEM вплотную к короткой тройке: после ОДНОГО прохода чисто, кусков нет",
+       not credential_spans(once) and not any(left), f"кусков: {left}")
+
+    # Засеянная выборка склеек: пробеги обоих алфавитов разных длин, обрамление
+    # PEM, тройки, разделители и имена генератора — вплотную и через знак.
+    # Утверждение одно: после одного прохода критерий не находит ничего.
+    rnd = random.Random(183)
+    url_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    std_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    fixed = ["-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----", "KEY-----",
+             "InternalAddressService/AllocateExternalIPv6", "_poll200_started_teardown_",
+             "acc0123456789abcdefgh", "Bearer ", "eyJhbGciOiJSUzI1NiJ9"]
+    seps = ["", "", ".", ".", " ", "\n", "=", "&", "?", "/", "+", "-", "_", "=="]
+
+    def token() -> str:
+        k = rnd.random()
+        if k < 0.35:
+            return "".join(rnd.choice(url_alpha) for _ in range(rnd.randint(6, 48)))
+        if k < 0.65:
+            return "".join(rnd.choice(std_alpha) for _ in range(rnd.randint(6, 70)))
+        if k < 0.8:
+            return "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(rnd.randint(3, 20)))
+        return rnd.choice(fixed)
+
+    corpus = ["".join(token() + rnd.choice(seps) for _ in range(rnd.randint(2, 14)))
+              for _ in range(4000)]
+    hit = sum(1 for t in corpus if credential_spans(t))
+    stuck = sum(1 for t in corpus if credential_spans(_cut_by_criterion(t)[0]))
+    print(f"  выборка склеек: {len(corpus)}, с находкой критерия {hit}, "
+          f"после одного прохода найдено снова {stuck}")
+    _c("предпосылка: выборка несёт находки критерия (не пустая по построению)",
+       hit >= len(corpus) // 2, f"{hit} из {len(corpus)}")
+    _c("после ОДНОГО прохода среза критерий не находит в выходе ничего",
+       stuck == 0, f"{stuck} из {hit}")
 
 
 def self_test() -> int:
@@ -761,7 +1361,7 @@ def self_test() -> int:
     # параметра и соседний несекретный параметр остались целиком.
     raw_url = ("https://localhost:9098/iam/v1/accounts"
                "?pageSize=10&access_token=opaque-short-2Fx9&filter=name%3Da")
-    cleaned, cut = scrub_text(raw_url)
+    cleaned, cut = scrub_text(raw_url)[0], scrub_text(raw_url).cut
     _c("непрозрачный параметр адреса вырезан (формы у него нет)",
        "opaque-short-2Fx9" not in cleaned and cut == 1, cleaned)
     _c("имя параметра осталось — иначе координата отказа теряется",
@@ -811,8 +1411,12 @@ def self_test() -> int:
     opaque = "kt9f3Ac71Qd0Ze8Bx2Yv5Nm4Kj6Hg1Fs3Dp7Lw0Rt2Uq"
     _c("непрозрачный пробег той же длины С ЦИФРАМИ — удостоверение",
        residue_shaped(opaque) is not None, f"{residue_shaped(opaque)}")
-    _c("и чистка сама его не режет: ловит ВТОРОЙ взгляд, а не первый",
-       scrub_text(opaque)[1] == 0, f"{scrub_text(opaque)}")
+    # Прежняя редакция утверждала здесь ОБРАТНОЕ — «чистка сама его не режет,
+    # ловит второй взгляд» — и это утверждение и было классом kaname#183: то,
+    # что проверка называет удостоверением, срез не резал, и зелёный прогон
+    # кончался невыложенным артефактом. Теперь срез судит тем же критерием.
+    _c("и срез его режет: критерий у среза и у проверки один (kaname#183)",
+       opaque not in scrub_text(opaque)[0] and residue_shaped(scrub_text(opaque)[0]) is None)
 
     # Идентификатор кейса — захвачен из отчёта прогона коллекции каталога прав на
     # автономном стенде: вторая редакция предиката на нём и покраснела. Пара
@@ -891,25 +1495,174 @@ def self_test() -> int:
     _c("оно же с ЧЕТВЁРТОЙ заглавной — удостоверение",
        residue_shaped(four_caps) is not None, f"{four_caps} -> {residue_shaped(four_caps)}")
 
-    # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
+    # ── ОСЬ: СРЕЗ И ПРОВЕРКА ВЫХОДА СУДЯТ ОДНИМ КРИТЕРИЕМ (kaname#183) ──────
     #
-    # Инъекция в сам предикат: если форма значения предикату неизвестна, отказ
-    # обязан наступить на ПОВТОРНОМ обходе выхода, а не быть объявлен зелёным.
-    with tempfile.TemporaryDirectory(prefix="redact-residue-") as td:
+    # ЗАХВАЧЕНО: прогон 35895962909, `own-landing-newman-report` НЕ выложен на
+    # зелёном наборе. Проверка выхода назвала удостоверением
+    # `environment.values[92]` и `[95]` полосы входа — признаки формы
+    # `loginLaneCsrfLogin` и `loginLaneCsrfLogout`, 43 знака base64url, — а
+    # перепись насчитала «вырезано по форме: 0». Срез знал JWT, PEM и Bearer,
+    # проверка — ещё и пробег 40+ и тройку через точку; имени `csrf` не знал
+    # перечень. Каждая следующая переменная без имени из перечня повторила бы
+    # отказ, поэтому предмет — КЛАСС: всё, что проверка назовёт удостоверением,
+    # срез срезает.
+    #
+    # Законный близнец, у которого критерий НЕ срабатывает, обязан выжить срез
+    # нетронутым: иначе «срезано» значило бы «срезано всё длинное».
+    for legit in (real_log_line, case_id_line, *generated, three_caps):
+        _c(f"законный близнец выжил срез нетронутым: {legit[:34]}…",
+           scrub_text(legit)[0] == legit)
+
+    # Законный близнец, у которого критерий СРАБАТЫВАЕТ: шестнадцатеричный
+    # отпечаток. Строка захвачена из дерева — закреплённая ревизия действия в
+    # `.github/workflows/e2e-newman.yml`, 40 знаков, буква вплотную к цифре.
+    # Отличить его ФОРМОЙ от шестнадцатеричного секрета нельзя (`rand -hex`
+    # даёт ту же форму), список прощённых не заводится — каждая его запись есть
+    # место, куда секрет проедет молча. Поэтому он СРЕЗАЕТСЯ, и это безопасно:
+    # срез не публикует ничего, цена — невидимый в артефакте отпечаток, и она
+    # СЧИТАНА строкой переписи. Прежняя цена того же входа — отказ выложить
+    # артефакт целиком.
+    pinned = "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7"
+    _c("предпосылка: закреплённую ревизию (40 hex) проверка называет удостоверением",
+       residue_shaped(pinned) is not None)
+    cut_pinned = scrub_text(pinned)[0]
+    _c("отпечаток срезан, а окружающий текст строки выжил",
+       "043fb46d1a93" not in cut_pinned and "actions/upload-artifact@" in cut_pinned
+       and "# v7" in cut_pinned and residue_shaped(cut_pinned) is None, cut_pinned)
+
+    # Засеянная выборка — то же свойство на двадцати тысячах входов: каждый
+    # пробег, который проверка назвала удостоверением, после среза проверке
+    # чист. Это определение «одного критерия», а не пример к нему.
+    leaked = sum(1 for t in sample
+                 if residue_shaped(t) is not None
+                 and residue_shaped(scrub_text(t)[0]) is not None)
+    print(f"  выборка: пойманных проверкой и НЕ срезанных срезом — {leaked} из {caught}")
+    _c("каждый пробег, названный проверкой удостоверением, срез срезает",
+       leaked == 0, f"не срезано {leaked} из {caught}")
+
+    # Самопроба инъекцией, вход — форма захваченного отказа: переменная
+    # окружения с БЕЗОБИДНЫМ именем и значением-пробегом 43 знака. Значение
+    # детерминировано и не взято ни из какого прогона.
+    import base64
+    import hashlib
+    flow_value = base64.urlsafe_b64encode(
+        hashlib.sha256(b"kaname#183 one-criterion probe").digest()).rstrip(b"=").decode()
+    harmless = "loginLaneFlowHandle"
+    _c("предпосылка: значение — пробег 43 знака, и проверка зовёт его удостоверением",
+       len(flow_value) == 43 and residue_shaped(flow_value) is not None)
+    _c("предпосылка: безобидное имя перечнем имён НЕ ловится (иначе проба про имя)",
+       not SECRET_NAME_RE.search(harmless))
+    env_doc = {"environment": {"values": [
+        {"key": "ownRestBaseUrl", "value": "https://localhost:9098"},
+        {"key": harmless, "value": flow_value},
+        {"key": "accountAId", "value": "acc0123456789abcdefgh"},
+    ]}}
+    for cut_on in (True, False):
+        with tempfile.TemporaryDirectory(prefix="redact-one-criterion-") as td:
+            tmp = pathlib.Path(td)
+            src, dst = tmp / "out", tmp / "out-public"
+            src.mkdir()
+            (src / "kaname-login-lane.json").write_text(json.dumps(env_doc), encoding="utf-8")
+            saved_scrub = globals()["scrub_text"]
+            if not cut_on:
+                # СРЕЗ ПО ФОРМЕ ОТКЛЮЧЁН ЦЕЛИКОМ: у проверки выхода свой обход,
+                # и отказ обязан наступить на нём, а не у среза.
+                globals()["scrub_text"] = lambda text: Scrubbed(text, 0, 0)
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    rc = run(src, dst)
+            finally:
+                globals()["scrub_text"] = saved_scrub
+            out = buf.getvalue()
+            if cut_on:
+                published = (dst / "kaname-login-lane.json").read_text(encoding="utf-8")
+                _c("безобидное имя, значение-пробег 43 знака — СРЕЗАНО, артефакт выложен (код 0)",
+                   rc == 0 and flow_value not in published, out[-400:])
+                _c("срезано ПО ФОРМЕ критерием проверки, а не по имени — перепись это называет",
+                   "критерием проверки выхода: 1" in out and "вырезано по имени ключа: 0" in out,
+                   out[:700])
+                vals = json.loads(published)["environment"]["values"]
+                _c("имя переменной и соседние значения выжили",
+                   [v["key"] for v in vals] == ["ownRestBaseUrl", harmless, "accountAId"]
+                   and vals[0]["value"] == "https://localhost:9098"
+                   and vals[2]["value"] == "acc0123456789abcdefgh", f"{[v['key'] for v in vals]}")
+            else:
+                _c("срез отключён — проверка выхода ОТКАЗЫВАЕТ (код 1), а не молчит",
+                   rc == 1 and "осталось 1 удостоверени" in out, out[-400:])
+                _c("отказ называет ПУТЬ переменной, а значение не печатает",
+                   "environment.values[1].value" in out and flow_value not in out, out[-400:])
+
+    # ИМЯ `csrf` В ПЕРЕЧНЕ — вторая, независимая половина. Значение КОРОТКОЕ и
+    # без формы: критерий среза его не видит, поймать его может только имя.
+    # Одно-фактный близнец — безобидное имя выше: тот же вход, другое имя.
+    for name in ("loginLaneCsrfLogin", "loginLaneCsrfLogout", "X-CSRF-Token", "xsrfState"):
+        _c(f"имя {name!r} перечень имён называет секретом", bool(SECRET_NAME_RE.search(name)))
+    short_env = {"environment": {"values": [
+        {"key": "loginLaneCsrfLogin", "value": "csrf-short-2Fx9"},
+        {"key": "accountAId", "value": "acc0123456789abcdefgh"},
+    ]}}
+    with tempfile.TemporaryDirectory(prefix="redact-csrf-name-") as td:
         tmp = pathlib.Path(td)
         src, dst = tmp / "out", tmp / "out-public"
         src.mkdir()
-        (src / "r.json").write_text(json.dumps(
-            {"run": {"executions": [{"leftover": _jwt("LEFT")}]}}), encoding="utf-8")
-        never = re.compile(r"ZZZ_NEVER_MATCHES_ZZZ")
-        saved = {k: globals()[k] for k in ("JWT_RE", "PEM_RE", "BEARER_RE")}
-        for k in saved:
-            globals()[k] = never
-        try:
+        (src / "kaname-login-lane.json").write_text(json.dumps(short_env), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             rc = run(src, dst)
-        finally:
-            globals().update(saved)
-        _c("предикаты ЧИСТКИ ослеплены — отказ по ОСТАТКУ, а не зелёное", rc == 1)
+        published = (dst / "kaname-login-lane.json").read_text(encoding="utf-8")
+        _c("короткий признак формы без формы вырезан ПО ИМЕНИ csrf (код 0)",
+           rc == 0 and "csrf-short-2Fx9" not in published
+           and "loginLaneCsrfLogin" in published, buf.getvalue()[-400:])
+    # Путь `/auth/csrf` — законный близнец имени: слово `csrf` в ПУТИ не имя
+    # параметра, и путь обязан выжить целиком.
+    csrf_url = "https://localhost:9098/iam/v1/auth/csrf?form=login&csrf=csrf-short-2Fx9"
+    cut_url = scrub_text(csrf_url)[0]
+    _c("параметр адреса `csrf=` вырезан, его имя, путь `/auth/csrf` и `form=login` выжили",
+       "csrf-short-2Fx9" not in cut_url and "&csrf=" in cut_url
+       and "/iam/v1/auth/csrf?form=login&" in cut_url, cut_url)
+
+    _self_test_cut_mechanics()
+    _self_test_pem_and_std_base64()
+    _self_test_pem_headers()
+    _self_test_hidden_triple_and_one_pass()
+
+    # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
+    #
+    # Две инъекции, и каждая про своё. Первая слепит ВИДОВЫЕ предикаты среза
+    # (JWT, Bearer): срез обязан всё равно срезать то же удостоверение общим
+    # критерием — это и есть «один критерий», а не совпадение двух списков.
+    # Вторая отключает срез по форме ЦЕЛИКОМ: тогда отказ обязан наступить на
+    # ПОВТОРНОМ обходе выхода, а не быть объявлен зелёным. PEM здесь не
+    # слепится: его предикат у среза и у проверки — один объект, и второй
+    # взгляд ослепнет вместе со срезом. Его слепоту ловят оси PEM
+    # (`_self_test_pem_and_std_base64`, `_self_test_pem_headers`): куска тела
+    # ключа в выходе нет.
+    never = re.compile(r"ZZZ_NEVER_MATCHES_ZZZ")
+    for inject in ("виды", "срез"):
+        with tempfile.TemporaryDirectory(prefix="redact-residue-") as td:
+            tmp = pathlib.Path(td)
+            src, dst = tmp / "out", tmp / "out-public"
+            src.mkdir()
+            (src / "r.json").write_text(json.dumps(
+                {"run": {"executions": [{"leftover": _jwt("LEFT")}]}}), encoding="utf-8")
+            names = ("JWT_RE", "BEARER_RE") if inject == "виды" else ("scrub_text",)
+            saved = {k: globals()[k] for k in names}
+            for k in saved:
+                globals()[k] = never if inject == "виды" else (lambda text: Scrubbed(text, 0, 0))
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    rc = run(src, dst)
+            finally:
+                globals().update(saved)
+            if inject == "виды":
+                left = (dst / "r.json").read_text(encoding="utf-8")
+                _c("видовые предикаты среза ослеплены — общий критерий срезал то же (код 0)",
+                   rc == 0 and "LEFT" not in left, buf.getvalue()[-400:])
+            else:
+                _c("срез по форме отключён — отказ по ОСТАТКУ, а не зелёное",
+                   rc == 1 and "осталось 1 удостоверени" in buf.getvalue(), buf.getvalue()[-400:])
 
     # ФОРМА 8 ОТДЕЛЬНО: ослеплён РАЗБОР ТЕЛА у чистки (тело снова режется только
     # по форме), а секрет под именем — КОРОТКИЙ, ниже порога пробега 40+, и формы
@@ -933,9 +1686,9 @@ def self_test() -> int:
             saved_body = globals()["_scrub_body"]
             if blinded:
                 def _shape_only(text: str, c: Census) -> str:
-                    clean, n = scrub_text(text)
-                    c.redacted_by_shape += n
-                    return clean
+                    s = scrub_text(text)
+                    c.add(s)
+                    return s.text
                 globals()["_scrub_body"] = _shape_only
             buf = io.StringIO()
             try:
@@ -974,8 +1727,11 @@ def self_test() -> int:
         return 1
     print("ДОКАЗАНО: все восемь замеренных форм вычищены (включая байтовый массив "
           "тела ответа, невидимый текстовому грепу, и секрет под именем ключа внутри "
-          "JSON-тела), имена ключей и разбор падения выжили, ослеплённый предикат "
-          "отвергается по остатку, пустой обход — отказ.")
+          "JSON-тела), имена ключей и разбор падения выжили, всё, что проверка выхода "
+          "называет удостоверением, срез срезает, отключённый срез отвергается по "
+          "остатку, ни одного куска секрета не остаётся ни при двух промежутках и "
+          "перекрытии форм, ни в ключе PEM любого из шести видов заголовка, ни в "
+          "стандартном base64, пустой обход — отказ.")
     return 0
 
 

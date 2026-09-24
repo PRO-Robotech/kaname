@@ -10,7 +10,7 @@
 //     leaves kaname's response and is NEVER stored in DB.
 //  2. Name the client. НА ПЕРЕВЕДЁННОМ КОНТУРЕ имя назначаем МЫ и оно совпадает
 //     с идентификатором нашей строки; к прежнему издателю обращения нет вовсе
-//     (задача #1120, разбор — `nameClient` ниже и
+//     (задача kacho#1120, разбор — `nameClient` ниже и
 //     `docs/engineering/architecture/sa-key-issuance-leaves-the-provider.md`).
 //     Пока контур не переведён — регистрируется OAuth2-клиент у прежнего
 //     издателя с `token_endpoint_auth_method=private_key_jwt`,
@@ -150,7 +150,7 @@ type IssueSAKeyUseCase struct {
 	// федеративной выдаче — ОТКАЗ, а не «пропустить»: ключ, чей перечень не
 	// записан, не примет никого, и выдача ответила бы успехом на невыполнимое.
 	trustedIssuers TrustedIssuerWriter
-	// ownIssuance — контур переведён на свою чеканку (задача #1120).
+	// ownIssuance — контур переведён на свою чеканку (задача kacho#1120).
 	ownIssuance bool
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
@@ -255,7 +255,7 @@ func (u *IssueSAKeyUseCase) WithTrustedIssuerWriter(w TrustedIssuerWriter) *Issu
 }
 
 // WithOwnIssuance объявляет контур выдачи ПЕРЕВЕДЁННЫМ на свою чеканку
-// (задача #1120).
+// (задача kacho#1120).
 //
 // Composition-root only: «переведён ли контур» — свойство ПОСАДКИ, а не запроса,
 // и вызывающий его не выбирает.
@@ -998,7 +998,7 @@ func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
 // Теперь утверждение проверяет наш проверяющий (`internal/clientassertion`,
 // федеративная полоса) по нашему перечню, и обе причины исчезли вместе. На
 // переведённом контуре зеркало не заводится — как и на полосе ключа с ключевым
-// материалом (#1120); решение принимает `nameClient`, а не эта ветка.
+// материалом (kacho#1120); решение принимает `nameClient`, а не эта ветка.
 func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
 	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
 	hydraReq := clients.CreateOAuthClientRequest{
