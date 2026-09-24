@@ -194,6 +194,8 @@ type surfaceFlow struct {
 	// именованные типы, упомянутые в теле функции (приведение, литерал,
 	// объявление переменной): их методы достижимы вместе с функцией
 	typeUses map[fkey][]*types.TypeName
+	// неподвижная точка «течёт ли тип» (Тарьян по графу типов)
+	typeSCC *typeSCCState
 
 	// объявления, собранные проходом (судит ceremony_surface.go)
 	surfaceLits []flowNode
@@ -233,6 +235,7 @@ func newSurfaceFlow(prog *surfaceProgram) *surfaceFlow {
 		ifaceCalls: map[*ast.CallExpr]*ifaceCall{},
 		zeroVars:   map[*types.Var]fkey{},
 		typeUses:   map[fkey][]*types.TypeName{},
+		typeSCC:    newTypeSCCState(),
 	}
 	a.handler = lookupHandlerIface(prog)
 	a.httpMuxT = lookupMuxPtr(prog, "net/http")
@@ -367,87 +370,148 @@ func isHandlerFuncSig(t types.Type) bool {
 }
 
 // interesting — течёт ли значение этого типа.
+//
+// «Течёт» — из типа достижим по его строению тип-носитель (мультиплексор,
+// обработчик, образец шлюза, параметр типа). Граф типов цикличен (A несёт
+// указатель на B, B — на A), и ответ — неподвижная точка по компонентам
+// сильной связности: у всех типов одной компоненты он общий. Ответ, посчитанный
+// при обрезанном цикле, не кэшируется как окончательный — иначе о типе
+// отвечал бы тот, кого спросили первым (kaname#320, круг 3).
 func (a *surfaceFlow) interesting(t types.Type) bool {
 	if t == nil {
 		return false
 	}
+	t = types.Unalias(t)
 	if v, ok := a.memo[t]; ok {
 		return v
 	}
-	a.memo[t] = false
-	v := a.interestingNow(t)
-	a.memo[t] = v
-	return v
+	a.typeSCC.visit(a, t)
+	return a.memo[t]
 }
 
-func (a *surfaceFlow) interestingNow(t types.Type) bool {
-	switch u := types.Unalias(t).(type) {
+// interestingBase — тип сам носитель, без обхода его строения.
+func (a *surfaceFlow) interestingBase(t types.Type) bool {
+	switch u := t.(type) {
 	case *types.Named:
-		if a.isHTTPMuxType(u) || a.isGatewayMuxType(u) || isNamed(u, gatewayRuntimePkg, "Pattern") {
-			return true
-		}
-		if isHandlerFuncSig(u) || a.isHandlerType(u) {
-			return true
-		}
-		return a.interesting(u.Underlying())
+		return a.isHTTPMuxType(u) || a.isGatewayMuxType(u) || isNamed(u, gatewayRuntimePkg, "Pattern") ||
+			isHandlerFuncSig(u) || a.isHandlerType(u)
 	case *types.Pointer:
-		return a.isHandlerType(u) || a.interesting(u.Elem())
-	case *types.Slice:
-		return a.interesting(u.Elem())
-	case *types.Array:
-		return a.interesting(u.Elem())
-	case *types.Chan:
-		return a.interesting(u.Elem())
-	case *types.Map:
-		return a.interesting(u.Key()) || a.interesting(u.Elem())
-	case *types.Struct:
-		for i := 0; i < u.NumFields(); i++ {
-			if a.interesting(u.Field(i).Type()) {
-				return true
-			}
-		}
-		return false
+		return a.isHandlerType(u)
 	case *types.Signature:
-		if isHandlerFuncSig(u) {
-			return true
-		}
-		for i := 0; i < u.Params().Len(); i++ {
-			if a.interesting(u.Params().At(i).Type()) {
-				return true
-			}
-		}
-		for i := 0; i < u.Results().Len(); i++ {
-			if a.interesting(u.Results().At(i).Type()) {
-				return true
-			}
-		}
-		return false
+		return isHandlerFuncSig(u)
 	case *types.Interface:
-		// Интерфейс течёт, если течёт хоть одна подпись его методов (регистратор
-		// Handle(string, http.Handler), монтировщик Mount(*http.ServeMux)) либо
-		// он — обработчик.
-		if u.NumMethods() == 0 {
-			return false
-		}
-		if a.isHandlerType(u) {
-			return true
-		}
-		for i := 0; i < u.NumMethods(); i++ {
-			if a.interesting(u.Method(i).Type()) {
-				return true
-			}
-		}
-		return false
+		return u.NumMethods() > 0 && a.isHandlerType(u)
 	case *types.TypeParam:
 		return true
-	case *types.Tuple:
-		for i := 0; i < u.Len(); i++ {
-			if a.interesting(u.At(i).Type()) {
-				return true
-			}
-		}
 	}
 	return false
+}
+
+// interestingKids — типы, из которых тип строится. Интерфейс течёт, если течёт
+// хоть одна подпись его методов (регистратор Handle(string, http.Handler),
+// монтировщик Mount(*http.ServeMux)).
+func interestingKids(t types.Type) []types.Type {
+	var out []types.Type
+	switch u := t.(type) {
+	case *types.Named:
+		out = append(out, u.Underlying())
+	case *types.Pointer:
+		out = append(out, u.Elem())
+	case *types.Slice:
+		out = append(out, u.Elem())
+	case *types.Array:
+		out = append(out, u.Elem())
+	case *types.Chan:
+		out = append(out, u.Elem())
+	case *types.Map:
+		out = append(out, u.Key(), u.Elem())
+	case *types.Struct:
+		for i := 0; i < u.NumFields(); i++ {
+			out = append(out, u.Field(i).Type())
+		}
+	case *types.Signature:
+		for i := 0; i < u.Params().Len(); i++ {
+			out = append(out, u.Params().At(i).Type())
+		}
+		for i := 0; i < u.Results().Len(); i++ {
+			out = append(out, u.Results().At(i).Type())
+		}
+	case *types.Interface:
+		for i := 0; i < u.NumMethods(); i++ {
+			out = append(out, u.Method(i).Type())
+		}
+	case *types.Tuple:
+		for i := 0; i < u.Len(); i++ {
+			out = append(out, u.At(i).Type())
+		}
+	}
+	return out
+}
+
+// typeSCCState — обход Тарьяна по графу типов для interesting.
+type typeSCCState struct {
+	next  int
+	index map[types.Type]int
+	low   map[types.Type]int
+	on    map[types.Type]bool
+	acc   map[types.Type]bool
+	stack []types.Type
+}
+
+func newTypeSCCState() *typeSCCState {
+	return &typeSCCState{index: map[types.Type]int{}, low: map[types.Type]int{}, on: map[types.Type]bool{}, acc: map[types.Type]bool{}}
+}
+
+// visit — компонента сильной связности типа t: ответ пишется в память
+// разбора, когда компонента закрыта, и один на всю компоненту.
+func (s *typeSCCState) visit(a *surfaceFlow, t types.Type) {
+	i := s.next
+	s.next++
+	s.index[t], s.low[t] = i, i
+	s.stack = append(s.stack, t)
+	s.on[t] = true
+	acc := a.interestingBase(t)
+	for _, c := range interestingKids(t) {
+		if acc {
+			break
+		}
+		c = types.Unalias(c)
+		if v, done := a.memo[c]; done {
+			acc = v
+			continue
+		}
+		if _, seen := s.index[c]; !seen {
+			s.visit(a, c)
+			if s.on[c] {
+				s.low[t] = min(s.low[t], s.low[c])
+			} else {
+				acc = a.memo[c]
+			}
+			continue
+		}
+		if s.on[c] {
+			s.low[t] = min(s.low[t], s.index[c])
+		}
+	}
+	s.acc[t] = acc
+	if s.low[t] != i {
+		return
+	}
+	var members []types.Type
+	val := false
+	for {
+		n := s.stack[len(s.stack)-1]
+		s.stack = s.stack[:len(s.stack)-1]
+		s.on[n] = false
+		members = append(members, n)
+		val = val || s.acc[n]
+		if n == t {
+			break
+		}
+	}
+	for _, n := range members {
+		a.memo[n] = val
+	}
 }
 
 func (a *surfaceFlow) typeOf(sp *surfaceSrcPkg, e ast.Expr) types.Type {
