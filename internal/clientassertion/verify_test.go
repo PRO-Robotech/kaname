@@ -113,7 +113,7 @@ func newFixture(t *testing.T, opts ...func(*domain.AssertionClient)) fixture {
 		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:            tokenpolicy.ClockSkew,
 		Clock:                func() time.Time { return testNow },
-	}, reg, iss, rep)
+	}, reg, iss, rep, generousPace(t))
 	require.NoError(t, err)
 	return fixture{verifier: v, registry: reg, issuers: iss, replay: rep, key: key}
 }

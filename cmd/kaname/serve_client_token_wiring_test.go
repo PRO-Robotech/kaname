@@ -110,6 +110,8 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
 	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{}, wiringCutoffs{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)

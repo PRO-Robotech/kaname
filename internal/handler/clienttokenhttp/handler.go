@@ -18,12 +18,21 @@
 // алгоритм и какие идентификаторы однократности уже заняты. Каждый ответ сам по
 // себе безобиден, а вместе они дают карту.
 //
-// Различимыми остаются ровно ПЯТЬ отказов, и все пять решаются ДО того, как
-// запрос назвал хоть какого-нибудь клиента: метод, потолок тела, неразбираемая
-// форма, вид выдачи вне перечня и повторённый параметр утверждения. Они не
-// сообщают о клиенте ничего, потому что клиента на этом шаге ещё нет, и
-// стандартные коды у них обязаны быть свои — иначе чужая библиотека прочтёт
-// «слишком большое тело» как «неверный клиент» и будет чинить не то.
+// Различимыми остаются ровно ПЯТЬ отказов формы, и все пять решаются ДО того,
+// как запрос назвал хоть какого-нибудь клиента: метод, потолок тела,
+// неразбираемая форма, вид выдачи вне перечня и повторённый параметр
+// утверждения. Они не сообщают о клиенте ничего, потому что клиента на этом шаге
+// ещё нет, и стандартные коды у них обязаны быть свои — иначе чужая библиотека
+// прочтёт «слишком большое тело» как «неверный клиент» и будет чинить не то.
+//
+// # Два отказа по темпу — тоже свои (kaname#315)
+//
+// Потолок одновременных обменов и темп обменов на идентификатор клиента
+// отвечают «повторите позже» (429 со сроком ожидания), а не «неверный клиент»:
+// слитые с отказом аутентификации, они заставили бы клиента чинить учётные
+// данные, которые исправны. Оба решаются ДО обращения к реестру — потолок до
+// проверяющего вовсе, темп по ЗАЯВЛЕННОМУ идентификатору до разрешения его в
+// строку, — поэтому о записи реестра не сообщают ничего.
 //
 // Различимость для НАС живёт с другой стороны провода: у каждого исхода свой
 // счётчик и своя запись в журнале. Без счётчика мёртвый контроль невидим —
@@ -36,9 +45,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/PRO-Robotech/corelib/httpbody"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
@@ -84,7 +96,14 @@ type Config struct {
 	// этого запроса — форма с одним подписанным утверждением, и его потолок
 	// объявляет тот, кто поднимает сервис.
 	BodyCeiling int64
-	Logger      *slog.Logger
+	// InFlightCeiling — потолок одновременных обменов на этом процессе.
+	// ОБЯЗАТЕЛЕН по тому же доводу, что потолок тела: ноль означал бы «без
+	// потолка», а величина, подставленная построением, стражу старта не видна.
+	//
+	// Обмен сверх потолка отвергается сразу, а не ждёт места: ожидание держало
+	// бы соединение и горутину ровно тогда, когда их и так слишком много.
+	InFlightCeiling int
+	Logger          *slog.Logger
 }
 
 // Handler — токен-эндпоинт.
@@ -92,6 +111,9 @@ type Handler struct {
 	cfg      Config
 	verifier Verifier
 	issuer   Issuer
+
+	// slots — места одновременных обменов; занятое место — элемент канала.
+	slots chan struct{}
 
 	// mu защищает перепись исходов. Счётчики читаются сборщиком метрик, и
 	// карта под конкурентной записью без него разъехалась бы молча.
@@ -112,10 +134,14 @@ func NewHandler(cfg Config, verifier Verifier, issuer Issuer) (*Handler, error) 
 	if cfg.BodyCeiling <= 0 {
 		return nil, errRequired("body ceiling")
 	}
+	if cfg.InFlightCeiling <= 0 {
+		return nil, errRequired("in-flight ceiling")
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	h := &Handler{cfg: cfg, verifier: verifier, issuer: issuer,
+		slots:    make(chan struct{}, cfg.InFlightCeiling),
 		outcomes: make(map[clientassertion.Outcome]uint64, len(clientassertion.Outcomes()))}
 	// Перепись заводится ЦЕЛИКОМ по закрытому словарю, а не по мере
 	// встречаемости: счётчик, появляющийся при первом отказе, не отличает
@@ -211,6 +237,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// (3а) Потолок одновременных обменов — ДО проверки. Всё, что ниже,
+	// обращается к хранилищам и сверяет подпись; потолок бережёт именно это, и
+	// обмен сверх него до проверяющего не доходит.
+	select {
+	case h.slots <- struct{}{}:
+		defer func() { <-h.slots }()
+	default:
+		h.count(clientassertion.OutcomeInFlightCeilingReached)
+		writeRetryLater(w, time.Second)
+		return
+	}
+
 	// (4) Полоса выбирается ВИДОМ ВЫДАЧИ, и формы двух полос не смешиваются.
 	//
 	// У каждого вида свои параметры: пара `client_assertion` +
@@ -227,6 +265,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// является — он говорит о запросе, не о состоянии перечня.
 			h.count(clientassertion.OutcomeMultipleAssertions)
 			writeJSON(w, http.StatusBadRequest, errorBody("invalid_request"))
+			return
+		}
+		if res.Outcome == clientassertion.OutcomeClientPaceExceeded {
+			// (5) Темп заявленного идентификатора: решён проверяющим ДО
+			// реестра, поэтому отвечает своим кодом, а не единым тоном отказов
+			// аутентификации.
+			h.count(clientassertion.OutcomeClientPaceExceeded)
+			writeRetryLater(w, res.RetryAfter)
 			return
 		}
 		h.refuse(r, res.Outcome, err)
@@ -327,6 +373,18 @@ func (h *Handler) refuse(r *http.Request, outcome clientassertion.Outcome, err e
 func confirmationFrom(*http.Request) *tokensigner.Confirmation { return nil }
 
 func errorBody(code string) map[string]any { return map[string]any{"error": code} }
+
+// writeRetryLater — отказ по темпу: 429 и срок ожидания целыми секундами,
+// округлённый ВВЕРХ. Повтор, названный раньше, чем место или темп освободится,
+// снова получил бы отказ; ноль секунд значил бы «повторите сразу».
+func writeRetryLater(w http.ResponseWriter, after time.Duration) {
+	secs := int64(math.Ceil(after.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	writeJSON(w, http.StatusTooManyRequests, errorBody("temporarily_unavailable"))
+}
 
 func writeJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")

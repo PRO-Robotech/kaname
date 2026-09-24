@@ -112,7 +112,7 @@ func newFedFixture(t *testing.T, opts ...func(*stubTrustedIssuers)) fedFixture {
 		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:            tokenpolicy.ClockSkew,
 		Clock:                func() time.Time { return testNow },
-	}, stubRegistry{rows: map[string]domain.AssertionClient{}}, issuers, rep)
+	}, stubRegistry{rows: map[string]domain.AssertionClient{}}, issuers, rep, generousPace(t))
 	require.NoError(t, err)
 	return fedFixture{verifier: v, issuers: issuers, replay: rep, idpKey: idp}
 }
@@ -380,7 +380,7 @@ func TestNew_RequiresTheTrustedIssuerResolver(t *testing.T) {
 		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:            tokenpolicy.ClockSkew,
 		Clock:                func() time.Time { return testNow },
-	}, stubRegistry{}, nil, newReplay())
+	}, stubRegistry{}, nil, newReplay(), generousPace(t))
 	require.Error(t, err, "проверяющий без перечня доверенных издателей построиться не вправе")
 	require.Contains(t, err.Error(), "trusted issuer")
 }
@@ -393,7 +393,7 @@ func TestNew_RequiresTheFederatedLifetimeCeiling(t *testing.T) {
 		MaxLifetime:      tokenpolicy.MaxAssertionLifetime,
 		ClockSkew:        tokenpolicy.ClockSkew,
 		Clock:            func() time.Time { return testNow },
-	}, stubRegistry{}, stubTrustedIssuers{}, newReplay())
+	}, stubRegistry{}, stubTrustedIssuers{}, newReplay(), generousPace(t))
 	require.Error(t, err, "федеративный потолок длительности обязан быть объявлен")
 }
 

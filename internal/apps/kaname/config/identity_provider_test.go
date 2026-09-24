@@ -55,14 +55,16 @@ func registryTokenLaneSettings() config.RegistryTokenConfig {
 }
 
 // clientTokenLaneSettings — токен-эндпоинт платформы, объявленный полностью:
-// четыре величины эндпоинта, каждую стережёт его собственный страж.
+// шесть величин эндпоинта, каждую стережёт его собственный страж.
 func clientTokenLaneSettings() config.ClientTokenConfig {
 	return config.ClientTokenConfig{
-		Enabled:          true,
-		AllowedAudiences: "registry.kacho.local, https://api.kacho.cloud",
-		DefaultAudience:  "https://api.kacho.cloud",
-		TokenTTL:         15 * time.Minute,
-		BodyCeiling:      64 << 10,
+		Enabled:                  true,
+		AllowedAudiences:         "registry.kacho.local, https://api.kacho.cloud",
+		DefaultAudience:          "https://api.kacho.cloud",
+		TokenTTL:                 15 * time.Minute,
+		BodyCeiling:              64 << 10,
+		ExchangesPerClientPerSec: 5,
+		InFlightCeiling:          64,
 	}
 }
 

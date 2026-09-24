@@ -156,6 +156,8 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
 	}, signer, claims)
 	require.NoError(t, err)
 

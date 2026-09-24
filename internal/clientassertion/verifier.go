@@ -49,6 +49,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +115,14 @@ const (
 	OutcomeReplayed               Outcome = "replayed"
 	OutcomeRegistryUnavailable    Outcome = "registry-unavailable"
 	OutcomeReplayStoreUnavailable Outcome = "replay-store-unavailable"
+	// OutcomeClientPaceExceeded — темп обменов ЗАЯВЛЕННОГО идентификатора
+	// исчерпан (kaname#315). Решается до реестра и до перечня доверенных
+	// издателей, по идентификатору из предъявления, и потому о записи реестра
+	// не говорит ничего: темп тратят только принятые предъявления. Наружу —
+	// свой код «повторите позже», а не «неверный клиент»: единый тон отказов
+	// аутентификации держится для исходов, наступающих ПОСЛЕ обращения к
+	// реестру, а этот наступает до него.
+	OutcomeClientPaceExceeded Outcome = "client-pace-exceeded"
 
 	// Исходы ниже производит НЕ проверяющий, а эндпоинт и выдача. Они живут в
 	// этом же закрытом словаре намеренно: перечень исходов есть перечень
@@ -134,6 +143,10 @@ const (
 	OutcomeMultipleAssertions Outcome = "multiple-assertions"
 	// OutcomeUnsupportedGrantType — вид выдачи вне закрытого перечня.
 	OutcomeUnsupportedGrantType Outcome = "unsupported-grant-type"
+	// OutcomeInFlightCeilingReached — потолок одновременных обменов эндпоинта
+	// занят (kaname#315). Решается до проверяющего: потолок бережёт именно
+	// проверку — обращение к реестру и сверку подписи.
+	OutcomeInFlightCeilingReached Outcome = "in-flight-ceiling-reached"
 	// OutcomeAudienceNotAllowed — запрошенный адресат вне объявленного
 	// конфигурацией перечня адресатов платформы.
 	OutcomeAudienceNotAllowed Outcome = "requested-audience-not-allowed"
@@ -189,11 +202,13 @@ func Outcomes() []Outcome {
 		OutcomeReplayed,
 		OutcomeRegistryUnavailable,
 		OutcomeReplayStoreUnavailable,
+		OutcomeClientPaceExceeded,
 		OutcomeMethodNotAllowed,
 		OutcomeBodyAboveCeiling,
 		OutcomeMalformedRequest,
 		OutcomeMultipleAssertions,
 		OutcomeUnsupportedGrantType,
+		OutcomeInFlightCeilingReached,
 		OutcomeAudienceNotAllowed,
 		OutcomeClientExpired,
 		OutcomeOwnerNotActive,
@@ -228,6 +243,9 @@ type Result struct {
 	AssertionID string
 	// ExpiresAt — момент истечения предъявленного утверждения.
 	ExpiresAt time.Time
+	// RetryAfter — через сколько повтор пройдёт по темпу. Заполняется только
+	// исходом [OutcomeClientPaceExceeded].
+	RetryAfter time.Duration
 }
 
 // PresenterResponse — опознавательное слово, которое уходит предъявителю.
@@ -292,12 +310,25 @@ type ReplayGuard interface {
 	Redeem(ctx context.Context, clientID, assertionID string, expiresAt time.Time) error
 }
 
+// ExchangePace — порт темпа «обменов в секунду на идентификатор клиента»
+// (kaname#315).
+//
+// Бронь, а не вопрос: Reserve САМ списывает обмен и сам отвечает, остался ли
+// он, — иначе параллельные предъявления проходили бы сверх темпа. Проверяющий
+// возвращает бронь (refund), когда предъявление отвергнуто: темп клиента тратят
+// только принятые предъявления, и назвавший чужой идентификатор без его ключа
+// чужой темп не расходует.
+type ExchangePace interface {
+	Reserve(key string) (refund func(), retryAfter time.Duration, ok bool)
+}
+
 // Verifier — проверяющий утверждение клиента.
 type Verifier struct {
 	policy  Policy
 	clients ClientResolver
 	issuers TrustedIssuerResolver
 	replay  ReplayGuard
+	pace    ExchangePace
 }
 
 // New строит проверяющего. Неполная настройка — ОТКАЗ ПОСТРОЕНИЯ.
@@ -305,7 +336,7 @@ type Verifier struct {
 // Проверяющий, собранный наполовину, принимал бы утверждения, которые обязан
 // отвергнуть, — и узналось бы это не на старте, а на первом принятом чужом
 // предъявлении, то есть никогда.
-func New(p Policy, clients ClientResolver, issuers TrustedIssuerResolver, replay ReplayGuard) (*Verifier, error) {
+func New(p Policy, clients ClientResolver, issuers TrustedIssuerResolver, replay ReplayGuard, pace ExchangePace) (*Verifier, error) {
 	switch {
 	case strings.TrimSpace(p.ExpectedAudience) == "":
 		return nil, fmt.Errorf("clientassertion: expected audience is required (empty means 'accept any')")
@@ -329,8 +360,12 @@ func New(p Policy, clients ClientResolver, issuers TrustedIssuerResolver, replay
 			"(a verifier without one refuses every federated assertion while looking healthy)")
 	case replay == nil:
 		return nil, fmt.Errorf("clientassertion: replay guard is required")
+	case pace == nil:
+		// Проверяющий без темпа не «работает без ограничения»: ось темпа,
+		// провязанная не на каждой сборке, молчит ровно там, где её забыли.
+		return nil, fmt.Errorf("clientassertion: exchange pace is required")
 	}
-	return &Verifier{policy: p, clients: clients, issuers: issuers, replay: replay}, nil
+	return &Verifier{policy: p, clients: clients, issuers: issuers, replay: replay, pace: pace}, nil
 }
 
 // refuse собирает отказ. Ответ предъявителю у всех исходов один; различает их
@@ -347,8 +382,11 @@ func refuse(o Outcome, format string, args ...any) (Result, error) {
 // того, как ключ разрешён по РЕЕСТРУ:
 //
 //	вид предъявления → форма → заголовок (дубли · пометки · ТИП) → алгоритм
-//	словаря → личность → реестр → алгоритм КЛИЕНТА → подпись → адресат →
-//	время → однократность
+//	словаря → личность → ТЕМП → реестр → алгоритм КЛИЕНТА → подпись →
+//	адресат → время → однократность
+//
+// Темп стоит между личностью и реестром: раньше ему нечем ключеваться, позже
+// он уже не бережёт обращения к хранилищам и сверки подписи (kaname#315).
 //
 // Две границы в нём несущие. Сверка алгоритма с ЗАРЕГИСТРИРОВАННЫМ у клиента
 // стоит ДО проверки подписи: перечень допустимых алгоритмов строится из строки
@@ -413,6 +451,18 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 		return refuse(OutcomeIdentityMismatch, "issuer and subject must agree and both name the client")
 	}
 
+	// (7а) Темп ЗАЯВЛЕННОГО идентификатора — до реестра (kaname#315). Всё, что
+	// ниже, обращается к хранилищам и сверяет подпись; темп стоит перед этим,
+	// потому что бережёт именно это.
+	return v.paced(paceKeyClient(issuer), func() (Result, error) {
+		return v.verifyRegistered(ctx, raw, alg, issuer, claims)
+	})
+}
+
+// verifyRegistered — хвост полосы клиента от реестра до однократности.
+func (v *Verifier) verifyRegistered(
+	ctx context.Context, raw, alg, issuer string, claims map[string]json.RawMessage,
+) (Result, error) {
 	// (8) Разрешение клиента по реестру. Зеркальное значение (идентификатор во
 	// внешнем сервере) на этом пути НЕ УЧАСТВУЕТ вовсе — ни как второй ключ
 	// поиска, ни как запасной.
@@ -469,6 +519,41 @@ func (v *Verifier) Verify(ctx context.Context, assertionType, raw string) (Resul
 	// (12)-(15) Адресат, время, однократность. Общее для обеих полос — см.
 	// admit. Потолок длительности подаётся полосой: он у них РАЗНЫЙ.
 	return v.admit(ctx, claims, client, v.policy.MaxLifetime)
+}
+
+// paced — бронь темпа вокруг той части проверки, что обращается к хранилищам.
+//
+// Отвергнутое предъявление бронь ВОЗВРАЩАЕТ: темп клиента тратят только
+// принятые предъявления. Иначе назвавший чужой идентификатор без его ключа
+// исчерпывал бы чужой темп, и ограничение стало бы способом остановить чужую
+// выдачу.
+//
+// Исход отказа по темпу не зависит от того, есть ли идентификатор в реестре:
+// реестр на этом шаге ещё не спрошен.
+func (v *Verifier) paced(key string, rest func() (Result, error)) (Result, error) {
+	refund, wait, ok := v.pace.Reserve(key)
+	if !ok {
+		res, err := refuse(OutcomeClientPaceExceeded, "exchange pace of the claimed identifier is exhausted")
+		res.RetryAfter = wait
+		return res, err
+	}
+	res, err := rest()
+	if err != nil {
+		refund()
+	}
+	return res, err
+}
+
+// paceKeyClient — ключ темпа полосы клиента: идентификатор строки реестра.
+func paceKeyClient(clientID string) string { return "client:" + clientID }
+
+// paceKeyFederated — ключ темпа федеративной полосы: пара (издатель, субъект).
+//
+// Длина издателя стоит в ключе, чтобы разные пары не сводились к одной строке:
+// оба члена выбирает предъявитель, и разделитель без длины он мог бы
+// поставить внутрь члена сам.
+func paceKeyFederated(issuer, subject string) string {
+	return "federated:" + strconv.Itoa(len(issuer)) + ":" + issuer + ":" + subject
 }
 
 // admit — общий хвост обеих полос: адресат, время, однократность, погашение.

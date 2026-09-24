@@ -99,6 +99,10 @@ func (s *stubIssuer) Issue(_ context.Context, in client_token.Input) (client_tok
 // заданной.
 const testBodyCeiling int64 = 64 << 10
 
+// testInFlightCeiling — потолок одновременных обменов в пробах, чей предмет не
+// потолок. Та же природа, что у потолка тела: число фикстуры, а не величина.
+const testInFlightCeiling = 8
+
 type stand struct {
 	h        *clienttokenhttp.Handler
 	verifier *stubVerifier
@@ -112,8 +116,9 @@ func newStand(t *testing.T) stand {
 		// Потолок задаётся ЯВНО: у построения умолчания нет, и это не
 		// неудобство пробы, а условие того, чтобы страж старта мог отличить
 		// заданную величину от незаданной.
-		BodyCeiling: testBodyCeiling,
-		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		BodyCeiling:     testBodyCeiling,
+		InFlightCeiling: testInFlightCeiling,
+		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
 	return stand{h: h, verifier: v, issuer: i}
@@ -185,8 +190,9 @@ func TestF2_11_BodyCeilingRefusesBeforeReadingAnyByte(t *testing.T) {
 	v, i := &stubVerifier{}, &stubIssuer{}
 	const ceiling = 512
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
-		BodyCeiling: ceiling,
-		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		BodyCeiling:     ceiling,
+		InFlightCeiling: testInFlightCeiling,
+		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
 
@@ -390,9 +396,12 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 			clientassertion.OutcomeBodyAboveCeiling,
 			clientassertion.OutcomeMalformedRequest,
 			clientassertion.OutcomeMultipleAssertions,
-			clientassertion.OutcomeUnsupportedGrantType:
-			// Эти пять решаются ДО того, как запрос назвал клиента, и им
-			// положены свои стандартные коды — их проверяют пробы выше.
+			clientassertion.OutcomeUnsupportedGrantType,
+			clientassertion.OutcomeInFlightCeilingReached,
+			clientassertion.OutcomeClientPaceExceeded:
+			// Эти решаются ДО того, как клиент разрешён по реестру, и им
+			// положены свои стандартные коды — их проверяют пробы выше и
+			// pace_test.go (два отказа по темпу, kaname#315).
 			continue
 		}
 		require.Truef(t, seen[o], "исход %s не подан ни одним входом пробы", o)
@@ -462,13 +471,15 @@ func TestRequestedAudienceReachesIssuanceAsGiven(t *testing.T) {
 // незаданной: она не бывала незаданной. Умолчание, снимающее вопрос, снимает и
 // проверку — и снимает её тише, чем отсутствие проверки.
 func TestHandlerRefusesToBuildWithoutItsPorts(t *testing.T) {
-	full := clienttokenhttp.Config{BodyCeiling: testBodyCeiling}
+	full := clienttokenhttp.Config{BodyCeiling: testBodyCeiling, InFlightCeiling: testInFlightCeiling}
 	_, err := clienttokenhttp.NewHandler(full, nil, &stubIssuer{})
 	require.Error(t, err)
 	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, nil)
 	require.Error(t, err)
 	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{}, &stubVerifier{}, &stubIssuer{})
 	require.Error(t, err, "нулевой потолок тела означает «без потолка» и обязан отвергать построение")
+	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{BodyCeiling: testBodyCeiling}, &stubVerifier{}, &stubIssuer{})
+	require.Error(t, err, "нулевой потолок одновременных обменов означает «без потолка» и обязан отвергать построение")
 	// Положительный контроль.
 	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, &stubIssuer{})
 	require.NoError(t, err)

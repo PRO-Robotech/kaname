@@ -647,9 +647,9 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
 	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
-	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а четыре
-	// его величины — его собственным стражем, то есть только после того, как
-	// эндпоинт включён. Образец перечня адресатов несёт образец адресата
+	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а шесть
+	// его величин (четыре F2 и две темпа, #315) — его собственным стражем, то
+	// есть только после того, как эндпоинт включён. Образец перечня адресатов несёт образец адресата
 	// докерной полосы (`api-server.registry-token.service` выше): страж той
 	// полосы требует его внутри перечня, и несогласованные образцы отверг бы он.
 	{
@@ -709,6 +709,29 @@ var RequiredSettings = []RequiredSetting{
 		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
 			"читал бы сколько прислали",
 		Refusal: "authn.client-token.body-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.exchanges-per-client-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "5",
+		Why: "темп обменов в секунду на идентификатор клиента, на реплику. Судится по заявленному " +
+			"идентификатору до обращения к реестру, тратят его только принятые предъявления; " +
+			"превышение — ответ 429 со сроком ожидания. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.exchanges-per-client-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "64",
+		Why: "потолок одновременных обменов на реплику. Обмен сверх потолка отвергается до " +
+			"проверки ответом 429 со сроком ожидания, а не ждёт места. Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.in-flight-ceiling must be declared",
 	},
 }
 

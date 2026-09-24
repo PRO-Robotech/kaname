@@ -271,6 +271,11 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.client-token.default-audience", "")
 	v.SetDefault("authn.client-token.token-ttl", "0s")
 	v.SetDefault("authn.client-token.body-ceiling", 0)
+	// Темп эндпоинта (kaname#315) — та же дисциплина: нулевое умолчание держит
+	// ключ разрешимым из окружения, а незаданная величина доезжает до стража
+	// нулём и отвергает пуск.
+	v.SetDefault("authn.client-token.exchanges-per-client-per-sec", 0)
+	v.SetDefault("authn.client-token.in-flight-ceiling", 0)
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
 	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает

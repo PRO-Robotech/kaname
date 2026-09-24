@@ -58,6 +58,15 @@ type ClientTokenConfig struct {
 	// BodyCeiling — потолок тела запроса в байтах. Ноль означал бы «без
 	// потолка», поэтому объявляется числом и проверяется стражем.
 	BodyCeiling int64 `mapstructure:"body-ceiling"`
+	// ExchangesPerClientPerSec — темп обменов в секунду на идентификатор
+	// клиента, НА ПРОЦЕСС (kaname#315). Судится по заявленному идентификатору
+	// до обращения к реестру; тратят его только принятые предъявления. Запас —
+	// одна секунда темпа. Несколько реплик дают клиенту до «темп × число
+	// реплик»: величина объявляется в расчёте на реплику.
+	ExchangesPerClientPerSec int `mapstructure:"exchanges-per-client-per-sec"`
+	// InFlightCeiling — потолок одновременных обменов, НА ПРОЦЕСС (kaname#315).
+	// Обмен сверх потолка отвергается до проверки, а не ждёт места.
+	InFlightCeiling int `mapstructure:"in-flight-ceiling"`
 }
 
 // AudienceList возвращает перечень адресатов платформы, считая ЭЛЕМЕНТЫ.
@@ -78,13 +87,15 @@ func (c ClientTokenConfig) AudienceList() []string {
 // Каждое сообщение называет НАСТРОЙКУ и правило; ни одно не называет значения
 // секрета — текст отказа читает оператор, а не предъявитель.
 //
-// # ПЕРЕЧЕНЬ ВЕЛИЧИН ЭНДПОИНТА, ТРЕБУЕМЫХ ПРИ СТАРТЕ, — ЧЕТЫРЕ (#112)
+// # ПЕРЕЧЕНЬ ВЕЛИЧИН ЭНДПОИНТА, ТРЕБУЕМЫХ ПРИ СТАРТЕ, — ШЕСТЬ (#112, #315)
 //
 // перечень адресатов платформы · адресат по умолчанию · срок выдаваемого
-// токена · потолок тела запроса.
+// токена · потолок тела запроса · темп обменов на идентификатор клиента ·
+// потолок одновременных обменов.
 //
-// Ровно эти четыре названы врезкой о фазе F2 в правиле безопасности корпуса, и
-// ровно их требует эта функция. До задачи #112 требование было ОБЪЯВЛЕНО и не
+// Первые четыре названы врезкой о фазе F2 в правиле безопасности корпуса;
+// две величины темпа добавлены задачей kaname#315 под той же дисциплиной —
+// нулевое умолчание в загрузчике и отказ старта при незаданной. До задачи #112 требование было ОБЪЯВЛЕНО и не
 // исполнялось у двух последних: загрузчик подставлял им значение умолчанием,
 // незаданными они не бывали, и ветвь стража не исполнялась ни разу. Сценарий
 // приёмки F2-43 («страж старта отвергает пуск при незаданном потолке тела»)
@@ -174,6 +185,21 @@ func (c ClientTokenConfig) Validate(signing TokenSigningConfig, hostListenAddres
 			"authn.client-token.body-ceiling must be declared as a positive number of bytes "+
 				"(got %d) — zero means «no ceiling», and the endpoint would read whatever arrives",
 			c.BodyCeiling))
+	}
+
+	// Темп (kaname#315). Ноль у обеих величин означал бы «без ограничения», и
+	// предел, выбранный за оператора, он не увидел бы и не пересмотрел.
+	if c.ExchangesPerClientPerSec <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.exchanges-per-client-per-sec must be declared as a positive number "+
+				"of exchanges per second per client identifier, per replica (got %d) — zero means «no pace»",
+			c.ExchangesPerClientPerSec))
+	}
+	if c.InFlightCeiling <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.in-flight-ceiling must be declared as a positive number of concurrent "+
+				"exchanges, per replica (got %d) — zero means «no ceiling»",
+			c.InFlightCeiling))
 	}
 	return errs
 }

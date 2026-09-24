@@ -52,6 +52,10 @@ func clientTokenOn() config.ClientTokenConfig {
 		DefaultAudience:  "api.kacho.local",
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
+		// Темп (kaname#315): обменов в секунду на идентификатор клиента и
+		// потолок одновременных обменов.
+		ExchangesPerClientPerSec: 5,
+		InFlightCeiling:          64,
 	}
 }
 
@@ -132,6 +136,31 @@ func TestF2_16_ClientTokenBootGuardRefusesTheDegenerateAndStartsOnTheDeclared(t 
 			name:    "потолок тела не задан",
 			mutate:  func(c *config.ClientTokenConfig, _ *config.TokenSigningConfig) { c.BodyCeiling = 0 },
 			mustSay: "body-ceiling",
+		},
+		{
+			// kaname#315 п. 2: ноль означал бы «без ограничения темпа».
+			name: "темп обменов на клиента не задан",
+			mutate: func(c *config.ClientTokenConfig, _ *config.TokenSigningConfig) {
+				c.ExchangesPerClientPerSec = 0
+			},
+			mustSay: "exchanges-per-client-per-sec",
+		},
+		{
+			name: "темп обменов на клиента отрицателен",
+			mutate: func(c *config.ClientTokenConfig, _ *config.TokenSigningConfig) {
+				c.ExchangesPerClientPerSec = -1
+			},
+			mustSay: "exchanges-per-client-per-sec",
+		},
+		{
+			name:    "потолок одновременных обменов не задан",
+			mutate:  func(c *config.ClientTokenConfig, _ *config.TokenSigningConfig) { c.InFlightCeiling = 0 },
+			mustSay: "in-flight-ceiling",
+		},
+		{
+			name:    "потолок одновременных обменов отрицателен",
+			mutate:  func(c *config.ClientTokenConfig, _ *config.TokenSigningConfig) { c.InFlightCeiling = -3 },
+			mustSay: "in-flight-ceiling",
 		},
 	}
 

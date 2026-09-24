@@ -85,11 +85,20 @@ func buildClientTokenEndpoint(
 	// Одинаковость ответа полос держат строка и запрос к ней (тип адаптера),
 	// предел на вызов (та же обёртка и тот же credentialLanePeerTimeout) и
 	// правило вердикта (`revocationpolicy`), а не общий экземпляр.
-	return clienttokenwire.FromPool(pool, clienttokenwire.BuildConfig{
+	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger), signer, claims)
+}
+
+// clientTokenBuildConfig — перевод настройки в вход сборки эндпоинта.
+//
+// Отделён от провязки пула затем, чтобы переход «настройка → сборка» судился
+// без базы: величина, которую страж требует и корень не передаёт, оставляет
+// обе стороны зелёными по своим пробам (kaname#315).
+func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger) clienttokenwire.BuildConfig {
+	return clienttokenwire.BuildConfig{
 		Logger: logger,
 		// Ожидаемый адресат утверждения — идентификатор НАШЕГО издателя, а не
 		// адрес эндпоинта: у адреса форм несколько, у издателя одна.
-		ExpectedAudience: signer.Issuer(),
+		ExpectedAudience: issuer,
 		// Величины объявлены числом ровно в одном месте и приезжают сюда
 		// параметром: сборка обязана отличать поданную величину от неподанной,
 		// а константа незаданной не бывает.
@@ -102,7 +111,11 @@ func buildClientTokenEndpoint(
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
 		PeerTimeout:              credentialLanePeerTimeout,
-	}, signer, claims)
+		// Темп (kaname#315): обе величины объявляет профиль, страж старта их
+		// требует при включённом эндпоинте.
+		ExchangesPerClientPerSec: cfg.AuthN.ClientToken.ExchangesPerClientPerSec,
+		InFlightCeiling:          cfg.AuthN.ClientToken.InFlightCeiling,
+	}
 }
 
 // clientTokenOutcomeReader — переходник от переписи обработчика к читателю
