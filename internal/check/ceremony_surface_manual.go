@@ -27,22 +27,6 @@ import (
 	"go/types"
 )
 
-// pathCandKind — вид места, где значение может выбирать ветку.
-type pathCandKind uint8
-
-const (
-	candCompare pathCandKind = iota + 1
-	candSwitch
-	candMapIndex
-	candMatchCall
-)
-
-// pathCand — место-кандидат в решение о маршруте.
-type pathCand struct {
-	node flowNode
-	kind pathCandKind
-}
-
 // manualRef — решение о маршруте по пути запроса и его форма словом.
 type manualRef struct {
 	node flowNode
@@ -61,20 +45,20 @@ func (a *surfaceFlow) notePathNode(sp *surfaceSrcPkg, fk fkey, n ast.Node) {
 		if isURLPath(sp, x) {
 			a.pathReads = append(a.pathReads, flowNode{sp, fk, x})
 		}
-		a.pathCands = append(a.pathCands, pathCand{flowNode{sp, fk, x}, candMatchCall})
+		a.pathCands = append(a.pathCands, flowNode{sp, fk, x})
 	case *ast.BinaryExpr:
 		switch x.Op {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
-			a.pathCands = append(a.pathCands, pathCand{flowNode{sp, fk, x}, candCompare})
+			a.pathCands = append(a.pathCands, flowNode{sp, fk, x})
 		}
 	case *ast.SwitchStmt:
 		if x.Tag != nil {
-			a.pathCands = append(a.pathCands, pathCand{flowNode{sp, fk, x}, candSwitch})
+			a.pathCands = append(a.pathCands, flowNode{sp, fk, x})
 		}
 	case *ast.IndexExpr:
 		if t := a.typeOf(sp, x.X); t != nil {
 			if _, ok := t.Underlying().(*types.Map); ok {
-				a.pathCands = append(a.pathCands, pathCand{flowNode{sp, fk, x}, candMapIndex})
+				a.pathCands = append(a.pathCands, flowNode{sp, fk, x})
 			}
 		}
 	}
@@ -84,9 +68,9 @@ func (a *surfaceFlow) notePathNode(sp *surfaceSrcPkg, fk fkey, n ast.Node) {
 func (a *surfaceFlow) judgePathCands() {
 	d := &pathDeriver{a: a, memo: map[*types.Var]bool{}, busy: map[*types.Var]bool{}}
 	for _, c := range a.pathCands {
-		sp := c.node.pkg
+		sp := c.pkg
 		var form string
-		switch x := c.node.node.(type) {
+		switch x := c.node.(type) {
 		case *ast.BinaryExpr:
 			if d.derived(sp, x.X) || d.derived(sp, x.Y) {
 				form = "сравнение пути"
@@ -110,7 +94,7 @@ func (a *surfaceFlow) judgePathCands() {
 			}
 		}
 		if form != "" {
-			a.manual = append(a.manual, manualRef{node: c.node, form: form})
+			a.manual = append(a.manual, manualRef{node: c, form: form})
 		}
 	}
 }
