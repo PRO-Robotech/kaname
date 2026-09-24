@@ -46,6 +46,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -347,7 +348,7 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 	for i, reason := range domain.FamilyRevocationReasons() {
 		causes = append(causes, cause{
 			name: "прямой отзыв семейства: " + string(reason),
-			tag:  "fv" + string(rune('0'+i)),
+			tag:  "fv" + strconv.Itoa(i),
 			twin: true,
 			apply: func(t *testing.T, f familyRig, a codeScene) string {
 				require.NoError(t, f.ceremony.RevokeFamily(context.Background(), a.ctx.FamilyID, reason))
