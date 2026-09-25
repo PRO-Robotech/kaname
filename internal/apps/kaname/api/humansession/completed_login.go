@@ -82,7 +82,7 @@ package humansession
 // # Ранжирование — чужое
 //
 // Сравнение уровней берётся у единой функции ранжирования платформы
-// (`grpcsrv.ACRRank`): второй таблицы ранжирования в дереве не заводится
+// (`acrlevel.Rank`): второй таблицы ранжирования в дереве не заводится
 // (`internal/assurance` §«ЧЕГО ПАКЕТ НЕ ДЕЛАЕТ»).
 
 import (
@@ -90,7 +90,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/acrlevel"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -171,7 +171,7 @@ func resetFailuresOnCompletedLogin(ctx context.Context, w Writer, in completedLo
 func loginCompletedToEnrolledLevel(presented []string, enrolled []assurance.Method) bool {
 	required := 0
 	for _, l := range assurance.PresentableLevels(enrolled) {
-		if r := grpcsrv.ACRRank(l.String()); r > required {
+		if r := acrlevel.Rank(l.String()); r > required {
 			required = r
 		}
 	}
@@ -182,5 +182,5 @@ func loginCompletedToEnrolledLevel(presented []string, enrolled []assurance.Meth
 	if !ok {
 		return false
 	}
-	return grpcsrv.ACRRank(reached.String()) >= required
+	return acrlevel.Rank(reached.String()) >= required
 }

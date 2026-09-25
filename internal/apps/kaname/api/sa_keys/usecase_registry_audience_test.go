@@ -121,9 +121,9 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 // resolved list.
 func TestIssue_PrivateKeyJWT_WhitelistsRegistryAudienceByDefault(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 	u.AudiencePrefix = "https://internal.example/iam"
 	u.RegistryAudience = testRegistryAud
 
@@ -137,15 +137,15 @@ func TestIssue_PrivateKeyJWT_WhitelistsRegistryAudienceByDefault(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if !hydra.created {
-		t.Fatal("Hydra CreateOAuthClient never called")
+	if !provider.created {
+		t.Fatal("provider CreateOAuthClient never called")
 	}
-	if !containsStr(hydra.gotReq.Audience, testRegistryAud) {
-		t.Fatalf("Hydra audience = %v, want to contain registry audience %q (#320: docker login fails without it)",
-			hydra.gotReq.Audience, testRegistryAud)
+	if !containsStr(provider.gotReq.Audience, testRegistryAud) {
+		t.Fatalf("provider audience = %v, want to contain registry audience %q (#320: docker login fails without it)",
+			provider.gotReq.Audience, testRegistryAud)
 	}
-	if !containsStr(hydra.gotReq.Audience, "https://internal.example/iam/sa/sva_docker0000000000") {
-		t.Errorf("Hydra audience = %v, must still contain the kaname-internal default", hydra.gotReq.Audience)
+	if !containsStr(provider.gotReq.Audience, "https://internal.example/iam/sa/sva_docker0000000000") {
+		t.Errorf("provider audience = %v, must still contain the kaname-internal default", provider.gotReq.Audience)
 	}
 
 	resp := &iamv1.IssueSAKeyResponse{}

@@ -253,6 +253,9 @@ stand_env() {
   export KANAME_AUTHN__TOKEN_SIGNING__ISSUER=https://kaname.local
   export KANAME_AUTHN__TOKEN_SIGNING__ALGORITHM=RS256
   export KANAME_AUTHN__TOKEN_SIGNING__ALLOWED_ALGORITHMS=RS256
+  # Срок ключа подписи — политика ротации: умолчания у него нет (#321), и
+  # незаданный он отвергает пуск.
+  export KANAME_AUTHN__TOKEN_SIGNING__KEY_LIFETIME=2160h
   # ПОЛОСА ОБМЕНА ПОДПИСАННОГО УТВЕРЖДЕНИЯ — БЕЗ НЕЁ ВЫДАННЫЙ КЛЮЧ НЕ ОБМЕНЯТЬ.
   #
   # `Issue` отдаёт приватный ключ ОДИН раз, и превратить его в предъявителя можно

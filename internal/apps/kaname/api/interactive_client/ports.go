@@ -35,13 +35,20 @@ type clientRepo interface {
 	Delete(ctx context.Context, id domain.InteractiveClientID) (domain.InteractiveClient, bool, error)
 }
 
-// providerClients — the identity provider's client-registration port.
+// ProviderClients — порт заведения и снятия клиента интерактивного входа.
 //
 // WHY IT IS A PORT AND NOT A DIRECT CALL. iam is the single facade to the
 // provider (core rule #16); expressing the dependency here keeps the use-case
 // testable without a live provider and keeps the provider's HTTP shape out of
-// the business layer. The adapter is *clients.HydraAdminClient.
-type providerClients interface {
+// the business layer.
+//
+// ИМЕНОВАН НАРУЖУ, и это не косметика: исполнителей у порта ДВА, и выбирает их
+// посадка — под `external` зеркало чужого реестра
+// (`*clients.InteractiveClientProvider`), под `own` наш собственный реестр
+// (`*pg.OwnInteractiveClientProvider`). Выбор делает композиционный корень, а
+// выбор, который нельзя назвать типом, пришлось бы выражать ветвью внутри
+// use-case — то есть переносить решение о посадке в бизнес-слой (kaname#313).
+type ProviderClients interface {
 	Register(ctx context.Context, in ProviderClientSpec) (ProviderClient, error)
 	Deregister(ctx context.Context, providerClientID string) error
 }

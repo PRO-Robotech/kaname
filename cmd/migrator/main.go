@@ -7,8 +7,8 @@
 //
 // API совпадает с goose-flavour:
 //
-//	kaname-migrator up [--target <version>]
-//	kaname-migrator down [--target <version>]
+//	kaname-migrator up [--target <номер>]
+//	kaname-migrator down [--target <номер>]
 //	kaname-migrator status
 //
 // # Глагола `create` здесь НЕТ — и это решение, а не пропуск (#566)
@@ -19,7 +19,7 @@
 //
 // Действующая форма — метка времени заведения `YYYYMMDDHHMMSS_<что_делает>.sql`
 // (`date -u +%Y%m%d%H%M%S`). Объявлена она в ОДНОМ месте и здесь НЕ
-// переписывается: docs/architecture/migration-version-namespace.md. Своей
+// переписывается: docs/engineering/architecture/migration-version-namespace.md. Своей
 // редакции у справки быть не должно — две редакции об одном предмете расходятся
 // молча, и расходились (#1026).
 //
@@ -151,7 +151,7 @@ func newRootCmd(migrationsFS fs.FS) *cobra.Command {
 			"Одна точка сборки на use-case (cmd-binary не смешивает обязанности).\n\n" +
 			"Новая миграция заводится РУКОЙ: internal/migrations/YYYYMMDDHHMMSS_<что>.sql\n" +
 			"(метка времени заведения: date -u +%Y%m%d%H%M%S).\n" +
-			"Подробности — docs/architecture/migration-version-namespace.md.",
+			"Подробности — docs/engineering/architecture/migration-version-namespace.md.",
 		SilenceUsage: true,
 		// Пустая командная строка — ОТКАЗ, а не успех (#1461). Cobra при корне без
 		// исполнения печатает помощь и выходит успехом; прямая форма отвечает

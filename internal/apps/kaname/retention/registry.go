@@ -85,6 +85,17 @@ const (
 	// СВОЙ и более простой, чем у общего уборщика платформы, а послабление
 	// обязано нести гейт, который покраснеет с появлением оживителя.
 	SubjectProviderCompensationOutbox = "provider_compensation_outbox"
+	// SubjectAccessTokens — записи выпуска токена доступа собственной церемонии
+	// (kaname#319): идентификатор выпуска → семейство. Писать строку ОБЯЗАН
+	// выпуск токена доступа церемонии (провязка — kaname#396); на этой ревизии
+	// писателя на пути выдачи нет, и предмет пуст. Когда выпуск провязан, темп
+	// задаёт арендатор: строка на каждый токен доступа, выданный обменом кода
+	// или ротацией. Читают её поверхности предъявления, и каждая отвергает
+	// истёкший токен по его сроку, поэтому строка за сроком токена ни одного
+	// исхода не меняет.
+	// #nosec G101 -- это ИМЯ ТАБЛИЦЫ, а не удостоверение: предмет уборки, он же
+	// ключ реестра, наружу не уезжает ничем, кроме журнала прохода.
+	SubjectAccessTokens = "access_tokens"
 	// SubjectHumanSessions — записи нашей сессии человека, которые `Resolve`
 	// уже не обслужит ни при каком носителе: истёкшие и снятые (Ф3-49).
 	SubjectHumanSessions = "human_sessions"
@@ -250,6 +261,11 @@ type CompensationOutboxReaper interface {
 	SweepDeliveredCompensations(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// AccessTokenReaper — порт уборщика записей выпуска токена доступа.
+type AccessTokenReaper interface {
+	SweepExpiredAccessTokens(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // ReconcileOutboxReaper — порт уборщика очереди сверки прав.
 type ReconcileOutboxReaper interface {
 	SweepDrainedReconcileEvents(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
@@ -267,6 +283,7 @@ type ReconcileOutboxReaper interface {
 //	уборка журнала:      created_at     <  now() − subjectchange.JournalRetention
 //	уборка очереди сверки: sent_at      <  now() − reconcile_outbox.DrainedRetention
 //	уборка компенсаций:    sent_at      <  now() − outbox.DeliveredRetention
+//	уборка выпусков:     expires_at     <  now() − (ClockSkew + RemovalSlack)
 //
 // У отзывов слагаемых НЕТ, и это не пропуск: часы уборки и всех четырёх её
 // читателей уже одни — база, — поэтому запасу взяться неоткуда. Ноль здесь
@@ -293,6 +310,7 @@ func Subjects(
 	subjectChangeJournal SubjectChangeJournalReaper,
 	reconcileOutbox ReconcileOutboxReaper,
 	compensationOutbox CompensationOutboxReaper,
+	accessTokens AccessTokenReaper,
 ) []Subject {
 	return []Subject{
 		{
@@ -334,6 +352,16 @@ func Subjects(
 			Name:  SubjectProviderCompensationOutbox,
 			Grace: outbox.DeliveredRetention,
 			Sweep: compensationOutbox.SweepDeliveredCompensations,
+		},
+		{
+			// Порог — предикат ЧИТАТЕЛЕЙ: каждая поверхность предъявления
+			// отвергает истёкший токен по его сроку с допуском ClockSkew, а
+			// RemovalSlack — запас на расхождение часов уборки (база) и часов
+			// поверхности (процесс). Того же вида, что порог утверждений клиента:
+			// предмет обоих — «после срока с допуском строка ничего не решает».
+			Name:  SubjectAccessTokens,
+			Grace: tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
+			Sweep: accessTokens.SweepExpiredAccessTokens,
 		},
 	}
 }

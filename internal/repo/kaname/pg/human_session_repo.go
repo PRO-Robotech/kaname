@@ -17,17 +17,20 @@ package pg
 // материала нет.
 //
 // Операцию записи отсечки этот файл тоже не переписывает: она одна на дерево
-// (`upsertRevokeAllSQL`, §4.1 п.17), и три существующих писателя зовут её же.
+// (`subjectCutoffRowSQL`, §4.1 п.17), и зовут её все писатели ОДНОЙ дверью
+// `upsertSubjectCutoff` — она кладёт ОБЕ записи отсечки (kaname#313).
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -161,29 +164,105 @@ func firstAuthenticationQ(ctx context.Context, q rowQuerier, userID domain.UserI
 	return at, true, nil
 }
 
-// Writer — см. порт.
-func (r *HumanSessionRepo) Writer(ctx context.Context) (humansession.Writer, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+// beginHumanSessionWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя сессии,
+// и открывает оно её на НАЗВАННОМ уровне писателей церемонии
+// (`ceremonyWriterTx()`), а не на умолчании сессии (kaname#316).
+//
+// Снятие записи отзывает выданное в ней (`revokeFamiliesOfSessionsTx`) в этой
+// же транзакции, и исход снятия против одновременной выдачи решает её уровень:
+// на названном отзыв идёт своим новым снимком и видит семейство, заведённое
+// выдачей, на которой снятие стояло; на унаследованном `repeatable read` или
+// `serializable` снимок один на транзакцию, и то же семейство оставалось бы
+// неотозванным при снятой записи (раздел «Выдача против снятия сессии» у
+// `ceremonyWriterTx`).
+//
+// Двери, отдающие эту транзакцию, — `Writer`, `SessionSetWriter`,
+// `ForceLogoutWriter` и регистрация (`RegistrationStore.Writer`); построить
+// писателя сессии мимо этого открытия перепись пакета не даёт
+// (`ceremony_writer_openers_test.go`).
+func beginHumanSessionWriter(ctx context.Context, pool *pgxpool.Pool) (*humanSessionWriter, error) {
+	tx, err := pool.BeginTx(ctx, ceremonyWriterTx())
 	if err != nil {
-		return nil, mapErr(err, "HumanSession.Writer", "")
+		return nil, err
 	}
 	return &humanSessionWriter{tx: tx}, nil
 }
 
-// SweepUnservableSessions — уборка (форма Ф-ж): строки, которые `Resolve` уже
-// не обслужит ни при каком носителе — истёкшие и снятые, — старше порога.
-// Партия ограничена `ctid`-подзапросом; full=true — партия заполнена, звать ещё.
-func (r *HumanSessionRepo) SweepUnservableSessions(ctx context.Context, grace time.Duration, batch int) (int64, bool, error) {
-	if batch <= 0 {
-		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
+// Writer — см. порт.
+func (r *HumanSessionRepo) Writer(ctx context.Context) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.Writer", "")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	return w, nil
+}
+
+// SessionSetWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
+// строка личности замком писателя нескольких сессий (`lockPersonForSessionSetSQL`).
+func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.SessionSetWriter", "")
+	}
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return w, nil
+}
+
+// sweepUnservableSessionsSQL — оператор уборки записей сессии, которые
+// `Resolve` уже не обслужит: истёкшие и снятые старше порога ($1), партией не
+// больше $2.
+//
+// # УБОРКА НЕ ЖДЁТ ЗАНЯТЫХ СТРОК СЕССИИ (kaname#340)
+//
+// Уборка — писатель нескольких строк сессии, и её кандидаты пересекаются с
+// кандидатами снятия: снятие (`endSessionsOfSQL`) помечает и истёкшие не
+// снятые строки человека. Строку личности уборка не берёт — она проходит
+// строки многих людей, а одна транзакция не держит строк двух личностей
+// (`holdPersonForSessionSet`), — и в сериализацию писателей нескольких сессий
+// одного человека (`lockPersonForSessionSetSQL`) не входит. Порядок, в котором
+// она проходит строки, задаёт план: на таблице формы службы — хеш-агрегат по
+// `ctid` и выборка по нему, то есть порядок хеша, встречный порядку снятия.
+// Уборка, ждавшая занятую строку, давала со снятием взаимную блокировку в 3
+// прогонах из 3 (держатель, расширяющий окно,
+// `human_session_sweep_teardown_integration_test.go`).
+//
+// Поэтому кандидаты берутся `FOR UPDATE SKIP LOCKED` в порядке `id`: строку,
+// которую держит снятие, смена пароля, выдача кода или перепредъявление,
+// уборка ПРОПУСКАЕТ, а не ждёт, и ребра ожидания на строке сессии у неё нет.
+// Пропущенная строка остаётся кандидатом, и её берёт следующий проход.
+// Порядок `id` делает состав партии независимым от физического размещения
+// строк. Ожиданий на дочерних строках каскада (семейства токенов убираемой
+// сессии) это не снимает: строк сессии каскад не берёт.
+//
+// Вход уборки в общий порядок — строка личности раньше строк сессии —
+// отвергнут построением: уборке пришлось бы либо держать строки многих
+// личностей одной транзакцией, а порядка между личностями не задаёт никто (и
+// дверь такой транзакции отказывает), либо дробиться на транзакцию на
+// человека и вставать в очередь за каждым пользовательским писателем, которого
+// она сама бы задерживала.
+const sweepUnservableSessionsSQL = `
 		DELETE FROM human_sessions
 		 WHERE ctid IN (
 		       SELECT ctid FROM human_sessions
 		        WHERE (expires_at <= now() - $1::interval)
 		           OR (ended_at IS NOT NULL AND ended_at <= now() - $1::interval)
-		        LIMIT $2)`, grace, batch)
+		        ORDER BY id
+		        LIMIT $2
+		        FOR UPDATE SKIP LOCKED)`
+
+// SweepUnservableSessions — уборка (форма Ф-ж): строки, которые `Resolve` уже
+// не обслужит ни при каком носителе — истёкшие и снятые, — старше порога.
+// Партия ограничена `ctid`-подзапросом; full=true — партия заполнена, звать ещё.
+// Занятые строки в партию не входят (`sweepUnservableSessionsSQL`): партия,
+// где их пропустили, не полна, и их берёт следующий проход.
+func (r *HumanSessionRepo) SweepUnservableSessions(ctx context.Context, grace time.Duration, batch int) (int64, bool, error) {
+	if batch <= 0 {
+		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
+	}
+	tag, err := r.pool.Exec(ctx, sweepUnservableSessionsSQL, grace, batch)
 	if err != nil {
 		return 0, false, mapErr(err, "HumanSession.Sweep", "")
 	}
@@ -210,6 +289,90 @@ func (r *HumanSessionRepo) SweepAgedFailures(ctx context.Context, grace time.Dur
 // humanSessionWriter — одна транзакция записи.
 type humanSessionWriter struct {
 	tx pgx.Tx
+	// person — личность, строку которой транзакция держит; пусто — никакую.
+	// Одна транзакция держит строку не более чем одной личности: порядка между
+	// личностями не задаёт никто.
+	person domain.UserID
+	// sessionSet — строка личности взята замком писателя нескольких сессий
+	// (`FOR NO KEY UPDATE`), а не только ключевым (`FOR KEY SHARE`).
+	sessionSet bool
+}
+
+// lockPersonForSessionSetSQL — строка личности замком ПИСАТЕЛЯ НЕСКОЛЬКИХ
+// СЕССИЙ этого человека (kaname#340).
+//
+// # ПЕРЕПИСЬ ПИСАТЕЛЕЙ НЕСКОЛЬКИХ СТРОК СЕССИИ
+//
+// Писатель нескольких строк сессии — оператор, пишущий строки `human_sessions`
+// не по одному идентификатору, либо каскад, их удаляющий. Предикат переписи:
+// `git grep -nE '(UPDATE|DELETE FROM) +(kaname\.)?human_sessions' -- '*.go'
+// ':!*_test.go'` (из найденных — операторы с условием не по `id`), вызывающие
+// двери — `git grep -n 'EndOtherSessions(' -- '*.go' ':!*_test.go'` (из
+// найденных — вызовы; объявления портов, сама дверь и эта строка — не они),
+// каскады — `REFERENCES kaname.users` у таблицы `human_sessions` в миграциях.
+// Формы по этой переписи:
+//
+//   - дверь снятия `EndOtherSessions` (`endSessionsOfSQL`); её зовут
+//     принудительный выход, смена пароля, снятие второго фактора и завершение
+//     восстановления — они и сериализуются этим замком;
+//   - каскад удаления личности (`human_sessions_user_fk`, `ON DELETE
+//     CASCADE`): строку личности удаление держит само, замком сильнее этого, и
+//     с дверью сериализуется им же;
+//   - уборка (`sweepUnservableSessionsSQL`): многоличностная, строку личности
+//     не берёт и в эту сериализацию не входит; от цикла с остальными её
+//     отводит другое — занятых строк сессии она не ждёт, а пропускает.
+//
+// # ЗАЧЕМ ЗАМОК НА ЛИЧНОСТИ, А НЕ ПОРЯДОК СТРОК СЕССИИ
+//
+// Смена пароля и снятие фактора снимают прочие записи и затем пишут в свою —
+// то есть берут строки сессии «прочие → своя», а принудительный выход берёт
+// все одним оператором в порядке просмотра. Порядки встречные: выход брал свою
+// запись смены и ждал прочие, смена ждала свою — взаимная блокировка в 3
+// прогонах из 3, жертвой каждый раз выход
+// (`force_logout_concurrent_teardown_integration_test.go`,
+// `session_set_writers_person_first_integration_test.go`). Замок на строке
+// личности, взятый ДО первой строки сессии, сериализует вызывающих двери на
+// одной строке, и порядок строк сессии между ними перестаёт что-либо значить;
+// с ним — 0 взаимных блокировок из 3 в каждой из двух сцен.
+//
+// # ПОЧЕМУ ЭТА СИЛА
+//
+// `FOR NO KEY UPDATE` конфликтует сам с собой — это и есть сериализация — и с
+// удалением личности (`FOR UPDATE`); с проверкой внешнего ключа (`FOR KEY
+// SHARE`) он СОВМЕСТИМ, поэтому вход человека (вставка сессии), выдача кода и
+// запись отсечки им не останавливаются. Обычные правки строки личности
+// (`UPDATE users` неключевых колонок) с ним сериализуются: ни одна из них в
+// дереве не берёт до этого строк сессии, способа входа или кода
+// восстановления, так что цикла с ними нет.
+//
+// Строки может не быть: тогда держать нечего, и об отсутствии личности судит
+// внешний ключ следующей записи.
+const lockPersonForSessionSetSQL = `
+SELECT 1 FROM kaname.users WHERE id = $1 FOR NO KEY UPDATE`
+
+// holdPersonForSessionSet — строка личности замком писателя нескольких сессий,
+// если транзакция ещё не держит её так. Транзакция, уже держащая строку ДРУГОЙ
+// личности, отказывает: две такие транзакции во встречном порядке личностей
+// блокировали бы друг друга.
+//
+// Пустая личность — строки нет: оператор исполняется (цена полосы «адреса нет
+// ни у кого» та же, что у полосы «адрес есть»), но держать нечего, и отметка не
+// ставится.
+func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID domain.UserID) error {
+	if w.person != "" && w.person != userID {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot serialize on a second one")
+	}
+	if w.sessionSet && w.person == userID {
+		return nil
+	}
+	if _, err := w.tx.Exec(ctx, lockPersonForSessionSetSQL, string(userID)); err != nil {
+		return mapErr(err, "User", string(userID))
+	}
+	if userID != "" {
+		w.person, w.sessionSet = userID, true
+	}
+	return nil
 }
 
 func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
@@ -255,7 +418,24 @@ func (w *humanSessionWriter) FirstAuthentication(ctx context.Context, userID dom
 }
 
 // EndSession — отметка снятия на живой (не снятой) записи; повтор ничего не
-// пишет (Ф1-18).
+// пишет (Ф1-18). Вместе с записью снимается и ВЫДАННОЕ В НЕЙ, той же
+// транзакцией (kaname#313).
+//
+// # ПОЧЕМУ ОТЗЫВ ЗДЕСЬ ОБЯЗАТЕЛЕН
+//
+// Живой вызывающий у этого метода — СОБСТВЕННЫЙ ВЫХОД ЧЕЛОВЕКА. Ротацию
+// обновляющего токена останавливает ровно отзыв семейства: оператор ротации не
+// читает ни отметку окончания сессии, ни одну из отсечек. Значит без отзыва
+// человек выходил сам, запись помечалась окончённой, а выданное в ней
+// продолжало ротироваться в свежие токены — то же, что чинилось для
+// распорядителя.
+//
+// # ПОЧЕМУ ОТЗЫВ СТОИТ ПОД УСЛОВИЕМ СНЯТИЯ
+//
+// Отзывается семейство ровно тогда, когда запись СНЯТА ЭТИМ вызовом. Повторный
+// выход и гонка с параллельным ничего не снимают — и отзывать им нечего:
+// семейство уже отозвал тот, кто снял запись. Безусловный отзыв здесь означал
+// бы, что проигравший гонку переписывает причину отзыва победителя.
 func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error) {
 	tag, err := w.tx.Exec(ctx, `
 		UPDATE human_sessions SET ended_at = $2, ended_reason = $3
@@ -263,20 +443,210 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 	if err != nil {
 		return false, mapErr(err, "HumanSession.End", string(id))
 	}
-	return tag.RowsAffected() == 1, nil
+	ended := tag.RowsAffected() == 1
+	if !ended {
+		return false, nil
+	}
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return false, rerr
+	}
+	return true, nil
 }
+
+// endSessionsOfSQL — ОДНА операция снятия живых записей личности на всё дерево.
+//
+// Выписана константой, потому что вызывающих у неё ДВА: полоса входа (смена
+// пароля, снятие второго фактора, завершение восстановления) и
+// административный принудительный выход (`ForceLogoutWriter`, kaname#340). Оба
+// исполняют её ТРАНЗАКЦИЕЙ писателя сессии, через `EndOtherSessions`. Две копии
+// одного оператора разошлись бы молча — и разошлись бы та, которую правили
+// последней, — а расхождение здесь означает «по одной полосе человек выведен,
+// по другой нет».
+//
+// `keep` пустой снимает ВСЕ живые записи: пустая строка не равна ни одному
+// идентификатору, поэтому исключать ей нечего. Это не подставное значение, а
+// то же поведение, каким им уже пользуется завершение восстановления.
+const endSessionsOfSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL
+		 RETURNING id`
 
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
+//
+// Строку личности дверь берёт САМА, раньше первой строки сессии
+// (`holdPersonForSessionSet`): порядок захвата строк сессии между писателями
+// нескольких сессий иначе зависел бы от того, помнит ли о нём каждый
+// вызывающий. Транзакция, открытая `SessionSetWriter` или уже снимавшая записи
+// той же личности, её уже держит, и повторного оператора нет.
 func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
-	tag, err := w.tx.Exec(ctx, `
-		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
-		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL`, string(userID), string(keep), at, reason)
-	if err != nil {
-		return 0, mapErr(err, "HumanSession.EndOthers", string(userID))
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		return 0, err
 	}
-	return int(tag.RowsAffected()), nil
+	return endSessionsAndRevokeWhatTheyHold(ctx, w.tx, userID, keep, at, reason)
+}
+
+// endSessionsAndRevokeWhatTheyHold — ЕДИНСТВЕННЫЙ способ снять сессии: снимает
+// записи И отзывает выданное в них (задача kaname#313).
+//
+// # ПОЧЕМУ ЭТО ОДИН ОПЕРАТОР, А НЕ ДВА РЯДОМ
+//
+// Ротацию обновляющего токена останавливает РОВНО отзыв семейства: запрос
+// ротации не читает ни отметку окончания сессии, ни одну из отсечек — он судит
+// по `active`, сроку токена и отметке отзыва семейства, и больше ни по чему.
+// Значит сессия, снятая БЕЗ отзыва семейства, снята только в записи: её
+// обновляющий токен продолжает ротироваться в свежие.
+//
+// Пока снятие и отзыв были двумя действиями, «снять и не отозвать» было
+// ПРЕДСТАВИМО — и представилось дважды. Сперва из двух методов, снимающих
+// НЕСКОЛЬКО записей, отзывал один. Затем обнаружился третий — снятие ОДНОЙ
+// записи по идентификатору (`EndSession`), чей живой вызывающий есть
+// собственный выход человека; он не отзывал ничего, а шапка здесь утверждала,
+// что снимающий метод ровно один.
+//
+// УТВЕРЖДЕНИЕ ЭТО БЫЛО ЛОЖНЫМ, и ложным оно было о ЗАЩИТЕ — тот самый класс,
+// который эта полоса чинит везде. Радиус брался по диффу, а надо было по
+// механизму: по операторам, ставящим отметку окончания записи.
+//
+// Теперь отзыв делает КАЖДЫЙ снимающий метод. Их было три: снятие одной
+// записи, снятие прочих записей личности и снятие всех её записей на пуле.
+// Третий снят (kaname#340): административный выход снимает записи транзакцией
+// писателя, вместе с отсечкой и записью события, то есть вторым методом с
+// пустым `keep`. Держит это гейт
+// дерева `TestSessionEndingWritersRevokeWhatTheSessionHolds` — до него у пары
+// «снятие сессии / отзыв семейства» не было ни одного прибора, в отличие от
+// пары записей отсечки.
+//
+// Остатки этой полосы объявлены каждый у своего места и собраны строкой
+// «предмет · причина · предикат» в
+// `tmp/kn-313-own-executor-runs/remnants-as-issue-lines.txt`. Номеров у задач
+// пока нет — заводит их не эта полоса.
+//
+// # ПОЧЕМУ ИДЕНТИФИКАТОРЫ, А НЕ ЧИСЛО
+//
+// Отзыв адресуется снятым записям поимённо. Второй запрос «а какие это были»
+// вернул бы уже снятые строки вперемешку с теми, что сняли до нас, — и отозвал
+// бы выданное в чужих сессиях.
+func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID domain.UserID,
+	keep domain.HumanSessionID, at time.Time, reason string,
+) (int, error) {
+	// Оператор снятия исполняется ЗДЕСЬ, а не в отдельном помощнике, и это
+	// решение: помощник, снимающий записи и не отзывающий выданного, был бы
+	// функцией, делающей ПОЛОВИНУ действия, — то есть ровно тем состоянием,
+	// которое эта дверь и делает непредставимым. Гейт дерева считает такую
+	// функцию находкой, и он прав: сегодня её звала бы только дверь, а завтра
+	// кто угодно.
+	// КУРСОР ЗАКРЫВАЕТСЯ РУКАМИ, А НЕ `defer`, И ЭТО НЕ НЕБРЕЖНОСТЬ: следом на
+	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
+	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
+	// них — то есть слишком поздно.
+	rows, err := tx.Query(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
+	if err != nil {
+		return 0, mapErr(err, "HumanSession.End", string(userID))
+	}
+	var ended []string
+	for rows.Next() {
+		var id string
+		if serr := rows.Scan(&id); serr != nil {
+			rows.Close()
+			return 0, mapErr(serr, "HumanSession.End", string(userID))
+		}
+		ended = append(ended, id)
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return 0, mapErr(rerr, "HumanSession.End", string(userID))
+	}
+	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+		domain.FamilyRevokedBySessionEnd); rerr != nil {
+		return 0, rerr
+	}
+	return len(ended), nil
+}
+
+// ForceLogoutWriter — транзакция записи для административного принудительного
+// выхода на посадке `own` (kaname#340): снятие ВСЕХ живых записей личности
+// (`EndOtherSessions` с пустым `keep`), отсечка и запись события — одним
+// коммитом.
+//
+// Это ТОТ ЖЕ писатель, что у полосы входа, а не отдельный путь: прежде снятие
+// шло своей транзакцией на пуле ПОСЛЕ транзакции отсечки, и запись события,
+// положенная транзакцией отсечки, ложилась до снятия — числа снятых она нести
+// не могла. Порядок операторов внутри транзакции задаёт вызывающий: снятие,
+// отсечка, событие.
+//
+// # СТРОКА ЛИЧНОСТИ БЕРЁТСЯ ПЕРВОЙ, ДО ЛЮБОЙ СТРОКИ СЕССИИ
+//
+// Удаление личности идёт по каскаду сверху вниз: строка `users` (`FOR UPDATE`
+// самим удалением), затем её записи сессии. Без этого замка выход брал строку
+// личности ПОСЛЕ строк сессии — проверкой внешнего ключа отсечки, — то есть
+// навстречу удалению. Измерено сценой «выход × удаление личности»
+// (`force_logout_identity_deletion_race_integration_test.go`): на форме без
+// замка 6 взаимных блокировок из 6 прогонов, жертвой каждый раз удаление
+// (`pg_stat_database.deadlocks` = 6); с замком — 0 из 6, обе транзакции
+// зафиксированы. Правило то же, что у выдачи кода авторизации: родители
+// внешних ключей берутся НЕ ПОЗЖЕ строки сессии (`lockUserForKeySQL`, раздел
+// «Порядок замков заведения»).
+//
+// Сила замка при открытии — `FOR KEY SHARE`, та, что взяла бы сама проверка
+// внешнего ключа: он конфликтует ровно с удалением строки и совместим с
+// остальными писателями личности. Строки может не быть вовсе — тогда держать
+// нечего, и об отсутствии личности судит внешний ключ отсечки, как и прежде.
+//
+// Снятие (`EndOtherSessions`) поднимает замок той же строки до замка писателя
+// нескольких сессий (`lockPersonForSessionSetSQL`) — до первой строки сессии.
+// Подъём внутри транзакции, уже держащей строку, у ждущих не встаёт в очередь
+// (Postgres не берёт повторно замок кортежа, строку которого транзакция уже
+// держит): сцены «выход × удаление личности» (6 прогонов) и «четыре выхода
+// сразу» (3 прогона) с ним — 0 взаимных блокировок. Открытие не берёт
+// сильного замка сразу намеренно:
+// транзакция частичного исхода — отсечка и запись события, без снятия, —
+// открывается тем же писателем и не обязана ждать смену пароля, держащую
+// личность: строк сессии она не трогает.
+//
+// # ОЖИДАНИЕ КАЖДОГО ЗАМКА ОГРАНИЧЕНО `lockWait`
+//
+// Предел ставится самой транзакции (`lock_timeout`, локально), а не берётся из
+// срока вызова. `lock_timeout` ограничивает КАЖДОЕ ожидание замка отдельно, а
+// не их сумму: оператор, ждущий по очереди нескольких держателей, ждёт каждого
+// до `lockWait`, и вся транзакция может ждать кратно дольше. Срока у вызова
+// может не быть вовсе, и тогда ожидание замка ограничивал бы только потолок
+// одного оператора пула (`statement_timeout`, 30 с); а когда он есть, ожидание
+// кончалось бы вместе с ним. Свой предел даёт отказ `55P03` на живом
+// соединении, и хранилище переводит его в недоступность.
+//
+// Пул сам `lock_timeout` не ставит намеренно (`corelib/db.NewPool`): на всех
+// путях всех служб он завёл бы класс `55P03`, который их переводы отказов не
+// знают. Здесь предел локален одной транзакции, и перевод его знает.
+//
+// Ноль у `lock_timeout` означает «без предела», а предел короче миллисекунды
+// записался бы нулём. Такой предел отвергается до открытия транзакции, а не
+// подставляется: величину даёт служба, а не вызывающий, и её негодность —
+// дефект службы, который обязан звучать, а не молча снимать ограничение.
+func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, subject domain.UserID,
+	lockWait time.Duration,
+) (internaliam.OwnSessionsWriter, error) {
+	if lockWait < time.Millisecond {
+		return nil, iamerr.Wrapf(iamerr.ErrInternal,
+			"force-logout writer: lock wait %s is not representable in lock_timeout", lockWait)
+	}
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
+	}
+	if _, err := w.tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`,
+		fmt.Sprintf("%dms", lockWait.Milliseconds())); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
+	}
+	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, mapErr(err, "User", string(subject))
+	}
+	w.person = subject
+	return w, nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент
@@ -321,15 +691,19 @@ func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.Hum
 	return nil
 }
 
-// UpsertCutoff — ТА ЖЕ операция, что у трёх существующих писателей (`now`).
+// UpsertCutoff — ТА ЖЕ дверь, что у прочих писателей отсечки: кладёт ОБЕ
+// записи одной транзакцией (`upsertSubjectCutoff`, kaname#313).
+//
+// Здесь стоял прямой вызов оператора ПЕРВОЙ записи, и вторую этот путь не писал
+// вовсе. Читателей у второй — авторитет отзыва на пути запроса, поэтому выход,
+// смена пароля, восстановление и сброс второго фактора снимали доступ на
+// выдаче и НЕ снимали на предъявлении: прежний носитель продолжал
+// аутентифицировать вызовы.
 func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	if err := u.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	if _, err := w.tx.Exec(ctx, upsertRevokeAllSQL, string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy)); err != nil {
-		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
+	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).
@@ -411,8 +785,10 @@ func (w *humanSessionWriter) Rollback(ctx context.Context) error {
 }
 
 var (
-	_ humansession.Store          = (*HumanSessionRepo)(nil)
-	_ humansession.Writer         = (*humanSessionWriter)(nil)
-	_ humansession.SessionSweeper = (*HumanSessionRepo)(nil)
-	_ humansession.FailureSweeper = (*HumanSessionRepo)(nil)
+	_ internaliam.OwnSessions       = (*HumanSessionRepo)(nil)
+	_ internaliam.OwnSessionsWriter = (*humanSessionWriter)(nil)
+	_ humansession.Store            = (*HumanSessionRepo)(nil)
+	_ humansession.Writer           = (*humanSessionWriter)(nil)
+	_ humansession.SessionSweeper   = (*HumanSessionRepo)(nil)
+	_ humansession.FailureSweeper   = (*HumanSessionRepo)(nil)
 )

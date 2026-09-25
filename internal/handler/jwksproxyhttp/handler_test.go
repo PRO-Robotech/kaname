@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Hydra-mirrored JWKS fixtures. Смысл зеркала в том, что отдаются НАСТОЯЩИЕ
+// Фикстуры зеркалируемого набора ключей ВЫШЕСТОЯЩЕГО издателя. Смысл зеркала в том, что отдаются НАСТОЯЩИЕ
 // подписные kid провайдера — и никогда наш собственный.
 //
 // Здесь стояло «iam has no keyset». Ключница у платформы ЕСТЬ, и её набор
@@ -30,9 +30,9 @@ import (
 // перестал бы покрывать ключи, которые ЕЩЁ СУЩЕСТВУЮТ, и сузился бы он молча:
 // на зелёном прогоне это неотличимо от исправной работы.
 const (
-	hydraJWKS1 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"}]}`
-	hydraJWKS2 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"},{"kty":"RSA","use":"sig","kid":"hydra-kid-2","alg":"RS256","n":"ZZZdefff","e":"AQAB"}]}`
-	emptyJWKS  = `{"keys":[]}`
+	upstreamJWKS1 = `{"keys":[{"kty":"RSA","use":"sig","kid":"upstream-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"}]}`
+	upstreamJWKS2 = `{"keys":[{"kty":"RSA","use":"sig","kid":"upstream-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"},{"kty":"RSA","use":"sig","kid":"upstream-kid-2","alg":"RS256","n":"ZZZdefff","e":"AQAB"}]}`
+	emptyJWKS     = `{"keys":[]}`
 )
 
 // fakeClock is an injectable, advanceable clock so cache-TTL / rotation tests are
@@ -54,7 +54,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.t = c.t.Add(d)
 }
 
-// upstream is a scripted fake Hydra JWKS server with a hit counter and a togglable
+// upstream is a scripted fake upstream-issuer JWKS server with a hit counter and a togglable
 // body / status so a test can simulate rotation, a brief blip, or a hard outage.
 type upstream struct {
 	mu      sync.Mutex
@@ -132,10 +132,10 @@ func doGet(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	return rec
 }
 
-// RJU-01 — happy: iam serves a BYTE-IDENTICAL mirror of Hydra's JWKS with
-// Cache-Control, and the served kids are Hydra's kids (not any iam-minted kid).
+// RJU-01 — happy: iam serves a BYTE-IDENTICAL mirror of the upstream issuer's JWKS with
+// Cache-Control, and the served kids are the upstream issuer's kids (not any iam-minted kid).
 func TestJWKSProxy_RJU01_ByteIdenticalMirror(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	srv := httptest.NewServer(up)
 	defer srv.Close()
 
@@ -145,19 +145,19 @@ func TestJWKSProxy_RJU01_ByteIdenticalMirror(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; want 200", rec.Code)
 	}
-	if got := rec.Body.String(); got != hydraJWKS1 {
-		t.Fatalf("body not byte-identical to upstream JWKS.\n got=%q\nwant=%q", got, hydraJWKS1)
+	if got := rec.Body.String(); got != upstreamJWKS1 {
+		t.Fatalf("body not byte-identical to upstream JWKS.\n got=%q\nwant=%q", got, upstreamJWKS1)
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc == "" {
 		t.Fatalf("Cache-Control header not set")
 	}
 	kids := kidsOf(t, rec.Body.Bytes())
-	if len(kids) != 1 || kids[0] != "hydra-kid-1" {
-		t.Fatalf("served kids = %v; want [hydra-kid-1]", kids)
+	if len(kids) != 1 || kids[0] != "upstream-kid-1" {
+		t.Fatalf("served kids = %v; want [upstream-kid-1]", kids)
 	}
 	for _, k := range kids {
 		if ownMintedKid(k) {
-			t.Fatalf("served an iam-minted kid %q — proxy must mirror Hydra kids only", k)
+			t.Fatalf("served an iam-minted kid %q — proxy must mirror the upstream issuer kids only", k)
 		}
 	}
 }
@@ -177,7 +177,7 @@ func TestJWKSProxy_RJU02_PerCallTimeoutNotDefaultClient(t *testing.T) {
 	}
 
 	// (b) behavioural: a hung upstream must not wedge the request.
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	up.blockCh = make(chan struct{})
 	srv := httptest.NewServer(up)
 	defer srv.Close()
@@ -196,7 +196,7 @@ func TestJWKSProxy_RJU02_PerCallTimeoutNotDefaultClient(t *testing.T) {
 	}
 }
 
-// RJU-03 — fail-closed: a COLD cache + an unavailable Hydra (5xx / unreachable /
+// RJU-03 — fail-closed: a COLD cache + an unavailable upstream issuer (5xx / unreachable /
 // empty keyset) must yield 502/503 — never an empty 200, never iam's own minted
 // kids as a substitute.
 func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
@@ -207,7 +207,7 @@ func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 		{
 			name: "upstream 5xx",
 			build: func(t *testing.T) *Handler {
-				up := newUpstream(hydraJWKS1)
+				up := newUpstream(upstreamJWKS1)
 				up.setStatus(http.StatusInternalServerError)
 				srv := httptest.NewServer(up)
 				t.Cleanup(srv.Close)
@@ -226,7 +226,7 @@ func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 		{
 			name: "upstream unreachable",
 			build: func(t *testing.T) *Handler {
-				srv := httptest.NewServer(newUpstream(hydraJWKS1))
+				srv := httptest.NewServer(newUpstream(upstreamJWKS1))
 				url := srv.URL
 				srv.Close() // now unreachable
 				return NewHandler(Config{UpstreamURL: url, Timeout: 200 * time.Millisecond})
@@ -245,7 +245,7 @@ func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 			if rec.Code == http.StatusOK {
 				t.Fatalf("served 200 on a cold cache + down upstream (fail-open)")
 			}
-			// Never a non-empty Hydra-shaped keyset, and never an iam-minted kid.
+			// Never a non-empty upstream-shaped keyset, and never an iam-minted kid.
 			if kids := kidsOf(t, rec.Body.Bytes()); len(kids) > 0 {
 				t.Fatalf("fail-closed body carried keys %v; must serve no keys", kids)
 			}
@@ -258,11 +258,11 @@ func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 	}
 }
 
-// RJU-04 — bounded-stale: a warm cache within TTL survives a brief Hydra blip
-// (served from cache, upstream not re-hit); once TTL elapses and Hydra is still
+// RJU-04 — bounded-stale: a warm cache within TTL survives a brief upstream blip
+// (served from cache, upstream not re-hit); once TTL elapses and the upstream issuer is still
 // down the endpoint degrades to fail-closed (never indefinitely-stale).
 func TestJWKSProxy_RJU04_BoundedStaleWarmBlip(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	up.cc = "" // force the default TTL path (no upstream Cache-Control)
 	srv := httptest.NewServer(up)
 	defer srv.Close()
@@ -278,7 +278,7 @@ func TestJWKSProxy_RJU04_BoundedStaleWarmBlip(t *testing.T) {
 		t.Fatalf("warm-up upstream hits = %d; want 1", up.hitCount())
 	}
 
-	// Hydra blips down, but we're within TTL → served from cache, no re-fetch.
+	// Вышестоящий издатель мигнул, но мы внутри TTL → served from cache, no re-fetch.
 	up.setStatus(http.StatusInternalServerError)
 	rec := doGet(t, h)
 	if rec.Code != http.StatusOK {
@@ -287,11 +287,11 @@ func TestJWKSProxy_RJU04_BoundedStaleWarmBlip(t *testing.T) {
 	if up.hitCount() != 1 {
 		t.Fatalf("within-TTL blip re-hit upstream (hits=%d); must serve from cache", up.hitCount())
 	}
-	if got := rec.Body.String(); got != hydraJWKS1 {
-		t.Fatalf("within-TTL blip body = %q; want cached %q", got, hydraJWKS1)
+	if got := rec.Body.String(); got != upstreamJWKS1 {
+		t.Fatalf("within-TTL blip body = %q; want cached %q", got, upstreamJWKS1)
 	}
 
-	// TTL elapses, Hydra still down → fail-closed (never indefinitely-stale).
+	// TTL истёк, вышестоящий издатель всё ещё недоступен → fail-closed (never indefinitely-stale).
 	clk.Advance(6 * time.Minute)
 	rec = doGet(t, h)
 	if rec.Code != http.StatusBadGateway && rec.Code != http.StatusServiceUnavailable {
@@ -305,7 +305,7 @@ func TestJWKSProxy_RJU04_BoundedStaleWarmBlip(t *testing.T) {
 // never make iam serve a rotated/revoked keyset past the short window. Regression
 // for the go-style review finding (max-age honored with no ceiling).
 func TestJWKSProxy_MaxAgeCeiling(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	up.cc = "public, max-age=86400" // 24h — far larger than the 5m TTL ceiling
 	srv := httptest.NewServer(up)
 	defer srv.Close()
@@ -319,7 +319,7 @@ func TestJWKSProxy_MaxAgeCeiling(t *testing.T) {
 	}
 
 	// Advance PAST the 5m ceiling but far WITHIN the upstream's 24h max-age, then take
-	// Hydra down. If the ceiling holds, the cache is expired at 6m → refetch → down →
+	// Вышестоящий издатель недоступен. Если потолок держит, the cache is expired at 6m → refetch → down →
 	// fail-closed. If max-age were honored uncapped, it would still serve stale at 6m.
 	clk.Advance(6 * time.Minute)
 	up.setStatus(http.StatusInternalServerError)
@@ -331,7 +331,7 @@ func TestJWKSProxy_MaxAgeCeiling(t *testing.T) {
 
 // Cache: a second call within TTL does NOT re-hit upstream; after TTL it refetches.
 func TestJWKSProxy_Cache_TTLRefetch(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	up.cc = ""
 	srv := httptest.NewServer(up)
 	defer srv.Close()
@@ -354,10 +354,10 @@ func TestJWKSProxy_Cache_TTLRefetch(t *testing.T) {
 	}
 }
 
-// RJU-05 — rotation: Hydra publishes a new kid; after TTL iam refetches and serves
-// the updated keyset containing the new Hydra kid (still never an iam-minted kid).
+// RJU-05 — rotation: the upstream issuer publishes a new kid; after TTL iam refetches and serves
+// the updated keyset containing the new upstream kid (still never an iam-minted kid).
 func TestJWKSProxy_RJU05_RotationNewKid(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	up.cc = ""
 	srv := httptest.NewServer(up)
 	defer srv.Close()
@@ -366,18 +366,18 @@ func TestJWKSProxy_RJU05_RotationNewKid(t *testing.T) {
 	h := NewHandler(Config{UpstreamURL: srv.URL, TTL: 5 * time.Minute, Clock: clk.Now})
 
 	rec := doGet(t, h)
-	if kids := kidsOf(t, rec.Body.Bytes()); len(kids) != 1 || kids[0] != "hydra-kid-1" {
-		t.Fatalf("pre-rotation kids = %v; want [hydra-kid-1]", kids)
+	if kids := kidsOf(t, rec.Body.Bytes()); len(kids) != 1 || kids[0] != "upstream-kid-1" {
+		t.Fatalf("pre-rotation kids = %v; want [upstream-kid-1]", kids)
 	}
 
-	up.setBody(hydraJWKS2) // Hydra rotates
+	up.setBody(upstreamJWKS2) // вышестоящий издатель провернул ротацию
 	clk.Advance(6 * time.Minute)
 
 	rec = doGet(t, h)
 	kids := kidsOf(t, rec.Body.Bytes())
 	found := false
 	for _, k := range kids {
-		if k == "hydra-kid-2" {
+		if k == "upstream-kid-2" {
 			found = true
 		}
 		if ownMintedKid(k) {
@@ -385,13 +385,13 @@ func TestJWKSProxy_RJU05_RotationNewKid(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("post-rotation kids = %v; want to contain hydra-kid-2", kids)
+		t.Fatalf("post-rotation kids = %v; want to contain upstream-kid-2", kids)
 	}
 }
 
 // The JWKS route rejects non-GET methods (it is a read-only well-known endpoint).
 func TestJWKSProxy_MethodNotAllowed(t *testing.T) {
-	up := newUpstream(hydraJWKS1)
+	up := newUpstream(upstreamJWKS1)
 	srv := httptest.NewServer(up)
 	defer srv.Close()
 

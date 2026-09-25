@@ -52,9 +52,10 @@ func startRetentionSweeper(
 ) error {
 	sweeper, err := retention.New(
 		cfg.Retention.Sweep(),
-		// Восьмым и девятым предметами — сессии человека и журнал неверных
-		// предъявлений (Ф3, kacho#1269): уборщики приходят от полосы входа и
-		// под `external` отсутствуют — тогда перечень остаётся прежним.
+		// За базовым перечнем — предметы полосы входа: сессии человека, журнал
+		// неверных предъявлений и прочие (Ф3, kacho#1269, `WithHumanSessions`).
+		// Их уборщики приходят от полосы входа и под `external` отсутствуют —
+		// тогда перечень остаётся базовым.
 		retention.WithHumanSessions(retention.Subjects(
 			kanamepg.NewClientAssertionReplayRepo(pool),
 			kanamepg.NewSessionRevocationRepo(pool),
@@ -76,6 +77,12 @@ func startRetentionSweeper(
 			// уборщик платформы требует ключа партиции, а он у этой очереди
 			// пуст намеренно — обоснование в росписи commutativeDrainExempt.
 			kanamepg.NewProviderCompensationSweeper(pool),
+			// Восьмым предметом базового перечня — записи выпуска токена доступа
+			// церемонии (kaname#319). Писать строку обязан выпуск церемонии
+			// (провязка — kaname#396); до неё предмет пуст, и проход снимает
+			// ноль. После срока токена с допуском строка ни одного исхода
+			// предъявления не меняет.
+			kanamepg.NewOAuthCeremonyRepo(pool),
 		), human),
 		logger.With(slog.String("component", "retention_sweep")),
 	)

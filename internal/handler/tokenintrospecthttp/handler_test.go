@@ -40,6 +40,17 @@ func (s stubKeys) PublishedSet(context.Context) ([]domain.PublishedKey, error) {
 type stubRevocations struct {
 	before map[string]time.Time
 	err    error
+	// families — ответ о семействе выпуска по идентификатору: true — семейство
+	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
+	families  map[string]bool
+	familyErr error
+}
+
+func (s stubRevocations) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	if s.familyErr != nil {
+		return false, s.familyErr
+	}
+	return s.families[jti], nil
 }
 
 func (s stubRevocations) RevokedBefore(_ context.Context, subject string) (time.Time, bool, error) {
@@ -267,6 +278,33 @@ func TestIntrospect_AuthorityUnavailableIsARefusalNotAnApproval(t *testing.T) {
 	h = newHandler(stubKeys{keys: []domain.PublishedKey{pub}}, stubRevocations{}, now)
 	if code, out := ask(t, h, good.raw); code != http.StatusOK || out["active"] != true {
 		t.Fatalf("при доступных источниках токен обязан быть действительным: %d %v", code, out["active"])
+	}
+}
+
+// TestIntrospect_BrokenOwnKeyIsOurFailureNotAnInactiveToken — ключ ИЗ НАШЕГО
+// набора, который не разбирается, — наша поломка, а не суждение о токене.
+//
+// Ответ «недействителен» здесь был бы ложью о предъявленном: токен подписан
+// нашим ключом, и сказать о нём нечего, пока свой ключ не читается. Спрашивающий
+// обязан получить третий исход — отказ, по которому он закрывается сам, — а
+// оператор — рост ряда «ответить не смогли», а не ряда «недействительно».
+// Близнец отличается одним фактом: тот же ключ исправен.
+func TestIntrospect_BrokenOwnKeyIsOurFailureNotAnInactiveToken(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	var pub domain.PublishedKey
+	good := mintToken(t, "sva-a", now.Add(-time.Minute), &pub)
+
+	h := newHandler(stubKeys{keys: []domain.PublishedKey{pub}}, stubRevocations{}, now)
+	if code, out := ask(t, h, good.raw); code != http.StatusOK || out["active"] != true {
+		t.Fatalf("близнец: при исправном ключе токен обязан быть действительным: %d %v", code, out["active"])
+	}
+
+	broken := pub
+	broken.PublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nnot base64 at all\n-----END PUBLIC KEY-----"
+	h = newHandler(stubKeys{keys: []domain.PublishedKey{broken}}, stubRevocations{}, now)
+	if code, out := ask(t, h, good.raw); code != http.StatusServiceUnavailable {
+		t.Fatalf("испорченный СВОЙ ключ набора дал суждение о токене (код %d, %v) вместо отказа "+
+			"«ответить не смогли»: наша поломка прочитана как негодный токен", code, out)
 	}
 }
 

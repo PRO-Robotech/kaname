@@ -99,7 +99,9 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
-	w, err := uc.deps.Store.Writer(ctx)
+	// Транзакция снимает прочие записи сессии, поэтому строку личности она
+	// берёт первой — раньше строк фактора (`SessionSetWriter`, kaname#340).
+	w, err := uc.deps.Store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}

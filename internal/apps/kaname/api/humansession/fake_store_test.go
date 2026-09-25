@@ -75,6 +75,9 @@ type fakeStore struct {
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
 	failOn string
+	// opened — каждая открытая транзакция, в порядке открытия: чем она открыта
+	// и чьи записи сессии в ней сняты — часть утверждений о порядке замков.
+	opened []*fakeWriter
 	// trips — операторы базы, которые исполнил бы адаптер (шапка файла).
 	trips atomic.Int64
 }
@@ -171,11 +174,39 @@ func (f *fakeStore) firstAuthentication(userID domain.UserID) (time.Time, bool, 
 }
 
 func (f *fakeStore) Writer(context.Context) (humansession.Writer, error) {
+	w, err := f.open("")
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// SessionSetWriter — транзакция, открытая ДЕРЖАЩЕЙ строку личности. Замков
+// дублёр не моделирует — ни ожиданий, ни взаимных блокировок: он запоминает,
+// чьей строкой транзакция открыта, до первого её оператора, и повторяет РАБОТУ
+// адаптера — открытие и оператор замка строки личности; у пустой личности
+// оператор исполняется так же, но держать нечего (`holdPersonForSessionSet`).
+func (f *fakeStore) SessionSetWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := f.open(userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.holdPerson(userID); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
 	if f.failOn == "writer" {
 		return nil, errFakePort
 	}
-	return &fakeWriter{store: f}, nil
+	w := &fakeWriter{store: f, lockedFor: lockedFor}
+	f.mu.Lock()
+	f.opened = append(f.opened, w)
+	f.mu.Unlock()
+	return w, nil
 }
 
 // fakeWriter — транзакция дублёра: записи копятся и применяются на Commit;
@@ -186,6 +217,37 @@ type fakeWriter struct {
 	store  *fakeStore
 	ops    []func()
 	closed bool
+	// lockedFor — личность, чьей строкой транзакция открыта (`SessionSetWriter`);
+	// пусто — открыта `Writer`.
+	lockedFor domain.UserID
+	// endedOthersOf — чьи записи сессии сняты `EndOtherSessions`, по вызову.
+	endedOthersOf []domain.UserID
+	// holds — личность, чью строку транзакция уже держит замком писателя
+	// нескольких сессий (у адаптера — `humanSessionWriter.person`): повторного
+	// оператора замка на ней нет, строку другой личности транзакция не берёт.
+	holds domain.UserID
+}
+
+// errFakeSecondPerson — вторая личность в транзакции, уже держащей строку
+// первой: у адаптера отказ класса INTERNAL без обращения к базе.
+func errFakeSecondPerson() error {
+	return iamerr.Wrapf(iamerr.ErrInternal,
+		"human session writer: the transaction already holds another person and cannot serialize on a second one")
+}
+
+// holdPerson — оператор замка строки личности, если транзакция её ещё не
+// держит (`holdPersonForSessionSet`): пустая личность — оператор есть, отметки
+// нет.
+func (w *fakeWriter) holdPerson(userID domain.UserID) error {
+	if w.holds != "" && w.holds != userID {
+		return errFakeSecondPerson()
+	}
+	if w.holds != "" {
+		return nil
+	}
+	w.store.trip()
+	w.holds = userID
+	return nil
 }
 
 func (w *fakeWriter) fail(op string) error {
@@ -231,6 +293,8 @@ func (w *fakeWriter) FirstAuthentication(_ context.Context, userID domain.UserID
 	return w.store.firstAuthentication(userID)
 }
 
+// EndSession — снятие одной записи и, если снята, отзыв выданного в ней
+// (`revokeFamiliesOfSessionsTx`, kaname#313): у адаптера это второй оператор.
 func (w *fakeWriter) EndSession(_ context.Context, id domain.HumanSessionID, at time.Time, reason string) (bool, error) {
 	w.store.trip()
 	if err := w.fail("end"); err != nil {
@@ -240,12 +304,20 @@ func (w *fakeWriter) EndSession(_ context.Context, id domain.HumanSessionID, at 
 	if !ok || r.ended != nil {
 		return false, nil
 	}
+	w.store.trip()
 	w.ops = append(w.ops, func() { r.ended = &at; r.reason = reason })
 	return true, nil
 }
 
 func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
+	// Работа — как у адаптера: строка личности, если транзакция её ещё не
+	// держит (kaname#340), оператор снятия и, если снято хоть что-то, отзыв
+	// выданного в снятых записях (kaname#313).
+	if err := w.holdPerson(userID); err != nil {
+		return 0, err
+	}
 	w.store.trip()
+	w.endedOthersOf = append(w.endedOthersOf, userID)
 	if err := w.fail("end-others"); err != nil {
 		return 0, err
 	}
@@ -256,6 +328,9 @@ func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, k
 			row := r
 			w.ops = append(w.ops, func() { row.ended = &at; row.reason = reason })
 		}
+	}
+	if n > 0 {
+		w.store.trip()
 	}
 	return n, nil
 }
@@ -310,10 +385,13 @@ func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocatio
 	if err := u.Validate(); err != nil {
 		return errFakeArg(err.Error())
 	}
+	// Две записи одной двери (`upsertSubjectCutoff`, kaname#313): строка
+	// отсечки субъекта и отсечка выпущенного — два оператора.
 	w.store.trip()
 	if err := w.fail("cutoff"); err != nil {
 		return err
 	}
+	w.store.trip()
 	w.ops = append(w.ops, func() {
 		cur, ok := w.store.cutoffs[u.UserID]
 		if !ok || !u.RevokeBefore.Before(cur.at) {

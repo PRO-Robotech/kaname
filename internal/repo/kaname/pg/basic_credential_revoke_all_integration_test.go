@@ -50,6 +50,7 @@ import (
 
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	sessionrev "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -247,9 +248,37 @@ func basicLaneAdminCtx() context.Context {
 		operations.Principal{Type: "user", ID: "usr0000000000000admin"})
 }
 
+// basicLaneExternalIDs — имя человека у поставщика, прочитанное тем же
+// репозиторием, которым его читает корень под `external`.
+type basicLaneExternalIDs struct{ users *kanamepg.UserPoolRepo }
+
+func (r basicLaneExternalIDs) ExternalIDOf(ctx context.Context, id domain.UserID) (string, error) {
+	u, err := r.users.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return string(u.ExternalID), nil
+}
+
+// basicLaneProviderSessions — поставщик под `external`, единственная подмена
+// в сборке. Записывает, чью сессию сняли: провязка доказывается тем, что её
+// позвали.
+type basicLaneProviderSessions struct{ ended []string }
+
+func (p *basicLaneProviderSessions) DeleteLoginSessions(_ context.Context, subject string) error {
+	p.ended = append(p.ended, subject)
+	return nil
+}
+
 // TestBasicLane_LogoutVerbsReachThePresentedSecret — настоящие глаголы
 // «вывести человека отовсюду», собранные так, как их собирает корень: после
 // каждого прежний секрет не проходит.
+//
+// ForceLogout корень собирает по посадке и ВСЕГДА со снятием сессии — ровно
+// одним из двух (`cmd/kaname/wiring.go`, kaname#313). Сборка без снятия корню
+// не принадлежит: глагол в ней отказывает закрыто (kaname#340), и это держит
+// своя проба. Отсечку две посадки кладут разными писателями — под `own`
+// транзакция снятия, под `external` писатель отзыва, — поэтому подаются обе.
 func TestBasicLane_LogoutVerbsReachThePresentedSecret(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -258,14 +287,31 @@ func TestBasicLane_LogoutVerbsReachThePresentedSecret(t *testing.T) {
 		name string
 		call func(t *testing.T, f assertionFixture)
 	}{
-		{"ForceLogout", func(t *testing.T, f assertionFixture) {
+		{"ForceLogout(own)", func(t *testing.T, f assertionFixture) {
 			t.Helper()
 			h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 				WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(f.pool)).
+				WithOwnSessions(kanamepg.NewHumanSessionRepo(f.pool)).
 				WithAdminChecker(basicLaneAdmin{}).
 				WithOperations(operations.NewRepo(f.pool, "kaname"))
 			_, err := h.ForceLogout(basicLaneAdminCtx(), &iamv1.ForceLogoutRequest{UserId: f.user})
 			require.NoError(t, err)
+		}},
+		{"ForceLogout(external)", func(t *testing.T, f assertionFixture) {
+			t.Helper()
+			provider := &basicLaneProviderSessions{}
+			h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
+				WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(f.pool)).
+				WithProviderSessions(provider, basicLaneExternalIDs{users: kanamepg.NewUserPoolRepo(f.pool)}).
+				WithAdminChecker(basicLaneAdmin{}).
+				WithOperations(operations.NewRepo(f.pool, "kaname"))
+			_, err := h.ForceLogout(basicLaneAdminCtx(), &iamv1.ForceLogoutRequest{UserId: f.user})
+			require.NoError(t, err)
+			var external string
+			require.NoError(t, f.pool.QueryRow(context.Background(),
+				`SELECT external_id FROM kaname.users WHERE id = $1`, f.user).Scan(&external))
+			require.Equal(t, []string{external}, provider.ended,
+				"снятие у поставщика не позвано либо позвано не о том человеке")
 		}},
 		{"Revoke(revoke_all_user_tokens)", func(t *testing.T, f assertionFixture) {
 			t.Helper()

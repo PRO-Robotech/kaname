@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Хук коммита: правило ветки и коммита в МОМЕНТ коммита. Предикат —
+# scripts/hooks/branch-rule.sh; провязка — `make install-hooks`.
+#
+# Судится то, что git ЗАПИШЕТ, а не черновик в файле. В редакторе (GIT_EDITOR
+# не «:») git вырезает строки с `#` как комментарий — и первая строка `#<N> `
+# исчезает после хука. Поэтому здесь сообщение чистится тем же способом, и
+# редактор отказывается: коммит только `-m`/`-F`.
+#
+# Подпись сверяется с корневой учётной записью: git сам выставляет хуку
+# GIT_AUTHOR_* (с учётом --author, -c user.*, локальной настройки), так что
+# сравнивается итог, а не переменные. Локальная настройка user.* и
+# GIT_COMMITTER_* из окружения отказывают отдельно, со своей причиной.
+#
+# Коммит с датой автора до T0 — переписывание истории (`--amend` старого
+# коммита): судится только атрибуция. Новый коммит с датой до T0 — подмена даты,
+# и это отказ. T0 выводится из истории HEAD (branch-rule.sh); коммита правила в
+# ней ещё нет — это он сам и создаётся, и судится он целиком.
+set -uo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "$here/branch-rule.sh" ]; then
+    echo "commit-msg ОТКАЗ: нет $here/branch-rule.sh — предиката правила нет, судить нечем" >&2
+    exit 1
+fi
+# shellcheck source=branch-rule.sh
+. "$here/branch-rule.sh"
+branch_rule_load_t0 HEAD
+
+file="${1:?commit-msg: git не передал файл сообщения}"
+fail=()
+
+comment="$(git config --get core.commentString 2> /dev/null || git config --get core.commentChar 2> /dev/null || printf '#')"
+if [ "${GIT_EDITOR:-:}" != ":" ] && [ "$comment" = "#" ]; then
+    msg="$(git stripspace --strip-comments < "$file")"
+    first_raw="$(git stripspace < "$file" | sed -n 1p)"
+    if [ "${first_raw:0:1}" = "#" ]; then
+        fail+=("коммит через редактор: строка «$first_raw» будет вырезана как комментарий — коммитьте -m/-F")
+    fi
+else
+    msg="$(git stripspace < "$file")"
+fi
+subj="${msg%%$'\n'*}"
+
+if attr="$(branch_rule_attribution "$msg")"; then
+    fail+=("атрибуция в сообщении: «$attr»")
+fi
+
+author="$(git var GIT_AUTHOR_IDENT)"
+at="${author% *}"; at="${at##* }"
+author="${author% * *}"
+history=0
+if [ "$at" -lt "$BRANCH_RULE_T0" ]; then
+    if [ "$(git log -1 --format='%an <%ae> %at' HEAD 2> /dev/null)" = "$author $at" ]; then
+        history=1
+    else
+        fail+=("дата автора $(date -d "@$at" '+%F %T' 2> /dev/null || echo "@$at") раньше T0 у нового коммита — дата в прошлом правило не обходит")
+    fi
+fi
+
+# Форма первой строки и автор — только у нового коммита: у переписываемой
+# истории (п.9 правила) они законно остаются прежними.
+if [ "$history" = 0 ]; then
+    branch="$(git symbolic-ref -q --short HEAD 2> /dev/null || true)"
+    git_dir="$(git rev-parse --git-dir)"
+    if ! n="$(branch_rule_subject_task "$subj")"; then
+        fail+=("первая строка не начинается с «#<N> »: «$subj»")
+    else
+        if [ -f "$git_dir/MERGE_HEAD" ] && ! branch_rule_merge_form "$subj"; then
+            fail+=("слияние — «#<N> merge #<M>: …» либо «#<N> merge main: …», а не «$subj»")
+        fi
+        if branch_rule_is_number "$branch" && [ "$n" != "$branch" ]; then
+            fail+=("«#$n» на ветке «$branch»: первая строка несёт номер ветки")
+        fi
+    fi
+fi
+
+# Коммиттер — всегда: переписывает историю тоже корневая учётная запись.
+if root="$(branch_rule_root_ident)"; then
+    committer="$(git var GIT_COMMITTER_IDENT)"
+    committer="${committer% * *}"
+    [ "$history" = 1 ] || [ "$author" = "$root" ] || fail+=("автор «$author» — не корневая учётная запись «$root»")
+    [ "$committer" = "$root" ] || fail+=("коммиттер «$committer» — не корневая учётная запись «$root»")
+else
+    fail+=("корневая учётная запись не задана (git config --global user.name / user.email) — подпись сверять не с чем")
+fi
+# Без extensions.worktreeConfig `--worktree` читает тот же файл, что `--local`.
+seen=""
+for scope in local worktree; do
+    over="$(git config "--$scope" --get-regexp '^user\.(name|email)$' 2> /dev/null || true)"
+    [ -n "$over" ] && [ "$over" != "$seen" ] || continue
+    seen="$over"
+    fail+=("подпись переопределена настройкой --$scope: «${over//$'\n'/; }» — git config --$scope --unset user.name / user.email")
+done
+for v in GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL; do
+    [ -z "${!v+x}" ] || fail+=("подпись переопределена окружением: $v")
+done
+
+if [ "${#fail[@]}" -gt 0 ]; then
+    {
+        echo "commit-msg ОТКАЗ — правило ветки и коммита (scripts/hooks/branch-rule.sh):"
+        printf '  · %s\n' "${fail[@]}"
+    } >&2
+    exit 1
+fi
+exit 0

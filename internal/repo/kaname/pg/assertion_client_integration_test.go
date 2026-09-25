@@ -148,8 +148,8 @@ func TestF2_44_InteractiveClientDoesNotResolveAtAll(t *testing.T) {
 
 	const interactiveID = "ic-ccccccccccccccccc"
 	_, err := f.pool.Exec(ctx, `INSERT INTO kaname.interactive_clients
-		  (id, name, redirect_uris, client_id)
-		 VALUES ($1,'assertion-interactive',ARRAY['https://console.example/cb'],$2)`,
+		  (id, name, redirect_uris, client_id, token_endpoint_auth_method)
+		 VALUES ($1,'assertion-interactive',ARRAY['https://console.example/cb'],$2,'none')`,
 		interactiveID, "provider-"+interactiveID)
 	require.NoError(t, err)
 

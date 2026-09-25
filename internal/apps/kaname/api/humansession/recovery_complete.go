@@ -207,8 +207,12 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	user := target.User
 
 	// (4) Одна транзакция: применить код одним оператором — ТОЧКА РЕШЕНИЯ — и,
-	// если применён, все записи завершения.
-	w, err := uc.store.Writer(ctx)
+	// если применён, все записи завершения. Записи завершения снимают все
+	// сессии, поэтому строка личности берётся первой — раньше строки кода и
+	// способа входа (`SessionSetWriter`, kaname#340). У адреса без личности
+	// строки нет, а оператор замка исполняется так же: до точки решения обе
+	// полосы делают одну и ту же работу хранилища (шапка).
+	w, err := uc.store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
