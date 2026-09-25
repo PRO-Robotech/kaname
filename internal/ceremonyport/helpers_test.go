@@ -11,6 +11,7 @@ package ceremonyport_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,10 +86,47 @@ func newSigner(t *testing.T, ring tokensigner.KeyProvider, clock func() time.Tim
 	return s
 }
 
-// newAccessTokens — адаптер порта выпуска над настоящим подписантом.
+// issuanceRecord — одна запись выпуска так, как её получил писатель.
+type issuanceRecord struct {
+	jti, family         string
+	issuedAt, expiresAt time.Time
+}
+
+// issuanceLog — писатель записи выпуска пробы: помнит каждую запись и
+// отказывает, когда проба велит (`refuse`).
+type issuanceLog struct {
+	mu      sync.Mutex
+	records []issuanceRecord
+	refuse  error
+}
+
+func (l *issuanceLog) RecordAccessToken(_ context.Context, jti, familyID string, issuedAt, expiresAt time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.refuse != nil {
+		return l.refuse
+	}
+	l.records = append(l.records, issuanceRecord{jti: jti, family: familyID, issuedAt: issuedAt, expiresAt: expiresAt})
+	return nil
+}
+
+func (l *issuanceLog) all() []issuanceRecord {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]issuanceRecord(nil), l.records...)
+}
+
+// newAccessTokens — адаптер порта выпуска над настоящим подписантом; записи
+// выпуска ложатся в писатель пробы, которого проба не читает.
 func newAccessTokens(t *testing.T, ring *keyRing, clock func() time.Time) *ceremonyport.AccessTokens {
 	t.Helper()
-	a, err := ceremonyport.NewAccessTokens(newSigner(t, ring, clock), ring)
+	return newRecordingAccessTokens(t, ring, clock, &issuanceLog{})
+}
+
+// newRecordingAccessTokens — то же над названным писателем записи выпуска.
+func newRecordingAccessTokens(t *testing.T, ring *keyRing, clock func() time.Time, rec ceremonyport.IssuanceRecorder) *ceremonyport.AccessTokens {
+	t.Helper()
+	a, err := ceremonyport.NewAccessTokens(newSigner(t, ring, clock), ring, rec)
 	require.NoError(t, err)
 	return a
 }

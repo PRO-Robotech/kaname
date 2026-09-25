@@ -44,6 +44,8 @@ type pagingReader struct {
 }
 
 func (f *pagingReader) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+func (f *pagingReader) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 func (f *pagingReader) GetByJTI(context.Context, string) (domain.SessionRevocation, error) {
 	return domain.SessionRevocation{}, nil
 }

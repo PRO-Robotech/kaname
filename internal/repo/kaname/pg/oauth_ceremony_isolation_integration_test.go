@@ -46,6 +46,12 @@ package pg_test
 //     одного оператора снимок один при любом уровне, и его исход
 //     уровнем не решается; проба их не судит — перечень держит
 //     `ceremonyPortClassification`;
+//   - уборщика порта (`SweepExpiredAccessTokens`): строку, удерживаемую
+//     другим, он пропускает (`SKIP LOCKED`), а не ждёт, и чередования «стоит на
+//     строке держателя» у него нет. Различие уровней у него наблюдаемо лишь
+//     при фиксации чужой правки строки ПОСЛЕ его снимка и ДО её блокировки, а
+//     без ожидания такое чередование не строится. Уровень ему назван тем же
+//     открытием писателя, и это держит перепись открытий;
 //   - писателя, пишущего ЧИТАЮЩИМ оператором пула (`QueryRow`/`Query` с
 //     `UPDATE … RETURNING`): перепись открытий
 //     (`TestCeremonyWriterTransactionsOpenOnTheNamedLevel`) судит обращения
@@ -90,12 +96,16 @@ import (
 // ceremonyPortClassification — ПЕРЕЧЕНЬ методов порта церемонии по отношению к
 // уровню изоляции. Писатель — метод, чей исход под конкуренцией решает движок
 // перепроверкой условия на строке, которую держал другой; читатель — метод из
-// одного читающего оператора.
+// одного читающего оператора; уборщик — метод, который строку, удерживаемую
+// другим, ПРОПУСКАЕТ (`SKIP LOCKED`), а не ждёт.
 //
 // Перечень сверяется с МНОЖЕСТВОМ методов типа
 // (`TestOAuthCeremonyPortMethodsAreClassified`), а покрытие писателей —
 // с набором сцен (`TestOAuthCeremonyWritersKeepTheirOutcomeUnderEitherDefault`):
 // новый метод, не попавший сюда, и писатель без сцены — находка, а не молчание.
+// У уборщика сцены «стоит на строке держателя» нет по построению (раздел «Чего
+// проба НЕ различает»); что его транзакция открыта названным уровнем, держит
+// перепись открытий.
 var ceremonyPortClassification = map[string]string{
 	"IssueAuthorizationCode":    "writer",
 	"ExchangeAuthorizationCode": "writer",
@@ -104,6 +114,10 @@ var ceremonyPortClassification = map[string]string{
 	"SetClientSecretVerifier":   "writer",
 	"ClearClientSecretVerifier": "writer",
 	"ClientSecretVerifier":      "reader",
+	// Запись выпуска токена доступа в его семейство (kaname#319).
+	"RecordAccessToken": "writer",
+	// Уборка записей выпуска (kaname#319).
+	"SweepExpiredAccessTokens": "sweeper",
 }
 
 // TestOAuthCeremonyPortMethodsAreClassified — предпосылка перечня: он называет
@@ -125,18 +139,24 @@ func TestOAuthCeremonyPortMethodsAreClassified(t *testing.T) {
 		}
 	}
 	sort.Strings(stale)
-	writers := 0
-	for _, kind := range ceremonyPortClassification {
-		if kind == "writer" {
-			writers++
+	kinds := map[string]int{}
+	var unknownKind []string
+	for name, kind := range ceremonyPortClassification {
+		switch kind {
+		case "writer", "reader", "sweeper":
+			kinds[kind]++
+		default:
+			unknownKind = append(unknownKind, name+"="+kind)
 		}
 	}
-	t.Logf("перепись: методов порта %d · в перечне %d · писателей %d · читателей %d",
-		len(methods), len(ceremonyPortClassification), writers, len(ceremonyPortClassification)-writers)
+	sort.Strings(unknownKind)
+	t.Logf("перепись: методов порта %d · в перечне %d · писателей %d · читателей %d · уборщиков %d",
+		len(methods), len(ceremonyPortClassification), kinds["writer"], kinds["reader"], kinds["sweeper"])
 	require.NotEmpty(t, methods, "обход не нашёл ни одного метода порта — вердикта нет")
 	assert.Empty(t, unclassified,
 		"метод порта не классифицирован по отношению к уровню изоляции: %v", unclassified)
 	assert.Empty(t, stale, "перечень называет метод, которого у порта нет: %v", stale)
+	assert.Empty(t, unknownKind, "вид метода вне словаря writer · reader · sweeper: %v", unknownKind)
 }
 
 // ceremonyShoulder — одно плечо: пул порта с его умолчанием и пул продукта для
@@ -258,24 +278,50 @@ func holdRefreshDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 
 // familyState — состояние семейства, прочитанное в момент наблюдения.
 //
-// Состояние — ОБЕ записи отзыва: отметка на семействе и отсечка по его ключу
-// для места предъявления (`writeFamilyCutoffsTx`, kaname#396). Обе кладёт одна
-// транзакция писателя; отметка без отсечки — отзыв, исполненный наполовину, и
-// судится своим утверждением.
+// Состояние — отметка на семействе и ОТВЕТ МЕСТА ПРЕДЪЯВЛЕНИЯ о выпуске,
+// записанном в семействе до писателя (`issuanceOf`). Отзыв семейства доезжает
+// до предъявления записью выпуска jti → семейство (kaname#319, решение К10
+// вариант А): отметку до неё доносит каскад ключа `(family_id, family_live)`,
+// а спрашивает её тот же читатель, что у поверхностей предъявления
+// (`FamilyRevoked`). Отметка, не дошедшая до ответа предъявления, — отзыв,
+// исполненный наполовину, и судится своим утверждением.
 type familyState struct {
 	revoked bool
 	reason  string
 	live    bool
-	cutoff  bool
+	// issuanceRecorded — запись выпуска сцены лежит: без неё ответ
+	// предъявления судить не по чему.
+	issuanceRecorded bool
+	// issuanceRevoked — ответ читателя предъявления о выпуске сцены.
+	issuanceRevoked bool
+}
+
+// issuanceOf — идентификатор выпуска, который сцена записывает в своё
+// семейство: хвост идентификатора семейства под префиксом выпуска. Алфавит у
+// обоих один (`access_tokens_jti_form_ck`, `access_tokens_family_form_ck`).
+func issuanceOf(familyID string) string { return "tok" + strings.TrimPrefix(familyID, "tfm-") }
+
+// recordIssuance записывает выпуск сцены в её ЖИВОЕ семейство — как это делает
+// выпуск токена доступа церемонии (`ceremonyport.AccessTokens`).
+func recordIssuance(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, familyID string) {
+	t.Helper()
+	issued := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, repo.RecordAccessToken(ctx, issuanceOf(familyID), familyID, issued, issued.Add(15*time.Minute)),
+		"посев записи выпуска в живое семейство")
 }
 
 func readFamily(ctx context.Context, pool *pgxpool.Pool, familyID string) (familyState, error) {
 	var st familyState
+	jti := issuanceOf(familyID)
 	err := pool.QueryRow(ctx, `
 		SELECT f.revoked_at IS NOT NULL, coalesce(f.revoked_reason, ''), f.live,
-		       EXISTS (SELECT 1 FROM kaname.minted_token_revocations r WHERE r.subject = f.id)
-		  FROM kaname.token_families f WHERE f.id = $1`, familyID).
-		Scan(&st.revoked, &st.reason, &st.live, &st.cutoff)
+		       EXISTS (SELECT 1 FROM kaname.access_tokens a WHERE a.jti = $2)
+		  FROM kaname.token_families f WHERE f.id = $1`, familyID, jti).
+		Scan(&st.revoked, &st.reason, &st.live, &st.issuanceRecorded)
+	if err != nil || !st.issuanceRecorded {
+		return st, err
+	}
+	st.issuanceRevoked, err = kanamepg.NewMintedTokenRevocationRepo(pool).FamilyRevoked(ctx, jti)
 	return st, err
 }
 
@@ -380,6 +426,10 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 	otherScene = lockOrderScene(t, ctx, sh.seed, base+1)
 	winnerPresented, gen := subj.prepare(t, ctx, repo, winnerScene, base)
 	otherPresented, _ := subj.prepare(t, ctx, repo, otherScene, base+1)
+	// У каждого семейства — выпуск токена доступа, записанный ДО сцены: по нему
+	// судится, дошёл ли отзыв до места предъявления.
+	recordIssuance(t, ctx, repo, winnerScene.FamilyID)
+	recordIssuance(t, ctx, repo, otherScene.FamilyID)
 	winnerSuccessor = ceremonyDigest(0x318000 + base)
 	loserSuccessor = ceremonyDigest(0x319000 + base)
 
@@ -476,9 +526,12 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 						"исходом не является (LINE-A-1-13)")
 				assert.Equal(t, string(subj.reason), out.atLoser.reason, "основание отзыва")
 				assert.False(t, out.atLoser.live, "живость семейства у проигравшего")
-				assert.True(t, out.atLoser.cutoff,
-					"к возврату проигравшего отсечка семейства обязана лежать: отзыв, не дошедший "+
-						"до места предъявления, исполнен наполовину")
+				require.True(t, out.atLoser.issuanceRecorded,
+					"НЕ ВЫПОЛНИЛОСЬ: записи выпуска в семействе проигравшего нет — ответ "+
+						"предъявления судить не по чему")
+				assert.True(t, out.atLoser.issuanceRevoked,
+					"к возврату проигравшего выпуск семейства обязан отвечать «отозван» на "+
+						"предъявлении: отзыв, не дошедший до места предъявления, исполнен наполовину")
 
 				// Транзакция проигравшего ОТКАЧЕНА: считается ДО попытки ротации ниже,
 				// иначе число мерило бы и её.
@@ -529,7 +582,11 @@ func TestOAuthCeremonyConcurrentPresentationsOfDifferentSubjectsBothPass(t *test
 				assert.NoError(t, out.loserErr, "второй, предъявивший СВОЙ предмет, обязан пройти")
 				require.NoError(t, out.atLoserErr)
 				assert.False(t, out.atLoser.revoked, "семейство второго обязано остаться живым")
-				assert.False(t, out.atLoser.cutoff, "у живого семейства второго отсечки быть не может")
+				require.True(t, out.atLoser.issuanceRecorded,
+					"НЕ ВЫПОЛНИЛОСЬ: записи выпуска в семействе второго нет — ответ предъявления "+
+						"судить не по чему")
+				assert.False(t, out.atLoser.issuanceRevoked,
+					"выпуск живого семейства второго обязан приниматься на предъявлении")
 
 				repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
 				for j, fam := range []struct {
@@ -608,6 +665,7 @@ var heldWriterCases = []heldWriterCase{
 		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, n int) (int, func()) {
 			code := issueCeremonyCode(t, ctx, repo, sc, n)
+			recordIssuance(t, ctx, repo, sc.FamilyID)
 			childPID, releaseChild := holdingTx(t, ctx, sh.seed, "строка ребёнка",
 				`SELECT 1 FROM kaname.authorization_codes WHERE code_digest = $1 FOR SHARE`, code)
 			type revoked struct {
@@ -648,7 +706,38 @@ var heldWriterCases = []heldWriterCase{
 			assert.True(t, st.revoked, "семейство отозвано")
 			assert.Equal(t, string(domain.FamilyRevokedByCodeReplay), st.reason,
 				"второй отзыв не вправе переписать причину первого")
-			assert.True(t, st.cutoff, "отсечка семейства обязана лежать после обоих отзывов")
+			require.True(t, st.issuanceRecorded,
+				"НЕ ВЫПОЛНИЛОСЬ: записи выпуска в семействе нет — ответ предъявления судить не по чему")
+			assert.True(t, st.issuanceRevoked,
+				"выпуск семейства обязан отвечать «отозван» на предъявлении после обоих отзывов")
+		},
+	},
+	{
+		// Выпуск токена доступа записывается в семейство, пока его отзывает
+		// одновременное обнаружение повтора: заведение стоит на строке семейства,
+		// ключ которой меняет отзыв (`live`). Исход — отказ ключа «семейство не
+		// живо», а не отказ сериализации, и записи не остаётся (kaname#319).
+		name: "RecordAccessToken",
+		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, n int) (int, func()) {
+			issueCeremonyCode(t, ctx, repo, sc, n)
+			return holdingTx(t, ctx, sh.seed, "отзыв семейства", `
+				UPDATE kaname.token_families
+				   SET revoked_at = now(), revoked_reason = $2, live = false
+				 WHERE id = $1 AND revoked_at IS NULL`, sc.FamilyID, string(domain.FamilyRevokedByCodeReplay))
+		},
+		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
+			issued := time.Now().UTC().Truncate(time.Second)
+			return repo.RecordAccessToken(ctx, issuanceOf(sc.FamilyID), sc.FamilyID, issued, issued.Add(15*time.Minute))
+		},
+		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, err error) {
+			assert.ErrorIs(t, err, domain.ErrAccessTokenFamilyNotLive,
+				"запись выпуска, стоявшая на отзыве своего семейства, обязана получить «семейство не живо»")
+			st, rErr := readFamily(ctx, sh.seed, sc.FamilyID)
+			require.NoError(t, rErr)
+			assert.True(t, st.revoked, "семейство отозвано держателем")
+			assert.False(t, st.issuanceRecorded, "запись выпуска в отозванное семейство легла")
 		},
 	},
 	{
@@ -999,8 +1088,16 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					"семейство, заведённое выдачей, на которой стояло снятие, обязано быть ОТОЗВАНО")
 				assert.Equal(t, string(domain.FamilyRevokedBySessionEnd), st.reason, "основание отзыва")
 				assert.False(t, st.live, "живость семейства после снятия сессии")
-				assert.True(t, st.cutoff,
-					"отсечка семейства, заведённого выдачей, обязана лечь той же транзакцией снятия")
+				// Место предъявления: выпуска, записанного раньше отзыва, у сцены
+				// нет — семейство заведено выдачей, на которой стояло снятие, — и
+				// отзыв до предъявления доходит тем, что выпуск в это семейство
+				// больше не записывается (kaname#319, решение К10 вариант А).
+				mintedAt := time.Now().UTC().Truncate(time.Second)
+				recErr := repo.RecordAccessToken(ctx, issuanceOf(sc.FamilyID), sc.FamilyID,
+					mintedAt, mintedAt.Add(15*time.Minute))
+				assert.ErrorIs(t, recErr, domain.ErrAccessTokenFamilyNotLive,
+					"выпуск в семейство, отозванное снятием сессии, обязан не записаться: "+
+						"иначе токен снятой сессии принимался бы на предъявлении")
 			})
 		}
 	}

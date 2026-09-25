@@ -73,8 +73,8 @@ func TestCutoffCensusFindsTheWritersOfTheRowWhateverTheOperationIsCalled(t *test
 
 // TestCutoffCensusLeavesTheWriterOfAnotherRowOut — законный близнец: та же
 // форма цепочки, отличающаяся ОДНИМ фактом — оператор пишет другую строку
-// (отсечку по ключу семейства в `minted_token_revocations`). Её писатель
-// путём этой строки не является, а соседние пути остаются найденными.
+// (отсечку в `minted_token_revocations`). Её писатель путём этой строки не
+// является, а соседние пути остаются найденными.
 func TestCutoffCensusLeavesTheWriterOfAnotherRowOut(t *testing.T) {
 	const twin = `package pg
 

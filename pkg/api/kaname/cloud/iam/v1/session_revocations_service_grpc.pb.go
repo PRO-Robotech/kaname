@@ -36,8 +36,9 @@ const (
 // InternalSessionRevocationsService — cluster-internal RPCs for the session
 // revocation hot-path (port 9091).
 //
-// `session_revocations` is queryable from api-gateway on every access-token
-// verification: `IsRevoked` is asked on the request path, per presentation.
+// `IsRevoked` is asked by api-gateway on the request path. Its answer covers a
+// `session_revocations` row for the token AND the revocation of the family the
+// token's issuance belongs to (see `IsRevoked` below).
 //
 // THERE IS NO PUSH, and the absence is deliberate. This comment used to
 // describe a cache pre-loaded over a notification channel that fanned every
@@ -52,6 +53,17 @@ const (
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
 //     internal_iam_service.proto; it shares this service's writer and records a
 //     user-level cutoff, not a row here).
+//   - Revocation of a token family of the service's own authorization ceremony:
+//     a replayed authorization code, a replayed refresh token, the end of the
+//     session the ceremony ran in, and removal of the family together with its
+//     client, its user or its session. None of them writes a row here: the
+//     family carries the mark, and `IsRevoked` reads it for every token whose
+//     issuance the ceremony's issuance adapter recorded as belonging to that
+//     family. The adapter records each issuance before the token leaves and
+//     refuses the issuance when the record is refused, so a token of the
+//     ceremony always belongs to its family. The ceremony is not yet mounted
+//     on a request path of the service (kaname#407); until it is, no request
+//     issues a token of a family.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -79,9 +91,22 @@ type InternalSessionRevocationsServiceClient interface {
 	//
 	// Idempotent on `token_jti` (upsert on conflict).
 	Revoke(ctx context.Context, in *RevokeRequest, opts ...grpc.CallOption) (*operation.Operation, error)
-	// IsRevoked — sync hot-path lookup for api-gateway: `SELECT 1 FROM
-	// session_revocations WHERE token_jti = $1`. Latency budget ≤ 5ms p95
-	// (PK lookup on indexed table). Called only on cache miss.
+	// IsRevoked — sync hot-path lookup for api-gateway by `token_jti`.
+	//
+	// `revoked` is true when EITHER holds:
+	//   - a non-expired `session_revocations` row exists for the `jti`;
+	//   - the token's issuance is recorded as belonging to a token family, and
+	//     that family is revoked or removed.
+	//
+	// A token whose issuance belongs to no family is judged by the row alone.
+	// `revoked_at` and `reason` come from the row only: a revocation by family
+	// answers `revoked=true` with both empty. One call answers both halves, so a
+	// caller has no second lookup, no second cache window and no second failure
+	// policy for the family.
+	//
+	// Both halves are primary-key lookups. Latency budget ≤ 5ms p95. Called only
+	// on cache miss. A store failure on either half is a fixed INTERNAL, never
+	// `revoked=false`.
 	IsRevoked(ctx context.Context, in *IsRevokedRequest, opts ...grpc.CallOption) (*IsRevokedResponse, error)
 	// ListByUser — admin / audit endpoint: enumerate active revocations for a
 	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was
@@ -195,8 +220,9 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 // InternalSessionRevocationsService — cluster-internal RPCs for the session
 // revocation hot-path (port 9091).
 //
-// `session_revocations` is queryable from api-gateway on every access-token
-// verification: `IsRevoked` is asked on the request path, per presentation.
+// `IsRevoked` is asked by api-gateway on the request path. Its answer covers a
+// `session_revocations` row for the token AND the revocation of the family the
+// token's issuance belongs to (see `IsRevoked` below).
 //
 // THERE IS NO PUSH, and the absence is deliberate. This comment used to
 // describe a cache pre-loaded over a notification channel that fanned every
@@ -211,6 +237,17 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
 //     internal_iam_service.proto; it shares this service's writer and records a
 //     user-level cutoff, not a row here).
+//   - Revocation of a token family of the service's own authorization ceremony:
+//     a replayed authorization code, a replayed refresh token, the end of the
+//     session the ceremony ran in, and removal of the family together with its
+//     client, its user or its session. None of them writes a row here: the
+//     family carries the mark, and `IsRevoked` reads it for every token whose
+//     issuance the ceremony's issuance adapter recorded as belonging to that
+//     family. The adapter records each issuance before the token leaves and
+//     refuses the issuance when the record is refused, so a token of the
+//     ceremony always belongs to its family. The ceremony is not yet mounted
+//     on a request path of the service (kaname#407); until it is, no request
+//     issues a token of a family.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -238,9 +275,22 @@ type InternalSessionRevocationsServiceServer interface {
 	//
 	// Idempotent on `token_jti` (upsert on conflict).
 	Revoke(context.Context, *RevokeRequest) (*operation.Operation, error)
-	// IsRevoked — sync hot-path lookup for api-gateway: `SELECT 1 FROM
-	// session_revocations WHERE token_jti = $1`. Latency budget ≤ 5ms p95
-	// (PK lookup on indexed table). Called only on cache miss.
+	// IsRevoked — sync hot-path lookup for api-gateway by `token_jti`.
+	//
+	// `revoked` is true when EITHER holds:
+	//   - a non-expired `session_revocations` row exists for the `jti`;
+	//   - the token's issuance is recorded as belonging to a token family, and
+	//     that family is revoked or removed.
+	//
+	// A token whose issuance belongs to no family is judged by the row alone.
+	// `revoked_at` and `reason` come from the row only: a revocation by family
+	// answers `revoked=true` with both empty. One call answers both halves, so a
+	// caller has no second lookup, no second cache window and no second failure
+	// policy for the family.
+	//
+	// Both halves are primary-key lookups. Latency budget ≤ 5ms p95. Called only
+	// on cache miss. A store failure on either half is a fixed INTERNAL, never
+	// `revoked=false`.
 	IsRevoked(context.Context, *IsRevokedRequest) (*IsRevokedResponse, error)
 	// ListByUser — admin / audit endpoint: enumerate active revocations for a
 	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was

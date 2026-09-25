@@ -225,5 +225,8 @@ func (noRevocations) RevokedBefore(context.Context, string) (time.Time, bool, er
 	return time.Time{}, false, nil
 }
 
+// FamilyRevoked — семейства, отозванного у этой сцены, нет.
+func (noRevocations) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
+
 var _ = jwt.MapClaims{}
 var _ = grpcsrv.NewTrustDomain
