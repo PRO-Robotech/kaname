@@ -244,6 +244,9 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 
+	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
+	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
+	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
@@ -277,7 +280,14 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	if err := w.ResetFailures(ctx, FailureByAddress, addressKey); err != nil {
+	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
+	// личности факторов (Ф12 Р7 ред. 11, Ф3 Р10 ред. 11). Сюда путь лежит
+	// только через совпавший КОД, доводящий сессию до «2», — но решает это
+	// единственный писатель, а не эта полоса.
+	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		AddressKey: addressKey, Presented: methods,
+	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditSecondFactorEnrolled, user, resolved.Session.ID, assurance.MethodTOTP); err != nil {
@@ -306,7 +316,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
 func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, presented []string) AssuranceView {
-	enrolled, err := enrolledMethods(ctx, d.Methods, userID)
+	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}

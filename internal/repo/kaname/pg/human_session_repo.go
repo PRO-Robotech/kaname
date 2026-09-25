@@ -12,7 +12,8 @@ package pg
 // Таблицу способа входа (`user_login_methods`) называет только её адаптер
 // (`login_method_repo.go`, гейт `TestLoginVerifierStaysInside`). Замещение
 // материала внутри транзакции этого адаптера поэтому ДЕЛЕГИРУЕТСЯ функции
-// того файла (`replaceLoginVerifierTx`) — здесь ни имени таблицы, ни выхода
+// того файла (`replaceLoginVerifierTx`), и чтение строки способа той же
+// транзакцией — тоже (`getLoginMethod`): здесь ни имени таблицы, ни выхода
 // материала нет.
 //
 // Операцию записи отсечки этот файл тоже не переписывает: она одна на дерево
@@ -708,6 +709,12 @@ func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserToke
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).
 func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
 	return replaceLoginVerifierTx(ctx, w.tx, m)
+}
+
+// LoginMethod — чтение строки способа входа тем же соединением транзакции;
+// оператор — адаптера таблицы секрета (`getLoginMethod`), как и у `Get` пулом.
+func (w *humanSessionWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return getLoginMethod(ctx, w.tx, userID, kind)
 }
 
 // Операторы второго фактора (Ф12) — те же делегации: таблицу секрета называет

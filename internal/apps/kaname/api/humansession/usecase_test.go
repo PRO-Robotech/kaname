@@ -49,6 +49,9 @@ type harness struct {
 	// Восстановление доступа (Ф5).
 	recoveryRequest  *humansession.RequestRecoveryUseCase
 	recoveryComplete *humansession.CompleteRecoveryUseCase
+	// journal — ряд обращений ЗАВЕРШЕНИЯ восстановления к портам хранилища
+	// (`recording_store_test.go`): завершение собрано над обёртками с записью.
+	journal *storeJournal
 }
 
 // rcCodeTTL — срок кода в пробах: величина Ф1 §4.1, объявляемая настройкой.
@@ -90,7 +93,8 @@ func probeTOTPVerifier(t *testing.T) *totpverify.Verifier {
 
 func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	t.Helper()
-	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, envelope: &laneEnvelope{}, totp: probeTOTPVerifier(t)}
+	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, envelope: &laneEnvelope{}, totp: probeTOTPVerifier(t),
+		journal: &storeJournal{}}
 	h.envelopePort = h.envelope
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
@@ -125,7 +129,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
+		Store: recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+		Observer: h.obs, Now: now, Logger: logger,
 	})
 	require.NoError(t, err)
 	return h
