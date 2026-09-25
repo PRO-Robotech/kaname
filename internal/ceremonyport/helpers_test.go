@@ -33,7 +33,14 @@ const (
 	testClientID = "svc-console"
 	testSubject  = "usr-0123456789abcdefg"
 	testFamily   = "tfm-0123456789abcdefg"
+	// Контекст входа сеанса: сессия, уровень и момент аутентификации — поля
+	// записи сеанса, а не ключи её карты утверждений.
+	testSessionID = "hss0123456789abcdefg"
+	testACR       = "2"
 )
+
+// testAuthTime — момент аутентификации сессии, из которой выдан грант.
+var testAuthTime = time.Date(2026, 9, 24, 8, 30, 15, 0, time.UTC)
 
 // keyRing — подписной материал и публикуемый набор одного ключа.
 type keyRing struct {
@@ -143,6 +150,9 @@ func grantWithin(bound time.Time) oauthceremony.GrantRecord {
 		Session: oauthceremony.SessionRecord{
 			Subject:   testSubject,
 			Username:  "session-only-username",
+			SessionID: testSessionID,
+			ACR:       testACR,
+			AuthTime:  testAuthTime,
 			ExpiresAt: map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAccess: bound},
 			Claims:    map[string]any{"session_only_claim": "session-only-value"},
 		},

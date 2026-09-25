@@ -109,6 +109,17 @@ const issuanceBackstopMessage = "access token issuance record refused a value th
 // `TestFamilyVerdictHasOneReaderAndEverySurfaceAsksTheRule`: реализация порта
 // выпуска при нуле вызывающих писателя в дереве — находка.
 //
+// # УРОВЕНЬ ИЗОЛЯЦИИ — НАЗВАННЫЙ
+//
+// Оператор исполняется на уровне писателей церемонии (`ceremonyWriterTx()`
+// через `execWriter`, kaname#316), а не на умолчании сессии. Заведение,
+// стоявшее на строке семейства, которую отзыв меняет в ключе (`live`), после
+// фиксации отзыва перепроверяет ключ по новой версии строки и получает отказ
+// ключа — «семейство не живо». Под унаследованным `repeatable read` либо
+// `serializable` тот же порядок дал бы отказ сериализации, то есть «повторите»
+// вместо исхода заведения. Держит сцена `RecordAccessToken` пробы
+// `oauth_ceremony_isolation_integration_test.go`.
+//
 // # ИСХОДОВ ДВА
 //
 // Семейства нет либо оно отозвано — `domain.ErrAccessTokenFamilyNotLive`: это
@@ -134,7 +145,7 @@ func (r *OAuthCeremonyRepo) RecordAccessToken(ctx context.Context, jti, familyID
 	case !expiresAt.After(issuedAt):
 		return issuanceDefect(ctx, familyID, "expires_at", "must be after issued_at")
 	}
-	if _, err := r.pool.Exec(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
+	if _, err := r.execWriter(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
 		return issuanceRefusal(ctx, err, jti, familyID)
 	}
 	return nil
@@ -179,11 +190,16 @@ func issuanceRefusal(ctx context.Context, err error, jti, familyID string) error
 // токен по его сроку с допуском `ClockSkew`, и после порога строка ни одного
 // исхода не меняет. Величину слагаемых задаёт реестр уборки
 // (`apps/kaname/retention`), не этот файл.
+//
+// Уровень — названный (`execWriter`), как у каждого писателя порта: строку,
+// которую держит другой (каскад отзыва семейства), уборка пропускает и снимет
+// следующим проходом, а правку строки, зафиксированную после её снимка, при
+// названном уровне перечитывает, а не отказывает сериализацией.
 func (r *OAuthCeremonyRepo) SweepExpiredAccessTokens(ctx context.Context, grace time.Duration, batch int) (int64, bool, error) {
 	if batch <= 0 {
 		return 0, false, fmt.Errorf("Illegal argument access_token sweep batch: must be positive")
 	}
-	tag, err := r.pool.Exec(ctx, sweepExpiredIssuancesSQL, grace.Seconds(), batch)
+	tag, err := r.execWriter(ctx, sweepExpiredIssuancesSQL, grace.Seconds(), batch)
 	if err != nil {
 		return 0, false, wrapPgErr(err, "AccessToken", "")
 	}

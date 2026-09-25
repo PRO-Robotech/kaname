@@ -163,25 +163,48 @@ func firstAuthenticationQ(ctx context.Context, q rowQuerier, userID domain.UserI
 	return at, true, nil
 }
 
+// beginHumanSessionWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя сессии,
+// и открывает оно её на НАЗВАННОМ уровне писателей церемонии
+// (`ceremonyWriterTx()`), а не на умолчании сессии (kaname#316).
+//
+// Снятие записи отзывает выданное в ней (`revokeFamiliesOfSessionsTx`) в этой
+// же транзакции, и исход снятия против одновременной выдачи решает её уровень:
+// на названном отзыв идёт своим новым снимком и видит семейство, заведённое
+// выдачей, на которой снятие стояло; на унаследованном `repeatable read` или
+// `serializable` снимок один на транзакцию, и то же семейство оставалось бы
+// неотозванным при снятой записи (раздел «Выдача против снятия сессии» у
+// `ceremonyWriterTx`).
+//
+// Двери, отдающие эту транзакцию, — `Writer`, `SessionSetWriter`,
+// `ForceLogoutWriter` и регистрация (`RegistrationStore.Writer`); построить
+// писателя сессии мимо этого открытия перепись пакета не даёт
+// (`ceremony_writer_openers_test.go`).
+func beginHumanSessionWriter(ctx context.Context, pool *pgxpool.Pool) (*humanSessionWriter, error) {
+	tx, err := pool.BeginTx(ctx, ceremonyWriterTx())
+	if err != nil {
+		return nil, err
+	}
+	return &humanSessionWriter{tx: tx}, nil
+}
+
 // Writer — см. порт.
 func (r *HumanSessionRepo) Writer(ctx context.Context) (humansession.Writer, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	w, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
 		return nil, mapErr(err, "HumanSession.Writer", "")
 	}
-	return &humanSessionWriter{tx: tx}, nil
+	return w, nil
 }
 
 // SessionSetWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
 // строка личности замком писателя нескольких сессий (`lockPersonForSessionSetSQL`).
 func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	w, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
 		return nil, mapErr(err, "HumanSession.SessionSetWriter", "")
 	}
-	w := &humanSessionWriter{tx: tx}
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
-		_ = tx.Rollback(ctx)
+		_ = w.tx.Rollback(ctx)
 		return nil, err
 	}
 	return w, nil
@@ -608,20 +631,21 @@ func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, subject domain
 		return nil, iamerr.Wrapf(iamerr.ErrInternal,
 			"force-logout writer: lock wait %s is not representable in lock_timeout", lockWait)
 	}
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	w, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
-	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`,
+	if _, err := w.tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`,
 		fmt.Sprintf("%dms", lockWait.Milliseconds())); err != nil {
-		_ = tx.Rollback(ctx)
+		_ = w.tx.Rollback(ctx)
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
-	if _, err := tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
-		_ = tx.Rollback(ctx)
+	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
+		_ = w.tx.Rollback(ctx)
 		return nil, mapErr(err, "User", string(subject))
 	}
-	return &humanSessionWriter{tx: tx, person: subject}, nil
+	w.person = subject
+	return w, nil
 }
 
 // RotateBearer — новый дайджест, сдвиг момента последнего предъявления; момент

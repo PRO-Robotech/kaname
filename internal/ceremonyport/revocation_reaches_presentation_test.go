@@ -13,16 +13,19 @@
 // запроса (`tokenintrospecthttp`), а правило отзыва в нём — настоящее
 // (`tokenrevocation`).
 //
-// Подставлены только хранилища: записи кода, токенов, семейств и выпусков
-// живут в памяти пробы. Подставка держит СЕМАНТИКУ порта (погашение одной
-// операцией под замком, повтор отдаёт запись вместе с отказом, отозванное
-// семейство не отдаётся) и семантику схемы службы: семейство заводится вместе с
-// кодом, запись выпуска ложится только в живое семейство, отметка отзыва
-// доезжает до каждой записи выпуска семейства (решение К10, вариант А:
-// семейство выпуска служба знает по записи jti → семейство, kaname#319). То,
-// что схема службы держит это на самом деле, держат интеграционные пробы слоя
-// доступа (`family_revocation_through_three_surfaces_integration_test.go`) и
-// схемы (`access_token_family_schema_integration_test.go`).
+// Подставлены только хранилища: записи кода, токенов, семейств и выпусков, а
+// также справочник проверочных значений секрета клиента живут в памяти пробы;
+// сверку секрета исполняет настоящий адаптер (`ClientSecrets`) над настоящим
+// проверяющим (`passwordverify`). Подставка держит СЕМАНТИКУ порта (погашение
+// одной операцией под замком, повтор отдаёт запись вместе с отказом,
+// отозванное семейство не отдаётся) и семантику схемы службы: семейство
+// заводится вместе с кодом, запись выпуска ложится только в живое семейство,
+// отметка отзыва доезжает до каждой записи выпуска семейства (решение К10,
+// вариант А: семейство выпуска служба знает по записи jti → семейство,
+// kaname#319). То, что схема службы держит это на самом деле, держат
+// интеграционные пробы слоя доступа
+// (`family_revocation_through_three_surfaces_integration_test.go`) и схемы
+// (`access_token_family_schema_integration_test.go`).
 //
 // # Почему одним прогоном
 //
@@ -37,6 +40,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -46,13 +51,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
 const (
@@ -170,15 +176,19 @@ type memVaults struct {
 	mu       sync.Mutex
 	families *memFamilies
 	clients  map[string]oauthceremony.ClientRegistration
-	codes    map[string]*codeRow
-	access   map[string]oauthceremony.GrantRecord
-	refresh  map[string]*refreshRow
+	// secrets — справочник проверочных значений секрета клиента, над которым
+	// стоит адаптер ClientSecrets; контракт — хранилища службы.
+	secrets *secretStore
+	codes   map[string]*codeRow
+	access  map[string]oauthceremony.GrantRecord
+	refresh map[string]*refreshRow
 }
 
 func newMemVaults(families *memFamilies) *memVaults {
 	return &memVaults{
 		families: families,
 		clients:  map[string]oauthceremony.ClientRegistration{},
+		secrets:  &secretStore{verifiers: map[string]domain.LoginVerifier{}},
 		codes:    map[string]*codeRow{},
 		access:   map[string]oauthceremony.GrantRecord{},
 		refresh:  map[string]*refreshRow{},
@@ -338,11 +348,15 @@ func newFlowRig(t *testing.T) *flowRig {
 	require.NoError(t, err)
 	vaults := newMemVaults(families)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(flowSecret), 10)
+	hasher := floorHasher(t)
+	stored, err := hasher.Hash(flowSecret)
+	require.NoError(t, err)
+	vaults.secrets.verifiers[testClientID] = stored
+	secrets, err := ceremonyport.NewClientSecrets(vaults.secrets,
+		alignedVerifier(t, hasher, &outcomeCounter{cells: map[passwordverify.Outcome]int{}}))
 	require.NoError(t, err)
 	vaults.clients[testClientID] = oauthceremony.ClientRegistration{
 		ClientID:      testClientID,
-		HashedSecret:  hash,
 		RedirectURIs:  []string{flowRedirect},
 		GrantKinds:    []oauthceremony.GrantKind{oauthceremony.GrantAuthorizationCode, oauthceremony.GrantRefreshToken},
 		ResponseKinds: []string{"code"},
@@ -355,11 +369,10 @@ func newFlowRig(t *testing.T) *flowRig {
 		TokenEndpoint:             "https://iam.kacho.local/iam/v1/token",
 		AccessTokenLifespan:       10 * time.Minute,
 		RefreshTokenLifespan:      time.Hour,
-		AuthorizationCodeLifespan: 5 * time.Minute,
+		AuthorizationCodeLifespan: tokenpolicy.MaxAuthorizationCodeTTL,
 		ScopeMatching:             oauthceremony.ScopeMatchingExact,
 		RefreshTokenIssuance:      oauthceremony.RefreshTokenIssuanceOnScope,
 		RefreshTokenScopes:        []string{"offline"},
-		SecretHashCost:            10,
 		MinParameterEntropy:       8,
 		PortTimeout:               2 * time.Second,
 		OperationTimeout:          5 * time.Second,
@@ -371,6 +384,7 @@ func newFlowRig(t *testing.T) *flowRig {
 		RefreshTokens:      vaults,
 		Grants:             grants,
 		AccessTokenIssuer:  tokens,
+		ClientSecrets:      secrets,
 	})
 	require.NoError(t, err, "церемония не собрана на адаптерах службы")
 
@@ -381,8 +395,28 @@ func newFlowRig(t *testing.T) *flowRig {
 	return rig
 }
 
+// loginGrant — решение службы о выдаче: контекст входа — полями, а не ключами
+// карты утверждений.
+func loginGrant() oauthceremony.AuthorizationGrant {
+	return oauthceremony.AuthorizationGrant{
+		Subject:          testSubject,
+		SessionID:        testSessionID,
+		ACR:              testACR,
+		AuthTime:         testAuthTime,
+		GrantedScopes:    []string{"openid", "offline"},
+		GrantedAudiences: []string{testAudience},
+	}
+}
+
 func (r *flowRig) issueCode(t *testing.T) string {
 	t.Helper()
+	code, err := r.issueCodeFor(loginGrant())
+	require.NoError(t, err, "CompleteAuthorization отказал")
+	return code
+}
+
+// issueCodeFor проходит точку авторизации и выдаёт код по решению grant.
+func (r *flowRig) issueCodeFor(grant oauthceremony.AuthorizationGrant) (string, error) {
 	sum := sha256.Sum256([]byte(flowVerifier))
 	intent, err := r.ceremony.Authorize(context.Background(), oauthceremony.AuthorizationRequest{
 		ClientID:      testClientID,
@@ -396,21 +430,28 @@ func (r *flowRig) issueCode(t *testing.T) string {
 			"code_challenge_method": {"S256"},
 		},
 	})
-	require.NoError(t, err, "Authorize отказал")
-	result, err := r.ceremony.CompleteAuthorization(context.Background(), intent, oauthceremony.AuthorizationGrant{
-		Subject:          testSubject,
-		GrantedScopes:    []string{"openid", "offline"},
-		GrantedAudiences: []string{testAudience},
-	})
-	require.NoError(t, err, "CompleteAuthorization отказал")
+	if err != nil {
+		return "", fmt.Errorf("Authorize: %w", err)
+	}
+	result, err := r.ceremony.CompleteAuthorization(context.Background(), intent, grant)
+	if err != nil {
+		return "", err
+	}
 	codes := result.Parameters["code"]
-	require.Len(t, codes, 1, "точка авторизации не выдала кода")
-	return codes[0]
+	if len(codes) != 1 {
+		return "", fmt.Errorf("точка авторизации выдала %d кодов, а не один", len(codes))
+	}
+	return codes[0], nil
 }
 
 func (r *flowRig) exchangeCode(code string) (oauthceremony.TokenResult, error) {
+	return r.exchangeCodeAs(testClientID, flowSecret, code)
+}
+
+// exchangeCodeAs — обмен кода клиентом clientID, доказывающим себя секретом.
+func (r *flowRig) exchangeCodeAs(clientID, secret, code string) (oauthceremony.TokenResult, error) {
 	return r.ceremony.Exchange(context.Background(), oauthceremony.TokenRequest{
-		Grant: oauthceremony.GrantAuthorizationCode, ClientID: testClientID, ClientSecret: flowSecret,
+		Grant: oauthceremony.GrantAuthorizationCode, ClientID: clientID, ClientSecret: secret,
 		AuthMethod: oauthceremony.ClientAuthBasic, Code: code, RedirectURI: flowRedirect, CodeVerifier: flowVerifier,
 	})
 }
@@ -525,7 +566,7 @@ func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
 				GrantID: grantID, ClientID: testClientID,
 				GrantedScopes: []string{"openid"}, GrantedAudiences: []string{testAudience},
 				Session: oauthceremony.SessionRecord{
-					Subject:   testSubject,
+					Subject: testSubject, SessionID: testSessionID, ACR: testACR, AuthTime: testAuthTime,
 					ExpiresAt: map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAccess: time.Now().Add(5 * time.Minute)},
 				},
 			})
@@ -568,4 +609,109 @@ func TestK1_ClientRevokeRefusesLoudlyWhileTheWordIsMissing(t *testing.T) {
 	require.Error(t, err, "отзыв клиентом ответил успехом, хотя причину записать нечем")
 	_, revoked := rig.families.isRevoked(family)
 	require.False(t, revoked, "семейству записана причина, которой нет в словаре службы")
+}
+
+// ── Контекст входа: поля записи, а не ключи карты ──────────────────────────
+
+// recordOf — запись гранта, под которой хранилище держит выпуск jti.
+func (r *flowRig) recordOf(t *testing.T, access string) oauthceremony.GrantRecord {
+	t.Helper()
+	jti, err := r.tokens.IdentifyAccessToken(context.Background(), access)
+	require.NoError(t, err)
+	r.vaults.mu.Lock()
+	defer r.vaults.mu.Unlock()
+	rec, ok := r.vaults.access[jti]
+	require.True(t, ok, "НЕ ВЫПОЛНИЛОСЬ: запись под jti выпуска не положена")
+	return rec
+}
+
+// Сессия, уровень и момент аутентификации, названные решением службы о выдаче,
+// доходят до записи ПОЛЯМИ — и после обмена кода, и после оборота токена
+// обновления: это снимок на выдаче кода, и у семейства он один. Токен доступа
+// несёт уровень и момент из этих полей.
+func TestLoginContext_ReachesTheRecordsAsFields(t *testing.T) {
+	rig := newFlowRig(t)
+	pair := rig.freshFamily(t)
+	rotated, err := rig.refresh(pair.RefreshToken)
+	require.NoError(t, err, "оборот токена обновления отказал")
+
+	for name, access := range map[string]string{"обмен кода": pair.AccessToken, "оборот": rotated.AccessToken} {
+		rec := rig.recordOf(t, access)
+		require.Equalf(t, testSessionID, rec.Session.SessionID, "%s: сессия не дошла до записи полем", name)
+		require.Equalf(t, testACR, rec.Session.ACR, "%s: уровень не дошёл до записи полем", name)
+		require.Truef(t, testAuthTime.Equal(rec.Session.AuthTime), "%s: момент аутентификации %s, а не %s",
+			name, rec.Session.AuthTime, testAuthTime)
+		for _, key := range []string{"sid", "acr", "auth_time"} {
+			require.NotContainsf(t, rec.Session.Claims, key, "%s: ключ %q лёг в карту утверждений записи", name, key)
+		}
+		_, claims := unverifiedClaims(t, access)
+		require.Equalf(t, testACR, claims["acr"], "%s: уровень токена не из поля записи", name)
+		require.Equalf(t, float64(testAuthTime.Unix()), claims["auth_time"], "%s: момент токена не из поля записи", name)
+	}
+}
+
+// Близнец: те же ключи — в карте утверждений решения, с ДРУГИМИ значениями, —
+// в запись не идут: выдача отказывает до кода, и хранилище кода не пополняется.
+// Ключ вне контекста входа в той же карте выдачи не мешает.
+func TestLoginContext_KeysOfTheClaimsMapDoNotReachTheRecord(t *testing.T) {
+	rig := newFlowRig(t)
+	codesBefore := func() int {
+		rig.vaults.mu.Lock()
+		defer rig.vaults.mu.Unlock()
+		return len(rig.vaults.codes)
+	}
+
+	for key, value := range map[string]any{
+		"sid": "hss-claims-only-session", "acr": "3", "auth_time": testAuthTime.Add(-time.Hour).Unix(),
+	} {
+		t.Run(key, func(t *testing.T) {
+			before := codesBefore()
+			grant := loginGrant()
+			grant.Claims = map[string]any{key: value}
+			code, err := rig.issueCodeFor(grant)
+			require.Error(t, err, "выдача приняла ключ %q в карте утверждений", key)
+			require.Empty(t, code)
+			require.Equal(t, before, codesBefore(), "запись кода легла при отвергнутой выдаче")
+		})
+	}
+
+	t.Run("близнец: ключ вне контекста входа выдаётся", func(t *testing.T) {
+		before := codesBefore()
+		grant := loginGrant()
+		grant.Claims = map[string]any{"tenant_hint": "acc-0123456789abcdefg"}
+		code, err := rig.issueCodeFor(grant)
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+		require.Equal(t, before+1, codesBefore())
+	})
+}
+
+// ── Секрет клиента сквозь церемонию ────────────────────────────────────────
+
+// Порт сверки провязан в церемонию: неверный секрет и неизвестный клиент — один
+// и тот же отказ доказательства; отказ справочника — отказ операции, а не
+// «клиент не доказан»; верный секрет обменивает тот же код.
+func TestClientSecrets_ProveTheClientThroughTheCeremony(t *testing.T) {
+	rig := newFlowRig(t)
+	code := rig.issueCode(t)
+
+	_, err := rig.exchangeCodeAs(testClientID, "not-the-secret-of-this-client", code)
+	require.Equal(t, oauthceremony.CodeInvalidClient, oauthceremony.CodeOf(err), "неверный секрет: %v", err)
+
+	_, err = rig.exchangeCodeAs(unknownClientID, flowSecret, code)
+	require.Equal(t, oauthceremony.CodeInvalidClient, oauthceremony.CodeOf(err), "неизвестный клиент: %v", err)
+
+	rig.vaults.secrets.mu.Lock()
+	rig.vaults.secrets.fail = errors.New("connection refused")
+	rig.vaults.secrets.mu.Unlock()
+	_, err = rig.exchangeCode(code)
+	require.Equal(t, oauthceremony.CodeServerError, oauthceremony.CodeOf(err),
+		"отказ справочника стал ответом о клиенте: %v", err)
+
+	rig.vaults.secrets.mu.Lock()
+	rig.vaults.secrets.fail = nil
+	rig.vaults.secrets.mu.Unlock()
+	tokens, err := rig.exchangeCode(code)
+	require.NoError(t, err, "близнец: верный секрет не обменял код")
+	require.NotEmpty(t, tokens.AccessToken)
 }

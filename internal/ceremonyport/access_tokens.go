@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
@@ -83,11 +84,22 @@ func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder
 // # Что идёт в токен — ПЕРЕЧЕНЬ, а не отбор
 //
 // Субъект — `grant.Session.Subject`, клиент — `grant.ClientID`, области —
-// `grant.GrantedScopes`, получатели — `grant.GrantedAudiences`. Остальное
-// подписант кладёт сам (`iss`, `iat`, `nbf`, `exp`, `jti`). Запрошенное
-// (`Requested*`), протокольные поля запроса (`Form`) и утверждения сеанса
-// (`Session.Claims`, `Session.Username`) в токен не идут: перечень собирается
-// здесь поимённо, и поля, которого в нём нет, выпуск не видит.
+// `grant.GrantedScopes`, получатели — `grant.GrantedAudiences`, уровень (`acr`)
+// и момент (`auth_time`) аутентификации — `grant.Session.ACR` и
+// `grant.Session.AuthTime`. Остальное подписант кладёт сам (`iss`, `iat`,
+// `nbf`, `exp`, `jti`). Запрошенное (`Requested*`), протокольные поля запроса
+// (`Form`), утверждения сеанса (`Session.Claims`, `Session.Username`) и сессия
+// входа (`Session.SessionID`) в токен не идут: перечень собирается здесь
+// поимённо, и поля, которого в нём нет, выпуск не видит.
+//
+// # Контекст входа — из полей сеанса
+//
+// Уровень и момент аутентификации читают точки принуждения ступени входа: у
+// токена без уровня ранг — аноним, и каждая из них отвергала бы его. Берутся
+// они из ПОЛЕЙ записи сеанса — снимка на выдаче кода, одного у всего
+// семейства. Карта `Session.Claims` вторым источником не служит: ключей
+// контекста входа в ней нет по контракту фундамента, а будь они — в токен их
+// не взяли бы, потому что карта в перечень не входит вовсе.
 //
 // # Семейство — в ЗАПИСИ выпуска, а не в токене
 //
@@ -107,9 +119,11 @@ func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder
 //
 // # Чего выпуск не делает
 //
-// Не выпускает без границы срока, без семейства, без субъекта, без клиента и
-// без выданного получателя: незаданный получатель означал бы «любой», а токен
-// без семейства записать не во что.
+// Не выпускает без границы срока, без семейства, без субъекта, без клиента, без
+// выданного получателя и без контекста входа: незаданный получатель означал бы
+// «любой», токен без семейства записать не во что, а токен без уровня входа
+// (ранжирование `acrlevel` ставит его анонимом) и без момента аутентификации
+// отвергался бы там, где его предъявят.
 func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony.GrantRecord) (oauthceremony.IssuedAccessToken, error) {
 	bound, named := grant.Session.ExpiresAt[oauthceremony.TokenKindAccess]
 	switch {
@@ -125,9 +139,21 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 	case len(grant.GrantedAudiences) == 0:
 		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no granted audience; " +
 			"a token without an audience would be good for any surface")
+	case acrlevel.Rank(grant.Session.ACR) == 0:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: the grant carries no login level: "+
+			"%q ranks as anonymous, and a token without a level is refused wherever a level is required",
+			grant.Session.ACR)
+	case grant.Session.AuthTime.IsZero():
+		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no moment of authentication")
 	}
 
-	claims := map[string]any{"client_id": grant.ClientID}
+	claims := map[string]any{
+		"client_id": grant.ClientID,
+		// Контекст входа — из полей сеанса (см. шапку); `auth_time` — целые
+		// секунды эпохи (OpenID Connect Core 1.0 §2).
+		"acr":       grant.Session.ACR,
+		"auth_time": grant.Session.AuthTime.Unix(),
+	}
 	if len(grant.GrantedScopes) > 0 {
 		// RFC 9068 §2.2.3: области — одной строкой через пробел.
 		claims["scope"] = strings.Join(grant.GrantedScopes, " ")
