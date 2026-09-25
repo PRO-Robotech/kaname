@@ -9,8 +9,6 @@
 //	POST /iam/v1/hooks/refresh        — Hydra refresh_token webhook.
 //	POST /iam/v1/hooks/provision      — Kratos registration/login user-provisioning webhook.
 //	POST /iam/v1/hooks/recovery       — Kratos recovery-completed webhook.
-//	GET  /healthz                     — liveness probe.
-//	GET  /readyz                      — readiness probe.
 //
 // Перечень выше — ОПИСЬ ПОЛОСЫ, и её полноту держит проба
 // `route_prose_names_every_route_test.go`: маршрут восстановления приехал позже
@@ -19,50 +17,18 @@
 // Hook-endpoints (token/refresh/provision/recovery) require Bearer X-Kacho-Hook-Token.
 // Listener — cluster-internal-only (ban #6: Internal.* not on external endpoint).
 //
-// # Живость и готовность строит ОБЪЯВЛЕННЫЙ носитель, а не этот пакет (#1752)
+// # Живости и готовности на этом слушателе НЕТ (kaname#360)
 //
-// Здесь стояли СВОЙ тип именованной проверки (`{Name string; Check func(ctx) error}`)
-// и свои обработчики `/healthz` / `/readyz`. Форма совпадала с
-// `pkg/observability/health` дословно, а шапка того пакета объявляет его
-// ЕДИНСТВЕННЫМ в дереве носителем разведённых живости и готовности: об одном
-// предмете высказывались два места, и одно из них объявляло себя единственным.
-//
-// Расходиться им было нечем by construction — копии не собираются вместе и друг
-// друга не читают, — поэтому расхождение пришло бы не отказом, а тишиной. И
-// пришло бы оно в том, что общий носитель УЖЕ решил, а своя форма не несла:
-//
-//	срок на чекер            — зависший `Ping` держал обработчик до probe-timeout
-//	                           kubelet'а, а не считался недоступной зависимостью;
-//	«носитель не провязан»   — `health.ErrDependencyNotWired`: окно старта своей
-//	                           формой молча зачитывалось в готовность;
-//	503 на гашении           — `SetShuttingDown` снимает под из ротации ДО
-//	                           остановки серверов; своя форма гасла молча;
-//	зеркало в счётчик        — `WithResultObserver`;
-//	пустой набор проверок    — своя форма отвечала 200 («пусто = готов»),
-//	                           то есть fail-open ровно там, где ответ неизвестен.
-//
-// Держит единственность гейт дерева `internal/repohygiene`
-// `TestEveryServiceServingReadyzBuildsItWithTheDeclaredCarrier`: файл,
-// монтирующий `/readyz`, обязан отдать туда обработчик, произведённый носителем.
+// Они жили здесь, и из-за этого слушатель нельзя было снять под посадкой
+// `own`, где поставщика нет: пробы пода шли в его порт. Живость и готовность
+// переехали на диагностическую поверхность (`internal/handler/diagnostics`),
+// которая есть при любой посадке, вместе со своими пробами. Второй копии здесь
+// не остаётся — её отсутствие держит `no_diagnostic_routes_test.go`.
 package iamhooks
 
 import (
-	"context"
-	"errors"
 	"net/http"
-
-	"github.com/PRO-Robotech/corelib/observability/health"
 )
-
-// errHealthCarrierNotWired — носитель готовности не передан композиционным
-// корнем. Это ошибка сборки, а не состояние среды, и ответ на неё —
-// fail-closed: под объявляет себя НЕ готовым и называет причину.
-//
-// Умолчание выбрано так же, как у `health.Slot`: неустановленный носитель есть
-// «ответа нет», а неполученный ответ не является «да». Прежняя форма на пустом
-// наборе проверок отвечала 200 — то есть непровязанная готовность была
-// неотличима от исправной.
-var errHealthCarrierNotWired = errors.New("readiness carrier not wired by the composition root")
 
 // Handlers — bundle всех hook handlers.
 type Handlers struct {
@@ -73,13 +39,6 @@ type Handlers struct {
 	// соседних: до него провайдер бил в легаси gRPC-порт с REST-подобным путём,
 	// и событие не доезжало никогда (см. recovery_hook_handler.go).
 	RecoveryHook http.Handler
-	// Health — объявленный носитель разведённых живости и готовности. ЧТО именно
-	// проверяет каждая зависимость, знает композиционный корень (он один знает,
-	// какая база своя и к кому сервис ходит); этот пакет только монтирует.
-	//
-	// nil означает «корень не провязал» и даёт fail-closed готовность, а не
-	// молчаливые 200 (см. errHealthCarrierNotWired).
-	Health *health.Aggregator
 	// LaneObserver — приёмник исходов полосы (#2495). Без него у живого пути
 	// входа человека нет ни одной величины, и «полоса отказывает» неотличимо от
 	// «поставщик не настроен звать хук»: в первом случае растут строки журнала,
@@ -95,18 +54,6 @@ type Handlers struct {
 // auth-проверку — mux только маршрутизирует.
 func NewMux(h Handlers) *http.ServeMux {
 	mux := http.NewServeMux()
-	agg := h.Health
-	if agg == nil {
-		agg = health.New([]health.Checker{{
-			Name:  "readiness-carrier",
-			Check: func(context.Context) error { return errHealthCarrierNotWired },
-		}})
-	}
-	// Образец с методом (`GET /healthz`) — та же форма, что у шести соседних
-	// сервисов: не-GET получает 405 от самого маршрутизатора, и отдельная ветка
-	// в обработчике не нужна.
-	mux.Handle("GET /healthz", agg.LiveHandler())
-	mux.Handle("GET /readyz", agg.ReadyHandler())
 	// Съём исхода надевается ПО МАРШРУТУ, а не общей обёрткой вокруг
 	// мультиплексора: общая обёртка знала бы только путь запроса, и обращение по
 	// пути, которого полоса не несёт, пришло бы в ряд несуществующего маршрута —

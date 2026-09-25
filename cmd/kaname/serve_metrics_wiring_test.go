@@ -62,6 +62,12 @@ func TestServeWiresMetricsInterceptorAndListener(t *testing.T) {
 		"latency.UnaryServerInterceptor(grpcsrv.ListenerInternal)",
 		"cfg.APIServer.MetricsListenAddress()",
 		`metricsMux.Handle("/metrics", metricsReg.Handler())`,
+		// Живость и готовность пода — на той же диагностической поверхности
+		// (`internal/handler/diagnostics`, kaname#360), и носитель у неё ТОТ,
+		// который корень гасит на остановке: эта поверхность есть при любой
+		// посадке, а слушатель вебхуков под `own` не поднимается.
+		`diagnostics.NewMux(diagnostics.Handlers{Health: readiness})`,
+		"readiness.SetShuttingDown()",
 		// Подъём и гашение слушателя ЗДЕСЬ БОЛЬШЕ НЕ ИЩУТСЯ, и это не ослабление:
 		// они переехали в профиль не-gRPC поверхности, а искать в исходнике имя
 		// снятого поля значит требовать дефекта. Что поверхность действительно

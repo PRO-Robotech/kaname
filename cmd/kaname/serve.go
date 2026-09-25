@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -662,7 +663,7 @@ func runServe(cfg config.Config) error {
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
 	// профиль, о них умолчавший, поднимал три слушателя открытым текстом.
 	declaredPlaintext, err := requireHTTPEdgeTLS(productionMode, iamHTTPEdges(
-		cfg.AuthN.HooksHTTPListenAddress(),
+		hooksListenAddress(cfg),
 		cfg.APIServer.MetricsListenAddress(),
 		cfg.APIServer.JWKSProxy.ListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
@@ -1169,23 +1170,18 @@ func runServe(cfg config.Config) error {
 	defer stopSurfaces()
 
 	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
-	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
-	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
-	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
-	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
-	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
-		svcs.bindingReconciler, metricsReg, cfg, logger)
-	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "вебхуки провайдера личности",
-		Mode:    surfaceMode,
-		Logger:  logger,
-		Addr:    addrAxis(hooksAddr, knobHooks+" не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
-		Handler: hooksHandler,
-		Reach:   servicecontract.ReachClusterInternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
-		TLS: hooksTLSConfig,
+	// provision/recovery). Cluster-internal-only (запрет #6), отдельный порт от
+	// gRPC. Только посадкой с внешним поставщиком: под `own` полоса не
+	// собирается и слушатель не поднимается (hooksLaneSurface, kaname#360).
+	//
+	// Носитель готовности строится ЗДЕСЬ и отдаётся тому, кто его монтирует, и
+	// гашению: оно переводит `/readyz` в 503 ДО остановки серверов (см.
+	// triggerShutdown ниже). Без этого носитель был бы, а дёрнуть его было бы
+	// некому (#1752).
+	readiness := buildReadiness(pool, metricsReg)
+	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() http.Handler {
+		return buildHooksMux(pool, kanameRepo, opsRepo,
+			svcs.bindingReconciler, metricsReg, cfg, logger)
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности вебхуков: %w", err)
@@ -1194,18 +1190,21 @@ func runServe(cfg config.Config) error {
 	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
 	// кардинальность туда не выносится.
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
-	metricsMux := http.NewServeMux()
+	// Живость и готовность пода — на ЭТОЙ поверхности (kaname#360): она есть
+	// при любой посадке, а слушатель вебхуков под `own` не поднимается.
+	metricsMux := diagnostics.NewMux(diagnostics.Handlers{Health: readiness})
 	metricsMux.Handle("/metrics", metricsReg.Handler())
 	metricsSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "диагностика (/metrics)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа, живости и готовности пода на этой посадке нет"),
 		Handler: metricsMux,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
 			"снята осознанно: поверхность выставлена только на внутренний Service и несёт " +
-				"счётчики процесса — ни секретов, ни данных арендатора на проводе нет"),
+				"счётчики процесса, живость и готовность по ИМЕНАМ зависимостей — ни секретов, " +
+				"ни данных арендатора на проводе нет"),
 		TLS: metricsTLSConfig,
 	})
 	if err != nil {
@@ -1657,7 +1656,7 @@ func runServe(cfg config.Config) error {
 		// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
 		// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
 		// есть предмет: флип после остановки не успевает ничего.
-		hooksHealth.SetShuttingDown()
+		readiness.SetShuttingDown()
 		stopAdmission()
 		stopGRPCBounded(internalSrv, gracefulTimeout)
 		stopGRPCBounded(grpcSrv, gracefulTimeout)
