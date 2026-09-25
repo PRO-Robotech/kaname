@@ -22,3 +22,14 @@ const SweepUnservableSessionsSQL = sweepUnservableSessionsSQL
 // EndSessionsOfSQL — оператор снятия живых записей личности, который исполняет
 // EndOtherSessions.
 const EndSessionsOfSQL = endSessionsOfSQL
+
+// Операторы выдачи кода (`IssueAuthorizationCode`) — ТЕ САМЫЕ тексты, из
+// которых пробы перекрытия собирают контрольные руки: форму «замок одной лишь
+// сессии», «только условие» и «только замок» (kaname#369). Рука, переписавшая
+// оператор своей рукой, отличалась бы от продукта не одним фактом, а двумя.
+const (
+	LockUserForKeySQL            = lockUserForKeySQL
+	LockCeremonyClientSQL        = lockCeremonyClientSQL
+	LockSessionOfCeremonySQL     = lockSessionOfCeremonySQL
+	InsertFamilyOnLiveSessionSQL = insertFamilyOnLiveSessionSQL
+)

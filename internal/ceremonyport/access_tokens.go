@@ -18,7 +18,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/publishedkey"
-	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -39,41 +38,59 @@ type KeySetSource interface {
 	PublishedSet(ctx context.Context) ([]domain.PublishedKey, error)
 }
 
+// IssuanceRecorder — писатель записи выпуска: идентификатор выпуска →
+// семейство. Реализует `(*pg.OAuthCeremonyRepo).RecordAccessToken`.
+//
+// Контракт, на котором стоит выпуск: запись ложится только в ЖИВОЕ семейство
+// (иначе `domain.ErrAccessTokenFamilyNotLive`), и отметка отзыва семейства
+// доезжает до каждой его записи — это держит схема службы, а не проверка перед
+// вставкой. По записи о семействе выпуска отвечают `IsRevoked` службы отзыва и
+// правило отзыва (`tokenrevocation`): других сведений о семействе токена у
+// поверхностей предъявления нет (kaname#319, решение К10 вариант А).
+type IssuanceRecorder interface {
+	RecordAccessToken(ctx context.Context, jti, familyID string, issuedAt, expiresAt time.Time) error
+}
+
 // AccessTokens — адаптер порта выпуска и опознания токена доступа церемонии.
 type AccessTokens struct {
-	signer Signer
-	keys   KeySetSource
+	signer   Signer
+	keys     KeySetSource
+	recorder IssuanceRecorder
 }
 
 var _ oauthceremony.AccessTokenIssuer = (*AccessTokens)(nil)
 
 // NewAccessTokens собирает адаптер. Без подписанта выпускать нечем, без набора
-// нечем опознавать — сборка отказывает, а не отвечает на первом запросе.
-func NewAccessTokens(signer Signer, keys KeySetSource) (*AccessTokens, error) {
+// нечем опознавать, без писателя записи выпуска некуда записать семейство
+// выданного — сборка отказывает, а не отвечает на первом запросе.
+func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder) (*AccessTokens, error) {
 	switch {
 	case signer == nil:
 		return nil, errors.New("ceremonyport: access token issuer needs the service signer")
 	case keys == nil:
 		return nil, errors.New("ceremonyport: access token issuer needs the published key set")
+	case recorder == nil:
+		return nil, errors.New("ceremonyport: access token issuer needs the issuance record writer; " +
+			"a token recorded in no family would outlive the revocation of its family")
 	case strings.TrimSpace(signer.Issuer()) == "":
 		return nil, errors.New("ceremonyport: the service signer names no issuer")
 	}
-	return &AccessTokens{signer: signer, keys: keys}, nil
+	return &AccessTokens{signer: signer, keys: keys, recorder: recorder}, nil
 }
 
-// IssueAccessToken выпускает токен доступа по гранту (K2).
+// IssueAccessToken выпускает токен доступа по гранту (K2) и записывает выпуск в
+// семейство гранта (K1).
 //
 // # Что идёт в токен — ПЕРЕЧЕНЬ, а не отбор
 //
-// Субъект — `grant.Session.Subject`, клиент — `grant.ClientID`, ключ семейства —
-// `grant.GrantID`, области — `grant.GrantedScopes`, получатели —
-// `grant.GrantedAudiences`, уровень (`acr`) и момент (`auth_time`)
-// аутентификации — `grant.Session.ACR` и `grant.Session.AuthTime`. Остальное
-// подписант кладёт сам (`iss`, `iat`, `nbf`, `exp`, `jti`). Запрошенное
-// (`Requested*`), протокольные поля запроса (`Form`), утверждения сеанса
-// (`Session.Claims`, `Session.Username`) и сессия входа (`Session.SessionID`) в
-// токен не идут: перечень собирается здесь поимённо, и поля, которого в нём
-// нет, выпуск не видит.
+// Субъект — `grant.Session.Subject`, клиент — `grant.ClientID`, области —
+// `grant.GrantedScopes`, получатели — `grant.GrantedAudiences`, уровень (`acr`)
+// и момент (`auth_time`) аутентификации — `grant.Session.ACR` и
+// `grant.Session.AuthTime`. Остальное подписант кладёт сам (`iss`, `iat`,
+// `nbf`, `exp`, `jti`). Запрошенное (`Requested*`), протокольные поля запроса
+// (`Form`), утверждения сеанса (`Session.Claims`, `Session.Username`) и сессия
+// входа (`Session.SessionID`) в токен не идут: перечень собирается здесь
+// поимённо, и поля, которого в нём нет, выпуск не видит.
 //
 // # Контекст входа — из полей сеанса
 //
@@ -84,22 +101,37 @@ func NewAccessTokens(signer Signer, keys KeySetSource) (*AccessTokens, error) {
 // контекста входа в ней нет по контракту фундамента, а будь они — в токен их
 // не взяли бы, потому что карта в перечень не входит вовсе.
 //
+// # Семейство — в ЗАПИСИ выпуска, а не в токене
+//
+// Семейство выданного (`grant.GrantID`) ложится записью jti → семейство, и по
+// ней о семействе отвечают все поверхности предъявления, включая край, который
+// спрашивает службу отзыва по одному jti. Утверждение, несущее семейство, было
+// бы вторым хранилищем того же решения со своим писателем и своей уборкой
+// (kaname#319, решение К10 вариант А).
+//
+// Запись ложится ПОСЛЕ подписи — jti, iat и exp чеканит подписант — и ДО того,
+// как токен уедет. Её отказ роняет выпуск: токен без записи правило отзыва
+// читает как «семейству не принадлежит», и отзыв семейства его не снял бы.
+// Выпуск в уже отозванное семейство (опередивший на одновременном повторе кода
+// прочитал семейство живым до отметки) поэтому не состоится: запись в
+// отозванное семейство схема не принимает. Выпуск, записанный раньше отметки,
+// снимает сама отметка — она доезжает до каждой записи семейства.
+//
 // # Чего выпуск не делает
 //
-// Не выпускает без границы срока, без ключа семейства, без субъекта, без
-// клиента, без выданного получателя и без контекста входа: незаданный
-// получатель означал бы «любой», токен без ключа семейства пережил бы отзыв
-// семейства до своего `exp`, а токен без уровня входа (ранжирование `acrlevel`
-// ставит его анонимом) и без момента аутентификации отвергался бы там, где его
-// предъявят.
+// Не выпускает без границы срока, без семейства, без субъекта, без клиента, без
+// выданного получателя и без контекста входа: незаданный получатель означал бы
+// «любой», токен без семейства записать не во что, а токен без уровня входа
+// (ранжирование `acrlevel` ставит его анонимом) и без момента аутентификации
+// отвергался бы там, где его предъявят.
 func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony.GrantRecord) (oauthceremony.IssuedAccessToken, error) {
 	bound, named := grant.Session.ExpiresAt[oauthceremony.TokenKindAccess]
 	switch {
 	case !named || bound.IsZero():
 		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the ceremony named no expiry bound for the access token")
 	case grant.GrantID == "":
-		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant carries no family key; " +
-			"a token without it would outlive the revocation of its family")
+		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no family; " +
+			"an issuance recorded in no family would outlive the revocation of its family")
 	case grant.Session.Subject == "":
 		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no subject")
 	case grant.ClientID == "":
@@ -116,8 +148,7 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 	}
 
 	claims := map[string]any{
-		"client_id":                    grant.ClientID,
-		tokenrevocation.FamilyKeyClaim: grant.GrantID,
+		"client_id": grant.ClientID,
 		// Контекст входа — из полей сеанса (см. шапку); `auth_time` — целые
 		// секунды эпохи (OpenID Connect Core 1.0 §2).
 		"acr":       grant.Session.ACR,
@@ -139,6 +170,9 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 	})
 	if err != nil {
 		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w", err)
+	}
+	if err := a.recorder.RecordAccessToken(ctx, tok.JTI, grant.GrantID, tok.IssuedAt, tok.ExpiresAt); err != nil {
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: record access token issuance: %w", err)
 	}
 	return oauthceremony.IssuedAccessToken{
 		Token:     tok.Token,

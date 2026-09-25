@@ -161,9 +161,15 @@ func acScene(t *testing.T, db *sql.DB, tag string) (clientID, userID, sessionID,
 	return clientID, userID, sessionID, familyID
 }
 
+// acExecer — то, чем исполняется сырой оператор: база либо её транзакция.
+// Проба ключа живости вставляет ребёнка ВНУТРИ транзакции, отозвавшей семейство.
+type acExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // acInsertCode — вставка кода сырым оператором: предмет проб — СХЕМА, и путь
 // через репозиторий отсёк бы негодный вход до базы.
-func acInsertCode(db *sql.DB, digest, family, client, user, session string, scope []string,
+func acInsertCode(db acExecer, digest, family, client, user, session string, scope []string,
 	method, challenge string) error {
 	_, err := db.Exec(`
 		INSERT INTO kaname.authorization_codes
@@ -364,6 +370,88 @@ func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
 	require.False(t, ownMark.Valid,
 		"СВОЕЙ отметки снятия у ребёнка быть не должно: он умер вместе с семейством, "+
 			"а не собственным событием — основание читается у семейства")
+}
+
+// TestIntegration_ChildOfARevokedFamilyIsRefusedByItsLiveKey — строка,
+// заводимая в ОТОЗВАННОЕ семейство, отвергается ключом живости
+// `<t>_family_live_fk` кодом 23503 — у кода и токена обновления (заказы C и D
+// схемного ревью kn-313, задача PRO-Robotech/kaname#369). Третий ребёнок —
+// запись выпуска (`access_tokens`, kaname#319) — отвергается тем же ключом
+// `access_tokens_family_live_fk`, и судит его своя проба
+// `TestIntegration_LINE_A_1_28_AccessTokenIsIssuedIntoALiveFamilyOnly`.
+//
+// # Один факт между отказом и близнецом
+//
+// Отказ и близнец исполняют ОДНУ вставку над ОДНИМ семейством. Отличает их
+// ровно живость семейства: отказ идёт в транзакции, отозвавшей семейство, и эта
+// транзакция откатывается; близнец — после отката, над тем же, снова живым
+// семейством. Близнец над другим семейством отличался бы ещё и строкой, и его
+// зелёное не говорило бы, что отказ дал именно отзыв.
+//
+// # Почему судится имя ограничения, а не только код
+//
+// 23503 даёт и ключ КОНТЕКСТА (`<t>_family_context_fk`). Проба, судящая один
+// код, зеленела бы и там, где ключ живости снят, а отказ пришёл от соседа.
+func TestIntegration_ChildOfARevokedFamilyIsRefusedByItsLiveKey(t *testing.T) {
+	db := acDB(t)
+	// Метки сцен РАЗНОЙ длины: `acScene` выводит свёртку носителя сессии из
+	// длины метки, а обе сцены живут в одной базе. Знаки — crockford-base32:
+	// формы `ic-…` и `tfm-…` закрыты ограничениями схемы.
+	children := []struct {
+		name, liveKey, tag string
+		insert             func(ex acExecer, family, client, user, session string) error
+	}{
+		{
+			name: "authorization_codes", liveKey: "authorization_codes_family_live_fk", tag: "acrvk",
+			insert: func(ex acExecer, family, client, user, session string) error {
+				return acInsertCode(ex, acDigest(0x51), family, client, user, session,
+					[]string{"openid", "profile"}, "S256", acChallenge)
+			},
+		},
+		{
+			name: "refresh_tokens", liveKey: "refresh_tokens_family_live_fk", tag: "acrvkt",
+			insert: func(ex acExecer, family, client, user, session string) error {
+				_, err := ex.Exec(`
+					INSERT INTO kaname.refresh_tokens
+					       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
+					VALUES ($1,$2,$3,$4,$5,$6,0, now() + interval '30 days')`,
+					acDigest(0x52), family, client, user, session, pqTextArray([]string{"openid", "profile"}))
+				return err
+			},
+		},
+	}
+	for _, child := range children {
+		t.Run(child.name, func(t *testing.T) {
+			client, user, session, family := acScene(t, db, child.tag)
+
+			tx, err := db.Begin()
+			require.NoError(t, err)
+			_, err = tx.Exec(`
+				UPDATE kaname.token_families
+				   SET revoked_at = now(), revoked_reason = 'logout', live = false
+				 WHERE id = $1 AND revoked_at IS NULL`, family)
+			require.NoError(t, err, "отзыв семейства в транзакции отказа обязан пройти")
+			requirePgRefusal(t, child.insert(tx, family, client, user, session), "23503", child.liveKey,
+				child.name+": строка в отозванное семейство обязана быть отвергнута ключом живости")
+			require.NoError(t, tx.Rollback(), "откат снимает отзыв: близнецу нужно то же семейство живым")
+
+			// Предпосылка близнеца: семейство снова живо. Иначе близнец отличался
+			// бы от отказа не отзывом, а чем-то, чего проба не видит.
+			var live bool
+			require.NoError(t, db.QueryRow(
+				`SELECT live FROM kaname.token_families WHERE id = $1`, family).Scan(&live))
+			require.True(t, live, "после отката семейство обязано быть живым")
+
+			require.NoError(t, child.insert(db, family, client, user, session),
+				child.name+": та же строка в живое семейство обязана лечь — отказ выше дал отзыв, а не вставка")
+			var rows int
+			require.NoError(t, db.QueryRow(
+				`SELECT count(*) FROM kaname.`+child.name+` WHERE family_id = $1 AND family_live`,
+				family).Scan(&rows))
+			t.Logf("%s: отказ по %s — 23503; близнец — строк живого семейства %d", child.name, child.liveKey, rows)
+			require.Equal(t, 1, rows, "близнец обязан оставить ровно одну строку живого семейства")
+		})
+	}
 }
 
 // TestIntegration_AuthorizationCodeVocabulariesAreClosed — словари и формы.

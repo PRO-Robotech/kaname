@@ -13,21 +13,25 @@
 // запроса (`tokenintrospecthttp`), а правило отзыва в нём — настоящее
 // (`tokenrevocation`).
 //
-// Подставлены только хранилища: записи кода, токенов и семейств, а также
-// справочник проверочных значений секрета клиента живут в памяти пробы; сверку
-// секрета исполняет настоящий адаптер (`ClientSecrets`) над настоящим
+// Подставлены только хранилища: записи кода, токенов, семейств и выпусков, а
+// также справочник проверочных значений секрета клиента живут в памяти пробы;
+// сверку секрета исполняет настоящий адаптер (`ClientSecrets`) над настоящим
 // проверяющим (`passwordverify`). Подставка держит СЕМАНТИКУ порта (погашение
 // одной операцией под замком, повтор отдаёт запись вместе с отказом,
-// отозванное семейство не отдаётся), а писатель отзыва семейства ставит отметку и пишет отсечку по
-// ключу семейства — как это делает хранилище службы; то, что хранилище службы
-// делает это на самом деле, держит интеграционная проба слоя доступа
-// (`family_cutoff_integration_test.go`).
+// отозванное семейство не отдаётся) и семантику схемы службы: семейство
+// заводится вместе с кодом, запись выпуска ложится только в живое семейство,
+// отметка отзыва доезжает до каждой записи выпуска семейства (решение К10,
+// вариант А: семейство выпуска служба знает по записи jti → семейство,
+// kaname#319). То, что схема службы держит это на самом деле, держат
+// интеграционные пробы слоя доступа
+// (`family_revocation_through_three_surfaces_integration_test.go`) и схемы
+// (`access_token_family_schema_integration_test.go`).
 //
 // # Почему одним прогоном
 //
-// Две пробы по половине — «отзыв ставит отсечку» и «правило читает отсечку» —
-// зелены каждая и при расхождении ключа: выпуск кладёт ключ семейства под одним
-// именем, правило спрашивает под другим, отзыв пишет отсечку по третьему.
+// Две пробы по половине — «отзыв ставит отметку» и «правило читает запись
+// выпуска» — зелены каждая и при несведённой середине: выпуск, не пишущий
+// запись, даёт токен, о семействе которого правилу спросить не по чему.
 // Сходимость видна только сквозь обе половины.
 package ceremonyport_test
 
@@ -43,7 +47,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,21 +68,34 @@ const (
 	flowVerifier = "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXkQ"
 )
 
-// ── Семейства: отметка отзыва и отсечка по ключу семейства ─────────────────
+// ── Семейства: отметка отзыва и записи выпуска ─────────────────────────────
 
 type memFamilies struct {
 	mu      sync.Mutex
+	known   map[string]bool
 	revoked map[string]domain.FamilyRevocationReason
-	cutoffs map[string]time.Time
+	// issued — записи выпуска: jti → семейство.
+	issued map[string]string
 }
 
 func newMemFamilies() *memFamilies {
-	return &memFamilies{revoked: map[string]domain.FamilyRevocationReason{}, cutoffs: map[string]time.Time{}}
+	return &memFamilies{
+		known:   map[string]bool{},
+		revoked: map[string]domain.FamilyRevocationReason{},
+		issued:  map[string]string{},
+	}
+}
+
+// open заводит семейство — у службы его заводит выдача кода.
+func (m *memFamilies) open(familyID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.known[familyID] = true
 }
 
 // RevokeFamily — как у хранилища службы: причина судится словарём, отметка
-// ставится один раз (первая причина остаётся), отсечка по ключу семейства
-// пишется БЕЗУСЛОВНО и монотонно.
+// ставится один раз (первая причина остаётся). Отметка и есть отзыв каждой
+// записи выпуска семейства: ответ о выпуске читается от неё.
 func (m *memFamilies) RevokeFamily(_ context.Context, familyID string, reason domain.FamilyRevocationReason) (int64, error) {
 	if familyID == "" {
 		return 0, errEmptyFamily
@@ -89,23 +105,46 @@ func (m *memFamilies) RevokeFamily(_ context.Context, familyID string, reason do
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var rows int64
-	if _, done := m.revoked[familyID]; !done {
-		m.revoked[familyID] = reason
-		rows = 1
+	if _, done := m.revoked[familyID]; done {
+		return 0, nil
 	}
-	if now := time.Now(); now.After(m.cutoffs[familyID]) {
-		m.cutoffs[familyID] = now
-	}
-	return rows, nil
+	m.revoked[familyID] = reason
+	return 1, nil
 }
 
-// RevokedBefore — читатель отсечек, которым пользуется место предъявления.
-func (m *memFamilies) RevokedBefore(_ context.Context, key string) (time.Time, bool, error) {
+// RecordAccessToken — писатель записи выпуска, как у хранилища службы: запись
+// ложится только в известное и живое семейство (у службы это держит внешний
+// ключ записи), иначе — ErrAccessTokenFamilyNotLive.
+func (m *memFamilies) RecordAccessToken(_ context.Context, jti, familyID string, issuedAt, expiresAt time.Time) error {
+	if jti == "" || familyID == "" || issuedAt.IsZero() || !expiresAt.After(issuedAt) {
+		return errString("issuance record: jti, family and a lifetime are required")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	at, ok := m.cutoffs[key]
-	return at, ok, nil
+	if _, revoked := m.revoked[familyID]; revoked || !m.known[familyID] {
+		return domain.ErrAccessTokenFamilyNotLive
+	}
+	m.issued[jti] = familyID
+	return nil
+}
+
+// RevokedBefore — читатель отсечек субъекта и клиента. Отсечек эта проба не
+// ставит: отзыв семейства их не пишет.
+func (m *memFamilies) RevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+// FamilyRevoked — ответ записи выпуска о семействе: записи нет — выпуск
+// семейству не принадлежит; есть — отозвано ли её семейство.
+func (m *memFamilies) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	family, recorded := m.issued[jti]
+	if !recorded {
+		return false, nil
+	}
+	_, revoked := m.revoked[family]
+	return revoked, nil
 }
 
 func (m *memFamilies) isRevoked(familyID string) (domain.FamilyRevocationReason, bool) {
@@ -178,6 +217,8 @@ func (v *memVaults) StoreAuthorizationCode(_ context.Context, sig string, rec oa
 		return oauthceremony.StoreOutcome{}, oauthceremony.ErrStorageConflict
 	}
 	v.codes[sig] = &codeRow{rec: rec}
+	// Код и его семейство заводятся вместе — как у выдачи кода службы.
+	v.families.open(rec.Grant.GrantID)
 	return oauthceremony.RowsTouched(1), nil
 }
 
@@ -293,19 +334,16 @@ type flowRig struct {
 	vaults   *memVaults
 	families *memFamilies
 	surface  http.Handler
-	// ahead — насколько часы подписанта впереди настенных. Проба сдвигает их,
-	// чтобы выпуск лёг позже отметки отзыва без выжидания.
-	ahead atomic.Int64
 }
 
 func newFlowRig(t *testing.T) *flowRig {
 	t.Helper()
 	rig := &flowRig{}
 	ring := newKeyRing(t, testKID)
-	tokens := newAccessTokens(t, ring, func() time.Time {
-		return time.Now().Add(time.Duration(rig.ahead.Load()))
-	})
 	families := newMemFamilies()
+	// Выпуск пишет запись в ТО ЖЕ хранилище семейств, от отметки которого
+	// читается ответ о выпуске, — как у службы.
+	tokens := newRecordingAccessTokens(t, ring, time.Now, families)
 	grants, err := ceremonyport.NewGrants(families)
 	require.NoError(t, err)
 	vaults := newMemVaults(families)
@@ -509,10 +547,12 @@ func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
 		require.True(t, rig.accepted(t, twin.AccessToken), "близнец: неотозванное семейство перестало приниматься")
 	})
 
-	t.Run("выпуск позже отметки отзыва тоже отвергается", func(t *testing.T) {
-		// Так выглядит одновременный повтор кода: опередивший выпускает позже
-		// отметки, которую ставит отзыв отставшего. Отсечка, судящая по моменту
-		// выпуска, пропустила бы ровно этот токен.
+	t.Run("выпуск после отметки отзыва не состоится", func(t *testing.T) {
+		// Так выглядит одновременный повтор кода: опередивший прочитал
+		// семейство живым и выпускает ПОСЛЕ отметки, которую ставит отзыв
+		// отставшего. Запись выпуска в отозванное семейство не ложится, и
+		// выпуск, не записанный в семейство, клиенту не уезжает: иначе это был
+		// бы токен, о семействе которого правилу спросить не по чему.
 		code := rig.issueCode(t)
 		first, err := rig.exchangeCode(code)
 		require.NoError(t, err)
@@ -521,13 +561,8 @@ func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
 		require.Error(t, err, "НЕ ВЫПОЛНИЛОСЬ: повтор кода обменялся")
 		_, revoked := rig.families.isRevoked(family)
 		require.True(t, revoked, "НЕ ВЫПОЛНИЛОСЬ: семейство не отозвано")
-		// iat — целые секунды: часы подписанта уходят на две секунды вперёд, и
-		// выпуск ложится строго позже отметки. Место предъявления это принимает
-		// в пределах допуска на расхождение часов.
-		rig.ahead.Store(int64(2 * time.Second))
-		defer rig.ahead.Store(0)
-		issueLate := func(grantID string) oauthceremony.IssuedAccessToken {
-			late, err := rig.tokens.IssueAccessToken(context.Background(), oauthceremony.GrantRecord{
+		issueLate := func(grantID string) (oauthceremony.IssuedAccessToken, error) {
+			return rig.tokens.IssueAccessToken(context.Background(), oauthceremony.GrantRecord{
 				GrantID: grantID, ClientID: testClientID,
 				GrantedScopes: []string{"openid"}, GrantedAudiences: []string{testAudience},
 				Session: oauthceremony.SessionRecord{
@@ -535,16 +570,16 @@ func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
 					ExpiresAt: map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAccess: time.Now().Add(5 * time.Minute)},
 				},
 			})
-			require.NoError(t, err)
-			return late
 		}
-		late := issueLate(family)
-		cutoff, _, _ := rig.families.RevokedBefore(context.Background(), family)
-		require.True(t, late.IssuedAt.After(cutoff), "НЕ ВЫПОЛНИЛОСЬ: выпуск не лёг позже отметки отзыва")
-		require.False(t, rig.accepted(t, late.Token), "выпуск позже отметки отзыва принят")
+		late, err := issueLate(family)
+		require.ErrorIsf(t, err, domain.ErrAccessTokenFamilyNotLive,
+			"выпуск в отозванное семейство состоялся (токен выдан: %v)", late.Token != "")
+		require.Empty(t, late.Token, "при отказе записи выпуска уехал токен")
 
 		// Близнец отличается ОДНИМ фактом — семейство не отозвано.
-		require.True(t, rig.accepted(t, issueLate(rig.familyOf(t, twin.AccessToken)).Token),
+		live, err := issueLate(rig.familyOf(t, twin.AccessToken))
+		require.NoError(t, err, "близнец: выпуск того же вида для неотозванного семейства отказал")
+		require.True(t, rig.accepted(t, live.Token),
 			"близнец: выпуск того же вида для неотозванного семейства не принят")
 	})
 }

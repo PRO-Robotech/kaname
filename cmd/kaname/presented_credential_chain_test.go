@@ -64,6 +64,9 @@ func (chainRevocations) RevokedBefore(context.Context, string) (time.Time, bool,
 	return time.Time{}, false, nil
 }
 
+// FamilyRevoked — семейства, отозванного у этой сцены, нет.
+func (chainRevocations) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
+
 // chainReader строит читателя и годный токен к нему.
 func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 	t.Helper()
