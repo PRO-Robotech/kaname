@@ -59,7 +59,7 @@ func TestIssue_K2_ClaimsComeOnlyFromWhatWasGranted(t *testing.T) {
 	require.ElementsMatch(t, []any{testAudience}, claims["aud"], "получатели — не выданные")
 
 	allowed := []string{"iss", "sub", "aud", "iat", "nbf", "exp", "jti", "client_id", "scope",
-		tokenrevocation.FamilyKeyClaim}
+		tokenrevocation.FamilyKeyClaim, "acr", "auth_time"}
 	for name := range claims {
 		require.Truef(t, slices.Contains(allowed, name),
 			"утверждение %q вне закрытого состава выпуска %v", name, allowed)
@@ -90,6 +90,38 @@ func TestIssue_K2_TwinGrantEqualToRequestCarriesTheSame(t *testing.T) {
 	require.ElementsMatch(t, []any{testAudience}, claims["aud"])
 }
 
+// Контекст входа — уровень (`acr`) и момент (`auth_time`) аутентификации — токен
+// берёт из ПОЛЕЙ сеанса гранта: их читают точки принуждения ступени входа, и
+// токен без уровня отвергался бы на каждой из них как анонимный. Карта
+// утверждений сеанса вторым источником не служит: те же ключи с ДРУГИМИ
+// значениями в токен не идут, а сессия в токен не идёт вовсе.
+func TestIssue_K2_LoginContextComesFromTheSessionFields(t *testing.T) {
+	ring := newKeyRing(t, testKID)
+	a := newAccessTokens(t, ring, time.Now)
+
+	grant := grantWithin(time.Now().Add(10 * time.Minute))
+	grant.Session.Claims = map[string]any{
+		"acr": "1", "auth_time": testAuthTime.Add(-time.Hour).Unix(), "sid": "hss-claims-only-session",
+	}
+	issued, err := a.IssueAccessToken(context.Background(), grant)
+	require.NoError(t, err)
+	_, claims := unverifiedClaims(t, issued.Token)
+	require.Equal(t, testACR, claims["acr"], "уровень взят не из поля сеанса")
+	require.Equal(t, float64(testAuthTime.Unix()), claims["auth_time"], "момент аутентификации взят не из поля сеанса")
+	require.NotContains(t, claims, "sid", "сессия уехала в токен доступа")
+
+	// Близнец отличается ОДНИМ фактом — значениями полей: токен следует за ними,
+	// а не за постоянной адаптера.
+	twin := grantWithin(time.Now().Add(10 * time.Minute))
+	twin.Session.ACR = "3"
+	twin.Session.AuthTime = testAuthTime.Add(-17 * time.Minute)
+	issued, err = a.IssueAccessToken(context.Background(), twin)
+	require.NoError(t, err)
+	_, claims = unverifiedClaims(t, issued.Token)
+	require.Equal(t, "3", claims["acr"])
+	require.Equal(t, float64(testAuthTime.Add(-17*time.Minute).Unix()), claims["auth_time"])
+}
+
 // Момент выпуска — не раньше начала секунды вызова, срок — не позже границы,
 // и отданные величины — ровно те, что легли в токен.
 func TestIssue_K2_IssuedAtIsNotBeforeTheCallAndExpiryWithinTheBound(t *testing.T) {
@@ -114,7 +146,8 @@ func TestIssue_K2_IssuedAtIsNotBeforeTheCallAndExpiryWithinTheBound(t *testing.T
 
 // Выпуск без предмета — отказ, а не токен: без границы срока, без ключа
 // семейства, без субъекта, без выданного получателя (незаданный получатель
-// означал бы «любой»).
+// означал бы «любой»), без уровня и момента входа (токен без уровня точки
+// ступени входа читают как анонимный).
 func TestIssue_K2_RefusesAGrantItCannotHonour(t *testing.T) {
 	ring := newKeyRing(t, testKID)
 	a := newAccessTokens(t, ring, time.Now)
@@ -134,6 +167,10 @@ func TestIssue_K2_RefusesAGrantItCannotHonour(t *testing.T) {
 		{"субъекта нет", func(g *oauthceremony.GrantRecord) { g.Session.Subject = "" }},
 		{"клиента нет", func(g *oauthceremony.GrantRecord) { g.ClientID = "" }},
 		{"получатель не выдан", func(g *oauthceremony.GrantRecord) { g.GrantedAudiences = nil }},
+		{"уровень входа не назван", func(g *oauthceremony.GrantRecord) { g.Session.ACR = "" }},
+		{"уровень входа — аноним", func(g *oauthceremony.GrantRecord) { g.Session.ACR = "0" }},
+		{"уровень входа вне ранжирования", func(g *oauthceremony.GrantRecord) { g.Session.ACR = "aal2" }},
+		{"момент аутентификации не назван", func(g *oauthceremony.GrantRecord) { g.Session.AuthTime = time.Time{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grant := grantWithin(bound)

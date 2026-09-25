@@ -125,6 +125,12 @@ func (v *Verifier) SetDecoy(decoy domain.LoginVerifier) error {
 	return nil
 }
 
+// Aligned отвечает, выровнена ли полоса «материала нет»: стоит ли выравнивающее
+// значение (SetDecoy). Вызывающий, чей контракт требует, чтобы отказ по
+// отсутствию материала стоил столько же, сколько отказ по несовпадению,
+// спрашивает это при сборке, а не узнаёт по времени ответа.
+func (v *Verifier) Aligned() bool { return !v.decoy.IsZero() }
+
 // WithCapacity исполняет работу, занимая одно место ёмкости; отвечает, удалось
 // ли место занять. Нужен полосе входа Ф3 и пробам ёмкости.
 func (v *Verifier) WithCapacity(work func()) bool {
@@ -157,6 +163,24 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 		return v.observed(Result{Outcome: OutcomeMaterialMissing})
 	}
 	return v.observed(inspectAndCompare(stored.Reveal(), presented, true))
+}
+
+// Presented — предъявленное значение, отдающее себя ОДНИМ методом.
+//
+// Так предъявленный секрет отдаёт тип фундамента (`oauthceremony.PresentedSecret`):
+// печать его значения не выдаёт, значение отдаёт только Reveal. Выход
+// принимается здесь, а не у вызывающего: этот файл — единственное место, где
+// выход с таким именем разрешён гейтом `TestLoginVerifierStaysInside`, и
+// предъявленное значение не становится строкой нигде, кроме сверки.
+type Presented interface {
+	Reveal() string
+}
+
+// VerifyPresented — [Verifier.Verify] для значения, отдающего себя методом:
+// тот же исход, та же ёмкость, тот же приёмник и то же выравнивание полосы
+// «материала нет».
+func (v *Verifier) VerifyPresented(stored domain.LoginVerifier, presented Presented) Result {
+	return v.Verify(stored, presented.Reveal())
 }
 
 // compute — вычисление против значения БЕЗ ёмкости и БЕЗ приёмника исходов:

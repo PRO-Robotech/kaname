@@ -1,0 +1,57 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Правило ветки и коммита на запросе слияния (решения владельца 2026-09-22):
+# заголовок `#<N> `, голова — номер задачи, тело и коммиты без атрибуции, форма
+# первой строки коммитов после T0. Предикат — scripts/hooks/branch-rule.sh, общий
+# с хуками коммита и отправки; проверка — .github/scripts/pr-rule-check.sh, её
+# проба — scripts/hooks/branch-rule-inject.sh.
+#
+# Хуки обходятся `--no-verify` и живут только в провязанном клоне, поэтому
+# держатель, которого не обойти, — здесь. Блокирует слияние он тогда, когда его
+# контекст внесён в защиту ветки: это настройка репозитория, а не дерево.
+#
+# Сообщение коммита серверного слияния задаётся в момент вливания, после этой
+# проверки. Слияние волны в ветку эпика судится следующим прогоном запроса эпика
+# (коммит попадает в его диапазон); слияние эпика в `main` не судит никто.
+name: правило запроса
+
+on:
+  pull_request:
+    # `edited` — заголовок и тело правятся без отправки, и вердикт обязан
+    # пересчитаться. `[0-9]+` — запрос волны в ветку эпика (ветка-номер).
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [main, '[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-rule-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-rule:
+    name: правило запроса (заголовок · голова · тело · коммиты)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Полная история нужна диапазону base..head; содержимое файлов — нет,
+      # поэтому без блобов и только два каталога.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            .github/scripts
+            scripts/hooks
+          sparse-checkout-cone-mode: false
+
+      - name: судить заголовок, голову, тело и коммиты запроса
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/pr-rule-check.sh
