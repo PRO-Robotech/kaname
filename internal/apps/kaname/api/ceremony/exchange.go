@@ -332,10 +332,14 @@ func (u *ExchangeUseCase) authenticateClient(ctx context.Context, p ClientPresen
 	if err != nil {
 		return "", u.unavailable(id, err)
 	}
-	switch {
-	case !found:
-		return "", u.refuse(TokenErrInvalidClient, ExchangeClientUnknown, id, "")
-	case !secret.Active:
+	if !found || !secret.Active {
+		// Стоимость настоящей проверки и здесь: время отказа не отличает
+		// «клиента нет» от «секрет не тот» (проверяющий выравнивает полосу
+		// «материала нет» своим значением-приманкой).
+		_ = u.secrets.Verify(domain.LoginVerifier{}, p.Secret)
+		if !found {
+			return "", u.refuse(TokenErrInvalidClient, ExchangeClientUnknown, id, "")
+		}
 		return "", u.refuse(TokenErrInvalidClient, ExchangeClientNotActive, id, "")
 	}
 	res := u.secrets.Verify(secret.Verifier, p.Secret)

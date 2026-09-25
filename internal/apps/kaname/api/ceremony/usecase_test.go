@@ -627,3 +627,36 @@ func TestCensusIsSeededWithEveryDeclaredOutcome(t *testing.T) {
 		}
 	}
 }
+
+type countingVerifier struct{ calls int }
+
+func (v *countingVerifier) Verify(domain.LoginVerifier, string) passwordverify.Result {
+	v.calls++
+	return passwordverify.Result{Outcome: passwordverify.OutcomeMaterialMissing}
+}
+
+// TestExchange_UnknownClientPaysTheVerificationCost — «клиента нет» и «клиент
+// снят» проходят проверку того же веса, что «секрет не тот»: время отказа не
+// оракул существования клиента. Близнец — известный клиент проверяется ровно
+// один раз.
+func TestExchange_UnknownClientPaysTheVerificationCost(t *testing.T) {
+	inactive := confidential()
+	inactive.secret.Active = false
+	for name, clients := range map[string]clientsStub{"клиента нет": {}, "клиент снят": inactive, "клиент есть": confidential()} {
+		v := &countingVerifier{}
+		uc, err := ceremony.NewExchangeUseCase(ceremony.ExchangeConfig{
+			AllowedAudiences: []string{"https://api.example.test"}, DefaultAudience: "https://api.example.test",
+			TokenTTL: time.Minute, Clock: time.Now,
+		}, ceremony.ExchangeDeps{Clients: clients, Secrets: v, Store: &storeStub{w: &writerStub{}}, Signer: &signerStub{},
+			Users: usersStub{domain.InviteStatusActive}, Claims: &claimsStub{}, Census: ceremony.NewCensus(), Logger: quiet})
+		if err != nil {
+			t.Fatalf("построение: %v", err)
+		}
+		if _, err := uc.ExchangeCode(context.Background(), codeInput()); err == nil {
+			t.Fatalf("%s: обмен без годного секрета принят", name)
+		}
+		if v.calls != 1 {
+			t.Errorf("%s: проверок секрета %d, ожидалась одна", name, v.calls)
+		}
+	}
+}
