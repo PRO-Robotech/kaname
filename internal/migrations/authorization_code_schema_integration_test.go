@@ -374,8 +374,11 @@ func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
 
 // TestIntegration_ChildOfARevokedFamilyIsRefusedByItsLiveKey — строка,
 // заводимая в ОТОЗВАННОЕ семейство, отвергается ключом живости
-// `<t>_family_live_fk` кодом 23503 — у обоих детей семейства (заказы C и D
-// схемного ревью kn-313, задача PRO-Robotech/kaname#369).
+// `<t>_family_live_fk` кодом 23503 — у кода и токена обновления (заказы C и D
+// схемного ревью kn-313, задача PRO-Robotech/kaname#369). Третий ребёнок —
+// запись выпуска (`access_tokens`, kaname#319) — отвергается тем же ключом
+// `access_tokens_family_live_fk`, и судит его своя проба
+// `TestIntegration_LINE_A_1_28_AccessTokenIsIssuedIntoALiveFamilyOnly`.
 //
 // # Один факт между отказом и близнецом
 //
