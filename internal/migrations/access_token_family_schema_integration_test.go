@@ -84,10 +84,15 @@ func atFamilyLive(t *testing.T, db *sql.DB, jti string) sql.NullBool {
 func atFamily(t *testing.T, db *sql.DB, client, user, session, tag string) string {
 	t.Helper()
 	family := "tfm-" + acPad("f"+tag)
-	_, err := db.Exec(`
+	insertFamily := `
 		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'])`,
-		family, client, user, session)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'])`
+	if acFamilyCarriesLevel(t, db) {
+		insertFamily = `
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'], '1')`
+	}
+	_, err := db.Exec(insertFamily, family, client, user, session)
 	require.NoError(t, err, "посев семейства %s", tag)
 	return family
 }

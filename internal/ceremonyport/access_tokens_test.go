@@ -58,9 +58,14 @@ func TestIssue_K2_ClaimsComeOnlyFromWhatWasGranted(t *testing.T) {
 	require.Equal(t, testClientID, claims["client_id"], "клиент — не клиент гранта")
 	require.Equal(t, "openid offline", claims["scope"], "область — не выданная")
 	require.ElementsMatch(t, []any{testAudience}, claims["aud"], "получатели — не выданные")
+	// Вид и идентификатор принципала — обязательная пара читателя
+	// предъявленного (`presentedcred.principalFrom`, приёмка LINE-A-1 Р6):
+	// грант церемонии выдаётся только человеку нашего входа.
+	require.Equal(t, domain.PrincipalTypeUser, claims[domain.ClaimPrincipalType], "вид принципала — не человек")
+	require.Equal(t, testSubject, claims[domain.ClaimPrincipalID], "принципал — не субъект сеанса гранта")
 
 	allowed := []string{"iss", "sub", "aud", "iat", "nbf", "exp", "jti", "client_id", "scope",
-		"acr", "auth_time"}
+		"acr", "auth_time", domain.ClaimPrincipalType, domain.ClaimPrincipalID}
 	for name := range claims {
 		require.Truef(t, slices.Contains(allowed, name),
 			"утверждение %q вне закрытого состава выпуска %v", name, allowed)

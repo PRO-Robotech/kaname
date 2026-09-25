@@ -155,6 +155,7 @@ func productArm(repo *kanamepg.OAuthCeremonyRepo) issuanceArm {
 			RedirectURI:         "https://app.example.test/cb",
 			CodeChallenge:       ceremonyChallenge,
 			CodeChallengeMethod: domain.PKCEMethodS256,
+			ACR:                 "1",
 			TTL:                 time.Minute,
 		})
 	}}
@@ -177,7 +178,8 @@ func composedArm(pool *pgxpool.Pool, name string, control bool, locks []ceremony
 			}
 		}
 		var sessionRows, inserted int
-		if err := tx.QueryRow(ctx, insertSQL, sc.FamilyID, sc.ClientID, sc.UserID, sc.SessionID, sc.Scope).
+		// Шестой довод — снимок уровня гранта (`token_families.acr`, kaname#423).
+		if err := tx.QueryRow(ctx, insertSQL, sc.FamilyID, sc.ClientID, sc.UserID, sc.SessionID, sc.Scope, "1").
 			Scan(&sessionRows, &inserted); err != nil {
 			return err
 		}

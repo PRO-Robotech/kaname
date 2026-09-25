@@ -37,6 +37,7 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/treeroot"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
@@ -59,17 +60,18 @@ var (
 
 // liveCeremonyCoordinates — координаты, которые судит живой прогон.
 //
-// Путь токен-эндпоинта берётся у ПРОИЗВОДИТЕЛЯ: он смонтирован, и он — якорь,
-// по которому выводится поверхность выдачи. Эндпоинт авторизации и метаданные
-// обнаружения ВЫПИСАНЫ: производителей у них в дереве нет (приёмка LINE-A-1,
-// §9: «не начаты»). Это названная граница, и она истекает сама: появись
-// постоянная с таким значением в бинаре — гейт покраснеет с требованием взять
-// путь у неё.
+// Все три пути берутся у ПРОИЗВОДИТЕЛЯ. Токен-эндпоинт — якорь, по которому
+// выводится поверхность выдачи. Эндпоинт авторизации и метаданные обнаружения
+// до kaname#423 стояли ВЫПИСАННЫМИ (производителей в дереве не было, приёмка
+// LINE-A-1 §9 «не начаты»); с появлением производителя
+// (`ceremonyhttp.AuthorizePath`, `ceremonyhttp.DiscoveryPath`) граница истекла
+// сама — гейт покраснел с требованием взять путь у него, — и выписанной
+// координаты в живом прогоне не осталось.
 func liveCeremonyCoordinates() []check.CeremonyCoordinate {
 	return []check.CeremonyCoordinate{
 		{Name: "токен-эндпоинт", Path: clienttokenhttp.TokenPath, Anchor: true},
-		{Name: "эндпоинт авторизации", Path: "/iam/v1/authorize", Written: true},
-		{Name: "метаданные обнаружения", Path: "/.well-known/oauth-authorization-server", Written: true},
+		{Name: "эндпоинт авторизации", Path: ceremonyhttp.AuthorizePath},
+		{Name: "метаданные обнаружения", Path: ceremonyhttp.DiscoveryPath},
 	}
 }
 
@@ -257,19 +259,29 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 	}
 	t.Logf("конечные точки токен-эндпоинта: %s", strings.Join(token.Endpoints, "; "))
 
-	// Т14: у эндпоинта авторизации и обнаружения производителя нет — это
-	// отдельная категория переписи, и в положительный контроль она не идёт.
+	// Т14: эндпоинт авторизации и метаданные обнаружения собраны (kaname#423):
+	// у каждого ровно один производитель, и каждый резолвится ровно на
+	// поверхности выдачи — той же, что якорь. Все три координаты — положительный
+	// контроль; координат без производителя не осталось.
 	for _, name := range []string{"эндпоинт авторизации", "метаданные обнаружения"} {
 		c := coords[name]
-		if len(c.Surfaces) != 0 || len(c.Producers) != 0 {
-			t.Errorf("%s: поверхностей %d, производителей %d — на этом дереве ожидалось 0 и 0", name, len(c.Surfaces), len(c.Producers))
+		if len(c.Producers) != 1 || len(c.Surfaces) != 1 {
+			t.Errorf("%s: производителей %d, поверхностей %d — ожидалось по одному: %s",
+				name, len(c.Producers), len(c.Surfaces), c.Summary())
+			continue
+		}
+		if c.Surfaces[0].Decl != token.Surfaces[0].Decl {
+			t.Errorf("%s резолвится на «%s», а не на поверхности выдачи «%s»", name, c.Surfaces[0].Name, token.Surfaces[0].Name)
+		}
+		if len(c.Endpoints) == 0 {
+			t.Errorf("%s: обработчик не прослежен ни до одного значения — монтаж под чужим путём не судится", name)
 		}
 	}
-	if report.Census.WithoutProducer != 2 {
-		t.Errorf("координат без производителя %d, ожидалось 2", report.Census.WithoutProducer)
+	if report.Census.WithoutProducer != 0 {
+		t.Errorf("координат без производителя %d, ожидалось 0", report.Census.WithoutProducer)
 	}
-	if report.Census.PositiveControls != 1 {
-		t.Errorf("положительных контролей %d, ожидался 1 (токен-эндпоинт)", report.Census.PositiveControls)
+	if report.Census.PositiveControls != 3 {
+		t.Errorf("положительных контролей %d, ожидалось 3 (токен-эндпоинт, авторизация, обнаружение)", report.Census.PositiveControls)
 	}
 
 	byReach := map[string][]check.SurfaceRoutes{}

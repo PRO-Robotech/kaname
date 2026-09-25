@@ -61,9 +61,10 @@ const (
 //     issuance the ceremony's issuance adapter recorded as belonging to that
 //     family. The adapter records each issuance before the token leaves and
 //     refuses the issuance when the record is refused, so a token of the
-//     ceremony always belongs to its family. The ceremony is not yet mounted
-//     on a request path of the service (kaname#407); until it is, no request
-//     issues a token of a family.
+//     ceremony always belongs to its family. The ceremony is mounted on the
+//     external issuing surface of the service under the `own` sign-in
+//     (kaname#423): its authorization endpoint and the `authorization_code`
+//     and `refresh_token` grants of the token endpoint issue these tokens.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -245,9 +246,10 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //     issuance the ceremony's issuance adapter recorded as belonging to that
 //     family. The adapter records each issuance before the token leaves and
 //     refuses the issuance when the record is refused, so a token of the
-//     ceremony always belongs to its family. The ceremony is not yet mounted
-//     on a request path of the service (kaname#407); until it is, no request
-//     issues a token of a family.
+//     ceremony always belongs to its family. The ceremony is mounted on the
+//     external issuing surface of the service under the `own` sign-in
+//     (kaname#423): its authorization endpoint and the `authorization_code`
+//     and `refresh_token` grants of the token endpoint issue these tokens.
 //
 // A CAEP receiver and a Hydra back-channel logout endpoint were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and

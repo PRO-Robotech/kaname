@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 750
+Всего кейсов: 764
 
 ## Перепись по модулям
 
@@ -69,6 +69,7 @@
 | `cases/iam-token-facade-conformance.py` | 7 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
+| `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-recovery-lane.py` | 3 |
 | `cases/kaname-second-factor.py` | 4 |
@@ -1018,6 +1019,34 @@
 - `IAM-SET-GRP-LABEL-EXACT-OK`
 - `IAM-SET-SVA-LIST-READ-PARITY`
 - `IAM-SET-GRP-LIST-READ-PARITY`
+
+## `cases/kaname-authorization-code.py` — 14 кейсов
+
+> Церемония `authorization_code` нашими силами (приёмка LINE-A-1, kaname#423):
+> точка авторизации и полосы `authorization_code`/`refresh_token` поверхности
+> выдачи службы; человек входит полосой входа, выданный токен принимает
+> собственный публичный фронт. Адресуется `iamRegistryTokenBaseUrl`,
+> `loginLaneBaseUrl` и `ownRestBaseUrl`; конфиденциальных клиентов набор не
+> заводит, а читает посеянными (`oauthClient*`, `oauthOtherClient*`,
+> `oauthRedirectUri*`). Непосеянный ключ — «условие не создано» помеченным
+> утверждением. Шага конвейера, который её гоняет, пока нет: держатель и
+> препятствия названы ведомостью переписи долга
+> (`.github/scripts/newman-suite-debt.py`).
+
+- `IAM-AUTHCODE-OK-ISSUE-EXCHANGE-ACCEPT`
+- `IAM-AUTHCODE-BVA-STATE-AT-FLOOR`
+- `IAM-AUTHCODE-NEG-STATE-BELOW-FLOOR`
+- `IAM-AUTHCODE-NEG-NO-SESSION`
+- `IAM-AUTHCODE-NEG-REDIRECT-UNREGISTERED`
+- `IAM-AUTHCODE-NEG-PKCE-MISSING-OR-PLAIN`
+- `IAM-AUTHCODE-NEG-WRONG-VERIFIER`
+- `IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED`
+- `IAM-AUTHCODE-NEG-CODE-REPLAY-REVOKES`
+- `IAM-AUTHCODE-NEG-REDIRECT-MISMATCH`
+- `IAM-AUTHCODE-NEG-FOREIGN-CLIENT`
+- `IAM-AUTHCODE-OK-REFRESH-ROTATES`
+- `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
+- `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
 ## `cases/kaname-login-lane.py` — 4 кейса
 
