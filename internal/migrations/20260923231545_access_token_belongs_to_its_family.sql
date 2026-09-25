@@ -76,7 +76,7 @@ CREATE TABLE kaname.access_tokens (
     CONSTRAINT access_tokens_jti_form_ck CHECK ((jti ~ '^tok[0-9a-hjkmnp-tv-z]{17}$'::text)),
     CONSTRAINT access_tokens_family_form_ck CHECK ((family_id ~ '^tfm-[0-9a-hjkmnp-tv-z]{17}$'::text)),
     CONSTRAINT access_tokens_expiry_after_issue_ck CHECK ((expires_at > issued_at)),
-    CONSTRAINT access_tokens_family_fk FOREIGN KEY (family_id, family_live)
+    CONSTRAINT access_tokens_family_live_fk FOREIGN KEY (family_id, family_live)
         REFERENCES kaname.token_families(id, live)
         ON UPDATE CASCADE
         ON DELETE SET NULL (family_live)

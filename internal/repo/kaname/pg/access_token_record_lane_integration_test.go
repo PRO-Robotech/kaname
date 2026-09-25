@@ -43,7 +43,7 @@ var issuanceConstraintLanes = map[string]string{
 	"access_tokens_jti_form_ck":           "writer",
 	"access_tokens_family_form_ck":        "writer",
 	"access_tokens_expiry_after_issue_ck": "precheck",
-	"access_tokens_family_fk":             "family",
+	"access_tokens_family_live_fk":        "family",
 }
 
 // TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated — перепись
