@@ -257,7 +257,7 @@ func TestAuthorize_RedirectRefusalsCarryOnlyTheErrorCode(t *testing.T) {
 		"response_type=token":       {func(p *ceremony.AuthorizeParams) { p.ResponseType = "token" }, ceremony.ErrUnsupportedResponseType, ceremony.AuthorizeResponseTypeRefused},
 		"response_type нет":         {func(p *ceremony.AuthorizeParams) { p.ResponseType = "" }, ceremony.ErrInvalidRequest, ceremony.AuthorizeResponseTypeMissing},
 		"state на знак короче пола": {func(p *ceremony.AuthorizeParams) { p.State = p.State[1:] }, ceremony.ErrInvalidRequest, ceremony.AuthorizeStateRefused},
-		"state не прислан":          {func(p *ceremony.AuthorizeParams) { p.State = "" }, ceremony.ErrInvalidRequest, ceremony.AuthorizeStateRefused},
+		"state не прислан":          {func(p *ceremony.AuthorizeParams) { p.State = "" }, ceremony.ErrInvalidRequest, ceremony.AuthorizeStateAbsent},
 		"state вне VSCHAR":          {func(p *ceremony.AuthorizeParams) { p.State = strings.Repeat("ж", 22) }, ceremony.ErrInvalidRequest, ceremony.AuthorizeStateRefused},
 		"PKCE нет":                  {func(p *ceremony.AuthorizeParams) { p.CodeChallenge, p.CodeChallengeMethod = "", "" }, ceremony.ErrInvalidRequest, ceremony.AuthorizePKCERefused},
 		"PKCE plain":                {func(p *ceremony.AuthorizeParams) { p.CodeChallengeMethod = "plain" }, ceremony.ErrInvalidRequest, ceremony.AuthorizePKCERefused},

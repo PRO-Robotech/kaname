@@ -155,9 +155,15 @@ func (u *AuthorizeUseCase) Execute(ctx context.Context, p AuthorizeParams) Autho
 	case p.ResponseType != "code":
 		return u.redirectError(target, ErrUnsupportedResponseType, AuthorizeResponseTypeRefused, clientID)
 	}
-	// «Не прислан» и «короче пола» — ОДНА проверка (Р13 п. 1).
+	// «Не прислан» и «короче пола» — ОДНА проверка и ОДИН исход наружу (Р13
+	// п. 1). Для нас два факта различимы: клетка переписи выбирается ПОСЛЕ
+	// решения и на него не влияет.
 	if !domain.ValidOAuthState(p.State) {
-		return u.redirectError(target, ErrInvalidRequest, AuthorizeStateRefused, clientID)
+		o := AuthorizeStateRefused
+		if p.State == "" {
+			o = AuthorizeStateAbsent
+		}
+		return u.redirectError(target, ErrInvalidRequest, o, clientID)
 	}
 	// PKCE обязателен вдобавок к аутентификации клиента на обмене (Р3):
 	// отсутствующий метод по RFC 7636 означает `plain`, и отвергается так же.

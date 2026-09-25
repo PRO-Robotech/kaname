@@ -23,6 +23,7 @@ const (
 	AuthorizeParamRepeated        Outcome = "authorize.param-repeated"
 	AuthorizeResponseTypeMissing  Outcome = "authorize.response-type-missing"
 	AuthorizeResponseTypeRefused  Outcome = "authorize.response-type-unsupported"
+	AuthorizeStateAbsent          Outcome = "authorize.state-absent"
 	AuthorizeStateRefused         Outcome = "authorize.state-refused"
 	AuthorizePKCERefused          Outcome = "authorize.pkce-refused"
 	AuthorizeScopeRefused         Outcome = "authorize.scope-refused"
@@ -64,7 +65,7 @@ const (
 var outcomes = []Outcome{
 	AuthorizeIssued, AuthorizeTargetParamInvalid, AuthorizeClientUnknown, AuthorizeClientNotActive,
 	AuthorizeRedirectUnregistered, AuthorizeParamRepeated, AuthorizeResponseTypeMissing,
-	AuthorizeResponseTypeRefused, AuthorizeStateRefused, AuthorizePKCERefused, AuthorizeScopeRefused,
+	AuthorizeResponseTypeRefused, AuthorizeStateAbsent, AuthorizeStateRefused, AuthorizePKCERefused, AuthorizeScopeRefused,
 	AuthorizeACRValuesRefused, AuthorizeUnauthenticated, AuthorizeStepUpRequired, AuthorizeIssueRaced,
 	AuthorizeUnavailable,
 	ExchangeCodeAccepted, ExchangeRefreshRotated, ExchangeFormInvalid, ExchangeClientMissing,
