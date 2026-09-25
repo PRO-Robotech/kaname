@@ -54,6 +54,7 @@ func buildClientTokenEndpoint(
 	cfg config.Config,
 	signer *tokensigner.Signer,
 	logger *slog.Logger,
+	ceremonyLanes clienttokenhttp.CeremonyLanes,
 ) (*clienttokenhttp.Handler, error) {
 	if !cfg.AuthN.ClientToken.Enabled {
 		return nil, nil
@@ -87,6 +88,9 @@ func buildClientTokenEndpoint(
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
 		PeerTimeout:              clientTokenPeerTimeout,
+		// Полосы церемонии — того же эндпоинта, не второй поверхности: вид
+		// выдачи задан формой запроса (LINE-A-1, 10–21).
+		Ceremony: ceremonyLanes,
 	}, signer, claims)
 }
 

@@ -143,7 +143,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 func TestServeMountsTheClientTokenEndpointOnTheExternalSurfaceAndNowhereElse(t *testing.T) {
 	src := readFileT(t, "serve.go")
 
-	if !strings.Contains(src, "buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)") {
+	if !strings.Contains(src, "buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, authzCeremony.lanes())") {
 		t.Error("serve.go: токен-эндпоинт платформы не собирается — эндпоинт без производственного вызывающего")
 	}
 	if !strings.Contains(src, "mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)") {

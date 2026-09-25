@@ -107,6 +107,20 @@ type loginLane struct {
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// verifier — проверяющий пароля полосы; его ёмкость — бюджет памяти
+	// процесса, и проверяющий секрета клиента церемонии делит её
+	// (`passwordverify.Verifier.SharingCapacity`, LINE-A-1).
+	verifier *passwordverify.Verifier
+}
+
+// secretVerifier — проверяющий секрета конфиденциального клиента церемонии:
+// та же ёмкость, свой приёмник исходов. nil-полоса — nil: церемонии без
+// своего входа нет.
+func (l *loginLane) secretVerifier(observer passwordverify.Observer) (*passwordverify.Verifier, error) {
+	if l == nil || l.verifier == nil {
+		return nil, nil
+	}
+	return l.verifier.SharingCapacity(observer)
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -565,6 +579,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		verifier: verifier,
 	}, nil
 }
 

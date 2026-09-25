@@ -75,6 +75,10 @@ type BuildConfig struct {
 	// вешает горутину навсегда, и горутины копятся до исчерпания процесса —
 	// то есть отказ приходит не туда, где причина.
 	PeerTimeout time.Duration
+	// Ceremony — полосы церемонии `authorization_code` (LINE-A-1). Необязательны:
+	// посадка без своего входа человека их не собирает, и оба вида выдачи
+	// остаются вне перечня эндпоинта.
+	Ceremony clienttokenhttp.CeremonyLanes
 }
 
 // New собирает эндпоинт из уже готовых портов.
@@ -138,6 +142,7 @@ func New(
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling: cfg.BodyCeiling,
 		Logger:      cfg.Logger,
+		Ceremony:    cfg.Ceremony,
 	}, verifier, issue)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)

@@ -85,6 +85,7 @@ import (
 	sessionrevapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
@@ -137,6 +138,8 @@ const (
 // печать узла разбора со сжатыми пробелами.
 var lineA1IssuanceRootUses = []string{
 	"Handler: registryTokenHandler",
+	"mux.Handle(ceremonyhttp.AuthorizePath, authzCeremony.authorize)",
+	"mux.Handle(ceremonyhttp.DiscoveryPath, authzCeremony.discovery)",
 	"mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)",
 	"registryTokenHandler = mux",
 }
@@ -398,8 +401,8 @@ func (w *ceremonyWorld) buildSurface() {
 
 	logger := slog.New(slog.NewJSONHandler(w.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mux, err := registrytokenwire.Build(w.pool, registrytokenwire.BuildConfig{
-		Realm:   "https://api.kacho.local/iam/token",
-		Service: "registry.kacho.local",
+		Realm:    "https://api.kacho.local/iam/token",
+		Service:  "registry.kacho.local",
 		Logger:   logger,
 		Signer:   signer,
 		TokenTTL: 15 * time.Minute,
@@ -408,6 +411,8 @@ func (w *ceremonyWorld) buildSurface() {
 		w.fixture("сборка поверхности выдачи: %v", err)
 	}
 	var cfg config.Config
+	// Церемония существует ровно под посадкой `own` (корень: ceremony.go).
+	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:          true,
 		AllowedAudiences: "https://api.kacho.local,registry.kacho.local",
@@ -415,13 +420,26 @@ func (w *ceremonyWorld) buildSurface() {
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
 	}
-	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger)
+	// Проверяющий секрета клиента: в корне он делит ёмкость проверяющего
+	// полосы входа (`loginLane.secretVerifier`); здесь полосы входа нет, и
+	// ёмкость объявлена пробой — с запасом на её одновременные обмены.
+	verifier, err := passwordverify.New(32, ceremonySecretOutcomes{})
+	if err != nil {
+		w.fixture("проверяющий секрета клиента: %v", err)
+	}
+	authzCeremony, err := buildAuthorizationCeremony(w.pool, cfg, signer, secretVerifierPort(verifier), logger)
+	if err != nil || authzCeremony == nil {
+		w.fixture("сборка церемонии: церемония %v, ошибка %v", authzCeremony != nil, err)
+	}
+	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger, authzCeremony.lanes())
 	if err != nil || clientTokenHandler == nil {
 		w.fixture("сборка токен-эндпоинта: обработчик %v, ошибка %v", clientTokenHandler != nil, err)
 	}
 	// Ровно так, как это делает композиционный корень (перечень —
 	// lineA1IssuanceRootUses, сверка — requireRootParity).
 	mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
+	mux.Handle(ceremonyhttp.AuthorizePath, authzCeremony.authorize)
+	mux.Handle(ceremonyhttp.DiscoveryPath, authzCeremony.discovery)
 	w.surface = mux
 }
 

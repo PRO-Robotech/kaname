@@ -37,11 +37,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
 	"github.com/PRO-Robotech/corelib/httpbody"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -74,6 +76,15 @@ type Issuer interface {
 	Issue(ctx context.Context, in client_token.Input) (client_token.Output, clientassertion.Outcome, error)
 }
 
+// CeremonyLanes — полосы церемонии `authorization_code` (LINE-A-1): обмен кода
+// и ротация обновляющего удостоверения. Необязательный порт: посадка без
+// своего входа человека церемонии не обслуживает, и оба вида выдачи там
+// остаются вне перечня — тем же отказом, что всякий иной неизвестный вид.
+type CeremonyLanes interface {
+	ExchangeCode(ctx context.Context, in ceremony.CodeExchangeInput) (ceremony.TokenPair, error)
+	Refresh(ctx context.Context, in ceremony.RefreshInput) (ceremony.TokenPair, error)
+}
+
 // Config — настройка эндпоинта.
 type Config struct {
 	// BodyCeiling — потолок тела запроса в байтах. ОБЯЗАТЕЛЕН.
@@ -85,6 +96,9 @@ type Config struct {
 	// объявляет тот, кто поднимает сервис.
 	BodyCeiling int64
 	Logger      *slog.Logger
+	// Ceremony — полосы церемонии; nil — церемония на этой посадке не
+	// обслуживается.
+	Ceremony CeremonyLanes
 }
 
 // Handler — токен-эндпоинт.
@@ -204,7 +218,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// приёма, и заведение второго вида её не завело: развилка ниже перечисляет
 	// оба поимённо, а всё остальное отвергается здесь.
 	grantType := r.PostForm.Get("grant_type")
-	if grantType != tokenpolicy.GrantTypeClientCredentials && grantType != tokenpolicy.GrantTypeJWTBearer {
+	switch grantType {
+	case tokenpolicy.GrantTypeClientCredentials, tokenpolicy.GrantTypeJWTBearer:
+	case ceremony.GrantTypeAuthorizationCode, ceremony.GrantTypeRefreshToken:
+		if h.cfg.Ceremony != nil {
+			h.serveCeremony(w, r, grantType)
+			return
+		}
+		h.count(clientassertion.OutcomeUnsupportedGrantType)
+		writeJSON(w, http.StatusBadRequest, errorBody("unsupported_grant_type"))
+		return
+	default:
 		h.count(clientassertion.OutcomeUnsupportedGrantType)
 		writeJSON(w, http.StatusBadRequest, errorBody("unsupported_grant_type"))
 		return
@@ -334,4 +358,86 @@ func writeJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// ceremonyFormParams — параметры полос церемонии, чьё повторение — отказ
+// формы (RFC 6749 §3.2): какое из двух значений проверять, запрос не говорит.
+var ceremonyFormParams = []string{
+	"grant_type", "code", "redirect_uri", "code_verifier", "client_id", "refresh_token", "scope",
+}
+
+// serveCeremony — полосы `authorization_code` и `refresh_token`.
+//
+// Аутентификация клиента — базовая, секретом (RFC 6749 §2.3.1): пара
+// идентификатор и секрет закодированы формой до base64 и раскодируются здесь.
+// Всякая иная форма предъявления клиента на этих полосах — секрет в теле,
+// подписанное утверждение — не принимается и отвечает `invalid_client`:
+// принятая и не прочитанная, она была бы тихим успехом без проверки.
+func (h *Handler) serveCeremony(w http.ResponseWriter, r *http.Request, grantType string) {
+	repeated := false
+	for _, name := range ceremonyFormParams {
+		if len(r.PostForm[name]) > 1 {
+			repeated = true
+		}
+	}
+	client := ceremony.ClientPresentation{FormClientID: r.PostForm.Get("client_id")}
+	if id, secret, ok := r.BasicAuth(); ok {
+		uid, e1 := url.QueryUnescape(id)
+		usec, e2 := url.QueryUnescape(secret)
+		if e1 == nil && e2 == nil {
+			client.Presented, client.ID, client.Secret = true, uid, usec
+		}
+	}
+	if len(r.PostForm["client_secret"]) != 0 || len(r.PostForm["client_assertion"]) != 0 ||
+		len(r.PostForm["client_assertion_type"]) != 0 {
+		client.Presented = false
+	}
+
+	var (
+		pair ceremony.TokenPair
+		err  error
+	)
+	if grantType == ceremony.GrantTypeAuthorizationCode {
+		pair, err = h.cfg.Ceremony.ExchangeCode(r.Context(), ceremony.CodeExchangeInput{
+			Client:      client,
+			Code:        r.PostForm.Get("code"),
+			RedirectURI: r.PostForm.Get("redirect_uri"),
+			Verifier:    r.PostForm.Get("code_verifier"),
+			Repeated:    repeated,
+		})
+	} else {
+		pair, err = h.cfg.Ceremony.Refresh(r.Context(), ceremony.RefreshInput{
+			Client:   client,
+			Refresh:  r.PostForm.Get("refresh_token"),
+			Scope:    r.PostForm.Get("scope"),
+			Repeated: repeated,
+		})
+	}
+	if err != nil {
+		refusal, ok := ceremony.IsRefusal(err)
+		if !ok {
+			refusal = &ceremony.Refusal{Code: ceremony.TokenErrUnavailable}
+		}
+		status := http.StatusBadRequest
+		switch refusal.Code {
+		case ceremony.TokenErrInvalidClient:
+			// Отказ аутентификации клиента называет схему (RFC 6749 §5.2).
+			w.Header().Set("WWW-Authenticate", `Basic realm="token"`)
+			status = http.StatusUnauthorized
+		case ceremony.TokenErrUnavailable:
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, errorBody(refusal.Code))
+		return
+	}
+	body := map[string]any{
+		"access_token":  pair.AccessToken,
+		"token_type":    pair.TokenType,
+		"expires_in":    pair.ExpiresIn,
+		"refresh_token": pair.Refresh.Deliver(),
+	}
+	if pair.Scope != "" {
+		body["scope"] = pair.Scope
+	}
+	writeJSON(w, http.StatusOK, body)
 }

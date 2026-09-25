@@ -34,12 +34,14 @@ import (
 	"github.com/PRO-Robotech/corelib/servicehost"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
@@ -1287,12 +1289,33 @@ func runServe(cfg config.Config) error {
 		// утверждение получает ПРОИЗВОДСТВЕННОГО вызывающего. Проверяющий без
 		// него выглядит исправным ровно потому, что его пробы подают ему то,
 		// что он умеет разобрать.
-		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)
+		//
+		// Церемония `authorization_code` (LINE-A-1) — ТА ЖЕ поверхность: обмен
+		// и ротация — полосы этого же токен-эндпоинта, эндпоинт авторизации и
+		// обнаружения — соседи по муксу. Под посадкой без своего входа
+		// человека церемонии нет (nil), и её пути не монтируются.
+		secretVerifier, sverr := lane.secretVerifier(ceremonySecretOutcomes{})
+		if sverr != nil {
+			return fmt.Errorf("authorization ceremony: %w", sverr)
+		}
+		authzCeremony, acerr := buildAuthorizationCeremony(pool, cfg, tokenSigner, secretVerifierPort(secretVerifier), logger)
+		if acerr != nil {
+			return acerr
+		}
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, authzCeremony.lanes())
 		if cterr != nil {
 			return fmt.Errorf("client token endpoint: %w", cterr)
 		}
 		if clientTokenHandler != nil {
 			mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
+			if authzCeremony != nil {
+				// Точные пары «метод + путь»: поддеревом не регистрируются, и
+				// соседняя координата с суффиксом действия здесь не резолвится.
+				mux.Handle(ceremonyhttp.AuthorizePath, authzCeremony.authorize)
+				mux.Handle(ceremonyhttp.DiscoveryPath, authzCeremony.discovery)
+				metricsReg.NewAuthorizationCeremonyOutcomeCollector(
+					ceremony.OutcomeNames(), authzCeremony.census.Snapshot)
+			}
 			// ЧИТАТЕЛЬ ПЕРЕПИСИ ИСХОДОВ — ВПЛОТНУЮ К МОНТИРОВАНИЮ (#2501), как у
 			// двух соседних поверхностей выдачи. Обработчик несёт перепись с
 			// пред-засевом по каждому объявленному исходу; без читателя она
