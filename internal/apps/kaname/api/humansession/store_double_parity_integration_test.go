@@ -415,6 +415,16 @@ func parityCases() []parityCase {
 			}
 			return said(err, "открыта")
 		}})
+	// Транзакция, открытая держащей строку личности (kaname#340): у «адреса
+	// нет» личность пуста, и оператор замка исполняется так же — строки нет.
+	cs = append(cs, parityCase{method: "Store.SessionSetWriter", form: "её личность",
+		store: func(ctx context.Context, s humansession.Store, p parityPerson, later func(func())) string {
+			w, err := s.SessionSetWriter(ctx, p.user.ID)
+			if err == nil {
+				later(func() { _ = w.Rollback(ctx) })
+			}
+			return said(err, "открыта")
+		}})
 
 	// --- Writer: сессия и память первой аутентификации ---
 	wr("InsertSession", "новая сессия её личности", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
