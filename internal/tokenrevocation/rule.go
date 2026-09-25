@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Reader — хранилище отсечек.
@@ -55,6 +57,11 @@ var subjectClaims = []string{
 	"kaname_user_token_id",
 	// Клиент ключа служебной учётки.
 	"kaname_sa_key_id",
+	// Авторизация церемонии `authorization_code` (LINE-A-1 Р8): отзыв
+	// СЕМЕЙСТВА по повтору кода либо ротированного удостоверения задевает
+	// ровно предъявителей этой авторизации, а не всех живых удостоверений
+	// человека — отсечка по субъекту была бы шире предмета.
+	domain.ClaimAuthorizationID,
 }
 
 // Keys возвращает ВСЕ ключи отсечки для состава утверждений: субъект и каждое

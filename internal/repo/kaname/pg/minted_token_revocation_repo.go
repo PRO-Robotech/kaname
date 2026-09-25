@@ -27,6 +27,19 @@ type MintedTokenRevocationRepo struct {
 	pool *pgxpool.Pool
 }
 
+// mintedTokenRevokeSQL — ЕДИНСТВЕННЫЙ оператор записи отсечки отчеканенного.
+// Путей к нему два — пул ([MintedTokenRevocationRepo.Revoke]) и транзакция
+// вызывающего (отзыв семейства авторизации, `authorization_ceremony_repo.go`),
+// — а текст один: второй текст об одной таблице разошёлся бы с первым в
+// монотонности молча.
+const mintedTokenRevokeSQL = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (subject) DO UPDATE
+		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
+		       reason        = EXCLUDED.reason,
+		       revoked_by    = EXCLUDED.revoked_by,
+		       updated_at    = now()`
+
 // NewMintedTokenRevocationRepo — построитель.
 func NewMintedTokenRevocationRepo(pool *pgxpool.Pool) *MintedTokenRevocationRepo {
 	return &MintedTokenRevocationRepo{pool: pool}
@@ -65,14 +78,7 @@ func (r *MintedTokenRevocationRepo) Revoke(ctx context.Context, subject string, 
 	if strings.TrimSpace(decidedBy) == "" {
 		return fmt.Errorf("%w: revocation must name who decided it", iamerr.ErrInvalidArg)
 	}
-	const q = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (subject) DO UPDATE
-		   SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
-		       reason        = EXCLUDED.reason,
-		       revoked_by    = EXCLUDED.revoked_by,
-		       updated_at    = now()`
-	if _, err := r.pool.Exec(ctx, q, subject, before, reason, decidedBy); err != nil {
+	if _, err := r.pool.Exec(ctx, mintedTokenRevokeSQL, subject, before, reason, decidedBy); err != nil {
 		return wrapPgErr(err, "TokenRevocation", subject)
 	}
 	return nil
