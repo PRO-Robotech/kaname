@@ -87,7 +87,7 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 	form := r.PostForm
 	for _, name := range laneSingleValued {
 		if len(form[name]) > 1 {
-			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeTokenRequestRefused, form.Get("client_id"),
+			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, form.Get("client_id"),
 				"parameter "+name+" is named more than once")
 			return
 		}
@@ -105,7 +105,7 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 	}
 	if user, pass, basic := r.BasicAuth(); basic {
 		if form.Has("client_secret") {
-			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeTokenRequestRefused, req.ClientID,
+			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, req.ClientID,
 				"the client authenticates by more than one method")
 			return
 		}
@@ -141,9 +141,9 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 		return
 	}
 
-	outcome := OutcomeTokenCodeExchanged
+	outcome := OutcomeExchangeCodeExchanged
 	if req.Grant == oauthceremony.GrantRefreshToken {
-		outcome = OutcomeTokenRefreshed
+		outcome = OutcomeExchangeRefreshed
 	}
 	l.census.count(outcome)
 	l.logger.InfoContext(ctx, "ceremony token issued",
@@ -170,19 +170,19 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 	case errors.Is(err, domain.ErrVerifierAtCapacity):
 		// Проверяющий секрета занят: отказ повторяемый и наш, а не клиента.
 		w.Header().Set("Retry-After", "1")
-		l.refuse(r, w, http.StatusServiceUnavailable, "temporarily_unavailable", OutcomeTokenUnavailable,
+		l.refuse(r, w, http.StatusServiceUnavailable, "temporarily_unavailable", OutcomeExchangeUnavailable,
 			clientID, "client secret checker at capacity")
 	case errors.Is(err, domain.ErrAccessTokenFamilyNotLive):
 		// Запись выпуска отвергнута: семейство гранта умерло ВО ВРЕМЯ операции
 		// (одновременный повтор токена обновления отозвал его раньше, чем этот
 		// оборот записал свой выпуск; К1). Грант, который назвал запрос, негоден —
 		// это отказ гранта тем же тоном, а не отказ сервера.
-		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeTokenGrantRefused, clientID,
+		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeExchangeGrantRefused, clientID,
 			"the family of the grant was revoked during the operation")
 	case wire == "invalid_client":
 		l.refuseClient(r, w, clientID, code.String())
 	case wire == "invalid_grant":
-		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeTokenGrantRefused, clientID, code.String())
+		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeExchangeGrantRefused, clientID, code.String())
 	case code.HTTPStatus() >= http.StatusInternalServerError || code == oauthceremony.CodeUnspecified:
 		// Отказ операции: текст причины — только в журнал, наружу — слово.
 		status, word := http.StatusInternalServerError, "server_error"
@@ -197,11 +197,11 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 			// службы их не пишут).
 			why += " (" + pe.Debug + ")"
 		}
-		l.refuse(r, w, status, word, OutcomeTokenUnavailable, clientID, why)
+		l.refuse(r, w, status, word, OutcomeExchangeUnavailable, clientID, why)
 	case wire == "unauthorized_client" || wire == "unsupported_grant_type" || wire == "invalid_scope":
-		l.refuse(r, w, http.StatusBadRequest, wire, OutcomeTokenRequestRefused, clientID, code.String())
+		l.refuse(r, w, http.StatusBadRequest, wire, OutcomeExchangeRequestRefused, clientID, code.String())
 	default:
-		l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeTokenRequestRefused, clientID, code.String())
+		l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, clientID, code.String())
 	}
 }
 
@@ -209,7 +209,7 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 // доказывает себя (RFC 6749 §5.2).
 func (l *TokenLane) refuseClient(r *http.Request, w http.ResponseWriter, clientID, why string) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="token"`)
-	l.refuse(r, w, http.StatusUnauthorized, "invalid_client", OutcomeTokenClientRefused, clientID, why)
+	l.refuse(r, w, http.StatusUnauthorized, "invalid_client", OutcomeExchangeClientRefused, clientID, why)
 }
 
 // refuse записывает отказ туда, где различимость законна, и отвечает словом.

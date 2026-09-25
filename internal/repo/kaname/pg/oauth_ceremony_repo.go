@@ -561,13 +561,13 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 	return out, nil
 }
 
-// insertRefreshTokenSQL — заведение обновляющего токена в семейство: ОДИН
+// insertRefreshSQL — заведение обновляющего токена в семейство: ОДИН
 // литерал на все пути, которыми токен ложится в семейство, — первое поколение
 // обмена кода и преемник ротации, в том числе в единице работы церемонии
 // фундамента (`oauth_ceremony_vaults.go`). Согласие контекста с семейством
 // держит составной ключ `refresh_tokens_family_context_fk`, живость семейства —
 // `refresh_tokens_family_live_fk`: писатель их не проверяет.
-const insertRefreshTokenSQL = `
+const insertRefreshSQL = `
 INSERT INTO kaname.refresh_tokens
        (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`
@@ -577,7 +577,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`
 func insertRefreshTokenTx(ctx context.Context, tx pgx.Tx, digest string, c domain.CeremonyContext,
 	generation int32, ttl time.Duration,
 ) error {
-	if _, err := tx.Exec(ctx, insertRefreshTokenSQL,
+	if _, err := tx.Exec(ctx, insertRefreshSQL,
 		digest, c.FamilyID, c.ClientID, c.UserID, c.SessionID, c.Scope, generation, ttl.Seconds()); err != nil {
 		return wrapPgErr(err, "RefreshToken", c.FamilyID)
 	}

@@ -98,7 +98,7 @@ func TestTokenLane_IssuanceIntoADeadFamilyIsAnInvalidGrant(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || rec.Body.String() != grantRefused {
 		t.Fatalf("выпуск в умершее семейство: %d %q, ожидалось 400 %q", rec.Code, rec.Body.String(), grantRefused)
 	}
-	if got := census.Read()[string(OutcomeTokenGrantRefused)]; got != 1 {
+	if got := census.Read()[string(OutcomeExchangeGrantRefused)]; got != 1 {
 		t.Errorf("исход «отказ гранта» сосчитан %d раз, ожидался один", got)
 	}
 

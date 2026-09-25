@@ -30,12 +30,12 @@ const (
 
 // Исходы полос обмена токен-эндпоинта.
 const (
-	OutcomeTokenRequestRefused Outcome = "token-request-refused"
-	OutcomeTokenClientRefused  Outcome = "token-client-refused"
-	OutcomeTokenGrantRefused   Outcome = "token-grant-refused"
-	OutcomeTokenUnavailable    Outcome = "token-unavailable"
-	OutcomeTokenCodeExchanged  Outcome = "token-code-exchanged"
-	OutcomeTokenRefreshed      Outcome = "token-refreshed"
+	OutcomeExchangeRequestRefused Outcome = "token-request-refused"
+	OutcomeExchangeClientRefused  Outcome = "token-client-refused"
+	OutcomeExchangeGrantRefused   Outcome = "token-grant-refused"
+	OutcomeExchangeUnavailable    Outcome = "token-unavailable"
+	OutcomeExchangeCodeExchanged  Outcome = "token-code-exchanged"
+	OutcomeExchangeRefreshed      Outcome = "token-refreshed"
 )
 
 // Outcomes — словарь целиком, КОПИЕЙ.
@@ -45,8 +45,8 @@ func Outcomes() []Outcome {
 		OutcomeAuthorizeRedirectUnregistered, OutcomeAuthorizeStateBelowFloor, OutcomeAuthorizeProtocolRefused,
 		OutcomeAuthorizeLoginRequired, OutcomeAuthorizeStepUpRequired, OutcomeAuthorizeUnavailable,
 		OutcomeAuthorizeIssued,
-		OutcomeTokenRequestRefused, OutcomeTokenClientRefused, OutcomeTokenGrantRefused,
-		OutcomeTokenUnavailable, OutcomeTokenCodeExchanged, OutcomeTokenRefreshed,
+		OutcomeExchangeRequestRefused, OutcomeExchangeClientRefused, OutcomeExchangeGrantRefused,
+		OutcomeExchangeUnavailable, OutcomeExchangeCodeExchanged, OutcomeExchangeRefreshed,
 	}
 }
 
