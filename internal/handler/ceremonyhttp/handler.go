@@ -26,8 +26,10 @@ package ceremonyhttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -139,6 +141,12 @@ type DiscoveryHandler struct{ body []byte }
 // Виды выдачи названы те, что обслуживает церемония; машинные полосы
 // токен-эндпоинта свои координаты этим документом не объявляют.
 func NewDiscoveryHandler(issuer string) (*DiscoveryHandler, error) {
+	if strings.TrimSpace(issuer) == "" {
+		return nil, fmt.Errorf("ceremonyhttp: issuer is required — the document would name no authority")
+	}
+	// Издатель — идентификатор без хвостового слэша (RFC 8414 §2): координаты
+	// строятся приклейкой пути, и слэш удвоился бы.
+	issuer = strings.TrimSuffix(issuer, "/")
 	body, err := json.Marshal(map[string]any{
 		"issuer":                           issuer,
 		"authorization_endpoint":           issuer + AuthorizePath,

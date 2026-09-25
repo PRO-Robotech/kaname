@@ -125,4 +125,15 @@ func TestDiscoveryIsPublicMaterialOnly(t *testing.T) {
 	if rec := serve(h, http.MethodPost, ceremonyhttp.DiscoveryPath, ""); rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 		t.Fatalf("POST: %d, Allow %q", rec.Code, rec.Header().Get("Allow"))
 	}
+
+	slashed, err := ceremonyhttp.NewDiscoveryHandler("https://issuer.test/")
+	if err != nil {
+		t.Fatalf("документ: %v", err)
+	}
+	if body := serve(slashed, http.MethodGet, ceremonyhttp.DiscoveryPath, "").Body.String(); strings.Contains(body, "test//iam") {
+		t.Fatalf("хвостовой слэш издателя удвоен в координатах: %s", body)
+	}
+	if _, err := ceremonyhttp.NewDiscoveryHandler(" "); err == nil {
+		t.Fatal("документ без издателя построен")
+	}
 }
