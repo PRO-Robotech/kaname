@@ -153,12 +153,32 @@ func acScene(t *testing.T, db *sql.DB, tag string) (clientID, userID, sessionID,
 		"ic-"+acPad(tag), "ic-"+tag, clientID)
 	require.NoError(t, err, "посев клиента %s", tag)
 
-	_, err = db.Exec(`
+	// Снимок уровня гранта (`token_families.acr`) заведён миграцией
+	// 20260925121413; сцена ставится и на ревизиях ДО неё (`goose.UpTo`), и посев
+	// следует схеме той ревизии, на которой стоит.
+	insertFamily := `
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'])`
+	if acFamilyCarriesLevel(t, db) {
+		insertFamily = `
 		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
-		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'], '1')`,
-		familyID, clientID, userID, sessionID)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'], '1')`
+	}
+	_, err = db.Exec(insertFamily, familyID, clientID, userID, sessionID)
 	require.NoError(t, err, "посев семейства %s", tag)
 	return clientID, userID, sessionID, familyID
+}
+
+// acFamilyCarriesLevel — есть ли у семейства снимок уровня на ревизии схемы,
+// на которой стоит база пробы.
+func acFamilyCarriesLevel(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	var present bool
+	require.NoError(t, db.QueryRow(`
+		SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		 WHERE table_schema = 'kaname' AND table_name = 'token_families' AND column_name = 'acr')`).Scan(&present),
+		"каталог о снимке уровня семейства")
+	return present
 }
 
 // acExecer — то, чем исполняется сырой оператор: база либо её транзакция.

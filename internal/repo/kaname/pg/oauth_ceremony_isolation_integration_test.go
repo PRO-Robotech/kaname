@@ -78,6 +78,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,6 +119,8 @@ var ceremonyPortClassification = map[string]string{
 	"RecordAccessToken": "writer",
 	// Уборка записей выпуска (kaname#319).
 	"SweepExpiredAccessTokens": "sweeper",
+	// Погашение кода для движка фундамента (kaname#423).
+	"ConsumeAuthorizationCode": "writer",
 }
 
 // TestOAuthCeremonyPortMethodsAreClassified — предпосылка перечня: он называет
@@ -631,7 +634,44 @@ func holdingTx(t *testing.T, ctx context.Context, seed *pgxpool.Pool, what, sql 
 	return backendPID(t, ctx, tx), func() { require.NoError(t, tx.Commit(ctx), "фиксация держателя: %s", what) }
 }
 
+// consumeSceneCodes — код сцены погашения по семейству: держатель заводит его,
+// писатель предъявляет тот же.
+var consumeSceneCodes sync.Map
+
 var heldWriterCases = []heldWriterCase{
+	{
+		// Два погашения одного кода (kaname#423): держатель погасил код и держит
+		// строку, погашение стоит на ней. Исход — ноль строк: код погашен другим,
+		// и это перепроверка условия, а не отказ сериализации.
+		name: "ConsumeAuthorizationCode",
+		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, n int) (int, func()) {
+			code := issueCeremonyCode(t, ctx, repo, sc, n)
+			consumeSceneCodes.Store(sc.FamilyID, code)
+			return holdingTx(t, ctx, sh.seed, "погашение кода", `
+				UPDATE kaname.authorization_codes SET deactivated_at = now(), deactivated_reason = 'redeemed'
+				 WHERE code_digest = $1`, code)
+		},
+		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
+			code, ok := consumeSceneCodes.Load(sc.FamilyID)
+			if !ok {
+				return fmt.Errorf("сцена не завела код семейства %s", sc.FamilyID)
+			}
+			rows, err := repo.ConsumeAuthorizationCode(ctx, code.(string))
+			if err == nil && rows != 0 {
+				return fmt.Errorf("погашение, стоявшее на погашенной строке, затронуло строк %d вместо нуля", rows)
+			}
+			return err
+		},
+		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, err error) {
+			assert.NoError(t, err, "погашение, стоявшее на погашенной строке, обязано дать ноль строк, а не отказ")
+			var active bool
+			require.NoError(t, sh.seed.QueryRow(ctx,
+				`SELECT active FROM kaname.authorization_codes WHERE family_id = $1`, sc.FamilyID).Scan(&active))
+			assert.False(t, active, "код остался активным после погашения держателем")
+		},
+	},
 	{
 		// Сессия снята одновременно с выдачей: держатель ставит отметку снятия,
 		// выдача стоит на строке сессии. Исход — «сессия не жива».

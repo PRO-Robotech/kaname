@@ -211,3 +211,29 @@ ALTER TABLE kaname.third ADD CONSTRAINT third_kind_ck CHECK (kind IN ('1', '2', 
 		t.Errorf("комментарий прочитан как объявление оси: %v", got)
 	}
 }
+
+// TestLevelSoleWriterAxisCopyLedger — ведомость снимков схемы в обе стороны:
+// снимок в названной таблице молчит; тот же столбец в неназванной — находка с
+// таблицей; запись ведомости без столбца — находка «нечего исключать»; дом без
+// объявления — находка. Близнец и инъекция отличаются одним фактом — таблицей.
+func TestLevelSoleWriterAxisCopyLedger(t *testing.T) {
+	t.Parallel()
+	const home, snapshot = "kaname.sessions", "kaname.grants"
+	copies := map[string]string{snapshot: "снимок уровня на выдаче"}
+	site := func(table string) check.AxisColumnSite {
+		return check.AxisColumnSite{File: "internal/migrations/9_x.sql", Line: 1, Table: table, Column: "acr"}
+	}
+
+	if got := check.JudgeAssuranceAxisColumns([]check.AxisColumnSite{site(home), site(snapshot)}, home, copies); len(got) != 0 {
+		t.Errorf("близнец: снимок в названной таблице дал находки: %v", got)
+	}
+	got := check.JudgeAssuranceAxisColumns([]check.AxisColumnSite{site(home), site("kaname.other")}, home, copies)
+	joined := strings.Join(got, "\n")
+	if len(got) != 2 || !strings.Contains(joined, "kaname.other") || !strings.Contains(joined, "нечего исключать") {
+		t.Errorf("инъекция: столбец оси вне дома и ведомости и запись ведомости без столбца — ожидались обе находки: %v", got)
+	}
+	if got := check.JudgeAssuranceAxisColumns([]check.AxisColumnSite{site(snapshot)}, home, copies); len(got) != 1 ||
+		!strings.Contains(got[0], home) {
+		t.Errorf("дом без объявления оси не назван: %v", got)
+	}
+}
