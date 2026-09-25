@@ -117,7 +117,7 @@ func TestIntegration_LINE_A_1_28_AccessTokenIsIssuedIntoALiveFamilyOnly(t *testi
 
 	// Неизвестное семейство — отказ ключа.
 	requirePgRefusal(t, atInsert(db, atJTI("a2"), "tfm-"+acPad("absent")),
-		"23503", "access_tokens_family_fk", "выпуск в семейство, которого нет")
+		"23503", "access_tokens_family_live_fk", "выпуск в семейство, которого нет")
 
 	// Идентификатор единственен.
 	requirePgRefusal(t, atInsert(db, atJTI("a1"), family),
@@ -131,7 +131,7 @@ func TestIntegration_LINE_A_1_28_AccessTokenIsIssuedIntoALiveFamilyOnly(t *testi
 
 	// Отозванное семейство выпуска не принимает.
 	requirePgRefusal(t, atInsert(db, atJTI("a3"), family),
-		"23503", "access_tokens_family_fk", "выпуск в отозванное семейство")
+		"23503", "access_tokens_family_live_fk", "выпуск в отозванное семейство")
 }
 
 // TestIntegration_AccessTokenOutlivesItsRemovedFamily — снятие семейства
@@ -223,7 +223,7 @@ func TestIntegration_LINE_A_1_28_IssuanceRacingRevocationLeavesNoLiveToken(t *te
 			var pgErr *pgconn.PgError
 			require.ErrorAs(t, insErr, &pgErr, "раунд %d: отказ обязан прийти от базы", i)
 			require.Equal(t, "23503", pgErr.Code, "раунд %d: отказ заведения — только ключом", i)
-			require.Equal(t, "access_tokens_family_fk", pgErr.ConstraintName)
+			require.Equal(t, "access_tokens_family_live_fk", pgErr.ConstraintName)
 			refused++
 			continue
 		}

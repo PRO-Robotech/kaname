@@ -44,7 +44,7 @@ import (
 
 // issuanceFamilyFK — ограничение, которым база отвергает выпуск в
 // неизвестное либо отозванное семейство.
-const issuanceFamilyFK = "access_tokens_family_fk"
+const issuanceFamilyFK = "access_tokens_family_live_fk"
 
 // recordIssuanceSQL — заведение записи выпуска. Живости семейства оператор
 // НЕ пишет: её берёт умолчание, и ключ сверяет его с живым семейством.
