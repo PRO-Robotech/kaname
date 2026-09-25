@@ -108,6 +108,11 @@ type NewAuthorizationCode struct {
 	RedirectURI         string
 	CodeChallenge       string
 	CodeChallengeMethod string
+	// ACR — уровень аутентификации ГРАНТА: снимок уровня сессии на выдаче кода
+	// (колонка `token_families.acr`, миграция `20260925121413`). Приходит от
+	// того, кто выдаёт, — у сессии уровень подвижен (шаг вверх), и прочитать его
+	// там при обмене значило бы перенести в токен уровень, которого код не нёс.
+	ACR string
 	// TTL — срок жизни кода. Приходит ВХОДОМ, а не константой этого файла: у
 	// величины нет владельца в слое доступа, и копия разошлась бы с политикой.
 	TTL time.Duration
@@ -275,8 +280,8 @@ const insertFamilyOnLiveSessionSQL = `
 WITH s AS (
     SELECT ended_at, expires_at FROM kaname.human_sessions WHERE id = $4
 ), ins AS (
-    INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-    SELECT $1, $2, $3, $4, $5 FROM s
+    INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+    SELECT $1, $2, $3, $4, $5, $6 FROM s
      WHERE s.ended_at IS NULL AND s.expires_at > now()
     RETURNING 1
 )
@@ -299,6 +304,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	}
 	if in.RedirectURI == "" {
 		return fmt.Errorf("Illegal argument authorization_code.redirect_uri: required")
+	}
+	if err := domain.ValidateCeremonyLevel(in.ACR); err != nil {
+		return err
 	}
 	if in.TTL <= 0 {
 		return fmt.Errorf("Illegal argument authorization_code.ttl: must be positive")
@@ -327,7 +335,7 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	var sessionRows, inserted int
 	if err = tx.QueryRow(ctx, insertFamilyOnLiveSessionSQL,
 		in.Context.FamilyID, in.Context.ClientID, in.Context.UserID,
-		in.Context.SessionID, in.Context.Scope).Scan(&sessionRows, &inserted); err != nil {
+		in.Context.SessionID, in.Context.Scope, in.ACR).Scan(&sessionRows, &inserted); err != nil {
 		return wrapPgErr(err, "TokenFamily", in.Context.FamilyID)
 	}
 	switch {
@@ -544,18 +552,89 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
 
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO kaname.refresh_tokens
-		       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,0, now() + make_interval(secs => $7))`,
-		in.RefreshTokenDigest, out.Context.FamilyID, out.Context.ClientID, out.Context.UserID,
-		out.Context.SessionID, out.Context.Scope, in.RefreshTokenTTL.Seconds()); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
+	if err = insertRefreshTokenTx(ctx, tx, in.RefreshTokenDigest, out.Context, 0, in.RefreshTokenTTL); err != nil {
+		return domain.RedeemedCode{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", out.Context.FamilyID)
 	}
 	return out, nil
+}
+
+// insertRefreshTokenSQL — заведение обновляющего токена в семейство: ОДИН
+// литерал на все пути, которыми токен ложится в семейство, — первое поколение
+// обмена кода и преемник ротации, в том числе в единице работы церемонии
+// фундамента (`oauth_ceremony_vaults.go`). Согласие контекста с семейством
+// держит составной ключ `refresh_tokens_family_context_fk`, живость семейства —
+// `refresh_tokens_family_live_fk`: писатель их не проверяет.
+const insertRefreshTokenSQL = `
+INSERT INTO kaname.refresh_tokens
+       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`
+
+// insertRefreshTokenTx — заведение обновляющего токена в транзакции
+// вызывающего. Срок — от времени БАЗЫ: сравнивают его тоже операторы базы.
+func insertRefreshTokenTx(ctx context.Context, tx pgx.Tx, digest string, c domain.CeremonyContext,
+	generation int32, ttl time.Duration,
+) error {
+	if _, err := tx.Exec(ctx, insertRefreshTokenSQL,
+		digest, c.FamilyID, c.ClientID, c.UserID, c.SessionID, c.Scope, generation, ttl.Seconds()); err != nil {
+		return wrapPgErr(err, "RefreshToken", c.FamilyID)
+	}
+	return nil
+}
+
+// ConsumeAuthorizationCode гасит код — ТЕМ ЖЕ оператором, что обмен
+// (`exchangeCodeSQL`), после замка семейства (`lockFamilyOfCodeSQL`), на
+// названном уровне (`ceremonyWriterTx()`). Возвращает число погашенных строк:
+// 1 — погасил этот вызов; 0 — условие не выполнилось (уже погашен, истёк либо
+// семейство отозвано). Разбор нуля — забота вызывающего: у церемонии
+// фундамента (`oauth_ceremony_vaults.go`) повтор узнаётся выборкой кода, а ноль
+// строк после живой выборки — одновременный повтор (контракт
+// `oauthceremony.AuthorizationCodeVault`).
+//
+// Первого поколения обновляющего токена здесь нет, и это не сокращение
+// `ExchangeAuthorizationCode`: движок фундамента гасит код при ПРЕДЪЯВЛЕНИИ, до
+// сверки доказательства, а пару кладёт позже, своей единицей работы.
+func (r *OAuthCeremonyRepo) ConsumeAuthorizationCode(ctx context.Context, digest string) (int64, error) {
+	if err := domain.ValidateCeremonyDigest("authorization_code.code_digest", digest); err != nil {
+		return 0, err
+	}
+	tx, err := r.beginWriter(ctx)
+	if err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	consumed, err := consumeCodeTx(ctx, tx, digest)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	return consumed, nil
+}
+
+// consumeCodeTx — погашение кода в транзакции вызывающего: замок семейства
+// ПЕРВЫМ (`lockFamilyOfCodeSQL`, порядок «родитель → ребёнок»), затем оператор
+// обмена (`exchangeCodeSQL`). Число погашенных строк — 1 либо 0.
+func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error) {
+	if _, err := tx.Exec(ctx, lockFamilyOfCodeSQL, digest); err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", "")
+	}
+	rows, err := tx.Query(ctx, exchangeCodeSQL, digest)
+	if err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	var consumed int64
+	for rows.Next() {
+		consumed++
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	return consumed, nil
 }
 
 // refuseCode называет ПРИЧИНУ, по которой условие обмена не выполнилось, и —
@@ -665,13 +744,8 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
 	}
 
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO kaname.refresh_tokens
-		       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`,
-		in.SuccessorDigest, out.Context.FamilyID, out.Context.ClientID, out.Context.UserID,
-		out.Context.SessionID, out.Context.Scope, out.Generation+1, in.TTL.Seconds()); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
+	if err = insertRefreshTokenTx(ctx, tx, in.SuccessorDigest, out.Context, out.Generation+1, in.TTL); err != nil {
+		return domain.RotatedRefreshToken{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)

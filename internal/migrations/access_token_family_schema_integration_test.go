@@ -85,8 +85,8 @@ func atFamily(t *testing.T, db *sql.DB, client, user, session, tag string) strin
 	t.Helper()
 	family := "tfm-" + acPad("f"+tag)
 	_, err := db.Exec(`
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'])`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'], '1')`,
 		family, client, user, session)
 	require.NoError(t, err, "посев семейства %s", tag)
 	return family

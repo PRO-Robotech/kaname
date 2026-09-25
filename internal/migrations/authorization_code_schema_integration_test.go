@@ -154,8 +154,8 @@ func acScene(t *testing.T, db *sql.DB, tag string) (clientID, userID, sessionID,
 	require.NoError(t, err, "посев клиента %s", tag)
 
 	_, err = db.Exec(`
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'])`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, ARRAY['openid','profile'], '1')`,
 		familyID, clientID, userID, sessionID)
 	require.NoError(t, err, "посев семейства %s", tag)
 	return clientID, userID, sessionID, familyID

@@ -354,6 +354,7 @@ func issueCeremonyCode(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCe
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 	return code
@@ -644,7 +645,7 @@ var heldWriterCases = []heldWriterCase{
 		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
 			return repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
 				Context: sc, CodeDigest: ceremonyDigest(0x31c001), RedirectURI: "https://app.example.test/cb",
-				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, TTL: time.Minute,
+				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, ACR: "1", TTL: time.Minute,
 			})
 		},
 		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
@@ -889,8 +890,8 @@ func holdCodeDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, $5)`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, $5, '1')`,
 		other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope)
 	require.NoError(t, err, "держатель: семейство чужой сцены")
 	_, err = tx.Exec(ctx, `
@@ -1037,6 +1038,7 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					issued <- repo.IssueAuthorizationCode(callCtx, kanamepg.NewAuthorizationCode{
 						Context: sc, CodeDigest: code, RedirectURI: "https://app.example.test/cb",
 						CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256,
+						ACR: "1",
 						TTL: time.Minute,
 					})
 				}()
