@@ -313,6 +313,18 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 неё, негде. Недостающие называются ОДНИМ ПЕРЕЧНЕМ, а не `required` на каждой, —
 тот же довод, что у перечня координат выше.
 
+Третье — ТЕНЬ ручки стража в окружении пода (задача #392). Страж судит ключи
+значений, а карты `env` и `secrets` уходят в под как есть, и переменная
+перекрывает файл настроек. Посадка `env.KANAME_AUTHN__IDENTITY_PROVIDER=own`
+без эндпоинта проходила бы рендер, и отказ приходил бы уже в кластере. Выбран
+ОДИН АДРЕС, а не суд обеих форм: суд обеих повторил бы здесь правило
+старшинства процесса (переменная перекрывает файл), то есть завёл бы второе
+место об одном предмете, — а посадку читают ещё карта настроек и правила
+тревоги. Поэтому переменная с именем ручки стража в любом источнике окружения
+пода — отказ, называющий ключ значений. Перечень ручек ниже сверяется с
+таблицей стража старта в обе стороны, а источники окружения пода выводятся
+обходом шаблона развёртывания (`posture_knob_has_one_address_test.go`).
+
 ОБЛАСТЬ НАЗВАНА: судится только ОБЪЯВЛЕННОСТЬ величин. Их согласованность
 (адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
 тела положителен) судит страж старта (`ClientTokenConfig.Validate`), и второго
@@ -321,6 +333,25 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 требует, чтобы отказ называл каждую строку.
 */}}
 {{- define "kaname-svc.requireClientTokenEndpoint" -}}
+{{- $canonical := dict
+      "KANAME_AUTHN__IDENTITY_PROVIDER" "authn.identityProvider"
+      "KANAME_AUTHN__CLIENT_TOKEN__ENABLED" "authn.clientToken.enabled"
+      "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES" "authn.clientToken.allowedAudiences"
+      "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE" "authn.clientToken.defaultAudience"
+      "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL" "authn.clientToken.tokenTtl"
+      "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING" "authn.clientToken.bodyCeiling" -}}
+{{- $shadows := list -}}
+{{- range $source := list "env" "secrets" -}}
+{{- $carried := index $.Values $source | default dict -}}
+{{- range $name := keys $canonical | sortAlpha -}}
+{{- if hasKey $carried $name -}}
+{{- $shadows = append $shadows (printf "  %s.%s — её адрес в профиле: %s" $source $name (get $canonical $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $shadows -}}
+{{- fail (printf "чарт службы прав не ставится: окружение пода несёт ручки стража посадки — %d.\n\nСтраж шаблона судит посадку own и токен-эндпоинт по ключам значений, а окружение пода уходит процессу как есть и перекрывает файл настроек: объявленная переменной, ручка обошла бы отказ установки, и отказ пришёл бы уже в кластере. Адрес у каждой из них один — ключ значений.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите переменную из карты env (secrets) и задайте ключ значений — накладкой -f либо --set; образец накладки own — INSTALL.md §1." (len $shadows) (join "\n" $shadows)) -}}
+{{- end -}}
 {{- $authn := .Values.authn | default dict -}}
 {{- $ct := $authn.clientToken | default dict -}}
 {{- $posture := $authn.identityProvider -}}

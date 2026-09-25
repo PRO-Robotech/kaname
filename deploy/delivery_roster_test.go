@@ -108,6 +108,8 @@ var deliveryRoster = []string{
 	"provider_anchor_is_its_own_coordinate_test.go",
 	"port_knob_moves_its_listener_injection_test.go",
 	"port_knob_moves_its_listener_test.go",
+	"posture_knob_has_one_address_injection_test.go",
+	"posture_knob_has_one_address_test.go",
 	"prod_profile_render_injection_test.go",
 	"prod_profile_render_test.go",
 	"prod_profile_test.go",

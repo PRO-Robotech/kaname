@@ -75,8 +75,12 @@ type tplPiece struct {
 }
 
 // tplAction — одно действие `{{ … }}`; комментарии в перечень не входят.
+// start и end — смещения разделителей в исходнике: текст МЕЖДУ действиями
+// (например `- name: ` перед именем переменной) судится по ним.
 type tplAction struct {
 	line   int
+	start  int
+	end    int
 	pieces []tplPiece
 }
 
@@ -158,7 +162,7 @@ func scanTemplateActions(src string) (actions []tplAction, comments int, err err
 			continue
 		}
 
-		act := tplAction{line: lineAt(start)}
+		act := tplAction{line: lineAt(start), start: start}
 		cs := p
 		flush := func(to int) {
 			if to > cs {
@@ -213,6 +217,7 @@ func scanTemplateActions(src string) (actions []tplAction, comments int, err err
 				flush(to)
 				closed = true
 				i = j + 2
+				act.end = i
 			default:
 				j++
 			}
@@ -249,8 +254,11 @@ type switchCensus struct {
 var (
 	// Поле `.enabled` у чего угодно: переменной, `.Values…`, точки, скобки.
 	fieldSwitchRe = regexp.MustCompile(`\.` + blockSwitchLeaf + `\b`)
-	// Точечный путь-литерал, кончающийся выключателем: `"a.b.enabled"`.
-	pathSwitchRe = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.` + blockSwitchLeaf + `$`)
+	// Точечный путь-литерал, кончающийся выключателем: `"a.b.enabled"`. Чтение
+	// он есть, только когда передан ИМЕНОВАННОМУ ШАБЛОНУ — путь по значениям
+	// разрешает лишь шаблон; тот же литерал в словаре или тексте — имя, данные.
+	pathSwitchRe       = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.` + blockSwitchLeaf + `$`)
+	passesToTemplateRe = regexp.MustCompile(`\b(include|template)\b`)
 	// Каноническая форма вызова: `include "<правило>" (list $ "<координата>")`.
 	canonicalCallRe = regexp.MustCompile(`\binclude\s+"@(\d+)"\s+\(\s*list\s+\$\s+"@(\d+)"\s*\)`)
 	// Координата — путь ключей значений в верблюжьем регистре.
@@ -352,12 +360,13 @@ func judgeActions(c *switchCensus, file string, actions []tplAction) {
 				"%s:%d: выключатель читается мимо правила — %s; истинность строки `\"false\"` включит блок. "+
 					"Читайте его вызовом include %q (list $ \"<координата>\")", file, line, form, blockSwitchRule))
 		}
+		toTemplate := passesToTemplateRe.MatchString(code)
 		for _, p := range a.pieces {
 			if p.lit {
 				if p.text == blockSwitchLeaf {
 					read(p.line, fmt.Sprintf("ключ-литерал %q", p.text))
-				} else if pathSwitchRe.MatchString(p.text) {
-					read(p.line, fmt.Sprintf("путь-литерал %q", p.text))
+				} else if toTemplate && pathSwitchRe.MatchString(p.text) {
+					read(p.line, fmt.Sprintf("путь-литерал %q, переданный именованному шаблону", p.text))
 				}
 				continue
 			}
