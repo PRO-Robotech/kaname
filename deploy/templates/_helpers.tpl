@@ -293,6 +293,26 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 {{- end -}}
 {{- end -}}
 
+{{/*
+kaname-svc.hooksLaneRaised — ПОДНИМАЕТ ЛИ ПРОЦЕСС СЛУШАТЕЛЬ ВЕБХУКОВ ПОСТАВЩИКА
+ЛИЧНОСТИ при посадке этого профиля (kaname#360). Отдаёт `true` либо пусто.
+
+ЗЕРКАЛО ПРЕДИКАТА ПРОЦЕССА, а не своё решение: `AuthNConfig.HasExternalIdentityProvider`
+(`hooksListenAddress` в композиционном корне) снимает слушатель ровно ОДНИМ
+объявленным значением — `own`. Поэтому здесь «не own», а не «== external»:
+незаявленная посадка слушатель СОХРАНЯЕТ, и чарт, сузивший условие до
+`external`, снял бы порт там, где процесс дверь поднимает.
+
+Читателей два — порт пода и порт внутреннего Service, — и порознь они
+разошлись бы молча. Согласие с процессом держит
+`deploy/hooks_port_follows_posture_test.go`: он спрашивает предикат процесса по
+каждому значению словаря посадок и сверяет с ним оба порта.
+*/}}
+{{- define "kaname-svc.hooksLaneRaised" -}}
+{{- $authn := .Values.authn | default dict -}}
+{{- if ne (toString ($authn.identityProvider | default "")) "own" -}}true{{- end -}}
+{{- end -}}
+
 {{- define "kaname-svc.processDefaultPort" -}}
 {{- $ports := dict "hooks" "9092" "metrics" "9095" "registryToken" "9096" "jwksProxy" "9097" -}}
 {{- $port := index $ports . -}}

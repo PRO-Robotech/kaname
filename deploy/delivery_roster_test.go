@@ -80,6 +80,8 @@ var deliveryRoster = []string{
 	"foreign_object_defaults_test.go",
 	"foreign_operator_declared_injection_test.go",
 	"foreign_operator_declared_test.go",
+	"hooks_port_follows_posture_injection_test.go",
+	"hooks_port_follows_posture_test.go",
 	"image_coordinate_injection_test.go",
 	"image_coordinate_test.go",
 	"invite_mail_rate_limit_render_test.go",
