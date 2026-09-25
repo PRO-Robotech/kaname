@@ -149,6 +149,13 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 
 	claims := map[string]any{
 		"client_id": grant.ClientID,
+		// Вид и идентификатор принципала — обязательная пара читателя
+		// предъявленного (`presentedcred.principalFrom`; приёмка LINE-A-1 Р6):
+		// без неё край не узнал бы, за кого говорит токен. Грант церемонии
+		// выдаётся только ЧЕЛОВЕКУ нашего входа — шов авторитета входа отвечает
+		// сессией человека, — поэтому вид один и назван словом домена.
+		domain.ClaimPrincipalType: domain.PrincipalTypeUser,
+		domain.ClaimPrincipalID:   grant.Session.Subject,
 		// Контекст входа — из полей сеанса (см. шапку); `auth_time` — целые
 		// секунды эпохи (OpenID Connect Core 1.0 §2).
 		"acr":       grant.Session.ACR,

@@ -106,7 +106,7 @@ func (c *ClientSecrets) VerifyClientSecret(ctx context.Context, clientID string,
 		return oauthceremony.SecretMismatched, nil
 	case passwordverify.OutcomeCapacityExhausted:
 		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
-			"the checker is at capacity (%s)", clientID, res.Outcome)
+			"the checker is at capacity (%s): %w", clientID, res.Outcome, domain.ErrVerifierAtCapacity)
 	case passwordverify.OutcomeFormatNotInRegistry, passwordverify.OutcomeBodyNotParsable,
 		passwordverify.OutcomeParamsAboveCeiling:
 		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
