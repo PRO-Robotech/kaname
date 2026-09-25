@@ -164,8 +164,12 @@ func issuanceDefect(ctx context.Context, familyID, field, rule string) error {
 // Полоса дефекта судится КЛАССОМ, а не перечнем имён: любой отказ целостности
 // (SQLSTATE класса 23) нашей таблицы, кроме ключа семейства, — значение службы,
 // которое схема не приняла. Ограничение, заведённое позже, попадает в ту же
-// полосу без правки здесь; решение по каждому ограничению выписано в переписи
-// integration-пробы `TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated`.
+// полосу без правки здесь. Полосу проверок таблицы решает перепись
+// `checkValueLanes` — таблица в ней целиком полоса службы, из того же довода
+// («ИСХОДОВ ДВА» у `RecordAccessToken`); что ответ общего переводчика совпадает
+// с ответом писателя, держит `TestCheckValueCensus_IssuanceTableAnswersAsItsWriter`.
+// Исход писателя по каждому ограничению выписан в переписи integration-пробы
+// `TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated`.
 //
 // Отказ без строки состояния (сервер не ответил) и прочие классы остаются общему
 // переводчику: «не дозвонились» — не дефект значения.

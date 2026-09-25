@@ -20,6 +20,7 @@ package pg
 
 import (
 	"bytes"
+	"context"
 	stderrors "errors"
 	"log/slog"
 	"strings"
@@ -323,4 +324,48 @@ func TestCheckValueCensus_NewCheckOfAMixedTableIsUndecided(t *testing.T) {
 
 	require.Empty(t, cvUndecided([]cvLiveCheck{{"human_sessions", "human_sessions_new_ck"}}),
 		"близнец: таблица, которую служба пишет целиком, решает новую проверку построением")
+}
+
+// cvIssuanceDisagreement — отказ проверки таблицы записей выпуска (kaname#319)
+// у обоих её переводчиков: писателя выпуска (`issuanceRefusal`, судит классом
+// отказа) и общего (`wrapPgErr`, судит переписью). Находка называет
+// ограничение и тот ответ, который не фиксированный INTERNAL.
+func cvIssuanceDisagreement(constraint string) []string {
+	pgErr := cvCheckPgErr(constraint, issuanceTable)
+	var out []string
+	for _, a := range []struct {
+		who string
+		err error
+	}{
+		{"писатель выпуска", issuanceRefusal(context.Background(), pgErr, "tok-probe", "tfm-probe")},
+		{"перепись", wrapPgErr(pgErr, "AccessToken", "tok-probe")},
+	} {
+		if !stderrors.Is(a.err, iamerr.ErrInternal) || a.err.Error() != iamerr.ErrInternal.Error() {
+			out = append(out, issuanceTable+"."+constraint+": "+a.who+
+				" — значение производит служба, ждали фиксированный INTERNAL, получено «"+a.err.Error()+"»")
+		}
+	}
+	return out
+}
+
+// TestCheckValueCensus_IssuanceTableAnswersAsItsWriter — у отказа проверки
+// таблицы записей выпуска два переводчика, и ответ у них один. Каждое значение
+// записи производит служба (`RecordAccessToken`, «ИСХОДОВ ДВА»), писатель
+// судит отказ классом, а не именем, — значит и перепись обязана решать таблицу
+// целиком. Имя ограничения синтетическое: решение не зависит от имени, в том
+// числе у проверки, заведённой позже. Инъекция роняет только решение переписи
+// о таблице.
+func TestCheckValueCensus_IssuanceTableAnswersAsItsWriter(t *testing.T) {
+	cvCaptureLog(t)
+	const constraint = "access_tokens_later_ck"
+
+	require.Empty(t, cvIssuanceDisagreement(constraint), "контроль: оба переводчика отвечают фиксированным INTERNAL")
+
+	t.Run("таблица снята с переписи", func(t *testing.T) {
+		cvSwapLanes(t, func(m map[string]*checkTableLanes) { delete(m, issuanceTable) })
+		findings := cvIssuanceDisagreement(constraint)
+		require.Len(t, findings, 1, "расходится ровно перепись, писатель судит классом: %v", findings)
+		require.Contains(t, findings[0], issuanceTable+"."+constraint+": перепись", "находка называет ограничение и переводчика")
+		require.Contains(t, findings[0], "invalid argument", "находка называет полученную полосу ввода")
+	})
 }
