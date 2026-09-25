@@ -244,6 +244,60 @@ kaname-svc.requireNoRetiredPortKnobs — СНЯТЫЙ КЛЮЧ ПОСАДКИ О
 {{- end -}}
 
 {{/*
+kaname-svc.blockEnabled — ВЫКЛЮЧАТЕЛЬ БЛОКА ЧАРТА, ОДНИМ ПРАВИЛОМ НА ВСЕ БЛОКИ
+(задача #391). Принимает `(list $ "<координата блока>")`, например
+`(list $ "authn.tokenSigning")`; отдаёт `true`, когда `<координата>.enabled`
+есть булево true, и пустую строку, когда булево false.
+
+ЧТО ОН ЗАПРЕЩАЕТ. Условие `if $x.enabled` судит ИСТИННОСТЬ, а не булевость:
+непустая строка истинна при любом тексте. Поэтому `false`, поданное строкой
+(`--set-string`, `--set-literal`, `enabled: "false"` в накладке), включало блок,
+который оператор выключал, — а у блока токен-эндпоинта вдобавок обходило отказ
+«own без эндпоинта». Снятый ключ (`null`) выключал блок молча. Здесь любой вид,
+кроме булева, — отказ рендера с координатой и тем, что пришло.
+
+ПОЧЕМУ ПРАВИЛО ОДНО. Выключатель читался в пяти местах шаблонов пятью
+условиями, и каждое было отдельным местом об одном предмете. Координата
+выключателя здесь и находит значение, и называет его в отказе — разойтись им
+не на чем. Читать `.enabled` мимо правила запрещает проба
+`block_switch_is_boolean_test.go`: она обходит шаблоны, выводит выключатели из
+умолчаний чарта и сверяет их с вызовами правила в обе стороны.
+*/}}
+{{- define "kaname-svc.blockEnabled" -}}
+{{- $root := index . 0 -}}
+{{- $at := index . 1 -}}
+{{- $cur := $root.Values -}}
+{{- $found := true -}}
+{{- range $seg := splitList "." $at -}}
+{{- if $found -}}
+{{- if kindIs "map" $cur -}}
+{{- if hasKey $cur $seg -}}
+{{- $cur = index $cur $seg -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $kind := "absent" -}}
+{{- $v := false -}}
+{{- if and $found (kindIs "map" $cur) -}}
+{{- if hasKey $cur "enabled" -}}
+{{- $v = index $cur "enabled" -}}
+{{- $kind = kindOf $v -}}
+{{- end -}}
+{{- end -}}
+{{- if ne $kind "bool" -}}
+{{- $got := "ключ не задан" -}}
+{{- if ne $kind "absent" -}}{{- $got = printf "получено: %s %s" $kind (toJson $v) -}}{{- end -}}
+{{- fail (printf "чарт службы прав не ставится: выключатель %s.enabled — не булево значение (%s).\n\nБлок включается только значением true и выключается только значением false. Условие по истинности приняло бы любую непустую строку за «включён»: «false», поданное строкой (--set-string, --set-literal, enabled: \"false\" в накладке), включало бы блок, который выключали, а снятый ключ выключал бы его молча.\n\nЧТО СДЕЛАТЬ: задайте выключатель булевым значением — --set %s.enabled=false (либо =true) или enabled: false без кавычек в накладке." $at $got $at) -}}
+{{- end -}}
+{{- if and (eq $kind "bool") $v }}true{{ end -}}
+{{- end -}}
+
+{{/*
 kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН-ЭНДПОИНТА
 ПЛАТФОРМЫ И ВКЛЮЧЁННЫЙ ЭНДПОИНТ БЕЗ ЕГО ВЕЛИЧИН НЕ СОБИРАЮТСЯ (задача #337).
 
@@ -270,10 +324,11 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 {{- $authn := .Values.authn | default dict -}}
 {{- $ct := $authn.clientToken | default dict -}}
 {{- $posture := $authn.identityProvider -}}
-{{- if and $posture (eq (toString $posture) "own") (not $ct.enabled) -}}
+{{- $ctOn := include "kaname-svc.blockEnabled" (list $ "authn.clientToken") -}}
+{{- if and $posture (eq (toString $posture) "own") (not $ctOn) -}}
 {{- fail "чарт службы прав не ставится: authn.identityProvider=own при невключённом authn.clientToken.enabled.\n\nНа посадке own ключ служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у этой посадки нет. Страж старта процесса такую посадку не поднимает (authn.identity-provider=own при authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его четыре величины (INSTALL.md §1, §3), — либо объявите authn.identityProvider=external." -}}
 {{- end -}}
-{{- if $ct.enabled -}}
+{{- if $ctOn -}}
 {{- $missing := list -}}
 {{- if not $ct.allowedAudiences -}}
 {{- $missing = append $missing "  authn.clientToken.allowedAudiences — authn.client-token.allowed-audiences: перечень адресатов,\n                                       которым платформа чеканит удостоверения, через запятую; адресат\n                                       докерной полосы (apiServer.registryToken.service) обязан в него входить." -}}
