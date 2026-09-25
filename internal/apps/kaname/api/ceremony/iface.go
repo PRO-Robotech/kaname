@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package ceremony — церемония OAuth 2.1 `authorization_code` нашими силами
-// (под-фаза LINE-A-1, задача PRO-Robotech/kacho#2721; приёмка
-// `sub-phase-LINE-A-1-own-authorization-endpoint-and-code-acceptance.md`).
+// (под-фаза LINE-A-1, задача PRO-Robotech/kacho#2721; контракт для
+// арендатора — `docs/content/api/authorization-code.mdx`).
 //
 // Три глагола: выдача кода эндпоинтом авторизации, обмен кода на наш
 // подписанный предъявитель и ротация обновляющего удостоверения. Транспорта

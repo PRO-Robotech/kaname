@@ -38,6 +38,7 @@ const sidebars: SidebarsConfig = {
         'api/access-binding',
         'api/tokens',
         'api/auth-lane',
+        'api/authorization-code',
         'api/authorize',
         'api/operations',
         'api/quotas',

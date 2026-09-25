@@ -5,9 +5,8 @@ package domain
 
 // authorization_ceremony.go — величины и значения церемонии OAuth 2.1
 // `authorization_code` нашими силами (под-фаза LINE-A-1, задача
-// PRO-Robotech/kacho#2721; приёмка
-// `sub-phase-LINE-A-1-own-authorization-endpoint-and-code-acceptance.md`,
-// решения Р3, Р5, Р8, Р13).
+// PRO-Robotech/kacho#2721, решения приёмки Р3, Р5, Р8, Р13; контракт для
+// арендатора — `docs/content/api/authorization-code.mdx`).
 //
 // # Величины объявлены ЗДЕСЬ, одним местом, и ручками не являются
 //
