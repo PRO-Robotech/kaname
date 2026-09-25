@@ -1,0 +1,297 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md
+  sha256: c9a0c3c7215972023e923cdcdc638a3903a86afd6a44a74a6ffeb41b053cb6c3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Одобрение выводится из внешнего события
+    и записи. Номер редакции и строку истории круга 1 автор правил тем же изменением, что и
+    тело; слово DRAFT не тронуто. У этой редакции вердикт — возврат, событие одобрения по ней
+    не выпускается.
+  base_commit: f4c6537ac4add4989faa9f28fb503b90a1531f12
+  content_commit: 29bda8b81deb05eb529631903488633575fc49af
+  content_commit_note: >-
+    Редакция 2 закоммичена в `acc-385` на 29bda8b81. Родитель — 2e10a4660 (запись круга 1),
+    дальше b73503ac8 (редакция 1) и f4c6537ac. `git show HEAD:<путь> | sha256sum` равен
+    отпечатку файла на диске. `git diff --stat f4c6537ac HEAD` → только документ и запись
+    круга 1. origin/358 стоит на 196bf9664, это +13 коммитов от базы. Каталогов, на которые
+    ссылается документ, они не трогают: предикат из шапки документа (`git diff --stat
+    $(git merge-base HEAD origin/358) origin/358 -- humansession pg internal_iam
+    loginlanehttp observability session_revocations migrations proto pkg/api cmd/kaname`)
+    перепрогнан → пусто.
+  branch: acc-385
+  pull_request: null
+  task: PRO-Robotech/kaname#385
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 1007
+  round: 2
+  predecessor_record: >-
+    docs/specs/reviews/login-issues-no-session-the-cutoff-covers/964a8751d3e967f1fd6d4d98eb074748d9480fe448bcddd53379224169af6d50.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md
+    → c9a0c3c7215972023e923cdcdc638a3903a86afd6a44a74a6ffeb41b053cb6c3. Снят с файла на диске
+    и с блоба коммита 29bda8b81, значения совпали.
+  measurement_revisions: >-
+    Дерево службы: f4c6537ac (код) и 29bda8b81 (плюс документ). origin/358: 196bf9664.
+    Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    (1) «Код #340 уже в 358» — ПОДТВЕРЖДЕНО: `git merge-base --is-ancestor 3a6ceed43
+    origin/358` → 0. (2) «Документа приёмки нет» — ОПРОВЕРГНУТО: документ в дереве `acc-385`,
+    это редакция 2, круг 2. (3) Отчёт автора «редакция 2 на 29bda8b81, не отправлена» —
+    ПОДТВЕРЖДЕНО: HEAD = 29bda8b81, трейлеров в сообщении 0 (`git log -1 --format=%B | grep
+    -ciE 'co-authored|claude-session|generated with'` → 0). (4) «Задача по N2 не заведена» —
+    ПОДТВЕРЖДЕНО: `gh search issues --repo PRO-Robotech/kaname 'восстановлени принудительн'` →
+    []. (5) «09/2 красная на сегодняшнем дереве, контроль 09/1 зелёный, три из трёх» —
+    ПОДТВЕРЖДЕНО собственным посевом (ниже). (6) Перепись §0 перепрогнана: login.go:280, :466,
+    :469; Writer :399, :450, :528; отсечка в login.go и issue.go — 0; human_session_repo.go:341;
+    force_logout.go:345, :349; IssueSession — 4 строки; NewLoginUseCase в пробах — 6 файлов;
+    `"before-cutoff"` вне проб — 0; строка-контроль п.4 — 1. Координаты §0.8, 0.11–0.13
+    сверены чтением. Расхождений нет.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-25'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Возврат. Блокирующий один, род DoD. Все три блокирующих круга 1 закрыты, и это показано
+    посевом. Но таблица под §5 и §6 п.10 предсказывают исход инъекции «захват после записи
+    фактора», которого дерево не производит ни при каком её месте. Р4, §1.1, §2 и §6 п.6
+    приписывают 09/2 то, что держит 09/3. Посев показал это в обе стороны: при одном месте
+    инъекции 09/2 зелёная, при другом 09/3 краснеет не взаимной блокировкой. Санкции на код
+    нет (ban #1). Правка сменит отпечаток и потребует соседней записи.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Редакция 2 целиком: шапка, §0.1–0.13, §1–§3 (Р1–Р6 и перечень исходов захвата),
+    KN-OVL-01…10 со всеми половинами, §5 (обе таблицы и абзацы под ними), §6 DoD пп. 0–11.
+    Сверено с задачей kaname#385 (тело, предикат снятия, DoD), с записью круга 1 и с кодом:
+    humansession/login.go (admitted, refuseWith, issue), sf_present.go (prepare, settle),
+    iface.go (Store, Writer, SessionSetWriter), refusals.go; loginlanehttp/handler.go (форма
+    входа, отказы 401 и 503); pg/human_session_repo.go (InsertSession, holdPersonForSessionSet,
+    EndOtherSessions, ForceLogoutWriter, UpsertCutoff), login_method_repo.go (lockLookupSetTx,
+    consumeLookupElementTx, Create), user_repo.go (Delete); force_logout.go; resolve.go;
+    session_cutoff.go; миграции (accounts_owner_fk, каскады на users).
+  method: experiment_and_reading
+  document_edited_by_reviewer: false
+
+prior_round_resolution:
+  B1_CONSTRUCTIBILITY: >-
+    ЗАКРЫТ. KN-OVL-09 ведётся на Q. Собственный посев повторил вывод §0.10 построчно. У P:
+    accounts-owned=1, bindings-as-subject=4, Delete(P) → failed precondition. У Q после Ф12:
+    codes=10, sessions=1, live=1, login-method-rows=3, lookup-set-rows=1. Delete(Q) → nil,
+    после — всё по нулям. Общая посылка §4 для 09 снята явно, S0 у Q нет.
+  B2_COVERAGE: >-
+    ЗАКРЫТ. Р1 и Р4 называют разрешение сравнения: m — показание, усечённое до
+    микросекунды, и то же m уходит в выдачу. Заведена KN-OVL-07/3, близнец 07/2. Строка
+    таблицы «сравнение по показанию в памяти» краснит только 07/3, и почему 05 её не держит,
+    сказано. Посев разрешения повторён: clock=…51.3213875Z stored=…51.321387Z,
+    clock.After(X)=true stored.After(X)=false stored.Equal(X)=true.
+  B3_NEGATIVE: >-
+    ЗАКРЫТ. У захвата закрытый перечень из четырёх исходов (Р4). Отказ держит KN-OVL-10 (10/1
+    против 01 и 10/2 против 10/1), исход «строки нет» — 09/3. Две строки таблицы («принят за
+    отсутствие», «принят за накрытие»). Ответ 503 и его текст сверены: handler.go:885-886
+    зовётся с `TextRequestNotPerformed` (handler.go:411, refusals.go:24). Клетка
+    `store-failed` — login.go:329-332.
+  N1_FORMAT: >-
+    ЗАКРЫТ. Тела входа названы, набор полей сверен с handler.go:231-246.
+  N2_SCOPE: >-
+    ОТКРЫТ. Предмет описан признаком и предикатом, но задачи в трекере нет. Остаётся
+    неблокирующим, ниже N1.
+  N3_DoD: >-
+    ЗАКРЫТ. Шапка перемерена, предикат перепрогнан → пусто. Перемер перед полосой кода — §6
+    п.0.
+
+checks:
+  fingerprint_match: true
+  scope: >-
+    Совпадает с kaname#385. Решение о границе записано (§3). Проба при любом порядке старта —
+    KN-OVL-05. Контроли названы (01, 04, 07/2, 09/1, вторая половина 06). Красное до правки
+    разведено (§6 п.5). Over-scope нет: правило края, завершение восстановления, перепись
+    #382, частичный исход #340 и посадка external выведены в §2 с причинами. Спеки 00..04 у
+    службы нет, источник scope — задача.
+  producers: >-
+    Все 10 сценариев (15 половин) имеют строку в §5 с координатой. У каждого «заводится»
+    названы место и сценарий, который краснеет. Дефект один — в атрибуции захвата первой
+    операцией, это B1 ниже. Остальные строки таблицы «снят → что краснеет» сверены
+    рассуждением по коду, и расхождений нет.
+  twins: >-
+    01↔02: где момент входа против момента выхода. 02↔03: где выход против выдачи. 03↔04:
+    зафиксирована ли выдача. 02↔06: верен ли пароль. 02↔07: кто положил отсечку. 07/1↔07/2:
+    одна микросекунда. 07/3↔07/2: где показание внутри микросекунды. 02↔08: есть ли код.
+    09/2↔09/1: З4 против З2. 09/3↔09/1: кто первым взял строку личности. 10/1↔01: ответил ли
+    захват. 10/2↔10/1: есть ли код. Отрицаний 10, близнец назван у 10 из 10. Каждая пара
+    отличается одним фактом.
+  constructibility: >-
+    Посеяно 4 «Дано» из 15, опровергнуто 0. Посеяны 07/3 (разрешение) и 09/1 и 09/2 на
+    сегодняшнем дереве, три раунда каждая. 09/3 посеяна в эмуляции захвата первым: удаление
+    зафиксировано до снятия задержки, три из трёх. Личность Q посеяна отдельно. Остальные 11
+    строятся названными фикстурами. P и S0 — регистрацией полосой (newSessionLane). Выход —
+    обработчиком, как в KN-SER-05. Отсечка с чужой причиной — UpsertCutoff
+    (human_session_repo.go:701-706). Второй фактор у P — enrolledSecondFactor
+    (step_up_journal_integration_test.go:310). Обёртка Store — форма KN-SER-05; точки З1, З4,
+    З2 в дереве есть, З3 заводит изменение. Предсказания инъекций проверены посевом на
+    четырёх местах захвата, это B1.
+  dod: >-
+    Пп. 0–5, 7–9, 11 измеримы, и их ожидания на дереве до правки сверены. П.5 для 09/1 и 09/2
+    подтверждён посевом. П.6 утверждает, что «09/1 и 09/2 вместе — место захвата в
+    транзакции», а это неверно. П.10, второй пункт, предсказывает исход, которого нет ни при
+    каком месте инъекции. Оба — B1.
+  open_questions: none
+  conventions: >-
+    ban #5 и #10 не тронуты: схемы нет, сериализация — замком строки на уровне базы. ban #6
+    не тронут: ForceLogout только внутренний. ban #9 не тронут. ban #12 — §6 п.5. Ответы 401
+    `UNAUTHENTICATED` и 503 `UNAVAILABLE` — таблица края, handler.go:858-859 и :885-886.
+    Порядок «личность → прочие строки» совпадает с уже записанным правилом писателей
+    нескольких сессий (iface.go, комментарий SessionSetWriter).
+  disclosure: >-
+    Предмет — правдивость записи и ответа входа и порядок замков, а не доступ: край
+    отсечённую сессию не пропускает (§1.2). Взаимная блокировка откатывает одну из двух
+    транзакций, повтор проходит. Обход защиты она не открывает. Связки «координата + условие
+    + следствие» дефекта защиты нет ни в документе, ни в этой записи.
+
+blocking_findings:
+  - id: B1
+    kind: DoD
+    where: >-
+      §5, таблица «снят / испорчен производитель», строка «захват после записи фактора, а не
+      первым» и абзац под таблицей («Замок не первой операцией держит 02 и 03 и валит 09/2»);
+      §6 п.6 («09/1 и 09/2 вместе — его место в транзакции»); §6 п.10, второй пункт; Р4, пункт
+      «Первой операцией транзакции» («Держит это KN-OVL-09/2»); §1.1, последний абзац; §2,
+      строка о #382 («её строку в переписи #382 держит проба 09/2»)
+    text: >-
+      09/2 останавливает вход в З4, на входе во вставку записи сессии. Поэтому она держит
+      свойство «строка личности взята до вставки записи сессии», а не «захват — первая
+      операция». Захват, поставленный после записи фактора, но до вставки, 09/2 проходит:
+      удаление ждёт строку личности и до строк фактора не доходит. Это место краснит только
+      09/3: там З3 стоит после записи фактора, и удаление ждёт строку фактора. Захват после
+      вставки краснит 09/2 взаимной блокировкой, а 09/3 — не блокировкой: вход выдаёт сессию.
+      Строка таблицы и второй пункт §6 п.10 требуют «09/2 и 09/3 красные: 40P01, счётчик
+      блокировок вырос». Такого исхода нет ни при одном месте инъекции, так что пункт DoD
+      невыполним на честном прогоне, и полоса кода вернётся в приёмку. Та же ошибка в
+      атрибуции Р4, §1.1 и §2 уйдёт в перепись #382 с неверным держателем. Все
+      неправильные места ловятся набором 09/2 + 09/3 вместе, так что дефект реализации не
+      ускользает. Неверно предсказание контракта, а не покрытие. ПОСЕВ (стенд
+      newSessionLane, testcontainers Postgres, дерево f4c6537ac, вход — LoginUseCase.Execute с
+      запасным кодом, удаление — UsersW().Delete, обёртка Store, три раунда на сцену, свежая Q
+      в каждом). Захват эмулирован оператором замка строки личности у писателя
+      (holdPersonForSessionSet через SessionSetWriter либо EndOtherSessions, сила FOR NO KEY
+      UPDATE вместо FOR SHARE). Против FOR UPDATE удаления обе силы конфликтуют одинаково. (A)
+      захват между записью фактора и вставкой, стоп в З4, то есть 09/2: удаление на замке,
+      deadlocks+0, login=nil, delete=nil, после users=0 — три из трёх, 09/2 ЗЕЛЁНАЯ. (A) стоп
+      в З3, то есть 09/3: deadlocks+1, удаление откачено — три из трёх, 09/3 красная 40P01.
+      (B) захват после вставки, стоп в З4, то есть 09/2: deadlocks+1 — три из трёх, красная
+      40P01. (B) стоп в З3, то есть 09/3: удаление на замке, deadlocks+0, login=nil (200),
+      delete=nil — три из трёх, красная фактом «вход выдал, no-row не вырос», а не 40P01.
+      Контроли: захват первым, стоп в З4 — deadlocks+0 три из трёх (09/2 после правки
+      зелёная). Захват первым, стоп в З3 — удаление зафиксировано до снятия задержки, три из
+      трёх. Сегодняшнее дерево: З4 — deadlocks+1 три из трёх, З2 — deadlocks+0 три из трёх.
+      Это совпадает с §0.11 и §6 п.5.
+    required_change: >-
+      Строку таблицы под §5 разделить по месту инъекции на две. «Захват после записи фактора,
+      до вставки записи сессии»: 09/3 красная 40P01, 09/2 зелёная. «Захват после вставки
+      записи сессии»: 09/2 красная 40P01; 09/3 красная фактом «вход ответил 200, клетка
+      `no-row` не выросла», без блокировки. Абзац под таблицей переписать так же. §6 п.10:
+      две инъекции, у каждой свой названный красный. §6 п.6: «09/2 и 09/3 вместе — место
+      захвата в транзакции» (плюс 09/1 как контроль). В Р4 и §1.1 сказать, что «до записи
+      фактора» держит 09/3, а «до вставки записи сессии» — 09/2. В строке §2 о #382 назвать
+      держателями обе.
+
+non_blocking_findings:
+  - id: N1
+    kind: SCOPE
+    where: §2, «Граница завершения восстановления с принудительным выходом»
+    text: >-
+      Перенесено из N2 круга 1. Предмет описан признаком и предикатом снятия, но задачи в
+      трекере нет: `gh search issues --repo PRO-Robotech/kaname 'восстановлени принудительн'` →
+      []. Документ пишет, что заведение «заказано возвратом круга 2». Этот возврат его
+      заказывает, строкой «нужен следующий». Номер вписать в §2 редакцией 3: правка всё равно
+      меняет отпечаток.
+  - id: N2
+    kind: FORMAT
+    where: KN-OVL-07, «X — целая микросекунда, выбранная пробой»
+    text: >-
+      07/2 утверждает «пара края годна», а Resolve судит срок сессии по часам процесса
+      (authenticated_at + TTL 24 ч). Если X выбран вдали от часов процесса, 07/2 краснеет
+      сроком, а не правилом. Назвать ограничение: X — часы процесса, усечённые до
+      микросекунды (или не дальше TTL от них).
+  - id: N3
+    kind: FORMAT
+    where: §4 «Входом ничего не записано» («KN-OVL-08 и KN-OVL-10/2 добавляют четвёртое»); KN-OVL-08 «Тогда»
+    text: >-
+      В «Тогда» у KN-OVL-08 нет утверждения «входом ничего не записано», а у 10/2 оно есть. Либо
+      дописать его в 08 (три наблюдения плюс код фактора), либо убрать 08 из фразы §4. Таблица
+      под §5 с 08 в строке «отказ кладёт след» согласна с тем, что 08 этого не утверждает.
+
+seed_attempt:
+  performed: true
+  outcome: executed
+  isolation: >-
+    Рабочая копия tmp/kaname-385-acc, ветка acc-385. Временная проба в
+    internal/handler/loginlanehttp (zz_review385r2_seed_integration_test.go) исполнена и
+    удалена; `git status --short` после — пусто. Запуск под замком
+    ~/.cache/heavy-slots/interim.lock, свободной памяти ≥27 ГиБ (проверено под замком),
+    systemd-run MemoryMax=10G MemorySwapMax=0.
+  command: >-
+    go test -count=1 -timeout 1200s -run TestReview385R2Seed -v ./internal/handler/loginlanehttp/
+  observed: >-
+    lane-registered P: accounts-owned=1 bindings-as-subject=4 · delete P: failed
+    precondition … has active access bindings · Q after F12: codes=10 sessions=1 live=1
+    login-method-rows=3 lookup-set-rows=1 · delete Q: nil, после 0 · resolution:
+    clock=…51.3213875Z stored=…51.321387Z stored.Equal(X)=true · today-Z4 ×3: deadlocks+1,
+    delete aborted · today-Z2 ×3: deadlocks+0 · fix-first-Z4 ×3: deadlocks+0 · fix-first-Z3
+    ×3: delete finished before release · injA-between-Z4 ×3: deadlocks+0, login nil, delete
+    nil · injA-between-Z3 ×3: deadlocks+1 · injB-afterinsert-Z4 ×3: deadlocks+1 ·
+    injB-afterinsert-Z3 ×3: deadlocks+0, login nil, delete nil · PASS 86.49s.
+  emulation_note: >-
+    Захвата в дереве нет. Место захвата эмулировано существующими операторами замка строки
+    личности писателя сессии (сила FOR NO KEY UPDATE). Против FOR UPDATE удаления FOR SHARE
+    конфликтует так же. При повышении уже взятого ключевого замка текущий держатель в
+    очередь замка кортежа не встаёт при любой силе. Исход «строки нет» (Р4, исход 3) не
+    эмулирован: отказ `no-row` в 09/3 посевом не показан, только сцена.
+  seeded: 4
+  of: 15
+  refuted: 0
+  named_fixture: 11
+  not_executed: 0
+
+route_signals:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+event_body: >-
+  acceptance-reviewer · CHANGES_REQUESTED · PRO-Robotech/kaname
+  docs/engineering/acceptance/login-issues-no-session-the-cutoff-covers.md · sha256
+  c9a0c3c7215972023e923cdcdc638a3903a86afd6a44a74a6ffeb41b053cb6c3 · ревизия 29bda8b81 ·
+  блокирующих 1 (DoD)
