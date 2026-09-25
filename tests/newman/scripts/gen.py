@@ -35,10 +35,11 @@ import re
 import subprocess
 import sys
 import uuid
+import urllib.parse
 import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field, replace
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 # --- общий слой генератора (задача #1367) ------------------------------------
 # Помощники ниже общие для ВСЕХ наборов newman и живут в дереве в одном
@@ -233,6 +234,22 @@ class Step:
     # silently and invisibly. Here it is declared on the one item that needs it and
     # is visible in the generated collection.
     insecure_tls: bool = False
+    # ШАГ, ГОВОРЯЩИЙ КАК БРАУЗЕР И КАК КЛИЕНТ OAuth (приёмка LINE-A-1). Три поля
+    # ниже нужны церемонии `authorization_code`, и у каждого умолчание — прежнее
+    # поведение байт в байт (держит `scripts/browser_lane_step_test.py`).
+    #
+    #   follow_redirects=False — ответ `302` точки авторизации виден шагу как есть:
+    #     иначе прогонщик уходит по `Location` сам, и «код выдан перенаправлением»
+    #     неотличим от «отказ без перенаправления»;
+    #   cookie_jar=False — банка печений прогонщика шагу не прикладывается: порт
+    #     границей печенья не является, и отрицание «сессии нет» получало бы
+    #     сессию из банки. Печенье такой шаг несёт только явным заголовком;
+    #   form — тело `application/x-www-form-urlencoded` парами «имя, значение»
+    #     (RFC 6749 §4.1.3). Литерал кодируется здесь; подстановка `{{имя}}`
+    #     уходит как есть — закодированное значение кладёт пред-скрипт.
+    follow_redirects: bool = True
+    cookie_jar: bool = True
+    form: Optional[List[Tuple[str, str]]] = None
 
 
 # Sentinel `auth` value: "poll the Operation as whoever MINTED it".
@@ -316,9 +333,10 @@ class Case:
 # три отказа стража против двух ложных зеленей в одном кейсе.
 #
 # ЧИТАЕТСЯ `raw` — И ЭТО ВСЯ ПОВЕРХНОСТЬ, А НЕ ЧАСТЬ ЕЁ. `step_to_postman` эмитит
-# тело единственным режимом `raw` (см. ниже по файлу); режима, который страж не
-# прочитал бы, генератор не производит. Появится второй режим — эта посылка станет
-# ложной, поэтому она записана здесь, а не подразумевается.
+# тело единственным режимом `raw` (см. ниже по файлу), и тело формы шага (`form`,
+# `_iam_item_hook`) эмитится тем же режимом; режима, который страж не прочитал бы,
+# генератор не производит. Появится второй режим — эта посылка станет ложной,
+# поэтому она записана здесь, а не подразумевается.
 _UNRESOLVED_VAR_GUARD = [
     "(function () {",
     "  var _u = '';",
@@ -1906,10 +1924,52 @@ def _iam_case_steps(case):
     return items
 
 
+# Подстановка набора в значении формы: уходит как есть, кодирует её пред-скрипт.
+_FORM_PLACEHOLDER_RE = re.compile(r"(\{\{[A-Za-z_][A-Za-z0-9_]*\}\})")
+
+
+def _form_raw(pairs: List[Tuple[str, str]]) -> str:
+    """Пары формы — в строку `application/x-www-form-urlencoded`.
+
+    Литерал кодируется целиком (`safe=''`: `/`, `:`, `?`, `&`, `=` в адресе
+    возврата разорвали бы форму), подстановка `{{имя}}` остаётся нетронутой —
+    её значение неизвестно до прогона, и закодированным его кладёт пред-скрипт.
+    """
+    def enc(value: str) -> str:
+        return "".join(part if _FORM_PLACEHOLDER_RE.fullmatch(part)
+                       else urllib.parse.quote(part, safe="")
+                       for part in _FORM_PLACEHOLDER_RE.split(value) if part)
+    return "&".join(f"{enc(k)}={enc(v)}" for k, v in pairs)
+
+
 def _iam_item_hook(step, item):
-    """Ослабленная проверка сертификата — по свойству шага, а не по умолчанию."""
+    """Поведение шага, объявленное ИМ САМИМ, а не умолчание прогонщика.
+
+    Ослабленная проверка сертификата, неследование перенаправлению, выключенная
+    банка печений и тело формы — у каждого умолчание прежнее байт в байт
+    (`scripts/browser_lane_step_test.py`): шаг без этих полей эмитится как раньше.
+    Три поведения делят ОДИН блок `protocolProfileBehavior` — второе присваивание
+    блока целиком стёрло бы первое молча.
+    """
+    ppb = {}
     if step.insecure_tls:
-        item["protocolProfileBehavior"] = {"strictSSL": False}
+        ppb["strictSSL"] = False
+    if not step.follow_redirects:
+        ppb["followRedirects"] = False
+    if not step.cookie_jar:
+        ppb["disableCookies"] = True
+    if ppb:
+        item["protocolProfileBehavior"] = ppb
+    if step.form is not None:
+        if step.body is not None:
+            raise ValueError(
+                f"шаг {step.name!r}: заданы и form, и body — тело у запроса одно, и "
+                f"второе молча перезаписало бы первое")
+        # Режим тот же `raw`, что у JSON: страж неразрешённой подстановки читает
+        # `pm.request.body.raw` и потому видит и эту форму (см. его шапку).
+        item["request"]["header"] = [
+            {"key": "Content-Type", "value": "application/x-www-form-urlencoded"}]
+        item["request"]["body"] = {"mode": "raw", "raw": _form_raw(step.form)}
 
 
 # Опрос операции: тело общее (#1475), решения набора — здесь. У iam их три, и
