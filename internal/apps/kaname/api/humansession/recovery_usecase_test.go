@@ -150,7 +150,10 @@ func TestRecovery_F5_03_CorrectCodeCompletesInOneOutcome(t *testing.T) {
 	require.Equal(t, domain.RevokeReasonPasswordChange, cut.reason, "причина — «смена пароля» (Ф1-17)")
 	require.Equal(t, u.ID, cut.actor, "актор — сам человек")
 
-	// Материал сменён: новым паролем входит (Ф5-18), прежним — нет.
+	// Материал сменён: новым паролем входит (Ф5-18), прежним — нет. Вход — после
+	// завершения: вход с моментом, равным отсечке восстановления, ею накрыт
+	// (kaname#385, Р1), а часы стенда стоят, пока их не сдвинут.
+	h.clock = h.clock.Add(time.Second)
 	h.mustLogin(t, "r03@example.invalid", "brand-new-password-3")
 	_, err = h.login.Execute(context.Background(), humansession.LoginInput{Email: "r03@example.invalid", Password: "old-password-3", Source: rcSource})
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
@@ -300,6 +303,9 @@ func TestRecovery_F5_17_BlockedIdentityGetsTheBlockedLoginRefusal(t *testing.T) 
 	require.Equal(t, 1, h.obs.login[humansession.LoginOutcomeBlocked], "причина — блокировка, а не пароль: материал сменён")
 	u.InviteStatus = domain.InviteStatusActive
 	h.store.users[u.ID] = u
+	// Вход — после завершения: момент, равный отсечке восстановления, ею накрыт
+	// (kaname#385, Р1), а часы стенда стоят, пока их не сдвинут.
+	h.clock = h.clock.Add(time.Second)
 	h.mustLogin(t, "r17@example.invalid", "brand-new-password-17")
 }
 
