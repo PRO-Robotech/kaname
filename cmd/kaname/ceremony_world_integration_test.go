@@ -99,6 +99,7 @@ import (
 	sessionrevapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
@@ -162,11 +163,14 @@ const (
 
 // lineA1IssuanceRootUses — как ЭТА сборка пользуется муксом поверхности
 // выдачи. Сверяется с переписью корня (`rootIssuanceUses`); форма записи —
-// печать узла разбора со сжатыми пробелами. Перечень — корня ветки `357`:
-// церемония в корне ещё не собрана (kaname#407), и реализация, смонтировавшая
-// её путь, обязана повторить монтаж здесь и в buildSurface.
+// печать узла разбора со сжатыми пробелами. Перечень — корня с собранной
+// церемонией (kaname#423): эндпоинт авторизации и метаданные обнаружения
+// смонтированы на поверхности выдачи рядом с токен-эндпоинтом, и сборка ниже
+// (buildSurface) повторяет монтаж корня.
 var lineA1IssuanceRootUses = []string{
 	"Handler: registryTokenHandler",
+	"mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)",
+	"mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)",
 	"mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)",
 	"registryTokenHandler = mux",
 }
@@ -498,14 +502,61 @@ func (w *ceremonyWorld) buildSurface() {
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
 	}
-	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger)
+	// Церемония — той же сборкой, что у корня (`buildCeremonySurface`): набор
+	// ключей — публикуемый набор подписанта пробы, проверяющий секрета клиента —
+	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
+	// (giveSecret), как проверяющий полосы входа у корня.
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w), logger)
+	if err != nil || ceremony == nil {
+		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
+	}
+	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger, ceremony)
 	if err != nil || clientTokenHandler == nil {
 		w.fixture("сборка токен-эндпоинта: обработчик %v, ошибка %v", clientTokenHandler != nil, err)
 	}
 	// Ровно так, как это делает композиционный корень (перечень —
 	// lineA1IssuanceRootUses, сверка — requireRootParity).
 	mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
+	mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
+	mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 	w.surface = mux
+}
+
+// ceremonySecretChecker — проверяющий секрета клиента мира: паролей службы,
+// выровненный приманкой объявленного класса секрета (argon2id, пол службы).
+func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
+	w.t.Helper()
+	// Ёмкость — по наибольшей одновременности проб мира (26: шестнадцать
+	// обменов одним кодом): предмет проб — погашение в базе, а не ёмкость
+	// проверяющего, и отказ по ёмкости был бы отказом фикстуры.
+	v, err := passwordverify.New(16, silentVerifyObserver{})
+	if err != nil {
+		w.fixture("проверяющий секрета клиента: %v", err)
+	}
+	decoy, err := ceremonySecretHasher(w).Hash(randomToken(32))
+	if err != nil {
+		w.fixture("приманка проверяющего: %v", err)
+	}
+	if err := v.SetDecoy(decoy); err != nil {
+		w.fixture("приманка проверяющего: %v", err)
+	}
+	return v
+}
+
+// ceremonySecretHasher — хешер секрета клиента: argon2id разметкой PHC на полу
+// службы (`interactive_clients_secret_verifier_form_ck`).
+func ceremonySecretHasher(w *ceremonyWorld) *passwordverify.Hasher {
+	w.t.Helper()
+	hasher, err := passwordverify.NewHasher(passwordverify.Declared{
+		Format: domain.PasswordHashFormatArgon2id,
+		Params: map[domain.PasswordHashCostParam]uint32{
+			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
+		},
+	})
+	if err != nil {
+		w.fixture("хешер секрета клиента: %v", err)
+	}
+	return hasher
 }
 
 type ceremonyKeys struct{ mat tokensigner.SigningMaterial }
@@ -589,16 +640,7 @@ func (w *ceremonyWorld) giveSecret(c *ceremonyClient) {
 		return
 	}
 	secret := randomToken(32)
-	hasher, err := passwordverify.NewHasher(passwordverify.Declared{
-		Format: domain.PasswordHashFormatArgon2id,
-		Params: map[domain.PasswordHashCostParam]uint32{
-			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
-		},
-	})
-	if err != nil {
-		w.fixture("хешер секрета клиента: %v", err)
-	}
-	v, err := hasher.Hash(secret)
+	v, err := ceremonySecretHasher(w).Hash(secret)
 	if err != nil {
 		w.fixture("проверочное значение секрета клиента: %v", err)
 	}

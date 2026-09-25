@@ -15,12 +15,16 @@
 //
 // # Законный пример — фикстурный, и это граница
 //
-// Координат церемонии в живом дереве нет: производители эндпоинта
-// авторизации и метаданных обнаружения не начаты. Поэтому «законный пример»
-// (F-cer) — копия живого корня плюс синтетический пакет authorizehttp с
-// постоянными AuthorizePath и DiscoveryPath, смонтированными ОДИН раз на
-// поверхности выдачи рядом с токен-эндпоинтом. Живой положительный контроль —
-// сам токен-эндпоинт (ceremony_surface_test.go).
+// Живой корень монтирует обе координаты церемонии производителем
+// `ceremonyhttp` (kaname#423), и живой положительный контроль — все три
+// координаты (ceremony_surface_test.go, Т14). «Законный пример» инъекций
+// (F-cer) всё же синтетический: пакет authorizehttp с постоянными
+// AuthorizePath и DiscoveryPath несёт формы, которые нужны близнецам и которых
+// у живого производителя нет (обработчик со своим мультиплексором для
+// двухуровневого монтажа, псевдоним импорта, локальная постоянная). Поэтому
+// F-cer снимает с копии корня живой монтаж (liveCeremonyMounts) и ставит
+// синтетический ОДИН раз на поверхности выдачи рядом с токен-эндпоинтом:
+// координата в фикстуре смонтирована ровно одним производителем.
 //
 // # Прогонов три
 //
@@ -133,11 +137,22 @@ func newRootCopyFixture(t *testing.T) *ceremonyFixture {
 	return f
 }
 
-// newCeremonyFixture — F-cer: копия корня, синтетический пакет церемонии и
-// ОДИН монтаж каждой его координаты на поверхности выдачи.
+// liveCeremonyMounts — монтаж координат церемонии живым корнем (serve.go):
+// F-cer его снимает, чтобы координата стояла одним производителем.
+var liveCeremonyMounts = []string{
+	"mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)",
+	"mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)",
+}
+
+// newCeremonyFixture — F-cer: копия корня без живого монтажа церемонии,
+// синтетический пакет церемонии и ОДИН монтаж каждой его координаты на
+// поверхности выдачи.
 func newCeremonyFixture(t *testing.T) *ceremonyFixture {
 	t.Helper()
 	f := newRootCopyFixture(t)
+	for _, live := range liveCeremonyMounts {
+		f.removeStmt(ceremonyRootDir, "serve.go", "", live)
+	}
 	f.add(fixtureCeremonyPkg, "authorizehttp.go", fixtureCeremonySource)
 	f.addImport(ceremonyRootDir, "serve.go", anchorCeremonyImp)
 	f.insertAfter(ceremonyRootDir, "serve.go", "", anchorTokenMount,
@@ -266,6 +281,13 @@ func (f *ceremonyFixture) insertBefore(rel, name, inFunc, stmtPrefix, text strin
 	f.t.Helper()
 	start, _ := f.locate(rel, name, inFunc, stmtPrefix, true, true)
 	f.splice(rel, name, start, start, text+"\n")
+}
+
+// removeStmt снимает оператор по его позиции в разборе.
+func (f *ceremonyFixture) removeStmt(rel, name, inFunc, stmtSrc string) {
+	f.t.Helper()
+	start, end := f.locate(rel, name, inFunc, stmtSrc, false, true)
+	f.splice(rel, name, start, end, "")
 }
 
 // replaceExpr заменяет выражение.
