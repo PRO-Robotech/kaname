@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -43,11 +44,12 @@ const unusableAnchor = "/nonexistent/provider-hop/ca.crt"
 // собирается, когда якорь дороги к прежнему издателю негоден.
 func TestBuild_ConvertedContourNeedsNoRouteToTheFormerIssuer(t *testing.T) {
 	_, err := Build(nil, BuildConfig{
-		Realm:            "https://api.kacho.local/iam/token",
-		Service:          "registry.kacho.local",
-		HydraTokenURL:    "https://provider.invalid/oauth2/token",
-		HydraTokenCAFile: unusableAnchor,
-		Signer:           aSigner(),
+		Realm:                  "https://api.kacho.local/iam/token",
+		Service:                "registry.kacho.local",
+		BasicCredentialTimeout: time.Second,
+		HydraTokenURL:          "https://provider.invalid/oauth2/token",
+		HydraTokenCAFile:       unusableAnchor,
+		Signer:                 aSigner(),
 	})
 	if err != nil {
 		t.Fatalf("Build() = %v, а переведённый контур к прежнему издателю не ходит: "+
@@ -59,9 +61,10 @@ func TestBuild_ConvertedContourNeedsNoRouteToTheFormerIssuer(t *testing.T) {
 // другой стороны: адреса нет вовсе.
 func TestBuild_ConvertedContourNeedsNoAddressOfTheFormerIssuer(t *testing.T) {
 	if _, err := Build(nil, BuildConfig{
-		Realm:   "https://api.kacho.local/iam/token",
-		Service: "registry.kacho.local",
-		Signer:  aSigner(),
+		Realm:                  "https://api.kacho.local/iam/token",
+		Service:                "registry.kacho.local",
+		BasicCredentialTimeout: time.Second,
+		Signer:                 aSigner(),
 	}); err != nil {
 		t.Fatalf("Build() = %v, а адрес прежнего издателя на переведённом контуре "+
 			"не читается ни одним путём", err)
@@ -75,10 +78,11 @@ func TestBuild_ConvertedContourNeedsNoAddressOfTheFormerIssuer(t *testing.T) {
 // производителем токена.
 func TestBuild_UnconvertedContourStillDemandsAUsableRoute(t *testing.T) {
 	_, err := Build(nil, BuildConfig{
-		Realm:            "https://api.kacho.local/iam/token",
-		Service:          "registry.kacho.local",
-		HydraTokenURL:    "https://provider.invalid/oauth2/token",
-		HydraTokenCAFile: unusableAnchor,
+		Realm:                  "https://api.kacho.local/iam/token",
+		Service:                "registry.kacho.local",
+		BasicCredentialTimeout: time.Second,
+		HydraTokenURL:          "https://provider.invalid/oauth2/token",
+		HydraTokenCAFile:       unusableAnchor,
 		// Signer намеренно не задан: контур НЕ переведён.
 	})
 	if err == nil {

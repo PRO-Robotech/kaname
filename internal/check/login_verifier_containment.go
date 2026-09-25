@@ -555,36 +555,25 @@ func (ix *lvIndex) indexFile(f *lvFile) {
 	}
 }
 
-// AuditLoginVerifierContainment — находки и перепись по корпусу не-тестовых
-// файлов. Корпус и объявление приходят ПАРАМЕТРАМИ: инъекция обязана подать
-// разбору синтетику, а не это дерево.
-func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([]string, LoginVerifierCensus, error) {
-	c := LoginVerifierCensus{AllowedUses: map[string]int{}, TableNamings: map[string]int{}, ConsumerUses: map[string]int{}}
-	for f := range spec.AllowedFiles {
-		c.AllowedUses[f] = 0
-	}
-	for k := range spec.OpaqueConsumers {
-		c.ConsumerUses[k] = 0
-	}
-	if spec.Accessor == "" || spec.Table == "" || spec.DeclRel == "" || spec.DeclType == "" || spec.TableOwnerRel == "" {
-		return nil, c, fmt.Errorf("объявление предмета неполно (%+v) — судить нечего", spec)
-	}
-
-	// Проход первый: разбор и индекс по каталогу пакета.
-	ix := &lvIndex{
-		relation: spec.Table, bindings: map[string]map[string]*lvBinding{}, pkgNames: map[string]string{},
+// newLVIndex — первый проход гейтов, судящих ЗНАЧЕНИЯ строк Go
+// (`AuditLoginVerifierContainment` и `JudgeFailureRowRemovals`): разбор
+// корпуса, индекс объявлений по каталогу пакета и неподвижная точка свёртки
+// связанных имён. Проход один на оба гейта: вторая копия свёртки разошлась бы с
+// первой молча — ровно на той форме записи, которую знает только одна. read —
+// сколько файлов начато, включая тот, чей разбор сорвался; files — разобранные.
+func newLVIndex(corpus TreeCorpus, relation string) (ix *lvIndex, files []*lvFile, read int, err error) {
+	ix = &lvIndex{
+		relation: relation, bindings: map[string]map[string]*lvBinding{}, pkgNames: map[string]string{},
 		types: map[string]map[string]bool{}, funcs: map[string]map[string]lvFunc{},
 		methods: map[string]map[string]map[string]lvFunc{}, consts: map[*ast.ValueSpec][]ast.Expr{},
 	}
-	var files []*lvFile
 	for _, rel := range corpus.Rels() {
-		c.FilesRead++
+		read++
 		fset := token.NewFileSet()
 		file, perr := parser.ParseFile(fset, rel, corpus[rel], parser.ParseComments)
 		if perr != nil {
-			return nil, c, fmt.Errorf("разбор %s: %w — гейт не вправе судить файл, которого он не разобрал", rel, perr)
+			return nil, files, read, fmt.Errorf("разбор %s: %w — гейт не вправе судить файл, которого он не разобрал", rel, perr)
 		}
-		c.FilesParsed++
 		f := &lvFile{rel: rel, dir: path.Dir(rel), fset: fset, file: file}
 		files = append(files, f)
 		ix.indexFile(f)
@@ -596,7 +585,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 	// прохода — страж от разбора, который Go не собрал бы (цикл инициализации).
 	for changed, pass := true, 0; changed; pass++ {
 		if pass > 1000 {
-			return nil, c, fmt.Errorf("свёртка связанных имён не сошлась за %d проходов — цикл инициализации?", pass)
+			return nil, files, read, fmt.Errorf("свёртка связанных имён не сошлась за %d проходов — цикл инициализации?", pass)
 		}
 		changed = false
 		for _, dir := range ix.dirs {
@@ -612,6 +601,30 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 				}
 			}
 		}
+	}
+	return ix, files, read, nil
+}
+
+// AuditLoginVerifierContainment — находки и перепись по корпусу не-тестовых
+// файлов. Корпус и объявление приходят ПАРАМЕТРАМИ: инъекция обязана подать
+// разбору синтетику, а не это дерево.
+func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([]string, LoginVerifierCensus, error) {
+	c := LoginVerifierCensus{AllowedUses: map[string]int{}, TableNamings: map[string]int{}, ConsumerUses: map[string]int{}}
+	for f := range spec.AllowedFiles {
+		c.AllowedUses[f] = 0
+	}
+	for k := range spec.OpaqueConsumers {
+		c.ConsumerUses[k] = 0
+	}
+	if spec.Accessor == "" || spec.Table == "" || spec.DeclRel == "" || spec.DeclType == "" || spec.TableOwnerRel == "" {
+		return nil, c, fmt.Errorf("объявление предмета неполно (%+v) — судить нечего", spec)
+	}
+
+	// Проход первый: разбор, индекс по каталогу пакета, свёртка связанных имён.
+	ix, files, read, err := newLVIndex(corpus, spec.Table)
+	c.FilesRead, c.FilesParsed = read, len(files)
+	if err != nil {
+		return nil, c, err
 	}
 	for _, dir := range ix.dirs {
 		for _, b := range ix.bindings[dir] {

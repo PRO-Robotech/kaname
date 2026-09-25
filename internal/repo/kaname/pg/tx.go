@@ -254,17 +254,12 @@ func (w *writeTx) InsertRecoveryCompletion(ctx context.Context, rc domain.Recove
 }
 
 // UpsertUserTokenRevokeAll — per-user monotonic revoke-all cutoff on THIS
-// writer-tx (user_token_revocations, migration 0012). Reuses the canonical
-// GREATEST upsert (single source of truth with the pool-scoped repo) so the
-// cutoff commits atomically with the recovery audit event (запрет #10).
+// writer-tx. Идёт ТОЙ ЖЕ дверью, что и прочие писатели отсечки
+// (`upsertSubjectCutoff`, kaname#313): записей отсечки две, судят по ним разные
+// читатели, и класть их порознь значит снимать доступ наполовину. Обе
+// коммитятся вместе с событием восстановления (запрет #10).
 func (w *writeTx) UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
-	_, err := w.tx.Exec(ctx, upsertRevokeAllSQL,
-		string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy),
-	)
-	if err != nil {
-		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
+	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
 // AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.

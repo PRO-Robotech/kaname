@@ -36,6 +36,9 @@ import (
 //	<таблица>_name_check        → ErrInternal (защита последнего рубежа: форму
 //	                              имени проверяет сам сервис, значит срабатывание
 //	                              ограничения — НАШ дефект, а не ввод вызывающего)
+//	проверка значения службы    → ErrInternal (колонку пишет служба, вызывающему
+//	                              исправлять нечего; решение по каждой проверке —
+//	                              перепись `checkValueLanes`, #395)
 //	projects_account_fk (FK→accounts on INSERT project)        → ErrFailedPrecondition
 //	projects_account_fk (FK←projects on DELETE account, 23503) → ErrFailedPrecondition "Account %s contains projects and cannot be deleted"
 //
@@ -167,6 +170,16 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 				return iamerr.ErrInternal
 			}
 		}
+		// Таблица клиентов: идентификатор, состояние, способ аутентификации и
+		// материал секрета вызывающий не присылает — их производят служба и
+		// производитель клиента (kaname#317). Срабатывание — их дефект, и отказ
+		// не обвиняет вызывающего. `Detail` этого отказа несёт строку с
+		// материалом и в журнал не идёт (`f.LogAttrs` его не несёт).
+		if isInteractiveClientProducedValueCheck(f.Table, f.Constraint) {
+			slog.Error("interactive client backstop fired: service or client producer made a value the schema refuses",
+				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
 		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
 		// «чьё это значение» (задача #718, здесь — #1279).
 		//
@@ -186,6 +199,21 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		if pgfault.CheckLaneOf(f) == pgfault.LaneServiceDefect || isRoleNameFormConstraint(f.Table, f.Constraint) {
 			slog.Error("name form backstop fired: service admitted a name it validates itself",
 				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
+		// Полоса ЗНАЧЕНИЯ СЛУЖБЫ на всей схеме (задача #395): проверка, чья
+		// колонка несёт значение, которое служба чеканит, штампует, выводит или
+		// берёт из своего закрытого словаря. Вызывающий его не присылал, и
+		// исправить ему нечего; решение по каждой проверке — перепись
+		// `checkValueLanes`.
+		//
+		// Запись называет ограничение и таблицу и НЕ несёт ни `Detail` (там
+		// строка целиком, с материалом), ни текста драйвера — поэтому
+		// координаты выписаны здесь поимённо, а не набором `f.LogAttrs`.
+		if checkValueLaneOf(f.Table, f.Constraint) == checkLaneService {
+			slog.Error("check backstop fired: the schema refused a value the service produced",
+				"kind", kindHint, "id", idHint,
+				"sqlstate", f.SQLState, "constraint", f.Constraint, "table", f.Table)
 			return iamerr.ErrInternal
 		}
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", checkText(pgErr))
@@ -254,6 +282,13 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	case "57P03": // cannot_connect_now — сервер ещё поднимается
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+	// Замок строки не выдан в пределе ожидания, который транзакция назначила
+	// себе сама (`lock_timeout`; ставит его писатель принудительного выхода,
+	// `HumanSessionRepo.ForceLogoutWriter`, kaname#340). Это состояние ЧУЖОЙ
+	// транзакции, держащей строку, а не поломка службы: оно проходит, как только
+	// та зафиксируется, и повтор осмыслен.
+	case "55P03": // lock_not_available
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "row lock not granted within the transaction's own wait")
 	}
 	// Unmapped SQLSTATE — never return the raw *pgconn.PgError: its Error()
 	// carries table/constraint/column/SQLSTATE and would surface verbatim as the

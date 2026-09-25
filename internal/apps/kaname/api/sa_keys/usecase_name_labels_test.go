@@ -45,9 +45,9 @@ func (s *stubSAClientRepo) OwnerUserForServiceAccount(ctx context.Context, id do
 // persisted row (Insert) и в proto-response (saClientToProto).
 func TestIssue_NameLabels_MapThrough(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000001",
@@ -93,7 +93,7 @@ func TestIssue_NameLabels_MapThrough(t *testing.T) {
 func TestIssue_AccountIDStampedOnMetadata(t *testing.T) {
 	repo := &stubSAClientRepo{accountID: "acc00000000000000042"}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000001",
@@ -128,11 +128,11 @@ func TestRevoke_AccountIDStampedOnMetadata(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc00000000000000009",
 			SvaID:          "sva00000000000000001",
-			OAuthClientID:  "hydra-soc-9",
+			OAuthClientID:  "provider-soc-9",
 		},
 	}
 	ops := &stubOpsRepo{}
-	uc := NewRevokeSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewRevokeSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	op, err := uc.Execute(context.Background(), RevokeInput{
 		ServiceAccountID: "sva00000000000000001",

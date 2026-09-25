@@ -10,7 +10,7 @@ package sa_keys
 //
 // `refusal_text_never_carries_the_cause_test.go` зовёт переводчик НАПРЯМУЮ:
 // он утверждает, что подробность не уезжает вызывающему, и про читателя не
-// говорит ничего. `usecase_hydra_unavailable_test.go` обе половины утверждает,
+// говорит ничего. `usecase_provider_unavailable_test.go` обе половины утверждает,
 // но на полосе ПИРА — там свой производитель записи, поэтому на этот предмет
 // он зелен by construction.
 //
@@ -51,7 +51,7 @@ func TestIssue_StoreUnavailable_CauseReachesTheLogAndNotTheCaller(t *testing.T) 
 	repo := &stubSAClientRepo{
 		accountErr: iamerr.Wrapf(iamerr.ErrUnavailable, "account lookup: %s", saStoreOutageCause),
 	}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, &stubOpsRepo{})
 	u.WithLogger(logger)
 
 	_, err := u.Execute(context.Background(), IssueInput{
@@ -86,7 +86,7 @@ func TestIssue_AddressedRefusal_IsNotRepeatedIntoTheLog(t *testing.T) {
 
 	const addressed = "ServiceAccount sva_test000000000000 not found"
 	repo := &stubSAClientRepo{accountErr: iamerr.Wrapf(iamerr.ErrNotFound, "%s", addressed)}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, &stubOpsRepo{})
 	u.WithLogger(logger)
 
 	_, err := u.Execute(context.Background(), IssueInput{

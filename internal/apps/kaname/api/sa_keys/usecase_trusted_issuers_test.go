@@ -103,7 +103,7 @@ func TestIssue_Federated_WritesTheTrustListIntoOurTable(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
 	ti := &fakeTrustedIssuers{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithTrustedIssuerWriter(ti)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).WithTrustedIssuerWriter(ti)
 
 	if _, err := u.Execute(context.Background(), trustedIssuerInput()); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -141,7 +141,7 @@ func TestIssue_Federated_TrustListFailureLeavesNoKeyRow(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
 	ti := &fakeTrustedIssuers{err: errors.New("trust list write failed")}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithTrustedIssuerWriter(ti)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).WithTrustedIssuerWriter(ti)
 
 	if _, err := u.Execute(context.Background(), trustedIssuerInput()); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
@@ -164,7 +164,7 @@ func TestIssue_Federated_TrustListFailureLeavesNoKeyRow(t *testing.T) {
 func TestIssue_Federated_WithoutTheTrustListWriterIsRefused(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops)
 
 	if _, err := u.Execute(context.Background(), trustedIssuerInput()); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
@@ -189,7 +189,7 @@ func TestIssue_Federated_TrustBindingDoesNotOutliveTheKey(t *testing.T) {
 	repo := &stubSAClientRepo{}
 	ops := &stubOpsRepo{}
 	ti := &fakeTrustedIssuers{}
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithTrustedIssuerWriter(ti)
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).WithTrustedIssuerWriter(ti)
 
 	in := trustedIssuerInput()
 	in.TTLSeconds = 3600

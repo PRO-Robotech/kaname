@@ -90,8 +90,18 @@ func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 			// получал другим.
 			return nil, ResolvedPrincipal{}, ErrSubjectNotActive
 		}
+		// Принципал — тот же, что разрешает прежний путь по той же строке,
+		// ЦЕЛИКОМ, включая момент выдачи ключа: ключ человека сессии не несёт,
+		// и его полномочие считается от собственной выдачи. По этому моменту
+		// вызывающий судит отсечку отзыва-всех владельца — принципал без него
+		// оставил бы правило без входа на одной из полос.
+		issued := row.CreatedAt
 		return s.userTokenClaims(row, user, string(row.OAuthClientID), hookCtx),
-			ResolvedPrincipal{Kind: PrincipalUser, UserID: string(row.UserID)}, nil
+			ResolvedPrincipal{
+				Kind:                       PrincipalUser,
+				UserID:                     string(row.UserID),
+				StandingCredentialIssuedAt: &issued,
+			}, nil
 
 	case domain.AssertionClientServiceAccount:
 		row, err := s.ownClients.GetSAKey(ctx, domain.SAOAuthClientID(client.ID))

@@ -163,7 +163,10 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, use
 // RevokeAllUserTokensTx — atomic per-user revoke-all cutoff + durable
 // audit_outbox emit in ONE tx (запрет #10). Shared by the
 // Revoke(revoke_all_user_tokens=true) path (eventType iam.session.all_revoked)
-// and admin ForceLogout (eventType iam.session.force_logout). The cutoff upsert
+// and admin ForceLogout (eventType iam.session.force_logout) on the postures
+// that hold none of our login-session records. Под `own` принудительный выход
+// кладёт отсечку НЕ здесь, а транзакцией снятия наших записей — запись события
+// обязана лечь после снятия и нести его исход (kaname#340). The cutoff upsert
 // is identical to RevokeAllUserTokens (monotonic GREATEST); only the tx
 // ownership + audit row differ. eventType MUST be one of the session taxonomy
 // values that satisfy the audit_outbox_event_type CHECK.
@@ -185,6 +188,13 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 	}, revokedBy); err != nil {
 		return err
 	}
+	// ОБЕ ЗАПИСИ ОТСЕЧКИ КЛАДЁТ ДВЕРЬ (`upsertSubjectCutoff`, kaname#313), и
+	// кладёт их ЭТОЙ транзакцией — вместе с записью журнала ниже.
+	//
+	// Здесь стоял отдельный второй вызов. Он был верен, но оставлял состояние
+	// «одна запись без другой» ПРЕДСТАВИМЫМ: писателей отсечки пять, и второй
+	// вызов стоял у одного. Теперь оператор первой записи виден только двери, а
+	// дверь кладёт обе — сторожить стало нечего.
 	payload := map[string]any{
 		"actor":        string(revokedBy),
 		"subject_type": "user",

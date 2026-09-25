@@ -415,13 +415,34 @@ var RequiredSettings = []RequiredSetting{
 		"перечень происхождений (origin) консоли `https://хост[:порт]` через запятую, каждое под именем доверяющей стороны; сверяется побайтово на приёме результата церемонии и на каждом предъявлении. Слово «"+AccessKeyOriginsNone+"» (в файле — пустой список) означает «никого»: служба стартует и отвергает всякий ключ. Незаданный перечень — отказ старта: «принимаем любое» не политика, а отсутствие привязки"),
 	accessKeyRequirement("algorithms", "-7",
 		"перечень алгоритмов открытого ключа (идентификаторы COSE через запятую), в которых принимаются ключи: -7 (ES256), -8 (EdDSA), -257 (RS256). Пустого «никого» не бывает: перечень без единого алгоритма делает церемонию невыполнимой. Сужение перечня делает уже принятые ключи вне его непринимаемыми — перепись переноса называет их числом"),
+	// СЕКРЕТ ХУКОВ закрывает ЧЕТЫРЕ маршрута, а не два. Перечень их сюда вторым
+	// экземпляром не переписан: строка `Why` ссылается на опись пакета
+	// `internal/handler/iamhooks`, а полноту самой описи держит проба
+	// `route_prose_names_every_route_test.go`
+	// (`TestPackageProseNamesEveryRouteOfTheProducer`): всякая шапка, назвавшая
+	// более одного маршрута, обязана назвать каждый маршрут производителя.
+	//
+	// ПОЧЕМУ ИМЯ ПРОБЫ СТОИТ ЗДЕСЬ, А НЕ В `Why`. Поле `Why` рендерится в
+	// INSTALL.md дословно, а руководство читает оператор ЧУЖОЙ установки: дерева
+	// у него нет и `go test` он не запустит. Координаты, названные руководством,
+	// держит `tools/operatordocs/install_coordinates_test.go`, и держит он два
+	// класса — ряды измерителей и ключи настройки; имя файла пробы ни к одному
+	// не относится, то есть переименование пробы сделало бы руководство лживым
+	// МОЛЧА. Пакет в `Why` при этом остаётся: без него «четырёх» не на что
+	// проверить, и число стало бы вторым экземпляром перечня маршрутов — ровно
+	// тем, что эта ссылка и отменяет.
 	{
 		Key:    "authn.hook-shared-secret",
 		Env:    "KANAME_HOOK_TOKEN",
 		Supply: SupplyEnv,
 		Sample: "заменить-на-случайную-строку",
-		Why: "предъявитель, которым поставщик удостоверений аутентифицируется на хуках выдачи и " +
-			"обновления токена. Без него хуки принимали бы вызов без всякой проверки",
+		Why: "предъявитель, которым поставщик удостоверений аутентифицируется на ВСЕХ ЧЕТЫРЁХ " +
+			"хуках слушателя `:9092`: выдача токена, продление, заведение человека по первому " +
+			"входу, завершение восстановления доступа. Перечень их — опись пакета " +
+			"`internal/handler/iamhooks`. Прежняя редакция называла два хука из четырёх: " +
+			"читатель, отводящий секрету только выдачу и продление, не знал, что тем же секретом " +
+			"закрыты заведение человека и восстановление доступа. Без секрета хуки принимали бы " +
+			"вызов без всякой проверки",
 		Refusal: "authn.hook-shared-secret is empty",
 	},
 	{
@@ -570,6 +591,19 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.token-signing.allowed-algorithms has no elements",
 	},
 	{
+		Key:                    "authn.token-signing.key-lifetime",
+		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__KEY_LIFETIME",
+		Supply:                 SupplyEnv,
+		Lanes:                  []IdentityProvider{IdentityProviderOwn},
+		WhenOwnPublicRESTFront: true,
+		Conditional:            true,
+		Sample:                 "2160h",
+		Why: "срок ключа подписи (Go duration) — политика его ротации. Умолчания нет ни у " +
+			"процесса, ни в базовых значениях чарта: срок, выбранный за оператора, он не увидит " +
+			"и не пересмотрит, а страж, судящий подставленную величину, не отказал бы ни разу",
+		Refusal: "authn.token-signing.key-lifetime is not declared",
+	},
+	{
 		Key:                    "authn.presented-credential.enabled",
 		Env:                    "KANAME_AUTHN__PRESENTED_CREDENTIAL__ENABLED",
 		Supply:                 SupplyEnv,
@@ -611,6 +645,70 @@ var RequiredSettings = []RequiredSetting{
 			"времени субъект, у которого доступ отобрали, продолжает проходить. Умолчания нет " +
 			"намеренно — окно, выбранное за оператора, он не увидит и не пересмотрит",
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
+	},
+	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
+	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а четыре
+	// его величины — его собственным стражем, то есть только после того, как
+	// эндпоинт включён. Образец перечня адресатов несёт образец адресата
+	// докерной полосы (`api-server.registry-token.service` выше): страж той
+	// полосы требует его внутри перечня, и несогласованные образцы отверг бы он.
+	{
+		Key:    "authn.client-token.enabled",
+		Env:    "KANAME_AUTHN__CLIENT_TOKEN__ENABLED",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "true",
+		Why: "токен-эндпоинт платформы, на котором ключ служебной учётки обменивается на токен. " +
+			"На посадке own внешнего поставщика нет вовсе, а с выключенным эндпоинтом выдача ключа " +
+			"заводит клиента у внешнего поставщика: процесс поднялся бы и отказывал на всякой выдаче " +
+			"ключа. Эндпоинт монтируется на слушателе api-server.registry-token.endpoint, и тот обязан " +
+			"быть поднят",
+		Refusal: "authn.client-token.enabled is false",
+	},
+	{
+		Key:         "authn.client-token.allowed-audiences",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "kacho-registry,https://api.example.invalid",
+		Why: "перечень адресатов, которым платформа вообще чеканит удостоверения (через запятую). " +
+			"Пустой означает «выдаём токен, адресованный чему угодно». Адресат докерной полосы " +
+			"(api-server.registry-token.service) обязан входить в перечень",
+		Refusal: "authn.client-token.allowed-audiences has no elements",
+	},
+	{
+		Key:         "authn.client-token.default-audience",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "https://api.example.invalid",
+		Why: "адресат токена, когда запрос его не назвал; обязан быть членом перечня выше, " +
+			"иначе умолчание отвергалось бы собственной проверкой",
+		Refusal: "authn.client-token.default-audience is empty",
+	},
+	{
+		Key:         "authn.client-token.token-ttl",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "15m",
+		Why: "срок выпускаемого токена, не выше платформенного потолка. Умолчания нет: срок — " +
+			"слагаемое арифметики отсрочки снятия ключа, и выбирает его тот, кто ставит службу",
+		Refusal: "authn.client-token.token-ttl must be declared",
+	},
+	{
+		Key:         "authn.client-token.body-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "65536",
+		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
+			"читал бы сколько прислали",
+		Refusal: "authn.client-token.body-ceiling must be declared",
 	},
 }
 

@@ -87,7 +87,7 @@ func (c *ca) serveTLS(t *testing.T, body string) *httptest.Server {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano() + 1),
-		Subject:      pkix.Name{CommonName: "hydra-public"},
+		Subject:      pkix.Name{CommonName: "upstream-public"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

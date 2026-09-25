@@ -56,6 +56,7 @@ func contourTranslated(t *testing.T) config.Config {
 		Algorithm:         tokenpolicy.AlgES256,
 		AllowedAlgorithms: tokenpolicy.AlgES256,
 		KeySetPath:        "/.well-known/kaname/jwks.json",
+		KeyLifetime:       90 * 24 * time.Hour,
 	}
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:          true,

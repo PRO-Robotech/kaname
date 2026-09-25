@@ -6,11 +6,13 @@ package humansession_test
 // recovery_fakes_test.go — дублёр хранилища для восстановления доступа (Ф5):
 // коды, письма, журнал завершений. НЕ снисходительнее настоящего: применение —
 // один оператор по (личность, свёртка, ещё не применён, срок не вышел); журнал
-// по ключу потока — вставка только нового ключа; намерение письма без адресата
-// либо без кода отвергается, как отвергает ограничение очереди.
+// по ключу потока — вставка только нового ключа; намерение письма без кода
+// отвергается аргументом, без адресата либо личности — отказом очереди, как у
+// адаптера. Работа базы — по правилу шапки `fake_store_test.go`.
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +36,7 @@ func (f *fakeStore) codesOf(user domain.UserID) []domain.RecoveryCode {
 }
 
 func (f *fakeStore) RecoveryTarget(_ context.Context, email domain.Email) (humansession.RecoveryTarget, bool, error) {
+	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failOn == "target" {
@@ -49,8 +52,9 @@ func (f *fakeStore) RecoveryTarget(_ context.Context, email domain.Email) (human
 
 func (w *fakeWriter) InsertRecoveryCode(_ context.Context, c domain.RecoveryCode) error {
 	if err := c.Validate(); err != nil {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+		return errFakeArg(err.Error())
 	}
+	w.store.trip()
 	if err := w.fail("insert-code"); err != nil {
 		return err
 	}
@@ -62,6 +66,7 @@ func (w *fakeWriter) InsertRecoveryCode(_ context.Context, c domain.RecoveryCode
 }
 
 func (w *fakeWriter) SupersedeRecoveryCodes(_ context.Context, userID domain.UserID) (int, error) {
+	w.store.trip()
 	if err := w.fail("supersede"); err != nil {
 		return 0, err
 	}
@@ -77,6 +82,11 @@ func (w *fakeWriter) SupersedeRecoveryCodes(_ context.Context, userID domain.Use
 }
 
 func (w *fakeWriter) ConsumeRecoveryCode(_ context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time) (domain.RecoveryCode, bool, error) {
+	if digest == "" {
+		// Адаптер: пустой свёртке кода не бывает — «не найден» без обхода базы.
+		return domain.RecoveryCode{}, false, nil
+	}
+	w.store.trip()
 	if err := w.fail("consume"); err != nil {
 		return domain.RecoveryCode{}, false, err
 	}
@@ -94,11 +104,16 @@ func (w *fakeWriter) ConsumeRecoveryCode(_ context.Context, userID domain.UserID
 }
 
 func (w *fakeWriter) EmitRecoveryMail(_ context.Context, in humansession.RecoveryMailIntent) error {
+	if in.Code.IsZero() {
+		return errFakeArg("Illegal argument recovery_mail.code: required")
+	}
+	if strings.TrimSpace(in.To) == "" || strings.TrimSpace(string(in.UserID)) == "" {
+		// Адаптер: отказ очереди писем — без класса словаря, до базы.
+		return errors.New("recovery mail intent: recipient and user required")
+	}
+	w.store.trip()
 	if err := w.fail("emit-mail"); err != nil {
 		return err
-	}
-	if strings.TrimSpace(in.To) == "" || in.Code.IsZero() || in.UserID == "" {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "recovery mail intent: recipient, code and user required")
 	}
 	w.ops = append(w.ops, func() { w.store.mail = append(w.store.mail, in) })
 	return nil
@@ -106,8 +121,9 @@ func (w *fakeWriter) EmitRecoveryMail(_ context.Context, in humansession.Recover
 
 func (w *fakeWriter) InsertRecoveryCompletion(_ context.Context, rc domain.RecoveryCompletion) (bool, error) {
 	if err := rc.Validate(); err != nil {
-		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+		return false, errFakeArg(err.Error())
 	}
+	w.store.trip()
 	if err := w.fail("ledger"); err != nil {
 		return false, err
 	}

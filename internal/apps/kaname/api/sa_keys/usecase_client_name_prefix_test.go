@@ -38,9 +38,9 @@ const clientNamePrefixComposedBefore = "kacho-sak-"
 // issueOnce прогоняет выдачу и отдаёт запрос, ушедший провайдеру.
 func issueOnce(t *testing.T, prefix string) clients.CreateOAuthClientRequest {
 	t.Helper()
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	u := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, provider, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 	if prefix != "" {
 		u.HydraClientNamePrefix = prefix
@@ -63,13 +63,13 @@ func issueOnce(t *testing.T, prefix string) clients.CreateOAuthClientRequest {
 	// Выдача асинхронна: клиент провайдера заводит работник. Дожидаемся ИСХОДА
 	// операции, а не паузой — иначе проба зеленела бы на несозданном предмете.
 	waitForOp(t, ops)
-	require.True(t, hydra.created, "клиент провайдера не заводился — предмет пробы не возник")
-	return hydra.gotReq
+	require.True(t, provider.created, "клиент провайдера не заводился — предмет пробы не возник")
+	return provider.gotReq
 }
 
 // TestClientNamePrefixNamesTheServiceThatComposesIt — умолчание называет службу.
 func TestClientNamePrefixNamesTheServiceThatComposesIt(t *testing.T) {
-	u := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+	u := NewIssueSAKeyUseCase(&stubSAClientRepo{}, &stubTx{}, &stubOAuthClientAdmin{}, &stubOpsRepo{})
 	require.Equalf(t, clientNamePrefixOwnedByTheService, u.HydraClientNamePrefix,
 		"умолчательная приставка имени клиента = %q; складывает имя служба, а не платформа",
 		u.HydraClientNamePrefix)

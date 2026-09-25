@@ -40,29 +40,29 @@ func (r *failingInsertRepo) Insert(
 	return domain.ServiceAccountOAuthClient{}, r.insertErr
 }
 
-// hydraCreateOKDeleteFails — провайдер, у которого регистрация проходит, а
+// createOKDeleteFails — провайдер, у которого регистрация проходит, а
 // снятие отказывает (провайдер прилёг ровно в окне компенсации).
-type hydraCreateOKDeleteFails struct {
+type createOKDeleteFails struct {
 	mu          sync.Mutex
 	clientID    string
 	deleteCalls int
 	deleteErr   error
 }
 
-func (h *hydraCreateOKDeleteFails) CreateOAuthClient(
+func (h *createOKDeleteFails) CreateOAuthClient(
 	_ context.Context, _ clients.CreateOAuthClientRequest,
 ) (clients.HydraOAuthClient, error) {
 	return clients.HydraOAuthClient{ClientID: h.clientID}, nil
 }
 
-func (h *hydraCreateOKDeleteFails) DeleteOAuthClient(_ context.Context, _ string) error {
+func (h *createOKDeleteFails) DeleteOAuthClient(_ context.Context, _ string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.deleteCalls++
 	return h.deleteErr
 }
 
-func (h *hydraCreateOKDeleteFails) calls() int {
+func (h *createOKDeleteFails) calls() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.deleteCalls
@@ -131,14 +131,14 @@ func federatedInput() IssueInput {
 // навсегда и его нечем назвать.
 func TestIssueSAKey_CommitFails_AndProviderDeleteFails_LeavesDurableCompensation(t *testing.T) {
 	repo := &failingInsertRepo{insertErr: errors.New("insert failed")}
-	hydra := &hydraCreateOKDeleteFails{
-		clientID:  "hydra-cli-orphan",
+	provider := &createOKDeleteFails{
+		clientID:  "provider-cli-orphan",
 		deleteErr: errors.New("provider unreachable"),
 	}
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithCompensationEmitter(comp).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
@@ -151,10 +151,10 @@ func TestIssueSAKey_CommitFails_AndProviderDeleteFails_LeavesDurableCompensation
 	if len(got) != 1 {
 		t.Fatalf("компенсирующих намерений записано %d, ожидалось 1 "+
 			"(клиент %q зарегистрирован у провайдера, своя строка не закоммичена, "+
-			"прямое снятие отказало — реклеймить его нечем)", len(got), hydra.clientID)
+			"прямое снятие отказало — реклеймить его нечем)", len(got), provider.clientID)
 	}
-	if got[0] != hydra.clientID {
-		t.Fatalf("намерение записано на %q, ожидалось %q", got[0], hydra.clientID)
+	if got[0] != provider.clientID {
+		t.Fatalf("намерение записано на %q, ожидалось %q", got[0], provider.clientID)
 	}
 }
 
@@ -163,11 +163,11 @@ func TestIssueSAKey_CommitFails_AndProviderDeleteFails_LeavesDurableCompensation
 // снятия, а не молчать. Хуже прежнего быть нельзя.
 func TestIssueSAKey_CommitFails_CompensationEmitFails_FallsBackToDirectRelease(t *testing.T) {
 	repo := &failingInsertRepo{insertErr: errors.New("insert failed")}
-	hydra := &hydraCreateOKDeleteFails{clientID: "hydra-cli-orphan-2"}
+	provider := &createOKDeleteFails{clientID: "provider-cli-orphan-2"}
 	comp := &recordingCompensation{err: errors.New("outbox unavailable")}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithCompensationEmitter(comp).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
@@ -176,7 +176,7 @@ func TestIssueSAKey_CommitFails_CompensationEmitFails_FallsBackToDirectRelease(t
 	}
 	waitForOp(t, ops)
 
-	if hydra.calls() == 0 {
+	if provider.calls() == 0 {
 		t.Fatal("приёмник намерений отказал, и прямого снятия у провайдера не было — " +
 			"клиент остался и о нём нет ни строки, ни намерения")
 	}
@@ -187,11 +187,11 @@ func TestIssueSAKey_CommitFails_CompensationEmitFails_FallsBackToDirectRelease(t
 // живого клиента, и «проверка» была бы вредна, а не бесполезна.
 func TestIssueSAKey_Success_EmitsNoCompensation(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &hydraCreateOKDeleteFails{clientID: "hydra-cli-live"}
+	provider := &createOKDeleteFails{clientID: "provider-cli-live"}
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	u := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithCompensationEmitter(comp).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
@@ -203,7 +203,7 @@ func TestIssueSAKey_Success_EmitsNoCompensation(t *testing.T) {
 	if got := comp.snapshot(); len(got) != 0 {
 		t.Fatalf("успешная сага записала компенсирующие намерения %v — дренаж снял бы живого клиента", got)
 	}
-	if hydra.calls() != 0 {
-		t.Fatalf("успешная сага звала снятие у провайдера %d раз", hydra.calls())
+	if provider.calls() != 0 {
+		t.Fatalf("успешная сага звала снятие у провайдера %d раз", provider.calls())
 	}
 }

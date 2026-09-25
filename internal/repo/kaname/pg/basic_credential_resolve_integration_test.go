@@ -29,7 +29,6 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 func basicCredPool(t *testing.T) *pgxpool.Pool {
@@ -105,7 +104,7 @@ VALUES ($1, $2, NULL, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30
 func TestBAT1_42_RevocationReachesPresentationThroughBothSides(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	first := mintUserCredential(t, pool, "uoc_0000000000000bat1", "usr0000000000000bat1")
@@ -144,7 +143,7 @@ func TestBAT1_42_RevocationReachesPresentationThroughBothSides(t *testing.T) {
 func TestBAT1_45_OwnerStateIsPartOfTheSingleResolveStatement(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	human := mintUserCredential(t, pool, "uoc_0000000000000bat3", "usr0000000000000bat2")
@@ -214,7 +213,7 @@ SELECT tc.constraint_name, kcu.column_name
 	require.NotEmpty(t, causes,
 		"поводов ноль — перечень пуст, и «утверждён каждый» здесь означало бы «не утверждён ни один»")
 
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	mine := mintUserCredential(t, pool, "uoc_0000000000000bat4", "usr0000000000000bat2")
 	neighbour := mintUserCredential(t, pool, "uoc_0000000000000bat5", "usr0000000000000bat1")
 
@@ -240,7 +239,7 @@ SELECT tc.constraint_name, kcu.column_name
 func TestBAT1_48_ExpiryIsRefusedByTheSameRefusalAndTheBoundaryIsCheckedBothWays(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	// За секунду до истечения — проходит.
@@ -276,7 +275,7 @@ UPDATE user_oauth_clients SET expires_at = now() - interval '1 second'
 func TestBAT1_10_TheRefusalIsSingleAndIsNoOracle(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	good := mintUserCredential(t, pool, "uoc_0000000000000bat7", "usr0000000000000bat1")

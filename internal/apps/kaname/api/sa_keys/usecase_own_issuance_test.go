@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_own_issuance_test.go — выдача ключа служебной учётки на ПЕРЕВЕДЁННОМ
-// контуре не заводит зеркала клиента у прежнего издателя (задача #1120,
-// подфаза Ф4б эпика #896).
+// контуре не заводит зеркала клиента у прежнего издателя (задача kacho#1120,
+// подфаза Ф4б эпика kacho#896).
 //
 // # Предмет
 //
@@ -40,10 +40,10 @@ import (
 // TestIssue_OwnIssuance_RegistersNothingAtTheProvider — главное утверждение.
 func TestIssue_OwnIssuance_RegistersNothingAtTheProvider(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
 
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithOwnIssuance()
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).WithOwnIssuance()
 
 	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
@@ -54,7 +54,7 @@ func TestIssue_OwnIssuance_RegistersNothingAtTheProvider(t *testing.T) {
 	if ops.lastErr != nil {
 		t.Fatalf("выдача обязана состояться без прежнего издателя, получено: %v", ops.lastErr)
 	}
-	if hydra.created {
+	if provider.created {
 		t.Error("переведённый контур завёл зеркало у прежнего издателя: запись у постороннего, " +
 			"которую своя полоса обмена не читает, при живой административной дороге к нему")
 	}
@@ -88,10 +88,10 @@ func TestIssue_OwnIssuance_RegistersNothingAtTheProvider(t *testing.T) {
 // производитель токена на этом ключе, и зеркало обязано заводиться.
 func TestIssue_ProviderContour_StillRegistersAtTheProvider(t *testing.T) {
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
 
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops)
 
 	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
@@ -99,10 +99,10 @@ func TestIssue_ProviderContour_StillRegistersAtTheProvider(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if !hydra.created {
+	if !provider.created {
 		t.Fatal("непереведённый контур не завёл зеркала — обменять этот ключ станет негде")
 	}
-	if got := string(repo.inserted.OAuthClientID); got != "hydra-cli-fake" {
+	if got := string(repo.inserted.OAuthClientID); got != "provider-cli-fake" {
 		t.Errorf("строка обязана нести идентификатор, назначенный издателем, несёт %q", got)
 	}
 }
@@ -115,11 +115,11 @@ func TestIssue_ProviderContour_StillRegistersAtTheProvider(t *testing.T) {
 // уходит к постороннему с просьбой снять то, чего он не заводил.
 func TestIssue_OwnIssuance_CommitFailure_CompensatesNothing(t *testing.T) {
 	repo := &failingInsertRepo{insertErr: errors.New("insert failed")}
-	hydra := &hydraCreateOKDeleteFails{clientID: "hydra-cli-orphan"}
+	provider := &createOKDeleteFails{clientID: "provider-cli-orphan"}
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithCompensationEmitter(comp).
 		WithOwnIssuance()
 
@@ -133,9 +133,9 @@ func TestIssue_OwnIssuance_CommitFailure_CompensatesNothing(t *testing.T) {
 		t.Errorf("записаны компенсирующие намерения %v при том, что у прежнего издателя "+
 			"ничего не заводили", got)
 	}
-	if hydra.calls() != 0 {
+	if provider.calls() != 0 {
 		t.Errorf("прямое снятие у прежнего издателя звалось %d раз при том, что "+
-			"регистрации не было", hydra.calls())
+			"регистрации не было", provider.calls())
 	}
 }
 
@@ -144,11 +144,11 @@ func TestIssue_OwnIssuance_CommitFailure_CompensatesNothing(t *testing.T) {
 // снимает то, что успел завести.
 func TestIssue_ProviderContour_CommitFailure_StillCompensates(t *testing.T) {
 	repo := &failingInsertRepo{insertErr: errors.New("insert failed")}
-	hydra := &hydraCreateOKDeleteFails{clientID: "hydra-cli-orphan"}
+	provider := &createOKDeleteFails{clientID: "provider-cli-orphan"}
 	comp := &recordingCompensation{}
 	ops := &stubOpsRepo{}
 
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithCompensationEmitter(comp)
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).WithCompensationEmitter(comp)
 
 	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
@@ -157,9 +157,9 @@ func TestIssue_ProviderContour_CommitFailure_StillCompensates(t *testing.T) {
 	waitForOp(t, ops)
 
 	got := comp.snapshot()
-	if len(got) != 1 || got[0] != hydra.clientID {
+	if len(got) != 1 || got[0] != provider.clientID {
 		t.Fatalf("компенсирующих намерений записано %v, ожидалось ровно одно на %q",
-			got, hydra.clientID)
+			got, provider.clientID)
 	}
 }
 
@@ -190,9 +190,9 @@ func TestIssue_ProviderContour_CommitFailure_StillCompensates(t *testing.T) {
 func TestIssue_OwnIssuance_FederatedLeavesTheProviderToo(t *testing.T) {
 	// (а) контур ПЕРЕВЕДЁН — зеркала нет, имя клиента наше.
 	repo := &stubSAClientRepo{}
-	hydra := &stubHydra{}
+	provider := &stubOAuthClientAdmin{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
+	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, provider, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{}).
 		WithOwnIssuance()
 
@@ -201,7 +201,7 @@ func TestIssue_OwnIssuance_FederatedLeavesTheProviderToo(t *testing.T) {
 	}
 	waitForOp(t, ops)
 
-	if hydra.created {
+	if provider.created {
 		t.Error("переведённый контур завёл зеркало федеративного ключа: обменивать его " +
 			"у прежнего издателя больше не требуется — утверждение проверяет наша полоса")
 	}
@@ -216,9 +216,9 @@ func TestIssue_OwnIssuance_FederatedLeavesTheProviderToo(t *testing.T) {
 	// (б) контур НЕ переведён — зеркало заводится ровно как прежде. Без этой
 	// половины утверждение выше зеленело бы на выдаче, сломанной целиком.
 	repo2 := &stubSAClientRepo{}
-	hydra2 := &stubHydra{}
+	admin2 := &stubOAuthClientAdmin{}
 	ops2 := &stubOpsRepo{}
-	uc2 := NewIssueSAKeyUseCase(repo2, &stubTx{}, hydra2, ops2).
+	uc2 := NewIssueSAKeyUseCase(repo2, &stubTx{}, admin2, ops2).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 
 	if _, err := uc2.Execute(context.Background(), trustedIssuerInput()); err != nil {
@@ -226,7 +226,7 @@ func TestIssue_OwnIssuance_FederatedLeavesTheProviderToo(t *testing.T) {
 	}
 	waitForOp(t, ops2)
 
-	if !hydra2.created {
+	if !admin2.created {
 		t.Error("непереведённый контур обязан заводить зеркало ровно как прежде")
 	}
 }
