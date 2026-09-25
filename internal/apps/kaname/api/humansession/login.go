@@ -11,27 +11,30 @@ package humansession
 //	(всегда, даже когда адреса нет: полоса «адреса нет» занимает ту же
 //	ёмкость проверяющего — PWV-15.4) → допуск класса в огибающую → сверка
 //	второго фактора (всегда, когда предъявлен — Ф12) → блокировка → исход
-//	поля `secondFactor` → выдача одним исходом → переписывание материала
+//	поля `secondFactor` → выдача одним исходом (первой её операцией — захват
+//	строки личности и отсечка, прочитанная после него: вход, накрытый
+//	отсечкой, сессии не выдаёт — kaname#385) → переписывание материала
 //	отдельной записью (не смена пароля — ID-PW-1 Р5) → [ожидание потолка
 //	огибающей]
 //
 // Отказ — ОДИН на все причины (Ф1 Р3): «адреса нет», «пароль не тот»,
-// «заблокирована», исходы проверяющего — наружу уходит один и тот же
-// ErrAuthenticationFailed; причина различима только приёмником (Ф3-48).
+// «заблокирована», «накрыт отсечкой», исходы проверяющего — наружу уходит
+// один и тот же ErrAuthenticationFailed; причина различима только приёмником
+// (Ф3-48).
 //
 // # Время исхода — огибающая по потолку (Ф3-31, Ф1-48; решение kaname#188)
 //
 // Всякий исход, наступивший ПОСЛЕ ворот частоты, уходит не раньше потолка
 // огибающей — калиброванной стоимости самого дорогого класса среди лежащих в
 // хранилище и класса ручки (`passwordverify.Envelope`). Успех, «пароль не
-// тот», «адреса нет», «материала нет», «заблокирована», негодный материал,
-// исчерпание ёмкости, отказ хранилища — все стоят одинаково, и класс хранимого
-// значения по времени невидим by construction. Ветви второго фактора (Ф12) —
-// холостая и настоящая сверка кода, «не заведён», «не сошёлся», «повторён»,
-// «недоступен», отказ формы предъявления — лежат внутри той же полосы после
-// ворот и ждут того же потолка: исход поля `secondFactor` не различим по
-// времени ни от исхода пароля, ни между собой. Ждёт ПОЛОСА, а не
-// проверяющий: место ёмкости отпущено до ожидания.
+// тот», «адреса нет», «материала нет», «заблокирована», «накрыт отсечкой»,
+// негодный материал, исчерпание ёмкости, отказ хранилища — все стоят
+// одинаково, и класс хранимого значения по времени невидим by construction.
+// Ветви второго фактора (Ф12) — холостая и настоящая сверка кода, «не
+// заведён», «не сошёлся», «повторён», «недоступен», отказ формы предъявления —
+// лежат внутри той же полосы после ворот и ждут того же потолка: исход поля
+// `secondFactor` не различим по времени ни от исхода пароля, ни между собой.
+// Ждёт ПОЛОСА, а не проверяющий: место ёмкости отпущено до ожидания.
 //
 // Вне огибающей ровно два исхода, у каждого СВОЙ ответ, отличимый кодом и не
 // говорящий о личности ничего: отказ формы (поле не заполнено) и отказ по
@@ -325,9 +328,25 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 		return LoginOutput{}, uc.refuseSecondFactor(ctx, *factor, settledPresentation{verdict: factor.verdict, outcome: factor.outcome}, addressKey, in.Source, now)
 	}
 
-	// (5) Выдача — одним исходом: запись, память, сброс счёта, событие.
-	out, settled, err := uc.issue(ctx, user, now, factor)
-	if err != nil {
+	// (5) Выдача — одним исходом: захват строки личности и её отсечка, запись,
+	// память, сброс счёта, событие. Отказы транзакции выдачи уходят отсюда —
+	// под огибающей и до переписывания материала.
+	out, settled, outcome := uc.issue(ctx, user, now, factor)
+	switch outcome {
+	case issueDone:
+	case issueBeforeCutoff:
+		// Накрыт отсечкой (Р3): тот же один отказ, попыткой не считается —
+		// удостоверение предъявлено верно; своя клетка; следа нет.
+		uc.observer.LoginObserved(LoginOutcomeBeforeCutoff)
+		return LoginOutput{}, ErrAuthenticationFailed
+	case issueNoRow:
+		// Личность удалена после чтения адреса (Р4, исход 3): так же, как адрес
+		// без строки — тот же один отказ и попытка. Транзакция выдачи к этому
+		// моменту закрыта, и попытка пишется своей.
+		return LoginOutput{}, uc.refuseWith(ctx, LoginOutcomeNoRow, addressKey, in.Source, now, factor)
+	default:
+		// issueFailed (Р4, исход 4 и всякая ошибка транзакции выдачи): закрыт
+		// ответом «не выполнено», транзакция откачена целиком.
 		uc.observer.LoginObserved(LoginOutcomeStoreFailed)
 		return LoginOutput{}, ErrStoreUnavailable
 	}
@@ -442,39 +461,90 @@ func (uc *LoginUseCase) refuseSecondFactor(ctx context.Context, pr preparedPrese
 	return uc.refuseWith(ctx, LoginOutcomeSecondFactorRefused, addressKey, source, now, nil)
 }
 
+// issueOutcome — исход транзакции выдачи входа. Перечень закрыт, «прочего»
+// нет; нулевое значение — «не исполнилась», так что путь, забывший назвать
+// исход, закрывает вход отказом «не выполнено», а не выдачей.
+type issueOutcome int
+
+const (
+	// issueFailed — хранилище не ответило: захват строки личности (Р4, исход 4)
+	// либо любая другая операция транзакции. Непрочитанная отсечка не
+	// считается ни отсутствующей, ни накрывающей.
+	issueFailed issueOutcome = iota
+	// issueDone — транзакция дошла до своего конца: сессия выдана, либо сверка
+	// второго фактора под замком решила иначе (вердикт — в settled).
+	issueDone
+	// issueBeforeCutoff — момент входа не позже стоящей отсечки личности:
+	// вход накрыт (Р1), выдачи нет (Р3).
+	issueBeforeCutoff
+	// issueNoRow — строки личности нет при захвате: личность удалена между
+	// чтением адреса и захватом (Р4, исход 3).
+	issueNoRow
+)
+
 // issue — выдача одним исходом; с кодом второго фактора — его запись (Р5:
 // принятый шаг, потреблённый элемент) в той же транзакции, ДО выдачи, и
 // проигравший гонку повтор выдачи не получает.
-func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time, factor *preparedPresentation) (LoginOutput, settledPresentation, error) {
+//
+// # Захват строки личности — первой операцией (kaname#385, Р4)
+//
+// Сразу после открытия транзакция берёт строку личности (`LockPersonForLogin`,
+// `FOR SHARE`) и получает её отсечку, прочитанную ПОСЛЕ захвата. Первой — раньше
+// записи второго фактора и вставки записи сессии: так у выдачи и у удаления
+// личности один порядок «личность → строки фактора», а принудительный выход,
+// пришедший внутрь открытой выдачи, ждёт её фиксации и снимает выданное.
+// Выдача, пришедшая к стоящему выходу, ждёт его фиксации и судит его отсечку.
+//
+// # Момент входа — в разрешении хранилища (Р1)
+//
+// m — показание часов входа, усечённое до микросекунды: хранилище держит оба
+// момента до микросекунды, и край судит пару в его разрешении. Одно и то же m
+// сравнивается с отсечкой и уходит в выдачу. Вход накрыт ⟺ m не позже
+// отсечки — граница включающая, как у края («годна ⟺ строго позже»).
+//
+// Ни один отказ транзакцию выдачи не фиксирует: `defer Rollback` откатывает её
+// целиком, вместе с записью второго фактора, если она уже сделана (отказ
+// хранилища после неё). Отказ по отсечке и «строки нет» приходят раньше неё.
+func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time, factor *preparedPresentation) (LoginOutput, settledPresentation, issueOutcome) {
 	var settled settledPresentation
+	m := now.Truncate(time.Microsecond)
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.methods, uc.logger, user.ID)
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
-		return LoginOutput{}, settled, err
+		return LoginOutput{}, settled, issueFailed
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	cutoff, hasCutoff, err := w.LockPersonForLogin(ctx, user.ID)
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return LoginOutput{}, settled, issueNoRow
+	case err != nil:
+		return LoginOutput{}, settled, issueFailed
+	case hasCutoff && !m.After(cutoff):
+		return LoginOutput{}, settled, issueBeforeCutoff
+	}
 	methods := []string{assurance.MethodPassword.String()}
 	if factor != nil {
 		settled, err = uc.factor.settle(ctx, w, *factor, true)
 		if err != nil {
-			return LoginOutput{}, settled, err
+			return LoginOutput{}, settled, issueFailed
 		}
 		if settled.verdict != verdictMatched {
-			return LoginOutput{}, settled, nil
+			return LoginOutput{}, settled, issueDone
 		}
 		methods = withMethod(methods, factor.method)
 	}
 	s, bearer, err := IssueSession(ctx, w, IssueInput{
 		User:      user,
 		Presented: presentationsOf(methods),
-		At:        now,
+		At:        m,
 		TTL:       uc.ttl,
 		EmitAudit: true,
 	})
 	if err != nil {
-		return LoginOutput{}, settled, err
+		return LoginOutput{}, settled, issueFailed
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
 	// личности факторов (Ф12 Р7 ред. 11, Ф3 Р10 ред. 11): вход паролём при
@@ -483,10 +553,10 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
 		AddressKey: AddressKey(string(user.Email)), Presented: methods,
 	}); err != nil {
-		return LoginOutput{}, settled, err
+		return LoginOutput{}, settled, issueFailed
 	}
 	if err := w.Commit(ctx); err != nil {
-		return LoginOutput{}, settled, err
+		return LoginOutput{}, settled, issueFailed
 	}
 	_, verified, err := uc.methods.EmailVerification(ctx, user.ID)
 	if err != nil {
@@ -495,7 +565,7 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 		uc.logger.Error("login: e-mail verification state unreadable after issue", "err", err.Error())
 		verified = false
 	}
-	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: verified}, Bearer: bearer}, settled, nil
+	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: verified}, Bearer: bearer}, settled, issueDone
 }
 
 // rewriteIfNeeded — Ф3-43 / ID-PW-1 PWV-08…11, 18, 19. Не смена пароля:

@@ -157,6 +157,11 @@ func (w recordingWriter) rec(name string) func() {
 	return record(w.j, w.meter, storeOp{Port: "writer", Name: name})
 }
 
+func (w recordingWriter) LockPersonForLogin(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
+	defer w.rec("LockPersonForLogin")()
+	return w.inner.LockPersonForLogin(ctx, userID)
+}
+
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	defer w.rec("InsertSession")()
 	return w.inner.InsertSession(ctx, s, digest)
