@@ -55,6 +55,15 @@
 // АРГУМЕНТУ (`iamerr.ErrX`), а не по имени вызываемого пакета. Поэтому
 // `stderrors`, `goerrors` и любое другое написание опознаются одинаково.
 //
+// ПОЛОСА КОНЦА КОНТЕКСТА (kaname#383) — не sentinel `iamerr`, а ошибки пакета
+// `context`: `context.Canceled` и `context.DeadlineExceeded`, в тех же формах
+// записи. Пакет опознаётся по ПУТИ ИМПОРТА файла, поэтому псевдоним импорта
+// (`stdctx "context"`) читается так же, как голое имя; файл без импорта
+// пакета читается по голому имени `context`. Поле `Canceled` чужого значения
+// полосой не читается. В признак переводчика (п. 1 выше) эти полосы НЕ входят:
+// счёт — по sentinel'ам `iamerr`, иначе переводчиком стала бы функция, судящая
+// только срок.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕГО РАЗБОР НЕ ВИДИТ — НАЗВАНО, А НЕ СПРЯТАНО
 //
@@ -83,8 +92,9 @@ type SentinelTranslator struct {
 	File string
 	Line int
 	Func string
-	// Sentinels — имена `iamerr.Err*`, которые переводчик различает,
-	// отсортированы.
+	// Sentinels — полосы, которые переводчик различает, отсортированы: имена
+	// `iamerr.Err*` и полосы конца контекста (`context.Canceled`,
+	// `context.DeadlineExceeded`).
 	Sentinels []string
 }
 
@@ -116,17 +126,19 @@ func ScanSentinelTranslators(path string, src []byte) (out []SentinelTranslator,
 	if perr != nil {
 		return nil, SentinelTranslatorCensus{}, perr
 	}
+	ctxName := contextPackageName(f)
 	for _, d := range f.Decls {
 		fd, ok := d.(*ast.FuncDecl)
 		if !ok || fd.Body == nil {
 			continue
 		}
 		census.Funcs++
-		sent := sentinelsDispatchedOn(fd.Body)
-		if len(sent) > 0 {
+		sent := sentinelsDispatchedOn(fd.Body, ctxName)
+		iam := iamSentinelCount(sent)
+		if iam > 0 {
 			census.WithSentinels++
 		}
-		if len(sent) < 2 || !endsWithTerminalInternal(fd.Body) {
+		if iam < 2 || !endsWithTerminalInternal(fd.Body) {
 			continue
 		}
 		census.Translators++
@@ -143,7 +155,7 @@ func ScanSentinelTranslators(path string, src []byte) (out []SentinelTranslator,
 // sentinelsDispatchedOn — sentinel'ы, различаемые В УСЛОВИИ: ветвь бестегового
 // switch либо условие if. Вызов `errors.Is` в теле ветви условием не является —
 // иначе делегирование канону читалось бы как собственное различение.
-func sentinelsDispatchedOn(body *ast.BlockStmt) []string {
+func sentinelsDispatchedOn(body *ast.BlockStmt, ctxName string) []string {
 	seen := map[string]bool{}
 	collect := func(e ast.Expr) {
 		ast.Inspect(e, func(n ast.Node) bool {
@@ -151,7 +163,7 @@ func sentinelsDispatchedOn(body *ast.BlockStmt) []string {
 			if !ok || len(call.Args) != 2 {
 				return true
 			}
-			if name, ok := sentinelName(call.Args[1]); ok {
+			if name, ok := sentinelName(call.Args[1], ctxName); ok {
 				seen[name] = true
 			}
 			return true
@@ -185,22 +197,71 @@ func sentinelsDispatchedOn(body *ast.BlockStmt) []string {
 	return out
 }
 
-// sentinelName — имя `iamerr.ErrX` из выражения-аргумента. Опознаётся по
-// АРГУМЕНТУ, а не по имени вызываемого пакета: псевдоним `errors` тогда
-// безразличен by construction.
-func sentinelName(e ast.Expr) (string, bool) {
+// sentinelName — имя полосы из выражения-аргумента: `iamerr.ErrX` либо ошибка
+// конца контекста под именем, которым файл импортирует пакет `context`
+// (ctxName). Опознаётся по АРГУМЕНТУ, а не по имени вызываемого пакета:
+// псевдоним `errors` тогда безразличен by construction.
+func sentinelName(e ast.Expr, ctxName string) (string, bool) {
 	sel, ok := e.(*ast.SelectorExpr)
 	if !ok {
 		return "", false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != SentinelIAMPackage {
+	if !ok {
+		return "", false
+	}
+	if pkg.Name == ctxName && ctxName != "" {
+		if lane, ok := contextEndLanes[sel.Sel.Name]; ok {
+			return lane, true
+		}
+		return "", false
+	}
+	if pkg.Name != SentinelIAMPackage {
 		return "", false
 	}
 	if !strings.HasPrefix(sel.Sel.Name, "Err") {
 		return "", false
 	}
 	return sel.Sel.Name, true
+}
+
+// contextEndLanes — ошибки пакета `context`, означающие конец контекста, и
+// имена их полос. Имя полосы — каноническое (`context.<Имя>`), а не написание
+// файла: канон и копия под разными псевдонимами обязаны сходиться.
+var contextEndLanes = map[string]string{
+	"Canceled":         "context.Canceled",
+	"DeadlineExceeded": "context.DeadlineExceeded",
+}
+
+// contextPackageName — имя, под которым файл видит пакет `context`: псевдоним
+// импорта, если он есть, иначе голое `context`. Импорт в пустой идентификатор
+// либо точкой полос не даёт — под таким именем ошибку не записать.
+func contextPackageName(f *ast.File) string {
+	for _, imp := range f.Imports {
+		if imp.Path == nil || imp.Path.Value != `"context"` {
+			continue
+		}
+		if imp.Name == nil {
+			return "context"
+		}
+		if imp.Name.Name == "_" || imp.Name.Name == "." {
+			return ""
+		}
+		return imp.Name.Name
+	}
+	return "context"
+}
+
+// iamSentinelCount — сколько из полос — sentinel'ы `iamerr` (признак
+// переводчика считается по ним, без полос конца контекста).
+func iamSentinelCount(lanes []string) int {
+	n := 0
+	for _, l := range lanes {
+		if strings.HasPrefix(l, "Err") {
+			n++
+		}
+	}
+	return n
 }
 
 // endsWithTerminalInternal — последний оператор тела возвращает
