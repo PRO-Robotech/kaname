@@ -36,6 +36,9 @@ import (
 //	<таблица>_name_check        → ErrInternal (защита последнего рубежа: форму
 //	                              имени проверяет сам сервис, значит срабатывание
 //	                              ограничения — НАШ дефект, а не ввод вызывающего)
+//	проверка значения службы    → ErrInternal (колонку пишет служба, вызывающему
+//	                              исправлять нечего; решение по каждой проверке —
+//	                              перепись `checkValueLanes`, #395)
 //	projects_account_fk (FK→accounts on INSERT project)        → ErrFailedPrecondition
 //	projects_account_fk (FK←projects on DELETE account, 23503) → ErrFailedPrecondition "Account %s contains projects and cannot be deleted"
 //
@@ -196,6 +199,21 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		if pgfault.CheckLaneOf(f) == pgfault.LaneServiceDefect || isRoleNameFormConstraint(f.Table, f.Constraint) {
 			slog.Error("name form backstop fired: service admitted a name it validates itself",
 				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
+		// Полоса ЗНАЧЕНИЯ СЛУЖБЫ на всей схеме (задача #395): проверка, чья
+		// колонка несёт значение, которое служба чеканит, штампует, выводит или
+		// берёт из своего закрытого словаря. Вызывающий его не присылал, и
+		// исправить ему нечего; решение по каждой проверке — перепись
+		// `checkValueLanes`.
+		//
+		// Запись называет ограничение и таблицу и НЕ несёт ни `Detail` (там
+		// строка целиком, с материалом), ни текста драйвера — поэтому
+		// координаты выписаны здесь поимённо, а не набором `f.LogAttrs`.
+		if checkValueLaneOf(f.Table, f.Constraint) == checkLaneService {
+			slog.Error("check backstop fired: the schema refused a value the service produced",
+				"kind", kindHint, "id", idHint,
+				"sqlstate", f.SQLState, "constraint", f.Constraint, "table", f.Table)
 			return iamerr.ErrInternal
 		}
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", checkText(pgErr))
