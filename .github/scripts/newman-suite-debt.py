@@ -771,6 +771,36 @@ def minted_by_seeds(scripts: list[pathlib.Path]
     return minted, mute
 
 
+def ceremony_need_of(text: str, declared: dict[str, str]) -> list[str]:
+    """Ключи ЦЕРЕМОНИИ, которых коллекция ждёт от посева, а не ставит сама.
+
+    ОДНА функция на двух читателей: этот разрез и объявление волны церемонии
+    (`tests/authz-fixtures/ceremony_credentials.py`). Перечень волны обязан быть
+    равен перечню «нужна церемония» отсюда, и равенство держится построением —
+    второй предикат того же предмета разошёлся бы с первым молча.
+    """
+    own = set(OWN_KEY_RE.findall(text))
+    return sorted(k for k in used_keys(text)
+                  if key_state(k, declared, own) is not None and is_ceremony_key(k))
+
+
+def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
+    """По КАЖДОЙ коллекции набора — ключи церемонии, которых она ждёт от посева.
+
+    Пустой обход — отказ, а не пустой ответ: «ни одной коллекции не нужна
+    церемония» и «не прочитано ни одной коллекции» ведут читателя в разные места.
+    """
+    cols = collections(newman)
+    if not cols:
+        raise ValueError(f"в {newman / 'collections'} не прочитано ни одной коллекции")
+    declared = template_keys(newman)
+    if not declared:
+        raise ValueError("шаблона окружения нет — природу ключа вывести не из чего")
+    return {col.name[: -len(".postman_collection.json")]:
+            ceremony_need_of(col.read_text(encoding="utf-8"), declared)
+            for col in cols}
+
+
 def survey(newman: pathlib.Path, workflows: pathlib.Path):
     """Разрез дерева: (гоняемые, заблокированные, по поверхности, по препятствию, …).
 
@@ -811,9 +841,7 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
         # оставляя `.postman_collection`, и перепись читалась бы шумом.
         stem = col.name[: -len(".postman_collection.json")]
         own = set(OWN_KEY_RE.findall(text))
-        ceremony_need[stem] = sorted(
-            k for k in keys
-            if key_state(k, declared, own) is not None and is_ceremony_key(k))
+        ceremony_need[stem] = ceremony_need_of(text, declared)
         bl, states = blockers(surface, keys, declared, own, minted,
                               runs.get(stem, []))
         for state, n in states.items():
@@ -1205,10 +1233,12 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print("    честный отказ при недостижимом соседе). Список — stand-assert.py;")
     print("  · свойства КРАЯ платформы здесь не проверяются вовсе и остаются")
     print("    предметом её конвейера;")
-    print("  · полоса личности `own` (внешнего поставщика нет ВООБЩЕ) сегодня")
-    print("    НЕ ПОДНИМАЕТСЯ: страж посадки отказывает и называет причины. Стенд")
-    print("    идёт на полосе `external` с ОБЪЯВЛЕННЫМ, но недостижимым")
-    print("    поставщиком — см. врезку в .github/scripts/stand-own.sh.")
+    print("  · полоса личности `own` (внешнего поставщика нет ВООБЩЕ) поднимается")
+    print("    стендом чарта — задание `chart-own`; автономный стенд идёт на полосе")
+    print("    `external` с ОБЪЯВЛЕННЫМ, но недостижимым поставщиком — это его")
+    print("    предмет, а не неспособность продукта (врезка в .github/scripts/stand-own.sh);")
+    print("  · человеческого предъявителя не куёт ни один посев: волна церемонии")
+    print("    печатает свой долг сама (tests/authz-fixtures/ceremony_credentials.py --debt).")
     return 0
 
 
