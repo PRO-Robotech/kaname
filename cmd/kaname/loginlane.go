@@ -111,6 +111,9 @@ type loginLane struct {
 	// процесса, и проверяющий секрета клиента церемонии делит её
 	// (`passwordverify.Verifier.SharingCapacity`, LINE-A-1).
 	verifier *passwordverify.Verifier
+	// codes — хранилище церемонии: его уборщик записей кода едет записью
+	// реестра уборки полосы.
+	codes *kanamepg.AuthorizationCeremonyRepo
 }
 
 // secretVerifier — проверяющий секрета конфиденциального клиента церемонии:
@@ -186,11 +189,19 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	if !l.wired() {
 		return retention.HumanSessionReapers{}
 	}
-	return retention.HumanSessionReapers{
+	reapers := retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
 		Challenges: l.keys,
 	}
+	// Записи кода церемонии `authorization_code` (LINE-A-1): церемония
+	// поднимается той же посадкой, что полоса. Присваивание — только живого
+	// хранилища: интерфейс с nil внутри читался бы уборкой как провязанный
+	// предмет.
+	if l.codes != nil {
+		reapers.AuthorizationCodes = l.codes
+	}
+	return reapers
 }
 
 // accessKeyHandler — шесть глаголов ключа доступа (Ф7, kacho#1273) теми же
@@ -579,7 +590,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
-		verifier: verifier,
+		verifier: verifier, codes: kanamepg.NewAuthorizationCeremonyRepo(pool),
 	}, nil
 }
 

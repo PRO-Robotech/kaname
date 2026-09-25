@@ -37,6 +37,8 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
+
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )
 
@@ -105,6 +107,11 @@ const (
 	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
 	// заводит начало церемонии либо предъявления под живой сессией.
 	SubjectAccessKeyChallenges = "access_key_challenges"
+	// SubjectAuthorizationCodes — записи кода авторизации церемонии
+	// `authorization_code` (LINE-A-1, kacho#2721): истёкшие дольше окна
+	// узнавания повтора. Темп задаёт человек: запись заводит каждый запрос
+	// авторизации под живой сессией.
+	SubjectAuthorizationCodes = "authorization_codes"
 )
 
 // HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
@@ -119,6 +126,15 @@ type HumanSessionReapers struct {
 	Challenges       AccessKeyChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
+	// AuthorizationCodes — уборщик записей кода церемонии (LINE-A-1). Церемония
+	// поднимается той же посадкой, что полоса входа, поэтому едет её записью;
+	// nil — предмета нет, и перечень остаётся прежним.
+	AuthorizationCodes AuthorizationCodeReaper
+}
+
+// AuthorizationCodeReaper — порт уборщика записей кода авторизации.
+type AuthorizationCodeReaper interface {
+	SweepUnservableCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
 // HumanSessionReaper — порт уборщика истёкших и снятых записей сессии.
@@ -154,7 +170,7 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 {
 		return base
 	}
-	return append(base,
+	out := append(base,
 		Subject{
 			Name: SubjectHumanSessions,
 			// Порог — функция предиката читателя: запись годна к снятию, как
@@ -193,6 +209,18 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			Sweep: r.Challenges.SweepUnservableChallenges,
 		},
 	)
+	if r.AuthorizationCodes != nil {
+		out = append(out, Subject{
+			Name: SubjectAuthorizationCodes,
+			// Порог — предикат читателя: истёкший код обмен не потребит ни при
+			// каком предъявлении (срок судит база), но ПОВТОР потреблённого кода
+			// отзывает семейство, пока запись есть. Окно узнавания повтора
+			// объявлено в домене церемонии одним местом.
+			Grace: domain.AuthorizationCodeReplayRetention,
+			Sweep: r.AuthorizationCodes.SweepUnservableCodes,
+		})
+	}
+	return out
 }
 
 // SweepFunc — один проход уборщика по одному предмету.

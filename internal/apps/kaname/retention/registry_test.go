@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )
 
@@ -240,5 +241,39 @@ func (stubReaper) SweepAgedFailures(_ context.Context, _ time.Duration, _ int) (
 }
 
 func (stubReaper) SweepUnservableRecoveryCodes(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+// TestWithHumanSessionsCarriesTheAuthorizationCodeSweeper — LINE-A-1
+// (kacho#2721): записи кода церемонии убираются реестром полосы, порог — окно
+// узнавания повтора из домена церемонии. Без уборщика перечень прежний.
+func TestWithHumanSessionsCarriesTheAuthorizationCodeSweeper(t *testing.T) {
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		LongestWindow: time.Minute, EnrollmentWindow: time.Minute, AuthorizationCodes: authorizationCodeReaper{},
+	}
+	byName := map[string]Subject{}
+	for _, s := range WithHumanSessions(nil, full) {
+		byName[s.Name] = s
+	}
+	s, ok := byName[SubjectAuthorizationCodes]
+	if !ok {
+		t.Fatalf("предмета %q нет среди %v", SubjectAuthorizationCodes, byName)
+	}
+	if s.Grace != domain.AuthorizationCodeReplayRetention || s.Sweep == nil {
+		t.Fatalf("порог %s, ожидалось окно узнавания повтора %s", s.Grace, domain.AuthorizationCodeReplayRetention)
+	}
+	without := full
+	without.AuthorizationCodes = nil
+	for _, s := range WithHumanSessions(nil, without) {
+		if s.Name == SubjectAuthorizationCodes {
+			t.Fatal("уборщик кода заведён без хранилища")
+		}
+	}
+}
+
+type authorizationCodeReaper struct{}
+
+func (authorizationCodeReaper) SweepUnservableCodes(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
 }
