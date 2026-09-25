@@ -48,6 +48,7 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/postureoverlay"
 )
 
 // Ручки пары — ключи ЗНАЧЕНИЙ чарта, как их пишет оператор.
@@ -59,18 +60,10 @@ const (
 // ownPostureOverlay — накладка оператора, переводящая боевую цепочку на `own`
 // (INSTALL.md §1): посадка, включённый эндпоинт и его четыре величины.
 //
-// Величины согласованы с заглушками боевого профиля, а не взяты образцами
-// таблицы стража: образец перечня адресатов называет адресат докерной полосы
-// ДРУГОЙ установки, и страж старта, требующий его внутри перечня, отверг бы
-// накладку поверх ЭТОГО профиля.
-var ownPostureOverlay = []string{
-	identityProviderKnob + "=own",
-	clientTokenEnabledKnob + "=true",
-	`authn.clientToken.allowedAudiences=registry.example.invalid\,https://access.example.invalid`,
-	"authn.clientToken.defaultAudience=https://access.example.invalid",
-	"authn.clientToken.tokenTtl=15m",
-	"authn.clientToken.bodyCeiling=65536",
-}
+// Берётся у ЕДИНСТВЕННОГО источника накладок (`postureoverlay.Own`): её же
+// читает гейт покрытия полос, засчитывая посадку, объявленную накладкой,
+// объявленной (kaname#232). Своя копия здесь разошлась бы с его молча.
+var ownPostureOverlay = postureoverlay.Own.Sets()
 
 // withOwnPosture — накладка `own` плюс названные `--set`; копия, а не общий
 // срез: append в общий срез переписал бы его соседям.
@@ -119,6 +112,11 @@ func TestChartRefusesOwnPostureWithoutTheClientTokenEndpoint(t *testing.T) {
 // ── О2 ───────────────────────────────────────────────────────────────────────
 
 func TestChartRendersOwnPostureWithTheClientTokenEndpoint(t *testing.T) {
+	// Накладка объявляет, ПОВЕРХ ЧЕГО она ложится, и рендер кладёт её ровно
+	// туда: иначе гейт покрытия полос засчитывал бы посадку по накладке поверх
+	// профиля, поверх которого её никто не рендерил.
+	require.Equal(t, chartProfiles[len(chartProfiles)-1], postureoverlay.Own.Base(),
+		"накладка `own` объявляет своим профилем не тот, поверх которого её рендерит эта проба")
 	rendered := renderStandaloneChart(t, chartProfiles, ownPostureOverlay...)
 	in := readRenderedInput(t, rendered)
 	tree := renderedConfigTree(t, rendered)

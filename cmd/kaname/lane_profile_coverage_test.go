@@ -39,7 +39,23 @@
 // Ведомости прощённых здесь нет намеренно: её пришлось бы вести руками, и она
 // пережила бы свой предмет. Вместо неё — предикат. В тот день, когда
 // композиционный корень научится выполнять требования сборки полосы `own`,
-// она станет достижимой, и гейт ПОТРЕБУЕТ профиль сам, ничего не спрашивая.
+// она станет достижимой, и гейт ПОТРЕБУЕТ объявления сам, ничего не спрашивая.
+//
+// Этот день наступил (Ф3/Ф12, kaname#21), и гейт его не видел: наилучшая
+// проводка подавала наблюдателю nil-полосу там, где корень строит собранную,
+// и вердикт о `own` был свойством фикстуры, а не дерева (kaname#232). Теперь
+// полоса подаётся той, что строит корень (`bestCaseWiring`), и предпосылку
+// держит своя проба (`TestBestCaseWiringCarriesTheLaneTheRootBuildsForThePosture`).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ФОРМ ОБЪЯВЛЕНИЯ ДВЕ
+//
+// Профиль значений чарта продукта и НАКЛАДКА ОПЕРАТОРА поверх профиля. Вторая
+// законна решением: боевой профиль стоит на `external`, профиля `own` в
+// поставке нет, перевод — накладка (kacho#2699 п. 3, INSTALL.md §1). Накладка
+// берётся у единственного источника (`internal/testsupport/postureoverlay`),
+// который читает и рендерная проба чарта, доказывающая, что накладка поверх
+// своего профиля рендерится и принимается стражем старта (`deploy`, О2).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПЕРЕЧЕНЬ ПОЛОС ВЫВОДИТСЯ ИЗ ТАБЛИЦЫ ТРЕБОВАНИЙ
@@ -61,8 +77,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/postureoverlay"
 )
 
 // КОРНЕЙ, ОБЪЯВЛЯЮЩИХ ПОСАДКУ, ДВА — И ЭТО НЕ УДВОЕНИЕ (задача #2101).
@@ -84,6 +103,12 @@ const (
 	// поставку модуля, поэтому читается в обеих посадках и пропуска не имеет.
 	productChartDirRel = "deploy"
 	productRootName    = "чарт продукта"
+	// overlayRootName — НАКЛАДКИ ОПЕРАТОРА поверх профилей чарта продукта
+	// (kaname#232). Это вторая законная форма объявления посадки: профиля
+	// `own` в поставке нет решением, перевод — накладка (kacho#2699 п. 3,
+	// INSTALL.md §1). Перепись ведёт их отдельным корнем: «накладок ноль»
+	// обязано быть отличимо от «накладки не читали».
+	overlayRootName = "накладки оператора"
 	// umbrellaRootName — ВТОРОЙ корень профилей. На дереве его больше нет:
 	// зонтичный чарт стенда живёт у платформы и в этот репозиторий не входит
 	// (разбор — в шапке `laneProfileSources`). Имя оставлено ради опыта над
@@ -122,9 +147,10 @@ func judgeLaneCoverage(facts []laneFact) (profiled, reachable int, findings []st
 		switch {
 		case f.Reachable && !f.Profiled:
 			findings = append(findings, "полоса "+f.Lane+": процесс её поднимает, и НИ ОДИН профиль "+
-				"развёртывания её не объявляет — возможность есть, и узнать о ней арендатору неоткуда")
+				"развёртывания и ни одна накладка оператора её не объявляет — возможность есть, "+
+				"и узнать о ней арендатору неоткуда")
 		case !f.Reachable && f.Profiled:
-			findings = append(findings, "полоса "+f.Lane+": её объявляют профили ["+
+			findings = append(findings, "полоса "+f.Lane+": её объявляют профили и накладки ["+
 				strings.Join(f.ProfileNames, ", ")+"], а композиционный корень отвергает её при "+
 				"старте — профиль обещает посадку, которой не будет. Отказ: "+f.Refusal)
 		}
@@ -140,16 +166,16 @@ func TestEveryLaneIsEitherProfiledOrProvablyUnreachable(t *testing.T) {
 	}
 
 	profiled, reachable, findings := judgeLaneCoverage(facts)
-	t.Logf("перепись: полос в таблице требований %d · объявлены профилями %d · поднимаются корнем %d · находок %d",
+	t.Logf("перепись: полос в таблице требований %d · объявлены профилями и накладками %d · поднимаются корнем %d · находок %d",
 		len(facts), profiled, reachable, len(findings))
 	for _, f := range facts {
 		switch {
 		case f.Reachable:
-			t.Logf("  %s: поднимается · профили [%s]", f.Lane, strings.Join(f.ProfileNames, ", "))
+			t.Logf("  %s: поднимается · объявления [%s]", f.Lane, strings.Join(f.ProfileNames, ", "))
 		default:
 			// Отказ печатается ВСЕГДА: «профиля нет» обязано быть отличимо от
 			// «профиль забыли», и различает их ровно этот текст.
-			t.Logf("  %s: НЕ поднимается · профили [%s] · отказ: %s",
+			t.Logf("  %s: НЕ поднимается · объявления [%s] · отказ: %s",
 				f.Lane, strings.Join(f.ProfileNames, ", "), f.Refusal)
 		}
 	}
@@ -164,28 +190,12 @@ func TestEveryLaneIsEitherProfiledOrProvablyUnreachable(t *testing.T) {
 func collectLaneFacts(t *testing.T) []laneFact {
 	t.Helper()
 
-	seen := map[config.IdentityProvider]bool{}
-	var lanes []config.IdentityProvider
-	for _, r := range config.LaneRequirements {
-		for _, l := range r.Lanes {
-			if !seen[l] {
-				seen[l] = true
-				lanes = append(lanes, l)
-			}
-		}
-	}
-	sort.Slice(lanes, func(i, j int) bool { return lanes[i].String() < lanes[j].String() })
-
 	declared := profilesDeclaringALane(t)
 
+	lanes := lanesOfTheRequirementTable()
 	out := make([]laneFact, 0, len(lanes))
 	for _, l := range lanes {
-		cfg := config.Config{}
-		cfg.AuthN.Mode = config.ModeProduction
-		cfg.AuthN.IdentityProvider = l
-		// Строка «своя чеканка включена» — стадии НАСТРОЙКИ, её выполняет
-		// профиль; здесь судится только стадия СБОРКИ.
-		cfg.AuthN.TokenSigning.Enabled = true
+		cfg := laneBuildConfig(l)
 
 		f := laneFact{Lane: l.String(), ProfileNames: declared[l.String()]}
 		f.Profiled = len(f.ProfileNames) > 0
@@ -215,12 +225,115 @@ func collectLaneFacts(t *testing.T) []laneFact {
 // поставщик есть. Одна проводка, снятая под чужой посадкой и приложенная ко
 // всем полосам, приписала бы полосе `own` стройки, которых корень под ней не
 // делает, — то есть гейт судил бы о дереве по наблюдению, снятому не о нём.
+//
+// ПОЛОСА ВХОДА ПОДАЁТСЯ ТОЙ, КОТОРУЮ КОРЕНЬ СТРОИТ ПОД ПОСАДКОЙ (задача
+// kaname#232). Здесь подавалась nil-полоса и nil-способы, и `own` была
+// недостижима при ЛЮБОМ состоянии дерева: наблюдатель после Ф3/Ф12 читает
+// собранную полосу, а гейт кормил его отсутствием, которого корень под `own`
+// не производит. Строит ли корень полосу, решает его `loginLaneWanted`; какие
+// у неё способы — её `signInMethods`; наблюдатель читает то и другое так же,
+// как на живом старте (`serve.go`: `observeLaneWiring(…, lane.signInMethods(),
+// lane, …)`). Пул базы не подаётся: провязку полосы судят собранные
+// хранилища, а не соединение, — то же приёмом держит проба полосы
+// `TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels`.
 func bestCaseWiring(t *testing.T, cfg config.Config) config.LaneWiring {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	w := observeLaneWiring(context.Background(), cfg, nil, nil, nil, logger)
+	lane := bestCaseLoginLane(cfg)
+	w := observeLaneWiring(context.Background(), cfg, nil, lane.signInMethods(), lane, logger)
 	w.OwnMintSignerWired = true
 	return w
+}
+
+// bestCaseLoginLane — полоса входа в лучшем исходе её сборки корнем: nil там,
+// где корень её не строит, и собранные хранилища сессии и способов там, где
+// строит. Успешный исход `buildLoginLane` иной полосы не возвращает.
+func bestCaseLoginLane(cfg config.Config) *loginLane {
+	if !loginLaneWanted(cfg) {
+		return nil
+	}
+	return &loginLane{sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil)}
+}
+
+// lanesOfTheRequirementTable — перечень полос, выведенный из таблицы
+// требований, по возрастанию имени.
+func lanesOfTheRequirementTable() []config.IdentityProvider {
+	seen := map[config.IdentityProvider]bool{}
+	var lanes []config.IdentityProvider
+	for _, r := range config.LaneRequirements {
+		for _, l := range r.Lanes {
+			if !seen[l] {
+				seen[l] = true
+				lanes = append(lanes, l)
+			}
+		}
+	}
+	sort.Slice(lanes, func(i, j int) bool { return lanes[i].String() < lanes[j].String() })
+	return lanes
+}
+
+// laneBuildConfig — настройка, под которой судится стадия СБОРКИ полосы.
+//
+// Строка «своя чеканка включена» — стадии НАСТРОЙКИ, её выполняет профиль;
+// здесь судится только стадия сборки.
+func laneBuildConfig(l config.IdentityProvider) config.Config {
+	cfg := config.Config{}
+	cfg.AuthN.Mode = config.ModeProduction
+	cfg.AuthN.IdentityProvider = l
+	cfg.AuthN.TokenSigning.Enabled = true
+	return cfg
+}
+
+// ПРЕДПОСЫЛКА ГЕЙТА: наилучшая проводка несёт ту полосу входа, которую корень
+// строит ПОД ЭТОЙ посадкой (задача kaname#232).
+//
+// Судится фикстура, а не дерево: проводка, снятая без полосы там, где корень
+// её строит, делает вердикт о посадке свойством фикстуры — `own` недостижима
+// при любом состоянии дерева, и обе ветви гейта о ней мертвы.
+//
+// Величины берутся у корня: строит ли он полосу — `loginLaneWanted`, какие
+// способы у построенной — `signInMethods`, какие уровни из них предъявимы —
+// правило `assurance.PresentableLevels`. Своей копии ни одной из трёх здесь нет.
+func TestBestCaseWiringCarriesTheLaneTheRootBuildsForThePosture(t *testing.T) {
+	built := (&loginLane{
+		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
+	}).signInMethods()
+	lanes, building := 0, 0
+	for _, l := range lanesOfTheRequirementTable() {
+		cfg := laneBuildConfig(l)
+
+		wanted := loginLaneWanted(cfg)
+		var levels []string
+		if wanted {
+			levels = assurance.PresentableLevels(built).Strings()
+		}
+		w := bestCaseWiring(t, cfg)
+		t.Logf("посадка %s: корень строит полосу %v · проводка гейта: способы %v, сессия %v, уровни %v",
+			l, wanted, w.HumanCredentialsWired, w.HumanSessionsWired, w.PresentableACRs)
+		if w.HumanCredentialsWired != wanted || w.HumanSessionsWired != wanted {
+			t.Errorf("посадка %s: корень полосу входа строит=%v, а проводка гейта докладывает способы=%v, "+
+				"сессию=%v — вердикт о посадке стал свойством фикстуры, а не дерева",
+				l, wanted, w.HumanCredentialsWired, w.HumanSessionsWired)
+		}
+		if strings.Join(w.PresentableACRs, ",") != strings.Join(levels, ",") {
+			t.Errorf("посадка %s: предъявимые уровни проводки гейта %v, а полоса корня предъявляет %v",
+				l, w.PresentableACRs, levels)
+		}
+		lanes++
+		if wanted {
+			building++
+		}
+	}
+	t.Logf("перепись: посадок осмотрено %d · из них корень строит полосу входа на %d · способов у полосы корня %d",
+		lanes, building, len(built))
+	// ПРЕДПОСЫЛКИ названы отдельно: без посадки, на которой корень строит
+	// полосу, и без способов у построенной сравнение молчало бы о пустом.
+	if building == 0 {
+		t.Fatal("предпосылка НЕ ВЫПОЛНЕНА: ни на одной посадке таблицы корень не строит полосу входа — сравнивать не с чем")
+	}
+	if len(built) == 0 {
+		t.Fatal("предпосылка НЕ ВЫПОЛНЕНА: провязанная полоса корня не назвала ни одного способа — сравнивать не с чем")
+	}
 }
 
 // profileSource — ОДИН файл значений, объявляющий полосу службе прав.
@@ -239,6 +352,11 @@ type profileSource struct {
 	Label string
 	Path  string
 	Keys  []string
+	// Sets — строки НАКЛАДКИ оператора в форме `--set`, лёгшей поверх профиля
+	// Path. Пусто у профиля. У накладки посадка читается из её строк, а Path
+	// обязан разбираться: накладка поверх профиля, которого нет, не объявляет
+	// ничего и считается не разобранной.
+	Sets []string
 }
 
 // rootCensus — объём осмотренного ПО КАЖДОМУ корню отдельно.
@@ -300,7 +418,23 @@ func laneProfileSources(t *testing.T) []profileSource {
 			Keys:  []string{"authn", "identityProvider"},
 		})
 	}
+	for _, o := range postureoverlay.All() {
+		sources = append(sources, profileSource{
+			Root:  overlayRootName,
+			Label: overlayLabel(platformtree.Under(prefix, productChartDirRel+"/"+o.Base()), o.Name()),
+			Path:  filepath.Join(productDir, o.Base()),
+			Keys:  []string{"authn", "identityProvider"},
+			Sets:  o.Sets(),
+		})
+	}
 	return sources
+}
+
+// overlayLabel — координата накладки: профиль, поверх которого она легла, и её
+// имя. Голое имя накладки адресом не является — читатель находки обязан знать,
+// поверх чего её класть.
+func overlayLabel(base, name string) string {
+	return base + " + накладка оператора " + name
 }
 
 // readLaneDeclarations — «полоса → профили, её объявляющие» плюс перепись по
@@ -324,7 +458,7 @@ func readLaneDeclarations(sources []profileSource) (map[string][]string, []rootC
 			census = append(census, rootCensus{Root: s.Root})
 		}
 		census[i].Seen++
-		lane, readable := nestedString(s.Path, s.Keys...)
+		lane, readable := declaredLane(s)
 		if !readable {
 			census[i].Unreadable = append(census[i].Unreadable, s.Label)
 			continue
@@ -415,4 +549,42 @@ func nestedString(path string, keys ...string) (string, bool) {
 	}
 	s, _ := cur.(string)
 	return s, true
+}
+
+// declaredLane — посадка, которую источник объявляет, и разобран ли он.
+//
+// Форм объявления ДВЕ, и обе законны: профиль значений и накладка оператора
+// поверх профиля. Третьей формы в поставке нет; накладка стенда конвейера
+// объявляет посадку стенду, а не поставке (шапка `postureoverlay`).
+func declaredLane(s profileSource) (string, bool) {
+	if len(s.Sets) == 0 {
+		return nestedString(s.Path, s.Keys...)
+	}
+	return overlayString(s.Path, s.Sets, s.Keys...)
+}
+
+// overlayString достаёт значение по пути ключей из строк накладки `--set`.
+//
+// Накладка разобрана, только когда разобран профиль под ней и каждая её строка
+// имеет форму `ключ=величина`: накладка поверх неразобранного профиля не
+// объявляет ничего, и молча прочитанная как «посадку не объявляет» сделала бы
+// гейт слепым ровно на ней. Накладка, не задающая ключа посадки, разобрана и
+// посадки не объявляет — её объявляет профиль под ней, и засчитывает его
+// собственный источник.
+func overlayString(basePath string, sets []string, keys ...string) (string, bool) {
+	if _, readable := nestedString(basePath, keys...); !readable {
+		return "", false
+	}
+	want := strings.Join(keys, ".")
+	lane := ""
+	for _, set := range sets {
+		key, value, ok := strings.Cut(set, "=")
+		if !ok || key == "" {
+			return "", false
+		}
+		if key == want {
+			lane = value
+		}
+	}
+	return lane, true
 }

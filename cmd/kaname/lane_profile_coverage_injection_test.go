@@ -209,3 +209,109 @@ func TestInjection_CensusSeparatesTheTwoRoots(t *testing.T) {
 		t.Fatalf("перепись не назвала оба корня порознь: %v", seen)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// НАКЛАДКА ОПЕРАТОРА — ВТОРАЯ ЗАКОННАЯ ФОРМА ОБЪЯВЛЕНИЯ (задача kaname#232)
+//
+// Инъекции зовут readLaneDeclarations и judgeLaneCoverage — ТЕ ЖЕ тела, что
+// исполняются на дереве. Ось одна на пару: строка посадки в накладке ·
+// читаемость профиля под ней · форма строки.
+
+// overlaySource — накладка оператора поверх названного профиля.
+func overlaySource(base string, sets ...string) profileSource {
+	return profileSource{
+		Root: overlayRootName, Label: overlayLabel("deploy/values.prod.yaml", "synthetic"), Path: base,
+		Keys: []string{"authn", "identityProvider"}, Sets: sets,
+	}
+}
+
+// Законный близнец: накладка поверх разобранного профиля объявляет `own` —
+// поднимаемая полоса засчитана объявленной, находок нет.
+func TestInjection_AnOverlayDeclaringAReachableLaneIsSilent(t *testing.T) {
+	base := writeValues(t, "authn:\n  identityProvider: external\n")
+	src := overlaySource(base, "authn.identityProvider=own", "authn.clientToken.enabled=true")
+
+	declared, census := readLaneDeclarations([]profileSource{src})
+	if got := declared["own"]; len(got) != 1 || got[0] != src.Label {
+		t.Fatalf("объявление накладки не доехало до судьи: %v", declared)
+	}
+	if len(census) != 1 || census[0].Root != overlayRootName || census[0].Parsed != 1 {
+		t.Fatalf("перепись не назвала корень накладок: %+v", census)
+	}
+	_, _, findings := judgeLaneCoverage([]laneFact{{
+		Lane: "own", Reachable: true, Profiled: len(declared["own"]) > 0, ProfileNames: declared["own"],
+	}})
+	if len(findings) != 0 {
+		t.Fatalf("поднимаемая полоса, объявленная накладкой, объявлена находкой: %v", findings)
+	}
+}
+
+// Дефект: та же накладка БЕЗ строки посадки — полосу не объявляет никто, и
+// поднимаемая полоса обязана быть находкой. Отличается от близнеца ровно
+// строкой посадки.
+func TestInjection_AnOverlayWithoutTheLaneLeavesAReachableLaneUndeclared(t *testing.T) {
+	base := writeValues(t, "authn:\n  identityProvider: external\n")
+	src := overlaySource(base, "authn.clientToken.enabled=true")
+
+	declared, census := readLaneDeclarations([]profileSource{src})
+	if len(declared["own"]) != 0 {
+		t.Fatalf("накладка без строки посадки засчитана объявляющей: %v", declared)
+	}
+	if census[0].Parsed != 1 || len(census[0].Unreadable) != 0 {
+		t.Fatalf("накладка разобрана, но посадки не объявляет — перепись обязана это показать: %+v", census)
+	}
+	_, _, findings := judgeLaneCoverage([]laneFact{{
+		Lane: "own", Reachable: true, Profiled: len(declared["own"]) > 0, ProfileNames: declared["own"],
+	}})
+	if len(findings) != 1 || !strings.Contains(findings[0], "ни одна накладка оператора") {
+		t.Fatalf("поднимаемая полоса без объявления не найдена либо находка не называет обе формы: %v", findings)
+	}
+}
+
+// Дефект С ДРУГОЙ СТОРОНЫ: накладка объявляет полосу, которую корень
+// отвергает, — находка несёт координату НАКЛАДКИ, иначе читателю нечем её
+// найти.
+func TestInjection_AnOverlayDeclaringAnUnreachableLaneIsFoundWithItsCoordinate(t *testing.T) {
+	base := writeValues(t, "authn:\n  identityProvider: external\n")
+	src := overlaySource(base, "authn.identityProvider=own")
+
+	declared, _ := readLaneDeclarations([]profileSource{src})
+	_, _, findings := judgeLaneCoverage([]laneFact{{
+		Lane: "own", Reachable: false, Profiled: len(declared["own"]) > 0, ProfileNames: declared["own"],
+		Refusal: "нечем впустить человека",
+	}})
+	if len(findings) != 1 || !strings.Contains(findings[0], src.Label) {
+		t.Fatalf("находка не назвала координату накладки: %v", findings)
+	}
+}
+
+// «ПРОФИЛЬ ПОД НАКЛАДКОЙ НЕ ПРОЧИТАН» НЕ ОЗНАЧАЕТ «ПОСАДКУ НЕ ОБЪЯВЛЯЕТ»:
+// накладка поверх профиля, которого нет, считается не разобранной и в
+// объявления не входит.
+func TestInjection_AnOverlayOverAMissingProfileIsCountedUnparsed(t *testing.T) {
+	src := overlaySource(filepath.Join(t.TempDir(), "нет-такого.yaml"), "authn.identityProvider=own")
+
+	declared, census := readLaneDeclarations([]profileSource{src})
+	if len(declared) != 0 {
+		t.Fatalf("накладка поверх отсутствующего профиля объявила посадку: %v", declared)
+	}
+	if len(census) != 1 || census[0].Parsed != 0 || len(census[0].Unreadable) != 1 {
+		t.Fatalf("накладка поверх отсутствующего профиля не отделена от необъявляющей: %+v", census)
+	}
+}
+
+// Строка не в форме `ключ=величина` — накладка не разобрана: helm её не
+// примет, и засчитать объявление по ней значило бы засчитать то, что не
+// ставится.
+func TestInjection_AnOverlayWithAMalformedLineIsCountedUnparsed(t *testing.T) {
+	base := writeValues(t, "authn:\n  identityProvider: external\n")
+	src := overlaySource(base, "authn.identityProvider=own", "authn.clientToken.enabled")
+
+	declared, census := readLaneDeclarations([]profileSource{src})
+	if len(declared) != 0 {
+		t.Fatalf("накладка с неразборной строкой объявила посадку: %v", declared)
+	}
+	if census[0].Parsed != 0 || len(census[0].Unreadable) != 1 {
+		t.Fatalf("накладка с неразборной строкой не отделена от необъявляющей: %+v", census)
+	}
+}
