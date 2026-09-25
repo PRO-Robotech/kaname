@@ -880,12 +880,37 @@ _HOLDER_CEREMONY = (
 _HOLDER_EDGE_HALF = (
     "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
     "расщепить коллекцию либо переутвердить по фактическому производителю")
-# Четырнадцать коллекций C и D: производитель их утверждений — край платформы
-# либо чужой домен, а копий в платформе нет (набор iam снят оттуда 2026-09-12).
-_HOLDER_PLATFORM_HOME = (
-    "PRO-Robotech/kaname#415 — дом по предмету и шаг конвейера этого дома: "
-    "переутвердить по фактическому производителю, перенести в платформу "
-    "расщеплением либо снять вместе с предметом")
+# ЗАДАЧА #415 РЕШИЛА ИСХОД ПО КАЖДОЙ ИЗ ЧЕТЫРНАДЦАТИ, и держатель называет
+# РЕШЁННЫЙ исход, а не перечень возможных. Прежняя запись «переутвердить,
+# перенести либо снять» стояла у всех четырнадцати одинаково и не говорила, что
+# будет сделано: решённое было неотличимо от нерешённого.
+#
+# Решение по дереву, а не по ярлыку. Пять из четырнадцати были записаны C с
+# доводом «читает `md.resource`», а коммит #50 уже перевёл эти одиннадцать пинов
+# на `md.scope` своей двери: против края они упали бы, исполнимы только на
+# собственном фронте. Их исход — переутвердить по фактическому производителю
+# (служба); `iam-role` гоняется, `iam-group` ждёт ключа посева, три читают
+# предъявителя церемонии и потому держатся #398. `geo-read` снята: обе половины
+# её предмета держит набор geo платформы (`region.py`, `zone.py`, `authz-deny.py`).
+def _holder_platform_move(suite: str) -> str:
+    """Исход «перенести в платформу»: дом по предмету — названный набор платформы."""
+    return (f"PRO-Robotech/kaname#415 — перенос в набор `{suite}` платформы "
+            "(PRO-Robotech/kacho) с названным шагом её конвейера; из дерева службы "
+            "снимается тем же изменением, что заводит шаг там")
+
+
+_HOLDER_FAILCLOSED_OWN = (
+    "PRO-Robotech/kaname#415 — переутвердить по фактическому производителю: "
+    "служба на собственном фронте автономного стенда, волна свёртки базы ЭТОГО "
+    "стенда; различитель производителя отказа снимается пробой стенда")
+_HOLDER_FACADE_SPLIT = (
+    "PRO-Robotech/kaname#415 — расщепить: полосы края (IBT-04 и IBT-10 уже держит "
+    "`gateway/tests/newman/cases/authn_edge.py` платформы, IBT-06 и IBT-15 — туда "
+    "же) уходят в набор края, полосы фасада службы (IBT-05, IBT-12, IBT-13) "
+    "переутверждаются на собственном фронте")
+_HOLDER_OWN_FRONT_SEED_KEY = (
+    "PRO-Robotech/kaname#415 — переутвердить на собственном фронте: посев "
+    "автономного стенда пишет цель привязки `userINVId`, затем шаг задания `stand`")
 # Две коллекции производителя-службы, которые адресуются краю: у каждой своё
 # условие стенда, а задача одна.
 _HOLDER_SERVICE_ON_EDGE = (
@@ -898,21 +923,20 @@ _HOLDER_SECOND_FACTOR = (
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек", _HOLDER_CEREMONY),
-    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", _HOLDER_PLATFORM_HOME),
-    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", _HOLDER_PLATFORM_HOME),
+    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", _HOLDER_FAILCLOSED_OWN),
+    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", _holder_platform_move("services/vpc/tests/newman")),
     "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
     "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
-    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль", _HOLDER_PLATFORM_HOME),
     "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
     "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
     "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
     "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction", _HOLDER_CEREMONY),
     "iam-account-redesign": ("B", "7 человеческих предъявителей из 10", _HOLDER_CEREMONY),
-    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`", _HOLDER_PLATFORM_HOME),
+    "iam-authz-grant-check-propagation": ("B", "выдача → внутренний `iam:check` — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ; вне посева ещё `userINVId`. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
-    "iam-group": ("C", "2 утверждения читают `md.resource`", _HOLDER_PLATFORM_HOME),
+    "iam-group": ("A", "CRUD группы и её членов — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` края не читается; вне посева автономного стенда один ключ — цель привязки `userINVId`", _HOLDER_OWN_FRONT_SEED_KEY),
     "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", _HOLDER_SERVICE_ON_EDGE),
-    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", _HOLDER_PLATFORM_HOME),
+    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", _holder_platform_move("gateway/tests/newman")),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
     "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
@@ -921,23 +945,23 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем", _HOLDER_CEREMONY),
     "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
     "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
-    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", _HOLDER_PLATFORM_HOME),
+    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", _holder_platform_move("gateway/tests/newman")),
     "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
     "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт", ""),
     "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC", ""),
     "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»", _HOLDER_CEREMONY),
-    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)", _HOLDER_PLATFORM_HOME),
+    "iam-role": ("A", "CRUD роли и её операций — глаголы службы; пин отказа — `md.scope` СВОЕЙ двери (`assert_unscoped_rejected('iam.roles.create','account')`, #50), `md.resource` края не читается; все ключи пишет посев автономного стенда", ""),
     "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция", ""),
-    "iam-service-account": ("C", "2 утверждения читают `md.resource`", _HOLDER_PLATFORM_HOME),
+    "iam-service-account": ("B", "служебная учётка и её ключи — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` не читается; 9 шагов из 74 (снятие выпущенных ключей) предъявляют `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
     "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`", ""),
     "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи", ""),
-    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", _HOLDER_PLATFORM_HOME),
-    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B", _HOLDER_PLATFORM_HOME),
+    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", _HOLDER_FACADE_SPLIT),
+    "iam-user": ("B", "пользователь и его удостоверения — глаголы службы; 5 пинов отказа — `md.scope` СВОЕЙ двери (#50); 16 шагов из 152 — человек церемонии (`jwtHumanCeremony`, `…StepUp`), ещё 23 — `jwtAccountAdminAStepUp`. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
     "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`", _HOLDER_CEREMONY),
     "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль", ""),
-    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", _HOLDER_PLATFORM_HOME),
-    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", _HOLDER_PLATFORM_HOME),
-    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", _HOLDER_PLATFORM_HOME),
+    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", _holder_platform_move("services/nlb/tests/newman")),
+    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", _holder_platform_move("services/storage/tests/newman")),
+    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", _holder_platform_move("services/vpc/tests/newman")),
     "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов", _HOLDER_CEREMONY),
     "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`", _HOLDER_CEREMONY),
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому

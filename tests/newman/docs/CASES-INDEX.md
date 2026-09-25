@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 754
+Всего кейсов: 750
 
 ## Перепись по модулям
 
@@ -38,7 +38,6 @@
 | `cases/authz-sa-apitoken.py` | 30 |
 | `cases/basic-access-token.py` | 2 |
 | `cases/docker-lane-credential-kind.py` | 1 |
-| `cases/geo-read.py` | 4 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
@@ -436,15 +435,6 @@
 > Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (#1143).
 
 - `IAM-DOCKER-LANE-BASIC-TOKEN-ONLY`
-
-## `cases/geo-read.py` — 4 кейсов
-
-> Case-set: AUTHENTICATED kacho-geo public reads through the api-gateway.
-
-- `GEO-ZON-GT-CONF-OK`
-- `GEO-REG-GT-CONF-OK`
-- `GEO-ZON-GT-AUTHZ-ANON-DENY`
-- `GEO-REG-GT-AUTHZ-ANON-DENY`
 
 ## `cases/iam-access-binding-account-scope.py` — 9 кейсов
 

@@ -476,14 +476,6 @@ else
   # вердикта выводится из дерева, а не из перечня вызовов), но подхват — сигнал
   # автору, а не норма: место в порядке у коллекции есть, и оно здесь.
   run_one "iam-access-binding-include-revoked"
-  # geo-read — AUTHENTICATED kacho-geo public reads through the api-gateway
-  # (gateway->geo "no children to pick from" 503 regression; api-gateway#83 +
-  # deploy#99). kacho-geo has no own tests/newman/, so the authenticated geo
-  # read lives in this harness (already wired to the authz-fixtures JWT +
-  # api-gateway endpoint). The CI `assert all suites green` step parses EVERY
-  # collections/*.json — so this MUST run here, else the gate reports
-  # `geo-read(no-report)` as a phantom failure.
-  run_one "geo-read"
   run_one "iam-internal-only-check"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
