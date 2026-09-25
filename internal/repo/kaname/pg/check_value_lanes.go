@@ -119,8 +119,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"access_key_challenges": nil,
 	// Запись выпуска токена доступа: идентификатор выпуска и оба момента чеканит
 	// подписант, семейство называет церемония (`RecordAccessToken`, «ИСХОДОВ
-	// ДВА»). Писатель судит отказ таблицы классом, а не именем
-	// (`issuanceRefusal`), и перепись решает её так же — целиком.
+	// ДВА»). Эта строка — единственный дом решения о полосе отказа таблицы:
+	// писатель выпуска (`issuanceRefusal`) спрашивает её и распространяет на
+	// весь класс отказа целостности, своего суждения не держит.
 	issuanceTable: nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"account_admission_rate_limits": nil,
@@ -478,6 +479,14 @@ const (
 	// checkLaneService — значение производит служба.
 	checkLaneService
 )
+
+// writtenWhollyByService — объявляет ли перепись таблицу написанной службой
+// целиком (`nil`): ни одно её значение не приходит от вызывающего. Адаптер,
+// судящий отказ своей таблицы классом, спрашивает это здесь, а не решает сам.
+func writtenWhollyByService(table string) bool {
+	lanes, declared := checkValueLanes[table]
+	return declared && lanes == nil
+}
 
 // checkValueLaneOf — полоса проверки `constraint` таблицы `table` по переписи.
 func checkValueLaneOf(table, constraint string) checkValueLane {

@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
@@ -326,46 +327,83 @@ func TestCheckValueCensus_NewCheckOfAMixedTableIsUndecided(t *testing.T) {
 		"близнец: таблица, которую служба пишет целиком, решает новую проверку построением")
 }
 
-// cvIssuanceDisagreement — отказ проверки таблицы записей выпуска (kaname#319)
-// у обоих её переводчиков: писателя выпуска (`issuanceRefusal`, судит классом
-// отказа) и общего (`wrapPgErr`, судит переписью). Находка называет
-// ограничение и тот ответ, который не фиксированный INTERNAL.
-func cvIssuanceDisagreement(constraint string) []string {
-	pgErr := cvCheckPgErr(constraint, issuanceTable)
-	var out []string
-	for _, a := range []struct {
-		who string
-		err error
-	}{
-		{"писатель выпуска", issuanceRefusal(context.Background(), pgErr, "tok-probe", "tfm-probe")},
-		{"перепись", wrapPgErr(pgErr, "AccessToken", "tok-probe")},
-	} {
-		if !stderrors.Is(a.err, iamerr.ErrInternal) || a.err.Error() != iamerr.ErrInternal.Error() {
-			out = append(out, issuanceTable+"."+constraint+": "+a.who+
-				" — значение производит служба, ждали фиксированный INTERNAL, получено «"+a.err.Error()+"»")
-		}
-	}
-	return out
+// cvIssuanceAnswers — ответы обоих переводчиков отказа таблицы записей выпуска
+// (kaname#319): писателя выпуска (`issuanceRefusal`) и общего (`wrapPgErr`).
+func cvIssuanceAnswers(pgErr *pgconn.PgError) (writer, general error) {
+	return issuanceRefusal(context.Background(), pgErr, "tok-probe", "tfm-probe"),
+		wrapPgErr(pgErr, "AccessToken", "tok-probe")
 }
 
-// TestCheckValueCensus_IssuanceTableAnswersAsItsWriter — у отказа проверки
-// таблицы записей выпуска два переводчика, и ответ у них один. Каждое значение
-// записи производит служба (`RecordAccessToken`, «ИСХОДОВ ДВА»), писатель
-// судит отказ классом, а не именем, — значит и перепись обязана решать таблицу
-// целиком. Имя ограничения синтетическое: решение не зависит от имени, в том
-// числе у проверки, заведённой позже. Инъекция роняет только решение переписи
-// о таблице.
-func TestCheckValueCensus_IssuanceTableAnswersAsItsWriter(t *testing.T) {
+// cvFixedInternal — фиксированный INTERNAL: код и текст без добавок.
+func cvFixedInternal(err error) bool {
+	return stderrors.Is(err, iamerr.ErrInternal) && err.Error() == iamerr.ErrInternal.Error()
+}
+
+// cvIssuanceRefusal — отказ целостности таблицы записей выпуска в форме
+// сервера.
+func cvIssuanceRefusal(code, constraint string) *pgconn.PgError {
+	return &pgconn.PgError{
+		Code:           code,
+		ConstraintName: constraint,
+		TableName:      issuanceTable,
+		Message:        `relation "` + issuanceTable + `" refused the row by "` + constraint + `"`,
+	}
+}
+
+// TestCheckValueCensus_IssuanceTableLaneHasOneHome — решение «каждое значение
+// записи выпуска производит служба» живёт в ОДНОМ месте — строке переписи
+// `issuanceTable: nil`, — и писатель выпуска его спрашивает, а не держит своё.
+//
+// Контроль: оба переводчика отвечают фиксированным INTERNAL на отказ проверки
+// (имя синтетическое: решение от имени не зависит, в том числе у проверки,
+// заведённой позже), писатель — и на повтор идентификатора. Инъекции меняют
+// ТОЛЬКО строку переписи о таблице: писатель, решающий классом отказа сам,
+// остался бы на INTERNAL и назвал бы второй дом. Близнец — ключ семейства:
+// это решение писателя о доменном исходе заведения, а не о полосе ввода, и
+// перепись его не меняет.
+func TestCheckValueCensus_IssuanceTableLaneHasOneHome(t *testing.T) {
 	cvCaptureLog(t)
 	const constraint = "access_tokens_later_ck"
+	check := cvCheckPgErr(constraint, issuanceTable)
+	dup := cvIssuanceRefusal("23505", "access_tokens_pkey")
+	family := cvIssuanceRefusal("23503", issuanceFamilyFK)
 
-	require.Empty(t, cvIssuanceDisagreement(constraint), "контроль: оба переводчика отвечают фиксированным INTERNAL")
+	writer, general := cvIssuanceAnswers(check)
+	require.True(t, cvFixedInternal(writer), "контроль: писатель на отказе проверки, получено «%v»", writer)
+	require.True(t, cvFixedInternal(general), "контроль: общий переводчик на отказе проверки, получено «%v»", general)
+	writer, _ = cvIssuanceAnswers(dup)
+	require.True(t, cvFixedInternal(writer), "контроль: повтор идентификатора выпуска — дефект службы, получено «%v»", writer)
+
+	t.Run("проверка названа вводом", func(t *testing.T) {
+		cvSwapLanes(t, func(m map[string]*checkTableLanes) {
+			m[issuanceTable] = &checkTableLanes{caller: []string{constraint}}
+		})
+		writer, general := cvIssuanceAnswers(check)
+		require.True(t, stderrors.Is(general, iamerr.ErrInvalidArg), "общий переводчик судит переписью, получено «%v»", general)
+		require.True(t, stderrors.Is(writer, iamerr.ErrInvalidArg),
+			"перепись назвала проверку вводом, а писатель ответил «%v»: у решения второй дом", writer)
+	})
 
 	t.Run("таблица снята с переписи", func(t *testing.T) {
 		cvSwapLanes(t, func(m map[string]*checkTableLanes) { delete(m, issuanceTable) })
-		findings := cvIssuanceDisagreement(constraint)
-		require.Len(t, findings, 1, "расходится ровно перепись, писатель судит классом: %v", findings)
-		require.Contains(t, findings[0], issuanceTable+"."+constraint+": перепись", "находка называет ограничение и переводчика")
-		require.Contains(t, findings[0], "invalid argument", "находка называет полученную полосу ввода")
+		for _, refusal := range []*pgconn.PgError{check, dup} {
+			writer, _ := cvIssuanceAnswers(refusal)
+			require.False(t, cvFixedInternal(writer),
+				"перепись о таблице молчит, а писатель ответил INTERNAL на %s: у решения второй дом", refusal.ConstraintName)
+		}
+	})
+
+	t.Run("близнец: ключ семейства", func(t *testing.T) {
+		for name, mutate := range map[string]func(map[string]*checkTableLanes){
+			"перепись как есть":        func(map[string]*checkTableLanes) {},
+			"таблица снята с переписи": func(m map[string]*checkTableLanes) { delete(m, issuanceTable) },
+		} {
+			t.Run(name, func(t *testing.T) {
+				cvSwapLanes(t, mutate)
+				writer, _ := cvIssuanceAnswers(family)
+				require.True(t, stderrors.Is(writer, domain.ErrAccessTokenFamilyNotLive),
+					"исход семейства — решение писателя, перепись его не меняет; получено «%v»", writer)
+			})
+		}
 	})
 }

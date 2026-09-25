@@ -15,8 +15,11 @@
 //     запись в журнале с координатами ограничения. Отказ ввода обвинял бы
 //     клиента в значении, которого он не присылал.
 //
-// Перепись ограничений таблицы на живой схеме держит полноту: ограничение,
-// заведённое позже без решения о полосе, эту пробу краснит.
+// Полосу решает перепись `checkValueLanes` (таблица в ней целиком полоса
+// службы), писатель её спрашивает. Здесь — перепись ограничений таблицы на
+// живой схеме: у каждого названо, чем проба достигает его отказа, и
+// ограничение, заведённое позже без этого, пробу краснит — его исход не
+// подтверждён настоящим отказом сервера.
 package pg_test
 
 import (
@@ -31,14 +34,15 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// issuanceConstraintLanes — решение по КАЖДОМУ ограничению таблицы выпусков.
+// issuanceConstraintReach — чем проба достигает отказа КАЖДОГО ограничения
+// таблицы выпусков (полосу решает перепись `checkValueLanes`, не этот перечень):
 //
 //   - writer — отказ достижим через писателя и приходит от базы;
 //   - precheck — писатель отказывает раньше базы той же полосой (проба без
 //     базы, `access_token_record_lane_test.go`); ограничение остаётся рубежом
 //     для писателя в обход;
 //   - family — доменный исход заведения.
-var issuanceConstraintLanes = map[string]string{
+var issuanceConstraintReach = map[string]string{
 	"access_tokens_pkey":                  "writer",
 	"access_tokens_jti_form_ck":           "writer",
 	"access_tokens_family_form_ck":        "writer",
@@ -71,15 +75,15 @@ func TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated(t *testing.T)
 	require.NotEmpty(t, live, "проверка НЕ ИСПОЛНЯЛАСЬ: у таблицы выпусков не найдено ни одного ограничения")
 
 	for name := range live {
-		_, decided := issuanceConstraintLanes[name]
+		_, decided := issuanceConstraintReach[name]
 		require.True(t, decided,
-			"ограничение %s таблицы выпусков не решено: его отказ ушёл бы в полосу ввода и обвинил "+
-				"бы клиента в значении, которого тот не присылал. Решение — здесь и у писателя", name)
+			"у ограничения %s таблицы выпусков не названо, чем проба достигает его отказа: исход "+
+				"писателя по нему настоящим отказом сервера не подтверждён. Путь — здесь и в пробе полос", name)
 	}
-	for name := range issuanceConstraintLanes {
+	for name := range issuanceConstraintReach {
 		require.True(t, live[name], "решение называет ограничение %s, которого в схеме нет", name)
 	}
-	t.Logf("перепись: ограничений таблицы выпусков %d, решено %d", len(live), len(issuanceConstraintLanes))
+	t.Logf("перепись: ограничений таблицы выпусков %d, решено %d", len(live), len(issuanceConstraintReach))
 }
 
 // TestIntegration_AccessTokenRecordRefusalLanes — настоящие отказы сервера по

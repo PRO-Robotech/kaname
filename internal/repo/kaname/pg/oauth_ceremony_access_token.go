@@ -161,24 +161,35 @@ func issuanceDefect(ctx context.Context, familyID, field, rule string) error {
 
 // issuanceRefusal разбирает отказ базы на заведении записи выпуска.
 //
-// Полоса дефекта судится КЛАССОМ, а не перечнем имён: любой отказ целостности
-// (SQLSTATE класса 23) нашей таблицы, кроме ключа семейства, — значение службы,
-// которое схема не приняла. Ограничение, заведённое позже, попадает в ту же
-// полосу без правки здесь. Полосу проверок таблицы решает перепись
-// `checkValueLanes` — таблица в ней целиком полоса службы, из того же довода
-// («ИСХОДОВ ДВА» у `RecordAccessToken`); что ответ общего переводчика совпадает
-// с ответом писателя, держит `TestCheckValueCensus_IssuanceTableAnswersAsItsWriter`.
-// Исход писателя по каждому ограничению выписан в переписи integration-пробы
-// `TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated`.
+// Исходов три, и решение о каждом живёт в одном месте:
 //
-// Отказ без строки состояния (сервер не ответил) и прочие классы остаются общему
-// переводчику: «не дозвонились» — не дефект значения.
+//   - ключ семейства — доменный исход заведения (`ErrAccessTokenFamilyNotLive`):
+//     это решение писателя, оно не о том, чьё значение, а о том, состоялась ли
+//     выдача;
+//   - любой другой отказ целостности (SQLSTATE класса 23) нашей таблицы —
+//     дефект службы, пока перепись `checkValueLanes` объявляет таблицу
+//     написанной службой целиком (`issuanceTable: nil`). Это объявление —
+//     ЕДИНСТВЕННЫЙ дом решения «каждое значение записи производит служба»
+//     (довод — «ИСХОДОВ ДВА» у `RecordAccessToken`); писатель его спрашивает и
+//     выводит из него следствие на весь класс — проверки, первичный ключ, пустое
+//     значение, — поэтому ограничение, заведённое позже, решено без правки
+//     здесь. Своего суждения о полосе у писателя нет: держит
+//     `TestCheckValueCensus_IssuanceTableLaneHasOneHome`;
+//   - остальное — общему переводчику: отказ без строки состояния («не
+//     дозвонились» — не дефект значения), прочие классы и отказ таблицы, о
+//     которой перепись целиком не говорит.
+//
+// Исход писателя по каждому живому ограничению подтверждён настоящим отказом
+// сервера в integration-пробе полосы; её перепись
+// (`TestIntegration_AccessTokenRecordConstraintsAreAllAdjudicated`) — перечень
+// того, чем проба достигает каждого ограничения, а не второе решение о полосе.
 func issuanceRefusal(ctx context.Context, err error, jti, familyID string) error {
 	f := pgfault.Classify(err)
 	if f.Class == pgfault.ForeignKey && f.Constraint == issuanceFamilyFK {
 		return fmt.Errorf("%w: family %s", domain.ErrAccessTokenFamilyNotLive, familyID)
 	}
-	if f.FromDatabase() && f.Table == issuanceTable && strings.HasPrefix(f.SQLState, "23") {
+	if f.FromDatabase() && f.Table == issuanceTable && strings.HasPrefix(f.SQLState, "23") &&
+		writtenWhollyByService(issuanceTable) {
 		slog.ErrorContext(ctx, issuanceBackstopMessage,
 			append([]any{slog.String("kind", "AccessToken"), slog.String("family", familyID)}, f.LogAttrs()...)...)
 		return iamerr.ErrInternal
