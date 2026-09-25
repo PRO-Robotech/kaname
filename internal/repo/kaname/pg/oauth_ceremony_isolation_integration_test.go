@@ -959,10 +959,25 @@ func endAllSessionsOf(ctx context.Context, w interface {
 
 var sessionEnderDoors = []sessionEnderDoor{
 	{
-		// Собственный выход человека.
+		// Открытие без личности. Снятие записи ему представимо, и судится
+		// дверь, а не вызывающий; собственный выход человека с kaname#382
+		// открывается ключевым замком строки личности (сцена ниже).
 		name: "HumanSessionRepo.Writer",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).Writer(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
+		// Собственный выход человека, вход, повышение, подтверждение второго
+		// фактора, перечеканка запасных кодов — транзакция, открытая ключевым
+		// замком строки личности (kaname#382).
+		name: "HumanSessionRepo.PersonWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).PersonWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}

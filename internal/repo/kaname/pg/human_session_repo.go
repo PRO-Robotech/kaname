@@ -211,6 +211,20 @@ func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.U
 	return w, nil
 }
 
+// PersonWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята строка
+// личности ключевым замком (`holdPersonForKey`, kaname#382).
+func (r *HumanSessionRepo) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.PersonWriter", "")
+	}
+	if err := w.holdPersonForKey(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return w, nil
+}
+
 // sweepUnservableSessionsSQL — оператор уборки записей сессии, которые
 // `Resolve` уже не обслужит: истёкшие и снятые старше порога ($1), партией не
 // больше $2.
@@ -349,6 +363,30 @@ type humanSessionWriter struct {
 // внешний ключ следующей записи.
 const lockPersonForSessionSetSQL = `
 SELECT 1 FROM kaname.users WHERE id = $1 FOR NO KEY UPDATE`
+
+// holdPersonForKey — строка личности ключевым замком (`lockUserForKeySQL`,
+// `FOR KEY SHARE`) — первым оператором транзакции, до любой строки-ребёнка
+// личности (kaname#382). Сила — та, что взяла бы проверка внешнего ключа
+// следующей вставки: замок конфликтует ровно с удалением строки и совместим с
+// остальными писателями личности, поэтому ставит писателя в один порядок с
+// удалением («личность → дети») и никого больше не останавливает.
+//
+// Транзакция, уже держащая строку ДРУГОЙ личности, отказывает — по той же
+// причине, что у замка писателя нескольких сессий. Строки может не быть: тогда
+// держать нечего, и об отсутствии личности судит внешний ключ следующей записи.
+func (w *humanSessionWriter) holdPersonForKey(ctx context.Context, userID domain.UserID) error {
+	if w.person != "" && w.person != userID {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot hold a second one")
+	}
+	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(userID)); err != nil {
+		return mapErr(err, "User", string(userID))
+	}
+	if userID != "" {
+		w.person = userID
+	}
+	return nil
+}
 
 // holdPersonForSessionSet — строка личности замком писателя нескольких сессий,
 // если транзакция ещё не держит её так. Транзакция, уже держащая строку ДРУГОЙ
@@ -641,11 +679,10 @@ func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, subject domain
 		_ = w.tx.Rollback(ctx)
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
-	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
+	if err := w.holdPersonForKey(ctx, subject); err != nil {
 		_ = w.tx.Rollback(ctx)
-		return nil, mapErr(err, "User", string(subject))
+		return nil, err
 	}
-	w.person = subject
 	return w, nil
 }
 

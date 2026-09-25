@@ -450,7 +450,10 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.methods, uc.logger, user.ID)
-	w, err := uc.store.Writer(ctx)
+	// Строка личности — ПЕРВОЙ, до строки способа входа (kaname#382): сверка
+	// кода берёт строку фактора, а вставка сессии — личность проверкой
+	// внешнего ключа; в обратном порядке вход шёл навстречу удалению личности.
+	w, err := uc.store.PersonWriter(ctx, user.ID)
 	if err != nil {
 		return LoginOutput{}, settled, err
 	}

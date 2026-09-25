@@ -123,6 +123,16 @@ func (s serLogoutStore) Writer(ctx context.Context) (humansession.Writer, error)
 	return serLogoutWriter{Writer: w, cutoffs: s.cutoffs, atEnd: s.atEnd}, nil
 }
 
+// PersonWriter — транзакция выхода открывается ключевым замком строки личности
+// (kaname#382); обёртка та же, что у `Writer`.
+func (s serLogoutStore) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := s.Store.PersonWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return serLogoutWriter{Writer: w, cutoffs: s.cutoffs, atEnd: s.atEnd}, nil
+}
+
 type serLogoutWriter struct {
 	humansession.Writer
 	cutoffs *atomic.Int32
