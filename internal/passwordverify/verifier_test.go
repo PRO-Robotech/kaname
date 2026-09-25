@@ -633,3 +633,54 @@ func TestVerifier_F3_31_AbsentMaterialIsComputedAgainstADecoy(t *testing.T) {
 	t.Logf("стоимость: настоящая %v · «материала нет» с выравниванием %v", realCost, absentCost)
 	require.Greater(t, absentCost, realCost/2, "полоса «материала нет» отвечает много быстрее настоящей — оракул существования")
 }
+
+// presentedValue — предъявленное значение, отдающее себя одним методом, как его
+// отдаёт тип фундамента для секрета клиента.
+type presentedValue string
+
+func (p presentedValue) Reveal() string { return string(p) }
+
+// TestVerifyPresented_ComparesWhatThePresentedValueReveals — сверка значения,
+// отдающего себя методом, даёт ТОТ ЖЕ исход, что сверка его строки: совпал,
+// не совпал и «материала нет» — три исхода рядом, каждый с положительным
+// контролем соседа.
+func TestVerifyPresented_ComparesWhatThePresentedValueReveals(t *testing.T) {
+	obs := newRecordingObserver()
+	v := newVerifier(t, 2, obs)
+	hasher, err := passwordverify.NewHasher(passwordverify.Declared{Format: domain.PasswordHashFormatArgon2id,
+		Params: map[domain.PasswordHashCostParam]uint32{
+			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4}})
+	require.NoError(t, err)
+	stored, err := hasher.Hash(rightPassword)
+	require.NoError(t, err)
+
+	require.Equal(t, passwordverify.OutcomeMatched, v.VerifyPresented(stored, presentedValue(rightPassword)).Outcome,
+		"предъявленное значение хранимого не совпало")
+	require.Equal(t, passwordverify.OutcomeMismatched, v.VerifyPresented(stored, presentedValue(wrongPassword)).Outcome,
+		"чужое предъявленное значение совпало")
+	require.Equal(t, passwordverify.OutcomeMaterialMissing,
+		v.VerifyPresented(domain.LoginVerifier{}, presentedValue(rightPassword)).Outcome,
+		"отсутствие материала сведено к другому исходу")
+	require.Equal(t, 1, obs.count(passwordverify.OutcomeMatched), "исход сверки прошёл мимо приёмника")
+	require.Equal(t, 1, obs.count(passwordverify.OutcomeMismatched), "исход сверки прошёл мимо приёмника")
+	require.Equal(t, 1, obs.count(passwordverify.OutcomeMaterialMissing), "исход сверки прошёл мимо приёмника")
+}
+
+// TestVerifier_AlignedOnlyOnceADecoyIsSet — проверяющий говорит, выровнена ли
+// полоса «материала нет»: без выравнивающего значения — нет, после него — да, а
+// отвергнутое значение выравнивания не даёт.
+func TestVerifier_AlignedOnlyOnceADecoyIsSet(t *testing.T) {
+	v := newVerifier(t, 1, newRecordingObserver())
+	require.False(t, v.Aligned(), "проверяющий без выравнивающего значения назвался выровненным")
+	require.Error(t, v.SetDecoy(verifierOf(t, "$unknown$format")))
+	require.False(t, v.Aligned(), "отвергнутое выравнивающее значение выровняло полосу")
+
+	hasher, err := passwordverify.NewHasher(passwordverify.Declared{Format: domain.PasswordHashFormatArgon2id,
+		Params: map[domain.PasswordHashCostParam]uint32{
+			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4}})
+	require.NoError(t, err)
+	decoy, err := hasher.Hash("decoy password of the day")
+	require.NoError(t, err)
+	require.NoError(t, v.SetDecoy(decoy))
+	require.True(t, v.Aligned(), "проверяющий с выравнивающим значением не назвался выровненным")
+}

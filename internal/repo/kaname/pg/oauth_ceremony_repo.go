@@ -41,7 +41,10 @@ package pg
 //
 // # ЧТО ДЕРЖИТ БАЗА, А НЕ ЭТОТ ФАЙЛ
 //
-//   - неделимость обмена и ротации — условный `UPDATE … RETURNING`;
+//   - неделимость обмена и ротации — условный `UPDATE … RETURNING` на
+//     НАЗВАННОМ уровне изоляции (`ceremonyWriterTx()`, решение записано у
+//     оператора обмена): исход проигравшего решает перепроверка условия, и
+//     умолчание сессии его не меняет;
 //   - согласие контекста церемонии между семейством, кодом и токеном —
 //     СОСТАВНОЙ внешний ключ `<t>_family_context_fk` по ПЯТИ столбцам сразу
 //     (`family_id` плюс четыре столбца контекста: клиент, человек, сессия,
@@ -71,6 +74,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -300,7 +304,7 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 		return fmt.Errorf("Illegal argument authorization_code.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return wrapPgErr(err, "AuthorizationCode", in.Context.FamilyID)
 	}
@@ -402,8 +406,96 @@ UPDATE kaname.authorization_codes AS c
 RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
           c.redirect_uri, c.code_challenge, c.code_challenge_method`
 
+// ceremonyWriterTx — УРОВЕНЬ ИЗОЛЯЦИИ, на котором исполняется потребление кода
+// (`exchangeCodeSQL` выше), КАЖДЫЙ другой писатель этого порта и транзакция
+// писателя сессии, отзывающая семейства при снятии (kaname#316).
+//
+// Он НАЗВАН здесь, а не унаследован. Умолчание сессии задаёт не этот файл —
+// конфигурация сервера, `ALTER DATABASE … SET`, `ALTER ROLE … SET`, параметр
+// подключения, — и писатель, чей исход от умолчания зависит, менял бы поведение
+// по чужой настройке, ничем этого не показав.
+//
+// # ПОЧЕМУ READ COMMITTED
+//
+// Одноинструкционный обмен держит строчный замок, и проигравший, СТОЯВШИЙ на
+// строке победителя, после фиксации победителя перепроверяет условие `WHERE` по
+// НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
+// разбирает `refuseCode`, перечитывая помеченную строку, и исход проигравшего —
+// ПОВТОР (LINE-A-1-13, LINE-A-1-17). Перепроверку по новой версии делает ТОЛЬКО
+// этот уровень: при REPEATABLE READ и SERIALIZABLE движок ту же строку не
+// перепроверяет, а отказывает транзакции целиком (40001), и разбору нуля строк
+// вход не достаётся вовсе.
+//
+// Устройство то же у остальных писателей порта, и потому решение одно на всех:
+// ротация, отзыв семейства (вторая отметка — пустая, а не отказ; отсечка по
+// ключу семейства — монотонная вставка с разбором конфликта, которую второй
+// тоже дописывает перепроверкой, а не отказом), проверочное значение клиента.
+// Исход каждого под конкуренцией — перепроверка условия, а не отказ
+// сериализации.
+//
+// # ВЫДАЧА ПРОТИВ СНЯТИЯ СЕССИИ — ПАРА ДВУХ ТРАНЗАКЦИЙ
+//
+// Исход этой пары решает уровень ОБЕИХ сторон, и потому уровень назван у
+// обеих. Выдача — писатель этого порта; снятие исполняется в транзакции
+// писателя сессии, которую открывает `beginHumanSessionWriter` — на этом же
+// уровне, и её отзыв семейств (`revokeFamiliesOfSessionsTx`) судится вместе с
+// ней. Выдача, стоявшая на снятии, перечитывает строку сессии по новой версии
+// и получает «сессия не жива». Снятие, стоявшее на выдаче, которая строку
+// сессии лишь держала, отзывает семейства СЛЕДУЮЩИМ оператором со своим новым
+// снимком — и видит семейство, заведённое выдачей. При унаследованном
+// `repeatable read` или `serializable` у снятия снимок один на транзакцию:
+// семейство выдачи он не видит, а отказа сериализации при выдаче на этом
+// уровне нет, и снятие фиксируется без отзыва заведённого в сессии.
+//
+// # ВЕТВИ «40001 → ПОВТОР» НЕТ, И ЭТО РЕШЕНИЕ, А НЕ УПУЩЕНИЕ
+//
+// На названном уровне эти операторы отказа сериализации не дают. 40001 (как и
+// 40P01) разбирает общий `wrapPgErr` — «повторите запрос», — и ни в какой исход
+// церемонии он не отображается: на этом уровне такая ветвь не получала бы входа,
+// а на ином подменяла бы разбор строки догадкой о том, что случилось.
+//
+// Держит решение `oauth_ceremony_isolation_integration_test.go`: каждый писатель
+// и каждая дверь писателя сессии исполняются под умолчанием продукта и под
+// `serializable`, и ожидание на строке там доказывается состоянием движка, а
+// не паузой. Что транзакции писателей открываются ТОЛЬКО здесь названным
+// уровнем, держит перепись по разбору пакета (`ceremony_writer_openers_test.go`).
+//
+// Функция, а не переменная пакета: значение названо один раз и переписано
+// быть не может.
+func ceremonyWriterTx() pgx.TxOptions { return pgx.TxOptions{IsoLevel: pgx.ReadCommitted} }
+
+// beginWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя в этом порту.
+func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.BeginTx(ctx, ceremonyWriterTx())
+}
+
+// execWriter — одиночный оператор писателя на названном уровне.
+//
+// Оператор, исполненный пулом без транзакции, шёл бы на умолчании сессии — то
+// есть уровень снова был бы унаследован. Цена названного — начало и фиксация
+// лишними репликами; путь, который ею платит (снятие проверочного значения
+// клиента), горячим не является.
+func (r *OAuthCeremonyRepo) execWriter(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx, err := r.beginWriter(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return tag, nil
+}
+
 // ExchangeAuthorizationCode обменивает код на первое поколение обновляющего
 // токена семейства.
+//
+// Транзакция — на названном уровне (`ceremonyWriterTx()`): исход проигравшего
+// одновременного обмена решает именно он.
 //
 // Гашение и выдача идут ОДНОЙ транзакцией: ноль затронутых строк означает
 // откат ВСЕЙ транзакции выдачи — токена в семействе не появляется. Разбор
@@ -421,7 +513,7 @@ func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in Co
 		return domain.RedeemedCode{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
@@ -545,7 +637,7 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 		return domain.RotatedRefreshToken{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
 	}
@@ -621,11 +713,13 @@ func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) er
 // семейства для места предъявления (`writeFamilyCutoffsTx`).
 //
 // Отзыв ИДЕМПОТЕНТЕН: условие `revoked_at IS NULL` делает повторную отметку
-// пустой, а не второй. Два одновременных обнаружения повтора — обычное дело
-// (проигравших гонку больше одного), и второй из них не вправе ни отказать, ни
-// переписать причину первого. Отсечка же пишется БЕЗУСЛОВНО — и при нуле строк
-// отметки: семейство, отмеченное писателем мимо этой двери, получает её на
-// первом же отзыве дверью, а монотонная запись повтору безвредна.
+// пустой, а не второй — на названном уровне (`ceremonyWriterTx()`), где
+// второй, стоявший на строке первого, перепроверяет условие, а не получает
+// отказ. Два одновременных обнаружения повтора — обычное дело (проигравших
+// гонку больше одного), и второй из них не вправе ни отказать, ни переписать
+// причину первого. Отсечка же пишется БЕЗУСЛОВНО — и при нуле строк отметки:
+// семейство, отмеченное писателем мимо этой двери, получает её на первом же
+// отзыве дверью, а монотонная запись повтору безвредна.
 //
 // Возвращается число строк отметки: 1 — отозвано этим вызовом, 0 — уже было.
 func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, reason domain.FamilyRevocationReason) (int64, error) {
@@ -635,7 +729,7 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 	if err := reason.Validate(); err != nil {
 		return 0, err
 	}
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
 		return 0, wrapPgErr(err, "TokenFamily", familyID)
 	}
@@ -730,6 +824,12 @@ func writeFamilyCutoffsTx(ctx context.Context, tx pgx.Tx, familyIDs []string, re
 
 // revokeFamiliesOfSessionsTx отзывает семейства, привязанные к НАЗВАННЫМ
 // сессиям, — в транзакции вызывающего.
+//
+// Вызывающий — писатель сессии, и транзакцию ему открывает
+// `beginHumanSessionWriter` на уровне писателей церемонии (`ceremonyWriterTx()`):
+// оператор ниже видит семейство, заведённое выдачей, на которой стояло снятие,
+// только при новом снимке у КАЖДОГО оператора (раздел «Выдача против снятия
+// сессии» у `ceremonyWriterTx`).
 //
 // # ПОЧЕМУ ЭТОТ ПИСАТЕЛЬ ОБЯЗАН СУЩЕСТВОВАТЬ
 //
@@ -831,7 +931,15 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	if verifier.IsZero() {
 		return fmt.Errorf("Illegal argument interactive_client.secret_verifier: required")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	// Транзакция СВОЯ, а не `execWriter`: материал уходит аргументом ровно
+	// этого оператора, и разрешение гейта удержания стоит на нём, а не на
+	// общем исполнителе, которому материал мог бы прийти откуда угодно.
+	tx, err := r.beginWriter(ctx)
+	if err != nil {
+		return wrapPgErr(err, "InteractiveClient", clientID)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
 		UPDATE kaname.interactive_clients
 		   SET secret_verifier = $2, secret_verifier_set_at = now()
 		 WHERE client_id = $1`, clientID, verifier.Reveal())
@@ -840,6 +948,9 @@ func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientI
 	}
 	if tag.RowsAffected() == 0 {
 		return refuseNoSuchClient(clientID)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return wrapPgErr(err, "InteractiveClient", clientID)
 	}
 	return nil
 }
@@ -851,7 +962,7 @@ func (r *OAuthCeremonyRepo) ClearClientSecretVerifier(ctx context.Context, clien
 	if clientID == "" {
 		return fmt.Errorf("Illegal argument interactive_client.client_id: required")
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.execWriter(ctx, `
 		UPDATE kaname.interactive_clients
 		   SET secret_verifier = '', secret_verifier_set_at = NULL
 		 WHERE client_id = $1`, clientID)
