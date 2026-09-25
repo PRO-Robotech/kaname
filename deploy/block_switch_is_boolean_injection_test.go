@@ -73,7 +73,8 @@ func TestBlockSwitchInjection_EveryLawfulReadFormIsFound(t *testing.T) {
 		{"ключ через pluck", "{{- $_ := pluck \"enabled\" $x }}\n", 1},
 		{"ключ через set", "{{- $_ := set $x \"enabled\" true }}\n", 1},
 		{"ключ сырым литералом", "{{- if index $x `enabled` }}{{ end }}\n", 1},
-		{"путь-литерал", "{{- if include \"other.path\" (list $ \"a.b.enabled\") }}{{ end }}\n", 1},
+		{"путь-литерал, переданный include", "{{- if include \"other.path\" (list $ \"a.b.enabled\") }}{{ end }}\n", 1},
+		{"путь-литерал, переданный template", "{{ template \"other.path\" (list $ \"a.b.enabled\") }}\n", 1},
 		{"с маркерами обрезки", "{{- if $x.enabled -}}{{- end -}}\n", 1},
 	}
 	for _, c := range cases {
@@ -98,6 +99,7 @@ func TestBlockSwitchInjection_LawfulTwinsAreSilent(t *testing.T) {
 		{"YAML вне действия", "token-signing:\n  enabled: true\n"},
 		{"соседнее имя поля", "{{- if $x.enabledBy }}{{ end }}{{ if $x.enabled_count }}{{ end }}\n"},
 		{"экранированный разделитель", "v: {{ \"{{\" }} $labels.enabled {{ \"}}\" }}\n"},
+		{"путь-литерал как имя в словаре", "{{- $m := dict \"KANAME_X__ENABLED\" \"authn.clientToken.enabled\" }}\n"},
 		{"вызов правила", "{{- if not (include \"kaname-svc.blockEnabled\" (list $ \"metricsScrape\")) }}{{ end }}\n"},
 	}
 	for _, c := range cases {
