@@ -380,7 +380,7 @@ data:
       {{- end }}
 
       {{- $ts := $authn.tokenSigning | default dict }}
-      {{- if $ts.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.tokenSigning") }}
       # СВОЯ ЧЕКАНКА ТОКЕНОВ (#897): ключница, подписант, ротация и публикация
       # набора проверочных ключей.
       #
@@ -415,7 +415,7 @@ data:
         {{- end }}
       {{- end }}
       {{- $pc := $authn.presentedCredential | default dict }}
-      {{- if $pc.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.presentedCredential") }}
       # ПРИЁМ УДОСТОВЕРЕНИЯ, ПРЕДЪЯВЛЕННОГО САМИМ АРЕНДАТОРОМ, на публичном
       # слушателе (#2077, #2191).
       #
@@ -450,7 +450,7 @@ data:
         {{- end }}
       {{- end }}
       {{- $ct := $authn.clientToken | default dict }}
-      {{- if $ct.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.clientToken") }}
       # ТОКЕН-ЭНДПОИНТ ПЛАТФОРМЫ (#898): ключ служебной учётки обменивается на
       # токен НАШЕЙ чеканкой, а не у внешнего поставщика (задача #337).
       #
