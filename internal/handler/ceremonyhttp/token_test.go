@@ -18,7 +18,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -59,11 +59,11 @@ func (u *countingUnits) OpenRequest(ctx context.Context) (context.Context, func(
 	}
 }
 
-func newLane(t *testing.T, e ceremony.ExchangeEngine, u ceremony.RequestUnits) (*TokenLane, *Census, *bytes.Buffer) {
+func newLane(t *testing.T, e ceremonyapp.ExchangeEngine, u ceremonyapp.RequestUnits) (*TokenLane, *Census, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
 	census := NewCensus()
-	exchange, err := ceremony.NewExchangeUseCase(ceremony.ExchangeDeps{Engine: e, Units: u, SettleTimeout: time.Second})
+	exchange, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{Engine: e, Units: u, SettleTimeout: time.Second})
 	if err != nil {
 		t.Fatalf("сборка варианта использования: %v", err)
 	}

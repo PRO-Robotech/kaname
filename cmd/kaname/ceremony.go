@@ -37,8 +37,8 @@ import (
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
-	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"

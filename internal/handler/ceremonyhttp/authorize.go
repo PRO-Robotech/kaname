@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
@@ -39,8 +39,8 @@ var singleValued = []string{
 // AuthorizeConfig — зависимости эндпоинта авторизации. Все обязательны.
 type AuthorizeConfig struct {
 	// UseCase — выдача кода: доверие цели, решения домена и сроки вызовов
-	// хранилища (`internal/apps/kaname/api/ceremony`).
-	UseCase *ceremony.AuthorizeUseCase
+	// хранилища (`internal/apps/kaname/api/oauth_ceremony`).
+	UseCase *ceremonyapp.AuthorizeUseCase
 	Census  *Census
 	Logger  *slog.Logger
 }
@@ -83,11 +83,11 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target, trust, err := a.cfg.UseCase.Trust(ctx, clientID, redirect)
 	switch trust {
-	case ceremony.TrustGranted:
-	case ceremony.TrustClientUnknown:
+	case ceremonyapp.TrustGranted:
+	case ceremonyapp.TrustClientUnknown:
 		a.refuseUntrusted(ctx, w, OutcomeAuthorizeClientUnknown, clientID, "client unknown")
 		return
-	case ceremony.TrustRedirectUnregistered:
+	case ceremonyapp.TrustRedirectUnregistered:
 		a.refuseUntrusted(ctx, w, OutcomeAuthorizeRedirectUnregistered, clientID, "return address unregistered")
 		return
 	default:
@@ -116,7 +116,7 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// (4)–(6) Протокол, шов входа, выдача — вариант использования.
-	res := a.cfg.UseCase.Execute(ctx, target, ceremony.AuthorizeInput{
+	res := a.cfg.UseCase.Execute(ctx, target, ceremonyapp.AuthorizeInput{
 		Scopes:              strings.Fields(q.Get("scope")),
 		ResponseKinds:       strings.Fields(q.Get("response_type")),
 		ResponseMode:        q.Get("response_mode"),
@@ -127,18 +127,18 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Session:             presentedSession(r),
 	})
 	switch res.Verdict {
-	case ceremony.VerdictRefusedByRedirect:
+	case ceremonyapp.VerdictRefusedByRedirect:
 		a.refuseByRedirect(ctx, w, target.RedirectURI, res.Wire, OutcomeAuthorizeProtocolRefused, clientID, res.Why)
-	case ceremony.VerdictRefusedUntrusted:
+	case ceremonyapp.VerdictRefusedUntrusted:
 		a.refuseUntrusted(ctx, w, OutcomeAuthorizeProtocolRefused, clientID, res.Why)
-	case ceremony.VerdictLoginRequired:
+	case ceremonyapp.VerdictLoginRequired:
 		a.challenge(ctx, w, OutcomeAuthorizeLoginRequired, clientID, res.Subject, errorBody("login_required"))
-	case ceremony.VerdictStepUpRequired:
+	case ceremonyapp.VerdictStepUpRequired:
 		a.challenge(ctx, w, OutcomeAuthorizeStepUpRequired, clientID, res.Subject, map[string]string{
 			"error":      "insufficient_user_authentication",
 			"acr_values": res.AcrValues,
 		})
-	case ceremony.VerdictIssued:
+	case ceremonyapp.VerdictIssued:
 		// Согласие первопартийного клиента не спрашивается (приёмка §4, 09):
 		// ответ выдачи — сразу перенаправление с кодом. Адрес собрал движок; код
 		// состояния — поверхности (302, приёмка 02).
