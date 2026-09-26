@@ -582,8 +582,11 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	w.t.Helper()
 	// Ёмкость — по наибольшей одновременности проб мира (26: шестнадцать
 	// обменов одним кодом): предмет проб — погашение в базе, а не ёмкость
-	// проверяющего, и отказ по ёмкости был бы отказом фикстуры.
-	v, err := passwordverify.New(16, silentVerifyObserver{})
+	// проверяющего, и отказ по ёмкости был бы отказом фикстуры. Сверка секрета
+	// церемонии занимает не больше половины ёмкости (доля рядом с полосой
+	// входа, `ceremonyport.ClientSecrets`), поэтому ёмкость — вдвое больше
+	// наибольшей одновременности.
+	v, err := passwordverify.New(32, silentVerifyObserver{})
 	if err != nil {
 		w.fixture("проверяющий секрета клиента: %v", err)
 	}
