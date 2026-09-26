@@ -189,10 +189,11 @@ for v in FamilyRevokedByCodeReplay FamilyRevokedByRefreshReplay FamilyRevokedByL
 не подаёт ни один:
 
 ```sh
-# в клоне фундамента
-git grep -n '\.Revoke(' c8b7650112 -- 'oauthceremony/*_test.go' | wc -l                  # → 16
-git grep -n -A4 '\.Revoke(' c8b7650112 -- 'oauthceremony/*_test.go' \
-  | grep -c 'ClientID: *testClientID\|revocationRequest('                                # → 14
+# фундамент — по пину go.mod:8, а не выписанным путём
+D=$(go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib)
+grep -n '\.Revoke(' "$D"/oauthceremony/*_test.go | wc -l                            # → 16
+grep -n -A4 '\.Revoke(' "$D"/oauthceremony/*_test.go \
+  | grep -c 'ClientID: *testClientID\|revocationRequest('                          # → 14
 # оставшиеся: client_secret_test.go (случай «отзыв», сверка секрета) и
 #             endpoints_internal_test.go (вызов доходит до поставщика)
 ```
