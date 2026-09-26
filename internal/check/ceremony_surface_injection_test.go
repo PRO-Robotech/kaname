@@ -728,8 +728,11 @@ func ceremonyInjections() []ceremonyInjection {
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "az.AuthorizePath"}},
 
 		{"I11_local_const_concat_in_package_constructor", func(f *ceremonyFixture) {
-			f.insertAfter("internal/handler/iamhooks", "http_server.go", "NewMux", `mux.Handle("GET /readyz", agg.ReadyHandler())`,
-				"const ceremonyProbePath = \"/iam/v1\" + \"/authorize\"\nmux.Handle(ceremonyProbePath, agg.LiveHandler())")
+			// Якорь — первый оператор конструктора: маршрутов живости и
+			// готовности, на которых здесь стоял якорь, на слушателе вебхуков
+			// больше нет (kaname#360).
+			f.insertAfter("internal/handler/iamhooks", "http_server.go", "NewMux", `mux := http.NewServeMux()`,
+				"const ceremonyProbePath = \"/iam/v1\" + \"/authorize\"\nmux.Handle(ceremonyProbePath, h.TokenHook)")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "вебхуки провайдера личности"}},
 
 		{"I12_registration_inside_login_lane_constructor", func(f *ceremonyFixture) {
