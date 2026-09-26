@@ -95,6 +95,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
@@ -169,10 +170,12 @@ const (
 // выдачи. Сверяется с переписью корня (`rootIssuanceUses`); форма записи —
 // печать узла разбора со сжатыми пробелами. Перечень — корня с собранной
 // церемонией (kaname#423): эндпоинт авторизации и метаданные обнаружения
-// смонтированы на поверхности выдачи рядом с токен-эндпоинтом, и сборка ниже
-// (buildSurface) повторяет монтаж корня.
+// смонтированы на поверхности выдачи рядом с токен-эндпоинтом, объявление
+// аутентификации поверхности выведено из того же обработчика
+// (`issuingSurfaceAuthOf`), и сборка ниже (buildSurface) повторяет корень.
 var lineA1IssuanceRootUses = []string{
 	"Handler: registryTokenHandler",
+	"issuingSurfaceAuthOf(registryTokenHandler)",
 	"mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)",
 	"mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)",
 	"mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)",
@@ -200,9 +203,12 @@ type ceremonyWorld struct {
 	ctx     context.Context
 	pool    *pgxpool.Pool
 	surface *http.ServeMux
-	priv    *ecdsa.PrivateKey
-	kid     string
-	logs    *lockedBuffer
+	// surfaceAuth — объявление аутентификации поверхности, выведенное из её
+	// обработчика так же, как у корня.
+	surfaceAuth servicecontract.Axis[servicecontract.SurfaceAuthMech]
+	priv        *ecdsa.PrivateKey
+	kid         string
+	logs        *lockedBuffer
 
 	user    domain.UserID
 	email   string
@@ -574,6 +580,7 @@ func (w *ceremonyWorld) buildSurface() {
 	mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
 	mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 	w.surface = mux
+	w.surfaceAuth = issuingSurfaceAuthOf(mux)
 }
 
 // ceremonySecretChecker — проверяющий секрета клиента мира: паролей службы,

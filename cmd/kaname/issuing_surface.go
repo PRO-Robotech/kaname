@@ -4,14 +4,77 @@
 package main
 
 import (
+	"net/http"
+	"net/url"
+	"strings"
+
 	"github.com/PRO-Robotech/corelib/servicecontract"
 
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
 
-// issuingSurfaceAuth — решение об аутентификации внешней поверхности выдачи,
-// объявленное по тому, что на ней смонтировано.
+// issuingSurfaceAuthOf — объявление аутентификации внешней поверхности выдачи,
+// ВЫВЕДЕННОЕ из обработчика, который она обслуживает (kaname#423, опыт 423F2
+// проверяющего сборки 425).
+//
+// Прежде объявление собиралось из флага, который композиционный корень ставил
+// рядом с монтажом церемонии: флаг и монтаж — два места об одном факте, и снятая
+// строка флага оставляла объявление прежним при смонтированной церемонии. Здесь
+// источник один — маршрутизатор: объявление называет пути церемонии ровно тогда,
+// когда маршрутизатор их РАЗРЕШАЕТ. Провязку «ось Auth выведена из того же
+// обработчика, что поле Handler» держит гейт
+// `TestIssuingSurfaceAuthIsDerivedFromItsMountedHandler`.
+//
+// Исходов три, и третий — не «не смонтировано»:
+//
+//   - обработчика нет (поверхность не поднимается) либо церемонии на нём нет —
+//     объявление машинных полос;
+//   - оба пути церемонии разрешаются — объявление с церемонией;
+//   - прочесть монтаж нельзя (обработчик не умеет назвать маршрут) либо
+//     смонтирована половина церемонии — ось НЕ ОБЪЯВЛЕНА, и профиль поверхности
+//     отказывает старту (`servicecontract.Surface`, ось Auth): объявить
+//     «церемонии нет» о том, чего не прочли, значило бы объявить наугад.
+func issuingSurfaceAuthOf(h http.Handler) servicecontract.Axis[servicecontract.SurfaceAuthMech] {
+	if h == nil {
+		return issuingSurfaceAuth(false)
+	}
+	routes, readable := h.(interface {
+		Handler(*http.Request) (http.Handler, string)
+	})
+	if !readable {
+		return servicecontract.Axis[servicecontract.SurfaceAuthMech]{}
+	}
+	authorize, aok := routedPath(routes, ceremonyhttp.AuthorizePath)
+	discovery, dok := routedPath(routes, ceremonyhttp.DiscoveryPath)
+	if !aok || !dok || authorize != discovery {
+		return servicecontract.Axis[servicecontract.SurfaceAuthMech]{}
+	}
+	return issuingSurfaceAuth(authorize)
+}
+
+// routedPath — разрешает ли маршрутизатор путь СОБСТВЕННЫМ шаблоном: шаблон
+// равен пути (с приставкой метода либо без). Шаблон-приёмник вроде «/» пути не
+// монтирует. Второе значение — удалось ли спросить: путь, не разбираемый как
+// адрес, — не «не смонтировано».
+//
+// Запрос собирается описанием, а не конструктором с контекстом: он не
+// исполняется и никуда не уходит — маршрутизатор лишь называет шаблон, и
+// контекста, который было бы чем отменять, у этого вопроса нет.
+func routedPath(routes interface {
+	Handler(*http.Request) (http.Handler, string)
+}, path string) (mounted, asked bool) {
+	u, err := url.ParseRequestURI(path)
+	if err != nil {
+		return false, false
+	}
+	_, pattern := routes.Handler(&http.Request{Method: http.MethodGet, URL: u, Header: http.Header{}})
+	return pattern == path || strings.HasSuffix(pattern, " "+path), true
+}
+
+// issuingSurfaceAuth — решение об аутентификации внешней поверхности выдачи по
+// тому, смонтирована ли на ней церемония. Зовёт его ТОЛЬКО issuingSurfaceAuthOf:
+// флаг, поставленный рядом с монтажом, — форма, которую держит гейт.
 //
 // Значение оси называет, ЧЕМ аутентифицируется запрос, — и называет КАЖДЫЙ
 // способ, а исключение без аутентификации — с причиной (ось Auth профиля

@@ -35,6 +35,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -238,6 +239,15 @@ func TestLINEA1_23_CeremonyMountedOnTheIssuingSurfaceAndNowhereElse(t *testing.T
 	}
 	if rec := w.post(lineA1AuthorizePath+":check", nil, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("%s: координата с суффиксом действия %s:check резолвится на поверхности выдачи (код %d)", w.id, lineA1AuthorizePath, rec.Code)
+	}
+	// Объявление аутентификации поверхности, выведенное из её обработчика,
+	// называет оба смонтированных пути церемонии (возврат проверяющего сборки
+	// 425, опыт 423F2).
+	declared, ok := w.surfaceAuth.Get()
+	for _, want := range []string{ceremonyhttp.AuthorizePath, ceremonyhttp.DiscoveryPath} {
+		if !ok || !strings.Contains(string(declared), want) {
+			t.Errorf("%s: объявление аутентификации поверхности с церемонией не называет %s: %q", w.id, want, declared)
+		}
 	}
 
 	got, read, err := rootInternalMounts(".")

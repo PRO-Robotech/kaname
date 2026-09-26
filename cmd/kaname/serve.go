@@ -1246,9 +1246,6 @@ func runServe(cfg config.Config) error {
 			"close_when", "kaname_registry_token_credential_kind_total{outcome=\"key_material_accepted_in_window\"} stops growing")
 	}
 	var registryTokenHandler http.Handler
-	// ceremonyMounted — церемония смонтирована на этой поверхности: её пути
-	// входят в объявление аутентификации поверхности (issuingSurfaceAuth).
-	ceremonyMounted := false
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
@@ -1325,7 +1322,8 @@ func runServe(cfg config.Config) error {
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
 		}
 		if ceremony != nil {
-			ceremonyMounted = true
+			// Объявление поверхности называет эти пути, потому что маршрутизатор
+			// их разрешает (issuingSurfaceAuthOf ниже), а не по флагу рядом.
 			mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
 			mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 			// Читатель переписи исходов — вплотную к монтажу, как у соседних
@@ -1342,7 +1340,7 @@ func runServe(cfg config.Config) error {
 		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
-		Auth:    issuingSurfaceAuth(ceremonyMounted),
+		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
 		// Транспорт поверхности — TLS, собранный из профиля развёртывания выше.
 		TLS: registryTokenTLSConfig,
 	})
