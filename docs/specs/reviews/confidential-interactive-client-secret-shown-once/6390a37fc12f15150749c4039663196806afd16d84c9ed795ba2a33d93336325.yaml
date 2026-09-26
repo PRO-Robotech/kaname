@@ -82,17 +82,56 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    Третья категория, «не выполнилось». Событие публикует курьер; тело — в строке
-    `event_body` ниже.
+  type: issue_comment
+  status: performed
+  database_id: 5847041640
+  node_id: IC_kwDOUO26pM8AAAABXILGaA
+  url: https://github.com/PRO-Robotech/kaname/issues/405#issuecomment-5847041640
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5847041640
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/405
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-26T14:25:56Z'
+  body_sha256: 5c0f4d5c94851c82516a957bec8ba2a31f400047ee2879553352a96c4fca086e
+  subject_sha256: 6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325
+  subject_revision: 0eb3e6e5b7952421cea9d8917cb50d42650fa573
+  verdict: APPROVED
   event_body: 'acceptance-reviewer · APPROVED · 6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325'
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента, по форме ee804f28c, в ветке 405 поверх
+    слияния acc-405 (7b95aa9f8). Ревизия тела 0eb3e6e5b опубликована раньше события: `gh api
+    'repos/PRO-Robotech/kaname/activity?ref=refs/heads/acc-405'` → создание ветки на ce8c7a19f
+    (потомок 0eb3e6e5b) в 2026-09-26T13:49:40Z, событие — 14:25:56Z; `git branch -r --contains
+    0eb3e6e5b` → origin/acc-405. Прежний блок `event` (`type: none`, `status: not_performed`,
+    причина — событие публикует курьер) заменён этим: он описывал момент вердикта, когда события
+    ещё не было. Поле `event_body` оставлено как отдано рецензентом — одной строкой через « · »;
+    опубликовано оно пятью строками заголовка до первой `---`, и именно эту форму судит гейт
+    `.github/scripts/review-event-silence.py`. В `attribution` к факту публикации приведены два
+    поля — `publishing_actor` (было null) и `publication_mode` (было
+    agent_verdict_awaiting_courier). Вердикт, разбор, находки, числа и `effective_approval`
+    (issued/ban1_lifted) НЕ тронуты: дописывающий — `git-operator`, вердикта о санкции он не
+    выносит. Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kaname/issues/comments/5847041640` (id, node_id, user pointpu, MEMBER,
+    `issue_url` → kaname#405, то есть `subject.task`; created_at == updated_at); пять строк тела
+    дословно, каждая ровно одна (`grep -cxF` → 1 по каждой), контроль в другую сторону `grep -cxF
+    'verdict: CHANGES_REQUESTED'` → 0; отпечаток тела — `gh api … | jq -j .body | sha256sum` →
+    5c0f4d5c…, на том же теле `jq -r` → 31b21fda… — другое число о другом входе. Отпечаток
+    предмета снят самостоятельно: `git show
+    0eb3e6e5b7952421cea9d8917cb50d42650fa573:docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+    | sha256sum` → 6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325, совпал с
+    именем файла записи и со строкой `subject_sha256` тела события. Полномочие: `pointpu` в
+    `review_authority.acceptance-reviewer` политики воркспейса (origin/main 6eddaa5e, строка 41),
+    `gh api repos/PRO-Robotech/kaname/collaborators/pointpu/permission` → admin; эпоха
+    post-cutover — `git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+    origin/main` → 0.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: agent_verdict_awaiting_courier
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 scope:
