@@ -298,15 +298,33 @@ SELECT (SELECT count(*) FROM s)::int, (SELECT count(*) FROM ins)::int`
 // же, что у края на браузерной полосе: действительна сессия, аутентифицированная
 // строго ПОЗЖЕ отсечки.
 //
-// Выдача церемонии читает его на КАЖДОМ своём ходе — заведение семейства и
-// выборка кода и токена обновления к обмену (`oauth_ceremony_vaults.go`) — тем
-// же оператором, что живость: предъявление судит токены по отметке выпуска, и
-// выпуск после отсечки из сессии, аутентифицированной до неё, предъявление
-// пропустило бы. Строку отсечки пишет `UserTokenRevocationRepo`; этот предикат
-// её только читает, и написан он один раз — на алиас сессии `s`.
+// Выдача церемонии читает его на КАЖДОМ своём ходе тем же оператором, что
+// живость: заведение семейства, выборка кода и токена обновления к обмену
+// (`oauth_ceremony_vaults.go`) и РЕШАЮЩИЕ условные записи — погашение кода
+// (`exchangeCodeSQL`), замок оборота (`lockRefreshForRotationSQL`) и сам оборот
+// (`rotateRefreshSQL`). Предъявление судит токены по отметке выпуска, и выпуск
+// после отсечки из сессии, аутентифицированной до неё, предъявление
+// пропустило бы. Чтения одного мало: движок читает строку ДО записи, и
+// отсечка, зафиксированная между чтением и записью, чтением не видна — судит
+// её запись (возврат ревью схемы сборки 425, N1). Строку отсечки пишет
+// `UserTokenRevocationRepo`; этот предикат её только читает, и написан он один
+// раз — на алиас сессии `s`.
 const sessionCutOffBySubjectSQL = `EXISTS (
     SELECT 1 FROM kaname.user_token_revocations r
      WHERE r.user_id = s.user_id AND r.revoke_before >= s.authenticated_at)`
+
+// codeSessionCutOffSQL, refreshSessionCutOffSQL — тот же предикат на сессии
+// предъявленной строки: кода (алиас `c`) и токена обновления (алиас `t`).
+// Условная запись и разбор её нуля строк читают ОДИН текст: разойдись они, ноль
+// строк от отсечки разбирался бы как «условие и разбор разошлись».
+const (
+	codeSessionCutOffSQL = `EXISTS (
+    SELECT 1 FROM kaname.human_sessions s
+     WHERE s.id = c.session_id AND ` + sessionCutOffBySubjectSQL + `)`
+	refreshSessionCutOffSQL = `EXISTS (
+    SELECT 1 FROM kaname.human_sessions s
+     WHERE s.id = t.session_id AND ` + sessionCutOffBySubjectSQL + `)`
+)
 
 // IssueAuthorizationCode заводит семейство и его код ОДНОЙ транзакцией.
 //
@@ -427,12 +445,17 @@ SELECT 1 FROM kaname.token_families
 // в неё база отвергает (428C9). Отдельного условия «семейство не отозвано» здесь
 // тоже НЕТ и быть не должно: живость семейства входит в саму производную, и
 // второе её написание разошлось бы с первым молча.
+//
+// Отсечка субъекта сессии кода — в том же операторе (`codeSessionCutOffSQL`):
+// зафиксированная после выборки кода, она отказывает погашению здесь, а не
+// проходит мимо.
 const exchangeCodeSQL = `
 UPDATE kaname.authorization_codes AS c
    SET deactivated_at = now(), deactivated_reason = 'redeemed'
  WHERE c.code_digest = $1
    AND c.active
    AND c.expires_at > now()
+   AND NOT ` + codeSessionCutOffSQL + `
 RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
           c.redirect_uri, c.code_challenge, c.code_challenge_method`
 
@@ -640,6 +663,12 @@ func (r *OAuthCeremonyRepo) ConsumeAuthorizationCode(ctx context.Context, digest
 // consumeCodeTx — погашение кода в транзакции вызывающего: замок семейства
 // ПЕРВЫМ (`lockFamilyOfCodeSQL`, порядок «родитель → ребёнок»), затем оператор
 // обмена (`exchangeCodeSQL`). Число погашенных строк — 1 либо 0.
+//
+// Ноль строк от ОТСЕЧКИ СУБЪЕКТА — не ноль, а отказ
+// `domain.ErrCeremonySubjectCutOff`: ноль строк у порта фундамента — повтор, и
+// повтор отзывает семейство, а журнал назвал бы атакой отзыв доступа. Причина
+// читается ТЕМ ЖЕ предикатом, что в условии (`codeRefusalSQL`), в той же
+// транзакции — второй связи из пула погашение не берёт.
 func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error) {
 	if _, err := tx.Exec(ctx, lockFamilyOfCodeSQL, digest); err != nil {
 		return 0, wrapPgErr(err, "TokenFamily", "")
@@ -656,16 +685,78 @@ func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error)
 	if err = rows.Err(); err != nil {
 		return 0, wrapPgErr(err, "AuthorizationCode", "")
 	}
-	return consumed, nil
+	if consumed != 0 {
+		return consumed, nil
+	}
+	why, familyID, err := adjudicatePresented(ctx, tx, codeRefusalSQL, digest, "AuthorizationCode")
+	if err != nil {
+		return 0, err
+	}
+	if why == presentedCutOff {
+		return 0, fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
+	}
+	return 0, nil
+}
+
+// presentedRefusal — чем предъявленная строка не прошла условную запись обмена
+// либо оборота. Корзины «прочее» нет: четвёртая причина на этой схеме —
+// расхождение условия и разбора, и она отдельный громкий исход.
+type presentedRefusal int
+
+const (
+	presentedUnknown  presentedRefusal = iota // строки нет
+	presentedReplay                           // строка неактивна: погашена, обёрнута либо семейство отозвано
+	presentedCutOff                           // сессия строки отрезана отсечкой субъекта
+	presentedExpired                          // строка активна, но срок вышел
+	presentedDiverged                         // жива, в сроке и не отрезана — условие и разбор разошлись
+)
+
+// codeRefusalSQL, refreshRefusalSQL — разбор нуля строк условной записи: те же
+// признаки, что в её условии, и тот же предикат отсечки.
+const (
+	codeRefusalSQL = `
+SELECT c.active, ` + codeSessionCutOffSQL + `, c.expires_at <= now(), c.family_id
+  FROM kaname.authorization_codes c
+ WHERE c.code_digest = $1`
+	refreshRefusalSQL = `
+SELECT t.active, ` + refreshSessionCutOffSQL + `, t.expires_at <= now(), t.family_id
+  FROM kaname.refresh_tokens t
+ WHERE t.token_digest = $1`
+)
+
+// adjudicatePresented называет причину нуля строк. Порядок — от решения,
+// которое дороже всего потерять: неактивная строка — повтор (по нему отзывается
+// семейство) при любой отсечке; живая, но отрезанная — отсечка; затем срок.
+func adjudicatePresented(ctx context.Context, q rowQuerier, sql, digest, entity string) (presentedRefusal, string, error) {
+	var (
+		active, cutOff, expired bool
+		familyID                string
+	)
+	err := q.QueryRow(ctx, sql, digest).Scan(&active, &cutOff, &expired, &familyID)
+	switch {
+	case stderrors.Is(err, pgx.ErrNoRows):
+		return presentedUnknown, "", nil
+	case err != nil:
+		return 0, "", wrapPgErr(err, entity, "")
+	case !active:
+		return presentedReplay, familyID, nil
+	case cutOff:
+		return presentedCutOff, familyID, nil
+	case expired:
+		return presentedExpired, familyID, nil
+	}
+	return presentedDiverged, familyID, nil
 }
 
 // refuseCode называет ПРИЧИНУ, по которой условие обмена не выполнилось, и —
 // если это ПОВТОР — отзывает всё семейство.
 //
-// Корзины «прочее» у разбора нет, и исходов РОВНО ТРИ: строка либо
-// отсутствует, либо неактивна, либо истекла. Четвёртого на сегодняшней схеме не
-// существует, и появление его означало бы, что условие обмена и этот разбор
-// разошлись — поэтому он отдельный ГРОМКИЙ отказ, а не тихое «повтор».
+// Корзины «прочее» у разбора нет, и исходов РОВНО ЧЕТЫРЕ: строка либо
+// отсутствует, либо неактивна, либо её сессия отрезана отсечкой субъекта, либо
+// истекла (`adjudicatePresented`). Пятого на сегодняшней схеме не существует, и
+// появление его означало бы, что условие обмена и этот разбор разошлись —
+// поэтому он отдельный ГРОМКИЙ отказ, а не тихое «повтор». Отсечка — не
+// повтор: семейство по ней не отзывается.
 //
 // ОТОЗВАННОЕ СЕМЕЙСТВО ОТДЕЛЬНОЙ ВЕТВЬЮ НЕ СТОИТ, И ЭТО НЕ УПУЩЕНИЕ: признак
 // активности строки ПРОИЗВОДЕН от живости семейства, поэтому отозванное
@@ -675,23 +766,14 @@ func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error)
 // живая. Семейство больше не опрашивается вовсе: соединение с ним отвечало на
 // вопрос, ответ на который теперь несёт сама строка.
 func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error {
-	var (
-		active   bool
-		expired  bool
-		familyID string
-	)
-	err := r.pool.QueryRow(ctx, `
-		SELECT c.active, c.expires_at <= now(), c.family_id
-		  FROM kaname.authorization_codes c
-		 WHERE c.code_digest = $1`, digest).Scan(&active, &expired, &familyID)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: digest not found", domain.ErrAuthorizationCodeUnknown)
-	}
+	why, familyID, err := adjudicatePresented(ctx, r.pool, codeRefusalSQL, digest, "AuthorizationCode")
 	if err != nil {
-		return wrapPgErr(err, "AuthorizationCode", "")
+		return err
 	}
-	switch {
-	case !active:
+	switch why {
+	case presentedUnknown:
+		return fmt.Errorf("%w: digest not found", domain.ErrAuthorizationCodeUnknown)
+	case presentedReplay:
 		// ПОВТОР. Отзыв семейства — следствие, неотделимое от решения: вернуть
 		// «повтор», не отозвав, значило бы объявить похищение и ничего по нему
 		// не сделать.
@@ -699,7 +781,9 @@ func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error
 			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
-	case expired:
+	case presentedCutOff:
+		return fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
+	case presentedExpired:
 		return fmt.Errorf("%w: family %s", domain.ErrAuthorizationCodeExpired, familyID)
 	default:
 		return fmt.Errorf("authorization code %s: exchange affected no row while the row is live "+
@@ -716,7 +800,10 @@ SELECT 1 FROM kaname.token_families
    FOR KEY SHARE`
 
 // rotateRefreshSQL — ТОТ ЖЕ механизм, что у обмена кода: условие на прежнее
-// состояние и возврат затронутой строки.
+// состояние и возврат затронутой строки. Отсечка субъекта сессии токена — в
+// том же операторе (`refreshSessionCutOffSQL`): замок оборота строку токена
+// держит, а строку отсечки нет, и отсечка, зафиксированная между замком и
+// оборотом, отказывает обороту здесь.
 const rotateRefreshSQL = `
 UPDATE kaname.refresh_tokens AS t
    SET deactivated_at = now(), deactivated_reason = 'rotated',
@@ -724,6 +811,7 @@ UPDATE kaname.refresh_tokens AS t
  WHERE t.token_digest = $1
    AND t.active
    AND t.expires_at > now()
+   AND NOT ` + refreshSessionCutOffSQL + `
 RETURNING t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.generation`
 
 // RotateRefreshToken ротирует обновляющий токен: предъявленный помечается
@@ -777,31 +865,25 @@ func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRo
 }
 
 // refuseRefresh — разбор нуля затронутых строк ротации, тот же по устройству,
-// что и у обмена кода: исходов РОВНО ТРИ, и отозванное семейство приходит сюда
-// как `!active` — признак производен от его живости.
+// что и у обмена кода: исходов РОВНО ЧЕТЫРЕ (`adjudicatePresented`), и
+// отозванное семейство приходит сюда как `!active` — признак производен от его
+// живости.
 func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) error {
-	var (
-		active   bool
-		expired  bool
-		familyID string
-	)
-	err := r.pool.QueryRow(ctx, `
-		SELECT t.active, t.expires_at <= now(), t.family_id
-		  FROM kaname.refresh_tokens t
-		 WHERE t.token_digest = $1`, digest).Scan(&active, &expired, &familyID)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: digest not found", domain.ErrRefreshTokenUnknown)
-	}
+	why, familyID, err := adjudicatePresented(ctx, r.pool, refreshRefusalSQL, digest, "RefreshToken")
 	if err != nil {
-		return wrapPgErr(err, "RefreshToken", "")
+		return err
 	}
-	switch {
-	case !active:
+	switch why {
+	case presentedUnknown:
+		return fmt.Errorf("%w: digest not found", domain.ErrRefreshTokenUnknown)
+	case presentedReplay:
 		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
 			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
 		}
 		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
-	case expired:
+	case presentedCutOff:
+		return fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
+	case presentedExpired:
 		return fmt.Errorf("%w: family %s", domain.ErrRefreshTokenExpired, familyID)
 	default:
 		return fmt.Errorf("refresh token of family %s: rotation affected no row while the row is "+
