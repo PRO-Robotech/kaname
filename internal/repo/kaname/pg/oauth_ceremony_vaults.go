@@ -42,14 +42,21 @@ package pg
 //
 //  1. RotateRefreshToken берёт замок семейства (порядок «родитель → ребёнок»,
 //     `lockFamilyOfRefreshSQL`) и строку предъявленного токена `FOR UPDATE` с
-//     условием живости В ТОМ ЖЕ операторе. На READ COMMITTED проигравший,
-//     стоявший на строке победителя, перепроверяет условие по НОВОЙ версии и
-//     получает ноль строк — это и есть одновременный повтор (сценарий 28);
+//     условием живости и отсечки субъекта В ТОМ ЖЕ операторе. На READ
+//     COMMITTED проигравший, стоявший на строке победителя, перепроверяет
+//     условие по НОВОЙ версии и получает ноль строк — это и есть
+//     одновременный повтор (сценарий 28);
 //  2. StoreRefreshToken той же транзакцией исполняет оператор ротации 357
 //     (`rotateRefreshSQL`, преемник назван) и заводит преемника
 //     (`insertRefreshSQL`). Замок строки держится от шага 1 до фиксации:
 //     решение и запись неразделимы, и пары «прочитал — потом записал» без
-//     замка здесь нет (ban #10).
+//     замка здесь нет (ban #10). Строку отсечки замок не держит, поэтому
+//     оператор ротации судит отсечку сам.
+//
+// Отсечка субъекта, зафиксированная после выборки, — отказ «записи нет»
+// (ErrGrantNotFound) на КАЖДОЙ решающей записи: погашении кода, замке и
+// обороте. Не ноль строк: ноль у порта — повтор, а повтор отзывает семейство, и
+// журнал назвал бы атакой отзыв доступа.
 //
 // Оборот вне единицы работы — нарушение контракта сборки, а не законный путь.
 //
@@ -467,7 +474,7 @@ func (v *CeremonyVaults) ConsumeAuthorizationCode(ctx context.Context, signature
 	if !ok {
 		n, err := v.repo.ConsumeAuthorizationCode(ctx, signature)
 		if err != nil {
-			return oauthceremony.StoreOutcome{}, err
+			return oauthceremony.StoreOutcome{}, cutOffIsNoGrant(err)
 		}
 		return oauthceremony.RowsTouched(n), nil
 	}
@@ -498,12 +505,37 @@ func (v *CeremonyVaults) ConsumeAuthorizationCode(ctx context.Context, signature
 		// Ноль строк либо отказ: писать нечего, и замок держать незачем.
 		_ = tx.Rollback(ctx)
 		if err != nil {
-			return oauthceremony.StoreOutcome{}, err
+			return oauthceremony.StoreOutcome{}, cutOffIsNoGrant(err)
 		}
 		return oauthceremony.RowsTouched(consumed), nil
 	}
 	rq.tx = tx
 	return oauthceremony.RowsTouched(consumed), nil
+}
+
+// cutOffIsNoGrant — отказ по отсечке субъекта порту фундамента говорит «записи
+// нет»: грант, по которому пришли, отрезан. Причина остаётся в цепочке для
+// журнала; прочие отказы — как есть.
+func cutOffIsNoGrant(err error) error {
+	if stderrors.Is(err, domain.ErrCeremonySubjectCutOff) {
+		return fmt.Errorf("%w: %w", oauthceremony.ErrGrantNotFound, err)
+	}
+	return err
+}
+
+// refuseCutOffRefresh — ноль строк решающей записи оборота: строка, отрезанная
+// отсечкой субъекта, — отказ «записи нет»; иначе nil, и ноль строк разбирает
+// вызывающий. Читает в транзакции единицы работы: второй связи из пула оборот
+// не берёт.
+func refuseCutOffRefresh(ctx context.Context, tx pgx.Tx, digest string) error {
+	why, familyID, err := adjudicatePresented(ctx, tx, refreshRefusalSQL, digest, "RefreshToken")
+	if err != nil {
+		return err
+	}
+	if why != presentedCutOff {
+		return nil
+	}
+	return cutOffIsNoGrant(fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID))
 }
 
 // querier — транзакция запроса, если погашение её открыло, иначе пул.
@@ -619,11 +651,15 @@ func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string
 }
 
 // lockRefreshForRotationSQL — строка предъявленного токена под замком С
-// условием живости в том же операторе. Ноль строк — токен уже обернули
-// (одновременный повтор) либо он не жив.
+// условием живости и отсечки субъекта сессии токена в том же операторе
+// (`refreshSessionCutOffSQL`). Ноль строк — токен уже обернули (одновременный
+// повтор), он не жив либо его сессия отрезана отсечкой — последнее разбирается
+// отдельно (`refuseCutOffRefresh`). Замок берётся на строке токена и только
+// на ней: подзапрос отсечки строк не запирает.
 const lockRefreshForRotationSQL = `
-SELECT 1 FROM kaname.refresh_tokens
- WHERE token_digest = $1 AND family_id = $2 AND active AND expires_at > now()
+SELECT 1 FROM kaname.refresh_tokens t
+ WHERE t.token_digest = $1 AND t.family_id = $2 AND t.active AND t.expires_at > now()
+   AND NOT ` + refreshSessionCutOffSQL + `
    FOR UPDATE`
 
 // RotateRefreshToken — первый шаг оборота (см. шапку): только в единице работы.
@@ -645,6 +681,11 @@ func (v *CeremonyVaults) RotateRefreshToken(ctx context.Context, grantID, signat
 	tag, err := u.tx.Exec(ctx, lockRefreshForRotationSQL, signature, grantID)
 	if err != nil {
 		return oauthceremony.StoreOutcome{}, wrapPgErr(err, "RefreshToken", grantID)
+	}
+	if tag.RowsAffected() == 0 {
+		if err := refuseCutOffRefresh(ctx, u.tx, signature); err != nil {
+			return oauthceremony.StoreOutcome{}, err
+		}
 	}
 	if tag.RowsAffected() == 1 {
 		u.mu.Lock()
@@ -699,8 +740,12 @@ func (v *CeremonyVaults) StoreRefreshToken(ctx context.Context, signature, _ str
 		&rotated.Context.FamilyID, &rotated.Context.ClientID, &rotated.Context.UserID,
 		&rotated.Context.SessionID, &rotated.Context.Scope, &rotated.Generation)
 	if stderrors.Is(err, pgx.ErrNoRows) {
-		// Строка под нашим замком с шага 1 — ноль строк здесь означает, что
-		// условие ротации и условие замка разошлись.
+		// Строка под нашим замком с шага 1: ноль строк здесь — отсечка
+		// субъекта, зафиксированная после замка (её строку замок не держит),
+		// либо расхождение условия ротации и условия замка.
+		if err := refuseCutOffRefresh(ctx, u.tx, pending.digest); err != nil {
+			return oauthceremony.StoreOutcome{}, err
+		}
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("refresh token of family %s: the row locked for rotation "+
 			"no longer matches the rotation condition", pending.familyID)
 	}
