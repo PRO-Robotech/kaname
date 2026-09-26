@@ -17,6 +17,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/publishedkey"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -176,10 +177,12 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 		Claims:   claims,
 	})
 	if err != nil {
-		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w", err)
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	if err := a.recorder.RecordAccessToken(ctx, tok.JTI, grant.GrantID, tok.IssuedAt, tok.ExpiresAt); err != nil {
-		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: record access token issuance: %w", err)
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: record access token issuance: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	return oauthceremony.IssuedAccessToken{
 		Token:     tok.Token,
@@ -216,7 +219,8 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 func (a *AccessTokens) IdentifyAccessToken(ctx context.Context, token string) (string, error) {
 	keys, err := a.keys.PublishedSet(ctx)
 	if err != nil {
-		return "", fmt.Errorf("ceremonyport: identify access token: the published key set is unavailable: %w", err)
+		return "", fmt.Errorf("ceremonyport: identify access token: the published key set is unavailable: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(

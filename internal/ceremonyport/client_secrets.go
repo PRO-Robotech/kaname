@@ -134,7 +134,7 @@ func (c *ClientSecrets) material(ctx context.Context, clientID string) (domain.L
 		return domain.LoginVerifier{}, nil
 	case err != nil:
 		return domain.LoginVerifier{}, fmt.Errorf("ceremonyport: client %s: the secret verifier store did not answer: %w",
-			clientID, err)
+			clientID, iamerr.OnEndedCall(ctx, err))
 	case !has:
 		return domain.LoginVerifier{}, nil
 	}

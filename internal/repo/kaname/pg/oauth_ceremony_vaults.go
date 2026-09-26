@@ -201,7 +201,8 @@ func requestTx(ctx context.Context) (pgx.Tx, bool) {
 // после операции и ДО ответа клиенту.
 func (v *CeremonyVaults) OpenRequest(ctx context.Context) (context.Context, func(context.Context) error) {
 	rq := &ceremonyRequest{}
-	return context.WithValue(ctx, ceremonyRequestKey{}, rq), func(ctx context.Context) error {
+	return context.WithValue(ctx, ceremonyRequestKey{}, rq), func(ctx context.Context) (err error) {
+		defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 		rq.mu.Lock()
 		defer rq.mu.Unlock()
 		if rq.tx == nil || rq.done {
@@ -237,7 +238,8 @@ func unitFrom(ctx context.Context) (*ceremonyUnit, bool) {
 // Begin открывает единицу работы на названном уровне писателей церемонии
 // (`ceremonyWriterTx`): исход проигравшего оборота решает перепроверка условия
 // строки, а не отказ сериализации.
-func (v *CeremonyVaults) Begin(ctx context.Context) (context.Context, error) {
+func (v *CeremonyVaults) Begin(ctx context.Context) (_ context.Context, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	if _, nested := unitFrom(ctx); nested {
 		return ctx, fmt.Errorf("ceremony unit of work: already open in this operation")
 	}
@@ -257,7 +259,8 @@ func (v *CeremonyVaults) Begin(ctx context.Context) (context.Context, error) {
 // Commit закрепляет единицу работы. Оборот, названный первым шагом и не
 // получивший преемника, закрепить нельзя: строка обёртки без преемника
 // схеме невыразима, и молча отпустить замок значило бы потерять решение.
-func (v *CeremonyVaults) Commit(ctx context.Context) error {
+func (v *CeremonyVaults) Commit(ctx context.Context) (err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	u, ok := unitFrom(ctx)
 	if !ok {
 		return fmt.Errorf("ceremony unit of work: commit without an open unit")
@@ -283,7 +286,8 @@ func (v *CeremonyVaults) Commit(ctx context.Context) error {
 }
 
 // Rollback отменяет единицу работы.
-func (v *CeremonyVaults) Rollback(ctx context.Context) error {
+func (v *CeremonyVaults) Rollback(ctx context.Context) (err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	u, ok := unitFrom(ctx)
 	if !ok {
 		return fmt.Errorf("ceremony unit of work: rollback without an open unit")
@@ -313,7 +317,8 @@ SELECT client_id, redirect_uris, grant_types, audiences, token_endpoint_auth_met
 
 // LookupClient отдаёт запись клиента. Клиента нет (либо он снимается) —
 // ErrGrantNotFound, единственный случай пакета в контракте вызова.
-func (v *CeremonyVaults) LookupClient(ctx context.Context, clientID string) (oauthceremony.ClientRegistration, error) {
+func (v *CeremonyVaults) LookupClient(ctx context.Context, clientID string) (_ oauthceremony.ClientRegistration, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	if clientID == "" {
 		return oauthceremony.ClientRegistration{}, oauthceremony.ErrGrantNotFound
 	}
@@ -322,7 +327,7 @@ func (v *CeremonyVaults) LookupClient(ctx context.Context, clientID string) (oau
 		uris, grantTypes, auds []string
 		stored, method         string
 	)
-	err := v.querier(ctx).QueryRow(ctx, lookupCeremonyClientSQL, clientID).Scan(&stored, &uris, &grantTypes, &auds, &method)
+	err = v.querier(ctx).QueryRow(ctx, lookupCeremonyClientSQL, clientID).Scan(&stored, &uris, &grantTypes, &auds, &method)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return oauthceremony.ClientRegistration{}, oauthceremony.ErrGrantNotFound
 	}
@@ -357,7 +362,8 @@ func (v *CeremonyVaults) LookupClient(ctx context.Context, clientID string) (oau
 // (`IssueAuthorizationCode`). Срок кода назначила церемония (граница — не позже
 // срока сессии); в базу он уезжает длительностью и отсчитывается от времени
 // БАЗЫ, которым его и сравнивает погашение.
-func (v *CeremonyVaults) StoreAuthorizationCode(ctx context.Context, signature string, code oauthceremony.AuthorizationCodeRecord) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) StoreAuthorizationCode(ctx context.Context, signature string, code oauthceremony.AuthorizationCodeRecord) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	g := code.Grant
 	expiry, named := g.Session.ExpiresAt[oauthceremony.TokenKindAuthorizationCode]
 	if !named || expiry.IsZero() {
@@ -371,7 +377,7 @@ func (v *CeremonyVaults) StoreAuthorizationCode(ctx context.Context, signature s
 	if redirect == "" {
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("authorization code: the grant carries no redirect_uri")
 	}
-	err := v.repo.IssueAuthorizationCode(ctx, NewAuthorizationCode{
+	err = v.repo.IssueAuthorizationCode(ctx, NewAuthorizationCode{
 		Context: domain.CeremonyContext{
 			FamilyID: g.GrantID, ClientID: g.ClientID, UserID: g.Session.Subject,
 			SessionID: g.Session.SessionID, Scope: append([]string(nil), g.GrantedScopes...),
@@ -414,7 +420,8 @@ SELECT c.family_id, c.client_id, c.user_id, c.session_id, c.scope, c.redirect_ur
 //   - не погашен, но не жив (истёк по времени базы, семейство отозвано) либо
 //     строки нет → ErrGrantNotFound: истечение — не признак похищения;
 //   - жив → запись.
-func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature string) (oauthceremony.AuthorizationCodeRecord, error) {
+func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature string) (_ oauthceremony.AuthorizationCodeRecord, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	var (
 		row            ceremonyGrantRow
 		redirect       string
@@ -423,7 +430,7 @@ func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature s
 		codeExpiry     time.Time
 		consumed, live bool
 	)
-	err := v.querier(ctx).QueryRow(ctx, fetchCodeSQL, signature, familyBoundSeconds()).Scan(
+	err = v.querier(ctx).QueryRow(ctx, fetchCodeSQL, signature, familyBoundSeconds()).Scan(
 		&row.familyID, &row.clientID, &row.userID, &row.sessionID, &row.scope, &redirect,
 		&challenge, &method, &codeExpiry, &consumed, &live,
 		&row.acr, &row.createdAt, &row.authTime, &row.bound, &row.audiences)
@@ -455,7 +462,8 @@ func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature s
 // В единице запроса (OpenRequest) погашение открывает её транзакцию и НЕ
 // закрепляется: замок строки держится до конца запроса (см. шапку). Вне её —
 // своя транзакция слоя доступа (`OAuthCeremonyRepo.ConsumeAuthorizationCode`).
-func (v *CeremonyVaults) ConsumeAuthorizationCode(ctx context.Context, signature string) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) ConsumeAuthorizationCode(ctx context.Context, signature string) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	rq, ok := requestFrom(ctx)
 	if !ok {
 		n, err := v.repo.ConsumeAuthorizationCode(ctx, signature)
@@ -520,14 +528,12 @@ UPDATE kaname.access_tokens SET expires_at = expires_at
 // StoreAccessToken подтверждает, что выпуск под jti записан в семействе гранта
 // (запись положил порт выпуска). Ноль строк — выпуск не записан: церемония
 // отвергает исход как нарушение контракта, и токен клиенту не уезжает.
-func (v *CeremonyVaults) StoreAccessToken(ctx context.Context, signature string, grant oauthceremony.GrantRecord) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) StoreAccessToken(ctx context.Context, signature string, grant oauthceremony.GrantRecord) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	if signature == "" || grant.GrantID == "" {
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("access token: neither the issuance nor its family may be unnamed")
 	}
-	var (
-		tagRows int64
-		err     error
-	)
+	var tagRows int64
 	if u, ok := unitFrom(ctx); ok {
 		tag, execErr := u.tx.Exec(ctx, confirmIssuanceSQL, signature, grant.GrantID)
 		tagRows, err = tag.RowsAffected(), execErr
@@ -581,13 +587,14 @@ SELECT t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.expires_at,
 //   - обёрнут → грант ВМЕСТЕ с ErrRefreshTokenRotated (повтор: по нему
 //     отзывается семейство);
 //   - жив → грант. Живой, но истёкший по времени базы — ErrGrantNotFound.
-func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string) (oauthceremony.GrantRecord, error) {
+func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string) (_ oauthceremony.GrantRecord, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	var (
 		row                      ceremonyGrantRow
 		expiry                   time.Time
 		familyLive, rotated, due bool
 	)
-	err := v.pool.QueryRow(ctx, fetchRefreshSQL, signature, familyBoundSeconds()).Scan(
+	err = v.pool.QueryRow(ctx, fetchRefreshSQL, signature, familyBoundSeconds()).Scan(
 		&row.familyID, &row.clientID, &row.userID, &row.sessionID, &row.scope, &expiry,
 		&familyLive, &rotated, &due,
 		&row.acr, &row.createdAt, &row.authTime, &row.bound, &row.audiences)
@@ -618,7 +625,8 @@ SELECT 1 FROM kaname.refresh_tokens
    FOR UPDATE`
 
 // RotateRefreshToken — первый шаг оборота (см. шапку): только в единице работы.
-func (v *CeremonyVaults) RotateRefreshToken(ctx context.Context, grantID, signature string) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) RotateRefreshToken(ctx context.Context, grantID, signature string) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	u, ok := unitFrom(ctx)
 	if !ok {
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("refresh token rotation outside a unit of work: " +
@@ -647,7 +655,8 @@ func (v *CeremonyVaults) RotateRefreshToken(ctx context.Context, grantID, signat
 // StoreRefreshToken заводит токен обновления: в обороте — преемника той же
 // транзакцией, что обёртка предшественника; вне оборота — первое поколение
 // семейства (обмен кода). Связь с токеном доступа несёт семейство.
-func (v *CeremonyVaults) StoreRefreshToken(ctx context.Context, signature, _ string, grant oauthceremony.GrantRecord) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) StoreRefreshToken(ctx context.Context, signature, _ string, grant oauthceremony.GrantRecord) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	u, ok := unitFrom(ctx)
 	if !ok {
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("refresh token outside a unit of work")
@@ -684,7 +693,7 @@ func (v *CeremonyVaults) StoreRefreshToken(ctx context.Context, signature, _ str
 			grant.GrantID, pending.familyID)
 	}
 	var rotated domain.RotatedRefreshToken
-	err := u.tx.QueryRow(ctx, rotateRefreshSQL, pending.digest, signature).Scan(
+	err = u.tx.QueryRow(ctx, rotateRefreshSQL, pending.digest, signature).Scan(
 		&rotated.Context.FamilyID, &rotated.Context.ClientID, &rotated.Context.UserID,
 		&rotated.Context.SessionID, &rotated.Context.Scope, &rotated.Generation)
 	if stderrors.Is(err, pgx.ErrNoRows) {
@@ -709,13 +718,14 @@ const dropRefreshSQL = `SELECT active FROM kaname.refresh_tokens WHERE token_dig
 // для обёрнутого токена, который из оборота уже выведен: снимать нечего (ноль
 // строк — законный исход). Снятие ЖИВОГО одиночного токена в схеме невыразимо:
 // токен снимает отзыв его семейства, и такой вызов — отказ, а не молчаливый ноль.
-func (v *CeremonyVaults) DropRefreshToken(ctx context.Context, signature string) (oauthceremony.StoreOutcome, error) {
+func (v *CeremonyVaults) DropRefreshToken(ctx context.Context, signature string) (_ oauthceremony.StoreOutcome, err error) {
+	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	var q rowQuerier = v.pool
 	if u, ok := unitFrom(ctx); ok {
 		q = u.tx
 	}
 	var active bool
-	err := q.QueryRow(ctx, dropRefreshSQL, signature).Scan(&active)
+	err = q.QueryRow(ctx, dropRefreshSQL, signature).Scan(&active)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return oauthceremony.RowsTouched(0), nil
 	}
