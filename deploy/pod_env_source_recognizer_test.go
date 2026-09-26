@@ -24,20 +24,42 @@
 //     карты выводится в любой законной форме (перечень форм с пробой на каждую —
 //     `lawfulPodEnvSourceForms`); адрес, который разбор не выводит, — ОТКАЗ с
 //     координатой, а не пропуск: кандидат вне переписи рендер не проверит вовсе.
-//  2. РЕНДЕР решает, кто из кандидатов источник: в карту кладётся пробный ключ,
-//     и источник — та карта, чей пробный ключ оказался в ИМЕНИ переменной
-//     окружения контейнера. Рендер же называет, как ключ становится именем
-//     (приставка и окончание, 392j), и суд теней кладёт ручку так, чтобы в поде
-//     оказалась именно она.
+//  2. РЕНДЕР решает, кто из кандидатов источник: в карту кладётся пробный ключ
+//     вида ручки стража при КАЖДОМ условии суда (посадка own и боевой профиль
+//     как есть), и источник — та карта, чей пробный ключ оказался в ИМЕНИ
+//     переменной окружения контейнера. Рендер же называет, как ключ становится
+//     именем (приставка и окончание, 392j), — и называет каждую форму, какую
+//     показал при каком-либо условии: одна карта может давать имя двумя
+//     проходами и двумя формами. Тени каждой формы суд судит при первом
+//     условии, её показавшем, и кладёт ручку так, чтобы в поде оказалась
+//     именно она.
 //
-// Лишний кандидат стоит одного рендера; пропущенный — молчание, которое и было
-// дефектом. Поэтому избыток — на первой ступени, решение — на второй.
+// Лишний кандидат стоит двух-трёх рендеров; пропущенный — молчание, которое и
+// было дефектом. Поэтому избыток — на первой ступени, решение — на второй, и у
+// решения три исхода, а не два (`confirmPodEnvSources`): источник; не источник —
+// только когда пробный ключ лёг в другое место рендера, а каждый проход по
+// карте стоит в файле шаблона вне всякого условия и упоминает ключ безусловно;
+// иначе — находка «не подтверждён и не опровергнут». Кандидат, чей
+// пробный ключ не дошёл ни до какого места (проход под условием, которого суд
+// не создаёт, либо ключ отфильтрован, опыты 392p–392r), — находка, а не «не
+// источник». Источник, чьи показанные формы имени не достигают какой-то ручки
+// (приставка, окончание, смена регистра), молчит о ней по той же мере: только
+// когда каждый проход вне условия и упоминает ключ безусловно; иначе
+// невыполненная ветвь могла дать другую форму, и это находка
+// (`postureShadowFindings`).
 //
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ. Источник — КЛЮЧ карты. Перечень элементов, у
 // которых имя берётся из поля элемента (опыт 392k), и `envFrom` — другой класс и
 // другая задача. Перечень ключей, полученный выражением, которого разбор не
 // выводит (не `keys`), кандидатом не становится; шаблон, собранный из строки
-// (`tpl`), разбором не читается.
+// (`tpl`), разбором не читается. Законный фильтр, отсекающий ключи вида ручки
+// (392s), суд от выключателя не отличает: это находка «не подтверждён», ложная
+// тревога, а не молчание. Условие, выраженное не ветвью, а значением внутри
+// действия (`ternary` или `default` по ручке в выражении имени), разбор не
+// видит: имя такого прохода судится при двух условиях суда и только при них.
+// Проход под условием, чьи показанные формы достигают КАЖДОЙ ручки, судится
+// этими формами: другая форма, которую дала бы лишь невыполненная ветвь, при
+// этом не судится.
 package deploy_test
 
 import (
@@ -151,15 +173,23 @@ type envCandidate struct {
 	// ключ рендера кладётся картой с этими полями, иначе рендер отказал бы
 	// раньше и не тем.
 	fields []string
+	// branched — хоть один проход по ключам этой карты во всех шаблонах чарта
+	// стоит под условием (ветвь, тело внешнего range, define) либо упоминает
+	// ключ не безусловно (`plainPass`). Он решает, вправе ли рендер ОПРОВЕРГНУТЬ
+	// кандидата (`confirmPodEnvSources`) и вправе ли показанные формы имени
+	// молчать о ручке, которой не достигают (`postureShadowFindings`).
+	branched bool
 }
 
 // walkEnv — общее для одного прохода разбора: точки мест вызова define,
-// признак вызова по вычисляемому имени, найденные кандидаты.
+// признак вызова по вычисляемому имени, найденные кандидаты и их проходы под
+// условием.
 type walkEnv struct {
 	sites      map[string]tplValue
 	dynamic    bool
 	judge      bool
 	candidates map[string]map[string]bool
+	branched   map[string]bool
 }
 
 func (e *walkEnv) site(name string, arg tplValue) {
@@ -172,11 +202,14 @@ func (e *walkEnv) site(name string, arg tplValue) {
 // tplScope — точка и переменные в месте шаблона. Переменные — указатели:
 // присваивание `$x = …` и `set $x …` во вложенной структуре меняют ту же
 // переменную, а объявление `$x := …` заводит новую до `end` своей структуры.
+// gated — место исполняется не при всяком рендере: внутри ветви if и with, тела
+// или else внешнего range, внутри define.
 type tplScope struct {
-	dot  tplValue
-	vars map[string]*tplValue
-	env  *walkEnv
-	tree *parse.Tree
+	dot   tplValue
+	vars  map[string]*tplValue
+	env   *walkEnv
+	tree  *parse.Tree
+	gated bool
 }
 
 func (s tplScope) child(dot tplValue) tplScope {
@@ -184,7 +217,14 @@ func (s tplScope) child(dot tplValue) tplScope {
 	for k, v := range s.vars {
 		vars[k] = v
 	}
-	return tplScope{dot: dot, vars: vars, env: s.env, tree: s.tree}
+	return tplScope{dot: dot, vars: vars, env: s.env, tree: s.tree, gated: s.gated}
+}
+
+// branch — место внутри ветви: исполняется не при всяком рендере.
+func (s tplScope) branch(dot tplValue) tplScope {
+	c := s.child(dot)
+	c.gated = true
+	return c
 }
 
 func (s tplScope) bind(name string, v tplValue) { nv := v; s.vars[name] = &nv }
@@ -261,7 +301,8 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 	}
 	sort.Strings(defs)
 
-	env := &walkEnv{sites: map[string]tplValue{}, candidates: map[string]map[string]bool{}}
+	env := &walkEnv{sites: map[string]tplValue{}, candidates: map[string]map[string]bool{},
+		branched: map[string]bool{}}
 	pass := func() error {
 		for _, n := range names {
 			if mains[n].Root == nil {
@@ -283,7 +324,7 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 			if !called || env.dynamic {
 				dot = unknownValue
 			}
-			s := tplScope{dot: dot, vars: map[string]*tplValue{}, env: env, tree: set[n]}
+			s := tplScope{dot: dot, vars: map[string]*tplValue{}, env: env, tree: set[n], gated: true}
 			s.bind("$", dot)
 			if err := walkTemplate(set[n].Root, s); err != nil {
 				return err
@@ -310,7 +351,7 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 
 	out := make([]envCandidate, 0, len(env.candidates))
 	for p, fs := range env.candidates {
-		c := envCandidate{path: p}
+		c := envCandidate{path: p, branched: env.branched[p]}
 		for f := range fs {
 			c.fields = append(c.fields, f)
 		}
@@ -353,18 +394,18 @@ func walkTemplate(n parse.Node, s tplScope) error {
 	case *parse.IfNode:
 		base := s.child(s.dot)
 		base.declare(x.Pipe, resolvePipe(x.Pipe, s))
-		if err := walkTemplate(x.List, base.child(s.dot)); err != nil {
+		if err := walkTemplate(x.List, base.branch(s.dot)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	case *parse.WithNode:
 		v := resolvePipe(x.Pipe, s)
 		base := s.child(s.dot)
 		base.declare(x.Pipe, v)
-		if err := walkTemplate(x.List, base.child(v)); err != nil {
+		if err := walkTemplate(x.List, base.branch(v)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	case *parse.RangeNode:
 		over := resolvePipe(x.Pipe, s)
 		if err := judgeRange(x, over, s); err != nil {
@@ -375,10 +416,10 @@ func walkTemplate(n parse.Node, s tplScope) error {
 		for _, d := range x.Pipe.Decl {
 			base.bind(d.Ident[0], unknownValue)
 		}
-		if err := walkTemplate(x.List, base.child(unknownValue)); err != nil {
+		if err := walkTemplate(x.List, base.branch(unknownValue)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	}
 	return nil
 }
@@ -422,6 +463,7 @@ func judgeRange(r *parse.RangeNode, over tplValue, s tplScope) error {
 	if valueVar != "" {
 		collectFieldsOf(r.List, valueVar, fields)
 	}
+	plain := plainPass(r.List, key) && !s.gated
 	for _, src := range sources {
 		if s.env.candidates[src] == nil {
 			s.env.candidates[src] = map[string]bool{}
@@ -429,8 +471,90 @@ func judgeRange(r *parse.RangeNode, over tplValue, s tplScope) error {
 		for f := range fields {
 			s.env.candidates[src][f] = true
 		}
+		if !plain {
+			s.env.branched[src] = true
+		}
 	}
 	return nil
+}
+
+// passEscapes — функции, через которые ключ уходит из тела прохода туда, где
+// рендер его места не называет: в define (`include`, `tpl`) и во внешнюю карту
+// (`set`, семейство `merge`).
+var passEscapes = map[string]bool{
+	"include": true, "tpl": true, "set": true, "unset": true,
+	"merge": true, "mergeOverwrite": true, "mustMerge": true, "mustMergeOverwrite": true,
+}
+
+// plainPass — проход, где ключ и переменные, объявленные из него в теле,
+// упоминаются только действиями верхнего уровня тела: вне ветвей if и with, вне
+// вложенных range, вне вызова define (`template`, `include`, `tpl`), вне
+// присваивания внешней переменной (`=`) и правки карты (`set`, `merge`). У
+// такого прохода выполненный проход — это выполненное КАЖДОЕ упоминание ключа, и
+// место, куда рендер положил пробный ключ, — всё, куда проход его кладёт.
+func plainPass(list *parse.ListNode, key string) bool {
+	if list == nil {
+		return true
+	}
+	tainted := map[string]bool{key: true}
+	for _, n := range list.Nodes {
+		switch x := n.(type) {
+		case *parse.TextNode, *parse.CommentNode:
+		case *parse.ActionNode:
+			if !mentionsAnyOf(x.Pipe, tainted) {
+				continue
+			}
+			if x.Pipe.IsAssign || callsAnyOf(x.Pipe, passEscapes) {
+				return false
+			}
+			for _, d := range x.Pipe.Decl {
+				tainted[d.Ident[0]] = true
+			}
+		default:
+			for v := range tainted {
+				if bodyMentions(&parse.ListNode{Nodes: []parse.Node{n}}, v) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func mentionsAnyOf(n parse.Node, keys map[string]bool) bool {
+	for k := range keys {
+		if mentions(n, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// callsAnyOf — зовёт ли конвейер (и вложенные в его аргументы) одну из функций.
+func callsAnyOf(n parse.Node, funcs map[string]bool) bool {
+	switch x := n.(type) {
+	case *parse.PipeNode:
+		if x == nil {
+			return false
+		}
+		for _, c := range x.Cmds {
+			if callsAnyOf(c, funcs) {
+				return true
+			}
+		}
+	case *parse.CommandNode:
+		for i, a := range x.Args {
+			if id, ok := a.(*parse.IdentifierNode); ok && i == 0 && funcs[id.Ident] {
+				return true
+			}
+			if callsAnyOf(a, funcs) {
+				return true
+			}
+		}
+	case *parse.ChainNode:
+		return callsAnyOf(x.Node, funcs)
+	}
+	return false
 }
 
 // bodyMentions — упоминает ли тело ключ: переменную key (с учётом затенения
@@ -766,25 +890,56 @@ func resolveArg(n parse.Node, s tplScope) tplValue {
 // folded — шаблон меняет регистр ключа: пробный ключ написан заглавными, и
 // изменить его могло лишь понижение — такой источник имени ручки стража
 // (заглавными) не даёт вовсе.
+// cond — первое условие суда, при котором рендер показал ЭТУ форму имени; при
+// нём же суд судит её тени. Карта, давшая имя несколькими формами, — несколько
+// источников, по одному на форму.
 type envSource struct {
 	envCandidate
 	prefix, suffix string
 	folded         bool
+	cond           podEnvCondition
 }
 
-// podEnvCanary — пробный ключ кандидата: заглавные буквы и цифры, чтобы и
-// `--set`, и преобразования регистра его не портили.
-func podEnvCanary(i int) string { return fmt.Sprintf("QZCANARY%dQZ", i) }
+// podEnvCondition — условие рендера поверх боевого профиля chartProfiles:
+// накладка `--set`, при которой ищется пробный ключ и судится тень.
+type podEnvCondition struct {
+	name    string
+	overlay []string
+}
+
+// with — накладка условия плюс названные `--set`; копия, а не общий срез:
+// append в общий срез переписал бы его соседям.
+func (c podEnvCondition) with(sets ...string) []string {
+	return append(append([]string{}, c.overlay...), sets...)
+}
+
+// podEnvConditions — условия суда по порядку. Первое — посадка own: при ней тень
+// ручки стража и есть дефект (#392), и при ней же судятся прежние источники.
+// Второе — боевой профиль как есть (посадка external): проход, выключенный на
+// own и включённый на поставке, судится там, где он включён.
+var podEnvConditions = []podEnvCondition{
+	{name: "накладка own", overlay: ownPostureOverlay},
+	{name: "боевой профиль", overlay: nil},
+}
+
+// podEnvCanary — пробный ключ кандидата ВИДА РУЧКИ СТРАЖА: приставка `KANAME_`,
+// заглавные буквы, цифры, подчёркивание. Так его пропускает фильтр, которым
+// шаблон отбирал бы ключи-ручки (392q), и не портят ни `--set`, ни
+// преобразования регистра.
+func podEnvCanary(i int) string { return fmt.Sprintf("KANAME_QZCANARY%dQZ", i) }
 
 // valueSets — `--set`, кладущие под ключ key карты кандидата значение: картой с
-// полями, которые читает тело, либо строкой.
+// полями, которые читает тело, либо строкой. Значения полей от ключа не
+// зависят: иначе пробный ключ оказался бы в рендере значением поля, и место,
+// куда его положил проход, было бы неотличимо от места, куда его положил сам
+// пробный рендер.
 func valueSets(c envCandidate, key, value string) []string {
 	if len(c.fields) == 0 {
 		return []string{fmt.Sprintf("%s.%s=%s", c.path, key, strings.ReplaceAll(value, ",", `\,`))}
 	}
 	sets := make([]string, 0, len(c.fields))
 	for _, f := range c.fields {
-		sets = append(sets, fmt.Sprintf("%s.%s.%s=%s", c.path, key, f, "kaname-"+strings.ToLower(strings.ReplaceAll(key, "_", "-"))))
+		sets = append(sets, fmt.Sprintf("%s.%s.%s=%s", c.path, key, f, "kaname-"+strings.ToLower(f)))
 	}
 	return sets
 }
@@ -825,29 +980,102 @@ func podEnvNames(t *testing.T, rendered string) []string {
 	return names
 }
 
-// confirmPodEnvSources — ступень 2: кандидат есть источник, если его пробный
-// ключ оказался в ИМЕНИ переменной окружения контейнера. Отказ рендера с
-// пробным ключом — не «не источник», а несостоявшееся суждение: находка.
-func confirmPodEnvSources(t *testing.T, dir string, cands []envCandidate) (sources []envSource, findings []string, renders int) {
+// confirmPodEnvSources — ступень 2. Пробный ключ кандидата кладётся при КАЖДОМ
+// условии суда (`podEnvConditions`), а не до первого подтверждения, и исход у
+// кандидата один из трёх — «выпал без суждения» среди них нет:
+//
+//   - ИСТОЧНИК: пробный ключ оказался в ИМЕНИ переменной окружения контейнера
+//     хоть при одном условии; источник — каждая форма имени, которую рендер
+//     показал при каком-либо условии, и тени каждой формы суд судит при первом
+//     условии, её показавшем. Форма, которую показало лишь второе условие
+//     (окончание имени под посадкой own, голое — на поставке), иначе выпала бы
+//     из суда: при первом условии она невидима;
+//   - НЕ ИСТОЧНИК (refuted): ни при одном условии имени он не дал, а рендер
+//     положил его в другое место (том, порт, аннотация, значение), и КАЖДЫЙ
+//     проход по карте стоит в файле шаблона вне всякого условия и упоминает
+//     ключ безусловно (`plainPass`): такие проходы исполнены при каждом рендере
+//     целиком, и ни один не положил пробный ключ в имя переменной;
+//   - НАХОДКА «не подтверждён и не опровергнут»: рендер отказал; пробный ключ не
+//     дошёл ни до какого места рендера ни при одном условии (проход выключен
+//     условием, которого суд не создаёт, либо ключ отфильтрован); проход стоит
+//     под условием либо ключ в нём под ветвью — и что положила бы
+//     невыполненная ветвь, рендер не называет: место, где лёг пробный ключ,
+//     мог дать и не этот проход (другой проход, карта, выведенная целиком).
+func confirmPodEnvSources(t *testing.T, dir string, cands []envCandidate) (sources []envSource, refuted, findings []string, renders int) {
 	t.Helper()
+	condNames := make([]string, 0, len(podEnvConditions))
+	for _, cond := range podEnvConditions {
+		condNames = append(condNames, cond.name)
+	}
+candidates:
 	for i, c := range cands {
 		canary := podEnvCanary(i)
-		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, valueSets(c, canary, "qzvalue")...)
-		renders++
-		if err != nil {
-			findings = append(findings, fmt.Sprintf("кандидат %s: рендер с пробным ключом %s отказал — источник не "+
-				"подтверждён и не опровергнут:\n%s", c.path, canary, headOf(out)))
-			continue
-		}
-		for _, name := range podEnvNames(t, out) {
-			if at := strings.Index(strings.ToUpper(name), canary); at >= 0 {
-				sources = append(sources, envSource{envCandidate: c, prefix: name[:at], suffix: name[at+len(canary):],
-					folded: name[at:at+len(canary)] != canary})
-				break
+		seen := false
+		forms := map[string]bool{}
+		for _, cond := range podEnvConditions {
+			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, cond.with(valueSets(c, canary, "qzvalue")...)...)
+			renders++
+			if err != nil {
+				findings = append(findings, fmt.Sprintf("кандидат %s: рендер с пробным ключом %s отказал (%s) — источник не "+
+					"подтверждён и не опровергнут:\n%s", c.path, canary, cond.name, headOf(out)))
+				continue candidates
 			}
+			for _, src := range envSourcesIn(t, out, c, canary, cond) {
+				if !forms[src.form()] {
+					forms[src.form()] = true
+					sources = append(sources, src)
+				}
+			}
+			seen = seen || strings.Contains(strings.ToUpper(out), canary)
+		}
+		switch {
+		case len(forms) > 0:
+		case !seen:
+			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ %s не дошёл ни до какого места рендера ни при "+
+				"одном условии суда (%s) — проход по карте выключен условием, которого суд не создаёт, либо ключ "+
+				"отфильтрован: источник не подтверждён и не опровергнут", c.path, canary, strings.Join(condNames, ", ")))
+		case c.branched:
+			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ %s рендер положил не в имя переменной пода, а "+
+				"проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него — что положила "+
+				"бы невыполненная ветвь, рендер не называет: источник не подтверждён и не опровергнут", c.path, canary))
+		default:
+			refuted = append(refuted, c.path)
 		}
 	}
-	return sources, findings, renders
+	return sources, refuted, findings, renders
+}
+
+// envSourcesIn — источники кандидата в рендере out: по одному на КАЖДУЮ форму
+// имени переменной окружения контейнера, в которой оказался пробный ключ. Одна
+// карта даёт имя не обязательно одним проходом и не обязательно одной формой
+// (приставка текстом в одном проходе, голое имя в другом), и форма первого
+// найденного имени о прочих ничего не говорит: суд теней судит каждую.
+func envSourcesIn(t *testing.T, out string, c envCandidate, canary string, cond podEnvCondition) []envSource {
+	t.Helper()
+	var srcs []envSource
+	forms := map[string]bool{}
+	for _, name := range podEnvNames(t, out) {
+		at := strings.Index(strings.ToUpper(name), canary)
+		if at < 0 {
+			continue
+		}
+		s := envSource{envCandidate: c, cond: cond, prefix: name[:at], suffix: name[at+len(canary):],
+			folded: name[at:at+len(canary)] != canary}
+		if !forms[s.form()] {
+			forms[s.form()] = true
+			srcs = append(srcs, s)
+		}
+	}
+	return srcs
+}
+
+// form — форма имени переменной пода: как ключ карты становится именем.
+func (s envSource) form() string {
+	f := s.prefix + "<ключ>" + s.suffix
+	if s.folded {
+		f += " (регистр изменён)"
+	}
+	return f
 }
 
 // keyFor — ключ карты источника, который даст переменной пода имя env; ложь —

@@ -17,6 +17,13 @@
 // ссылки на ключ и дома источника (392h, 392i, 392j, 392m, 392n, `keys`);
 // законные близнецы — прежние env и secrets формой `$.Values.` (392g) и ключ,
 // дающий имя не переменной пода, а тому (392o), порту, аннотации пода, значению.
+// Кандидат, чей пробный ключ не дошёл до имени переменной при условии
+// подтверждающего рендера (392p–392s: источник под посадкой own и external, под
+// фильтром ключа и выключателем, одна карта двумя проходами, ветвь и
+// присваивание в теле прохода), и карта, чья форма имени, показанная первой,
+// ручки не даёт, а другая форма — даёт (второй проход, ветвь, окончание под
+// посадкой), — находка с источником либо «не подтверждён и не опровергнут», а
+// не молчание; законный близнец — приставка, не дающая ручки, без условия.
 package deploy_test
 
 import (
@@ -495,6 +502,7 @@ func TestPostureShadowInjection_KeyThatNamesNoPodVariableIsSilent(t *testing.T) 
               value: {{ $envName | quote }}
             {{- end }}
 `},
+		{"ключ за приставкой, не дающей ручки, без всякого условия", envRangeInTheTree, prefixedExtraEnvRange},
 	} {
 		t.Run(twin.name, func(t *testing.T) {
 			dir := chartCopy(t)
@@ -524,4 +532,184 @@ func TestPostureShadowInjection_UnconfirmableCandidateIsNotSilent(t *testing.T) 
 	require.Containsf(t, joined, "кандидат extraEnv: рендер с пробным ключом",
 		"кандидат, которого рендер не подтвердил и не опроверг, выпал из суда молча:\n%s", joined)
 	require.Contains(t, joined, "источник не подтверждён и не опровергнут")
+}
+
+// ── Пробный ключ, не дошедший до имени переменной: опыты 392p–392s ────────────
+
+// extraEnvRange — новый источник `extraEnv` в том виде, в каком его вставлял
+// проверяющий: ключ — имя переменной пода.
+const extraEnvRange = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
+
+// chartPatch — одна вставка в шаблон развёртывания копии чарта: за якорем.
+type chartPatch struct{ anchor, insert string }
+
+// Чем находка «не подтверждён и не опровергнут» объясняет себя.
+const (
+	nowhereWhy   = "не дошёл ни до какого места рендера ни при одном условии суда"
+	branchedWhy  = "проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него"
+	unreachedWhy = "ручек стража ими недостижимо"
+)
+
+// Формы имени, которые рендер показывает НЕ первой либо НЕ при первом условии
+// суда: приставка текстом всегда и голое имя под выключателем (двумя проходами и
+// ветвью одного прохода), окончание имени под посадкой own, та же карта двумя
+// безусловными проходами — с приставкой и голым именем.
+const (
+	prefixedExtraEnvRange = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: EXTRA_{{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
+	prefixedAndBareUnderBranch = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: EXTRA_{{ $k }}
+              value: {{ $v | quote }}
+            {{- if $.Values.extraEnvEnabled }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+`
+	suffixUnderOwnPosture = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}{{ if eq $.Values.authn.identityProvider "own" }}_OWN{{ end }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
+)
+
+// gatedExtraEnvForms — новый источник `extraEnv` в копии чарта, чей ключ доходит
+// до имени переменной пода НЕ при всяком условии: под посадкой own (392p), под
+// фильтром ключа (392q), под отдельным выключателем (392r), под посадкой
+// external; одна карта двумя проходами — в имя тома всегда, в имя переменной
+// под выключателем; один проход, где ключ даёт имя под ветвью, а иначе —
+// значение; один проход, откуда ключ уходит присваиванием во внешнюю переменную;
+// проход под выключателем, когда та же карта целиком выведена в аннотацию;
+// законный фильтр, отсекающий ключи вида ручки (392s). До починки каждая форма
+// молчала либо судилась не тем: пробный ключ не был похож на ручку,
+// подтверждающий рендер шёл одной посадкой, а суд — другой, и кандидат, чей
+// пробный ключ не дошёл до имени, выпадал без находки. Последние четыре — форма
+// имени, показанная первой, ручки не даёт (приставка, окончание под посадкой
+// own), а другая форма той же карты даёт: вторым проходом, ветвью, на
+// поставке. До починки суд брал одну форму — первое найденное имя при первом
+// подтвердившем условии — и молчал: «недостижимых пар 6», находок 0, а ручка
+// доходила до пода.
+//
+// Молчания среди исходов нет. judged — условие суда подтвердило источник, и
+// находка по каждой ручке называет его ключом; иначе — ровно одна находка
+// «не подтверждён и не опровергнут», называющая кандидата. У 392s это ложная
+// тревога, и она названа вслух: законный фильтр суд от выключателя не отличает и
+// называет себя несостоявшимся, а не молчит.
+var gatedExtraEnvForms = []struct {
+	name    string
+	patches []chartPatch
+	judged  bool
+	why     string // чем находка «не подтверждён» объясняет себя: каждое правило опровержения держит свой случай
+}{
+	{name: "392p источник под посадкой own", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		"            {{- if eq .Values.authn.identityProvider \"own\" }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "392q фильтр ключа по приставке ручки", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		`            {{- range $k, $v := .Values.extraEnv }}
+            {{- if hasPrefix "KANAME_" $k }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+`}}},
+	{name: "источник под посадкой external", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		"            {{- if eq .Values.authn.identityProvider \"external\" }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "392r источник под отдельным выключателем", why: nowhereWhy, patches: []chartPatch{{envRangeInTheTree,
+		"            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "одна карта: том всегда, переменная под выключателем", why: branchedWhy, patches: []chartPatch{
+		{"            name: {{ .Values.name }}-config\n", `        {{- range $k, $v := .Values.extraEnv }}
+        - name: {{ $k }}
+          configMap:
+            name: {{ $v | quote }}
+        {{- end }}
+`},
+		{envRangeInTheTree, "            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "один проход: ключ в имени под ветвью, иначе в значении", why: branchedWhy, patches: []chartPatch{{envRangeInTheTree,
+		`            {{- range $k, $v := .Values.extraEnv }}
+            {{- if $.Values.extraEnvEnabled }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- else }}
+            - name: KANAME_EXTRA_ENV_KEY
+              value: {{ $k | quote }}
+            {{- end }}
+            {{- end }}
+`}}},
+	{name: "один проход: ключ уходит наружу присваиванием", why: branchedWhy, patches: []chartPatch{{envRangeInTheTree,
+		`            {{- $extraNames := list }}
+            {{- range $k, $v := .Values.extraEnv }}
+            {{- $extraNames = append $extraNames $k }}
+            - name: KANAME_EXTRA_ENV_KEY
+              value: {{ $k | quote }}
+            {{- end }}
+            {{- if .Values.extraEnvEnabled }}
+            {{- range $extraNames }}
+            - name: {{ . }}
+              value: "1"
+            {{- end }}
+            {{- end }}
+`}}},
+	{name: "проход под выключателем, карта целиком в аннотации", why: branchedWhy, patches: []chartPatch{
+		{"        app: {{ .Values.name }}\n      annotations:\n", "        kaname.io/extra-env: {{ toJson .Values.extraEnv | quote }}\n"},
+		{envRangeInTheTree, "            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "392s законный фильтр, отсекающий ключи вида ручки", why: nowhereWhy, patches: []chartPatch{{envRangeInTheTree,
+		`            {{- range $k, $v := .Values.extraEnv }}
+            {{- if not (hasPrefix "KANAME_" $k) }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+`}}},
+	{name: "одна карта: имя с приставкой всегда, голое имя под выключателем", why: unreachedWhy, patches: []chartPatch{{envRangeInTheTree,
+		prefixedExtraEnvRange + "            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "один проход: имя с приставкой всегда, голое имя под ветвью", why: unreachedWhy, patches: []chartPatch{{envRangeInTheTree,
+		prefixedAndBareUnderBranch}}},
+	{name: "один проход: окончание имени под посадкой own", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		suffixUnderOwnPosture}}},
+	{name: "одна карта двумя безусловными проходами: с приставкой и голое имя", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		prefixedExtraEnvRange + extraEnvRange}}},
+}
+
+func TestPostureShadowInjection_CandidateWhoseProbeKeyReachesNoNameIsNotSilent(t *testing.T) {
+	rows := postureGuardRows(t)
+	for _, f := range gatedExtraEnvForms {
+		t.Run(f.name, func(t *testing.T) {
+			dir := chartCopy(t)
+			for _, p := range f.patches {
+				patchInCopy(t, dir, filepath.Join("templates", "deployment.yaml"), p.anchor, p.anchor+p.insert)
+			}
+			got, n := postureShadowFindings(t, dir)
+			var own, foreign []string
+			for _, g := range got {
+				if strings.HasPrefix(g, "extraEnv") || strings.HasPrefix(g, "кандидат extraEnv") {
+					own = append(own, g)
+					continue
+				}
+				foreign = append(foreign, g)
+			}
+			joined := strings.Join(own, "\n")
+			require.Emptyf(t, foreign, "находка пришла и от неиспорченного источника:\n%s", strings.Join(foreign, "\n"))
+			if f.judged {
+				require.Lenf(t, own, len(rows)+1, "источник, подтверждённый условием суда, судим не по каждой ручке (рендеров %d):\n%s",
+					n, strings.Join(got, "\n"))
+				for _, r := range rows {
+					require.Containsf(t, joined, "extraEnv."+r.env+": рендер прошёл — ручка стража посадки уехала в окружение пода",
+						"ручка %s в новом источнике не найдена", r.env)
+				}
+			} else {
+				require.Lenf(t, own, 1, "кандидат, чей пробный ключ не дошёл до имени, выпал из суда молча (рендеров %d):\n%s",
+					n, strings.Join(got, "\n"))
+				require.Contains(t, own[0], "источник не подтверждён и не опровергнут")
+				require.Containsf(t, own[0], f.why, "находка объясняет себя не тем правилом — инъекция уронила не свой предмет")
+				t.Logf("находка: %s", headOf(own[0]))
+			}
+			t.Logf("перепись: рендеров %d · находок %d", n, len(got))
+		})
+	}
 }

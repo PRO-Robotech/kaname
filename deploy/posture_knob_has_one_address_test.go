@@ -27,8 +27,9 @@
 // (`pod_env_source_recognizer_test.go`): разбор всех шаблонов чарта называет
 // кандидатов — карты, по чьим ключам проходит шаблон, в любой законной форме
 // адреса; адрес, который разбор не выводит, — отказ с координатой, а не
-// пропуск. Рендер с пробным ключом решает, чей ключ стал ИМЕНЕМ переменной
-// окружения пода, и как именно.
+// пропуск. Рендер с пробным ключом вида ручки при каждом условии суда решает,
+// чей ключ стал ИМЕНЕМ переменной окружения пода, в каких формах и при каком
+// условии; кандидат, которого рендер не подтвердил и не опроверг, — находка.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
@@ -205,15 +206,18 @@ func TestOwnPostureOverlayMovedIntoTheEnvironmentIsRefused(t *testing.T) {
 // ── Р4 ───────────────────────────────────────────────────────────────────────
 
 // postureShadowFindings судит чарт по пути dir: источники окружения пода
-// подтверждены рендером, и каждая ручка стража в каждом источнике — отказ
-// правила тени с источником и канонической координатой; все сразу — один
-// перечень с числом; соседняя ручка — рендер.
+// подтверждены рендером, и каждая ручка стража в каждом источнике — в каждой
+// показанной форме имени, при первом условии, её показавшем, — отказ правила
+// тени с источником и канонической координатой; все сразу — один перечень с
+// числом; соседняя ручка — рендер. Кандидат, которого рендер не подтвердил и
+// не опроверг, — находка; ручка, которой не достигает ни одна показанная форма
+// карты с проходом под условием, — тоже.
 func postureShadowFindings(t *testing.T, dir string) (findings []string, renders int) {
 	t.Helper()
 	cands, err := podEnvSourcesIn(chartTemplates(t, filepath.Join(dir, "templates")))
 	require.NoError(t, err)
 	require.NotEmpty(t, cands, "кандидатов в источники окружения пода не выведено — обход пуст")
-	sources, unconfirmed, confirmRenders := confirmPodEnvSources(t, dir, cands)
+	sources, refuted, unconfirmed, confirmRenders := confirmPodEnvSources(t, dir, cands)
 	findings = append(findings, unconfirmed...)
 	renders += confirmRenders
 	require.NotEmpty(t, sources, "ни один кандидат не подтверждён рендером источником окружения пода — "+
@@ -221,7 +225,19 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 	rows := postureGuardRows(t)
 
 	unreachable := 0
+	// reached — путь кандидата → ручки, имя которых даёт хоть одна показанная
+	// рендером форма; order — пути в порядке источников.
+	reached := map[string]map[string]bool{}
+	candOf := map[string]envSource{}
+	formsOf := map[string][]string{}
+	var order []string
 	for _, src := range sources {
+		if reached[src.path] == nil {
+			reached[src.path] = map[string]bool{}
+			candOf[src.path] = src
+			order = append(order, src.path)
+		}
+		formsOf[src.path] = append(formsOf[src.path], src.form())
 		var all []string
 		var judged []postureGuardRow
 		var keys []string
@@ -231,8 +247,9 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 				unreachable++
 				continue
 			}
+			reached[src.path][r.env] = true
 			sets := valueSets(src.envCandidate, key, r.value)
-			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture(sets...)...)
+			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(sets...)...)
 			renders++
 			findings = append(findings, judgeShadow(t, src, src.label(key, r.env), out, err,
 				[]postureGuardRow{r}, []string{key})...)
@@ -243,12 +260,34 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 		if len(judged) == 0 {
 			continue
 		}
-		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture(all...)...)
+		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(all...)...)
 		renders++
 		findings = append(findings, judgeShadow(t, src, src.path+" (все ручки сразу)", out, err, judged, keys)...)
 		if err != nil && !strings.Contains(out, fmt.Sprintf("— %d.", len(judged))) {
 			findings = append(findings, fmt.Sprintf("%s (все ручки сразу): отказ не называет число теней %d:\n%s",
 				src.path, len(judged), headOf(out)))
+		}
+	}
+	// Ручка, имени которой не даёт ни одна показанная форма, молчит, лишь когда
+	// каждый проход по карте вне условия и упоминает ключ безусловно: тогда
+	// рендер исполнил каждое упоминание, и других форм у карты нет. Иначе форму,
+	// которую дала бы невыполненная ветвь, рендер не называет — находка.
+	for _, p := range order {
+		if !candOf[p].branched {
+			continue
+		}
+		var missed []string
+		for _, r := range rows {
+			if !reached[p][r.env] {
+				missed = append(missed, r.env)
+			}
+		}
+		if len(missed) > 0 {
+			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ дал имя переменной пода лишь формами %s — "+
+				"ручек стража ими недостижимо %d из %d (%s), а проход по карте стоит под условием либо ключ в его теле "+
+				"под ветвью или уходит из него: какую форму имени дала бы невыполненная ветвь, рендер не называет — "+
+				"источник не подтверждён и не опровергнут", p, strings.Join(formsOf[p], ", "), len(missed), len(rows),
+				strings.Join(missed, ", ")))
 		}
 	}
 	out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture("env.KANAME_AUTHN__DOMAIN=access.example.invalid")...)
@@ -259,10 +298,19 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 	}
 	names := make([]string, 0, len(sources))
 	for _, s := range sources {
-		names = append(names, s.path)
+		name := s.path
+		if f := s.form(); f != "<ключ>" {
+			name += " " + f
+		}
+		if s.cond.name != podEnvConditions[0].name {
+			name += " — " + s.cond.name
+		}
+		names = append(names, name)
 	}
-	t.Logf("перепись: кандидатов %d · подтверждено рендером источников %d (%s) · ручек %d · недостижимых пар %d · рендеров %d · находок %d",
-		len(cands), len(sources), strings.Join(names, ", "), len(rows), unreachable, renders, len(findings))
+	t.Logf("перепись: кандидатов %d · подтверждено рендером источников %d (%s) · опровергнуто %d (%s) · не подтверждено %d · "+
+		"ручек %d · недостижимых пар %d · рендеров %d · находок %d",
+		len(cands), len(sources), strings.Join(names, ", "), len(refuted), strings.Join(refuted, ", "), len(unconfirmed),
+		len(rows), unreachable, renders, len(findings))
 	return findings, renders
 }
 
