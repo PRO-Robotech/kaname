@@ -24,6 +24,25 @@
 Посев границы ступени НЕ ждёт, и это сказано здесь, а не оставлено часам: код
 той же ступени, что при `confirm`, верный продукт отвергает повтором.
 
+ГДЕ НАБОР ГОНЯЕТСЯ. Задание `chart-own` процесса `e2e-newman.yml` — тем же
+вызовом прогонщика, что вход и восстановление, после них: стенд чарта посадки
+`own`, лист края и посев человека те же (`stand-chart.sh`, `seed_login_lane.py`).
+
+УТВЕРЖДЕНИЯ НАБОРА НЕ ПОЛУЧАЮТ ЗНАЧЕНИЙ УДОСТОВЕРЕНИЙ (kaname#417). Отчёт прогона
+выкладывается артефактом публичного репозитория, а текст упавшего утверждения —
+проза: chai печатает в нём сообщение, ПРЕДМЕТ и ОЖИДАЕМОЕ, и срез отчёта
+(`.github/scripts/redact-newman-report.py`) на прозе этой полосы слеп — у
+запасного кода и кода по времени нет формы. Поэтому ни сообщение, ни предмет, ни
+ожидаемое не несут ни тела ответа, ни заголовков, ни переменной с удостоверением:
+сообщение — литерал, форма секрета и кодов утверждается булевым предметом,
+состав — числом. Общие помощники `assert_status` и `assert_grpc_code` кладут в
+сообщение тело ответа, и потому здесь не зовутся: отрицательный шаг `enroll` при
+дефекте получает тело с секретом. Разбор падения при этом не теряется — тело
+ответа лежит в отчёте, и срез режет в нём удостоверения по имени. Переменные с
+удостоверением названы так, как их знает срез: `sfSecret`, `sfCode`,
+`sfBackupCode0`, `sfBackupCode1`. Держит это
+`tests/newman/scripts/second_factor_assertion_values_test.py`.
+
 ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ: окно ±1 по краям (Ф12-21 — часы пробы), гонки (Ф12-07,
 Ф12-24 — интеграция), счёт частоты (Ф12-31 — N попыток в одном окне сделали бы
 следующий прогон красным по частоте).
@@ -77,7 +96,9 @@ _SOURCE = "203.0.113.12"
 _TOTP_JS = [
     "const __totp = (secretB32, step) => {",
     "  const CryptoJS = require('crypto-js');",
-    "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';",
+    # Алфавит — двумя строками: одной строкой он есть пробег формы секрета, и срез
+    # отчёта вырезал бы его из скрипта коллекции как секрет.
+    "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
     "  let bits = 0, value = 0; const bytes = [];",
     "  for (const ch of secretB32.toUpperCase()) {",
     "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
@@ -95,6 +116,35 @@ _TOTP_JS = [
     "};",
     "const __stepNow = () => Math.floor(Date.now() / 1000 / 30);",
 ]
+
+
+# Код ответа и код отказа — литеральным сообщением: общий помощник кладёт в
+# сообщение тело ответа, а тело этой полосы бывает телом с секретом и кодами.
+_OK = ["pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));"]
+
+
+def _status(status):
+    return [f"pm.test({js_str(f'status {status}')}, () => pm.expect(pm.response.code, 'код ответа').to.eql({status}));"]
+
+
+def _grpc_code(code, code_name):
+    return [
+        f"pm.test({js_str(f'grpc code {code} ({code_name})')}, () => {{",
+        "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+        f"  pm.expect(j.code, 'код отказа').to.eql({code});",
+        "});",
+    ]
+
+
+def _backup_summary(label, remaining):
+    """Сводка набора состояния: члены и числа — без значений кодов."""
+    return [
+        f"pm.test({js_str(label)}, () => {{",
+        "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
+        "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+        f"  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([{remaining}, 10]);",
+        "});",
+    ]
 
 
 def _lane(path):
@@ -124,7 +174,7 @@ def _capture_cookie(name, var, label):
         "  const __sc = pm.response.headers.all()"
         f".filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith({js_str(name + '=')}));",
         f"  pm.test({js_str(label + ': ответ ставит печенье ' + name)}, () => "
-        "pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+        f"pm.expect(__sc.length, {js_str('печений ' + name)}).to.eql(1));",
         f"  if (__sc.length === 1) {{ pm.environment.set({js_str(var)}, __sc[0].value.split(';')[0].slice({len(name) + 1})); }}",
         "}",
     ]
@@ -133,22 +183,22 @@ def _capture_cookie(name, var, label):
 def _refusal(status, code, text, label, reason=None):
     names = {16: "UNAUTHENTICATED", 3: "INVALID_ARGUMENT", 7: "PERMISSION_DENIED", 9: "FAILED_PRECONDITION", 6: "ALREADY_EXISTS"}
     out = [
-        *assert_status(status),
-        *assert_grpc_code(code, names[code]),
+        *_status(status),
+        *_grpc_code(code, names[code]),
         f"pm.test({js_str(label + ': текст отказа фиксирован')}, () => {{",
         "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-        f"  pm.expect(j.message, JSON.stringify(j)).to.eql({js_str(text)});",
+        f"  pm.expect(j.message, 'текст отказа').to.eql({js_str(text)});",
         "});",
         f"pm.test({js_str(label + ': носитель сессии НЕ выдан')}, () => "
         "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' "
-        "&& h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+        "&& h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
     ]
     if reason:
         out += [
             f"pm.test({js_str(label + ': токен отказа ' + reason)}, () => {{",
             "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
             "  const info = (j.details || []).filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0];",
-            f"  pm.expect(info && info.reason, JSON.stringify(j)).to.eql({js_str(reason)});",
+            f"  pm.expect(info && info.reason, 'токен отказа').to.eql({js_str(reason)});",
             "});",
         ]
     return out
@@ -163,9 +213,10 @@ def _csrf_step(name, kind, var, label):
         insecure_tls=True,
         auth="anonymous",
         test_script=[
-            *assert_status(200),
+            *_OK,
             "const j = pm.response.json();",
-            f"pm.test({js_str(label + ': признак выдан')}, () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+            f"pm.test({js_str(label + ': признак выдан')}, () => "
+            "pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
             f"pm.environment.set({js_str(var)}, j.csrfToken);",
             "{",
             "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -188,9 +239,9 @@ def _login_step(name, label, second_factor=None, level="1"):
         insecure_tls=True,
         auth="anonymous",
         test_script=[
-            *assert_status(200),
+            *_OK,
             "const j = pm.response.json();",
-            f"pm.test({js_str(label + ': сессия уровня ' + level)}, () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql({js_str(level)}));",
+            f"pm.test({js_str(label + ': сессия уровня ' + level)}, () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql({js_str(level)}));",
             *_capture_cookie("kaname_session", "sfSessionCookie", label),
             *_capture_cookie("kaname_form", "sfFormCookie", label),
         ],
@@ -208,7 +259,7 @@ def _logout_steps(prefix):
             pre_script=[*_lane(_LOGOUT), *_session_and_form()],
             insecure_tls=True,
             auth="anonymous",
-            test_script=[*assert_status(200), "pm.environment.unset('sfSessionCookie');"],
+            test_script=[*_OK, "pm.environment.unset('sfSessionCookie');"],
         ),
         _csrf_step(prefix + "-csrf-login", "login", "sfCsrfLogin", "CSRF-LOGIN"),
     ]
@@ -233,11 +284,11 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('STATUS-0: фактор не заведён, набора нет', () => {",
-                "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                 "});",
             ],
         ),
@@ -251,16 +302,16 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('ENROLL: секрет base32 без дополнения (32 знака — 20 байт), адрес otpauth, срок', () => {",
-                "  pm.expect(j.secret, JSON.stringify(j)).to.match(/^[A-Z2-7]{32}$/);",
-                "  pm.expect(j.otpauthUri, JSON.stringify(j)).to.match(/^otpauth:\\/\\/totp\\/.+\\?secret=[A-Z2-7]{32}&issuer=.+&algorithm=SHA1&digits=6&period=30$/);",
-                "  pm.expect(j.expiresAt, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                "  pm.expect(/^[A-Z2-7]{32}$/.test(String(j.secret)), 'форма секрета').to.eql(true);",
+                "  pm.expect(/^otpauth:\\/\\/totp\\/.+\\?secret=[A-Z2-7]{32}&issuer=.+&algorithm=SHA1&digits=6&period=30$/.test(String(j.otpauthUri)), 'форма адреса otpauth').to.eql(true);",
+                "  pm.expect(j.expiresAt, 'срок заведения').to.be.a('string').and.not.empty;",
                 "});",
                 "pm.environment.set('sfSecret', j.secret);",
                 "pm.test('ENROLL: печений не пишет — сессия и контекст прежние', () => "
-                "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+                "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, 'печений').to.eql(0));",
             ],
         ),
         Step(
@@ -271,12 +322,12 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('STATUS-PENDING: не заведён, срок ожидания назван, набора нет', () => {",
-                "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                "  pm.expect(j.totp && j.totp.pendingUntil, JSON.stringify(j)).to.be.a('string').and.not.empty;",
-                "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                "  pm.expect(j.totp && j.totp.pendingUntil, 'срок ожидания').to.be.a('string').and.not.empty;",
+                "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                 "});",
             ],
         ),
@@ -294,17 +345,18 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('CONFIRM: десять запасных кодов по десять знаков Crockford, сессия «2», assurance', () => {",
-                "  pm.expect(j.backupCodes, JSON.stringify(j)).to.be.an('array').with.lengthOf(10);",
-                "  j.backupCodes.forEach(c => pm.expect(c, c).to.match(/^[0-9A-HJKMNP-TV-Z]{10}$/));",
-                "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                "  pm.expect(j.assurance, JSON.stringify(j)).to.eql({level: '2', level2Reachable: true, missingForLevel2: []});",
+                "  const codes = Array.isArray(j.backupCodes) ? j.backupCodes : [];",
+                "  pm.expect(Array.isArray(j.backupCodes) ? j.backupCodes.length : -1, 'запасных кодов').to.eql(10);",
+                "  pm.expect(codes.filter(c => !/^[0-9A-HJKMNP-TV-Z]{10}$/.test(String(c))).length, 'кодов вне формы Crockford').to.eql(0);",
+                "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                "  pm.expect(j.assurance, 'assurance').to.eql({level: '2', level2Reachable: true, missingForLevel2: []});",
                 "});",
                 "if (j.backupCodes && j.backupCodes.length === 10) {",
-                "  pm.environment.set('sfBackup0', j.backupCodes[0]);",
-                "  pm.environment.set('sfBackup1', j.backupCodes[1]);",
+                "  pm.environment.set('sfBackupCode0', j.backupCodes[0]);",
+                "  pm.environment.set('sfBackupCode1', j.backupCodes[1]);",
                 "}",
                 *_capture_cookie("kaname_session", "sfSessionCookie", "CONFIRM"),
             ],
@@ -317,16 +369,19 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
-                "pm.test('STATUS-ACTIVE: заведён, момент подтверждения, 10 из 10', () => {",
-                "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(true);",
-                "  pm.expect(j.totp && j.totp.confirmedAt, JSON.stringify(j)).to.be.a('string').and.not.empty;",
-                "  pm.expect(j.backupCodes, JSON.stringify(j)).to.eql({remaining: 10, total: 10});",
+                "pm.test('STATUS-ACTIVE: заведён, момент подтверждения', () => {",
+                "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(true);",
+                "  pm.expect(j.totp && j.totp.confirmedAt, 'момент подтверждения').to.be.a('string').and.not.empty;",
                 "});",
+                *_backup_summary("STATUS-ACTIVE: 10 из 10", 10),
                 "pm.test('STATUS: ни секрета, ни кодов, ни адреса в ответе (Ф12-27)', () => {",
                 "  const t = pm.response.text();",
-                "  pm.expect(t).to.not.include('otpauth'); pm.expect(t).to.not.include(pm.environment.get('sfSecret'));",
+                "  const has = (k) => { const v = pm.environment.get(k); return typeof v === 'string' && v !== '' && t.includes(v); };",
+                "  pm.expect(t.includes('otpauth'), 'адрес otpauth в ответе').to.eql(false);",
+                "  pm.expect(has('sfSecret'), 'секрет в ответе').to.eql(false);",
+                "  pm.expect(has('sfBackupCode0') || has('sfBackupCode1'), 'запасной код в ответе').to.eql(false);",
                 "});",
             ],
         ),
@@ -346,9 +401,9 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
-                "pm.test('LOGIN-2FA: сессия «2» на исходном носителе (Ф11-02)', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2'));",
+                "pm.test('LOGIN-2FA: сессия «2» на исходном носителе (Ф11-02)', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2'));",
                 *_capture_cookie("kaname_session", "sfSessionCookie", "LOGIN-2FA"),
                 *_capture_cookie("kaname_form", "sfFormCookie", "LOGIN-2FA"),
             ],
@@ -386,23 +441,24 @@ CASES.append(Case(
             name="step-up-with-backup-code",
             method="POST",
             path=_STEP_UP,
-            body={"method": "lookup_secret", "code": "{{sfBackup0}}", "csrfToken": "{{sfCsrfStepUp}}"},
+            body={"method": "lookup_secret", "code": "{{sfBackupCode0}}", "csrfToken": "{{sfCsrfStepUp}}"},
             pre_script=[
                 *_lane(_STEP_UP), *_session_and_form(),
                 "pm.test('STEP-UP: фикстура хребта на месте — сессия и запасной код захвачены', () => {",
-                "  pm.expect(pm.environment.get('sfSessionCookie'), 'носитель').to.be.a('string').and.not.empty;",
-                "  pm.expect(pm.environment.get('sfBackup0'), 'запасной код').to.be.a('string').and.not.empty;",
+                "  const got = (k) => { const v = pm.environment.get(k); return typeof v === 'string' && v !== ''; };",
+                "  pm.expect(got('sfSessionCookie'), 'носитель захвачен').to.eql(true);",
+                "  pm.expect(got('sfBackupCode0'), 'запасной код захвачен').to.eql(true);",
                 "});",
             ],
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('STEP-UP: «2», остаток 9 назван только здесь', () => {",
-                "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                "  pm.expect(j.assurance && j.assurance.level, JSON.stringify(j)).to.eql('2');",
-                "  pm.expect(j.backupCodesRemaining, JSON.stringify(j)).to.eql(9);",
+                "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                "  pm.expect(j.assurance && j.assurance.level, 'уровень assurance').to.eql('2');",
+                "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(9);",
                 "});",
                 *_capture_cookie("kaname_session", "sfSessionCookie", "STEP-UP"),
             ],
@@ -411,7 +467,7 @@ CASES.append(Case(
             name="step-up-same-backup-code-again",
             method="POST",
             path=_STEP_UP,
-            body={"method": "lookup_secret", "code": "{{sfBackup0}}", "csrfToken": "{{sfCsrfStepUp}}"},
+            body={"method": "lookup_secret", "code": "{{sfBackupCode0}}", "csrfToken": "{{sfCsrfStepUp}}"},
             pre_script=[*_lane(_STEP_UP), *_session_and_form()],
             insecure_tls=True,
             auth="anonymous",
@@ -425,9 +481,9 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
-                "pm.test('STATUS: 9 из 10', () => pm.expect(j.backupCodes, JSON.stringify(j)).to.eql({remaining: 9, total: 10}));",
+                *_backup_summary("STATUS: 9 из 10", 9),
             ],
         ),
     ],
@@ -453,17 +509,17 @@ CASES.append(Case(
             name="remove-with-backup-code",
             method="POST",
             path=_REMOVE,
-            body={"method": "lookup_secret", "code": "{{sfBackup1}}", "csrfToken": "{{sfCsrfSecondFactor}}"},
+            body={"method": "lookup_secret", "code": "{{sfBackupCode1}}", "csrfToken": "{{sfCsrfSecondFactor}}"},
             pre_script=[*_lane(_REMOVE), *_session_and_form()],
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('REMOVE: сессия «2», остаток 0 всегда (фактор снят, набора нет — Р4 ред. 10), путь к «2» закрыт', () => {",
-                "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                "  pm.expect(j.backupCodesRemaining, JSON.stringify(j)).to.eql(0);",
-                "  pm.expect(j.assurance, JSON.stringify(j)).to.eql({level: '2', level2Reachable: false, missingForLevel2: []});",
+                "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(0);",
+                "  pm.expect(j.assurance, 'assurance').to.eql({level: '2', level2Reachable: false, missingForLevel2: []});",
                 "});",
                 *_capture_cookie("kaname_session", "sfSessionCookie", "REMOVE"),
             ],
@@ -476,11 +532,11 @@ CASES.append(Case(
             insecure_tls=True,
             auth="anonymous",
             test_script=[
-                *assert_status(200),
+                *_OK,
                 "const j = pm.response.json();",
                 "pm.test('STATUS: не заведён, набора нет', () => {",
-                "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                 "});",
             ],
         ),
@@ -512,7 +568,7 @@ CASES.append(Case(
             test_script=[
                 *_refusal(401, 16, "authentication failed", "NOT-ENROLLED-ON-LOGIN"),
                 "pm.test('NOT-ENROLLED-ON-LOGIN: тело побайтово равно отказу на неверный пароль — совпавший пароль не назван', () => "
-                "pm.expect(pm.response.text()).to.eql(pm.environment.get('sfWrongPasswordRefusalBody')));",
+                "pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону отказа').to.eql(true));",
             ],
         ),
         _login_step("login-plain-after-remove", "LOGIN-PLAIN"),

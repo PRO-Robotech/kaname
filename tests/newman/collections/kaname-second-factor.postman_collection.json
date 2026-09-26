@@ -123,9 +123,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -220,17 +220,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('LOGIN-1: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('1'));",
+                  "pm.test('LOGIN-1: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('1'));",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('LOGIN-1: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-1: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
-                  "  pm.test('LOGIN-1: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-1: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, 'печений kaname_form').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
                   "}"
                 ]
@@ -313,11 +313,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('STATUS-0: фактор не заведён, набора нет', () => {",
-                  "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                  "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                  "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                  "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                   "});"
                 ]
               }
@@ -399,9 +399,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfSecondFactor', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -497,15 +497,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('ENROLL: секрет base32 без дополнения (32 знака — 20 байт), адрес otpauth, срок', () => {",
-                  "  pm.expect(j.secret, JSON.stringify(j)).to.match(/^[A-Z2-7]{32}$/);",
-                  "  pm.expect(j.otpauthUri, JSON.stringify(j)).to.match(/^otpauth:\\/\\/totp\\/.+\\?secret=[A-Z2-7]{32}&issuer=.+&algorithm=SHA1&digits=6&period=30$/);",
-                  "  pm.expect(j.expiresAt, JSON.stringify(j)).to.be.a('string').and.not.empty;",
+                  "  pm.expect(/^[A-Z2-7]{32}$/.test(String(j.secret)), 'форма секрета').to.eql(true);",
+                  "  pm.expect(/^otpauth:\\/\\/totp\\/.+\\?secret=[A-Z2-7]{32}&issuer=.+&algorithm=SHA1&digits=6&period=30$/.test(String(j.otpauthUri)), 'форма адреса otpauth').to.eql(true);",
+                  "  pm.expect(j.expiresAt, 'срок заведения').to.be.a('string').and.not.empty;",
                   "});",
                   "pm.environment.set('sfSecret', j.secret);",
-                  "pm.test('ENROLL: печений не пишет — сессия и контекст прежние', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('ENROLL: печений не пишет — сессия и контекст прежние', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, 'печений').to.eql(0));"
                 ]
               }
             }
@@ -586,12 +586,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('STATUS-PENDING: не заведён, срок ожидания назван, набора нет', () => {",
-                  "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                  "  pm.expect(j.totp && j.totp.pendingUntil, JSON.stringify(j)).to.be.a('string').and.not.empty;",
-                  "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                  "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                  "  pm.expect(j.totp && j.totp.pendingUntil, 'срок ожидания').to.be.a('string').and.not.empty;",
+                  "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                   "});"
                 ]
               }
@@ -658,7 +658,7 @@
                   "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
                   "const __totp = (secretB32, step) => {",
                   "  const CryptoJS = require('crypto-js');",
-                  "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';",
+                  "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
                   "  let bits = 0, value = 0; const bytes = [];",
                   "  for (const ch of secretB32.toUpperCase()) {",
                   "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
@@ -705,21 +705,22 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('CONFIRM: десять запасных кодов по десять знаков Crockford, сессия «2», assurance', () => {",
-                  "  pm.expect(j.backupCodes, JSON.stringify(j)).to.be.an('array').with.lengthOf(10);",
-                  "  j.backupCodes.forEach(c => pm.expect(c, c).to.match(/^[0-9A-HJKMNP-TV-Z]{10}$/));",
-                  "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                  "  pm.expect(j.assurance, JSON.stringify(j)).to.eql({level: '2', level2Reachable: true, missingForLevel2: []});",
+                  "  const codes = Array.isArray(j.backupCodes) ? j.backupCodes : [];",
+                  "  pm.expect(Array.isArray(j.backupCodes) ? j.backupCodes.length : -1, 'запасных кодов').to.eql(10);",
+                  "  pm.expect(codes.filter(c => !/^[0-9A-HJKMNP-TV-Z]{10}$/.test(String(c))).length, 'кодов вне формы Crockford').to.eql(0);",
+                  "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                  "  pm.expect(j.assurance, 'assurance').to.eql({level: '2', level2Reachable: true, missingForLevel2: []});",
                   "});",
                   "if (j.backupCodes && j.backupCodes.length === 10) {",
-                  "  pm.environment.set('sfBackup0', j.backupCodes[0]);",
-                  "  pm.environment.set('sfBackup1', j.backupCodes[1]);",
+                  "  pm.environment.set('sfBackupCode0', j.backupCodes[0]);",
+                  "  pm.environment.set('sfBackupCode1', j.backupCodes[1]);",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('CONFIRM: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('CONFIRM: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}"
                 ]
@@ -802,16 +803,23 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('STATUS-ACTIVE: заведён, момент подтверждения, 10 из 10', () => {",
-                  "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(true);",
-                  "  pm.expect(j.totp && j.totp.confirmedAt, JSON.stringify(j)).to.be.a('string').and.not.empty;",
-                  "  pm.expect(j.backupCodes, JSON.stringify(j)).to.eql({remaining: 10, total: 10});",
+                  "pm.test('STATUS-ACTIVE: заведён, момент подтверждения', () => {",
+                  "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(true);",
+                  "  pm.expect(j.totp && j.totp.confirmedAt, 'момент подтверждения').to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.test('STATUS-ACTIVE: 10 из 10', () => {",
+                  "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
+                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([10, 10]);",
                   "});",
                   "pm.test('STATUS: ни секрета, ни кодов, ни адреса в ответе (Ф12-27)', () => {",
                   "  const t = pm.response.text();",
-                  "  pm.expect(t).to.not.include('otpauth'); pm.expect(t).to.not.include(pm.environment.get('sfSecret'));",
+                  "  const has = (k) => { const v = pm.environment.get(k); return typeof v === 'string' && v !== '' && t.includes(v); };",
+                  "  pm.expect(t.includes('otpauth'), 'адрес otpauth в ответе').to.eql(false);",
+                  "  pm.expect(has('sfSecret'), 'секрет в ответе').to.eql(false);",
+                  "  pm.expect(has('sfBackupCode0') || has('sfBackupCode1'), 'запасной код в ответе').to.eql(false);",
                   "});"
                 ]
               }
@@ -893,9 +901,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogout', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -990,7 +998,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "pm.environment.unset('sfSessionCookie');"
                 ]
               }
@@ -1072,9 +1080,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -1144,7 +1152,7 @@
                   "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
                   "const __totp = (secretB32, step) => {",
                   "  const CryptoJS = require('crypto-js');",
-                  "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';",
+                  "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
                   "  let bits = 0, value = 0; const bytes = [];",
                   "  for (const ch of secretB32.toUpperCase()) {",
                   "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
@@ -1190,17 +1198,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('LOGIN-2FA: сессия «2» на исходном носителе (Ф11-02)', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2'));",
+                  "pm.test('LOGIN-2FA: сессия «2» на исходном носителе (Ф11-02)', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2'));",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('LOGIN-2FA: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-2FA: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
-                  "  pm.test('LOGIN-2FA: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-2FA: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, 'печений kaname_form').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
                   "}"
                 ]
@@ -1283,9 +1291,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogout', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -1380,7 +1388,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "pm.environment.unset('sfSessionCookie');"
                 ]
               }
@@ -1462,9 +1470,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -1559,16 +1567,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, 'код ответа').to.eql(401));",
                   "pm.test('grpc code 16 (UNAUTHENTICATED)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(16);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(16);",
                   "});",
                   "pm.test('REPLAY: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
-                  "pm.test('REPLAY: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('REPLAY: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]
               }
             }
@@ -1658,17 +1666,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('LOGIN-NO-CODE: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('1'));",
+                  "pm.test('LOGIN-NO-CODE: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('1'));",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('LOGIN-NO-CODE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-NO-CODE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
-                  "  pm.test('LOGIN-NO-CODE: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-NO-CODE: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, 'печений kaname_form').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
                   "}"
                 ]
@@ -1757,9 +1765,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-STEP-UP: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-STEP-UP: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfStepUp', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -1794,7 +1802,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackup0}}\", \"csrfToken\": \"{{sfCsrfStepUp}}\"}",
+              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackupCode0}}\", \"csrfToken\": \"{{sfCsrfStepUp}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1828,8 +1836,9 @@
                   "const __cookie = ((pm.environment.get('sfSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('sfSessionCookie') + '; ' : '') + (pm.environment.get('sfFormCookie') ? 'kaname_form' + '=' + pm.environment.get('sfFormCookie') + '; ' : '')).replace(/; $/, '');",
                   "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
                   "pm.test('STEP-UP: фикстура хребта на месте — сессия и запасной код захвачены', () => {",
-                  "  pm.expect(pm.environment.get('sfSessionCookie'), 'носитель').to.be.a('string').and.not.empty;",
-                  "  pm.expect(pm.environment.get('sfBackup0'), 'запасной код').to.be.a('string').and.not.empty;",
+                  "  const got = (k) => { const v = pm.environment.get(k); return typeof v === 'string' && v !== ''; };",
+                  "  pm.expect(got('sfSessionCookie'), 'носитель захвачен').to.eql(true);",
+                  "  pm.expect(got('sfBackupCode0'), 'запасной код захвачен').to.eql(true);",
                   "});",
                   "(function () {",
                   "  var _u = '';",
@@ -1858,16 +1867,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('STEP-UP: «2», остаток 9 назван только здесь', () => {",
-                  "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                  "  pm.expect(j.assurance && j.assurance.level, JSON.stringify(j)).to.eql('2');",
-                  "  pm.expect(j.backupCodesRemaining, JSON.stringify(j)).to.eql(9);",
+                  "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                  "  pm.expect(j.assurance && j.assurance.level, 'уровень assurance').to.eql('2');",
+                  "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(9);",
                   "});",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('STEP-UP: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('STEP-UP: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}"
                 ]
@@ -1899,7 +1908,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackup0}}\", \"csrfToken\": \"{{sfCsrfStepUp}}\"}",
+              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackupCode0}}\", \"csrfToken\": \"{{sfCsrfStepUp}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1959,16 +1968,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, 'код ответа').to.eql(401));",
                   "pm.test('grpc code 16 (UNAUTHENTICATED)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(16);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(16);",
                   "});",
                   "pm.test('BACKUP-AGAIN: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
-                  "pm.test('BACKUP-AGAIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('BACKUP-AGAIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]
               }
             }
@@ -2049,9 +2058,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('STATUS: 9 из 10', () => pm.expect(j.backupCodes, JSON.stringify(j)).to.eql({remaining: 9, total: 10}));"
+                  "pm.test('STATUS: 9 из 10', () => {",
+                  "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
+                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([9, 10]);",
+                  "});"
                 ]
               }
             }
@@ -2138,9 +2151,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfSecondFactor', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -2176,7 +2189,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackup1}}\", \"csrfToken\": \"{{sfCsrfSecondFactor}}\"}",
+              "raw": "{\"method\": \"lookup_secret\", \"code\": \"{{sfBackupCode1}}\", \"csrfToken\": \"{{sfCsrfSecondFactor}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2236,16 +2249,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('REMOVE: сессия «2», остаток 0 всегда (фактор снят, набора нет — Р4 ред. 10), путь к «2» закрыт', () => {",
-                  "  pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('2');",
-                  "  pm.expect(j.backupCodesRemaining, JSON.stringify(j)).to.eql(0);",
-                  "  pm.expect(j.assurance, JSON.stringify(j)).to.eql({level: '2', level2Reachable: false, missingForLevel2: []});",
+                  "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
+                  "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(0);",
+                  "  pm.expect(j.assurance, 'assurance').to.eql({level: '2', level2Reachable: false, missingForLevel2: []});",
                   "});",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('REMOVE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('REMOVE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}"
                 ]
@@ -2328,11 +2341,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('STATUS: не заведён, набора нет', () => {",
-                  "  pm.expect(j.totp && j.totp.enrolled, JSON.stringify(j)).to.eql(false);",
-                  "  pm.expect(j, JSON.stringify(j)).to.not.have.property('backupCodes');",
+                  "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
+                  "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
                   "});"
                 ]
               }
@@ -2414,9 +2427,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogout', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -2511,7 +2524,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "pm.environment.unset('sfSessionCookie');"
                 ]
               }
@@ -2593,9 +2606,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -2690,16 +2703,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, 'код ответа').to.eql(401));",
                   "pm.test('grpc code 16 (UNAUTHENTICATED)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(16);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(16);",
                   "});",
                   "pm.test('WRONG-PW-WITH-CODE: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
-                  "pm.test('WRONG-PW-WITH-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+                  "pm.test('WRONG-PW-WITH-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.environment.set('sfWrongPasswordRefusalBody', pm.response.text());"
                 ]
               }
@@ -2790,17 +2803,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, 'код ответа').to.eql(401));",
                   "pm.test('grpc code 16 (UNAUTHENTICATED)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(16);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(16);",
                   "});",
                   "pm.test('NOT-ENROLLED-ON-LOGIN: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
-                  "pm.test('NOT-ENROLLED-ON-LOGIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
-                  "pm.test('NOT-ENROLLED-ON-LOGIN: тело побайтово равно отказу на неверный пароль — совпавший пароль не назван', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('sfWrongPasswordRefusalBody')));"
+                  "pm.test('NOT-ENROLLED-ON-LOGIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
+                  "pm.test('NOT-ENROLLED-ON-LOGIN: тело побайтово равно отказу на неверный пароль — совпавший пароль не назван', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону отказа').to.eql(true));"
                 ]
               }
             }
@@ -2890,17 +2903,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('LOGIN-PLAIN: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('1'));",
+                  "pm.test('LOGIN-PLAIN: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('1'));",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('LOGIN-PLAIN: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-PLAIN: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
-                  "  pm.test('LOGIN-PLAIN: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-PLAIN: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, 'печений kaname_form').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
                   "}"
                 ]
@@ -2983,9 +2996,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogout', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -3080,7 +3093,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "pm.environment.unset('sfSessionCookie');"
                 ]
               }
@@ -3162,9 +3175,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -3265,17 +3278,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('LOGIN-NEG: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, JSON.stringify(j)).to.eql('1'));",
+                  "pm.test('LOGIN-NEG: сессия уровня 1', () => pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('1'));",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
-                  "  pm.test('LOGIN-NEG: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-NEG: ответ ставит печенье kaname_session', () => pm.expect(__sc.length, 'печений kaname_session').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
                   "}",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
-                  "  pm.test('LOGIN-NEG: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, JSON.stringify(pm.response.headers.all())).to.eql(1));",
+                  "  pm.test('LOGIN-NEG: ответ ставит печенье kaname_form', () => pm.expect(__sc.length, 'печений kaname_form').to.eql(1));",
                   "  if (__sc.length === 1) { pm.environment.set('sfFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
                   "}"
                 ]
@@ -3358,9 +3371,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-2FA: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfSecondFactor', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -3446,9 +3459,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-STEP-UP: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-STEP-UP: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfStepUp', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -3544,20 +3557,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
+                  "pm.test('status 403', () => pm.expect(pm.response.code, 'код ответа').to.eql(403));",
                   "pm.test('grpc code 7 (PERMISSION_DENIED)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(7);",
                   "});",
                   "pm.test('FOREIGN-TOKEN: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('form token rejected');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('form token rejected');",
                   "});",
-                  "pm.test('FOREIGN-TOKEN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+                  "pm.test('FOREIGN-TOKEN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('FOREIGN-TOKEN: токен отказа FORM_TOKEN_REJECTED', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const info = (j.details || []).filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0];",
-                  "  pm.expect(info && info.reason, JSON.stringify(j)).to.eql('FORM_TOKEN_REJECTED');",
+                  "  pm.expect(info && info.reason, 'токен отказа').to.eql('FORM_TOKEN_REJECTED');",
                   "});"
                 ]
               }
@@ -3649,16 +3662,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code, 'код ответа').to.eql(400));",
                   "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(3);",
                   "});",
                   "pm.test('NO-CODE: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('Illegal argument code: required');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('Illegal argument code: required');",
                   "});",
-                  "pm.test('NO-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('NO-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]
               }
             }
@@ -3748,16 +3761,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code, 'код ответа').to.eql(400));",
                   "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(3);",
                   "});",
                   "pm.test('BAD-METHOD: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('Illegal argument method: must be one of password|totp|lookup_secret');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('Illegal argument method: must be one of password|totp|lookup_secret');",
                   "});",
-                  "pm.test('BAD-METHOD: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('BAD-METHOD: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]
               }
             }
@@ -3848,20 +3861,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('status 400', () => pm.expect(pm.response.code, 'код ответа').to.eql(400));",
                   "pm.test('grpc code 9 (FAILED_PRECONDITION)', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(9);",
+                  "  pm.expect(j.code, 'код отказа').to.eql(9);",
                   "});",
                   "pm.test('NOT-PENDING: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('no pending enrollment: begin with enroll');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('no pending enrollment: begin with enroll');",
                   "});",
-                  "pm.test('NOT-PENDING: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+                  "pm.test('NOT-PENDING: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('NOT-PENDING: токен отказа ENROLLMENT_NOT_PENDING', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const info = (j.details || []).filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0];",
-                  "  pm.expect(info && info.reason, JSON.stringify(j)).to.eql('ENROLLMENT_NOT_PENDING');",
+                  "  pm.expect(info && info.reason, 'токен отказа').to.eql('ENROLLMENT_NOT_PENDING');",
                   "});"
                 ]
               }
@@ -3943,9 +3956,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGOUT: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogout', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
@@ -4040,7 +4053,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "pm.environment.unset('sfSessionCookie');"
                 ]
               }
@@ -4122,9 +4135,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, 'код ответа').to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(j.csrfToken, JSON.stringify(j)).to.be.a('string').and.not.empty);",
+                  "pm.test('CSRF-LOGIN: признак выдан', () => pm.expect(typeof j.csrfToken === 'string' && j.csrfToken.length > 0, 'признак формы').to.eql(true));",
                   "pm.environment.set('sfCsrfLogin', j.csrfToken);",
                   "{",
                   "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
