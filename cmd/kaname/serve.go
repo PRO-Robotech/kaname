@@ -1246,6 +1246,9 @@ func runServe(cfg config.Config) error {
 			"close_when", "kaname_registry_token_credential_kind_total{outcome=\"key_material_accepted_in_window\"} stops growing")
 	}
 	var registryTokenHandler http.Handler
+	// ceremonyMounted — церемония смонтирована на этой поверхности: её пути
+	// входят в объявление аутентификации поверхности (issuingSurfaceAuth).
+	ceremonyMounted := false
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
@@ -1322,6 +1325,7 @@ func runServe(cfg config.Config) error {
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
 		}
 		if ceremony != nil {
+			ceremonyMounted = true
 			mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
 			mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 			// Читатель переписи исходов — вплотную к монтажу, как у соседних
@@ -1338,12 +1342,8 @@ func runServe(cfg config.Config) error {
 		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"два вида предъявления, у каждого своя проверка на каждом запросе: подпись ключом " +
-				"служебной учётки на пути docker-токена и подписанное утверждение клиента, " +
-				"сверяемое открытым ключом из нашего реестра, на пути выдачи по учётным данным " +
-				"клиента; второй выпускает НАШ подписант"),
-		TLS: registryTokenTLSConfig,
+		Auth:    issuingSurfaceAuth(ceremonyMounted),
+		TLS:     registryTokenTLSConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
