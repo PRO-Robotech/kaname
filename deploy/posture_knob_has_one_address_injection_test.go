@@ -4,21 +4,23 @@
 // posture_knob_has_one_address_injection_test.go — СПОСОБНОСТЬ суда над
 // тенями ручек стража упасть, доказанная инъекцией в обе стороны (задача #392).
 //
-// Вывод источников окружения пода: карта, чей ключ становится `name:`
-// переменной, — источник в КАЖДОЙ законной форме адреса и ссылки на ключ
-// (перечень `lawfulPodEnvSourceForms`); та же карта, чей ключ уходит в другое
-// поле, в комментарии либо в перечне портов, — нет; адрес, который
-// распознаватель не выводит, — отказ с координатой, а не пропуск. Перечень
-// стража: пара литералов словаря внутри стража — строка; тот же литерал вне
-// стража — нет.
+// Ступень разбора: карта, по чьим ключам проходит шаблон, — кандидат в КАЖДОЙ
+// законной форме адреса и ссылки на ключ (перечень `lawfulPodEnvSourceForms`),
+// в том числе в define, вызванном через include; проход, чьё тело ключа не
+// упоминает, комментарий и постоянная — не кандидаты; адрес, который разбор не
+// выводит, — отказ с координатой, а не пропуск. Перечень стража: пара литералов
+// словаря внутри стража — строка; тот же литерал вне стража — нет.
 //
-// Настоящий вход — на копии чарта: строка, выпавшая из перечня стража;
-// источник, выпавший из обхода стража; новый источник формой `$.Values.` и в
-// скобках (опыты 392e и 392f проверяющего) и законный близнец — прежние env и
-// secrets формой `$.Values.` (392g).
+// Ступень рендера и суд — настоящим входом на копии чарта: строка, выпавшая из
+// перечня стража; источник, выпавший из обхода стража; новый источник формой
+// `$.Values.` и в скобках (опыты 392e и 392f проверяющего) и каждой формой
+// ссылки на ключ и дома источника (392h, 392i, 392j, 392m, 392n, `keys`);
+// законные близнецы — прежние env и secrets формой `$.Values.` (392g) и ключ,
+// дающий имя не переменной пода, а тому (392o), порту, аннотации пода, значению.
 package deploy_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +90,61 @@ var lawfulPodEnvSourceForms = []struct {
 	{"ключ: под условием в теле",
 		"        {{- range $k, $v := .Values.extraEnv }}\n        {{- if $v }}\n        - name: {{ $k }}\n        {{- end }}\n        {{- end }}\n",
 		[]string{"extraEnv"}},
+	{"ключ: через переменную (392h)",
+		"        {{- range $k, $v := .Values.extraEnv }}\n        {{- $envName := $k }}\n        - name: {{ $envName }}\n        {{- end }}\n",
+		[]string{"extraEnv"}},
+	{"ключ: в элементе из dict и toYaml (392i)",
+		"        {{- range $k, $v := .Values.extraEnv }}\n        {{- list (dict \"name\" $k \"value\" (toString $v)) | toYaml | nindent 8 }}\n        {{- end }}\n",
+		[]string{"extraEnv"}},
+	{"ключ: за приставкой текстом (392j)", envRangeOf(`$k, $v := .Values.extraEnv`, `- name: KANAME_{{ $k }}`), []string{"extraEnv"}},
+	{"адрес: карта, положенная в dict через set (392m)",
+		"{{- $ctx := dict }}\n{{- $_ := set $ctx \"m\" .Values.extraEnv }}\n" + envRangeOf(`$k, $v := $ctx.m`, `- name: {{ $k }}`),
+		[]string{"extraEnv"}},
+	{"адрес: поле dict с картой",
+		"{{- $ctx := dict \"m\" .Values.extraEnv \"c\" 1 }}\n" + envRangeOf(`$k, $v := $ctx.m`, `- name: {{ $k }}`),
+		[]string{"extraEnv"}},
+	{"адрес: слияние карт", envRangeOf(`$k, $v := merge (dict) .Values.baseEnv .Values.extraEnv`, `- name: {{ $k }}`),
+		[]string{"baseEnv", "extraEnv"}},
+	{"адрес: слияние в переменную",
+		"{{- $m := dict }}\n{{- $_ := mergeOverwrite $m .Values.extraEnv }}\n" + envRangeOf(`$k, $v := $m`, `- name: {{ $k }}`),
+		[]string{"extraEnv"}},
+	{"адрес: required", envRangeOf(`$k, $v := required "нужен" .Values.extraEnv`, `- name: {{ $k }}`), []string{"extraEnv"}},
+	{"адрес: ternary", envRangeOf(`$k, $v := ternary .Values.baseEnv .Values.extraEnv .Values.flag`, `- name: {{ $k }}`),
+		[]string{"baseEnv", "extraEnv"}},
+	{"перечень ключей keys",
+		"        {{- range $name := keys .Values.extraEnv }}\n        - name: {{ $name }}\n        {{- end }}\n", []string{"extraEnv"}},
+	{"перечень ключей keys | sortAlpha с умолчанием",
+		"        {{- range $name := keys (.Values.extraEnv | default dict) | sortAlpha }}\n        - name: {{ $name }}\n        {{- end }}\n",
+		[]string{"extraEnv"}},
+	{"перечень ключей с точкой элемента",
+		"        {{- range sortAlpha (keys .Values.extraEnv) }}\n        - name: {{ . }}\n        {{- end }}\n", []string{"extraEnv"}},
+}
+
+// lawfulPodEnvSourceHomes — источник в define, вызванном из другого шаблона:
+// точка define — аргумент места вызова (392n). Форма вызова — каждая, которой
+// шаблон её передаёт.
+var lawfulPodEnvSourceHomes = []struct {
+	form  string
+	files map[string]string
+	want  []string
+}{
+	{"include с корнем", map[string]string{
+		"deployment.yaml": "        {{- include \"x.env\" . | nindent 8 }}\n",
+		"_helpers.tpl":    "{{- define \"x.env\" -}}\n" + envRangeOf(`$k, $v := .Values.extraEnv`, `- name: {{ $k }}`) + "{{- end -}}\n",
+	}, []string{"extraEnv"}},
+	{"template с корнем и $ внутри", map[string]string{
+		"deployment.yaml": "        {{- template \"x.env\" . }}\n",
+		"_helpers.tpl":    "{{- define \"x.env\" -}}\n" + envRangeOf(`$k, $v := $.Values.extraEnv`, `- name: {{ $k }}`) + "{{- end -}}\n",
+	}, []string{"extraEnv"}},
+	{"include с картой аргументом", map[string]string{
+		"deployment.yaml": "        {{- include \"x.env\" .Values.pod | nindent 8 }}\n",
+		"_helpers.tpl":    "{{- define \"x.env\" -}}\n" + envRangeOf(`$k, $v := .env`, `- name: {{ $k }}`) + "{{- end -}}\n",
+	}, []string{"pod.env"}},
+	{"include из define, вызванного с dict", map[string]string{
+		"deployment.yaml": "        {{- include \"x.outer\" (dict \"root\" $) | nindent 8 }}\n",
+		"_helpers.tpl": "{{- define \"x.outer\" -}}\n{{- include \"x.env\" .root -}}\n{{- end -}}\n" +
+			"{{- define \"x.env\" -}}\n" + envRangeOf(`$k, $v := .Values.extraEnv`, `- name: {{ $k }}`) + "{{- end -}}\n",
+	}, []string{"extraEnv"}},
 }
 
 func TestPostureShadowInjection_PodEnvSourcesKnowEveryLawfulForm(t *testing.T) {
@@ -126,32 +183,47 @@ func TestPostureShadowInjection_PodEnvSourcesKnowEveryLawfulForm(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"env", "extraEnv", "secrets"}, got,
 		"законные формы источника окружения не выведены, либо один источник назван дважды")
-	t.Logf("перепись: законных форм %d, каждая назвала свой источник", len(lawfulPodEnvSourceForms))
+
+	for _, h := range lawfulPodEnvSourceHomes {
+		t.Run(h.form, func(t *testing.T) {
+			cands, err := podEnvSourcesIn(h.files)
+			require.NoErrorf(t, err, "законный дом источника отвергнут")
+			paths := make([]string, 0, len(cands))
+			for _, c := range cands {
+				paths = append(paths, c.path)
+			}
+			require.Equalf(t, h.want, paths, "источник в define не выведен с точкой места вызова")
+		})
+	}
+	t.Logf("перепись: законных форм %d и домов %d, каждая назвала свой источник",
+		len(lawfulPodEnvSourceForms), len(lawfulPodEnvSourceHomes))
 }
 
-func TestPostureShadowInjection_PodEnvSourceTwinsAreSilent(t *testing.T) {
+// TestPostureShadowInjection_PodEnvSourceNonCandidatesAreSilent — не кандидаты
+// на ступени разбора: проход, чьё тело ключа не упоминает (имя из значения),
+// ключ, затенённый объявлением, комментарий и постоянная карта. Ключ,
+// уходящий в метку, порт или значение, — КАНДИДАТ: решает рендер, и его
+// близнецы — настоящим входом ниже (`KeyThatNamesNoPodVariableIsSilent`).
+func TestPostureShadowInjection_PodEnvSourceNonCandidatesAreSilent(t *testing.T) {
 	const twins = `{{/* {{- range $k, $v := .Values.commented }}
 - name: {{ $k }} */}}
-{{- range $k, $v := .Values.labels }}
-  {{ $k }}: {{ $v | quote }}
-{{- end }}
-{{- range $i, $p := .Values.ports }}
-- containerPort: {{ $i }}
-{{- end }}
 {{- range $k, $v := .Values.annotations }}
 - name: {{ $v }}
 {{- end }}
-{{- range $k, $v := .Values.valueOnly }}
-- name: FIXED
-  value: {{ $k }}
+{{- range $k, $v := .Values.shadowed }}
+{{- $k := "KANAME_FIXED" }}
+- name: {{ $k }}
 {{- end }}
 {{- range $k, $v := dict "KANAME_FIXED" "x" }}
 - name: {{ $k }}
 {{- end }}
+{{- range $v := .Values.valuesOnly }}
+- name: {{ $v }}
+{{- end }}
 `
 	got, err := podEnvSources(twins)
 	require.NoError(t, err)
-	require.Empty(t, got, "близнец назван источником окружения: ключ карты значений не становится именем переменной")
+	require.Empty(t, got, "не кандидат назван кандидатом: по ключам карты значений шаблон здесь не проходит")
 }
 
 // TestPostureShadowInjection_UnknownSourceAddressIsRefusedNotSkipped — форма,
@@ -163,7 +235,10 @@ func TestPostureShadowInjection_UnknownSourceAddressIsRefusedNotSkipped(t *testi
 		src  string
 	}{
 		{"карта из вызова шаблона", envRangeOf(`$k, $v := include "kaname-svc.extraEnv" . | fromYaml`, `- name: {{ $k }}`)},
-		{"слияние карт", envRangeOf(`$k, $v := merge (dict) .Values.baseEnv .Values.extraEnv`, `- name: {{ $k }}`)},
+		{"ключ по вычисляемому полю", envRangeOf(`$k, $v := index .Values (printf "extra%s" "Env")`, `- name: {{ $k }}`)},
+		{"define, вызванный по вычисляемому имени", "{{- include (printf \"x.%s\" \"env\") . }}\n{{- define \"x.env\" }}\n" +
+			envRangeOf(`$k, $v := .Values.extraEnv`, `- name: {{ $k }}`) + "{{- end }}\n"},
+		{"перечень ключей неизвестной карты", "        {{- range $n := keys (include \"x\" . | fromYaml) }}\n        - name: {{ $n }}\n        {{- end }}\n"},
 		{"весь корень значений", envRangeOf(`$k, $v := .Values`, `- name: {{ $k }}`)},
 		{"адрес вне значений", envRangeOf(`$k, $v := .Release`, `- name: {{ $k }}`)},
 		{"точка — элемент внешнего range",
@@ -288,4 +363,165 @@ func TestPostureShadowInjection_SourceDroppedFromTheGuardIsFound(t *testing.T) {
 	require.NotContains(t, joined, "env.KANAME_AUTHN__IDENTITY_PROVIDER: рендер прошёл",
 		"находка пришла и от неиспорченного источника — инъекция уронила не только свой предмет")
 	t.Logf("перепись: рендеров инъекции %d · находок %d", n, len(got))
+}
+
+// ── Ссылка на ключ и дом источника: опыты 392h–392n проверяющего ──────────────
+
+// extraEnvForms — новый источник `extraEnv` в копии чарта КАЖДОЙ формой, которой
+// ключ карты законно становится именем переменной окружения пода, кроме формы
+// «range по .Values.карта, name: ключ» (её держит тест выше): ключ через
+// переменную (392h), элемент, собранный dict и toYaml (392i), приставка
+// текстом (392j), карта, положенная в dict через set (392m), источник в define
+// файла _helpers.tpl (392n), перечень ключей `keys`. Каждая обязана дать
+// находку по каждой ручке стража: страж обходит только env и secrets.
+var extraEnvForms = []struct {
+	name    string
+	body    string // вставка за картой env шаблона развёртывания
+	helpers string // вставка в конец _helpers.tpl
+	key     func(env string) string
+}{
+	{name: "392h ключ через переменную", body: `            {{- range $k, $v := .Values.extraEnv }}
+            {{- $envName := $k }}
+            - name: {{ $envName }}
+              value: {{ $v | quote }}
+            {{- end }}
+`},
+	{name: "392i элемент собран dict и toYaml", body: `            {{- range $k, $v := .Values.extraEnv }}
+            {{- list (dict "name" $k "value" (toString $v)) | toYaml | nindent 12 }}
+            {{- end }}
+`},
+	{name: "392j приставка имени текстом", body: `            {{- range $k, $v := .Values.extraEnv }}
+            - name: KANAME_{{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`, key: func(env string) string { return strings.TrimPrefix(env, "KANAME_") }},
+	{name: "392m карта положена в dict через set", body: `            {{- $ctx := dict }}
+            {{- $_ := set $ctx "m" .Values.extraEnv }}
+            {{- range $k, $v := $ctx.m }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`},
+	{name: "392n источник в define файла _helpers.tpl", body: `            {{- include "kaname-svc.cvExtraEnv" . | nindent 12 }}
+`, helpers: `
+{{- define "kaname-svc.cvExtraEnv" -}}
+{{- range $k, $v := .Values.extraEnv }}
+- name: {{ $k }}
+  value: {{ $v | quote }}
+{{- end }}
+{{- end -}}
+`},
+	{name: "перечень ключей keys", body: `            {{- range $name := keys (.Values.extraEnv | default dict) | sortAlpha }}
+            - name: {{ $name }}
+              value: {{ index $.Values.extraEnv $name | quote }}
+            {{- end }}
+`},
+}
+
+// patchExtraEnvForm кладёт форму в копию чарта.
+func patchExtraEnvForm(t *testing.T, dir, body, helpers string) {
+	t.Helper()
+	patchInCopy(t, dir, filepath.Join("templates", "deployment.yaml"), envRangeInTheTree, envRangeInTheTree+body)
+	if helpers == "" {
+		return
+	}
+	path := filepath.Join(dir, "templates", "_helpers.tpl")
+	b, err := os.ReadFile(path) // #nosec G304 -- путь из t.TempDir
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(b, helpers...), 0o600))
+}
+
+func TestPostureShadowInjection_NewSourceInEveryReferenceFormIsJudged(t *testing.T) {
+	rows := postureGuardRows(t)
+	for _, f := range extraEnvForms {
+		t.Run(f.name, func(t *testing.T) {
+			dir := chartCopy(t)
+			patchExtraEnvForm(t, dir, f.body, f.helpers)
+
+			got, n := postureShadowFindings(t, dir)
+			var own, foreign []string
+			for _, g := range got {
+				if strings.HasPrefix(g, "extraEnv") {
+					own = append(own, g)
+					continue
+				}
+				foreign = append(foreign, g)
+			}
+			require.Emptyf(t, foreign, "находка пришла и от неиспорченного источника:\n%s", strings.Join(foreign, "\n"))
+			require.Lenf(t, own, len(rows)+1, "не каждая ручка в новом источнике найдена (рендеров %d):\n%s",
+				n, strings.Join(got, "\n"))
+			joined := strings.Join(own, "\n")
+			for _, r := range rows {
+				key := r.env
+				if f.key != nil {
+					key = f.key(r.env)
+				}
+				require.Containsf(t, joined, "extraEnv."+key, "ручка %s в новом источнике не названа ключом %s", r.env, key)
+				require.Containsf(t, joined, r.env+": рендер прошёл", "ручка %s: находка не называет переменную пода", r.env)
+			}
+			t.Logf("перепись: рендеров %d · находок %d", n, len(got))
+		})
+	}
+}
+
+// Законные близнецы настоящим входом: ключ карты уходит не в имя переменной
+// окружения пода — в имя тома (392o) и в значение переменной (близнец 392h).
+// Находок ноль, а не ложная тревога «уехала в окружение пода».
+func TestPostureShadowInjection_KeyThatNamesNoPodVariableIsSilent(t *testing.T) {
+	for _, twin := range []struct{ name, anchor, insert string }{
+		{"392o том назван ключом", "            name: {{ .Values.name }}-config\n", `        {{- range $k, $v := .Values.extraVolumes }}
+        - name: {{ $k }}
+          configMap:
+            name: {{ $v | quote }}
+        {{- end }}
+`},
+		{"порт назван ключом", "              containerPort: {{ .Values.ports.internalGrpc }}\n", `            {{- range $k, $v := .Values.extraPorts }}
+            - name: {{ $k }}
+              containerPort: {{ $v }}
+            {{- end }}
+`},
+		{"аннотация пода названа ключом", "        app: {{ .Values.name }}\n      annotations:\n", `        {{- range $k, $v := .Values.extraAnnotations }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+`},
+		{"ключ даёт имя строчными — ручку стража (заглавными) не даёт", envRangeInTheTree, `            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k | lower }}
+              value: {{ $v | quote }}
+            {{- end }}
+`},
+		{"близнец 392h: ключ в значении", envRangeInTheTree, `            {{- range $k, $v := .Values.extraEnv }}
+            {{- $envName := $k }}
+            - name: KANAME_FIXED_TWIN
+              value: {{ $envName | quote }}
+            {{- end }}
+`},
+	} {
+		t.Run(twin.name, func(t *testing.T) {
+			dir := chartCopy(t)
+			patchInCopy(t, dir, filepath.Join("templates", "deployment.yaml"), twin.anchor, twin.anchor+twin.insert)
+			got, n := postureShadowFindings(t, dir)
+			require.Emptyf(t, got, "ключ, не дающий имени переменной пода, назван источником — ложных находок %d:\n%s",
+				len(got), strings.Join(got, "\n"))
+			t.Logf("перепись: рендеров %d · находок 0", n)
+		})
+	}
+}
+
+// TestPostureShadowInjection_UnconfirmableCandidateIsNotSilent — кандидат, чей
+// пробный ключ рендер не принял (значение обязано быть картой, а разбор этого
+// не вывел), — несостоявшееся суждение и находка, а не «не источник»: иначе
+// источник, которого рендер не проверил, выпал бы из суда молча.
+func TestPostureShadowInjection_UnconfirmableCandidateIsNotSilent(t *testing.T) {
+	dir := chartCopy(t)
+	patchInCopy(t, dir, filepath.Join("templates", "deployment.yaml"), envRangeInTheTree, envRangeInTheTree+
+		`            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ required "нужно поле must" (index $v "must") | quote }}
+            {{- end }}
+`)
+	got, _ := postureShadowFindings(t, dir)
+	joined := strings.Join(got, "\n")
+	require.Containsf(t, joined, "кандидат extraEnv: рендер с пробным ключом",
+		"кандидат, которого рендер не подтвердил и не опроверг, выпал из суда молча:\n%s", joined)
+	require.Contains(t, joined, "источник не подтверждён и не опровергнут")
 }
