@@ -400,10 +400,12 @@ func (v *CeremonyVaults) StoreAuthorizationCode(ctx context.Context, signature s
 
 // fetchCodeSQL — запись кода с тем, из чего собирается грант. Живость, срок и
 // погашенность судит БАЗА, её временем; разбор исхода ниже только читает ответ.
+// Живость включает отсечку субъекта сессии кода (`sessionCutOffBySubjectSQL`).
 const fetchCodeSQL = `
 SELECT c.family_id, c.client_id, c.user_id, c.session_id, c.scope, c.redirect_uri,
        c.code_challenge, c.code_challenge_method, c.expires_at,
-       c.deactivated_at IS NOT NULL, (c.active AND c.expires_at > now()),
+       c.deactivated_at IS NOT NULL,
+       (c.active AND c.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `),
        f.acr, f.created_at, s.authenticated_at,
        LEAST(s.expires_at, f.created_at + make_interval(secs => $2)),
        ic.audiences
@@ -417,8 +419,9 @@ SELECT c.family_id, c.client_id, c.user_id, c.session_id, c.scope, c.redirect_ur
 //
 //   - погашен → запись ВМЕСТЕ с ErrAuthorizationCodeConsumed: по ней отзывается
 //     семейство повтора, и повтор узнаётся по записи, а не по сроку;
-//   - не погашен, но не жив (истёк по времени базы, семейство отозвано) либо
-//     строки нет → ErrGrantNotFound: истечение — не признак похищения;
+//   - не погашен, но не жив (истёк по времени базы, семейство отозвано, сессия
+//     отрезана отсечкой субъекта) либо строки нет → ErrGrantNotFound:
+//     истечение — не признак похищения;
 //   - жив → запись.
 func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature string) (_ oauthceremony.AuthorizationCodeRecord, err error) {
 	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
@@ -568,10 +571,13 @@ func (v *CeremonyVaults) DropAccessToken(context.Context, string) (oauthceremony
 
 // ── Токены обновления ───────────────────────────────────────────────────────
 
-// fetchRefreshSQL — токен обновления с тем, из чего собирается грант.
+// fetchRefreshSQL — токен обновления с тем, из чего собирается грант. Годность
+// к обороту включает отсечку субъекта сессии семейства
+// (`sessionCutOffBySubjectSQL`).
 const fetchRefreshSQL = `
 SELECT t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.expires_at,
-       t.family_live, t.deactivated_at IS NOT NULL, t.expires_at > now(),
+       t.family_live, t.deactivated_at IS NOT NULL,
+       (t.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `),
        f.acr, f.created_at, s.authenticated_at,
        LEAST(s.expires_at, f.created_at + make_interval(secs => $2)),
        ic.audiences
@@ -586,7 +592,8 @@ SELECT t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.expires_at,
 //   - семейство отозвано либо строки нет → ErrGrantNotFound;
 //   - обёрнут → грант ВМЕСТЕ с ErrRefreshTokenRotated (повтор: по нему
 //     отзывается семейство);
-//   - жив → грант. Живой, но истёкший по времени базы — ErrGrantNotFound.
+//   - жив → грант. Живой, но истёкший по времени базы либо из сессии,
+//     отрезанной отсечкой субъекта, — ErrGrantNotFound.
 func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string) (_ oauthceremony.GrantRecord, err error) {
 	defer func() { err = iamerr.OnEndedCall(ctx, err) }()
 	var (
