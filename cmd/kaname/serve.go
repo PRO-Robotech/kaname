@@ -1343,7 +1343,8 @@ func runServe(cfg config.Config) error {
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth:    issuingSurfaceAuth(ceremonyMounted),
-		TLS:     registryTokenTLSConfig,
+		// Транспорт поверхности — TLS, собранный из профиля развёртывания выше.
+		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
