@@ -82,9 +82,25 @@ func (r *SigningKeyRepo) Get(ctx context.Context, kid domain.KeyID) (domain.Sign
 //
 // Отсутствие подписывающего — ОТКАЗ, а не нулевая структура: «подписали ничем»
 // обязано быть невыразимо, а не отловлено вызывающим.
+//
+// # В окне транзакции запроса обмена — через неё, а не через пул
+//
+// Подписант церемонии читает ключ между погашением кода и урегулированием
+// запроса, пока транзакция запроса держит связь пула (`CeremonyVaults`,
+// `OpenRequest`). Второе взятие связи в этом окне при пуле, занятом такими же
+// обменами, ждало бы само себя: каждый держатель ждёт вторую связь, и не идёт
+// никто до срока вызова порта. Поэтому, если контекст несёт открытую
+// транзакцию запроса, ключ читается в ней: чтение одним оператором, транзакция
+// на READ COMMITTED видит зафиксированное состояние ключницы, и лишней связи
+// не берётся.
 func (r *SigningKeyRepo) Active(ctx context.Context) (domain.SigningKeyRecord, error) {
 	q := `SELECT ` + signingKeyColumns + ` FROM kaname.token_signing_keys WHERE state = 'ACTIVE'`
-	row := r.pool.QueryRow(ctx, q)
+	var row pgx.Row
+	if tx, inRequest := requestTx(ctx); inRequest {
+		row = tx.QueryRow(ctx, q)
+	} else {
+		row = r.pool.QueryRow(ctx, q)
+	}
 	rec, err := scanSigningKey(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SigningKeyRecord{}, fmt.Errorf("%w: no active signing key", iamerr.ErrFailedPrecondition)

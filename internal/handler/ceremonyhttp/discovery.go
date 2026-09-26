@@ -6,6 +6,7 @@ package ceremonyhttp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -74,7 +75,7 @@ func NewDiscovery(cfg DiscoveryConfig) (*Discovery, error) {
 		ScopesSupported:               append([]string(nil), cfg.Scopes...),
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ceremonyhttp: discovery document: %w", err)
 	}
 	return &Discovery{body: append(body, '\n')}, nil
 }

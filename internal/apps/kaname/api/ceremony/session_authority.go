@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package ceremonyhttp
+package ceremony
 
 import (
 	"context"
@@ -13,8 +13,12 @@ import (
 
 // SessionResolver — чтение сессии нашего входа по носителю: тот же вариант
 // использования, что отвечает краю (`humansession.ResolveUseCase`). Момент
-// последнего предъявления он не двигает и отсечку не применяет — церемония
-// спрашивает, КТО вошёл, а отзыв выданного читается на предъявлении (01).
+// последнего предъявления он не двигает.
+//
+// Отсечку субъекта он не применяет, и здесь это не мягкий проход: её судит
+// выдача семейства тем же оператором, что и живость сессии
+// (`pg.OAuthCeremonyRepo.IssueAuthorizationCode`), а сессия, отрезанная
+// отсечкой, получает вызов аутентификации, а не код.
 type SessionResolver interface {
 	Execute(ctx context.Context, bearer domain.SessionBearer) (humansession.SessionView, bool, error)
 }
@@ -30,7 +34,7 @@ var _ LoginAuthority = (*SessionAuthority)(nil)
 // NewSessionAuthority — шов над чтением сессии.
 func NewSessionAuthority(resolve SessionResolver) (*SessionAuthority, error) {
 	if resolve == nil {
-		return nil, errors.New("ceremonyhttp: login authority needs the session resolver")
+		return nil, errors.New("ceremony: login authority needs the session resolver")
 	}
 	return &SessionAuthority{resolve: resolve}, nil
 }

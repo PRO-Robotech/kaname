@@ -71,6 +71,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -81,6 +82,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -89,6 +91,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/pgtest"
@@ -99,6 +102,7 @@ import (
 	sessionrevapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
@@ -244,20 +248,54 @@ func (w *ceremonyWorld) seam(format string, args ...any) {
 	w.t.Fatalf("%s %s: %s", w.id, outcomeSeam, fmt.Sprintf(format, args...))
 }
 
+// worldShape — то, чем мир пробы отличается от мира по умолчанию. Нулевое
+// значение — мир по умолчанию.
+type worldShape struct {
+	// poolWidth — ширина пула службы; 0 — умолчание конструктора пула.
+	poolWidth int
+}
+
+// worldOption — одно отличие мира от мира по умолчанию.
+type worldOption func(*worldShape)
+
+// withPoolWidth — пул службы шириной n связей.
+func withPoolWidth(n int) worldOption { return func(s *worldShape) { s.poolWidth = n } }
+
 // newCeremonyWorld собирает мир и проверяет каждую его часть ДО того, как
 // проба спросит испытуемого. level — уровень доверия посеянной сессии.
-func newCeremonyWorld(t *testing.T, id, level string) *ceremonyWorld {
+//
+// Пул мира — пул СЛУЖБЫ (`coredb.NewPool`, тот же конструктор, что у корня):
+// отмена доводится до сервера, у связи тот же потолок оператора и простоя в
+// транзакции. Пул, собранный иначе, был бы снисходительнее продукта ровно на
+// той оси, где отказ хранилища на кончившемся сроке вызова отличается от
+// отказа по сроку.
+func newCeremonyWorld(t *testing.T, id, level string, opts ...worldOption) *ceremonyWorld {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("интеграция: нужен Postgres в контейнере")
 	}
+	var shape worldShape
+	for _, o := range opts {
+		o(&shape)
+	}
 	w := &ceremonyWorld{t: t, id: id, ctx: context.Background(), logs: &lockedBuffer{}}
 
-	pool, err := pgxpool.New(w.ctx, iampgtest.NewTestPostgres(t))
+	dsn := iampgtest.NewTestPostgres(t)
+	if shape.poolWidth > 0 {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "pool_max_conns=" + strconv.Itoa(shape.poolWidth)
+	}
+	pool, err := coredb.NewPool(w.ctx, dsn)
 	if err != nil {
 		w.fixture("пул к базе пробы: %v", err)
 	}
 	pgtest.ClosePoolAtEnd(t, pool)
+	if shape.poolWidth > 0 && int(pool.Config().MaxConns) != shape.poolWidth {
+		w.fixture("ширина пула мира %d не применилась: %d", shape.poolWidth, pool.Config().MaxConns)
+	}
 	w.pool = pool
 
 	w.requireStorePremise()
@@ -421,6 +459,22 @@ func (w *ceremonyWorld) seedSession(level string) ceremonySession {
 // идентификатор предъявления — наш `ic-…` (§5, 02).
 func (w *ceremonyWorld) seedClient(name string, status domain.InteractiveClientStatus, redirects []string) *ceremonyClient {
 	w.t.Helper()
+	return w.seedClientAuthenticatedBy(name, status, redirects, lineA1ClientAuth)
+}
+
+// seedPublicClient — публичный клиент (способ `none`): секрета у него нет, и
+// доказательства клиента перед погашением кода не стоит — ничто не разносит
+// одновременные обмены во времени.
+func (w *ceremonyWorld) seedPublicClient(name string, redirects []string) *ceremonyClient {
+	w.t.Helper()
+	return w.seedClientAuthenticatedBy(name, domain.InteractiveClientActive, redirects,
+		string(oauthceremony.ClientAuthNone))
+}
+
+func (w *ceremonyWorld) seedClientAuthenticatedBy(name string, status domain.InteractiveClientStatus,
+	redirects []string, method string,
+) *ceremonyClient {
+	w.t.Helper()
 	id := domain.InteractiveClientID(ids.NewHyphenID(ids.PrefixInteractiveClientHyphen))
 	repo := kanamepg.NewInteractiveClientRepo(w.pool)
 	in := domain.InteractiveClient{
@@ -431,7 +485,7 @@ func (w *ceremonyWorld) seedClient(name string, status domain.InteractiveClientS
 		ClientID:                string(id),
 		Audiences:               []string{"https://api.kacho.local"},
 		GrantTypes:              []string{grantAuthorizationCode, grantRefreshToken},
-		TokenEndpointAuthMethod: lineA1ClientAuth,
+		TokenEndpointAuthMethod: method,
 		Status:                  status,
 	}
 	if _, err := repo.Insert(w.ctx, in); err != nil {
@@ -442,7 +496,7 @@ func (w *ceremonyWorld) seedClient(name string, status domain.InteractiveClientS
 		w.fixture("посеянный клиент %s не читается: %v", name, err)
 	}
 	if got.Status != status || strings.Join(got.RedirectURIs, " ") != strings.Join(redirects, " ") ||
-		got.TokenEndpointAuthMethod != lineA1ClientAuth {
+		got.TokenEndpointAuthMethod != method {
 		w.fixture("клиент %s прочитан не таким, каким посеян: статус %s, цели %v, способ %q",
 			name, got.Status, got.RedirectURIs, got.TokenEndpointAuthMethod)
 	}
@@ -468,7 +522,7 @@ func (w *ceremonyWorld) buildSurface() {
 	w.priv, w.kid = priv, "kaname-line-a-1"
 	signer, err := tokensigner.New(tokensigner.Config{
 		Issuer: lineA1Issuer, Clock: time.Now, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
-	}, ceremonyKeys{mat: tokensigner.SigningMaterial{
+	}, ceremonyKeys{store: kanamepg.NewSigningKeyRepo(w.pool), mat: tokensigner.SigningMaterial{
 		KID:           domain.KeyID(w.kid),
 		Algorithm:     domain.SigningAlgES256,
 		PrivateKeyPEM: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}),
@@ -528,8 +582,11 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	w.t.Helper()
 	// Ёмкость — по наибольшей одновременности проб мира (26: шестнадцать
 	// обменов одним кодом): предмет проб — погашение в базе, а не ёмкость
-	// проверяющего, и отказ по ёмкости был бы отказом фикстуры.
-	v, err := passwordverify.New(16, silentVerifyObserver{})
+	// проверяющего, и отказ по ёмкости был бы отказом фикстуры. Сверка секрета
+	// церемонии занимает не больше половины ёмкости (доля рядом с полосой
+	// входа, `ceremonyport.ClientSecrets`), поэтому ёмкость — вдвое больше
+	// наибольшей одновременности.
+	v, err := passwordverify.New(32, silentVerifyObserver{})
 	if err != nil {
 		w.fixture("проверяющий секрета клиента: %v", err)
 	}
@@ -559,9 +616,25 @@ func ceremonySecretHasher(w *ceremonyWorld) *passwordverify.Hasher {
 	return hasher
 }
 
-type ceremonyKeys struct{ mat tokensigner.SigningMaterial }
+// ceremonyKeys — подписной материал мира. Материал — ключ мира, а ЧТЕНИЕ —
+// продуктовое: на каждую подпись ключ спрашивается у читателя ключницы
+// (`SigningKeyRepo.Active`), как это делает подписант службы. Иначе мир был бы
+// снисходительнее продукта на оси, где подпись зовёт хранилище посреди
+// транзакции запроса обмена. Ответ хранилища мира — «подписного ключа нет»:
+// его ключ живёт в памяти, и именно этот ответ означает, что хранилище
+// спрошено и ответило; всякий иной отказ — отказ подписи, как у ключницы.
+type ceremonyKeys struct {
+	store *kanamepg.SigningKeyRepo
+	mat   tokensigner.SigningMaterial
+}
 
-func (k ceremonyKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial, error) {
+func (k ceremonyKeys) ActiveSigningKey(ctx context.Context) (tokensigner.SigningMaterial, error) {
+	if _, err := k.store.Active(ctx); !errors.Is(err, iamerr.ErrFailedPrecondition) {
+		if err == nil {
+			return tokensigner.SigningMaterial{}, fmt.Errorf("мир: в хранилище пробы оказался подписной ключ")
+		}
+		return tokensigner.SigningMaterial{}, err
+	}
 	return k.mat, nil
 }
 

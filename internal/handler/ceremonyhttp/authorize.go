@@ -9,15 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
-	"github.com/PRO-Robotech/corelib/acrlevel"
-	"github.com/PRO-Robotech/corelib/oauthceremony"
-	"github.com/PRO-Robotech/corelib/tokenpolicy"
-
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
@@ -43,13 +38,11 @@ var singleValued = []string{
 
 // AuthorizeConfig — зависимости эндпоинта авторизации. Все обязательны.
 type AuthorizeConfig struct {
-	Engine    Engine
-	Clients   Clients
-	Authority LoginAuthority
-	Census    *Census
-	Logger    *slog.Logger
-	// Clock — источник времени границы семейства. Вход, а не окружение.
-	Clock func() time.Time
+	// UseCase — выдача кода: доверие цели, решения домена и сроки вызовов
+	// хранилища (`internal/apps/kaname/api/ceremony`).
+	UseCase *ceremony.AuthorizeUseCase
+	Census  *Census
+	Logger  *slog.Logger
 }
 
 // Authorize — эндпоинт авторизации `GET /iam/v1/authorize`.
@@ -60,18 +53,12 @@ type Authorize struct {
 // NewAuthorize строит эндпоинт. Неполная провязка — отказ построения.
 func NewAuthorize(cfg AuthorizeConfig) (*Authorize, error) {
 	switch {
-	case cfg.Engine == nil:
-		return nil, errors.New("ceremonyhttp: authorize endpoint needs the ceremony")
-	case cfg.Clients == nil:
-		return nil, errors.New("ceremonyhttp: authorize endpoint needs the client directory")
-	case cfg.Authority == nil:
-		return nil, errors.New("ceremonyhttp: authorize endpoint needs the login authority")
+	case cfg.UseCase == nil:
+		return nil, errors.New("ceremonyhttp: authorize endpoint needs the authorize use-case")
 	case cfg.Census == nil:
 		return nil, errors.New("ceremonyhttp: authorize endpoint needs the outcome census")
 	case cfg.Logger == nil:
 		return nil, errors.New("ceremonyhttp: authorize endpoint needs a logger")
-	case cfg.Clock == nil:
-		return nil, errors.New("ceremonyhttp: authorize endpoint needs a clock")
 	}
 	return &Authorize{cfg: cfg}, nil
 }
@@ -91,34 +78,31 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (2) Клиент и адрес возврата — до всякого доверия.
 	clientID, redirect := q.Get("client_id"), q.Get("redirect_uri")
 	if len(q["client_id"]) != 1 || len(q["redirect_uri"]) != 1 || clientID == "" || redirect == "" {
-		a.refuseUntrusted(ctx, w, OutcomeAuthorizeRequestMalformed, clientID)
+		a.refuseUntrusted(ctx, w, OutcomeAuthorizeRequestMalformed, clientID, "client or return address not named once")
 		return
 	}
-	reg, err := a.cfg.Clients.LookupClient(ctx, clientID)
-	switch {
-	case oauthceremony.CodeOf(err) == oauthceremony.CodeGrantNotFound:
-		a.refuseUntrusted(ctx, w, OutcomeAuthorizeClientUnknown, clientID)
+	target, trust, err := a.cfg.UseCase.Trust(ctx, clientID, redirect)
+	switch trust {
+	case ceremony.TrustGranted:
+	case ceremony.TrustClientUnknown:
+		a.refuseUntrusted(ctx, w, OutcomeAuthorizeClientUnknown, clientID, "client unknown")
 		return
-	case err != nil:
+	case ceremony.TrustRedirectUnregistered:
+		a.refuseUntrusted(ctx, w, OutcomeAuthorizeRedirectUnregistered, clientID, "return address unregistered")
+		return
+	default:
 		a.cfg.Census.count(OutcomeAuthorizeUnavailable)
 		a.cfg.Logger.ErrorContext(ctx, "authorization request: client directory did not answer",
 			slog.String("outcome", string(OutcomeAuthorizeUnavailable)), slog.String("client", clientID),
-			slog.String("err", err.Error()))
+			slog.Any("err", err))
 		writeText(w, http.StatusServiceUnavailable, unavailableRefusal)
-		return
-	}
-	// Точное равенство, без нормализации: хвостовой слэш, регистр, порядок
-	// параметров — другой адрес (Р4, LAX-4).
-	if !slices.Contains(reg.RedirectURIs, redirect) {
-		a.refuseUntrusted(ctx, w, OutcomeAuthorizeRedirectUnregistered, clientID)
 		return
 	}
 
 	// С этого места цель доверена, и отказ уезжает перенаправлением.
-	target := redirect
 	for _, name := range singleValued {
 		if len(q[name]) > 1 {
-			a.refuseByRedirect(ctx, w, target, "invalid_request", OutcomeAuthorizeProtocolRefused, clientID,
+			a.refuseByRedirect(ctx, w, target.RedirectURI, "invalid_request", OutcomeAuthorizeProtocolRefused, clientID,
 				"parameter "+name+" is named more than once")
 			return
 		}
@@ -126,124 +110,53 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// (3) Пол `state`: не прислан (длина 0) и короче пола — один исход (Р13 п. 1).
 	if utf8.RuneCountInString(q.Get("state")) < StateFloor {
-		a.refuseByRedirect(ctx, w, target, "invalid_request", OutcomeAuthorizeStateBelowFloor, clientID,
+		a.refuseByRedirect(ctx, w, target.RedirectURI, "invalid_request", OutcomeAuthorizeStateBelowFloor, clientID,
 			"state below the floor")
 		return
 	}
-	required, ok := requiredLevel(q.Get("acr_values"))
-	if !ok {
-		a.refuseByRedirect(ctx, w, target, "invalid_request", OutcomeAuthorizeProtocolRefused, clientID,
-			"acr_values names a level outside the platform vocabulary")
-		return
-	}
-	scopes := strings.Fields(q.Get("scope"))
-	if len(scopes) == 0 {
-		a.refuseByRedirect(ctx, w, target, "invalid_scope", OutcomeAuthorizeProtocolRefused, clientID,
-			"no scope requested")
-		return
-	}
-	if len(reg.Audiences) == 0 {
-		// Получателя штампуем мы по регистрации клиента (Р6); клиент без
-		// зарегистрированного получателя токена получить не может.
-		a.refuseByRedirect(ctx, w, target, "unauthorized_client", OutcomeAuthorizeProtocolRefused, clientID,
-			"the client registers no audience")
-		return
-	}
 
-	// (4) Протокол — церемонией фундамента. Назначаемое выдачей (субъект,
-	// уровень, момент, получатель) из запроса не берётся: такие параметры
-	// церемонии не передаются вовсе (Р5).
-	req := oauthceremony.AuthorizationRequest{
-		ClientID:    clientID,
-		RedirectURI: redirect,
-		Scopes:      scopes,
-		Audiences:   append([]string(nil), reg.Audiences...),
-		State:       q.Get("state"),
-		Delivery:    oauthceremony.ResponseDelivery(q.Get("response_mode")),
-		Additional:  map[string][]string{},
-	}
-	for _, kind := range strings.Fields(q.Get("response_type")) {
-		req.ResponseKinds = append(req.ResponseKinds, oauthceremony.ResponseKind(kind))
-	}
-	for _, name := range []string{"code_challenge", "code_challenge_method"} {
-		if v := q.Get(name); v != "" {
-			req.Additional[name] = []string{v}
-		}
-	}
-	intent, err := a.cfg.Engine.Authorize(ctx, req)
-	if err != nil {
-		if intent.RedirectURI() == "" {
-			a.refuseUntrusted(ctx, w, OutcomeAuthorizeProtocolRefused, clientID)
-			return
-		}
-		a.refuseByRedirect(ctx, w, target, authorizeWire(oauthceremony.CodeOf(err)), OutcomeAuthorizeProtocolRefused,
-			clientID, oauthceremony.CodeOf(err).String())
-		return
-	}
-
-	// (5) Шов входа.
-	login, found, err := a.cfg.Authority.Resolve(ctx, presentedSession(r))
-	switch {
-	case err != nil:
-		a.refuseByRedirect(ctx, w, target, "temporarily_unavailable", OutcomeAuthorizeUnavailable, clientID,
-			"login authority did not answer: "+err.Error())
-		return
-	case !found:
-		a.challenge(ctx, w, OutcomeAuthorizeLoginRequired, clientID, "", errorBody("login_required"))
-		return
-	case required > 0 && acrlevel.Rank(login.Level) < required:
-		a.challenge(ctx, w, OutcomeAuthorizeStepUpRequired, clientID, login.Subject, map[string]string{
-			"error":      "insufficient_user_authentication",
-			"acr_values": strings.TrimSpace(q.Get("acr_values")),
-		})
-		return
-	}
-
-	// (6) Выдача. Граница семейства — не позже сессии, в которой оно выдано, и
-	// не позже потолка семейства фундамента.
-	bound := a.cfg.Clock().Add(tokenpolicy.MaxRefreshTokenFamilyTTL)
-	if !login.ExpiresAt.IsZero() && login.ExpiresAt.Before(bound) {
-		bound = login.ExpiresAt
-	}
-	result, err := a.cfg.Engine.CompleteAuthorization(ctx, intent, oauthceremony.AuthorizationGrant{
-		Subject:          login.Subject,
-		SessionID:        login.SessionID,
-		ACR:              login.Level,
-		AuthTime:         login.AuthTime,
-		GrantedScopes:    intent.RequestedScopes(),
-		GrantedAudiences: intent.RequestedAudiences(),
-		ExpiresAt: map[oauthceremony.TokenKind]time.Time{
-			oauthceremony.TokenKindAuthorizationCode: bound,
-			oauthceremony.TokenKindAccess:            bound,
-			oauthceremony.TokenKindRefresh:           bound,
-		},
+	// (4)–(6) Протокол, шов входа, выдача — вариант использования.
+	res := a.cfg.UseCase.Execute(ctx, target, ceremony.AuthorizeInput{
+		Scopes:              strings.Fields(q.Get("scope")),
+		ResponseKinds:       strings.Fields(q.Get("response_type")),
+		ResponseMode:        q.Get("response_mode"),
+		State:               q.Get("state"),
+		AcrValues:           q.Get("acr_values"),
+		CodeChallenge:       q.Get("code_challenge"),
+		CodeChallengeMethod: q.Get("code_challenge_method"),
+		Session:             presentedSession(r),
 	})
-	if errors.Is(err, domain.ErrCeremonySessionNotLive) || errors.Is(err, domain.ErrCeremonySessionUnknown) {
-		// Сессия кончилась между ответом шва и выдачей: входа, в котором идёт
-		// церемония, больше нет.
-		a.challenge(ctx, w, OutcomeAuthorizeLoginRequired, clientID, login.Subject, errorBody("login_required"))
-		return
+	switch res.Verdict {
+	case ceremony.VerdictRefusedByRedirect:
+		a.refuseByRedirect(ctx, w, target.RedirectURI, res.Wire, OutcomeAuthorizeProtocolRefused, clientID, res.Why)
+	case ceremony.VerdictRefusedUntrusted:
+		a.refuseUntrusted(ctx, w, OutcomeAuthorizeProtocolRefused, clientID, res.Why)
+	case ceremony.VerdictLoginRequired:
+		a.challenge(ctx, w, OutcomeAuthorizeLoginRequired, clientID, res.Subject, errorBody("login_required"))
+	case ceremony.VerdictStepUpRequired:
+		a.challenge(ctx, w, OutcomeAuthorizeStepUpRequired, clientID, res.Subject, map[string]string{
+			"error":      "insufficient_user_authentication",
+			"acr_values": res.AcrValues,
+		})
+	case ceremony.VerdictIssued:
+		// Согласие первопартийного клиента не спрашивается (приёмка §4, 09):
+		// ответ выдачи — сразу перенаправление с кодом. Адрес собрал движок; код
+		// состояния — поверхности (302, приёмка 02).
+		a.cfg.Census.count(OutcomeAuthorizeIssued)
+		a.cfg.Logger.InfoContext(ctx, "authorization code issued",
+			slog.String("outcome", string(OutcomeAuthorizeIssued)), slog.String("client", clientID),
+			slog.String("subject", res.Subject), slog.String("acr", res.Level))
+		w.Header().Set("Location", res.RedirectURI)
+		w.WriteHeader(http.StatusFound)
+	default:
+		// VerdictUnavailable и всякий исход, которого словарь поверхности не знает,
+		// — отказ по нашей причине перенаправлением на доверенную цель.
+		wire := res.Wire
+		if wire == "" {
+			wire = "server_error"
+		}
+		a.refuseByRedirect(ctx, w, target.RedirectURI, wire, OutcomeAuthorizeUnavailable, clientID, res.Why)
 	}
-	if err != nil {
-		a.refuseByRedirect(ctx, w, target, authorizeWire(oauthceremony.CodeOf(err)), OutcomeAuthorizeUnavailable,
-			clientID, oauthceremony.CodeOf(err).String()+": "+err.Error())
-		return
-	}
-	if result.RedirectURI == "" || result.Delivery != oauthceremony.DeliveryQuery {
-		a.refuseByRedirect(ctx, w, target, "server_error", OutcomeAuthorizeUnavailable, clientID,
-			"the ceremony assembled no query redirect")
-		return
-	}
-
-	// Согласие первопартийного клиента не спрашивается (приёмка §4, 09): ответ
-	// выдачи — сразу перенаправление с кодом. Адрес собрал движок; код
-	// состояния — поверхности (302, приёмка 02).
-	a.cfg.Census.count(OutcomeAuthorizeIssued)
-	a.cfg.Logger.InfoContext(ctx, "authorization code issued",
-		slog.String("outcome", string(OutcomeAuthorizeIssued)), slog.String("client", clientID),
-		slog.String("subject", login.Subject), slog.String("acr", login.Level))
-	w.Header().Set("Location", result.RedirectURI)
-	w.WriteHeader(http.StatusFound)
 }
 
 // presentedSession — носитель нашей сессии из печенья полосы входа.
@@ -255,43 +168,12 @@ func presentedSession(r *http.Request) domain.SessionBearer {
 	return domain.PresentedSessionBearer(c.Value)
 }
 
-// requiredLevel — наименьший уровень из `acr_values`: клиент перечисляет
-// приемлемые уровни, и любой из них удовлетворяет запросу. ok=false — значение
-// вне словаря платформы (ранжирование `acrlevel`).
-func requiredLevel(acrValues string) (int, bool) {
-	required := 0
-	for _, v := range strings.Fields(acrValues) {
-		rank := acrlevel.Rank(v)
-		if rank == 0 {
-			return 0, false
-		}
-		if required == 0 || rank < required {
-			required = rank
-		}
-	}
-	return required, true
-}
-
-// authorizeWire — код отказа точки авторизации из словаря RFC 6749 §4.1.2.1.
-// Случай церемонии вне этого словаря уезжает ближайшим словом словаря, а не
-// своим: чужая библиотека прочтёт только слово стандарта.
-func authorizeWire(code oauthceremony.FailureCode) string {
-	switch wire := code.WireCode(); wire {
-	case "invalid_request", "unauthorized_client", "access_denied", "unsupported_response_type",
-		"invalid_scope", "server_error", "temporarily_unavailable":
-		return wire
-	}
-	if code.HTTPStatus() >= http.StatusInternalServerError {
-		return "server_error"
-	}
-	return "invalid_request"
-}
-
 // refuseUntrusted — отказ без перенаправления (см. untrustedTargetRefusal).
-func (a *Authorize) refuseUntrusted(ctx context.Context, w http.ResponseWriter, outcome Outcome, clientID string) {
+// Причина — только в журнал: наружу ответ один на все причины.
+func (a *Authorize) refuseUntrusted(ctx context.Context, w http.ResponseWriter, outcome Outcome, clientID, why string) {
 	a.cfg.Census.count(outcome)
 	a.cfg.Logger.WarnContext(ctx, "authorization request refused without redirect",
-		slog.String("outcome", string(outcome)), slog.String("client", clientID))
+		slog.String("outcome", string(outcome)), slog.String("client", clientID), slog.String("why", why))
 	writeText(w, http.StatusBadRequest, untrustedTargetRefusal)
 }
 

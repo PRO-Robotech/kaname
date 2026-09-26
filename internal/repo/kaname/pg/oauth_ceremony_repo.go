@@ -276,16 +276,37 @@ SELECT 1 FROM kaname.human_sessions WHERE id = $1 FOR SHARE`
 // вставлено. Ноль первых — сессии НЕТ (прежняя форма давала здесь отказ с
 // именем внешнего ключа, и терять это различение нельзя); ноль вторых при
 // единице первых — сессия есть, но не жива.
+//
+// # ЖИВОСТЬ СЕССИИ ВКЛЮЧАЕТ ОТСЕЧКУ СУБЪЕКТА
+//
+// Сессия, отрезанная отсечкой своего человека (`sessionCutOffBySubjectSQL`), —
+// тоже «не жива», хотя отметки снятия на ней нет: отсечку кладут и писатели,
+// сессий не снимающие. Условие стоит в том же операторе, что запись.
 const insertFamilyOnLiveSessionSQL = `
 WITH s AS (
-    SELECT ended_at, expires_at FROM kaname.human_sessions WHERE id = $4
+    SELECT user_id, authenticated_at, ended_at, expires_at FROM kaname.human_sessions WHERE id = $4
 ), ins AS (
     INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
     SELECT $1, $2, $3, $4, $5, $6 FROM s
-     WHERE s.ended_at IS NULL AND s.expires_at > now()
+     WHERE s.ended_at IS NULL AND s.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `
     RETURNING 1
 )
 SELECT (SELECT count(*) FROM s)::int, (SELECT count(*) FROM ins)::int`
+
+// sessionCutOffBySubjectSQL — сессия `s` отрезана отсечкой своего субъекта:
+// аутентифицирована НЕ ПОЗЖЕ `user_token_revocations.revoke_before`. Правило то
+// же, что у края на браузерной полосе: действительна сессия, аутентифицированная
+// строго ПОЗЖЕ отсечки.
+//
+// Выдача церемонии читает его на КАЖДОМ своём ходе — заведение семейства и
+// выборка кода и токена обновления к обмену (`oauth_ceremony_vaults.go`) — тем
+// же оператором, что живость: предъявление судит токены по отметке выпуска, и
+// выпуск после отсечки из сессии, аутентифицированной до неё, предъявление
+// пропустило бы. Строку отсечки пишет `UserTokenRevocationRepo`; этот предикат
+// её только читает, и написан он один раз — на алиас сессии `s`.
+const sessionCutOffBySubjectSQL = `EXISTS (
+    SELECT 1 FROM kaname.user_token_revocations r
+     WHERE r.user_id = s.user_id AND r.revoke_before >= s.authenticated_at)`
 
 // IssueAuthorizationCode заводит семейство и его код ОДНОЙ транзакцией.
 //
@@ -345,8 +366,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 		// отказ значило бы потерять различение, которое уже было.
 		return fmt.Errorf("%w: session %s", domain.ErrCeremonySessionUnknown, in.Context.SessionID)
 	case inserted == 0:
-		// Сессия ЕСТЬ, но не жива. Снятую и истёкшую предъявителю различать
-		// незачем: обе означают «входа, в котором идёт церемония, больше нет».
+		// Сессия ЕСТЬ, но не жива. Снятую, истёкшую и отрезанную отсечкой
+		// субъекта предъявителю различать незачем: все три означают «входа, в
+		// котором идёт церемония, больше нет».
 		return fmt.Errorf("%w: session %s", domain.ErrCeremonySessionNotLive, in.Context.SessionID)
 	}
 	if _, err = tx.Exec(ctx, `

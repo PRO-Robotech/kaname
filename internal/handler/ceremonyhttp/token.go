@@ -4,16 +4,15 @@
 package ceremonyhttp
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
@@ -31,50 +30,35 @@ import (
 // Различимы только отказы, решённые ДО этого: форма запроса и аутентификация
 // конфиденциального клиента (`invalid_client`, о клиенте, не о коде).
 type TokenLane struct {
-	engine Engine
-	units  RequestUnits
-	census *Census
-	logger *slog.Logger
-}
-
-// RequestUnits — единица запроса обмена: погашение кода, запись выпуска и пара
-// — одна транзакция хранилища, открываемая погашением (реализует
-// `pg.CeremonyVaults`). settle урегулирует запрос: закрепляет погашение, если
-// выдача не состоялась. Зовётся ровно один раз — после операции, до ответа.
-type RequestUnits interface {
-	OpenRequest(ctx context.Context) (context.Context, func(context.Context) error)
+	exchange *ceremony.ExchangeUseCase
+	census   *Census
+	logger   *slog.Logger
+	grants   []string
 }
 
 var _ clienttokenhttp.CeremonyLane = (*TokenLane)(nil)
 
 // NewTokenLane строит полосы. Неполная провязка — отказ построения.
-func NewTokenLane(engine Engine, units RequestUnits, census *Census, logger *slog.Logger) (*TokenLane, error) {
+func NewTokenLane(exchange *ceremony.ExchangeUseCase, census *Census, logger *slog.Logger) (*TokenLane, error) {
 	switch {
-	case engine == nil:
-		return nil, errors.New("ceremonyhttp: token lane needs the ceremony")
-	case units == nil:
-		return nil, errors.New("ceremonyhttp: token lane needs the exchange request units")
+	case exchange == nil:
+		return nil, errors.New("ceremonyhttp: token lane needs the exchange use-case")
 	case census == nil:
 		return nil, errors.New("ceremonyhttp: token lane needs the outcome census")
 	case logger == nil:
 		return nil, errors.New("ceremonyhttp: token lane needs a logger")
 	}
-	return &TokenLane{engine: engine, units: units, census: census, logger: logger}, nil
+	kinds := oauthceremony.GrantKinds()
+	grants := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		grants = append(grants, string(k))
+	}
+	return &TokenLane{exchange: exchange, census: census, logger: logger, grants: grants}, nil
 }
 
 // Grants — виды выдачи полосы: словарь церемонии фундамента, а не выписанные
-// слова.
-func (l *TokenLane) Grants() []string {
-	kinds := oauthceremony.GrantKinds()
-	out := make([]string, 0, len(kinds))
-	for _, k := range kinds {
-		out = append(out, string(k))
-	}
-	return out
-}
-
-// settleTimeout — предел урегулирования запроса: одно закрепление транзакции.
-const settleTimeout = 3 * time.Second
+// слова. Набор собран при построении; наружу — копия.
+func (l *TokenLane) Grants() []string { return append([]string(nil), l.grants...) }
 
 // laneSingleValued — параметры полосы, называемые не более одного раза.
 var laneSingleValued = []string{
@@ -121,20 +105,12 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 	}
 
 	// Назначаемое выдачей — субъект, уровень, момент, получатель — церемонии не
-	// передаётся вовсе: читается из кода (Р5, сценарии 10, 27).
-	unitCtx, settle := l.units.OpenRequest(ctx)
-	res, err := l.engine.Exchange(unitCtx, req)
-	// Урегулирование — ДО ответа и отвязано от отмены вызывающего: ответ
-	// «отказ» после незакреплённого погашения оставил бы код живым для повтора.
-	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
-	serr := settle(settleCtx)
-	cancel()
-	if serr != nil {
+	// передаётся вовсе: читается из кода (Р5, сценарии 10, 27). Единицу запроса
+	// открывает и урегулирует на каждом выходе вариант использования.
+	res, err := l.exchange.Execute(ctx, req)
+	if errors.Is(err, ceremony.ErrNotSettled) {
 		l.logger.ErrorContext(ctx, "ceremony exchange request was not settled",
-			slog.String("client", req.ClientID), slog.String("err", serr.Error()))
-		if err == nil {
-			err = serr
-		}
+			slog.String("client", req.ClientID), slog.Any("err", err))
 	}
 	if err != nil {
 		l.refuseExchange(r, w, req.ClientID, err)

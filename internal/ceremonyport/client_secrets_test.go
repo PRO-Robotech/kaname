@@ -260,6 +260,8 @@ func (s stubChecker) VerifyPresented(domain.LoginVerifier, passwordverify.Presen
 
 func (stubChecker) Aligned() bool { return true }
 
+func (stubChecker) Capacity() int { return 2 }
+
 // Словарь исходов проверяющего ЗАКРЫТ, и у каждого исхода — свой ответ порта:
 // совпал · не совпал · сверка не состоялась. Исход, которого эта таблица не
 // знает, — находка: словарь вырос, и решение о новом исходе не принято.

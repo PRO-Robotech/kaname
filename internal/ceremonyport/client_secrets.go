@@ -33,6 +33,9 @@ type SecretChecker interface {
 	// Aligned — полоса «материала нет» вычисляется против выравнивающего
 	// значения, а не отвечает мгновенно.
 	Aligned() bool
+	// Capacity — объявленная ёмкость проверяющего: сколько сверок идут
+	// одновременно на всех делящих его полосах.
+	Capacity() int
 }
 
 // ClientSecrets — адаптер порта сверки секрета клиента
@@ -61,9 +64,23 @@ type SecretChecker interface {
 //
 // Адаптер не ведёт журнала и не видит значения: оно уходит проверяющему
 // типом фундамента, а тексты отказов называют клиента и исход, но не секрет.
+//
+// # Доля ёмкости проверяющего
+//
+// Проверяющий — общий с полосой входа паролем: тот же пул вычислений, под
+// который посчитан бюджет памяти процесса. Сверка на токен-эндпоинте идёт ДО
+// всякого доказательства клиента, и поток запросов, называющих клиента с любым
+// секретом, занимал бы места проверяющего целиком — вход людей получал бы отказ
+// по ёмкости. Поэтому сверка церемонии занимает не больше своей доли — половины
+// ёмкости проверяющего; сверка сверх доли — отказ по ёмкости сразу, без
+// ожидания, тем же исходом, что исчерпание самого проверяющего. Вторая половина
+// остаётся полосе входа при любом потоке на токен-эндпоинте. Доля — предел
+// одновременности, а не частоты.
 type ClientSecrets struct {
 	store   SecretVerifierStore
 	checker SecretChecker
+	// share — места доли церемонии: неблокирующий захват одной отправкой в канал.
+	share chan struct{}
 }
 
 var (
@@ -84,8 +101,11 @@ func NewClientSecrets(store SecretVerifierStore, checker SecretChecker) (*Client
 	case !checker.Aligned():
 		return nil, errors.New("ceremonyport: the secret checker has no decoy; a refusal to an unknown " +
 			"client would cost less than a refusal to a wrong secret")
+	case checker.Capacity()/2 < 1:
+		return nil, fmt.Errorf("ceremonyport: the secret checker capacity %d leaves no share for the ceremony "+
+			"beside the sign-in lane; declare a capacity of at least 2", checker.Capacity())
 	}
-	return &ClientSecrets{store: store, checker: checker}, nil
+	return &ClientSecrets{store: store, checker: checker, share: make(chan struct{}, checker.Capacity()/2)}, nil
 }
 
 // VerifyClientSecret сверяет секрет, предъявленный от имени клиента clientID.
@@ -93,6 +113,13 @@ func (c *ClientSecrets) VerifyClientSecret(ctx context.Context, clientID string,
 	stored, err := c.material(ctx, clientID)
 	if err != nil {
 		return oauthceremony.SecretVerdictUnspecified, err
+	}
+	select {
+	case c.share <- struct{}{}:
+		defer func() { <-c.share }()
+	default:
+		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
+			"the ceremony share of the checker is at capacity: %w", clientID, domain.ErrVerifierAtCapacity)
 	}
 	res := c.checker.VerifyPresented(stored, presented)
 	switch res.Outcome {
@@ -134,7 +161,7 @@ func (c *ClientSecrets) material(ctx context.Context, clientID string) (domain.L
 		return domain.LoginVerifier{}, nil
 	case err != nil:
 		return domain.LoginVerifier{}, fmt.Errorf("ceremonyport: client %s: the secret verifier store did not answer: %w",
-			clientID, err)
+			clientID, iamerr.OnEndedCall(ctx, err))
 	case !has:
 		return domain.LoginVerifier{}, nil
 	}

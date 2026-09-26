@@ -134,8 +134,10 @@ var (
 )
 
 // liveSessionCondition — условие живости сессии в операторе заведения
-// семейства. Рука «только замок» — тот же оператор БЕЗ него.
-const liveSessionCondition = "WHERE s.ended_at IS NULL AND s.expires_at > now()"
+// семейства ЦЕЛИКОМ: снятие, срок и отсечка субъекта (kaname#423). Рука
+// «только замок» — тот же оператор БЕЗ него.
+const liveSessionCondition = "WHERE s.ended_at IS NULL AND s.expires_at > now() AND NOT " +
+	kanamepg.SessionCutOffBySubjectSQL
 
 // issuanceArm — одна форма выдачи. `control` — рука без одной из половин
 // решения: её исход в сцене объявлен заранее, и позеленевшая там, где обязана
