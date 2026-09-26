@@ -27,8 +27,9 @@
 // (`pod_env_source_recognizer_test.go`): разбор всех шаблонов чарта называет
 // кандидатов — карты, по чьим ключам проходит шаблон, в любой законной форме
 // адреса; адрес, который разбор не выводит, — отказ с координатой, а не
-// пропуск. Рендер с пробным ключом решает, чей ключ стал ИМЕНЕМ переменной
-// окружения пода, и как именно.
+// пропуск. Рендер с пробным ключом вида ручки при каждом условии суда решает,
+// чей ключ стал ИМЕНЕМ переменной окружения пода, как именно и при каком
+// условии; кандидат, которого рендер не подтвердил и не опроверг, — находка.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
@@ -205,15 +206,17 @@ func TestOwnPostureOverlayMovedIntoTheEnvironmentIsRefused(t *testing.T) {
 // ── Р4 ───────────────────────────────────────────────────────────────────────
 
 // postureShadowFindings судит чарт по пути dir: источники окружения пода
-// подтверждены рендером, и каждая ручка стража в каждом источнике — отказ
-// правила тени с источником и канонической координатой; все сразу — один
-// перечень с числом; соседняя ручка — рендер.
+// подтверждены рендером, и каждая ручка стража в каждом источнике — при
+// условии, которым источник подтверждён, — отказ правила тени с источником и
+// канонической координатой; все сразу — один перечень с числом; соседняя
+// ручка — рендер. Кандидат, которого рендер не подтвердил и не опроверг, —
+// находка.
 func postureShadowFindings(t *testing.T, dir string) (findings []string, renders int) {
 	t.Helper()
 	cands, err := podEnvSourcesIn(chartTemplates(t, filepath.Join(dir, "templates")))
 	require.NoError(t, err)
 	require.NotEmpty(t, cands, "кандидатов в источники окружения пода не выведено — обход пуст")
-	sources, unconfirmed, confirmRenders := confirmPodEnvSources(t, dir, cands)
+	sources, refuted, unconfirmed, confirmRenders := confirmPodEnvSources(t, dir, cands)
 	findings = append(findings, unconfirmed...)
 	renders += confirmRenders
 	require.NotEmpty(t, sources, "ни один кандидат не подтверждён рендером источником окружения пода — "+
@@ -232,7 +235,7 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 				continue
 			}
 			sets := valueSets(src.envCandidate, key, r.value)
-			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture(sets...)...)
+			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(sets...)...)
 			renders++
 			findings = append(findings, judgeShadow(t, src, src.label(key, r.env), out, err,
 				[]postureGuardRow{r}, []string{key})...)
@@ -243,7 +246,7 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 		if len(judged) == 0 {
 			continue
 		}
-		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture(all...)...)
+		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(all...)...)
 		renders++
 		findings = append(findings, judgeShadow(t, src, src.path+" (все ручки сразу)", out, err, judged, keys)...)
 		if err != nil && !strings.Contains(out, fmt.Sprintf("— %d.", len(judged))) {
@@ -259,10 +262,16 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 	}
 	names := make([]string, 0, len(sources))
 	for _, s := range sources {
-		names = append(names, s.path)
+		name := s.path
+		if s.cond.name != podEnvConditions[0].name {
+			name += " — " + s.cond.name
+		}
+		names = append(names, name)
 	}
-	t.Logf("перепись: кандидатов %d · подтверждено рендером источников %d (%s) · ручек %d · недостижимых пар %d · рендеров %d · находок %d",
-		len(cands), len(sources), strings.Join(names, ", "), len(rows), unreachable, renders, len(findings))
+	t.Logf("перепись: кандидатов %d · подтверждено рендером источников %d (%s) · опровергнуто %d (%s) · не подтверждено %d · "+
+		"ручек %d · недостижимых пар %d · рендеров %d · находок %d",
+		len(cands), len(sources), strings.Join(names, ", "), len(refuted), strings.Join(refuted, ", "), len(unconfirmed),
+		len(rows), unreachable, renders, len(findings))
 	return findings, renders
 }
 
