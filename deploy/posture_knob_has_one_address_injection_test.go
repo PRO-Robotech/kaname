@@ -20,8 +20,10 @@
 // Кандидат, чей пробный ключ не дошёл до имени переменной при условии
 // подтверждающего рендера (392p–392s: источник под посадкой own и external, под
 // фильтром ключа и выключателем, одна карта двумя проходами, ветвь и
-// присваивание в теле прохода), — находка с источником либо «не подтверждён и не
-// опровергнут», а не молчание.
+// присваивание в теле прохода), и карта, чья форма имени, показанная первой,
+// ручки не даёт, а другая форма — даёт (второй проход, ветвь, окончание под
+// посадкой), — находка с источником либо «не подтверждён и не опровергнут», а
+// не молчание; законный близнец — приставка, не дающая ручки, без условия.
 package deploy_test
 
 import (
@@ -500,6 +502,7 @@ func TestPostureShadowInjection_KeyThatNamesNoPodVariableIsSilent(t *testing.T) 
               value: {{ $envName | quote }}
             {{- end }}
 `},
+		{"ключ за приставкой, не дающей ручки, без всякого условия", envRangeInTheTree, prefixedExtraEnvRange},
 	} {
 		t.Run(twin.name, func(t *testing.T) {
 			dir := chartCopy(t)
@@ -546,8 +549,35 @@ type chartPatch struct{ anchor, insert string }
 
 // Чем находка «не подтверждён и не опровергнут» объясняет себя.
 const (
-	nowhereWhy  = "не дошёл ни до какого места рендера ни при одном условии суда"
-	branchedWhy = "проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него"
+	nowhereWhy   = "не дошёл ни до какого места рендера ни при одном условии суда"
+	branchedWhy  = "проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него"
+	unreachedWhy = "ручек стража ими недостижимо"
+)
+
+// Формы имени, которые рендер показывает НЕ первой либо НЕ при первом условии
+// суда: приставка текстом всегда и голое имя под выключателем (двумя проходами и
+// ветвью одного прохода), окончание имени под посадкой own, та же карта двумя
+// безусловными проходами — с приставкой и голым именем.
+const (
+	prefixedExtraEnvRange = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: EXTRA_{{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
+	prefixedAndBareUnderBranch = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: EXTRA_{{ $k }}
+              value: {{ $v | quote }}
+            {{- if $.Values.extraEnvEnabled }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+`
+	suffixUnderOwnPosture = `            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}{{ if eq $.Values.authn.identityProvider "own" }}_OWN{{ end }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
 )
 
 // gatedExtraEnvForms — новый источник `extraEnv` в копии чарта, чей ключ доходит
@@ -560,7 +590,12 @@ const (
 // законный фильтр, отсекающий ключи вида ручки (392s). До починки каждая форма
 // молчала либо судилась не тем: пробный ключ не был похож на ручку,
 // подтверждающий рендер шёл одной посадкой, а суд — другой, и кандидат, чей
-// пробный ключ не дошёл до имени, выпадал без находки.
+// пробный ключ не дошёл до имени, выпадал без находки. Последние четыре — форма
+// имени, показанная первой, ручки не даёт (приставка, окончание под посадкой
+// own), а другая форма той же карты даёт: вторым проходом, ветвью, на
+// поставке. До починки суд брал одну форму — первое найденное имя при первом
+// подтвердившем условии — и молчал: «недостижимых пар 6», находок 0, а ручка
+// доходила до пода.
 //
 // Молчания среди исходов нет. judged — условие суда подтвердило источник, и
 // находка по каждой ручке называет его ключом; иначе — ровно одна находка
@@ -631,6 +666,14 @@ var gatedExtraEnvForms = []struct {
             {{- end }}
             {{- end }}
 `}}},
+	{name: "одна карта: имя с приставкой всегда, голое имя под выключателем", why: unreachedWhy, patches: []chartPatch{{envRangeInTheTree,
+		prefixedExtraEnvRange + "            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
+	{name: "один проход: имя с приставкой всегда, голое имя под ветвью", why: unreachedWhy, patches: []chartPatch{{envRangeInTheTree,
+		prefixedAndBareUnderBranch}}},
+	{name: "один проход: окончание имени под посадкой own", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		suffixUnderOwnPosture}}},
+	{name: "одна карта двумя безусловными проходами: с приставкой и голое имя", judged: true, patches: []chartPatch{{envRangeInTheTree,
+		prefixedExtraEnvRange + extraEnvRange}}},
 }
 
 func TestPostureShadowInjection_CandidateWhoseProbeKeyReachesNoNameIsNotSilent(t *testing.T) {

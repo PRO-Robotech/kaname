@@ -28,7 +28,7 @@
 // кандидатов — карты, по чьим ключам проходит шаблон, в любой законной форме
 // адреса; адрес, который разбор не выводит, — отказ с координатой, а не
 // пропуск. Рендер с пробным ключом вида ручки при каждом условии суда решает,
-// чей ключ стал ИМЕНЕМ переменной окружения пода, как именно и при каком
+// чей ключ стал ИМЕНЕМ переменной окружения пода, в каких формах и при каком
 // условии; кандидат, которого рендер не подтвердил и не опроверг, — находка.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,11 +206,12 @@ func TestOwnPostureOverlayMovedIntoTheEnvironmentIsRefused(t *testing.T) {
 // ── Р4 ───────────────────────────────────────────────────────────────────────
 
 // postureShadowFindings судит чарт по пути dir: источники окружения пода
-// подтверждены рендером, и каждая ручка стража в каждом источнике — при
-// условии, которым источник подтверждён, — отказ правила тени с источником и
-// канонической координатой; все сразу — один перечень с числом; соседняя
-// ручка — рендер. Кандидат, которого рендер не подтвердил и не опроверг, —
-// находка.
+// подтверждены рендером, и каждая ручка стража в каждом источнике — в каждой
+// показанной форме имени, при первом условии, её показавшем, — отказ правила
+// тени с источником и канонической координатой; все сразу — один перечень с
+// числом; соседняя ручка — рендер. Кандидат, которого рендер не подтвердил и
+// не опроверг, — находка; ручка, которой не достигает ни одна показанная форма
+// карты с проходом под условием, — тоже.
 func postureShadowFindings(t *testing.T, dir string) (findings []string, renders int) {
 	t.Helper()
 	cands, err := podEnvSourcesIn(chartTemplates(t, filepath.Join(dir, "templates")))
@@ -224,7 +225,19 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 	rows := postureGuardRows(t)
 
 	unreachable := 0
+	// reached — путь кандидата → ручки, имя которых даёт хоть одна показанная
+	// рендером форма; order — пути в порядке источников.
+	reached := map[string]map[string]bool{}
+	candOf := map[string]envSource{}
+	formsOf := map[string][]string{}
+	var order []string
 	for _, src := range sources {
+		if reached[src.path] == nil {
+			reached[src.path] = map[string]bool{}
+			candOf[src.path] = src
+			order = append(order, src.path)
+		}
+		formsOf[src.path] = append(formsOf[src.path], src.form())
 		var all []string
 		var judged []postureGuardRow
 		var keys []string
@@ -234,6 +247,7 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 				unreachable++
 				continue
 			}
+			reached[src.path][r.env] = true
 			sets := valueSets(src.envCandidate, key, r.value)
 			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(sets...)...)
 			renders++
@@ -254,6 +268,28 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 				src.path, len(judged), headOf(out)))
 		}
 	}
+	// Ручка, имени которой не даёт ни одна показанная форма, молчит, лишь когда
+	// каждый проход по карте вне условия и упоминает ключ безусловно: тогда
+	// рендер исполнил каждое упоминание, и других форм у карты нет. Иначе форму,
+	// которую дала бы невыполненная ветвь, рендер не называет — находка.
+	for _, p := range order {
+		if !candOf[p].branched {
+			continue
+		}
+		var missed []string
+		for _, r := range rows {
+			if !reached[p][r.env] {
+				missed = append(missed, r.env)
+			}
+		}
+		if len(missed) > 0 {
+			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ дал имя переменной пода лишь формами %s — "+
+				"ручек стража ими недостижимо %d из %d (%s), а проход по карте стоит под условием либо ключ в его теле "+
+				"под ветвью или уходит из него: какую форму имени дала бы невыполненная ветвь, рендер не называет — "+
+				"источник не подтверждён и не опровергнут", p, strings.Join(formsOf[p], ", "), len(missed), len(rows),
+				strings.Join(missed, ", ")))
+		}
+	}
 	out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture("env.KANAME_AUTHN__DOMAIN=access.example.invalid")...)
 	renders++
 	if err != nil {
@@ -263,6 +299,9 @@ func postureShadowFindings(t *testing.T, dir string) (findings []string, renders
 	names := make([]string, 0, len(sources))
 	for _, s := range sources {
 		name := s.path
+		if f := s.form(); f != "<ключ>" {
+			name += " " + f
+		}
 		if s.cond.name != podEnvConditions[0].name {
 			name += " — " + s.cond.name
 		}
