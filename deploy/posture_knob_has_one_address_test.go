@@ -23,8 +23,10 @@
 // Класс, а не экземпляр: ручек у стража шесть (посадка, выключатель
 // эндпоинта и четыре его величины), и каждая обходит отказ рендера одинаково.
 // Популяция берётся у таблицы стража старта (`config.RequiredSettings`), а
-// источники окружения пода — обходом шаблона развёртывания: всякий
-// `range $k, $v := .Values.<карта>`, чей ключ становится `- name:` переменной.
+// источники окружения пода — обходом дерева разбора шаблона развёртывания:
+// всякий `range $k, $v := <адрес карты>`, чей ключ становится `name:`
+// переменной, в любой законной форме адреса; адрес, который обход не выводит,
+// — отказ с координатой, а не пропуск (`podEnvSources`).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
@@ -48,6 +50,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"text/template/parse"
 
 	"github.com/stretchr/testify/require"
 
@@ -85,45 +88,386 @@ func postureGuardRows(t *testing.T) []postureGuardRow {
 }
 
 var (
-	envRangeRe = regexp.MustCompile(`^range\s+\$(\w+)\s*,\s*\$\w+\s*:=\s*\.Values\.([A-Za-z][A-Za-z0-9]*)$`)
-	envKeyRe   = regexp.MustCompile(`^\$(\w+)$`)
-	envNameRe  = regexp.MustCompile(`^KANAME_[A-Z0-9_]+$`)
+	// envNameKeyRe — строка текста перед действием, дающим имя переменной:
+	// поле `name` элемента перечня `env`, первым полем элемента либо нет, с
+	// открытой кавычкой либо без.
+	envNameKeyRe = regexp.MustCompile(`^(-\s+)?name:\s*["']?$`)
+	envNameRe    = regexp.MustCompile(`^KANAME_[A-Z0-9_]+$`)
 )
 
-// podEnvSources выводит карты значений, чьи КЛЮЧИ становятся именами
-// переменных окружения пода: `range $k, $v := .Values.<карта>`, а в теле —
-// `- name: {{ $k }}`. Форма, которую он знает, — единственная, которой шаблон
-// развёртывания даёт переменной имя из значений.
-func podEnvSources(src string) ([]string, error) {
-	actions, _, err := scanTemplateActions(src)
-	if err != nil {
-		return nil, err
+// tplValue — что обход шаблона знает о значении выражения: множество путей от
+// корня данных шаблона, откуда значение может прийти. known=false — значение
+// распознавателю неизвестно; known и пустое множество — постоянная шаблона
+// (`dict`, литерал), в значениях у неё адреса нет.
+type tplValue struct {
+	known bool
+	paths [][]string
+}
+
+var unknownValue = tplValue{}
+
+// field — значение поля (цепочки полей) каждого из путей.
+func (v tplValue) field(idents ...string) tplValue {
+	if !v.known {
+		return unknownValue
 	}
-	var out []string
-	for i, a := range actions {
-		m := envRangeRe.FindStringSubmatch(strings.TrimSpace(a.normalized()))
-		if m == nil {
-			continue
-		}
-		for _, b := range actions[i+1:] {
-			code := strings.TrimSpace(b.normalized())
-			if endBlockRe.MatchString(code) {
-				break
-			}
-			k := envKeyRe.FindStringSubmatch(code)
-			if k == nil || k[1] != m[1] {
+	out := tplValue{known: true}
+	for _, p := range v.paths {
+		out.paths = append(out.paths, append(append([]string{}, p...), idents...))
+	}
+	return out
+}
+
+// union — значение, приходящее из любого из двух выражений.
+func (v tplValue) union(w tplValue) tplValue {
+	if !v.known || !w.known {
+		return unknownValue
+	}
+	return tplValue{known: true, paths: append(append([][]string{}, v.paths...), w.paths...)}
+}
+
+// tplScope — точка и переменные в месте шаблона. Переменные — указатели:
+// присваивание `$x = …` во вложенной структуре меняет ту же переменную, а
+// объявление `$x := …` заводит новую до `end` своей структуры.
+type tplScope struct {
+	dot  tplValue
+	vars map[string]*tplValue
+}
+
+func (s tplScope) child(dot tplValue) tplScope {
+	vars := make(map[string]*tplValue, len(s.vars))
+	for k, v := range s.vars {
+		vars[k] = v
+	}
+	return tplScope{dot: dot, vars: vars}
+}
+
+func (s tplScope) declare(pipe *parse.PipeNode, v tplValue) {
+	if pipe == nil {
+		return
+	}
+	for _, d := range pipe.Decl {
+		if pipe.IsAssign {
+			if cur := s.vars[d.Ident[0]]; cur != nil {
+				*cur = cur.union(v)
 				continue
 			}
-			before := src[:b.start]
-			lastLine := strings.TrimSpace(before[strings.LastIndexByte(before, '\n')+1:])
-			if lastLine == "- name:" {
-				out = append(out, m[2])
-			}
-			break
 		}
+		nv := v
+		s.vars[d.Ident[0]] = &nv
+	}
+}
+
+// podEnvSourceWalk — обход дерева разбора шаблона развёртывания.
+type podEnvSourceWalk struct {
+	src   string
+	tree  *parse.Tree
+	found map[string]bool
+}
+
+// podEnvSources выводит карты значений, чьи КЛЮЧИ становятся именами
+// переменных окружения пода. Шаблон читается разбором text/template — тем же,
+// которым его исполняет helm, — а не образцом строки.
+//
+// Признак источника стоит в ТЕЛЕ `range $k, $v := …`: действие после `name:`
+// элемента перечня ссылается на переменную ключа. Адрес карты выводится из
+// выражения `range` в любой законной форме: поле от точки корня, от `$`, от
+// переменной, которой присвоен корень либо карта, в скобках, поле цепочки,
+// `index`/`get`, `default`, точка и поле точки внутри `with` (перечень форм с
+// пробой на каждую — `lawfulPodEnvSourceForms`). Адрес, который распознаватель
+// не выводит, — ОШИБКА с координатой, а не пропуск: пропуск и был дефектом
+// (опыты 392e и 392f проверяющего), потому что источник, не попавший в
+// перепись, суд теней не судит вовсе.
+func podEnvSources(src string) ([]string, error) {
+	const name = "deployment.yaml"
+	tr := parse.New(name)
+	tr.Mode = parse.SkipFuncCheck
+	set := map[string]*parse.Tree{}
+	if _, err := tr.Parse(src, "{{", "}}", set); err != nil {
+		return nil, fmt.Errorf("шаблон развёртывания не разобран: %w", err)
+	}
+	root := tplValue{known: true, paths: [][]string{{}}}
+	w := &podEnvSourceWalk{src: src, tree: tr, found: map[string]bool{}}
+	if err := w.walk(tr.Root, tplScope{dot: root, vars: map[string]*tplValue{"$": &root}}); err != nil {
+		return nil, err
+	}
+	// Внутри define точка и `$` — аргумент шаблона, а не корень данных.
+	defs := make([]string, 0, len(set))
+	for n := range set {
+		defs = append(defs, n)
+	}
+	sort.Strings(defs)
+	for _, n := range defs {
+		def := set[n]
+		if n == name || def.Root == nil {
+			continue
+		}
+		dw := &podEnvSourceWalk{src: src, tree: def, found: w.found}
+		unknown := unknownValue
+		if err := dw.walk(def.Root, tplScope{dot: unknownValue, vars: map[string]*tplValue{"$": &unknown}}); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]string, 0, len(w.found))
+	for s := range w.found {
+		out = append(out, s)
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (w *podEnvSourceWalk) walk(n parse.Node, s tplScope) error {
+	switch x := n.(type) {
+	case *parse.ListNode:
+		if x == nil {
+			return nil
+		}
+		for _, c := range x.Nodes {
+			if err := w.walk(c, s); err != nil {
+				return err
+			}
+		}
+	case *parse.ActionNode:
+		if len(x.Pipe.Decl) > 0 {
+			s.declare(x.Pipe, resolvePipe(x.Pipe, s))
+		}
+	case *parse.IfNode:
+		base := s.child(s.dot)
+		base.declare(x.Pipe, resolvePipe(x.Pipe, s))
+		if err := w.walk(x.List, base.child(s.dot)); err != nil {
+			return err
+		}
+		return w.walk(x.ElseList, base.child(s.dot))
+	case *parse.WithNode:
+		v := resolvePipe(x.Pipe, s)
+		base := s.child(s.dot)
+		base.declare(x.Pipe, v)
+		if err := w.walk(x.List, base.child(v)); err != nil {
+			return err
+		}
+		return w.walk(x.ElseList, base.child(s.dot))
+	case *parse.RangeNode:
+		if err := w.judgeRange(x, s); err != nil {
+			return err
+		}
+		base := s.child(s.dot)
+		base.declare(x.Pipe, unknownValue)
+		if err := w.walk(x.List, base.child(unknownValue)); err != nil {
+			return err
+		}
+		return w.walk(x.ElseList, base.child(s.dot))
+	}
+	return nil
+}
+
+// judgeRange — источник ли range и какой: ключ становится именем переменной —
+// адрес карты обязан быть выведен.
+func (w *podEnvSourceWalk) judgeRange(r *parse.RangeNode, s tplScope) error {
+	if len(r.Pipe.Decl) != 2 || !w.namesByVar(r.List, r.Pipe.Decl[0].Ident[0]) {
+		return nil
+	}
+	v := resolvePipe(r.Pipe, s)
+	var sources []string
+	for _, p := range v.paths {
+		if len(p) < 2 || p[0] != "Values" {
+			v = unknownValue
+			break
+		}
+		sources = append(sources, strings.Join(p[1:], "."))
+	}
+	if !v.known {
+		loc, _ := w.tree.ErrorContext(r)
+		return fmt.Errorf("%s: ключ карты становится именем переменной окружения пода, а адрес карты распознаватель не выводит — "+
+			"`range %s`. Пропустить молча нельзя: источник вне переписи суд теней не судит вовсе; научите распознаватель "+
+			"этой форме (lawfulPodEnvSourceForms) либо запишите источник формой из перечня", loc, r.Pipe)
+	}
+	for _, src := range sources {
+		w.found[src] = true
+	}
+	return nil
+}
+
+// namesByVar — даёт ли тело имя переменной окружения переменной key: действие
+// после `name:` ссылается на неё. Структура, объявившая key заново, её затеняет.
+func (w *podEnvSourceWalk) namesByVar(list *parse.ListNode, key string) bool {
+	if list == nil {
+		return false
+	}
+	for _, n := range list.Nodes {
+		switch x := n.(type) {
+		case *parse.ActionNode:
+			if declares(x.Pipe, key) {
+				return false
+			}
+			if len(x.Pipe.Decl) == 0 && mentionsVar(x.Pipe, key) && w.afterNameKey(int(x.Pos)) {
+				return true
+			}
+		case *parse.IfNode:
+			if w.namesByVar(x.List, key) || w.namesByVar(x.ElseList, key) {
+				return true
+			}
+		case *parse.WithNode:
+			if !declares(x.Pipe, key) && (w.namesByVar(x.List, key) || w.namesByVar(x.ElseList, key)) {
+				return true
+			}
+		case *parse.RangeNode:
+			if !declares(x.Pipe, key) && (w.namesByVar(x.List, key) || w.namesByVar(x.ElseList, key)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// afterNameKey — стоит ли действие, чей код начинается в pos, сразу после
+// `name:` в своей строке исходника.
+func (w *podEnvSourceWalk) afterNameKey(pos int) bool {
+	open := strings.LastIndex(w.src[:pos], "{{")
+	if open < 0 {
+		return false
+	}
+	before := w.src[:open]
+	return envNameKeyRe.MatchString(strings.TrimSpace(before[strings.LastIndexByte(before, '\n')+1:]))
+}
+
+func declares(pipe *parse.PipeNode, key string) bool {
+	if pipe == nil || pipe.IsAssign {
+		return false
+	}
+	for _, d := range pipe.Decl {
+		if d.Ident[0] == key {
+			return true
+		}
+	}
+	return false
+}
+
+// mentionsVar — ссылается ли выражение на переменную key где угодно внутри.
+func mentionsVar(n parse.Node, key string) bool {
+	switch x := n.(type) {
+	case *parse.PipeNode:
+		if x == nil {
+			return false
+		}
+		for _, c := range x.Cmds {
+			if mentionsVar(c, key) {
+				return true
+			}
+		}
+	case *parse.CommandNode:
+		for _, a := range x.Args {
+			if mentionsVar(a, key) {
+				return true
+			}
+		}
+	case *parse.VariableNode:
+		return x.Ident[0] == key
+	case *parse.ChainNode:
+		return mentionsVar(x.Node, key)
+	}
+	return false
+}
+
+// resolvePipe — значение конвейера: первая команда, затем каждая следующая
+// с результатом предыдущей последним аргументом.
+func resolvePipe(p *parse.PipeNode, s tplScope) tplValue {
+	if p == nil || len(p.Cmds) == 0 {
+		return unknownValue
+	}
+	v := resolveCommand(p.Cmds[0], nil, s)
+	for _, c := range p.Cmds[1:] {
+		prev := v
+		v = resolveCommand(c, &prev, s)
+	}
+	return v
+}
+
+// resolveCommand знает функции, которые сохраняют адрес карты: `default`
+// (значение — любой из двух операндов), `index`/`get` (поле по литералу),
+// `dict`/`list` без операндов-значений (постоянная). Прочие — неизвестное
+// значение, и вызывающий обязан отказать, а не пропустить.
+func resolveCommand(c *parse.CommandNode, piped *tplValue, s tplScope) tplValue {
+	if len(c.Args) == 0 {
+		return unknownValue
+	}
+	id, isFunc := c.Args[0].(*parse.IdentifierNode)
+	if !isFunc {
+		if piped != nil || len(c.Args) != 1 {
+			return unknownValue
+		}
+		return resolveArg(c.Args[0], s)
+	}
+	var ops []tplValue
+	for _, a := range c.Args[1:] {
+		ops = append(ops, resolveArg(a, s))
+	}
+	if piped != nil {
+		ops = append(ops, *piped)
+	}
+	switch id.Ident {
+	case "default":
+		if len(ops) == 2 {
+			return ops[0].union(ops[1])
+		}
+	case "index", "get":
+		if piped != nil || len(c.Args) < 3 || (id.Ident == "get" && len(c.Args) != 3) {
+			return unknownValue
+		}
+		var keys []string
+		for _, a := range c.Args[2:] {
+			k, ok := a.(*parse.StringNode)
+			if !ok {
+				return unknownValue
+			}
+			keys = append(keys, k.Text)
+		}
+		return ops[0].field(keys...)
+	case "dict", "list":
+		// Постоянная — только из постоянных операндов: карта, собранная из
+		// значений, несёт их адрес, и её форма здесь не выводится.
+		if all := (tplValue{known: true}).unionAll(ops); piped == nil && all.known && len(all.paths) == 0 {
+			return all
+		}
+	}
+	return unknownValue
+}
+
+// unionAll — объединение значений; нужно, чтобы отличить постоянную от
+// значения, несущего адрес.
+func (v tplValue) unionAll(ws []tplValue) tplValue {
+	for _, w := range ws {
+		v = v.union(w)
+	}
+	return v
+}
+
+func resolveArg(n parse.Node, s tplScope) tplValue {
+	switch x := n.(type) {
+	case *parse.FieldNode:
+		return s.dot.field(x.Ident...)
+	case *parse.DotNode:
+		return s.dot
+	case *parse.VariableNode:
+		b := s.vars[x.Ident[0]]
+		if b == nil {
+			return unknownValue
+		}
+		return b.field(x.Ident[1:]...)
+	case *parse.PipeNode:
+		if len(x.Decl) > 0 {
+			return unknownValue
+		}
+		return resolvePipe(x, s)
+	case *parse.ChainNode:
+		return resolveArg(x.Node, s).field(x.Field...)
+	case *parse.StringNode, *parse.NumberNode, *parse.BoolNode, *parse.NilNode:
+		return tplValue{known: true}
+	case *parse.IdentifierNode:
+		if x.Ident == "dict" || x.Ident == "list" {
+			return tplValue{known: true}
+		}
+	}
+	return unknownValue
 }
 
 // guardEnvRoster — перечень ручек в теле стража шаблона: пары литералов
