@@ -34,19 +34,25 @@
 //     условии, её показавшем, и кладёт ручку так, чтобы в поде оказалась
 //     именно она.
 //
-// Лишний кандидат стоит двух-трёх рендеров; пропущенный — молчание, которое и
-// было дефектом. Поэтому избыток — на первой ступени, решение — на второй, и у
-// решения три исхода, а не два (`confirmPodEnvSources`): источник; не источник —
-// только когда пробный ключ лёг в другое место рендера, а каждый проход по
-// карте стоит в файле шаблона вне всякого условия и упоминает ключ безусловно;
-// иначе — находка «не подтверждён и не опровергнут». Кандидат, чей
-// пробный ключ не дошёл ни до какого места (проход под условием, которого суд
-// не создаёт, либо ключ отфильтрован, опыты 392p–392r), — находка, а не «не
-// источник». Источник, чьи показанные формы имени не достигают какой-то ручки
-// (приставка, окончание, смена регистра), молчит о ней по той же мере: только
-// когда каждый проход вне условия и упоминает ключ безусловно; иначе
-// невыполненная ветвь могла дать другую форму, и это находка
-// (`postureShadowFindings`).
+// Лишний кандидат стоит рендера на каждое условие суда (сейчас двух);
+// пропущенный — молчание, которое и было дефектом. Поэтому избыток — на первой
+// ступени, решение — на второй, и у решения три исхода, а не два
+// (`confirmPodEnvSources`): источник; не источник — только когда пробный ключ лёг
+// в другое место рендера, а каждый проход по карте ПРОСТ (`plainPass`); иначе —
+// находка «не подтверждён и не опровергнут», называющая, чем проход не прост, с
+// местом в шаблоне. Простой проход стоит вне всякого условия, а его тело — прямой
+// код, чей вывод вокруг ключа выбирает один ключ: ни узла управления (`if`,
+// `with`, `range`, `template`) — упоминает он ключ или нет, — ни выхода из
+// итерации (`break`, `continue`), ни присваивания и функции побега, ни чтения
+// значений чарта (`$`) и переменной, чьё значение не одно при всяком рендере
+// (выбрано ветвью вне прохода, `ternary` по непостоянному условию, выведено из
+// значений). Такой проход рендер исполнил целиком и в единственной форме.
+// Кандидат, чей пробный ключ не дошёл ни до какого места (проход под условием,
+// которого суд не создаёт, либо ключ отфильтрован, опыты 392p–392r), — находка,
+// а не «не источник». Источник, чьи показанные формы имени не достигают какой-то
+// ручки (приставка, окончание, смена регистра), молчит о ней по той же мере:
+// только когда каждый проход прост; иначе другое исполнение места-причины могло
+// дать другую форму, и это находка (`postureShadowFindings`).
 //
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ. Источник — КЛЮЧ карты. Перечень элементов, у
 // которых имя берётся из поля элемента (опыт 392k), и `envFrom` — другой класс и
@@ -54,12 +60,18 @@
 // выводит (не `keys`), кандидатом не становится; шаблон, собранный из строки
 // (`tpl`), разбором не читается. Законный фильтр, отсекающий ключи вида ручки
 // (392s), суд от выключателя не отличает: это находка «не подтверждён», ложная
-// тревога, а не молчание. Условие, выраженное не ветвью, а значением внутри
-// действия (`ternary` или `default` по ручке в выражении имени), разбор не
-// видит: имя такого прохода судится при двух условиях суда и только при них.
-// Проход под условием, чьи показанные формы достигают КАЖДОЙ ручки, судится
-// этими формами: другая форма, которую дала бы лишь невыполненная ветвь, при
-// этом не судится.
+// тревога, а не молчание. Ту же ложную тревогу дают тело, читающее значения
+// чарта лишь в значении переменной, выход из итерации без всякого условия и
+// переменная, чьё значение разбор не выводит (`printf` из постоянных): мера
+// простоты судит тело целиком, а не одно выражение имени. Значение ЭЛЕМЕНТА карты
+// пробный рендер кладёт одно (`valueSets`): имя, чья форма зависит от значения
+// элемента (поле значения в выражении имени, `ternary` по нему), судится этим
+// значением и только им. Место вывода прохода в документе — под каким ключом
+// YAML, в комментарии ли — задаёт шаблон ВНЕ прохода: ветвь вне прохода, которая
+// меняет это место, а не переменную, прочитанную проходом, суд не видит. Не
+// простой проход, чьи показанные формы достигают КАЖДОЙ ручки, судится этими
+// формами: форма, которую дало бы другое исполнение места-причины, при этом не
+// судится.
 package deploy_test
 
 import (
@@ -80,12 +92,15 @@ import (
 // неизвестно. Иначе значение приходит из любого из путей paths (от корня данных
 // шаблона), а карта, собранная шаблоном, — ещё и из своих полей fields (`dict`,
 // `set`). keysOf — значение есть перечень КЛЮЧЕЙ таких карт (`keys`); при
-// known=false — перечень ключей карты, адрес которой не выведен.
+// known=false — перечень ключей карты, адрес которой не выведен. chosen —
+// значение выбирает условие: переменная переприсвоена или правлена (`set`,
+// `merge`) под ветвью, `ternary` выбирает по непостоянному условию.
 type tplValue struct {
 	known  bool
 	paths  [][]string
 	fields map[string]tplValue
 	keysOf bool
+	chosen bool
 }
 
 var (
@@ -100,7 +115,7 @@ func (v tplValue) field(idents ...string) tplValue {
 	if !v.known || v.keysOf {
 		return unknownValue
 	}
-	out := tplValue{known: true}
+	out := tplValue{known: true, chosen: v.chosen}
 	for _, p := range v.paths {
 		out.paths = append(out.paths, append(append([]string{}, p...), idents[0]))
 	}
@@ -114,7 +129,7 @@ func (v tplValue) union(w tplValue) tplValue {
 	if !v.known || !w.known || (v.keysOf != w.keysOf && v.hasContent() && w.hasContent()) {
 		return unknownValue
 	}
-	out := tplValue{known: true, keysOf: v.keysOf || w.keysOf}
+	out := tplValue{known: true, keysOf: v.keysOf || w.keysOf, chosen: v.chosen || w.chosen}
 	seen := map[string]bool{}
 	for _, p := range append(append([][]string{}, v.paths...), w.paths...) {
 		if k := strings.Join(p, "\x00"); !seen[k] {
@@ -145,6 +160,11 @@ func (v tplValue) unionAll(ws []tplValue) tplValue {
 
 func (v tplValue) hasContent() bool { return len(v.paths) > 0 || len(v.fields) > 0 }
 
+// fixed — значение одно при всяком рендере: постоянная, которую не выбирает ни
+// ветвь, ни значения чарта. Неизвестное значение, адрес в значениях, карта
+// шаблона с полями и выбранное условием — не одно.
+func (v tplValue) fixed() bool { return v.known && !v.keysOf && !v.hasContent() && !v.chosen }
+
 // String — каноническая запись: по ней неподвижная точка вызовов define узнаёт,
 // что точки мест вызова перестали меняться.
 func (v tplValue) String() string {
@@ -160,6 +180,9 @@ func (v tplValue) String() string {
 	}
 	sort.Strings(parts)
 	s := "{" + strings.Join(parts, ",") + "}"
+	if v.chosen {
+		s += "!"
+	}
 	if v.keysOf {
 		return "keys" + s
 	}
@@ -173,23 +196,24 @@ type envCandidate struct {
 	// ключ рендера кладётся картой с этими полями, иначе рендер отказал бы
 	// раньше и не тем.
 	fields []string
-	// branched — хоть один проход по ключам этой карты во всех шаблонах чарта
-	// стоит под условием (ветвь, тело внешнего range, define) либо упоминает
-	// ключ не безусловно (`plainPass`). Он решает, вправе ли рендер ОПРОВЕРГНУТЬ
-	// кандидата (`confirmPodEnvSources`) и вправе ли показанные формы имени
-	// молчать о ручке, которой не достигают (`postureShadowFindings`).
-	branched bool
+	// notPlainBy — чем НЕ прост хоть один проход по ключам этой карты во всех
+	// шаблонах чарта (`plainPass`), с местом в шаблоне; пусто — каждый проход
+	// прост. Он решает, вправе ли рендер ОПРОВЕРГНУТЬ кандидата
+	// (`confirmPodEnvSources`) и вправе ли показанные формы имени молчать о
+	// ручке, которой не достигают (`postureShadowFindings`), и его же называет
+	// находка.
+	notPlainBy string
 }
 
 // walkEnv — общее для одного прохода разбора: точки мест вызова define,
-// признак вызова по вычисляемому имени, найденные кандидаты и их проходы под
-// условием.
+// признак вызова по вычисляемому имени, найденные кандидаты и чем не прост их
+// первый не простой проход.
 type walkEnv struct {
 	sites      map[string]tplValue
 	dynamic    bool
 	judge      bool
 	candidates map[string]map[string]bool
-	branched   map[string]bool
+	notPlain   map[string]string
 }
 
 func (e *walkEnv) site(name string, arg tplValue) {
@@ -203,7 +227,8 @@ func (e *walkEnv) site(name string, arg tplValue) {
 // присваивание `$x = …` и `set $x …` во вложенной структуре меняют ту же
 // переменную, а объявление `$x := …` заводит новую до `end` своей структуры.
 // gated — место исполняется не при всяком рендере: внутри ветви if и with, тела
-// или else внешнего range, внутри define.
+// или else внешнего range, внутри define; присваивание и правка переменной в
+// таком месте делают её значение выбранным условием (`tplValue.chosen`).
 type tplScope struct {
 	dot   tplValue
 	vars  map[string]*tplValue
@@ -235,11 +260,18 @@ func (s tplScope) declare(pipe *parse.PipeNode, v tplValue) {
 	}
 	for _, d := range pipe.Decl {
 		if cur := s.vars[d.Ident[0]]; pipe.IsAssign && cur != nil {
-			*cur = cur.union(v)
+			s.mutate(cur, cur.union(v))
 			continue
 		}
 		s.bind(d.Ident[0], v)
 	}
+}
+
+// mutate — новое значение переменной, переприсвоенной или правленой в этом
+// месте; в месте под условием значение выбирает условие.
+func (s tplScope) mutate(cur *tplValue, v tplValue) {
+	v.chosen = v.chosen || s.gated
+	*cur = v
 }
 
 // podEnvSources — кандидаты шаблона развёртывания, заданного одним текстом.
@@ -302,7 +334,7 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 	sort.Strings(defs)
 
 	env := &walkEnv{sites: map[string]tplValue{}, candidates: map[string]map[string]bool{},
-		branched: map[string]bool{}}
+		notPlain: map[string]string{}}
 	pass := func() error {
 		for _, n := range names {
 			if mains[n].Root == nil {
@@ -351,7 +383,7 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 
 	out := make([]envCandidate, 0, len(env.candidates))
 	for p, fs := range env.candidates {
-		c := envCandidate{path: p, branched: env.branched[p]}
+		c := envCandidate{path: p, notPlainBy: env.notPlain[p]}
 		for f := range fs {
 			c.fields = append(c.fields, f)
 		}
@@ -463,7 +495,13 @@ func judgeRange(r *parse.RangeNode, over tplValue, s tplScope) error {
 	if valueVar != "" {
 		collectFieldsOf(r.List, valueVar, fields)
 	}
-	plain := plainPass(r.List, key) && !s.gated
+	var why string
+	if s.gated {
+		loc, _ := s.tree.ErrorContext(r)
+		why = loc + ": проход стоит под условием — в ветви if или with, в теле внешнего range либо в define"
+	} else {
+		why = plainPass(r, s)
+	}
 	for _, src := range sources {
 		if s.env.candidates[src] == nil {
 			s.env.candidates[src] = map[string]bool{}
@@ -471,90 +509,194 @@ func judgeRange(r *parse.RangeNode, over tplValue, s tplScope) error {
 		for f := range fields {
 			s.env.candidates[src][f] = true
 		}
-		if !plain {
-			s.env.branched[src] = true
+		if why != "" && s.env.notPlain[src] == "" {
+			s.env.notPlain[src] = why
 		}
 	}
 	return nil
 }
 
-// passEscapes — функции, через которые ключ уходит из тела прохода туда, где
-// рендер его места не называет: в define (`include`, `tpl`) и во внешнюю карту
-// (`set`, семейство `merge`).
+// passEscapes — функции, через которые ключ либо вывод уходят из тела прохода
+// туда, где рендер их места не называет: в define (`include`, `tpl`) и во
+// внешнюю карту (`set`, семейство `merge`).
 var passEscapes = map[string]bool{
 	"include": true, "tpl": true, "set": true, "unset": true,
 	"merge": true, "mergeOverwrite": true, "mustMerge": true, "mustMergeOverwrite": true,
 }
 
-// plainPass — проход, где ключ и переменные, объявленные из него в теле,
-// упоминаются только действиями верхнего уровня тела: вне ветвей if и with, вне
-// вложенных range, вне вызова define (`template`, `include`, `tpl`), вне
-// присваивания внешней переменной (`=`) и правки карты (`set`, `merge`). У
-// такого прохода выполненный проход — это выполненное КАЖДОЕ упоминание ключа, и
-// место, куда рендер положил пробный ключ, — всё, куда проход его кладёт.
-func plainPass(list *parse.ListNode, key string) bool {
-	if list == nil {
-		return true
+// plainPass — чем проход НЕ прост, с местом в шаблоне; пусто — прост. Простой
+// проход — прямой код, чей вывод вокруг ключа выбирает один ключ: в теле только
+// текст, комментарии и действия, а действия читают лишь ключ, элемент,
+// переменные, объявленные в теле, и переменные с одним значением при всяком
+// рендере (`tplValue.fixed`). Не прост проход, в теле которого
+//
+//   - выход из итерации (`break`, `continue`) на любой глубине, кроме тела
+//     вложенного range: исполнено ли место тела после него, решает не ключ;
+//   - узел управления (`if`, `with`, `range`, `template`), упоминает он ключ или
+//     нет: ветвь без ключа меняет форму имени и место записи — приставка под
+//     ветвью, запись, которую ветвь делает комментарием;
+//   - присваивание `=` либо функция побега (`passEscapes`): ключ либо вывод
+//     уходят туда, где рендер их места не называет;
+//   - чтение `$` (значений чарта) либо переменной вне прохода, чьё значение не
+//     одно: выбрано условием, выведено из значений, не выведено разбором.
+//
+// Выполненный простой проход — это выполненное КАЖДОЕ место его тела, и в
+// единственной форме: место, куда рендер положил пробный ключ, — всё, куда
+// проход его кладёт.
+func plainPass(r *parse.RangeNode, s tplScope) string {
+	at := func(n parse.Node) string {
+		loc, _ := s.tree.ErrorContext(n)
+		return loc
 	}
-	tainted := map[string]bool{key: true}
-	for _, n := range list.Nodes {
+	if exit, word := passExit(r.List); exit != nil {
+		return fmt.Sprintf("%s: в теле прохода выход из итерации `%s` — исполнено ли место тела после него, решает не ключ",
+			at(exit), word)
+	}
+	if r.List == nil {
+		return ""
+	}
+	local := map[string]bool{}
+	for _, d := range r.Pipe.Decl {
+		local[d.Ident[0]] = true
+	}
+	for _, n := range r.List.Nodes {
 		switch x := n.(type) {
 		case *parse.TextNode, *parse.CommentNode:
 		case *parse.ActionNode:
-			if !mentionsAnyOf(x.Pipe, tainted) {
-				continue
+			if x.Pipe.IsAssign {
+				return fmt.Sprintf("%s: в теле прохода присваивание `%s` — ключ либо вывод уходят туда, где рендер их места не называет",
+					at(x), x)
 			}
-			if x.Pipe.IsAssign || callsAnyOf(x.Pipe, passEscapes) {
-				return false
+			if fn := firstCallOf(x.Pipe, passEscapes); fn != "" {
+				return fmt.Sprintf("%s: тело прохода зовёт `%s` — ключ либо вывод уходят туда, где рендер их места не называет", at(x), fn)
+			}
+			if what := passReads(x.Pipe, local, s); what != "" {
+				return fmt.Sprintf("%s: тело прохода читает %s — вывод вокруг ключа выбирает не один ключ", at(x), what)
 			}
 			for _, d := range x.Pipe.Decl {
-				tainted[d.Ident[0]] = true
+				local[d.Ident[0]] = true
 			}
 		default:
-			for v := range tainted {
-				if bodyMentions(&parse.ListNode{Nodes: []parse.Node{n}}, v) {
-					return false
-				}
+			return fmt.Sprintf("%s: в теле прохода узел управления `%s` — он меняет форму имени и место записи, упоминает он "+
+				"ключ или нет", at(n), controlWord(n))
+		}
+	}
+	return ""
+}
+
+// passExit — первый выход из итерации (`break`, `continue`), который принадлежит
+// ЭТОМУ проходу: на любой глубине ветвей и в else вложенного range, но не в теле
+// вложенного range — там он выходит из вложенного.
+func passExit(list *parse.ListNode) (parse.Node, string) {
+	if list == nil {
+		return nil, ""
+	}
+	for _, n := range list.Nodes {
+		switch x := n.(type) {
+		case *parse.BreakNode:
+			return x, "break"
+		case *parse.ContinueNode:
+			return x, "continue"
+		case *parse.IfNode:
+			if e, w := passExit(x.List); e != nil {
+				return e, w
+			}
+			if e, w := passExit(x.ElseList); e != nil {
+				return e, w
+			}
+		case *parse.WithNode:
+			if e, w := passExit(x.List); e != nil {
+				return e, w
+			}
+			if e, w := passExit(x.ElseList); e != nil {
+				return e, w
+			}
+		case *parse.RangeNode:
+			if e, w := passExit(x.ElseList); e != nil {
+				return e, w
 			}
 		}
 	}
-	return true
+	return nil, ""
 }
 
-func mentionsAnyOf(n parse.Node, keys map[string]bool) bool {
-	for k := range keys {
-		if mentions(n, k) {
-			return true
-		}
+// controlWord — слово шаблона, которым записан узел управления.
+func controlWord(n parse.Node) string {
+	switch n.(type) {
+	case *parse.IfNode:
+		return "if"
+	case *parse.WithNode:
+		return "with"
+	case *parse.RangeNode:
+		return "range"
+	case *parse.TemplateNode:
+		return "template"
 	}
-	return false
+	return fmt.Sprintf("%T", n)
 }
 
-// callsAnyOf — зовёт ли конвейер (и вложенные в его аргументы) одну из функций.
-func callsAnyOf(n parse.Node, funcs map[string]bool) bool {
+// passReads — что из того, что выбирает не проход, читает действие тела: `$`
+// (значения чарта) либо переменную вне прохода с не одним значением; пусто —
+// ничего такого. local — ключ, элемент и переменные, объявленные в теле.
+func passReads(n parse.Node, local map[string]bool, s tplScope) string {
 	switch x := n.(type) {
 	case *parse.PipeNode:
 		if x == nil {
-			return false
+			return ""
 		}
 		for _, c := range x.Cmds {
-			if callsAnyOf(c, funcs) {
-				return true
+			if what := passReads(c, local, s); what != "" {
+				return what
+			}
+		}
+	case *parse.CommandNode:
+		for _, a := range x.Args {
+			if what := passReads(a, local, s); what != "" {
+				return what
+			}
+		}
+	case *parse.ChainNode:
+		return passReads(x.Node, local, s)
+	case *parse.VariableNode:
+		name := x.Ident[0]
+		switch v := s.vars[name]; {
+		case local[name]:
+		case name == "$":
+			return fmt.Sprintf("значения чарта (`%s`)", x)
+		case v == nil || !v.field(x.Ident[1:]...).fixed():
+			return fmt.Sprintf("переменную `%s`, чьё значение не одно при всяком рендере — выбрано условием, выведено из "+
+				"значений чарта либо не выведено разбором", name)
+		}
+	}
+	return ""
+}
+
+// firstCallOf — первая из функций funcs, которую зовёт конвейер (и вложенные в
+// его аргументы); пусто — ни одной.
+func firstCallOf(n parse.Node, funcs map[string]bool) string {
+	switch x := n.(type) {
+	case *parse.PipeNode:
+		if x == nil {
+			return ""
+		}
+		for _, c := range x.Cmds {
+			if fn := firstCallOf(c, funcs); fn != "" {
+				return fn
 			}
 		}
 	case *parse.CommandNode:
 		for i, a := range x.Args {
 			if id, ok := a.(*parse.IdentifierNode); ok && i == 0 && funcs[id.Ident] {
-				return true
+				return id.Ident
 			}
-			if callsAnyOf(a, funcs) {
-				return true
+			if fn := firstCallOf(a, funcs); fn != "" {
+				return fn
 			}
 		}
 	case *parse.ChainNode:
-		return callsAnyOf(x.Node, funcs)
+		return firstCallOf(x.Node, funcs)
 	}
-	return false
+	return ""
 }
 
 // bodyMentions — упоминает ли тело ключ: переменную key (с учётом затенения
@@ -706,7 +848,8 @@ func resolvePipe(p *parse.PipeNode, s tplScope) tplValue {
 // `pick`, `omit`, `unset` (та же карта), `keys` (перечень ключей) и
 // `sortAlpha`/`uniq`/`compact` над ним. `include` запоминает точку места вызова
 // define. Прочие — неизвестное значение, и проход по ним с упоминанием ключа —
-// отказ, а не пропуск.
+// отказ, а не пропуск. Значение `ternary` по непостоянному условию и правка
+// переменной под ветвью — значение, выбранное условием (`tplValue.chosen`).
 func resolveCommand(c *parse.CommandNode, piped *tplValue, s tplScope) tplValue {
 	if len(c.Args) == 0 {
 		return unknownValue
@@ -728,7 +871,9 @@ func resolveCommand(c *parse.CommandNode, piped *tplValue, s tplScope) tplValue 
 	switch id.Ident {
 	case "default", "ternary", "coalesce":
 		if id.Ident == "ternary" && len(ops) == 3 {
-			return ops[0].union(ops[1])
+			out := ops[0].union(ops[1])
+			out.chosen = out.chosen || !ops[2].fixed()
+			return out
 		}
 		if len(ops) >= 2 && id.Ident != "ternary" {
 			return ops[0].unionAll(ops[1:])
@@ -785,7 +930,7 @@ func resolveCommand(c *parse.CommandNode, piped *tplValue, s tplScope) tplValue 
 			*cur = unknownValue
 			return unknownValue
 		}
-		*cur = cur.union(tplValue{known: true, fields: map[string]tplValue{k.Text: ops[2]}})
+		s.mutate(cur, cur.union(tplValue{known: true, fields: map[string]tplValue{k.Text: ops[2]}}))
 		return *cur
 	case "merge", "mergeOverwrite", "mustMerge", "mustMergeOverwrite":
 		if len(ops) == 0 {
@@ -793,7 +938,7 @@ func resolveCommand(c *parse.CommandNode, piped *tplValue, s tplScope) tplValue 
 		}
 		out := ops[0].unionAll(ops[1:])
 		if cur := mutableVar(c.Args[1], s); cur != nil && piped == nil {
-			*cur = out
+			s.mutate(cur, out)
 		}
 		return out
 	case "deepCopy", "mustDeepCopy", "pick", "omit", "unset":
@@ -992,15 +1137,17 @@ func podEnvNames(t *testing.T, rendered string) []string {
 //     из суда: при первом условии она невидима;
 //   - НЕ ИСТОЧНИК (refuted): ни при одном условии имени он не дал, а рендер
 //     положил его в другое место (том, порт, аннотация, значение), и КАЖДЫЙ
-//     проход по карте стоит в файле шаблона вне всякого условия и упоминает
-//     ключ безусловно (`plainPass`): такие проходы исполнены при каждом рендере
-//     целиком, и ни один не положил пробный ключ в имя переменной;
+//     проход по карте прост (`plainPass`): стоит вне всякого условия, а его
+//     тело — прямой код, чей вывод вокруг ключа выбирает один ключ. Такие
+//     проходы исполнены при каждом рендере целиком и в единственной форме, и ни
+//     один не положил пробный ключ в имя переменной;
 //   - НАХОДКА «не подтверждён и не опровергнут»: рендер отказал; пробный ключ не
 //     дошёл ни до какого места рендера ни при одном условии (проход выключен
-//     условием, которого суд не создаёт, либо ключ отфильтрован); проход стоит
-//     под условием либо ключ в нём под ветвью — и что положила бы
-//     невыполненная ветвь, рендер не называет: место, где лёг пробный ключ,
-//     мог дать и не этот проход (другой проход, карта, выведенная целиком).
+//     условием, которого суд не создаёт, либо ключ отфильтрован); хоть один
+//     проход по карте не прост — находка называет чем, с местом в шаблоне, — и
+//     как он положил бы ключ при другом исполнении этого места, рендер не
+//     называет: место, где лёг пробный ключ, мог дать и не этот проход (другой
+//     проход, карта, выведенная целиком).
 func confirmPodEnvSources(t *testing.T, dir string, cands []envCandidate) (sources []envSource, refuted, findings []string, renders int) {
 	t.Helper()
 	condNames := make([]string, 0, len(podEnvConditions))
@@ -1034,10 +1181,10 @@ candidates:
 			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ %s не дошёл ни до какого места рендера ни при "+
 				"одном условии суда (%s) — проход по карте выключен условием, которого суд не создаёт, либо ключ "+
 				"отфильтрован: источник не подтверждён и не опровергнут", c.path, canary, strings.Join(condNames, ", ")))
-		case c.branched:
+		case c.notPlainBy != "":
 			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ %s рендер положил не в имя переменной пода, а "+
-				"проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него — что положила "+
-				"бы невыполненная ветвь, рендер не называет: источник не подтверждён и не опровергнут", c.path, canary))
+				"проход по карте не прост — %s; как он положил бы ключ при другом исполнении этого места, рендер не "+
+				"называет: источник не подтверждён и не опровергнут", c.path, canary, c.notPlainBy))
 		default:
 			refuted = append(refuted, c.path)
 		}
@@ -1069,9 +1216,12 @@ func envSourcesIn(t *testing.T, out string, c envCandidate, canary string, cond 
 	return srcs
 }
 
+// bareEnvForm — форма имени, где ключ карты и есть имя переменной пода.
+const bareEnvForm = "<ключ>"
+
 // form — форма имени переменной пода: как ключ карты становится именем.
 func (s envSource) form() string {
-	f := s.prefix + "<ключ>" + s.suffix
+	f := s.prefix + bareEnvForm + s.suffix
 	if s.folded {
 		f += " (регистр изменён)"
 	}
