@@ -68,6 +68,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
@@ -88,18 +89,66 @@ const alertRulesToggle = "alertRules.enabled"
 // словом, а слово «own» стоит на странице и там, где посадка не при чём.
 var pageAlertBlockRe = regexp.MustCompile("(?s)(?:<!-- posture: ([a-z]+) -->\n)?```yaml\n(.*?)```")
 
-// posturedRules — правила страницы, разложенные по посадке: пустой ключ —
-// правила, действующие на ЛЮБОЙ посадке.
+// posturedRules — правила страницы, разложенные по пометке полосы: пустой
+// ключ — правила, действующие на ЛЮБОЙ посадке.
 type posturedRules map[string][]alertRule
 
-// forPosture — что страница обещает установке названной посадки: общие
-// правила плюс правила её полосы. Правила чужой посадки в обещание НЕ входят.
-func (p posturedRules) forPosture(posture string) []alertRule {
-	out := append([]alertRule{}, p[""]...)
+// forPosture — что страница обещает установке названной посадки: правила
+// каждой полосы, которую процесс при этой посадке поднимает
+// ([laneDeliveredTo]). Правила полосы, которой процесс не поднимает, в
+// обещание НЕ входят. Пусто — посадка не объявлена.
+func (p posturedRules) forPosture(posture string) ([]alertRule, error) {
+	target := config.IdentityProviderUnset
 	if posture != "" {
-		out = append(out, p[posture]...)
+		parsed, err := config.ParseIdentityProvider(posture)
+		if err != nil {
+			return nil, fmt.Errorf("посадка рендера: %w", err)
+		}
+		target = parsed
 	}
-	return out
+	lanes := make([]string, 0, len(p))
+	for lane := range p {
+		lanes = append(lanes, lane)
+	}
+	sort.Strings(lanes)
+	var out []alertRule
+	for _, lane := range lanes {
+		delivered, err := laneDeliveredTo(lane, target)
+		if err != nil {
+			return nil, err
+		}
+		if delivered {
+			out = append(out, p[lane]...)
+		}
+	}
+	return out, nil
+}
+
+// laneDeliveredTo — везёт ли чарт установке посадки posture правила полосы,
+// помеченной на странице как lane.
+//
+// Пометка называет полосу по посадке, которая её ОБЪЯВЛЯЕТ, а не перечень
+// посадок, которым её везут. Где полоса есть, отвечает предикат процесса,
+// поднимающего её ряд, а не совпадение имени: полосу хуков внешнего
+// поставщика процесс поднимает при любой посадке, кроме `own`, то есть и при
+// незаявленной (#427). Сверка по совпадению имени обещала бы незаявленной
+// посадке меньше, чем работает, и молча согласилась бы с чартом, который
+// там правила о хуках не везёт.
+//
+// Пометка вне словаря — отказ, а не молчаливое «никому»: иначе правила
+// опечатанной полосы выпали бы из сверки обеих сторон разом.
+func laneDeliveredTo(lane string, posture config.IdentityProvider) (bool, error) {
+	switch lane {
+	case "":
+		return true, nil
+	case config.IdentityProviderExternal.String():
+		return hooksRaisedByProcess(posture), nil
+	case config.IdentityProviderOwn.String():
+		return posture == config.IdentityProviderOwn, nil
+	}
+	return false, fmt.Errorf("пометка полосы %q на странице не называет ни одной полосы, известной сверке "+
+		"(%s, %s либо без пометки): её правила не обещаны ни одной посадке",
+		lane, config.IdentityProviderExternal, config.IdentityProviderOwn)
 }
 
 // alertRule — правило в том виде, в каком его сверяют две стороны.
@@ -247,8 +296,10 @@ func diffRuleSets(page, chart []alertRule) (onlyPage, onlyChart []string) {
 // хуков поставщика там нет by construction, тишина на них штатна, а порог,
 // срабатывающий на штатном состоянии, перестают читать — и вместе с ним
 // теряют настоящую тревогу под `external`. Поэтому набор правил ЗАВИСИТ от
-// посадки: общие правила плюс правила своей полосы, и страница обещает
-// ровно то, что объект везёт установке этой посадки.
+// посадки: общие правила плюс правила каждой полосы, которую процесс при ней
+// поднимает, и страница обещает ровно то, что объект везёт установке этой
+// посадки. Незаявленная посадка — стендовый профиль — получает и правила о
+// хуках: слушатель их процесс при ней поднимает (#427).
 //
 // Сверяется в обе стороны на каждой из четырёх раскладок: два поставляемых
 // профиля как есть и боевой профиль, явно переведённый на каждую из полос.
@@ -267,11 +318,9 @@ func TestDeliveredAlertRulesMatchThePublishedPage(t *testing.T) {
 		t.Run(r.name, func(t *testing.T) {
 			rendered := renderStandaloneChart(t, r.chain, r.sets...)
 			chart, objects := chartAlertRules(t, rendered)
-			page := paged.forPosture(r.posture)
-			lane := 0
-			if r.posture != "" {
-				lane = len(paged[r.posture])
-			}
+			page, perr := paged.forPosture(r.posture)
+			require.NoError(t, perr, "обещание страницы для посадки рендера")
+			lane := len(page) - len(paged[""])
 
 			onlyPage, onlyChart := diffRuleSets(page, chart)
 
