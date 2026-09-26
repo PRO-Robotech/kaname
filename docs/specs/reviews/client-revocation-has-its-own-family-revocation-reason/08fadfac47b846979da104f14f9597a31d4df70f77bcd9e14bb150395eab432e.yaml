@@ -1,0 +1,234 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/client-revocation-has-its-own-family-revocation-reason.md
+  sha256: 08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Строку истории ревью круга 2 в шапку
+    вписывает автор только вместе со следующей редакцией: любая правка документа даёт новый
+    отпечаток, и этот вердикт на неё не переносится.
+  base_commit: fc9f5aff19cfff9ec310f2ff35338b80f24379b1
+  content_commit: 3e71cbf19bad8338c02023361ef19f1d65c43d9f
+  content_commit_note: >-
+    Ветка `acc-406` от `origin/366` (fc9f5aff1). Редакция 2 внесена двумя коммитами: 2e9722a60
+    (отпечаток 170a095a…, ревью не проходил) и 3e71cbf19 (предикат §0.4 берёт фундамент пином
+    go.mod). Судится содержимое 3e71cbf19. `git diff --stat origin/366...3e71cbf19` — документ и
+    запись круга 1. На origin ветки нет (`git ls-remote origin refs/heads/acc-406` → пусто).
+  branch: acc-406
+  pull_request: null
+  task: PRO-Robotech/kaname#406
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 977
+  round: 2
+  predecessor_record: >-
+    docs/specs/reviews/client-revocation-has-its-own-family-revocation-reason/392a74f1de0832daaca729454f088ff7312b32bfbff4c02f21df1c7bd8677fd4.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> и git show 3e71cbf19:<путь> | sha256sum — оба
+    08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e, совпал с объявленным в
+    задании.
+  measurement_revisions: >-
+    Служба: 3e71cbf19 (код = origin/366 fc9f5aff1). Фундамент: corelib v1.10.0-rc.2 из кэша
+    модулей (пин go.mod:8), тег = c8b7650112d97d7a4349290703c691ad608291c5 (Origin.Hash в .info
+    кэша и rev-parse тега в клоне фундамента). Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: отпечаток совпал; круг 2 (в каталоге записей одна запись круга 1 на
+    392a74f1); дом записи — docs/specs/reviews/<документ>/<sha256>.yaml, как у круга 1 и соседей.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-26'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 2 — APPROVED, блокирующих ноль. Блокирующее круга 1 (NEGATIVE, третий путь
+    отзыва без отрицания от чужого клиента) закрыто по существу: заведён KN-FRV-12 с близнецом,
+    строки в §5 и §6 пп. 5, 6, 11, 12, пункт §2 переписан. Проверено повтором того же опыта, с
+    новым исходом: на копии фундамента со снятой сверкой церемонии красна ровно KN-FRV-12.
+    Санкция этим не выдана: роль без внешнего события полномочия не даёт (change-graph.md §3).
+  publication_pending:
+    required_for_sanction: true
+    expected_from: диспетчер/курьер волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в PRO-Robotech/kaname#406 с полями role, verdict, subject, subject_revision
+      (3e71cbf19bad8338c02023361ef19f1d65c43d9f — ревизия обязана быть опубликована на origin
+      раньше события), subject_sha256 дословно. Блок `event` дописывается ОТДЕЛЬНЫМ коммитом
+      поверх этой записи; вердикт и разбор задним числом не правятся.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml
+    `review_authority.acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5846063540
+  node_id: IC_kwDOUO26pM8AAAABXHPZtA
+  url: https://github.com/PRO-Robotech/kaname/issues/406#issuecomment-5846063540
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5846063540
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/406
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-26T11:56:47Z'
+  body_sha256: f50741a5374ed86b06b7e793490df5537e424e247119150ac7046a68a8d089aa
+  subject_sha256: 08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e
+  subject_revision: 3e71cbf19bad8338c02023361ef19f1d65c43d9f
+  verdict: APPROVED
+  event_body: 'acceptance-reviewer · APPROVED · 08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e'
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента, по форме 91a6c36dd. Ревизия тела
+    3e71cbf19 опубликована раньше события: `gh api
+    'repos/PRO-Robotech/kaname/activity?ref=refs/heads/acc-406'` → создание ветки на e5068af12
+    (потомок 3e71cbf19) в 2026-09-26T11:34:36Z, событие — 11:56:47Z; `git branch -r --contains
+    3e71cbf19` → origin/acc-406. Прежний блок `event` (`status: not_performed`, причина — событие
+    публикует курьер, а не рецензент) заменён этим: он описывал момент вердикта, когда события ещё
+    не было. Поле `event_body` оставлено как отдано рецензентом — одной строкой через « · »;
+    опубликовано оно пятью строками заголовка до первой `---`, и именно эту форму судит гейт
+    `.github/scripts/review-event-silence.py`. В `attribution` к факту публикации приведены два поля — `publishing_actor` (было
+    none) и `publication_mode` (было agent_verdict_awaiting_courier). Вердикт, разбор, находки,
+    числа и `effective_approval` (issued/ban1_lifted) НЕ тронуты: дописывающий — `git-operator`,
+    вердикта о санкции он не выносит; привести `effective_approval` к событию — решение того, кто
+    выпускает effective approval. Перемерено дописывающим: поля события — `gh api
+    repos/PRO-Robotech/kaname/issues/comments/5846063540` (id, node_id, user pointpu, MEMBER,
+    `issue_url` → kaname#406, то есть `subject.task`; created_at == updated_at); пять строк тела
+    дословно, каждая ровно одна (`grep -cxF` → 1 по каждой), контроль в другую сторону `grep -cxF
+    'verdict: CHANGES_REQUESTED'` → 0; отпечаток тела — `gh api … | jq -j .body | sha256sum` →
+    f50741a5…, на том же теле `jq -r` → 1e022c17… — другое число о другом входе. Отпечаток
+    предмета снят самостоятельно: `git show
+    3e71cbf19bad8338c02023361ef19f1d65c43d9f:docs/engineering/acceptance/client-revocation-has-its-own-family-revocation-reason.md
+    | sha256sum` → 08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e, совпал с
+    именем файла записи и со строкой `subject_sha256` тела события. Полномочие: `pointpu` в
+    `review_authority.acceptance-reviewer` политики воркспейса (origin/main 6eddaa5e, строка 41),
+    `gh api repos/PRO-Robotech/kaname/collaborators/pointpu/permission` → admin; эпоха
+    post-cutover — `git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+    origin/main` → 0.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком, §0…§6, против тела #406 и записи круга 1. Каждая команда §0 и DoD п. 4, 8
+    перепрогнана на 3e71cbf19, выводы совпали: три определения ограничения
+    (…175117.sql:209, …225650.sql:64 и :84); `client-revoke` в миграциях, домене, не-тестовом Go
+    — 0, 0, 0; писатели RevokeFamily — grants.go:77, oauth_ceremony_repo.go:597 и :704;
+    перепись констант 1·1·2·0·0 в порядке таблицы §0.3; вызовов церемонии из cmd/ — 0; SELECT причины — ноль;
+    откатывающих проб 16; `ждёт слова` — 31-deployment.md:508 и doc.go:37;
+    RevocationClientRevoke в grants_test.go — :64, :178. Новый предикат §0.4 по пину — 16 и 14;
+    14 вызовов разобраны поимённо, все от testClientID; оставшиеся два — client_secret_test.go
+    (живой токен, сверка секрета) и endpoints_internal_test.go. TestRevokeToken, случай
+    «token was issued to another client», существует и подаёт только токен обновления.
+    Координаты rc.2 сверены чтением: ceremony.go:1009 и :1037 (условие совпадения клиента),
+    revocation.go:44-62. Координаты службы §0.9, Р4, KN-FRV-01 сверены по строкам.
+    Гейты DoD п. 13 на дереве ветки: TestAcceptancePathCoordinateResolves и
+    TestAcceptanceProbeCoordinateResolves — PASS, находок 0 (приёмок 47).
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+closure_of_round_1:
+  blocking_1_NEGATIVE: >-
+    ЗАКРЫТО. KN-FRV-12 посеян стендом K1: от X прежним токеном — успех, A живо, токен оборота и
+    B приняты; затем C тем же токеном — A отозвано с `client-revoke`, оба токена доступа A
+    отвергнуты, B принят. Инъекции на двух копиях rc.2 (replace через отдельный файл модуля):
+    без сверки церемонии со словом красна только KN-FRV-12 (X отзывает A), 01…04 зелены; без
+    слова X получает server_error, A живо. Без сверки движка со словом красна только KN-FRV-04
+    (оба вызова X — успех, A отозвано), 01…03 и 12 зелены; без слова X получает
+    temporarily_unavailable на живых токенах и успех без действия на прежнем. Всё — как в §0.6
+    и §6 п.12.
+  non_blocking_2_PRODUCER: 'ЗАКРЫТО: Р4 больше не называет KN-FRV-10 держателем ухода семейства.'
+  non_blocking_3_CONSTRUCTIBILITY: >-
+    ЗАКРЫТО: §0.9 и KN-FRV-05 называют столкновение у ceremonyScene. Опытом: вторая сцена с
+    меткой той же длины в той же базе не заводится (посев сессии), с меткой другой длины —
+    заводится.
+  non_blocking_4_SCOPE: 'ЗАКРЫТО: строка «Задача» называет для #315 и #318 снятие блокера, а не санкцию.'
+
+constructibility:
+  seeded: >-
+    Выгрузки дерева 3e71cbf19: Т0 (как есть), Т1 (слово в домене), Т2 (Т1 плюс черновая
+    миграция), черновые пробы вне запроса. Стенд K1: KN-FRV-01, 02, 03, 04, 12 на Т0 и Т1 и на
+    двух копиях фундамента. Т0: красны 01, 02 (temporarily_unavailable), 03 (server_error),
+    контроли 04 и 12; половины X зелены. Т1: 01…04 и 12 зелены, истекающие пробы красны на
+    grants_test.go:99, :186 и revocation_reaches_presentation_test.go:598. Postgres в
+    контейнере: Т2 — 05 (обе половины), 06 (TestLINE_A_1_21 PASS), 07 (принято 6, отвергнуты
+    client_revoke и consent-withdrawn с 23514), 08 (6 = 6), 10/1 (откат отвергнут 23514,
+    версия прежняя, A client-revoke и не живо, B и C прежние), 10/2 (откат прошёл, C со словом
+    отвергнут, одно расхождение, повторный накат — сверка пуста); сосед #404 красен на :353 с
+    двумя расхождениями. Т1 — 06 красен на :357, 08 на :211, 05/2 красна, 05/1 зелена.
+  named_fixture_not_seeded: >-
+    KN-FRV-09 — versionsOf, acScene с шестью метками разной длины, приём наката до версии у
+    соседа #404. KN-FRV-11 — итоговое состояние после снятия записи ожидания не посеяно;
+    посеяны истекающие красные и порт на Т1.
+  counts: 'посеяно 10 из 12 сценариев; названной фикстурой 2; не выполнилось 0'
+
+findings:
+  blocking: []
+  non_blocking:
+    - id: 1
+      kind: FORMAT
+      where: 'KN-FRV-12 и KN-FRV-03, «Дано»'
+      statement: >-
+        «Тогда» утверждает, что оба токена доступа A — выданный кодом и выданный оборотом —
+        отвергнуты, а «Дано» называет принятым только токен оборота. Опытом токен, выданный
+        кодом, после оборота принят, так что утверждение различающее; стоит назвать его
+        состояние и в «Дано», чтобы исходное состояние было частью контракта.
+    - id: 2
+      kind: FORMAT
+      where: 'KN-FRV-05, «Красный до правки»'
+      statement: >-
+        На Т1 проба увидит отказ писателя слоя доступа как внутреннюю ошибку: наблюдено
+        first=0/internal. Код 23514 лежит под ним и в тексте ошибки не виден. Описание красного
+        в запросе должно назвать то, что проба печатает.
+    - id: 3
+      kind: FORMAT
+      where: '§6 п.11'
+      statement: >-
+        11 перечислен среди проб стенда K1, а §4 и KN-FRV-11 держат его пробами сопряжения
+        grants_test.go без стенда. Было и в редакции 1.
+
+twins_and_producers:
+  producer_per_then: '12 из 12 — таблица §5 полна, строка KN-FRV-12 добавлена'
+  twin_per_negative: >-
+    у каждого отрицательного и различающего сценария близнец назван, дельта в один факт: 04 и 12 — положительный контроль от C на том же стенде
+    (дельта — кто просит); 07 — одна строка, одно написание; 10/1 против 10/2 — причина A;
+    05/1 против 05/2 — порядок; 01, 02, 03, 06 — семейство B.
+  note: >-
+    Различения, которые держит фундамент (половины X 04 и 12, причина операции в 03), внутри
+    дерева не снять; способность упасть показана инъекциями на копиях фундамента, и каждая
+    краснит ровно свой сценарий. Перемерено этим кругом.
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+next_step_note: >-
+  До события запрет #1 в силе. Незаблокирующие 1…3 либо правятся ДО события (новая редакция,
+  короткий круг 3 только по ним), либо остаются как есть и учитываются в описании запроса.
+  Поправить после события и считать вердикт перенесённым — не исход (change-graph.md §2).
