@@ -469,10 +469,14 @@ func (v *CeremonyVaults) ConsumeAuthorizationCode(ctx context.Context, signature
 	if rq.tx != nil || rq.done {
 		return oauthceremony.StoreOutcome{}, fmt.Errorf("ceremony request: a second authorization code consumption in one exchange")
 	}
-	// Начало транзакции отвязано от срока ВЫЗОВА: транзакция живёт до конца
-	// запроса, а срок каждого её оператора назначает вызов, который его
-	// исполняет.
-	tx, err := v.repo.beginWriter(context.WithoutCancel(ctx))
+	// Начало транзакции — взятие связи из пула и BEGIN — идёт под сроком ЭТОГО
+	// вызова: порт обязан уложиться в срок, который ему назначил мост
+	// (контракт `oauthceremony`), а пул, не отдающий связи, иначе держал бы обмен
+	// без предела под замком единицы запроса. Жить транзакции до конца запроса
+	// это не мешает: драйвер контекст начала не удерживает (pgx: контекст
+	// судит только команду BEGIN, отката по его концу нет), и срок каждого
+	// следующего оператора назначает вызов, который его исполняет.
+	tx, err := v.repo.beginWriter(ctx)
 	if err != nil {
 		return oauthceremony.StoreOutcome{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
