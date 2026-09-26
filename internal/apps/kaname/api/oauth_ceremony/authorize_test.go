@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package ceremony
+package oauth_ceremony
 
 import (
 	"context"

@@ -12,7 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
@@ -30,7 +30,7 @@ import (
 // Различимы только отказы, решённые ДО этого: форма запроса и аутентификация
 // конфиденциального клиента (`invalid_client`, о клиенте, не о коде).
 type TokenLane struct {
-	exchange *ceremony.ExchangeUseCase
+	exchange *ceremonyapp.ExchangeUseCase
 	census   *Census
 	logger   *slog.Logger
 	grants   []string
@@ -39,7 +39,7 @@ type TokenLane struct {
 var _ clienttokenhttp.CeremonyLane = (*TokenLane)(nil)
 
 // NewTokenLane строит полосы. Неполная провязка — отказ построения.
-func NewTokenLane(exchange *ceremony.ExchangeUseCase, census *Census, logger *slog.Logger) (*TokenLane, error) {
+func NewTokenLane(exchange *ceremonyapp.ExchangeUseCase, census *Census, logger *slog.Logger) (*TokenLane, error) {
 	switch {
 	case exchange == nil:
 		return nil, errors.New("ceremonyhttp: token lane needs the exchange use-case")
@@ -108,7 +108,7 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 	// передаётся вовсе: читается из кода (Р5, сценарии 10, 27). Единицу запроса
 	// открывает и урегулирует на каждом выходе вариант использования.
 	res, err := l.exchange.Execute(ctx, req)
-	if errors.Is(err, ceremony.ErrNotSettled) {
+	if errors.Is(err, ceremonyapp.ErrNotSettled) {
 		l.logger.ErrorContext(ctx, "ceremony exchange request was not settled",
 			slog.String("client", req.ClientID), slog.Any("err", err))
 	}

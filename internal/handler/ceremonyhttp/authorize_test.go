@@ -18,7 +18,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -64,17 +64,17 @@ func (d directory) LookupClient(_ context.Context, id string) (oauthceremony.Cli
 // silentAuthority — шов входа, которого отказ до доверия цели не спрашивает.
 type silentAuthority struct{ calls int }
 
-func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (ceremony.Login, bool, error) {
+func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (ceremonyapp.Login, bool, error) {
 	a.calls++
-	return ceremony.Login{}, false, nil
+	return ceremonyapp.Login{}, false, nil
 }
 
 // authorizeEndpoint — эндпоинт над вариантом использования с портами пробы.
-func authorizeEndpoint(t *testing.T, engine ceremony.AuthorizationEngine, d ceremony.Clients,
-	authority ceremony.LoginAuthority, census *Census, callTimeout time.Duration,
+func authorizeEndpoint(t *testing.T, engine ceremonyapp.AuthorizationEngine, d ceremonyapp.Clients,
+	authority ceremonyapp.LoginAuthority, census *Census, callTimeout time.Duration,
 ) *Authorize {
 	t.Helper()
-	uc, err := ceremony.NewAuthorizeUseCase(ceremony.AuthorizeDeps{Engine: engine, Clients: d, Authority: authority,
+	uc, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{Engine: engine, Clients: d, Authority: authority,
 		Clock: time.Now, CallTimeout: callTimeout})
 	if err != nil {
 		t.Fatalf("сборка варианта использования: %v", err)
@@ -87,7 +87,7 @@ func authorizeEndpoint(t *testing.T, engine ceremony.AuthorizationEngine, d cere
 	return a
 }
 
-func newTestAuthorize(t *testing.T, d ceremony.Clients) (*Authorize, *untouchedEngine, *silentAuthority, *Census) {
+func newTestAuthorize(t *testing.T, d ceremonyapp.Clients) (*Authorize, *untouchedEngine, *silentAuthority, *Census) {
 	t.Helper()
 	engine, authority, census := &untouchedEngine{}, &silentAuthority{}, NewCensus()
 	return authorizeEndpoint(t, engine, d, authority, census, time.Second), engine, authority, census

@@ -25,7 +25,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -40,9 +40,9 @@ func (stalledDirectory) LookupClient(ctx context.Context, _ string) (oauthceremo
 // stalledAuthority — шов входа, который не отвечает, пока вызов не кончится.
 type stalledAuthority struct{}
 
-func (stalledAuthority) Resolve(ctx context.Context, _ domain.SessionBearer) (ceremony.Login, bool, error) {
+func (stalledAuthority) Resolve(ctx context.Context, _ domain.SessionBearer) (ceremonyapp.Login, bool, error) {
 	<-ctx.Done()
-	return ceremony.Login{}, false, ctx.Err()
+	return ceremonyapp.Login{}, false, ctx.Err()
 }
 
 // protocolPassingEngine — церемония, пропускающая протокол: запрос доходит до
@@ -84,8 +84,8 @@ func TestAuthorize_EachStoreCallCarriesTheConfiguredDeadline(t *testing.T) {
 	}
 	for _, cell := range []struct {
 		name      string
-		clients   ceremony.Clients
-		authority ceremony.LoginAuthority
+		clients   ceremonyapp.Clients
+		authority ceremonyapp.LoginAuthority
 		answered  func(*httptest.ResponseRecorder) bool
 	}{
 		{"справочник клиентов", stalledDirectory{}, &silentAuthority{}, func(r *httptest.ResponseRecorder) bool {
