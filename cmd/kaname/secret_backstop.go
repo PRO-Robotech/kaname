@@ -119,7 +119,11 @@ func secretSweepTargets() ([]secretsweep.Target, error) {
 	if err != nil {
 		return nil, fmt.Errorf("user-token response type: %w", err)
 	}
-	saKeyType, userTokenType := saKey.TypeUrl, userToken.TypeUrl
+	interactiveClient, err := anypb.New(&iamv1.CreateInteractiveClientResponse{})
+	if err != nil {
+		return nil, fmt.Errorf("interactive-client response type: %w", err)
+	}
+	saKeyType, userTokenType, interactiveClientType := saKey.TypeUrl, userToken.TypeUrl, interactiveClient.TypeUrl
 	return []secretsweep.Target{
 		// У ответа машинного ключа названы ОБА написания: нынешний одноразовый
 		// ключ и легаси-секрет, оставленный ради совместимости провода. Поле,
@@ -130,5 +134,12 @@ func secretSweepTargets() ([]secretsweep.Target, error) {
 		// стоит как БЭКСТОП против будущего второго пути записи.
 		{ResponseType: saKeyType, Fields: []string{"private_key_pem", "client_secret", "secret"}},
 		{ResponseType: userTokenType, Fields: []string{"private_key_pem", "secret"}},
+		// `client_secret` — секрет конфиденциального интерактивного клиента
+		// (kaname#405). В тело строки операции он не кладётся ВОВСЕ — тело для
+		// строки собирается без него, — поэтому подметать здесь нечего; запись
+		// стоит как БЭКСТОП против будущего второго пути записи. Предел назван:
+		// подметаются только строки, осевшие дольше льготы плюс запас
+		// (`secretSweepMargin`) и моложе окна (`secretSweepWindow`).
+		{ResponseType: interactiveClientType, Fields: []string{"client_secret"}},
 	}, nil
 }

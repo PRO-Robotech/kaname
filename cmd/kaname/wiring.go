@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -878,8 +879,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
+	// Исполнитель посадки `own` строится с хешером полосы входа; без него —
+	// отказ старта, а не клиент без материала (kaname#405, ban #16).
+	interactiveSecretHasher, err := ownClientSecretHasher(cfg)
+	if err != nil {
+		log.Fatalf("interactive client executor: %v", err)
+	}
 	interactiveProvider, err := interactiveClientProvider(cfg,
-		kanamepg.NewOAuthCeremonyRepo(pool), nil, metricsReg.ProviderRoadRecorder())
+		kanamepg.NewOAuthCeremonyRepo(pool), interactiveSecretHasher, metricsReg.ProviderRoadRecorder())
 	if err != nil {
 		log.Fatalf("interactive client executor: %v", err)
 	}
@@ -1131,9 +1138,29 @@ func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSec
 	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry, ownHasher)
 }
 
-// ownClientSecretHasher — хешер проверочного значения секрета клиента.
-func ownClientSecretHasher(_ config.Config) (kanamepg.ClientSecretHasher, error) {
-	return nil, nil
+// ownClientSecretHasher — хешер проверочного значения секрета интерактивного
+// клиента для исполнителя заведения на ЭТОЙ посадке (задача kaname#405).
+//
+// Под `own` — хешер объявленного класса записи полосы входа, ТОТ ЖЕ
+// производитель, которым корень пишет приманку проверяющего (`laneHasher`):
+// другой класс сделал бы отказ незаведённому клиенту по цене отличным от
+// отказа заведённому, и время ответа перечисляло бы клиентов. Под `external`
+// исполнителя, которому он нужен, нет, и возвращается ЧИСТЫЙ nil — не
+// типизированный: сборка исполнителя судит интерфейс.
+//
+// Предикат посадки берётся у строителя дороги (`providerAdminHopIsBuilt`), а
+// не повторяется: исполнитель `own` строится ровно там, где дороги нет
+// (`interactiveClientProvider`), и второе условие об одной посадке разошлось бы
+// с первым молча.
+func ownClientSecretHasher(cfg config.Config) (kanamepg.ClientSecretHasher, error) {
+	if providerAdminHopIsBuilt(cfg) {
+		return nil, nil
+	}
+	h, err := laneHasher(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("interactive client secret hasher: %w", err)
+	}
+	return h, nil
 }
 
 // forceLogoutProviderSessions — снятие сессии входа У ВНЕШНЕГО ПОСТАВЩИКА, если

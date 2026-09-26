@@ -5,7 +5,7 @@ package pg
 
 // own_interactive_client_provider.go — ИСПОЛНИТЕЛЬ заведения и снятия
 // интерактивного клиента на посадке БЕЗ внешнего поставщика личности
-// (задача PRO-Robotech/kaname#313).
+// (задачи PRO-Robotech/kaname#313, #405).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ИСПОЛНЯЕТСЯ, А ЧТО ИСПОЛНЯЕТ СХЕМА
@@ -17,9 +17,11 @@ package pg
 //
 // Поэтому у исполнителя ровно две обязанности, и обе настоящие:
 //
-//   - ЗАВЕДЕНИЕ чеканит идентификатор клиента и объявляет форму выдачи. Строку
-//     кладёт вызывающий (`clientRepo.Insert`) сразу следом — писать её здесь
-//     значило бы завести ВТОРОГО писателя одной строки;
+//   - ЗАВЕДЕНИЕ чеканит идентификатор клиента, его СЕКРЕТ и проверочное
+//     значение секрета и объявляет форму выдачи. Строку — вместе с
+//     проверочным значением, одним оператором — кладёт вызывающий
+//     (`clientRepo.Insert`) сразу следом: писать её здесь значило бы завести
+//     ВТОРОГО писателя одной строки;
 //   - СНЯТИЕ снимает проверочное значение секрета. Всё остальное, что было
 //     ключено на клиента, сносит СХЕМА: `token_families` ссылается на
 //     `interactive_clients(client_id)` с `ON DELETE CASCADE`, а
@@ -29,42 +31,67 @@ package pg
 //     предмете, которое разойдётся со схемой молча.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// СЕКРЕТ НЕ ЧЕКАНИТСЯ — И ЭТО РЕШЕНИЕ, А НЕ УМОЛЧАНИЕ
+// КЛИЕНТ КОНФИДЕНЦИАЛЕН — РЕШЕНИЕ ВЛАДЕЛЬЦА, А НЕ УМОЛЧАНИЕ
 //
-// Собственный реестр УМЕЕТ нести проверочное значение секрета клиента
-// (`interactive_clients.secret_verifier`, миграция
-// `20260920175118_interactive_client_carries_its_secret_verifier.sql`), а
-// прежняя дорога секрета интерактивному клиенту не чеканит вовсе: она
-// регистрирует его ПУБЛИЧНЫМ, `token_endpoint_auth_method: "none"`, и её
-// адаптер объявляет это инвариантом приёмки — «секрет не чеканится, значит его
-// нечего вернуть, сохранить или утечь».
+// Одобренная приёмка LINE-A-1 решила (Р3, строка 3 таблицы решений §6), что
+// интерактивный клиент нашей церемонии КОНФИДЕНЦИАЛЬНЫЙ и доказывает себя на
+// обмене кода; PKCE `S256` обязателен ВДОБАВОК, а не вместо. Приёмка
+// confidential-interactive-client-secret-shown-once (#405) дала этому
+// удостоверение: способ — `client_secret_basic` (Р1: его RFC 6749 §2.3.1
+// обязывает поддерживать всякий сервер авторизации), секрет чеканит служба
+// (Р2) и показывает ОДИН раз — в ответе вызова `Create` (Р3).
 //
-// Расхождение названо, и решено оно в пользу прежней формы — по БЕЗОПАСНОСТИ,
-// не по удобству:
+// Прежняя редакция этого файла заводила клиента публичным и разбирала
+// конфиденциальность тремя доводами. Их разбор приёмкой #405 (Р1):
 //
-//  1. интерактивный клиент предъявляется ИЗ БРАУЗЕРА. Секрет, попавший в
-//     загружаемый код, секретом не является ни при какой его длине, а его
-//     наличие создаёт ровно одно новое свойство — вид защищённости, которой
-//     нет;
-//  2. владение здесь доказывается PKCE, и собственная церемония принимает
-//     ТОЛЬКО `S256` — `plain` отвергает сама схема. Это доказательство на
-//     каждую церемонию, а не одно значение на всю жизнь клиента;
-//  3. чеканка секрета под `own` при её отсутствии под `external` развела бы
-//     постановки по полю контракта `token_endpoint_auth_method`, которое
-//     неизменяемо после заведения. Разошлись бы они молча — в ответе глагола,
-//     а сказалось бы это в чужой церемонии.
+//  1. «секрет в браузерном коде не секрет» — верно для клиента, чей обмен идёт
+//     в браузере; обмен конфиденциального клиента идёт на серверной стороне
+//     потребителя, а перевод консоли на нашу церемонию — предмет LINE-A-2;
+//  2. «владение доказывает PKCE» — PKCE остаётся, и остаётся обязательным:
+//     секрет добавлен к нему, а не вместо него;
+//  3. «посадки разойдутся по полю способа» — расходятся НЕ молча: поле
+//     `token_endpoint_auth_method` ровно это и называет, под `external` оно
+//     `none` и секрет пуст, под `own` — `client_secret_basic` и секрет выдан.
 //
-// Поэтому `SetClientSecretVerifier` на ЭТОЙ полосе читателя не получает:
-// клиент заводится публичным, колонка остаётся пустой (её умолчание), и
-// «секрета нет» у способа `none` держит схема: материал у публичного клиента
-// невыразим (`interactive_clients_secret_verifier_method_ck`). Полоса, у
-// которой клиент КОНФИДЕНЦИАЛЕН, — свой предмет со своим полем контракта.
+// Клиенты, заведённые под `own` ДО этого решения, остаются `none`: способ
+// неизменяем после заведения. Их исход — снятие и перезаведение посевом
+// стенда, а не миграция.
 //
-// Снятие проверочного значения читателя получает: снятие клиента не имеет
-// права оставить за собой годный материал, ЧЕМ БЫ он туда ни попал.
+// ─────────────────────────────────────────────────────────────────────────────
+// ФОРМА СЕКРЕТА
+//
+// Секрет — ownClientSecretBytes случайных байт из криптографического источника
+// (256 бит; пол приёмки — 128, паритет с базовым удостоверением платформы и с
+// полом `state` LINE-A-1), записанных base64url без дополнения. Алфавит — только
+// незарезервированные знаки RFC 3986 (`A–Z a–z 0–9 - _`): движок церемонии
+// снимает процентное кодирование с обеих половин заголовка Basic, и `+`
+// превратился бы в пробел у клиента, не кодирующего пару.
+//
+// Форма базового удостоверения платформы (`credsecret`, марка `kacho_`) НЕ
+// берётся, и это решение, названное вслух: марка ведёт строку в полосу приёма
+// базового удостоверения на крае, а секрет клиента предъявляется только нашему
+// токен-эндпоинту заголовком Basic и базовым удостоверением не является.
+// Следствие тоже названо: предикат сканера утёкших удостоверений
+// (`credsecret.Pattern`) секрет клиента НЕ опознаёт — строка без марки ему не
+// якорь.
+//
+// Сорванный источник случайности — ОТКАЗ фиксированным текстом, а не секрет
+// предсказуемого вида: угадываемое удостоверение хуже отсутствующего.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПРОВЕРОЧНОЕ ЗНАЧЕНИЕ — ТЕМ ЖЕ ХЕШЕРОМ, ЧТО ПАРОЛИ И ПРИМАНКА
+//
+// Значение пишет хешер ОБЪЯВЛЕННОГО класса записи полосы входа — тот, которым
+// корень пишет приманку проверяющего. Порт сверки секрета отвечает клиенту,
+// которого нет, вычислением против приманки; отдельный «дешёвый» хешер под
+// высокоэнтропийный секрет сделал бы отказ незаведённому клиенту дорогим, а
+// заведённому — дешёвым, и время ответа перечисляло бы клиентов. Хешер
+// приходит ОТ КОРНЯ; без него исполнитель не строится.
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -90,10 +117,8 @@ import (
 // клиента ресурсом не адресуется, `validate.ResourceID` его не судит.
 const ownInteractiveClientIDPrefix = "oic"
 
-// ownPublicClientAuthMethod — форма удостоверения клиента на токен-эндпоинте.
-// Значение то же, что объявляет прежняя дорога: клиент ПУБЛИЧНЫЙ, владение
-// доказывается PKCE. Разбор — в шапке файла.
-const ownPublicClientAuthMethod = "none"
+// ownClientSecretBytes — случайных байт в секрете клиента: 256 бит.
+const ownClientSecretBytes = 32
 
 // ClientSecretStore — то, что исполнителю нужно от собственного реестра.
 //
@@ -106,7 +131,8 @@ type ClientSecretStore interface {
 	ClearClientSecretVerifier(ctx context.Context, clientID string) error
 }
 
-// ClientSecretHasher — производитель проверочного значения секрета.
+// ClientSecretHasher — производитель проверочного значения секрета клиента.
+// Реализует `*passwordverify.Hasher` объявленного класса записи полосы входа.
 type ClientSecretHasher interface {
 	Hash(secret string) (domain.LoginVerifier, error)
 }
@@ -116,20 +142,34 @@ type ClientSecretHasher interface {
 type OwnInteractiveClientProvider struct {
 	clients ClientSecretStore
 	hasher  ClientSecretHasher
+	// entropy — источник случайности секрета; nil — криптографический.
 	entropy io.Reader
 }
 
-// NewOwnInteractiveClientProvider — построение над реестром.
+// NewOwnInteractiveClientProvider — построение над реестром и хешером.
+//
+// Без хешера нечем положить проверочное значение, без реестра — нечем его
+// снять. Сборка ОТКАЗЫВАЕТ, а не заводит клиента без материала и не
+// откатывается к публичному: отказ здесь — отказ старта корня (ban #16).
 func NewOwnInteractiveClientProvider(store ClientSecretStore, hasher ClientSecretHasher) (*OwnInteractiveClientProvider, error) {
+	switch {
+	case store == nil:
+		return nil, stderrors.New("own interactive-client executor needs the client registry " +
+			"(the secret verification value would have no one to clear it)")
+	case hasher == nil:
+		return nil, stderrors.New("own interactive-client executor needs the secret hasher " +
+			"(a confidential client would get a row without a verification value)")
+	}
 	return &OwnInteractiveClientProvider{clients: store, hasher: hasher}, nil
 }
 
-// Register чеканит идентификатор клиента и объявляет форму его выдачи.
+// Register чеканит идентификатор клиента, его секрет и проверочное значение
+// секрета и объявляет форму его выдачи.
 //
-// Хранилища здесь не касается НАМЕРЕННО: строку кладёт вызывающий следующим
-// оператором, и второй писатель одной строки развёл бы «что записано» и «что
-// возвращено». Отсюда же следует, что отказать этот глагол может только на
-// негодном входе.
+// Хранилища здесь не касается НАМЕРЕННО: строку вместе с проверочным значением
+// кладёт вызывающий следующим оператором, и второй писатель одной строки
+// развёл бы «что записано» и «что возвращено». Отказать этот глагол может на
+// негодном входе и на сорванной чеканке; второй отказ — фиксированным текстом.
 func (p *OwnInteractiveClientProvider) Register(
 	_ context.Context, in interactiveclient.ProviderClientSpec,
 ) (interactiveclient.ProviderClient, error) {
@@ -145,17 +185,49 @@ func (p *OwnInteractiveClientProvider) Register(
 		return interactiveclient.ProviderClient{},
 			iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument interactive_client.grant_types: required")
 	}
+	secret, verifier, err := p.mintSecret()
+	if err != nil {
+		// Причина остаётся в цепочке; наружу — фиксированный текст полосы
+		// INTERNAL (`shared.MapRepoErr`), без причины и без секрета.
+		return interactiveclient.ProviderClient{},
+			iamerr.Wrapf(iamerr.ErrInternal, "interactive client secret was not minted: %v", err)
+	}
 	return interactiveclient.ProviderClient{
 		ClientID: ids.NewHyphenID(ownInteractiveClientIDPrefix),
 		// Форму выдачи РЕШИЛ use-case, и она возвращается дословно. Своего
 		// умолчания здесь нет: умолчание адаптера — ровно то, из-за чего три
 		// соседние полосы регистрации все стали означать машинную выдачу.
 		GrantTypes:              append([]string(nil), in.GrantTypes...),
-		TokenEndpointAuthMethod: ownPublicClientAuthMethod,
+		TokenEndpointAuthMethod: interactiveclient.AuthMethodClientSecretBasic,
 		// Круг получателей тоже решён вызывающим (Р2: он чеканится службой, а
 		// не принимается полем запроса).
-		Audiences: append([]string(nil), in.Audiences...),
+		Audiences:      append([]string(nil), in.Audiences...),
+		Secret:         secret,
+		SecretVerifier: verifier,
 	}, nil
+}
+
+// mintSecret — секрет из источника случайности и его проверочное значение.
+// Строкой секрет живёт только внутри этой функции: наружу он уходит носителем.
+func (p *OwnInteractiveClientProvider) mintSecret() (interactiveclient.ClientSecret, domain.LoginVerifier, error) {
+	src := p.entropy
+	if src == nil {
+		src = rand.Reader
+	}
+	raw := make([]byte, ownClientSecretBytes)
+	if _, err := io.ReadFull(src, raw); err != nil {
+		return interactiveclient.ClientSecret{}, domain.LoginVerifier{}, fmt.Errorf("random source: %w", err)
+	}
+	value := base64.RawURLEncoding.EncodeToString(raw)
+	verifier, err := p.hasher.Hash(value)
+	if err != nil {
+		return interactiveclient.ClientSecret{}, domain.LoginVerifier{}, fmt.Errorf("verification value: %w", err)
+	}
+	secret, err := interactiveclient.NewClientSecret(value)
+	if err != nil {
+		return interactiveclient.ClientSecret{}, domain.LoginVerifier{}, err
+	}
+	return secret, verifier, nil
 }
 
 // Deregister снимает проверочное значение секрета клиента.
@@ -165,6 +237,11 @@ func (p *OwnInteractiveClientProvider) Register(
 // та же идемпотентность, с какой прежняя дорога принимает 404 поставщика.
 // Отличить достигнутое состояние от неполадки хранилища позволяет признак
 // отказа, а не его текст.
+//
+// Материал живёт только колонкой строки, и строку уносит глагол `Delete`, так
+// что обычно снимать здесь уже нечего; вызов остаётся, потому что снятие
+// клиента не имеет права оставить за собой годный материал, ЧЕМ БЫ он туда ни
+// попал.
 func (p *OwnInteractiveClientProvider) Deregister(ctx context.Context, clientID string) error {
 	if p == nil || p.clients == nil {
 		return fmt.Errorf("own interactive-client registry is not configured")

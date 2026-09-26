@@ -23,6 +23,13 @@ import (
 
 // interactiveClientCols — the column list every read shares, so a column added
 // to one query cannot silently go missing from another.
+//
+// The verification value of the secret (`secret_verifier`) is NOT here and must
+// not be added (kaname#405): every statement that returns this list — Get,
+// List, Update, `Insert RETURNING`, `Delete RETURNING` — feeds the domain
+// entity, the echo of a removed resource and the journals. The value is read by
+// the ceremony's own reader (`OAuthCeremonyRepo.ClientSecretVerifier`) into its
+// own type, and nowhere else.
 const interactiveClientCols = `id, created_at, name, description, labels,
 	redirect_uris, post_logout_redirect_uris,
 	client_id, audiences, grant_types, token_endpoint_auth_method, status`
@@ -160,12 +167,29 @@ func (r *InteractiveClientRepo) List(
 	return out, next, nil
 }
 
-// Insert — records a client whose provider-side registration succeeded.
+// Insert — records a client whose registration succeeded, together with the
+// verification value of its secret (kaname#405, Р5).
 //
 // A 23505 on interactive_clients_name_uk becomes ALREADY_EXISTS: the uniqueness
 // is the database's promise, so two concurrent Creates naming one client produce
 // one row and one refusal rather than a second silent winner.
-func (r *InteractiveClientRepo) Insert(ctx context.Context, c domain.InteractiveClient, _ domain.LoginVerifier) (domain.InteractiveClient, error) {
+//
+// ОДИН ОПЕРАТОР — СТРОКА, МАТЕРИАЛ И МОМЕНТ ЕГО УСТАНОВКИ. Проверочное значение
+// кладётся тем же `INSERT`, что строка, а не отдельной записью следом: второй
+// оператор открыл бы окно «клиент со способом секретом есть, предъявить
+// нечего», а сбой между двумя операторами оставил бы клиента, которого нельзя
+// доказать никогда. Несостоявшаяся вставка (имя занято, гонка) не оставляет ни
+// строки, ни материала. Нулевой материал — «секрета нет»: колонка получает своё
+// пустое значение, момент — NULL (согласие держит
+// `interactive_clients_secret_verifier_stamp_ck`). Одноместность записи держит
+// гейт `TestInteractiveClientSecretMaterialHasOneWriter`.
+//
+// Материал уходит в базу АРГУМЕНТОМ оператора и в этом файле больше нигде не
+// участвует; назад он не читается — `interactiveClientCols` колонки материала не
+// называет, поэтому в домен, эхо ресурса и журналы он не попадает. Разрешение
+// на выход `domain.LoginVerifier.Reveal` дано ЭТОМУ оператору гейтом
+// `internal/check` `TestLoginVerifierStaysInside`.
+func (r *InteractiveClientRepo) Insert(ctx context.Context, c domain.InteractiveClient, material domain.LoginVerifier) (domain.InteractiveClient, error) {
 	labels, err := json.Marshal(nonNilLabels(c.Labels))
 	if err != nil {
 		return domain.InteractiveClient{}, iamerr.Wrapf(iamerr.ErrInternal, "marshal labels")
@@ -173,14 +197,17 @@ func (r *InteractiveClientRepo) Insert(ctx context.Context, c domain.Interactive
 	const q = `INSERT INTO interactive_clients (
 			id, name, description, labels,
 			redirect_uris, post_logout_redirect_uris,
-			client_id, audiences, grant_types, token_endpoint_auth_method, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			client_id, audiences, grant_types, token_endpoint_auth_method, status,
+			secret_verifier, secret_verifier_set_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+			$12::text, CASE WHEN $12::text = '' THEN NULL ELSE now() END)
 		RETURNING ` + interactiveClientCols
 	out, err := scanInteractiveClient(r.pool.QueryRow(ctx, q,
 		string(c.ID), string(c.Name), string(c.Description), labels,
 		nonNilStrings(c.RedirectURIs), nonNilStrings(c.PostLogoutRedirectURIs),
 		c.ClientID, nonNilStrings(c.Audiences), nonNilStrings(c.GrantTypes),
 		c.TokenEndpointAuthMethod, string(c.Status),
+		material.Reveal(),
 	))
 	if err != nil {
 		return domain.InteractiveClient{}, mapErr(err, "InteractiveClient", string(c.Name))

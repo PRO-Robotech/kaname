@@ -861,45 +861,13 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 
 // ── Проверочное значение секрета интерактивного клиента ─────────────────────
 
-// SetClientSecretVerifier кладёт проверочное значение секрета клиента.
-//
-// Материал уходит в базу АРГУМЕНТОМ оператора и в этом файле больше нигде не
-// участвует: разрешение на выход `domain.LoginVerifier.Reveal` дано ЭТОМУ файлу
-// с причиной в `internal/check/login_verifier_containment_test.go`.
-//
-// Снятие значения — отдельный глагол (`ClearClientSecretVerifier`), а не пустой
-// вход сюда: «положить пустое» и «снять» читались бы одинаково, и опечатка
-// вызывающего молча разоружала бы клиента.
-func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientID string, verifier domain.LoginVerifier) error {
-	if clientID == "" {
-		return fmt.Errorf("Illegal argument interactive_client.client_id: required")
-	}
-	if verifier.IsZero() {
-		return fmt.Errorf("Illegal argument interactive_client.secret_verifier: required")
-	}
-	// Транзакция СВОЯ, а не `execWriter`: материал уходит аргументом ровно
-	// этого оператора, и разрешение гейта удержания стоит на нём, а не на
-	// общем исполнителе, которому материал мог бы прийти откуда угодно.
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `
-		UPDATE kaname.interactive_clients
-		   SET secret_verifier = $2, secret_verifier_set_at = now()
-		 WHERE client_id = $1`, clientID, verifier.Reveal())
-	if err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	if tag.RowsAffected() == 0 {
-		return refuseNoSuchClient(clientID)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	return nil
-}
+// ПИСАТЕЛЯ проверочного значения в этом файле НЕТ, и это решение (задача
+// kaname#405, Р5). Значение кладёт вставка строки клиента ТЕМ ЖЕ оператором
+// (`InteractiveClientRepo.Insert`): отдельная запись после вставки открывала бы
+// окно «клиент со способом секретом есть, предъявить нечего», а сбой между
+// двумя операторами оставлял бы клиента, которого нельзя доказать никогда.
+// Прежний глагол записи снят вместе с разрешением гейта удержания; второго
+// писателя держит гейт `TestInteractiveClientSecretMaterialHasOneWriter`.
 
 // ClearClientSecretVerifier снимает проверочное значение: секрета у клиента
 // больше нет. Способ аутентификации при этом НЕ меняется — публичным клиента
