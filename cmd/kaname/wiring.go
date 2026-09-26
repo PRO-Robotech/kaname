@@ -878,8 +878,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
-	interactiveProvider := interactiveClientProvider(cfg,
-		kanamepg.NewOAuthCeremonyRepo(pool), metricsReg.ProviderRoadRecorder())
+	interactiveProvider, err := interactiveClientProvider(cfg,
+		kanamepg.NewOAuthCeremonyRepo(pool), nil, metricsReg.ProviderRoadRecorder())
+	if err != nil {
+		log.Fatalf("interactive client executor: %v", err)
+	}
 	interactiveCreate := interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider,
 		opsRepo, []string{interactiveAudience}, logger)
 	// КОМПЕНСАЦИЯ ПОЛУСДЕЛАННОЙ РЕГИСТРАЦИИ ПРОВЯЗЫВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ
@@ -1119,13 +1122,18 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 // административной дороги отсюда не зовётся вовсе, поэтому терминальный отказ
 // «внешнего поставщика нет» на путь заведения и снятия не попадает.
 func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSecretStore,
-	roadObs clients.ProviderRoadObserver,
-) interactiveclientapp.ProviderClients {
+	ownHasher kanamepg.ClientSecretHasher, roadObs clients.ProviderRoadObserver,
+) (interactiveclientapp.ProviderClients, error) {
 	road, built := mustProviderAdminClient(cfg, roadObs)
 	if built {
-		return clients.NewInteractiveClientProvider(road)
+		return clients.NewInteractiveClientProvider(road), nil
 	}
-	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry)
+	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry, ownHasher)
+}
+
+// ownClientSecretHasher — хешер проверочного значения секрета клиента.
+func ownClientSecretHasher(_ config.Config) (kanamepg.ClientSecretHasher, error) {
+	return nil, nil
 }
 
 // forceLogoutProviderSessions — снятие сессии входа У ВНЕШНЕГО ПОСТАВЩИКА, если

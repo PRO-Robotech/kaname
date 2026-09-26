@@ -49,7 +49,7 @@ func (f *fakeRepo) List(_ context.Context, _ int, _, _ string) ([]domain.Interac
 	return nil, "", nil
 }
 
-func (f *fakeRepo) Insert(_ context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error) {
+func (f *fakeRepo) Insert(_ context.Context, c domain.InteractiveClient, _ domain.LoginVerifier) (domain.InteractiveClient, error) {
 	f.touched = true
 	return c, nil
 }
@@ -285,7 +285,7 @@ type insertFailsRepo struct {
 	inserted bool
 }
 
-func (r *insertFailsRepo) Insert(_ context.Context, _ domain.InteractiveClient) (domain.InteractiveClient, error) {
+func (r *insertFailsRepo) Insert(_ context.Context, _ domain.InteractiveClient, _ domain.LoginVerifier) (domain.InteractiveClient, error) {
 	r.inserted = true
 	return domain.InteractiveClient{}, iamerr.Wrapf(iamerr.ErrAlreadyExists,
 		"InteractiveClient with name console-a already exists")

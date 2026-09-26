@@ -165,7 +165,7 @@ func (r *InteractiveClientRepo) List(
 // A 23505 on interactive_clients_name_uk becomes ALREADY_EXISTS: the uniqueness
 // is the database's promise, so two concurrent Creates naming one client produce
 // one row and one refusal rather than a second silent winner.
-func (r *InteractiveClientRepo) Insert(ctx context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error) {
+func (r *InteractiveClientRepo) Insert(ctx context.Context, c domain.InteractiveClient, _ domain.LoginVerifier) (domain.InteractiveClient, error) {
 	labels, err := json.Marshal(nonNilLabels(c.Labels))
 	if err != nil {
 		return domain.InteractiveClient{}, iamerr.Wrapf(iamerr.ErrInternal, "marshal labels")

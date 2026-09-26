@@ -272,7 +272,7 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 	c.TokenEndpointAuthMethod = pc.TokenEndpointAuthMethod
 	c.Audiences = pc.Audiences
 
-	created, err := uc.repo.Insert(ctx, c)
+	created, err := uc.repo.Insert(ctx, c, pc.SecretVerifier)
 	if err != nil {
 		// Compensate the half-done registration. The compensating intent cannot
 		// ride the insert's transaction — that transaction is precisely the one

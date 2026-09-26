@@ -144,11 +144,12 @@ func TestBAT1_73_EverySecretBearingOperationResponseFieldIsInTheSweeperLedger(t 
 
 	// Перечень подметальщика — тот же, что исполняется в рантайме. Второй копии
 	// здесь не заводится: копия разошлась бы молча.
+	targets, err := secretSweepTargets()
+	if err != nil {
+		t.Fatalf("перечень подметальщика не построен: %v", err)
+	}
 	ledger := map[string]map[string]struct{}{}
-	for _, tgt := range secretSweepTargets(
-		"type.googleapis.com/kaname.cloud.iam.v1.IssueSAKeyResponse",
-		"type.googleapis.com/kaname.cloud.iam.v1.IssueUserTokenResponse",
-	) {
+	for _, tgt := range targets {
 		full := strings.TrimPrefix(tgt.ResponseType, "type.googleapis.com/")
 		set := map[string]struct{}{}
 		for _, f := range tgt.Fields {

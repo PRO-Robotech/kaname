@@ -51,6 +51,11 @@ func newInteractiveClient(name string) domain.InteractiveClient {
 	}
 }
 
+// noClientSecret — материала секрета нет: способ фикстуры `none`, и схема
+// материал у публичного клиента не принимает
+// (`interactive_clients_secret_verifier_method_ck`).
+var noClientSecret domain.LoginVerifier
+
 func newInteractiveClientRepo(t *testing.T) (*kanamepg.InteractiveClientRepo, context.Context) {
 	t.Helper()
 	ctx := context.Background()
@@ -70,7 +75,7 @@ func TestInteractiveClient_01_InsertGet_RoundTrip(t *testing.T) {
 	repo, ctx := newInteractiveClientRepo(t)
 
 	in := newInteractiveClient("console-roundtrip")
-	created, err := repo.Insert(ctx, in)
+	created, err := repo.Insert(ctx, in, noClientSecret)
 	require.NoError(t, err)
 	require.Equal(t, in.ID, created.ID)
 	require.True(t, strings.HasPrefix(string(created.ID), "ic-"), "id must carry the ic- prefix")
@@ -92,10 +97,10 @@ func TestInteractiveClient_02_Insert_DuplicateName(t *testing.T) {
 	}
 	repo, ctx := newInteractiveClientRepo(t)
 
-	_, err := repo.Insert(ctx, newInteractiveClient("console-dup"))
+	_, err := repo.Insert(ctx, newInteractiveClient("console-dup"), noClientSecret)
 	require.NoError(t, err)
 
-	_, err = repo.Insert(ctx, newInteractiveClient("console-dup"))
+	_, err = repo.Insert(ctx, newInteractiveClient("console-dup"), noClientSecret)
 	require.Error(t, err)
 	require.True(t, stderrors.Is(err, iamerr.ErrAlreadyExists),
 		"a taken name must be ALREADY_EXISTS, got %v", err)
@@ -122,7 +127,7 @@ func TestInteractiveClient_02_Insert_RaceUnique(t *testing.T) {
 		go func() {
 			ready.Done()
 			<-startGate
-			_, err := repo.Insert(ctx, newInteractiveClient("console-race"))
+			_, err := repo.Insert(ctx, newInteractiveClient("console-race"), noClientSecret)
 			results <- err
 		}()
 	}
@@ -166,7 +171,7 @@ func TestInteractiveClient_09_Delete_Idempotent(t *testing.T) {
 	repo, ctx := newInteractiveClientRepo(t)
 
 	in := newInteractiveClient("console-del")
-	_, err := repo.Insert(ctx, in)
+	_, err := repo.Insert(ctx, in, noClientSecret)
 	require.NoError(t, err)
 
 	removed, existed, err := repo.Delete(ctx, in.ID)
@@ -213,7 +218,7 @@ func TestInteractiveClient_03_DatabaseRefusesIllFormedTargets(t *testing.T) {
 
 	// Positive: the legitimate shape is accepted (control for the negatives).
 	ok := newInteractiveClient("console-ok")
-	_, err := repo.Insert(ctx, ok)
+	_, err := repo.Insert(ctx, ok, noClientSecret)
 	require.NoError(t, err, "a well-formed https target must be accepted")
 
 	for name, uris := range map[string][]string{
@@ -225,7 +230,7 @@ func TestInteractiveClient_03_DatabaseRefusesIllFormedTargets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bad := newInteractiveClient("console-bad-" + strings.ReplaceAll(name, " ", "-"))
 			bad.RedirectURIs = uris
-			_, err := repo.Insert(ctx, bad)
+			_, err := repo.Insert(ctx, bad, noClientSecret)
 			require.Error(t, err, "the database accepted %v — the rule is not unavoidable", uris)
 		})
 	}
@@ -235,6 +240,6 @@ func TestInteractiveClient_03_DatabaseRefusesIllFormedTargets(t *testing.T) {
 	// different statement than the one above.
 	pl := newInteractiveClient("console-postlogout")
 	pl.PostLogoutRedirectURIs = []string{"http://api.example/out"}
-	_, err = repo.Insert(ctx, pl)
+	_, err = repo.Insert(ctx, pl, noClientSecret)
 	require.Error(t, err, "a plaintext post-logout target must be refused too")
 }

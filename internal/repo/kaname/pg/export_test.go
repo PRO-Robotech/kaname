@@ -3,6 +3,8 @@
 
 package pg
 
+import "io"
+
 // export_test.go — мост для проб пакета, намеренно УЗКИЙ.
 //
 // Здесь только то, чего проба не вправе написать своей рукой: ТЕКСТ оператора
@@ -33,3 +35,12 @@ const (
 	LockSessionOfCeremonySQL     = lockSessionOfCeremonySQL
 	InsertFamilyOnLiveSessionSQL = insertFamilyOnLiveSessionSQL
 )
+
+// WithClientSecretEntropy — исполнитель заведения с НАЗВАННЫМ источником
+// случайности секрета клиента (kaname#405). Проба подаёт им сорванный источник
+// (отказ, а не запасная строка) и считающий источник (сколько случайности
+// секрет потребил). Прод-путь источник не называет — берёт криптографический.
+func (p *OwnInteractiveClientProvider) WithClientSecretEntropy(r io.Reader) *OwnInteractiveClientProvider {
+	p.entropy = r
+	return p
+}

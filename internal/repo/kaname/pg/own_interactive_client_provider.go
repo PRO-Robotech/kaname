@@ -67,10 +67,12 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 
 	"github.com/PRO-Robotech/corelib/ids"
 
 	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
@@ -104,15 +106,22 @@ type ClientSecretStore interface {
 	ClearClientSecretVerifier(ctx context.Context, clientID string) error
 }
 
+// ClientSecretHasher — производитель проверочного значения секрета.
+type ClientSecretHasher interface {
+	Hash(secret string) (domain.LoginVerifier, error)
+}
+
 // OwnInteractiveClientProvider — исполнитель порта `ProviderClients` на
 // посадке без внешнего поставщика.
 type OwnInteractiveClientProvider struct {
 	clients ClientSecretStore
+	hasher  ClientSecretHasher
+	entropy io.Reader
 }
 
 // NewOwnInteractiveClientProvider — построение над реестром.
-func NewOwnInteractiveClientProvider(store ClientSecretStore) *OwnInteractiveClientProvider {
-	return &OwnInteractiveClientProvider{clients: store}
+func NewOwnInteractiveClientProvider(store ClientSecretStore, hasher ClientSecretHasher) (*OwnInteractiveClientProvider, error) {
+	return &OwnInteractiveClientProvider{clients: store, hasher: hasher}, nil
 }
 
 // Register чеканит идентификатор клиента и объявляет форму его выдачи.

@@ -30,7 +30,7 @@ type clientRepo interface {
 	// produced by the same code — a caller cannot re-derive a cursor from a page
 	// it has already truncated.
 	List(ctx context.Context, limit int, pageToken, nameFilter string) ([]domain.InteractiveClient, string, error)
-	Insert(ctx context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error)
+	Insert(ctx context.Context, c domain.InteractiveClient, material domain.LoginVerifier) (domain.InteractiveClient, error)
 	Update(ctx context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error)
 	Delete(ctx context.Context, id domain.InteractiveClientID) (domain.InteractiveClient, bool, error)
 }
@@ -74,4 +74,6 @@ type ProviderClient struct {
 	GrantTypes              []string
 	TokenEndpointAuthMethod string
 	Audiences               []string
+	Secret                  ClientSecret
+	SecretVerifier          domain.LoginVerifier
 }

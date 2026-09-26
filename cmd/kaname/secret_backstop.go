@@ -61,16 +61,9 @@ const secretSweepBatch = 200
 // every branch that logs "key material may remain" runs inside the goroutine that
 // no longer exists.
 func startSecretBackstop(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, logger *slog.Logger) error {
-	// The response types are derived from the messages themselves, never written
-	// out as strings: a renamed message would otherwise leave a sweeper that
-	// matches nothing and reports a clean table for ever.
-	saKey, err := anypb.New(&iamv1.IssueSAKeyResponse{})
+	targets, err := secretSweepTargets()
 	if err != nil {
-		return fmt.Errorf("secret backstop: sa-key response type: %w", err)
-	}
-	userToken, err := anypb.New(&iamv1.IssueUserTokenResponse{})
-	if err != nil {
-		return fmt.Errorf("secret backstop: user-token response type: %w", err)
+		return fmt.Errorf("secret backstop: %w", err)
 	}
 
 	settled := cfg.AuthN.SAKeyRedactGrace
@@ -82,7 +75,7 @@ func startSecretBackstop(ctx context.Context, pool *pgxpool.Pool, cfg config.Con
 	sw := secretsweep.New(
 		secretSweepStore{inner: kanamepg.NewOpsResponseRedactor(pool, "kaname")},
 		secretsweep.Spec{
-			Targets: secretSweepTargets(saKey.TypeUrl, userToken.TypeUrl),
+			Targets: targets,
 			Settled: settled,
 			Window:  secretSweepWindow,
 			Limit:   secretSweepBatch,
@@ -112,7 +105,21 @@ func startSecretBackstop(ctx context.Context, pool *pgxpool.Pool, cfg config.Con
 // при записи (конструкция того пути, который заводит фаза), а перечень
 // подметальщика страхует ЛЮБОЙ путь, включая тот, что заведут завтра и который
 // о конструкции знать не будет.
-func secretSweepTargets(saKeyType, userTokenType string) []secretsweep.Target {
+//
+// Адреса типов ВЫВОДЯТСЯ из самих сообщений, а не выписываются строкой: сверка
+// идёт по колонке `response_type`, и переименованное сообщение оставило бы
+// подметальщика, не узнающего ничего и докладывающего о чистой таблице вечно.
+// Гейт зовёт ЭТУ функцию — второй копии перечня у него нет.
+func secretSweepTargets() ([]secretsweep.Target, error) {
+	saKey, err := anypb.New(&iamv1.IssueSAKeyResponse{})
+	if err != nil {
+		return nil, fmt.Errorf("sa-key response type: %w", err)
+	}
+	userToken, err := anypb.New(&iamv1.IssueUserTokenResponse{})
+	if err != nil {
+		return nil, fmt.Errorf("user-token response type: %w", err)
+	}
+	saKeyType, userTokenType := saKey.TypeUrl, userToken.TypeUrl
 	return []secretsweep.Target{
 		// У ответа машинного ключа названы ОБА написания: нынешний одноразовый
 		// ключ и легаси-секрет, оставленный ради совместимости провода. Поле,
@@ -123,5 +130,5 @@ func secretSweepTargets(saKeyType, userTokenType string) []secretsweep.Target {
 		// стоит как БЭКСТОП против будущего второго пути записи.
 		{ResponseType: saKeyType, Fields: []string{"private_key_pem", "client_secret", "secret"}},
 		{ResponseType: userTokenType, Fields: []string{"private_key_pem", "secret"}},
-	}
+	}, nil
 }
