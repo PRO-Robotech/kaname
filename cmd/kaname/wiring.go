@@ -1128,6 +1128,11 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 // ОТСТАВЛЕННОЙ ДОРОГИ ЭТА ПОЛОСА БОЛЬШЕ НЕ ПОЛУЧАЕТ: под `own` строитель
 // административной дороги отсюда не зовётся вовсе, поэтому терминальный отказ
 // «внешнего поставщика нет» на путь заведения и снятия не попадает.
+//
+// ПОД `own` ИСПОЛНИТЕЛЬ СОБИРАЕТСЯ НАД РЕЕСТРОМ И ХЕШЕРОМ (задача kaname#405):
+// клиент конфиденциален, и проверочное значение его секрета нечем положить без
+// хешера. Сборка без него — ОШИБКА, и корень отказывает в старте, называя
+// недостающее; отката к публичному клиенту нет.
 func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSecretStore,
 	ownHasher kanamepg.ClientSecretHasher, roadObs clients.ProviderRoadObserver,
 ) (interactiveclientapp.ProviderClients, error) {
