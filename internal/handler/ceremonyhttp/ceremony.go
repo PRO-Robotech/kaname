@@ -10,10 +10,14 @@
 //
 // Протокол исполняет церемония фундамента (`corelib/oauthceremony`): разбор
 // запроса, PKCE, выдача и погашение кода, оборот токена обновления, отзыв
-// семейства на повторе. Своего движка здесь нет. Этот пакет делает то, чего
-// церемония не делает по построению: пишет в сеть, консультирует шов входа
-// (LoginAuthority, приёмка Р2), решает, КУДА можно отвечать (Р4), держит пол
-// `state` (Р13) и единый тон отказов (Р10), ведёт счёт исходов и журнал.
+// семейства на повторе. Своего движка здесь нет. Порядок, в котором
+// спрашиваются справочник клиентов, шов входа (приёмка Р2) и церемония,
+// решения домена — уровень входа, граница семейства, отказ клиенту без
+// получателя — и граница транзакции обмена принадлежат вариантам использования
+// (`internal/apps/kaname/api/ceremony`). Этот пакет разбирает запрос, зовёт
+// вариант использования и оформляет ответ: решает, КУДА можно отвечать (Р4),
+// держит однозначность параметров, пол `state` (Р13) и единый тон отказов
+// (Р10), ведёт счёт исходов и журнал.
 //
 // # Порядок решений на эндпоинте авторизации — несущий
 //
@@ -35,17 +39,12 @@
 package ceremonyhttp
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
-	"github.com/PRO-Robotech/corelib/oauthceremony"
-
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
 
@@ -63,41 +62,6 @@ const DiscoveryPath = "/.well-known/oauth-authorization-server"
 // НАША величина, а не умолчание движка; движку она передаётся тем же
 // значением (`oauthceremony.Config.MinParameterEntropy`).
 const StateFloor = 22
-
-// Engine — церемония фундамента в той части, которой пользуется поверхность.
-// Реализует `*oauthceremony.Ceremony`.
-type Engine interface {
-	Authorize(ctx context.Context, req oauthceremony.AuthorizationRequest) (oauthceremony.AuthorizationIntent, error)
-	CompleteAuthorization(ctx context.Context, intent oauthceremony.AuthorizationIntent, grant oauthceremony.AuthorizationGrant) (oauthceremony.AuthorizationResult, error)
-	Exchange(ctx context.Context, req oauthceremony.TokenRequest) (oauthceremony.TokenResult, error)
-}
-
-var _ Engine = (*oauthceremony.Ceremony)(nil)
-
-// Clients — справочник клиентов церемонии: тот же порт, что у движка
-// (`oauthceremony.ClientDirectory`), — сверка адреса возврата не заводит второго
-// источника регистрации.
-type Clients interface {
-	LookupClient(ctx context.Context, clientID string) (oauthceremony.ClientRegistration, error)
-}
-
-// Login — ответ шва «авторитет входа» (приёмка Р2): кто вошёл, в какой сессии,
-// когда и на каком уровне. Церемония знает ЧТО предъявлено, но не ЧЕМ получено.
-type Login struct {
-	Subject   string
-	SessionID string
-	AuthTime  time.Time
-	Level     string
-	// ExpiresAt — срок сессии: граница семейства, выданного в ней.
-	ExpiresAt time.Time
-}
-
-// LoginAuthority — шов авторитета входа. Производитель — наш вход (Ф1):
-// сессия человека по носителю. found=false — «не-аутентифицирован»; ошибка —
-// авторитет не ответил.
-type LoginAuthority interface {
-	Resolve(ctx context.Context, bearer domain.SessionBearer) (login Login, found bool, err error)
-}
 
 // Endpoints выводит адреса точек церемонии из издателя.
 //

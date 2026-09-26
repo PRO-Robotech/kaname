@@ -25,9 +25,11 @@ package pg
 //     получателя штампуем мы по регистрации клиента (приёмка LINE-A-1 Р6,
 //     «output-only»), а не вызывающий; сужение регистрации действует на
 //     следующий же выпуск семейства;
-//   - граница семейства — меньшее из срока сессии и потолка семейства
-//     фундамента (`tokenpolicy.MaxRefreshTokenFamilyTTL`) от рождения семейства:
-//     семейство кончается вместе со своим входом (AuthorizationGrant.SessionID).
+//   - граница семейства — правило домена `domain.CeremonyFamilyBound` (меньшее
+//     из срока сессии и потолка семейства фундамента от рождения семейства) над
+//     `human_sessions.expires_at` и `token_families.created_at`: семейство
+//     кончается вместе со своим входом (AuthorizationGrant.SessionID). Правило
+//     у выдачи кода и здесь одно, второго написания в операторах нет.
 //
 // # ЕДИНИЦА РАБОТЫ И ОБОРОТ В ДВА ШАГА
 //
@@ -105,7 +107,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
-	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -132,10 +133,6 @@ var (
 func NewCeremonyVaults(pool *pgxpool.Pool) *CeremonyVaults {
 	return &CeremonyVaults{repo: NewOAuthCeremonyRepo(pool), pool: pool, scopes: domain.CeremonyScopes()}
 }
-
-// familyBoundSeconds — потолок семейства фундамента в секундах, параметром
-// операторов границы.
-func familyBoundSeconds() float64 { return tokenpolicy.MaxRefreshTokenFamilyTTL.Seconds() }
 
 // ── Единица работы ──────────────────────────────────────────────────────────
 
@@ -406,8 +403,7 @@ SELECT c.family_id, c.client_id, c.user_id, c.session_id, c.scope, c.redirect_ur
        c.code_challenge, c.code_challenge_method, c.expires_at,
        c.deactivated_at IS NOT NULL,
        (c.active AND c.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `),
-       f.acr, f.created_at, s.authenticated_at,
-       LEAST(s.expires_at, f.created_at + make_interval(secs => $2)),
+       f.acr, f.created_at, s.authenticated_at, s.expires_at,
        ic.audiences
   FROM kaname.authorization_codes c
   JOIN kaname.token_families f ON f.id = c.family_id
@@ -433,10 +429,10 @@ func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature s
 		codeExpiry     time.Time
 		consumed, live bool
 	)
-	err = v.querier(ctx).QueryRow(ctx, fetchCodeSQL, signature, familyBoundSeconds()).Scan(
+	err = v.querier(ctx).QueryRow(ctx, fetchCodeSQL, signature).Scan(
 		&row.familyID, &row.clientID, &row.userID, &row.sessionID, &row.scope, &redirect,
 		&challenge, &method, &codeExpiry, &consumed, &live,
-		&row.acr, &row.createdAt, &row.authTime, &row.bound, &row.audiences)
+		&row.acr, &row.createdAt, &row.authTime, &row.sessionExpiresAt, &row.audiences)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return oauthceremony.AuthorizationCodeRecord{}, oauthceremony.ErrGrantNotFound
 	}
@@ -578,8 +574,7 @@ const fetchRefreshSQL = `
 SELECT t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.expires_at,
        t.family_live, t.deactivated_at IS NOT NULL,
        (t.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `),
-       f.acr, f.created_at, s.authenticated_at,
-       LEAST(s.expires_at, f.created_at + make_interval(secs => $2)),
+       f.acr, f.created_at, s.authenticated_at, s.expires_at,
        ic.audiences
   FROM kaname.refresh_tokens t
   JOIN kaname.token_families f ON f.id = t.family_id
@@ -601,10 +596,10 @@ func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string
 		expiry                   time.Time
 		familyLive, rotated, due bool
 	)
-	err = v.pool.QueryRow(ctx, fetchRefreshSQL, signature, familyBoundSeconds()).Scan(
+	err = v.pool.QueryRow(ctx, fetchRefreshSQL, signature).Scan(
 		&row.familyID, &row.clientID, &row.userID, &row.sessionID, &row.scope, &expiry,
 		&familyLive, &rotated, &due,
-		&row.acr, &row.createdAt, &row.authTime, &row.bound, &row.audiences)
+		&row.acr, &row.createdAt, &row.authTime, &row.sessionExpiresAt, &row.audiences)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return oauthceremony.GrantRecord{}, oauthceremony.ErrGrantNotFound
 	}
@@ -752,15 +747,16 @@ type ceremonyGrantRow struct {
 	familyID, clientID, userID, sessionID string
 	scope, audiences                      []string
 	acr                                   string
-	createdAt, authTime, bound            time.Time
+	createdAt, authTime, sessionExpiresAt time.Time
 }
 
 // grant собирает запись гранта по правилу шапки.
 func (r ceremonyGrantRow) grant(expires map[oauthceremony.TokenKind]time.Time) oauthceremony.GrantRecord {
+	bound := domain.CeremonyFamilyBound(r.createdAt, r.sessionExpiresAt)
 	notAfter := map[oauthceremony.TokenKind]time.Time{
-		oauthceremony.TokenKindAuthorizationCode: r.bound,
-		oauthceremony.TokenKindAccess:            r.bound,
-		oauthceremony.TokenKindRefresh:           r.bound,
+		oauthceremony.TokenKindAuthorizationCode: bound,
+		oauthceremony.TokenKindAccess:            bound,
+		oauthceremony.TokenKindRefresh:           bound,
 	}
 	return oauthceremony.GrantRecord{
 		GrantID:            r.familyID,

@@ -18,6 +18,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -63,20 +64,33 @@ func (d directory) LookupClient(_ context.Context, id string) (oauthceremony.Cli
 // silentAuthority — шов входа, которого отказ до доверия цели не спрашивает.
 type silentAuthority struct{ calls int }
 
-func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (Login, bool, error) {
+func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (ceremony.Login, bool, error) {
 	a.calls++
-	return Login{}, false, nil
+	return ceremony.Login{}, false, nil
 }
 
-func newTestAuthorize(t *testing.T, d Clients) (*Authorize, *untouchedEngine, *silentAuthority, *Census) {
+// authorizeEndpoint — эндпоинт над вариантом использования с портами пробы.
+func authorizeEndpoint(t *testing.T, engine ceremony.AuthorizationEngine, d ceremony.Clients,
+	authority ceremony.LoginAuthority, census *Census, callTimeout time.Duration,
+) *Authorize {
 	t.Helper()
-	engine, authority, census := &untouchedEngine{}, &silentAuthority{}, NewCensus()
-	a, err := NewAuthorize(AuthorizeConfig{Engine: engine, Clients: d, Authority: authority, Census: census,
-		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)), Clock: time.Now})
+	uc, err := ceremony.NewAuthorizeUseCase(ceremony.AuthorizeDeps{Engine: engine, Clients: d, Authority: authority,
+		Clock: time.Now, CallTimeout: callTimeout})
+	if err != nil {
+		t.Fatalf("сборка варианта использования: %v", err)
+	}
+	a, err := NewAuthorize(AuthorizeConfig{UseCase: uc, Census: census,
+		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))})
 	if err != nil {
 		t.Fatalf("сборка: %v", err)
 	}
-	return a, engine, authority, census
+	return a
+}
+
+func newTestAuthorize(t *testing.T, d ceremony.Clients) (*Authorize, *untouchedEngine, *silentAuthority, *Census) {
+	t.Helper()
+	engine, authority, census := &untouchedEngine{}, &silentAuthority{}, NewCensus()
+	return authorizeEndpoint(t, engine, d, authority, census, time.Second), engine, authority, census
 }
 
 func authorizeGet(a *Authorize, q url.Values) *httptest.ResponseRecorder {
@@ -165,40 +179,6 @@ func TestAuthorize_OnlyGetIsServed(t *testing.T) {
 		a.ServeHTTP(rec, httptest.NewRequest(m, AuthorizePath, nil))
 		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 			t.Errorf("%s: %d, Allow %q", m, rec.Code, rec.Header().Get("Allow"))
-		}
-	}
-}
-
-// Уровень запроса — наименьший из перечисленных; значение вне оси — отказ, а не
-// «нет требования».
-func TestRequiredLevel(t *testing.T) {
-	for in, want := range map[string]int{"": 0, "2": 2, "3 2": 2, " 1  3 ": 1} {
-		got, ok := requiredLevel(in)
-		if !ok || got != want {
-			t.Errorf("acr_values %q: %d (%v), ожидалось %d", in, got, ok, want)
-		}
-	}
-	for _, bad := range []string{"0", "4", "2 gold", "silver"} {
-		if _, ok := requiredLevel(bad); ok {
-			t.Errorf("acr_values %q принят", bad)
-		}
-	}
-}
-
-// Словарь отказов точки авторизации — RFC 6749 §4.1.2.1; прочие случаи
-// церемонии уезжают ближайшим словом, пятисотые — server_error.
-func TestAuthorizeWire(t *testing.T) {
-	for code, want := range map[oauthceremony.FailureCode]string{
-		oauthceremony.CodeInvalidRequest:          "invalid_request",
-		oauthceremony.CodeUnsupportedResponseType: "unsupported_response_type",
-		oauthceremony.CodeInvalidScope:            "invalid_scope",
-		oauthceremony.CodeUnsupportedResponseMode: "invalid_request",
-		oauthceremony.CodeInvalidState:            "invalid_request",
-		oauthceremony.CodePortContract:            "server_error",
-		oauthceremony.CodePortDeadline:            "temporarily_unavailable",
-	} {
-		if got := authorizeWire(code); got != want {
-			t.Errorf("%s → %q, ожидалось %q", code, got, want)
 		}
 	}
 }

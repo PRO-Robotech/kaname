@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
+	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/ceremony"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -155,18 +156,34 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
-	authority, err := ceremonyhttp.NewSessionAuthority(resolve)
+	authority, err := ceremonyapp.NewSessionAuthority(resolve)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
+	// Сроки вызовов хранилища вариантов использования — та же величина, что
+	// мост церемонии назначает каждому вызову порта (Config.PortTimeout): один
+	// предел одного вызова хранилища на всю поверхность.
+	authorizeUC, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{
+		Engine: engine, Clients: vaults, Authority: authority, Clock: time.Now,
+		CallTimeout: credentialLanePeerTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
+	exchangeUC, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{
+		Engine: engine, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
 	census := ceremonyhttp.NewCensus()
 	authorize, err := ceremonyhttp.NewAuthorize(ceremonyhttp.AuthorizeConfig{
-		Engine: engine, Clients: vaults, Authority: authority, Census: census, Logger: logger, Clock: time.Now,
+		UseCase: authorizeUC, Census: census, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
-	token, err := ceremonyhttp.NewTokenLane(engine, vaults, census, logger)
+	token, err := ceremonyhttp.NewTokenLane(exchangeUC, census, logger)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
