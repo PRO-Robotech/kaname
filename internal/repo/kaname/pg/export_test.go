@@ -32,4 +32,5 @@ const (
 	LockCeremonyClientSQL        = lockCeremonyClientSQL
 	LockSessionOfCeremonySQL     = lockSessionOfCeremonySQL
 	InsertFamilyOnLiveSessionSQL = insertFamilyOnLiveSessionSQL
+	SessionCutOffBySubjectSQL    = sessionCutOffBySubjectSQL
 )

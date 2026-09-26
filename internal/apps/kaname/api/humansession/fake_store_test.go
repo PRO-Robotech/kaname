@@ -401,6 +401,34 @@ func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocatio
 	return nil
 }
 
+// LockPersonForLogin — захват строки личности транзакцией выдачи входа
+// (kaname#385, Р4) в той форме, в какой его объявляют пробы границы входа с
+// принудительным выходом: отсечка отвечается из ТОГО ЖЕ состояния, которое
+// пишет `UpsertCutoff` дублёра; строки личности нет — NOT_FOUND; отсечки нет —
+// отдельный ответ, а не нулевой момент. Замков дублёр не моделирует (шапка
+// `SessionSetWriter`); работа — оператор захвата и, если строка есть, оператор
+// чтения отсечки.
+func (w *fakeWriter) LockPersonForLogin(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
+	if userID == "" {
+		return time.Time{}, false, errFakeArg("Illegal argument user_id: required")
+	}
+	w.store.trip()
+	if err := w.fail("lock-person"); err != nil {
+		return time.Time{}, false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	if _, ok := w.store.users[userID]; !ok {
+		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
+	}
+	w.store.trip()
+	c, ok := w.store.cutoffs[userID]
+	if !ok {
+		return time.Time{}, false, nil
+	}
+	return c.at, true, nil
+}
+
 func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {
 	if err := m.Validate(); err != nil {
 		return false, errFakeArg(err.Error())

@@ -4,6 +4,7 @@
 package shared_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -62,6 +63,11 @@ func TestMapRepoErrFailureBandsCharacterization(t *testing.T) {
 		// есть «by construction» в godoc означало «пока никто не обернул».
 		{"unavailable/bare", iamerr.ErrUnavailable, codes.Unavailable, "service unavailable"},
 		{"unavailable/wrapped", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable"), codes.Unavailable, "service unavailable"},
+
+		// Конец контекста — состояние, которое проходит (kaname#383): текст тот же
+		// фиксированный текст недоступности, цепочка остаётся журналу.
+		{"context_end/canceled", context.Canceled, codes.Unavailable, "service unavailable"},
+		{"context_end/deadline_wrapped", fmt.Errorf("list accounts: %w", context.DeadlineExceeded), codes.Unavailable, "service unavailable"},
 
 		{"internal/bare", iamerr.ErrInternal, codes.Internal, "internal error"},
 		{"internal/wrapped", iamerr.Wrapf(iamerr.ErrInternal, "pgx: dial tcp 10.0.0.7:5432"), codes.Internal, "internal error"},

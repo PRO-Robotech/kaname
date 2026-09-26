@@ -134,8 +134,10 @@ var (
 )
 
 // liveSessionCondition — условие живости сессии в операторе заведения
-// семейства. Рука «только замок» — тот же оператор БЕЗ него.
-const liveSessionCondition = "WHERE s.ended_at IS NULL AND s.expires_at > now()"
+// семейства ЦЕЛИКОМ: снятие, срок и отсечка субъекта (kaname#423). Рука
+// «только замок» — тот же оператор БЕЗ него.
+const liveSessionCondition = "WHERE s.ended_at IS NULL AND s.expires_at > now() AND NOT " +
+	kanamepg.SessionCutOffBySubjectSQL
 
 // issuanceArm — одна форма выдачи. `control` — рука без одной из половин
 // решения: её исход в сцене объявлен заранее, и позеленевшая там, где обязана
@@ -155,6 +157,7 @@ func productArm(repo *kanamepg.OAuthCeremonyRepo) issuanceArm {
 			RedirectURI:         "https://app.example.test/cb",
 			CodeChallenge:       ceremonyChallenge,
 			CodeChallengeMethod: domain.PKCEMethodS256,
+			ACR:                 "1",
 			TTL:                 time.Minute,
 		})
 	}}
@@ -177,7 +180,8 @@ func composedArm(pool *pgxpool.Pool, name string, control bool, locks []ceremony
 			}
 		}
 		var sessionRows, inserted int
-		if err := tx.QueryRow(ctx, insertSQL, sc.FamilyID, sc.ClientID, sc.UserID, sc.SessionID, sc.Scope).
+		// Шестой довод — снимок уровня гранта (`token_families.acr`, kaname#423).
+		if err := tx.QueryRow(ctx, insertSQL, sc.FamilyID, sc.ClientID, sc.UserID, sc.SessionID, sc.Scope, "1").
 			Scan(&sessionRows, &inserted); err != nil {
 			return err
 		}

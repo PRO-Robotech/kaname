@@ -66,6 +66,17 @@ var (
 	// выше: там разбирается предъявленная строка, здесь — право завести новую.
 	ErrCeremonySessionNotLive = errors.New("ceremony session: not live")
 
+	// ErrCeremonySubjectCutOff — предъявленная строка (код либо токен
+	// обновления) есть, активна и в сроке, но сессия, в которой она выдана,
+	// аутентифицирована НЕ ПОЗЖЕ отсечки своего субъекта
+	// (`user_token_revocations.revoke_before`).
+	//
+	// Исход ПРЕДЪЯВЛЕНИЯ, отдельный от тройки выше: это не повтор — семейство по
+	// нему не отзывается, и журнал не называет атакой отзыв доступа, — и не
+	// истечение. Предъявителю он говорит то же, что отсутствие записи: гранта,
+	// по которому он пришёл, больше нет.
+	ErrCeremonySubjectCutOff = errors.New("ceremony session: authenticated no later than its subject's cutoff")
+
 	// ErrAccessTokenFamilyNotLive — выпуск токена доступа не записан: семейства,
 	// в которое он заводится, нет либо оно отозвано (kaname#319).
 	//
@@ -74,6 +85,11 @@ var (
 	// нет», — и токен клиенту уезжать не должен. Различает их, если понадобится,
 	// строка семейства, а не этот отказ.
 	ErrAccessTokenFamilyNotLive = errors.New("access token: family is unknown or revoked")
+
+	// ErrVerifierAtCapacity — проверяющий секрета занят: все места ёмкости
+	// (`passwordverify`) заняты другими проверками. Отказ ПОВТОРЯЕМЫЙ и наш, а не
+	// «секрет неверен»: несостоявшаяся сверка вердиктом не становится.
+	ErrVerifierAtCapacity = errors.New("secret verifier: at capacity")
 )
 
 // ЗДЕСЬ СТОЯЛ ЧЕТВЁРТЫЙ ИСХОД — `ErrTokenFamilyRevoked`, «семейство отозвано».
@@ -179,6 +195,35 @@ func ValidatePKCEChallenge(challenge, method string) error {
 	}
 	return nil
 }
+
+// ValidateCeremonyLevel — уровень аутентификации гранта из той же закрытой оси,
+// что у сессии (`assuranceLevelValues`, Ф11): семейство несёт СНИМОК уровня
+// сессии на выдаче кода (миграция `20260925121413`), и второго словаря у этого
+// предмета нет.
+func ValidateCeremonyLevel(level string) error {
+	for _, l := range assuranceLevelValues {
+		if level == l {
+			return nil
+		}
+	}
+	return fmt.Errorf("Illegal argument token_family.acr: must be one of %v", assuranceLevelValues)
+}
+
+// CeremonyScopeOpenID — область интерактивного входа: её запрашивает
+// первопартийный клиент (консоль, CLI), и она проецируется в утверждение
+// `scope` выданного токена доступа (RFC 9068 §2.2.3).
+//
+// Прав область НЕ несёт: решение о доступе принимает модель (приёмка LINE-A-1
+// Р9), и выданное по коду судится так же, как всякий наш токен. Токена личности
+// церемония не выдаёт (`corelib/oauthceremony`, doc.go) — область называет вид
+// гранта, а не обещание ID-токена.
+const CeremonyScopeOpenID = "openid"
+
+// CeremonyScopes — ЗАКРЫТЫЙ перечень областей, которые интерактивный клиент
+// вправе запросить у точки авторизации. Копией: вызывающий не расширит его на
+// месте. Область вне перечня отвергается движком церемонии (`invalid_scope`) —
+// принять её и ничего по ней не сделать было бы «принято и проигнорировано».
+func CeremonyScopes() []string { return []string{CeremonyScopeOpenID} }
 
 // ── Значения церемонии ──────────────────────────────────────────────────────
 

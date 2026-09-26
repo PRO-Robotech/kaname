@@ -291,3 +291,177 @@ func TestSentinelWalkExcludesGeneratedAndProbes(t *testing.T) {
 		}
 	}
 }
+
+// ── Полоса конца контекста (kaname#383) ─────────────────────────────────────
+//
+// Конец контекста — не sentinel `iamerr`, а ошибка пакета `context`, и до
+// kaname#383 разбор её не читал вовсе: канон различал её бы, а копия без неё
+// выглядела полной. Её законные формы — те же, что у sentinel'ов (ветвь switch,
+// условие if, дизъюнкция), плюс псевдоним ИМПОРТА пакета `context`: опознаётся
+// она по пути импорта, а не по написанию идентификатора.
+
+// sentinelCanonWithContextEndSrc — канон с полосой конца контекста.
+const sentinelCanonWithContextEndSrc = `package shared
+
+import (
+	"context"
+)
+
+func MapRepoErr(err error) error {
+	switch {
+	case stderrors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
+	case stderrors.Is(err, iamerr.ErrUnavailable):
+		return status.Error(codes.Unavailable, UnavailableMessage)
+	case stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.Unavailable, UnavailableMessage)
+	case stderrors.Is(err, iamerr.ErrInternal):
+		return status.Error(codes.Internal, "internal error")
+	}
+	return status.Error(codes.Internal, "internal error")
+}
+`
+
+// sentinelCopyWithoutContextEndSrc — копия, различающая все sentinel'ы канона,
+// но не конец контекста: дефект kaname#383 в форме копии.
+const sentinelCopyWithoutContextEndSrc = `package sa_keys
+
+func mapPGErr(err error) error {
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnavailable):
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, iamerr.ErrInternal):
+		return status.Error(codes.Internal, "internal SA key error")
+	}
+	return status.Error(codes.Internal, "internal SA key error")
+}
+`
+
+// sentinelCopyWithContextEndAliasedSrc — законный близнец: та же копия с
+// полосой конца контекста, пакет `context` импортирован под псевдонимом, а
+// полоса записана условием if.
+const sentinelCopyWithContextEndAliasedSrc = `package sa_keys
+
+import (
+	stdctx "context"
+)
+
+func mapPGErr(err error) error {
+	if errors.Is(err, stdctx.Canceled) || errors.Is(err, stdctx.DeadlineExceeded) {
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	}
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnavailable):
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, iamerr.ErrInternal):
+		return status.Error(codes.Internal, "internal SA key error")
+	}
+	return status.Error(codes.Internal, "internal SA key error")
+}
+`
+
+func scanOneTranslator(t *testing.T, rel, src string) check.SentinelTranslator {
+	t.Helper()
+	ts, census, err := check.ScanSentinelTranslators(rel, []byte(src))
+	if err != nil {
+		t.Fatalf("разбор %s: %v", rel, err)
+	}
+	if len(ts) != 1 {
+		t.Fatalf("переводчик в %s опознан %d раз(а) вместо одного: %+v", rel, len(ts), census)
+	}
+	return ts[0]
+}
+
+// TestSentinelParityGateRedsOnACopyMissingTheContextEndLane — инъекция
+// дефектом kaname#383: копия без полосы конца контекста — находка, и находка
+// называет обе ошибки контекста.
+func TestSentinelParityGateRedsOnACopyMissingTheContextEndLane(t *testing.T) {
+	canon := scanOneTranslator(t, "internal/apps/kaname/shared/errors.go", sentinelCanonWithContextEndSrc)
+	for _, lane := range []string{"context.Canceled", "context.DeadlineExceeded"} {
+		if !canon.Has(lane) {
+			t.Fatalf("канон с полосой конца контекста прочитан без %s: %v — полоса вне наблюдения, "+
+				"и копия без неё выглядит полной", lane, canon.Sentinels)
+		}
+	}
+	const rel = "internal/apps/kaname/api/sa_keys/usecases.go"
+	findings := sentinelParityFindings(canon, []check.SentinelTranslator{scanOneTranslator(t, rel, sentinelCopyWithoutContextEndSrc)})
+	if len(findings) != 1 {
+		t.Fatalf("копия без полосы конца контекста НЕ стала находкой: %v", findings)
+	}
+	for _, want := range []string{rel, "context.Canceled", "context.DeadlineExceeded"} {
+		if !strings.Contains(findings[0], want) {
+			t.Errorf("находка не называет %s: %q", want, findings[0])
+		}
+	}
+	if strings.Contains(findings[0], "ErrNotFound") {
+		t.Errorf("находка называет полосу, которую копия различает: %q", findings[0])
+	}
+}
+
+// TestSentinelParityGateReadsTheContextEndLaneInEveryLegalForm — законный
+// близнец: полоса записана условием if под псевдонимом импорта — молчание.
+func TestSentinelParityGateReadsTheContextEndLaneInEveryLegalForm(t *testing.T) {
+	canon := scanOneTranslator(t, "internal/apps/kaname/shared/errors.go", sentinelCanonWithContextEndSrc)
+	cp := scanOneTranslator(t, "internal/apps/kaname/api/sa_keys/usecases.go", sentinelCopyWithContextEndAliasedSrc)
+	if f := sentinelParityFindings(canon, []check.SentinelTranslator{cp}); len(f) != 0 {
+		t.Fatalf("копия с полосой конца контекста под псевдонимом импорта объявлена находкой: %v "+
+			"(прочитано %v)", f, cp.Sentinels)
+	}
+}
+
+// TestSentinelScannerDoesNotReadAForeignCanceled — граница опознания: поле
+// `Canceled` чужого значения — не ошибка пакета `context`, и полосой оно не
+// читается. Иначе копия «различала» бы конец контекста, не зная его.
+func TestSentinelScannerDoesNotReadAForeignCanceled(t *testing.T) {
+	const src = `package p
+
+func translate(err error, st state) error {
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, "")
+	case errors.Is(err, iamerr.ErrAborted):
+		return status.Error(codes.Aborted, "")
+	case errors.Is(err, st.Canceled):
+		return status.Error(codes.Unavailable, "")
+	}
+	return status.Error(codes.Internal, "internal error")
+}
+`
+	tr := scanOneTranslator(t, "internal/x/a.go", src)
+	if tr.Has("context.Canceled") {
+		t.Fatalf("поле чужого значения прочитано ошибкой пакета context: %v", tr.Sentinels)
+	}
+}
+
+// TestSentinelScannerNeedsTwoIAMSentinelsEvenWithTheContextLane — признак
+// переводчика прежний: два и более sentinel'а `iamerr`. Полосы конца контекста
+// в этот счёт не входят — иначе переводчиком стала бы функция, судящая только
+// срок и одну полосу.
+func TestSentinelScannerNeedsTwoIAMSentinelsEvenWithTheContextLane(t *testing.T) {
+	const src = `package p
+
+func onDeadline(err error) error {
+	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.Unavailable, "")
+	case errors.Is(err, iamerr.ErrNotFound):
+		return status.Error(codes.NotFound, "")
+	}
+	return status.Error(codes.Internal, "internal error")
+}
+`
+	ts, census, err := check.ScanSentinelTranslators("internal/x/a.go", []byte(src))
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if census.WithSentinels != 1 {
+		t.Fatalf("sentinel'ы не прочитаны — граница проверена ни на чём: %+v", census)
+	}
+	if len(ts) != 0 {
+		t.Fatalf("функция с одним sentinel'ом iamerr объявлена переводчиком: %+v", ts)
+	}
+}

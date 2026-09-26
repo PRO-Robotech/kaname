@@ -41,6 +41,11 @@ func TestMintMapErrKeepsTheRetryableAndAuthzLanes(t *testing.T) {
 		{"негодный ввод", iamerr.Wrapf(iamerr.ErrInvalidArg, "bad input"), codes.InvalidArgument},
 		{"недоступно", iamerr.Wrapf(iamerr.ErrUnavailable, "peer down"), codes.Unavailable},
 		{"внутренняя", iamerr.Wrapf(iamerr.ErrInternal, "boom"), codes.Internal},
+		// Конец контекста — повторяемый отказ (kaname#383): до правки уезжал в
+		// терминальный INTERNAL. Близнец — «внутренняя» ниже: та же обёртка, причина
+		// не конец контекста.
+		{"конец контекста: отмена", context.Canceled, codes.Unavailable},
+		{"конец контекста: срок под обёрткой", iamerr.Wrapf(iamerr.ErrInternal, "store: %w", context.DeadlineExceeded), codes.Unavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := status.Code(u.mapErr(ctx, "probe", tc.in))

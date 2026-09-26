@@ -944,6 +944,11 @@ func mapPGErr(err error) error {
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
 		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —
+		// канонический текст недоступности. Набор полос сходится с каноном
+		// (`shared.MapRepoErr`), и сходимость держит гейт.
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, iamerr.ErrInternal):
 		// Ветвь ЯВНАЯ, хотя исход совпадает с запасным ниже. Так набор различаемых
 		// полос сходится с каноном, а сходимость держит гейт: копия, у которой

@@ -134,6 +134,7 @@ func TestOAuthCodeExchangeUnderConcurrentTransactions(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: domain.PKCEMethodS256,
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}), "выдача кода — положительный контроль")
 
@@ -248,6 +249,7 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: domain.PKCEMethodS256,
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}))
 			first := ceremonyDigest(0x2000)
@@ -369,6 +371,7 @@ func TestOAuthCeremonyDistinguishesUnknownFromInactive(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}))
 	redeemed, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{

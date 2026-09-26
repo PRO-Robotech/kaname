@@ -28,6 +28,13 @@
 // постановка письма синхронна (иначе код восстановления пришлось бы ждать
 // временем), журнал молчит.
 //
+// Пробы границы входа с принудительным выходом (`login_overlap_*`, kaname#385)
+// подают стенду ещё три величины ВХОДА — `sessionLaneOptions`: обёртку его
+// хранилища (задержка в названной точке транзакции выдачи), приёмник его
+// исходов (клетки счётчика) и его часы. Обёртка передаёт каждый вызов
+// настоящему адаптеру, приёмник и часы ничего не решают. Нулевые опции — стенд
+// ровно таким, как описан выше; прочие глаголы стенда их не видят никогда.
+//
 // # Почему ответ краю — через соединение
 //
 // Край читает сессию СООБЩЕНИЕМ на проводе: поле, которого сервер больше не
@@ -132,6 +139,27 @@ type sessionLane struct {
 	// limits — профиль частоты, с которым собраны глаголы: пробы, судящие
 	// счёт по адресу, печатают его и строят «Дано» от него, а не от литерала.
 	limits humansession.Limits
+	// dsn — адрес базы стенда: счётчик взаимных блокировок читается своим
+	// соединением после закрытия пула (`overlapDeadlocksAfterPoolClose`).
+	dsn string
+	// hasher — хешер стенда: строка пароля личности, заведённой мимо
+	// регистрации, кладётся тем же материалом, что сверит проверяющий.
+	hasher humansession.Hasher
+	// register — регистрация полосой пароля, которой заведена личность стенда:
+	// пробы с раундами заводят ею свежую личность на раунд.
+	register *registration.RegisterUseCase
+}
+
+// sessionLaneOptions — величины ВХОДА, которыми стенд расходится с корнем
+// ради пробы (шапка файла). Нулевое значение — стенд без расхождений.
+type sessionLaneOptions struct {
+	// loginStore — хранилище, которое получает глагол входа, поверх адаптера
+	// стенда; nil — сам адаптер.
+	loginStore func(*kanamepg.HumanSessionRepo) humansession.Store
+	// loginObserver — приёмник исходов входа; nil — молчащий.
+	loginObserver humansession.Observer
+	// loginNow — часы входа (`LoginDeps.Now`); nil — часы процесса.
+	loginNow func() time.Time
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -143,11 +171,18 @@ type laneSession struct {
 
 func newSessionLane(t *testing.T) *sessionLane {
 	t.Helper()
+	return newSessionLaneWith(t, sessionLaneOptions{})
+}
+
+// newSessionLaneWith — тот же стенд с величинами входа пробы (`sessionLaneOptions`).
+func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	dsn := iampgtest.NewTestPostgres(t)
+	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	logger := slog.New(slog.DiscardHandler)
@@ -194,9 +229,23 @@ func newSessionLane(t *testing.T) *sessionLane {
 	limits := humansession.Limits{AddressAttempts: 5, AddressWindow: 10 * time.Minute, SourceAttempts: 50, SourceWindow: 10 * time.Minute}
 	nop := humansession.NopObserver{}
 
+	var (
+		loginStore    humansession.Store    = sessions
+		loginObserver humansession.Observer = nop
+		loginNow                            = time.Now
+	)
+	if opts.loginStore != nil {
+		loginStore = opts.loginStore(sessions)
+	}
+	if opts.loginObserver != nil {
+		loginObserver = opts.loginObserver
+	}
+	if opts.loginNow != nil {
+		loginNow = opts.loginNow
+	}
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
-		Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+		Store: loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		Limits: limits, TTL: laneSessionTTL, Observer: loginObserver, Now: loginNow, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
 	require.NoError(t, err)
@@ -229,7 +278,7 @@ func newSessionLane(t *testing.T) *sessionLane {
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
-		secondFactor: secondFactor, limits: limits,
+		secondFactor: secondFactor, limits: limits, dsn: dsn, hasher: hasher, register: register,
 	}
 }
 

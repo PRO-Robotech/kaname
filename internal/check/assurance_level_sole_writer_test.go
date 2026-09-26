@@ -27,10 +27,11 @@
 //
 // # Ведомости — самоистекают
 //
-// Держатели поля уровня и таблица оси названы поимённо ниже; запись, у которой
-// больше нет предмета, — находка. Сегодня обе ведомости ПУСТЫ: записи сессии в
-// дереве нет (Ф3, kacho#1269), и первый держатель входит сюда тем же изменением,
-// что таблица сессии.
+// Держатели поля уровня, таблица оси и снимки оси в схеме названы поимённо
+// ниже; запись, у которой больше нет предмета, — находка. Ведомость держателей
+// сегодня пуста (запись сессии несёт уровень строкой закрытой оси, а не полем
+// типа), ведомость снимков — одна запись: уровень гранта церемонии у семейства
+// выданного (kaname#423).
 //
 // # Граница названа
 //
@@ -73,8 +74,18 @@ var assuranceLevelHolders = map[string]string{}
 // assuranceAxisHomeTable — таблица, при которой объявлена ось уровня в схеме
 // (запись сессии, Р1): `kaname.human_sessions` (Ф3, kacho#1269,
 // `20260916190000_human_session_is_our_record.sql`). Объявление оси при любой
-// ДРУГОЙ таблице — находка: уровень как состояние лежит только в записи сессии.
+// ДРУГОЙ таблице вне ведомости копий — находка: уровень как состояние лежит
+// только в записи сессии.
 const assuranceAxisHomeTable = "kaname.human_sessions"
+
+// assuranceAxisCopyTables — ведомость СНИМКОВ уровня: таблица → основание.
+// Снимок — чтение записи сессии в миг события, дальше неподвижное; уровень
+// сессии подвижен (шаг вверх), и читать его заново значило бы переписать
+// событие. Ведомость самоистекает: таблица без объявления оси — находка.
+var assuranceAxisCopyTables = map[string]string{
+	"kaname.token_families": "уровень гранта церемонии на выдаче кода; обмен и оборот его не пересчитывают " +
+		"(приёмка LINE-A-1 Р5/Р6, kaname#423, миграция 20260925121413)",
+}
 
 func TestAssuranceLevelHasOneWriterAndOneHome(t *testing.T) {
 	t.Parallel()
@@ -154,30 +165,19 @@ func TestAssuranceLevelHasOneWriterAndOneHome(t *testing.T) {
 		schemaFiles++
 		axisColumns = append(axisColumns, check.ScanAssuranceAxisColumns(rel, migrations.MigrationUpSection(migs[rel]))...)
 	}
-	homeSeen := false
-	for _, c := range axisColumns {
-		if assuranceAxisHomeTable != "" && c.Table == assuranceAxisHomeTable {
-			homeSeen = true
-			continue
-		}
-		findings = append(findings, fmt.Sprintf("%s — объявление оси уровня вне таблицы сессии (%q): уровень как "+
-			"состояние лежит только в записи сессии", c, assuranceAxisHomeTable))
-	}
-	if assuranceAxisHomeTable != "" && !homeSeen {
-		findings = append(findings, fmt.Sprintf("ведомость называет таблицу оси %q, а объявления оси при ней в схеме нет", assuranceAxisHomeTable))
-	}
+	findings = append(findings, check.JudgeAssuranceAxisColumns(axisColumns, assuranceAxisHomeTable, assuranceAxisCopyTables)...)
 
 	t.Logf("перепись: файлов прод-кода прочитано %d (дом правила — %d), импортирующих дом %d; обращений к оси %d — "+
 		"сравнений %d, производств %d, преобразований %d, вызовов правила %d; структур с полем уровня %d (в ведомости %d); "+
-		"файлов миграций %d, столбцов оси %d",
+		"файлов миграций %d, столбцов оси %d (копий в ведомости %d)",
 		census.Files+homeFiles, homeFiles, census.ImportingHome, census.AxisReferences,
 		census.Comparisons, census.Productions, census.Conversions, census.RuleCalls,
-		len(holders), len(assuranceLevelHolders), schemaFiles, len(axisColumns))
+		len(holders), len(assuranceLevelHolders), schemaFiles, len(axisColumns), len(assuranceAxisCopyTables))
 
 	if len(findings) != 0 {
 		t.Fatalf("у уровня уверенности появился ВТОРОЙ писатель либо второе место хранения — %d находок:\n  %s\n\n"+
 			"Уровень производит только правило (`assurance.LevelOf`), хранится только в записи сессии; копии — "+
-			"чтения записи, названные в ведомости держателей.",
+			"чтения записи, названные в ведомости держателей и в ведомости снимков схемы.",
 			len(findings), strings.Join(findings, "\n  "))
 	}
 }

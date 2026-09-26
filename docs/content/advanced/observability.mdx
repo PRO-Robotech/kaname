@@ -229,7 +229,7 @@ sum by (reason) (rate(kaname_human_session_no_session_total[5m]))
 
 | Ряд | Метки | Что значит |
 |---|---|---|
-| `kaname_login_outcomes_total` | `outcome` | исходы входа: `issued`, `no-row`, `blocked`, `rate-limited`, `store-failed`, `verifier-issue`, `mismatched`, `material-missing`, `capacity-exhausted`, `second-factor-refused` (пароль сошёлся, отказано по полю `secondFactor` — исход в клетках предъявления ниже), `second-factor-not-enrolled` (пароль сошёлся, код приложен, а фактора у личности нет — наружу тот же отказ, что на неверный пароль). Человек получает один и тот же отказ на всё, кроме частоты; какая именно причина — видно только здесь и в журнале |
+| `kaname_login_outcomes_total` | `outcome` | исходы входа: `issued`, `no-row`, `blocked`, `rate-limited`, `store-failed`, `verifier-issue`, `mismatched`, `material-missing`, `capacity-exhausted`, `second-factor-refused` (пароль сошёлся, отказано по полю `secondFactor` — исход в клетках предъявления ниже), `second-factor-not-enrolled` (пароль сошёлся, код приложен, а фактора у личности нет — наружу тот же отказ, что на неверный пароль), `before-cutoff` (пароль сошёлся, но момент входа не позже отсечки личности — например, вход начат до принудительного выхода, а выдача пришла после него; сессии нет, наружу тот же отказ, что на неверный пароль, попыткой он не считается). Человек получает один и тот же отказ на всё, кроме частоты; какая именно причина — видно только здесь и в журнале |
 | `kaname_password_verification_outcomes_total` | `outcome` | исходы проверяющего пароля: `matched`, `mismatched`, `format-not-in-registry`, `body-not-parsable`, `params-above-ceiling`, `material-missing`, `capacity-exhausted`. Три средних — **наша** негодность хранимого материала, а не ошибка человека: рост означает находку о хранилище |
 | `kaname_human_session_no_session_total` | `reason` | ответы «сессии нет» краю: `unknown` (носитель неизвестен), `ended` (завершена выходом либо сменой пароля), `expired`, `blocked`. Край и предъявитель получают один ответ; причина считается только здесь |
 | `kaname_login_form_refusals_total` | `refusal` | отказы признака формы: `missing`, `rejected`. Рост `rejected` при живой консоли — признак подделанной формы либо смены контекста, о которой консоль не знает |
@@ -288,6 +288,34 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 
 **Печатаются все объявленные исходы, включая нулевые.** Поэтому «ноль отказов» отличимо от «полоса
 не исполнялась ни разу»: во втором случае на нуле и `accepted`.
+
+## Церемония входа человека (`authorization_code`)
+
+Под посадкой `own` служба сама проводит интерактивную церемонию: эндпоинт авторизации
+`GET /iam/v1/authorize`, метаданные обнаружения и виды выдачи `authorization_code` и
+`refresh_token` на `/iam/v1/token`. Наружу её отказы неразличимы: после того как в запросе назван
+код или токен обновления, всякий отказ отдаёт одно и то же `invalid_grant`, а отказ до того, как
+адрес возврата сверен с регистрацией клиента, показывает одну и ту же страницу без
+перенаправления. Различимость — здесь.
+
+```promql
+# исходы церемонии
+sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_ceremony_outcomes_total` | `outcome` | исходы обращений к церемонии. Набор значений закрытый: у эндпоинта авторизации — `authorize-code-issued` и по значению на каждый отказ (`authorize-client-unknown`, `authorize-redirect-unregistered`, `authorize-state-below-floor`, `authorize-login-required`, `authorize-step-up-required` и прочие), у полос обмена — `token-code-exchanged`, `token-refreshed`, `token-grant-refused`, `token-client-refused`, `token-request-refused`, `token-unavailable` |
+
+| `outcome="…"` | Кто чинит |
+|---|---|
+| `authorize-unavailable`, `token-unavailable` | наша сторона: хранилище церемонии, справочник клиентов, проверяющий секрета клиента (занятость его ёмкости — повторяемый отказ `503`) |
+| `authorize-login-required`, `authorize-step-up-required` | не отказ, а вызов входа: человека ведут на полосу входа либо шага вверх |
+| остальные значения | клиент либо его регистрация: неизвестный или снимаемый клиент, адрес возврата вне регистрации, короткий `state`, негодный или повторённый код, чужой клиент, неверный `code_verifier` |
+
+Рост `token-grant-refused` при ровном `token-code-exchanged` у одного клиента — предмет разбора по
+журналу (`ceremony token refused`, поле `why`): среди этих отказов повторы кода и токена
+обновления, и каждый такой повтор отзывает всё семейство выданного.
 
 ## Материализация выданного доступа
 

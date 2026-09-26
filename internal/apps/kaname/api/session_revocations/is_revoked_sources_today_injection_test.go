@@ -55,7 +55,7 @@ func TestSourcesTodayGate_FallsOnEachSide(t *testing.T) {
 	})
 
 	t.Run("писатель в собираемом корнем, оговорка осталась", func(t *testing.T) {
-		found := auditSourcesToday(sourcesTodayFacts{WriterCalls: 1, WriterMounted: true, List: treeListWithFamily(tree)})
+		found := auditSourcesToday(sourcesTodayFacts{WriterCalls: 1, WriterMounted: true, List: treeListWithCaveat(tree)})
 		require.Len(t, found, 1)
 		require.Contains(t, found[0], serviceRoot)
 		require.Contains(t, found[0], "оговорка о несобранной церемонии пережила свой предмет")
@@ -68,13 +68,29 @@ func treeListWithoutCaveat(tree sourcesTodayFacts) string {
 	return unmountedCaveat.ReplaceAllString(tree.List, "mounted")
 }
 
-// TestSourcesTodayGate_TreeCarriesTheCaveatItIsJudgedBy — предпосылка оси
-// сборки: оговорка в перечне дерева распознаётся, а её снятие — нет. Иначе
-// инъекция «оговорки нет» совпала бы с деревом и ничего бы не доказала.
-func TestSourcesTodayGate_TreeCarriesTheCaveatItIsJudgedBy(t *testing.T) {
+// caveatItem — оговорка о несобранной церемонии СИНТЕТИЧЕСКИМ пунктом. Перечень
+// дерева её больше не несёт: церемония собрана в корне (kaname#423), и оговорка
+// снята тем же изменением. Инъекции оси сборки ставят её сами.
+const caveatItem = "  - The ceremony is not yet mounted on a request path of the service."
+
+// treeListWithCaveat — перечень дерева с семейством и оговоркой о несобранной
+// церемонии.
+func treeListWithCaveat(tree sourcesTodayFacts) string {
+	return treeListWithFamily(tree) + "\n" + caveatItem
+}
+
+// TestSourcesTodayGate_CaveatIsRecognisedAndTheTreeCarriesNone — предпосылка оси
+// сборки: оговорка распознаётся, её снятие — нет, и снятие не уносит семейство
+// (инъекция меняет один факт). Дерево, в котором писателя собирает корень,
+// оговорки не несёт: иначе инъекция «оговорка осталась» совпала бы с деревом.
+func TestSourcesTodayGate_CaveatIsRecognisedAndTheTreeCarriesNone(t *testing.T) {
 	tree, _ := treeSourcesToday(t)
-	require.True(t, unmountedCaveat.MatchString(tree.List), "в перечне дерева не распознана оговорка о несобранной церемонии")
-	require.False(t, unmountedCaveat.MatchString(treeListWithoutCaveat(tree)), "снятая оговорка распознаётся по-прежнему")
+	require.True(t, tree.WriterMounted, "писателя записи выпуска корень не собирает — предпосылка дерева сменилась")
+	require.False(t, unmountedCaveat.MatchString(tree.List), "перечень дерева несёт оговорку о несобранной церемонии")
+	withCaveat := treeListWithCaveat(tree)
+	require.True(t, unmountedCaveat.MatchString(withCaveat), "синтетическая оговорка не распознана")
+	require.False(t, unmountedCaveat.MatchString(unmountedCaveat.ReplaceAllString(withCaveat, "mounted")),
+		"снятая оговорка распознаётся по-прежнему")
 	require.True(t, sourceMarker[sourceFamily].MatchString(treeListWithoutCaveat(tree)),
 		"снятие оговорки унесло с собой семейство — инъекция меняет два факта")
 }
@@ -87,8 +103,8 @@ func TestSourcesTodayGate_SilentOnTwins(t *testing.T) {
 		require.Empty(t, auditSourcesToday(tree),
 			"гейт находит нарушение на согласном дереве — он ловит форму, а не существо")
 	})
-	t.Run("писатель позван, семейство в перечне", func(t *testing.T) {
-		require.Empty(t, auditSourcesToday(sourcesTodayFacts{WriterCalls: 1, List: treeListWithFamily(tree)}))
+	t.Run("писатель позван вне собираемого корнем, семейство в перечне с оговоркой", func(t *testing.T) {
+		require.Empty(t, auditSourcesToday(sourcesTodayFacts{WriterCalls: 1, List: treeListWithCaveat(tree)}))
 	})
 	t.Run("писатель не позван, семейства в перечне нет", func(t *testing.T) {
 		require.Empty(t, auditSourcesToday(sourcesTodayFacts{WriterCalls: 0, List: treeListWithoutFamily(tree)}))
