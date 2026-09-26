@@ -35,11 +35,12 @@
 // Лишний кандидат стоит одного-двух рендеров; пропущенный — молчание, которое и
 // было дефектом. Поэтому избыток — на первой ступени, решение — на второй, и у
 // решения три исхода, а не два (`confirmPodEnvSources`): источник; не источник —
-// только когда пробный ключ лёг в другое место рендера и положить его туда мог
-// лишь единственный проход по карте, упоминающий ключ безусловно; иначе —
-// находка «не подтверждён и не опровергнут». Кандидат, чей пробный ключ не
-// дошёл ни до какого места (проход под условием, которого суд не создаёт, либо
-// ключ отфильтрован, опыты 392p–392r), — находка, а не «не источник».
+// только когда пробный ключ лёг в другое место рендера, а проход по карте
+// единственный, стоит в файле шаблона вне всякого условия и упоминает ключ
+// безусловно; иначе — находка «не подтверждён и не опровергнут». Кандидат, чей
+// пробный ключ не дошёл ни до какого места (проход под условием, которого суд
+// не создаёт, либо ключ отфильтрован, опыты 392p–392r), — находка, а не «не
+// источник».
 //
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ. Источник — КЛЮЧ карты. Перечень элементов, у
 // которых имя берётся из поля элемента (опыт 392k), и `envFrom` — другой класс и
@@ -47,7 +48,9 @@
 // выводит (не `keys`), кандидатом не становится; шаблон, собранный из строки
 // (`tpl`), разбором не читается. Законный фильтр, отсекающий ключи вида ручки
 // (392s), суд от выключателя не отличает: это находка «не подтверждён», ложная
-// тревога, а не молчание.
+// тревога, а не молчание. Условие, выраженное не ветвью, а значением внутри
+// действия (`ternary` или `default` по ручке в выражении имени), разбор не
+// видит: имя такого прохода судится при двух условиях суда и только при них.
 package deploy_test
 
 import (
@@ -162,8 +165,9 @@ type envCandidate struct {
 	// раньше и не тем.
 	fields []string
 	// passes — сколько проходов по ключам этой карты во всех шаблонах чарта;
-	// branched — хоть в одном из них ключ упомянут не безусловно (`plainPass`).
-	// Оба решают, вправе ли рендер ОПРОВЕРГНУТЬ кандидата (`confirmPodEnvSources`).
+	// branched — хоть один из них стоит под условием (ветвь, тело внешнего
+	// range, define) либо упоминает ключ не безусловно (`plainPass`). Оба
+	// решают, вправе ли рендер ОПРОВЕРГНУТЬ кандидата (`confirmPodEnvSources`).
 	passes   int
 	branched bool
 }
@@ -189,11 +193,14 @@ func (e *walkEnv) site(name string, arg tplValue) {
 // tplScope — точка и переменные в месте шаблона. Переменные — указатели:
 // присваивание `$x = …` и `set $x …` во вложенной структуре меняют ту же
 // переменную, а объявление `$x := …` заводит новую до `end` своей структуры.
+// gated — место исполняется не при всяком рендере: внутри ветви if и with, тела
+// или else внешнего range, внутри define.
 type tplScope struct {
-	dot  tplValue
-	vars map[string]*tplValue
-	env  *walkEnv
-	tree *parse.Tree
+	dot   tplValue
+	vars  map[string]*tplValue
+	env   *walkEnv
+	tree  *parse.Tree
+	gated bool
 }
 
 func (s tplScope) child(dot tplValue) tplScope {
@@ -201,7 +208,14 @@ func (s tplScope) child(dot tplValue) tplScope {
 	for k, v := range s.vars {
 		vars[k] = v
 	}
-	return tplScope{dot: dot, vars: vars, env: s.env, tree: s.tree}
+	return tplScope{dot: dot, vars: vars, env: s.env, tree: s.tree, gated: s.gated}
+}
+
+// branch — место внутри ветви: исполняется не при всяком рендере.
+func (s tplScope) branch(dot tplValue) tplScope {
+	c := s.child(dot)
+	c.gated = true
+	return c
 }
 
 func (s tplScope) bind(name string, v tplValue) { nv := v; s.vars[name] = &nv }
@@ -301,7 +315,7 @@ func podEnvSourcesIn(files map[string]string) ([]envCandidate, error) {
 			if !called || env.dynamic {
 				dot = unknownValue
 			}
-			s := tplScope{dot: dot, vars: map[string]*tplValue{}, env: env, tree: set[n]}
+			s := tplScope{dot: dot, vars: map[string]*tplValue{}, env: env, tree: set[n], gated: true}
 			s.bind("$", dot)
 			if err := walkTemplate(set[n].Root, s); err != nil {
 				return err
@@ -371,18 +385,18 @@ func walkTemplate(n parse.Node, s tplScope) error {
 	case *parse.IfNode:
 		base := s.child(s.dot)
 		base.declare(x.Pipe, resolvePipe(x.Pipe, s))
-		if err := walkTemplate(x.List, base.child(s.dot)); err != nil {
+		if err := walkTemplate(x.List, base.branch(s.dot)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	case *parse.WithNode:
 		v := resolvePipe(x.Pipe, s)
 		base := s.child(s.dot)
 		base.declare(x.Pipe, v)
-		if err := walkTemplate(x.List, base.child(v)); err != nil {
+		if err := walkTemplate(x.List, base.branch(v)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	case *parse.RangeNode:
 		over := resolvePipe(x.Pipe, s)
 		if err := judgeRange(x, over, s); err != nil {
@@ -393,10 +407,10 @@ func walkTemplate(n parse.Node, s tplScope) error {
 		for _, d := range x.Pipe.Decl {
 			base.bind(d.Ident[0], unknownValue)
 		}
-		if err := walkTemplate(x.List, base.child(unknownValue)); err != nil {
+		if err := walkTemplate(x.List, base.branch(unknownValue)); err != nil {
 			return err
 		}
-		return walkTemplate(x.ElseList, base.child(s.dot))
+		return walkTemplate(x.ElseList, base.branch(s.dot))
 	}
 	return nil
 }
@@ -440,7 +454,7 @@ func judgeRange(r *parse.RangeNode, over tplValue, s tplScope) error {
 	if valueVar != "" {
 		collectFieldsOf(r.List, valueVar, fields)
 	}
-	plain := plainPass(r.List, key)
+	plain := plainPass(r.List, key) && !s.gated
 	for _, src := range sources {
 		if s.env.candidates[src] == nil {
 			s.env.candidates[src] = map[string]bool{}
@@ -964,14 +978,16 @@ func podEnvNames(t *testing.T, rendered string) []string {
 //   - ИСТОЧНИК: пробный ключ оказался в ИМЕНИ переменной окружения контейнера;
 //     при этом условии суд и судит его тени;
 //   - НЕ ИСТОЧНИК (refuted): ни при одном условии имени он не дал, а рендер
-//     положил его в другое место (том, порт, аннотация, значение), и положить
-//     его мог только ЕДИНСТВЕННЫЙ проход по карте, где ключ упомянут безусловно
-//     (`plainPass`): тогда место в рендере — всё, куда проход кладёт ключ;
+//     положил его в другое место (том, порт, аннотация, значение), и проход по
+//     карте ЕДИНСТВЕННЫЙ, стоит в файле шаблона вне всякого условия и
+//     упоминает ключ безусловно (`plainPass`): такой проход исполнен при
+//     каждом рендере целиком, и место в рендере — всё, куда он кладёт ключ;
 //   - НАХОДКА «не подтверждён и не опровергнут»: рендер отказал; пробный ключ не
 //     дошёл ни до какого места рендера ни при одном условии (проход выключен
 //     условием, которого суд не создаёт, либо ключ отфильтрован); проходов по
-//     карте больше одного либо ключ в проходе стоит под ветвью — и что положила
-//     бы невыполненная ветвь или другой проход, рендер не называет.
+//     карте больше одного, проход стоит под условием либо ключ в нём под
+//     ветвью — и что положили бы невыполненная ветвь или другой проход, рендер
+//     не называет: место, где лёг пробный ключ, мог дать и не этот проход.
 func confirmPodEnvSources(t *testing.T, dir string, cands []envCandidate) (sources []envSource, refuted, findings []string, renders int) {
 	t.Helper()
 	condNames := make([]string, 0, len(podEnvConditions))
@@ -1004,7 +1020,7 @@ candidates:
 		case c.passes != 1 || c.branched:
 			why := fmt.Sprintf("проходов по карте %d", c.passes)
 			if c.branched {
-				why += ", и ключ в теле прохода стоит под ветвью либо уходит из него"
+				why += ", и проход стоит под условием либо ключ в его теле под ветвью или уходит из него"
 			}
 			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ %s рендер положил не в имя переменной пода, а "+
 				"%s — что положила бы невыполненная ветвь или другой проход, рендер не называет: источник не "+
