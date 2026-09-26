@@ -547,7 +547,7 @@ type chartPatch struct{ anchor, insert string }
 // Чем находка «не подтверждён и не опровергнут» объясняет себя.
 const (
 	nowhereWhy  = "не дошёл ни до какого места рендера ни при одном условии суда"
-	branchedWhy = "проход стоит под условием либо ключ в его теле под ветвью или уходит из него"
+	branchedWhy = "проход по карте стоит под условием либо ключ в его теле под ветвью или уходит из него"
 )
 
 // gatedExtraEnvForms — новый источник `extraEnv` в копии чарта, чей ключ доходит
@@ -587,7 +587,7 @@ var gatedExtraEnvForms = []struct {
 		"            {{- if eq .Values.authn.identityProvider \"external\" }}\n" + extraEnvRange + "            {{- end }}\n"}}},
 	{name: "392r источник под отдельным выключателем", why: nowhereWhy, patches: []chartPatch{{envRangeInTheTree,
 		"            {{- if .Values.extraEnvEnabled }}\n" + extraEnvRange + "            {{- end }}\n"}}},
-	{name: "одна карта: том всегда, переменная под выключателем", why: "проходов по карте 2", patches: []chartPatch{
+	{name: "одна карта: том всегда, переменная под выключателем", why: branchedWhy, patches: []chartPatch{
 		{"            name: {{ .Values.name }}-config\n", `        {{- range $k, $v := .Values.extraEnv }}
         - name: {{ $k }}
           configMap:
