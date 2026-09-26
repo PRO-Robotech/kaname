@@ -86,6 +86,9 @@ var ErrNoLookup = errors.New("revocationpolicy: revoke-all cutoff reader is not 
 // ErrUnknownPrincipalKind — вид принципала вне словаря [service.PrincipalKind].
 var ErrUnknownPrincipalKind = errors.New("revocationpolicy: principal kind is outside the closed dictionary")
 
+// ErrLimitNotPositive — предел на вызов, поданный обёртке, не положителен.
+var ErrLimitNotPositive = errors.New("revocationpolicy: per-call limit must be a positive duration")
+
 // ErrPrincipalWithoutID — принципал назван человеком, но без идентификатора,
 // по которому отсечка ключуется.
 var ErrPrincipalWithoutID = errors.New("revocationpolicy: principal is a person but carries no user id")
@@ -169,13 +172,22 @@ func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal
 // поздно не появится — молча. Истёкший предел — ошибка чтения, то есть
 // [Undecidable], а не «отсечки нет».
 //
+// Неположительный предел — ОТКАЗ ПОСТРОЕНИЯ ([ErrLimitNotPositive]), а не
+// обёртка: контекст с таким сроком истёк в момент вызова, каждое чтение
+// кончалось бы ошибкой, и полоса отказывала бы в выдаче всем — на первом
+// запросе, а не на старте. Предел судится раньше читателя: величина неверна
+// независимо от того, что оборачивается.
+//
 // Неподанный читатель остаётся неподанным: обёртка над nil вернула бы
 // непустое значение, и «читатель не провязан» перестал бы быть различимым.
-func WithDeadline(inner Lookup, timeout time.Duration) Lookup {
-	if inner == nil {
-		return nil
+func WithDeadline(inner Lookup, timeout time.Duration) (Lookup, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("%w, got %s", ErrLimitNotPositive, timeout)
 	}
-	return deadlineLookup{inner: inner, timeout: timeout}
+	if inner == nil {
+		return nil, nil
+	}
+	return deadlineLookup{inner: inner, timeout: timeout}, nil
 }
 
 // deadlineLookup — чтение отсечки со СВОИМ пределом времени.

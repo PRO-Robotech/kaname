@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // hooks_mux.go — HTTP mux composition for AuthN hooks listener.
-// Hydra hooks (token + refresh), DPoP replay cache.
+// Hydra hooks (token + refresh), Kratos hooks (provision + recovery).
 package main
 
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -71,33 +71,28 @@ func buildHooksMux(
 	// Repo adapters (pool-scoped).
 	users := kanamepg.NewUserPoolRepo(pool)
 	auditPg := kanamepg.NewAuditEmitterAdapter(pool)
-	revsPg := kanamepg.NewSessionRevocationsAdapter(pool)
 
-	// Adapter shims между port-iface'ами handler-слоя и repo-adapter'ами.
-	auditAdapter := &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit}
-
-	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
-	saPort := &tokenEnrichSAAdapter{saClients: saClientRepo}
-
-	// User-token principal mapping: минтованный из UserOAuthClient токен резолвится
-	// в принципал `user:<id>` (net-new относительно SA-key → serviceAccount:<id>).
-	userClientRepo := kanamepg.NewUserOAuthClientRepo(pool)
-	userTokenPort := &tokenEnrichUserTokenAdapter{userClients: userClientRepo, users: users}
-
-	tokenEnricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: domain, HydraIssuer: hydraIssuer},
-		users,
-	).WithSAPort(saPort).WithUserTokenPort(userTokenPort)
-	tokenHook, refreshHook := buildIssuanceHooks(issuanceHookConfig{
+	tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
 		hookSecret:  hookSecret,
 		domain:      domain,
 		hydraIssuer: hydraIssuer,
-	}, issuanceHookPorts{
-		users:    users,
-		enricher: tokenEnricher,
-		cutoffs:  revsPg,
-		audit:    auditAdapter,
+	}, handlerinternal.IssuancePorts{
+		Users:           users,
+		ServiceAccounts: &tokenEnrichSAAdapter{saClients: kanamepg.NewSAOAuthClientRepo(pool)},
+		// User-token principal mapping: минтованный из UserOAuthClient токен резолвится
+		// в принципал `user:<id>` (net-new относительно SA-key → serviceAccount:<id>).
+		UserTokens: &tokenEnrichUserTokenAdapter{userClients: kanamepg.NewUserOAuthClientRepo(pool), users: users},
+		Cutoffs:    kanamepg.NewSessionRevocationsAdapter(pool),
+		Audit:      &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit},
 	}, logger)
+	if err != nil {
+		// Отказ сборки полос выдачи — отказ старта, а не полоса без пределов:
+		// без обработчика поверхность с объявленным адресом не строится
+		// (`servicecontract.NewSurface`: «обслуживать нечем»), и корень не
+		// поднимается. Причину называет эта строка журнала.
+		logger.Error("hooks: issuance lanes refused to assemble", "err", err)
+		return nil
+	}
 
 	// Provision hook (C4): Kratos registration/login → UpsertFromIdentity.
 	// Reuse the SAME repo/opsRepo/relationStore the gRPC InternalUserService
@@ -241,45 +236,45 @@ type issuanceHookConfig struct {
 	hydraIssuer string
 }
 
-// issuanceHookPorts — готовые порты обеих полос хука, чеканящих токен человеку.
-//
-// Порты, а не пул: сборка полос обязана проверяться без базы, и проба сборки
-// подаёт сюда своего читателя отсечки, чтобы увидеть, с чем его позвали.
-type issuanceHookPorts struct {
-	users    handlerinternal.UserLookupPort
-	enricher *service.TokenEnrichmentService
-	cutoffs  revocationpolicy.Lookup
-	audit    handlerinternal.AuditEmitter
-}
-
 // buildIssuanceHooks собирает обе полосы хука, чеканящие токен человеку: хук
 // выпуска и хук обновления.
 //
 // Одна сборка на обе полосы, а не две провязки рядом: читатель отсечки у них
 // ОДИН экземпляр, и производитель состава утверждений — тоже один.
 //
-// Читатель отсечки оборачивается здесь ОДИН раз — той же обёрткой и тем же
-// объявленным пределом на вызов, что у токен-эндпоинта
-// ([revocationpolicy.WithDeadline], [credentialLanePeerTimeout]). Без неё
-// чтение шло бы с контекстом запроса поставщика, у которого своего предела нет,
-// и одно чтение одной строки несло бы разный предел на разных полосах. Предел
-// закреплён пробой через эту сборку
-// (`TestIssuanceHookLanesReadTheCutoffUnderTheDeclaredLimit`).
+// Вход — порты, а не пул: сборка обязана проверяться без базы, и проба подаёт
+// сюда свои порты, чтобы увидеть, с каким сроком их позвали. Порты
+// оборачиваются здесь ОДИН раз ([handlerinternal.WithCallDeadline]) объявленным
+// пределом на вызов — тем же, что у токен-эндпоинта
+// ([credentialLanePeerTimeout]), — и ДО построения производителя утверждений:
+// он ходит в базу теми же портами, и собранный из необёрнутых, он читал бы
+// строку человека, ключа и персонального токена со сроком поставщика, у
+// которого своего предела нет. Под пределом идёт КАЖДОЕ обращение полос к
+// базе — разрешение субъекта, чтение отсечки отзыва-всех, запись аудита.
+// Держит проба через эту сборку
+// (`TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit`).
 func buildIssuanceHooks(
 	cfg issuanceHookConfig,
-	ports issuanceHookPorts,
+	ports handlerinternal.IssuancePorts,
 	logger *slog.Logger,
-) (*handlerinternal.TokenHookHandler, *handlerinternal.RefreshHookHandler) {
-	cutoffs := revocationpolicy.WithDeadline(ports.cutoffs, credentialLanePeerTimeout)
+) (*handlerinternal.TokenHookHandler, *handlerinternal.RefreshHookHandler, error) {
+	bounded, err := handlerinternal.WithCallDeadline(ports, credentialLanePeerTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("полосы хука выдачи: %w", err)
+	}
+	enricher := service.NewTokenEnrichmentService(
+		service.TokenEnrichmentConfig{Domain: cfg.domain, HydraIssuer: cfg.hydraIssuer},
+		bounded.Users,
+	).WithSAPort(bounded.ServiceAccounts).WithUserTokenPort(bounded.UserTokens)
 	tokenHook := handlerinternal.NewTokenHookHandler(
 		handlerinternal.TokenHookConfig{
 			HookSharedSecret: cfg.hookSecret,
 			Domain:           cfg.domain,
 			HydraIssuer:      cfg.hydraIssuer,
 		},
-		ports.enricher,
-		cutoffs,
-		ports.audit,
+		enricher,
+		bounded.Cutoffs,
+		bounded.Audit,
 		logger,
 	)
 	refreshHook := handlerinternal.NewRefreshHookHandler(
@@ -288,15 +283,15 @@ func buildIssuanceHooks(
 			Domain:           cfg.domain,
 			HydraIssuer:      cfg.hydraIssuer,
 		},
-		ports.users,
+		bounded.Users,
 		// The SAME producer the token hook enriches with. One claim set per
 		// principal, whichever lane asks for it.
-		ports.enricher,
-		cutoffs,
-		ports.audit,
+		enricher,
+		bounded.Cutoffs,
+		bounded.Audit,
 		logger,
 	)
-	return tokenHook, refreshHook
+	return tokenHook, refreshHook, nil
 }
 
 // hooksLaneSurface — профиль поверхности вебхуков провайдера личности.
