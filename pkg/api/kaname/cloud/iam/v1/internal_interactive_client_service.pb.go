@@ -299,6 +299,75 @@ func (x *CreateInteractiveClientRequest) GetPostLogoutRedirectUris() []string {
 	return nil
 }
 
+// CreateInteractiveClientResponse — the response of the Create operation.
+//
+// The secret lives in THIS message and nowhere else: `InteractiveClient` has no
+// secret field, so `Get`, `List`, `Update` and `Delete` do not carry it by the
+// form of the contract.
+type CreateInteractiveClientResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The registered client — the same projection `Get` returns.
+	InteractiveClient *InteractiveClient `protobuf:"bytes,1,opt,name=interactive_client,json=interactiveClient,proto3" json:"interactive_client,omitempty"`
+	// The client secret, SHOWN ONCE. The client presents it at the token
+	// endpoint together with `interactive_client.client_id`, by HTTP Basic
+	// (RFC 6749 §2.3.1), as `token_endpoint_auth_method` says.
+	//
+	// WHAT EMPTINESS MEANS. Non-empty EXACTLY in the answer of the Create call
+	// for a client whose `token_endpoint_auth_method` presents a secret. Empty
+	// in the answer of the call for a client with `none` — that client has no
+	// secret. Empty ALWAYS in the operation read back later
+	// (`OperationService.Get`): the secret is shown once. Whether the client has
+	// a secret is told by `token_endpoint_auth_method`, not by this field being
+	// empty.
+	ClientSecret  string `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateInteractiveClientResponse) Reset() {
+	*x = CreateInteractiveClientResponse{}
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateInteractiveClientResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateInteractiveClientResponse) ProtoMessage() {}
+
+func (x *CreateInteractiveClientResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateInteractiveClientResponse.ProtoReflect.Descriptor instead.
+func (*CreateInteractiveClientResponse) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CreateInteractiveClientResponse) GetInteractiveClient() *InteractiveClient {
+	if x != nil {
+		return x.InteractiveClient
+	}
+	return nil
+}
+
+func (x *CreateInteractiveClientResponse) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
 type UpdateInteractiveClientRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the InteractiveClient to update.
@@ -324,7 +393,7 @@ type UpdateInteractiveClientRequest struct {
 
 func (x *UpdateInteractiveClientRequest) Reset() {
 	*x = UpdateInteractiveClientRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +405,7 @@ func (x *UpdateInteractiveClientRequest) String() string {
 func (*UpdateInteractiveClientRequest) ProtoMessage() {}
 
 func (x *UpdateInteractiveClientRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +418,7 @@ func (x *UpdateInteractiveClientRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateInteractiveClientRequest.ProtoReflect.Descriptor instead.
 func (*UpdateInteractiveClientRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescGZIP(), []int{4}
+	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateInteractiveClientRequest) GetInteractiveClientId() string {
@@ -411,7 +480,7 @@ type DeleteInteractiveClientRequest struct {
 
 func (x *DeleteInteractiveClientRequest) Reset() {
 	*x = DeleteInteractiveClientRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -423,7 +492,7 @@ func (x *DeleteInteractiveClientRequest) String() string {
 func (*DeleteInteractiveClientRequest) ProtoMessage() {}
 
 func (x *DeleteInteractiveClientRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -436,7 +505,7 @@ func (x *DeleteInteractiveClientRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteInteractiveClientRequest.ProtoReflect.Descriptor instead.
 func (*DeleteInteractiveClientRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeleteInteractiveClientRequest) GetInteractiveClientId() string {
@@ -450,7 +519,7 @@ var File_kaname_cloud_iam_v1_internal_interactive_client_service_proto protorefl
 
 const file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc = "" +
 	"\n" +
-	"=kaname/cloud/iam/v1/internal_interactive_client_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/interactive_client.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"Q\n" +
+	"=kaname/cloud/iam/v1/internal_interactive_client_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/interactive_client.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"Q\n" +
 	"\x1bGetInteractiveClientRequest\x122\n" +
 	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId\"s\n" +
 	"\x1dListInteractiveClientsRequest\x12\x1b\n" +
@@ -469,7 +538,10 @@ const file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc
 	"\x19post_logout_redirect_uris\x18\x05 \x03(\tR\x16postLogoutRedirectUris\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbb\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa3\x01\n" +
+	"\x1fCreateInteractiveClientResponse\x12U\n" +
+	"\x12interactive_client\x18\x01 \x01(\v2&.kaname.cloud.iam.v1.InteractiveClientR\x11interactiveClient\x12)\n" +
+	"\rclient_secret\x18\x02 \x01(\tB\x04\xc0\xc81\x01R\fclientSecret\"\xbb\x03\n" +
 	"\x1eUpdateInteractiveClientRequest\x122\n" +
 	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
@@ -483,16 +555,16 @@ const file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"T\n" +
 	"\x1eDeleteInteractiveClientRequest\x122\n" +
-	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId2\xc9\n" +
+	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId2\xd7\n" +
 	"\n" +
 	" InternalInteractiveClientService\x12\xe9\x01\n" +
 	"\x03Get\x120.kaname.cloud.iam.v1.GetInteractiveClientRequest\x1a&.kaname.cloud.iam.v1.InteractiveClient\"\x87\x01\x8a\xb5\x18\x1biam.interactive_clients.get\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02=\x12;/iam/v1/internal/interactiveClients/{interactive_client_id}\x12\xe1\x01\n" +
 	"\x04List\x122.kaname.cloud.iam.v1.ListInteractiveClientsRequest\x1a3.kaname.cloud.iam.v1.ListInteractiveClientsResponse\"p\x8a\xb5\x18\x1ciam.interactive_clients.list\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
-	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02%\x12#/iam/v1/internal/interactiveClients\x12\x8b\x02\n" +
-	"\x06Create\x123.kaname.cloud.iam.v1.CreateInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xad\x01\x8a\xb5\x18\x1eiam.interactive_clients.create\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
-	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*4\n" +
-	"\x1fCreateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/internal/interactiveClients\x12\xa3\x02\n" +
+	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02%\x12#/iam/v1/internal/interactiveClients\x12\x99\x02\n" +
+	"\x06Create\x123.kaname.cloud.iam.v1.CreateInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xbb\x01\x8a\xb5\x18\x1eiam.interactive_clients.create\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*B\n" +
+	"\x1fCreateInteractiveClientMetadata\x12\x1fCreateInteractiveClientResponse\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/internal/interactiveClients\x12\xa3\x02\n" +
 	"\x06Update\x123.kaname.cloud.iam.v1.UpdateInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xc5\x01\x8a\xb5\x18\x1eiam.interactive_clients.update\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*4\n" +
 	"\x1fUpdateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02@:\x01*2;/iam/v1/internal/interactiveClients/{interactive_client_id}\x12\xa0\x02\n" +
@@ -512,40 +584,42 @@ func file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescG
 	return file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_goTypes = []any{
-	(*GetInteractiveClientRequest)(nil),    // 0: kaname.cloud.iam.v1.GetInteractiveClientRequest
-	(*ListInteractiveClientsRequest)(nil),  // 1: kaname.cloud.iam.v1.ListInteractiveClientsRequest
-	(*ListInteractiveClientsResponse)(nil), // 2: kaname.cloud.iam.v1.ListInteractiveClientsResponse
-	(*CreateInteractiveClientRequest)(nil), // 3: kaname.cloud.iam.v1.CreateInteractiveClientRequest
-	(*UpdateInteractiveClientRequest)(nil), // 4: kaname.cloud.iam.v1.UpdateInteractiveClientRequest
-	(*DeleteInteractiveClientRequest)(nil), // 5: kaname.cloud.iam.v1.DeleteInteractiveClientRequest
-	nil,                                    // 6: kaname.cloud.iam.v1.CreateInteractiveClientRequest.LabelsEntry
-	nil,                                    // 7: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.LabelsEntry
-	(*InteractiveClient)(nil),              // 8: kaname.cloud.iam.v1.InteractiveClient
-	(*fieldmaskpb.FieldMask)(nil),          // 9: google.protobuf.FieldMask
-	(*operation.Operation)(nil),            // 10: corelib.operation.Operation
+	(*GetInteractiveClientRequest)(nil),     // 0: kaname.cloud.iam.v1.GetInteractiveClientRequest
+	(*ListInteractiveClientsRequest)(nil),   // 1: kaname.cloud.iam.v1.ListInteractiveClientsRequest
+	(*ListInteractiveClientsResponse)(nil),  // 2: kaname.cloud.iam.v1.ListInteractiveClientsResponse
+	(*CreateInteractiveClientRequest)(nil),  // 3: kaname.cloud.iam.v1.CreateInteractiveClientRequest
+	(*CreateInteractiveClientResponse)(nil), // 4: kaname.cloud.iam.v1.CreateInteractiveClientResponse
+	(*UpdateInteractiveClientRequest)(nil),  // 5: kaname.cloud.iam.v1.UpdateInteractiveClientRequest
+	(*DeleteInteractiveClientRequest)(nil),  // 6: kaname.cloud.iam.v1.DeleteInteractiveClientRequest
+	nil,                                     // 7: kaname.cloud.iam.v1.CreateInteractiveClientRequest.LabelsEntry
+	nil,                                     // 8: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.LabelsEntry
+	(*InteractiveClient)(nil),               // 9: kaname.cloud.iam.v1.InteractiveClient
+	(*fieldmaskpb.FieldMask)(nil),           // 10: google.protobuf.FieldMask
+	(*operation.Operation)(nil),             // 11: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_depIdxs = []int32{
-	8,  // 0: kaname.cloud.iam.v1.ListInteractiveClientsResponse.interactive_clients:type_name -> kaname.cloud.iam.v1.InteractiveClient
-	6,  // 1: kaname.cloud.iam.v1.CreateInteractiveClientRequest.labels:type_name -> kaname.cloud.iam.v1.CreateInteractiveClientRequest.LabelsEntry
-	9,  // 2: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.update_mask:type_name -> google.protobuf.FieldMask
-	7,  // 3: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateInteractiveClientRequest.LabelsEntry
-	0,  // 4: kaname.cloud.iam.v1.InternalInteractiveClientService.Get:input_type -> kaname.cloud.iam.v1.GetInteractiveClientRequest
-	1,  // 5: kaname.cloud.iam.v1.InternalInteractiveClientService.List:input_type -> kaname.cloud.iam.v1.ListInteractiveClientsRequest
-	3,  // 6: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:input_type -> kaname.cloud.iam.v1.CreateInteractiveClientRequest
-	4,  // 7: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:input_type -> kaname.cloud.iam.v1.UpdateInteractiveClientRequest
-	5,  // 8: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:input_type -> kaname.cloud.iam.v1.DeleteInteractiveClientRequest
-	8,  // 9: kaname.cloud.iam.v1.InternalInteractiveClientService.Get:output_type -> kaname.cloud.iam.v1.InteractiveClient
-	2,  // 10: kaname.cloud.iam.v1.InternalInteractiveClientService.List:output_type -> kaname.cloud.iam.v1.ListInteractiveClientsResponse
-	10, // 11: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:output_type -> corelib.operation.Operation
-	10, // 12: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:output_type -> corelib.operation.Operation
-	10, // 13: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:output_type -> corelib.operation.Operation
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	9,  // 0: kaname.cloud.iam.v1.ListInteractiveClientsResponse.interactive_clients:type_name -> kaname.cloud.iam.v1.InteractiveClient
+	7,  // 1: kaname.cloud.iam.v1.CreateInteractiveClientRequest.labels:type_name -> kaname.cloud.iam.v1.CreateInteractiveClientRequest.LabelsEntry
+	9,  // 2: kaname.cloud.iam.v1.CreateInteractiveClientResponse.interactive_client:type_name -> kaname.cloud.iam.v1.InteractiveClient
+	10, // 3: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.update_mask:type_name -> google.protobuf.FieldMask
+	8,  // 4: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateInteractiveClientRequest.LabelsEntry
+	0,  // 5: kaname.cloud.iam.v1.InternalInteractiveClientService.Get:input_type -> kaname.cloud.iam.v1.GetInteractiveClientRequest
+	1,  // 6: kaname.cloud.iam.v1.InternalInteractiveClientService.List:input_type -> kaname.cloud.iam.v1.ListInteractiveClientsRequest
+	3,  // 7: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:input_type -> kaname.cloud.iam.v1.CreateInteractiveClientRequest
+	5,  // 8: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:input_type -> kaname.cloud.iam.v1.UpdateInteractiveClientRequest
+	6,  // 9: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:input_type -> kaname.cloud.iam.v1.DeleteInteractiveClientRequest
+	9,  // 10: kaname.cloud.iam.v1.InternalInteractiveClientService.Get:output_type -> kaname.cloud.iam.v1.InteractiveClient
+	2,  // 11: kaname.cloud.iam.v1.InternalInteractiveClientService.List:output_type -> kaname.cloud.iam.v1.ListInteractiveClientsResponse
+	11, // 12: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:output_type -> corelib.operation.Operation
+	11, // 13: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:output_type -> corelib.operation.Operation
+	11, // 14: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:output_type -> corelib.operation.Operation
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_init() }
@@ -554,13 +628,14 @@ func file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_init() {
 		return
 	}
 	file_kaname_cloud_iam_v1_interactive_client_proto_init()
+	file_kaname_cloud_iam_v1_secret_options_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -29,11 +29,16 @@ func createNamed(t *testing.T, name string) *iamv1.InteractiveClient {
 	if op.GetResponse() == nil {
 		t.Fatalf("ответ операции обязан нести созданный ресурс")
 	}
-	var got iamv1.InteractiveClient
+	// Ответ операции Create — CreateInteractiveClientResponse (задача #405):
+	// ресурс лежит в его поле `interactive_client`, рядом с секретом.
+	var got iamv1.CreateInteractiveClientResponse
 	if uerr := op.GetResponse().UnmarshalTo(&got); uerr != nil {
 		t.Fatalf("ответ операции не разбирается: %v", uerr)
 	}
-	return &got
+	if got.GetInteractiveClient() == nil {
+		t.Fatalf("ответ операции не несёт ресурса")
+	}
+	return got.GetInteractiveClient()
 }
 
 // TestCreateInteractiveClient_EmptyName_WritesIdDerivedDefault — пустое имя до

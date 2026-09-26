@@ -122,8 +122,10 @@ type InteractiveClient struct {
 	// Optional post-logout redirect targets. Same `https://` rule as
 	// `redirect_uris` when present.
 	PostLogoutRedirectUris []string `protobuf:"bytes,7,rep,name=post_logout_redirect_uris,json=postLogoutRedirectUris,proto3" json:"post_logout_redirect_uris,omitempty"`
-	// Client id at the identity provider. Output-only — assigned by the
-	// provider, echoed here so the ceremony can be started against it.
+	// The name the sign-in ceremony knows the client by. Output-only — assigned
+	// by the registry that holds the client (the external identity provider, or
+	// the service's own registry), echoed here so the ceremony can be started
+	// against it.
 	ClientId string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	// Audiences stamped into bearers issued through this client. Output-only
 	// (decision Р2): the caller does not supply an audience, iam stamps the
@@ -135,7 +137,18 @@ type InteractiveClient struct {
 	// always exactly `["authorization_code", "refresh_token"]`; this resource
 	// exists to create that shape and offers no other.
 	GrantTypes []string `protobuf:"bytes,10,rep,name=grant_types,json=grantTypes,proto3" json:"grant_types,omitempty"`
-	// Token-endpoint authentication method at the provider. Output-only.
+	// How the client authenticates at the token endpoint. Output-only and
+	// immutable after Create; the registry that holds the client decides it:
+	//
+	//   - `none` — a public client: it holds no secret and proves possession by
+	//     PKCE alone (the external identity provider registers this form);
+	//   - `client_secret_basic` — a confidential client: it presents the secret
+	//     shown once in `CreateInteractiveClientResponse.client_secret` by HTTP
+	//     Basic, and PKCE on top (the service's own registry registers this
+	//     form).
+	//
+	// This field, not the emptiness of any other, is the sign that the client
+	// has a secret. The resource itself carries no secret field at all.
 	TokenEndpointAuthMethod string `protobuf:"bytes,11,opt,name=token_endpoint_auth_method,json=tokenEndpointAuthMethod,proto3" json:"token_endpoint_auth_method,omitempty"`
 	// Lifecycle status of the client.
 	Status        InteractiveClient_Status `protobuf:"varint,12,opt,name=status,proto3,enum=kaname.cloud.iam.v1.InteractiveClient_Status" json:"status,omitempty"`
