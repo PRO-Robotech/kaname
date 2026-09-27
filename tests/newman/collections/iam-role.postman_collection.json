@@ -2555,7 +2555,11 @@
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
                   "});",
-                  "pm.test('отказ называет действие', () =>   pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                  "pm.test('отказ называет действие (ErrorInfo.metadata.action)', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo')) || {};",
+                  "  pm.expect((info.metadata || {}).action, JSON.stringify(j)).to.eql('iam.roles.update');",
+                  "});",
                   "pm.test('отказ не раскрывает свойства роли', () =>   pm.expect((pm.response.json().message||'').toLowerCase()).to.not.contain('system role'));"
                 ]
               }
@@ -6579,7 +6583,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"feedgate_iamrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"role\"], \"verbs\": [\"get\"], \"matchLabels\": {\"tier\": \"gold\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"feedgate_iamrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"role\"], \"verbs\": [\"list\"], \"matchLabels\": {\"tier\": \"gold\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"

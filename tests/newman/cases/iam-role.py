@@ -906,8 +906,17 @@ CASES.append(Case(
             test_script=[
                 *assert_status(403),
                 *assert_grpc_code(7, "PERMISSION_DENIED"),
-                "pm.test('отказ называет действие', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                # ДЕЙСТВИЕ НАЗЫВАЕТ ErrorInfo, А НЕ ТЕКСТ СООБЩЕНИЯ. Прежний пин читал
+                # действие в `message` — так его пишет край. Дверь службы пишет
+                # `message = permission denied`, а действие — в
+                # `ErrorInfo.metadata.action` (`internal/authzguard/deny_details.go`);
+                # свойство «отказ называет действие» переутверждено по производителю
+                # (#415), а не снято.
+                "pm.test('отказ называет действие (ErrorInfo.metadata.action)', () => {",
+                "  const j = pm.response.json();",
+                "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo')) || {};",
+                "  pm.expect((info.metadata || {}).action, JSON.stringify(j)).to.eql('iam.roles.update');",
+                "});",
                 # Отказ не должен раскрывать, что роль системная: это свойство объекта,
                 # а вызывающему нечего о нём знать без доступа.
                 "pm.test('отказ не раскрывает свойства роли', () => "
@@ -1555,7 +1564,13 @@ CASES.append(Case(
             body={
                 "accountId": "{{accountAId}}",
                 "name": "feedgate_iamrole_{{runId}}",
-                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["get"],
+                # ГЛАГОЛ `get` У iam.role СНЯТ из каталога (миграция
+                # 20260914120000_role_read_relation_leaves_the_catalog), и операция
+                # отвечала «verbs: get is not a live verb of resource role» (code 9).
+                # Предмет кейса — приём matchLabels на типе iam, а не выбор глагола;
+                # живые глаголы типа — `list`, `update`, `delete`, и `list` — тот же,
+                # что взял набор `iam-rbac-rules-labels` по той же причине.
+                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["list"],
                            "matchLabels": {"tier": "gold"}}],
             },
             auth="jwtAccountAdminA",
