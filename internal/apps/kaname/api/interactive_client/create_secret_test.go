@@ -416,16 +416,16 @@ func TestCreate_JournalCarriesNoSecret(t *testing.T) {
 		t.Fatalf("ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: журнал не несёт строк о компенсации и о срыве записи — "+
 			"«секрета нет» значило бы «журнала нет»:\n%s", journal)
 	}
-	// Отказ INTERNAL наружу несёт фиксированный текст, значит ПРИЧИНА обязана
-	// остаться в журнале службы — иначе у дефекта реестра и у сорвавшейся
-	// вставки нет следа ни в ответе, ни на сервере (круг 1 сборки 435).
-	for _, cause := range []string{
-		"storage refused the row",
-		"verification value present=false",
-	} {
-		if !strings.Contains(journal, cause) {
-			t.Errorf("причина отказа INTERNAL %q не оставила следа в журнале службы:\n%s", cause, journal)
-		}
+	// Отказ INTERNAL наружу несёт фиксированный текст, значит причина, которая
+	// есть НАШ текст (несогласие тройки в ответе реестра), обязана остаться в
+	// журнале службы — иначе у дефекта реестра нет следа нигде (круг 1 сборки
+	// 435). Близнец — причина отказа вставки: это текст хранилища, и
+	// IC-SECRET-13 (б) запрещает эхать его и в журнал.
+	if !strings.Contains(journal, "verification value present=false") {
+		t.Errorf("причина отказа INTERNAL (несогласие тройки) не оставила следа в журнале службы:\n%s", journal)
+	}
+	if strings.Contains(journal, "storage refused the row") {
+		t.Errorf("журнал эхает текст хранилища из отказа вставки (IC-SECRET-13 (б)):\n%s", journal)
 	}
 	requireNoSecretForm(t, "журнал заведения", journal, probeSecret)
 	mangled := "X" + probeSecret[1:]

@@ -266,13 +266,21 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		return nil, fmt.Errorf("persist operation: %w", err)
 	}
 
-	// Отказ INTERNAL наружу несёт фиксированный текст, поэтому причина уходит
-	// в журнал службы общим путём (`shared.LogMappedErr`): иначе у дефекта
-	// реестра, срыва чеканки и сорвавшейся вставки нет следа нигде.
 	fail := func(err error) (*operationpb.Operation, error) {
-		gerr := shared.LogMappedErr(ctx, uc.logger, "InteractiveClient.Create", err, shared.MapRepoErr(err))
+		gerr := shared.MapRepoErr(err)
 		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
 		return nil, gerr
+	}
+	// failTraced — отказ пути, чья причина — НАШ текст: ответ реестра (в том
+	// числе срыв чеканки секрета), несогласие тройки, сборка тела ответа. Наружу
+	// у него фиксированный текст INTERNAL, поэтому причина уходит в журнал
+	// службы общим путём (`shared.LogMappedErr`) — иначе у дефекта реестра нет
+	// следа нигде. Отказ ВСТАВКИ сюда не идёт намеренно: его причина — текст
+	// хранилища, и IC-SECRET-13 (б) требует, чтобы отказ вне словаря не эхал
+	// его и в журнал (`TestIntegration_IC13b_InternalInsertRefusalEchoesNothing`).
+	failTraced := func(err error) (*operationpb.Operation, error) {
+		_ = shared.LogMappedErr(ctx, uc.logger, "InteractiveClient.Create", err, shared.MapRepoErr(err))
+		return fail(err)
 	}
 
 	pc, err := uc.provider.Register(ctx, ProviderClientSpec{
@@ -283,14 +291,14 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		GrantTypes:             grantTypesInteractive,
 	})
 	if err != nil {
-		return fail(err)
+		return failTraced(err)
 	}
 	// Согласие тройки «способ ⟺ материал ⟺ секрет» — ДО вставки (задача #405).
 	// Схема держит только одно направление; без этой проверки возможен клиент
 	// со способом секретом, которому нечего предъявить никогда.
 	if err := secretMaterialAgrees(pc); err != nil {
 		uc.releaseProviderClient(ctx, pc.ClientID, "registry answered a secret material that disagrees with the method")
-		return fail(err)
+		return failTraced(err)
 	}
 	c.ClientID = pc.ClientID
 	c.GrantTypes = pc.GrantTypes
@@ -322,7 +330,7 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		uc.abandonCreated(ctx, created)
 		// Причина — только ТЕКСТОМ (%v), в цепочку она не входит нарочно:
 		// чужой признак в цепочке переклассифицировал бы отказ в MapRepoErr.
-		return fail(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
+		return failTraced(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
 	}
 	if err := uc.opsRepo.MarkDone(ctx, op.ID, stored); err != nil && uc.logger != nil {
 		uc.logger.ErrorContext(ctx, "interactive client Create: operation complete failed",
