@@ -135,6 +135,12 @@ const (
 	FamilyRevokedBySessionEnd FamilyRevocationReason = "session-ended"
 	// FamilyRevokedByClientRemoval — клиент снят.
 	FamilyRevokedByClientRemoval FamilyRevocationReason = "client-removed"
+	// FamilyRevokedByClientRevocation — клиент, которому выдан грант, сам
+	// попросил отзыва (RFC 7009). Написание — дословно причина фундамента
+	// `oauthceremony.RevocationClientRevoke`: адаптер порта отзыва сопрягает
+	// словари ПО ЗНАЧЕНИЮ (`ceremonyport.FamilyReasonOf`), и другое написание
+	// оставило бы причину без слова (kaname#406).
+	FamilyRevokedByClientRevocation FamilyRevocationReason = "client-revoke"
 )
 
 // FamilyRevocationReasons — перечень целиком, КОПИЕЙ: вызывающий не может
@@ -142,7 +148,7 @@ const (
 func FamilyRevocationReasons() []FamilyRevocationReason {
 	return []FamilyRevocationReason{
 		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedByLogout,
-		FamilyRevokedBySessionEnd, FamilyRevokedByClientRemoval,
+		FamilyRevokedBySessionEnd, FamilyRevokedByClientRemoval, FamilyRevokedByClientRevocation,
 	}
 }
 
