@@ -284,10 +284,13 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4. Audit emit success. Log-and-continue on failure (mirrors
 	// token_hook.authn.token.issued): a failing/backpressured audit sink must
 	// not be invisible — swallowing the error silently drops the authn audit
-	// record with zero operator signal (OWASP A09 / CWE-778).
+	// record with zero operator signal (OWASP A09 / CWE-778). The provider
+	// renews only after this hook answers, so a record lost here belongs to a
+	// token that IS handed out; the assembly counts it (ObserveAuditDrops),
+	// including a write cut by the per-call limit, and this line names why.
 	if h.audit != nil {
 		if emitErr := h.audit.Emit(ctx, AuditEvent{
-			EventType:       "authn.refresh.issued",
+			EventType:       AuditRefreshIssued,
 			TenantAccountID: string(primary.AccountID),
 			Payload: map[string]any{
 				"subject":   payload.Subject,
@@ -298,7 +301,7 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		}); emitErr != nil {
 			h.logger.Warn("refresh_hook: audit emit failed",
-				"event_type", "authn.refresh.issued", "err", emitErr)
+				"event_type", AuditRefreshIssued, "err", emitErr)
 		}
 	}
 
@@ -344,9 +347,10 @@ func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHoo
 		return
 	}
 	// Log-and-continue on emit failure: a dropped "authn.refresh.denied" record
-	// must be observable (OWASP A09 / CWE-778), not silently swallowed.
+	// must be observable (OWASP A09 / CWE-778), not silently swallowed — the
+	// assembly counts it (ObserveAuditDrops) and this line names why.
 	if emitErr := h.audit.Emit(ctx, AuditEvent{
-		EventType: "authn.refresh.denied",
+		EventType: AuditRefreshDenied,
 		Payload: map[string]any{
 			"subject":   p.Subject,
 			"reason":    reason,
@@ -354,6 +358,6 @@ func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHoo
 		},
 	}); emitErr != nil {
 		h.logger.Warn("refresh_hook: audit emit failed",
-			"event_type", "authn.refresh.denied", "err", emitErr)
+			"event_type", AuditRefreshDenied, "err", emitErr)
 	}
 }

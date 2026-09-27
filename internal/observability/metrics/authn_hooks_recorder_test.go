@@ -89,3 +89,46 @@ func TestAuthnHooksRecorder_SecondWiringDoesNotKillTheProcess(t *testing.T) {
 	second := reg.AuthnHooksRecorder(hookRoutesForTest, hookOutcomesForTest)
 	require.Same(t, first, second, "второй вызов завёл ВТОРОГО приёмника")
 }
+
+func auditDropCell(t *testing.T, r *Registry, eventType string) (value float64, present bool) {
+	t.Helper()
+	return labelledCounter(t, r, AuthnHookAuditDropsMetric, map[string]string{"event_type": eventType})
+}
+
+var hookAuditEventTypesForTest = []string{
+	"authn.token.issued", "authn.token.denied", "authn.refresh.issued", "authn.refresh.denied",
+}
+
+// TestAuthnHookAuditDropsRecorder_SeedsEveryCellAndMovesOnlyOnTheEvent — клетка
+// каждого вида есть нулём до первой потери, и двигается только своя (kaname#389).
+func TestAuthnHookAuditDropsRecorder_SeedsEveryCellAndMovesOnlyOnTheEvent(t *testing.T) {
+	reg := NewRegistry()
+	rec := reg.AuthnHookAuditDropsRecorder(hookAuditEventTypesForTest)
+
+	for _, e := range hookAuditEventTypesForTest {
+		value, present := auditDropCell(t, reg, e)
+		require.Truef(t, present, "клетки %s{event_type=%q} нет до первой потери — «потерь не было» невыразимо",
+			AuthnHookAuditDropsMetric, e)
+		require.Zerof(t, value, "клетка %s{event_type=%q} заведена не нулём", AuthnHookAuditDropsMetric, e)
+	}
+
+	rec.AuditDropped("authn.token.issued")
+
+	for _, e := range hookAuditEventTypesForTest {
+		value, _ := auditDropCell(t, reg, e)
+		want := 0.0
+		if e == "authn.token.issued" {
+			want = 1
+		}
+		require.Equalf(t, want, value, "клетка %s двинулась не по своему событию", e)
+	}
+}
+
+// TestAuthnHookAuditDropsRecorder_EmptySetIsRefusedAndWiringIsSingle — пустой
+// набор отвергнут, повторная провязка отдаёт того же приёмника.
+func TestAuthnHookAuditDropsRecorder_EmptySetIsRefusedAndWiringIsSingle(t *testing.T) {
+	require.Panics(t, func() { NewRegistry().AuthnHookAuditDropsRecorder(nil) }, "пустой перечень видов принят молча")
+	reg := NewRegistry()
+	require.Same(t, reg.AuthnHookAuditDropsRecorder(hookAuditEventTypesForTest),
+		reg.AuthnHookAuditDropsRecorder(hookAuditEventTypesForTest), "второй вызов завёл ВТОРОГО приёмника")
+}
