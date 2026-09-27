@@ -24,6 +24,13 @@ type fakeOps struct {
 	doneMarked bool
 	errMarked  bool
 	op         operations.Operation
+	// doneResp — тело, ПЕРЕДАННОЕ в MarkDone: то, что ложится в строку
+	// операции. Проба секрета судит именно его, а не ответ вызывающему.
+	doneResp *anypb.Any
+	// errStatus — статус, переданный в MarkError.
+	errStatus *status.Status
+	// markDoneErr — отказ терминальной записи, когда проба его подаёт.
+	markDoneErr error
 }
 
 func (f *fakeOps) Create(_ context.Context, op operations.Operation) error {
@@ -47,13 +54,18 @@ func (f *fakeOps) List(_ context.Context, _ operations.ListFilter) ([]operations
 	return nil, "", nil
 }
 
-func (f *fakeOps) MarkDone(_ context.Context, _ string, _ *anypb.Any) error {
+func (f *fakeOps) MarkDone(_ context.Context, _ string, resp *anypb.Any) error {
+	if f.markDoneErr != nil {
+		return f.markDoneErr
+	}
 	f.doneMarked = true
+	f.doneResp = resp
 	return nil
 }
 
-func (f *fakeOps) MarkError(_ context.Context, _ string, _ *status.Status) error {
+func (f *fakeOps) MarkError(_ context.Context, _ string, st *status.Status) error {
 	f.errMarked = true
+	f.errStatus = st
 	return nil
 }
 

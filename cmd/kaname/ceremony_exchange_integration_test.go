@@ -116,16 +116,16 @@ func TestLINEA1_12_ConfidentialClientAuthenticationRequired(t *testing.T) {
 	w := newCeremonyWorld(t, "LINE-A-1-12", "1")
 	w.requireGrant(grantAuthorizationCode)
 	w.requireAuthorizeEndpoint()
-	w.giveSecret(w.ic1)
+	w.requireSecret(w.ic1)
 
 	ic := w.issueCode(w.ic1, lineA1R)
 	unknown := exchangeForm(ic)
 	unknown.Set("code", randomToken(32))
 	cases := map[string]*httptest.ResponseRecorder{
 		"без аутентификации клиента": w.post(clienttokenhttp.TokenPath, exchangeForm(ic), nil),
-		"неверный секрет":            w.post(clienttokenhttp.TokenPath, exchangeForm(ic), []string{string(w.ic1.rec.ID), "not-the-secret"}),
+		"неверный секрет":            w.post(clienttokenhttp.TokenPath, exchangeForm(ic), []string{w.ic1.rec.ClientID, "not-the-secret"}),
 		"неизвестный код и неверный секрет": w.post(clienttokenhttp.TokenPath, unknown,
-			[]string{string(w.ic1.rec.ID), "not-the-secret"}),
+			[]string{w.ic1.rec.ClientID, "not-the-secret"}),
 	}
 	for what, rec := range cases {
 		if rec.Code != http.StatusUnauthorized {
@@ -203,7 +203,7 @@ func TestLINEA1_16_CodePresentedByAnotherClientRefused(t *testing.T) {
 
 	ic := w.issueCode(w.ic1, lineA1R)
 	form := exchangeForm(ic)
-	form.Set("client_id", string(w.ic2.rec.ID))
+	form.Set("client_id", w.ic2.rec.ClientID)
 	requireInvalidGrant(t, w.id, "код чужого клиента", w.exchangeAs(w.ic2, form))
 
 	w.redeem(w.issueCode(w.ic1, lineA1R))
@@ -212,7 +212,7 @@ func TestLINEA1_16_CodePresentedByAnotherClientRefused(t *testing.T) {
 // raceExchange — n одновременных обменов форм клиентом c; ответы по порядку.
 func (w *ceremonyWorld) raceExchange(c *ceremonyClient, forms []url.Values) []*httptest.ResponseRecorder {
 	w.t.Helper()
-	w.giveSecret(c)
+	w.requireSecret(c)
 	out := make([]*httptest.ResponseRecorder, len(forms))
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -221,7 +221,7 @@ func (w *ceremonyWorld) raceExchange(c *ceremonyClient, forms []url.Values) []*h
 		go func(i int, f url.Values) {
 			defer wg.Done()
 			<-start
-			out[i] = w.post(clienttokenhttp.TokenPath, f, []string{string(c.rec.ID), c.secret})
+			out[i] = w.post(clienttokenhttp.TokenPath, f, []string{c.rec.ClientID, c.secret})
 		}(i, f)
 	}
 	close(start)
@@ -281,8 +281,8 @@ func TestLINEA1_24_RefusalsAfterCodeIsNamedAreByteIdentical(t *testing.T) {
 	w := newCeremonyWorld(t, "LINE-A-1-24", "1")
 	w.requireGrant(grantAuthorizationCode)
 	w.requireAuthorizeEndpoint()
-	w.giveSecret(w.ic1)
-	w.giveSecret(w.ic2)
+	w.requireSecret(w.ic1)
+	w.requireSecret(w.ic2)
 
 	// Истёкший код заводится первым и один: перенос срока задевает все записи.
 	expired := w.issueCode(w.ic1, lineA1R)
@@ -299,7 +299,7 @@ func TestLINEA1_24_RefusalsAfterCodeIsNamedAreByteIdentical(t *testing.T) {
 	other, _ := pkcePair()
 	verifierForm.Set("code_verifier", other)
 	clientForm := exchangeForm(clientCode)
-	clientForm.Set("client_id", string(w.ic2.rec.ID))
+	clientForm.Set("client_id", w.ic2.rec.ClientID)
 	redirectForm := exchangeForm(redirectCode)
 	redirectForm.Set("redirect_uri", lineA1R2)
 
