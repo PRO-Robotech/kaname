@@ -9,6 +9,14 @@ package pg
 // `20260920175117_authorization_code_is_our_record.sql`,
 // `20260920175118_interactive_client_carries_its_secret_verifier.sql`).
 //
+// Обмен кода и оборот токена обновления исполняет движок фундамента над
+// хранилищами церемонии (`oauth_ceremony_vaults.go`, kaname#423). Своих
+// композиций обмена и оборота у этого файла НЕТ (kaname#434): здесь лежат
+// операторы, которые хранилища исполняют, — погашение (`exchangeCodeSQL`),
+// оборот (`rotateRefreshSQL`), замки семейства, заведение токена
+// (`insertRefreshSQL`), разбор нуля строк, — и писатели без копий у хранилищ:
+// выдача кода, отзыв семейства, запись выпуска, проверочное значение клиента.
+//
 // # ОДНА ИНСТРУКЦИЯ — ЭТО ИНВАРИАНТ, А НЕ АККУРАТНОСТЬ
 //
 // «Жив ли код» и «погасить его» здесь НЕДЕЛИМЫ, и неделимыми их делает сам
@@ -22,17 +30,22 @@ package pg
 // реализации зелен целиком. Отличает её только проба с конкурирующими
 // транзакциями — `oauth_ceremony_race_integration_test.go`.
 //
-// # НОЛЬ ЗАТРОНУТЫХ СТРОК — ЭТО ТРИ РАЗНЫХ ИСХОДА, А НЕ ОДИН
+// # «НЕ ОБМЕНЯЛОСЬ» — НЕ ОДИН ИСХОД
 //
-// Ноль строк означает, что условие не выполнилось; ПОЧЕМУ — говорит разбор,
-// идущий ПОСЛЕ отката транзакции выдачи:
+// Порт фундамента различает исходы предъявления, и различение стоит на строке,
+// а не на тексте отказа:
 //
-//   - строки нет вовсе → `domain.ErrAuthorizationCodeUnknown`;
-//   - строка есть и НЕАКТИВНА → ПОВТОР. Кодом уже воспользовались, второй
+//   - строки нет вовсе либо она жива, но срок вышел → «записи нет»
+//     (`oauthceremony.ErrGrantNotFound` у выборки хранилищ). Отзыва не влечёт:
+//     истечение — не признак похищения;
+//   - строка ПОГАШЕНА (обёрнута) → ПОВТОР. Кодом уже воспользовались, второй
 //     предъявитель — либо похититель, либо тот, у кого похитили, и различить их
-//     нельзя. Поэтому отзывается ВСЁ семейство (RFC 6819 §5.2.1.1);
-//   - строка активна, но срок вышел → истечение. Отзыва не влечёт: это не
-//     признак похищения.
+//     нельзя. Поэтому движок отзывает ВСЁ семейство (RFC 6819 §5.2.1.1):
+//     выборка отдаёт запись вместе с признаком погашения, а ноль строк
+//     решающей записи после живой выборки — одновременный повтор;
+//   - сессия строки отрезана отсечкой субъекта → тоже «записи нет», на
+//     решающей записи — с причиной `domain.ErrCeremonySubjectCutOff` в цепочке.
+//     Это не повтор, и семейство по нему не отзывается.
 //
 // Ради этого различения использованный код и отротированный токен ПОМЕЧАЮТСЯ
 // неактивными и ЖИВУТ до истечения. Удалить строку значило бы сделать повтор
@@ -60,10 +73,10 @@ package pg
 //     получает 23503 и транзакция выдачи откатывается; успела вставка — каскад
 //     проставляет свежей строке признак. Гасить `active` руками не может НИКТО:
 //     запись в неё отвергается кодом 428C9;
-//   - ПОРЯДОК ЗАМКОВ «родитель → ребёнок» на обоих путях: обмен и ротация берут
-//     семейство первыми (`lockFamilyOfCodeSQL`, `lockFamilyOfRefreshSQL`), иначе
-//     встречный порядок с каскадом отзыва даёт цикл, жертвой которого движок
-//     выбирал сам отзыв;
+//   - ПОРЯДОК ЗАМКОВ «родитель → ребёнок» на обоих путях: погашение кода и оборот
+//     токена обновления берут семейство первыми (`lockFamilyOfCodeSQL`,
+//     `lockFamilyOfRefreshSQL`), иначе встречный порядок с каскадом отзыва даёт
+//     цикл, жертвой которого движок выбирал сам отзыв;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
 //   - форма свёрток, испытания PKCE и словари причин — ограничения схемы.
 
@@ -116,24 +129,6 @@ type NewAuthorizationCode struct {
 	// TTL — срок жизни кода. Приходит ВХОДОМ, а не константой этого файла: у
 	// величины нет владельца в слое доступа, и копия разошлась бы с политикой.
 	TTL time.Duration
-}
-
-// CodeExchange — предъявление кода к обмену вместе со свёрткой обновляющего
-// токена, который встанет в семейство ПЕРВЫМ поколением.
-//
-// Свёртка преемника приходит ВХОДОМ, а не чеканится здесь: сам токен уходит
-// вызывающему, и слой доступа его не видит — он видит только свёртку.
-type CodeExchange struct {
-	CodeDigest         string
-	RefreshTokenDigest string
-	RefreshTokenTTL    time.Duration
-}
-
-// RefreshRotation — предъявление обновляющего токена к ротации.
-type RefreshRotation struct {
-	PresentedDigest string
-	SuccessorDigest string
-	TTL             time.Duration
 }
 
 // ── Порядок замков заведения ────────────────────────────────────────────────
@@ -412,9 +407,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 // # ЗАЧЕМ ОН СТОИТ ЗДЕСЬ И ПОЧЕМУ ЕГО НЕЛЬЗЯ СНЕСТИ
 //
 // Отзыв семейства ходит от РОДИТЕЛЯ К ДЕТЯМ: он берёт ключевой замок на строке
-// семейства, а `ON UPDATE CASCADE` затем идёт за замками всех его детей. Обмен
-// без этого оператора шёл НАВСТРЕЧУ — условный `UPDATE` брал замок на РЕБЁНКЕ,
-// и лишь вставка преемника бралась за семейство. Два встречных порядка дают
+// семейства, а `ON UPDATE CASCADE` затем идёт за замками всех его детей.
+// Погашение без этого оператора шло НАВСТРЕЧУ — условный `UPDATE` брал замок на
+// РЕБЁНКЕ, и лишь вставка первого поколения бралась за семейство. Два встречных порядка дают
 // цикл, и движок снимал одного из двоих.
 //
 // Снимал он ОТЗЫВ: 6 прогонов из 6 на postgres:16-alpine жертвой становилась
@@ -424,7 +419,8 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 //
 // Поэтому замок на семействе берётся ПЕРВЫМ, и оба порядка становятся
 // «родитель → ребёнок». Повтор лечил бы симптом и оставлял бы контроль
-// зависимым от поведения клиента.
+// зависимым от поведения клиента. Держит `TestOAuthExchangeTakesTheFamilyBeforeTheChild`
+// на прод-пути хранилищ.
 //
 // # ЭТО НЕ НАРУШАЕТ ban #10
 //
@@ -470,17 +466,18 @@ RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
 //
 // # ПОЧЕМУ READ COMMITTED
 //
-// Одноинструкционный обмен держит строчный замок, и проигравший, СТОЯВШИЙ на
-// строке победителя, после фиксации победителя перепроверяет условие `WHERE` по
-// НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
-// разбирает `refuseCode`, перечитывая помеченную строку, и исход проигравшего —
-// ПОВТОР (LINE-A-1-13, LINE-A-1-17). Перепроверку по новой версии делает ТОЛЬКО
-// этот уровень: при REPEATABLE READ и SERIALIZABLE движок ту же строку не
-// перепроверяет, а отказывает транзакции целиком (40001), и разбору нуля строк
-// вход не достаётся вовсе.
+// Одноинструкционное погашение держит строчный замок, и проигравший, СТОЯВШИЙ
+// на строке победителя, после фиксации победителя перепроверяет условие `WHERE`
+// по НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
+// разбирает `adjudicatePresented` в той же транзакции и отдаёт порту фундамента
+// нулём, а движок читает его одновременным ПОВТОРОМ (LINE-A-1-13, LINE-A-1-17).
+// Перепроверку по новой версии делает ТОЛЬКО этот уровень: при REPEATABLE READ
+// и SERIALIZABLE движок ту же строку не перепроверяет, а отказывает транзакции
+// целиком (40001), и разбору нуля строк вход не достаётся вовсе.
 //
-// Устройство то же у остальных писателей порта, и потому решение одно на всех:
-// ротация, отзыв семейства (вторая отметка — пустая, а не отказ), запись
+// Устройство то же у остальных писателей, и потому решение одно на всех:
+// оборот токена обновления (единица работы хранилищ открывается этим же
+// уровнем), отзыв семейства (вторая отметка — пустая, а не отказ), запись
 // выпуска токена доступа (заведение, стоявшее на отзыве своего семейства,
 // перепроверяет ключ и получает «семейство не живо», kaname#319),
 // проверочное значение клиента. Исход каждого под конкуренцией — перепроверка
@@ -549,67 +546,10 @@ func (r *OAuthCeremonyRepo) execWriter(ctx context.Context, sql string, args ...
 	return tag, nil
 }
 
-// ExchangeAuthorizationCode обменивает код на первое поколение обновляющего
-// токена семейства.
-//
-// Транзакция — на названном уровне (`ceremonyWriterTx()`): исход проигравшего
-// одновременного обмена решает именно он.
-//
-// Гашение и выдача идут ОДНОЙ транзакцией: ноль затронутых строк означает
-// откат ВСЕЙ транзакции выдачи — токена в семействе не появляется. Разбор
-// причины идёт ПОСЛЕ отката, по пулу: откаченная транзакция читать уже не
-// вправе, а держать её открытой ради разбора значило бы держать замок на время
-// разбора.
-func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in CodeExchange) (domain.RedeemedCode, error) {
-	if err := domain.ValidateCeremonyDigest("authorization_code.code_digest", in.CodeDigest); err != nil {
-		return domain.RedeemedCode{}, err
-	}
-	if err := domain.ValidateCeremonyDigest("refresh_token.token_digest", in.RefreshTokenDigest); err != nil {
-		return domain.RedeemedCode{}, err
-	}
-	if in.RefreshTokenTTL <= 0 {
-		return domain.RedeemedCode{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
-	}
-
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ. Порядок замков, а не проверка: см.
-	// `lockFamilyOfCodeSQL`. Ноль строк здесь законен и ничего не решает.
-	if _, err = tx.Exec(ctx, lockFamilyOfCodeSQL, in.CodeDigest); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "TokenFamily", "")
-	}
-
-	var out domain.RedeemedCode
-	err = tx.QueryRow(ctx, exchangeCodeSQL, in.CodeDigest).Scan(
-		&out.Context.FamilyID, &out.Context.ClientID, &out.Context.UserID,
-		&out.Context.SessionID, &out.Context.Scope,
-		&out.RedirectURI, &out.CodeChallenge, &out.CodeChallengeMethod)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		// Транзакция выдачи откачена ЗДЕСЬ, до разбора: разбор идёт по пулу.
-		_ = tx.Rollback(ctx)
-		return domain.RedeemedCode{}, r.refuseCode(ctx, in.CodeDigest)
-	}
-	if err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
-	}
-
-	if err = insertRefreshTokenTx(ctx, tx, in.RefreshTokenDigest, out.Context, 0, in.RefreshTokenTTL); err != nil {
-		return domain.RedeemedCode{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", out.Context.FamilyID)
-	}
-	return out, nil
-}
-
 // insertRefreshSQL — заведение обновляющего токена в семейство: ОДИН
-// литерал на все пути, которыми токен ложится в семейство, — первое поколение
-// обмена кода и преемник ротации, в том числе в единице работы церемонии
-// фундамента (`oauth_ceremony_vaults.go`). Согласие контекста с семейством
+// литерал на оба пути, которыми токен ложится в семейство, — первое поколение
+// обмена кода и преемник оборота, оба в единице работы церемонии фундамента
+// (`oauth_ceremony_vaults.go`). Согласие контекста с семейством
 // держит составной ключ `refresh_tokens_family_context_fk`, живость семейства —
 // `refresh_tokens_family_live_fk`: писатель их не проверяет.
 const insertRefreshSQL = `
@@ -638,9 +578,9 @@ func insertRefreshTokenTx(ctx context.Context, tx pgx.Tx, digest string, c domai
 // строк после живой выборки — одновременный повтор (контракт
 // `oauthceremony.AuthorizationCodeVault`).
 //
-// Первого поколения обновляющего токена здесь нет, и это не сокращение
-// `ExchangeAuthorizationCode`: движок фундамента гасит код при ПРЕДЪЯВЛЕНИИ, до
-// сверки доказательства, а пару кладёт позже, своей единицей работы.
+// Первого поколения обновляющего токена здесь нет, и это не сокращение: движок
+// фундамента гасит код при ПРЕДЪЯВЛЕНИИ, до сверки доказательства, а пару
+// кладёт позже, своей единицей работы (`CeremonyVaults.StoreRefreshToken`).
 func (r *OAuthCeremonyRepo) ConsumeAuthorizationCode(ctx context.Context, digest string) (int64, error) {
 	if err := domain.ValidateCeremonyDigest("authorization_code.code_digest", digest); err != nil {
 		return 0, err
@@ -698,9 +638,16 @@ func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error)
 	return 0, nil
 }
 
-// presentedRefusal — чем предъявленная строка не прошла условную запись обмена
-// либо оборота. Корзины «прочее» нет: четвёртая причина на этой схеме —
-// расхождение условия и разбора, и она отдельный громкий исход.
+// presentedRefusal — чем предъявленная строка не прошла условную запись
+// погашения либо оборота. Корзины «прочее» нет: пятая причина на этой схеме —
+// расхождение условия и разбора, и она названа своим значением.
+//
+// Вызывающие различают ОДНУ причину — отсечку (`consumeCodeTx`,
+// `refuseCutOffRefresh`): она отказ «записи нет», а не ноль строк. Прочие
+// уходят порту фундамента нулём строк, и движок читает его одновременным
+// повтором. Разбор нужен и им: без него неактивная строка отрезанной сессии
+// читалась бы отсечкой, и повтор остался бы без отзыва (порядок —
+// `adjudicatePresented`).
 type presentedRefusal int
 
 const (
@@ -712,7 +659,8 @@ const (
 )
 
 // codeRefusalSQL, refreshRefusalSQL — разбор нуля строк условной записи: те же
-// признаки, что в её условии, и тот же предикат отсечки.
+// признаки, что в её условии, и тот же предикат отсечки. Читает их транзакция
+// решающей записи: второй связи из пула разбор не берёт.
 const (
 	codeRefusalSQL = `
 SELECT c.active, ` + codeSessionCutOffSQL + `, c.expires_at <= now(), c.family_id
@@ -748,62 +696,22 @@ func adjudicatePresented(ctx context.Context, q rowQuerier, sql, digest, entity 
 	return presentedDiverged, familyID, nil
 }
 
-// refuseCode называет ПРИЧИНУ, по которой условие обмена не выполнилось, и —
-// если это ПОВТОР — отзывает всё семейство.
-//
-// Корзины «прочее» у разбора нет, и исходов РОВНО ЧЕТЫРЕ: строка либо
-// отсутствует, либо неактивна, либо её сессия отрезана отсечкой субъекта, либо
-// истекла (`adjudicatePresented`). Пятого на сегодняшней схеме не существует, и
-// появление его означало бы, что условие обмена и этот разбор разошлись —
-// поэтому он отдельный ГРОМКИЙ отказ, а не тихое «повтор». Отсечка — не
-// повтор: семейство по ней не отзывается.
-//
-// ОТОЗВАННОЕ СЕМЕЙСТВО ОТДЕЛЬНОЙ ВЕТВЬЮ НЕ СТОИТ, И ЭТО НЕ УПУЩЕНИЕ: признак
-// активности строки ПРОИЗВОДЕН от живости семейства, поэтому отозванное
-// семейство наблюдается здесь как `!active` и разбирается первой же ветвью.
-// Ветвь, стоявшая ниже неё, не получала управления ни при каком входе — а
-// закрытый `switch` с ветвью, которой не достаётся вход, читается следующим как
-// живая. Семейство больше не опрашивается вовсе: соединение с ним отвечало на
-// вопрос, ответ на который теперь несёт сама строка.
-func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error {
-	why, familyID, err := adjudicatePresented(ctx, r.pool, codeRefusalSQL, digest, "AuthorizationCode")
-	if err != nil {
-		return err
-	}
-	switch why {
-	case presentedUnknown:
-		return fmt.Errorf("%w: digest not found", domain.ErrAuthorizationCodeUnknown)
-	case presentedReplay:
-		// ПОВТОР. Отзыв семейства — следствие, неотделимое от решения: вернуть
-		// «повтор», не отозвав, значило бы объявить похищение и ничего по нему
-		// не сделать.
-		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
-			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
-		}
-		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
-	case presentedCutOff:
-		return fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
-	case presentedExpired:
-		return fmt.Errorf("%w: family %s", domain.ErrAuthorizationCodeExpired, familyID)
-	default:
-		return fmt.Errorf("authorization code %s: exchange affected no row while the row is live "+
-			"and unexpired — the exchange condition and this adjudication have diverged", familyID)
-	}
-}
-
 // lockFamilyOfRefreshSQL — ЗАМОК, А НЕ ПРОВЕРКА, и по той же причине, что
-// `lockFamilyOfCodeSQL`: ротация обязана брать семейство ПЕРВОЙ, иначе её
-// порядок замков встречен порядку отзыва и жертвой цикла становится отзыв.
+// `lockFamilyOfCodeSQL`: оборот (`CeremonyVaults.RotateRefreshToken`) обязан
+// брать семейство ПЕРВЫМ, иначе его порядок замков встречен порядку отзыва и
+// жертвой цикла становится отзыв. Держит
+// `TestOAuthRotationTakesTheFamilyBeforeTheChild`.
 const lockFamilyOfRefreshSQL = `
 SELECT 1 FROM kaname.token_families
  WHERE id = (SELECT family_id FROM kaname.refresh_tokens WHERE token_digest = $1)
    FOR KEY SHARE`
 
-// rotateRefreshSQL — ТОТ ЖЕ механизм, что у обмена кода: условие на прежнее
-// состояние и возврат затронутой строки. Отсечка субъекта сессии токена — в
-// том же операторе (`refreshSessionCutOffSQL`): замок оборота строку токена
-// держит, а строку отсечки нет, и отсечка, зафиксированная между замком и
-// оборотом, отказывает обороту здесь.
+// rotateRefreshSQL — ТОТ ЖЕ механизм, что у погашения кода: условие на
+// прежнее состояние и возврат затронутой строки. Исполняет его второй шаг
+// оборота хранилищ (`CeremonyVaults.StoreRefreshToken`). Отсечка субъекта
+// сессии токена — в том же операторе (`refreshSessionCutOffSQL`): замок оборота
+// строку токена держит, а строку отсечки нет, и отсечка, зафиксированная между
+// замком и оборотом, отказывает обороту здесь.
 const rotateRefreshSQL = `
 UPDATE kaname.refresh_tokens AS t
    SET deactivated_at = now(), deactivated_reason = 'rotated',
@@ -813,83 +721,6 @@ UPDATE kaname.refresh_tokens AS t
    AND t.expires_at > now()
    AND NOT ` + refreshSessionCutOffSQL + `
 RETURNING t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.generation`
-
-// RotateRefreshToken ротирует обновляющий токен: предъявленный помечается
-// отротированным, преемник встаёт следующим поколением — ОДНОЙ транзакцией.
-func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRotation) (domain.RotatedRefreshToken, error) {
-	if err := domain.ValidateCeremonyDigest("refresh_token.token_digest", in.PresentedDigest); err != nil {
-		return domain.RotatedRefreshToken{}, err
-	}
-	if err := domain.ValidateCeremonyDigest("refresh_token.successor_digest", in.SuccessorDigest); err != nil {
-		return domain.RotatedRefreshToken{}, err
-	}
-	if in.PresentedDigest == in.SuccessorDigest {
-		return domain.RotatedRefreshToken{}, fmt.Errorf(
-			"Illegal argument refresh_token.successor_digest: must differ from the presented one")
-	}
-	if in.TTL <= 0 {
-		return domain.RotatedRefreshToken{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
-	}
-
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ, по той же причине, что у обмена.
-	if _, err = tx.Exec(ctx, lockFamilyOfRefreshSQL, in.PresentedDigest); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "TokenFamily", "")
-	}
-
-	var out domain.RotatedRefreshToken
-	err = tx.QueryRow(ctx, rotateRefreshSQL, in.PresentedDigest, in.SuccessorDigest).Scan(
-		&out.Context.FamilyID, &out.Context.ClientID, &out.Context.UserID,
-		&out.Context.SessionID, &out.Context.Scope, &out.Generation)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		_ = tx.Rollback(ctx)
-		return domain.RotatedRefreshToken{}, r.refuseRefresh(ctx, in.PresentedDigest)
-	}
-	if err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
-	}
-
-	if err = insertRefreshTokenTx(ctx, tx, in.SuccessorDigest, out.Context, out.Generation+1, in.TTL); err != nil {
-		return domain.RotatedRefreshToken{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
-	}
-	out.Generation++
-	return out, nil
-}
-
-// refuseRefresh — разбор нуля затронутых строк ротации, тот же по устройству,
-// что и у обмена кода: исходов РОВНО ЧЕТЫРЕ (`adjudicatePresented`), и
-// отозванное семейство приходит сюда как `!active` — признак производен от его
-// живости.
-func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) error {
-	why, familyID, err := adjudicatePresented(ctx, r.pool, refreshRefusalSQL, digest, "RefreshToken")
-	if err != nil {
-		return err
-	}
-	switch why {
-	case presentedUnknown:
-		return fmt.Errorf("%w: digest not found", domain.ErrRefreshTokenUnknown)
-	case presentedReplay:
-		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
-			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
-		}
-		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
-	case presentedCutOff:
-		return fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
-	case presentedExpired:
-		return fmt.Errorf("%w: family %s", domain.ErrRefreshTokenExpired, familyID)
-	default:
-		return fmt.Errorf("refresh token of family %s: rotation affected no row while the row is "+
-			"live and unexpired — the rotation condition and this adjudication have diverged", familyID)
-	}
-}
 
 // RevokeFamily отзывает семейство целиком ОДНОЙ транзакцией: отметка на
 // семействе и снятие всего живого, что по нему выдано, — включая записи

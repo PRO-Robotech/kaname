@@ -122,10 +122,8 @@ func TestCeremonyVaults_RefreshRotationReadsTheSubjectCutoff(t *testing.T) {
 			code := ceremonyDigest(0x7f0201 + i)
 			storeVaultCode(t, ctx, v, sc, code)
 			rt := ceremonyDigest(0x7f0301 + i)
-			_, err := kanamepg.NewOAuthCeremonyRepo(pool).ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-				CodeDigest: code, RefreshTokenDigest: rt, RefreshTokenTTL: time.Hour,
-			})
-			require.NoError(t, err, "посев живого токена обновления")
+			seeded, err := newCeremonyWalk(t, pool).exchange(ctx, code, rt)
+			requireWalkIssued(t, seeded, err, "посев живого токена обновления")
 			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
 
 			_, err = v.FetchRefreshToken(ctx, rt)
