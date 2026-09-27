@@ -883,8 +883,18 @@ CASES.append(Case(
 # на объекте `iam_role`; у типа `iam_role` в модели нет ни каскада от кластера, ни
 # wildcard — только прямая выдача и `super_admin: admin from account`. У системной роли
 # аккаунта нет вовсе (`account_id` пуст), значит вторая ветка недостижима, а прямой выдачи
-# у `jwtAccountAdminA` нет. Отказ терминальный и выносится краем: сервис не набирается,
-# и его собственный страж «System role is read-only» на этом пути НЕ исполняется.
+# у `jwtAccountAdminA` нет. Отказ терминальный и выносится рубежом прав самой службы
+# (`internal/authzguard`) ДО обработчика, и её страж «System role is read-only» на этом
+# пути НЕ исполняется.
+#
+# ДЕЙСТВИЕ ОТКАЗ НАЗЫВАЕТ В ДЕТАЛЯХ, А НЕ В ТЕКСТЕ. Текст отказа службы дословный
+# «permission denied» на каждом отказе (`internal/authzguard/deny_details.go`: различимый
+# текст и есть оракул существования), а действие и ярус несёт `ErrorInfo.metadata`. Здесь
+# стояло вхождение `iam.roles.update` в `message` — утверждение, написанное против края, и
+# на собственном фронте оно падало на верном ответе (job 108572398281, сборка 435). Пин
+# теперь общий дискриминатор `assert_scoped_authz_deny`: действие плюс ярус `resource`,
+# потому что строка каталога `RoleService/Update` спрашивает `v_update` на объекте
+# `iam_role`, а `scopeTier()` сводит такой объект в ярус `resource`.
 #
 # Сам страж покрыт отдельно и правильно — `IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG` идёт под
 # `jwtBootstrap`, действительно доходит до сервиса и пинит точный текст. Прежний заголовок
@@ -904,10 +914,7 @@ CASES.append(Case(
             body={"description": "trying to update system role", "updateMask": "description"},
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(403),
-                *assert_grpc_code(7, "PERMISSION_DENIED"),
-                "pm.test('отказ называет действие', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                *assert_scoped_authz_deny("iam.roles.update", "resource"),
                 # Отказ не должен раскрывать, что роль системная: это свойство объекта,
                 # а вызывающему нечего о нём знать без доступа.
                 "pm.test('отказ не раскрывает свойства роли', () => "
@@ -1542,6 +1549,15 @@ CASES.append(Case(
 # (feed-gate reversed — iam.role/user/serviceAccount/group/accessBinding are
 # label-selectable, materialized iam-direct same-DB from own-table labels).
 # verifies: a matchLabels rule on an iam content type (iam.role) is accepted on Create.
+#
+# ГЛАГОЛ — ЖИВОЙ ГЛАГОЛ ТИПА. Здесь стоял `get`: его сняли с `iam.role` вместе с
+# отношением без читателя (kacho#1922, миграция
+# 20260914120000_role_read_relation_leaves_the_catalog), и операция отвечала
+# «verbs: get is not a live verb of resource role» (code 9, REFERENCE_MISSING, job
+# 108572398281, сборка 435). Предмет кейса — приём matchLabels на типе iam, а не выбор
+# глагола; живые пообъектные глаголы типа — `list`, `update`, `delete`, и `list` —
+# тот, которым поимённо читается роль. Та же правка и та же причина — у близнеца
+# RBACLBL-IAMTYPE-ACCEPTED (`iam-rbac-rules-labels.py`), и на том же стенде он зелёный.
 CASES.append(Case(
     id="IAM-ROL-CR-RULES-FEEDGATE-IAMROLE-OK",
     title="Create custom role with matchLabels on iam content type (iam.role) → Operation succeeds (feed-gate reversed)",
@@ -1555,7 +1571,7 @@ CASES.append(Case(
             body={
                 "accountId": "{{accountAId}}",
                 "name": "feedgate_iamrole_{{runId}}",
-                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["get"],
+                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["list"],
                            "matchLabels": {"tier": "gold"}}],
             },
             auth="jwtAccountAdminA",

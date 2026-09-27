@@ -2550,12 +2550,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
-                  "pm.test('grpc code 7 (PERMISSION_DENIED)', () => {",
-                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
+                  "pm.test('403 PermissionDenied (code 7)', () => {",
+                  "  pm.expect(pm.response.code).to.eql(403);",
+                  "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
                   "});",
-                  "pm.test('отказ называет действие', () =>   pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                  "pm.test('deny is the scoped authz deny on iam.roles.update, not a permission-catalog miss', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.roles.update');",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
+                  "});",
                   "pm.test('отказ не раскрывает свойства роли', () =>   pm.expect((pm.response.json().message||'').toLowerCase()).to.not.contain('system role'));"
                 ]
               }
@@ -6579,7 +6586,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"feedgate_iamrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"role\"], \"verbs\": [\"get\"], \"matchLabels\": {\"tier\": \"gold\"}}]}",
+              "raw": "{\"accountId\": \"{{accountAId}}\", \"name\": \"feedgate_iamrole_{{runId}}\", \"rules\": [{\"module\": \"iam\", \"resources\": [\"role\"], \"verbs\": [\"list\"], \"matchLabels\": {\"tier\": \"gold\"}}]}",
               "options": {
                 "raw": {
                   "language": "json"
