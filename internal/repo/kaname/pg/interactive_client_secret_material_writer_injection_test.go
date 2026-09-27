@@ -233,6 +233,55 @@ var rotateMaterial = func(p pooler, material string) error {
 `},
 			wantFinding: "rotateMaterial @ verifier.go:3: второй писатель материала",
 		},
+		// ЗНАЧЕНИЕ var ПАКЕТА, НЕ ЛИТЕРАЛ ФУНКЦИИ (kaname#445, опыт B14
+		// проверяющего сборки 2 #435 — форма reconcile_adapter.go): SQL лежит
+		// в поле составного литерала, а функция читает его селектором. У
+		// объявления нет литерала функции, у функции — строкового значения SQL:
+		// прежний обход не судил объявление, а тело видело лишь имя переменной
+		// без значения — «писателей 1, находок 0».
+		{
+			name: "второй писатель: SQL в поле составного литерала var пакета (B14)",
+			extra: map[string]string{"verifier.go": `package pg
+
+type materialStatement struct{ q string }
+
+var materialStatements = map[string]materialStatement{
+	"rotate": {q: "UPDATE interactive_clients SET secret_verifier = $2 WHERE client_id = $1"},
+}
+
+func (r *OAuthCeremonyRepo) Rotate(clientID, material string) error {
+	return r.pool.Exec(materialStatements["rotate"].q, clientID, material)
+}
+`},
+			wantFinding: "materialStatements @ verifier.go:5: второй писатель материала",
+		},
+		{
+			name: "второй писатель: константа пакета в поле структуры var пакета",
+			extra: map[string]string{"verifier.go": `package pg
+
+const setMaterial = "UPDATE kaname.interactive_clients SET secret_verifier = $2"
+
+type materialStatement struct{ q string }
+
+var rotateStatement = materialStatement{q: setMaterial + " WHERE client_id = $1"}
+
+func (r *OAuthCeremonyRepo) Rotate(clientID, material string) error {
+	return r.pool.Exec(rotateStatement.q, clientID, material)
+}
+`},
+			wantFinding: "rotateStatement @ verifier.go:7: второй писатель материала",
+		},
+		{
+			name: "второй писатель: элемент среза в var пакета",
+			extra: map[string]string{"verifier.go": `package pg
+
+var materialSteps = []string{
+	"SELECT 1",
+	"INSERT INTO interactive_clients AS ic (id, secret_verifier) VALUES ($1, $2)",
+}
+`},
+			wantFinding: "materialSteps @ verifier.go:3: второй писатель материала",
+		},
 		{
 			name: "вставка без материала",
 			edit: func(s string) string {
@@ -322,6 +371,28 @@ func (r *OAuthCeremonyRepo) Lock(id string) error {
 `},
 		},
 		{
+			// Форма reconcile_adapter.go: составной литерал var пакета несёт
+			// фрагменты SQL чтения реестра — судится, и писателем не является.
+			name: "законный близнец: составной литерал var пакета с фрагментами чтения реестра",
+			extra: map[string]string{"scope.go": `package pg
+
+type scopeExpr struct{ table, parentExpr string }
+
+var scopeExprs = map[string]scopeExpr{
+	"iam.client": {table: "kaname.interactive_clients", parentExpr: "(SELECT secret_verifier FROM kaname.interactive_clients o WHERE o.id = $1)"},
+}
+`},
+		},
+		{
+			name: "законный близнец: снятие материала в поле составного литерала var пакета",
+			extra: map[string]string{"clear.go": `package pg
+
+type materialStatement struct{ q string }
+
+var clearStatement = materialStatement{q: "UPDATE interactive_clients SET secret_verifier = '' WHERE client_id = $1"}
+`},
+		},
+		{
 			name: "законный близнец: запись другой таблицы с той же колонкой",
 			extra: map[string]string{"other.go": `package pg
 
@@ -344,6 +415,33 @@ func (r *OAuthCeremonyRepo) Other(material string) error {
 			require.Contains(t, strings.Join(findings, "\n"), sc.wantFinding, "находка обязана называть координату")
 		})
 	}
+}
+
+// TestClientMaterialGate_CensusNamesPackageVarValues — перепись называет
+// значения var пакета числом и по видам (kaname#445, предикат 2): строковое
+// значение судится в месте чтения, литерал функции и составной литерал — в
+// объявлении. «Писателей 1» без этого числа не отличить от «объявлений var не
+// читали».
+func TestClientMaterialGate_CensusNamesPackageVarValues(t *testing.T) {
+	_, census, err := auditClientMaterialWriters(writeClientMaterialPackage(t, map[string]string{"vars.go": `package pg
+
+var plainSQL = "SELECT 1"
+
+var viaFunc = func(p pooler) error { return p.Exec(plainSQL) }
+
+type stmt struct{ q string }
+
+var viaComposite = stmt{q: "SELECT 2"}
+
+var viaCall, viaPair = newStmt("SELECT 3"), stmt{}
+
+func newStmt(q string) stmt { return stmt{q: q} }
+`}, nil))
+	require.NoError(t, err)
+	t.Log(census)
+	require.Contains(t, census.String(),
+		"значений var пакета 5 (строковых 1 · с литералом функции 1 · составных и прочих 3)",
+		"перепись обязана назвать каждое значение var пакета и то, где оно судится")
 }
 
 // TestClientMaterialGate_EmptyPackageIsNotClean — пустой обход не зелёный.
