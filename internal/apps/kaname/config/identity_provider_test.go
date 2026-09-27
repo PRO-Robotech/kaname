@@ -184,23 +184,25 @@ func TestF4d01_UnsetLaneDemandsNothingLaneScoped(t *testing.T) {
 		}
 	}
 
-	// Положительный контроль той же оси: объявленная посадка external те же
-	// требования предъявляет — то есть отсутствие их выше не оттого, что их
-	// вообще нет.
-	ext := cfg
-	ext.AuthN.IdentityProvider = config.IdentityProviderExternal
-	extErr := ext.Validate()
+	// Положительный контроль той же оси: строки полосы `external` на том же
+	// входе требование адреса предъявляют — то есть отсутствие их выше не
+	// оттого, что их вообще нет. Строки судятся напрямую: посадка снята
+	// фундаментом (PRO-Robotech/corelib#30), и проверка старта до них не
+	// доходит (#424).
+	extErr := externalLaneRefusal(cfg)
 	if extErr == nil || !strings.Contains(extErr.Error(), "hydra-admin-url") {
-		t.Fatalf("контроль: при external требование адреса обязано предъявляться, получено: %v", extErr)
+		t.Fatalf("контроль: строки полосы external требование адреса обязаны предъявлять, получено: %v", extErr)
 	}
 }
 
 // F4d-02 — значение вне словаря старт не проходит, и отката к «безопасному» не
-// происходит: негодное значение не читается ни как own, ни как external.
+// происходит: негодное значение не читается ни как own, ни как снятая external.
 func TestF4d02_ValueOutsideTheDictionaryRefusesTheStart(t *testing.T) {
 	// Соседняя раскладка регистра · лишний символ · пустая строка · омоглиф
 	// кириллицы (`о` в `own`) — четыре формы одного класса.
-	for _, raw := range []string{"External", "OWN", "own ", "externa", "", "оwn"} {
+	// Снятая посадка `external` (PRO-Robotech/corelib#30) — теперь того же
+	// класса: разбор её не производит.
+	for _, raw := range []string{"external", "External", "OWN", "own ", "externa", "", "оwn"} {
 		t.Run(strings.ReplaceAll(raw, " ", "_"), func(t *testing.T) {
 			got, err := config.ParseIdentityProvider(raw)
 			if err == nil {

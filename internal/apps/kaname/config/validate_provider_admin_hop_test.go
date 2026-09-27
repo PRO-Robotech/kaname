@@ -15,6 +15,15 @@
 // facade looked configured on every profile, including the ones that never
 // declared it — the exact shape the platform rule about not deriving a
 // security-relevant dependency address was written for.
+//
+// СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ СУДЯТСЯ НАПРЯМУЮ (задача #424). Посадка
+// `external` снята фундаментом (PRO-Robotech/corelib#30), и проверка старта
+// отвергает её раньше требований её полосы (Provider.Validate): через
+// Config.Validate эти стражи больше не достижимы. Строки таблицы, которые их
+// зовут, живут до снятия полосы целиком (#363), и пробы их содержимого ходят
+// в строки напрямую (externalLaneRefusal), а не через проверку старта —
+// иначе положительные случаи зеленели бы на полосе `own`, где эти стражи не
+// предъявляются вовсе.
 package config_test
 
 import (
@@ -40,9 +49,9 @@ func adminHopCfg(mode config.Mode, adminURL string) config.Config {
 func TestValidate_Production_RefusesTLSProviderAdminURLWithoutAnchor(t *testing.T) {
 	cfg := adminHopCfg(config.ModeProduction, "https://kacho-umbrella-hydra-admin.kacho.svc:4445")
 	cfg.AuthN.HydraAdminCAFile = ""
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal for an https hop with no pinned anchor")
+		t.Fatal("external-lane rows = nil, want refusal for an https hop with no pinned anchor")
 	}
 	if !strings.Contains(err.Error(), "hydra-admin-ca-file") {
 		t.Fatalf("the refusal must name the anchor setting, got: %q", err.Error())
@@ -54,9 +63,9 @@ func TestValidate_Production_RefusesTLSProviderAdminURLWithoutAnchor(t *testing.
 // reports itself configured while addressing a host nobody chose.
 func TestValidate_Production_RefusesDerivedProviderAdminURL(t *testing.T) {
 	cfg := adminHopCfg(config.ModeProduction, "")
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal when the provider-admin address is derived")
+		t.Fatal("external-lane rows = nil, want refusal when the provider-admin address is derived")
 	}
 	if !strings.Contains(err.Error(), "hydra-admin-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
@@ -68,9 +77,9 @@ func TestValidate_Production_RefusesDerivedProviderAdminURL(t *testing.T) {
 // nobody.
 func TestValidate_Production_RefusesPlaintextProviderAdminURL(t *testing.T) {
 	cfg := adminHopCfg(config.ModeProduction, "http://kacho-umbrella-hydra-admin.kacho.svc:4445")
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal for a plaintext provider-admin hop")
+		t.Fatal("external-lane rows = nil, want refusal for a plaintext provider-admin hop")
 	}
 	if !strings.Contains(err.Error(), "hydra-admin-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
@@ -82,8 +91,8 @@ func TestValidate_Production_RefusesPlaintextProviderAdminURL(t *testing.T) {
 func TestValidate_Production_AcceptsDeclaredTLSProviderAdminURL(t *testing.T) {
 	cfg := adminHopCfg(config.ModeProduction, "https://kacho-umbrella-hydra-admin.kacho.svc:4445")
 	cfg.AuthN.HydraAdminCAFile = "/etc/kaname/tls/server/ca.crt"
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil for a declared https provider-admin hop", err)
+	if err := externalLaneRefusal(cfg); err != nil {
+		t.Fatalf("external-lane rows = %v, want nil for a declared https provider-admin hop", err)
 	}
 }
 

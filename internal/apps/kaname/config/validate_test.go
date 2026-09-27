@@ -67,6 +67,10 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",
+			// Свой контур выдачи ключей служебных учёток — требование посадки
+			// `own` (задача #337): слушатель, на котором монтируется
+			// токен-эндпоинт платформы.
+			RegistryToken: registryTokenLaneSettings(),
 		},
 		Repository: config.RepositoryConfig{
 			Postgres: config.PostgresConfig{
@@ -83,15 +87,27 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			// профиль. Значение нарочно НЕ платформенное: подставленное имя
 			// чужого продукта — ровно тот дефект, ради которого умолчание снято.
 			Domain: "access.example.invalid",
-			// Посадка личности объявлена ЯВНО и равна той, в которой сегодня
-			// работает всякий развёрнутый профиль: личность проверяет внешний
-			// поставщик. Умолчания у поля нет by construction (задача #1125),
-			// поэтому фикстура обязана его назвать — как обязан профиль.
-			IdentityProvider:     config.IdentityProviderExternal,
-			TrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
-			TrustDomainName:      "kacho.cloud",
-			HydraAdminURL:        "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
-			HydraAdminCAFile:     "/etc/kaname/tls/server/ca.crt",
+			// Посадка личности объявлена ЯВНО и равна единственному законному
+			// значению словаря: посадка `external` снята фундаментом
+			// (PRO-Robotech/corelib#30), и проверка старта отвергает её (#424).
+			// Умолчания у поля нет by construction (задача #1125), поэтому
+			// фикстура обязана его назвать — как обязан профиль. Величины полосы
+			// `own` посеяны ниже на тех же основаниях, что величины уборки
+			// выше: без них каждая боевая проба, которая не про полосу, падала
+			// бы на требованиях полосы.
+			IdentityProvider:             config.IdentityProviderOwn,
+			SecondFactorEncryptionKeyHex: strings.Repeat("cd", 32),
+			SelfServiceFreshness:         15 * time.Minute,
+			TokenSigning:                 ownMintingSettings(),
+			ClientToken:                  clientTokenLaneSettings(),
+			PresentedCredential:          presentedCredentialSettings(),
+			Login:                        loginLaneSettings(),
+			Registration:                 registrationSettings(),
+			AccessKeys:                   accessKeySettings(),
+			TrustedForwarderSANs:         []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
+			TrustDomainName:              "kacho.cloud",
+			HydraAdminURL:                "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
+			HydraAdminCAFile:             "/etc/kaname/tls/server/ca.crt",
 			// Both hops to the provider's PUBLIC listener declared, in the plain
 			// http the provider actually serves there — the shape the deployed
 			// profiles carry. They are part of the fixture, not of any test's
