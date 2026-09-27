@@ -253,6 +253,7 @@ func (f familyRig) exchangeIn(t *testing.T, scene domain.CeremonyContext, base i
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 time.Minute,
 	}), "выдача кода")
 	_, err := f.ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{

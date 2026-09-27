@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
@@ -1291,7 +1292,17 @@ func runServe(cfg config.Config) error {
 		// утверждение получает ПРОИЗВОДСТВЕННОГО вызывающего. Проверяющий без
 		// него выглядит исправным ровно потому, что его пробы подают ему то,
 		// что он умеет разобрать.
-		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)
+		// Церемония OAuth `authorization_code` нашими силами (приёмка LINE-A-1,
+		// kaname#423) — под `own` и при поднятом токен-эндпоинте: её полосы
+		// обмена живут на нём, а эндпоинт авторизации и метаданные обнаружения
+		// монтируются на ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше
+		// (сценарий 23). Под `external` — nil, и её пути здесь не резолвятся.
+		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), logger)
+		if cerr != nil {
+			return fmt.Errorf("ceremony: %w", cerr)
+		}
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony)
 		if cterr != nil {
 			return fmt.Errorf("client token endpoint: %w", cterr)
 		}
@@ -1310,6 +1321,16 @@ func runServe(cfg config.Config) error {
 			metricsReg.NewClientTokenOutcomeCollector(
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
 		}
+		if ceremony != nil {
+			// Объявление поверхности называет эти пути, потому что маршрутизатор
+			// их разрешает (issuingSurfaceAuthOf ниже), а не по флагу рядом.
+			mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
+			mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
+			// Читатель переписи исходов — вплотную к монтажу, как у соседних
+			// полос выдачи: наружу отказы церемонии неразличимы, различимость —
+			// здесь.
+			metricsReg.NewCeremonyOutcomeCollector(ceremonyhttp.DeclaredOutcomes(), ceremony.Census.Read)
+		}
 		registryTokenHandler = mux
 	}
 	registryTokenSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1319,11 +1340,8 @@ func runServe(cfg config.Config) error {
 		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"два вида предъявления, у каждого своя проверка на каждом запросе: подпись ключом " +
-				"служебной учётки на пути docker-токена и подписанное утверждение клиента, " +
-				"сверяемое открытым ключом из нашего реестра, на пути выдачи по учётным данным " +
-				"клиента; второй выпускает НАШ подписант"),
+		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
+		// Транспорт поверхности — TLS, собранный из профиля развёртывания выше.
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {

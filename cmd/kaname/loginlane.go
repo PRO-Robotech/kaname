@@ -56,6 +56,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
@@ -107,6 +108,18 @@ type loginLane struct {
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// verifier — проверяющий паролей полосы с приманкой объявленного класса.
+	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
+	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
+	verifier *passwordverify.Verifier
+}
+
+// secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
+func (l *loginLane) secretChecker() ceremonyport.SecretChecker {
+	if l == nil || l.verifier == nil {
+		return nil
+	}
+	return l.verifier
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -565,6 +578,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		verifier: verifier,
 	}, nil
 }
 
