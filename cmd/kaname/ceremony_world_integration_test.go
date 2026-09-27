@@ -98,6 +98,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -590,7 +591,7 @@ func (w *ceremonyWorld) buildSurface() {
 		// их предмет — церемония, а не оси (оси судят пробы обработчиков).
 		ExchangesPerClientPerSec: 1 << 20,
 		InFlightCeiling:          1 << 10,
-		FailedProofsPerSource:    1 << 20,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
 		FailedProofWindow:        time.Minute,
 		AuthorizePerSourcePerSec: 1 << 20,
 		AuthorizeInFlightCeiling: 1 << 10,

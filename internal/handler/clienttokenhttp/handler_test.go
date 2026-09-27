@@ -109,7 +109,7 @@ const testInFlightCeiling = 8
 // предмет не П3: предел, которого пробы не достигают, на часах процесса.
 func testFailedProofs(t *testing.T) *failurewindow.Window {
 	t.Helper()
-	w, err := failurewindow.New(1<<20, time.Minute, time.Now)
+	w, err := failurewindow.New(failurewindow.MaxStoredFailures, time.Minute, time.Now)
 	require.NoError(t, err)
 	return w
 }
