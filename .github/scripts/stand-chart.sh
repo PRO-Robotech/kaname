@@ -83,6 +83,20 @@
 #     двери, учётные данные живут Secret'ом стенда (`<релиз>-login-lane-human`)
 #     и в дерево не попадают.
 #
+# Третье условие — ПРЕДЪЯВИТЕЛЬ ЧЕЛОВЕКА СВОЕЙ ЦЕРЕМОНИЕЙ (`seed-ceremony`,
+# `tests/authz-fixtures/seed_ceremony.py`, kaname#398). Для него накладка `own`
+# несёт ещё две величины, и обе — координаты этой установки, а не посадка:
+#
+#   · КЛЮЧ БУТСТРАП-КОНТУРА (Secret `<релиз>-bootstrap`) и круг вызывающих его
+#     чеканки — ровно лист службы. Первое машинное удостоверение `system_admin`
+#     на дереве без личностей выдаёт только эта чеканка;
+#   · ИМЯ КРАЯ В КРУГЕ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ рядом с именем службы. Глагол
+#     `Create` интерактивного клиента фронтируется краем
+#     (`GatewayFrontedInternalRPCs`): хоп собственного фронта его не проходит
+#     by construction, и пересланный принципал принимается только от
+#     доверенного пересылающего. В боевом профиле этот круг и есть край; стенд
+#     дописывает его к имени службы, а не заменяет.
+#
 # Посадку, с которой процесс поднялся, `assert` сверяет по самоотчёту: под этой
 # ручкой ось `identity_provider=own` добавляется к шести осям боевой посадки.
 #
@@ -481,6 +495,22 @@ make_secrets() {
 			--from-file=tls.crt="$PKI/edge.crt" --from-file=tls.key="$PKI/edge.key" \
 			--from-file=ca.crt="$PKI/ca.crt" >/dev/null
 		say "стенд: шестой секрет — клиентский лист с именем края"
+		# КЛЮЧ БУТСТРАП-КОНТУРА — седьмой секрет, и только под `own`. Посев
+		# церемонии (`seed-ceremony`) заводит интерактивных клиентов ГЛАГОЛОМ
+		# `Create`, а у глагола пол — машинный `system_admin`; первое такое
+		# удостоверение на дереве без личностей выдаёт ровно чеканка бутстрапа
+		# (`InternalBootstrapTokenService` на :9091). Ключ — P-256 PKCS#8, как у
+		# автономного стенда (`stand-own.sh`): его открытой половиной служба
+		# заводит строку соответствия бутстрап-клиента при старте.
+		( umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+			-out "$PKI/bootstrap-sa.key" >/dev/null 2>&1 ) || {
+			unmet "ключ бутстрап-контура не выпустился (openssl)"
+			exit "$RC_UNMET"
+		}
+		"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-bootstrap" >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-bootstrap" \
+			--from-file=private-key-pem="$PKI/bootstrap-sa.key" >/dev/null
+		say "стенд: седьмой секрет — ключ бутстрап-контура для посева церемонии"
 	fi
 }
 
@@ -562,12 +592,21 @@ EOF
 	cat > "$WORK/values.stand-own.yaml" <<EOF
 authn:
   identityProvider: own
+  trustedForwarderSANs:
+    - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
+    - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"
   clientToken:
     enabled: true
     allowedAudiences: "https://$DOMAIN,registry.$DOMAIN"
     defaultAudience: "https://$DOMAIN"
     tokenTtl: 15m
     bodyCeiling: 16384
+secrets:
+  KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM:
+    secretName: $RELEASE-bootstrap
+    secretKey: private-key-pem
+env:
+  KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS: "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
 EOF
 }
 
@@ -970,6 +1009,56 @@ start_lane_forward() {
 	say "стенд: полоса входа переадресована — $LANE_URL (порт службы $remote)"
 }
 
+# ensure_forward <тег> <Service> <имя порта> — переадресация порта Service на
+# 127.0.0.1 для поверхностей, которые зовёт посев церемонии. Порт службы читается
+# у Service ПО ИМЕНИ, местный выбирает ядро; итог — в FORWARD_PORT.
+#
+# ЖИВАЯ ПЕРЕАДРЕСАЦИЯ ТОГО ЖЕ ТЕГА ПЕРЕИСПОЛЬЗУЕТСЯ, А НЕ ПЕРЕЗАПУСКАЕТСЯ: адрес,
+# уже записанный посевом в окружение, обязан остаться верным до прогона набора.
+# Снимает их `down` (stop_forwards).
+FORWARD_PORT=""
+ensure_forward() {
+	local tag="$1" svc="$2" pname="$3" remote pid i port=""
+	local pidf="$WORK/forward-$tag.pid" logf="$WORK/forward-$tag.log"
+	remote="$("${KCTL[@]}" -n "$NS" get svc "$svc" \
+		-o "jsonpath={.spec.ports[?(@.name==\"$pname\")].port}" 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у Service $svc нет порта $pname — чарт не объявил поверхность, которую зовёт посев"
+		exit 1
+	fi
+	if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+		port="$(forward_port_of "$logf" "$remote")"
+	fi
+	if [ -z "$port" ]; then
+		if [ -f "$pidf" ]; then kill "$(cat "$pidf")" 2>/dev/null || true; fi
+		nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "svc/$svc" ":$remote" \
+			> "$logf" 2>&1 < /dev/null &
+		pid=$!
+		echo "$pid" > "$pidf"
+		for i in $(seq 1 30); do
+			port="$(forward_port_of "$logf" "$remote")"
+			[ -n "$port" ] && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+	fi
+	if [ -z "$port" ]; then
+		unmet "переадресация $tag ($svc:$pname) не встала: $(tail -2 "$logf" 2>/dev/null | tr '\n' ' ')"
+		exit "$RC_UNMET"
+	fi
+	FORWARD_PORT="$port"
+	say "стенд: $tag переадресована — 127.0.0.1:$port (порт службы $remote)"
+}
+
+stop_forwards() {
+	local f
+	for f in "$WORK"/forward-*.pid; do
+		[ -f "$f" ] || continue
+		kill "$(cat "$f")" 2>/dev/null || true
+		rm -f "$f"
+	done
+}
+
 # secret_value <имя объекта> <ключ> — значение ключа Secret стенда.
 secret_value() {
 	local key="${2//./\\.}"
@@ -1028,8 +1117,70 @@ seed_login_lane() {
 	return "$rc"
 }
 
+# ─── ПОСЕВ ЦЕРЕМОНИИ ────────────────────────────────────────────────────────
+#
+# Отдельная подкоманда ПОСЛЕ `seed-login-lane`: человек и его вход — условие
+# этого посева, и отказ церемонии не должен выглядеть отказом входа. Исходы — те
+# же три. Посев куёт предъявителя человека СВОЕЙ церемонией службы (вход → код →
+# обмен → приём фронтом) и заводит двух конфиденциальных клиентов глаголом
+# `Create`; разбор шагов и границ — шапка `tests/authz-fixtures/seed_ceremony.py`.
+#
+# Листы — из Secret'ов стенда, как у посева полосы: лист службы (круг чеканки
+# бутстрапа) и лист края (единственная дверь к глаголу, который фронтирует край, и
+# к полосе). Поверхностей четыре; полоса переиспользует уже живую переадресацию
+# посева полосы, и адрес, записанный им в окружение, остаётся верным.
+seed_ceremony() {
+	if [ "$IDENTITY" != "own" ]; then
+		printf 'seed-ceremony — посев стенда посадки own: задайте KANAME_STAND_IDENTITY_PROVIDER=own\n' >&2
+		exit 2
+	fi
+	need_tool python3; need_tool base64; need_tool grpcurl
+	local cdir="$WORK/ceremony-pki" k f
+	mkdir -p "$cdir"; chmod 700 "$cdir"
+	for k in "$RELEASE-server-tls:tls.crt:srv.crt" "$RELEASE-server-tls:tls.key:srv.key" \
+		"$RELEASE-server-tls:ca.crt:ca.crt" "$RELEASE-edge-client-tls:tls.crt:edge.crt" \
+		"$RELEASE-edge-client-tls:tls.key:edge.key"; do
+		f="$cdir/${k##*:}"
+		secret_value "${k%%:*}" "$(printf '%s' "$k" | cut -d: -f2)" > "$f" || true
+		[ -s "$f" ] || { unmet "лист не вынесен из Secret ${k%%:*} — стенд поднят не под own?"; exit "$RC_UNMET"; }
+	done
+	chmod 600 "$cdir/srv.key" "$cdir/edge.key"
+
+	local human="$RELEASE-login-lane-human" email password
+	email="$(secret_value "$human" email || true)"
+	password="$(secret_value "$human" password || true)"
+	if [ -z "$email" ] || [ -z "$password" ]; then
+		unmet "человека нет: Secret $human не заведён — сначала seed-login-lane"
+		exit "$RC_UNMET"
+	fi
+
+	local lane grpc issuance own
+	if [ -f "$LANE_FORWARD_PID" ] && kill -0 "$(cat "$LANE_FORWARD_PID")" 2>/dev/null; then
+		lane="$(forward_port_of "$LANE_FORWARD_LOG" \
+			"$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+				-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null)")"
+	fi
+	if [ -n "${lane:-}" ]; then
+		LANE_URL="https://127.0.0.1:$lane"
+		say "стенд: полоса входа — живая переадресация посева полосы, $LANE_URL"
+	else
+		start_lane_forward
+	fi
+	ensure_forward grpc-internal "$RELEASE-internal" grpc-internal; grpc="127.0.0.1:$FORWARD_PORT"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+
+	local rc=0
+	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
+		python3 "$ROOT/tests/authz-fixtures/seed_ceremony.py" \
+		--lane-url "$LANE_URL" --issuance-url "$issuance" --own-url "$own" \
+		--grpc-addr "$grpc" --pki "$cdir" || rc=$?
+	return "$rc"
+}
+
 down() {
 	stop_lane_forward
+	stop_forwards
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 		if [ -f "$CREATED_MARK" ]; then
 			kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
@@ -1073,12 +1224,16 @@ case "${1:-}" in
 		need_tool kubectl
 		seed_login_lane
 		;;
+	seed-ceremony)
+		need_tool kubectl
+		seed_ceremony
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac
