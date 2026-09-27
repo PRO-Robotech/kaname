@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // revocation_reaches_presentation_test.go — K1 одним прогоном СКВОЗЬ обе
-// половины (задача PRO-Robotech/kaname#396, предикат снятия п. 1).
+// половины (задача PRO-Robotech/kaname#396, предикат снятия п. 1) на каждом
+// из трёх путей отзыва: повтором кода, повтором токена обновления и просьбой
+// клиента (RFC 7009). Отзыв клиентом и его отрицание от чужого клиента —
+// сценарии KN-FRV-01…04 и 12 приёмки
+// `docs/engineering/acceptance/client-revocation-has-its-own-family-revocation-reason.md`
+// (задача PRO-Robotech/kaname#406).
 //
 // # Что здесь настоящее
 //
@@ -66,6 +71,12 @@ const (
 	flowRedirect = "https://console.kacho.local/oauth2/callback"
 	flowState    = "s6BhdRkqt3s6BhdRkqt3s6BhdRkqt3xx"
 	flowVerifier = "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXkQ"
+
+	// otherClientID — второй клиент X сценариев KN-FRV-04 и 12: заведён тем же
+	// способом, что клиент стенда (`registerClient`), и доказывает себя своим
+	// секретом. Грантов ему церемония в этих пробах не выдаёт.
+	otherClientID = "svc-other-console"
+	otherSecret   = "another-horse-another-battery"
 )
 
 // ── Семейства: отметка отзыва и записи выпуска ─────────────────────────────
@@ -334,6 +345,32 @@ type flowRig struct {
 	vaults   *memVaults
 	families *memFamilies
 	surface  http.Handler
+	// hasher чеканит проверочные значения секретов клиентов стенда — тот же
+	// производитель, что у колонки проверочного значения клиента службы.
+	hasher *passwordverify.Hasher
+}
+
+// registerClient заводит клиента стенда: запись регистрации в справочнике
+// клиентов и проверочное значение секрета, начеканенное хешером стенда. Так
+// заводятся и клиент стенда C, и второй клиент X: «заведён так же» — это один
+// и тот же код.
+func (r *flowRig) registerClient(t *testing.T, clientID, secret string) {
+	t.Helper()
+	stored, err := r.hasher.Hash(secret)
+	require.NoError(t, err)
+	r.vaults.secrets.mu.Lock()
+	r.vaults.secrets.verifiers[clientID] = stored
+	r.vaults.secrets.mu.Unlock()
+	r.vaults.mu.Lock()
+	defer r.vaults.mu.Unlock()
+	r.vaults.clients[clientID] = oauthceremony.ClientRegistration{
+		ClientID:      clientID,
+		RedirectURIs:  []string{flowRedirect},
+		GrantKinds:    []oauthceremony.GrantKind{oauthceremony.GrantAuthorizationCode, oauthceremony.GrantRefreshToken},
+		ResponseKinds: []string{"code"},
+		Scopes:        []string{"openid", "offline"},
+		Audiences:     []string{testAudience},
+	}
 }
 
 func newFlowRig(t *testing.T) *flowRig {
@@ -349,20 +386,11 @@ func newFlowRig(t *testing.T) *flowRig {
 	vaults := newMemVaults(families)
 
 	hasher := floorHasher(t)
-	stored, err := hasher.Hash(flowSecret)
-	require.NoError(t, err)
-	vaults.secrets.verifiers[testClientID] = stored
 	secrets, err := ceremonyport.NewClientSecrets(vaults.secrets,
 		alignedVerifier(t, hasher, &outcomeCounter{cells: map[passwordverify.Outcome]int{}}))
 	require.NoError(t, err)
-	vaults.clients[testClientID] = oauthceremony.ClientRegistration{
-		ClientID:      testClientID,
-		RedirectURIs:  []string{flowRedirect},
-		GrantKinds:    []oauthceremony.GrantKind{oauthceremony.GrantAuthorizationCode, oauthceremony.GrantRefreshToken},
-		ResponseKinds: []string{"code"},
-		Scopes:        []string{"openid", "offline"},
-		Audiences:     []string{testAudience},
-	}
+	rig.vaults, rig.hasher = vaults, hasher
+	rig.registerClient(t, testClientID, flowSecret)
 
 	ceremony, err := oauthceremony.New(oauthceremony.Config{
 		AuthorizationEndpoint:     "https://iam.kacho.local/iam/v1/authorize",
@@ -502,6 +530,47 @@ func (r *flowRig) accepted(t *testing.T, access string) bool {
 	return body.Active
 }
 
+// revokeAs — отзыв клиентом (RFC 7009 §2.1) операцией церемонии: клиент
+// clientID доказывает себя секретом способом `client_secret_basic` и просит
+// отзыва token с подсказкой вида hint.
+func (r *flowRig) revokeAs(clientID, secret, token string, hint oauthceremony.TokenKind) error {
+	return r.ceremony.Revoke(context.Background(), oauthceremony.RevocationRequest{
+		Token: token, KindHint: hint, ClientID: clientID, ClientSecret: secret,
+		AuthMethod: oauthceremony.ClientAuthBasic,
+	})
+}
+
+// issueLate — выпуск токена доступа в семейство grantID мимо обмена: так
+// выглядит выпуск, прочитавший семейство живым до отметки отзыва.
+func (r *flowRig) issueLate(grantID string) (oauthceremony.IssuedAccessToken, error) {
+	return r.tokens.IssueAccessToken(context.Background(), oauthceremony.GrantRecord{
+		GrantID: grantID, ClientID: testClientID,
+		GrantedScopes: []string{"openid"}, GrantedAudiences: []string{testAudience},
+		Session: oauthceremony.SessionRecord{
+			Subject: testSubject, SessionID: testSessionID, ACR: testACR, AuthTime: testAuthTime,
+			ExpiresAt: map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAccess: time.Now().Add(5 * time.Minute)},
+		},
+	})
+}
+
+// requireRevokedByClient — семейство отозвано, и журнал называет причиной
+// просьбу клиента. Слово сравнивается с причиной фундамента ПО ЗНАЧЕНИЮ, как
+// их сопрягает адаптер: проба собирается и на дереве, где слова ещё нет.
+func (r *flowRig) requireRevokedByClient(t *testing.T, family string) {
+	t.Helper()
+	reason, revoked := r.families.isRevoked(family)
+	require.True(t, revoked, "семейство %s не отозвано", family)
+	require.Equal(t, domain.FamilyRevocationReason(oauthceremony.RevocationClientRevoke), reason,
+		"журнал семейства %s называет не просьбу клиента", family)
+}
+
+// requireLive — семейство не отозвано: ни отметки, ни причины.
+func (r *flowRig) requireLive(t *testing.T, family string) {
+	t.Helper()
+	reason, revoked := r.families.isRevoked(family)
+	require.False(t, revoked, "семейство %s отозвано (причина %q)", family, reason)
+}
+
 // ── K1 ─────────────────────────────────────────────────────────────────────
 
 func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
@@ -561,54 +630,152 @@ func TestK1_RevokedFamilyIsRefusedWhereTheAccessTokenIsPresented(t *testing.T) {
 		require.Error(t, err, "НЕ ВЫПОЛНИЛОСЬ: повтор кода обменялся")
 		_, revoked := rig.families.isRevoked(family)
 		require.True(t, revoked, "НЕ ВЫПОЛНИЛОСЬ: семейство не отозвано")
-		issueLate := func(grantID string) (oauthceremony.IssuedAccessToken, error) {
-			return rig.tokens.IssueAccessToken(context.Background(), oauthceremony.GrantRecord{
-				GrantID: grantID, ClientID: testClientID,
-				GrantedScopes: []string{"openid"}, GrantedAudiences: []string{testAudience},
-				Session: oauthceremony.SessionRecord{
-					Subject: testSubject, SessionID: testSessionID, ACR: testACR, AuthTime: testAuthTime,
-					ExpiresAt: map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAccess: time.Now().Add(5 * time.Minute)},
-				},
-			})
-		}
-		late, err := issueLate(family)
+		late, err := rig.issueLate(family)
 		require.ErrorIsf(t, err, domain.ErrAccessTokenFamilyNotLive,
 			"выпуск в отозванное семейство состоялся (токен выдан: %v)", late.Token != "")
 		require.Empty(t, late.Token, "при отказе записи выпуска уехал токен")
 
 		// Близнец отличается ОДНИМ фактом — семейство не отозвано.
-		live, err := issueLate(rig.familyOf(t, twin.AccessToken))
+		live, err := rig.issueLate(rig.familyOf(t, twin.AccessToken))
 		require.NoError(t, err, "близнец: выпуск того же вида для неотозванного семейства отказал")
 		require.True(t, rig.accepted(t, live.Token),
 			"близнец: выпуск того же вида для неотозванного семейства не принят")
 	})
+
+	// KN-FRV-01. Семейство B этого сценария — близнец прогона: той же
+	// церемонией, тем же клиентом, отзыва о нём никто не просит.
+	t.Run("KN-FRV-01 отзыв клиентом живым токеном обновления", func(t *testing.T) {
+		pair := rig.freshFamily(t)
+		family := rig.familyOf(t, pair.AccessToken)
+		require.True(t, rig.accepted(t, pair.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен семейства A не принят до отзыва")
+
+		require.NoError(t, rig.revokeAs(testClientID, flowSecret, pair.RefreshToken, oauthceremony.TokenKindRefresh),
+			"отзыв клиентом живым токеном обновления отказал")
+		rig.requireRevokedByClient(t, family)
+
+		require.False(t, rig.accepted(t, pair.AccessToken), "токен доступа отозванного клиентом семейства принят")
+		_, err := rig.refresh(pair.RefreshToken)
+		require.Error(t, err, "обмен токена обновления отозванного семейства состоялся")
+		require.Equal(t, "invalid_grant", oauthceremony.CodeOf(err).WireCode(),
+			"обмен токена обновления отозванного семейства: %v", err)
+		late, err := rig.issueLate(family)
+		require.ErrorIsf(t, err, domain.ErrAccessTokenFamilyNotLive,
+			"выпуск в отозванное клиентом семейство состоялся (токен выдан: %v)", late.Token != "")
+		require.Empty(t, late.Token, "при отказе записи выпуска уехал токен")
+		require.True(t, rig.accepted(t, twin.AccessToken), "близнец: неотозванное семейство перестало приниматься")
+	})
 }
 
-// Отзыв клиентом (RFC 7009) — причина фундамента `client-revoke`, у которой в
-// закрытом словаре службы и в ограничении схемы слова НЕТ; слово заводит
-// задача PRO-Robotech/kaname#406. Пока его нет, отзыв обязан отказать
-// ОПЕРАЦИЕЙ — громко, не назвав успехом отзыв, которого не было, и не записав
-// семейству чужую причину.
-//
-// Проба истекает сама: слово появилось — первое утверждение краснеет, и подслучай
-// переводится на полное утверждение K1 (отозвано → отвергнуто при предъявлении,
-// близнец принят), как у двух соседних путей.
-func TestK1_ClientRevokeRefusesLoudlyWhileTheWordIsMissing(t *testing.T) {
-	_, hasWord := ceremonyport.FamilyReasonOf(oauthceremony.RevocationClientRevoke)
-	require.False(t, hasWord, "у причины client-revoke появилось слово службы — переведите этот "+
-		"подслучай на полное утверждение K1 и снимите запись ожидания в grants_test.go")
-
+// KN-FRV-02 — тот же отзыв ТОКЕНОМ ДОСТУПА, на свежем стенде. Дельта против
+// KN-FRV-01 — вид предъявленного токена: грант находится через опознание токена
+// доступа адаптером службы, и ответ «не наш» дал бы успех без действия —
+// отличает его от верного исхода только «семейство A отозвано». Обмен токена
+// обновления утверждает, что семейство снято целиком.
+func TestK1_KN_FRV_02_ClientRevocationByTheAccessTokenRevokesTheWholeFamily(t *testing.T) {
 	rig := newFlowRig(t)
-	pair := rig.freshFamily(t)
-	family := rig.familyOf(t, pair.AccessToken)
+	a := rig.freshFamily(t)
+	b := rig.freshFamily(t)
+	family := rig.familyOf(t, a.AccessToken)
+	require.True(t, rig.accepted(t, a.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен семейства A не принят до отзыва")
+	require.True(t, rig.accepted(t, b.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен семейства B не принят до отзыва")
 
-	err := rig.ceremony.Revoke(context.Background(), oauthceremony.RevocationRequest{
-		Token: pair.RefreshToken, KindHint: oauthceremony.TokenKindRefresh,
-		ClientID: testClientID, ClientSecret: flowSecret, AuthMethod: oauthceremony.ClientAuthBasic,
-	})
-	require.Error(t, err, "отзыв клиентом ответил успехом, хотя причину записать нечем")
-	_, revoked := rig.families.isRevoked(family)
-	require.False(t, revoked, "семейству записана причина, которой нет в словаре службы")
+	require.NoError(t, rig.revokeAs(testClientID, flowSecret, a.AccessToken, oauthceremony.TokenKindAccess),
+		"отзыв клиентом токеном доступа отказал")
+	rig.requireRevokedByClient(t, family)
+
+	require.False(t, rig.accepted(t, a.AccessToken), "токен доступа отозванного клиентом семейства принят")
+	_, err := rig.refresh(a.RefreshToken)
+	require.Error(t, err, "обмен токена обновления семейства, снятого отзывом токена доступа, состоялся")
+	require.Equal(t, "invalid_grant", oauthceremony.CodeOf(err).WireCode(),
+		"обмен токена обновления семейства, снятого отзывом токена доступа: %v", err)
+	require.True(t, rig.accepted(t, b.AccessToken), "близнец: семейство B перестало приниматься")
+}
+
+// KN-FRV-03 — отзыв ОБЁРНУТЫМ токеном обновления называет причиной просьбу
+// клиента, а не повтор. Дельта против KN-FRV-01 — предъявленный токен уже
+// обёрнут законным обменом: отзывает здесь не движок, а сама церемония, и
+// причина операции побеждает замеченный повтор.
+func TestK1_KN_FRV_03_RevocationByARotatedRefreshTokenNamesTheClientNotTheReplay(t *testing.T) {
+	rig := newFlowRig(t)
+	a := rig.freshFamily(t)
+	b := rig.freshFamily(t)
+	family := rig.familyOf(t, a.AccessToken)
+	rotated, err := rig.refresh(a.RefreshToken)
+	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: законный оборот токена обновления отказал")
+	require.True(t, rig.accepted(t, rotated.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен оборота не принят до отзыва")
+
+	require.NoError(t, rig.revokeAs(testClientID, flowSecret, a.RefreshToken, oauthceremony.TokenKindRefresh),
+		"отзыв клиентом обёрнутым токеном обновления отказал")
+	rig.requireRevokedByClient(t, family)
+
+	require.False(t, rig.accepted(t, a.AccessToken), "токен доступа, выданный кодом, принят")
+	require.False(t, rig.accepted(t, rotated.AccessToken), "токен доступа, выданный оборотом, принят")
+	require.True(t, rig.accepted(t, b.AccessToken), "близнец: семейство B перестало приниматься")
+}
+
+// KN-FRV-04 — чужой клиент ЖИВЫМ токеном семейство не отзывает (близнец
+// KN-FRV-01; вызов токеном доступа — близнец KN-FRV-02). Сверку «токен выдан
+// спрашивающему» исполняет движок фундамента; своей копии служба не заводит.
+// Последняя пара — положительный контроль на том же стенде: без неё отказ X
+// неотличим от стенда, где отзыв не работает ни у кого.
+func TestK1_KN_FRV_04_AnotherClientDoesNotRevokeTheFamilyByALiveToken(t *testing.T) {
+	rig := newFlowRig(t)
+	rig.registerClient(t, otherClientID, otherSecret)
+	a := rig.freshFamily(t)
+	family := rig.familyOf(t, a.AccessToken)
+	require.True(t, rig.accepted(t, a.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен семейства A не принят до отзыва")
+
+	for _, c := range []struct {
+		name  string
+		token string
+		hint  oauthceremony.TokenKind
+	}{
+		{"токен обновления", a.RefreshToken, oauthceremony.TokenKindRefresh},
+		{"токен доступа", a.AccessToken, oauthceremony.TokenKindAccess},
+	} {
+		err := rig.revokeAs(otherClientID, otherSecret, c.token, c.hint)
+		require.Errorf(t, err, "%s: отзыв чужим клиентом ответил успехом", c.name)
+		require.Equalf(t, "unauthorized_client", oauthceremony.CodeOf(err).WireCode(),
+			"%s: отзыв чужим клиентом ответил не отказом unauthorized_client: %v", c.name, err)
+	}
+	rig.requireLive(t, family)
+	require.True(t, rig.accepted(t, a.AccessToken), "после просьб чужого клиента токен семейства A не принят")
+
+	// Контроль: тот же запрос от клиента гранта отзывает.
+	require.NoError(t, rig.revokeAs(testClientID, flowSecret, a.RefreshToken, oauthceremony.TokenKindRefresh),
+		"контроль: отзыв клиентом гранта отказал")
+	rig.requireRevokedByClient(t, family)
+}
+
+// KN-FRV-12 — чужой клиент ПРЕЖНИМ токеном обновления семейство не отзывает
+// (близнец KN-FRV-03). На этом пути сверку клиента исполняет церемония, и
+// чужой обёрнутый токен для неё — негодный токен: X получает успех без
+// действия. Код ответа утверждается как есть, а свойство судят утверждения о
+// семействе: успехом отвечают и верная сверка, и её отсутствие.
+func TestK1_KN_FRV_12_AnotherClientDoesNotRevokeTheFamilyByARotatedRefreshToken(t *testing.T) {
+	rig := newFlowRig(t)
+	rig.registerClient(t, otherClientID, otherSecret)
+	a := rig.freshFamily(t)
+	b := rig.freshFamily(t)
+	family := rig.familyOf(t, a.AccessToken)
+	rotated, err := rig.refresh(a.RefreshToken)
+	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: законный оборот токена обновления отказал")
+	require.True(t, rig.accepted(t, rotated.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен оборота не принят до отзыва")
+	require.True(t, rig.accepted(t, b.AccessToken), "НЕ ВЫПОЛНИЛОСЬ: токен семейства B не принят до отзыва")
+
+	require.NoError(t, rig.revokeAs(otherClientID, otherSecret, a.RefreshToken, oauthceremony.TokenKindRefresh),
+		"чужой обёрнутый токен — негодный токен, и отвечают на него успехом без действия")
+	rig.requireLive(t, family)
+	require.True(t, rig.accepted(t, rotated.AccessToken), "после просьбы чужого клиента токен оборота не принят")
+	require.True(t, rig.accepted(t, b.AccessToken), "близнец: семейство B перестало приниматься")
+
+	// Контроль — KN-FRV-03 на том же стенде: тот же токен от клиента гранта.
+	require.NoError(t, rig.revokeAs(testClientID, flowSecret, a.RefreshToken, oauthceremony.TokenKindRefresh),
+		"контроль: отзыв клиентом гранта тем же прежним токеном отказал")
+	rig.requireRevokedByClient(t, family)
+	require.False(t, rig.accepted(t, a.AccessToken), "контроль: токен доступа, выданный кодом, принят")
+	require.False(t, rig.accepted(t, rotated.AccessToken), "контроль: токен доступа, выданный оборотом, принят")
+	require.True(t, rig.accepted(t, b.AccessToken), "контроль: семейство B перестало приниматься")
 }
 
 // ── Контекст входа: поля записи, а не ключи карты ──────────────────────────
