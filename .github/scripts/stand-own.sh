@@ -83,12 +83,18 @@ WRAPKEY_FILE="$RUNDIR/wrapping.key"
 # этого ключа. Новый ключ на каждый запуск означал бы, что второй старт не
 # признаёт запись первого, и отказ приходил бы не там, где причина.
 BOOTSTRAP_KEY_FILE="$RUNDIR/bootstrap-sa.key"
+SECOND_FACTOR_KEY_FILE="$RUNDIR/second-factor.key"
 
 # SPIFFE-имя, которым стенд зовёт чеканку бутстрап-удостоверения. Это ТО ЖЕ имя,
 # что стоит в SAN сертификата стенда (см. make_pki): круг вызывающих у чеканки
 # задаётся ИМЕНАМИ, а не сетевым положением, поэтому «кто вправе» на этом стенде
 # выражено ровно одним значением и оно здесь одно.
 BOOTSTRAP_CALLER_SAN="${KANAME_STAND_BOOTSTRAP_SAN:-spiffe://kaname.local/ns/kaname/sa/kaname}"
+
+# Имя края в SAN листа, которым посев стоит на месте края у полосы входа. Полоса
+# разбирает из него короткое имя службы (`kacho-` снимается) и сравнивает с
+# константой края — `api-gateway`. То же имя, что у стенда чарта.
+EDGE_SA="kacho-api-gateway"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'НАХОДКА: %s\n' "$*" >&2; }
@@ -108,7 +114,7 @@ need_tool() {
 # украшение сертификата.
 make_pki() {
   mkdir -p "$PKI" || { unmet "каталог $PKI не создаётся"; exit "$RC_UNMET"; }
-  if [ -f "$PKI/srv.crt" ] && [ -f "$PKI/ca.crt" ]; then
+  if [ -f "$PKI/srv.crt" ] && [ -f "$PKI/ca.crt" ] && [ -f "$PKI/edge.crt" ]; then
     say "PKI уже есть: $PKI"
     return 0
   fi
@@ -124,6 +130,11 @@ basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth,clientAuth
 subjectAltName=DNS:$HOSTNAME_FOR_TLS,DNS:kaname,IP:127.0.0.1,URI:spiffe://kaname.local/ns/kaname/sa/kaname
+[v3_edge]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+subjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/$EDGE_SA
 EOF
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj '/CN=kaname-stand-ca' \
     -config "$PKI/openssl.cnf" -extensions v3_ca \
@@ -134,8 +145,18 @@ EOF
   openssl x509 -req -in "$PKI/srv.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
     -days 2 -extfile "$PKI/openssl.cnf" -extensions v3_srv -out "$PKI/srv.crt" >/dev/null 2>&1 || {
       unmet "сертификат службы не выпустился"; exit "$RC_UNMET"; }
+  # ЛИСТ КРАЯ — только клиентский: сервером край для службы не бывает. Под `own`
+  # человек заводится ТОЛЬКО полосой входа, а она допускает ровно край по имени
+  # службы из SAN проверенного листа (INSTALL.md §2, `:9100`). Края на этом
+  # стенде нет, и его место у полосы занимает посев — так же, как у стенда
+  # чарта (`stand-chart.sh`, «ПОСАДКА `own`»). Лист предъявляется ТОЛЬКО полосе.
+  openssl req -newkey rsa:2048 -nodes -subj "/CN=$EDGE_SA" \
+    -keyout "$PKI/edge.key" -out "$PKI/edge.csr" >/dev/null 2>&1
+  openssl x509 -req -in "$PKI/edge.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
+    -days 2 -extfile "$PKI/openssl.cnf" -extensions v3_edge -out "$PKI/edge.crt" >/dev/null 2>&1 || {
+      unmet "лист края не выпустился"; exit "$RC_UNMET"; }
   cp "$PKI/srv.crt" "$PKI/pg.crt"; cp "$PKI/srv.key" "$PKI/pg.key"
-  say "PKI выпущен: $PKI (УЦ + сертификат службы с SPIFFE-именем в SAN)"
+  say "PKI выпущен: $PKI (УЦ + сертификат службы с SPIFFE-именем в SAN + клиентский лист края)"
 }
 
 # ─── База: TLS обязателен, иначе страж посадки откажет ───────────────────────
@@ -209,37 +230,55 @@ stand_env() {
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5
   export KANAME_OWN_CEILINGS__ACCESS_KEYS_PER_USER=5
-  # ПОЛОСА ЛИЧНОСТИ — `external`, И ЭТО ПРЕДМЕТ СТЕНДА, А НЕ НЕСПОСОБНОСТЬ
-  # ПРОДУКТА.
+  # ПОЛОСА ЛИЧНОСТИ — `own`, И ДРУГОЙ У СЛУЖБЫ НЕТ.
   #
-  # Здесь стояло «стартовать на `own` служба сегодня отказывается: осталось три
-  # причины» — больше не верно. Все пять причин kaname#21 закрыты (Ф3 провязала
-  # хранилища способов входа и сессии, Ф12 дала уровни `1` и `2`), и
-  # 2026-09-17 служба ПОДНЯТА под `own` поставляемым чартом в kind: девять
-  # слушателей, страж посадки пропускает, связка «регистрация → второй фактор →
-  # выход → вход» прошла на живом слушателе полосы. Число записей каталога,
-  # требующих уровня, печатает самоотчёт живого процесса
-  # (`identity posture lane wiring`, `catalog_entries_demanding_a_raised_floor`).
+  # Здесь стояло `external` с объявленными и недостижимыми адресами поставщика.
+  # Посадку `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424):
+  # разбор ключа принимает ровно `own`, и накатчик отвергал настройку раньше,
+  # чем стенд доходил до службы, — задание краснело на загрузке настройки.
   #
-  # ЭТОТ стенд остаётся на `external` потому, что его предмет — служба без
-  # платформы и без края, а дверь входа человека под `own` открывает ТОЛЬКО
-  # край (лист с его именем в SAN). Посадку `own` со вторым листом, человеком
-  # и прогоном набора полосы входа поднимает стенд чарта —
-  # `KANAME_STAND_IDENTITY_PROVIDER=own .github/scripts/stand-chart.sh`,
-  # задание `chart-own` процесса `e2e-newman.yml`; условия старта `own` —
-  # INSTALL.md §1.
+  # Под `own` вход человека держит сама служба, и старт требует величин полосы
+  # входа, обёртки секретов второго фактора, окна свежести и привязки ключей
+  # доступа. Числа ниже — те же, что объявляет боевой профиль
+  # (`deploy/values.prod.yaml`, блок `authn.login`): стенд судит ту посадку,
+  # которую поставка уносит клиенту, а не свою. Происхождение ключей доступа —
+  # адрес консоли установки под её доменом, как у профиля: консоли на стенде
+  # нет, и ключ, привязанный к этому адресу, не предъявит никто.
   #
-  # Адреса поставщика объявлены и НЕДОСТИЖИМЫ намеренно: страж требует, чтобы их
-  # НАЗВАЛИ (выведенный из домена адрес выглядел бы настроенным, никуда не ведя),
-  # но соединения при старте не делает. Поэтому стенд поднимается без поставщика,
-  # а пути, которым он нужен, отвечают ЧЕСТНЫМ отказом — это и проверяется.
-  export KANAME_AUTHN__IDENTITY_PROVIDER=external
-  export KANAME_HYDRA_ADMIN_URL=https://127.0.0.1:14445
-  export KANAME_HYDRA_JWKS_URL=https://127.0.0.1:14444/.well-known/jwks.json
-  export KANAME_HYDRA_TOKEN_URL=https://127.0.0.1:14444/oauth2/token
-  export KANAME_HYDRA_ADMIN_CA_FILE="$PKI/ca.crt"
-  export KANAME_HYDRA_JWKS_CA_FILE="$PKI/ca.crt"
-  export KANAME_HYDRA_TOKEN_CA_FILE="$PKI/ca.crt"
+  # Адресов поставщика здесь больше нет: под `own` их не читает никто.
+  export KANAME_AUTHN__IDENTITY_PROVIDER=own
+  export KANAME_AUTHN__LOGIN__SESSION_TTL=24h
+  export KANAME_AUTHN__LOGIN__COOKIE_DOMAIN=none
+  export KANAME_AUTHN__LOGIN__ADDRESS_ATTEMPTS=5
+  export KANAME_AUTHN__LOGIN__ADDRESS_WINDOW=15m
+  export KANAME_AUTHN__LOGIN__SOURCE_ATTEMPTS=50
+  export KANAME_AUTHN__LOGIN__SOURCE_WINDOW=15m
+  export KANAME_AUTHN__LOGIN__PASSWORD_MIN_LENGTH=8
+  export KANAME_AUTHN__LOGIN__BREACH_CHECK=disabled
+  export KANAME_AUTHN__LOGIN__HASHER_FORMAT=argon2id
+  export KANAME_AUTHN__LOGIN__HASHER_MEMORY=65536
+  export KANAME_AUTHN__LOGIN__HASHER_ITERATIONS=3
+  export KANAME_AUTHN__LOGIN__HASHER_PARALLELISM=4
+  export KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL=5m
+  # Ёмкость проверяющего и резерв памяти страж сверяет с ПРЕДЕЛОМ ПАМЯТИ СРЕДЫ,
+  # и предела он требует: без него старт отказывает. Предел накладывает
+  # контейнер службы (`SERVICE_MEMORY` ниже), и сверку выносит сам страж.
+  export KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY=8
+  export KANAME_AUTHN__LOGIN__MEMORY_RESERVE_BYTES=268435456
+  export KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW=3
+  export KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW=1h
+  export KANAME_AUTHN__SELF_SERVICE_FRESHNESS=15m
+  export KANAME_AUTHN__ACCESS_KEYS__RP_ID=kaname.local
+  export KANAME_AUTHN__ACCESS_KEYS__ORIGINS=https://console.kaname.local
+  export KANAME_AUTHN__ACCESS_KEYS__ALGORITHMS=-7,-8,-257
+  # Ключ обёртки секретов второго фактора ПОСТОЯНЕН по той же причине, что ключ
+  # обёртки подписных ключей: записанное им другой ключ не откроет.
+  [ -f "$SECOND_FACTOR_KEY_FILE" ] || openssl rand -hex 32 > "$SECOND_FACTOR_KEY_FILE"
+  export KANAME_SECOND_FACTOR_ENC_KEY="$(cat "$SECOND_FACTOR_KEY_FILE")"
+  # СЛУШАТЕЛЬ ПОЛОСЫ ВХОДА — дверь, которой посев заводит людей. Он допускает
+  # РОВНО край по SAN проверенного клиентского листа, поэтому режим — `mutual`,
+  # а лист края стенд выписывает сам (`make_pki`, `edge.crt`).
+  export KANAME_API_SERVER__LOGIN_LANE_ENDPOINT=0.0.0.0:9100
   # Собственные REST-фронты — предмет автономности: только они принадлежат службе.
   export KANAME_API_SERVER__REST_ENDPOINT=0.0.0.0:9098
   export KANAME_API_SERVER__INTERNAL_REST_ENDPOINT=0.0.0.0:9099
@@ -295,7 +334,7 @@ stand_env() {
   # потолок при этом остаётся потолком, а не «сколько пришлют».
   export KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING=16384
   local l u
-  for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN; do
+  for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \
       KANAME_${l}_SERVER_MTLS_CERTFILE=$PKI/srv.crt \
       KANAME_${l}_SERVER_MTLS_KEYFILE=$PKI/srv.key \
@@ -314,8 +353,11 @@ stand_env() {
 build_binaries() {
   need_tool go
   mkdir -p "$BIN"
-  go build -o "$BIN/kaname" ./cmd/kaname || { fail "сборка kaname не прошла"; exit 1; }
-  go build -o "$BIN/kaname-migrator" ./cmd/migrator || { fail "сборка накатчика не прошла"; exit 1; }
+  # Сборка — без cgo, той же формой, что у образа поставки (`Dockerfile`):
+  # служба исполняется в контейнере (см. `start_service`), и бинарь, связанный с
+  # библиотеками машины сборки, в нём бы не запустился.
+  CGO_ENABLED=0 go build -o "$BIN/kaname" ./cmd/kaname || { fail "сборка kaname не прошла"; exit 1; }
+  CGO_ENABLED=0 go build -o "$BIN/kaname-migrator" ./cmd/migrator || { fail "сборка накатчика не прошла"; exit 1; }
   say "собрано: kaname, kaname-migrator"
 }
 
@@ -363,9 +405,41 @@ migrate() {
   exit 1
 }
 
+# СЛУЖБА ИСПОЛНЯЕТСЯ В КОНТЕЙНЕРЕ, И ПРИЧИНА ОДНА — ПРЕДЕЛ ПАМЯТИ.
+#
+# Под `own` страж полосы входа сверяет ёмкость проверяющего с пределом памяти
+# среды и БЕЗ предела отказывает в старте (ID-PW-1 PWV-15.8). Предел он читает
+# там, где его объявляет контейнер (`/sys/fs/cgroup/memory.max`), а процесс,
+# запущенный прямо на машине, предела не видит. Поэтому тот же бинарь, собранный
+# здесь, исполняется контейнером с пределом `SERVICE_MEMORY`: чарта, кластера и
+# образа поставки по-прежнему нет. Предел — тот же, что у боевого профиля
+# (`resources.limits.memory`), и та же арифметика стража: ёмкость 8 × память
+# проверки на потолке + резерв.
+#
+# Образ — тот же, что у базы: он уже скачан, а статически собранному бинарю от
+# образа не нужно ничего. Сеть — машины: слушатели службы отвечают на тех же
+# адресах, что прежде, и утверждения с посевом их не меняют. Вызов клиента
+# контейнера идёт на ПЕРЕДНЕМ плане под `nohup`: процесс клиента живёт ровно
+# столько, сколько служба, и различение «страж отказал» от «слушатель не
+# поднялся» остаётся прежним — по живости процесса и по портам.
+SERVICE_NAME="${KANAME_STAND_SERVICE_NAME:-kaname-stand-svc}"
+SERVICE_IMAGE="${KANAME_STAND_SERVICE_IMAGE:-$PG_IMAGE}"
+SERVICE_MEMORY="${KANAME_STAND_SERVICE_MEMORY:-1280m}"
+
 start_service() {
   mkdir -p "$RUNDIR"
-  nohup "$BIN/kaname" > "$RUNDIR/kaname.log" 2>&1 &
+  local envs=() v
+  # Посадка уезжает в контейнер ИМЕНАМИ, а не значениями: `-e ИМЯ` берёт
+  # величину из окружения, и ключи с переводом строки доезжают целыми. Ручки
+  # самого стенда (`KANAME_STAND_*`) службе не принадлежат и не передаются.
+  for v in $(compgen -e); do
+    case "$v" in KANAME_STAND_*) ;; KANAME_*) envs+=(-e "$v") ;; esac
+  done
+  docker rm -f "$SERVICE_NAME" >/dev/null 2>&1
+  nohup docker run --rm --name "$SERVICE_NAME" --network host \
+    --memory "$SERVICE_MEMORY" --memory-swap "$SERVICE_MEMORY" \
+    --user "$(id -u):$(id -g)" -v "$BIN:$BIN:ro" -v "$PKI:$PKI:ro" "${envs[@]}" \
+    --entrypoint "" "$SERVICE_IMAGE" "$BIN/kaname" > "$RUNDIR/kaname.log" 2>&1 &
   echo $! > "$RUNDIR/kaname.pid"
   local i alive
   for i in $(seq 1 "$SERVICE_TRIES"); do
@@ -391,7 +465,10 @@ start_service() {
 # Порты собственных слушателей службы. Перечень — ручка, потому что самопроверка
 # ниже подставляет свою пару: судить готовность на восьми боевых номерах значило бы
 # мерить, свободны ли они на этой машине, а не различает ли скрипт исходы.
-PORTS="${KANAME_STAND_PORTS:-9090 9091 9092 9095 9096 9097 9098 9099}"
+#
+# Слушателя хуков поставщика (`:9092`) в перечне нет: под `own` поставщика нет, и
+# слушатель не поднимается (kaname#360). Есть слушатель полосы входа (`:9100`).
+PORTS="${KANAME_STAND_PORTS:-9090 9091 9095 9096 9097 9098 9099 9100}"
 
 # Счёт слушателей ВЫВОДИТСЯ из перечня: выписанное число разошлось бы с ним молча,
 # и сообщение об успехе стало бы утверждать о стенде неправду.
@@ -439,7 +516,7 @@ down() {
     kill "$(cat "$RUNDIR/kaname.pid")" 2>/dev/null
     rm -f "$RUNDIR/kaname.pid"
   fi
-  command -v docker >/dev/null 2>&1 && docker rm -f "$PG_NAME" >/dev/null 2>&1
+  command -v docker >/dev/null 2>&1 && docker rm -f "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
   say "стенд снесён"
 }
 
@@ -506,8 +583,18 @@ if [ "${1:-}" = "--self-test" ]; then
 
     # Подложные средства подъёма: их НИКОГДА не исполняют, `need_tool` смотрит лишь
     # наличие. Поэтому ни один прогон самопроверки не трогает настоящий docker.
-    printf '#!/bin/sh\nexit 0\n' > "$TMP/toolbin/docker"
     printf '#!/bin/sh\nexit 0\n' > "$TMP/toolbin/go"
+    # Подложный клиент контейнера. `need_tool` спрашивает лишь его наличие, а
+    # `start_service` зовёт `docker run … <образ> <бинарь>`: подложный исполняет
+    # ПОСЛЕДНИЙ довод — подставную службу мира — на переднем плане, как настоящий
+    # клиент держит контейнер. Так миры судят ту же ветку запуска, что подъём, и
+    # движка контейнеров не требуют. Прочие подкоманды (`rm -f`) — пустой успех.
+    cat > "$TMP/toolbin/docker" <<'EOF'
+#!/bin/sh
+[ "$1" = run ] || exit 0
+for a in "$@"; do last="$a"; done
+exec "$last"
+EOF
 
     # Подложный `go`, который СОБИРАЕТ: понимает `build -o <путь>` и создаёт файл.
     cat > "$TMP/gobin-ok/go" <<'EOF'
@@ -664,17 +751,17 @@ EOF
     world_build_ok()        { ( PATH="$TMP/gobin-ok:$PATH";      BIN="$TMP/build-bin"; build_binaries ); }
 
     world_service_up() {
-        ( BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+        ( PATH="$TMP/toolbin:$PATH"; BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
           SERVICE_TRIES=20; export SELFTEST_BIND_PORTS="$PAIR_SVC"
           start_service )
     }
     world_service_partial() {
-        ( BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+        ( PATH="$TMP/toolbin:$PATH"; BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
           SERVICE_TRIES=3;  export SELFTEST_BIND_PORTS="$PORT_A"
           start_service )
     }
     world_service_guard() {
-        ( BIN="$TMP/svc-guard"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+        ( PATH="$TMP/toolbin:$PATH"; BIN="$TMP/svc-guard"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
           SERVICE_TRIES=5;  export SELFTEST_BIND_PORTS=""
           start_service )
     }
