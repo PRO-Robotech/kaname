@@ -1213,10 +1213,13 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// (`authn.client-token.enabled` не включён). Там выдача уходит к
 	// поставщику, которого нет, и отказывает на всяком входе.
 	//
-	// В БОЕВЫХ РЕЖИМАХ ВЕТВЬ НИЖЕ НЕДОСТИЖИМА. Комбинацию отвергает страж
-	// старта — строка контура выдачи в таблице требований полос
-	// (`config.LaneRequirements`, задача #337), — и процесс до этой сборки не
-	// доходит. Чарт её не собирает ни в каком режиме
+	// В БОЕВЫХ РЕЖИМАХ ВЕТВЬ НИЖЕ НЕДОСТИЖИМА, и держится это двумя половинами.
+	// Комбинацию отвергает страж старта — строка контура выдачи в таблице
+	// требований полос (`config.LaneRequirements`, задача #337); вердикт стража
+	// по режимам держит `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
+	// Отказ стража завершает процесс в `main` до этой сборки; порядок держит
+	// `TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring`, исполняя
+	// настоящий `main` в дочернем процессе. Чарт её не собирает ни в каком режиме
 	// (`kaname-svc.requireClientTokenEndpoint`, та же задача): на стенде,
 	// поставленном чартом, ветвь не исполняется.
 	//
@@ -1227,7 +1230,8 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// сборке, был бы вторым местом об одном предмете и разошёлся бы с первым
 	// по режиму. Поэтому ответ о посадке ЧИТАЕТСЯ: неработающая комбинация
 	// называется при старте, один раз и с обеими ручками, — молчание здесь
-	// оставило бы дефект до пути запроса. Достижимость по режимам держит
+	// оставило бы дефект до пути запроса. Что в этом режиме предупреждение
+	// печатается ровно один раз и называет, чем снимается, держит та же
 	// `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
 	hydraAdmin, providerRoadBuilt := mustProviderAdminClient(cfg, roadObs)
 	if !providerRoadBuilt && !saKeyIssuanceIsOurs(cfg) {
