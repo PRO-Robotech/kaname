@@ -141,9 +141,12 @@ func TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake(t *testing.T) {
 		isDeclared[e] = true
 	}
 
+	// Перепись считает ИСПОЛНЕННОЕ: прогон, зависание и потерю своего вида
+	// засчитывает сценарий, дошедший до конца, а не перечень объявленных. Прогон,
+	// оборванный раньше, не сосчитан ни в одной величине (kaname#436, находка 4).
 	var mu sync.Mutex
 	reached := map[string]bool{}
-	var runs, counted int
+	var runs, hangs, counted int
 
 	for _, sc := range scenarios {
 		for _, hang := range []bool{true, false} {
@@ -216,8 +219,13 @@ func TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake(t *testing.T) {
 				mu.Lock()
 				runs++
 				reached[sc.wantEvent] = true
-				if hang && n == 1 {
-					counted++
+				if hang {
+					hangs++
+					// Потеря засчитывается только СВОЕГО вида: приёмник, насчитавший
+					// одну запись чужого вида, потерю этого сценария не увидел.
+					if n == 1 && byType[sc.wantEvent] == 1 {
+						counted++
+					}
 				}
 				mu.Unlock()
 			})
@@ -235,9 +243,9 @@ func TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake(t *testing.T) {
 		if len(missing) > 0 {
 			t.Errorf("виды записей %v не достигнуты ни одним сценарием — их потеря НЕ ИЗМЕРЕНА", missing)
 		}
-		t.Logf("перепись: видов объявлено %d, достигнуто %d · прогонов %d (зависаний %d, "+
-			"сосчитано потерь %d) · предел на вызов %s",
-			len(declared), len(reached), runs, len(scenarios), counted, credentialLanePeerTimeout)
+		t.Logf("перепись: видов объявлено %d, достигнуто %d · сценариев %d · исполнено прогонов %d "+
+			"(зависаний %d, сосчитано потерь своего вида %d) · предел на вызов %s",
+			len(declared), len(reached), len(scenarios), runs, hangs, counted, credentialLanePeerTimeout)
 	})
 }
 
