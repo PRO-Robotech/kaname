@@ -33,7 +33,16 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
+  Poll hits /operations/{id} on the service's own front (iop* → kaname).
+
+ГДЕ ГОНЯЕТСЯ (e2e-flow.md §7а; kaname#415). Производитель каждого утверждения —
+служба: CRUD роли и её операций — её глаголы, а пин отказа — `md.scope` СВОЕЙ
+двери (`assert_unscoped_rejected`, `assert_scoped_authz_deny`, коммит #50), тогда
+как `md.resource` ставит только край и здесь не читается. Поэтому шаги идут на
+собственный публичный фронт (`ownRestBaseUrl`, `address_own_front` в конце
+модуля), и гоняет модуль задание `stand` процесса `e2e-newman.yml`. Все ключи
+окружения пишет посев автономного стенда
+(`tests/authz-fixtures/seed_own_stand.py --minted-keys`).
 
 Case IDs follow the IAM-ROL-<RPC>-<CLASS>[-detail] scheme.
 
@@ -883,7 +892,7 @@ CASES.append(Case(
 # все три исхода — включая приём обновления системной роли.
 CASES.append(Case(
     id="IAM-ROL-UP-NEG-SYSTEM-NO-PATH",
-    title="Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the edge "
+    title="Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the service's door "
           "(immutability itself is pinned by IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG under jwtBootstrap)",
     classes=["NEG", "AUTHZ"],
     priority="P1",
@@ -1745,7 +1754,7 @@ CASES.append(Case(
 # RBAC rules model: rules[] is the only writable policy surface; the compiled
 # `permissions` field is OUTPUT-only (empty/absent on the public Get/List
 # projection) and is REJECTED if supplied to Create. Black-box through
-# api-gateway. Do not weaken assertions.
+# the service's own front. Do not weaken assertions.
 # ===========================================================================
 
 
@@ -1956,11 +1965,10 @@ CASES.append(Case(
 #
 # The case hard-expected 400 INVALID_ARGUMENT, i.e. that the request reaches the
 # backend's scope validation. It does not, and by design: with no scope in the body
-# the gateway scope_extractor has nothing to resolve for the anti-BOLA check, so it
-# fail-closes on the unscoped anchor `account:*` FIRST (403 AUTHZ_DENIED,
-# `no authorization path to the resource`) — the platform-wide authz-before-
-# validation ordering (security.md), the same one the vpc/nlb/compute/storage suites
-# already encode via assert_unscoped_rejected.
+# the door's scope extractor has nothing to resolve for the anti-BOLA check, so it
+# fail-closes on the unscoped anchor FIRST (403 AUTHZ_DENIED) — the platform-wide
+# authz-before-validation ordering (security.md). Both doors order it this way; on
+# the service's own front the pinned tier is `md.scope = account`.
 #
 # So: tolerate 400 OR 403 — but PIN the refusal. A bare "403 or 400" would also be
 # satisfied by a permission-catalog miss or a malformed body, which is exactly the
@@ -2111,3 +2119,9 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

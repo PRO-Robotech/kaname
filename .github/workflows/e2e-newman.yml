@@ -578,6 +578,7 @@ jobs:
             --service iam-system-grant-visibility \
             --service iam-rbac-rules-labels \
             --service iam-role-redesign \
+            --service iam-role \
             --service label-revoke-iam \
             --service iam-project \
             --service iam-access-binding-redesign \
