@@ -7,14 +7,14 @@ package main
 
 import (
 	"context"
-	"errors"
+	"crypto/tls"
 	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/corelib/observability/health"
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
@@ -26,20 +26,13 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
-
-	"github.com/PRO-Robotech/corelib/schemaguard"
-	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
-// buildHooksMux — собирает HTTP mux для AuthN hooks и ВОЗВРАЩАЕТ носитель
-// готовности вместе с ним.
+// buildHooksMux — собирает HTTP mux для AuthN hooks.
 //
-// Носитель отдаётся наружу, а не остаётся внутри, ровно ради одного: гашение.
-// `SetShuttingDown` переводит `/readyz` в 503 ДО остановки серверов, и знает о
-// начале гашения только тот, кто его запускает (`serve.go`). Оставить носитель
-// здесь значило бы иметь механизм и не иметь того, кто его дёрнет, — у шести
-// соседних сервисов эта провязка есть, и её отсутствие было бы расхождением,
-// которому нечем себя выдать (#1752).
+// Живости и готовности здесь больше нет (kaname#360): они на диагностической
+// поверхности, которая есть при любой посадке, а этот mux собирается только
+// там, где есть внешний поставщик (hooksLaneSurface).
 //
 // kanameRepo / opsRepo / bindingReconciler прокидываются из
 // composition root (serve.go) — provision hook (Kratos user-provisioning, C4)
@@ -70,7 +63,7 @@ func buildHooksMux(
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
-) (http.Handler, *health.Aggregator) {
+) http.Handler {
 	hookSecret := cfg.AuthN.ResolveHookSharedSecret()
 	domain := cfg.AuthN.ResolveDomain()
 	hydraIssuer := cfg.AuthN.ResolveHydraIssuer()
@@ -138,57 +131,11 @@ func buildHooksMux(
 		logger,
 	)
 
-	// Готовность строит ОБЪЯВЛЕННЫЙ носитель (`pkg/observability/health`), а не
-	// своя форма в handler-слое (#1752): срок на чекер, различение
-	// «носитель не провязан»/«носитель ответил», перевод в 503 на гашении и
-	// зеркало результата — свойства, которые он уже решил, и решать их второй
-	// раз по месту значило бы завести расхождение, которому нечем себя выдать.
-	//
-	// ЧТО именно проверяется — по-прежнему решает композиционный корень: он один
-	// знает, какая база своя и к кому сервис ходит.
-	readinessCheckers := []health.Checker{
-		{Name: "database", Check: pool.Ping},
-		// ВЕРСИЯ СХЕМЫ — ОТДЕЛЬНАЯ ИМЕНОВАННАЯ ЗАВИСИМОСТЬ, а не часть
-		// проверки базы. Мигратор идёт при каждом раскате, поэтому откат
-		// выкатки ставит ПРЕЖНИЙ образ на НОВУЮ схему; база при этом
-		// отвечает на `Ping`, и без этого чекера под объявлялся бы готовым и
-		// получал трафик (`pkg/schemaguard`, задача #1734). Отдельное имя
-		// обязательно: оператор обязан отличить «база недоступна» от «образ
-		// не той версии, что схема», не читая кода.
-		//
-		// Набор миграций читается как встроенные байты, у базы спрашивается
-		// ОДИН `SELECT` применённой версии — least-privilege serve-бинаря
-		// сохраняется, схему он по-прежнему не меняет.
-		{Name: schemaguard.CheckerName, Check: schemaguard.CheckFromFS(
-			migrations.FS, schemaguard.PgxVersionReader(pool))},
-		{Name: "lro-worker", Check: func(context.Context) error {
-			if operations.Ready() {
-				return nil
-			}
-			return errors.New("lro worker not ready")
-		}},
-	}
-	// ИСХОД ГОТОВНОСТИ ЗЕРКАЛИТСЯ В ВЕЛИЧИНУ, и это не украшение витрины
-	// (#2494). Без зеркала наружу выходит ОДИН БИТ: имена трёх зависимостей
-	// остаются в теле пробы, поднятой по TLS на внутреннем порту, и прочесть их
-	// можно только пробросом порта в обход проверки сертификата. Дежурный
-	// чужой установки — а kaname поставляется именно так, отдельно — не
-	// отличает «база недоступна» (сломан продукт) от «образ не той версии, что
-	// схема» (условие не создано).
-	//
-	// Набор зависимостей выводится ИЗ ТОГО ЖЕ среза, которым построен носитель:
-	// второй перечень отстал бы от первого молча, и отставший чекер остался бы
-	// без рядов — то есть невидимым ровно так же, как до этой провязки.
-	readinessValues := metricsReg.ReadinessRecorder(readinessDependencyNames(readinessCheckers))
-	healthAgg := health.New(readinessCheckers,
-		health.WithResultObserver(readinessValues.Observe))
-
 	mux := handlerinternal.NewMux(handlerinternal.Handlers{
 		TokenHook:     tokenHook,
 		RefreshHook:   refreshHook,
 		ProvisionHook: provisionHook,
 		RecoveryHook:  recoveryHook,
-		Health:        healthAgg,
 		// ИСХОД КАЖДОГО ОБРАЩЕНИЯ СТАНОВИТСЯ ВЕЛИЧИНОЙ (#2495). До этой провязки
 		// живой путь входа человека не производил ни одной: «полоса отказывает»
 		// и «поставщик не настроен звать хук» давали одинаково ненаблюдаемые
@@ -204,20 +151,7 @@ func buildHooksMux(
 	wrapped := handlerinternal.LoggerMiddleware(mux, func(method, path string, status int) {
 		logger.Info("hooks http", "method", method, "path", path, "status", status)
 	})
-	return wrapped, healthAgg
-}
-
-// readinessDependencyNames — имена объявленных чекеров в порядке объявления.
-//
-// Выведение, а не второй перечень: набор рядов величины обязан совпадать с
-// набором зависимостей by construction, иначе добавленный чекер остаётся без
-// рядов и не наблюдаем — тот же дефект, который эта провязка и снимает.
-func readinessDependencyNames(checkers []health.Checker) []string {
-	names := make([]string, 0, len(checkers))
-	for _, c := range checkers {
-		names = append(names, c.Name)
-	}
-	return names
+	return wrapped
 }
 
 // userProvisionAdapter maps the iamhooks.UserProvisioner port to the
@@ -363,4 +297,67 @@ func buildIssuanceHooks(
 		logger,
 	)
 	return tokenHook, refreshHook
+}
+
+// hooksLaneSurface — профиль поверхности вебхуков провайдера личности.
+//
+// # Поднимается ПОСАДКОЙ (kaname#360)
+//
+// Хуки Hydra (token, refresh) и Kratos (provision, recovery) зовёт внешний
+// поставщик, и только он. Под `authn.identity-provider=own` поставщика нет:
+// полоса не собирается (build не зовётся), слушатель не поднимается, и ни
+// один путь `/iam/v1/hooks/*` не отвечает. Отсутствие названо причиной в
+// профиле поверхности — самоотчёт о подъёме отличает решение от недосмотра.
+//
+// Посадку судит ЕДИНСТВЕННЫЙ предикат (`HasExternalIdentityProvider`): им же
+// корень решает дорогу к поставщику и запись зеркала его ключей. Держит
+// `hooks_lane_posture_test.go`.
+//
+// build — сборка обработчика полосы; зовётся, только когда поверхность
+// поднимается.
+func hooksLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog.Logger,
+	tlsCfg *tls.Config, build func() http.Handler,
+) (servicecontract.SurfaceDescriptor, error) {
+	addr := hooksListenAddress(cfg)
+	var handler http.Handler
+	if cfg.AuthN.HasExternalIdentityProvider() {
+		handler = build()
+	}
+	if handler == nil {
+		tlsCfg = nil
+	}
+	return iamHTTPSurface(servicecontract.Surface{
+		Name:   "вебхуки провайдера личности",
+		Mode:   mode,
+		Logger: logger,
+		// Причина — ОДНА СТРОКА ЛИТЕРАЛОМ с именем ручки, как у полосы входа:
+		// перечень поверхностей (`tools/surfaceroster`) выводит ключ адреса из
+		// этой строки разбором, и причина, собранная переменной, выпала бы из
+		// него молча вместе с маршрутом поверхности.
+		Addr: addrAxis(addr, "вебхуки поставщика личности поднимаются только посадкой с внешним "+
+			"поставщиком по адресу "+knobHooks+": под authn.identity-provider=own поставщика нет, и "+
+			"хуки Hydra (token, refresh) и Kratos (provision, recovery) не собираются — вход, заведение "+
+			"и восстановление человека исполняет полоса входа службы; при внешнем поставщике "+
+			"незаданный адрес значит, что обогащение токена и заведение пользователя по первому "+
+			"входу на этой посадке не обслуживаются"),
+		Handler: handler,
+		Reach:   servicecontract.ReachClusterInternal,
+		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
+			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
+		TLS: tlsCfg,
+	})
+}
+
+// hooksListenAddress — адрес, на котором корень ПОДНИМАЕТ слушатель вебхуков;
+// пусто — не поднимает.
+//
+// Читателей два, и порознь они разошлись бы молча: построитель поверхности и
+// страж транспорта HTTP-рёбер. Под `own` слушателя нет, и страж, получивший
+// адрес из настройки, требовал бы TLS у двери, которой не будет, — посадка
+// `own` без сертификата несуществующего слушателя не стартовала бы.
+func hooksListenAddress(cfg config.Config) string {
+	if !cfg.AuthN.HasExternalIdentityProvider() {
+		return ""
+	}
+	return cfg.AuthN.HooksHTTPListenAddress()
 }
