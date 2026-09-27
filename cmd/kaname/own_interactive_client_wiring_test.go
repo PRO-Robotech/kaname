@@ -31,11 +31,14 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // ownClientRegistryDouble — собственный реестр клиентов, отвечающий контрактом
@@ -66,9 +69,9 @@ func ownInteractiveSpec() interactiveclient.ProviderClientSpec {
 // ЗАВЕДЕНИЕ под `own` исполняется.
 func TestCompositionRoot_InteractiveClientCreateHasAnExecutorUnderOwnPosture(t *testing.T) {
 	ctx := context.Background()
-	cfg := roadCfg(config.IdentityProviderOwn, "9097")
+	cfg := loginLaneCfg(config.IdentityProviderOwn)
 
-	prov := interactiveClientProvider(cfg, &ownClientRegistryDouble{}, nil)
+	prov := mustOwnExecutor(t, cfg, &ownClientRegistryDouble{})
 
 	pc, err := prov.Register(ctx, ownInteractiveSpec())
 	if errors.Is(err, clients.ErrNoExternalIdentityProvider) {
@@ -96,10 +99,10 @@ func TestCompositionRoot_InteractiveClientCreateHasAnExecutorUnderOwnPosture(t *
 // дорога принимает 404 поставщика).
 func TestCompositionRoot_InteractiveClientDeleteHasAnExecutorUnderOwnPosture(t *testing.T) {
 	ctx := context.Background()
-	cfg := roadCfg(config.IdentityProviderOwn, "9097")
+	cfg := loginLaneCfg(config.IdentityProviderOwn)
 
 	registry := &ownClientRegistryDouble{}
-	prov := interactiveClientProvider(cfg, registry, nil)
+	prov := mustOwnExecutor(t, cfg, registry)
 
 	err := prov.Deregister(ctx, "oic-00000000000000000")
 	if errors.Is(err, clients.ErrNoExternalIdentityProvider) {
@@ -125,7 +128,18 @@ func TestCompositionRoot_InteractiveClientKeepsTheForeignRoadUnderExternalPostur
 	cfg := roadCfg(config.IdentityProviderExternal, "9097")
 
 	registry := &ownClientRegistryDouble{}
-	prov := interactiveClientProvider(cfg, registry, nil)
+	hasher, err := ownClientSecretHasher(cfg)
+	if err != nil {
+		t.Fatalf("под external хешер секрета клиента не нужен, а его сборка отказала: %v", err)
+	}
+	if hasher != nil {
+		t.Errorf("под external собран хешер секрета клиента (%T) — исполнителя, которому он нужен, "+
+			"на этой посадке нет", hasher)
+	}
+	prov, err := interactiveClientProvider(cfg, registry, hasher, nil)
+	if err != nil {
+		t.Fatalf("под external исполнитель не собран: %v", err)
+	}
 
 	if _, ok := prov.(*clients.InteractiveClientProvider); !ok {
 		t.Fatalf("под external исполнителем стал %T — прежняя посадка обязана "+
@@ -144,3 +158,78 @@ func TestCompositionRoot_InteractiveClientKeepsTheForeignRoadUnderExternalPostur
 			"о нём знать не должна", registry.cleared)
 	}
 }
+
+// mustOwnExecutor — исполнитель посадки `own` ТЕМИ ЖЕ вызовами, что корень:
+// хешер от его же производителя, исполнитель от выбора по посадке.
+func mustOwnExecutor(t *testing.T, cfg config.Config, registry kanamepg.ClientSecretStore) interactiveclient.ProviderClients {
+	t.Helper()
+	hasher, err := ownClientSecretHasher(cfg)
+	if err != nil {
+		t.Fatalf("хешер секрета клиента под own не собран: %v", err)
+	}
+	prov, err := interactiveClientProvider(cfg, registry, hasher, nil)
+	if err != nil {
+		t.Fatalf("исполнитель заведения под own не собран: %v", err)
+	}
+	return prov
+}
+
+// TestCompositionRoot_OwnInteractiveClientExecutorRefusesToStartWithoutHasher —
+// условие поверхности п.9 (ban #16): на посадке `own` исполнитель заведения без
+// хешера — отказ в пуске с названием недостающего, а не клиент без материала и
+// не откат к публичному.
+func TestCompositionRoot_OwnInteractiveClientExecutorRefusesToStartWithoutHasher(t *testing.T) {
+	cfg := loginLaneCfg(config.IdentityProviderOwn)
+
+	prov, err := interactiveClientProvider(cfg, &ownClientRegistryDouble{}, nil, nil)
+	if err == nil {
+		t.Fatalf("под own исполнитель заведения собран БЕЗ хешера (%T): клиент со способом секретом "+
+			"получил бы строку без проверочного значения либо откат к публичному", prov)
+	}
+	if !strings.Contains(err.Error(), "hasher") {
+		t.Errorf("отказ сборки не называет недостающего: %v", err)
+	}
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же корень с хешером своего производителя собирается.
+	_ = mustOwnExecutor(t, cfg, &ownClientRegistryDouble{})
+}
+
+// TestCompositionRoot_OwnClientSecretIsHashedInTheSignInLaneClass — условие
+// поверхности п.6: проверочное значение секрета клиента пишет хешер ТОГО
+// объявленного класса, которым корень пишет приманку проверяющего
+// (`cfg.AuthN.Login.Declared()`); иначе отказ незаведённому клиенту стоил бы
+// иначе, чем заведённому, и время ответа перечисляло бы клиентов.
+func TestCompositionRoot_OwnClientSecretIsHashedInTheSignInLaneClass(t *testing.T) {
+	cfg := loginLaneCfg(config.IdentityProviderOwn)
+	declared := cfg.AuthN.Login.Declared()
+
+	pc, err := mustOwnExecutor(t, cfg, &ownClientRegistryDouble{}).Register(context.Background(), ownInteractiveSpec())
+	if err != nil {
+		t.Fatalf("заведение под own отказало: %v", err)
+	}
+	if pc.SecretVerifier.IsZero() {
+		t.Fatal("исполнитель корня не отдал проверочного значения — клиенту нечего будет предъявить")
+	}
+	checker, err := passwordverify.New(1, rootNopObserver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meets, err := checker.MeetsDeclared(pc.SecretVerifier, declared)
+	if err != nil || !meets {
+		t.Fatalf("проверочное значение не отвечает объявленному классу полосы входа: отвечает=%t, %v", meets, err)
+	}
+	got := checker.Verify(pc.SecretVerifier, "x")
+	for param, want := range declared.Params {
+		if got.Params[param] != want {
+			t.Errorf("параметр %s проверочного значения = %d, у объявленного класса приманки — %d",
+				param, got.Params[param], want)
+		}
+	}
+	if got.Format != declared.Format {
+		t.Errorf("формат проверочного значения %q, у объявленного класса — %q", got.Format, declared.Format)
+	}
+}
+
+type rootNopObserver struct{}
+
+func (rootNopObserver) VerificationObserved(passwordverify.Outcome) {}

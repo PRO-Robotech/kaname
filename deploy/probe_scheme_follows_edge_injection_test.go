@@ -26,8 +26,8 @@ import (
 
 // probeSchemeLines — то, что инъекция снимает: обе строки схемы.
 const (
-	probeSchemeReadiness = "              scheme: {{ $hooksScheme }}\n            initialDelaySeconds: 5"
-	probeSchemeLiveness  = "              scheme: {{ $hooksScheme }}\n            initialDelaySeconds: 10"
+	probeSchemeReadiness = "              scheme: {{ $diagScheme }}\n            initialDelaySeconds: 5"
+	probeSchemeLiveness  = "              scheme: {{ $diagScheme }}\n            initialDelaySeconds: 10"
 	probeNoSchemeRead    = "            initialDelaySeconds: 5"
 	probeNoSchemeLive    = "            initialDelaySeconds: 10"
 )
@@ -49,13 +49,14 @@ func TestProbeSchemeCensusCanFail(t *testing.T) {
 	require.Equal(t, 2, probes, "проб в шаблоне две")
 	require.Equal(t, 2, checked, "обе сверены с ребром")
 	require.Len(t, findings, 2,
-		"боевой профиль поднимает ребро вебхуков по TLS, а обе пробы идут открытым текстом — "+
+		"боевой профиль поднимает ребро диагностики по TLS, а обе пробы идут открытым текстом — "+
 			"гейт, здесь промолчавший, не измеряет своего предмета")
 
 	joined := strings.Join(findings, "\n")
 	require.Contains(t, joined, "readinessProbe", "находка обязана назвать пробу поимённо")
 	require.Contains(t, joined, "livenessProbe", "находка обязана назвать пробу поимённо")
-	require.Contains(t, joined, "KANAME_HOOKS_SERVER_MTLS_ENABLE",
+	// Пробы живут на диагностике (kaname#360), поэтому ручка вердикта — её.
+	require.Contains(t, joined, "KANAME_METRICS_SERVER_MTLS_ENABLE",
 		"находка обязана назвать РУЧКУ, по которой вынесен вердикт: без неё читатель не знает, где чинить")
 	require.Contains(t, joined, "не станет готовым",
 		"находка обязана назвать следствие, а не только расхождение: гейт, чьё сообщение непонятно, снимают")

@@ -29,7 +29,7 @@ func TestClientTokenPaceValuesReachTheEndpointBuild(t *testing.T) {
 		InFlightCeiling:          33,
 	}
 
-	got := clientTokenBuildConfig(cfg, "https://kaname.kacho.local", nil)
+	got := clientTokenBuildConfig(cfg, "https://kaname.kacho.local", nil, nil)
 	if got.ExchangesPerClientPerSec != 7 {
 		t.Fatalf("темп на клиента из настройки не дошёл до сборки: %d, ожидалось 7", got.ExchangesPerClientPerSec)
 	}

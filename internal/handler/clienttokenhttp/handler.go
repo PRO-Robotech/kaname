@@ -47,6 +47,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,6 +87,20 @@ type Issuer interface {
 	Issue(ctx context.Context, in client_token.Input) (client_token.Output, clientassertion.Outcome, error)
 }
 
+// CeremonyLane — полосы церемонии OAuth на этом же эндпоинте:
+// `authorization_code` и `refresh_token` (приёмка LINE-A-1, группы B и G).
+//
+// Эндпоинт судит метод, потолок тела и разбор формы для ВСЕХ полос, а вид
+// выдачи — по закрытому перечню: машинные полосы названы поимённо ниже, полосы
+// церемонии — словом церемонии (Grants). Полоса получает разобранную форму.
+// Реализует `ceremonyhttp.TokenLane`.
+type CeremonyLane interface {
+	// Grants — виды выдачи, которые обслуживает полоса.
+	Grants() []string
+	// ServeGrant отвечает на запрос вида grant.
+	ServeGrant(w http.ResponseWriter, r *http.Request, grant string)
+}
+
 // Config — настройка эндпоинта.
 type Config struct {
 	// BodyCeiling — потолок тела запроса в байтах. ОБЯЗАТЕЛЕН.
@@ -104,6 +119,9 @@ type Config struct {
 	// бы соединение и горутину ровно тогда, когда их и так слишком много.
 	InFlightCeiling int
 	Logger          *slog.Logger
+	// Ceremony — полосы церемонии. nil — церемония на этой посадке не
+	// собрана (посадка `external`), и её виды выдачи — вне перечня.
+	Ceremony CeremonyLane
 }
 
 // Handler — токен-эндпоинт.
@@ -231,6 +249,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// приёма, и заведение второго вида её не завело: развилка ниже перечисляет
 	// оба поимённо, а всё остальное отвергается здесь.
 	grantType := r.PostForm.Get("grant_type")
+	if h.cfg.Ceremony != nil && slices.Contains(h.cfg.Ceremony.Grants(), grantType) {
+		// Полосы церемонии: доказательство клиента, обмен и счёт исходов —
+		// у полосы. Вид выдачи назван ЕЁ словом, а не корзиной приёма.
+		h.cfg.Ceremony.ServeGrant(w, r, grantType)
+		return
+	}
 	if grantType != tokenpolicy.GrantTypeClientCredentials && grantType != tokenpolicy.GrantTypeJWTBearer {
 		h.count(clientassertion.OutcomeUnsupportedGrantType)
 		writeJSON(w, http.StatusBadRequest, errorBody("unsupported_grant_type"))

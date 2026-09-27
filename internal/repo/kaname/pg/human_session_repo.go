@@ -18,7 +18,9 @@ package pg
 //
 // Операцию записи отсечки этот файл тоже не переписывает: она одна на дерево
 // (`subjectCutoffRowSQL`, §4.1 п.17), и зовут её все писатели ОДНОЙ дверью
-// `upsertSubjectCutoff` — она кладёт ОБЕ записи отсечки (kaname#313).
+// `upsertSubjectCutoff` — она кладёт ОБЕ записи отсечки (kaname#313). Чтение
+// отсечки — тоже не своё: захват строки личности входа читает её оператором
+// читателя отсечки (`revokedBeforeQ`, kaname#385).
 
 import (
 	"context"
@@ -211,6 +213,20 @@ func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.U
 	return w, nil
 }
 
+// PersonWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята строка
+// личности ключевым замком (`holdPersonForKey`, kaname#382).
+func (r *HumanSessionRepo) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.PersonWriter", "")
+	}
+	if err := w.holdPersonForKey(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return w, nil
+}
+
 // sweepUnservableSessionsSQL — оператор уборки записей сессии, которые
 // `Resolve` уже не обслужит: истёкшие и снятые старше порога ($1), партией не
 // больше $2.
@@ -339,8 +355,13 @@ type humanSessionWriter struct {
 //
 // `FOR NO KEY UPDATE` конфликтует сам с собой — это и есть сериализация — и с
 // удалением личности (`FOR UPDATE`); с проверкой внешнего ключа (`FOR KEY
-// SHARE`) он СОВМЕСТИМ, поэтому вход человека (вставка сессии), выдача кода и
-// запись отсечки им не останавливаются. Обычные правки строки личности
+// SHARE`) он СОВМЕСТИМ, поэтому вставка записи сессии, выдача кода и запись
+// отсечки им не останавливаются. Выдача ВХОДА в этой сериализации участник:
+// первой своей операцией она берёт строку личности `FOR SHARE`
+// (`lockPersonForLoginSQL`, kaname#385), а с ним этот замок конфликтует. Вход и
+// писатель нескольких сессий того же человека поэтому ждут друг друга, и
+// дождавшийся видит записанное первым; два входа на этой строке друг друга
+// не ждут. Обычные правки строки личности
 // (`UPDATE users` неключевых колонок) с ним сериализуются: ни одна из них в
 // дереве не берёт до этого строк сессии, способа входа или кода
 // восстановления, так что цикла с ними нет.
@@ -349,6 +370,30 @@ type humanSessionWriter struct {
 // внешний ключ следующей записи.
 const lockPersonForSessionSetSQL = `
 SELECT 1 FROM kaname.users WHERE id = $1 FOR NO KEY UPDATE`
+
+// holdPersonForKey — строка личности ключевым замком (`lockUserForKeySQL`,
+// `FOR KEY SHARE`) — первым оператором транзакции, до любой строки-ребёнка
+// личности (kaname#382). Сила — та, что взяла бы проверка внешнего ключа
+// следующей вставки: замок конфликтует ровно с удалением строки и совместим с
+// остальными писателями личности, поэтому ставит писателя в один порядок с
+// удалением («личность → дети») и никого больше не останавливает.
+//
+// Транзакция, уже держащая строку ДРУГОЙ личности, отказывает — по той же
+// причине, что у замка писателя нескольких сессий. Строки может не быть: тогда
+// держать нечего, и об отсутствии личности судит внешний ключ следующей записи.
+func (w *humanSessionWriter) holdPersonForKey(ctx context.Context, userID domain.UserID) error {
+	if w.person != "" && w.person != userID {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot hold a second one")
+	}
+	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(userID)); err != nil {
+		return mapErr(err, "User", string(userID))
+	}
+	if userID != "" {
+		w.person = userID
+	}
+	return nil
+}
 
 // holdPersonForSessionSet — строка личности замком писателя нескольких сессий,
 // если транзакция ещё не держит её так. Транзакция, уже держащая строку ДРУГОЙ
@@ -373,6 +418,67 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 		w.person, w.sessionSet = userID, true
 	}
 	return nil
+}
+
+// lockPersonForLoginSQL — строка личности замком ВЫДАЧИ ВХОДА (kaname#385, Р4).
+//
+// # ПОЧЕМУ ЭТА СИЛА
+//
+// `FOR SHARE` конфликтует с замком писателя нескольких сессий
+// (`lockPersonForSessionSetSQL`, `FOR NO KEY UPDATE`) и с удалением личности
+// (`FOR UPDATE`): принудительный выход, пришедший внутрь открытой выдачи,
+// ждёт её фиксации и снимает выданное, а выдача, пришедшая к стоящему выходу,
+// ждёт его фиксации и читает его отсечку. С ключевым замком (`FOR KEY SHARE`:
+// открытие транзакции выхода, проверки внешних ключей, выдача кода) он
+// совместим, и сам с собой тоже — захват одного входа не ждёт захвата
+// другого входа того же человека. Сила та же и по той же причине, что у выдачи
+// кода против снятия сессии (`lockSessionOfCeremonySQL`).
+//
+// # ПОЧЕМУ ОПЕРАТОР ТОЛЬКО БЕРЁТ СТРОКУ
+//
+// Отсечку этот оператор не читает — ни соединением, ни подзапросом. Оператор,
+// ждавший замка, отвечает снимком, взятым ДО ожидания, и выхода,
+// зафиксированного за ожидание, не видит. Отсечку читает следующий оператор
+// (`revokedBeforeQ`): на уровне писателя сессии (`ceremonyWriterTx()`, `read
+// committed`) его снимок взят после ответа захвата.
+//
+// # ПОЧЕМУ ПЕРВЫМ В ТРАНЗАКЦИИ ВЫДАЧИ
+//
+// Выдача с кодом второго фактора пишет строку фактора — дочернюю строку
+// личности. Удаление личности берёт строку личности и каскадом — строки
+// фактора. Захват, взятый ДО записи фактора, даёт у обоих один порядок
+// «личность → строки фактора»; взятый позже — встречный. Место держит вариант
+// использования входа (`humansession.LoginUseCase`), здесь — только оператор.
+//
+// Строки может не быть: личность удалена между чтением адреса и захватом. Это
+// отдельный исход захвата — `NOT_FOUND` по счёту строк оператора.
+const lockPersonForLoginSQL = `
+SELECT 1 FROM kaname.users WHERE id = $1 FOR SHARE`
+
+// LockPersonForLogin — см. порт: захват строки личности транзакцией выдачи
+// входа и чтение её отсечки ПОСЛЕ него.
+//
+// Строку одной личности транзакция держит не более одной (`person`): захват
+// второй личности отказывает, как и у писателя нескольких сессий. Отметка
+// `sessionSet` не ставится — замок слабее писательского, и дверь снятия,
+// позванная в этой же транзакции, подняла бы его своим оператором.
+func (w *humanSessionWriter) LockPersonForLogin(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
+	if userID == "" {
+		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if w.person != "" && w.person != userID {
+		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot serialize on a second one")
+	}
+	tag, err := w.tx.Exec(ctx, lockPersonForLoginSQL, string(userID))
+	if err != nil {
+		return time.Time{}, false, mapErr(err, "User", string(userID))
+	}
+	if tag.RowsAffected() == 0 {
+		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
+	}
+	w.person = userID
+	return revokedBeforeQ(ctx, w.tx, string(userID))
 }
 
 func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
@@ -641,11 +747,10 @@ func (r *HumanSessionRepo) ForceLogoutWriter(ctx context.Context, subject domain
 		_ = w.tx.Rollback(ctx)
 		return nil, mapErr(err, "HumanSession.ForceLogoutWriter", "")
 	}
-	if _, err := w.tx.Exec(ctx, lockUserForKeySQL, string(subject)); err != nil {
+	if err := w.holdPersonForKey(ctx, subject); err != nil {
 		_ = w.tx.Rollback(ctx)
-		return nil, mapErr(err, "User", string(subject))
+		return nil, err
 	}
-	w.person = subject
 	return w, nil
 }
 

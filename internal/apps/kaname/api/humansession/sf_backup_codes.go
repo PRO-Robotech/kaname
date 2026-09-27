@@ -101,7 +101,9 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
-	w, err := uc.deps.Store.Writer(ctx)
+	// Строка личности — ПЕРВОЙ, до строки набора (kaname#382): в обратном
+	// порядке перечеканка держала набор и ждала личность навстречу её удалению.
+	w, err := uc.deps.Store.PersonWriter(ctx, user.ID)
 	if err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}

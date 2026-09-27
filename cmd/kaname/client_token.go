@@ -41,8 +41,9 @@ import (
 //
 // Назван здесь потому, что эти полосы собираются в этом корне: две величины в
 // двух местах — то, как они расходятся. Предмет предела — чтение реестра,
-// допуск однократности и чтение отсечки отзыва-всех на токен-эндпоинте; то же
-// чтение отсечки на обеих полосах хука поставщика (`hooks_mux.go`,
+// допуск однократности и чтение отсечки отзыва-всех на токен-эндпоинте; КАЖДОЕ
+// обращение обеих полос хука поставщика к базе — разрешение субъекта, ключа и
+// персонального токена, то же чтение отсечки и запись аудита (`hooks_mux.go`,
 // buildIssuanceHooks); и обращение авторитета о базовом секрете к базе, в
 // котором для строки человека читается та же отсечка
 // (`basic_credential_lane.go` — глаголы внутреннего слушателя; `serve.go` —
@@ -63,6 +64,7 @@ func buildClientTokenEndpoint(
 	cfg config.Config,
 	signer *tokensigner.Signer,
 	logger *slog.Logger,
+	ceremony *ceremonySurface,
 ) (*clienttokenhttp.Handler, error) {
 	if !cfg.AuthN.ClientToken.Enabled {
 		return nil, nil
@@ -79,13 +81,21 @@ func buildClientTokenEndpoint(
 	// доезжает до всех сторон by construction.
 	claims := newAssertionClaimsComposer(pool, cfg)
 
+	// Полосы церемонии (`authorization_code`, `refresh_token`) — на ЭТОМ же
+	// эндпоинте, когда церемония собрана (`ceremony.go`). nil-указатель в
+	// интерфейс не кладётся: пустой интерфейс и есть «церемонии нет».
+	var ceremonyLane clienttokenhttp.CeremonyLane
+	if ceremony != nil && ceremony.Token != nil {
+		ceremonyLane = ceremony.Token
+	}
+
 	// Отсечку отзыва-всех владельца сборка от пула читает адаптером ТОГО ЖЕ
 	// типа, что у полос хука (`hooks_mux.go`), — своим экземпляром над тем же
 	// пулом, потому что эндпоинт собирается и на посадке без хуков поставщика.
 	// Одинаковость ответа полос держат строка и запрос к ней (тип адаптера),
 	// предел на вызов (та же обёртка и тот же credentialLanePeerTimeout) и
 	// правило вердикта (`revocationpolicy`), а не общий экземпляр.
-	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger), signer, claims)
+	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger, ceremonyLane), signer, claims)
 }
 
 // clientTokenBuildConfig — перевод настройки в вход сборки эндпоинта.
@@ -93,7 +103,7 @@ func buildClientTokenEndpoint(
 // Отделён от провязки пула затем, чтобы переход «настройка → сборка» судился
 // без базы: величина, которую страж требует и корень не передаёт, оставляет
 // обе стороны зелёными по своим пробам (kaname#315).
-func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger) clienttokenwire.BuildConfig {
+func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger, ceremony clienttokenhttp.CeremonyLane) clienttokenwire.BuildConfig {
 	return clienttokenwire.BuildConfig{
 		Logger: logger,
 		// Ожидаемый адресат утверждения — идентификатор НАШЕГО издателя, а не
@@ -111,6 +121,7 @@ func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logge
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
 		PeerTimeout:              credentialLanePeerTimeout,
+		Ceremony:                 ceremony,
 		// Темп (kaname#315): обе величины объявляет профиль, страж старта их
 		// требует при включённом эндпоинте.
 		ExchangesPerClientPerSec: cfg.AuthN.ClientToken.ExchangesPerClientPerSec,

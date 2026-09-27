@@ -46,7 +46,7 @@ func (r *laneRepo) Get(context.Context, domain.InteractiveClientID) (domain.Inte
 func (r *laneRepo) List(context.Context, int, string, string) ([]domain.InteractiveClient, string, error) {
 	return nil, "", nil
 }
-func (r *laneRepo) Insert(_ context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error) {
+func (r *laneRepo) Insert(_ context.Context, c domain.InteractiveClient, _ domain.LoginVerifier) (domain.InteractiveClient, error) {
 	r.inserted = true
 	return c, nil
 }

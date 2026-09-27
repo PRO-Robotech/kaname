@@ -56,6 +56,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
@@ -107,6 +108,18 @@ type loginLane struct {
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// verifier — проверяющий паролей полосы с приманкой объявленного класса.
+	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
+	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
+	verifier *passwordverify.Verifier
+}
+
+// secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
+func (l *loginLane) secretChecker() ceremonyport.SecretChecker {
+	if l == nil || l.verifier == nil {
+		return nil
+	}
+	return l.verifier
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -349,6 +362,16 @@ func calibrateLoginEnvelope(ctx context.Context, envelope *passwordverify.Envelo
 	return report, nil
 }
 
+// laneHasher — ХЕШЕР объявленного класса записи полосы входа
+// (`cfg.AuthN.Login.Declared()`). Производитель ОДИН на две потребы: им корень
+// пишет приманку проверяющего, и им же исполнитель заведения интерактивного
+// клиента пишет проверочное значение секрета (задача kaname#405). Два
+// построения из одного объявления разошлись бы в первой же правке одного из
+// них, и сверка секрета клиента стоила бы иначе, чем отказ по приманке.
+func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
+	return passwordverify.NewHasher(cfg.AuthN.Login.Declared())
+}
+
 // buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
@@ -377,7 +400,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
-	hasher, err := passwordverify.NewHasher(login.Declared())
+	hasher, err := laneHasher(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -565,6 +588,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		verifier: verifier,
 	}, nil
 }
 

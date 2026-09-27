@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 754
+Всего кейсов: 764
 
 ## Перепись по модулям
 
@@ -38,7 +38,6 @@
 | `cases/authz-sa-apitoken.py` | 30 |
 | `cases/basic-access-token.py` | 2 |
 | `cases/docker-lane-credential-kind.py` | 1 |
-| `cases/geo-read.py` | 4 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
@@ -70,6 +69,7 @@
 | `cases/iam-token-facade-conformance.py` | 7 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
+| `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-recovery-lane.py` | 3 |
 | `cases/kaname-second-factor.py` | 4 |
@@ -436,15 +436,6 @@
 > Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (#1143).
 
 - `IAM-DOCKER-LANE-BASIC-TOKEN-ONLY`
-
-## `cases/geo-read.py` — 4 кейсов
-
-> Case-set: AUTHENTICATED kacho-geo public reads through the api-gateway.
-
-- `GEO-ZON-GT-CONF-OK`
-- `GEO-REG-GT-CONF-OK`
-- `GEO-ZON-GT-AUTHZ-ANON-DENY`
-- `GEO-REG-GT-AUTHZ-ANON-DENY`
 
 ## `cases/iam-access-binding-account-scope.py` — 9 кейсов
 
@@ -1029,6 +1020,34 @@
 - `IAM-SET-SVA-LIST-READ-PARITY`
 - `IAM-SET-GRP-LIST-READ-PARITY`
 
+## `cases/kaname-authorization-code.py` — 14 кейсов
+
+> Церемония `authorization_code` нашими силами (приёмка LINE-A-1, kaname#423):
+> точка авторизации и полосы `authorization_code`/`refresh_token` поверхности
+> выдачи службы; человек входит полосой входа, выданный токен принимает
+> собственный публичный фронт. Адресуется `iamRegistryTokenBaseUrl`,
+> `loginLaneBaseUrl` и `ownRestBaseUrl`; конфиденциальных клиентов набор не
+> заводит, а читает посеянными (`oauthClient*`, `oauthOtherClient*`,
+> `oauthRedirectUri*`). Непосеянный ключ — «условие не создано» помеченным
+> утверждением. Шага конвейера, который её гоняет, пока нет: держатель и
+> препятствия названы ведомостью переписи долга
+> (`.github/scripts/newman-suite-debt.py`).
+
+- `IAM-AUTHCODE-OK-ISSUE-EXCHANGE-ACCEPT`
+- `IAM-AUTHCODE-BVA-STATE-AT-FLOOR`
+- `IAM-AUTHCODE-NEG-STATE-BELOW-FLOOR`
+- `IAM-AUTHCODE-NEG-NO-SESSION`
+- `IAM-AUTHCODE-NEG-REDIRECT-UNREGISTERED`
+- `IAM-AUTHCODE-NEG-PKCE-MISSING-OR-PLAIN`
+- `IAM-AUTHCODE-NEG-WRONG-VERIFIER`
+- `IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED`
+- `IAM-AUTHCODE-NEG-CODE-REPLAY-REVOKES`
+- `IAM-AUTHCODE-NEG-REDIRECT-MISMATCH`
+- `IAM-AUTHCODE-NEG-FOREIGN-CLIENT`
+- `IAM-AUTHCODE-OK-REFRESH-ROTATES`
+- `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
+- `IAM-AUTHCODE-NEG-CODE-EXPIRED`
+
 ## `cases/kaname-login-lane.py` — 4 кейса
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
@@ -1064,7 +1083,10 @@
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
 > на автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие
 > не создано». Код по времени вычисляет посев из `secret` ответа `enroll`; вход с
-> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08).
+> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08). Гоняет
+> набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом прогонщика,
+> что вход и восстановление, последним (kaname#417); утверждения набора значений
+> удостоверений не печатают — держит `scripts/second_factor_assertion_values_test.py`.
 
 - `IAM-2FA-OK-ENROLL-CONFIRM-LOGIN-LEVEL2`
 - `IAM-2FA-OK-BACKUP-CODE-STEP-UP`

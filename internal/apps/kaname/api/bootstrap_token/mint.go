@@ -240,6 +240,12 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 		// вызывающего, которому она не адресована.
 		u.logErr(ctx, action, err)
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —
+		// канонический текст недоступности, причина — журналу тем же глаголом.
+		// Набор полос сходится с каноном, и сходимость держит гейт.
+		u.logErr(ctx, action, err)
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, iamerr.ErrInternal):
 		// Ветвь ЯВНАЯ, хотя исход совпадает с запасным ниже: так набор различаемых
 		// полос сходится с каноном, а сходимость держит гейт. Причина уходит в

@@ -117,6 +117,10 @@ type Registry struct {
 	// единожды, а второй конструктор уронил бы старт на повторной регистрации.
 	authnHooksOnce sync.Once
 	authnHooks     *AuthnHooksRecorder
+	// authnHookAuditDropsOnce/authnHookAuditDrops — единственный экземпляр
+	// приёмника незаписанного журнала полос хука (kaname#389); причина та же.
+	authnHookAuditDropsOnce sync.Once
+	authnHookAuditDrops     *AuthnHookAuditDropsRecorder
 
 	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
 	// величин второго уборщика по сроку (#2499).

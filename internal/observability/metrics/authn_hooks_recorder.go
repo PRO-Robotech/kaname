@@ -76,3 +76,56 @@ func (r *Registry) AuthnHooksRecorder(routes, outcomes []string) *AuthnHooksReco
 func (a *AuthnHooksRecorder) HookServed(route, outcome string) {
 	a.requests.WithLabelValues(route, outcome).Inc()
 }
+
+// AuthnHookAuditDropsMetric — записи журнала выдачи, которые полосы хука НЕ
+// записали (kaname#389).
+const AuthnHookAuditDropsMetric = Namespace + "_authn_hook_audit_dropped_total"
+
+// AuthnHookAuditDropsRecorder — приёмник незаписанных записей журнала полос
+// хука. Форма метода [AuditDropped] совпадает с портом полосы
+// (`iamhooks.AuditDropObserver`), поэтому корень отдаёт приёмник сборке
+// напрямую.
+type AuthnHookAuditDropsRecorder struct {
+	dropped *prometheus.CounterVec
+}
+
+// AuthnHookAuditDropsRecorder заводит приёмник и СЕЙЧАС ЖЕ клетку на каждый вид
+// записи.
+//
+// Полоса на отказе записи журнала обслуживает дальше, и потерянная запись без
+// этой величины видна только строкой журнала процесса. Клетка с нулём делает
+// «потерь не было» отличимым от «приёмник не провязан».
+//
+// Пустой набор видов — ОТКАЗ: клеток не будет ни одной, и молчание витрины
+// неотличимо от полосы, не теряющей ничего. Повторный вызов возвращает ТОГО ЖЕ
+// приёмника: полоса собирается в прогоне не единожды.
+func (r *Registry) AuthnHookAuditDropsRecorder(eventTypes []string) *AuthnHookAuditDropsRecorder {
+	if len(eventTypes) == 0 {
+		panic("metrics: AuthnHookAuditDropsRecorder с пустым набором видов записи — " +
+			"клеток не будет ни одной, и «потерь не было» останется невыразимым")
+	}
+	r.authnHookAuditDropsOnce.Do(func() {
+		r.authnHookAuditDrops = &AuthnHookAuditDropsRecorder{
+			dropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: AuthnHookAuditDropsMetric,
+				Help: "Audit records the AuthN hook lane did NOT write, by event_type " +
+					"(authn.token.issued|authn.token.denied|authn.refresh.issued|authn.refresh.denied). " +
+					"The lane keeps serving when its audit write fails — a write cut by the per-call " +
+					"limit rolls back like one the database refused — so a non-zero " +
+					"authn.token.issued or authn.refresh.issued cell counts tokens handed out with " +
+					"no audit_outbox row behind them. The cause is on the matching log line; this " +
+					"counts how many.",
+			}, []string{"event_type"}),
+		}
+		r.reg.MustRegister(r.authnHookAuditDrops.dropped)
+	})
+	for _, eventType := range eventTypes {
+		r.authnHookAuditDrops.dropped.WithLabelValues(eventType).Add(0)
+	}
+	return r.authnHookAuditDrops
+}
+
+// AuditDropped принимает ОДНУ незаписанную запись.
+func (a *AuthnHookAuditDropsRecorder) AuditDropped(eventType string) {
+	a.dropped.WithLabelValues(eventType).Inc()
+}
