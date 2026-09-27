@@ -14,9 +14,12 @@
 //
 // # Что утверждают пробы
 //
-//   - 07: база принимает `client-revoke` и пять прежних слов, отвергает
-//     написание, отличающееся одним знаком (`client_revoke`), и снятое #404
-//     `consent-withdrawn`. Отказ — пара «23514, имя ограничения»;
+//   - 07: база принимает четыре слова словаря и отвергает написание,
+//     отличающееся одним знаком (`client_revoke`), снятое #404
+//     `consent-withdrawn` и два слова, снятых #339 (`logout`,
+//     `client-removed`; приёмка §7). Отказ — пара «23514, имя ограничения».
+//     Каждая пара судится своим подслучаем: иначе первый отказ скрыл бы цвет
+//     пар, стоящих после него;
 //   - 09: накат лежащих строк не трогает, и версия после него — версия новой
 //     миграции. Второе несущее: без него проба зеленела бы и там, где миграции
 //     нет, — строки остались бы нетронутыми по пустой причине;
@@ -65,15 +68,18 @@ const clientRevokeReason = string(domain.FamilyRevokedByClientRevocation)
 // произвольному слову утверждал бы только, что словарь закрыт.
 const clientRevokeNearSpelling = "client_revoke"
 
-// priorFamilyReasons — пять слов словаря до этого изменения, каждое по имени
-// константы домена: перечень, выведенный из домена, включал бы испытуемое
-// слово и сделал бы вопрос «прежние слова проходят» тождественным.
-var priorFamilyReasons = []domain.FamilyRevocationReason{
-	domain.FamilyRevokedByCodeReplay,
-	domain.FamilyRevokedByRefreshReplay,
-	domain.FamilyRevokedByLogout,
-	domain.FamilyRevokedBySessionEnd,
-	domain.FamilyRevokedByClientRemoval,
+// priorFamilyReasons — пять слов словаря до миграции #406: столько принимает
+// версия перед ней. Перечень, выведенный из домена, включал бы испытуемое
+// слово и сделал бы вопрос «прежние слова проходят» тождественным. Три слова
+// стоят по имени константы домена; два, снятых #339, — литералом прежнего
+// словаря: констант у них больше нет, а версия перед #406 их принимает
+// (приёмка §7.6 п.8).
+var priorFamilyReasons = []string{
+	string(domain.FamilyRevokedByCodeReplay),
+	string(domain.FamilyRevokedByRefreshReplay),
+	removedLogoutReason,
+	string(domain.FamilyRevokedBySessionEnd),
+	removedClientRemovalReason,
 }
 
 // frvOpenAt — пустая база, накатанная ровно до названной версии цепочки.
@@ -129,29 +135,42 @@ func frvConstraintDef(t *testing.T, db *sql.DB) string {
 	return def
 }
 
-// TestTokenFamilySchema_KN_FRV_07_TheBaseAcceptsClientRevokeAndRefusesANearSpelling
-// — база принимает слово отзыва клиентом, пять прежних слов и отвергает
-// близкое написание и снятое слово. Строка одна, оператор один: каждая проба
-// идёт в своей транзакции, которая откатывается.
-func TestTokenFamilySchema_KN_FRV_07_TheBaseAcceptsClientRevokeAndRefusesANearSpelling(t *testing.T) {
+// TestTokenFamilySchema_KN_FRV_07_TheBaseAcceptsTheVocabularyAndRefusesTheRest
+// — база принимает четыре слова словаря и отвергает близкое написание и
+// снятые слова. Строка одна, оператор один: каждая проба идёт в своей
+// транзакции, которая откатывается, и каждая пара — своим подслучаем.
+//
+// Пары и их доводы (приёмка §4 KN-FRV-07): `client-revoke` против
+// `client_revoke` — отказ утверждает дословное написание, контракт с
+// фундаментом; `session-ended` против `logout` — снято слово, а не повод:
+// выход отзывает семейство своим словом; `client-revoke` против
+// `client-removed` — ограничение судит слово целиком, а не приставку клиента.
+// Без принятых близнецов отказы были бы истинны и на базе, отвергающей всё.
+func TestTokenFamilySchema_KN_FRV_07_TheBaseAcceptsTheVocabularyAndRefusesTheRest(t *testing.T) {
 	db := consentLeavesDB(t)
 	_, _, _, family := acScene(t, db, "frv7")
 	require.Contains(t, frvFamily(t, db, family), "live=true", "Дано: семейство живо")
 
-	require.NoError(t, reasonAccepted(t, db, family, clientRevokeReason),
-		"база обязана принимать отзыв семейства словом %q", clientRevokeReason)
-
-	// Дельта против принятия — ОДИН факт: написание причины.
-	requirePgRefusal(t, reasonAccepted(t, db, family, clientRevokeNearSpelling), "23514", revokedReasonConstraint,
-		"написание, отличающееся одним знаком, обязано отвергаться ограничением словаря")
-
-	for _, prior := range priorFamilyReasons {
-		require.NoError(t, reasonAccepted(t, db, family, string(prior)),
-			"прежнее слово %q обязано по-прежнему приниматься", prior)
+	accepts := func(word string) {
+		t.Run("accepts_"+word, func(t *testing.T) {
+			require.NoError(t, reasonAccepted(t, db, family, word),
+				"база обязана принимать отзыв семейства словом %q", word)
+		})
+	}
+	refuses := func(word, why string) {
+		t.Run("refuses_"+word, func(t *testing.T) {
+			requirePgRefusal(t, reasonAccepted(t, db, family, word), "23514", revokedReasonConstraint, why)
+		})
 	}
 
-	requirePgRefusal(t, reasonAccepted(t, db, family, withdrawnReason), "23514", revokedReasonConstraint,
-		"слово, снятое #404, в словарь не возвращается")
+	accepts(clientRevokeReason)
+	refuses(clientRevokeNearSpelling, "написание, отличающееся одним знаком, обязано отвергаться ограничением словаря")
+	accepts(string(domain.FamilyRevokedBySessionEnd))
+	refuses(removedLogoutReason, "слово, снятое #339, обязано отвергаться: выход отзывает семейство словом session-ended")
+	refuses(removedClientRemovalReason, "слово, снятое #339, обязано отвергаться: снятие клиента уносит семейство каскадом")
+	accepts(string(domain.FamilyRevokedByCodeReplay))
+	accepts(string(domain.FamilyRevokedByRefreshReplay))
+	refuses(withdrawnReason, "слово, снятое #404, в словарь не возвращается")
 
 	require.Contains(t, frvFamily(t, db, family), "live=true",
 		"каждая проба откатывалась: семейство обязано остаться живым")
@@ -174,7 +193,7 @@ func TestTokenFamilyMigration_KN_FRV_09_UpLeavesLyingRowsUntouched(t *testing.T)
 		_, _, _, families[i] = acScene(t, db, tag)
 	}
 	for i, reason := range priorFamilyReasons {
-		_, err := db.Exec(revokeFamilySQL, families[i], string(reason))
+		_, err := db.Exec(revokeFamilySQL, families[i], reason)
 		require.NoError(t, err, "Дано: семейство %s отзывается словом %q на версии %d", families[i], reason, previous)
 	}
 	before := make(map[string]string, len(families))
@@ -247,9 +266,15 @@ func TestTokenFamilyMigration_KN_FRV_10_DownRefusesWhileAFamilyCarriesTheWord(t 
 	_, err = db.Exec(revokeFamilySQL, c, clientRevokeReason)
 	requirePgRefusal(t, err, "23514", revokedReasonConstraint,
 		"10/2: на откаченной базе отзыв живого C словом обязан отвергаться тем же ограничением")
-	require.Equal(t, []string{onlyInDomain(clientRevokeReason)},
-		revocationVocabularyFindings(dbRevocationReasons(t, db), domainRevocationReasons()),
-		"10/2: на откаченной базе расхождение ровно одно, и оно называет слово и сторону")
+	// После #339 откат с головы проходит и раздел #339: база снова принимает
+	// два слова, которых домен уже не знает, и не знает слова, которое домен
+	// объявляет (приёмка §7.5). Каждое расхождение — поимённо, со стороной.
+	require.ElementsMatch(t, []string{
+		onlyInDomain(clientRevokeReason),
+		onlyInBase(removedLogoutReason),
+		onlyInBase(removedClientRemovalReason),
+	}, revocationVocabularyFindings(dbRevocationReasons(t, db), domainRevocationReasons()),
+		"10/2: на откаченной базе расхождений ровно три, и каждое называет слово и сторону")
 
 	require.NoError(t, goose.Up(db, "."), "10/2: повторный накат")
 	_, err = db.Exec(revokeFamilySQL, c, clientRevokeReason)
