@@ -919,10 +919,18 @@ _HOLDER_PLATFORM_HOME = (
 # Членство уже гоняет задание `stand` собственным фронтом, и его запись держателя
 # снята тем же изменением, что завело шаг. Осталась вторая: регистрация клиента
 # идёт в поставщика, которого на автономном стенде нет.
+# Замер задания `chart-own` (kaname#416, стенд kind): под `own` глагол `Create`
+# свой реестр исполняет (kaname#405), но все пять глаголов
+# `InternalInteractiveClientService` фронтируются краем
+# (`internal/authzguard/caller_policy.go`, `GatewayFrontedInternalRPCs`), а хоп
+# собственного внутреннего фронта кругом края не становится by construction:
+# `POST /iam/v1/internal/interactiveClients` через него — 403 `AUTHZ_DENIED`.
+# Коллекция ходит REST-ом, и дойти до глагола ей на этом стенде нечем.
 _HOLDER_SERVICE_ON_EDGE = (
-    "PRO-Robotech/kaname#416 — прогон на стенде с адресом и посевом: интерактивный "
-    "клиент — на посадке `own` поверх своей выдачи клиента (kaname#313), "
-    "собственным внутренним фронтом и машинным посевом этой посадки")
+    "PRO-Robotech/kaname#416 — дверь к глаголам интерактивного клиента на посадке "
+    "`own` без края: их круг — край, хоп собственного внутреннего фронта отвергается "
+    "403 AUTHZ_DENIED; исход — решение о двери оператора в продукте либо дом "
+    "коллекции у края платформы")
 _HOLDER_SECOND_FACTOR = (
     "PRO-Robotech/kaname#417 — срез отчёта знает удостоверения полосы второго "
     "фактора, и задание `chart-own` гоняет набор")
@@ -942,7 +950,7 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`", _HOLDER_PLATFORM_HOME),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
     "iam-group": ("C", "2 утверждения читают `md.resource`", _HOLDER_PLATFORM_HOME),
-    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", _HOLDER_SERVICE_ON_EDGE),
+    "iam-interactive-client": ("B", "глаголы клиента фронтируются краем; на `external` Create/Delete регистрируют клиента во внешнем поставщике, на `own` — в своём реестре (kaname#405)", _HOLDER_SERVICE_ON_EDGE),
     "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", _HOLDER_PLATFORM_HOME),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
     "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
