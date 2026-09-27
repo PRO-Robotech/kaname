@@ -314,24 +314,26 @@ func TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit(t *testing.T) {
 		strings.Join(names, ", "))
 }
 
-// TestIssuanceLanesAssemblyRefusalStopsTheStart — сборка полос, отказавшая
-// (обработчика нет), не поднимает поверхность под внешним поставщиком с
-// объявленным адресом: построитель отказывает, и корень не стартует. Законный
-// близнец — та же посадка с собранным обработчиком: поверхность строится.
+// TestIssuanceLanesAssemblyRefusalStopsTheStart — сборка полос без обработчика
+// (и без отказа) не поднимает поверхность под внешним поставщиком с объявленным
+// адресом: построитель отказывает, и корень не стартует. Законный близнец — та
+// же посадка с собранным обработчиком: поверхность строится. Отказ сборки,
+// поданный значением, и его причину в отказе старта держит
+// `TestIssuanceLanesAssemblyRefusalReachesTheStartWithItsCause` (kaname#440).
 func TestIssuanceLanesAssemblyRefusalStopsTheStart(t *testing.T) {
 	cfg := roadCfg(config.IdentityProviderExternal, "9097")
 	cfg.AuthN.HooksHTTPEndpoint = "tcp://0.0.0.0:9092"
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13}
 
 	_, err := hooksLaneSurface(cfg, servicecontract.ModeProduction, quietLogger(), tlsCfg,
-		func() http.Handler { return nil })
+		func() (http.Handler, error) { return nil, nil })
 	if err == nil {
 		t.Fatal("под внешним поставщиком с объявленным адресом поверхность вебхуков построилась без " +
 			"обработчика — отказ сборки полос выдачи не остановил бы старт")
 	}
 
 	desc, err := hooksLaneSurface(cfg, servicecontract.ModeProduction, quietLogger(), tlsCfg,
-		func() http.Handler { return http.NotFoundHandler() })
+		func() (http.Handler, error) { return http.NotFoundHandler(), nil })
 	if err != nil || !desc.Enabled() {
 		t.Fatalf("законный близнец: с обработчиком поверхность обязана строиться и подниматься, err=%v", err)
 	}

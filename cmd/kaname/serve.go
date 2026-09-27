@@ -1184,7 +1184,7 @@ func runServe(cfg config.Config) error {
 	// triggerShutdown ниже). Без этого носитель был бы, а дёрнуть его было бы
 	// некому (#1752).
 	readiness := buildReadiness(pool, metricsReg)
-	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() http.Handler {
+	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() (http.Handler, error) {
 		return buildHooksMux(pool, kanameRepo, opsRepo,
 			svcs.bindingReconciler, metricsReg, cfg, logger)
 	})
