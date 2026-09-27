@@ -84,7 +84,7 @@ func buildHooksMux(
 		UserTokens: &tokenEnrichUserTokenAdapter{userClients: kanamepg.NewUserOAuthClientRepo(pool), users: users},
 		Cutoffs:    kanamepg.NewSessionRevocationsAdapter(pool),
 		Audit:      &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit},
-	}, logger)
+	}, metricsReg.AuthnHookAuditDropsRecorder(handlerinternal.AuditEventTypes()), logger)
 	if err != nil {
 		// Отказ сборки полос выдачи — отказ старта, а не полоса без пределов:
 		// без обработчика поверхность с объявленным адресом не строится
@@ -253,12 +253,24 @@ type issuanceHookConfig struct {
 // базе — разрешение субъекта, чтение отсечки отзыва-всех, запись аудита.
 // Держит проба через эту сборку
 // (`TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit`).
+//
+// auditDrops — приёмник записей журнала, которые полосы не записали
+// ([handlerinternal.ObserveAuditDrops]); без него сборка отказывает. Держит
+// `TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake`.
 func buildIssuanceHooks(
 	cfg issuanceHookConfig,
 	ports handlerinternal.IssuancePorts,
+	auditDrops handlerinternal.AuditDropObserver,
 	logger *slog.Logger,
 ) (*handlerinternal.TokenHookHandler, *handlerinternal.RefreshHookHandler, error) {
 	bounded, err := handlerinternal.WithCallDeadline(ports, credentialLanePeerTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("полосы хука выдачи: %w", err)
+	}
+	// Счёт незаписанного журнала — ПОВЕРХ предела: запись, срезанная пределом,
+	// откатывается так же, как отвергнутая базой, а обработчики обслуживают
+	// дальше, и без величины такая потеря видна только строкой журнала.
+	audit, err := handlerinternal.ObserveAuditDrops(bounded.Audit, auditDrops)
 	if err != nil {
 		return nil, nil, fmt.Errorf("полосы хука выдачи: %w", err)
 	}
@@ -274,7 +286,7 @@ func buildIssuanceHooks(
 		},
 		enricher,
 		bounded.Cutoffs,
-		bounded.Audit,
+		audit,
 		logger,
 	)
 	refreshHook := handlerinternal.NewRefreshHookHandler(
@@ -288,7 +300,7 @@ func buildIssuanceHooks(
 		// principal, whichever lane asks for it.
 		enricher,
 		bounded.Cutoffs,
-		bounded.Audit,
+		audit,
 		logger,
 	)
 	return tokenHook, refreshHook, nil

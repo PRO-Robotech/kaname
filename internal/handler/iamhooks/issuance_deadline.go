@@ -136,6 +136,10 @@ func (d deadlineUserTokens) GetUser(ctx context.Context, id domain.UserID) (doma
 }
 
 // deadlineAudit — запись журнала со СВОИМ пределом на вызов.
+//
+// Запись, не успевшая за предел, откатывается, а обработчики обслуживают
+// дальше: такую потерю считает [ObserveAuditDrops], который сборка надевает
+// ПОВЕРХ этой обёртки.
 type deadlineAudit struct {
 	inner   AuditEmitter
 	timeout time.Duration
