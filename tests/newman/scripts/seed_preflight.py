@@ -139,7 +139,7 @@ def preflight(env_path: pathlib.Path, stems: list[str], ca: str | None,
             f"({REFUSAL_TEXT}). Срок удостоверений посева — 15 минут; повтор "
             f"позже даёт СПЛОШНОЙ 401 тем же текстом, каким служба отвечает на "
             f"подделку, и это не дефект рубежа. Лекарство: пересеять — "
-            f"`KANAME_HOOK_TOKEN=… python3 tests/authz-fixtures/seed_own_stand.py`")
+            f"`python3 tests/authz-fixtures/seed_own_stand.py`")
         return RC_UNMET, say
     say.append(f"предполёт: предъявитель посева ПРИНЯТ фронтом {base} (код {code})")
 
