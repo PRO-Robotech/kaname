@@ -1,8 +1,14 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package exchangepace — ось темпа «обменов в секунду на идентификатор клиента»
-// у поверхности выдачи (kaname#315).
+// Package exchangepace — темп «запросов в секунду на ключ» у поверхности выдачи
+// (kaname#315): ведро в одну секунду объявленного темпа.
+//
+// Держит две оси приёмки ceremony-pace-is-named-by-number.md: П2 — обменов в
+// секунду на ЗАЯВЛЕННЫЙ идентификатор клиента (машинные полосы токен-эндпоинта;
+// тратят только принятые предъявления — вызывающий возвращает бронь) и П4 —
+// запросов авторизации в секунду на источник (точка авторизации; тратит всякий
+// запрос, прошедший проверку метода, — бронь не возвращается).
 //
 // # Бронь, а не «спросить» и «списать»
 //
@@ -74,7 +80,7 @@ type bucket struct {
 // различить с объявленным.
 func New(perSec int, now func() time.Time) (*Pace, error) {
 	if perSec <= 0 {
-		return nil, fmt.Errorf("exchangepace: exchanges per second per client must be declared as a positive number (got %d)", perSec)
+		return nil, fmt.Errorf("exchangepace: pace per second per key must be declared as a positive number (got %d)", perSec)
 	}
 	if now == nil {
 		return nil, fmt.Errorf("exchangepace: clock is required (time source is an input, not the environment)")
@@ -166,3 +172,7 @@ func (p *Pace) maybeSweepLocked(now time.Time) {
 func (p *Pace) waitFor(deficit float64) time.Duration {
 	return time.Duration(math.Ceil(deficit / p.perSec * float64(time.Second)))
 }
+
+// PerSecond — объявленный темп в секунду: ёмкость ведра и скорость его
+// пополнения.
+func (p *Pace) PerSecond() int { return int(p.perSec) }

@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -65,6 +67,7 @@ func buildClientTokenEndpoint(
 	signer *tokensigner.Signer,
 	logger *slog.Logger,
 	ceremony *ceremonySurface,
+	source *issuingsource.Rule,
 ) (*clienttokenhttp.Handler, error) {
 	if !cfg.AuthN.ClientToken.Enabled {
 		return nil, nil
@@ -73,6 +76,11 @@ func buildClientTokenEndpoint(
 		// Страж настройки это уже требует; здесь — вторая, структурная
 		// половина того же требования: выпускать нечем.
 		return nil, fmt.Errorf("client token endpoint is enabled but our signer is not wired")
+	}
+	if source == nil {
+		// Правило адреса источника — ключ оси П3; без него окно отказов
+		// ключевалось бы ничем.
+		return nil, fmt.Errorf("client token endpoint is enabled but the source address rule is not wired")
 	}
 
 	// Состав утверждений собирают ТЕ ЖЕ функции, что и на пути обратного
@@ -95,7 +103,7 @@ func buildClientTokenEndpoint(
 	// Одинаковость ответа полос держат строка и запрос к ней (тип адаптера),
 	// предел на вызов (та же обёртка и тот же credentialLanePeerTimeout) и
 	// правило вердикта (`revocationpolicy`), а не общий экземпляр.
-	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger, ceremonyLane), signer, claims)
+	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger, ceremonyLane, source.TokenPoint), signer, claims)
 }
 
 // clientTokenBuildConfig — перевод настройки в вход сборки эндпоинта.
@@ -103,7 +111,7 @@ func buildClientTokenEndpoint(
 // Отделён от провязки пула затем, чтобы переход «настройка → сборка» судился
 // без базы: величина, которую страж требует и корень не передаёт, оставляет
 // обе стороны зелёными по своим пробам (kaname#315).
-func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger, ceremony clienttokenhttp.CeremonyLane) clienttokenwire.BuildConfig {
+func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger, ceremony clienttokenhttp.CeremonyLane, source func(*http.Request) string) clienttokenwire.BuildConfig {
 	return clienttokenwire.BuildConfig{
 		Logger: logger,
 		// Ожидаемый адресат утверждения — идентификатор НАШЕГО издателя, а не
@@ -122,10 +130,15 @@ func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logge
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
 		PeerTimeout:              credentialLanePeerTimeout,
 		Ceremony:                 ceremony,
-		// Темп (kaname#315): обе величины объявляет профиль, страж старта их
+		// Темп (kaname#315, П1–П3): величины объявляет профиль, страж старта их
 		// требует при включённом эндпоинте.
 		ExchangesPerClientPerSec: cfg.AuthN.ClientToken.ExchangesPerClientPerSec,
 		InFlightCeiling:          cfg.AuthN.ClientToken.InFlightCeiling,
+		FailedProofsPerSource:    cfg.AuthN.ClientToken.FailedProofsPerSource,
+		FailedProofWindow:        cfg.AuthN.ClientToken.FailedProofWindow,
+		// Ключ П3 — правило адреса источника поверхности выдачи (Р7), одно на
+		// обе точки.
+		Source: source,
 	}
 }
 

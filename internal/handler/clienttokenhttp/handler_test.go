@@ -18,12 +18,14 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
 
@@ -103,6 +105,15 @@ const testBodyCeiling int64 = 64 << 10
 // потолок. Та же природа, что у потолка тела: число фикстуры, а не величина.
 const testInFlightCeiling = 8
 
+// testFailedProofs — окно отказов доказательства на источник в пробах, чей
+// предмет не П3: предел, которого пробы не достигают, на часах процесса.
+func testFailedProofs(t *testing.T) *failurewindow.Window {
+	t.Helper()
+	w, err := failurewindow.New(1<<20, time.Minute, time.Now)
+	require.NoError(t, err)
+	return w
+}
+
 type stand struct {
 	h        *clienttokenhttp.Handler
 	verifier *stubVerifier
@@ -118,6 +129,8 @@ func newStand(t *testing.T) stand {
 		// заданную величину от незаданной.
 		BodyCeiling:     testBodyCeiling,
 		InFlightCeiling: testInFlightCeiling,
+		FailedProofs:    testFailedProofs(t),
+		Source:          peerHost,
 		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
@@ -192,6 +205,8 @@ func TestF2_11_BodyCeilingRefusesBeforeReadingAnyByte(t *testing.T) {
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling:     ceiling,
 		InFlightCeiling: testInFlightCeiling,
+		FailedProofs:    testFailedProofs(t),
+		Source:          peerHost,
 		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
@@ -398,10 +413,12 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 			clientassertion.OutcomeMultipleAssertions,
 			clientassertion.OutcomeUnsupportedGrantType,
 			clientassertion.OutcomeInFlightCeilingReached,
-			clientassertion.OutcomeClientPaceExceeded:
+			clientassertion.OutcomeClientPaceExceeded,
+			clientassertion.OutcomeSourceFailuresExceeded:
 			// Эти решаются ДО того, как клиент разрешён по реестру, и им
-			// положены свои стандартные коды — их проверяют пробы выше и
-			// pace_test.go (два отказа по темпу, kaname#315).
+			// положены свои стандартные коды — их проверяют пробы выше,
+			// pace_test.go и ceremony_pace_test.go (три отказа по темпу,
+			// kaname#315).
 			continue
 		}
 		require.Truef(t, seen[o], "исход %s не подан ни одним входом пробы", o)
@@ -471,14 +488,16 @@ func TestRequestedAudienceReachesIssuanceAsGiven(t *testing.T) {
 // незаданной: она не бывала незаданной. Умолчание, снимающее вопрос, снимает и
 // проверку — и снимает её тише, чем отсутствие проверки.
 func TestHandlerRefusesToBuildWithoutItsPorts(t *testing.T) {
-	full := clienttokenhttp.Config{BodyCeiling: testBodyCeiling, InFlightCeiling: testInFlightCeiling}
+	full := clienttokenhttp.Config{BodyCeiling: testBodyCeiling, InFlightCeiling: testInFlightCeiling,
+		FailedProofs: testFailedProofs(t), Source: peerHost}
 	_, err := clienttokenhttp.NewHandler(full, nil, &stubIssuer{})
 	require.Error(t, err)
 	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, nil)
 	require.Error(t, err)
 	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{}, &stubVerifier{}, &stubIssuer{})
 	require.Error(t, err, "нулевой потолок тела означает «без потолка» и обязан отвергать построение")
-	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{BodyCeiling: testBodyCeiling}, &stubVerifier{}, &stubIssuer{})
+	_, err = clienttokenhttp.NewHandler(clienttokenhttp.Config{BodyCeiling: testBodyCeiling,
+		FailedProofs: testFailedProofs(t), Source: peerHost}, &stubVerifier{}, &stubIssuer{})
 	require.Error(t, err, "нулевой потолок одновременных обменов означает «без потолка» и обязан отвергать построение")
 	// Положительный контроль.
 	_, err = clienttokenhttp.NewHandler(full, &stubVerifier{}, &stubIssuer{})

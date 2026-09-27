@@ -117,6 +117,10 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 		BodyCeiling:              64 << 10,
 		ExchangesPerClientPerSec: 5,
 		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 	return cfg
 }

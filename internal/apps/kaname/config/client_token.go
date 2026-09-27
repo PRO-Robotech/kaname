@@ -64,9 +64,60 @@ type ClientTokenConfig struct {
 	// одна секунда темпа. Несколько реплик дают клиенту до «темп × число
 	// реплик»: величина объявляется в расчёте на реплику.
 	ExchangesPerClientPerSec int `mapstructure:"exchanges-per-client-per-sec"`
-	// InFlightCeiling — потолок одновременных обменов, НА ПРОЦЕСС (kaname#315).
-	// Обмен сверх потолка отвергается до проверки, а не ждёт места.
+	// InFlightCeiling — потолок одновременных обменов, НА ПРОЦЕСС (kaname#315),
+	// все четыре вида выдачи (ось П1). Обмен сверх потолка отвергается до
+	// проверки ответом 503, а не ждёт места.
 	InFlightCeiling int `mapstructure:"in-flight-ceiling"`
+	// FailedProofsPerSource и FailedProofWindow — ось П3: неудавшихся
+	// доказательств клиента за скользящее окно на источник, НА ПРОЦЕСС. Считается
+	// отказ доказательства клиента, а не всякий отказ обмена (приёмка
+	// ceremony-pace-is-named-by-number.md, Р5); источник — по правилу адреса
+	// поверхности выдачи (Р7). Превышение — 429 со сроком до момента, когда в
+	// окне останется предел минус один отказ.
+	FailedProofsPerSource int           `mapstructure:"failed-proofs-per-source"`
+	FailedProofWindow     time.Duration `mapstructure:"failed-proof-window"`
+	// AuthorizePerSourcePerSec — ось П4: запросов авторизации в секунду на
+	// источник, НА ПРОЦЕСС. Нужна собранной церемонии ([AuthNConfig.CeremonyAssembled]).
+	AuthorizePerSourcePerSec int `mapstructure:"authorize-per-source-per-sec"`
+	// AuthorizeInFlightCeiling — ось П5: потолок одновременных запросов
+	// авторизации, НА ПРОЦЕСС, свой — не общий с потолком обменов. Нужна
+	// собранной церемонии.
+	AuthorizeInFlightCeiling int `mapstructure:"authorize-in-flight-ceiling"`
+}
+
+// CeremonyAssembled — собрана ли церемония OAuth своей посадки: посадка `own` и
+// включённый токен-эндпоинт.
+//
+// ЕДИНСТВЕННЫЙ предикат: его спрашивают сборка церемонии в композиционном
+// корне, страж величин точки авторизации и страж режима слушателя выдачи. Три
+// одинаково написанных условия разошлись бы молча, и страж требовал бы величину
+// посадки, на которой её никто не читает, — либо не требовал бы там, где читают.
+func (a AuthNConfig) CeremonyAssembled() bool {
+	return a.IdentityProvider == IdentityProviderOwn && a.ClientToken.Enabled
+}
+
+// ValidateCeremonyPace — страж величин точки авторизации (П4, П5): при
+// собранной церемонии обе обязаны быть заданы положительным числом. Без
+// церемонии точки авторизации нет, и величины не требуются.
+func (a AuthNConfig) ValidateCeremonyPace() error {
+	if !a.CeremonyAssembled() {
+		return nil
+	}
+	var errs error
+	c := a.ClientToken
+	if c.AuthorizePerSourcePerSec <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.authorize-per-source-per-sec must be declared as a positive number of "+
+				"authorization requests per second per source, per replica, while the own ceremony is on "+
+				"(got %d) — zero means «no pace»", c.AuthorizePerSourcePerSec))
+	}
+	if c.AuthorizeInFlightCeiling <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.authorize-in-flight-ceiling must be declared as a positive number of "+
+				"concurrent authorization requests, per replica, while the own ceremony is on (got %d) — "+
+				"zero means «no ceiling»", c.AuthorizeInFlightCeiling))
+	}
+	return errs
 }
 
 // AudienceList возвращает перечень адресатов платформы, считая ЭЛЕМЕНТЫ.
@@ -87,15 +138,18 @@ func (c ClientTokenConfig) AudienceList() []string {
 // Каждое сообщение называет НАСТРОЙКУ и правило; ни одно не называет значения
 // секрета — текст отказа читает оператор, а не предъявитель.
 //
-// # ПЕРЕЧЕНЬ ВЕЛИЧИН ЭНДПОИНТА, ТРЕБУЕМЫХ ПРИ СТАРТЕ, — ШЕСТЬ (#112, #315)
+// # ПЕРЕЧЕНЬ ВЕЛИЧИН ЭНДПОИНТА, ТРЕБУЕМЫХ ПРИ СТАРТЕ, — ВОСЕМЬ (#112, #315)
 //
 // перечень адресатов платформы · адресат по умолчанию · срок выдаваемого
 // токена · потолок тела запроса · темп обменов на идентификатор клиента ·
-// потолок одновременных обменов.
+// потолок одновременных обменов · отказов доказательства на источник · окно
+// этих отказов.
 //
 // Первые четыре названы врезкой о фазе F2 в правиле безопасности корпуса;
-// две величины темпа добавлены задачей kaname#315 под той же дисциплиной —
-// нулевое умолчание в загрузчике и отказ старта при незаданной. До задачи #112 требование было ОБЪЯВЛЕНО и не
+// четыре величины темпа добавлены задачей kaname#315 под той же дисциплиной —
+// нулевое умолчание в загрузчике и отказ старта при незаданной. Две величины
+// точки авторизации требует не этот страж, а [AuthNConfig.ValidateCeremonyPace]:
+// их условие — собранная церемония, а не включённый эндпоинт. До задачи #112 требование было ОБЪЯВЛЕНО и не
 // исполнялось у двух последних: загрузчик подставлял им значение умолчанием,
 // незаданными они не бывали, и ветвь стража не исполнялась ни разу. Сценарий
 // приёмки F2-43 («страж старта отвергает пуск при незаданном потолке тела»)
@@ -200,6 +254,19 @@ func (c ClientTokenConfig) Validate(signing TokenSigningConfig, hostListenAddres
 			"authn.client-token.in-flight-ceiling must be declared as a positive number of concurrent "+
 				"exchanges, per replica (got %d) — zero means «no ceiling»",
 			c.InFlightCeiling))
+	}
+	// Окно отказов доказательства на источник (П3): обе половины обязательны —
+	// предел без окна и окно без предела не ограничивают ничего.
+	if c.FailedProofsPerSource <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.failed-proofs-per-source must be declared as a positive number of failed "+
+				"client proofs per source within the window, per replica (got %d) — zero means «no limit»",
+			c.FailedProofsPerSource))
+	}
+	if c.FailedProofWindow <= 0 {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"authn.client-token.failed-proof-window must be declared as a positive duration (got %s) — "+
+				"zero means «no window»", c.FailedProofWindow))
 	}
 	return errs
 }

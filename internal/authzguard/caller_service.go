@@ -10,7 +10,11 @@
 // has been superseded by the per-RPC CallerPolicy and removed.
 package authzguard
 
-import "github.com/PRO-Robotech/corelib/grpcsrv"
+import (
+	"crypto/tls"
+
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+)
 
 // ServiceNameFromSAN extracts the module service short-name from a verified SPIRE
 // SAN (`spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>` → `<svc>`). Returns
@@ -26,4 +30,24 @@ import "github.com/PRO-Robotech/corelib/grpcsrv"
 // снова.
 func ServiceNameFromSAN(d grpcsrv.TrustDomain, san string) (string, bool) {
 	return SANToServiceDomain(d, san)
+}
+
+// PeerIsGateway — пир HTTP-слушателя предъявил ПРОВЕРЕННЫЙ сертификат края:
+// короткое имя службы из SAN проверенного листа — api-gateway.
+//
+// Один признак края на все HTTP-слушатели, читающие заголовок, который ставит
+// край: полосу входа (допуск ровно края) и поверхность выдачи (адрес источника,
+// приёмка ceremony-pace-is-named-by-number.md Р7). Сертификат, которого слушатель
+// не проверил (нет проверенной цепочки), личности не доказывает. Необъявленный
+// домен доверия не узнаёт никого.
+func PeerIsGateway(d grpcsrv.TrustDomain, st *tls.ConnectionState) bool {
+	if st == nil || len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 {
+		return false
+	}
+	san := d.CertIdentity(st.VerifiedChains[0][0])
+	if san == "" {
+		return false
+	}
+	svc, ok := ServiceNameFromSAN(d, san)
+	return ok && svc == GatewayServiceName()
 }

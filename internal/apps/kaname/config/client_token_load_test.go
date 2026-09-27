@@ -64,6 +64,12 @@ func profileWithClientTokenOn(omit ...string) string {
 	if !skip["in-flight-ceiling"] {
 		b.WriteString("    in-flight-ceiling: 64\n")
 	}
+	if !skip["failed-proofs-per-source"] {
+		b.WriteString("    failed-proofs-per-source: 50\n")
+	}
+	if !skip["failed-proof-window"] {
+		b.WriteString("    failed-proof-window: \"15m\"\n")
+	}
 	return b.String()
 }
 

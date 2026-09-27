@@ -75,6 +75,8 @@ func newPacedHandler(t *testing.T, ceiling int, v clienttokenhttp.Verifier, i cl
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling:     testBodyCeiling,
 		InFlightCeiling: ceiling,
+		FailedProofs:    testFailedProofs(t),
+		Source:          peerHost,
 		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, v, i)
 	require.NoError(t, err)
@@ -160,7 +162,9 @@ func TestInFlightCeilingRefusesAboveItBeforeAuthentication(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("второй обмен не получил ответа за 10 с: потолок не отказал")
 	}
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	// Занята НАША ёмкость, и занял её не обязательно этот вызывающий: 503, а не
+	// 429 (приёмка ceremony-pace-is-named-by-number.md, Р2, KN-PACE-07).
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Equal(t, "1", rec.Header().Get("Retry-After"))
 	require.Equal(t, "temporarily_unavailable", errorCode(t, rec.Body.Bytes()))
 	require.EqualValues(t, 1, v.calls.Load(),

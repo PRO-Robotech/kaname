@@ -112,6 +112,9 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		PeerTimeout:              3 * time.Second,
 		ExchangesPerClientPerSec: 1 << 20,
 		InFlightCeiling:          64,
+		FailedProofsPerSource:    1 << 20,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
 	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{}, wiringCutoffs{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)

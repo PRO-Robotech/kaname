@@ -462,7 +462,8 @@ data:
       # оператора.
       #
       # Блок рендерится ТОЛЬКО при enabled — та же форма, что у чеканки выше.
-      # Четыре величины отданы ветвью без умолчаний шаблона; незаданную при
+      # Величины выдачи и шесть величин темпа поверхности выдачи (kaname#315)
+      # отданы ветвью без умолчаний шаблона; незаданную при
       # включённом эндпоинте отвергает рендер тем же помощником, одним перечнем,
       # а согласованность заданных судит страж старта. Целое проходит через
       # `int64` — тот же довод, что у блока `login`.
@@ -479,6 +480,24 @@ data:
         {{- end }}
         {{- with $ct.bodyCeiling }}
         body-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.inFlightCeiling }}
+        in-flight-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.exchangesPerClientPerSec }}
+        exchanges-per-client-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofsPerSource }}
+        failed-proofs-per-source: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofWindow }}
+        failed-proof-window: {{ . | quote }}
+        {{- end }}
+        {{- with $ct.authorizePerSourcePerSec }}
+        authorize-per-source-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.authorizeInFlightCeiling }}
+        authorize-in-flight-ceiling: {{ int64 . }}
         {{- end }}
       {{- end }}
 

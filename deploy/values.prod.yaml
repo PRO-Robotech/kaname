@@ -607,6 +607,16 @@ env:
   KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE: "true"
   KANAME_REGISTRYTOKEN_SERVER_MTLS_CERTFILE: /etc/kaname/tls/server/tls.crt
   KANAME_REGISTRYTOKEN_SERVER_MTLS_KEYFILE: /etc/kaname/tls/server/tls.key
+  # Слушатель выдачи ЗАПРАШИВАЕТ клиентский сертификат и проверяет
+  # предъявленный (optional-mutual); вызывающий без сертификата — `docker
+  # login`, машинный клиент — обслуживается как прежде. Край, ретранслирующий
+  # церемонию, опознаётся по проверенному сертификату, и только у него служба
+  # читает адрес клиента из X-Forwarded-For — ключ осей темпа источника
+  # (kaname#315, приёмка ceremony-pace-is-named-by-number.md Р7). Под `own` с
+  # собранной церемонией иной режим — отказ старта. Корень — тот же набор
+  # внутреннего УЦ, что у прочих взаимных рёбер этого профиля.
+  KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE: optional-mutual
+  KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   # Слушатель полосы входа паролем (Ф3, kacho#1269) — ВЗАИМНЫЙ TLS: вызывающий
   # (край платформы) опознаётся SAN проверенного клиентского листа, режим
   # `mutual` под `own` — условие старта (страж requireLoginLaneTLS). На посадке

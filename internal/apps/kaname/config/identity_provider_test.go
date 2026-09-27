@@ -55,7 +55,7 @@ func registryTokenLaneSettings() config.RegistryTokenConfig {
 }
 
 // clientTokenLaneSettings — токен-эндпоинт платформы, объявленный полностью:
-// шесть величин эндпоинта, каждую стережёт его собственный страж.
+// величины эндпоинта и темпа поверхности выдачи, каждую стережёт свой страж.
 func clientTokenLaneSettings() config.ClientTokenConfig {
 	return config.ClientTokenConfig{
 		Enabled:                  true,
@@ -64,7 +64,11 @@ func clientTokenLaneSettings() config.ClientTokenConfig {
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		ExchangesPerClientPerSec: 5,
-		InFlightCeiling:          64,
+		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 }
 

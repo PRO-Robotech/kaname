@@ -25,14 +25,36 @@
 // ещё нет, и стандартные коды у них обязаны быть свои — иначе чужая библиотека
 // прочтёт «слишком большое тело» как «неверный клиент» и будет чинить не то.
 //
-// # Два отказа по темпу — тоже свои (kaname#315)
+// # Три отказа по темпу — тоже свои (kaname#315)
 //
-// Потолок одновременных обменов и темп обменов на идентификатор клиента
-// отвечают «повторите позже» (429 со сроком ожидания), а не «неверный клиент»:
-// слитые с отказом аутентификации, они заставили бы клиента чинить учётные
-// данные, которые исправны. Оба решаются ДО обращения к реестру — потолок до
-// проверяющего вовсе, темп по ЗАЯВЛЕННОМУ идентификатору до разрешения его в
-// строку, — поэтому о записи реестра не сообщают ничего.
+// Приёмка `docs/engineering/acceptance/ceremony-pace-is-named-by-number.md`
+// называет на этом эндпоинте три оси:
+//
+//   - П3 — неудавшихся доказательств клиента за окно на источник: источник
+//     прислал слишком много, 429 со сроком до момента, когда в окне останется
+//     предел минус один отказ;
+//   - П1 — потолок одновременных обменов, все четыре вида выдачи: занята НАША
+//     ёмкость, и занял её не обязательно этот вызывающий, — 503 и
+//     `Retry-After: 1`, та же форма, что у занятого проверяющего секрета
+//     церемонии;
+//   - П2 — темп обменов на идентификатор клиента, только машинные полосы: судит
+//     проверяющий по ЗАЯВЛЕННОМУ идентификатору до реестра, 429.
+//
+// Ни одна не сливается с отказом аутентификации: слитая, она заставила бы
+// клиента чинить учётные данные, которые исправны. Все три решаются ДО
+// обращения к реестру и потому о записи реестра не сообщают ничего.
+//
+// # Порядок решений — несущий (Р3)
+//
+// Метод → потолок тела → разбор формы → вид выдачи из закрытого перечня → П3 →
+// П1 → полоса. Отказы формы решаются до всех осей и остаются различимыми: ось
+// темпа не прячет «неверный метод» под «повторите позже». Источник, исчерпавший
+// П3, места под потолком не занимает. П3 решается при входе по счёту, набранному
+// к этому моменту, а растёт по исходу — отказом доказательства клиента (Р5):
+// на машинных полосах это отказ проверяющего, кроме двух исходов нашей стороны
+// (`registry-unavailable`, `replay-store-unavailable`) и отказов формы и темпа;
+// на полосах церемонии — `invalid_client`, о котором сообщает полоса
+// ([LaneVerdict]).
 //
 // Различимость для НАС живёт с другой стороны провода: у каждого исхода свой
 // счётчик и своя запись в журнале. Без счётчика мёртвый контроль невидим —
@@ -57,6 +79,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -98,8 +121,22 @@ type CeremonyLane interface {
 	// Grants — виды выдачи, которые обслуживает полоса.
 	Grants() []string
 	// ServeGrant отвечает на запрос вида grant.
-	ServeGrant(w http.ResponseWriter, r *http.Request, grant string)
+	ServeGrant(w http.ResponseWriter, r *http.Request, grant string) LaneVerdict
 }
+
+// LaneVerdict — что полоса церемонии сообщает эндпоинту о доказательстве
+// клиента. Судит по нему ось П3: засчитывается отказ доказательства клиента, а
+// не всякий отказ обмена (приёмка Р5).
+type LaneVerdict uint8
+
+const (
+	// LaneProofNotRefused — доказательство клиента не отвергнуто: принято либо
+	// до него не дошло (отказ формы). `invalid_grant` сюда же: его производит
+	// клиент, уже доказавший себя.
+	LaneProofNotRefused LaneVerdict = iota
+	// LaneProofRefused — отвергнуто доказательство клиента: `invalid_client`.
+	LaneProofRefused
+)
 
 // Config — настройка эндпоинта.
 type Config struct {
@@ -111,9 +148,10 @@ type Config struct {
 	// этого запроса — форма с одним подписанным утверждением, и его потолок
 	// объявляет тот, кто поднимает сервис.
 	BodyCeiling int64
-	// InFlightCeiling — потолок одновременных обменов на этом процессе.
-	// ОБЯЗАТЕЛЕН по тому же доводу, что потолок тела: ноль означал бы «без
-	// потолка», а величина, подставленная построением, стражу старта не видна.
+	// InFlightCeiling — потолок одновременных обменов на этом процессе (П1),
+	// все четыре вида выдачи. ОБЯЗАТЕЛЕН по тому же доводу, что потолок тела:
+	// ноль означал бы «без потолка», а величина, подставленная построением,
+	// стражу старта не видна.
 	//
 	// Обмен сверх потолка отвергается сразу, а не ждёт места: ожидание держало
 	// бы соединение и горутину ровно тогда, когда их и так слишком много.
@@ -122,6 +160,12 @@ type Config struct {
 	// Ceremony — полосы церемонии. nil — церемония на этой посадке не
 	// собрана (посадка `external`), и её виды выдачи — вне перечня.
 	Ceremony CeremonyLane
+	// FailedProofs — окно отказов доказательства клиента на источник (П3).
+	// ОБЯЗАТЕЛЬНО: эндпоинт без него не решал бы П3 ни разу.
+	FailedProofs *failurewindow.Window
+	// Source — адрес источника запроса по правилу Р7 (`issuingsource`).
+	// ОБЯЗАТЕЛЕН: ключ П3.
+	Source func(*http.Request) string
 }
 
 // Handler — токен-эндпоинт.
@@ -154,6 +198,12 @@ func NewHandler(cfg Config, verifier Verifier, issuer Issuer) (*Handler, error) 
 	}
 	if cfg.InFlightCeiling <= 0 {
 		return nil, errRequired("in-flight ceiling")
+	}
+	if cfg.FailedProofs == nil {
+		return nil, errRequired("failed-proof window per source")
+	}
+	if cfg.Source == nil {
+		return nil, errRequired("source address rule")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -246,30 +296,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// (3) Вид выдачи — из ЗАКРЫТОГО перечня. «Прочее» не является корзиной
-	// приёма, и заведение второго вида её не завело: развилка ниже перечисляет
-	// оба поимённо, а всё остальное отвергается здесь.
+	// приёма: машинные виды названы поимённо, виды церемонии — словом полосы, а
+	// всё остальное отвергается здесь.
 	grantType := r.PostForm.Get("grant_type")
-	if h.cfg.Ceremony != nil && slices.Contains(h.cfg.Ceremony.Grants(), grantType) {
-		// Полосы церемонии: доказательство клиента, обмен и счёт исходов —
-		// у полосы. Вид выдачи назван ЕЁ словом, а не корзиной приёма.
-		h.cfg.Ceremony.ServeGrant(w, r, grantType)
-		return
-	}
-	if grantType != tokenpolicy.GrantTypeClientCredentials && grantType != tokenpolicy.GrantTypeJWTBearer {
+	ceremonyGrant := h.cfg.Ceremony != nil && slices.Contains(h.cfg.Ceremony.Grants(), grantType)
+	if !ceremonyGrant && grantType != tokenpolicy.GrantTypeClientCredentials &&
+		grantType != tokenpolicy.GrantTypeJWTBearer {
 		h.count(clientassertion.OutcomeUnsupportedGrantType)
 		writeJSON(w, http.StatusBadRequest, errorBody("unsupported_grant_type"))
 		return
 	}
 
-	// (3а) Потолок одновременных обменов — ДО проверки. Всё, что ниже,
-	// обращается к хранилищам и сверяет подпись; потолок бережёт именно это, и
-	// обмен сверх него до проверяющего не доходит.
+	// (3а) П3 — отказы доказательства клиента с этого источника. Раньше
+	// потолка: источник, исчерпавший П3, места под потолком не занимает.
+	source := h.cfg.Source(r)
+	if after, ok := h.cfg.FailedProofs.Admit(source); !ok {
+		h.count(clientassertion.OutcomeSourceFailuresExceeded)
+		writeRetryLater(w, after)
+		return
+	}
+
+	// (3б) П1 — потолок одновременных обменов, все четыре вида выдачи, ДО
+	// проверки: всё, что ниже, обращается к хранилищам и сверяет подпись либо
+	// секрет, и обмен сверх потолка до этого не доходит.
 	select {
 	case h.slots <- struct{}{}:
 		defer func() { <-h.slots }()
 	default:
 		h.count(clientassertion.OutcomeInFlightCeilingReached)
-		writeRetryLater(w, time.Second)
+		writeCapacityTaken(w)
+		return
+	}
+
+	if ceremonyGrant {
+		// Полосы церемонии: доказательство клиента, обмен и счёт исходов — у
+		// полосы; об отказе доказательства она сообщает, и П3 его засчитывает.
+		if h.cfg.Ceremony.ServeGrant(w, r, grantType) == LaneProofRefused {
+			h.cfg.FailedProofs.Record(source)
+		}
 		return
 	}
 
@@ -300,6 +364,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.refuse(r, res.Outcome, err)
+		if countsAgainstSource(res.Outcome) {
+			h.cfg.FailedProofs.Record(source)
+		}
 		writeJSON(w, http.StatusUnauthorized, errorBody(res.PresenterResponse()))
 		return
 	}
@@ -371,6 +438,21 @@ func (h *Handler) authenticate(r *http.Request, grantType string) (clientasserti
 	}
 }
 
+// countsAgainstSource — засчитывается ли отказ проверяющего в П3 (приёмка Р5).
+//
+// Отказ доказательства клиента засчитывается; не засчитываются два исхода
+// НАШЕЙ стороны — их отвечают тем же `invalid_client`, но причина у нас, и счёт
+// наших сбоев против источника заблокировал бы исправных вызывающих после
+// восстановления хранилища. Отказы формы и темпа решены до этого места и сюда
+// не приходят.
+func countsAgainstSource(o clientassertion.Outcome) bool {
+	switch o {
+	case clientassertion.OutcomeRegistryUnavailable, clientassertion.OutcomeReplayStoreUnavailable:
+		return false
+	}
+	return true
+}
+
 // errFormMismatch — форма запроса не соответствует объявленному виду выдачи.
 var errFormMismatch = errors.New("clienttokenhttp: request form does not match the declared grant type")
 
@@ -398,9 +480,10 @@ func confirmationFrom(*http.Request) *tokensigner.Confirmation { return nil }
 
 func errorBody(code string) map[string]any { return map[string]any{"error": code} }
 
-// writeRetryLater — отказ по темпу: 429 и срок ожидания целыми секундами,
-// округлённый ВВЕРХ. Повтор, названный раньше, чем место или темп освободится,
-// снова получил бы отказ; ноль секунд значил бы «повторите сразу».
+// writeRetryLater — вызывающий прислал слишком много (П2, П3): 429 и срок
+// ожидания целыми секундами, округлённый ВВЕРХ. Повтор, названный раньше, чем
+// темп или окно освободится, снова получил бы отказ; ноль секунд значил бы
+// «повторите сразу».
 func writeRetryLater(w http.ResponseWriter, after time.Duration) {
 	secs := int64(math.Ceil(after.Seconds()))
 	if secs < 1 {
@@ -408,6 +491,15 @@ func writeRetryLater(w http.ResponseWriter, after time.Duration) {
 	}
 	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
 	writeJSON(w, http.StatusTooManyRequests, errorBody("temporarily_unavailable"))
+}
+
+// writeCapacityTaken — занята наша ёмкость (П1): 503 и `Retry-After: 1` — место
+// освобождает любой завершившийся обмен. Та же форма, что у занятого
+// проверяющего секрета церемонии на этом эндпоинте: второй формы для «наша
+// ёмкость занята» не заводится (приёмка Р2).
+func writeCapacityTaken(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	writeJSON(w, http.StatusServiceUnavailable, errorBody("temporarily_unavailable"))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body map[string]any) {

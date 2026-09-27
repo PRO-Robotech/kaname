@@ -728,10 +728,58 @@ var RequiredSettings = []RequiredSetting{
 		Supply:      SupplyEnv,
 		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
-		Sample:      "64",
-		Why: "потолок одновременных обменов на реплику. Обмен сверх потолка отвергается до " +
-			"проверки ответом 429 со сроком ожидания, а не ждёт места. Ноль означал бы «без потолка»",
+		Sample:      "32",
+		Why: "потолок одновременных обменов на реплику, все четыре вида выдачи. Обмен сверх потолка " +
+			"отвергается до проверки ответом 503 и Retry-After: 1, а не ждёт места. Ноль означал бы «без потолка»",
 		Refusal: "authn.client-token.in-flight-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proofs-per-source",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "50",
+		Why: "неудавшихся доказательств клиента за окно на источник, на реплику: отказов проверки " +
+			"утверждения машинных полос и invalid_client полос церемонии. Отказы нашей стороны, формы и " +
+			"темпа не считаются. Источник — адрес от края при сертификате края, иначе адрес пира. " +
+			"Превышение — ответ 429 со сроком. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.failed-proofs-per-source must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proof-window",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "15m",
+		Why: "скользящее окно отказов доказательства на источник. Отказ в окне, пока с него прошло " +
+			"меньше длины окна. Ноль означал бы «без окна»",
+		Refusal: "authn.client-token.failed-proof-window must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-per-source-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "10",
+		Why: "запросов авторизации в секунду на источник, на реплику; обязательна при собранной " +
+			"церемонии (own и включённый эндпоинт). Тратит его всякий запрос, прошедший проверку метода; " +
+			"превышение — ответ 429 до справочника клиентов. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.authorize-per-source-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "32",
+		Why: "потолок одновременных запросов авторизации на реплику, свой — не общий с потолком " +
+			"обменов; обязательна при собранной церемонии. Превышение — ответ 503 и Retry-After: 1. " +
+			"Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.authorize-in-flight-ceiling must be declared",
 	},
 }
 

@@ -121,6 +121,9 @@ func full() clienttokenwire.BuildConfig {
 		PeerTimeout:              3 * time.Second,
 		ExchangesPerClientPerSec: 1 << 20,
 		InFlightCeiling:          64,
+		FailedProofsPerSource:    1 << 20,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
 	}
 }
 
@@ -158,6 +161,10 @@ func TestF2_22_CompositionRefusesADegenerateDeclaredNumber(t *testing.T) {
 		{"темп обменов на клиента нулевой", func(c *clienttokenwire.BuildConfig) { c.ExchangesPerClientPerSec = 0 }, "pace"},
 		{"темп обменов на клиента отрицателен", func(c *clienttokenwire.BuildConfig) { c.ExchangesPerClientPerSec = -1 }, "pace"},
 		{"потолок одновременных обменов нулевой", func(c *clienttokenwire.BuildConfig) { c.InFlightCeiling = 0 }, "in-flight"},
+		// Ось П3 (приёмка ceremony-pace-is-named-by-number.md).
+		{"отказов на источник нулевой", func(c *clienttokenwire.BuildConfig) { c.FailedProofsPerSource = 0 }, "failed-proof"},
+		{"окно отказов нулевое", func(c *clienttokenwire.BuildConfig) { c.FailedProofWindow = 0 }, "failed-proof"},
+		{"правило источника не подано", func(c *clienttokenwire.BuildConfig) { c.Source = nil }, "source"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

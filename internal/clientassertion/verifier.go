@@ -147,6 +147,11 @@ const (
 	// занят (kaname#315). Решается до проверяющего: потолок бережёт именно
 	// проверку — обращение к реестру и сверку подписи.
 	OutcomeInFlightCeilingReached Outcome = "in-flight-ceiling-reached"
+	// OutcomeSourceFailuresExceeded — источник исчерпал окно отказов
+	// доказательства клиента (ось П3, kaname#315). Решается эндпоинтом до
+	// потолка и до проверяющего, по источнику (правило адреса Р7), и о клиенте
+	// не говорит ничего.
+	OutcomeSourceFailuresExceeded Outcome = "source-failures-exceeded"
 	// OutcomeAudienceNotAllowed — запрошенный адресат вне объявленного
 	// конфигурацией перечня адресатов платформы.
 	OutcomeAudienceNotAllowed Outcome = "requested-audience-not-allowed"
@@ -209,6 +214,7 @@ func Outcomes() []Outcome {
 		OutcomeMultipleAssertions,
 		OutcomeUnsupportedGrantType,
 		OutcomeInFlightCeilingReached,
+		OutcomeSourceFailuresExceeded,
 		OutcomeAudienceNotAllowed,
 		OutcomeClientExpired,
 		OutcomeOwnerNotActive,

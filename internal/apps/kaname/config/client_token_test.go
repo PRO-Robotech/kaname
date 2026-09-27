@@ -55,7 +55,11 @@ func clientTokenOn() config.ClientTokenConfig {
 		// Темп (kaname#315): обменов в секунду на идентификатор клиента и
 		// потолок одновременных обменов.
 		ExchangesPerClientPerSec: 5,
-		InFlightCeiling:          64,
+		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 }
 

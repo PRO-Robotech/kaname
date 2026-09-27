@@ -43,7 +43,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -86,12 +88,18 @@ func buildCeremonySurface(
 	signer *tokensigner.Signer,
 	keys ceremonyport.KeySetSource,
 	secrets ceremonyport.SecretChecker,
+	source *issuingsource.Rule,
 	logger *slog.Logger,
 ) (*ceremonySurface, error) {
-	if cfg.AuthN.IdentityProvider != config.IdentityProviderOwn || !cfg.AuthN.ClientToken.Enabled {
+	// Условие сборки — ТОТ ЖЕ предикат, что у стражей величин точки
+	// авторизации и режима слушателя выдачи: три одинаковых условия разошлись
+	// бы молча.
+	if !cfg.AuthN.CeremonyAssembled() {
 		return nil, nil
 	}
 	switch {
+	case source == nil:
+		return nil, errors.New("ceremony: the source address rule is not wired")
 	case signer == nil:
 		return nil, errors.New("ceremony: own sign-in is on but our signer is not wired")
 	case keys == nil:
@@ -177,9 +185,12 @@ func buildCeremonySurface(
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
 	census := ceremonyhttp.NewCensus()
-	authorize, err := ceremonyhttp.NewAuthorize(ceremonyhttp.AuthorizeConfig{
-		UseCase: authorizeUC, Census: census, Logger: logger,
-	})
+	authorizeCfg, err := ceremonyAuthorizePace(cfg, source, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
+	authorizeCfg.UseCase, authorizeCfg.Census, authorizeCfg.Logger = authorizeUC, census, logger
+	authorize, err := ceremonyhttp.NewAuthorize(authorizeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
@@ -203,6 +214,30 @@ func buildCeremonySurface(
 		slog.String("token_endpoint", tokenURL),
 		slog.String("access_token_lifespan", cfg.AuthN.ClientToken.TokenTTL.String()),
 		slog.String("authorization_code_lifespan", tokenpolicy.MaxAuthorizationCodeTTL.String()),
-		slog.Int("state_floor", ceremonyhttp.StateFloor))
+		slog.Int("state_floor", ceremonyhttp.StateFloor),
+		slog.Int("authorize_per_source_per_sec", cfg.AuthN.ClientToken.AuthorizePerSourcePerSec),
+		slog.Int("authorize_in_flight_ceiling", cfg.AuthN.ClientToken.AuthorizeInFlightCeiling))
 	return &ceremonySurface{Authorize: authorize, Discovery: discovery, Token: token, Census: census}, nil
+}
+
+// ceremonyAuthorizePace — оси точки авторизации из настройки (приёмка
+// ceremony-pace-is-named-by-number.md, П4 и П5): темп на источник, потолок
+// одновременных и правило адреса источника.
+//
+// Отделено от сборки церемонии затем, чтобы переход «настройка → сборка» судился
+// без базы: величина, которую страж требует, а корень не передаёт, оставляла бы
+// обе стороны зелёными по своим пробам.
+func ceremonyAuthorizePace(cfg config.Config, source *issuingsource.Rule, now func() time.Time) (ceremonyhttp.AuthorizeConfig, error) {
+	if source == nil {
+		return ceremonyhttp.AuthorizeConfig{}, errors.New("authorize pace: the source address rule is not wired")
+	}
+	pace, err := exchangepace.New(cfg.AuthN.ClientToken.AuthorizePerSourcePerSec, now)
+	if err != nil {
+		return ceremonyhttp.AuthorizeConfig{}, fmt.Errorf("authorize pace per source: %w", err)
+	}
+	return ceremonyhttp.AuthorizeConfig{
+		Pace:            pace,
+		InFlightCeiling: cfg.AuthN.ClientToken.AuthorizeInFlightCeiling,
+		Source:          source.AuthorizePoint,
+	}, nil
 }

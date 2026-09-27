@@ -66,14 +66,18 @@ var laneSingleValued = []string{
 }
 
 // ServeGrant обслуживает вид выдачи grant по разобранной форме запроса.
-func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant string) {
+//
+// Возвращает эндпоинту, отвергнуто ли доказательство клиента (`invalid_client`):
+// этот отказ засчитывает ось П3 эндпоинта, прочие — нет (приёмка
+// ceremony-pace-is-named-by-number.md, Р5).
+func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant string) clienttokenhttp.LaneVerdict {
 	ctx := r.Context()
 	form := r.PostForm
 	for _, name := range laneSingleValued {
 		if len(form[name]) > 1 {
 			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, form.Get("client_id"),
 				"parameter "+name+" is named more than once")
-			return
+			return clienttokenhttp.LaneProofNotRefused
 		}
 	}
 
@@ -91,13 +95,12 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 		if form.Has("client_secret") {
 			l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, req.ClientID,
 				"the client authenticates by more than one method")
-			return
+			return clienttokenhttp.LaneProofNotRefused
 		}
 		id, idErr := url.QueryUnescape(user)
 		secret, secretErr := url.QueryUnescape(pass)
 		if idErr != nil || secretErr != nil || id == "" || (req.ClientID != "" && req.ClientID != id) {
-			l.refuseClient(r, w, id, "the Basic credentials are malformed or name another client than the form")
-			return
+			return l.refuseClient(r, w, id, "the Basic credentials are malformed or name another client than the form")
 		}
 		req.ClientID, req.ClientSecret, req.AuthMethod = id, secret, oauthceremony.ClientAuthBasic
 	} else if form.Has("client_secret") {
@@ -113,8 +116,7 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 			slog.String("client", req.ClientID), slog.Any("err", err))
 	}
 	if err != nil {
-		l.refuseExchange(r, w, req.ClientID, err)
-		return
+		return l.refuseExchange(r, w, req.ClientID, err)
 	}
 
 	outcome := OutcomeExchangeCodeExchanged
@@ -136,11 +138,12 @@ func (l *TokenLane) ServeGrant(w http.ResponseWriter, r *http.Request, grant str
 		body["scope"] = strings.Join(res.Scopes, " ")
 	}
 	writeJSON(w, http.StatusOK, body)
+	return clienttokenhttp.LaneProofNotRefused
 }
 
 // refuseExchange переводит отказ церемонии в ответ полосы по словарю RFC 6749
 // §5.2. Случай церемонии — в счётчик и журнал; наружу — только слово словаря.
-func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clientID string, err error) {
+func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clientID string, err error) clienttokenhttp.LaneVerdict {
 	code := oauthceremony.CodeOf(err)
 	switch wire := code.WireCode(); {
 	case errors.Is(err, domain.ErrVerifierAtCapacity):
@@ -156,7 +159,7 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeExchangeGrantRefused, clientID,
 			"the family of the grant was revoked during the operation")
 	case wire == "invalid_client":
-		l.refuseClient(r, w, clientID, code.String())
+		return l.refuseClient(r, w, clientID, code.String())
 	case wire == "invalid_grant":
 		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeExchangeGrantRefused, clientID, code.String())
 	case code.HTTPStatus() >= http.StatusInternalServerError || code == oauthceremony.CodeUnspecified:
@@ -179,13 +182,18 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 	default:
 		l.refuse(r, w, http.StatusBadRequest, "invalid_request", OutcomeExchangeRequestRefused, clientID, code.String())
 	}
+	return clienttokenhttp.LaneProofNotRefused
 }
 
 // refuseClient — `invalid_client`: 401 и вызов схемы, которой клиент
 // доказывает себя (RFC 6749 §5.2).
-func (l *TokenLane) refuseClient(r *http.Request, w http.ResponseWriter, clientID, why string) {
+//
+// Это ЕДИНСТВЕННЫЙ путь отказа доказательства клиента, и он же — единственный,
+// что сообщает эндпоинту [clienttokenhttp.LaneProofRefused].
+func (l *TokenLane) refuseClient(r *http.Request, w http.ResponseWriter, clientID, why string) clienttokenhttp.LaneVerdict {
 	w.Header().Set("WWW-Authenticate", `Basic realm="token"`)
 	l.refuse(r, w, http.StatusUnauthorized, "invalid_client", OutcomeExchangeClientRefused, clientID, why)
+	return clienttokenhttp.LaneProofRefused
 }
 
 // refuse записывает отказ туда, где различимость законна, и отвечает словом.
