@@ -87,6 +87,19 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 свой предмет и истекает вместе с препятствием, а не остаётся ведомостью прощения.
 Форма держателя закрыта (`HOLDER_RE`): адрес задачи и то, что она сделает.
 
+ПОЗИЦИЯ ПРИЁМКИ — ВТОРАЯ ЕДИНИЦА ДОЛГА, И ОНА МЕЛЬЧЕ КОЛЛЕКЦИИ (kaname#449).
+Ведомость производителя судит коллекцию, а приёмка объявляет сквозным отдельный
+СЦЕНАРИЙ: заголовок `**ID: <ID>** · I + E — …`, где уровень `E` — прогон на стенде.
+Такой сценарий без кейса ни в одной коллекции не виден ведомости коллекций вовсе:
+ни одна коллекция не пропала, и перепись зеленела, пока DoD приёмки называл
+позицию, которую никто не гоняет. Поэтому позиции уровня E ВЫВОДЯТСЯ из приёмок
+(`docs/engineering/acceptance/*.md`) разбором заголовков сценариев, и каждая либо
+НЕСЁТСЯ модулем кейсов (идентификатор стоит в строковом литерале модуля
+`tests/newman/cases/<коллекция>.py`; комментарий не в счёт), либо записана в
+`SCENARIO_DEBT` с доводом и держателем в закрытой форме `HOLDER_RE`. Сверка — в
+обе стороны: позиция без кейса и без записи роняет перепись; запись, чью позицию
+уже несёт модуль, либо запись без позиции уровня E роняет её же.
+
 ИСХОДЫ:
     0  — перепись напечатана (долг — не отказ: он именно объявляется);
     1  — перепись беспредметна: коллекций либо шаблона окружения нет, разбор дал
@@ -1029,6 +1042,52 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "kaname-authorization-code": ("A", "церемония `authorization_code` нашими силами (LINE-A-1): точка авторизации, обмен кода и обёртка токена обновления на поверхности выдачи службы, вход — полоса входа службы, приём токена — собственный фронт; все утверждения производит служба, ключей `jwt…` не читает; конфиденциальные клиенты — глагол `Create` в посеве церемонии", ""),
 }
 
+# ДОЛГ ПОЗИЦИЙ ПРИЁМОК УРОВНЯ E: ID сценария → (довод, держатель). Запись живёт,
+# пока позицию не несёт ни один модуль кейсов, и снимается тем же изменением, что
+# заводит кейс (`reconcile_scenario_debt`).
+ScenarioDebt = dict[str, tuple[str, str]]
+
+# Позиции DoD п.7 приёмки секрета клиента (kaname#405,
+# `docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md`).
+# Уровень I у них держат интеграционные пробы; здесь — только сквозной уровень.
+#
+# Стенд посадки `own` у службы один — задание `chart-own`, и его набор ходит REST-ом.
+# До глаголов интерактивного клиента REST на нём не доходит: их круг вызывающих —
+# край (`internal/authzguard/caller_policy.go`, `GatewayFrontedInternalRPCs`), а хоп
+# собственного внутреннего фронта кругом края не становится и получает 403
+# `AUTHZ_DENIED`. Посев церемонии зовёт `Create` gRPC-ом с листом края
+# (`tests/authz-fixtures/seed_ceremony.py`), поэтому 06 гоняется, а у кейсов набора
+# такой двери нет. Держатель тот же, что у коллекции `iam-interactive-client`.
+_IC_SECRET_OWN_DOOR = (
+    "стенд `chart-own`: REST набора до глаголов `InternalInteractiveClientService` не "
+    "доходит — их круг вызывающих край (`GatewayFrontedInternalRPCs`), хоп собственного "
+    "внутреннего фронта получает 403 AUTHZ_DENIED; посев церемонии проходит глагол "
+    "gRPC-ом с листом края, у кейсов newman такой двери нет")
+_HOLDER_EXTERNAL_LANDING_REMOVAL = (
+    "PRO-Robotech/kaname#363 — посадка `external` снимается вместе с ключом посадки; "
+    "позиция уходит с предметом, правило поля держит пара с IC-SECRET-01 на `own`")
+
+SCENARIO_DEBT: ScenarioDebt = {
+    "IC-SECRET-01": ("секрет выдаётся в ответе `Create` посадки own; " + _IC_SECRET_OWN_DOOR,
+                     _HOLDER_SERVICE_ON_EDGE),
+    "IC-SECRET-04": ("несостоявшееся заведение секрета не выдаёт и материала не оставляет; "
+                     + _IC_SECRET_OWN_DOOR, _HOLDER_SERVICE_ON_EDGE),
+    "IC-SECRET-08": ("`Get` секрета не несёт; " + _IC_SECRET_OWN_DOOR, _HOLDER_SERVICE_ON_EDGE),
+    "IC-SECRET-09": ("`List` и `Update` секрета не несут, маской его не задать; "
+                     + _IC_SECRET_OWN_DOOR, _HOLDER_SERVICE_ON_EDGE),
+    "IC-SECRET-10": ("снятие не оставляет годного секрета; " + _IC_SECRET_OWN_DOOR,
+                     _HOLDER_SERVICE_ON_EDGE),
+    # Условие позиции — стенд посадки `external` — не создаёт ни один стенд службы:
+    # боевой профиль объявляет `identityProvider: own` (`deploy/values.prod.yaml`),
+    # задание `chart` набора не гоняет, а коллекция `iam-interactive-client`, где
+    # позиции место по DoD, не гоняется ни одним шагом.
+    "IC-SECRET-11": ("посадка `external`: секрета нет, способ `none`. Стенда этой посадки с "
+                     "прогоном набора у службы нет: боевой профиль объявляет "
+                     "`identityProvider: own`, задание `chart` набора не гоняет, коллекция "
+                     "`iam-interactive-client` не гоняется ни одним шагом",
+                     _HOLDER_EXTERNAL_LANDING_REMOVAL),
+}
+
 
 def _surface_of_stem(stem, runnable, blocked) -> str:
     """Адресация позиции по её стеблю — для сверки двух величин между собой."""
@@ -1133,8 +1192,99 @@ def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
     return out
 
 
+# ─────────────── ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (kaname#449) ──────────────────────
+#
+# Каталог приёмок относительно корня дерева: у синтетических деревьев
+# самопроверки он свой, поэтому путь выводится от каталога набора, а не от ROOT.
+ACCEPTANCE_REL = pathlib.Path("docs") / "engineering" / "acceptance"
+
+# Заголовок сценария с уровнями: `**ID: IC-SECRET-01** · I + E — …`. Уровни —
+# закрытый словарь приёмки: I (integration), G (гейт по дереву), E (стенд).
+SCENARIO_HEAD_RE = re.compile(r"^\*\*ID: ([^*\s]+)\*\* · ([IGE](?: \+ [IGE])*) — ")
+# Строка заголовка, где после разделителя стоит ЛАТИНСКАЯ буква уровня, — перечень
+# уровней. Не разобранная первым выражением — незнакомая форма перечня, и она
+# называется, а не отбрасывается: разбор, молча пропустивший форму, дал бы
+# «позиций E ноль». Заголовок, где после разделителя идёт довод словами
+# («· отрицание; близнец — …»), перечня уровней не несёт и позицией не является.
+SCENARIO_LEVELED_RE = re.compile(r"^\*\*ID: [^*]+\*\* · [IGE](?=[\s+,/—])")
+
+
+def acceptance_positions(acceptance: pathlib.Path) -> tuple[dict[str, str], int, list[str]]:
+    """Позиции уровня E: ID → приёмка; сколько приёмок прочитано; незнакомые формы."""
+    positions: dict[str, str] = {}
+    unknown: list[str] = []
+    docs = sorted(acceptance.glob("*.md")) if acceptance.is_dir() else []
+    for doc in docs:
+        for n, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            if not SCENARIO_LEVELED_RE.match(line):
+                continue
+            m = SCENARIO_HEAD_RE.match(line)
+            if m is None:
+                unknown.append(f"{doc.name}:{n}: {line[:90]}")
+                continue
+            if "E" in m.group(2).split(" + "):
+                positions[m.group(1)] = doc.name
+    return positions, len(docs), unknown
+
+
+def carried_positions(cases: pathlib.Path, ids: set[str]) -> dict[str, list[str]]:
+    """Какой модуль кейсов несёт позицию: ID стоит в СТРОКОВОМ ЛИТЕРАЛЕ модуля.
+
+    Модуль читается разобранным (`ast`): комментарий, объясняющий, почему позиции
+    здесь нет, позицию не несёт. Докстрока — литерал, и она в счёт: трасса
+    «сценарий — кейс» в наборе пишется именно ею.
+    """
+    import ast as _ast
+    out: dict[str, list[str]] = {}
+    pats = {i: re.compile(r"(?<![A-Z0-9-])" + re.escape(i) + r"(?![0-9])") for i in ids}
+    for mod in sorted(cases.glob("*.py")) if cases.is_dir() else []:
+        tree = _ast.parse(mod.read_text(encoding="utf-8"), filename=str(mod))
+        text = "\n".join(n.value for n in _ast.walk(tree)
+                         if isinstance(n, _ast.Constant) and isinstance(n.value, str))
+        for i, pat in pats.items():
+            if pat.search(text):
+                out.setdefault(i, []).append(mod.stem)
+    return out
+
+
+def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt
+                            ) -> tuple[list[str], dict[str, str], dict[str, list[str]], int]:
+    """Позиции уровня E против модулей кейсов и записей долга — В ОБЕ СТОРОНЫ.
+
+    Возвращает находки, позиции (ID → приёмка), кто их несёт и сколько приёмок
+    прочитано.
+    """
+    positions, docs, unknown = acceptance_positions(newman.parents[1] / ACCEPTANCE_REL)
+    carried = carried_positions(newman / "cases", set(positions) | set(debt))
+    out = [f"заголовок сценария в незнакомой форме (уровни не разобраны): {u}" for u in unknown]
+    for sid in sorted(positions):
+        if sid not in carried and sid not in debt:
+            out.append(f"позиция {sid} ({positions[sid]}) объявлена сквозной (уровень E), а ни "
+                       f"кейса в модулях набора, ни записи долга о ней нет")
+    for sid, (why, holder) in sorted(debt.items()):
+        if sid not in positions:
+            out.append(f"запись долга позиции {sid} пережила предмет: сценария уровня E с таким "
+                       f"ID нет ни в одной приёмке")
+        elif sid in carried:
+            out.append(f"запись долга позиции {sid} пережила предмет: её несёт модуль "
+                       f"{', '.join(carried[sid])} — запись снимается тем же изменением, что "
+                       f"завело кейс")
+        if not why.strip():
+            out.append(f"запись долга позиции {sid} без довода")
+        if not HOLDER_RE.match(holder):
+            out.append(f"держатель позиции {sid} вне закрытой формы "
+                       f"«PRO-Robotech/<репозиторий>#<номер> — <что сделает>»: {holder!r}")
+    return out, positions, carried, docs
+
+
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-        ledger: Ledger | None = None) -> int:
+        ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None) -> int:
+    # Ведомость позиций, как и ведомость производителя, — ПАРАМЕТР. Объявленная
+    # берётся только для объявленного дерева: синтетическая ведомость коллекций
+    # значит синтетическое дерево, и объявленных позиций у него нет.
+    declared_tree = ledger is None and scenario_debt is None
+    if scenario_debt is None:
+        scenario_debt = SCENARIO_DEBT if ledger is None else {}
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
@@ -1167,6 +1317,12 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     # расхождение со шагом держит `pipeline_claims_test.py`.
     all_stems = {stem for stem, *_ in [*runnable, *blocked]}
     drift += reconcile_holders(all_stems, runs, ledger)
+    # ПОЗИЦИЯ ПРИЁМКИ — мельче коллекции, и её долг судится отдельно (kaname#449).
+    pos_drift, positions, carried, acc_docs = reconcile_scenario_debt(newman, scenario_debt)
+    if declared_tree and acc_docs == 0:
+        pos_drift.append(f"приёмок в {ACCEPTANCE_REL} прочитано 0 — перепись позиций "
+                         f"беспредметна: «долга позиций нет» значило бы «ничего не прочитано»")
+    drift += pos_drift
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
@@ -1263,6 +1419,26 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
             print(f"      — {b}")
         holder = holder_of(stem, ledger)
         if holder:
+            print(f"      держатель: {holder}")
+    print()
+    # ПОЗИЦИИ ПРИЁМОК УРОВНЯ E — числом и по каждой: гоняется ли модуль, который
+    # её несёт, либо чем и кем записан её долг.
+    ran = [sid for sid in positions if any(runs.get(st) for st in carried.get(sid, []))]
+    built = [sid for sid in positions if sid in carried and sid not in ran]
+    owed = [sid for sid in positions if sid not in carried]
+    print(f"ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (сквозной прогон на стенде): приёмок прочитано {acc_docs}, "
+          f"позиций {len(positions)} — гоняется {len(ran)} · собрана, коллекция не гоняется "
+          f"{len(built)} · долг {len(owed)}")
+    for sid in sorted(positions):
+        if sid in carried:
+            where = "; ".join(w for st in carried[sid] for w in runs.get(st, []))
+            state = (f"гоняется ← {where}" if where else
+                     f"собрана в {', '.join(carried[sid])}, коллекция не гоняется "
+                     f"(её держатель — строкой выше)")
+            print(f"  · {sid} [{positions[sid]}] — {state}")
+        else:
+            why, holder = scenario_debt[sid]
+            print(f"  · {sid} [{positions[sid]}] — ДОЛГ: {why}")
             print(f"      держатель: {holder}")
     print()
     print("ЧТО ЭТОТ ДОЛГ ЗНАЧИТ, СКАЗАНО ПРЯМО:")
@@ -2102,6 +2278,58 @@ def self_test() -> int:
         _c("негоняемые с держателем названы числом",
            "НЕ гоняет ни один шаг: 1 — держатель назван у 1" in out16, out16[-900:])
 
+
+        # Ось 17: ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (kaname#449). Позиция мельче коллекции:
+        # приёмка объявляет сквозным сценарий, и без кейса он не виден ведомости
+        # коллекций вовсе. Пара по каждой стороне, различие в одном факте.
+        pdir = tmp / "positions"
+        pn = _mk(pdir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        pwf_runs = _wf(pdir / "runs", runs=["carrier"])
+        pwf_none = _wf(pdir / "none", runs=[])
+        acc = pdir / ACCEPTANCE_REL
+        acc.mkdir(parents=True, exist_ok=True)
+        base_heads = ("**ID: SYN-01** · I + E — несётся кейсом\n"
+                      "**ID: SYN-02** · I — только интеграция\n"
+                      "**ID: SYN-03** · E — не несётся ничем\n"
+                      "**ID: SYN-05** · отрицание; близнец — SYN-01, довод словами\n")
+        (pn / "cases").mkdir(parents=True, exist_ok=True)
+        (pn / "cases" / "carrier.py").write_text(
+            '"""Модуль кейсов: несёт SYN-01."""\n# SYN-03 здесь только комментарием\nCASES = []\n',
+            encoding="utf-8")
+        hold = "PRO-Robotech/kaname#1 — синтетика: заведёт кейс"
+        pled = {"carrier": ("A", "довод", "")}
+        for label, debt, extra, want_rc, want_text in (
+                ("позиция E без кейса и без записи — находка; комментарий кейсом не считается",
+                 {}, "", 1, "позиция SYN-03"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: та же позиция записана долгом по форме — молчание",
+                 {"SYN-03": ("довод", hold)}, "", 0, ""),
+                ("запись долга позиции, которую несёт модуль, — пережила предмет",
+                 {"SYN-03": ("довод", hold), "SYN-01": ("довод", hold)}, "", 1, "несёт модуль carrier"),
+                ("запись долга позиции без уровня E — без предмета",
+                 {"SYN-03": ("довод", hold), "SYN-02": ("довод", hold)}, "", 1, "нет ни в одной приёмке"),
+                ("держатель позиции вне закрытой формы — находка",
+                 {"SYN-03": ("довод", "когда-нибудь")}, "", 1, "вне закрытой формы"),
+                ("перечень уровней в незнакомой форме — находка, а не пропуск",
+                 {"SYN-03": ("довод", hold)}, "**ID: SYN-04** · I+E — слитно\n", 1, "незнакомой форме")):
+            (acc / "synthetic.md").write_text(base_heads + extra, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt=debt)
+            _c(f"позиции: {label} (код {want_rc})",
+               rc == want_rc and (not want_text or want_text in err.getvalue()),
+               f"код {rc}; {err.getvalue()[:400]}")
+        (acc / "synthetic.md").write_text(base_heads, encoding="utf-8")
+        for label, wf17, led17, want in (
+                ("модуль гоняется шагом", pwf_runs, pled,
+                 "позиций 2 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 1"),
+                ("модуль собран, коллекцию не гоняет ни один шаг", pwf_none,
+                 {"carrier": ("A", "довод", hold)},
+                 "позиций 2 — гоняется 0 · собрана, коллекция не гоняется 1 · долг 1")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = run(pn, workflows=wf17, ledger=led17, scenario_debt={"SYN-03": ("довод", hold)})
+            _c(f"позиции: перепись числом — {label}", rc == 0 and want in buf.getvalue(),
+               f"код {rc}; {buf.getvalue()[-700:]}")
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
