@@ -24,30 +24,17 @@ import (
 	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
-// ownClientVerifier — проверочное значение, вычеканенное ТЕМ ЖЕ производителем,
-// каким пишутся пароли. Переписанной строки здесь нет намеренно: переписанная
-// разошлась бы с производителем молча, и проба судила бы свою копию формы.
-func ownClientVerifier(t *testing.T) domain.LoginVerifier {
-	t.Helper()
-	record, ok := domain.PasswordHashFormatByMarker(string(domain.PasswordHashFormatArgon2id))
-	require.True(t, ok, "формат argon2id обязан стоять в перечне")
-	hasher, err := passwordverify.NewHasher(passwordverify.Declared{
-		Format: domain.PasswordHashFormatArgon2id,
-		Params: record.Floor,
-	})
-	require.NoError(t, err, "хешер объявленного формата")
-	v, err := hasher.Hash("s3cret-of-the-interactive-client")
-	require.NoError(t, err)
-	return v
-}
-
 // TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind —
 // снятие уносит проверочное значение секрета клиента.
+//
+// Материал кладёт ПРОДУКТОВЫЙ путь (kaname#405): исполнитель чеканит секрет и
+// его проверочное значение, вставка строки кладёт значение ТЕМ ЖЕ оператором,
+// что строку. Второго писателя материала у проб нет — посев отдельной записью
+// был бы вторым путём, которого у продукта не существует.
 func TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -58,10 +45,9 @@ func TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind(t *t
 	t.Cleanup(pool.Close)
 
 	ceremony := kanamepg.NewOAuthCeremonyRepo(pool)
-	provider := kanamepg.NewOwnInteractiveClientProvider(ceremony)
+	provider, err := kanamepg.NewOwnInteractiveClientProvider(ceremony, floorHasher(t))
+	require.NoError(t, err)
 
-	// Заведение чеканит имя клиента; строку реестра кладёт вызывающий — здесь
-	// его роль исполняет посев, тем же оператором, что и адаптер ресурса.
 	pc, err := provider.Register(ctx, interactiveclient.ProviderClientSpec{
 		Name:                   "console",
 		RedirectURIs:           []string{"https://console.example.test/cb"},
@@ -71,27 +57,27 @@ func TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind(t *t
 	})
 	require.NoError(t, err, "заведение")
 	require.NotEmpty(t, pc.ClientID, "имя клиента не отчеканено")
-	require.Equal(t, "none", pc.TokenEndpointAuthMethod,
-		"клиент интерактивного входа обязан быть ПУБЛИЧНЫМ: владение доказывает "+
-			"PKCE, и секрета у него нет — та же форма, что у прежней дороги")
+	require.Equal(t, "client_secret_basic", pc.TokenEndpointAuthMethod,
+		"клиент собственного реестра конфиденциален (Р3 LINE-A-1, Р1 приёмки #405)")
 
-	// Строка объявлена способом СЕКРЕТОМ, а не способом производителя (`none`):
-	// материал лежит только у клиента, который секрет предъявляет
-	// (`interactive_clients_secret_verifier_method_ck`, kaname#317), и
-	// положительный близнец иначе не положил бы материала вовсе.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.interactive_clients (id, name, redirect_uris, client_id, token_endpoint_auth_method)
-		VALUES ($1, $2, ARRAY['https://console.example.test/cb'], $3, 'client_secret_basic')`,
-		"ic-00000000000000001", "own-console", pc.ClientID)
-	require.NoError(t, err, "посев строки реестра")
+	_, err = kanamepg.NewInteractiveClientRepo(pool).Insert(ctx, domain.InteractiveClient{
+		ID:                      "ic-00000000000000001",
+		Name:                    "own-console",
+		RedirectURIs:            []string{"https://console.example.test/cb"},
+		PostLogoutRedirectURIs:  []string{},
+		ClientID:                pc.ClientID,
+		Audiences:               pc.Audiences,
+		GrantTypes:              pc.GrantTypes,
+		TokenEndpointAuthMethod: pc.TokenEndpointAuthMethod,
+		Status:                  domain.InteractiveClientActive,
+	}, pc.SecretVerifier)
+	require.NoError(t, err, "вставка строки вместе с проверочным значением")
 
 	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: значение, положенное в реестр, читается.
-	require.NoError(t, ceremony.SetClientSecretVerifier(ctx, pc.ClientID, ownClientVerifier(t)))
-
 	_, hasSecret, err := ceremony.ClientSecretVerifier(ctx, pc.ClientID)
 	require.NoError(t, err)
 	require.True(t, hasSecret,
-		"фикстура не положила материала — отрицание ниже зеленело бы на пустом месте")
+		"вставка не положила материала — отрицание ниже зеленело бы на пустом месте")
 
 	// ПРЕДМЕТ: снятие уносит материал.
 	require.NoError(t, provider.Deregister(ctx, pc.ClientID), "снятие")
@@ -118,7 +104,8 @@ func TestIntegration_OwnInteractiveClientDeregistrationIsIdempotent(t *testing.T
 	t.Cleanup(pool.Close)
 
 	ceremony := kanamepg.NewOAuthCeremonyRepo(pool)
-	provider := kanamepg.NewOwnInteractiveClientProvider(ceremony)
+	provider, err := kanamepg.NewOwnInteractiveClientProvider(ceremony, floorHasher(t))
+	require.NoError(t, err)
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ формы отказа: сам реестр об отсутствующем клиенте
 	// отвечает ПРИЗНАКОМ, а не прозой. На этом признаке стоит идемпотентность.

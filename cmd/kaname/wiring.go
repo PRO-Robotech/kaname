@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -878,8 +879,17 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
-	interactiveProvider := interactiveClientProvider(cfg,
-		kanamepg.NewOAuthCeremonyRepo(pool), metricsReg.ProviderRoadRecorder())
+	// Исполнитель посадки `own` строится с хешером полосы входа; без него —
+	// отказ старта, а не клиент без материала (kaname#405, ban #16).
+	interactiveSecretHasher, err := ownClientSecretHasher(cfg)
+	if err != nil {
+		log.Fatalf("interactive client executor: %v", err)
+	}
+	interactiveProvider, err := interactiveClientProvider(cfg,
+		kanamepg.NewOAuthCeremonyRepo(pool), interactiveSecretHasher, metricsReg.ProviderRoadRecorder())
+	if err != nil {
+		log.Fatalf("interactive client executor: %v", err)
+	}
 	interactiveCreate := interactiveclientapp.NewCreateUseCase(interactiveRepo, interactiveProvider,
 		opsRepo, []string{interactiveAudience}, logger)
 	// КОМПЕНСАЦИЯ ПОЛУСДЕЛАННОЙ РЕГИСТРАЦИИ ПРОВЯЗЫВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ
@@ -1118,14 +1128,44 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 // ОТСТАВЛЕННОЙ ДОРОГИ ЭТА ПОЛОСА БОЛЬШЕ НЕ ПОЛУЧАЕТ: под `own` строитель
 // административной дороги отсюда не зовётся вовсе, поэтому терминальный отказ
 // «внешнего поставщика нет» на путь заведения и снятия не попадает.
+//
+// ПОД `own` ИСПОЛНИТЕЛЬ СОБИРАЕТСЯ НАД РЕЕСТРОМ И ХЕШЕРОМ (задача kaname#405):
+// клиент конфиденциален, и проверочное значение его секрета нечем положить без
+// хешера. Сборка без него — ОШИБКА, и корень отказывает в старте, называя
+// недостающее; отката к публичному клиенту нет.
 func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSecretStore,
-	roadObs clients.ProviderRoadObserver,
-) interactiveclientapp.ProviderClients {
+	ownHasher kanamepg.ClientSecretHasher, roadObs clients.ProviderRoadObserver,
+) (interactiveclientapp.ProviderClients, error) {
 	road, built := mustProviderAdminClient(cfg, roadObs)
 	if built {
-		return clients.NewInteractiveClientProvider(road)
+		return clients.NewInteractiveClientProvider(road), nil
 	}
-	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry)
+	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry, ownHasher)
+}
+
+// ownClientSecretHasher — хешер проверочного значения секрета интерактивного
+// клиента для исполнителя заведения на ЭТОЙ посадке (задача kaname#405).
+//
+// Под `own` — хешер объявленного класса записи полосы входа, ТОТ ЖЕ
+// производитель, которым корень пишет приманку проверяющего (`laneHasher`):
+// другой класс сделал бы отказ незаведённому клиенту по цене отличным от
+// отказа заведённому, и время ответа перечисляло бы клиентов. Под `external`
+// исполнителя, которому он нужен, нет, и возвращается ЧИСТЫЙ nil — не
+// типизированный: сборка исполнителя судит интерфейс.
+//
+// Предикат посадки берётся у строителя дороги (`providerAdminHopIsBuilt`), а
+// не повторяется: исполнитель `own` строится ровно там, где дороги нет
+// (`interactiveClientProvider`), и второе условие об одной посадке разошлось бы
+// с первым молча.
+func ownClientSecretHasher(cfg config.Config) (kanamepg.ClientSecretHasher, error) {
+	if providerAdminHopIsBuilt(cfg) {
+		return nil, nil
+	}
+	h, err := laneHasher(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("interactive client secret hasher: %w", err)
+	}
+	return h, nil
 }
 
 // forceLogoutProviderSessions — снятие сессии входа У ВНЕШНЕГО ПОСТАВЩИКА, если

@@ -74,10 +74,33 @@ type InternalInteractiveClientServiceClient interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	List(ctx context.Context, in *ListInteractiveClientsRequest, opts ...grpc.CallOption) (*ListInteractiveClientsResponse, error)
-	// Registers a new interactive-login client at the identity provider and
-	// records it. The provider call happens on the request path and is
-	// fail-closed: if the provider is unreachable the mutation ends
-	// `UNAVAILABLE` and leaves NO row behind — the name does not stay taken.
+	// Registers a new interactive-login client and records it. The registry that
+	// holds the client is chosen by the deployment, not by the caller:
+	//
+	//   - with an external identity provider, the client is registered there on
+	//     the request path, fail-closed: if the provider is unreachable the
+	//     mutation ends `UNAVAILABLE` and leaves NO row behind — the name does not
+	//     stay taken. Such a client is public (`token_endpoint_auth_method =
+	//     none`) and gets no secret;
+	//   - with the service's own registry, the client is CONFIDENTIAL
+	//     (`client_secret_basic`): the service mints its secret and returns it
+	//     ONCE, in `CreateInteractiveClientResponse.client_secret` of THIS call.
+	//     The secret is stored nowhere in readable form — only its verification
+	//     value — and no other call returns it.
+	//
+	// The operation completes on the request path (`done = true` in the answer
+	// of this call). A refused Create (name taken, registry failure) answers
+	// synchronously, returns no operation and issues no secret.
+	//
+	// A LOST ANSWER MEANS A LOST SECRET, and the secret cannot be recovered or
+	// re-read. After a timeout or a dropped connection: list clients by the
+	// `name` the request carried; if one exists, delete it and create it anew. A
+	// Create without `name` must not be repeated blindly — every such call
+	// registers another client with another secret.
+	//
+	// CHANGE OF THE OPERATION RESPONSE TYPE. The response used to be the bare
+	// `InteractiveClient`; it is now `CreateInteractiveClientResponse`, whose
+	// `interactive_client` carries the same projection `Get` returns.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Create(ctx context.Context, in *CreateInteractiveClientRequest, opts ...grpc.CallOption) (*operation.Operation, error)
@@ -173,10 +196,33 @@ type InternalInteractiveClientServiceServer interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	List(context.Context, *ListInteractiveClientsRequest) (*ListInteractiveClientsResponse, error)
-	// Registers a new interactive-login client at the identity provider and
-	// records it. The provider call happens on the request path and is
-	// fail-closed: if the provider is unreachable the mutation ends
-	// `UNAVAILABLE` and leaves NO row behind — the name does not stay taken.
+	// Registers a new interactive-login client and records it. The registry that
+	// holds the client is chosen by the deployment, not by the caller:
+	//
+	//   - with an external identity provider, the client is registered there on
+	//     the request path, fail-closed: if the provider is unreachable the
+	//     mutation ends `UNAVAILABLE` and leaves NO row behind — the name does not
+	//     stay taken. Such a client is public (`token_endpoint_auth_method =
+	//     none`) and gets no secret;
+	//   - with the service's own registry, the client is CONFIDENTIAL
+	//     (`client_secret_basic`): the service mints its secret and returns it
+	//     ONCE, in `CreateInteractiveClientResponse.client_secret` of THIS call.
+	//     The secret is stored nowhere in readable form — only its verification
+	//     value — and no other call returns it.
+	//
+	// The operation completes on the request path (`done = true` in the answer
+	// of this call). A refused Create (name taken, registry failure) answers
+	// synchronously, returns no operation and issues no secret.
+	//
+	// A LOST ANSWER MEANS A LOST SECRET, and the secret cannot be recovered or
+	// re-read. After a timeout or a dropped connection: list clients by the
+	// `name` the request carried; if one exists, delete it and create it anew. A
+	// Create without `name` must not be repeated blindly — every such call
+	// registers another client with another secret.
+	//
+	// CHANGE OF THE OPERATION RESPONSE TYPE. The response used to be the bare
+	// `InteractiveClient`; it is now `CreateInteractiveClientResponse`, whose
+	// `interactive_client` carries the same projection `Get` returns.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Create(context.Context, *CreateInteractiveClientRequest) (*operation.Operation, error)
