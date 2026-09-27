@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,10 +64,12 @@ func (d directory) LookupClient(_ context.Context, id string) (oauthceremony.Cli
 }
 
 // silentAuthority — шов входа, которого отказ до доверия цели не спрашивает.
-type silentAuthority struct{ calls int }
+// Счёт атомарный: посев А (pace_test.go) держит до потолка запросов разом, и
+// по сигналу они входят в шов одновременно.
+type silentAuthority struct{ calls atomic.Int64 }
 
 func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (ceremonyapp.Login, bool, error) {
-	a.calls++
+	a.calls.Add(1)
 	return ceremonyapp.Login{}, false, nil
 }
 
@@ -134,8 +137,8 @@ func TestAuthorize_UntrustedTargetRefusalsAreOneAnswerWithoutRedirect(t *testing
 			t.Errorf("%s: тело отличимо от прочих отказов до доверия цели: %q", what, rec.Body.String())
 		}
 	}
-	if engine.calls != 0 || authority.calls != 0 {
-		t.Errorf("отказ до доверия цели позвал церемонию (%d) либо шов входа (%d)", engine.calls, authority.calls)
+	if engine.calls != 0 || authority.calls.Load() != 0 {
+		t.Errorf("отказ до доверия цели позвал церемонию (%d) либо шов входа (%d)", engine.calls, authority.calls.Load())
 	}
 	read := census.Read()
 	if read[string(OutcomeAuthorizeClientUnknown)] != 1 || read[string(OutcomeAuthorizeRedirectUnregistered)] != 1 ||
