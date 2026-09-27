@@ -22,32 +22,33 @@
 //
 // Класс, а не экземпляр: ручек у стража шесть (посадка, выключатель
 // эндпоинта и четыре его величины), и каждая обходит отказ рендера одинаково.
-// Популяция берётся у таблицы стража старта (`config.RequiredSettings`), а
-// источники окружения пода выводятся в две ступени
-// (`pod_env_source_recognizer_test.go`): разбор всех шаблонов чарта называет
-// кандидатов — карты, по чьим ключам проходит шаблон, в любой законной форме
-// адреса; адрес, который разбор не выводит, — отказ с координатой, а не
-// пропуск. Рендер с пробным ключом вида ручки при каждом условии суда решает,
-// чей ключ стал ИМЕНЕМ переменной окружения пода, в каких формах и при каком
-// условии; кандидат, которого рендер не подтвердил и не опроверг, — находка.
+// Популяция ручек берётся у таблицы стража старта (`config.RequiredSettings`),
+// а источники окружения пода судит ИСПОЛНЕНИЕ чарта, а не текст шаблонов
+// (`pod_env_execution_test.go`, задача #433): пробный ключ в каждой карте
+// дерева значений каждой посадки, каждый узел управления шаблонов принуждён в
+// обе ветви, и судится итоговое имя каждой переменной каждого контейнера.
+// Карта, чей ключ стал именем в любой форме, либо судится стражем — и тогда
+// дословно, — либо это находка с посадкой, исполнением и контейнером.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
 //
-//	Р1  (без helm) кандидаты выведены разбором всех шаблонов, и страж шаблона
-//	    называет в своём перечне ровно популяцию таблицы — в обе стороны;
+//	Р1  (без helm) страж шаблона называет в своём перечне ровно популяцию
+//	    таблицы — в обе стороны;
 //	Р2  (helm) предикат задачи: `env.KANAME_AUTHN__IDENTITY_PROVIDER=own` без
 //	    эндпоинта — отказ рендера с канонической координатой;
 //	Р3  (helm) близнец одним фактом: накладка `own` с эндпоинтом рендерится,
 //	    а та же накладка, где посадка перенесена в окружение, — отказ;
-//	Р4  (helm) класс: источники подтверждены рендером, и каждая ручка × каждый
-//	    источник — отказ с именем источника и канонической координатой; все
-//	    сразу — один перечень; соседняя ручка той же полосы в окружении —
-//	    рендер.
+//	Р4  (helm) класс: источник — карта, чей пробный ключ стал именем
+//	    переменной пода при каком-либо исполнении; каждая ручка × каждый
+//	    источник — отказ с именем источника и канонической координатой, и имя —
+//	    ключ дословно; все сразу — один перечень; соседняя ручка той же полосы в
+//	    окружении — рендер.
 package deploy_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -130,24 +131,15 @@ func guardEnvRoster(src string) (map[string]string, error) {
 
 // ── Р1 ───────────────────────────────────────────────────────────────────────
 
-// judgePostureGuardRoster сверяет перечень стража шаблона в каталоге dir с
-// таблицей стража старта в обе стороны и выводит кандидатов в источники
-// окружения пода разбором всех шаблонов каталога.
-func judgePostureGuardRoster(t *testing.T, dir string) (drift, sources []string, roster map[string]string) {
+// judgePostureGuardRoster сверяет перечень стража шаблона в каталоге шаблонов
+// dir с таблицей стража старта в обе стороны.
+func judgePostureGuardRoster(t *testing.T, dir string) (drift []string, roster map[string]string) {
 	t.Helper()
-	files := chartTemplates(t, dir)
-	cands, err := podEnvSourcesIn(files)
+	b, err := os.ReadFile(filepath.Join(dir, "_helpers.tpl")) // #nosec G304 -- путь из дерева чарта либо t.TempDir
+	require.NoError(t, err, "в каталоге шаблонов нет _helpers.tpl — стража шаблона читать неоткуда")
+	roster, err = guardEnvRoster(string(b))
 	require.NoError(t, err)
-	for _, c := range cands {
-		sources = append(sources, c.path)
-	}
-	require.NotEmpty(t, sources, "в шаблонах чарта не найдено ни одной карты, по чьим ключам шёл бы проход — "+
-		"обход пуст, и «ни одной тени» было бы неотличимо от «ни одного прочитанного источника»")
-
-	helpers, ok := files["_helpers.tpl"]
-	require.True(t, ok, "в каталоге шаблонов нет _helpers.tpl — стража шаблона читать неоткуда")
-	roster, err = guardEnvRoster(helpers)
-	require.NoError(t, err)
+	require.NotEmpty(t, roster, "в теле стража %s ни одной пары «переменная → ключ» — сверять не с чем", postureGuardHelper)
 
 	want := map[string]bool{}
 	for _, r := range postureGuardRows(t) {
@@ -167,14 +159,13 @@ func judgePostureGuardRoster(t *testing.T, dir string) (drift, sources []string,
 		}
 	}
 	sort.Strings(drift)
-	return drift, sources, roster
+	return drift, roster
 }
 
 func TestPostureGuardNamesEveryShadowOfItsKnobs(t *testing.T) {
-	drift, sources, roster := judgePostureGuardRoster(t, "templates")
+	drift, roster := judgePostureGuardRoster(t, "templates")
 	require.Emptyf(t, drift, "перечень стража шаблона и таблица стража старта разошлись:\n%s", strings.Join(drift, "\n"))
-	t.Logf("перепись: кандидатов в источники окружения пода %d (%s) · ручек стража в таблице %d · в перечне шаблона %d",
-		len(sources), strings.Join(sources, ", "), len(postureGuardRows(t)), len(roster))
+	t.Logf("перепись: ручек стража в таблице %d · в перечне шаблона %d", len(postureGuardRows(t)), len(roster))
 }
 
 // ── helm: общая часть Р2–Р4 ──────────────────────────────────────────────────
@@ -205,156 +196,14 @@ func TestOwnPostureOverlayMovedIntoTheEnvironmentIsRefused(t *testing.T) {
 
 // ── Р4 ───────────────────────────────────────────────────────────────────────
 
-// postureShadowFindings судит чарт по пути dir: источники окружения пода
-// подтверждены рендером, и каждая ручка стража в каждом источнике — в каждой
-// показанной форме имени, при первом условии, её показавшем, — отказ правила
-// тени с источником и канонической координатой; все сразу — один перечень с
-// числом; соседняя ручка — рендер. Кандидат, которого рендер не подтвердил и
-// не опроверг, — находка; ручка, которой не достигает ни одна показанная форма
-// карты с не простым проходом (`plainPass`), — тоже.
-func postureShadowFindings(t *testing.T, dir string) (findings []string, renders int) {
-	t.Helper()
-	cands, err := podEnvSourcesIn(chartTemplates(t, filepath.Join(dir, "templates")))
-	require.NoError(t, err)
-	require.NotEmpty(t, cands, "кандидатов в источники окружения пода не выведено — обход пуст")
-	sources, refuted, unconfirmed, confirmRenders := confirmPodEnvSources(t, dir, cands)
-	findings = append(findings, unconfirmed...)
-	renders += confirmRenders
-	require.NotEmpty(t, sources, "ни один кандидат не подтверждён рендером источником окружения пода — "+
-		"суд теней судил бы пустое множество")
-	rows := postureGuardRows(t)
-
-	unreachable := 0
-	// reached — путь кандидата → ручки, имя которых даёт хоть одна показанная
-	// рендером форма; order — пути в порядке источников.
-	reached := map[string]map[string]bool{}
-	candOf := map[string]envSource{}
-	formsOf := map[string][]string{}
-	var order []string
-	for _, src := range sources {
-		if reached[src.path] == nil {
-			reached[src.path] = map[string]bool{}
-			candOf[src.path] = src
-			order = append(order, src.path)
-		}
-		formsOf[src.path] = append(formsOf[src.path], src.form())
-		var all []string
-		var judged []postureGuardRow
-		var keys []string
-		for _, r := range rows {
-			key, ok := src.keyFor(r.env)
-			if !ok {
-				unreachable++
-				continue
-			}
-			reached[src.path][r.env] = true
-			sets := valueSets(src.envCandidate, key, r.value)
-			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(sets...)...)
-			renders++
-			findings = append(findings, judgeShadow(t, src, src.label(key, r.env), out, err,
-				[]postureGuardRow{r}, []string{key})...)
-			all = append(all, sets...)
-			judged = append(judged, r)
-			keys = append(keys, key)
-		}
-		if len(judged) == 0 {
-			continue
-		}
-		out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, src.cond.with(all...)...)
-		renders++
-		findings = append(findings, judgeShadow(t, src, src.path+" (все ручки сразу)", out, err, judged, keys)...)
-		if err != nil && !strings.Contains(out, fmt.Sprintf("— %d.", len(judged))) {
-			findings = append(findings, fmt.Sprintf("%s (все ручки сразу): отказ не называет число теней %d:\n%s",
-				src.path, len(judged), headOf(out)))
-		}
-	}
-	// Ручка, имени которой не даёт ни одна показанная форма, молчит, лишь когда
-	// каждый проход по карте прост (`plainPass`): тогда рендер исполнил каждое
-	// место его тела, и в единственной форме — других форм у карты нет. Иначе
-	// форму, которую дал бы проход при другом исполнении места, названного
-	// причиной, рендер не называет — находка.
-	for _, p := range order {
-		if candOf[p].notPlainBy == "" {
-			continue
-		}
-		var missed []string
-		for _, r := range rows {
-			if !reached[p][r.env] {
-				missed = append(missed, r.env)
-			}
-		}
-		if len(missed) > 0 {
-			findings = append(findings, fmt.Sprintf("кандидат %s: пробный ключ дал имя переменной пода лишь формами %s — "+
-				"ручек стража ими недостижимо %d из %d (%s), а проход по карте не прост — %s; какую форму имени дал бы "+
-				"он при другом исполнении этого места, рендер не называет — источник не подтверждён и не опровергнут",
-				p, strings.Join(formsOf[p], ", "), len(missed), len(rows), strings.Join(missed, ", "), candOf[p].notPlainBy))
-		}
-	}
-	out, err := renderChartAtAllowingFailure(t, dir, chartProfiles, withOwnPosture("env.KANAME_AUTHN__DOMAIN=access.example.invalid")...)
-	renders++
-	if err != nil {
-		findings = append(findings, fmt.Sprintf("близнец env.KANAME_AUTHN__DOMAIN: ручка, которую страж шаблона не судит, отвергнута — "+
-			"правило шире своего предмета:\n%s", headOf(out)))
-	}
-	names := make([]string, 0, len(sources))
-	for _, s := range sources {
-		name := s.path
-		if f := s.form(); f != bareEnvForm {
-			name += " " + f
-		}
-		if s.cond.name != podEnvConditions[0].name {
-			name += " — " + s.cond.name
-		}
-		names = append(names, name)
-	}
-	t.Logf("перепись: кандидатов %d · подтверждено рендером источников %d (%s) · опровергнуто %d (%s) · не подтверждено %d · "+
-		"ручек %d · недостижимых пар %d · рендеров %d · находок %d",
-		len(cands), len(sources), strings.Join(names, ", "), len(refuted), strings.Join(refuted, ", "), len(unconfirmed),
-		len(rows), unreachable, renders, len(findings))
-	return findings, renders
-}
-
-// judgeShadow — исход одного рендера тени: отказ правилом тени, называющий
-// ключ в источнике и координату каждой ручки, — законно; рендер, положивший
-// ручку в под, — находка; рендер, ручку в под не положивший, — несостоявшийся
-// суд (источник подтверждён, а тень не доехала), тоже находка.
-func judgeShadow(t *testing.T, src envSource, what, out string, err error, want []postureGuardRow, keys []string) []string {
-	t.Helper()
-	switch {
-	case err == nil:
-		names := podEnvNames(t, out)
-		var reached, missing []string
-		for _, r := range want {
-			if containsName(names, r.env) {
-				reached = append(reached, r.env)
-				continue
-			}
-			missing = append(missing, r.env)
-		}
-		var findings []string
-		if len(reached) > 0 {
-			findings = append(findings, fmt.Sprintf("%s: рендер прошёл — ручка стража посадки уехала в окружение пода мимо отказа", what))
-		}
-		if len(missing) > 0 {
-			findings = append(findings, fmt.Sprintf("%s: рендер прошёл, а переменной %s в поде нет — источник подтверждён, "+
-				"а тень не доехала: суд не выполнился", what, strings.Join(missing, ", ")))
-		}
-		return findings
-	case !strings.Contains(out, postureShadowMark):
-		return []string{fmt.Sprintf("%s: рендер отказал, но не правилом тени (нет %q):\n%s", what, postureShadowMark, headOf(out))}
-	}
-	var findings []string
-	for i, r := range want {
-		if !strings.Contains(out, src.path+"."+keys[i]) || !strings.Contains(out, r.knob) {
-			findings = append(findings, fmt.Sprintf("%s: отказ не называет %s.%s и координату %s:\n%s", what, src.path, keys[i], r.knob, headOf(out)))
-		}
-	}
-	return findings
-}
-
+// Суд теней — по исполнению чарта (`judgePodEnvByExecution`,
+// pod_env_execution_test.go): каждая карта дерева значений каждой посадки при
+// каждом принуждённом исполнении ветвей; находка называет посадку, исполнение,
+// документ и контейнер.
 func TestEveryPostureGuardKnobIsRefusedInEveryPodEnvSource(t *testing.T) {
-	findings, renders := postureShadowFindings(t, ".")
-	require.Emptyf(t, findings, "ручка стража посадки проходит рендер через окружение пода — находок %d:\n%s",
+	findings, census, err := judgePodEnvByExecution(t, ".", podEnvConditions)
+	require.NoError(t, err)
+	t.Logf("перепись: %s · ручек %d · находок %d", census, len(postureGuardRows(t)), len(findings))
+	require.Emptyf(t, findings, "имя переменной пода взято из ключа карты мимо суда стража — находок %d:\n%s",
 		len(findings), strings.Join(findings, "\n"))
-	t.Logf("перепись: ручек %d · рендеров %d · находок 0", len(postureGuardRows(t)), renders)
 }
