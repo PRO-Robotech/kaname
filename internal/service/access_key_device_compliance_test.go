@@ -27,7 +27,7 @@ import (
 )
 
 func TestAccessKey_F7_39_DeviceComplianceIsNotDerivedFromTheKey(t *testing.T) {
-	svc := NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"}, nil)
+	svc := NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "kacho.cloud"}, nil)
 	svc.now = func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC) }
 	user := domain.User{ID: "usr-abc", AccountID: "acc-xyz"}
 
