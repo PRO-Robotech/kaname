@@ -70,6 +70,9 @@ type BuildConfig struct {
 	TokenTTL time.Duration
 	// BodyCeiling — потолок тела запроса.
 	BodyCeiling int64
+	// Ceremony — полосы церемонии OAuth на этом эндпоинте; nil — церемония на
+	// посадке не собрана (см. `clienttokenhttp.Config.Ceremony`).
+	Ceremony clienttokenhttp.CeremonyLane
 	// PeerTimeout — предел времени КАЖДОГО внешнего вызова этого пути: чтения
 	// реестра, допуска однократности и чтения отсечки отзыва-всех.
 	//
@@ -133,19 +136,22 @@ func New(
 		return nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
 	}
 
+	// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
+	// объявленным пределом на вызов: одно чтение одной строки несёт один
+	// предел на любой полосе (полоса базового секрета читает ту же строку
+	// в одном операторе со своей и несёт ту же величину пределом
+	// оператора).
+	cutoffs, err := revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader: %w", err)
+	}
 	issue, err := client_token.New(client_token.Config{
 		AllowedAudiences: cfg.AllowedAudiences,
 		DefaultAudience:  cfg.DefaultAudience,
 		TokenTTL:         cfg.TokenTTL,
 		Clock:            cfg.Clock,
 	},
-		signer, claims,
-		// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
-		// объявленным пределом на вызов: одно чтение одной строки несёт один
-		// предел на любой полосе (полоса базового секрета читает ту же строку
-		// в одном операторе со своей и несёт ту же величину пределом
-		// оператора).
-		revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout))
+		signer, claims, cutoffs)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
 	}
@@ -153,6 +159,7 @@ func New(
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling: cfg.BodyCeiling,
 		Logger:      cfg.Logger,
+		Ceremony:    cfg.Ceremony,
 	}, verifier, issue)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)

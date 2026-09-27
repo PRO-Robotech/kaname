@@ -6,8 +6,10 @@ package interactiveclient
 // mapping.go — domain ↔ proto projection for InteractiveClient.
 
 import (
+	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -68,4 +70,28 @@ func toProto(c domain.InteractiveClient) *iamv1.InteractiveClient {
 // the database hands back only after the mutation) does not arise.
 func operationResponse(c domain.InteractiveClient) (*anypb.Any, error) {
 	return anypb.New(toProto(c))
+}
+
+// createResponses — ДВА тела ответа операции `Create` (задача #405, Р3):
+// `stored` ложится в строку операции и секрета не несёт НИ В КАКОЙ МОМЕНТ;
+// `shown` уходит вызывающему и несёт его. Разведение несущее: строка операции
+// читается `OperationService.Get` сколько угодно раз, а секрет показывается
+// один. Положить секрет в строку и стереть позже значило бы «показан ещё
+// столько-то» вместо «показан один раз».
+//
+// Оба тела собираются ДО терминальной записи: срыв сборки любого из них —
+// ошибка операции, а не `done` с телом, которого вызывающий не получит.
+func createResponses(c domain.InteractiveClient, secret ClientSecret) (stored, shown *anypb.Any, err error) {
+	body := &iamv1.CreateInteractiveClientResponse{InteractiveClient: toProto(c)}
+	stored, err = anypb.New(body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stored response body: %w", err)
+	}
+	withSecret := proto.Clone(body).(*iamv1.CreateInteractiveClientResponse)
+	secret.IntoResponse(withSecret)
+	shown, err = anypb.New(withSecret)
+	if err != nil {
+		return nil, nil, fmt.Errorf("shown response body: %w", err)
+	}
+	return stored, shown, nil
 }

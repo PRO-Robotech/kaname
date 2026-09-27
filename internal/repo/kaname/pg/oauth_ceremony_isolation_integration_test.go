@@ -78,6 +78,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,13 +112,14 @@ var ceremonyPortClassification = map[string]string{
 	"ExchangeAuthorizationCode": "writer",
 	"RotateRefreshToken":        "writer",
 	"RevokeFamily":              "writer",
-	"SetClientSecretVerifier":   "writer",
 	"ClearClientSecretVerifier": "writer",
 	"ClientSecretVerifier":      "reader",
 	// Запись выпуска токена доступа в его семейство (kaname#319).
 	"RecordAccessToken": "writer",
 	// Уборка записей выпуска (kaname#319).
 	"SweepExpiredAccessTokens": "sweeper",
+	// Погашение кода для движка фундамента (kaname#423).
+	"ConsumeAuthorizationCode": "writer",
 }
 
 // TestOAuthCeremonyPortMethodsAreClassified — предпосылка перечня: он называет
@@ -354,6 +356,7 @@ func issueCeremonyCode(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCe
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 	return code
@@ -630,7 +633,44 @@ func holdingTx(t *testing.T, ctx context.Context, seed *pgxpool.Pool, what, sql 
 	return backendPID(t, ctx, tx), func() { require.NoError(t, tx.Commit(ctx), "фиксация держателя: %s", what) }
 }
 
+// consumeSceneCodes — код сцены погашения по семейству: держатель заводит его,
+// писатель предъявляет тот же.
+var consumeSceneCodes sync.Map
+
 var heldWriterCases = []heldWriterCase{
+	{
+		// Два погашения одного кода (kaname#423): держатель погасил код и держит
+		// строку, погашение стоит на ней. Исход — ноль строк: код погашен другим,
+		// и это перепроверка условия, а не отказ сериализации.
+		name: "ConsumeAuthorizationCode",
+		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, n int) (int, func()) {
+			code := issueCeremonyCode(t, ctx, repo, sc, n)
+			consumeSceneCodes.Store(sc.FamilyID, code)
+			return holdingTx(t, ctx, sh.seed, "погашение кода", `
+				UPDATE kaname.authorization_codes SET deactivated_at = now(), deactivated_reason = 'redeemed'
+				 WHERE code_digest = $1`, code)
+		},
+		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
+			code, ok := consumeSceneCodes.Load(sc.FamilyID)
+			if !ok {
+				return fmt.Errorf("сцена не завела код семейства %s", sc.FamilyID)
+			}
+			rows, err := repo.ConsumeAuthorizationCode(ctx, code.(string))
+			if err == nil && rows != 0 {
+				return fmt.Errorf("погашение, стоявшее на погашенной строке, затронуло строк %d вместо нуля", rows)
+			}
+			return err
+		},
+		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, err error) {
+			assert.NoError(t, err, "погашение, стоявшее на погашенной строке, обязано дать ноль строк, а не отказ")
+			var active bool
+			require.NoError(t, sh.seed.QueryRow(ctx,
+				`SELECT active FROM kaname.authorization_codes WHERE family_id = $1`, sc.FamilyID).Scan(&active))
+			assert.False(t, active, "код остался активным после погашения держателем")
+		},
+	},
 	{
 		// Сессия снята одновременно с выдачей: держатель ставит отметку снятия,
 		// выдача стоит на строке сессии. Исход — «сессия не жива».
@@ -644,7 +684,7 @@ var heldWriterCases = []heldWriterCase{
 		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
 			return repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
 				Context: sc, CodeDigest: ceremonyDigest(0x31c001), RedirectURI: "https://app.example.test/cb",
-				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, TTL: time.Minute,
+				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, ACR: "1", TTL: time.Minute,
 			})
 		},
 		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
@@ -741,33 +781,10 @@ var heldWriterCases = []heldWriterCase{
 		},
 	},
 	{
-		// Проверочное значение кладётся, пока строку клиента правит посторонний
-		// писатель реестра. Исход — значение положено.
-		name: "SetClientSecretVerifier",
-		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, _ int) (int, func()) {
-			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
-			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
-				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
-				 WHERE client_id = $1`, sc.ClientID)
-		},
-		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
-			return repo.SetClientSecretVerifier(ctx, sc.ClientID, verifierForCases)
-		},
-		check: func(t *testing.T, ctx context.Context, _ ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, err error) {
-			assert.NoError(t, err, "значение обязано лечь")
-			_, has, vErr := repo.ClientSecretVerifier(ctx, sc.ClientID)
-			require.NoError(t, vErr)
-			assert.True(t, has, "у клиента обязан появиться секрет")
-		},
-	},
-	{
 		name: "ClearClientSecretVerifier",
 		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, _ int) (int, func()) {
 			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
-			require.NoError(t, repo.SetClientSecretVerifier(ctx, sc.ClientID, verifierForCases), "посев значения")
 			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
 				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
 				 WHERE client_id = $1`, sc.ClientID)
@@ -785,18 +802,25 @@ var heldWriterCases = []heldWriterCase{
 	},
 }
 
-// declareSecretClient — клиент сцены объявляется способом СЕКРЕТОМ до сцен
-// проверочного значения. Сцена заводит клиента публичным (`none`), а материал
-// лежит только у клиента, предъявляющего секрет
-// (`interactive_clients_secret_verifier_method_ck`, kaname#317): без этого
-// посева писатель получал бы отказ схемы, а не свой исход под конкуренцией.
+// declareSecretClient — клиент сцены становится клиентом С СЕКРЕТОМ до сцены
+// снятия проверочного значения: способ секретом и материал одним оператором
+// посева. Сцена заводит клиента посевом публичным (`none`), а материал лежит
+// только у клиента, предъявляющего секрет
+// (`interactive_clients_secret_verifier_method_ck`, kaname#317).
+//
+// Продуктового писателя материала, кроме вставки строки, нет (kaname#405, Р5):
+// строку сцены кладёт посев, поэтому и материал кладёт посев — Given,
+// сконструированный посевом, тем же одним оператором, что у продукта, а не
+// второй глагол записи ради пробы.
 func declareSecretClient(t *testing.T, ctx context.Context, seed *pgxpool.Pool, clientID string) {
 	t.Helper()
 	tag, err := seed.Exec(ctx, `
-		UPDATE kaname.interactive_clients SET token_endpoint_auth_method = 'client_secret_basic'
-		 WHERE client_id = $1`, clientID)
-	require.NoError(t, err, "посев способа секретом")
-	require.EqualValues(t, 1, tag.RowsAffected(), "посев способа секретом: клиента сцены нет")
+		UPDATE kaname.interactive_clients
+		   SET token_endpoint_auth_method = 'client_secret_basic',
+		       secret_verifier = $2, secret_verifier_set_at = now()
+		 WHERE client_id = $1`, clientID, verifierForCases.Reveal())
+	require.NoError(t, err, "посев клиента с секретом")
+	require.EqualValues(t, 1, tag.RowsAffected(), "посев клиента с секретом: клиента сцены нет")
 }
 
 // verifierForCases — проверочное значение объявленной формы.
@@ -889,8 +913,8 @@ func holdCodeDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, $5)`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, $5, '1')`,
 		other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope)
 	require.NoError(t, err, "держатель: семейство чужой сцены")
 	_, err = tx.Exec(ctx, `
@@ -959,10 +983,25 @@ func endAllSessionsOf(ctx context.Context, w interface {
 
 var sessionEnderDoors = []sessionEnderDoor{
 	{
-		// Собственный выход человека.
+		// Открытие без личности. Снятие записи ему представимо, и судится
+		// дверь, а не вызывающий; собственный выход человека с kaname#382
+		// открывается ключевым замком строки личности (сцена ниже).
 		name: "HumanSessionRepo.Writer",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).Writer(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
+		// Собственный выход человека, вход, повышение, подтверждение второго
+		// фактора, перечеканка запасных кодов — транзакция, открытая ключевым
+		// замком строки личности (kaname#382).
+		name: "HumanSessionRepo.PersonWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).PersonWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}
@@ -1037,6 +1076,7 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					issued <- repo.IssueAuthorizationCode(callCtx, kanamepg.NewAuthorizationCode{
 						Context: sc, CodeDigest: code, RedirectURI: "https://app.example.test/cb",
 						CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256,
+						ACR: "1",
 						TTL: time.Minute,
 					})
 				}()

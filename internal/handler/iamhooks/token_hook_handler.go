@@ -376,10 +376,14 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"ext_claims": enriched,
 	}
 	if h.audit != nil {
-		// Routine token-issued trail — log-and-continue (audit_outbox is the
-		// durable record; the token is already minted at this point).
+		// Routine token-issued trail — log-and-continue. The provider mints only
+		// after this hook answers, so the token is NOT yet minted here: refusing
+		// on a failed write would make every sign-in depend on the audit write.
+		// A record lost this way — refused by the database or cut by the per-call
+		// limit — is counted by the assembly (ObserveAuditDrops); this line names
+		// why it was lost.
 		if emitErr := h.audit.Emit(ctx, AuditEvent{
-			EventType:       "authn.token.issued",
+			EventType:       AuditTokenIssued,
 			TenantAccountID: getString(enriched, "kaname_active_account"),
 			Payload: map[string]any{
 				"subject":          subject,
@@ -392,7 +396,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		}); emitErr != nil {
 			h.logger.Warn("token_hook: audit emit failed",
-				"event_type", "authn.token.issued", "err", emitErr)
+				"event_type", AuditTokenIssued, "err", emitErr)
 		}
 	}
 
@@ -450,14 +454,15 @@ func (h *TokenHookHandler) denyUnmappedClient(ctx context.Context, subject strin
 // WHY the credential was turned away — an expired key and one that resolves to
 // nothing call for different operator responses. Log-and-continue on an emit
 // failure, mirroring the issued-trail: a dropped authn record must be visible
-// (OWASP A09 / CWE-778), never silently swallowed. No key material or PII is
+// (OWASP A09 / CWE-778), never silently swallowed — the assembly counts it
+// (ObserveAuditDrops) and this line names why. No key material or PII is
 // carried — the client_id and subject correlate the event.
 func (h *TokenHookHandler) auditDenied(ctx context.Context, subject string, payload hydraTokenHookRequest, reason string) {
 	if h.audit == nil {
 		return
 	}
 	if emitErr := h.audit.Emit(ctx, AuditEvent{
-		EventType: "authn.token.denied",
+		EventType: AuditTokenDenied,
 		Payload: map[string]any{
 			"subject":   subject,
 			"reason":    reason,
@@ -465,7 +470,7 @@ func (h *TokenHookHandler) auditDenied(ctx context.Context, subject string, payl
 		},
 	}); emitErr != nil {
 		h.logger.Warn("token_hook: audit emit failed",
-			"event_type", "authn.token.denied", "err", emitErr)
+			"event_type", AuditTokenDenied, "err", emitErr)
 	}
 }
 

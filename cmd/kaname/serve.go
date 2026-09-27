@@ -40,7 +40,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -662,7 +664,7 @@ func runServe(cfg config.Config) error {
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
 	// профиль, о них умолчавший, поднимал три слушателя открытым текстом.
 	declaredPlaintext, err := requireHTTPEdgeTLS(productionMode, iamHTTPEdges(
-		cfg.AuthN.HooksHTTPListenAddress(),
+		hooksListenAddress(cfg),
 		cfg.APIServer.MetricsListenAddress(),
 		cfg.APIServer.JWKSProxy.ListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
@@ -1169,23 +1171,18 @@ func runServe(cfg config.Config) error {
 	defer stopSurfaces()
 
 	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
-	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
-	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
-	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
-	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
-	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
-		svcs.bindingReconciler, metricsReg, cfg, logger)
-	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "вебхуки провайдера личности",
-		Mode:    surfaceMode,
-		Logger:  logger,
-		Addr:    addrAxis(hooksAddr, knobHooks+" не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
-		Handler: hooksHandler,
-		Reach:   servicecontract.ReachClusterInternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
-		TLS: hooksTLSConfig,
+	// provision/recovery). Cluster-internal-only (запрет #6), отдельный порт от
+	// gRPC. Только посадкой с внешним поставщиком: под `own` полоса не
+	// собирается и слушатель не поднимается (hooksLaneSurface, kaname#360).
+	//
+	// Носитель готовности строится ЗДЕСЬ и отдаётся тому, кто его монтирует, и
+	// гашению: оно переводит `/readyz` в 503 ДО остановки серверов (см.
+	// triggerShutdown ниже). Без этого носитель был бы, а дёрнуть его было бы
+	// некому (#1752).
+	readiness := buildReadiness(pool, metricsReg)
+	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() http.Handler {
+		return buildHooksMux(pool, kanameRepo, opsRepo,
+			svcs.bindingReconciler, metricsReg, cfg, logger)
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности вебхуков: %w", err)
@@ -1194,18 +1191,21 @@ func runServe(cfg config.Config) error {
 	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
 	// кардинальность туда не выносится.
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
-	metricsMux := http.NewServeMux()
+	// Живость и готовность пода — на ЭТОЙ поверхности (kaname#360): она есть
+	// при любой посадке, а слушатель вебхуков под `own` не поднимается.
+	metricsMux := diagnostics.NewMux(diagnostics.Handlers{Health: readiness})
 	metricsMux.Handle("/metrics", metricsReg.Handler())
 	metricsSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "диагностика (/metrics)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа, живости и готовности пода на этой посадке нет"),
 		Handler: metricsMux,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
 			"снята осознанно: поверхность выставлена только на внутренний Service и несёт " +
-				"счётчики процесса — ни секретов, ни данных арендатора на проводе нет"),
+				"счётчики процесса, живость и готовность по ИМЕНАМ зависимостей — ни секретов, " +
+				"ни данных арендатора на проводе нет"),
 		TLS: metricsTLSConfig,
 	})
 	if err != nil {
@@ -1291,7 +1291,17 @@ func runServe(cfg config.Config) error {
 		// утверждение получает ПРОИЗВОДСТВЕННОГО вызывающего. Проверяющий без
 		// него выглядит исправным ровно потому, что его пробы подают ему то,
 		// что он умеет разобрать.
-		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)
+		// Церемония OAuth `authorization_code` нашими силами (приёмка LINE-A-1,
+		// kaname#423) — под `own` и при поднятом токен-эндпоинте: её полосы
+		// обмена живут на нём, а эндпоинт авторизации и метаданные обнаружения
+		// монтируются на ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше
+		// (сценарий 23). Под `external` — nil, и её пути здесь не резолвятся.
+		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), logger)
+		if cerr != nil {
+			return fmt.Errorf("ceremony: %w", cerr)
+		}
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony)
 		if cterr != nil {
 			return fmt.Errorf("client token endpoint: %w", cterr)
 		}
@@ -1310,6 +1320,16 @@ func runServe(cfg config.Config) error {
 			metricsReg.NewClientTokenOutcomeCollector(
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
 		}
+		if ceremony != nil {
+			// Объявление поверхности называет эти пути, потому что маршрутизатор
+			// их разрешает (issuingSurfaceAuthOf ниже), а не по флагу рядом.
+			mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
+			mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
+			// Читатель переписи исходов — вплотную к монтажу, как у соседних
+			// полос выдачи: наружу отказы церемонии неразличимы, различимость —
+			// здесь.
+			metricsReg.NewCeremonyOutcomeCollector(ceremonyhttp.DeclaredOutcomes(), ceremony.Census.Read)
+		}
 		registryTokenHandler = mux
 	}
 	registryTokenSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1319,11 +1339,8 @@ func runServe(cfg config.Config) error {
 		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"два вида предъявления, у каждого своя проверка на каждом запросе: подпись ключом " +
-				"служебной учётки на пути docker-токена и подписанное утверждение клиента, " +
-				"сверяемое открытым ключом из нашего реестра, на пути выдачи по учётным данным " +
-				"клиента; второй выпускает НАШ подписант"),
+		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
+		// Транспорт поверхности — TLS, собранный из профиля развёртывания выше.
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
@@ -1657,7 +1674,7 @@ func runServe(cfg config.Config) error {
 		// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
 		// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
 		// есть предмет: флип после остановки не успевает ничего.
-		hooksHealth.SetShuttingDown()
+		readiness.SetShuttingDown()
 		stopAdmission()
 		stopGRPCBounded(internalSrv, gracefulTimeout)
 		stopGRPCBounded(grpcSrv, gracefulTimeout)

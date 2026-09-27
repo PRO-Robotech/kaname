@@ -197,6 +197,21 @@ func (f *fakeStore) SessionSetWriter(_ context.Context, userID domain.UserID) (h
 	return w, nil
 }
 
+// PersonWriter — транзакция, открытая ключевым замком строки личности
+// (kaname#382). Замков дублёр не моделирует; он повторяет РАБОТУ адаптера —
+// открытие и оператор замка строки личности, исполняемый и у пустой личности
+// (`holdPersonForKey`), — и запоминает, чью строку транзакция держит.
+func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := f.open("")
+	if err != nil {
+		return nil, err
+	}
+	if err := w.holdPersonForKey(userID); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
 	if f.failOn == "writer" {
@@ -222,10 +237,14 @@ type fakeWriter struct {
 	lockedFor domain.UserID
 	// endedOthersOf — чьи записи сессии сняты `EndOtherSessions`, по вызову.
 	endedOthersOf []domain.UserID
-	// holds — личность, чью строку транзакция уже держит замком писателя
-	// нескольких сессий (у адаптера — `humanSessionWriter.person`): повторного
-	// оператора замка на ней нет, строку другой личности транзакция не берёт.
+	// holds — личность, чью строку транзакция уже держит (у адаптера —
+	// `humanSessionWriter.person`): строку другой личности транзакция не берёт.
 	holds domain.UserID
+	// sessionSet — строка держится замком писателя нескольких сессий, а не
+	// только ключевым (у адаптера — `humanSessionWriter.sessionSet`): у
+	// ключевого замка дверь снятия исполняет оператор подъёма, у сильного —
+	// нет.
+	sessionSet bool
 }
 
 // errFakeSecondPerson — вторая личность в транзакции, уже держащей строку
@@ -242,11 +261,27 @@ func (w *fakeWriter) holdPerson(userID domain.UserID) error {
 	if w.holds != "" && w.holds != userID {
 		return errFakeSecondPerson()
 	}
-	if w.holds != "" {
+	if w.sessionSet && w.holds == userID {
 		return nil
 	}
 	w.store.trip()
-	w.holds = userID
+	if userID != "" {
+		w.holds, w.sessionSet = userID, true
+	}
+	return nil
+}
+
+// holdPersonForKey — оператор ключевого замка строки личности
+// (`holdPersonForKey` адаптера): пустая личность — оператор есть, отметки нет.
+func (w *fakeWriter) holdPersonForKey(userID domain.UserID) error {
+	if w.holds != "" && w.holds != userID {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot hold a second one")
+	}
+	w.store.trip()
+	if userID != "" {
+		w.holds = userID
+	}
 	return nil
 }
 
@@ -399,6 +434,34 @@ func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocatio
 		}
 	})
 	return nil
+}
+
+// LockPersonForLogin — захват строки личности транзакцией выдачи входа
+// (kaname#385, Р4) в той форме, в какой его объявляют пробы границы входа с
+// принудительным выходом: отсечка отвечается из ТОГО ЖЕ состояния, которое
+// пишет `UpsertCutoff` дублёра; строки личности нет — NOT_FOUND; отсечки нет —
+// отдельный ответ, а не нулевой момент. Замков дублёр не моделирует (шапка
+// `SessionSetWriter`); работа — оператор захвата и, если строка есть, оператор
+// чтения отсечки.
+func (w *fakeWriter) LockPersonForLogin(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
+	if userID == "" {
+		return time.Time{}, false, errFakeArg("Illegal argument user_id: required")
+	}
+	w.store.trip()
+	if err := w.fail("lock-person"); err != nil {
+		return time.Time{}, false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	if _, ok := w.store.users[userID]; !ok {
+		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
+	}
+	w.store.trip()
+	c, ok := w.store.cutoffs[userID]
+	if !ok {
+		return time.Time{}, false, nil
+	}
+	return c.at, true, nil
 }
 
 func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {

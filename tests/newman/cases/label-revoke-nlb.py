@@ -34,8 +34,9 @@ NOT define existingRegionId (it is a compute/nlb-suite env var, absent in the ia
 harness the umbrella runs). A LoadBalancer Create with the unsubstituted literal
 "{{existingRegionId}}" failed (region not found) → no LB → no listener → grant
 never materialized → false-RED. Fix: the case first GETs the geo-seeded regions
-via the PUBLIC read GET /geo/v1/regions (idempotent — same source geo-read.py
-asserts) and stashes the first region id into a suite-local env var
+via the PUBLIC read GET /geo/v1/regions (idempotent — the same read the platform's
+geo suite asserts, PRO-Robotech/kacho:services/geo/tests/newman/cases/region.py) and
+stashes the first region id into a suite-local env var
 {{_t31nRegionId}}, used as regionId.
 
 Fixtures: jwtBootstrap, jwtAccountAdminA, accountAId, projectA1Id. The region is

@@ -41,6 +41,9 @@
 // (`IN (…)` либо `= ANY (ARRAY[…])`) — читается вместе с именем столбца и
 // таблицей, при которой он объявлен. Нужна потому, что колонку с умолчанием
 // пишет база, и писателя в коде у неё нет: половина по коду её не видит.
+// Законных мест два вида: таблица сессии (дом состояния) и названная ведомостью
+// СНИМКОВ таблица, где уровень лежит неподвижной копией события
+// (JudgeAssuranceAxisColumns).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦА НАЗВАНА
@@ -57,6 +60,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -288,6 +292,47 @@ type AxisColumnSite struct {
 
 func (s AxisColumnSite) String() string {
 	return fmt.Sprintf("%s:%d %s.%s IN ('1','2','3')", s.File, s.Line, s.Table, s.Column)
+}
+
+// JudgeAssuranceAxisColumns судит объявления оси уровня в схеме.
+//
+// Объявление при таблице сессии (home) — дом состояния уровня. Объявление при
+// таблице ведомости копий (copies: таблица → основание) — СНИМОК уровня,
+// сделанный чтением записи сессии и дальше неподвижный: у гранта церемонии это
+// уровень на выдаче кода, который обмен и оборот не пересчитывают (приёмка
+// LINE-A-1 Р5/Р6, `oauthceremony.SessionRecord`). Объявление при любой иной
+// таблице — находка: второе место хранения. Ведомость самоистекает: таблица
+// копий без объявления оси в схеме — находка, как и дом без объявления.
+func JudgeAssuranceAxisColumns(columns []AxisColumnSite, home string, copies map[string]string) []string {
+	var findings []string
+	homeSeen := false
+	copySeen := map[string]bool{}
+	for _, c := range columns {
+		switch _, isCopy := copies[c.Table]; {
+		case home != "" && c.Table == home:
+			homeSeen = true
+		case isCopy:
+			copySeen[c.Table] = true
+		default:
+			findings = append(findings, fmt.Sprintf("%s — объявление оси уровня вне таблицы сессии (%q) и вне ведомости "+
+				"копий: уровень как состояние лежит только в записи сессии, снимок — только в названной копии", c, home))
+		}
+	}
+	if home != "" && !homeSeen {
+		findings = append(findings, fmt.Sprintf("ведомость называет таблицу оси %q, а объявления оси при ней в схеме нет", home))
+	}
+	tables := make([]string, 0, len(copies))
+	for table := range copies {
+		tables = append(tables, table)
+	}
+	sort.Strings(tables)
+	for _, table := range tables {
+		if !copySeen[table] {
+			findings = append(findings, fmt.Sprintf("ведомость копий называет таблицу %q (%s), а объявления оси при ней "+
+				"в схеме нет: записи больше нечего исключать", table, copies[table]))
+		}
+	}
+	return findings
 }
 
 // ScanAssuranceAxisColumns — объявления оси уровня в накате миграции.
