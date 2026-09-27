@@ -1,0 +1,275 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/ceremony-pace-is-named-by-number.md
+  sha256: 51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Строку истории ревью круга 3 в шапку
+    вписывает автор только вместе со следующей редакцией: любая правка документа даёт новый
+    отпечаток, и этот вердикт на неё не переносится.
+  base_commit: f2c8696bfa81d4b7c2654a5d75574cb1296f367d
+  content_commit: 22e6cd5ce161f9a3d1fbe0f8b64d09af3a748b3d
+  content_commit_note: >-
+    Ветка `315`: поверх записи круга 2 (a88edf823) один коммит 22e6cd5ce с одним файлом,
+    документом (`git show --stat 22e6cd5ce` — 103 вставки, 48 удалений). Код ветки от
+    f58c32bd3 не менялся: `git diff --stat f58c32bd3 22e6cd5ce` — документ и две записи
+    ревью. На origin ветка по-прежнему стоит на f306f155f (`git ls-remote origin
+    refs/heads/315`); слияние, документ и три записи не опубликованы.
+  branch: '315'
+  pull_request: null
+  task: PRO-Robotech/kaname#315
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 1141
+  round: 3
+  predecessor_record: >-
+    docs/specs/reviews/ceremony-pace-is-named-by-number/ce40e5a0db18f4acefaa4936028d7e698f0fe291bbdcc56c1af3cf851dd0b89c.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/ceremony-pace-is-named-by-number.md и git show
+    22e6cd5ce:<тот же путь> | sha256sum — оба
+    51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637, совпал с объявленным в
+    задании.
+  measurement_revisions: >-
+    Служба: 22e6cd5ce (код = f58c32bd3). Церемония: база волны origin/366 @ 93d0df81c и
+    неподвижная ревизия сборки 40902d877. Край: PRO-Robotech/kacho@2e8867d21 = origin/2817;
+    ствол продукта origin/main @ 1d42a6728. Фундамент: corelib v1.10.0-rc.2 (пин go.mod:8).
+    Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: отпечаток совпал; круг 3 (в каталоге две записи, круга 1 на faa8ff00 и круга
+    2 на ce40e5a0, `ls docs/specs/reviews/ceremony-pace-is-named-by-number/` → 2 файла); дом
+    записи тот же. Журнала оборванной пачки в задании не названо; живое состояние перемерено:
+    записи на 51f437a8 до этой не было ни в ветке, ни в истории (`git log --all --
+    '<дом>/51f437a8*'` → 0), ни файлом в tmp воркспейса; рабочее дерево ветки чисто
+    (`git status --porcelain` → 0 строк).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-27'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 3 — APPROVED, блокирующих ноль. Блокирующее круга 2 (TWIN, high: KN-PACE-25
+    по 10 запросов на строку при пределе 50) закрыто по существу. Проверено посевом, а не
+    чтением: по 50 запросов на строку дают ответ строки, и When → 200 на каждой из семи. Для
+    каждой строки взят свой дефект — классификатор, засчитывающий ровно этот вид отказа. При
+    таком дефекте When → 429 и Retry-After 840 на каждой из семи, а близнец KN-PACE-18 → 429 и
+    840. Норма ускорения: в круге 3 блокируют только critical и high; обе находки этого круга —
+    low, уходят задачей. Санкция этим не выдана: роль без внешнего события полномочия не даёт
+    (change-graph.md §3).
+  publication_pending:
+    required_for_sanction: true
+    expected_from: диспетчер/курьер волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в PRO-Robotech/kaname#315 с полями role, verdict, subject, subject_revision
+      (22e6cd5ce161f9a3d1fbe0f8b64d09af3a748b3d — ревизия обязана быть опубликована на origin
+      раньше события; сейчас origin/315 стоит на f306f155f и её не несёт), subject_sha256
+      дословно. Блок `event` дописывается ОТДЕЛЬНЫМ коммитом поверх этой записи; вердикт и
+      разбор задним числом не правятся.
+  sanction:
+    outcome: САНКЦИИ ЕЩЁ НЕТ — ждёт события
+    decided_by: acceptance-reviewer
+    decided_at: '2026-09-27'
+    issued_by_event: null
+    basis: >-
+      change-graph.md §3: санкцию выдаёт одобрительный вердикт, подтверждённый внешним
+      событием. Событие должно принадлежать названной задаче, автор — быть допущен к роли, а
+      тело — связывать точный отпечаток, роль и вердикт. Вердикт этой записи — APPROVED, но
+      события на этот отпечаток нет, поэтому поля выдачи — false. Форма полей — 585749b74
+      (#295). Поля выводятся из события, а не из вердикта. К факту их приводит рецензент
+      правкой этой же записи на месте, после того как событие опубликовано и все четыре
+      условия перемерены на его ревизии. Так сделано в 2e45268cb (#406).
+    remeasured: >-
+      Предикат расхождения каталога исполнен на ветке 315 @ 22e6cd5ce до внесения этой
+      записи. Контроль в другую сторону тем же прогоном:
+      записей без исполненного события с issued true — 0.
+    divergence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужен PyYAML
+      import glob, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      bad = [p for p, d in rows
+             if (d.get('event') or {}).get('status') == 'performed'
+             and d.get('verdict') == 'APPROVED'
+             and (d.get('effective_approval') or {}).get('issued') is not True]
+      print('осмотрено', len(rows), '· расхождений', len(bad))
+      PY
+    divergence_predicate_result: >-
+      До этой записи — «осмотрено 66 · расхождений 0». Запись результата не меняет: у неё
+      event.status not_performed. После события и без приведения полей к факту предикат
+      покраснеет ровно на этой записи — это и есть признак, что шаг выдачи пропущен.
+    gate: >-
+      Гейта на это свойство в дереве нет; предикат держится вниманием. Держатель заказан
+      задачами kaname#302 и kaname#402 (названы в 585749b74).
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: not_performed
+  why_not_performed: >-
+    Внешнее событие публикует курьер, а не рецензент: политика называет единственного
+    допущенного — pointpu. «Не выполнилось» — третья категория, в успех не зачитывается.
+  subject_sha256: 51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637
+  subject_revision: 22e6cd5ce161f9a3d1fbe0f8b64d09af3a748b3d
+  verdict: APPROVED
+  event_body: 'acceptance-reviewer · APPROVED · 51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637'
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: none
+  publication_mode: agent_verdict_awaiting_courier
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком против записи круга 2. Разность ред. 2 → ред. 3 (`git diff ad22d9fd6
+    22e6cd5ce -- <документ>`) разобрана по месту: шапка, строка замеров края, §1.4 (счётчики
+    края), Р6, Р7 п.4, KN-PACE-25, KN-PACE-35, KN-PACE-42, строки 25 и 42 таблицы
+    производителей, §6 S1 п.1, S2 п.4. Прочие сценарии байт-в-байт те же, что в ред. 2. Команды
+    §1 перепрогнаны на 22e6cd5ce, выводы совпали: 9, 9, 0; 2, 0, handler.go:386; mtls.go:249,
+    values.yaml:277. Ни одна из 93d0df81c, 40902d877, f58c32bd3, 22e6cd5ce в origin/main не
+    входит (код выхода 1 у каждой). Новые утверждения о крае сверены в клоне kacho: origin/2817
+    = 2e8867d21, в origin/main не входит (код 1); команда §1.4 → строки 198 и 212;
+    login_lane_paths.go:202 — запись authorize с целью issuance; имена рядов —
+    session_lane.go:115 и :120, метка unreachable — target, значение issuance —
+    login_lane_paths.go:122. Обе названные пробы края существуют (login_lane_relay_test.go:241,
+    session_lane_test.go:71).
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+probes_run:
+  command: >-
+    go test -count=1 -json -run '^(<14 проб таблицы производителей>)$'
+    ./internal/apps/kaname/config/ ./cmd/kaname/ ./internal/handler/clienttokenhttp/
+    ./internal/clientassertion/ ./internal/exchangepace/ ./deploy/ — на 22e6cd5ce, слот
+    тяжёлых работ; в kacho на 2e8867d21 — go test -run '^(TestLoginLaneRelay_F3_17_…|TestSessionLane_L13_…)$'
+    ./gateway/internal/handler/ ./gateway/internal/observability/metrics/
+  result: >-
+    Служба: исполнено 14, зелёных 13, красная 1 — TestChartRefusesAnEnabledClientTokenWithoutItsValues,
+    6 подслучаев из 16, те же, что в кругах 1 и 2 (own и external: ни одной величины и две
+    величины темпа); по легенде таблицы строка 38 — «заказан». Край: исполнено 2, зелёных 2.
+    F3_17 утверждает рост по глаголу и недостижимость на цели form, L13 — клетки
+    relayed{verb=authorize} и unreachable{target=issuance} на витрине. Рост authorize на
+    ретрансляторе цели issuance держится построением: карта глаголов собирается из записей
+    своей цели (login_lane_relay.go:160-163), счёт — :198. На стволе без 2817 шаг 42 красен
+    (сумма 0), а не вакуумен.
+
+constructibility:
+  seeded: >-
+    Посев во временном рабочем дереве на 22e6cd5ce, снят после прогона. Состав: обработчик
+    ветки с потолком 32; настоящий exchangepace (5 в секунду, управляемые часы) в дублёре
+    проверяющего с бронью и возвратом, как paced в verifier.go; дублёр выдачи, удерживающий
+    клиентов H*. Там, где Р3 ставит П3 (после вида выдачи, до П1), стоит МОДЕЛЬ П3 по Р3, Р5 и
+    §3: решение при входе, рост по исходу, 50 за 15 мин, Retry-After до предела минус один.
+    Сама ось в ветке заказана. KN-PACE-25, каждая строка отдельным стендом, 50 запросов с P в
+    t0 … t0+49 с. Ответ каждого и счётчик +50: а 405, б 413, в 400 invalid_request, г 400
+    unsupported_grant_type, д 400 invalid_request, е 429 Retry-After 1 и client-pace-exceeded
+    50, ж in-flight-ceiling-reached 50. В е перед каждым запросом с P пять принятых X с R
+    получили 200. В ж 32 удержания с R дошли до выдачи до первого запроса; ответ потолка — 429
+    на HEAD (503 заказан, §1.3 п.1); после снятия удержаний 32 из 32 получили 200. When в
+    t0+60 с → 200 на всех семи, модель П3 не отказала ни разу. Инъекция на каждой строке —
+    классификатор, засчитывающий ровно вид этой строки: When → 429, Retry-After 840, отказ П3
+    ровно один, на всех семи. Близнец KN-PACE-18: 50 отвергнутых, называющих X, → 401, When →
+    429, Retry-After 840. Исполнено 15 подслучаев, зелёных 15.
+  carried_from_round_2: >-
+    Given неизменных сценариев байт-в-байт те же, что в ред. 2, поэтому посев круга 2 на
+    ad22d9fd6 к ним относится: 24, 11, 18b посеяны, 38 — рендером. Given 01, 02, 03, 04, 07,
+    08, 12–16 пересобраны этим кругом 13 зелёными пробами.
+  named_fixture_not_seeded: >-
+    35 (изменён: строки а–г) — настоящий слушатель выдачи и тестовый УЦ, как 32–34 и 36. Без
+    изменений с ред. 2: 05, 06, 09, 09b, 10, 17, 19–23, 26–31, 30b, 32–34, 36, 37, 38b, 39,
+    40 — фикстуры названы в записи круга 2.
+  not_executed: >-
+    41, 42, 42b — подъём стенда в боевой посадке; изоляция для посева стенда в задании не
+    названа. Не зачитывается ни в зелёное, ни в красное.
+  counts: >-
+    сценариев 47 (44 заголовка и 3 близнеца внутри сценариев: 09b, 30b, 38b). Этим кругом
+    посеяно 2 (25 а–ж, 18), пробами производителя пересобрано 11, изменённый 35 держится
+    названной фикстурой. Из неизменных посевом круга 2 держатся 4, названной фикстурой 26. Не
+    выполнилось 3.
+
+findings:
+  blocking: []
+  non_blocking:
+    - id: 1
+      kind: FORMAT
+      severity: low
+      where: 'таблица производителей, строка 42; §1.4'
+      statement: >-
+        «В стволе продукта счётчика по глаголу нет» неверно. На kacho origin/main @ 1d42a6728
+        ряд kacho_api_gateway_login_lane_relayed_total с меткой verb есть (session_lane.go), и
+        ретранслятор формы считает по глаголу (login_lane_relay.go:157). Нет записи authorize
+        и цели issuance (git grep -c RelayTargetIssuance -- gateway: на стволе 0 файлов, на 2e8867d21 — 12), а у недостижимости нет
+        метки target. Верно: в стволе у счётчика по глаголу нет клетки authorize, у
+        недостижимости — метки цели. Направление ошибки безопасное: без 2817 шаг 42 красен,
+        а не вакуумен.
+    - id: 2
+      kind: DoD
+      severity: low
+      where: '§6 S1 п.1, род «положительный близнец и утверждение отсутствия»'
+      statement: >-
+        25 ж стоит среди проб, зелёных до кода по построению. Но Given ж требует ответа 503 у
+        каждого из 50, а HEAD отвечает 429 (§1.3 п.1; посеяно — 50 × 429). Проба, утверждающая
+        свой Given, до кода красна. Строке место в первом роду рядом с 07 и 11. Другой
+        вариант — проба утверждает форму ответа Given только после правки на 503; это надо
+        назвать.
+
+round_two_closure:
+  blocking_1_twin: >-
+    ЗАКРЫТО. KN-PACE-25 — семь строк по 50 запросов, у каждой свой исход и свой близнец
+    KN-PACE-18. Разница в один факт — вид отказа; трафик R в е и ж создаёт условие отказа и
+    счёт P не трогает. Посеяно: верный счёт → 200 на каждой строке, засчитывание вида строки
+    → 429 и 840 на каждой (constructibility.seeded).
+  non_blocking_2_to_5: >-
+    Учтены все четыре: DoD S1 п.1 делит пробы на три рода (2; остаток — находка 2 этого
+    круга); непустота 42 — по счётчику края, разность relayed authorize и unreachable issuance
+    названа нижней границей (3); Р6 называет порядок П4 → П5 (4); в KN-PACE-35 одиннадцатый
+    запрос несёт другое негодное значение, и 429 сам доказывает ключ E (5).
+
+twins_and_producers:
+  producer_per_then: >-
+    47 из 47. Строка 25 а–ж называет производителя ответа каждой строки: а–г шаги (1)–(3), д
+    handler.go:260, е verifier.go:533, ж handler.go:244-248. Незасчитанность — заказанный шаг
+    П3. Строка 42: производитель непустоты — счётчики края на 2817, они сверены и исполнены.
+  twin_per_negative: >-
+    Близнец назван у всех отрицательных и утверждающих отсутствие, как в круге 2. 25 а–ж → 18,
+    разница в один факт. 35 а–г → 32, в б–г одиннадцатый отличается от десяти всем
+    значением. 42 → 42b.
+  note: >-
+    Раскрытия защиты в документе нет. §1.4 называет, почему ось источника не объявляется до
+    механизма Р7, и живого пути в дереве не описывает. На слушателе выдачи сегодня ничего по
+    заголовку пересылки не ключуется.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+next_step_note: >-
+  До события запрет 1 в силе. Незаблокирующие 1 и 2 (low) уходят задачей к #315 по норме
+  ускорения. Их можно учесть в описании запроса реализации либо правкой документа ДО
+  события, с коротким кругом 4 только по ним. Поправить после события и считать вердикт
+  перенесённым — не исход (change-graph.md §2). Перед событием ревизию 22e6cd5ce нужно
+  опубликовать на origin.
