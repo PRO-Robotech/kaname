@@ -294,6 +294,13 @@ stand_env() {
   # RSA-4096 уложилось бы примерно в 1.2 КиБ. Запас более чем десятикратный, и
   # потолок при этом остаётся потолком, а не «сколько пришлют».
   export KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING=16384
+  # СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318) — тоже решение того, кто поднимает
+  # службу: умолчаний нет, под `own` незаданный срок — отказ старта. Величины —
+  # дословный перенос поведения сборки до ручек, равного потолкам фундамента
+  # (tokenpolicy.MaxAuthorizationCodeTTL, tokenpolicy.MaxRefreshTokenFamilyTTL):
+  # коллекции церемонии на стенде судят прежнее поведение.
+  export KANAME_AUTHN__CEREMONY__CODE_TTL=60s
+  export KANAME_AUTHN__CEREMONY__REFRESH_TTL=168h
   local l u
   for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \

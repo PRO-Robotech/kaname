@@ -260,6 +260,10 @@ var configBridge = []bridged{
 	// а не пустота, и вычет пустого выбросил бы её из входа.
 	{configKey: "authn.registration.admissions-per-window", valuePath: []string{"authn", "registration", "admissionsPerWindow"}},
 	{configKey: "authn.registration.admission-window", valuePath: []string{"authn", "registration", "admissionWindow"}, omitEmpty: true},
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318): обе ветвью `with`, читаются
+	// только под `own`, поэтому стоят и в ведомости восстановленных намеренно.
+	{configKey: "authn.ceremony.code-ttl", valuePath: []string{"authn", "ceremony", "codeTtl"}, omitEmpty: true},
+	{configKey: "authn.ceremony.refresh-ttl", valuePath: []string{"authn", "ceremony", "refreshTtl"}, omitEmpty: true},
 	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281): окно свежести правки своих данных —
 	// та же форма, что у величин полосы: ветвь, читается только под `own`.
 	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
@@ -385,6 +389,15 @@ var restatedDeliberately = map[string]string{
 		"стоит на `external`. Объявлена по приёмке Ф5 (Ф5-06): дословный перенос Ф1 §4.1 (5 мин) живёт в " +
 		"профилях обоих чартов, где его видит читающий (задача #205). Запись истекает с первым профилем на " +
 		"`own`: там снятие ручки роняет СТАРТ",
+	"authn.ceremony.codeTtl": "величина СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5, Р6): срок кода авторизации; страж " +
+		"читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль стоит на " +
+		"`external`. Объявлена по приёмке сроков церемонии: дословный перенос поведения сборки (60 с) живёт в " +
+		"профиле, где его видит читающий. Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.ceremony.refreshTtl": "величина СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5, Р6): срок семейства токенов " +
+		"обновления; страж читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой " +
+		"профиль стоит на `external`. Объявлена по приёмке сроков церемонии: дословный перенос поведения сборки " +
+		"(168 ч) живёт в профиле, где его видит читающий. Запись истекает с первым профилем на `own`: там снятие " +
+		"ручки роняет СТАРТ",
 	"authn.registration.admissionsPerWindow": "величина РЕГИСТРАЦИИ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270, Р5): " +
 		"потолок темпа заведения аккаунтов одной личностью; страж читает её только под посадкой `own` " +
 		"(config.ValidateLaneRequirements), а боевой профиль стоит на `external`. Объявлена по приёмке Ф4 " +

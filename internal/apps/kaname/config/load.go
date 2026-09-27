@@ -149,6 +149,13 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
+	// Сроки церемонии (kaname#318) — та же причина: умолчания нет намеренно,
+	// незаданная величина доезжает до стража нулём.
+	for _, k := range CeremonyLifespanKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
 
 	// YAML file (optional).
 	if path != "" {

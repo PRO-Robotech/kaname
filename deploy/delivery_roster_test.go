@@ -72,6 +72,7 @@ var deliveryRoster = []string{
 	"chart_raise_has_a_holder_test.go",
 	"block_switch_is_boolean_injection_test.go",
 	"block_switch_is_boolean_test.go",
+	"ceremony_lifespans_chart_test.go",
 	"boot_guard_base_values_injection_test.go",
 	"boot_guard_base_values_test.go",
 	"boot_guard_defaults_injection_test.go",

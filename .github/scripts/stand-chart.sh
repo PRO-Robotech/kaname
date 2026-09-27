@@ -588,7 +588,10 @@ EOF
 	# (набор полосы входа токенов не чеканит): величина — законная ниже потолка
 	# платформы 30m, та, с которой посадка перемерена живым стартом (INSTALL.md
 	# §1). Потолок тела — тот же, что у автономного стенда, и довод тот же
-	# (`stand-own.sh`, «СРОК ТОКЕНА И ПОТОЛОК ТЕЛА»).
+	# (`stand-own.sh`, «СРОК ТОКЕНА И ПОТОЛОК ТЕЛА»). Сроки церемонии (kaname#318)
+	# накладка называет сама, а не берёт у профиля поставки: церемонию собирает
+	# именно эта посадка, и величины — перенос поведения сборки до ручек,
+	# равного потолкам фундамента; коллекции церемонии судят прежнее поведение.
 	cat > "$WORK/values.stand-own.yaml" <<EOF
 authn:
   identityProvider: own
@@ -601,6 +604,9 @@ authn:
     defaultAudience: "https://$DOMAIN"
     tokenTtl: 15m
     bodyCeiling: 16384
+  ceremony:
+    codeTtl: 60s
+    refreshTtl: 168h
 secrets:
   KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM:
     secretName: $RELEASE-bootstrap

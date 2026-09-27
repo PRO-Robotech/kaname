@@ -317,6 +317,24 @@ data:
         {{- end }}
       {{- end }}
 
+      {{- with $authn.ceremony }}
+      # СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318): срок кода авторизации от его
+      # выдачи и срок семейства токенов обновления от первой выдачи. Обе —
+      # условие старта под `authn.identityProvider: own`, умолчания нет ни у
+      # одной: незаданная — отказ старта с именем ручки
+      # (KANAME_AUTHN__CEREMONY__*). Потолки держит фундамент
+      # (tokenpolicy.MaxAuthorizationCodeTTL, tokenpolicy.MaxRefreshTokenFamilyTTL),
+      # судит их страж старта, а не рендер. Под `external` блок не читается:
+      # церемонии там нет.
+      ceremony:
+        {{- with .codeTtl }}
+        code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- with .refreshTtl }}
+        refresh-ttl: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
       {{- with $authn.selfServiceFreshness }}
       # ОКНО СВЕЖЕСТИ ПРАВКИ СВОИХ ДАННЫХ (Ф12, kacho#1281): условие старта под
       # `authn.identityProvider: own`, умолчания нет — ветвь, а не сквозная

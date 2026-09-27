@@ -30,7 +30,6 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // lockClientsTable — держатель: транзакция на ОТДЕЛЬНОЙ связи держит таблицу
@@ -59,7 +58,7 @@ func TestCeremonyVaults_StoreFailureOnAnEndedCallCarriesTheEndOfTheCall(t *testi
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 
 	calls := []struct {
 		name string
@@ -128,7 +127,7 @@ func TestCeremonyVaults_StatementCeilingOnALiveCallStaysAStoreFailure(t *testing
 	conn.Release()
 	require.NoError(t, err)
 
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	lockClientsTable(t, ctx, dsn)
 
 	_, err = v.LookupClient(ctx, "client-held")

@@ -75,7 +75,7 @@ func authorizeEndpoint(t *testing.T, engine ceremonyapp.AuthorizationEngine, d c
 ) *Authorize {
 	t.Helper()
 	uc, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{Engine: engine, Clients: d, Authority: authority,
-		Clock: time.Now, CallTimeout: callTimeout})
+		Clock: time.Now, CallTimeout: callTimeout, FamilyTTL: 2 * time.Hour})
 	if err != nil {
 		t.Fatalf("сборка варианта использования: %v", err)
 	}
