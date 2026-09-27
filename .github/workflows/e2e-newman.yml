@@ -579,6 +579,7 @@ jobs:
             --service iam-rbac-rules-labels \
             --service iam-role-redesign \
             --service iam-role \
+            --service iam-group \
             --service label-revoke-iam \
             --service iam-project \
             --service iam-access-binding-redesign \
@@ -601,8 +602,8 @@ jobs:
       # есть КАЖДОГО предъявителя, которого посев в него записал. ЕДИНИЦА СЧЁТА
       # НАЗВАНА, потому что их две и они дают разные числа: предъявителей —
       # десять (девять годных плюс один законно-отозванный, перепись посева
-      # печатает их строкой «предъявителей N»), ключей окружения — двадцать
-      # девять (`python3 tests/authz-fixtures/seed_own_stand.py --minted-keys |
+      # печатает их строкой «предъявителей N»), ключей окружения — тридцать
+      # (`python3 tests/authz-fixtures/seed_own_stand.py --minted-keys |
       # wc -l`). Обе меняются вместе с посевом; в артефакт уезжают ВСЕ ключи, а
       # опасны из них предъявители. Это уже
       # случилось: `own-front-newman-report` (53 104 байта) нёс 51 вхождение строк

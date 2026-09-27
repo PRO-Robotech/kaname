@@ -34,7 +34,16 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
+  Poll hits /operations/{id} on the service's own front (iop* → kaname).
+
+ГДЕ ГОНЯЕТСЯ (e2e-flow.md §7а; kaname#415). Производитель каждого утверждения —
+служба: CRUD группы и её членов — её глаголы, членство держит триггер её базы, а
+пины отказа — `md.scope` СВОЕЙ двери (коммит #50); `md.resource` ставит только
+край и здесь не читается. Поэтому шаги идут на собственный публичный фронт
+(`ownRestBaseUrl`, `address_own_front` в конце модуля), и гоняет модуль задание
+`stand` процесса `e2e-newman.yml`. Все ключи окружения, включая цель привязки
+`userINVId`, пишет посев автономного стенда
+(`tests/authz-fixtures/seed_own_stand.py --minted-keys`).
 
 Gotchas:
   - AddMember with non-existent user/SA → FailedPrecondition (9) via
@@ -296,7 +305,7 @@ CASES.append(Case(
 # «нет объекта» становится оракулом существования аккаунтов чужих тенантов.
 CASES.append(Case(
     id="IAM-GRP-CR-NEG-ACCOUNT-MISSING",
-    title="Create group under an account with no authorization path → 403 PERMISSION_DENIED at the edge (anti-oracle)",
+    title="Create group under an account with no authorization path → 403 PERMISSION_DENIED at the service's door (anti-oracle)",
     classes=["NEG", "AUTHZ"],
     priority="P1",
     steps=[
@@ -1449,3 +1458,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "набора группы нет поверхности, которую он судит")

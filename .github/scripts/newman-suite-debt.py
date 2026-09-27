@@ -908,9 +908,6 @@ _HOLDER_FACADE_SPLIT = (
     "`gateway/tests/newman/cases/authn_edge.py` платформы, IBT-06 и IBT-15 — туда "
     "же) уходят в набор края, полосы фасада службы (IBT-05, IBT-12, IBT-13) "
     "переутверждаются на собственном фронте")
-_HOLDER_OWN_FRONT_SEED_KEY = (
-    "PRO-Robotech/kaname#415 — переутвердить на собственном фронте: посев "
-    "автономного стенда пишет цель привязки `userINVId`, затем шаг задания `stand`")
 # Две коллекции производителя-службы, которые адресуются краю: у каждой своё
 # условие стенда, а задача одна.
 _HOLDER_SERVICE_ON_EDGE = (
@@ -934,7 +931,7 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "iam-account-redesign": ("B", "7 человеческих предъявителей из 10", _HOLDER_CEREMONY),
     "iam-authz-grant-check-propagation": ("B", "выдача → внутренний `iam:check` — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ; вне посева ещё `userINVId`. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
-    "iam-group": ("A", "CRUD группы и её членов — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` края не читается; вне посева автономного стенда один ключ — цель привязки `userINVId`", _HOLDER_OWN_FRONT_SEED_KEY),
+    "iam-group": ("A", "CRUD группы и её членов — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` края не читается; все ключи, включая цель привязки `userINVId`, пишет посев автономного стенда (#415)", ""),
     "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…", _HOLDER_SERVICE_ON_EDGE),
     "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»", _holder_platform_move("gateway/tests/newman")),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
