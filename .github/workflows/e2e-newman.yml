@@ -948,6 +948,7 @@ jobs:
   # Сверх полосы входа стенд создаёт условие СВОЕЙ ЦЕРЕМОНИИ (kaname#398):
   # предъявитель человека выковывается входом → кодом → обменом, а
   # конфиденциальные клиенты церемонии заводятся глаголом `Create` (kaname#405).
+  # Им гоняется набор `kaname-authorization-code` (LINE-A-1, kaname#423).
   chart-own:
     name: стенд посадки own (kind) — полоса входа паролем и своя церемония
     runs-on: ubuntu-latest
@@ -1092,18 +1093,23 @@ jobs:
       # Порядок несущий: вход первым — восстановление способа входа не меняет, а
       # его отказ читается раньше. `kaname-second-factor` здесь НЕ гоняется: его
       # держатель и причина названы ведомостью переписи долга.
-      - name: полоса формы гоняется — вход паролем и восстановление (числовой вердикт)
-        timeout-minutes: 10
+      #
+      # ТРЕТЬЯ КОЛЛЕКЦИЯ ТЕМ ЖЕ ВЫЗОВОМ — церемония `authorization_code` (LINE-A-1,
+      # kaname#423): её условие — оба посева выше, и второй вызов прогонщика стёр
+      # бы отчёт первого. Она последняя: её отказ читается после отказа входа.
+      - name: наборы посадки own гоняются — вход, восстановление, церемония (числовой вердикт)
+        timeout-minutes: 15
         run: |
           cd tests/newman
           rc=0
           ./scripts/run.sh --service kaname-login-lane \
             --service kaname-recovery-lane \
+            --service kaname-authorization-code \
             --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
             --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
             --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
           case "$rc" in
-            0) echo "наборы полосы формы зелены: вход паролем и восстановление" ;;
+            0) echo "наборы посадки own зелены: вход паролем, восстановление, церемония authorization_code" ;;
             75)
               echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предполёт снял этот прогон до первого запроса — вердикта о наборе нет"
               exit 1 ;;
