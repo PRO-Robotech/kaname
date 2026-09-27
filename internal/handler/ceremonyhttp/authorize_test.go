@@ -20,6 +20,7 @@ import (
 
 	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 )
 
 // untouchedEngine — церемония, которую отказ до доверия цели звать не вправе.
@@ -79,8 +80,15 @@ func authorizeEndpoint(t *testing.T, engine ceremonyapp.AuthorizationEngine, d c
 	if err != nil {
 		t.Fatalf("сборка варианта использования: %v", err)
 	}
+	// Оси темпа — числами, которых пробы этого файла не достигают: их предмет не
+	// темп (оси — pace_test.go).
+	pace, err := exchangepace.New(1<<20, time.Now)
+	if err != nil {
+		t.Fatalf("темп: %v", err)
+	}
 	a, err := NewAuthorize(AuthorizeConfig{UseCase: uc, Census: census,
-		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))})
+		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		Pace:   pace, InFlightCeiling: 1 << 10, Source: remoteHost})
 	if err != nil {
 		t.Fatalf("сборка: %v", err)
 	}

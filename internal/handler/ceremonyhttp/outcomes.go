@@ -26,6 +26,12 @@ const (
 	OutcomeAuthorizeStepUpRequired       Outcome = "authorize-step-up-required"
 	OutcomeAuthorizeUnavailable          Outcome = "authorize-unavailable"
 	OutcomeAuthorizeIssued               Outcome = "authorize-code-issued"
+	// OutcomeAuthorizeSourcePaceExceeded — источник исчерпал темп точки
+	// авторизации (П4, kaname#315). Решается до справочника клиентов.
+	OutcomeAuthorizeSourcePaceExceeded Outcome = "authorize-source-pace-exceeded"
+	// OutcomeAuthorizeInFlightCeilingReached — занят потолок одновременных
+	// запросов авторизации (П5, kaname#315). Решается до справочника клиентов.
+	OutcomeAuthorizeInFlightCeilingReached Outcome = "authorize-in-flight-ceiling-reached"
 )
 
 // Исходы полос обмена токен-эндпоинта.
@@ -44,7 +50,7 @@ func Outcomes() []Outcome {
 		OutcomeAuthorizeMethodNotAllowed, OutcomeAuthorizeRequestMalformed, OutcomeAuthorizeClientUnknown,
 		OutcomeAuthorizeRedirectUnregistered, OutcomeAuthorizeStateBelowFloor, OutcomeAuthorizeProtocolRefused,
 		OutcomeAuthorizeLoginRequired, OutcomeAuthorizeStepUpRequired, OutcomeAuthorizeUnavailable,
-		OutcomeAuthorizeIssued,
+		OutcomeAuthorizeIssued, OutcomeAuthorizeSourcePaceExceeded, OutcomeAuthorizeInFlightCeilingReached,
 		OutcomeExchangeRequestRefused, OutcomeExchangeClientRefused, OutcomeExchangeGrantRefused,
 		OutcomeExchangeUnavailable, OutcomeExchangeCodeExchanged, OutcomeExchangeRefreshed,
 	}

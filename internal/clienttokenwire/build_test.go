@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -119,6 +120,11 @@ func full() clienttokenwire.BuildConfig {
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
 	}
 }
 
@@ -152,6 +158,14 @@ func TestF2_22_CompositionRefusesADegenerateDeclaredNumber(t *testing.T) {
 		{"срок токена нулевой", func(c *clienttokenwire.BuildConfig) { c.TokenTTL = 0 }, "lifetime"},
 		{"потолок тела нулевой", func(c *clienttokenwire.BuildConfig) { c.BodyCeiling = 0 }, "body"},
 		{"предел времени внешнего вызова не задан", func(c *clienttokenwire.BuildConfig) { c.PeerTimeout = 0 }, "timeout"},
+		// kaname#315: две величины темпа.
+		{"темп обменов на клиента нулевой", func(c *clienttokenwire.BuildConfig) { c.ExchangesPerClientPerSec = 0 }, "pace"},
+		{"темп обменов на клиента отрицателен", func(c *clienttokenwire.BuildConfig) { c.ExchangesPerClientPerSec = -1 }, "pace"},
+		{"потолок одновременных обменов нулевой", func(c *clienttokenwire.BuildConfig) { c.InFlightCeiling = 0 }, "in-flight"},
+		// Ось П3 (приёмка ceremony-pace-is-named-by-number.md).
+		{"отказов на источник нулевой", func(c *clienttokenwire.BuildConfig) { c.FailedProofsPerSource = 0 }, "failed-proof"},
+		{"окно отказов нулевое", func(c *clienttokenwire.BuildConfig) { c.FailedProofWindow = 0 }, "failed-proof"},
+		{"правило источника не подано", func(c *clienttokenwire.BuildConfig) { c.Source = nil }, "source"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -311,4 +325,32 @@ func assertionRequest(t *testing.T, key *ecdsa.PrivateKey, clientID, audience st
 	req := httptest.NewRequest(http.MethodPost, clienttokenhttp.TokenPath, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return req
+}
+
+// TestTheDeclaredPaceReachesTheBuiltEndpoint — величина темпа, поданная сборке,
+// ДЕЙСТВУЕТ на собранном эндпоинте (kaname#315): сборка, принявшая величину и
+// не провязавшая её, прошла бы все пробы стража и не ограничивала бы ничего.
+func TestTheDeclaredPaceReachesTheBuiltEndpoint(t *testing.T) {
+	now := time.Now()
+	cfg := full()
+	cfg.Clock = func() time.Time { return now }
+	cfg.ExchangesPerClientPerSec = 1
+	key, pemKey := newClientKey(t)
+	res := &keyedResolver{client: domain.AssertionClient{
+		ID: deadlineClientID, Kind: domain.AssertionClientUser, OwnerID: deadlineOwnerID,
+		PublicKeyPEM: pemKey, Algorithm: tokenpolicy.AlgES256, OwnerActive: true,
+	}}
+	h, err := clienttokenwire.New(cfg, res, &recordingIssuers{}, &recordingReplay{}, stubSigner{}, personClaims{}, &recordingCutoffs{})
+	require.NoError(t, err)
+
+	// Законный близнец: под порогом обмен проходит.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, assertionRequest(t, key, deadlineClientID, cfg.ExpectedAudience))
+	require.Equalf(t, http.StatusOK, rec.Code, "первый обмен под порогом обязан пройти: %s", rec.Body.String())
+
+	// Второй в ту же секунду при темпе 1 — отказ по темпу, а не выдача.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, assertionRequest(t, key, deadlineClientID, cfg.ExpectedAudience))
+	require.Equalf(t, http.StatusTooManyRequests, rec.Code,
+		"величина темпа, поданная сборке, не дошла до эндпоинта: %s", rec.Body.String())
 }

@@ -7,13 +7,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
 
@@ -25,8 +29,13 @@ import (
 const untrustedTargetRefusal = "The authorization request cannot be served: " +
 	"the client or its return address is not recognised.\n"
 
-// unavailableRefusal — справочник клиентов не ответил, пока цель не доверена.
+// unavailableRefusal — справочник клиентов не ответил, пока цель не доверена;
+// тем же текстом отвечает занятый потолок точки авторизации (П5): и там, и там
+// занята НАША сторона.
 const unavailableRefusal = "The authorization server is temporarily unavailable.\n"
+
+// tooManyRefusal — источник исчерпал темп точки авторизации (П4).
+const tooManyRefusal = "Too many authorization requests: retry later.\n"
 
 // singleValued — параметры, которые запрос называет не более одного раза:
 // параметр, названный дважды, делает запрос неоднозначным (RFC 6749 §3.1), и
@@ -43,11 +52,22 @@ type AuthorizeConfig struct {
 	UseCase *ceremonyapp.AuthorizeUseCase
 	Census  *Census
 	Logger  *slog.Logger
+	// Pace — запросов авторизации в секунду на источник (П4), ведро в одну
+	// секунду темпа. Тратит его всякий запрос, прошедший проверку метода.
+	Pace *exchangepace.Pace
+	// InFlightCeiling — потолок одновременных запросов авторизации на процесс
+	// (П5). Свой, отдельный от потолка токен-эндпоинта: поток обменов не
+	// отнимает мест у навигаций людей, и наоборот.
+	InFlightCeiling int
+	// Source — адрес источника запроса по правилу Р7 (`issuingsource`).
+	Source func(*http.Request) string
 }
 
 // Authorize — эндпоинт авторизации `GET /iam/v1/authorize`.
 type Authorize struct {
 	cfg AuthorizeConfig
+	// slots — места одновременных запросов; занятое место — элемент канала.
+	slots chan struct{}
 }
 
 // NewAuthorize строит эндпоинт. Неполная провязка — отказ построения.
@@ -59,8 +79,14 @@ func NewAuthorize(cfg AuthorizeConfig) (*Authorize, error) {
 		return nil, errors.New("ceremonyhttp: authorize endpoint needs the outcome census")
 	case cfg.Logger == nil:
 		return nil, errors.New("ceremonyhttp: authorize endpoint needs a logger")
+	case cfg.Pace == nil:
+		return nil, errors.New("ceremonyhttp: authorize endpoint needs its pace per source")
+	case cfg.InFlightCeiling <= 0:
+		return nil, errors.New("ceremonyhttp: authorize endpoint needs a positive in-flight ceiling")
+	case cfg.Source == nil:
+		return nil, errors.New("ceremonyhttp: authorize endpoint needs the source address rule")
 	}
-	return &Authorize{cfg: cfg}, nil
+	return &Authorize{cfg: cfg, slots: make(chan struct{}, cfg.InFlightCeiling)}, nil
 }
 
 // ServeHTTP — см. порядок решений в шапке пакета.
@@ -73,6 +99,26 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+
+	// (1а) П4 — темп источника. Раньше потолка: источник, исчерпавший П4, места
+	// под П5 не занимает. Обе оси — до справочника клиентов и хранилища сессий:
+	// бережётся именно обращение к ним. Цель ещё не доверена, поэтому отказ —
+	// прямо, без перенаправления.
+	if _, after, ok := a.cfg.Pace.Reserve(a.cfg.Source(r)); !ok {
+		a.cfg.Census.count(OutcomeAuthorizeSourcePaceExceeded)
+		writeRetryText(w, http.StatusTooManyRequests, after, tooManyRefusal)
+		return
+	}
+	// (1б) П5 — потолок одновременных запросов авторизации.
+	select {
+	case a.slots <- struct{}{}:
+		defer func() { <-a.slots }()
+	default:
+		a.cfg.Census.count(OutcomeAuthorizeInFlightCeilingReached)
+		writeRetryText(w, http.StatusServiceUnavailable, time.Second, unavailableRefusal)
+		return
+	}
+
 	q := r.URL.Query()
 
 	// (2) Клиент и адрес возврата — до всякого доверия.
@@ -215,6 +261,19 @@ func (a *Authorize) challenge(ctx context.Context, w http.ResponseWriter, outcom
 	}
 	a.cfg.Logger.InfoContext(ctx, "authorization request needs authentication", attrs...)
 	writeJSON(w, http.StatusUnauthorized, body)
+}
+
+// writeRetryText — отказ по темпу точки авторизации: срок ожидания целыми
+// секундами, округлённый вверх и не меньше одной. У П4 темп не меньше единицы в
+// секунду, у П5 место освобождает любой завершившийся запрос, поэтому срок у
+// обеих — секунда.
+func writeRetryText(w http.ResponseWriter, status int, after time.Duration, body string) {
+	secs := int64(math.Ceil(after.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	writeText(w, status, body)
 }
 
 func writeText(w http.ResponseWriter, status int, body string) {

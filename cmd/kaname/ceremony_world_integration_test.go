@@ -98,6 +98,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -109,6 +110,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -599,17 +601,26 @@ func (w *ceremonyWorld) buildSurface() {
 		DefaultAudience:  "https://api.kacho.local",
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
+		// Темп поверхности выдачи — числами, которых пробы мира не достигают:
+		// их предмет — церемония, а не оси (оси судят пробы обработчиков).
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          1 << 10,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
+		FailedProofWindow:        time.Minute,
+		AuthorizePerSourcePerSec: 1 << 20,
+		AuthorizeInFlightCeiling: 1 << 10,
 	}
 	cfg.AuthN.Ceremony = w.lifespans
 	// Церемония — той же сборкой, что у корня (`buildCeremonySurface`): набор
 	// ключей — публикуемый набор подписанта пробы, проверяющий секрета клиента —
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
-	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w), logger)
+	source := issuingsource.New(cfg.AuthN.TrustDomain())
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
 	}
-	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger, ceremony)
+	clientTokenHandler, err := buildClientTokenEndpoint(w.pool, cfg, signer, logger, ceremony, source)
 	if err != nil || clientTokenHandler == nil {
 		w.fixture("сборка токен-эндпоинта: обработчик %v, ошибка %v", clientTokenHandler != nil, err)
 	}

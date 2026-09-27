@@ -60,11 +60,13 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 )
 
 // SupplyPath — каким путём оператор подаёт величину процессу.
@@ -686,9 +688,12 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
 	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
-	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а четыре
-	// его величины — его собственным стражем, то есть только после того, как
-	// эндпоинт включён. Образец перечня адресатов несёт образец адресата
+	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а восемь
+	// его величин (четыре F2 и четыре темпа токен-эндпоинта, #315) — его
+	// собственным стражем [ClientTokenConfig.Validate], то есть только после
+	// того, как эндпоинт включён. Две величины темпа точки авторизации требует
+	// [AuthNConfig.ValidateCeremonyPace]: их условие — собранная церемония.
+	// Образец перечня адресатов несёт образец адресата
 	// докерной полосы (`api-server.registry-token.service` выше): страж той
 	// полосы требует его внутри перечня, и несогласованные образцы отверг бы он.
 	{
@@ -748,6 +753,80 @@ var RequiredSettings = []RequiredSetting{
 		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
 			"читал бы сколько прислали",
 		Refusal: "authn.client-token.body-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.exchanges-per-client-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "5",
+		Why: "темп обменов в секунду на идентификатор клиента, на реплику. Судится по заявленному " +
+			"идентификатору до обращения к реестру, тратят его только принятые предъявления; " +
+			"превышение — ответ 429 со сроком ожидания. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.exchanges-per-client-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "32",
+		Why: "потолок одновременных обменов на реплику, все четыре вида выдачи. Обмен сверх потолка " +
+			"отвергается до проверки ответом 503 и Retry-After: 1, а не ждёт места. Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.in-flight-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proofs-per-source",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "50",
+		Why: "неудавшихся доказательств клиента за окно на источник, на реплику: отказов проверки " +
+			"утверждения машинных полос и invalid_client полос церемонии. Отказы нашей стороны, формы и " +
+			"темпа не считаются. Источник — адрес от края при сертификате края, иначе адрес пира. " +
+			"Превышение — ответ 429 со сроком. Таблица окна держит не больше " +
+			strconv.Itoa(failurewindow.MaxStoredFailures) + " засчитанных отказов " +
+			"на все источники: под потоком источников забывается источник ниже предела, источник на " +
+			"пределе — никогда; предел выше этого числа — отказ старта. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.failed-proofs-per-source must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proof-window",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "15m",
+		Why: "скользящее окно отказов доказательства на источник. Отказ в окне, пока с него прошло " +
+			"меньше длины окна. Ноль означал бы «без окна»",
+		Refusal: "authn.client-token.failed-proof-window must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-per-source-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "10",
+		Why: "запросов авторизации в секунду на источник, на реплику; обязательна при собранной " +
+			"церемонии (own и включённый эндпоинт). Тратит его всякий запрос, прошедший проверку метода; " +
+			"превышение — ответ 429 до справочника клиентов. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.authorize-per-source-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "32",
+		Why: "потолок одновременных запросов авторизации на реплику, свой — не общий с потолком " +
+			"обменов; обязательна при собранной церемонии. Превышение — ответ 503 и Retry-After: 1. " +
+			"Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.authorize-in-flight-ceiling must be declared",
 	},
 }
 

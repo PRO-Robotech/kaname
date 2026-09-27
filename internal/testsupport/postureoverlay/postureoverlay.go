@@ -51,7 +51,8 @@ func (o Overlay) Base() string { return o.base }
 func (o Overlay) Sets() []string { return append([]string(nil), o.sets...) }
 
 // Own — накладка, переводящая боевую цепочку на `own` (INSTALL.md §1):
-// посадка, включённый токен-эндпоинт платформы и его четыре величины.
+// посадка, включённый токен-эндпоинт платформы, его четыре величины выдачи и
+// шесть величин темпа поверхности выдачи (kaname#315).
 //
 // Величины согласованы с заглушками боевого профиля, а не взяты образцами
 // таблицы стража: образец перечня адресатов называет адресат докерной полосы
@@ -67,6 +68,13 @@ var Own = Overlay{
 		"authn.clientToken.defaultAudience=https://access.example.invalid",
 		"authn.clientToken.tokenTtl=15m",
 		"authn.clientToken.bodyCeiling=65536",
+		// Темп поверхности выдачи — числа §3 приёмки ceremony-pace-is-named-by-number.md.
+		"authn.clientToken.inFlightCeiling=32",
+		"authn.clientToken.exchangesPerClientPerSec=5",
+		"authn.clientToken.failedProofsPerSource=50",
+		"authn.clientToken.failedProofWindow=15m",
+		"authn.clientToken.authorizePerSourcePerSec=10",
+		"authn.clientToken.authorizeInFlightCeiling=32",
 	},
 }
 

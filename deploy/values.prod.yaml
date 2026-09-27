@@ -252,6 +252,16 @@ authn:
     defaultAudience: https://access.example.invalid
     tokenTtl: 15m
     bodyCeiling: 65536
+    # Темп поверхности выдачи — числа §3 приёмки
+    # ceremony-pace-is-named-by-number.md (kaname#315), на реплику: без любой из
+    # шести величин чарт включённый эндпоинт не собирает. Режим слушателя выдачи
+    # optional-mutual и его корень объявлены в `env` ниже.
+    inFlightCeiling: 32
+    exchangesPerClientPerSec: 5
+    failedProofsPerSource: 50
+    failedProofWindow: 15m
+    authorizePerSourcePerSec: 10
+    authorizeInFlightCeiling: 32
 
   # ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины, которые читает посадка
   # `own`, и страж старта их судит; объявлены они по приёмке Ф3 (Р3 — срок 24 ч и домен, Р11 — длина 8 и
@@ -612,6 +622,16 @@ env:
   KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE: "true"
   KANAME_REGISTRYTOKEN_SERVER_MTLS_CERTFILE: /etc/kaname/tls/server/tls.crt
   KANAME_REGISTRYTOKEN_SERVER_MTLS_KEYFILE: /etc/kaname/tls/server/tls.key
+  # Слушатель выдачи ЗАПРАШИВАЕТ клиентский сертификат и проверяет
+  # предъявленный (optional-mutual); вызывающий без сертификата — `docker
+  # login`, машинный клиент — обслуживается как прежде. Край, ретранслирующий
+  # церемонию, опознаётся по проверенному сертификату, и только у него служба
+  # читает адрес клиента из X-Forwarded-For — ключ осей темпа источника
+  # (kaname#315, приёмка ceremony-pace-is-named-by-number.md Р7). Под `own` с
+  # собранной церемонией иной режим — отказ старта. Корень — тот же набор
+  # внутреннего УЦ, что у прочих взаимных рёбер этого профиля.
+  KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE: optional-mutual
+  KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   # Слушатель полосы входа паролем (Ф3, kacho#1269) — ВЗАИМНЫЙ TLS: вызывающий
   # (край платформы) опознаётся SAN проверенного клиентского листа, режим
   # `mutual` под `own` — условие старта (страж requireLoginLaneTLS).

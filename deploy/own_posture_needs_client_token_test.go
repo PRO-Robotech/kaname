@@ -238,7 +238,51 @@ func TestChartRefusesAnEnabledClientTokenWithoutItsValues(t *testing.T) {
 			renders++
 			require.NoErrorf(t, err, "включённый эндпоинт со всеми величинами стража отвергнут "+
 				"рендером — шаблон строже стража:\n%s", out)
+			// KN-PACE-38b: карта настроек несёт каждую величину дословно — рендер,
+			// прошедший и потерявший ключ, отдал бы процессу нулевую величину.
+			tree := renderedConfigTreeOf(out)
+			require.NotNil(t, tree, "в рендере нет карты настроек")
+			for _, r := range rows {
+				require.Equalf(t, r.Sample, configScalar(tree, r.Key),
+					"карта настроек не несёт %s дословно", r.Key)
+			}
 		})
 	}
 	t.Logf("перепись: величин эндпоинта в таблице стража %d · посадок 1 · рендеров %d", len(rows), renders)
+}
+
+// configScalar — значение по точечному ключу карты настроек строкой, какого бы
+// типа оно ни было в YAML; ключа нет — пустая строка.
+func configScalar(tree map[string]any, key string) string {
+	cur := any(tree)
+	for _, seg := range strings.Split(key, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		if cur, ok = m[seg]; !ok {
+			return ""
+		}
+	}
+	return fmt.Sprint(cur)
+}
+
+// TestKNPACE39_ProdProfileDeclaresTheIssuingListenerMode — боевой профиль
+// объявляет режим слушателя выдачи `optional-mutual` и корень внутреннего УЦ
+// для проверки клиентских сертификатов (приёмка
+// ceremony-pace-is-named-by-number.md, KN-PACE-39): без режима собранная
+// церемония не стартует, а без корня режим не собирается.
+func TestKNPACE39_ProdProfileDeclaresTheIssuingListenerMode(t *testing.T) {
+	in := readRenderedInput(t, renderStandaloneChart(t, chartProfiles))
+	require.Equal(t, config.IssuingListenerRequestingModeName(), in.Envs["KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE"],
+		"окружение пода не объявляет режим слушателя выдачи")
+	roots := in.Envs["KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES"]
+	require.NotEmpty(t, roots, "окружение пода не несёт корня УЦ для проверки клиентских сертификатов слушателя выдачи")
+	var mounted bool
+	for _, m := range in.Mounts {
+		if strings.HasPrefix(roots, strings.TrimSuffix(m, "/")+"/") {
+			mounted = true
+		}
+	}
+	require.Truef(t, mounted, "корень %s не лежит ни под одним томом контейнера %v", roots, in.Mounts)
 }

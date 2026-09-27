@@ -302,6 +302,14 @@ var configBridge = []bridged{
 	{configKey: "authn.client-token.default-audience", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "defaultAudience"}, omitEmpty: true},
 	{configKey: "authn.client-token.token-ttl", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "tokenTtl"}, omitEmpty: true},
 	{configKey: "authn.client-token.body-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "bodyCeiling"}, omitEmpty: true},
+	// ТЕМП ПОВЕРХНОСТИ ВЫДАЧИ (kaname#315): шесть величин того же блока, ветвью
+	// `with` без умолчаний шаблона, поэтому `omitEmpty` у всех.
+	{configKey: "authn.client-token.in-flight-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "inFlightCeiling"}, omitEmpty: true},
+	{configKey: "authn.client-token.exchanges-per-client-per-sec", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "exchangesPerClientPerSec"}, omitEmpty: true},
+	{configKey: "authn.client-token.failed-proofs-per-source", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "failedProofsPerSource"}, omitEmpty: true},
+	{configKey: "authn.client-token.failed-proof-window", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "failedProofWindow"}, omitEmpty: true},
+	{configKey: "authn.client-token.authorize-per-source-per-sec", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "authorizePerSourcePerSec"}, omitEmpty: true},
+	{configKey: "authn.client-token.authorize-in-flight-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "authorizeInFlightCeiling"}, omitEmpty: true},
 }
 
 // Выключатели блоков — названы ОДИН раз: путь, повторённый у каждого ключа
@@ -347,6 +355,21 @@ const withdrawnProviderRoadReason = "адрес контура к ВНЕШНЕМ
 	"внешнего поставщика у посадки own нет. Ручка остаётся в профиле, пока гейт исходящих полос поставки " +
 	"считает этот адрес полосой процесса, и снимается вместе с полосой целиком (#363)"
 
+// issuingListenerRootGuardReason — причина записи режима СЛУШАТЕЛЯ ВЫДАЧИ.
+//
+// Прежде причиной было «боевой профиль стоит на `external`, где умолчание
+// server-tls-only законно», и запись истекала с первым профилем на `own`.
+// Профиль на `own` с включённым эндпоинтом (#424) — и церемония собирается,
+// но страж режима живёт в композиционном корне
+// (requireIssuingListenerAsksForACertificate в cmd/kaname), а проба судит
+// стража настройки и корня не видит.
+const issuingListenerRootGuardReason = "режим слушателя выдачи (kaname#315, приёмка " +
+	"ceremony-pace-is-named-by-number.md, Р7 п.5, KN-PACE-39): его судит страж композиционного корня " +
+	"(requireIssuingListenerAsksForACertificate в cmd/kaname) при собранной церемонии, а эта проба " +
+	"спрашивает стража настройки, который корня не видит, поэтому снятие ручки здесь посадку не роняет. " +
+	"Объявлен приёмкой в боевом профиле, который стоит на own с включённым эндпоинтом (#424). Запись " +
+	"истекает, когда страж корня станет достижим стражу настройки"
+
 var restatedDeliberately = map[string]string{
 	// КОНТУРЫ К ВНЕШНЕМУ ПОСТАВЩИКУ — одна причина на все шесть записей.
 	"env.KANAME_HYDRA_ADMIN_URL":     withdrawnProviderRoadReason,
@@ -360,6 +383,9 @@ var restatedDeliberately = map[string]string{
 	"apiServer.loginLaneEndpoint":                     loginLaneRootGuardReason,
 	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE":         loginLaneRootGuardReason,
 	"env.KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE": loginLaneRootGuardReason,
+	// РЕЖИМ СЛУШАТЕЛЯ ВЫДАЧИ (kaname#315) — та же причина, что у слушателя
+	// полосы входа: его страж живёт в композиционном корне.
+	"env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE": issuingListenerRootGuardReason,
 	"authMode": "базовые значения чарта уже несут production, поэтому снятие этой строки " +
 		"посадку не роняет. Строка стоит затем, чтобы будущая правка умолчания чарта не " +
 		"уронила посадку МОЛЧА: профиль называет её сам",

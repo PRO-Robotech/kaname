@@ -64,6 +64,14 @@ func contourTranslated(t *testing.T) config.Config {
 		DefaultAudience:  "registry.kacho.local",
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
+		// Темп эндпоинта (kaname#315): предмет пробы не он, но без него
+		// эндпоинт не стартует.
+		ExchangesPerClientPerSec: 5,
+		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 	return cfg
 }

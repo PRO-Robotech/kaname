@@ -301,6 +301,15 @@ stand_env() {
   # коллекции церемонии на стенде судят прежнее поведение.
   export KANAME_AUTHN__CEREMONY__CODE_TTL=60s
   export KANAME_AUTHN__CEREMONY__REFRESH_TTL=168h
+  # ТЕМП ПОВЕРХНОСТИ ВЫДАЧИ (kaname#315) — числа §3 приёмки
+  # ceremony-pace-is-named-by-number.md: у величин нет умолчаний, и страж старта
+  # при включённом эндпоинте требует все четыре. Величины точки авторизации
+  # (`authorize-*`) нужны только собранной церемонии — на этой посадке
+  # (`external`) её нет, и они не объявляются.
+  export KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING=32
+  export KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC=5
+  export KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE=50
+  export KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW=15m
   local l u
   for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \

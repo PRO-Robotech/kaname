@@ -604,6 +604,16 @@ authn:
     defaultAudience: "https://$DOMAIN"
     tokenTtl: 15m
     bodyCeiling: 16384
+    # Темп поверхности выдачи — числа §3 приёмки
+    # ceremony-pace-is-named-by-number.md (kaname#315): без любой из шести
+    # величин чарт включённый эндпоинт не собирает. Режим слушателя выдачи
+    # optional-mutual и его корень объявляет боевой профиль.
+    inFlightCeiling: 32
+    exchangesPerClientPerSec: 5
+    failedProofsPerSource: 50
+    failedProofWindow: 15m
+    authorizePerSourcePerSec: 10
+    authorizeInFlightCeiling: 32
   ceremony:
     codeTtl: 60s
     refreshTtl: 168h

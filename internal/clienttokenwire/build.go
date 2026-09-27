@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -38,6 +39,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
@@ -80,6 +83,20 @@ type BuildConfig struct {
 	// вешает горутину навсегда, и горутины копятся до исчерпания процесса —
 	// то есть отказ приходит не туда, где причина.
 	PeerTimeout time.Duration
+	// ExchangesPerClientPerSec — темп обменов в секунду на идентификатор
+	// клиента, на процесс (kaname#315). Судится проверяющим по заявленному
+	// идентификатору ДО реестра; тратят его только принятые предъявления.
+	ExchangesPerClientPerSec int
+	// InFlightCeiling — потолок одновременных обменов на процесс, все четыре
+	// вида выдачи (П1, kaname#315).
+	InFlightCeiling int
+	// FailedProofsPerSource и FailedProofWindow — ось П3: неудавшихся
+	// доказательств клиента за скользящее окно на источник, на процесс.
+	FailedProofsPerSource int
+	FailedProofWindow     time.Duration
+	// Source — адрес источника запроса по правилу Р7 (`issuingsource`): ключ
+	// П3. Обязателен — без него окну нечем ключеваться.
+	Source func(*http.Request) string
 }
 
 // New собирает эндпоинт из уже готовых портов.
@@ -121,6 +138,27 @@ func New(
 		// читателя выдача не отличала бы «отсечек нет» от «спросить некого».
 		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader is required")
 	}
+	if cfg.InFlightCeiling <= 0 {
+		return nil, fmt.Errorf("clienttokenwire: in-flight exchange ceiling must be declared as a positive number "+
+			"(got %d) — zero means «no ceiling»", cfg.InFlightCeiling)
+	}
+
+	if cfg.Source == nil {
+		return nil, fmt.Errorf("clienttokenwire: source address rule is required — the failed-proof window " +
+			"per source would have nothing to key by")
+	}
+
+	// Темп строится ЗДЕСЬ, одним экземпляром на эндпоинт: обе полосы
+	// проверяющего списывают из него, и второй экземпляр удвоил бы темп.
+	pace, err := exchangepace.New(cfg.ExchangesPerClientPerSec, cfg.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: pace: %w", err)
+	}
+	// Окно П3 — тоже одно на эндпоинт: его делят все четыре вида выдачи.
+	failedProofs, err := failurewindow.New(cfg.FailedProofsPerSource, cfg.FailedProofWindow, cfg.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: failed-proof window per source: %w", err)
+	}
 
 	verifier, err := clientassertion.New(clientassertion.Policy{
 		ExpectedAudience:     cfg.ExpectedAudience,
@@ -131,7 +169,8 @@ func New(
 	},
 		WithDeadlineResolver(clients, cfg.PeerTimeout),
 		WithDeadlineIssuers(issuers, cfg.PeerTimeout),
-		WithDeadlineReplay(replay, cfg.PeerTimeout))
+		WithDeadlineReplay(replay, cfg.PeerTimeout),
+		pace)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
 	}
@@ -157,9 +196,12 @@ func New(
 	}
 
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
-		BodyCeiling: cfg.BodyCeiling,
-		Logger:      cfg.Logger,
-		Ceremony:    cfg.Ceremony,
+		BodyCeiling:     cfg.BodyCeiling,
+		InFlightCeiling: cfg.InFlightCeiling,
+		FailedProofs:    failedProofs,
+		Source:          cfg.Source,
+		Logger:          cfg.Logger,
+		Ceremony:        cfg.Ceremony,
 	}, verifier, issue)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)

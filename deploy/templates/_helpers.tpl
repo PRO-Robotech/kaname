@@ -327,6 +327,14 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 (`pod_env_source_recognizer_test.go`): карта, чей ключ стал именем переменной
 пода и которой нет в обходе ниже, — находка суда теней.
 
+Шесть величин темпа поверхности выдачи (kaname#315, приёмка
+ceremony-pace-is-named-by-number.md) требуются здесь при ЛЮБОМ включённом
+эндпоинте, одним условием с прочими. Страж процесса строже различает: две
+величины точки авторизации он требует только при собранной церемонии (посадка
+own). Под external шаблон тем самым требует на две величины больше, чем читает
+процесс, — это выбор одного условия на блок вместо второго условия об одном
+предмете, а не расхождение: рендер строже стража, но не слабее.
+
 ОБЛАСТЬ НАЗВАНА: судится только ОБЪЯВЛЕННОСТЬ величин. Их согласованность
 (адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
 тела положителен) судит страж старта (`ClientTokenConfig.Validate`), и второго
@@ -341,7 +349,13 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
       "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES" "authn.clientToken.allowedAudiences"
       "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE" "authn.clientToken.defaultAudience"
       "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL" "authn.clientToken.tokenTtl"
-      "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING" "authn.clientToken.bodyCeiling" -}}
+      "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING" "authn.clientToken.bodyCeiling"
+      "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING" "authn.clientToken.inFlightCeiling"
+      "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC" "authn.clientToken.exchangesPerClientPerSec"
+      "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE" "authn.clientToken.failedProofsPerSource"
+      "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW" "authn.clientToken.failedProofWindow"
+      "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC" "authn.clientToken.authorizePerSourcePerSec"
+      "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING" "authn.clientToken.authorizeInFlightCeiling" -}}
 {{- $shadows := list -}}
 {{- range $source := list "env" "secrets" -}}
 {{- $carried := index $.Values $source | default dict -}}
@@ -359,7 +373,7 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 {{- $posture := $authn.identityProvider -}}
 {{- $ctOn := include "kaname-svc.blockEnabled" (list $ "authn.clientToken") -}}
 {{- if and $posture (eq (toString $posture) "own") (not $ctOn) -}}
-{{- fail "чарт службы прав не ставится: authn.identityProvider=own при невключённом authn.clientToken.enabled.\n\nНа посадке own ключ служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у этой посадки нет. Страж старта процесса такую посадку не поднимает (authn.identity-provider=own при authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его четыре величины (INSTALL.md §1, §3). Посадка own — единственное законное значение authn.identityProvider: посадка external снята." -}}
+{{- fail "чарт службы прав не ставится: authn.identityProvider=own при невключённом authn.clientToken.enabled.\n\nНа посадке own ключ служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у этой посадки нет. Страж старта процесса такую посадку не поднимает (authn.identity-provider=own при authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его величины (INSTALL.md §1, §3). Посадка own — единственное законное значение authn.identityProvider: посадка external снята." -}}
 {{- end -}}
 {{- if $ctOn -}}
 {{- $missing := list -}}
@@ -374,6 +388,24 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 {{- end -}}
 {{- if not $ct.bodyCeiling -}}
 {{- $missing = append $missing "  authn.clientToken.bodyCeiling      — authn.client-token.body-ceiling: потолок тела запроса к\n                                       эндпоинту, байт; положительное целое — ноль величиной не является." -}}
+{{- end -}}
+{{- if not $ct.inFlightCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.inFlightCeiling  — authn.client-token.in-flight-ceiling: потолок одновременных\n                                       обменов на реплику, все четыре вида выдачи; сверх — 503." -}}
+{{- end -}}
+{{- if not $ct.exchangesPerClientPerSec -}}
+{{- $missing = append $missing "  authn.clientToken.exchangesPerClientPerSec — authn.client-token.exchanges-per-client-per-sec:\n                                       обменов в секунду на идентификатор клиента, на реплику; сверх — 429." -}}
+{{- end -}}
+{{- if not $ct.failedProofsPerSource -}}
+{{- $missing = append $missing "  authn.clientToken.failedProofsPerSource — authn.client-token.failed-proofs-per-source:\n                                       неудавшихся доказательств клиента за окно на источник, на реплику." -}}
+{{- end -}}
+{{- if not $ct.failedProofWindow -}}
+{{- $missing = append $missing "  authn.clientToken.failedProofWindow — authn.client-token.failed-proof-window: скользящее окно\n                                       этих отказов (длительность Go)." -}}
+{{- end -}}
+{{- if not $ct.authorizePerSourcePerSec -}}
+{{- $missing = append $missing "  authn.clientToken.authorizePerSourcePerSec — authn.client-token.authorize-per-source-per-sec:\n                                       запросов авторизации в секунду на источник, на реплику." -}}
+{{- end -}}
+{{- if not $ct.authorizeInFlightCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.authorizeInFlightCeiling — authn.client-token.authorize-in-flight-ceiling:\n                                       потолок одновременных запросов авторизации на реплику." -}}
 {{- end -}}
 {{- if $missing -}}
 {{- fail (printf "чарт службы прав не ставится: токен-эндпоинт платформы включён (authn.clientToken.enabled=true), а его величины не названы — %d.\n\nУмолчаний у них нет намеренно: каждую выбирает тот, кто ставит, и без любой из них страж старта процесса службу не поднимает.\n\n%s\n\nЧТО СДЕЛАТЬ: назовите их профилю — накладкой `-f` либо `--set`; образцы величин — INSTALL.md §3." (len $missing) (join "\n\n" $missing)) -}}

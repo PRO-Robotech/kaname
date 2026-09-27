@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
@@ -110,6 +111,11 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
 	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{}, wiringCutoffs{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)
