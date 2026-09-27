@@ -284,10 +284,12 @@ CASES.append(Case(
             body={"accountId": "acc00000000000notfnd", "name": "svabadacc{{runId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(403),
-                *assert_grpc_code(7, "PERMISSION_DENIED"),
-                "pm.test('отказ называет действие, а не судьбу объекта', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.service_accounts.create'));",
+                # Действие отказ называет в `ErrorInfo.metadata`, а не в тексте: текст
+                # отказа службы дословный «permission denied» (deny_details.go), и
+                # вхождение действия в `message` падало на верном ответе своей двери
+                # (тот же класс, что IAM-ROL-UP-NEG-SYSTEM-NO-PATH, сборка 435). Ярус
+                # `account`: строка каталога берёт область из `account_id`.
+                *assert_scoped_authz_deny("iam.service_accounts.create", "account"),
                 # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
                 # «доступа нет».
                 "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
