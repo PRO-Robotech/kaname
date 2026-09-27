@@ -952,8 +952,80 @@ def address_own_front(cases: List["Case"], why: str) -> List["Case"]:
 # спрашивает не о ресурсе: окно видимости прав такой адрес не наполнит никогда, а
 # отказ по нему приходит кодом ИЗ полосы ожидания — то есть шаг выжигает весь бюджет
 # и падает, называя следствие вместо предмета.
-_rya = functools.partial(retry_until_authorized,
-                        budget=15, interval_ms=400, lane_head=True)
+_rya_window = functools.partial(retry_until_authorized,
+                                budget=15, interval_ms=400, lane_head=True)
+
+
+# ── ГДЕ ОКНО ЕСТЬ, А ГДЕ ЕГО НЕТ — РЕШЕНИЕ НАБОРА (kaname#393) ──────────────
+#
+# Повтор пережидает ОДНО окно — материализацию прав владельца на свой свежий
+# ресурс — и потому законен в одном месте: на первом обращении к такому ресурсу с
+# ОЖИДАЕМЫМ УСПЕХОМ. Предикат общего слоя (`_wrap_own_fresh_reads`) требования
+# «шаг ждёт успеха» не несёт — его шапка снимает его прямо, — и свежей считает
+# ЛЮБУЮ переменную, записанную раньше в кейсе. Замер по порождённым коллекциям
+# дерева до этой правки: 33 обёрнутых шага без единого 2xx в объявленном исходе
+# (12 коллекций из 47) и 25 обёрнутых шагов слушателя формы.
+#
+# Слой вендорен (`tests/newman/vendor-provenance.json`), поэтому решение принято
+# ЗДЕСЬ, адаптером повтора, который общий слой получает аргументом: он зовёт
+# обёртку, а обёртка набора отказывается ставить повтор там, где окна нет.
+# Отрицание на свежем ресурсе получает окно ЧТЕНИЕМ этого ресурса перед собой,
+# а не повтором самого отрицания: отказ отрицания читается с первого ответа.
+#
+# ПОВЕРХНОСТЬ БЕЗ ОКНА. Слушатель формы стоит не за шлюзом прав: его шаги
+# ссылаются на признак формы и печенье, и материализации прав, которую пережидает
+# повтор, у него нет. Когда слушатель отвечает `403` на каждый запрос, повтор
+# уводил шаги выхода по шестнадцать раз (39 запросов вместо 9, замер 2026-09-23).
+NO_AUTHZ_WINDOW_SURFACES = frozenset({"loginLaneBaseUrl"})
+
+_SURFACE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _addressed_surface(step) -> Optional[str]:
+    """Переменная адреса, которой шаг адресован САМИМ кейсом (`require_env_url`)."""
+    for line in step.pre_script:
+        if line.startswith(_ENV_URL_MARK):
+            m = _SURFACE_NAME_RE.match(line[len(_ENV_URL_MARK):])
+            return m.group(0) if m else None
+    return None
+
+
+def _window_refusal(step) -> Optional[str]:
+    """Почему повтору окна прав на этом шаге НЕ место; None — место есть.
+
+    Исход читается тем же разбором, что у общего слоя (`_accepted_http_codes`):
+    второй разборщик того же предмета разошёлся бы с ним молча. Шаг без
+    объявленного статуса отказом не объявлен и под запрет не подпадает.
+    """
+    accepted = _accepted_http_codes("\n".join(step.test_script))
+    if accepted and not any(200 <= c < 300 for c in accepted):
+        return (f"шаг {step.name!r} ждёт отказа {sorted(accepted)}: повтор окна прав "
+                f"на отрицании пережидал бы ровно то, что шаг проверяет; окно даёт "
+                f"обёрнутое ЧТЕНИЕ свежего ресурса перед ним")
+    surface = _addressed_surface(step)
+    if surface in NO_AUTHZ_WINDOW_SURFACES:
+        return (f"шаг {step.name!r} адресован {surface}: эта поверхность стоит не за "
+                f"шлюзом прав, окна материализации у неё нет")
+    return None
+
+
+def _rya(step, **kw):
+    """Явная обёртка кейса: там, где окна нет, — ОТКАЗ генерации, а не тихий пропуск.
+
+    Автор, попросивший повтор на отрицании, просит маску; молча не обернуть значило
+    бы оставить его думать, что окно закрыто. Отказ называет шаг и причину.
+    """
+    why = _window_refusal(step)
+    if why:
+        raise ValueError(f"retry_until_authorized: {why}")
+    return _rya_window(step, **kw)
+
+
+def _auto_rya(step, retry_on):
+    """Адаптер для предиката общего слоя: там, где окна нет, шаг остаётся как есть."""
+    if _window_refusal(step):
+        return step
+    return _rya_window(step, retry_on=retry_on)
 
 # То же окно у СПИСОЧНОГО ожидания — и то же правило: величину называет НАБОР,
 # а не общий слой (#1379). Форма общая: до сведения ЭТОТ набор нёс ЧЕТВЁРТУЮ
@@ -1744,7 +1816,7 @@ def _iam_case_steps(case):
     # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
     case = replace(case, steps=_assert_published_id_outcome(
         _reset_captured_operation_id(_assert_delete_operation_outcome(
-            _wrap_own_fresh_reads(case.steps, _rya, rename=False)))))
+            _wrap_own_fresh_reads(case.steps, _auto_rya, rename=False)))))
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
     # Newman's `setNextRequest(<name>)`

@@ -22,7 +22,9 @@
 //     обоими форматами и отвергается на чужом;
 //  6. мера стоимости — вход огибающей: без неё огибающая не строится, мера,
 //     не позвавшая прогон ровно один раз либо отдавшая неположительную
-//     стоимость, — отказ, а не потолок; паника меры не уносит место ёмкости;
+//     стоимость, — отказ, а не потолок; паника меры не уносит место ёмкости
+//     и класса не держит: калибровка, не дошедшая до исхода, снята, ждавший
+//     получает отказ, следующий допуск калибрует класс заново;
 //  7. мера композиционного корня (настенные часы) мерит САМ прогон: часы
 //     читаются до его начала и после его конца, и мера не короче прогона.
 //
@@ -37,6 +39,7 @@ package passwordverify_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -78,6 +81,14 @@ func (o *recordingEnvelopeObserver) EnvelopeFloorObserved(floor time.Duration, _
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.floors = append(o.floors, floor)
+}
+
+// snapshot — копии записанного под замком: для проб, где огибающую зовут и
+// другие горутины.
+func (o *recordingEnvelopeObserver) snapshot() (calibrated []string, floors []time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.calibrated...), append([]time.Duration(nil), o.floors...)
 }
 
 // newEnvelope — огибающая на настенных часах процесса, как в композиционном
@@ -375,6 +386,215 @@ func TestEnvelope_APanickingMeterReleasesTheCapacitySlot(t *testing.T) {
 		_, _ = e.Admit(context.Background(), bcryptClass(4), passwordverify.EnvelopeTriggerStartup)
 	}, "паника меры доходит до вызывающего, а не глотается огибающей")
 	require.True(t, v.WithCapacity(func() {}), "место ёмкости освобождено и при панике меры")
+}
+
+const (
+	// interruptedWaitBudget — срок ждавшего и следующего допусков: секунды,
+	// много дольше прогона (1 мс по мере пробы). Производитель, держащий класс
+	// «в калибровке», держит их до этого срока, и проба краснеет им, а не
+	// пределом `go test`.
+	interruptedWaitBudget = 3 * time.Second
+	// interruptedPremiseBudget — предел ожидания предпосылок сцены (первый
+	// допуск дошёл до меры, ждавший встал в ожидание). Истёк — проба НЕ
+	// ИСПОЛНЯЛАСЬ, а не краснеет по предмету.
+	interruptedPremiseBudget = 10 * time.Second
+)
+
+// waitReachedContext — контекст допуска, извещающий пробу о ПЕРВОМ обращении к
+// Done(). Допуск, заставший калибровку своего класса идущей, до ожидания
+// контекст не читает, и первое обращение — вход в ожидание: барьер
+// предпосылки (м′) — «в момент паники ждавший уже ждёт» — стоит на действии
+// самого допуска, а не на сне пробы.
+type waitReachedContext struct {
+	context.Context
+	once    sync.Once
+	reached chan struct{}
+}
+
+func (c *waitReachedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.reached) })
+	return c.Context.Done()
+}
+
+// interruptingMeter — мера пробы, прерывающая ПЕРВЫЙ прогон калибровки ПОСЛЕ
+// самого прогона (`interrupt` — паника либо выход горутины), когда ждавший
+// допуск уже встал в ожидание; дальше — стоимость 1 мс. От меры (ж) она
+// отличается одним фактом — прерыванием первого прогона.
+type interruptingMeter struct {
+	interrupt func()
+	waiter    <-chan struct{}
+	entered   chan struct{}
+
+	mu     sync.Mutex
+	calls  int
+	missed bool
+}
+
+func (m *interruptingMeter) measure(_ domain.PasswordCostClass, verify func()) time.Duration {
+	verify()
+	m.mu.Lock()
+	m.calls++
+	first := m.calls == 1
+	m.mu.Unlock()
+	if !first {
+		return time.Millisecond
+	}
+	close(m.entered)
+	select {
+	case <-m.waiter:
+	case <-time.After(interruptedPremiseBudget):
+		m.mu.Lock()
+		m.missed = true
+		m.mu.Unlock()
+	}
+	m.interrupt()
+	return time.Millisecond
+}
+
+func (m *interruptingMeter) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+func (m *interruptingMeter) premiseMissed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.missed
+}
+
+// TestEnvelope_APanickingMeterLeavesNoCalibrationInFlight — Ф3-53 (м) вторая
+// половина, (м′), (м″): калибровка, прерванная паникой меры, класса НЕ ДЕРЖИТ.
+// Тот же вред «до перезапуска», что у места ёмкости (м), стоял бы на классе:
+// запись «в калибровке», пережившая прогон, держала бы до срока вызывающего
+// и ждавший допуск, и каждый следующий допуск класса. Положительный близнец
+// (м′) — (ж) TestEnvelope_ConcurrentAdmitsOfOneClassCalibrateOnce: те же
+// ждущие за мерой без паники получают стоимость одной калибровки. Законный
+// близнец (м″) — эта же мера: паникует только на самом первом прогоне.
+func TestEnvelope_APanickingMeterLeavesNoCalibrationInFlight(t *testing.T) {
+	t.Parallel()
+	interruptedCalibrationLeavesNothingInFlight(t, func() { panic("мера пробы") }, "мера пробы")
+}
+
+// TestEnvelope_AMeterThatExitsItsGoroutineLeavesNoCalibrationInFlight — тот же
+// предмет при ВЫХОДЕ горутины прогона (runtime.Goexit): отложенные функции
+// исполняются, а recover() отдаёт nil. Снятие калибровки, построенное на
+// перехвате паники, этот исход пропустило бы, и ждавший стоял бы до срока;
+// снятие по признаку «исход не записан» видит оба.
+func TestEnvelope_AMeterThatExitsItsGoroutineLeavesNoCalibrationInFlight(t *testing.T) {
+	t.Parallel()
+	interruptedCalibrationLeavesNothingInFlight(t, runtime.Goexit, nil)
+}
+
+// interruptedCalibrationLeavesNothingInFlight — сцена (м)…(м″) при ёмкости 1:
+// первый допуск класса калибрует его, мера прерывает первый прогон, когда
+// второй допуск того же класса ждёт идущей калибровки; затем — следующий
+// допуск того же класса и допуск другого. `wantPanic` — значение, с которым
+// прерывание обязано дойти до вызывающего (nil — выход горутины).
+func interruptedCalibrationLeavesNothingInFlight(t *testing.T, interrupt func(), wantPanic any) {
+	t.Helper()
+	class := bcryptClass(4)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), interruptedWaitBudget)
+	defer cancelWait()
+	waiterCtx := &waitReachedContext{Context: waitCtx, reached: make(chan struct{})}
+	meter := &interruptingMeter{interrupt: interrupt, waiter: waiterCtx.reached, entered: make(chan struct{})}
+	e, v, obs := newEnvelopeMeasuredBy(t, 1, meter.measure)
+
+	type firstOutcome struct {
+		returned bool
+		panicked any
+	}
+	first := make(chan firstOutcome, 1)
+	go func() {
+		var out firstOutcome
+		defer func() {
+			out.panicked = recover()
+			first <- out
+		}()
+		_, _ = e.Admit(context.Background(), class, passwordverify.EnvelopeTriggerStartup)
+		out.returned = true
+	}()
+	select {
+	case <-meter.entered:
+	case <-time.After(interruptedPremiseBudget):
+		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: первый допуск класса %s не дошёл до меры за %v", class.Key(), interruptedPremiseBudget)
+	}
+
+	type waiterOutcome struct {
+		adm        passwordverify.Admission
+		err        error
+		ctxErr     error
+		meterCalls int
+	}
+	waiter := make(chan waiterOutcome, 1)
+	go func() {
+		adm, err := e.Admit(waiterCtx, class, passwordverify.EnvelopeTriggerRead)
+		waiter <- waiterOutcome{adm: adm, err: err, ctxErr: waitCtx.Err(), meterCalls: meter.callCount()}
+	}()
+
+	var got firstOutcome
+	select {
+	case got = <-first:
+	case <-time.After(2 * interruptedPremiseBudget):
+		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: первый допуск не завершился за %v", 2*interruptedPremiseBudget)
+	}
+	if meter.premiseMissed() {
+		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: второй допуск класса %s не встал в ожидание идущей калибровки за %v — "+
+			"(м′) судить не о чем", class.Key(), interruptedPremiseBudget)
+	}
+	require.False(t, got.returned, "(м): прерванная калибровка исхода не вернула — прерывание дошло до вызывающего, а не проглочено огибающей")
+	require.Equal(t, wantPanic, got.panicked, "(м): паника меры доходит до вызывающего с её значением")
+	require.True(t, v.WithCapacity(func() {}), "(м): место ёмкости свободно и после прерывания — иначе (м″) судила бы ёмкость, а не класс")
+	require.Empty(t, e.Classes(), "(м): прерванная калибровка класса в огибающую не записала")
+	require.Zero(t, e.Floor(), "(м): потолок из прерванной калибровки не выставлен")
+	_, hasCeiling := e.Ceiling()
+	require.False(t, hasCeiling, "(м): класса-потолка нет")
+	calibrated, _ := obs.snapshot()
+	require.Empty(t, calibrated, "(м): о прерванной калибровке приёмник не извещён")
+
+	t.Run("(м′) ждавший получает отказ с именем класса, не дожидаясь срока", func(t *testing.T) {
+		var w waiterOutcome
+		select {
+		case w = <-waiter:
+		case <-time.After(interruptedWaitBudget + interruptedPremiseBudget):
+			t.Fatalf("ждавший допуск не вернулся и после своего срока %v", interruptedWaitBudget)
+		}
+		require.Error(t, w.err, "ждавший прерванную калибровку получает отказ, а не стоимость")
+		require.NotErrorIs(t, w.err, context.DeadlineExceeded, "отказ — прерванная калибровка, а не срок ждавшего")
+		require.NoError(t, w.ctxErr, "ответ пришёл до срока ждавшего: он не стоял до него")
+		require.Contains(t, w.err.Error(), class.Key(), "отказ называет класс")
+		require.Contains(t, w.err.Error(), "прервана", "отказ называет прерванную калибровку")
+		require.False(t, w.adm.Calibrated)
+		require.Equal(t, 1, w.meterCalls, "к ответу ждавшего мера звана ровно раз: он получил исход прерванной калибровки, а не калибровал сам")
+	})
+
+	t.Run("(м″) следующий допуск калибрует класс заново", func(t *testing.T) {
+		before := meter.callCount()
+		ctx, cancel := context.WithTimeout(context.Background(), interruptedWaitBudget)
+		defer cancel()
+		adm, err := e.Admit(ctx, class, passwordverify.EnvelopeTriggerRead)
+		require.NoError(t, err, "класс, чью калибровку прервали, «в калибровке» не держится")
+		require.True(t, adm.Calibrated, "следующий допуск — калибровка, а не поиск по ключу")
+		require.Equal(t, time.Millisecond, adm.Cost, "стоимость — число меры этой калибровки")
+		require.Equal(t, time.Millisecond+time.Millisecond/4, adm.Floor, "потолок — стоимость с запасом в четверть")
+		require.Greater(t, meter.callCount(), before, "класс калиброван прогоном через меру")
+		classes := e.Classes()
+		require.Len(t, classes, 1)
+		require.Equal(t, class.Key(), classes[0].Class.Key())
+		require.Equal(t, time.Millisecond, classes[0].Cost)
+		calibrated, floors := obs.snapshot()
+		require.Equal(t, []string{class.Key()}, calibrated, "приёмник извещён о калибровке ровно раз — прерванная не сосчитана")
+		require.Equal(t, []time.Duration{time.Millisecond + time.Millisecond/4}, floors)
+	})
+
+	t.Run("допуск другого класса после того же прерывания проходит", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), interruptedWaitBudget)
+		defer cancel()
+		adm, err := e.Admit(ctx, bcryptClass(5), passwordverify.EnvelopeTriggerRead)
+		require.NoError(t, err, "огибающая жива: держится один класс, а не она целиком")
+		require.True(t, adm.Calibrated)
+		require.Equal(t, time.Millisecond, adm.Cost)
+	})
 }
 
 // TestEnvelope_AMeterThatDoesNotRunTheVerificationOnceIsRefused — мера обязана

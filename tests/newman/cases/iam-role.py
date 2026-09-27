@@ -1371,7 +1371,18 @@ CASES.append(Case(
         ),
         poll_operation_until_done(),
         assert_op_success(),
+        # ОКНО ПРАВ НА СВЕЖЕЙ РОЛИ ЗАКРЫВАЕТ ЧТЕНИЕ ТОГО ЖЕ ПЕРЕЧНЯ БЕЗ МАРКЕРА, а не
+        # повтор отрицания (kaname#393): цель проверки прав — сама роль, и до
+        # материализации её прав владельца шлюз ответил бы 403/404 вместо 400
+        # предмета. Отрицание ниже уходит один раз и читается с первого ответа.
         retry_until_authorized(Step(
+            name="lsop-warm-read",
+            method="GET",
+            path="/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        ), retry_on=(403, 404)),
+        Step(
             name="lsop-bad-token",
             method="GET",
             path="/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10&pageToken=not-a-real-token",
@@ -1402,7 +1413,7 @@ CASES.append(Case(
                 "  pm.expect(fields, JSON.stringify(j)).to.include('page_token');",
                 "});",
             ],
-        ), retry_on=(403, 404)),
+        ),
         Step(name="cleanup-lsop-role", method="DELETE", path="/iam/v1/roles/{{lsopTokRoleId}}",
              auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
         poll_operation_until_done(required=False),

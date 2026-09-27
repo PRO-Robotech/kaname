@@ -260,7 +260,9 @@ func (e *Envelope) Classes() []CalibratedClass {
 
 // Admit — класс входит в огибающую: известный — поиск по ключу; новый —
 // калибровка, и потолок поднимается, если класс дороже текущего. Одновременные
-// допуски одного нового класса дают ОДНУ калибровку.
+// допуски одного нового класса дают ОДНУ калибровку. Калибровка, прерванная
+// паникой меры, класса не держит: ждавшие её получают отказ, следующий допуск
+// калибрует заново.
 func (e *Envelope) Admit(ctx context.Context, class domain.PasswordCostClass, trigger EnvelopeTrigger) (Admission, error) {
 	if err := class.Validate(); err != nil {
 		return Admission{}, fmt.Errorf("password_envelope: %w", err)
@@ -295,7 +297,20 @@ func (e *Envelope) Admit(ctx context.Context, class domain.PasswordCostClass, tr
 	e.inflight[key] = fl
 	e.mu.Unlock()
 
+	// Калибровку, не дошедшую до исхода, снимает сам допуск. Мера — довод
+	// вызывающего, и её паника либо выход горутины прогона иначе оставили бы
+	// класс «в калибровке» до перезапуска: ждавший и каждый следующий допуск
+	// класса стояли бы до своего срока (Ф3-53 (м′), (м″)). Паника не
+	// перехватывается и идёт к вызывающему дальше. Признак — флаг исхода, а
+	// не recover: выход горутины recover не видит.
+	settled := false
+	defer func() {
+		if !settled {
+			e.abandon(key, fl)
+		}
+	}()
 	cost, err := e.calibrate(ctx, class)
+	settled = true
 
 	e.mu.Lock()
 	delete(e.inflight, key)
@@ -322,6 +337,20 @@ func (e *Envelope) Admit(ctx context.Context, class domain.PasswordCostClass, tr
 		e.observer.EnvelopeFloorObserved(fl.adm.Floor, class)
 	}
 	return fl.adm, nil
+}
+
+// abandon — калибровка класса не дошла до исхода: запись «в калибровке»
+// снята, ждавшие получают отказ с именем класса, класс в огибающую не
+// записан, потолок не тронут, приёмник не извещён. Следующий допуск класса
+// калибрует его заново. Ошибка записывается до закрытия канала — ждавший
+// читает её после него.
+func (e *Envelope) abandon(key string, fl *flight) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.inflight, key)
+	fl.err = fmt.Errorf("password_envelope: калибровка класса %s прервана паникой меры либо выходом горутины прогона — "+
+		"класс не калиброван, следующий допуск калибрует его заново", key)
+	close(fl.done)
 }
 
 // calibrate — стоимость класса на этом железе: максимум из
@@ -368,7 +397,8 @@ func (e *Envelope) calibrate(ctx context.Context, class domain.PasswordCostClass
 // calibrationRun — один прогон калибровки: неверный пароль против
 // синтетического значения класса, в месте ёмкости и под мерой огибающей.
 // Место освобождается отложенно: мера — довод вызывающего, и её паника не
-// уносит место ёмкости у полосы входа.
+// уносит место ёмкости у полосы входа (класс при той же панике освобождает
+// `Admit`).
 func (e *Envelope) calibrationRun(ctx context.Context, class domain.PasswordCostClass, value domain.LoginVerifier, wrong string) (time.Duration, error) {
 	release, err := e.verifier.capacity.acquireWait(ctx)
 	if err != nil {

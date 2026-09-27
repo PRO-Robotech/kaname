@@ -83,6 +83,9 @@ func GatewayServiceName() string { return gatewayServiceName }
 //     спрашивает эту полосу на каждом предъявлении удостоверения. Здесь стояло
 //     «этого вызывающего в дереве СЕГОДНЯ НЕТ (#797)»: утверждение пережило
 //     свой предмет (#1156). Исчезнет метод у края — снимать и эту строку.
+//     Ответ метода покрывает и отзыв СЕМЕЙСТВА выпуска (kaname#319); послабление
+//     под эту возможность выведено заново, а не унаследовано, — разбор у
+//     `session_revocations.Handler.IsRevoked`.
 //   - InternalUserService/Get — service→service lookup.
 //   - Hydra hook callbacks are not in this set and cannot be: they are served
 //     over HTTP by internal/handler/iamhooks, not as gRPC methods. The gRPC

@@ -46,6 +46,7 @@ package session_revocations
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -61,6 +62,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
 // revoker — narrow write port. Implemented by
@@ -72,7 +74,12 @@ type revoker interface {
 // reader — narrow read port (CQRS-split). Implemented by an adapter over the
 // SessionRevocationRepo (pool-scoped). nil when the read stack is not wired —
 // IsRevoked / ListByUser then fail-closed Unavailable.
+//
+// Порт несёт и ответ о СЕМЕЙСТВЕ выпуска (`tokenrevocation.FamilyReader`):
+// встроен, а не отдельный, чтобы `IsRevoked` нельзя было собрать без него —
+// непровязанный ответ о семействе был бы «не отозван» о снятом удостоверении.
 type reader interface {
+	tokenrevocation.FamilyReader
 	IsRevoked(ctx context.Context, jti string) (bool, error)
 	GetByJTI(ctx context.Context, jti string) (domain.SessionRevocation, error)
 	// ListByUser returns ONE page of the user's revocations plus the token that
@@ -163,6 +170,44 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeRequest) (*operat
 // refresh-хук сюда по-прежнему не приходит: пер-jti гейта он не несёт и прямо
 // это оговаривает — в его теле нет claims предъявленного токена.
 //
+// # ОТВЕТ О СЕМЕЙСТВЕ — ТЕМ ЖЕ ОБРАЩЕНИЕМ (kaname#319, решение К10 вариант А)
+//
+// Признак ответа покрывает запись отзыва по идентификатору ЛИБО отзыв
+// семейства, которому выпуск принадлежит. Запрос и ответ контракта не меняются:
+// вопрос — идентификатор, ответ — признак. Второго обращения за семейством у
+// спрашивающего нет, значит нет и второго окна кеша, второй политики на неответ
+// и второго места, где «не ответил» становится вердиктом.
+//
+// Семейство судит правило `tokenrevocation.FamilyRevoked` — то же, которым
+// судят авторитет отзыва и читатель предъявленного; своего оператора чтения у
+// этой поверхности нет. Обогащение `revoked_at`/`reason` по-прежнему берётся
+// из записи по идентификатору: у отзыва семейства такой записи нет, и признак
+// остаётся контрактом.
+//
+// # ЗАПИСЬ КАТАЛОГА ПРАВ ВЫВЕДЕНА ЗАНОВО, А НЕ УНАСЛЕДОВАНА
+//
+// Ответ о семействе приехал под прежней записью каталога — `<exempt>` с
+// причиной «внутренний слушатель». Запись переоценена по трём вопросам и
+// оставлена осознанно:
+//
+//  1. КТО вправе спрашивать, решает ПОЛ вызывающего модуля, а не каталог:
+//     метод смонтирован только на внутреннем слушателе, и спросить вправе
+//     любой модуль с проверенным сертификатом (`authzguard/caller_policy.go`,
+//     ярус 1). Сужения сверх этого пола нет; единственный отправитель в
+//     графе импортов на момент правки — край.
+//  2. Отношения модели, которое сужало бы вопрос, НЕ СУЩЕСТВУЕТ: вопрос
+//     задаётся ДО того, как личность установлена — спрашивающий выясняет,
+//     годно ли удостоверение вообще, — а предмет вопроса, идентификатор
+//     выпуска, объектом модели не является. Отношение, которое выполнил бы
+//     любой проверенный модуль, выполнялось бы подстановкой и не сужало бы
+//     ничего.
+//  3. Ответ НЕ ШИРЕ прежнего: тот же признак об идентификаторе, который
+//     спрашивающий уже держит. Ни состава семейства, ни причины его отзыва, ни
+//     субъекта, ни клиента ответ не несёт.
+//
+// Изменись любой из трёх — например, ответ начнёт нести причину отзыва
+// семейства — запись выводится заново, а не наследуется.
+//
 // fail-closed Unavailable when the read stack is unwired.
 func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*iamv1.IsRevokedResponse, error) {
 	jti := strings.TrimSpace(req.GetTokenJti())
@@ -174,18 +219,37 @@ func (h *Handler) IsRevoked(ctx context.Context, req *iamv1.IsRevokedRequest) (*
 	}
 	revoked, err := h.read.IsRevoked(ctx, jti)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "session revocation lookup failed")
+		return nil, isRevokedLookupFailed(ctx, "record", err)
 	}
-	resp := &iamv1.IsRevokedResponse{Revoked: revoked}
-	if revoked {
-		// Best-effort enrichment of revoked_at / reason; a lookup miss here is
-		// not fatal — the boolean is the contract.
-		if rev, gerr := h.read.GetByJTI(ctx, jti); gerr == nil {
-			resp.RevokedAt = shared.TimestampProto(rev.RevokedAt)
-			resp.Reason = rev.Reason
+	if !revoked {
+		// Семейство выпуска — тем же правилом, что у поверхностей предъявления.
+		// Сбой хранилища — ТОТ ЖЕ фиксированный отказ: «спросить не смогли» не
+		// есть «не отозван».
+		familyRevoked, ferr := tokenrevocation.FamilyRevoked(ctx, h.read, jti)
+		if ferr != nil {
+			return nil, isRevokedLookupFailed(ctx, "family", ferr)
 		}
+		return &iamv1.IsRevokedResponse{Revoked: familyRevoked}, nil
+	}
+	resp := &iamv1.IsRevokedResponse{Revoked: true}
+	// Best-effort enrichment of revoked_at / reason; a lookup miss here is
+	// not fatal — the boolean is the contract.
+	if rev, gerr := h.read.GetByJTI(ctx, jti); gerr == nil {
+		resp.RevokedAt = shared.TimestampProto(rev.RevokedAt)
+		resp.Reason = rev.Reason
 	}
 	return resp, nil
+}
+
+// isRevokedLookupFailed — сбой хранилища на `IsRevoked`: спрашивающему —
+// фиксированный текст без текста хранилища, оператору — запись с половиной
+// ответа, которая не ответила (`record` — запись отзыва по идентификатору,
+// `family` — семейство выпуска), и причиной. Идентификатор удостоверения в
+// журнал не идёт: коррелировать сбой хранилища с ним незачем.
+func isRevokedLookupFailed(ctx context.Context, part string, err error) error {
+	slog.ErrorContext(ctx, "session revocation lookup failed",
+		slog.String("part", part), slog.String("err", err.Error()))
+	return status.Error(codes.Internal, "session revocation lookup failed")
 }
 
 // ListByUser — sync admin/audit enumeration of active revocations for a user,

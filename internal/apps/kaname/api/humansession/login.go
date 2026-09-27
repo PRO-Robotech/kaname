@@ -447,12 +447,15 @@ func (uc *LoginUseCase) refuseSecondFactor(ctx context.Context, pr preparedPrese
 // проигравший гонку повтор выдачи не получает.
 func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time, factor *preparedPresentation) (LoginOutput, settledPresentation, error) {
 	var settled settledPresentation
+	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
+	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
+	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.methods, uc.logger, user.ID)
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
 		return LoginOutput{}, settled, err
 	}
 	defer func() { _ = w.Rollback(ctx) }()
-	presented := []assurance.Presentation{assurance.PasswordPresented()}
+	methods := []string{assurance.MethodPassword.String()}
 	if factor != nil {
 		settled, err = uc.factor.settle(ctx, w, *factor, true)
 		if err != nil {
@@ -461,11 +464,11 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 		if settled.verdict != verdictMatched {
 			return LoginOutput{}, settled, nil
 		}
-		presented = presentationsOf(withMethod([]string{assurance.MethodPassword.String()}, factor.method))
+		methods = withMethod(methods, factor.method)
 	}
 	s, bearer, err := IssueSession(ctx, w, IssueInput{
 		User:      user,
-		Presented: presented,
+		Presented: presentationsOf(methods),
 		At:        now,
 		TTL:       uc.ttl,
 		EmitAudit: true,
@@ -473,7 +476,13 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 	if err != nil {
 		return LoginOutput{}, settled, err
 	}
-	if err := w.ResetFailures(ctx, FailureByAddress, AddressKey(string(user.Email))); err != nil {
+	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
+	// личности факторов (Ф12 Р7 ред. 11, Ф3 Р10 ред. 11): вход паролём при
+	// заведённом факторе выдаёт сессию «1» — успех, но не завершённый вход.
+	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		AddressKey: AddressKey(string(user.Email)), Presented: methods,
+	}); err != nil {
 		return LoginOutput{}, settled, err
 	}
 	if err := w.Commit(ctx); err != nil {

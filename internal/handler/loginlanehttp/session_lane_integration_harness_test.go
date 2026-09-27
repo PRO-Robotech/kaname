@@ -129,6 +129,9 @@ type sessionLane struct {
 	resolver iamv1.InternalHumanSessionServiceClient
 	// secondFactor — зависимости, из которых собрана церемония.
 	secondFactor humansession.SecondFactorDeps
+	// limits — профиль частоты, с которым собраны глаголы: пробы, судящие
+	// счёт по адресу, печатают его и строят «Дано» от него, а не от литерала.
+	limits humansession.Limits
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -226,7 +229,7 @@ func newSessionLane(t *testing.T) *sessionLane {
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
-		secondFactor: secondFactor,
+		secondFactor: secondFactor, limits: limits,
 	}
 }
 

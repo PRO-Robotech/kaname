@@ -127,14 +127,24 @@ func (w *RegistrationWriter) InsertLoginMethod(ctx context.Context, m domain.Log
 
 // Get читает способ человека данного вида.
 func (r *LoginMethodRepo) Get(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return getLoginMethod(ctx, r.pool, userID, kind)
+}
+
+// getLoginMethod — ЕДИНСТВЕННЫЙ оператор чтения строки способа входа по человеку
+// и виду. Исполняет его пул (глагол `Get`) либо транзакция вызывающего: писатель
+// сессии (`humanSessionWriter.LoginMethod`) читает им заведённое тем же
+// соединением, что пишет, — завершение восстановления спрашивает о способах
+// входа только ПОСЛЕ применения кода (задача PRO-Robotech/kaname#305). Живёт в
+// этом файле, потому что называет таблицу секрета.
+func getLoginMethod(ctx context.Context, q loginMethodQuerier, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	if userID == "" {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
 	}
 	if err := kind.Validate(); err != nil {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	q := `SELECT verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2`
-	m, err := scanLoginMethod(r.pool.QueryRow(ctx, q, string(userID), string(kind)), userID, kind)
+	sql := `SELECT verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2`
+	m, err := scanLoginMethod(q.QueryRow(ctx, sql, string(userID), string(kind)), userID, kind)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrNotFound, "Login method %s of user %s not found", kind, userID)
 	}

@@ -5,9 +5,10 @@
 // нему судят оба гейта материала способа входа: гейт дерева Go — значения
 // строковых литералов и их склеек (`login_verifier_containment.go`), гейт
 // схемы — тексты подпрограмм базы (`internal/repo/kaname/pg`
-// `TestLoginVerifierStaysInsideTheSchema`). Разбор ОДИН: вторая копия
-// разошлась бы с первой молча, и расхождение пришлось бы ровно на то
-// написание, которое знает только одна из копий.
+// `TestLoginVerifierStaysInsideTheSchema`). Его же лексемы судят посылку
+// гейта единственного писателя счёта (`failure_reset_sole_writer.go`). Разбор
+// ОДИН: вторая копия разошлась бы с первой молча, и расхождение пришлось бы
+// ровно на то написание, которое знает только одна из копий.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ — ГРАММАТИКА, А НЕ ПОДСТРОКА
@@ -154,6 +155,8 @@ type sqlTok struct {
 	name, form string
 	// readings — у строки: прочтения содержимого (одно либо два).
 	readings []string
+	// op — у прочей лексемы: её знак (`;`, `=`, `<`, `.`, `(`, `$` параметра).
+	op byte
 }
 
 // sqlStrKind — вид строковой константы: от него зависит раскрытие содержимого.
@@ -199,7 +202,7 @@ func sqlTokens(src string) []sqlTok {
 			tag := sqlDollarTag(src[i:])
 			if tag == "" {
 				// `$1` — параметр, а не начало строки в долларах.
-				toks, i = append(toks, sqlTok{kind: sqlTokOther}), i+1
+				toks, i = append(toks, sqlTok{kind: sqlTokOther, op: c}), i+1
 				continue
 			}
 			body := src[i+len(tag):]
@@ -246,7 +249,7 @@ func sqlTokens(src string) []sqlTok {
 		case c == '|' && strings.HasPrefix(src[i:], "||"):
 			toks, i = append(toks, sqlTok{kind: sqlTokConcat}), i+2
 		default:
-			toks, i = append(toks, sqlTok{kind: sqlTokOther}), i+1
+			toks, i = append(toks, sqlTok{kind: sqlTokOther, op: c}), i+1
 		}
 	}
 	return toks

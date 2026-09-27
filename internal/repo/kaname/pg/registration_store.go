@@ -45,15 +45,20 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 }
 
 // Writer — одна транзакция трёх следствий.
+//
+// Транзакцию открывает открытие писателя сессии (`beginHumanSessionWriter`),
+// а не эта дверь: писатель сессии встроен сюда целиком, снятие записи с
+// отзывом выданного в ней этой транзакции представимо, и уровень её назван
+// там же, где у остальных дверей писателя сессии (kaname#316).
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	w, err := beginHumanSessionWriter(ctx, s.pool)
 	if err != nil {
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
-		humanSessionWriter: &humanSessionWriter{tx: tx},
-		mirror:             &writeTx{readTx: readTx{tx: tx}},
-		tx:                 tx,
+		humanSessionWriter: w,
+		mirror:             &writeTx{readTx: readTx{tx: w.tx}},
+		tx:                 w.tx,
 	}, nil
 }
 

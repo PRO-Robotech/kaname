@@ -40,6 +40,17 @@ func (s stubKeys) PublishedSet(context.Context) ([]domain.PublishedKey, error) {
 type stubRevocations struct {
 	before map[string]time.Time
 	err    error
+	// families — ответ о семействе выпуска по идентификатору: true — семейство
+	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
+	families  map[string]bool
+	familyErr error
+}
+
+func (s stubRevocations) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	if s.familyErr != nil {
+		return false, s.familyErr
+	}
+	return s.families[jti], nil
 }
 
 func (s stubRevocations) RevokedBefore(_ context.Context, subject string) (time.Time, bool, error) {

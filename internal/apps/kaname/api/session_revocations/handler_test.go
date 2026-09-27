@@ -87,6 +87,20 @@ type fakeReader struct {
 	listErr   error
 	gotJTI    string
 	gotUserID string
+
+	// families — ответ о семействе выпуска по идентификатору: true — семейство
+	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
+	families    map[string]bool
+	familyErr   error
+	familyAsked []string
+}
+
+func (f *fakeReader) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	f.familyAsked = append(f.familyAsked, jti)
+	if f.familyErr != nil {
+		return false, f.familyErr
+	}
+	return f.families[jti], nil
 }
 
 func (f *fakeReader) IsRevoked(_ context.Context, jti string) (bool, error) {

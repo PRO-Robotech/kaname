@@ -328,6 +328,10 @@ type manifestListing struct {
 // ради которого полоса заведена, и вернул бы его невидимо: на машине без git
 // проверка продолжала бы «работать». Полосу выбирает вызывающий ПО ИМЕНИ, и
 // сама она не переключается.
+//
+// # Индекс, не знающий под корнем ни одного файла, — та же НАХОДКА
+//
+// Об этом — [untrackedRootFinding].
 func listManifestsInIndex(root string, accept func(name string) bool) manifestListing {
 	var out manifestListing
 	tree, err := treecorpus.NewTree(root)
@@ -336,6 +340,10 @@ func listManifestsInIndex(root string, accept func(name string) bool) manifestLi
 			"%s: перечень путей не взят у индекса: %v — непрочитанное есть НАХОДКА, "+
 				"а не «проверять нечего»: полоса дерева читает состав КОММИТА, и откат "+
 				"на диск отдал бы вердикт, зависящий от рабочего каталога", root, err))
+		return out
+	}
+	if tree.Count() == 0 {
+		out.Findings = append(out.Findings, untrackedRootFinding(root))
 		return out
 	}
 	// Слепая зона считается КАТАЛОГАМИ, а не файлами под ними: перепись обеих

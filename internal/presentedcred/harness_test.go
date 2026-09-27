@@ -232,6 +232,31 @@ type stubRevocations struct {
 	before map[string]time.Time
 	err    error
 	asked  int
+
+	// families — ответ о семействе выпуска по идентификатору: true — семейство
+	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
+	families  map[string]bool
+	familyErr error
+}
+
+func (s *stubRevocations) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.familyErr != nil {
+		return false, s.familyErr
+	}
+	return s.families[jti], nil
+}
+
+// revokeFamily отзывает семейство, которому принадлежит выпуск с этим
+// идентификатором.
+func (s *stubRevocations) revokeFamily(jti string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.families == nil {
+		s.families = map[string]bool{}
+	}
+	s.families[jti] = true
 }
 
 func (s *stubRevocations) RevokedBefore(_ context.Context, subject string) (time.Time, bool, error) {
