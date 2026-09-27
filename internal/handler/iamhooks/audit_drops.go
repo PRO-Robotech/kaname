@@ -37,8 +37,13 @@ import (
 // Виды записей журнала, которые пишут полосы хука выдачи. Набор ЗАКРЫТ.
 const (
 	// AuditTokenIssued — хук выпуска отдал утверждения токена.
+	// #nosec G101 -- это имя вида записи журнала, а не секрет: значение читают
+	// приёмник величин и журнал аудита. Правило срабатывает на подстроку "token"
+	// в имени константы.
 	AuditTokenIssued = "authn.token.issued"
 	// AuditTokenDenied — хук выпуска отказал в токене.
+	// #nosec G101 -- это имя вида записи журнала, а не секрет; причина та же,
+	// что у AuditTokenIssued.
 	AuditTokenDenied = "authn.token.denied"
 	// AuditRefreshIssued — хук обновления отдал утверждения токена.
 	AuditRefreshIssued = "authn.refresh.issued"
