@@ -156,9 +156,12 @@ func saKeysWarnings(t *testing.T, cfg config.Config) []map[string]any {
 }
 
 // differingFacts — пути полей настройки, в которых два входа расходятся.
-// Структуры обходятся вглубь, прочее сравнивается целиком. Неэкспортируемое
-// поле перечислить нечем, поэтому оно судится общим сравнением в
-// requireOneFactTwin, а не молчит.
+// Структуры обходятся вглубь, прочее сравнивается целиком.
+//
+// Предпосылка разбора — все поля настройки экспортируемы (сегодня так: полей
+// 127, неэкспортируемых 0). Неэкспортируемое поле сравнить нечем, и молчать о
+// нём нельзя: оно называется расхождением ВСЕГДА, и проба близнеца краснеет с
+// его путём, пока разбор его не узнает.
 func differingFacts(a, b reflect.Value, path string) []string {
 	if a.Kind() != reflect.Struct {
 		if reflect.DeepEqual(a.Interface(), b.Interface()) {
@@ -169,12 +172,13 @@ func differingFacts(a, b reflect.Value, path string) []string {
 	var out []string
 	for i := 0; i < a.NumField(); i++ {
 		f := a.Type().Field(i)
-		if !f.IsExported() {
-			continue
-		}
 		name := f.Name
 		if path != "" {
 			name = path + "." + f.Name
+		}
+		if !f.IsExported() {
+			out = append(out, name+" (неэкспортируемое, не сравнимо)")
+			continue
 		}
 		out = append(out, differingFacts(a.Field(i), b.Field(i), name)...)
 	}
@@ -186,10 +190,6 @@ func differingFacts(a, b reflect.Value, path string) []string {
 func requireOneFactTwin(t *testing.T, caseIn, twin config.Config, fact string) {
 	t.Helper()
 	facts := differingFacts(reflect.ValueOf(caseIn), reflect.ValueOf(twin), "")
-	if len(facts) == 0 && !reflect.DeepEqual(caseIn, twin) {
-		t.Fatalf("близнец расходится с входом случая в неэкспортируемом поле — факт %s "+
-			"не единственный, а какой второй, отсюда не перечислить", fact)
-	}
 	if len(facts) != 1 || facts[0] != fact {
 		t.Fatalf("близнец обязан менять ровно один факт %s против входа случая, меняет %d: %v",
 			fact, len(facts), facts)
@@ -331,7 +331,6 @@ func runMainChild(t *testing.T, overrides map[string]string) ([]map[string]any, 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	// #nosec G204 -- исполняется этот же тестовый бинарь, аргументы из этой пробы.
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring$")
 	env := []string{mainChildEnv + "=1"}
 	for _, kv := range os.Environ() {
