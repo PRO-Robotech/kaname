@@ -220,6 +220,8 @@ type ceremonyWorld struct {
 	session ceremonySession
 	// ic1 — ACTIVE, цели R, R2, RQ; ic2 — ACTIVE, цель R; gone — DELETING.
 	ic1, ic2, gone *ceremonyClient
+	// census — перепись исходов поверхности церемонии, собранной миром.
+	census *ceremonyhttp.Census
 }
 
 // lockedBuffer — журнал пробы: обработчики пишут в него конкурентно.
@@ -630,6 +632,7 @@ func (w *ceremonyWorld) buildSurface() {
 	mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
 	mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 	w.surface = mux
+	w.census = ceremony.Census
 	w.surfaceAuth = issuingSurfaceAuthOf(mux)
 }
 

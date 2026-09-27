@@ -237,6 +237,38 @@ type stubRevocations struct {
 	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
 	families  map[string]bool
 	familyErr error
+
+	// unverified — строки людей, чей текущий адрес НЕ подтверждён (kaname#456,
+	// Р5а): второй вопрос правила предъявления. Человек стенда по умолчанию —
+	// строка человека с подтверждённым адресом.
+	unverified map[string]bool
+	marksErr   error
+}
+
+// PersonMarks — из названных идентификаторов строки людей и их отметка.
+func (s *stubRevocations) PersonMarks(_ context.Context, ids []string) (map[string]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.marksErr != nil {
+		return nil, s.marksErr
+	}
+	out := map[string]bool{}
+	for _, id := range ids {
+		if id == testSubject || s.unverified[id] {
+			out[id] = !s.unverified[id]
+		}
+	}
+	return out, nil
+}
+
+// unmark — адрес человека id не подтверждён.
+func (s *stubRevocations) unmark(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unverified == nil {
+		s.unverified = map[string]bool{}
+	}
+	s.unverified[id] = true
 }
 
 func (s *stubRevocations) FamilyRevoked(_ context.Context, jti string) (bool, error) {
