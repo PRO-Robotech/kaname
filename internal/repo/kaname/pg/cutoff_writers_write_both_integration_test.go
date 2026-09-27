@@ -101,6 +101,7 @@ func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 time.Minute,
 	}))
 	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
@@ -171,6 +172,7 @@ func TestIntegration_EndingOneSessionRevokesItsFamily(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 time.Minute,
 	}))
 	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{

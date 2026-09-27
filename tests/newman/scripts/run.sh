@@ -318,8 +318,9 @@ aggregate_verdict() {
 # below and resurface as a phantom suite with frozen pass/fail numbers (this is
 # exactly how `authz-deny-rerun` — a 511-failure ghost — leaked into the
 # newman-e2e gate). out/ is .gitignore'd; this rm is the belt to that suspenders.
-# Targeted rm (not `rm -rf out`) so an out/suite.log already opened by
-# deploy/scripts/newman-parallel.sh is not unlinked from under it.
+# Targeted rm (not `rm -rf out`) so an out/suite.log already opened by a parallel
+# driver (in the platform tree: PRO-Robotech/kacho:deploy/scripts/newman-parallel.sh)
+# is not unlinked from under it.
 mkdir -p out
 rm -f out/*.json out/*.cli out/*.rc out/summary.txt out/coverage.txt 2>/dev/null || true
 
@@ -384,13 +385,27 @@ elif ! command -v python3 >/dev/null 2>&1; then
 elif ! python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" --seed-exists 2>/dev/null; then
   echo "[ceremony] УСЛОВИЕ НЕ СОЗДАНО: волна церемонии НЕ активирована —"
   echo "[ceremony]   объявление $_CEREMONY_DECL есть, а посева церемонии нет"
+  # Перечень называет САМО объявление — долгом, числом и поимённо; выписанный
+  # здесь второй перечень разошёлся бы с ним молча. Отказ печати — тоже исход.
+  python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" --suite tests/newman --debt \
+    || echo "[ceremony]   долг НЕ напечатан: объявление не ответило (код $?) — перечень не назван"
 else
-  _n_before="${#DELEGATED[@]}"
-  while IFS= read -r _cs; do
-    [[ -n "$_cs" ]] && DELEGATED+=("$_cs")
-  done < <(python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" \
-             --suite tests/newman --stems 2>/dev/null)
-  echo "[ceremony] волна церемонии активна — делегировано коллекций: $(( ${#DELEGATED[@]} - _n_before ))"
+  # КОД ПЕРЕЧНЯ ЧИТАЕТСЯ, а не теряется в подстановке процесса: упавший вывод
+  # иначе напечатался бы строкой «волна активна — делегировано коллекций: 0», и
+  # коллекции, которым нужен человек, молча ушли бы в общую волну под машинным.
+  _cer_rc=0
+  _cer_out="$(python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" \
+                --suite tests/newman --stems)" || _cer_rc=$?
+  if [[ "$_cer_rc" -ne 0 ]]; then
+    echo "[ceremony] УСЛОВИЕ НЕ СОЗДАНО: посев церемонии есть, а перечень волны не выведен (код $_cer_rc) —"
+    echo "[ceremony]   вычитать нечего, и коллекции идут в ОБЩЕЙ волне под машинным"
+  else
+    _n_before="${#DELEGATED[@]}"
+    while IFS= read -r _cs; do
+      [[ -n "$_cs" ]] && DELEGATED+=("$_cs")
+    done <<< "$_cer_out"
+    echo "[ceremony] волна церемонии активна — делегировано коллекций: $(( ${#DELEGATED[@]} - _n_before ))"
+  fi
 fi
 _is_delegated() {
   local s
@@ -711,29 +726,31 @@ fi
 # спрятать не может: оно снимает ложный MISSING у прогонщика, а не проверку.
 #
 #   authz-failclosed — нужен ВЫКЛЮЧЕННЫЙ store прав; scripts/run-failclosed.sh
-#     сворачивает его в ноль, гоняет коллекцию и поднимает обратно. Волну
-#     запускает deploy/scripts/newman-parallel.sh (WAVE 3, после всех суит) либо
-#     отдельный шаг CI — соседям выключенный store прав сломал бы всё.
+#     сворачивает его в ноль, гоняет коллекцию и поднимает обратно. В дереве
+#     платформы волну запускал PRO-Robotech/kacho:deploy/scripts/newman-parallel.sh
+#     (WAVE 3, после всех суит); в конвейере службы шага этой волны нет, и исход
+#     коллекции записан держателем в ведомости переписи долга (kaname#415) —
+#     соседям выключенный store прав сломал бы всё.
 #
 #   волна ЦЕРЕМОНИИ — коллекции, часть шагов которых требует ЧЕЛОВЕЧЕСКОГО
 #     вызывающего (аккаунт принадлежит пользователю by construction; уровень
 #     аутентификации поднимается только церемонией входа). Машинный посев такого
 #     предъявителя не производит, поэтому сейчас эти шаги идут под ЧУЖИМ
 #     принципалом: часть падает, часть зеленеет по неверной причине. Их гоняет
-#     scripts/run-ceremony.sh (WAVE 4 в deploy/scripts/newman-parallel.sh) — волна,
-#     которая условие СОЗДАЁТ посевом церемонии.
+#     scripts/run-ceremony.sh — волна, которая условие СОЗДАЁТ посевом церемонии;
+#     в конвейере службы её шаг заводится вместе с посевом (kaname#398).
 #
-#     Перечень НЕ выписан здесь и не будет: он ВЫВОДИТСЯ из дерева единственным
-#     объявлением (PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py) на каждом запуске,
-#     по двум основаниям сразу — переменная предъявителя, которую посев не куёт, и
-#     форма запроса, требующая человека структурно. Выписанный перечень в этом
-#     репозитории уже расходился с деревом.
+#     Перечень НЕ выписан здесь и не будет: он ВЫВОДИТСЯ из дерева объявлением
+#     tests/authz-fixtures/ceremony_credentials.py на каждом запуске — по ключу
+#     предъявителя, которого машинный посев не куёт, тем же предикатом, что у
+#     переписи долга (.github/scripts/newman-suite-debt.py, `ceremony_need`).
+#     Выписанный перечень в этом репозитории уже расходился с деревом.
 #
 #     Вычитание включается РОВНО ТОГДА, когда посев церемонии существует в дереве
-#     (артефакт стадии S2). Пока его нет, условие создавать нечем — коллекции идут
-#     здесь, как и раньше, а долг называется ЧИСЛОМ там, где планируются волны
-#     (`ceremony_credentials.py --debt`). Предикат внешний: его выполняет чужая
-#     стадия, а не эта правка, — поэтому он не может быть отменён ею же.
+#     (`ceremony_credentials.py --seed-path`). Пока его нет, условие создавать
+#     нечем — коллекции идут здесь, как и раньше, а долг печатается ЧИСЛОМ и
+#     поимённо (`ceremony_credentials.py --debt`) ветвью выше. Предикат внешний:
+#     его выполняет посев, а не эта правка, — поэтому он не может быть отменён ею же.
 stems=()
 if [[ ${#SERVICES[@]} -gt 0 ]]; then
   stems=("${SERVICES[@]}")

@@ -12,6 +12,7 @@ import (
 	"github.com/PRO-Robotech/corelib/oauthceremony"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // FamilyRevoker — писатель отзыва семейства слоя доступа. Реализует
@@ -76,7 +77,8 @@ func (g *Grants) revoke(ctx context.Context, grantID string, reason oauthceremon
 	}
 	rows, err := g.families.RevokeFamily(ctx, grantID, word)
 	if err != nil {
-		return oauthceremony.StoreOutcome{}, fmt.Errorf("ceremonyport: revoke family %s: %w", grantID, err)
+		return oauthceremony.StoreOutcome{}, fmt.Errorf("ceremonyport: revoke family %s: %w", grantID,
+			iamerr.OnEndedCall(ctx, err))
 	}
 	return oauthceremony.RowsTouched(rows), nil
 }

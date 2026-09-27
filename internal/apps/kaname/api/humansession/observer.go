@@ -34,6 +34,13 @@ const (
 	// отказов второго фактора `not-enrolled` считает отказы ПОД СЕССИЕЙ и на
 	// входе не растёт.
 	LoginOutcomeSecondFactorNotEnrolled LoginOutcome = "second-factor-not-enrolled"
+	// LoginOutcomeBeforeCutoff — пароль сошёлся, а момент входа не позже
+	// стоящей отсечки личности (принудительный выход, завершение
+	// восстановления, сброс второго фактора распорядителем): вход накрыт ею, и
+	// сессии не выдаёт (kaname#385, Р1, Р3). Наружу — тот же один отказ, что на
+	// неверный пароль, попыткой не считается: удостоверение предъявлено верно,
+	// и принудительный выход иначе приближал бы человека к отказу по частоте.
+	LoginOutcomeBeforeCutoff LoginOutcome = "before-cutoff"
 )
 
 // LoginOutcomes — закрытый перечень исходов входа.
@@ -42,7 +49,7 @@ func LoginOutcomes() []LoginOutcome {
 		LoginOutcomeIssued, LoginOutcomeNoRow, LoginOutcomeBlocked, LoginOutcomeRateLimited,
 		LoginOutcomeStoreFailed, LoginOutcomeVerifierIssue, LoginOutcomeMismatched,
 		LoginOutcomeMaterialNone, LoginOutcomeCapacity, LoginOutcomeSecondFactorRefused,
-		LoginOutcomeSecondFactorNotEnrolled,
+		LoginOutcomeSecondFactorNotEnrolled, LoginOutcomeBeforeCutoff,
 	}
 }
 

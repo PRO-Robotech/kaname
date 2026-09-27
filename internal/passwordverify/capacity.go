@@ -86,3 +86,8 @@ func (g *capacityGate) acquireWait(ctx context.Context) (func(), error) {
 		<-g.slots
 	}, nil
 }
+
+// Capacity — объявленная ёмкость: сколько проверок идут одновременно. Её
+// читает полоса, делящая проверяющего с полосой входа (сверка секрета клиента
+// церемонии), чтобы занимать не больше своей доли.
+func (v *Verifier) Capacity() int { return cap(v.capacity.slots) }

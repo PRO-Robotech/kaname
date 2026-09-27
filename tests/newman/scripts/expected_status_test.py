@@ -29,6 +29,13 @@
 «названных невозможными» в производимое множество, и запись, которой больше нечего
 запрещать, снята вместе со своим предметом.
 
+ПРОИЗВОДИТЕЛЕЙ ДВА, И У ВТОРОГО СВОЁ МНОЖЕСТВО. Точка авторизации поверхности
+выдачи (`/iam/v1/authorize`, церемония `authorization_code`) — рукописный
+обработчик, а не отображение кода отказа: она отвечает перенаправлением `302`,
+которого REST-фронт не производит ничем. Поэтому `302` законен ровно в модуле,
+чей шаг её адресует (`AUTHORIZE_REDIRECT`, `addresses_authorize`), и остаётся
+находкой везде, где её нет.
+
 ГРАНИЦА ГЕЙТА ОБЪЯВЛЕНА, А НЕ УМОЛЧАНА. Обходится каталог кейсов ЭТОГО набора.
 Статус, порождённый ОБЩИМ слоем генератора (`tests/newman/kacholib`), сюда не
 попадает — и там такой случай есть: помощник «метод не разрешён» перечисляет
@@ -79,6 +86,31 @@ NAMED_IMPOSSIBLE = {
     422: "не производится ни одним кодом отображения и ни одним исходом маршрутизатора",
 }
 
+# ИСХОД ТОЧКИ АВТОРИЗАЦИИ — производитель другой, и множество у него своё.
+#
+# Перенаправление с кодом (RFC 6749 §4.1.2; приёмка LINE-A-1, сценарии 02, 06,
+# 29, 30) отвечает РУКОПИСНЫЙ обработчик поверхности выдачи, а не отображение
+# кода отказа: REST-фронт 302 не производит ничем, и в множестве выше его нет по
+# праву. Поэтому статус законен РОВНО в модуле, чей шаг адресует точку
+# авторизации, — модуль без неё, ждущий 302, ждёт исхода без производителя.
+#
+# Адресация судится КОДОМ модуля: строковой константой пути, разобранной
+# деревом, а не подстрокой текста. Путь в комментарии шагом не является, а
+# глагол фронта `…/authorize:check` — другой производитель с другим множеством.
+AUTHORIZE_PATH = "/iam/v1/authorize"
+AUTHORIZE_REDIRECT = {302}
+
+
+def addresses_authorize(tree) -> bool:
+    """Есть ли у модуля шаг, адресующий точку авторизации (с запросом или без)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            v = node.value
+            if v == AUTHORIZE_PATH or v.startswith(AUTHORIZE_PATH + "?"):
+                return True
+    return False
+
+
 CASES_DIR = pathlib.Path(__file__).resolve().parents[1] / "cases"
 
 # Форма 2: рукописное сравнение кода с одним значением.
@@ -89,7 +121,11 @@ RE_ONEOF = re.compile(r"pm\.response\.code[^;]{0,200}?to\.be\.oneOf\(\s*\[([\d,\
 
 
 def collect(path):
-    """Ожидаемые статусы одного модуля кейсов, по формам записи."""
+    """Ожидаемые статусы одного модуля кейсов, по формам записи.
+
+    Возвращает пару: статусы по формам и признак «модуль адресует точку
+    авторизации» — у неё своё множество (`AUTHORIZE_REDIRECT`).
+    """
     text = path.read_text(encoding="utf-8")
     by_form = {"assert_status": [], "литерал": [], "полоса": []}
 
@@ -117,7 +153,7 @@ def collect(path):
             raw = raw.strip()
             if raw:
                 by_form["полоса"].append(int(raw))
-    return by_form
+    return by_form, addresses_authorize(tree)
 
 
 def audit(cases_dir):
@@ -128,15 +164,21 @@ def audit(cases_dir):
     findings = []
     for path in modules:
         census["модулей"] += 1
-        by_form = collect(path)
+        by_form, authorize = collect(path)
         for form, codes in by_form.items():
             census[form] += len(codes)
             for code in codes:
                 seen.add(code)
                 if code in PRODUCIBLE:
                     continue
-                why = NAMED_IMPOSSIBLE.get(
-                    code, "статуса нет ни среди отображаемых кодов, ни среди исходов маршрутизатора")
+                if code in AUTHORIZE_REDIRECT and authorize:
+                    continue
+                if code in AUTHORIZE_REDIRECT:
+                    why = (f"{code} производит только точка авторизации ({AUTHORIZE_PATH}, "
+                           f"перенаправление с кодом), а ни один шаг модуля её не адресует")
+                else:
+                    why = NAMED_IMPOSSIBLE.get(
+                        code, "статуса нет ни среди отображаемых кодов, ни среди исходов маршрутизатора")
                 findings.append(f"{path.name}: ожидается {code} ({form}) — {why}")
     census["различных статусов"] = len(seen)
     return census, findings

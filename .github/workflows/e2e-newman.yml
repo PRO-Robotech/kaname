@@ -589,6 +589,7 @@ jobs:
             --service iam-list-visibility \
             --service iam-flat-authz-vbc \
             --service docker-lane-credential-kind \
+            --service iam-membership-create \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt

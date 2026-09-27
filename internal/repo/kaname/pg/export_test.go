@@ -34,6 +34,7 @@ const (
 	LockCeremonyClientSQL        = lockCeremonyClientSQL
 	LockSessionOfCeremonySQL     = lockSessionOfCeremonySQL
 	InsertFamilyOnLiveSessionSQL = insertFamilyOnLiveSessionSQL
+	SessionCutOffBySubjectSQL    = sessionCutOffBySubjectSQL
 )
 
 // WithClientSecretEntropy — исполнитель заведения с НАЗВАННЫМ источником
