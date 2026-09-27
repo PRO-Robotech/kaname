@@ -70,6 +70,9 @@ type BuildConfig struct {
 	TokenTTL time.Duration
 	// BodyCeiling — потолок тела запроса.
 	BodyCeiling int64
+	// Ceremony — полосы церемонии OAuth на этом эндпоинте; nil — церемония на
+	// посадке не собрана (см. `clienttokenhttp.Config.Ceremony`).
+	Ceremony clienttokenhttp.CeremonyLane
 	// PeerTimeout — предел времени КАЖДОГО внешнего вызова этого пути: чтения
 	// реестра, допуска однократности и чтения отсечки отзыва-всех.
 	//
@@ -153,6 +156,7 @@ func New(
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling: cfg.BodyCeiling,
 		Logger:      cfg.Logger,
+		Ceremony:    cfg.Ceremony,
 	}, verifier, issue)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)

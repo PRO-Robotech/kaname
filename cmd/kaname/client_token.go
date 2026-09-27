@@ -63,6 +63,7 @@ func buildClientTokenEndpoint(
 	cfg config.Config,
 	signer *tokensigner.Signer,
 	logger *slog.Logger,
+	ceremony *ceremonySurface,
 ) (*clienttokenhttp.Handler, error) {
 	if !cfg.AuthN.ClientToken.Enabled {
 		return nil, nil
@@ -78,6 +79,14 @@ func buildClientTokenEndpoint(
 	// правила объявлены один раз (token_claims.go), и правка любого из них
 	// доезжает до всех сторон by construction.
 	claims := newAssertionClaimsComposer(pool, cfg)
+
+	// Полосы церемонии (`authorization_code`, `refresh_token`) — на ЭТОМ же
+	// эндпоинте, когда церемония собрана (`ceremony.go`). nil-указатель в
+	// интерфейс не кладётся: пустой интерфейс и есть «церемонии нет».
+	var ceremonyLane clienttokenhttp.CeremonyLane
+	if ceremony != nil && ceremony.Token != nil {
+		ceremonyLane = ceremony.Token
+	}
 
 	// Отсечку отзыва-всех владельца сборка от пула читает адаптером ТОГО ЖЕ
 	// типа, что у полос хука (`hooks_mux.go`), — своим экземпляром над тем же
@@ -102,6 +111,7 @@ func buildClientTokenEndpoint(
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
 		PeerTimeout:              credentialLanePeerTimeout,
+		Ceremony:                 ceremonyLane,
 	}, signer, claims)
 }
 

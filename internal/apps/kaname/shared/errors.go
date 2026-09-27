@@ -14,6 +14,7 @@
 package shared
 
 import (
+	"context"
 	stderrors "errors"
 	"strings"
 
@@ -49,6 +50,10 @@ const UnavailableMessage = "service unavailable"
 //
 // Fallback'и:
 //   - если err уже несет gRPC status (не codes.Unknown) — пропускаем через;
+//   - если в цепочке конец контекста (`context.Canceled` /
+//     `context.DeadlineExceeded`) и ни одна полоса, называющая свою причину,
+//     не опознана — Unavailable с фиксированным текстом (kaname#383); код
+//     хранилища на кончившемся контексте судит [MapRepoErrAt];
 //   - если err-текст начинается с "Illegal argument" — YC-style InvalidArgument
 //     (parity с verbatim-формой error-сообщений);
 //   - иначе — Internal с переданным err-текстом (StripSentinel снимает
@@ -118,6 +123,21 @@ func MapRepoErr(err error) error {
 		// сосед, и гейт прав, поэтому «database unavailable» на проводе был бы
 		// собственной маленькой ложью в двух случаях из трёх.
 		return status.Error(codes.Unavailable, UnavailableMessage)
+	case stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded):
+		// Конец контекста — состояние, которое проходит, а не поломка службы
+		// (kaname#383): вызов оборван сроком либо отменой, и повтор на свежем
+		// сроке осмыслен. `Internal` сказал бы обратное, и клиент, решающий по
+		// коду, не повторил бы. Текст — фиксированный текст недоступности:
+		// цепочка ведёт к драйверу, её читатель — журнал ([LogMappedErr]).
+		//
+		// Ветвь стоит ПОСЛЕ полос, называющих свою причину, и ДО внутренней:
+		// ошибка контекста, обёрнутая внутренним признаком, — всё ещё конец
+		// контекста, а ответ «строки нет» или «ввод негоден» о сроке не говорит.
+		//
+		// Это ПЕРВАЯ из двух форм конца контекста — ошибка контекста в цепочке.
+		// Вторую, код хранилища без ошибки контекста, по цепочке не отличить от
+		// поломки; её судит состояние контекста вызова — [MapRepoErrAt].
+		return status.Error(codes.Unavailable, UnavailableMessage)
 	case stderrors.Is(err, iamerr.ErrInternal):
 		// hardening-invariant #1: INTERNAL carries a FIXED opaque text, never the
 		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,
@@ -132,6 +152,39 @@ func MapRepoErr(err error) error {
 	// (INTERNAL = fixed text, no leak). The detail stays in
 	// the error chain for server-side logging.
 	return status.Error(codes.Internal, "internal error")
+}
+
+// MapRepoErrAt — [MapRepoErr], судящий ВТОРУЮ форму конца контекста: отказ
+// хранилища кодом состояния, пришедший, когда контекст вызова уже кончился
+// (kaname#383).
+//
+// # Почему по состоянию контекста, а не по ошибке
+//
+// Пул службы доводит отмену до сервера (`CancelRequest`, `corelib/db.NewPool`),
+// и оператор снимается там строкой состояния `57014` — без ошибки контекста в
+// цепочке. По ошибке её не отличить от снятия по собственному потолку
+// оператора (`statement_timeout` пула), которое повтором не лечится: перевод
+// всякого `57014` в недоступность обещал бы повтор там, где повторять нечего.
+// Различает их ровно один факт — кончился ли контекст, на котором шёл вызов.
+//
+// Поэтому ctx — ТОТ контекст, на котором исполнялся вызов хранилища, а не
+// ближайший под рукой: конец запроса не переклассифицирует отказ вызова,
+// шедшего на отвязанном сроке (так же судит принудительный выход,
+// `internal_iam`, по сроку своего шага).
+//
+// # Что переклассифицируется
+//
+// Только `Internal`. Ответ, называющий свою причину (строки нет, ввод негоден,
+// конфликт), о сроке не говорит и остаётся собой. Отказ кодом хранилища на
+// кончившемся контексте читается концом контекста, и решение правдиво в обе
+// стороны: повтор на свежем сроке либо пройдёт, либо упрётся в тот же отказ и
+// получит его уже на живом контексте.
+func MapRepoErrAt(ctx context.Context, err error) error {
+	gerr := MapRepoErr(err)
+	if gerr != nil && ctx.Err() != nil && status.Code(gerr) == codes.Internal {
+		return status.Error(codes.Unavailable, UnavailableMessage)
+	}
+	return gerr
 }
 
 // MapValidationErr — обертка для результатов `domain.<Type>.Validate()`

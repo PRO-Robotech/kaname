@@ -189,9 +189,22 @@ func (r *UserTokenRevocationRepo) UpsertRevokeAllTx(ctx context.Context, tx pgx.
 // marker exists, (zero, false, nil) when none. An error is surfaced so the
 // caller can fail-closed (the refresh-hook MUST deny on a lookup error).
 func (r *UserTokenRevocationRepo) RevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
-	const q = `SELECT revoke_before FROM user_token_revocations WHERE user_id = $1`
+	return revokedBeforeQ(ctx, r.pool, userID)
+}
+
+// revokedBeforeSQL — чтение стоящей отсечки личности. Оператор ОДИН на дерево:
+// его исполняют читатель отсечки пулом (`RevokedBefore`) и захват строки
+// личности транзакцией выдачи входа (`humanSessionWriter.LockPersonForLogin`,
+// kaname#385), так что вход судит ту же отсечку, которую видят остальные её
+// читатели.
+const revokedBeforeSQL = `SELECT revoke_before FROM user_token_revocations WHERE user_id = $1`
+
+// revokedBeforeQ — `revokedBeforeSQL` на пуле либо в открытой транзакции:
+// (cutoff, true, nil) — отсечка есть, (zero, false, nil) — нет; ошибка
+// поднимается, чтобы вызывающий отказал, а не принял её за «отсечки нет».
+func revokedBeforeQ(ctx context.Context, q rowQuerier, userID string) (time.Time, bool, error) {
 	var before time.Time
-	err := r.pool.QueryRow(ctx, q, userID).Scan(&before)
+	err := q.QueryRow(ctx, revokedBeforeSQL, userID).Scan(&before)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false, nil
 	}

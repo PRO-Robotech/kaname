@@ -244,6 +244,60 @@ kaname-svc.requireNoRetiredPortKnobs — СНЯТЫЙ КЛЮЧ ПОСАДКИ О
 {{- end -}}
 
 {{/*
+kaname-svc.blockEnabled — ВЫКЛЮЧАТЕЛЬ БЛОКА ЧАРТА, ОДНИМ ПРАВИЛОМ НА ВСЕ БЛОКИ
+(задача #391). Принимает `(list $ "<координата блока>")`, например
+`(list $ "authn.tokenSigning")`; отдаёт `true`, когда `<координата>.enabled`
+есть булево true, и пустую строку, когда булево false.
+
+ЧТО ОН ЗАПРЕЩАЕТ. Условие `if $x.enabled` судит ИСТИННОСТЬ, а не булевость:
+непустая строка истинна при любом тексте. Поэтому `false`, поданное строкой
+(`--set-string`, `--set-literal`, `enabled: "false"` в накладке), включало блок,
+который оператор выключал, — а у блока токен-эндпоинта вдобавок обходило отказ
+«own без эндпоинта». Снятый ключ (`null`) выключал блок молча. Здесь любой вид,
+кроме булева, — отказ рендера с координатой и тем, что пришло.
+
+ПОЧЕМУ ПРАВИЛО ОДНО. Выключатель читался в пяти местах шаблонов пятью
+условиями, и каждое было отдельным местом об одном предмете. Координата
+выключателя здесь и находит значение, и называет его в отказе — разойтись им
+не на чем. Читать `.enabled` мимо правила запрещает проба
+`block_switch_is_boolean_test.go`: она обходит шаблоны, выводит выключатели из
+умолчаний чарта и сверяет их с вызовами правила в обе стороны.
+*/}}
+{{- define "kaname-svc.blockEnabled" -}}
+{{- $root := index . 0 -}}
+{{- $at := index . 1 -}}
+{{- $cur := $root.Values -}}
+{{- $found := true -}}
+{{- range $seg := splitList "." $at -}}
+{{- if $found -}}
+{{- if kindIs "map" $cur -}}
+{{- if hasKey $cur $seg -}}
+{{- $cur = index $cur $seg -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $kind := "absent" -}}
+{{- $v := false -}}
+{{- if and $found (kindIs "map" $cur) -}}
+{{- if hasKey $cur "enabled" -}}
+{{- $v = index $cur "enabled" -}}
+{{- $kind = kindOf $v -}}
+{{- end -}}
+{{- end -}}
+{{- if ne $kind "bool" -}}
+{{- $got := "ключ не задан" -}}
+{{- if ne $kind "absent" -}}{{- $got = printf "получено: %s %s" $kind (toJson $v) -}}{{- end -}}
+{{- fail (printf "чарт службы прав не ставится: выключатель %s.enabled — не булево значение (%s).\n\nБлок включается только значением true и выключается только значением false. Условие по истинности приняло бы любую непустую строку за «включён»: «false», поданное строкой (--set-string, --set-literal, enabled: \"false\" в накладке), включало бы блок, который выключали, а снятый ключ выключал бы его молча.\n\nЧТО СДЕЛАТЬ: задайте выключатель булевым значением — --set %s.enabled=false (либо =true) или enabled: false без кавычек в накладке." $at $got $at) -}}
+{{- end -}}
+{{- if and (eq $kind "bool") $v }}true{{ end -}}
+{{- end -}}
+
+{{/*
 kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН-ЭНДПОИНТА
 ПЛАТФОРМЫ И ВКЛЮЧЁННЫЙ ЭНДПОИНТ БЕЗ ЕГО ВЕЛИЧИН НЕ СОБИРАЮТСЯ (задача #337).
 
@@ -259,6 +313,20 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 неё, негде. Недостающие называются ОДНИМ ПЕРЕЧНЕМ, а не `required` на каждой, —
 тот же довод, что у перечня координат выше.
 
+Третье — ТЕНЬ ручки стража в окружении пода (задача #392). Страж судит ключи
+значений, а карты `env` и `secrets` уходят в под как есть, и переменная
+перекрывает файл настроек. Посадка `env.KANAME_AUTHN__IDENTITY_PROVIDER=own`
+без эндпоинта проходила бы рендер, и отказ приходил бы уже в кластере. Выбран
+ОДИН АДРЕС, а не суд обеих форм: суд обеих повторил бы здесь правило
+старшинства процесса (переменная перекрывает файл), то есть завёл бы второе
+место об одном предмете, — а посадку читают ещё карта настроек и правила
+тревоги. Поэтому переменная с именем ручки стража в любом источнике окружения
+пода — отказ, называющий ключ значений. Перечень ручек ниже сверяется с
+таблицей стража старта в обе стороны, а источники окружения пода выводятся
+разбором всех шаблонов чарта и подтверждаются рендером с пробным ключом
+(`pod_env_source_recognizer_test.go`): карта, чей ключ стал именем переменной
+пода и которой нет в обходе ниже, — находка суда теней.
+
 ОБЛАСТЬ НАЗВАНА: судится только ОБЪЯВЛЕННОСТЬ величин. Их согласованность
 (адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
 тела положителен) судит страж старта (`ClientTokenConfig.Validate`), и второго
@@ -267,13 +335,33 @@ kaname-svc.requireClientTokenEndpoint — ПОСАДКА `own` БЕЗ ТОКЕН
 требует, чтобы отказ называл каждую строку.
 */}}
 {{- define "kaname-svc.requireClientTokenEndpoint" -}}
+{{- $canonical := dict
+      "KANAME_AUTHN__IDENTITY_PROVIDER" "authn.identityProvider"
+      "KANAME_AUTHN__CLIENT_TOKEN__ENABLED" "authn.clientToken.enabled"
+      "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES" "authn.clientToken.allowedAudiences"
+      "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE" "authn.clientToken.defaultAudience"
+      "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL" "authn.clientToken.tokenTtl"
+      "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING" "authn.clientToken.bodyCeiling" -}}
+{{- $shadows := list -}}
+{{- range $source := list "env" "secrets" -}}
+{{- $carried := index $.Values $source | default dict -}}
+{{- range $name := keys $canonical | sortAlpha -}}
+{{- if hasKey $carried $name -}}
+{{- $shadows = append $shadows (printf "  %s.%s — её адрес в профиле: %s" $source $name (get $canonical $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $shadows -}}
+{{- fail (printf "чарт службы прав не ставится: окружение пода несёт ручки стража посадки — %d.\n\nСтраж шаблона судит посадку own и токен-эндпоинт по ключам значений, а окружение пода уходит процессу как есть и перекрывает файл настроек: объявленная переменной, ручка обошла бы отказ установки, и отказ пришёл бы уже в кластере. Адрес у каждой из них один — ключ значений.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите переменную из карты env (secrets) и задайте ключ значений — накладкой -f либо --set; образец накладки own — INSTALL.md §1." (len $shadows) (join "\n" $shadows)) -}}
+{{- end -}}
 {{- $authn := .Values.authn | default dict -}}
 {{- $ct := $authn.clientToken | default dict -}}
 {{- $posture := $authn.identityProvider -}}
-{{- if and $posture (eq (toString $posture) "own") (not $ct.enabled) -}}
+{{- $ctOn := include "kaname-svc.blockEnabled" (list $ "authn.clientToken") -}}
+{{- if and $posture (eq (toString $posture) "own") (not $ctOn) -}}
 {{- fail "чарт службы прав не ставится: authn.identityProvider=own при невключённом authn.clientToken.enabled.\n\nНа посадке own ключ служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у этой посадки нет. Страж старта процесса такую посадку не поднимает (authn.identity-provider=own при authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его четыре величины (INSTALL.md §1, §3), — либо объявите authn.identityProvider=external." -}}
 {{- end -}}
-{{- if $ct.enabled -}}
+{{- if $ctOn -}}
 {{- $missing := list -}}
 {{- if not $ct.allowedAudiences -}}
 {{- $missing = append $missing "  authn.clientToken.allowedAudiences — authn.client-token.allowed-audiences: перечень адресатов,\n                                       которым платформа чеканит удостоверения, через запятую; адресат\n                                       докерной полосы (apiServer.registryToken.service) обязан в него входить." -}}
