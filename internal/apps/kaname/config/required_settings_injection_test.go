@@ -139,7 +139,7 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		},
 		{
 			name: "безусловная строка объявлена условной",
-			table: mutate(cloneTable(), "authn.hydra-jwks-url", func(s *config.RequiredSetting) {
+			table: mutate(cloneTable(), "authn.client-token.enabled", func(s *config.RequiredSetting) {
 				s.Conditional = true
 			}),
 			wantFinding: false,
@@ -162,15 +162,17 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		{
 			name: "применимость УЖЕ антецедента: страж требует, поле молчит",
 			table: mutate(cloneTable(), "authn.presented-credential.enabled", func(s *config.RequiredSetting) {
-				s.WhenOwnPublicRESTFront = false
+				s.Lanes = []config.IdentityProvider{config.IdentityProviderExternal}
 			}),
 			wantFinding: true,
 			coordinate:  "presented-credential",
-			why: "поднятый собственный публичный REST-фронт требует читателя предъявленного " +
-				"удостоверения на ЛЮБОЙ посадке (PresentedCredentialConfig.ValidateBinding), а поле " +
-				"объявляет строку нужной только посадке own. Оператор внешней полосы сканирует " +
-				"столбец применимости, делает вывод «моей посадке не требуется» — и процесс не " +
-				"стартует",
+			why: "поле объявляет строку нужной только снятой посадке external и поднятому собственному " +
+				"публичному REST-фронту, а посадка own, у которой нет края платформы, требует читателя " +
+				"предъявленного удостоверения и без фронта (PresentedCredentialConfig.ValidateBinding). " +
+				"Оператор сканирует столбец применимости, делает вывод «без фронта моей посадке не " +
+				"требуется» — и процесс не стартует. Прежде случай строился на посадке external с " +
+				"поднятым фронтом; посадка снята (PRO-Robotech/corelib#30), и строка, оставленная " +
+				"помеченной под неё, — ровно тот дефект, который после снятия и ожидаем",
 		},
 		{
 			name: "применимость ШИРЕ антецедента: поле требует, страж молчит",
@@ -184,18 +186,14 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 				"Т1 ловит это с другой стороны — снятая строка обязана дать отказ на КАЖДОЙ посадке, " +
 				"где объявлена применимой",
 		},
-		{
-			name: "условность объявлена посадочной там, где строка требуется САМА",
-			table: mutate(cloneTable(), "authn.token-signing.enabled", func(s *config.RequiredSetting) {
-				s.UnconditionalOn = nil
-			}),
-			wantFinding: true,
-			coordinate:  "authn.token-signing.enabled",
-			why: "у величины ДВА производителя отказа с разными антецедентами: на посадке own её " +
-				"требует полосное правило само по себе, при поднятом фронте — читатель, то есть уже " +
-				"после него. Снятая разметка объявляет строку безусловной ВЕЗДЕ, и Т3 требует от " +
-				"пустого профиля отказа там, где страж молчит by construction",
-		},
+		// ЗДЕСЬ СТОЯЛ СЛУЧАЙ «условность объявлена посадочной там, где строка
+		// требуется САМА» (authn.token-signing.enabled без UnconditionalOn). Его
+		// дефект на единственной законной посадке НЕ ПРЕДСТАВИМ (#424): он
+		// строился на различии посадок external и own, а посадка external снята
+		// фундаментом (PRO-Robotech/corelib#30). На посадках own ± фронт строка
+		// требуется сама по себе на обеих, и снятая разметка UnconditionalOn
+		// объявляет ровно то, что есть, — различать нечего. Разметка снимается
+		// вместе с полосностью (#363).
 		{
 			name: "законный близнец применимости: пометка сходится со стражем",
 			table: mutate(cloneTable(), "authn.presented-credential.audience", func(s *config.RequiredSetting) {

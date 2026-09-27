@@ -235,9 +235,6 @@ func TestAlertRulesInjection_PostureMarkerSplitsThePage(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"SampleStuck", "LaneOnly"}, promised("own"),
 		"установке `own` обещаны общие правила И правила её полосы — и НЕ правила хуков: их слушателя там нет")
-	require.ElementsMatch(t, []string{"SampleStuck", "HooksOnly"}, promised("external"),
-		"установке `external` обещаны общие правила и правила хуков — и НЕ правила полосы `own`: "+
-			"под ней они звонили бы вечно")
 	require.ElementsMatch(t, []string{"SampleStuck", "HooksOnly"}, promised(""),
 		"профилю без посадки обещаны общие правила и правила хуков: слушатель хуков процесс при нём поднимает")
 }
@@ -250,11 +247,13 @@ func TestAlertRulesInjection_UnknownLaneMarkerIsRefused(t *testing.T) {
 	t.Parallel()
 	block := []alertRule{{Alert: "Lane", Expr: "kaname_lane_total > 1"}}
 
-	_, err := posturedRules{"": block, "extrnal": block}.forPosture("external")
+	// Посадка обещания — незаявленная: снятую `external` (#424) разбор не
+	// принимает, а полосу хуков процесс поднимает именно при незаявленной.
+	_, err := posturedRules{"": block, "extrnal": block}.forPosture("")
 	require.Error(t, err, "пометка вне словаря прошла сверку молча")
 	require.Contains(t, err.Error(), `"extrnal"`, "отказ не называет пометку, которой нет в словаре")
 
-	twin, err := posturedRules{"": block, "external": block}.forPosture("external")
+	twin, err := posturedRules{"": block, hooksLanePageMarker: block}.forPosture("")
 	require.NoError(t, err, "близнец: законная пометка обещание строит")
 	require.Len(t, twin, 2, "близнец: общие правила и правила полосы")
 }

@@ -31,6 +31,15 @@
 // is that the moment a profile says https, the anchor must be pinned with it —
 // otherwise the address reads as hardened while the process verifies against the
 // system roots, which an internal-CA certificate never chains to.
+//
+// СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ СУДЯТСЯ НАПРЯМУЮ (задача #424). Посадка
+// `external` снята фундаментом (PRO-Robotech/corelib#30), и проверка старта
+// отвергает её раньше требований её полосы (Provider.Validate): через
+// Config.Validate эти стражи больше не достижимы. Строки таблицы, которые их
+// зовут, живут до снятия полосы целиком (#363), и пробы их содержимого ходят
+// в строки напрямую (externalLaneRefusal), а не через проверку старта —
+// иначе положительные случаи зеленели бы на полосе `own`, где эти стражи не
+// предъявляются вовсе.
 package config_test
 
 import (
@@ -55,9 +64,9 @@ func TestValidate_Production_RefusesDerivedProviderJWKSURL(t *testing.T) {
 	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
 	cfg := publicHopCfg(config.ModeProduction)
 	cfg.AuthN.HydraJWKSURL = ""
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal when the JWKS upstream address is derived")
+		t.Fatal("external-lane rows = nil, want refusal when the JWKS upstream address is derived")
 	}
 	if !strings.Contains(err.Error(), "hydra-jwks-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
@@ -70,9 +79,9 @@ func TestValidate_Production_RefusesDerivedProviderTokenURL(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
 	cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 	cfg.AuthN.HydraTokenURL = ""
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal when the token endpoint address is derived")
+		t.Fatal("external-lane rows = nil, want refusal when the token endpoint address is derived")
 	}
 	if !strings.Contains(err.Error(), "hydra-token-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
@@ -111,9 +120,9 @@ func TestValidate_Production_RefusesTLSPublicHopWithoutAnchor(t *testing.T) {
 			cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 			cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
 			tc.set(&cfg)
-			err := cfg.Validate()
+			err := externalLaneRefusal(cfg)
 			if err == nil {
-				t.Fatal("Validate() = nil, want refusal for an https hop with no pinned anchor")
+				t.Fatal("external-lane rows = nil, want refusal for an https hop with no pinned anchor")
 			}
 			if !strings.Contains(err.Error(), tc.wantHas) {
 				t.Fatalf("the refusal must name the anchor setting, got: %q", err.Error())
@@ -128,9 +137,9 @@ func TestValidate_Production_RefusesNonAbsolutePublicHop(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
 	cfg.AuthN.HydraJWKSURL = "kacho-umbrella-hydra-public:4444/.well-known/jwks.json"
 	cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil, want refusal for an address that is not an absolute http(s) URL")
+		t.Fatal("external-lane rows = nil, want refusal for an address that is not an absolute http(s) URL")
 	}
 	if !strings.Contains(err.Error(), "hydra-jwks-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
@@ -145,8 +154,8 @@ func TestValidate_Production_AcceptsDeclaredPlaintextPublicHops(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
 	cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 	cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil for declared plaintext public hops", err)
+	if err := externalLaneRefusal(cfg); err != nil {
+		t.Fatalf("external-lane rows = %v, want nil for declared plaintext public hops", err)
 	}
 }
 
@@ -158,8 +167,8 @@ func TestValidate_Production_AcceptsTLSPublicHopsWithAnchor(t *testing.T) {
 	cfg.AuthN.HydraJWKSCAFile = "/etc/kaname/tls/server/ca.crt"
 	cfg.AuthN.HydraTokenURL = "https://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
 	cfg.AuthN.HydraTokenCAFile = "/etc/kaname/tls/server/ca.crt"
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil for https public hops with pinned anchors", err)
+	if err := externalLaneRefusal(cfg); err != nil {
+		t.Fatalf("external-lane rows = %v, want nil for https public hops with pinned anchors", err)
 	}
 }
 
@@ -169,8 +178,8 @@ func TestValidate_Production_AcceptsEnvDeclaredPublicHops(t *testing.T) {
 	t.Setenv("KANAME_HYDRA_JWKS_URL", "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json")
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token")
 	cfg := publicHopCfg(config.ModeProduction)
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil when the addresses come from the ENV override", err)
+	if err := externalLaneRefusal(cfg); err != nil {
+		t.Fatalf("external-lane rows = %v, want nil when the addresses come from the ENV override", err)
 	}
 }
 

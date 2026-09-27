@@ -58,6 +58,11 @@ type SettingsCensus struct {
 	// нельзя было отличить от нуля.
 	OwnPublicFront int
 	Condition      int
+	// WithdrawnOnly — строк, обязательных только на посадках вне словаря
+	// (снятых, PRO-Robotech/corelib#30). Документ их не печатает: объявить такую
+	// посадку нельзя (#424). Печатается отдельной величиной, чтобы «не
+	// напечатано» было отличимо от «не прочитано».
+	WithdrawnOnly int
 }
 
 func (c SettingsCensus) String() string {
@@ -71,8 +76,9 @@ func (c SettingsCensus) String() string {
 		parts = append(parts, fmt.Sprintf("%s %d", l, c.ByLane[l]))
 	}
 	return fmt.Sprintf("строк %d · на любой посадке %d · полосных: %s · сверх полос при поднятом "+
-		"собственном публичном фронте %d · подаются только файлом %d · условных %d",
-		c.Rows, c.Anywhere, strings.Join(parts, ", "), c.OwnPublicFront, c.FileOnly, c.Condition)
+		"собственном публичном фронте %d · подаются только файлом %d · условных %d · "+
+		"только на снятых посадках, не напечатано %d",
+		c.Rows, c.Anywhere, strings.Join(parts, ", "), c.OwnPublicFront, c.FileOnly, c.Condition, c.WithdrawnOnly)
 }
 
 // BuildSettingsBlock рендерит блок обязательных величин из таблицы стража.
@@ -93,6 +99,14 @@ func BuildSettingsBlock(table []config.RequiredSetting) (string, []string, Setti
 	b.WriteString("|---|---|---|---|\n")
 
 	for _, s := range table {
+		// СТРОКА СНЯТОЙ ПОСАДКИ НЕ ПЕЧАТАЕТСЯ (#424). Посадку вне словаря
+		// объявить нельзя — разбор её не производит, проверка старта отвергает
+		// число мимо разбора, — поэтому величина, обязательная только на ней,
+		// оператору не нужна ни на одной посадке, которую он может выбрать.
+		if s.OnlyOnWithdrawnPostures() {
+			census.WithdrawnOnly++
+			continue
+		}
 		// ПРИМЕНИМОСТЬ БЕРЁТСЯ ЦЕЛИКОМ, а не собирается здесь из полос.
 		//
 		// Перечень полос — лишь ПОЛОВИНА антецедента, который судит страж:

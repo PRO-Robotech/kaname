@@ -14,10 +14,9 @@
 // быть на неё неспособен: рендер отказывает и называет обе ручки — ту же пару,
 // что называет страж процесса.
 //
-// Вторая ось — величины включённого эндпоинта. Профиля `own` в поставке нет
-// (INSTALL.md §1): перевод — накладка оператора, и объявить величины негде,
-// кроме неё. Поэтому включённый эндпоинт без величин тоже отвергается рендером,
-// одним перечнем. Шаблон судит только ОБЪЯВЛЕННОСТЬ; согласованность величин
+// Вторая ось — величины включённого эндпоинта. Боевой профиль объявляет их
+// заглушками (#424, INSTALL.md §1), накладка оператора их переопределяет, и
+// снятая любая из них — отказ рендера, одним перечнем. Шаблон судит только ОБЪЯВЛЕННОСТЬ; согласованность величин
 // (адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
 // тела положителен) остаётся предметом стража старта, и второго места о ней
 // здесь не заводится.
@@ -25,17 +24,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
 //
-//	О1  own без эндпоинта — отказ рендера с обеими ручками; ручка не задана
-//	    профилем и ручка задана ложью — два входа одного отказа;
+//	О1  own без эндпоинта — отказ рендера с обеими ручками;
 //	О2  законный близнец: own с эндпоинтом и его величинами — рендер проходит,
 //	    блок в карте настроек, и вход принимает страж старта;
-//	О3  external без блока — рендер проходит, блока нет, явная ложь и явный
-//	    external дают тот же рендер байт в байт;
 //	О4  включённый эндпоинт без величин — отказ рендера; ПОПУЛЯЦИЯ величин
 //	    берётся у стража (`config.RequiredSettings`), а не выписывается: каждая
 //	    недостающая названа, названная — только она.
 //
 // Пода проба НЕ поднимает: об установке в кластере она не утверждает ничего.
+//
+// Случая О3 («external без блока — рендер проходит, явная ложь и явный external
+// дают тот же рендер») здесь больше нет (#424): посадка `external` снята
+// фундаментом (PRO-Robotech/corelib#30), боевой профиль стоит на `own` и
+// эндпоинт включает, и поставляемого рендера без блока не существует. По той
+// же причине в О1 нет входа «ручка не задана профилем» — профиль её задаёт, — а
+// О4 судит одну посадку `own`.
 package deploy_test
 
 import (
@@ -97,8 +100,6 @@ func TestChartRefusesOwnPostureWithoutTheClientTokenEndpoint(t *testing.T) {
 		name string
 		sets []string
 	}{
-		// Боевой профиль ручку не задаёт; ложь приходит из базовых значений.
-		{name: "ручка эндпоинта не задана профилем", sets: []string{identityProviderKnob + "=own"}},
 		{name: "ручка эндпоинта задана ложью", sets: []string{identityProviderKnob + "=own", clientTokenEnabledKnob + "=false"}},
 	}
 	for _, c := range cases {
@@ -141,28 +142,6 @@ func TestChartRendersOwnPostureWithTheClientTokenEndpoint(t *testing.T) {
 			"под с этим входом не поднимется")
 	t.Logf("перепись: накладка %d ключей · документов рендера %d · величин блока %d",
 		len(ownPostureOverlay), in.Docs, len(want))
-}
-
-// ── О3 ───────────────────────────────────────────────────────────────────────
-
-func TestExternalPostureRenderCarriesNoClientTokenBlock(t *testing.T) {
-	asDelivered := renderStandaloneChart(t, chartProfiles)
-	in := readRenderedInput(t, asDelivered)
-	require.Equal(t, "external", configString(renderedConfigTree(t, asDelivered), "authn.identity-provider"),
-		"боевой профиль больше не стоит на `external` — близнец проверял бы не ту посадку")
-	require.NotContains(t, in.ConfigBody, "client-token",
-		"под `external` с невключённым эндпоинтом карта настроек несёт блок authn.client-token")
-
-	for _, sets := range [][]string{
-		{clientTokenEnabledKnob + "=false"},
-		{identityProviderKnob + "=external"},
-		{identityProviderKnob + "=external", clientTokenEnabledKnob + "=false"},
-	} {
-		require.Equalf(t, asDelivered, renderStandaloneChart(t, chartProfiles, sets...),
-			"рендер боевого профиля с %v отличается от поставляемого: названная явно ложь "+
-				"обязана значить то же, что умолчание", sets)
-	}
-	t.Logf("перепись: байт рендера %d · близнецов, совпавших байт в байт, 3", len(asDelivered))
 }
 
 // ── О4 ───────────────────────────────────────────────────────────────────────
@@ -209,8 +188,14 @@ func TestChartRefusesAnEnabledClientTokenWithoutItsValues(t *testing.T) {
 	rows := clientTokenValueRows(t)
 	var renders int
 
-	for _, posture := range []string{"own", "external"} {
-		base := []string{identityProviderKnob + "=" + posture, clientTokenEnabledKnob + "=true"}
+	// Величины, которые боевой профиль объявляет заглушками, снимаются явно:
+	// иначе «без величины» проверяло бы профиль, в котором она есть.
+	unset := make([]string, 0, len(rows))
+	for _, r := range rows {
+		unset = append(unset, valuesKeyOf(r.Key)+"=null")
+	}
+	for _, posture := range []string{"own"} {
+		base := append([]string{identityProviderKnob + "=" + posture, clientTokenEnabledKnob + "=true"}, unset...)
 
 		t.Run(posture+"/ни одной величины", func(t *testing.T) {
 			out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, base...)
@@ -255,5 +240,5 @@ func TestChartRefusesAnEnabledClientTokenWithoutItsValues(t *testing.T) {
 				"рендером — шаблон строже стража:\n%s", out)
 		})
 	}
-	t.Logf("перепись: величин эндпоинта в таблице стража %d · посадок 2 · рендеров %d", len(rows), renders)
+	t.Logf("перепись: величин эндпоинта в таблице стража %d · посадок 1 · рендеров %d", len(rows), renders)
 }

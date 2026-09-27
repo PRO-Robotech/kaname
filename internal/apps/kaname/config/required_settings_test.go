@@ -79,12 +79,24 @@ import (
 // стража целиком») ловит это само, как только посадка оказывается в прогоне:
 // строка, объявленная неприменимой там, где страж её требует, не подаётся — и
 // профиль отвергается с её отказом в тексте.
-var landingsUnderTest = []config.Landing{
-	{Provider: config.IdentityProviderExternal},
-	{Provider: config.IdentityProviderExternal, OwnPublicRESTFront: true},
-	{Provider: config.IdentityProviderOwn},
-	{Provider: config.IdentityProviderOwn, OwnPublicRESTFront: true},
-}
+//
+// # Почему посадок две, а не четыре (#424)
+//
+// Посадка `external` снята фундаментом (PRO-Robotech/corelib#30): профиль,
+// объявивший её, не собирается — разбор её не принимает, — а число мимо
+// разбора отвергает проверка старта. Посадка, которую нельзя объявить, не
+// посадка, и прогон по ней судил бы отказ разбора вместо строк таблицы.
+// Посадки выводятся из словаря, а не выписываются: вернувшееся значение
+// словаря приедет в прогон само.
+var landingsUnderTest = func() []config.Landing {
+	var out []config.Landing
+	for _, p := range config.IdentityProviderValues() {
+		out = append(out,
+			config.Landing{Provider: p},
+			config.Landing{Provider: p, OwnPublicRESTFront: true})
+	}
+	return out
+}()
 
 // ownPublicRESTFrontSample — адрес, которым посадка поднимает собственный
 // публичный REST-фронт.
@@ -302,7 +314,7 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 		if strings.TrimSpace(s.Refusal) == "" {
 			findings = append(findings, s.Key+": не названа подстрока отказа — доказать строку прогоном нечем")
 		}
-		if strings.TrimSpace(s.SampleValue(config.Landing{Provider: config.IdentityProviderExternal})) == "" {
+		if strings.TrimSpace(s.SampleValue(config.Landing{Provider: config.IdentityProviderOwn})) == "" {
 			findings = append(findings, s.Key+": нет годного значения — подать величину прогоном нечем")
 		}
 		if s.Supply == config.SupplyEnv && strings.TrimSpace(s.Env) == "" {

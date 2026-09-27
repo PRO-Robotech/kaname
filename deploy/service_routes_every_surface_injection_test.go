@@ -229,7 +229,11 @@ spec:
 func TestSurfaceRouteCensusCanFail(t *testing.T) {
 	roster := readSurfaceRoster(t)
 	dir := chartCopyWithService(t, serviceBeforeTheFix)
-	rendered := renderChartAt(t, dir, "values.yaml", "values.prod.yaml")
+	// Посадка снята со входа: слушатель вебхуков процесс поднимает при любой
+	// посадке, кроме `own` (kaname#360), а боевой профиль стоит на `own` (#424).
+	// Инъекция судит все поверхности перечня разом, поэтому вход — тот, при
+	// котором поднята каждая.
+	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"}, identityProviderKnob+"=")
 
 	raised, routed, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.NotEmpty(t, findings,
@@ -267,7 +271,10 @@ func TestSurfaceRouteStaysSilentOnSurfacesThatAreNotRaised(t *testing.T) {
 func TestSurfaceRouteCatchesAnInternalDoorOnThePublicObject(t *testing.T) {
 	roster := readSurfaceRoster(t)
 	dir := chartCopyWithService(t, serviceWithInternalOnPublic)
-	rendered := renderChartAt(t, dir, "values.yaml", "values.prod.yaml")
+	// Посадка снята со входа по той же причине, что в переписи выше: иначе
+	// законный близнец — вебхуки на своём объекте — молчал бы оттого, что
+	// слушателя нет, а не оттого, что маршрут верен.
+	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"}, identityProviderKnob+"=")
 
 	_, _, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.NotEmpty(t, findings,

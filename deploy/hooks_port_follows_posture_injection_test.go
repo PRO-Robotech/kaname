@@ -79,7 +79,9 @@ func findingsAbout(findings []string, sub string) []string {
 func TestHooksPortGate_TwinCopyIsSilentOnEveryPosture(t *testing.T) {
 	roster := readSurfaceRoster(t)
 	dir := chartCopy(t)
-	for _, p := range []config.IdentityProvider{config.IdentityProviderUnset, config.IdentityProviderExternal, config.IdentityProviderOwn} {
+	// Посадки — незаявленная и словарь; снятую `external` объявить чарту нечем
+	// (PRO-Robotech/corelib#30, #424).
+	for _, p := range append([]config.IdentityProvider{config.IdentityProviderUnset}, config.IdentityProviderValues()...) {
 		_, findings := judgeHooksPosture(t, roster, injectedRender(t, dir, p), p)
 		require.Emptyf(t, findings, "неиспорченная копия при посадке %s дала находки — близнец не законен:\n%s",
 			p, strings.Join(findings, "\n"))
@@ -102,8 +104,11 @@ func TestHooksPortGate_FindsTheUnconditionalPortUnderOwn(t *testing.T) {
 		"не каждое правило о хуках под own названо:\n%s", strings.Join(own, "\n"))
 	require.Lenf(t, own, 2+c.hookRules, "находок не о предмете инъекции:\n%s", strings.Join(own, "\n"))
 
-	_, ext := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderExternal), config.IdentityProviderExternal)
-	require.Emptyf(t, ext, "та же копия под external обязана молчать — порт там законен:\n%s", strings.Join(ext, "\n"))
+	// Близнец — незаявленная посадка: процесс слушатель там поднимает, и
+	// безусловный порт законен. Прежде близнецом стояла посадка `external`;
+	// она снята (PRO-Robotech/corelib#30, #424), и объявить её чарту нечем.
+	_, unset := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderUnset), config.IdentityProviderUnset)
+	require.Emptyf(t, unset, "та же копия при незаявленной посадке обязана молчать — порт там законен:\n%s", strings.Join(unset, "\n"))
 }
 
 func TestHooksPortGate_FindsThePortDroppedWhereTheProcessRaisesIt(t *testing.T) {
@@ -122,8 +127,11 @@ func TestHooksPortGate_FindsThePortDroppedWhereTheProcessRaisesIt(t *testing.T) 
 			"что у порта:\n%s", strings.Join(unset, "\n"))
 	require.Lenf(t, unset, 3, "находок не о предмете инъекции:\n%s", strings.Join(unset, "\n"))
 
-	_, ext := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderExternal), config.IdentityProviderExternal)
-	require.Emptyf(t, ext, "та же копия под external обязана молчать:\n%s", strings.Join(ext, "\n"))
+	// Близнец — посадка `own`: процесс слушатель там не поднимает, и суженное
+	// условие чарта его тоже снимает — расхождения нет. Прежде близнецом стояла
+	// посадка `external`; она снята (PRO-Robotech/corelib#30, #424).
+	_, own := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderOwn), config.IdentityProviderOwn)
+	require.Emptyf(t, own, "та же копия под own обязана молчать:\n%s", strings.Join(own, "\n"))
 }
 
 func TestHooksPortGate_FindsAProbeBackOnTheHooksPort(t *testing.T) {
@@ -133,10 +141,12 @@ func TestHooksPortGate_FindsAProbeBackOnTheHooksPort(t *testing.T) {
 	// служит близнецом внутри того же рендера.
 	patchInCopy(t, dir, "templates/deployment.yaml", "port: metrics", "port: http-hooks")
 
-	_, ext := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderExternal), config.IdentityProviderExternal)
-	require.Lenf(t, findingsAbout(ext, "readinessProbe нацелена на :9092"), 1,
-		"проба на порту вебхуков под external не названа:\n%s", strings.Join(ext, "\n"))
-	require.Lenf(t, ext, 1, "живость на диагностике — близнец, о ней находок быть не должно:\n%s", strings.Join(ext, "\n"))
+	// Посадка, где порт вебхуков есть, — незаявленная: `external` снята
+	// (PRO-Robotech/corelib#30, #424).
+	_, unset := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderUnset), config.IdentityProviderUnset)
+	require.Lenf(t, findingsAbout(unset, "readinessProbe нацелена на :9092"), 1,
+		"проба на порту вебхуков при незаявленной посадке не названа:\n%s", strings.Join(unset, "\n"))
+	require.Lenf(t, unset, 1, "живость на диагностике — близнец, о ней находок быть не должно:\n%s", strings.Join(unset, "\n"))
 
 	_, own := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderOwn), config.IdentityProviderOwn)
 	require.Lenf(t, findingsAbout(own, `readinessProbe нацелена на порт "http-hooks", которого под не объявляет`), 1,
@@ -180,7 +190,8 @@ func TestHooksPortGate_FindsHookRulesNarrowedToExternal(t *testing.T) {
 		strings.Join(unset, "\n"))
 	require.Lenf(t, unset, 1, "находок не о предмете инъекции — порт здесь верен:\n%s", strings.Join(unset, "\n"))
 
-	for _, p := range []config.IdentityProvider{config.IdentityProviderExternal, config.IdentityProviderOwn} {
+	// Близнец — посадка `own`; `external` снята (PRO-Robotech/corelib#30, #424).
+	for _, p := range []config.IdentityProvider{config.IdentityProviderOwn} {
 		_, twin := judgeHooksPosture(t, roster, injectedRender(t, dir, p), p)
 		require.Emptyf(t, twin, "та же копия при посадке %s обязана молчать:\n%s", p, strings.Join(twin, "\n"))
 	}
