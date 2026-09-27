@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
@@ -31,15 +32,10 @@ const resourceKind = "interactive client"
 // Способы аутентификации клиента на токен-эндпоинте — словарь схемы
 // (`interactive_clients_auth_method_ck`, kaname#317). Способ решает реестр,
 // который держит клиента; use-case судит согласие способа с материалом.
-const (
-	// AuthMethodNone — публичный клиент: секрета нет, владение доказывает PKCE.
-	AuthMethodNone = "none"
-	// AuthMethodClientSecretBasic — конфиденциальный клиент, секрет в
-	// заголовке Basic (RFC 6749 §2.3.1).
-	AuthMethodClientSecretBasic = "client_secret_basic"
-	// AuthMethodClientSecretPost — конфиденциальный клиент, секрет в теле формы.
-	AuthMethodClientSecretPost = "client_secret_post"
-)
+//
+// Слова берутся у фундамента (`oauthceremony.ClientAuth*`), а не заводятся
+// здесь: колонку пишет реестр этой службы, а читает церемония фундамента
+// (`oauth_ceremony_vaults.go`), и два словаря одной колонки разошлись бы молча.
 
 // grantTypesInteractive — the ONLY shape this resource registers. A constant and
 // not a request field: the resource exists precisely to produce this shape, and
@@ -275,6 +271,17 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
 		return nil, gerr
 	}
+	// failTraced — отказ пути, чья причина — НАШ текст: ответ реестра (в том
+	// числе срыв чеканки секрета), несогласие тройки, сборка тела ответа. Наружу
+	// у него фиксированный текст INTERNAL, поэтому причина уходит в журнал
+	// службы общим путём (`shared.LogMappedErr`) — иначе у дефекта реестра нет
+	// следа нигде. Отказ ВСТАВКИ сюда не идёт намеренно: его причина — текст
+	// хранилища, и IC-SECRET-13 (б) требует, чтобы отказ вне словаря не эхал
+	// его и в журнал (`TestIntegration_IC13b_InternalInsertRefusalEchoesNothing`).
+	failTraced := func(err error) (*operationpb.Operation, error) {
+		_ = shared.LogMappedErr(ctx, uc.logger, "InteractiveClient.Create", err, shared.MapRepoErr(err))
+		return fail(err)
+	}
 
 	pc, err := uc.provider.Register(ctx, ProviderClientSpec{
 		Name:                   string(c.Name),
@@ -284,14 +291,14 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		GrantTypes:             grantTypesInteractive,
 	})
 	if err != nil {
-		return fail(err)
+		return failTraced(err)
 	}
 	// Согласие тройки «способ ⟺ материал ⟺ секрет» — ДО вставки (задача #405).
 	// Схема держит только одно направление; без этой проверки возможен клиент
 	// со способом секретом, которому нечего предъявить никогда.
 	if err := secretMaterialAgrees(pc); err != nil {
 		uc.releaseProviderClient(ctx, pc.ClientID, "registry answered a secret material that disagrees with the method")
-		return fail(err)
+		return failTraced(err)
 	}
 	c.ClientID = pc.ClientID
 	c.GrantTypes = pc.GrantTypes
@@ -321,7 +328,9 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		// клиент, которого никто не может доказать, не остаётся: строка
 		// снимается, заведение у реестра отзывается.
 		uc.abandonCreated(ctx, created)
-		return fail(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
+		// Причина — только ТЕКСТОМ (%v), в цепочку она не входит нарочно:
+		// чужой признак в цепочке переклассифицировал бы отказ в MapRepoErr.
+		return failTraced(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
 	}
 	if err := uc.opsRepo.MarkDone(ctx, op.ID, stored); err != nil && uc.logger != nil {
 		uc.logger.ErrorContext(ctx, "interactive client Create: operation complete failed",
@@ -340,11 +349,11 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 func secretMaterialAgrees(pc ProviderClient) error {
 	hasSecret, hasMaterial := !pc.Secret.IsZero(), !pc.SecretVerifier.IsZero()
 	switch pc.TokenEndpointAuthMethod {
-	case AuthMethodClientSecretBasic, AuthMethodClientSecretPost:
+	case string(oauthceremony.ClientAuthBasic), string(oauthceremony.ClientAuthPost):
 		if hasSecret && hasMaterial {
 			return nil
 		}
-	case AuthMethodNone:
+	case string(oauthceremony.ClientAuthNone):
 		if !hasSecret && !hasMaterial {
 			return nil
 		}

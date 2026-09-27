@@ -13,9 +13,9 @@
 // (виды выдачи, способ аутентификации клиента) проба берёт у него, а не
 // выписывает. Хранилище — записи службы волны-2: код авторизации лежит в
 // `kaname.authorization_codes` (миграция `20260920175117`), проверочное
-// значение секрета клиента кладёт единственный продуктовый писатель — вставка
-// строки реестра тем же оператором, что строку (`InteractiveClientRepo.Insert`,
-// kaname#405; столбец — миграция `20260920175118`).
+// значение секрета клиента кладёт единственный продуктовый писатель строки
+// клиента тем же оператором вставки (`InteractiveClientRepo.Insert`, миграция
+// `20260920175118`; kaname#405, Р5).
 // Оба существуют НЕЗАВИСИМО от предмета проб, поэтому их наличие — часть мира
 // (ступень 1), а не шаг после возможности: отсутствие хранилища — сломанный
 // вопрос, и выдать себя за «эндпоинта нет» оно не может.
@@ -311,8 +311,6 @@ func newCeremonyWorld(t *testing.T, id, level string, opts ...worldOption) *cere
 	w.ic1 = w.seedClient("ceremony-first", domain.InteractiveClientActive, []string{lineA1R, lineA1R2, lineA1RQ})
 	w.ic2 = w.seedClient("ceremony-second", domain.InteractiveClientActive, []string{lineA1R})
 	w.gone = w.seedClient("ceremony-gone", domain.InteractiveClientDeleting, []string{lineA1R})
-	w.giveSecret(w.ic1)
-	w.giveSecret(w.ic2)
 	w.buildSurface()
 	w.requireRootParity()
 	w.requireSurfaceAnswers()
@@ -461,9 +459,11 @@ func (w *ceremonyWorld) seedSession(level string) ceremonySession {
 	return ceremonySession{bearer: bearer, id: s.ID, level: level, authAt: authAt}
 }
 
-// seedClient — интерактивный клиент посевом продуктовым хранилищем реестра
-// (приёмка §1: здесь клиент — Given, сконструированный посевом). Его
-// идентификатор предъявления — наш `ic-…` (§5, 02).
+// seedClient — конфиденциальный интерактивный клиент посевом продуктовым
+// хранилищем реестра (приёмка §1: здесь клиент — Given, сконструированный
+// посевом). Предъявляется он колонкой `client_id` — по ней клиента ищет
+// церемония (`lookupCeremonyClientSQL`); у посева она равна `id` (`ic-…`), у
+// клиента, заведённого глаголом `Create`, — нет (`oic-…`, kaname#405).
 func (w *ceremonyWorld) seedClient(name string, status domain.InteractiveClientStatus, redirects []string) *ceremonyClient {
 	w.t.Helper()
 	return w.seedClientAuthenticatedBy(name, status, redirects, lineA1ClientAuth)
@@ -495,9 +495,10 @@ func (w *ceremonyWorld) seedClientAuthenticatedBy(name string, status domain.Int
 		TokenEndpointAuthMethod: method,
 		Status:                  status,
 	}
-	// Материал секрета кладёт вставка строки — других писателей у продукта нет
-	// (kaname#405): секрет конфиденциального клиента чеканится ЗДЕСЬ, посевом, и
-	// уходит тем же оператором, что строка; у публичного материала нет вовсе.
+	// Секрет клиента со способом секретом — посевом ТЕМ ЖЕ оператором вставки,
+	// что строка (kaname#405, Р5): второго писателя материала у продукта нет,
+	// и посев его не заводит. Клиент без способа секретом материала не несёт
+	// (`interactive_clients_secret_verifier_method_ck`).
 	var (
 		secret   string
 		material domain.LoginVerifier
@@ -522,11 +523,12 @@ func (w *ceremonyWorld) seedClientAuthenticatedBy(name string, status domain.Int
 		w.fixture("клиент %s прочитан не таким, каким посеян: статус %s, цели %v, способ %q",
 			name, got.Status, got.RedirectURIs, got.TokenEndpointAuthMethod)
 	}
-	if secret != "" {
-		store := kanamepg.NewOAuthCeremonyRepo(w.pool)
-		if _, present, err := store.ClientSecretVerifier(w.ctx, got.ClientID); err != nil || !present {
-			w.fixture("секрет клиента %s не читается обратно (есть %v, ошибка %v)", name, present, err)
-		}
+	// Материал прочитан обратно продуктовым читателем церемонии: есть ровно у
+	// клиента со способом секретом.
+	if _, present, err := kanamepg.NewOAuthCeremonyRepo(w.pool).ClientSecretVerifier(w.ctx, got.ClientID); err != nil ||
+		present != (secret != "") {
+		w.fixture("секрет клиента %s прочитан не таким, каким посеян (есть %v, посеян %v, ошибка %v)",
+			name, present, secret != "", err)
 	}
 	return &ceremonyClient{rec: got, secret: secret}
 }
@@ -587,7 +589,7 @@ func (w *ceremonyWorld) buildSurface() {
 	// Церемония — той же сборкой, что у корня (`buildCeremonySurface`): набор
 	// ключей — публикуемый набор подписанта пробы, проверяющий секрета клиента —
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
-	// (посев клиента), как проверяющий полосы входа у корня.
+	// (seedClient), как проверяющий полосы входа у корня.
 	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w), logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
@@ -732,16 +734,15 @@ func (w *ceremonyWorld) requireGrant(grant string) {
 	}
 }
 
-// giveSecret — секрет клиента мира. Проверочное значение кладёт единственный
-// продуктовый писатель — вставка строки реестра (kaname#405), поэтому секрет
-// чеканится посевом клиента (`seedClientAuthenticatedBy`) и здесь не заводится,
-// а спрашивается: клиент без секрета — сломанный мир (ступень 1), и выдать себя
-// за отказ испытуемого он не может.
-func (w *ceremonyWorld) giveSecret(c *ceremonyClient) {
+// requireSecret — у клиента есть секрет, которым он предъявит себя. Секрет
+// кладётся ВМЕСТЕ со строкой (seedClient; глагол `Create` — kaname#405),
+// отдельной записи материала после вставки у продукта нет, поэтому клиент без
+// секрета — сломанный мир, а не шаг, который проба доделает сама.
+func (w *ceremonyWorld) requireSecret(c *ceremonyClient) {
 	w.t.Helper()
 	if c.secret == "" {
-		w.fixture("клиент %s посеян без секрета (способ %q): материал кладёт только вставка строки",
-			c.rec.ID, c.rec.TokenEndpointAuthMethod)
+		w.fixture("у клиента %s нет секрета — предъявлять нечего (способ %q)",
+			c.rec.ClientID, c.rec.TokenEndpointAuthMethod)
 	}
 }
 
@@ -842,7 +843,7 @@ func stateOfLen(n int) string {
 func authorizeQuery(c *ceremonyClient, redirect, state, challenge string) url.Values {
 	q := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {string(c.rec.ID)},
+		"client_id":             {c.rec.ClientID},
 		"redirect_uri":          {redirect},
 		"scope":                 {lineA1Scope},
 		"code_challenge":        {challenge},
@@ -891,7 +892,7 @@ func exchangeForm(ic issuedCode) url.Values {
 		"grant_type":    {grantAuthorizationCode},
 		"code":          {ic.code},
 		"redirect_uri":  {ic.redirect},
-		"client_id":     {string(ic.client.rec.ID)},
+		"client_id":     {ic.client.rec.ClientID},
 		"code_verifier": {ic.verifier},
 	}
 }
@@ -899,8 +900,8 @@ func exchangeForm(ic issuedCode) url.Values {
 // exchangeAs — обмен формы с аутентификацией клиента c.
 func (w *ceremonyWorld) exchangeAs(c *ceremonyClient, form url.Values) *httptest.ResponseRecorder {
 	w.t.Helper()
-	w.giveSecret(c)
-	return w.post(clienttokenhttp.TokenPath, form, []string{string(c.rec.ID), c.secret})
+	w.requireSecret(c)
+	return w.post(clienttokenhttp.TokenPath, form, []string{c.rec.ClientID, c.secret})
 }
 
 type tokenResponse struct {
@@ -940,7 +941,7 @@ func (w *ceremonyWorld) refresh(c *ceremonyClient, rt string) *httptest.Response
 	return w.exchangeAs(c, url.Values{
 		"grant_type":    {grantRefreshToken},
 		"refresh_token": {rt},
-		"client_id":     {string(c.rec.ID)},
+		"client_id":     {c.rec.ClientID},
 	})
 }
 

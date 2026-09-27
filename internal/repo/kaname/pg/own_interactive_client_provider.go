@@ -97,6 +97,7 @@ import (
 	"io"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/oauthceremony"
 
 	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -187,8 +188,10 @@ func (p *OwnInteractiveClientProvider) Register(
 	}
 	secret, verifier, err := p.mintSecret()
 	if err != nil {
-		// Причина остаётся в цепочке; наружу — фиксированный текст полосы
-		// INTERNAL (`shared.MapRepoErr`), без причины и без секрета.
+		// Причина остаётся только ТЕКСТОМ (%v) и уходит в журнал службы
+		// (`shared.LogMappedErr` у use-case); в цепочку она не входит нарочно —
+		// чужой признак в цепочке переклассифицировал бы отказ. Наружу —
+		// фиксированный текст полосы INTERNAL, без причины и без секрета.
 		return interactiveclient.ProviderClient{},
 			iamerr.Wrapf(iamerr.ErrInternal, "interactive client secret was not minted: %v", err)
 	}
@@ -198,7 +201,7 @@ func (p *OwnInteractiveClientProvider) Register(
 		// умолчания здесь нет: умолчание адаптера — ровно то, из-за чего три
 		// соседние полосы регистрации все стали означать машинную выдачу.
 		GrantTypes:              append([]string(nil), in.GrantTypes...),
-		TokenEndpointAuthMethod: interactiveclient.AuthMethodClientSecretBasic,
+		TokenEndpointAuthMethod: string(oauthceremony.ClientAuthBasic),
 		// Круг получателей тоже решён вызывающим (Р2: он чеканится службой, а
 		// не принимается полем запроса).
 		Audiences:      append([]string(nil), in.Audiences...),

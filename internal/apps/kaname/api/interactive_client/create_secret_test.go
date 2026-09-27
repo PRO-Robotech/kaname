@@ -403,11 +403,29 @@ func TestCreate_JournalCarriesNoSecret(t *testing.T) {
 		&fakeOps{markDoneErr: errors.New("operations store did not answer")}, logger); err != nil {
 		t.Fatalf("срыв терминальной записи после коммита ресурса не отказывает вызывающему: %v", err)
 	}
+	// Реестр ответил способом секретом с секретом, но без проверочного
+	// значения: тройка не сошлась, отказ INTERNAL, а секрет у вызова на руках.
+	disagreeing := confidential()
+	disagreeing.verifier = false
+	if _, err := executeCreate(&insertRecordingRepo{}, disagreeing, &fakeOps{}, logger); status.Code(err) != codes.Internal {
+		t.Fatalf("ПРЕДУСЛОВИЕ: несогласие тройки обязано дать INTERNAL, а дало %v", err)
+	}
 
 	journal := buf.String()
 	if !strings.Contains(journal, probeClientID) || !strings.Contains(journal, "operation_id") {
 		t.Fatalf("ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: журнал не несёт строк о компенсации и о срыве записи — "+
 			"«секрета нет» значило бы «журнала нет»:\n%s", journal)
+	}
+	// Отказ INTERNAL наружу несёт фиксированный текст, значит причина, которая
+	// есть НАШ текст (несогласие тройки в ответе реестра), обязана остаться в
+	// журнале службы — иначе у дефекта реестра нет следа нигде (круг 1 сборки
+	// 435). Близнец — причина отказа вставки: это текст хранилища, и
+	// IC-SECRET-13 (б) запрещает эхать его и в журнал.
+	if !strings.Contains(journal, "verification value present=false") {
+		t.Errorf("причина отказа INTERNAL (несогласие тройки) не оставила следа в журнале службы:\n%s", journal)
+	}
+	if strings.Contains(journal, "storage refused the row") {
+		t.Errorf("журнал эхает текст хранилища из отказа вставки (IC-SECRET-13 (б)):\n%s", journal)
 	}
 	requireNoSecretForm(t, "журнал заведения", journal, probeSecret)
 	mangled := "X" + probeSecret[1:]
