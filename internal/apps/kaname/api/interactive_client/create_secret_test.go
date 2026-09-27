@@ -403,11 +403,29 @@ func TestCreate_JournalCarriesNoSecret(t *testing.T) {
 		&fakeOps{markDoneErr: errors.New("operations store did not answer")}, logger); err != nil {
 		t.Fatalf("срыв терминальной записи после коммита ресурса не отказывает вызывающему: %v", err)
 	}
+	// Реестр ответил способом секретом с секретом, но без проверочного
+	// значения: тройка не сошлась, отказ INTERNAL, а секрет у вызова на руках.
+	disagreeing := confidential()
+	disagreeing.verifier = false
+	if _, err := executeCreate(&insertRecordingRepo{}, disagreeing, &fakeOps{}, logger); status.Code(err) != codes.Internal {
+		t.Fatalf("ПРЕДУСЛОВИЕ: несогласие тройки обязано дать INTERNAL, а дало %v", err)
+	}
 
 	journal := buf.String()
 	if !strings.Contains(journal, probeClientID) || !strings.Contains(journal, "operation_id") {
 		t.Fatalf("ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: журнал не несёт строк о компенсации и о срыве записи — "+
 			"«секрета нет» значило бы «журнала нет»:\n%s", journal)
+	}
+	// Отказ INTERNAL наружу несёт фиксированный текст, значит ПРИЧИНА обязана
+	// остаться в журнале службы — иначе у дефекта реестра и у сорвавшейся
+	// вставки нет следа ни в ответе, ни на сервере (круг 1 сборки 435).
+	for _, cause := range []string{
+		"storage refused the row",
+		"verification value present=false",
+	} {
+		if !strings.Contains(journal, cause) {
+			t.Errorf("причина отказа INTERNAL %q не оставила следа в журнале службы:\n%s", cause, journal)
+		}
 	}
 	requireNoSecretForm(t, "журнал заведения", journal, probeSecret)
 	mangled := "X" + probeSecret[1:]
