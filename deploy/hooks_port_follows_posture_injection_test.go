@@ -13,16 +13,21 @@
 //
 // # Оси, у каждой законный близнец
 //
-//	И1  ЧАРТ ДО ПОЧИНКИ (#360): порт вебхуков безусловен → под `own` красное о
-//	    порте Service и о порте пода; под `external` та же копия молчит о портах;
+//	И1  ЧАРТ ДО ПОЧИНКИ (#360): условие полосы хуков безусловно → под `own`
+//	    красное о порте Service, о порте пода и о каждом правиле о хуках (#427:
+//	    условие одно на всех читателей); под `external` та же копия молчит;
 //	И2  ОБРАТНАЯ СТОРОНА: условие чарта сужено до «== external» → при
-//	    незаявленной посадке процесс слушатель поднимает, а чарт порта не
-//	    объявляет → красное; под `external` та же копия молчит;
+//	    незаявленной посадке процесс слушатель поднимает, а чарт не объявляет
+//	    ни порта, ни правил о хуках → красное о каждом из трёх: условие одно на
+//	    всех читателей; под `external` та же копия молчит;
 //	И3  проба готовности возвращена на порт вебхуков → под `external` (где порт
 //	    есть) красное «не диагностика», под `own` (где порта нет) — «порта нет»;
 //	И4  проба спрашивает путь, которого диагностика не обслуживает → красное;
 //	И5  правило о хуках вынуто из-под выключателя посадки → под `own` красное;
-//	И6  ПУСТОТА: вход без Service, портов и проб → отказ предпосылки.
+//	И6  ПУСТОТА: вход без Service, портов и проб → отказ предпосылки;
+//	И7  выключатель правил о хуках возвращён к «== external» (дефект до #427)
+//	    при верном условии порта → при незаявленной посадке красное ровно о
+//	    правилах, а не о порте; под `external` и под `own` та же копия молчит.
 //
 // Неиспорченная копия под теми же входами — близнец всех осей: ноль находок.
 package deploy_test
@@ -41,7 +46,10 @@ import (
 // собственную безвредность.
 const (
 	hooksLanePredicateLine = `{{- if ne (toString ($authn.identityProvider | default "")) "own" -}}true{{- end -}}`
-	hookRulesSwitchLine    = `{{- if eq $authn.identityProvider "external" }}`
+	hookRulesSwitchLine    = `{{- if include "kaname-svc.hooksLaneRaised" . }}`
+	// hookRulesExternalOnly — выключатель правил о хуках до #427: снимает их
+	// при незаявленной посадке, где процесс слушатель поднимает.
+	hookRulesExternalOnly = `{{- if eq $authn.identityProvider "external" }}`
 )
 
 // injectedRender — рендер копии чарта при посадке p.
@@ -83,12 +91,16 @@ func TestHooksPortGate_FindsTheUnconditionalPortUnderOwn(t *testing.T) {
 	dir := chartCopy(t)
 	patchInCopy(t, dir, "templates/_helpers.tpl", hooksLanePredicateLine, "true")
 
-	_, own := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderOwn), config.IdentityProviderOwn)
+	c, own := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderOwn), config.IdentityProviderOwn)
 	require.Lenf(t, findingsAbout(own, `Service "kaname-internal" несёт порт вебхуков`), 1,
 		"безусловный порт под own не назван на Service:\n%s", strings.Join(own, "\n"))
 	require.Lenf(t, findingsAbout(own, "под объявляет порт вебхуков"), 1,
 		"безусловный порт под own не назван у пода:\n%s", strings.Join(own, "\n"))
-	require.Lenf(t, own, 2, "находок не о предмете инъекции:\n%s", strings.Join(own, "\n"))
+	require.NotZero(t, c.hookRules, "безусловное условие не вернуло правил о хуках под own — "+
+		"правила стоят не тем условием, что порт")
+	require.Lenf(t, findingsAbout(own, "звонило бы вечно"), c.hookRules,
+		"не каждое правило о хуках под own названо:\n%s", strings.Join(own, "\n"))
+	require.Lenf(t, own, 2+c.hookRules, "находок не о предмете инъекции:\n%s", strings.Join(own, "\n"))
 
 	_, ext := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderExternal), config.IdentityProviderExternal)
 	require.Emptyf(t, ext, "та же копия под external обязана молчать — порт там законен:\n%s", strings.Join(ext, "\n"))
@@ -105,7 +117,10 @@ func TestHooksPortGate_FindsThePortDroppedWhereTheProcessRaisesIt(t *testing.T) 
 		"снятый при незаявленной посадке порт Service не назван:\n%s", strings.Join(unset, "\n"))
 	require.Lenf(t, findingsAbout(unset, "а под порта http-hooks"), 1,
 		"снятый при незаявленной посадке порт пода не назван:\n%s", strings.Join(unset, "\n"))
-	require.Lenf(t, unset, 2, "находок не о предмете инъекции:\n%s", strings.Join(unset, "\n"))
+	require.Lenf(t, findingsAbout(unset, "тишину работающей двери не видит никто"), 1,
+		"снятые при незаявленной посадке правила о хуках не названы — условие у них не то же, "+
+			"что у порта:\n%s", strings.Join(unset, "\n"))
+	require.Lenf(t, unset, 3, "находок не о предмете инъекции:\n%s", strings.Join(unset, "\n"))
 
 	_, ext := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderExternal), config.IdentityProviderExternal)
 	require.Emptyf(t, ext, "та же копия под external обязана молчать:\n%s", strings.Join(ext, "\n"))
@@ -150,6 +165,25 @@ func TestHooksPortGate_FindsAHookRuleOutsideItsPostureSwitch(t *testing.T) {
 	require.Lenf(t, findingsAbout(own, "звонило бы вечно"), c.hookRules,
 		"не каждое правило о хуках под own названо:\n%s", strings.Join(own, "\n"))
 	require.Lenf(t, own, c.hookRules, "находок не о предмете инъекции:\n%s", strings.Join(own, "\n"))
+}
+
+func TestHooksPortGate_FindsHookRulesNarrowedToExternal(t *testing.T) {
+	roster := readSurfaceRoster(t)
+	dir := chartCopy(t)
+	patchInCopy(t, dir, "templates/prometheusrule.yaml", hookRulesSwitchLine, hookRulesExternalOnly)
+
+	c, unset := judgeHooksPosture(t, roster, injectedRender(t, dir, config.IdentityProviderUnset), config.IdentityProviderUnset)
+	require.True(t, c.raised, "предпосылка: при незаявленной посадке процесс слушатель поднимает")
+	require.NotZero(t, c.rules, "инъекция беспредметна: правил тревоги в рендере нет вовсе")
+	require.Lenf(t, findingsAbout(unset, "тишину работающей двери не видит никто"), 1,
+		"правила о хуках, суженные до external, при незаявленной посадке не названы:\n%s",
+		strings.Join(unset, "\n"))
+	require.Lenf(t, unset, 1, "находок не о предмете инъекции — порт здесь верен:\n%s", strings.Join(unset, "\n"))
+
+	for _, p := range []config.IdentityProvider{config.IdentityProviderExternal, config.IdentityProviderOwn} {
+		_, twin := judgeHooksPosture(t, roster, injectedRender(t, dir, p), p)
+		require.Emptyf(t, twin, "та же копия при посадке %s обязана молчать:\n%s", p, strings.Join(twin, "\n"))
+	}
 }
 
 func TestHooksPortGate_RefusesAnEmptyInput(t *testing.T) {
