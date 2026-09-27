@@ -89,7 +89,12 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 
 ПОЗИЦИЯ ПРИЁМКИ — ВТОРАЯ ЕДИНИЦА ДОЛГА, И ОНА МЕЛЬЧЕ КОЛЛЕКЦИИ (kaname#449).
 Ведомость производителя судит коллекцию, а приёмка объявляет сквозным отдельный
-СЦЕНАРИЙ: заголовок `**ID: <ID>** · I + E — …`, где уровень `E` — прогон на стенде.
+СЦЕНАРИЙ заголовком с перечнем уровней, где `E` — прогон на стенде. Законных форм
+заголовка три, и каждая выведена обходом каталога приёмок: `**ID: <ID>** · I + E —
+…`, `**<ID> — <заголовок>** · E + I` (уровни в конце строки) и `**<ID> (I).**`
+(`SCENARIO_FORMS`). Прежде читалась одна первая, и позиция второй формы без кейса
+давала код 0 (опыт J4 по kaname#449); прочитанное печатается числом ПО КАЖДОЙ
+форме, а строка с перечнем, не разобранная ни одной, — находка незнакомой формы.
 Такой сценарий без кейса ни в одной коллекции не виден ведомости коллекций вовсе:
 ни одна коллекция не пропала, и перепись зеленела, пока DoD приёмки называл
 позицию, которую никто не гоняет. Поэтому позиции уровня E ВЫВОДЯТСЯ из приёмок
@@ -1088,6 +1093,51 @@ SCENARIO_DEBT: ScenarioDebt = {
                      _HOLDER_EXTERNAL_LANDING_REMOVAL),
 }
 
+# Позиции уровня E формы `**<ID> — <заголовок>** · <уровни>` (опыт J4 по #449):
+# прежний распознаватель эту форму не читал, и позиции шести приёмок не были видны
+# переписи вовсе. Запись — ТОЧНЫЙ перечень ID, а не приёмка целиком: новая позиция
+# без кейса роняет перепись, а не прощается записью о её приёмке. Довод один на
+# всех и верен ровно пока запись жива — перепись роняет запись, чей ID назвал
+# модуль кейсов.
+_HOLDER_E_POSITIONS = (
+    "PRO-Robotech/kaname#460 — заведёт кейс набора на позицию либо впишет её ID в "
+    "модуль, который её уже гоняет; запись снимается тем же изменением")
+
+
+def _e_positions_debt(acceptance: str, ids: str) -> ScenarioDebt:
+    why = (f"приёмка {acceptance} объявляет позицию сквозной (уровень E), а её ID не "
+           "называет ни один модуль набора: кейса нет либо трасса не вписана")
+    return {sid: (why, _HOLDER_E_POSITIONS) for sid in ids.split()}
+
+
+SCENARIO_DEBT.update({
+    **_e_positions_debt(
+        "Ф3 (`login-lane-issues-our-session-and-logout-ends-it-server-side.md`)",
+        "Ф3-02 Ф3-04 Ф3-05 Ф3-06 Ф3-07 Ф3-08 Ф3-13 Ф3-14 Ф3-18 Ф3-19 Ф3-20 Ф3-22 Ф3-24 "
+        "Ф3-25 Ф3-26 Ф3-27 Ф3-28 Ф3-29 Ф3-30 Ф3-34 Ф3-37 Ф3-38 Ф3-39 Ф3-40 Ф3-43 Ф3-46 "
+        "Ф3-51"),
+    **_e_positions_debt(
+        "ID-PW-1 (`password-verifier-follows-the-stored-value.md`)",
+        "PWV-01 PWV-02 PWV-03"),
+    **_e_positions_debt(
+        "Ф13 (`passwordless-login-with-access-key.md`)",
+        "Ф13-01 Ф13-02 Ф13-03 Ф13-04 Ф13-05 Ф13-06 Ф13-07 Ф13-08 Ф13-09 Ф13-10 Ф13-11 "
+        "Ф13-12 Ф13-13 Ф13-15 Ф13-16 Ф13-17 Ф13-18 Ф13-19 Ф13-20 Ф13-21 Ф13-22 Ф13-23 "
+        "Ф13-24 Ф13-25 Ф13-26 Ф13-27 Ф13-28 Ф13-32"),
+    **_e_positions_debt(
+        "Ф5 (`recovery-of-access.md`)",
+        "Ф5-03 Ф5-05 Ф5-08 Ф5-12 Ф5-17 Ф5-18 Ф5-19 Ф5-20 Ф5-21 Ф5-22 Ф5-24 Ф5-25"),
+    **_e_positions_debt(
+        "Ф4 (`registration-and-its-three-consequences.md`)",
+        "Ф4-01 Ф4-11 Ф4-12 Ф4-13 Ф4-14 Ф4-15 Ф4-16 Ф4-17 Ф4-20 Ф4-21 Ф4-22 Ф4-23 Ф4-26 "
+        "Ф4-27 Ф4-29 Ф4-30"),
+    **_e_positions_debt(
+        "Ф12 (`second-factor-totp-and-recovery-codes.md`)",
+        "Ф12-01 Ф12-02 Ф12-03 Ф12-05 Ф12-09 Ф12-10 Ф12-12 Ф12-15 Ф12-17 Ф12-19 Ф12-20 "
+        "Ф12-22 Ф12-23 Ф12-25 Ф12-26 Ф12-29 Ф12-30 Ф12-32 Ф12-33 Ф12-35 Ф12-38 Ф12-45 "
+        "Ф12-46"),
+})
+
 
 def _surface_of_stem(stem, runnable, blocked) -> str:
     """Адресация позиции по её стеблю — для сверки двух величин между собой."""
@@ -1198,33 +1248,74 @@ def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
 # самопроверки он свой, поэтому путь выводится от каталога набора, а не от ROOT.
 ACCEPTANCE_REL = pathlib.Path("docs") / "engineering" / "acceptance"
 
-# Заголовок сценария с уровнями: `**ID: IC-SECRET-01** · I + E — …`. Уровни —
-# закрытый словарь приёмки: I (integration), G (гейт по дереву), E (стенд).
-SCENARIO_HEAD_RE = re.compile(r"^\*\*ID: ([^*\s]+)\*\* · ([IGE](?: \+ [IGE])*) — ")
-# Строка заголовка, где после разделителя стоит ЛАТИНСКАЯ буква уровня, — перечень
-# уровней. Не разобранная первым выражением — незнакомая форма перечня, и она
-# называется, а не отбрасывается: разбор, молча пропустивший форму, дал бы
-# «позиций E ноль». Заголовок, где после разделителя идёт довод словами
-# («· отрицание; близнец — …»), перечня уровней не несёт и позицией не является.
-SCENARIO_LEVELED_RE = re.compile(r"^\*\*ID: [^*]+\*\* · [IGE](?=[\s+,/—])")
+# Словарь уровней — объединение легенд приёмок, выведенное обходом каталога, а не
+# по памяти: E — наблюдаемо снаружи (стенд: слушатель службы либо край); I —
+# изнутри процесса (интеграционный); G — гейт дерева; P — свойство дерева,
+# проверяемое переписью; U — модульный. Уровень — одиночная латинская заглавная.
+LEVELS = "EIGPU"
+_LV = rf"[{LEVELS}](?![A-Za-z0-9])"
+# Одиночная буква словаря в ХВОСТЕ за перечнем: уровень за незнакомым
+# разделителем («I / E», «(I, E)») был бы потерян разбором молча.
+_LEVEL_IN_TAIL_RE = re.compile(rf"(?<![A-Za-z0-9])[{LEVELS}](?![A-Za-z0-9])")
+
+# ЗАКОННЫХ ФОРМ ЗАГОЛОВКА СЦЕНАРИЯ ТРИ (kaname#449, опыт J4), и каждая выведена
+# обходом `docs/engineering/acceptance/*.md`:
+#   prefix — `**ID: IC-SECRET-01** · I + E — …`: перечень между разделителями;
+#   titled — `**Ф3-08 — заголовок** · E + I`: перечень в конце строки, уровни
+#            разделены « + » либо « · », за перечнем бывает хвост — пометка
+#            редакции `· *новый*`, ссылка `(→ **Ф11-02**)`, довод `— **…**`;
+#   parens — `**CRED-CAP-04 (I, управляемые часы).**`: перечень в скобках, за ним
+#            бывает примечание после запятой.
+# Прежний распознаватель знал одну prefix: позиция E формы titled давала код 0 и
+# «позиций 7», пока DoD шести приёмок называл 132 такие позиции.
+#
+# У каждой формы два выражения. «Несёт перечень» — после разделителя стоит
+# одиночная латинская заглавная; «разобрана» — перечень прочитан целиком. Строка,
+# несущая перечень и не разобранная, — НЕЗНАКОМАЯ форма, и она называется, а не
+# отбрасывается: разбор, молча пропустивший форму, дал бы «позиций E ноль».
+# Заголовок, где после разделителя идёт довод словами («· отрицание; близнец —
+# …», «(RED)», «(`kacho#1`)»), перечня уровней не несёт и позицией не является.
+_BOLD_TITLE = r"(?:[^*]|\*(?!\*))+"
+SCENARIO_FORMS: tuple[tuple[str, str, re.Pattern, re.Pattern], ...] = (
+    ("prefix", "«**ID: <ID>** · <уровни> — …»",
+     re.compile(r"^\*\*ID: [^*]+\*\* · [A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*ID: (?P<id>[^*\s]+)\*\* · (?P<lv>{_LV}(?: \+ {_LV})*) — ")),
+    ("titled", "«**<ID> — <заголовок>** · <уровни>»",
+     re.compile(rf"^\*\*[^*\s]+ — {_BOLD_TITLE}\*\* · [A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*(?P<id>[^*\s]+) — {_BOLD_TITLE}\*\* · "
+                rf"(?P<lv>{_LV}(?:(?: \+ | · ){_LV})*)(?P<tail>(?:\s.*)?)$")),
+    ("parens", "«**<ID> (<уровни>).**»",
+     re.compile(r"^\*\*[^*\s]+ \([A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*(?P<id>[^*\s]+) \((?P<lv>{_LV}(?: \+ {_LV})*)"
+                rf"(?P<tail>(?:, [^)]*)?)\)\.?\*\*")),
+)
+_LEVEL_SEP_RE = re.compile(r" [+·] ")
 
 
-def acceptance_positions(acceptance: pathlib.Path) -> tuple[dict[str, str], int, list[str]]:
-    """Позиции уровня E: ID → приёмка; сколько приёмок прочитано; незнакомые формы."""
+def acceptance_positions(acceptance: pathlib.Path
+                         ) -> tuple[dict[str, str], int, list[str], dict[str, list[int]]]:
+    """Позиции уровня E: ID → приёмка; сколько приёмок прочитано; незнакомые формы;
+    по каждой форме — [заголовков с перечнем прочитано, из них уровня E]."""
     positions: dict[str, str] = {}
     unknown: list[str] = []
+    forms: dict[str, list[int]] = {key: [0, 0] for key, *_ in SCENARIO_FORMS}
     docs = sorted(acceptance.glob("*.md")) if acceptance.is_dir() else []
     for doc in docs:
         for n, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
-            if not SCENARIO_LEVELED_RE.match(line):
-                continue
-            m = SCENARIO_HEAD_RE.match(line)
-            if m is None:
-                unknown.append(f"{doc.name}:{n}: {line[:90]}")
-                continue
-            if "E" in m.group(2).split(" + "):
-                positions[m.group(1)] = doc.name
-    return positions, len(docs), unknown
+            for key, _label, leveled, head in SCENARIO_FORMS:
+                if not leveled.match(line):
+                    continue
+                m = head.match(line)
+                tail = (m.groupdict().get("tail") or "") if m else ""
+                if m is None or _LEVEL_IN_TAIL_RE.search(tail):
+                    unknown.append(f"{doc.name}:{n}: {line[:90]}")
+                    break
+                forms[key][0] += 1
+                if "E" in _LEVEL_SEP_RE.split(m.group("lv")):
+                    forms[key][1] += 1
+                    positions[m.group("id")] = doc.name
+                break
+    return positions, len(docs), unknown, forms
 
 
 def carried_positions(cases: pathlib.Path, ids: set[str]) -> dict[str, list[str]]:
@@ -1248,13 +1339,14 @@ def carried_positions(cases: pathlib.Path, ids: set[str]) -> dict[str, list[str]
 
 
 def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt
-                            ) -> tuple[list[str], dict[str, str], dict[str, list[str]], int]:
+                            ) -> tuple[list[str], dict[str, str], dict[str, list[str]], int,
+                                       dict[str, list[int]]]:
     """Позиции уровня E против модулей кейсов и записей долга — В ОБЕ СТОРОНЫ.
 
-    Возвращает находки, позиции (ID → приёмка), кто их несёт и сколько приёмок
-    прочитано.
+    Возвращает находки, позиции (ID → приёмка), кто их несёт, сколько приёмок
+    прочитано и перепись заголовков по формам.
     """
-    positions, docs, unknown = acceptance_positions(newman.parents[1] / ACCEPTANCE_REL)
+    positions, docs, unknown, forms = acceptance_positions(newman.parents[1] / ACCEPTANCE_REL)
     carried = carried_positions(newman / "cases", set(positions) | set(debt))
     out = [f"заголовок сценария в незнакомой форме (уровни не разобраны): {u}" for u in unknown]
     for sid in sorted(positions):
@@ -1274,7 +1366,7 @@ def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt
         if not HOLDER_RE.match(holder):
             out.append(f"держатель позиции {sid} вне закрытой формы "
                        f"«PRO-Robotech/<репозиторий>#<номер> — <что сделает>»: {holder!r}")
-    return out, positions, carried, docs
+    return out, positions, carried, docs, forms
 
 
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
@@ -1318,7 +1410,8 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     all_stems = {stem for stem, *_ in [*runnable, *blocked]}
     drift += reconcile_holders(all_stems, runs, ledger)
     # ПОЗИЦИЯ ПРИЁМКИ — мельче коллекции, и её долг судится отдельно (kaname#449).
-    pos_drift, positions, carried, acc_docs = reconcile_scenario_debt(newman, scenario_debt)
+    pos_drift, positions, carried, acc_docs, acc_forms = reconcile_scenario_debt(
+        newman, scenario_debt)
     if declared_tree and acc_docs == 0:
         pos_drift.append(f"приёмок в {ACCEPTANCE_REL} прочитано 0 — перепись позиций "
                          f"беспредметна: «долга позиций нет» значило бы «ничего не прочитано»")
@@ -1429,6 +1522,11 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print(f"ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (сквозной прогон на стенде): приёмок прочитано {acc_docs}, "
           f"позиций {len(positions)} — гоняется {len(ran)} · собрана, коллекция не гоняется "
           f"{len(built)} · долг {len(owed)}")
+    # Прочитанное ПО КАЖДОЙ ФОРМЕ: «позиций N» без него не отличает «форма не
+    # встречается» от «форму не читают» — ровно тот случай, что был слеп (J4).
+    print("  формы заголовка сценария (с перечнем уровней прочитано · из них уровня E): "
+          + "; ".join(f"{label} {acc_forms[key][0]} · {acc_forms[key][1]}"
+                      for key, label, *_ in SCENARIO_FORMS))
     for sid in sorted(positions):
         if sid in carried:
             where = "; ".join(w for st in carried[sid] for w in runs.get(st, []))
@@ -2330,6 +2428,83 @@ def self_test() -> int:
                 rc = run(pn, workflows=wf17, ledger=led17, scenario_debt={"SYN-03": ("довод", hold)})
             _c(f"позиции: перепись числом — {label}", rc == 0 and want in buf.getvalue(),
                f"код {rc}; {buf.getvalue()[-700:]}")
+
+        # Ось 18: ВСЕ ЗАКОННЫЕ ФОРМЫ ЗАГОЛОВКА СЦЕНАРИЯ (kaname#449, опыт J4).
+        # Приёмки пишут уровни тремя формами, выведенными обходом каталога: ID-префикс
+        # `**ID: X** · I + E — …`, жирный ID с заголовком `**X — …** · E + I` (уровни
+        # в конце строки, за ними бывает хвост) и уровни в скобках `**X (I).**`.
+        # Распознаватель, знающий одну, молчит о двух других: позиция E второй формы
+        # без кейса давала код 0. Пара по каждой форме, различие в одном факте.
+        fdir = tmp / "forms"
+        fn = _mk(fdir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        fwf = _wf(fdir / "runs", runs=["carrier"])
+        facc = fdir / ACCEPTANCE_REL
+        facc.mkdir(parents=True, exist_ok=True)
+        fheads = ("**ID: SYN-01** · I + E — форма ID-префикса\n"
+                  "**SYN-11 — несётся кейсом** · E + I\n"
+                  "**SYN-12 — не несётся ничем** · E\n"
+                  "**SYN-13 — хвост после уровней** · E · *новый, редакция 3*\n"
+                  "**SYN-14 — перечень через точку** · I · P\n"
+                  "**SYN-15 — ссылка в хвосте** · I (→ **SYN-12**)\n"
+                  "**SYN-16 — довод словами, уровней нет** (`kacho#1`)\n"
+                  "**SYN-21 (E).** Given стенд.\n"
+                  "**SYN-22 (I, управляемые часы).** Given контейнер.\n"
+                  "**SYN-23 (U).** Given модуль.\n"
+                  "**SYN-24 (RED)** пометка, а не уровни\n")
+        (fn / "cases").mkdir(parents=True, exist_ok=True)
+        (fn / "cases" / "carrier.py").write_text(
+            '"""Модуль кейсов: несёт SYN-11."""\nCASES = []\n', encoding="utf-8")
+        ftwin = {s: ("довод", hold) for s in ("SYN-01", "SYN-12", "SYN-13", "SYN-21")}
+
+        def _less(sid):
+            return {k: v for k, v in ftwin.items() if k != sid}
+
+        for label, debt, extra, want_rc, want_texts in (
+                ("вторая форма: позиция E без кейса и без записи — находка",
+                 _less("SYN-12"), "", 1, ("позиция SYN-12",)),
+                ("вторая форма: уровни с хвостом за ними — позиция E",
+                 _less("SYN-13"), "", 1, ("позиция SYN-13",)),
+                ("третья форма: уровни в скобках — позиция E",
+                 _less("SYN-21"), "", 1, ("позиция SYN-21",)),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: позиции трёх форм записаны либо несутся — молчание",
+                 ftwin, "", 0, ()),
+                ("вторая форма: запись долга позиции, которую несёт модуль, — пережила предмет",
+                 {**ftwin, "SYN-11": ("довод", hold)}, "", 1, ("несёт модуль carrier",)),
+                ("вторая форма: запись долга позиции без уровня E — без предмета",
+                 {**ftwin, "SYN-14": ("довод", hold)}, "", 1,
+                 ("позиции SYN-14", "нет ни в одной приёмке")),
+                ("вторая форма: слитный перечень уровней — незнакомая форма",
+                 ftwin, "**SYN-17 — слитно** · E+I\n", 1, ("незнакомой форме", "SYN-17")),
+                ("вторая форма: буква вне словаря уровней — незнакомая форма",
+                 ftwin, "**SYN-18 — буква вне словаря** · X\n", 1, ("незнакомой форме", "SYN-18")),
+                ("вторая форма: уровень за незнакомым разделителем — незнакомая форма, а не "
+                 "потерянный E", ftwin, "**SYN-19 — косая черта** · I / E\n", 1,
+                 ("незнакомой форме", "SYN-19")),
+                ("третья форма: слитный перечень в скобках — незнакомая форма",
+                 ftwin, "**SYN-25 (E+I).** Given\n", 1, ("незнакомой форме", "SYN-25")),
+                ("третья форма: уровень в примечании скобок — незнакомая форма",
+                 ftwin, "**SYN-26 (I, E).** Given\n", 1, ("незнакомой форме", "SYN-26")),
+                ("первая форма: буква вне словаря уровней — незнакомая форма",
+                 ftwin, "**ID: SYN-02** · X — буква вне словаря\n", 1,
+                 ("незнакомой форме", "SYN-02"))):
+            (facc / "synthetic.md").write_text(fheads + extra, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(fn, workflows=fwf, ledger=pled, scenario_debt=debt)
+            _c(f"формы заголовка: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:500]}")
+        (facc / "synthetic.md").write_text(fheads, encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(fn, workflows=fwf, ledger=pled, scenario_debt=ftwin)
+        fout = buf.getvalue()
+        _c("формы заголовка: перепись позиций числом по трём формам",
+           rc == 0 and "позиций 5 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 4" in fout,
+           f"код {rc}; {fout[-900:]}")
+        _c("формы заголовка: прочитанное и уровня E названы числом по каждой форме",
+           "«**ID: <ID>** · <уровни> — …» 1 · 1; «**<ID> — <заголовок>** · <уровни>» 5 · 3; "
+           "«**<ID> (<уровни>).**» 3 · 1" in fout, fout[-900:])
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
