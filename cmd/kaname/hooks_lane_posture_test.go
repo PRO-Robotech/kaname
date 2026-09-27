@@ -37,7 +37,7 @@ func hooksLaneOf(t *testing.T, p config.IdentityProvider, tlsCfg *tls.Config) (s
 	cfg := roadCfg(p, "9097")
 	cfg.AuthN.HooksHTTPEndpoint = "tcp://0.0.0.0:9092"
 	built := 0
-	desc, err := hooksLaneSurface(cfg, servicecontract.ModeProduction, quietLogger(), tlsCfg, func() http.Handler {
+	desc, err := hooksLaneSurface(cfg, servicecontract.ModeProduction, quietLogger(), tlsCfg, func() (http.Handler, error) {
 		built++
 		return buildHooksMux(nil, nil, nil, nil, metrics.NewRegistry(), cfg, quietLogger())
 	})
