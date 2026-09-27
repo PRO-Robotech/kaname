@@ -94,8 +94,8 @@ func TestLINEA1_28_ConcurrentRefreshHasOneRotationAndTheRestIsReplay(t *testing.
 
 	a, b := w.firstPair(), w.firstPair()
 	distinct := []url.Values{
-		{"grant_type": {grantRefreshToken}, "refresh_token": {a.RefreshToken}, "client_id": {string(w.ic1.rec.ID)}},
-		{"grant_type": {grantRefreshToken}, "refresh_token": {b.RefreshToken}, "client_id": {string(w.ic1.rec.ID)}},
+		{"grant_type": {grantRefreshToken}, "refresh_token": {a.RefreshToken}, "client_id": {w.ic1.rec.ClientID}},
+		{"grant_type": {grantRefreshToken}, "refresh_token": {b.RefreshToken}, "client_id": {w.ic1.rec.ClientID}},
 	}
 	for i, rec := range w.raceExchange(w.ic1, distinct) {
 		if rec.Code != http.StatusOK {
@@ -106,7 +106,7 @@ func TestLINEA1_28_ConcurrentRefreshHasOneRotationAndTheRestIsReplay(t *testing.
 	rt1 := w.firstPair()
 	same := make([]url.Values, 8)
 	for i := range same {
-		same[i] = url.Values{"grant_type": {grantRefreshToken}, "refresh_token": {rt1.RefreshToken}, "client_id": {string(w.ic1.rec.ID)}}
+		same[i] = url.Values{"grant_type": {grantRefreshToken}, "refresh_token": {rt1.RefreshToken}, "client_id": {w.ic1.rec.ClientID}}
 	}
 	recs := w.raceExchange(w.ic1, same)
 	requireExactlyOneWinner(t, w.id, "одно удостоверение", recs)

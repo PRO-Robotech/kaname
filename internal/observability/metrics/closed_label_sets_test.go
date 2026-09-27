@@ -290,6 +290,13 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		},
 		Why: "полоса хуков поставщика личности: непровязанный маршрут обязан быть виден нулём",
 	},
+	AuthnHookAuditDropsMetric: {
+		Cells: 2, // виды записи, набор приходит доводом от корня
+		Build: func(r *Registry) {
+			r.AuthnHookAuditDropsRecorder([]string{"authn.token.issued", "authn.refresh.issued"})
+		},
+		Why: "полоса обслуживает дальше на отказе записи журнала: «потерь не было» обязано быть отличимо от непровязанного приёмника",
+	},
 	ReadinessChecksMetric: {
 		Cells: 1 * len(ReadinessOutcomes), // одна названная зависимость × исходы
 		Build: func(r *Registry) { r.ReadinessRecorder([]string{"database"}) },

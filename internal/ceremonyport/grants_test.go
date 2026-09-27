@@ -55,14 +55,12 @@ func (r *recordingFamilies) RevokeFamily(_ context.Context, familyID string, rea
 // находка (путь отзыва не исполняется ни при каком входе, и никто этого не
 // назвал). Пустой перечень — цель, а не отказ.
 //
-// `client-revoke`: слова нет ни в `domain.FamilyRevocationReasons()`, ни в
-// ограничении `token_families_revoked_reason_ck`; оба заводятся одним
-// изменением со своей приёмкой и миграцией — задачей PRO-Robotech/kaname#406.
-// До тех пор отзыв клиентом отказывает операцией, не тронув семейства
-// (`TestK1_ClientRevokeRefusesLoudlyWhileTheWordIsMissing`).
-var reasonsAwaitingAServiceWord = map[oauthceremony.RevocationReason]string{
-	oauthceremony.RevocationClientRevoke: "PRO-Robotech/kaname#406 (K1, путь отзыва клиентом)",
-}
+// Перечень ПУСТ: последняя ожидавшая причина, `client-revoke`, получила слово
+// `domain.FamilyRevokedByClientRevocation` вместе с ограничением схемы
+// `token_families_revoked_reason_ck` (задача PRO-Robotech/kaname#406). Новая
+// причина фундамента без слова службы делает пробу сопряжения ниже красной,
+// пока её не назовут здесь с предметом.
+var reasonsAwaitingAServiceWord = map[oauthceremony.RevocationReason]string{}
 
 // issueRef — ссылка на задачу службы.
 var issueRef = regexp.MustCompile(`PRO-Robotech/kaname#[0-9]+`)
@@ -167,6 +165,12 @@ func TestGrants_RevokeTheFamilyWithTheCeremonyReason(t *testing.T) {
 
 // Вход, который отзывом не является, отвергается ДО записи: писатель не зван.
 // Отказ хранилища — отказ операции, а не названный исход.
+//
+// Подслучая «причина фундамента без слова службы» здесь нет: его входа больше
+// нет — в закрытом словаре фундамента сопряжены все причины (kaname#406). Сам
+// класс держит проба сопряжения
+// `TestGrants_EveryCeremonyReasonHasAFamilyWordOrANamedSubject`, а ветвь отказа
+// адаптера исполняют два прочих подслучая причины.
 func TestGrants_RefuseBeforeAnyWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -175,7 +179,6 @@ func TestGrants_RefuseBeforeAnyWrite(t *testing.T) {
 	}{
 		{"причина не названа", testFamily, ""},
 		{"причина вне словаря фундамента", testFamily, "session-ended"},
-		{"причина фундамента без слова службы", testFamily, oauthceremony.RevocationClientRevoke},
 		{"грант без идентификатора", "", oauthceremony.RevocationCodeReplay},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
