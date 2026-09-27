@@ -20,7 +20,11 @@
 // Между вариантом использования входа и хранилищем стоит ОБЁРТКА ХРАНИЛИЩА
 // ВХОДА (`overlapStore`), между обработчиком выхода и его хранилищем — ОБЁРТКА
 // ВЫХОДА (`overlapForceSide`). Обе передают каждый вызов настоящей реализации и
-// ничего не решают; они задерживают вызов каналом в названной точке. Точки
+// ничего не решают; они задерживают вызов каналом в названной точке. Обёртка
+// хранилища перехватывает КАЖДУЮ дверь порта, открывающую транзакцию записи
+// (`Writer`, `SessionSetWriter`, `PersonWriter`), — перечень из порта сверяет
+// `login_overlap_harness_openers_test.go`: неперехваченная дверь ушла бы к
+// адаптеру мимо точек молча (kaname#382). Точки
 // транзакции выдачи в их порядке — З1 → З3 → З4 → З2, у выхода — З5. Задержка
 // взводится пробой на ОДИН вызов (`overlapGates.arm`): первый вызов, дошедший
 // до точки, её забирает, прочие проходят. Сна нет нигде: порядок задают каналы,
@@ -290,14 +294,35 @@ func (s *overlapStore) opens() int {
 	return len(s.openReadings)
 }
 
+// Двери транзакции записи. Обёртка встраивает порт, и дверь, которую она не
+// переопределила, прошла бы к настоящему адаптеру мимо точек З1…З4 молча —
+// поэтому перехвачена КАЖДАЯ дверь порта, какой бы ни открывала транзакцию
+// выдача входа (перейдя на `PersonWriter` в a941fa831, выдача обошла обёртку,
+// и 15 проб из 16 не выполнились, kaname#382). Что перехвачены все,
+// судит `login_overlap_harness_openers_test.go` по перечню дверей из порта.
+
 func (s *overlapStore) Writer(ctx context.Context) (humansession.Writer, error) {
+	return s.open(func() (humansession.Writer, error) { return s.Store.Writer(ctx) })
+}
+
+func (s *overlapStore) SessionSetWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	return s.open(func() (humansession.Writer, error) { return s.Store.SessionSetWriter(ctx, userID) })
+}
+
+func (s *overlapStore) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	return s.open(func() (humansession.Writer, error) { return s.Store.PersonWriter(ctx, userID) })
+}
+
+// open — точка З1 до открытия транзакции настоящей дверью, затем обёртка
+// транзакции над открытой.
+func (s *overlapStore) open(inner func() (humansession.Writer, error)) (humansession.Writer, error) {
 	if b := s.noteOpen(); b != nil {
 		b()
 	}
 	if g := s.gates.take(pointOpen); g != nil {
 		g.hold()
 	}
-	w, err := s.Store.Writer(ctx)
+	w, err := inner()
 	if err != nil {
 		return nil, err
 	}
