@@ -29,6 +29,13 @@ package internal_iam_test
 //	IssueSession(ctx, …)                 — вызов функции своего пакета;
 //	Sweep: r.Sessions.SweepUnservableSessions — метод значением, без вызова.
 //
+// Место ссылки — тело объявления функции (литерал функции внутри тела
+// приписывается ей) ЛИБО инициализатор объявления `var` уровня пакета
+// (`var x = func(…) { w.EndSession(…) }`, `var x = r.S.SweepUnservableSessions`):
+// у такого писателя нет объявления функции, и ключ его — «пакет.имя». Прежний
+// обход судил одни тела, и писатель в объявлении пакета не был даже сосчитан
+// (опыт b382_1 проверяющего, круг 1 сборки 435).
+//
 // Каждая форма доказана инъекцией (`TestSessionRowWriterCensusKnowsEveryForm`).
 
 import (
@@ -79,6 +86,9 @@ var doorBodies = map[string]bool{"humansession.IssueSession": true}
 // writerCensus — объём осмотренного.
 type writerCensus struct {
 	files, funcs, refs int
+	// pkgVars — объявлений var уровня пакета с инициализатором, осмотренных
+	// тем же отбором ссылок, что тела функций.
+	pkgVars int
 }
 
 // sessionRowWriters — писатели в файлах каталогов dirs (обход рекурсивный,
@@ -100,14 +110,10 @@ func sessionRowWriters(dirs []string, skip func(path string) bool) (map[string]s
 				return perr
 			}
 			c.files++
-			for _, decl := range f.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil {
-					continue
-				}
-				c.funcs++
-				key := f.Name.Name + "." + funcKey(fn)
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
+			// judge — один отбор ссылок для тела функции и для инициализатора
+			// объявления пакета: второй отбор разошёлся бы с первым молча.
+			judge := func(key string, body ast.Node) {
+				ast.Inspect(body, func(n ast.Node) bool {
 					name, pos := doorRef(n)
 					if name == "" {
 						return true
@@ -121,6 +127,36 @@ func sessionRowWriters(dirs []string, skip func(path string) bool) (map[string]s
 					}
 					return true
 				})
+			}
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					if d.Body == nil {
+						continue
+					}
+					c.funcs++
+					judge(f.Name.Name+"."+funcKey(d), d.Body)
+				case *ast.GenDecl:
+					// Объявление var уровня пакета: литерал функции либо метод
+					// значением в инициализаторе — писатель без объявления
+					// функции. Ключ — «пакет.имя».
+					if d.Tok != token.VAR {
+						continue
+					}
+					for _, spec := range d.Specs {
+						vs, ok := spec.(*ast.ValueSpec)
+						if !ok {
+							continue
+						}
+						for i, v := range vs.Values {
+							if i >= len(vs.Names) {
+								break
+							}
+							c.pkgVars++
+							judge(f.Name.Name+"."+vs.Names[i].Name, v)
+						}
+					}
+				}
 			}
 			return nil
 		})
@@ -231,8 +267,8 @@ func TestEverySessionRowWriterHasAnIdentityDeletionScene(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	t.Logf("перепись: файлов %d · функций %d · ссылок на двери %d · писателей %d · строк ведомости %d · проб пакета %d · находок %d",
-		c.files, c.funcs, c.refs, len(found), len(writerSceneLedger), len(scenes), len(findings))
+	t.Logf("перепись: файлов %d · функций %d · объявлений var пакета %d · ссылок на двери %d · писателей %d · строк ведомости %d · проб пакета %d · находок %d",
+		c.files, c.funcs, c.pkgVars, c.refs, len(found), len(writerSceneLedger), len(scenes), len(findings))
 	for _, k := range keys {
 		t.Logf("  %s → %s (%s)", k, writerSceneLedger[k], found[k])
 	}
@@ -272,6 +308,11 @@ func TestSessionRowWriterCensusKnowsEveryForm(t *testing.T) {
 		{"функция другого пакета", "import hs \"x/humansession\"\nfunc Run() { hs.IssueSession() }\n", "probe.Run"},
 		{"функция своего пакета", "func IssueSession() {}\nfunc Run() { IssueSession() }\n", "probe.Run"},
 		{"метод значением", "type R struct{ S interface{ SweepUnservableSessions() } }\nfunc With(r R) any { return r.S.SweepUnservableSessions }\n", "probe.With"},
+		// Две формы объявления уровня пакета (круг 1 сборки 435, опыт b382_1
+		// проверяющего): у писателя нет объявления функции, и обход одних тел
+		// его не видел — ссылка не была даже сосчитана.
+		{"литерал функции в объявлении var пакета", "var Run = func(w interface{ EndSession() }) { w.EndSession() }\n", "probe.Run"},
+		{"метод значением в объявлении var пакета", "type R struct{ S interface{ SweepUnservableSessions() } }\nvar r R\nvar Sweep = r.S.SweepUnservableSessions\n", "probe.Sweep"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -291,6 +332,14 @@ func TestSessionRowWriterCensusKnowsEveryForm(t *testing.T) {
 	}
 	if len(found) != 0 || c.funcs == 0 {
 		t.Fatalf("близнец: имя, дверью не являющееся, засчитано писателем (%v), либо обход пуст (функций %d)", found, c.funcs)
+	}
+	found, c, err = sessionRowWriters([]string{writeProbePackage(t,
+		"var Later = func(w interface{ EndSessionLater() }) { w.EndSessionLater() }\n")}, noSkip)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	if len(found) != 0 || c.pkgVars == 0 {
+		t.Fatalf("близнец уровня пакета: имя, дверью не являющееся, засчитано писателем (%v), либо объявление не осмотрено (объявлений var %d)", found, c.pkgVars)
 	}
 }
 
