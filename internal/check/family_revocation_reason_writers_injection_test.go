@@ -29,10 +29,10 @@ type OtherReason string
 
 const (
 	FamilyRevokedByCodeReplay       FamilyRevocationReason = "code-replay"
-	FamilyRevokedByLogout           FamilyRevocationReason = "logout"
+	FamilyRevokedByOrphan           FamilyRevocationReason = "orphan-word"
 	FamilyRevokedByClientRevocation FamilyRevocationReason = "client-revoke"
-	OtherLogout                     OtherReason            = "logout"
-	untyped                                                = "logout"
+	OtherOrphan                     OtherReason            = "orphan-word"
+	untyped                                                = "orphan-word"
 )
 `
 
@@ -44,13 +44,13 @@ import "example.test/svc/internal/domain"
 func revoke() any { return domain.FamilyRevokedByCodeReplay }
 `
 
-// frvLogoutWriterSrc — ЗАКОННЫЙ БЛИЗНЕЦ находки: ссылка на константу в коде,
+// frvOrphanWriterSrc — ЗАКОННЫЙ БЛИЗНЕЦ находки: ссылка на константу в коде,
 // под псевдонимом импорта.
-const frvLogoutWriterSrc = `package humansession
+const frvOrphanWriterSrc = `package humansession
 
 import d "example.test/svc/internal/domain"
 
-func end() any { return d.FamilyRevokedByLogout }
+func end() any { return d.FamilyRevokedByOrphan }
 `
 
 // frvMentionOnlySrc — константа названа только комментарием и строкой.
@@ -59,8 +59,8 @@ const frvMentionOnlySrc = `package humansession
 
 import "example.test/svc/internal/domain"
 
-// Выход мог бы писать domain.FamilyRevokedByLogout — но не пишет.
-const note = "domain.FamilyRevokedByLogout"
+// Писатель мог бы ссылаться на domain.FamilyRevokedByOrphan — но не пишет.
+const note = "domain.FamilyRevokedByOrphan"
 
 var _ domain.FamilyRevocationReason
 `
@@ -71,7 +71,7 @@ const frvForeignSelectorSrc = `package other
 
 import "example.test/other/domain"
 
-func end() any { return domain.FamilyRevokedByLogout }
+func end() any { return domain.FamilyRevokedByOrphan }
 `
 
 func frvSynthConstants(t *testing.T) map[string]string {
@@ -106,17 +106,17 @@ func frvFindings(t *testing.T, files map[string]string, vocabulary []string,
 // писателя красно и названо поимённо; близнец со ссылкой в коде зелёный.
 func TestFamilyReasonWritersGate_KN_FRV_17_NamesAWordWithoutAWriter(t *testing.T) {
 	t.Parallel()
-	vocabulary := []string{"code-replay", "logout", "client-revoke"}
+	vocabulary := []string{"code-replay", "orphan-word", "client-revoke"}
 
 	_, findings := frvFindings(t, map[string]string{"pg/repo.go": frvWriterSrc}, vocabulary, frvOnlyClientRevoke)
-	if len(findings) != 1 || !strings.Contains(findings[0], `"logout"`) {
+	if len(findings) != 1 || !strings.Contains(findings[0], `"orphan-word"`) {
 		t.Fatalf("слово без писателя обязано быть ровно одной находкой и названо: %q", findings)
 	}
 
 	// Близнец — одно изменение: ссылка на константу в коде, под псевдонимом.
 	census, findings := frvFindings(t, map[string]string{
 		"pg/repo.go":          frvWriterSrc,
-		"humansession/end.go": frvLogoutWriterSrc,
+		"humansession/end.go": frvOrphanWriterSrc,
 	}, vocabulary, frvOnlyClientRevoke)
 	if len(findings) != 0 {
 		t.Fatalf("законный близнец обязан быть зелёным: %q", findings)
@@ -135,9 +135,9 @@ func TestFamilyReasonWritersGate_KN_FRV_17_AMentionIsNotAWriter(t *testing.T) {
 		"pg/repo.go":          frvWriterSrc,
 		"humansession/end.go": frvMentionOnlySrc,
 		"other/end.go":        frvForeignSelectorSrc,
-	}, []string{"code-replay", "logout"}, nil)
-	if len(findings) != 1 || !strings.Contains(findings[0], `"logout"`) {
-		t.Fatalf("упоминание не пишет слова: находка обязана быть одна и назвать logout: %q", findings)
+	}, []string{"code-replay", "orphan-word"}, nil)
+	if len(findings) != 1 || !strings.Contains(findings[0], `"orphan-word"`) {
+		t.Fatalf("упоминание не пишет слова: находка обязана быть одна и назвать orphan-word: %q", findings)
 	}
 	if census.FilesParsed != 2 {
 		t.Fatalf("разобраны обязаны быть ровно два файла, импортирующих домен: %d", census.FilesParsed)
