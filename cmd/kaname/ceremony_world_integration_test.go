@@ -210,6 +210,8 @@ type ceremonyWorld struct {
 	priv        *ecdsa.PrivateKey
 	kid         string
 	logs        *lockedBuffer
+	// lifespans — сроки церемонии, которые настройка мира называет сборке.
+	lifespans config.CeremonyConfig
 
 	user    domain.UserID
 	email   string
@@ -260,6 +262,10 @@ func (w *ceremonyWorld) seam(format string, args ...any) {
 type worldShape struct {
 	// poolWidth — ширина пула службы; 0 — умолчание конструктора пула.
 	poolWidth int
+	// lifespans — сроки церемонии, названные настройкой мира. Мир по умолчанию
+	// называет потолки фундамента, и пробы LINE-A-1 судят прежнее поведение
+	// (kaname#318).
+	lifespans config.CeremonyConfig
 }
 
 // worldOption — одно отличие мира от мира по умолчанию.
@@ -267,6 +273,12 @@ type worldOption func(*worldShape)
 
 // withPoolWidth — пул службы шириной n связей.
 func withPoolWidth(n int) worldOption { return func(s *worldShape) { s.poolWidth = n } }
+
+// withCeremonyLifespans — сроки кода и семейства, которые настройка мира
+// называет сборке церемонии (kaname#318, приёмка §0.7).
+func withCeremonyLifespans(code, refresh time.Duration) worldOption {
+	return func(s *worldShape) { s.lifespans = config.CeremonyConfig{CodeTTL: code, RefreshTTL: refresh} }
+}
 
 // newCeremonyWorld собирает мир и проверяет каждую его часть ДО того, как
 // проба спросит испытуемого. level — уровень доверия посеянной сессии.
@@ -281,11 +293,13 @@ func newCeremonyWorld(t *testing.T, id, level string, opts ...worldOption) *cere
 	if testing.Short() {
 		t.Skip("интеграция: нужен Postgres в контейнере")
 	}
-	var shape worldShape
+	shape := worldShape{lifespans: config.CeremonyConfig{
+		CodeTTL: tokenpolicy.MaxAuthorizationCodeTTL, RefreshTTL: tokenpolicy.MaxRefreshTokenFamilyTTL,
+	}}
 	for _, o := range opts {
 		o(&shape)
 	}
-	w := &ceremonyWorld{t: t, id: id, ctx: context.Background(), logs: &lockedBuffer{}}
+	w := &ceremonyWorld{t: t, id: id, ctx: context.Background(), logs: &lockedBuffer{}, lifespans: shape.lifespans}
 
 	dsn := iampgtest.NewTestPostgres(t)
 	if shape.poolWidth > 0 {
@@ -586,6 +600,7 @@ func (w *ceremonyWorld) buildSurface() {
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
 	}
+	cfg.AuthN.Ceremony = w.lifespans
 	// Церемония — той же сборкой, что у корня (`buildCeremonySurface`): набор
 	// ключей — публикуемый набор подписанта пробы, проверяющий секрета клиента —
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета

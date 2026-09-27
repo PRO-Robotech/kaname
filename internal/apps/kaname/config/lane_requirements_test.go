@@ -184,6 +184,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.Registration.AdmissionsPerWindow = nil
 	case "срок кода восстановления доступа объявлен":
 		broken.AuthN.Login.RecoveryCodeTTL = 0
+	case "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства":
+		broken.AuthN.Ceremony.CodeTTL = 0
 	case "перечень ключей обёртки секретов второго фактора объявлен":
 		t.Setenv("KANAME_SECOND_FACTOR_ENC_KEY", "")
 		broken.AuthN.SecondFactorEncryptionKeyHex = ""

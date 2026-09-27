@@ -106,8 +106,14 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
+	// Сроки церемонии называет установка (kaname#318): страж старта уже принял
+	// их в пределах потолков фундамента, и фундамент судит их ещё раз.
+	lifespans := cfg.AuthN.Ceremony
 	store := kanamepg.NewOAuthCeremonyRepo(pool)
-	vaults := kanamepg.NewCeremonyVaults(pool)
+	vaults, err := kanamepg.NewCeremonyVaults(pool, lifespans.RefreshTTL)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
 	issuer, err := ceremonyport.NewAccessTokens(signer, keys, store)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
@@ -126,10 +132,11 @@ func buildCeremonySurface(
 		// Срок токена доступа — тот же, что у машинных полос этого эндпоинта:
 		// одна ручка срока выпускаемого токена на поверхность.
 		AccessTokenLifespan: cfg.AuthN.ClientToken.TokenTTL,
-		// Срок одного токена обновления — потолок семейства фундамента; семейство
-		// кончается раньше вместе со своей сессией (граница выдачи и хранилища).
-		RefreshTokenLifespan:      tokenpolicy.MaxRefreshTokenFamilyTTL,
-		AuthorizationCodeLifespan: tokenpolicy.MaxAuthorizationCodeTTL,
+		// Срок одного токена обновления — срок семейства: токен семейства не
+		// бывает годен дольше своего семейства. Предел семейства на обороте держит
+		// граница выдачи и хранилища (рождение плюс тот же срок, не позже сессии).
+		RefreshTokenLifespan:      lifespans.RefreshTTL,
+		AuthorizationCodeLifespan: lifespans.CodeTTL,
 		ScopeMatching:             oauthceremony.ScopeMatchingExact,
 		// Токен обновления выдаётся вместе с токеном доступа каждым обменом
 		// (приёмка Р8).
@@ -165,7 +172,7 @@ func buildCeremonySurface(
 	// предел одного вызова хранилища на всю поверхность.
 	authorizeUC, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{
 		Engine: engine, Clients: vaults, Authority: authority, Clock: time.Now,
-		CallTimeout: credentialLanePeerTimeout,
+		CallTimeout: credentialLanePeerTimeout, FamilyTTL: lifespans.RefreshTTL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
@@ -202,7 +209,8 @@ func buildCeremonySurface(
 		slog.String("authorization_endpoint", authorizeURL),
 		slog.String("token_endpoint", tokenURL),
 		slog.String("access_token_lifespan", cfg.AuthN.ClientToken.TokenTTL.String()),
-		slog.String("authorization_code_lifespan", tokenpolicy.MaxAuthorizationCodeTTL.String()),
+		slog.String("authorization_code_lifespan", lifespans.CodeTTL.String()),
+		slog.String("refresh_token_lifespan", lifespans.RefreshTTL.String()),
 		slog.Int("state_floor", ceremonyhttp.StateFloor))
 	return &ceremonySurface{Authorize: authorize, Discovery: discovery, Token: token, Census: census}, nil
 }

@@ -40,6 +40,7 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.Registration = registrationSettings()
 	cfg.AuthN.AccessKeys = accessKeySettings()
+	cfg.AuthN.Ceremony = ceremonyLifespanSettings()
 	return cfg
 }
 

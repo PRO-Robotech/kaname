@@ -315,6 +315,17 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.Login.ValidateRecovery())
 		},
 	},
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5): срок кода и срок семейства
+	// объявляет профиль, не выше потолков фундамента. Церемония собирается только
+	// под `own`, и под `external` ручки не судятся.
+	{
+		Lanes:   laneOwn,
+		Element: "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Ceremony.Validate())
+		},
+	},
 	// ДВЕ СТРОКИ ВТОРОГО ФАКТОРА (Ф12, kacho#1281; Р2, Р8; Ф12-35, Ф12-36):
 	// перечень ключей обёртки секретов и окно свежести правки своих данных
 	// объявляет профиль; незаданное — отказ старта с именем ручки. Под

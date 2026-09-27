@@ -26,10 +26,11 @@ package pg
 //     «output-only»), а не вызывающий; сужение регистрации действует на
 //     следующий же выпуск семейства;
 //   - граница семейства — правило домена `domain.CeremonyFamilyBound` (меньшее
-//     из срока сессии и потолка семейства фундамента от рождения семейства) над
-//     `human_sessions.expires_at` и `token_families.created_at`: семейство
-//     кончается вместе со своим входом (AuthorizationGrant.SessionID). Правило
-//     у выдачи кода и здесь одно, второго написания в операторах нет.
+//     из срока сессии и рождения семейства плюс срок семейства, названный
+//     установкой, `authn.ceremony.refresh-ttl`) над `human_sessions.expires_at`
+//     и `token_families.created_at`: семейство кончается вместе со своим входом
+//     (AuthorizationGrant.SessionID) и не живёт дольше своего срока. Правило у
+//     выдачи кода и здесь одно, второго написания в операторах нет.
 //
 // # ЕДИНИЦА РАБОТЫ И ОБОРОТ В ДВА ШАГА
 //
@@ -126,6 +127,9 @@ type CeremonyVaults struct {
 	// scopes — области, которые клиенту дозволено запрашивать; закрытый
 	// перечень домена (`domain.CeremonyScopes`).
 	scopes []string
+	// familyTTL — срок семейства от первой выдачи: слагаемое границы семейства
+	// при сборке гранта из записи.
+	familyTTL time.Duration
 }
 
 var (
@@ -136,9 +140,17 @@ var (
 	_ oauthceremony.UnitOfWork             = (*CeremonyVaults)(nil)
 )
 
-// NewCeremonyVaults — хранилища над пулом службы.
-func NewCeremonyVaults(pool *pgxpool.Pool) *CeremonyVaults {
-	return &CeremonyVaults{repo: NewOAuthCeremonyRepo(pool), pool: pool, scopes: domain.CeremonyScopes()}
+// NewCeremonyVaults — хранилища над пулом службы. familyTTL — срок семейства
+// токенов обновления от первой выдачи, названный установкой; без него граница
+// семейства невыразима, и построение отказывает.
+func NewCeremonyVaults(pool *pgxpool.Pool, familyTTL time.Duration) (*CeremonyVaults, error) {
+	switch {
+	case pool == nil:
+		return nil, stderrors.New("ceremony vaults: a pool is required")
+	case familyTTL <= 0:
+		return nil, stderrors.New("ceremony vaults: the refresh token family lifespan is not a positive duration")
+	}
+	return &CeremonyVaults{repo: NewOAuthCeremonyRepo(pool), pool: pool, scopes: domain.CeremonyScopes(), familyTTL: familyTTL}, nil
 }
 
 // ── Единица работы ──────────────────────────────────────────────────────────
@@ -446,7 +458,7 @@ func (v *CeremonyVaults) FetchAuthorizationCode(ctx context.Context, signature s
 	if err != nil {
 		return oauthceremony.AuthorizationCodeRecord{}, wrapPgErr(err, "AuthorizationCode", "")
 	}
-	grant := row.grant(map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAuthorizationCode: codeExpiry})
+	grant := row.grant(map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindAuthorizationCode: codeExpiry}, v.familyTTL)
 	grant.Form["response_type"] = []string{string(oauthceremony.ResponseKindCode)}
 	grant.Form["redirect_uri"] = []string{redirect}
 	rec := oauthceremony.AuthorizationCodeRecord{
@@ -638,7 +650,7 @@ func (v *CeremonyVaults) FetchRefreshToken(ctx context.Context, signature string
 	if err != nil {
 		return oauthceremony.GrantRecord{}, wrapPgErr(err, "RefreshToken", "")
 	}
-	grant := row.grant(map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindRefresh: expiry})
+	grant := row.grant(map[oauthceremony.TokenKind]time.Time{oauthceremony.TokenKindRefresh: expiry}, v.familyTTL)
 	switch {
 	case !familyLive:
 		return oauthceremony.GrantRecord{}, oauthceremony.ErrGrantNotFound
@@ -796,8 +808,8 @@ type ceremonyGrantRow struct {
 }
 
 // grant собирает запись гранта по правилу шапки.
-func (r ceremonyGrantRow) grant(expires map[oauthceremony.TokenKind]time.Time) oauthceremony.GrantRecord {
-	bound := domain.CeremonyFamilyBound(r.createdAt, r.sessionExpiresAt)
+func (r ceremonyGrantRow) grant(expires map[oauthceremony.TokenKind]time.Time, familyTTL time.Duration) oauthceremony.GrantRecord {
+	bound := domain.CeremonyFamilyBound(r.createdAt, r.sessionExpiresAt, familyTTL)
 	notAfter := map[oauthceremony.TokenKind]time.Time{
 		oauthceremony.TokenKindAuthorizationCode: bound,
 		oauthceremony.TokenKindAccess:            bound,

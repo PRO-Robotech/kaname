@@ -39,7 +39,7 @@ func TestCeremonyVaults_RequestWindowReadsTheSigningKeyWithoutASecondConnection(
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := narrowPool(t, cell.width)
 			sc := ceremonyScene(t, ctx, pool, "vsk1")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			keys := kanamepg.NewSigningKeyRepo(pool)
 			sig := ceremonyDigest(0x7d0100 + cell.width)
 			storeVaultCode(t, ctx, v, sc, sig)

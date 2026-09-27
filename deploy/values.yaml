@@ -492,6 +492,13 @@ authn:
   #                                   # «после первого ни одного»
   #                                   # (KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW)
   #     admissionWindow: 1h           # окно счёта (KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW)
+  #   ceremony:                       # сроки собственной церемонии (kaname#318)
+  #     codeTtl: 60s                  # срок кода авторизации от выдачи, не выше
+  #                                   # tokenpolicy.MaxAuthorizationCodeTTL
+  #                                   # (KANAME_AUTHN__CEREMONY__CODE_TTL)
+  #     refreshTtl: 168h              # срок семейства токенов обновления от первой
+  #                                   # выдачи, не выше tokenpolicy.MaxRefreshTokenFamilyTTL
+  #                                   # (KANAME_AUTHN__CEREMONY__REFRESH_TTL)
   #   selfServiceFreshness: 15m       # окно свежести правки своих данных (Ф12 Р8):
   #                                   # заведение и подтверждение второго фактора
   #                                   # и срок его неподтверждённого заведения

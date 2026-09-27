@@ -26,10 +26,37 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
+
+// ceremonyVaults — хранилища церемонии над пулом пробы. Срок семейства — потолок
+// фундамента: поведение сборки по умолчанию, предмет этих проб не он.
+func ceremonyVaults(t *testing.T, pool *pgxpool.Pool) *kanamepg.CeremonyVaults {
+	t.Helper()
+	v, err := kanamepg.NewCeremonyVaults(pool, tokenpolicy.MaxRefreshTokenFamilyTTL)
+	require.NoError(t, err, "хранилища церемонии не собраны")
+	return v
+}
+
+// Хранилища без срока семейства не собираются: без него граница семейства
+// невыразима. Близнец — положительный срок собирает (kaname#318).
+func TestNewCeremonyVaults_RefusesAMissingFamilyLifespan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	_, pool := catalogPool(t)
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		_, err := kanamepg.NewCeremonyVaults(pool, ttl)
+		require.Errorf(t, err, "срок семейства %s принят", ttl)
+	}
+	_, err := kanamepg.NewCeremonyVaults(nil, time.Hour)
+	require.Error(t, err, "хранилища собраны без пула")
+	_, err = kanamepg.NewCeremonyVaults(pool, time.Nanosecond)
+	require.NoError(t, err, "близнец: положительный срок семейства отвергнут")
+}
 
 // vaultCodeRecord — запись кода так, как её кладёт движок: грант, привязка
 // PKCE, срок кода от церемонии.
@@ -68,7 +95,7 @@ func TestCeremonyVaults_CodeCarriesTheLevelOfItsIssuance(t *testing.T) {
 	}
 	ctx, pool := catalogPool(t)
 	sc := ceremonyScene(t, ctx, pool, "vxa1")
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	sig := ceremonyDigest(0x7a0001)
 	storeVaultCode(t, ctx, v, sc, sig)
 
@@ -103,7 +130,7 @@ func TestCeremonyVaults_ConsumptionSurvivesARefusedIssuance(t *testing.T) {
 	}
 	ctx, pool := catalogPool(t)
 	sc := ceremonyScene(t, ctx, pool, "vxb1")
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	sig := ceremonyDigest(0x7a0002)
 	storeVaultCode(t, ctx, v, sc, sig)
 
@@ -168,7 +195,7 @@ func TestCeremonyVaults_ConcurrentConsumptionWaitsForTheWinnersIssuance(t *testi
 	}
 	ctx, pool := catalogPool(t)
 	sc := ceremonyScene(t, ctx, pool, "vxc1")
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	repo := kanamepg.NewOAuthCeremonyRepo(pool)
 	sig := ceremonyDigest(0x7a0003)
 	storeVaultCode(t, ctx, v, sc, sig)
@@ -242,7 +269,7 @@ func TestCeremonyVaults_WhatTheSchemaCannotExpressIsRefused(t *testing.T) {
 	}
 	ctx, pool := catalogPool(t)
 	sc := ceremonyScene(t, ctx, pool, "vxd1")
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	repo := kanamepg.NewOAuthCeremonyRepo(pool)
 	code := ceremonyDigest(0x7a0004)
 	storeVaultCode(t, ctx, v, sc, code)
