@@ -30,9 +30,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import expected_status_test as gate  # noqa: E402
 
 FAILURES = []
+CHECKED = []
 
 
 def check(name, condition, detail=""):
+    CHECKED.append(name)
     if condition:
         print(f"  ok   {name}")
     else:
@@ -94,6 +96,38 @@ def main():
     check("инъекция: статус вне перечня поимённых — тоже находка",
           len(findings) == 1 and "418" in findings[0], str(findings))
 
+    print("ось 6 — 302 производит ТОЧКА АВТОРИЗАЦИИ, и только она")
+    # Перенаправление с кодом (RFC 6749 §4.1.2) — ответ рукописного обработчика
+    # поверхности выдачи, а не отображение кода отказа: REST-фронт 302 не
+    # производит ничем. Поэтому статус законен ровно в модуле, чей шаг адресует
+    # точку авторизации, — и близнецы ниже отличаются от неё одним фактом.
+    _authz = '"/iam/v1/authorize"'
+    census, findings = audit_source("CASES = []\nx = assert_status(302)\n")
+    check("инъекция: 302 без точки авторизации — находка",
+          len(findings) == 1 and "302" in findings[0], str(findings))
+    check("находка называет производителя", findings and "авторизац" in findings[0], str(findings))
+    _, findings = audit_source(
+        'CASES = []\np = "/iam/v1/authorize:check"\nx = assert_status(302)\n')
+    check("инъекция: глагол фронта `authorize:check` точкой авторизации не является",
+          len(findings) == 1 and "302" in findings[0], str(findings))
+    _, findings = audit_source(
+        'CASES = []\n# шаг ходит на /iam/v1/authorize\nx = assert_status(302)\n')
+    check("инъекция: путь только в комментарии — находка (судится код, а не текст)",
+          len(findings) == 1, str(findings))
+    _, findings = audit_source(f"CASES = []\np = {_authz}\nx = assert_status(303)\n")
+    check("инъекция: 303 при точке авторизации — находка (она производит 302)",
+          len(findings) == 1 and "303" in findings[0], str(findings))
+    census, findings = audit_source(f"CASES = []\np = {_authz}\nx = assert_status(302)\n")
+    check("контроль: 302 при точке авторизации — молчание", not findings, str(findings))
+    check("контроль: предмет осмотрен", census["assert_status"] == 1, str(census))
+    _, findings = audit_source(
+        'CASES = []\np = "/iam/v1/authorize?{{_q}}"\nx = assert_status(302)\n')
+    check("контроль: путь точки авторизации со строкой запроса — молчание",
+          not findings, str(findings))
+    _, findings = audit_source(
+        f'CASES = []\np = {_authz}\ns = "pm.expect(pm.response.code).to.eql(302);"\n')
+    check("контроль: литеральная форма при точке авторизации — молчание", not findings, str(findings))
+
     print("ось 5 — пустой обход не выдаётся за чистый")
     census, findings = audit_source("CASES = []\n")
     check("модуль без утверждений: находок нет...", not findings, str(findings))
@@ -102,11 +136,11 @@ def main():
 
     print()
     if FAILURES:
-        print(f"ОТКАЗ: провалено утверждений {len(FAILURES)} из 14", file=sys.stderr)
+        print(f"ОТКАЗ: провалено утверждений {len(FAILURES)} из {len(CHECKED)}", file=sys.stderr)
         for f in FAILURES:
             print("  " + f, file=sys.stderr)
         return 1
-    print("ЧИСТО: 14 утверждений, гейт способен упасть и способен смолчать по каждой оси")
+    print(f"ЧИСТО: {len(CHECKED)} утверждений, гейт способен упасть и способен смолчать по каждой оси")
     return 0
 
 

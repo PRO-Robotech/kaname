@@ -78,6 +78,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,6 +119,8 @@ var ceremonyPortClassification = map[string]string{
 	"RecordAccessToken": "writer",
 	// Уборка записей выпуска (kaname#319).
 	"SweepExpiredAccessTokens": "sweeper",
+	// Погашение кода для движка фундамента (kaname#423).
+	"ConsumeAuthorizationCode": "writer",
 }
 
 // TestOAuthCeremonyPortMethodsAreClassified — предпосылка перечня: он называет
@@ -354,6 +357,7 @@ func issueCeremonyCode(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCe
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 	return code
@@ -630,7 +634,44 @@ func holdingTx(t *testing.T, ctx context.Context, seed *pgxpool.Pool, what, sql 
 	return backendPID(t, ctx, tx), func() { require.NoError(t, tx.Commit(ctx), "фиксация держателя: %s", what) }
 }
 
+// consumeSceneCodes — код сцены погашения по семейству: держатель заводит его,
+// писатель предъявляет тот же.
+var consumeSceneCodes sync.Map
+
 var heldWriterCases = []heldWriterCase{
+	{
+		// Два погашения одного кода (kaname#423): держатель погасил код и держит
+		// строку, погашение стоит на ней. Исход — ноль строк: код погашен другим,
+		// и это перепроверка условия, а не отказ сериализации.
+		name: "ConsumeAuthorizationCode",
+		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, n int) (int, func()) {
+			code := issueCeremonyCode(t, ctx, repo, sc, n)
+			consumeSceneCodes.Store(sc.FamilyID, code)
+			return holdingTx(t, ctx, sh.seed, "погашение кода", `
+				UPDATE kaname.authorization_codes SET deactivated_at = now(), deactivated_reason = 'redeemed'
+				 WHERE code_digest = $1`, code)
+		},
+		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
+			code, ok := consumeSceneCodes.Load(sc.FamilyID)
+			if !ok {
+				return fmt.Errorf("сцена не завела код семейства %s", sc.FamilyID)
+			}
+			rows, err := repo.ConsumeAuthorizationCode(ctx, code.(string))
+			if err == nil && rows != 0 {
+				return fmt.Errorf("погашение, стоявшее на погашенной строке, затронуло строк %d вместо нуля", rows)
+			}
+			return err
+		},
+		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, err error) {
+			assert.NoError(t, err, "погашение, стоявшее на погашенной строке, обязано дать ноль строк, а не отказ")
+			var active bool
+			require.NoError(t, sh.seed.QueryRow(ctx,
+				`SELECT active FROM kaname.authorization_codes WHERE family_id = $1`, sc.FamilyID).Scan(&active))
+			assert.False(t, active, "код остался активным после погашения держателем")
+		},
+	},
 	{
 		// Сессия снята одновременно с выдачей: держатель ставит отметку снятия,
 		// выдача стоит на строке сессии. Исход — «сессия не жива».
@@ -644,7 +685,7 @@ var heldWriterCases = []heldWriterCase{
 		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
 			return repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
 				Context: sc, CodeDigest: ceremonyDigest(0x31c001), RedirectURI: "https://app.example.test/cb",
-				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, TTL: time.Minute,
+				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, ACR: "1", TTL: time.Minute,
 			})
 		},
 		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
@@ -889,8 +930,8 @@ func holdCodeDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, $5)`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, $5, '1')`,
 		other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope)
 	require.NoError(t, err, "держатель: семейство чужой сцены")
 	_, err = tx.Exec(ctx, `
@@ -1037,6 +1078,7 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					issued <- repo.IssueAuthorizationCode(callCtx, kanamepg.NewAuthorizationCode{
 						Context: sc, CodeDigest: code, RedirectURI: "https://app.example.test/cb",
 						CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256,
+						ACR: "1",
 						TTL: time.Minute,
 					})
 				}()

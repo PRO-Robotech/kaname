@@ -164,6 +164,7 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: "S256",
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}), "посев кода")
 
@@ -295,6 +296,7 @@ func TestOAuthExchangeTakesTheFamilyBeforeTheChild(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: "S256",
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 

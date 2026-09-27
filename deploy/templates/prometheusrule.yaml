@@ -41,7 +41,7 @@
 экранировано: без экранирования helm вычислил бы его сам и отказал на
 неизвестной переменной.
 */}}
-{{- if .Values.alertRules.enabled }}
+{{- if include "kaname-svc.blockEnabled" (list $ "alertRules") }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

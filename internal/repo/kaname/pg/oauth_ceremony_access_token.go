@@ -145,6 +145,16 @@ func (r *OAuthCeremonyRepo) RecordAccessToken(ctx context.Context, jti, familyID
 	case !expiresAt.After(issuedAt):
 		return issuanceDefect(ctx, familyID, "expires_at", "must be after issued_at")
 	}
+	// Выпуск ОБМЕНА КОДА записывается в транзакции запроса, открытой погашением
+	// (`oauth_ceremony_vaults.go`): замок строки кода держит отставших, пока
+	// запись и пара опередившего не закреплены. Вне обмена кода — своя
+	// транзакция на названном уровне.
+	if tx, ok := requestTx(ctx); ok {
+		if _, err := tx.Exec(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
+			return issuanceRefusal(ctx, err, jti, familyID)
+		}
+		return nil
+	}
 	if _, err := r.execWriter(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
 		return issuanceRefusal(ctx, err, jti, familyID)
 	}

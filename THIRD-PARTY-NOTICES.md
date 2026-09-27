@@ -24,16 +24,20 @@
 
 | Лицензия | Модулей |
 |---|---:|
-| Apache-2.0 | 13 |
-| BSD-3-Clause | 10 |
-| MIT | 21 |
-| **всего** | **44** |
+| Apache-2.0 | 17 |
+| BSD-2-Clause | 1 |
+| BSD-3-Clause | 11 |
+| MIT | 24 |
+| MPL-2.0 | 2 |
+| **всего** | **55** |
 
 ## Apache-2.0
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
 | `github.com/PRO-Robotech/corelib` | `v1.10.0-rc.2` | `LICENSE` |
+| `github.com/dgraph-io/ristretto/v2` | `v2.4.2` | `LICENSE` |
+| `github.com/go-jose/go-jose/v3` | `v3.0.5` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
 | `github.com/prometheus/client_model` | `v0.6.2` | `LICENSE` |
 | `github.com/prometheus/common` | `v0.70.1` | `LICENSE` |
@@ -41,17 +45,26 @@
 | `github.com/sethvargo/go-retry` | `v0.4.0` | `LICENSE` |
 | `github.com/spf13/afero` | `v1.15.0` | `LICENSE.txt` |
 | `github.com/spf13/cobra` | `v1.10.2` | `LICENSE.txt` |
+| `go.opentelemetry.io/otel` | `v1.45.0` | `LICENSE` |
+| `go.opentelemetry.io/otel/trace` | `v1.45.0` | `LICENSE` |
 | `go.yaml.in/yaml/v3` | `v3.0.5` | `LICENSE` |
 | `google.golang.org/genproto/googleapis/api` | `v0.0.0-20260803160001-6ac0973c030d` | `LICENSE` |
 | `google.golang.org/genproto/googleapis/rpc` | `v0.0.0-20260803160001-6ac0973c030d` | `LICENSE` |
 | `google.golang.org/grpc` | `v1.83.2` | `LICENSE` |
 | `gopkg.in/yaml.v3` | `v3.0.1` | `LICENSE` |
 
+## BSD-2-Clause
+
+| Модуль | Версия | Файл лицензии в модуле |
+|---|---|---|
+| `github.com/pkg/errors` | `v0.9.1` | `LICENSE` |
+
 ## BSD-3-Clause
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
 | `github.com/fsnotify/fsnotify` | `v1.9.0` | `LICENSE` |
+| `github.com/google/uuid` | `v1.6.0` | `LICENSE` |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | `v2.30.0` | `LICENSE` |
 | `github.com/munnerz/goautoneg` | `v0.0.0-20191010083416-a7dc8b61c822` | `LICENSE` |
 | `github.com/spf13/pflag` | `v1.0.10` | `LICENSE` |
@@ -66,9 +79,11 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
+| `github.com/asaskevich/govalidator` | `v0.0.0-20230301143203-a9d515a09cc2` | `LICENSE` |
 | `github.com/beorn7/perks` | `v1.0.1` | `LICENSE` |
 | `github.com/cenkalti/backoff/v4` | `v4.3.0` | `LICENSE` |
 | `github.com/cespare/xxhash/v2` | `v2.3.0` | `LICENSE.txt` |
+| `github.com/dustin/go-humanize` | `v1.0.1` | `LICENSE` |
 | `github.com/fxamacker/cbor/v2` | `v2.9.0` | `LICENSE` |
 | `github.com/go-viper/mapstructure/v2` | `v2.5.0` | `LICENSE` |
 | `github.com/golang-jwt/jwt/v5` | `v5.3.1` | `LICENSE` |
@@ -78,6 +93,7 @@
 | `github.com/jackc/puddle/v2` | `v2.2.2` | `LICENSE` |
 | `github.com/kelseyhightower/envconfig` | `v1.4.0` | `LICENSE` |
 | `github.com/mfridman/interpolate` | `v0.0.2` | `LICENSE.txt` |
+| `github.com/mohae/deepcopy` | `v0.0.0-20170929034955-c48cc78d4826` | `LICENSE` |
 | `github.com/pelletier/go-toml/v2` | `v2.2.4` | `LICENSE` |
 | `github.com/pressly/goose/v3` | `v3.27.3` | `LICENSE` |
 | `github.com/sagikazarmark/locafero` | `v0.11.0` | `LICENSE` |
@@ -87,6 +103,13 @@
 | `github.com/subosito/gotenv` | `v1.6.0` | `LICENSE` |
 | `github.com/x448/float16` | `v0.8.4` | `LICENSE` |
 | `go.uber.org/multierr` | `v1.11.0` | `LICENSE.txt` |
+
+## MPL-2.0
+
+| Модуль | Версия | Файл лицензии в модуле |
+|---|---|---|
+| `github.com/hashicorp/go-cleanhttp` | `v0.5.2` | `LICENSE` |
+| `github.com/hashicorp/go-retryablehttp` | `v0.7.8` | `LICENSE` |
 
 ---
 

@@ -426,6 +426,14 @@ func parityCases() []parityCase {
 			return said(err, "открыта")
 		}})
 
+	// --- Writer: захват строки личности входа (kaname#385) ---
+	// У «адреса нет» личность пуста: отказ аргументом без обхода базы; у
+	// прочих — оператор захвата и оператор чтения отсечки.
+	wr("LockPersonForLogin", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		_, found, err := w.LockPersonForLogin(ctx, p.user.ID)
+		return said(err, "взята, отсечка %v", found)
+	})
+
 	// --- Writer: сессия и память первой аутентификации ---
 	wr("InsertSession", "новая сессия её личности", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		err := w.InsertSession(ctx, domain.HumanSession{
