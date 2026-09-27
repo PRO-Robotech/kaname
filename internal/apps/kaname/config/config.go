@@ -440,6 +440,10 @@ type AuthNConfig struct {
 	// стороны, перечень происхождений, перечень алгоритмов. Величины посадки
 	// `own` без умолчания; пустой перечень происхождений — «никого».
 	AccessKeys AccessKeysConfig `mapstructure:"access-keys"`
+	// Ceremony — сроки артефактов собственной церемонии (kaname#318): срок кода
+	// авторизации и срок семейства токенов обновления. Величины посадки `own`
+	// без умолчания, не выше потолков фундамента.
+	Ceremony CeremonyConfig `mapstructure:"ceremony"`
 	// TrustedForwarderSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
 	// FORWARD an end-user identity (`x-kacho-principal-*` metadata) to iam. Fed
 	// into grpcsrv.WithTrustedForwarders on BOTH gRPC listeners

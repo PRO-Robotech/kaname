@@ -137,19 +137,30 @@ func (p posturedRules) forPosture(posture string) ([]alertRule, error) {
 //
 // Пометка вне словаря — отказ, а не молчаливое «никому»: иначе правила
 // опечатанной полосы выпали бы из сверки обеих сторон разом.
+//
+// ПОМЕТКА ПОЛОСЫ ХУКОВ — СЛОВО, А НЕ ИМЯ ИЗ СЛОВАРЯ (#424). Полоса хуков
+// помечена на странице словом снятой посадки `external`
+// (PRO-Robotech/corelib#30); словарь посадки этого имени больше не печатает —
+// снятое значение печатается числом, — поэтому пометка сверяется со словом
+// страницы. Полоса при этом жива: процесс поднимает её при незаявленной
+// посадке (#427), и пометка уходит вместе с полосой (#363).
 func laneDeliveredTo(lane string, posture config.IdentityProvider) (bool, error) {
 	switch lane {
 	case "":
 		return true, nil
-	case config.IdentityProviderExternal.String():
+	case hooksLanePageMarker:
 		return hooksRaisedByProcess(posture), nil
 	case config.IdentityProviderOwn.String():
 		return posture == config.IdentityProviderOwn, nil
 	}
 	return false, fmt.Errorf("пометка полосы %q на странице не называет ни одной полосы, известной сверке "+
 		"(%s, %s либо без пометки): её правила не обещаны ни одной посадке",
-		lane, config.IdentityProviderExternal, config.IdentityProviderOwn)
+		lane, hooksLanePageMarker, config.IdentityProviderOwn)
 }
+
+// hooksLanePageMarker — пометка полосы хуков внешнего поставщика на
+// опубликованной странице (см. laneDeliveredTo).
+const hooksLanePageMarker = "external"
 
 // alertRule — правило в том виде, в каком его сверяют две стороны.
 type alertRule struct {
@@ -227,7 +238,11 @@ func alertRenders(t *testing.T) []alertRender {
 		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
 		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
 		{name: "values.prod.yaml+own", chain: prod, sets: ownPostureOverlay, posture: "own"},
-		{name: "values.prod.yaml+external", chain: prod, sets: []string{identityPostureSet + "=external"}, posture: "external"},
+		// Раскладки «боевой профиль, переведённый на external» здесь больше нет
+		// (#424): посадка снята фундаментом (PRO-Robotech/corelib#30), и
+		// обещание страницы для неё не строится — разбор её не принимает.
+		// Правила полосы хуков обещаны и сверяются на профиле без посадки
+		// (values.dev.yaml): там процесс их слушатель поднимает (#427).
 	}
 }
 
@@ -312,7 +327,7 @@ func TestDeliveredAlertRulesMatchThePublishedPage(t *testing.T) {
 	paged := pageAlertRules(t, root)
 	require.NotEmpty(t, paged["own"], "страница не несёт ни одного правила полосы `own` — "+
 		"тревога под этой посадкой не объявлена вовсе")
-	require.NotEmpty(t, paged["external"], "страница не несёт ни одного правила полосы `external`")
+	require.NotEmpty(t, paged[hooksLanePageMarker], "страница не несёт ни одного правила полосы хуков")
 
 	for _, r := range alertRenders(t) {
 		t.Run(r.name, func(t *testing.T) {

@@ -528,7 +528,14 @@ var blockSwitchCompanions = map[string]struct{ on, off []string }{
 	// Выключенный сбор обязан нести причину (`deployment.yaml`).
 	"metricsScrape": {off: []string{"metricsScrape.disabledBecause=проба выключателя"}},
 	// Включённый эндпоинт обязан нести четыре величины (`kaname-svc.requireClientTokenEndpoint`).
-	"authn.clientToken": {on: clientTokenValueSets()},
+	//
+	// Выключенный рендерится только на профиле, посадки НЕ объявившем: боевой
+	// профиль стоит на `own` (#424), а посадка `own` без эндпоинта не
+	// собирается (тот же помощник). Посадки, которая законно обходилась бы без
+	// эндпоинта, нет — `external` снята (PRO-Robotech/corelib#30), — поэтому
+	// положение «выключен» судится на профиле без посадки: предмет пробы —
+	// булевость выключателя, а не выбор посадки.
+	"authn.clientToken": {on: clientTokenValueSets(), off: []string{"authn.identityProvider="}},
 }
 
 // clientTokenValueSets — величины эндпоинта из накладки `own`, без самой

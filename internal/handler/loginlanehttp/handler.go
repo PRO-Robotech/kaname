@@ -204,15 +204,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // callerIsGateway — ярус допуска (Р16, форма Ф-т на HTTP-слушателе).
 func (h *Handler) callerIsGateway(r *http.Request) bool {
-	if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.VerifiedChains[0]) == 0 {
-		return false
-	}
-	san := h.cfg.TrustDomain.CertIdentity(r.TLS.VerifiedChains[0][0])
-	if san == "" {
-		return false
-	}
-	svc, ok := authzguard.ServiceNameFromSAN(h.cfg.TrustDomain, san)
-	return ok && svc == authzguard.GatewayServiceName()
+	return authzguard.PeerIsGateway(h.cfg.TrustDomain, r.TLS)
 }
 
 func (h *Handler) method(want string, next http.HandlerFunc) http.HandlerFunc {

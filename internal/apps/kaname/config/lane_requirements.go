@@ -58,7 +58,6 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/corelib/acrlevel"
-	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
 // LaneStage — на какой стадии старта требование проверяется.
@@ -170,6 +169,12 @@ var (
 // оператора); полосность добавляет к ним одну строку о том, каким значением
 // поля требование снимается.
 var LaneRequirements = []LaneRequirement{
+	// ТРИ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` (PRO-Robotech/corelib#30).
+	// Проверка старта до них НЕ доходит: посадку вне словаря она отвергает
+	// первой и в одиночку (validateIdentityProviderLane, #424), поэтому ни один
+	// старт этих отказов не произносит. Строки снимаются вместе с полосой
+	// целиком (#363); до того пробы их содержимого зовут строку напрямую, а не
+	// проверку старта.
 	{
 		Lanes:   laneExternal,
 		Element: "административная дорога к внешнему поставщику",
@@ -205,10 +210,8 @@ var LaneRequirements = []LaneRequirement{
 			return fmt.Errorf(
 				"production mode: %s=%s but authn.token-signing.enabled is false — this posture "+
 					"has no identity provider to fall back to, so with our own minting off the "+
-					"process would start and be unable to issue a single token. Enable it, or "+
-					"declare %s=%s",
-				IdentityProviderSetting, IdentityProviderOwn,
-				IdentityProviderSetting, IdentityProviderExternal)
+					"process would start and be unable to issue a single token. Enable it",
+				IdentityProviderSetting, IdentityProviderOwn)
 		},
 	},
 	// СТРОКА КОНТУРА ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337). Непереведённый
@@ -230,9 +233,8 @@ var LaneRequirements = []LaneRequirement{
 					"key is exchanged on the platform token endpoint, and with the endpoint off the "+
 					"key issuance registers the client at an external identity provider, which this "+
 					"posture does not have: the process would start and refuse every key issuance. "+
-					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED), or declare %s=%s",
-				IdentityProviderSetting, IdentityProviderOwn,
-				IdentityProviderSetting, IdentityProviderExternal)
+					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED)",
+				IdentityProviderSetting, IdentityProviderOwn)
 		},
 	},
 	// ЗДЕСЬ СТОЯЛА СТРОКА «приём предъявленного удостоверения включён», и она
@@ -313,6 +315,17 @@ var LaneRequirements = []LaneRequirement{
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
 			return ownScoped(c.AuthN.Login.ValidateRecovery())
+		},
+	},
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5): срок кода и срок семейства
+	// объявляет профиль, не выше потолков фундамента. Церемония собирается только
+	// под `own`, и под `external` ручки не судятся.
+	{
+		Lanes:   laneOwn,
+		Element: "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Ceremony.Validate())
 		},
 	},
 	// ДВЕ СТРОКИ ВТОРОГО ФАКТОРА (Ф12, kacho#1281; Р2, Р8; Ф12-35, Ф12-36):
@@ -524,11 +537,12 @@ func presentedList(presentable []string) string {
 	return strings.Join(out, ", ")
 }
 
-// laneScoped добавляет к отказу полосы ОДНУ строку о том, каким значением поля
-// требование снимается. Текст самого отказа не меняется — он часть контракта
-// оператора.
-// ownScoped — то же для требований, предъявляемых посадке `own`: каждая
-// строка отказа называет поле посадки и значение, которым требование снимается.
+// ownScoped — пометка требований, предъявляемых посадке `own`: каждая строка
+// отказа называет поле посадки и значение, из-за которого требование
+// предъявлено. Значения, которым требование снималось бы, пометка не называет:
+// `own` — единственное законное значение словаря, а снятую посадку `external`
+// (PRO-Robotech/corelib#30) проверка старта отвергает (#424) — совет объявить
+// её послал бы оператора за вторым отказом.
 func ownScoped(err error) error {
 	if err == nil {
 		return nil
@@ -536,13 +550,19 @@ func ownScoped(err error) error {
 	var out error
 	for _, e := range multierr.Errors(err) {
 		out = multierr.Append(out, fmt.Errorf(
-			"%w [required because %s=%s; declare %s=%s and this requirement is lifted]",
-			e, IdentityProviderSetting, IdentityProviderOwn,
-			IdentityProviderSetting, IdentityProviderExternal))
+			"%w [required because %s=%s]",
+			e, IdentityProviderSetting, IdentityProviderOwn))
 	}
 	return out
 }
 
+// laneScoped добавляет к отказу полосы снятой посадки ОДНУ строку о том, каким
+// значением поля требование снимается. Текст самого отказа не меняется — он
+// часть контракта оператора.
+//
+// До этих строк проверка старта не доходит (#424): посадку вне словаря она
+// отвергает раньше требований полосы. Строки живут до снятия полосы целиком
+// (#363).
 func laneScoped(err error) error {
 	if err == nil {
 		return nil
@@ -557,19 +577,27 @@ func laneScoped(err error) error {
 	return out
 }
 
-// validateIdentityProviderLane — посадочная половина: поле объявлено, и
-// требования ЕГО полосы, выразимые настройкой, выполнены.
+// validateIdentityProviderLane — посадочная половина: посадка ЗАКОННА, и
+// требования ЕЁ полосы, выразимые настройкой, выполнены.
 //
-// Незаданное поле отвергается ПЕРВЫМ и в одиночку: посадка неизвестна, и
+// Законность судит проверка старта фундамента (Provider.Validate, задача #424):
+// у неё три исхода — не объявлено · объявлено числом вне словаря · законно. Она
+// замещает прежнюю ветку «объявлено ли поле», а не стоит рядом с ней: на
+// незаданном поле Validate сама отвечает identityposture.NotDeclared. Одного
+// IsSet мало — тип посадки целое, и число мимо разбора (преобразование типа,
+// декодер, кладущий число прямо в поле) IsSet называет объявленным: снятую
+// посадку `external` прежняя ветка пропускала к требованиям её полосы, а число,
+// которого словарь не знал никогда, — в старт без единого требования.
+//
+// Незаконная посадка отвергается ПЕРВОЙ и в одиночку: полоса неизвестна, и
 // требовать по ней нечего. Предъявлять сверх этого требования какой-нибудь
-// полосы значило бы выбрать полосу за оператора.
+// полосы значило бы выбрать полосу за оператора. Текст отказа один на оба
+// процесса — служба прав и край зовут одну проверку фундамента: расхождение
+// диагностики заставило бы оператора учить два объяснения одного предмета.
 func (c Config) validateIdentityProviderLane() error {
 	p := c.AuthN.IdentityProvider
-	if !p.IsSet() {
-		// Текст отказа один на оба процесса (identityposture.NotDeclared):
-		// расхождение диагностики заставило бы оператора учить два объяснения
-		// одного предмета.
-		return fmt.Errorf("production mode: %w", identityposture.NotDeclared(IdentityProviderSetting))
+	if err := p.Validate(IdentityProviderSetting); err != nil {
+		return fmt.Errorf("production mode: %w", err)
 	}
 
 	var errs error
@@ -597,9 +625,10 @@ func ValidateLaneWiring(c Config, w LaneWiring) error {
 		return nil
 	}
 	p := c.AuthN.IdentityProvider
-	if !p.IsSet() {
-		// Посадка неизвестна — об этом уже отказала проверка настройки; второй
-		// отказ о том же предмете сделал бы два места об одном.
+	if !p.IsLegal() {
+		// Посадка не объявлена либо вне словаря — об этом уже отказала проверка
+		// настройки (validateIdentityProviderLane); второй отказ о том же
+		// предмете сделал бы два места об одном.
 		return nil
 	}
 	var errs error

@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
@@ -654,6 +655,9 @@ func runServe(cfg config.Config) error {
 	}
 	if err := requireRegistryTokenTLS(productionMode,
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
+		return err
+	}
+	if err := requireIssuingListenerAsksForACertificate(cfg, mtlsCfg); err != nil {
 		return err
 	}
 	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
@@ -1296,12 +1300,19 @@ func runServe(cfg config.Config) error {
 		// обмена живут на нём, а эндпоинт авторизации и метаданные обнаружения
 		// монтируются на ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше
 		// (сценарий 23). Под `external` — nil, и её пути здесь не резолвятся.
+		//
+		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
+		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
+		// только при проверенном сертификате края, иначе адрес пира. Режим
+		// слушателя, при котором край вообще узнаваем, требует страж
+		// requireIssuingListenerAsksForACertificate выше.
+		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
 		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
-			ceremonyKeySource(signingKeystore), lane.secretChecker(), logger)
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), issuingSource, logger)
 		if cerr != nil {
 			return fmt.Errorf("ceremony: %w", cerr)
 		}
-		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony)
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony, issuingSource)
 		if cterr != nil {
 			return fmt.Errorf("client token endpoint: %w", cterr)
 		}
@@ -1319,6 +1330,9 @@ func runServe(cfg config.Config) error {
 			// перепись: полнота витрины тогда не зависит от чужого засева.
 			metricsReg.NewClientTokenOutcomeCollector(
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
+			// Перепись правила адреса источника — там же: её клетки есть
+			// измеренное свидетельство того, что край и служба сошлись.
+			metricsReg.NewIssuingSourceFallbackCollector(issuingSourceFallbackCells(), issuingSourceFallbackReader(issuingSource))
 		}
 		if ceremony != nil {
 			// Объявление поверхности называет эти пути, потому что маршрутизатор

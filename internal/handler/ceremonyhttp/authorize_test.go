@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	ceremonyapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/oauth_ceremony"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 )
 
 // untouchedEngine — церемония, которую отказ до доверия цели звать не вправе.
@@ -62,10 +64,12 @@ func (d directory) LookupClient(_ context.Context, id string) (oauthceremony.Cli
 }
 
 // silentAuthority — шов входа, которого отказ до доверия цели не спрашивает.
-type silentAuthority struct{ calls int }
+// Счёт атомарный: посев А (pace_test.go) держит до потолка запросов разом, и
+// по сигналу они входят в шов одновременно.
+type silentAuthority struct{ calls atomic.Int64 }
 
 func (a *silentAuthority) Resolve(context.Context, domain.SessionBearer) (ceremonyapp.Login, bool, error) {
-	a.calls++
+	a.calls.Add(1)
 	return ceremonyapp.Login{}, false, nil
 }
 
@@ -75,12 +79,19 @@ func authorizeEndpoint(t *testing.T, engine ceremonyapp.AuthorizationEngine, d c
 ) *Authorize {
 	t.Helper()
 	uc, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{Engine: engine, Clients: d, Authority: authority,
-		Clock: time.Now, CallTimeout: callTimeout})
+		Clock: time.Now, CallTimeout: callTimeout, FamilyTTL: 2 * time.Hour})
 	if err != nil {
 		t.Fatalf("сборка варианта использования: %v", err)
 	}
+	// Оси темпа — числами, которых пробы этого файла не достигают: их предмет не
+	// темп (оси — pace_test.go).
+	pace, err := exchangepace.New(1<<20, time.Now)
+	if err != nil {
+		t.Fatalf("темп: %v", err)
+	}
 	a, err := NewAuthorize(AuthorizeConfig{UseCase: uc, Census: census,
-		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))})
+		Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		Pace:   pace, InFlightCeiling: 1 << 10, Source: remoteHost})
 	if err != nil {
 		t.Fatalf("сборка: %v", err)
 	}
@@ -126,8 +137,8 @@ func TestAuthorize_UntrustedTargetRefusalsAreOneAnswerWithoutRedirect(t *testing
 			t.Errorf("%s: тело отличимо от прочих отказов до доверия цели: %q", what, rec.Body.String())
 		}
 	}
-	if engine.calls != 0 || authority.calls != 0 {
-		t.Errorf("отказ до доверия цели позвал церемонию (%d) либо шов входа (%d)", engine.calls, authority.calls)
+	if engine.calls != 0 || authority.calls.Load() != 0 {
+		t.Errorf("отказ до доверия цели позвал церемонию (%d) либо шов входа (%d)", engine.calls, authority.calls.Load())
 	}
 	read := census.Read()
 	if read[string(OutcomeAuthorizeClientUnknown)] != 1 || read[string(OutcomeAuthorizeRedirectUnregistered)] != 1 ||

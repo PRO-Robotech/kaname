@@ -34,7 +34,7 @@ func atClock(t *testing.T, at time.Time, opts ...func(*domain.AssertionClient)) 
 		MaxFederatedLifetime: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:            tokenpolicy.ClockSkew,
 		Clock:                func() time.Time { return at },
-	}, f.registry, f.issuers, f.replay)
+	}, f.registry, f.issuers, f.replay, generousPace(t))
 	require.NoError(t, err)
 	f.verifier = v
 	return f
@@ -241,23 +241,23 @@ func TestVerifierRefusesToBuildWithoutItsDeclaredNumbers(t *testing.T) {
 	for name, break_ := range degenerate {
 		p := full
 		break_(&p)
-		_, err := clientassertion.New(p, reg, iss, newReplay())
+		_, err := clientassertion.New(p, reg, iss, newReplay(), generousPace(t))
 		require.Error(t, err, "вырожденный вход %q обязан отвергнуть построение", name)
 	}
 
 	// Порты обязательны так же: проверяющий без реестра принимал бы всех,
 	// проверяющий без однократности — повторы, проверяющий без перечня
 	// доверенных издателей — отвергал бы каждое федеративное утверждение молча.
-	_, err := clientassertion.New(full, nil, iss, newReplay())
+	_, err := clientassertion.New(full, nil, iss, newReplay(), generousPace(t))
 	require.Error(t, err)
-	_, err = clientassertion.New(full, reg, nil, newReplay())
+	_, err = clientassertion.New(full, reg, nil, newReplay(), generousPace(t))
 	require.Error(t, err)
-	_, err = clientassertion.New(full, reg, iss, nil)
+	_, err = clientassertion.New(full, reg, iss, nil, generousPace(t))
 	require.Error(t, err)
 
 	// Положительный контроль: с полной настройкой проверяющий строится. Без
 	// него проба зелена на конструкторе, не пускающем никого.
-	_, err = clientassertion.New(full, reg, iss, newReplay())
+	_, err = clientassertion.New(full, reg, iss, newReplay(), generousPace(t))
 	require.NoError(t, err)
 }
 

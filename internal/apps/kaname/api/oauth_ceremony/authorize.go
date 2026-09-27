@@ -26,6 +26,9 @@ type AuthorizeDeps struct {
 	// CallTimeout — срок ОДНОГО вызова справочника клиентов и шва входа: тот
 	// же, что мост церемонии назначает каждому вызову порта.
 	CallTimeout time.Duration
+	// FamilyTTL — срок семейства от первой выдачи, названный установкой
+	// (`authn.ceremony.refresh-ttl`, kaname#318): слагаемое границы семейства.
+	FamilyTTL time.Duration
 }
 
 // AuthorizeUseCase — выдача кода авторизации в два шага: доверие цели (Trust),
@@ -49,6 +52,8 @@ func NewAuthorizeUseCase(d AuthorizeDeps) (*AuthorizeUseCase, error) {
 		return nil, errors.New("ceremony: authorize needs a clock")
 	case d.CallTimeout <= 0:
 		return nil, errors.New("ceremony: authorize needs the per-call deadline of its store calls")
+	case d.FamilyTTL <= 0:
+		return nil, errors.New("ceremony: authorize needs the family lifespan of the refresh token family")
 	}
 	return &AuthorizeUseCase{d: d}, nil
 }
@@ -204,8 +209,8 @@ func (uc *AuthorizeUseCase) Execute(ctx context.Context, target Target, in Autho
 	}
 
 	// Выдача. Граница семейства — правило домена: не позже сессии, в которой
-	// оно выдано, и не позже потолка семейства от момента выдачи.
-	bound := domain.CeremonyFamilyBound(uc.d.Clock(), login.ExpiresAt)
+	// оно выдано, и не позже срока семейства от момента выдачи.
+	bound := domain.CeremonyFamilyBound(uc.d.Clock(), login.ExpiresAt, uc.d.FamilyTTL)
 	result, err := uc.d.Engine.CompleteAuthorization(ctx, intent, oauthceremony.AuthorizationGrant{
 		Subject:          login.Subject,
 		SessionID:        login.SessionID,

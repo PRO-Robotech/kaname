@@ -12,8 +12,11 @@
 package config_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
@@ -33,15 +36,19 @@ func TestF4d_OwnPostureBootsWithoutASingleProviderAddress(t *testing.T) {
 	}
 }
 
-// Положительный контроль того же входа: под `external` те же пустые адреса
-// старт по-прежнему НЕ проходят, и отказов ровно три — по одному на адрес.
-// Без него зелёное выше означало бы «стражи сняты», а не «стражи полосные».
-func TestF4d_ExternalPostureStillRefusesTheSameEmptyAddresses(t *testing.T) {
+// Положительный контроль того же входа: строки полосы `external` те же пустые
+// адреса НЕ пропускают, и отказов ровно три — по одному на адрес. Без него
+// зелёное выше означало бы «стражи сняты», а не «стражи полосные».
+//
+// Строки судятся напрямую, а не проверкой старта: посадка снята фундаментом
+// (PRO-Robotech/corelib#30), и старт отвергает её раньше требований полосы
+// (#424). Строки живут до снятия полосы целиком (#363).
+func TestF4d_ExternalLaneRowsStillRefuseTheSameEmptyAddresses(t *testing.T) {
 	cfg := postureWithoutProviderAddresses(t, config.IdentityProviderExternal)
 
-	err := cfg.Validate()
+	err := externalLaneRefusal(cfg)
 	if err == nil {
-		t.Fatal("Validate() = nil; под external адреса поставщика обязаны требоваться")
+		t.Fatal("строки полосы external = nil; адреса поставщика обязаны требоваться")
 	}
 	msg := err.Error()
 	for _, setting := range []string{
@@ -59,6 +66,31 @@ func TestF4d_ExternalPostureStillRefusesTheSameEmptyAddresses(t *testing.T) {
 	if n := strings.Count(msg, "declare authn.identity-provider=own and this requirement is lifted"); n != 3 {
 		t.Fatalf("каждый полосный отказ обязан назвать снимающее значение; таких строк %d, ожидалось 3", n)
 	}
+}
+
+// externalLaneRefusal — отказ строк стадии «настройка» полосы снятой посадки
+// `external`, взятых из той же таблицы, по которой ходит проверка старта.
+//
+// Проверка старта до этих строк не доходит (#424): посадку вне словаря она
+// отвергает первой и в одиночку. Строки живут в таблице до снятия полосы
+// целиком (#363), и пробы их содержимого зовут их здесь — иначе положительные
+// случаи зеленели бы на полосе `own`, где эти стражи не предъявляются вовсе.
+func externalLaneRefusal(c config.Config) error {
+	var errs error
+	rows := 0
+	for _, r := range config.LaneRequirements {
+		if r.Stage != config.LaneStageConfig || !r.AppliesTo(config.IdentityProviderExternal) {
+			continue
+		}
+		rows++
+		errs = multierr.Append(errs, r.Check(c, config.LaneWiring{}))
+	}
+	if rows == 0 {
+		// Строк не осталось — судить нечего, и молчание не должно читаться как
+		// «стражи пропустили вход».
+		return errors.New("в таблице полос нет ни одной строки полосы external — пробам, которые их судят, судить нечего")
+	}
+	return errs
 }
 
 // postureWithoutProviderAddresses — боевая настройка со СВОЕЙ чеканкой и без
@@ -184,6 +216,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.Registration.AdmissionsPerWindow = nil
 	case "срок кода восстановления доступа объявлен":
 		broken.AuthN.Login.RecoveryCodeTTL = 0
+	case "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства":
+		broken.AuthN.Ceremony.CodeTTL = 0
 	case "перечень ключей обёртки секретов второго фактора объявлен":
 		t.Setenv("KANAME_SECOND_FACTOR_ENC_KEY", "")
 		broken.AuthN.SecondFactorEncryptionKeyHex = ""

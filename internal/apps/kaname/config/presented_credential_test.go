@@ -110,17 +110,12 @@ func TestKAN_BOOT_02_MaterialDeclaredLetsTheStartThrough(t *testing.T) {
 	}
 }
 
-// TestKAN_BOOT_02_DisabledLaneRequiresNothing — под посадкой внешнего
-// поставщика выключенный приём требований не предъявляет: страж, требующий
-// того, чем не пользуются, — отказ в старте без предмета.
-func TestKAN_BOOT_02_DisabledLaneRequiresNothing(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderExternal)
-	cfg.AuthN.PresentedCredential = config.PresentedCredentialConfig{}
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v; выключенный приём не обязан требовать своих величин", err)
-	}
-}
+// ЗДЕСЬ СТОЯЛ СЛУЧАЙ «под посадкой внешнего поставщика выключенный приём
+// требований не предъявляет». Посадка снята фундаментом
+// (PRO-Robotech/corelib#30), и проверка старта отвергает её раньше требований
+// любой полосы (#424): случай зеленел бы на отказе старта, ничего о приёме не
+// утверждая. Отказ старта на снятой посадке держит
+// identity_provider_validate_test.go.
 
 // TestKAN_BOOT_01_WindowCeilingIsTheTokenLifetimeNotAConstant — потолок окна
 // отзыва ВЫЧИСЛЯЕТСЯ из срока выпускаемого токена, а не выбирается константой.

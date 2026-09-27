@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
-	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -88,10 +87,14 @@ func (e *engine) CompleteAuthorization(_ context.Context, _ oauthceremony.Author
 
 var clockAt = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 
+// rigFamilyTTL — срок семейства, который установка называет выдаче пробы.
+// Нарочно не потолок фундамента: граница обязана следовать за названным сроком.
+const rigFamilyTTL = 2 * time.Hour
+
 func newAuthorizeRig(t *testing.T, d *directory, a *authority, e *engine) *AuthorizeUseCase {
 	t.Helper()
 	uc, err := NewAuthorizeUseCase(AuthorizeDeps{Engine: e, Clients: d, Authority: a,
-		Clock: func() time.Time { return clockAt }, CallTimeout: time.Second})
+		Clock: func() time.Time { return clockAt }, CallTimeout: time.Second, FamilyTTL: rigFamilyTTL})
 	if err != nil {
 		t.Fatalf("сборка: %v", err)
 	}
@@ -216,16 +219,27 @@ func TestAuthorizeExecute_StepUpIsJudgedAgainstTheLowestRequestedLevel(t *testin
 	}
 }
 
-// Граница семейства — одно правило домена: не позже сессии и не позже потолка
-// семейства от момента выдачи.
+// Граница семейства — одно правило домена: не позже сессии и не позже срока
+// семейства, названного установкой, от момента выдачи (kaname#318).
 func TestAuthorizeExecute_TheFamilyBoundIsTheDomainRule(t *testing.T) {
-	for _, expires := range []time.Time{clockAt.Add(time.Hour), clockAt.Add(tokenpolicy.MaxRefreshTokenFamilyTTL + time.Hour), {}} {
+	familyEnd := clockAt.Add(rigFamilyTTL)
+	for _, tc := range []struct {
+		name          string
+		expires, want time.Time
+	}{
+		{"сессия короче срока семейства", clockAt.Add(time.Hour), clockAt.Add(time.Hour)},
+		{"сессия длиннее срока семейства", familyEnd.Add(time.Hour), familyEnd},
+		{"сессия без срока", time.Time{}, familyEnd},
+	} {
+		expires, want := tc.expires, tc.want
 		e := &engine{result: issued()}
 		uc := newAuthorizeRig(t, &directory{}, liveLogin("1", expires), e)
 		if res := uc.Execute(context.Background(), trusted(t, uc), baseInput()); res.Verdict != VerdictIssued {
-			t.Fatalf("выдача: %+v", res)
+			t.Fatalf("%s: выдача: %+v", tc.name, res)
 		}
-		want := domain.CeremonyFamilyBound(clockAt, expires)
+		if rule := domain.CeremonyFamilyBound(clockAt, expires, rigFamilyTTL); !rule.Equal(want) {
+			t.Fatalf("%s: правило домена даёт %s, проба ждёт %s", tc.name, rule, want)
+		}
 		for kind, got := range e.grant.ExpiresAt {
 			if !got.Equal(want) {
 				t.Errorf("срок сессии %s: граница %s у %s, ожидалась %s", expires, got, kind, want)
@@ -315,13 +329,14 @@ func TestAuthorizeWire(t *testing.T) {
 
 func TestNewAuthorizeUseCase_RefusesAnIncompleteWiring(t *testing.T) {
 	full := AuthorizeDeps{Engine: &engine{}, Clients: &directory{}, Authority: &authority{},
-		Clock: time.Now, CallTimeout: time.Second}
+		Clock: time.Now, CallTimeout: time.Second, FamilyTTL: rigFamilyTTL}
 	for name, broken := range map[string]func(AuthorizeDeps) AuthorizeDeps{
-		"церемонии нет":   func(d AuthorizeDeps) AuthorizeDeps { d.Engine = nil; return d },
-		"справочника нет": func(d AuthorizeDeps) AuthorizeDeps { d.Clients = nil; return d },
-		"шва входа нет":   func(d AuthorizeDeps) AuthorizeDeps { d.Authority = nil; return d },
-		"часов нет":       func(d AuthorizeDeps) AuthorizeDeps { d.Clock = nil; return d },
-		"срок не назван":  func(d AuthorizeDeps) AuthorizeDeps { d.CallTimeout = 0; return d },
+		"церемонии нет":            func(d AuthorizeDeps) AuthorizeDeps { d.Engine = nil; return d },
+		"справочника нет":          func(d AuthorizeDeps) AuthorizeDeps { d.Clients = nil; return d },
+		"шва входа нет":            func(d AuthorizeDeps) AuthorizeDeps { d.Authority = nil; return d },
+		"часов нет":                func(d AuthorizeDeps) AuthorizeDeps { d.Clock = nil; return d },
+		"срок не назван":           func(d AuthorizeDeps) AuthorizeDeps { d.CallTimeout = 0; return d },
+		"срок семейства не назван": func(d AuthorizeDeps) AuthorizeDeps { d.FamilyTTL = 0; return d },
 	} {
 		if _, err := NewAuthorizeUseCase(broken(full)); err == nil {
 			t.Errorf("%s: собрано", name)

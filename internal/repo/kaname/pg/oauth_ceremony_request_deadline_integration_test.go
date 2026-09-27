@@ -82,7 +82,7 @@ func TestCeremonyVaults_ConsumptionHonoursItsCallDeadlineOnASaturatedPool(t *tes
 	}
 	ctx, pool := narrowPool(t, 1)
 	sc := ceremonyScene(t, ctx, pool, "vdd1")
-	v := kanamepg.NewCeremonyVaults(pool)
+	v := ceremonyVaults(t, pool)
 	sig := ceremonyDigest(0x7d0001)
 	storeVaultCode(t, ctx, v, sc, sig)
 

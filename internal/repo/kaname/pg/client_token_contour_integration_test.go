@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -156,6 +157,11 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
 	}, signer, claims)
 	require.NoError(t, err)
 

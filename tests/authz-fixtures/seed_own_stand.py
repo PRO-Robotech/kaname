@@ -36,27 +36,27 @@
   1. чеканка бутстрап-удостоверения — `InternalBootstrapTokenService` на :9091,
      gRPC поверх взаимного TLS. Круг вызывающих задан ИМЕНАМИ сертификатов, и
      стенд предъявляет своё; REST-маршрута у этой чеканки нет нигде;
-  2. провизия личности — `POST /iam/v1/hooks/provision` на :9092 с секретом
-     `X-Kacho-Hook-Token`. Это ТОТ ЖЕ обработчик, что обслуживает
-     `InternalUserService/UpsertFromIdentity`, и он заводит человека, его личный
-     аккаунт, проект по умолчанию и выдачу владельца — то есть АРЕНДАТОРА;
+  2. регистрация человека — `POST /iam/v1/auth/register` на слушателе полосы
+     входа :9100, признаком формы от `GET /iam/v1/auth/csrf`. Глагол заводит
+     человека, его личный аккаунт, проект по умолчанию и выдачу владельца — то
+     есть АРЕНДАТОРА;
   3. выпуск удостоверения субъекта — `UserTokenService/Issue` и
      `SAKeyService/Issue`. Приватный ключ показывается ОДИН раз;
   4. обмен — `POST /iam/v1/token` на :9096: подписанное утверждение клиента
      (RFC 7521/7523) у НАШЕГО издателя. Адресат утверждения — идентификатор
      издателя, а не адрес эндпоинта.
 
-ПОЧЕМУ ВТОРОЙ ВХОД (ХУК) ЗАКОНЕН, И ГДЕ ЕГО ГРАНИЦА — СКАЗАНО ПРЯМО. Аккаунт
-принадлежит ЧЕЛОВЕКУ by construction: `CreateAccount` от служебной учётки
-отвергается синхронно («an Account is owned by a user; principal type is
-service_account»), а единственный человек свежего стенда несёт
-`invite_status=PENDING` и пустой внешний идентификатор, то есть токен ему не
-выпускается («is not active»). Машинных дверей к активному человеку ровно две:
-gRPC `UpsertFromIdentity`, доступный в боевой посадке ТОЛЬКО учётной записи
-края, и этот хук, доступный держателю общего секрета. Края на автономном стенде
-нет by construction — значит остаётся хук, и предъявляем мы НАСТОЯЩИЙ секрет
-посадки, а не обходим проверку. Отсюда и граница: посев не вправе выпустить себе
-сертификат с именем края — это была бы личность отсутствующего звена.
+ПОЧЕМУ ВТОРОЙ ВХОД (ПОЛОСА ВХОДА) ЗАКОНЕН, И ГДЕ ЕГО ГРАНИЦА — СКАЗАНО ПРЯМО.
+Аккаунт принадлежит ЧЕЛОВЕКУ by construction: `CreateAccount` от служебной
+учётки отвергается синхронно («an Account is owned by a user; principal type is
+service_account»). Под посадкой `own` — единственной у службы (kaname#424) —
+человека заводит только полоса входа: хука поставщика нет (kaname#360), а gRPC
+`UpsertFromIdentity` в боевой посадке доступен ТОЛЬКО учётной записи края.
+Полоса допускает РОВНО край по SAN проверенного клиентского листа, края на
+стенде нет, и его место у полосы занимает посев — листом с именем края,
+выписанным УЦ стенда (`stand-own.sh`, `edge.crt`), как у стенда чарта. Граница:
+лист края посев предъявляет ТОЛЬКО полосе входа, ни одной другой поверхности
+службы; остальные шаги идут листом самой службы.
 
 ИСХОДЫ — ТРИ, И ОНИ РАЗЛИЧАЮТСЯ КОДОМ:
 
@@ -74,8 +74,8 @@ gRPC `UpsertFromIdentity`, доступный в боевой посадке Т�
 от находки КОДОМ, что успешный статус с пустым захватом даёт находку, что
 объявленный перечень записываемых ключей сходится с тем, что запись действительно
 производит (в обе стороны), что `--minted-surface` отвечает ровно одной строкой,
-что 401 `invalid_hook_token` — код 75, а не находка, при живом законном близнеце
-рядом (409 от того же хука обязан остаться находкой), что ни одна объявленная пара
+что отказ полосы входа (403 листу не края, регистрация без печенья сессии,
+регистрация не 200) — находка, а 200 с печеньем — молчание, что ни одна объявленная пара
 «идентификатор ↔ предъявитель» не покрыта ПОЛОВИНОЙ, что фронт, который после
 отзыва всё ещё принимает предъявителя, даёт находку, и что пустой набор ключей
 собственной чеканки даёт находку.
@@ -144,7 +144,6 @@ ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 # отвергается до сверки подписи, и отказ выглядит как неверный клиент.
 ASSERTION_TOKEN_TYPE = "client-authentication+jwt"
 
-HOOK_HEADER = "X-Kacho-Hook-Token"
 BOOTSTRAP_METHOD = (
     "kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken")
 BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
@@ -154,6 +153,15 @@ BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
 # Зеркало прежнего издателя (`/.well-known/jwks.json`) лежит на том же слушателе и
 # на автономном стенде отвечать не может: поставщика нет ВООБЩЕ.
 OWN_JWKS_PATH = "/.well-known/kaname/jwks.json"
+
+# Полоса входа: признак формы, регистрация и носители. Адрес источника — свой,
+# отличный от посева стенда чарта и от набора: счёт частоты по источнику у
+# каждого раздельный, и попытки посева не съедают окно прогона.
+LANE_CSRF = "/iam/v1/auth/csrf"
+LANE_REGISTER = "/iam/v1/auth/register"
+LANE_SESSION_COOKIE = "kaname_session"
+LANE_FORM_COOKIE = "kaname_form"
+LANE_SOURCE = "203.0.113.12"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # КЛЮЧИ ОКРУЖЕНИЯ, КОТОРЫЕ ЭТОТ ПОСЕВ ПИШЕТ
@@ -444,47 +452,106 @@ def assert_bootstrap_accepted(http: Http, public: str, token: str) -> None:
             f"нельзя: всякий следующий отказ назвал бы виновником невиновного")
 
 
-def provision_identity(http: Http, hooks: str, secret: str, external_id: str) -> None:
-    """Провизия личности через хук поставщика — НАСТОЯЩИМ секретом посадки."""
-    code, text = http.ask(f"{hooks}/iam/v1/hooks/provision", method="POST",
-                          headers={HOOK_HEADER: secret},
-                          body={"external_id": external_id, "email": external_id,
-                                "display_name": external_id})
-    if code == 500 and "hook_secret_not_configured" in text:
-        raise Unmet("секрет хука не задан на посадке (KANAME_HOOK_TOKEN) — "
-                    "провизия невозможна, вердикта о дереве нет")
-    # 401 `invalid_hook_token` — УСЛОВИЕ НЕ СОЗДАНО, а НЕ находка, и это следует
-    # из устройства продукта, а не из снисходительности.
-    #
-    # `writeHookAuthRefusal` — единственный производитель этого отказа, и он
-    # отвечает ПОБАЙТОВО ОДИНАКОВО на «заголовка нет» и на «величина не та»:
-    # различимый снаружи отказ был бы ОРАКУЛОМ по стерегомому секрету. Значит из
-    # 401 вердикт о дереве НЕ ВЫВОДИМ ни при каком чтении ответа: он говорит ровно
-    # то, что секрет посева и секрет посадки — две копии одной величины — разошлись
-    # либо заголовок не дошёл. И то и другое — несозданное условие.
-    #
-    # Цена прежнего чтения: конвейер на rc≠75 печатал «Посев отвергнут продуктом»
-    # и посылал читателя чинить рубеж хука, который работал правильно.
-    if code == 401 and "invalid_hook_token" in text:
-        raise Unmet(
-            f"хук провизии отверг секрет ({HOOK_HEADER}): 401 invalid_hook_token. "
-            f"Отказ ЕДИН намеренно — «заголовка нет» и «величина не та» побайтово "
-            f"одинаковы, чтобы не давать оракула по секрету, — поэтому вердикта о "
-            f"дереве из него нет НИ ОДНОГО. Сверьте KANAME_HOOK_TOKEN у посева и у "
-            f"посадки: это ДВЕ копии одной величины")
-    if code != 200:
+class LaneHttp:
+    """Клиент полосы входа: взаимный TLS ЛИСТОМ КРАЯ и проверка имени сервера.
+
+    Лист края предъявляется ТОЛЬКО здесь: полоса допускает ровно край, и другой
+    двери к регистрации человека под `own` у продукта нет.
+    """
+
+    def __init__(self, base_url: str, pki: pathlib.Path):
+        ca, cert, key = pki / "ca.crt", pki / "edge.crt", pki / "edge.key"
+        for f in (ca, cert, key):
+            if not f.is_file():
+                raise Unmet(f"нет {f} — лист края стенд не выписывал")
+        self.base = base_url.rstrip("/")
+        self.ctx = ssl.create_default_context(cafile=str(ca))
+        self.ctx.load_cert_chain(str(cert), str(key))
+
+    def ask(self, method: str, path: str, body: dict | None = None,
+            cookies: dict | None = None) -> tuple[int, list[str], str]:
+        """(код, значения `Set-Cookie`, тело)."""
+        hdrs = {"X-Forwarded-For": LANE_SOURCE, "Accept": "application/json"}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+        if cookies:
+            hdrs["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        req = urllib.request.Request(self.base + path, data=data, method=method,
+                                     headers=hdrs)
+        try:
+            with urllib.request.urlopen(req, context=self.ctx, timeout=30) as r:
+                return (r.status, r.headers.get_all("Set-Cookie") or [],
+                        r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            return (e.code, e.headers.get_all("Set-Cookie") or [],
+                    e.read().decode("utf-8", "replace"))
+        except (urllib.error.URLError, ssl.SSLError, OSError, socket.timeout) as e:
+            raise Unmet(f"полоса входа {self.base} недостижима: {e}") from None
+
+
+def lane_cookie(set_cookies: list[str], name: str) -> str | None:
+    for sc in set_cookies:
+        head = sc.split(";", 1)[0]
+        if head.startswith(name + "="):
+            return head[len(name) + 1:]
+    return None
+
+
+def person_password() -> str:
+    """Пароль заводимого человека: случайный, у каждого свой, нигде не печатается.
+
+    Входить под ним посеву незачем — человек нужен как ВЛАДЕЛЕЦ аккаунта, а
+    предъявители аккаунтов — служебные учётки (см. «ПРЕДЪЯВИТЕЛЬ ЗДЕСЬ —
+    МАШИНА»). Длина выше минимума профиля (`authn.login.password-min-length`).
+    """
+    return secrets.token_urlsafe(24)
+
+
+def register_person(lane, email: str, password: str) -> None:
+    """Регистрация человека полосой входа. Утверждается и статус, и носитель.
+
+    Пароль и почта в текст отказа НЕ попадают: журнал прогона публичного
+    репозитория читает кто угодно.
+    """
+    code, sc, text = lane.ask("GET", f"{LANE_CSRF}?form=register")
+    if code == 403:
         raise Finding(
-            f"хук провизии отказал на {external_id}: код {code}, тело "
-            f"{text[:300]!r}. Секрет предъявлен заголовком {HOOK_HEADER}")
+            f"признак формы регистрации: полоса ответила 403 ({text[:200]!r}) — "
+            f"лист края стенда не принят как край. Полоса допускает РОВНО край по "
+            f"SAN клиентского листа; отказ обвиняет либо имя листа, либо сужение "
+            f"круга у службы")
+    try:
+        token = json.loads(text or "{}").get("csrfToken") if code == 200 else None
+    except json.JSONDecodeError:
+        token = None
+    ctx = lane_cookie(sc, LANE_FORM_COOKIE)
+    if code != 200 or not isinstance(token, str) or not token or not ctx:
+        raise Finding(
+            f"признак формы регистрации: код {code}, признак строкой "
+            f"{isinstance(token, str) and bool(token)}, печенье {LANE_FORM_COOKIE} "
+            f"{bool(ctx)} — форму отправить нечем")
+    code, sc, text = lane.ask("POST", LANE_REGISTER,
+                              body={"email": email, "password": password,
+                                    "csrfToken": token},
+                              cookies={LANE_FORM_COOKIE: ctx})
+    if code != 200:
+        raise Finding(f"регистрация человека: ждали 200, получили {code} "
+                      f"({text[:200]!r})")
+    if not lane_cookie(sc, LANE_SESSION_COOKIE):
+        raise Finding(f"регистрация ответила 200 без печенья {LANE_SESSION_COOKIE} — "
+                      f"следствия регистрации одним исходом не наступили")
 
 
-def resolve_tenant(http: Http, public: str, token: str, external_id: str,
+def resolve_tenant(http: Http, public: str, token: str, email: str,
                    budget_s: float = 60.0) -> dict:
     """Личность → её аккаунт → её проект по умолчанию. ЖДЁТ, а не спрашивает раз.
 
-    Хук отвечает 200 синхронно, а строка личности, её аккаунт и проект приезжают
+    Регистрация отвечает 200 синхронно, а аккаунт и проект могут приезжать
     своим путём. Единственный ответ «ещё нет» здесь неотличим от «не будет»,
-    поэтому ожидание идёт до ПРЕДМЕТА, а не до кода ответа.
+    поэтому ожидание идёт до ПРЕДМЕТА, а не до кода ответа. Человек ищется по
+    почте: внешний идентификатор под `own` — случайное имя субъекта полосы.
     """
     deadline = time.time() + budget_s
     seen = {"user": False, "active": False, "account": False}
@@ -493,7 +560,7 @@ def resolve_tenant(http: Http, public: str, token: str, external_id: str,
         if code != 200:
             raise Finding(f"перечень людей не читается: код {code}")
         user = next((u for u in body.get("users", [])
-                     if u.get("externalId") == external_id), None)
+                     if u.get("email") == email), None)
         if user:
             seen["user"] = True
             if user.get("inviteStatus") == "ACTIVE":
@@ -513,10 +580,10 @@ def resolve_tenant(http: Http, public: str, token: str, external_id: str,
                                 "projectId": prj["id"]}
         time.sleep(1)
     raise Finding(
-        f"личность {external_id} не стала арендатором за {budget_s:.0f} с: "
+        f"зарегистрированный человек не стал арендатором за {budget_s:.0f} с: "
         f"строка есть={seen['user']}, активна={seen['active']}, "
-        f"аккаунт есть={seen['account']}. Хук ответил 200, значит отказ "
-        f"наступил ПОСЛЕ него — смотреть журнал службы, а не вызов")
+        f"аккаунт есть={seen['account']}. Регистрация ответила 200, значит отказ "
+        f"наступил ПОСЛЕ неё — смотреть журнал службы, а не вызов")
 
 
 def await_operation(http: Http, public: str, token: str, op_id: str,
@@ -912,7 +979,7 @@ def run(args: argparse.Namespace) -> int:
     host = args.host
     public = f"https://{host}:{args.port_public}"
     internal = f"https://{host}:{args.port_internal}"
-    hooks = f"https://{host}:{args.port_hooks}"
+    lane_url = f"https://{host}:{args.port_lane}"
     token_base = f"https://{host}:{args.port_token}"
     token_url = f"{token_base}/iam/v1/token"
     jwks_base = f"https://{host}:{args.port_jwks}"
@@ -923,19 +990,14 @@ def run(args: argparse.Namespace) -> int:
 
     for port, what in ((args.port_public, "собственный публичный REST"),
                        (args.port_internal, "собственный внутренний REST"),
-                       (args.port_hooks, "хуки поставщика"),
+                       (args.port_lane, "полоса входа"),
                        (args.port_token, "выдача токенов"),
                        (args.port_jwks, "публикатор набора ключей"),
                        (args.port_grpc, "внутренний gRPC")):
         require_listener(host, port, what)
 
-    hook_secret = os.environ.get("KANAME_HOOK_TOKEN", "").strip()
-    if not hook_secret:
-        raise Unmet("KANAME_HOOK_TOKEN не задан в окружении посева — тем же "
-                    "секретом посадка принимает хук поставщика; без него "
-                    "провизия личности невозможна")
-
     http = Http(pki)
+    lane_http = LaneHttp(lane_url, pki)
 
     say(f"===== машинный посев автономного стенда (прогон {run_id}) =====")
 
@@ -949,10 +1011,10 @@ def run(args: argparse.Namespace) -> int:
     say("── два арендатора: личность → аккаунт → проект ───────────────────────")
     tenants = {}
     for lane in ("a", "b"):
-        external_id = f"seed-{run_id}-{lane}@kaname.local"
-        provision_identity(http, hooks, hook_secret, external_id)
-        step(f"личность {lane.upper()} провизирована хуком поставщика")
-        tenants[lane] = resolve_tenant(http, public, boot, external_id)
+        email = f"seed-{run_id}-{lane}@kaname.local"
+        register_person(lane_http, email, person_password())
+        step(f"человек {lane.upper()} зарегистрирован полосой входа")
+        tenants[lane] = resolve_tenant(http, public, boot, email)
         t = tenants[lane]
         step(f"и стала арендатором: человек {t['userId']}, аккаунт "
              f"{t['accountId']}, проект {t['projectId']}")
@@ -1047,10 +1109,10 @@ def run(args: argparse.Namespace) -> int:
     # выдачи и ни разу не ходят под ним. Выпустить токен человека машинно значило
     # бы дать предъявителя с пустым уровнем подтверждения личности — тот самый
     # случай, который эта же полоса измерила выше.
-    nob_external = f"seed-{run_id}-nob@kaname.local"
-    provision_identity(http, hooks, hook_secret, nob_external)
-    step("личность БЕЗ ВЫДАЧ провизирована хуком поставщика")
-    tenants["nob"] = resolve_tenant(http, public, boot, nob_external)
+    nob_email = f"seed-{run_id}-nob@kaname.local"
+    register_person(lane_http, nob_email, person_password())
+    step("человек БЕЗ ВЫДАЧ зарегистрирован полосой входа")
+    tenants["nob"] = resolve_tenant(http, public, boot, nob_email)
     user_nob = tenants["nob"]["userId"]
     if tenants["nob"]["accountId"] in (tenants["a"]["accountId"],
                                        tenants["b"]["accountId"]):
@@ -1068,10 +1130,10 @@ def run(args: argparse.Namespace) -> int:
     # набор членов. Второй слот, а не `userNOBId`: «человеку не выдано ничего»
     # у соседних наборов не должно зависеть от того, чьим членом его сделала
     # группа. Предъявителя у него нет по той же причине, что у `userNOBId`.
-    inv_external = f"seed-{run_id}-inv@kaname.local"
-    provision_identity(http, hooks, hook_secret, inv_external)
-    step("личность — цель привязки членства — провизирована хуком поставщика")
-    tenants["inv"] = resolve_tenant(http, public, boot, inv_external)
+    inv_email = f"seed-{run_id}-inv@kaname.local"
+    register_person(lane_http, inv_email, person_password())
+    step("человек — цель привязки членства — зарегистрирован полосой входа")
+    tenants["inv"] = resolve_tenant(http, public, boot, inv_email)
     user_inv = tenants["inv"]["userId"]
     if user_inv in (user_nob, tenants["a"]["userId"], tenants["b"]["userId"]):
         raise Finding(
@@ -1265,8 +1327,8 @@ def run(args: argparse.Namespace) -> int:
     say(f"перепись: шагов с утверждённым исходом {steps_done} · "
          f"ключей записано {len(patch)} · предъявителей {len(creds)} · "
          f"арендаторов {len(tenants)}")
-    say("ПОСЕЯНО. Всё выдано глаголами продукта: чеканка бутстрапа, хук "
-        "провизии, выпуск удостоверения, обмен подписанного утверждения.")
+    say("ПОСЕЯНО. Всё выдано глаголами продукта: чеканка бутстрапа, регистрация "
+        "полосой входа, выпуск удостоверения, обмен подписанного утверждения.")
     return 0
 
 
@@ -1326,12 +1388,12 @@ def self_test() -> int:
     free.bind(("127.0.0.1", 0))
     _, closed_port = free.getsockname()
     free.close()
-    env = dict(os.environ, KANAME_HOOK_TOKEN="selftest-secret")
+    env = dict(os.environ)
     proc = subprocess.run(
         [sys.executable, str(pathlib.Path(__file__).resolve()),
          "--host", "127.0.0.1", "--pki", "/nonexistent-pki-for-selftest",
          "--port-public", str(closed_port), "--port-internal", str(closed_port),
-         "--port-hooks", str(closed_port), "--port-token", str(closed_port),
+         "--port-lane", str(closed_port), "--port-token", str(closed_port),
          "--port-grpc", str(closed_port)],
         capture_output=True, text=True, env=env, timeout=120)
     _c("нет слушателя — код 75, а НЕ 1 и не 0", proc.returncode == RC_UNMET,
@@ -1341,35 +1403,34 @@ def self_test() -> int:
        and "НАХОДКА" not in (proc.stdout + proc.stderr),
        (proc.stdout + proc.stderr)[-300:])
 
-    # Ось 2б: РАСХОЖДЕНИЕ СЕКРЕТА ХУКА — «условие не создано», а НЕ находка.
+    # Ось 2б: РЕГИСТРАЦИЯ ПОЛОСОЙ ВХОДА — отказ полосы есть находка, успех молчит.
     #
-    # Отказ хука един намеренно: `writeHookAuthRefusal` отвечает побайтово
-    # одинаково и на «заголовка нет», и на «величина не та» — различимый снаружи
-    # отказ был бы ОРАКУЛОМ по стерегомому секрету. Отсюда следствие для посева:
-    # из 401 `invalid_hook_token` вердикт о дереве НЕ ВЫВОДИМ ни при каком чтении.
-    # Он означает ровно то, что секрет посева и секрет посадки — две копии одной
-    # величины — разошлись; это код 75, и конвейер обязан прочесть его как «нет
-    # вердикта», а не как дефект продукта.
-    #
-    # Законный близнец рядом и отличается ОДНИМ фактом: тот же не-200, но отказ НЕ
-    # про аутентификацию хука — это находка, и она обязана остаться находкой.
-    class _Hook:
-        def __init__(self, code, text):
-            self.code, self.text = code, text
+    # Каждый мир отличается от законного близнеца (последняя строка) ОДНИМ
+    # фактом: признак формы отвергнут листу (403), регистрация не 200,
+    # регистрация 200 без печенья сессии. Близнец — 200 с печеньем — обязан
+    # молчать: иначе проба падала бы на чём угодно.
+    class _Lane:
+        def __init__(self, csrf_code=200, register_code=200, session=True):
+            self.csrf_code, self.register_code = csrf_code, register_code
+            self.session = session
 
-        def ask(self, url, **kw):
-            return self.code, self.text
+        def ask(self, method, path, body=None, cookies=None):
+            if path.startswith(LANE_CSRF):
+                if self.csrf_code != 200:
+                    return self.csrf_code, [], '{"code":7,"message":"edge only"}'
+                return 200, [f"{LANE_FORM_COOKIE}=f; Path=/"], '{"csrfToken":"t"}'
+            if self.register_code != 200:
+                return self.register_code, [], '{"code":3,"message":"bad form"}'
+            sc = [f"{LANE_SESSION_COOKIE}=s; Path=/"] if self.session else []
+            return 200, sc, "{}"
 
-    for label, code, text, want in (
-            ("401 invalid_hook_token — УСЛОВИЕ НЕ СОЗДАНО (75), а не находка",
-             401, '{"error":"invalid_hook_token"}', Unmet),
-            ("500 hook_secret_not_configured — тоже условие не создано",
-             500, '{"error":"hook_secret_not_configured"}', Unmet),
-            ("409 при живом хуке — НАХОДКА (вердикт о дереве)",
-             409, '{"error":"user_already_exists"}', Finding),
-            ("200 — молчит", 200, "{}", None)):
+    for label, lane_world, want in (
+            ("признак формы отвергнут листу (403) — НАХОДКА", _Lane(csrf_code=403), Finding),
+            ("регистрация ответила 400 — НАХОДКА", _Lane(register_code=400), Finding),
+            ("регистрация 200 без печенья сессии — НАХОДКА", _Lane(session=False), Finding),
+            ("регистрация 200 с печеньем — молчит", _Lane(), None)):
         try:
-            provision_identity(_Hook(code, text), "https://h", "s", "who@x")
+            register_person(lane_world, "who@x", "pw-selftest")
             got = None
         except Unmet:
             got = Unmet
@@ -1585,7 +1646,7 @@ def main() -> int:
     ap.add_argument("--pki", default=str(ROOT / ".stand" / "pki"))
     ap.add_argument("--port-public", type=int, default=9098)
     ap.add_argument("--port-internal", type=int, default=9099)
-    ap.add_argument("--port-hooks", type=int, default=9092)
+    ap.add_argument("--port-lane", type=int, default=9100)
     ap.add_argument("--port-token", type=int, default=9096)
     ap.add_argument("--port-jwks", type=int, default=9097)
     ap.add_argument("--port-grpc", type=int, default=9091)

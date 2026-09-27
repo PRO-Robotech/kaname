@@ -51,8 +51,10 @@
 // ФОРМ ОБЪЯВЛЕНИЯ ДВЕ
 //
 // Профиль значений чарта продукта и НАКЛАДКА ОПЕРАТОРА поверх профиля. Вторая
-// законна решением: боевой профиль стоит на `external`, профиля `own` в
-// поставке нет, перевод — накладка (kacho#2699 п. 3, INSTALL.md §1). Накладка
+// законна решением: боевой профиль стоял на `external`, и перевод на `own` был
+// накладкой (kacho#2699 п. 3); посадка снята (PRO-Robotech/corelib#30), профиль
+// объявляет `own` сам (#424), а накладка остаётся образцом переопределения его
+// величин (INSTALL.md §1). Накладка
 // берётся у единственного источника (`internal/testsupport/postureoverlay`),
 // который читает и рендерная проба чарта, доказывающая, что накладка поверх
 // своего профиля рендерится и принимается стражем старта (`deploy`, О2).
@@ -199,7 +201,15 @@ func collectLaneFacts(t *testing.T) []laneFact {
 
 		f := laneFact{Lane: l.String(), ProfileNames: declared[l.String()]}
 		f.Profiled = len(f.ProfileNames) > 0
-		if err := config.ValidateLaneWiring(cfg, bestCaseWiring(t, cfg)); err != nil {
+		// ЗАКОННОСТЬ ПОСАДКИ — ТОЖЕ УСЛОВИЕ ДОСТИЖИМОСТИ, И ЕГО НЕ ВЫПОЛНИТ
+		// НИКАКОЙ ПРОФИЛЬ (#424). Посадку вне словаря — снятую `external`
+		// (PRO-Robotech/corelib#30) — проверка старта отвергает первой и в
+		// одиночку, а разбор профиля её не производит: объявить её нельзя, и
+		// поднять её корень не может by construction. Отказ спрашивается у той
+		// же проверки фундамента, что зовёт старт.
+		if err := l.Validate(config.IdentityProviderSetting); err != nil {
+			f.Refusal = strings.ReplaceAll(err.Error(), "\n", " | ")
+		} else if err := config.ValidateLaneWiring(cfg, bestCaseWiring(t, cfg)); err != nil {
 			f.Refusal = strings.ReplaceAll(err.Error(), "\n", " | ")
 		} else {
 			f.Reachable = true

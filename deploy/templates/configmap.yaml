@@ -317,6 +317,24 @@ data:
         {{- end }}
       {{- end }}
 
+      {{- with $authn.ceremony }}
+      # СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318): срок кода авторизации от его
+      # выдачи и срок семейства токенов обновления от первой выдачи. Обе —
+      # условие старта под `authn.identityProvider: own`, умолчания нет ни у
+      # одной: незаданная — отказ старта с именем ручки
+      # (KANAME_AUTHN__CEREMONY__*). Потолки держит фундамент
+      # (tokenpolicy.MaxAuthorizationCodeTTL, tokenpolicy.MaxRefreshTokenFamilyTTL),
+      # судит их страж старта, а не рендер. Под `external` блок не читается:
+      # церемонии там нет.
+      ceremony:
+        {{- with .codeTtl }}
+        code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- with .refreshTtl }}
+        refresh-ttl: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
       {{- with $authn.selfServiceFreshness }}
       # ОКНО СВЕЖЕСТИ ПРАВКИ СВОИХ ДАННЫХ (Ф12, kacho#1281): условие старта под
       # `authn.identityProvider: own`, умолчания нет — ветвь, а не сквозная
@@ -462,7 +480,8 @@ data:
       # оператора.
       #
       # Блок рендерится ТОЛЬКО при enabled — та же форма, что у чеканки выше.
-      # Четыре величины отданы ветвью без умолчаний шаблона; незаданную при
+      # Величины выдачи и шесть величин темпа поверхности выдачи (kaname#315)
+      # отданы ветвью без умолчаний шаблона; незаданную при
       # включённом эндпоинте отвергает рендер тем же помощником, одним перечнем,
       # а согласованность заданных судит страж старта. Целое проходит через
       # `int64` — тот же довод, что у блока `login`.
@@ -479,6 +498,24 @@ data:
         {{- end }}
         {{- with $ct.bodyCeiling }}
         body-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.inFlightCeiling }}
+        in-flight-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.exchangesPerClientPerSec }}
+        exchanges-per-client-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofsPerSource }}
+        failed-proofs-per-source: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofWindow }}
+        failed-proof-window: {{ . | quote }}
+        {{- end }}
+        {{- with $ct.authorizePerSourcePerSec }}
+        authorize-per-source-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.authorizeInFlightCeiling }}
+        authorize-in-flight-ceiling: {{ int64 . }}
         {{- end }}
       {{- end }}
 
