@@ -143,7 +143,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
-	w, err := uc.deps.Store.Writer(ctx)
+	// Строка личности — ПЕРВОЙ, до строки фактора и записи сессии (kaname#382):
+	// порядок «личность → дети» у всех писателей сессии одной личности один, и
+	// держит его открытие, а не то, что следом за сверкой не пишется ничего,
+	// требующего личности.
+	w, err := uc.deps.Store.PersonWriter(ctx, user.ID)
 	if err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}

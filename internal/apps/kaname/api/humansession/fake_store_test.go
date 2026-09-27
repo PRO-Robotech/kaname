@@ -197,6 +197,21 @@ func (f *fakeStore) SessionSetWriter(_ context.Context, userID domain.UserID) (h
 	return w, nil
 }
 
+// PersonWriter — транзакция, открытая ключевым замком строки личности
+// (kaname#382). Замков дублёр не моделирует; он повторяет РАБОТУ адаптера —
+// открытие и оператор замка строки личности, исполняемый и у пустой личности
+// (`holdPersonForKey`), — и запоминает, чью строку транзакция держит.
+func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := f.open("")
+	if err != nil {
+		return nil, err
+	}
+	if err := w.holdPersonForKey(userID); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
 	if f.failOn == "writer" {
@@ -222,10 +237,14 @@ type fakeWriter struct {
 	lockedFor domain.UserID
 	// endedOthersOf — чьи записи сессии сняты `EndOtherSessions`, по вызову.
 	endedOthersOf []domain.UserID
-	// holds — личность, чью строку транзакция уже держит замком писателя
-	// нескольких сессий (у адаптера — `humanSessionWriter.person`): повторного
-	// оператора замка на ней нет, строку другой личности транзакция не берёт.
+	// holds — личность, чью строку транзакция уже держит (у адаптера —
+	// `humanSessionWriter.person`): строку другой личности транзакция не берёт.
 	holds domain.UserID
+	// sessionSet — строка держится замком писателя нескольких сессий, а не
+	// только ключевым (у адаптера — `humanSessionWriter.sessionSet`): у
+	// ключевого замка дверь снятия исполняет оператор подъёма, у сильного —
+	// нет.
+	sessionSet bool
 }
 
 // errFakeSecondPerson — вторая личность в транзакции, уже держащей строку
@@ -242,11 +261,27 @@ func (w *fakeWriter) holdPerson(userID domain.UserID) error {
 	if w.holds != "" && w.holds != userID {
 		return errFakeSecondPerson()
 	}
-	if w.holds != "" {
+	if w.sessionSet && w.holds == userID {
 		return nil
 	}
 	w.store.trip()
-	w.holds = userID
+	if userID != "" {
+		w.holds, w.sessionSet = userID, true
+	}
+	return nil
+}
+
+// holdPersonForKey — оператор ключевого замка строки личности
+// (`holdPersonForKey` адаптера): пустая личность — оператор есть, отметки нет.
+func (w *fakeWriter) holdPersonForKey(userID domain.UserID) error {
+	if w.holds != "" && w.holds != userID {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the transaction already holds another person and cannot hold a second one")
+	}
+	w.store.trip()
+	if userID != "" {
+		w.holds = userID
+	}
 	return nil
 }
 

@@ -144,6 +144,15 @@ func (s recordingStore) SessionSetWriter(ctx context.Context, userID domain.User
 	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
 }
 
+func (s recordingStore) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	defer s.rec("PersonWriter")()
+	w, err := s.inner.PersonWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
+}
+
 // recordingWriter — humansession.Writer с журналом.
 type recordingWriter struct {
 	inner humansession.Writer
