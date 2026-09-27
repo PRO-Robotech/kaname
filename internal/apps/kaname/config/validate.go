@@ -74,6 +74,9 @@ func (c Config) Validate() error {
 	// объявляет нашего издателя единственной принимаемой формой адресата
 	// утверждения, поэтому связь двух настроек проверяется там, где она есть.
 	errs = multierr.Append(errs, c.AuthN.ClientToken.Validate(c.AuthN.TokenSigning, c.APIServer.RegistryToken.ListenAddress()))
+	// Величины точки авторизации (kaname#315, П4 и П5) — при собранной
+	// церемонии, а не при включённом эндпоинте: без церемонии точки нет.
+	errs = multierr.Append(errs, c.AuthN.ValidateCeremonyPace())
 
 	// Страж докерной полосы выдачи (задача #1184): адресат, которому она
 	// чеканит, обязан входить в перечень адресатов платформы. Полос выдачи по

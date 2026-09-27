@@ -43,7 +43,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -86,12 +88,18 @@ func buildCeremonySurface(
 	signer *tokensigner.Signer,
 	keys ceremonyport.KeySetSource,
 	secrets ceremonyport.SecretChecker,
+	source *issuingsource.Rule,
 	logger *slog.Logger,
 ) (*ceremonySurface, error) {
-	if cfg.AuthN.IdentityProvider != config.IdentityProviderOwn || !cfg.AuthN.ClientToken.Enabled {
+	// Условие сборки — ТОТ ЖЕ предикат, что у стражей величин точки
+	// авторизации и режима слушателя выдачи: три одинаковых условия разошлись
+	// бы молча.
+	if !cfg.AuthN.CeremonyAssembled() {
 		return nil, nil
 	}
 	switch {
+	case source == nil:
+		return nil, errors.New("ceremony: the source address rule is not wired")
 	case signer == nil:
 		return nil, errors.New("ceremony: own sign-in is on but our signer is not wired")
 	case keys == nil:
@@ -106,8 +114,14 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
+	// Сроки церемонии называет установка (kaname#318): страж старта уже принял
+	// их в пределах потолков фундамента, и фундамент судит их ещё раз.
+	lifespans := cfg.AuthN.Ceremony
 	store := kanamepg.NewOAuthCeremonyRepo(pool)
-	vaults := kanamepg.NewCeremonyVaults(pool)
+	vaults, err := kanamepg.NewCeremonyVaults(pool, lifespans.RefreshTTL)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
 	issuer, err := ceremonyport.NewAccessTokens(signer, keys, store)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
@@ -126,10 +140,11 @@ func buildCeremonySurface(
 		// Срок токена доступа — тот же, что у машинных полос этого эндпоинта:
 		// одна ручка срока выпускаемого токена на поверхность.
 		AccessTokenLifespan: cfg.AuthN.ClientToken.TokenTTL,
-		// Срок одного токена обновления — потолок семейства фундамента; семейство
-		// кончается раньше вместе со своей сессией (граница выдачи и хранилища).
-		RefreshTokenLifespan:      tokenpolicy.MaxRefreshTokenFamilyTTL,
-		AuthorizationCodeLifespan: tokenpolicy.MaxAuthorizationCodeTTL,
+		// Срок одного токена обновления — срок семейства: токен семейства не
+		// бывает годен дольше своего семейства. Предел семейства на обороте держит
+		// граница выдачи и хранилища (рождение плюс тот же срок, не позже сессии).
+		RefreshTokenLifespan:      lifespans.RefreshTTL,
+		AuthorizationCodeLifespan: lifespans.CodeTTL,
 		ScopeMatching:             oauthceremony.ScopeMatchingExact,
 		// Токен обновления выдаётся вместе с токеном доступа каждым обменом
 		// (приёмка Р8).
@@ -165,7 +180,7 @@ func buildCeremonySurface(
 	// предел одного вызова хранилища на всю поверхность.
 	authorizeUC, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{
 		Engine: engine, Clients: vaults, Authority: authority, Clock: time.Now,
-		CallTimeout: credentialLanePeerTimeout,
+		CallTimeout: credentialLanePeerTimeout, FamilyTTL: lifespans.RefreshTTL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
@@ -177,9 +192,12 @@ func buildCeremonySurface(
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
 	census := ceremonyhttp.NewCensus()
-	authorize, err := ceremonyhttp.NewAuthorize(ceremonyhttp.AuthorizeConfig{
-		UseCase: authorizeUC, Census: census, Logger: logger,
-	})
+	authorizeCfg, err := ceremonyAuthorizePace(cfg, source, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
+	authorizeCfg.UseCase, authorizeCfg.Census, authorizeCfg.Logger = authorizeUC, census, logger
+	authorize, err := ceremonyhttp.NewAuthorize(authorizeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
@@ -202,7 +220,32 @@ func buildCeremonySurface(
 		slog.String("authorization_endpoint", authorizeURL),
 		slog.String("token_endpoint", tokenURL),
 		slog.String("access_token_lifespan", cfg.AuthN.ClientToken.TokenTTL.String()),
-		slog.String("authorization_code_lifespan", tokenpolicy.MaxAuthorizationCodeTTL.String()),
-		slog.Int("state_floor", ceremonyhttp.StateFloor))
+		slog.String("authorization_code_lifespan", lifespans.CodeTTL.String()),
+		slog.String("refresh_token_lifespan", lifespans.RefreshTTL.String()),
+		slog.Int("state_floor", ceremonyhttp.StateFloor),
+		slog.Int("authorize_per_source_per_sec", cfg.AuthN.ClientToken.AuthorizePerSourcePerSec),
+		slog.Int("authorize_in_flight_ceiling", cfg.AuthN.ClientToken.AuthorizeInFlightCeiling))
 	return &ceremonySurface{Authorize: authorize, Discovery: discovery, Token: token, Census: census}, nil
+}
+
+// ceremonyAuthorizePace — оси точки авторизации из настройки (приёмка
+// ceremony-pace-is-named-by-number.md, П4 и П5): темп на источник, потолок
+// одновременных и правило адреса источника.
+//
+// Отделено от сборки церемонии затем, чтобы переход «настройка → сборка» судился
+// без базы: величина, которую страж требует, а корень не передаёт, оставляла бы
+// обе стороны зелёными по своим пробам.
+func ceremonyAuthorizePace(cfg config.Config, source *issuingsource.Rule, now func() time.Time) (ceremonyhttp.AuthorizeConfig, error) {
+	if source == nil {
+		return ceremonyhttp.AuthorizeConfig{}, errors.New("authorize pace: the source address rule is not wired")
+	}
+	pace, err := exchangepace.New(cfg.AuthN.ClientToken.AuthorizePerSourcePerSec, now)
+	if err != nil {
+		return ceremonyhttp.AuthorizeConfig{}, fmt.Errorf("authorize pace per source: %w", err)
+	}
+	return ceremonyhttp.AuthorizeConfig{
+		Pace:            pace,
+		InFlightCeiling: cfg.AuthN.ClientToken.AuthorizeInFlightCeiling,
+		Source:          source.AuthorizePoint,
+	}, nil
 }

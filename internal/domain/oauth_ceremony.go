@@ -121,7 +121,10 @@ func IsRefreshTokenReplay(err error) bool { return errors.Is(err, ErrRefreshToke
 // с ограничением `token_families_revoked_reason_ck`: корзины «прочее» у него
 // нет, и значение вне перечня — наша ошибка, а не чужая. Совпадение в обе
 // стороны держит проба живой схемы
-// `TestIntegration_RevocationVocabularyAgreesWithTheDomain`.
+// `TestIntegration_RevocationVocabularyAgreesWithTheDomain`, а то, что у
+// каждого слова есть писатель, — гейт
+// `TestFamilyRevocationVocabulary_KN_FRV_17_EveryWordHasAWriter`: слово, которого
+// никто не пишет, перечень превращает в обещание (kaname#339).
 type FamilyRevocationReason string
 
 const (
@@ -129,12 +132,8 @@ const (
 	FamilyRevokedByCodeReplay FamilyRevocationReason = "code-replay"
 	// FamilyRevokedByRefreshReplay — повторное предъявление обновляющего токена.
 	FamilyRevokedByRefreshReplay FamilyRevocationReason = "refresh-replay"
-	// FamilyRevokedByLogout — человек вышел.
-	FamilyRevokedByLogout FamilyRevocationReason = "logout"
 	// FamilyRevokedBySessionEnd — сессия, в которой шла церемония, снята.
 	FamilyRevokedBySessionEnd FamilyRevocationReason = "session-ended"
-	// FamilyRevokedByClientRemoval — клиент снят.
-	FamilyRevokedByClientRemoval FamilyRevocationReason = "client-removed"
 	// FamilyRevokedByClientRevocation — клиент, которому выдан грант, сам
 	// попросил отзыва (RFC 7009). Написание — дословно причина фундамента
 	// `oauthceremony.RevocationClientRevoke`: адаптер порта отзыва сопрягает
@@ -147,8 +146,8 @@ const (
 // расширить его на месте.
 func FamilyRevocationReasons() []FamilyRevocationReason {
 	return []FamilyRevocationReason{
-		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedByLogout,
-		FamilyRevokedBySessionEnd, FamilyRevokedByClientRemoval, FamilyRevokedByClientRevocation,
+		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedBySessionEnd,
+		FamilyRevokedByClientRevocation,
 	}
 }
 

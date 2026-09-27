@@ -376,7 +376,7 @@ func TestIntegration_IssuedContextSurvivesAnUpdateOfItsFamily(t *testing.T) {
 	// живость, а не контекст. Обязан пройти и снестись каскадом.
 	_, err = db.Exec(`
 		UPDATE kaname.token_families
-		   SET revoked_at = now(), revoked_reason = 'logout', live = false
+		   SET revoked_at = now(), revoked_reason = 'session-ended', live = false
 		 WHERE id = $1 AND revoked_at IS NULL`, family)
 	require.NoError(t, err, "отзыв семейства обязан ПРОХОДИТЬ: расщепление ключа его не трогает")
 
@@ -448,7 +448,7 @@ func TestIntegration_ChildOfARevokedFamilyIsRefusedByItsLiveKey(t *testing.T) {
 			require.NoError(t, err)
 			_, err = tx.Exec(`
 				UPDATE kaname.token_families
-				   SET revoked_at = now(), revoked_reason = 'logout', live = false
+				   SET revoked_at = now(), revoked_reason = 'session-ended', live = false
 				 WHERE id = $1 AND revoked_at IS NULL`, family)
 			require.NoError(t, err, "отзыв семейства в транзакции отказа обязан пройти")
 			requirePgRefusal(t, child.insert(tx, family, client, user, session), "23503", child.liveKey,

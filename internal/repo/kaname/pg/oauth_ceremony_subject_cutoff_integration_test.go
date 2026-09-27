@@ -67,7 +67,7 @@ func TestCeremonyVaults_CodeIssuanceReadsTheSubjectCutoff(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vcf1")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
 
 			_, err := v.StoreAuthorizationCode(ctx, ceremonyDigest(0x7f0001+i),
@@ -94,7 +94,7 @@ func TestCeremonyVaults_CodeExchangeReadsTheSubjectCutoff(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vcf2")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			sig := ceremonyDigest(0x7f0101 + i)
 			storeVaultCode(t, ctx, v, sc, sig)
 			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
@@ -118,7 +118,7 @@ func TestCeremonyVaults_RefreshRotationReadsTheSubjectCutoff(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vcf3")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			code := ceremonyDigest(0x7f0201 + i)
 			storeVaultCode(t, ctx, v, sc, code)
 			rt := ceremonyDigest(0x7f0301 + i)

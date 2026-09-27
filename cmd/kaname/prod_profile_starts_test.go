@@ -193,6 +193,25 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"боевой профиль не проходит стража старта полосы входа: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 	t.Logf("полоса входа: посадка %q · адрес %q", posture, laneCfg.APIServer.LoginLaneEndpoint)
 
+	// ── РЕЖИМ СЛУШАТЕЛЯ ВЫДАЧИ (kaname#315, Р7 п.5) ────────────────────────
+	//
+	// Страж читает режим только при собранной церемонии, а боевой профиль стоит
+	// на `external` — там вердикт вакуумен. Поэтому он судится ДВАЖДЫ: посадкой
+	// профиля и посадкой накладки оператора `own` с включённым эндпоинтом
+	// (INSTALL.md §1) поверх того же окружения. Второй вердикт и есть предмет:
+	// профиль, чья накладка `own` не поднимается, объявил неисполнимую посадку.
+	for _, c := range []struct {
+		name     string
+		provider config.IdentityProvider
+	}{{"посадка профиля", posture}, {"накладка own", config.IdentityProviderOwn}} {
+		var ceremonyCfg config.Config
+		ceremonyCfg.AuthN.IdentityProvider = c.provider
+		ceremonyCfg.AuthN.ClientToken.Enabled = c.provider == config.IdentityProviderOwn
+		require.NoErrorf(t, requireIssuingListenerAsksForACertificate(ceremonyCfg, mtlsCfg),
+			"%s: боевой профиль не проходит стража режима слушателя выдачи — собранная церемония не поднимется", c.name)
+	}
+	t.Logf("режим слушателя выдачи: %q", mtlsCfg.RegistryTokenClientAuthModeValue())
+
 	// ── ТРАНСПОРТ ОСТАЛЬНЫХ HTTP-РЁБЕР ──────────────────────────────────────
 	//
 	// Адреса берутся у САМОГО процесса (`config.RegisterDefaults`), а не

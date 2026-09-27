@@ -88,7 +88,7 @@ func TestCeremonyVaults_CodeConsumptionJudgesACutoffCommittedAfterTheRead(t *tes
 			t.Run(lane.name+"/"+cell.name, func(t *testing.T) {
 				ctx, pool := catalogPool(t)
 				sc := ceremonyScene(t, ctx, pool, "vdw1")
-				v := kanamepg.NewCeremonyVaults(pool)
+				v := ceremonyVaults(t, pool)
 				sig := ceremonyDigest(0x7f0401 + 0x10*li + i)
 				storeVaultCode(t, ctx, v, sc, sig)
 
@@ -124,7 +124,7 @@ func TestCeremonyVaults_RotationLockJudgesACutoffCommittedAfterTheRead(t *testin
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vdw2")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			rt := ceremonyDigest(0x7f0501 + i)
 			seedLiveRefresh(t, ctx, pool, v, sc, ceremonyDigest(0x7f0511+i), rt)
 
@@ -157,7 +157,7 @@ func TestCeremonyVaults_RotationWriteJudgesACutoffCommittedAfterTheLock(t *testi
 		t.Run(cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vdw3")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			rt := ceremonyDigest(0x7f0601 + i)
 			seedLiveRefresh(t, ctx, pool, v, sc, ceremonyDigest(0x7f0611+i), rt)
 
@@ -203,7 +203,7 @@ func TestOAuthCeremonyRepo_ExchangeAndRotationNameTheSubjectCutoff(t *testing.T)
 		t.Run("обмен кода/"+cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vdw4")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			sig := ceremonyDigest(0x7f0701 + i)
 			storeVaultCode(t, ctx, v, sc, sig)
 			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
@@ -222,7 +222,7 @@ func TestOAuthCeremonyRepo_ExchangeAndRotationNameTheSubjectCutoff(t *testing.T)
 		t.Run("оборот токена обновления/"+cell.name, func(t *testing.T) {
 			ctx, pool := catalogPool(t)
 			sc := ceremonyScene(t, ctx, pool, "vdw5")
-			v := kanamepg.NewCeremonyVaults(pool)
+			v := ceremonyVaults(t, pool)
 			rt := ceremonyDigest(0x7f0801 + i)
 			seedLiveRefresh(t, ctx, pool, v, sc, ceremonyDigest(0x7f0811+i), rt)
 			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))

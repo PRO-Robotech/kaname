@@ -293,6 +293,22 @@ func (m MTLSConfig) JWKSProxyClientAuthModeValue() string {
 // проверочных ключей, который обязан оставаться доступным без сертификата.
 func JWKSProxyRequestingModeName() string { return clientAuthOptionalMutual }
 
+// IssuingListenerRequestingModeName — режим слушателя выдачи, которого требует
+// собранная церемония (приёмка ceremony-pace-is-named-by-number.md, Р7 п.5):
+// сертификат ЗАПРАШИВАЕТСЯ и, предъявленный, проверяется — край узнаётся по
+// проверенному сертификату, вызывающий без сертификата допускается.
+//
+// Отдаётся отсюда, а не пишется у стража литералом, по тому же доводу, что у
+// [JWKSProxyRequestingModeName].
+func IssuingListenerRequestingModeName() string { return clientAuthOptionalMutual }
+
+// RegistryTokenClientAuthModeValue — эффективный режим проверки клиента на
+// слушателе выдачи, тот самый, что уходит в транспорт: незаданная ручка
+// отвечает своим умолчанием, а не пустой строкой.
+func (m MTLSConfig) RegistryTokenClientAuthModeValue() string {
+	return resolveClientAuthMode(m.RegistryTokenClientAuthMode)
+}
+
 // resolveClientAuthMode возвращает эффективный ClientAuth-режим для ребра:
 // пустая строка → безопасный per-edge дефолт server-tls-only (явное осознанное
 // решение, не случайный zero-value: ни Ory webhooks, ни metrics scrape-клиент

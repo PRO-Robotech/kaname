@@ -110,11 +110,17 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 		Service:  "registry.kacho.local",
 	}
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
-		Enabled:          false,
-		AllowedAudiences: "registry.kacho.local, https://api.kacho.cloud",
-		DefaultAudience:  "https://api.kacho.cloud",
-		TokenTTL:         15 * time.Minute,
-		BodyCeiling:      64 << 10,
+		Enabled:                  false,
+		AllowedAudiences:         "registry.kacho.local, https://api.kacho.cloud",
+		DefaultAudience:          "https://api.kacho.cloud",
+		TokenTTL:                 15 * time.Minute,
+		BodyCeiling:              64 << 10,
+		ExchangesPerClientPerSec: 5,
+		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 	return cfg
 }

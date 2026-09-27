@@ -201,9 +201,8 @@ func (c PresentedCredentialConfig) ValidateBinding(
 			"%s=%s but authn.presented-credential.enabled is false — on this posture there is no "+
 				"edge of ours to forward an identity and no module certificate for a person, so a "+
 				"tenant has NOTHING to name itself with: every public RPC would answer an honest "+
-				"and useless refusal. Enable it, or declare %s=%s",
-			IdentityProviderSetting, IdentityProviderOwn,
-			IdentityProviderSetting, IdentityProviderExternal))
+				"and useless refusal. Enable it",
+			IdentityProviderSetting, IdentityProviderOwn))
 	}
 	return errs
 }

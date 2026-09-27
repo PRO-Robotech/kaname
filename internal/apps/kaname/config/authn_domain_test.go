@@ -44,6 +44,7 @@ func domainCfg(domain string) config.Config {
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
 	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.AccessKeys = accessKeySettings()
+	cfg.AuthN.Ceremony = ceremonyLifespanSettings()
 	cfg.AuthN.Registration = registrationSettings()
 	cfg.AuthN.SecondFactorEncryptionKeyHex = strings.Repeat("cd", 32)
 	cfg.AuthN.SelfServiceFreshness = 15 * time.Minute

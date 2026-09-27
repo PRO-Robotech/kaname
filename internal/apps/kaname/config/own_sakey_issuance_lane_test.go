@@ -87,13 +87,8 @@ func TestOwnPostureWithOwnSAKeyIssuanceStarts(t *testing.T) {
 	}
 }
 
-// TestExternalPostureWithoutOwnSAKeyIssuanceStarts — полосность: на посадке
-// `external` у непереведённого контура исполнитель есть, и та же выключенная
-// ручка старт не останавливает.
-func TestExternalPostureWithoutOwnSAKeyIssuanceStarts(t *testing.T) {
-	cfg := withoutOwnSAKeyIssuance(config.IdentityProviderExternal)
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v: под external зеркало заводится у существующего поставщика, "+
-			"и невключённый токен-эндпоинт отказом старта не является", err)
-	}
-}
+// ЗДЕСЬ СТОЯЛ СЛУЧАЙ «на посадке `external` та же выключенная ручка старт не
+// останавливает». Посадка снята фундаментом (PRO-Robotech/corelib#30), и
+// проверка старта отвергает её раньше требований любой полосы (#424): случай
+// зеленел бы на отказе старта, ничего о ручке не утверждая. Отказ старта на
+// снятой посадке держит identity_provider_validate_test.go.

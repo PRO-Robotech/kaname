@@ -298,6 +298,27 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 **Печатаются все объявленные исходы, включая нулевые.** Поэтому «ноль отказов» отличимо от «полоса
 не исполнялась ни разу»: во втором случае на нуле и `accepted`.
 
+Три исхода — отказы по темпу, у них свои коды наружу, и чинит их не учётная запись клиента, а
+темп: `in-flight-ceiling-reached` (занят потолок одновременных обменов, `503`),
+`client-pace-exceeded` (темп клиента, `429`) и `source-failures-exceeded` (с одного источника
+слишком много отказов доказательства клиента за окно, `429`). Устойчивый рост первого — повод
+смотреть на задержку хранилища или на объявленный потолок; рост третьего с одного адреса —
+перебор учётных данных.
+
+Адрес источника для осей темпа служба берёт у края платформы; когда взять не может, считает случай:
+
+```promql
+# источником стал адрес пира, хотя заголовок пересылки был или ждался
+sum by (point, reason) (increase(kaname_issuing_source_fallbacks_total[1h]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_issuing_source_fallbacks_total` | `point`, `reason` | `point` — `authorize`/`token`; `reason` — `forwarded-from-non-edge` (заголовок пересылки у вызывающего, который не край: не прочитан) и `edge-without-address` (край не передал годного адреса). Четыре клетки, все печатаются с нуля |
+
+Ненулевая клетка — вопрос к посадке: край ретранслирует без своей клиентской пары, либо перед
+слушателем выдачи стоит балансировщик, подменяющий адрес.
+
 ## Церемония входа человека (`authorization_code`)
 
 Под посадкой `own` служба сама проводит интерактивную церемонию: эндпоинт авторизации
@@ -314,7 +335,7 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 
 | Ряд | Метки | Что значит |
 |---|---|---|
-| `kaname_ceremony_outcomes_total` | `outcome` | исходы обращений к церемонии. Набор значений закрытый: у эндпоинта авторизации — `authorize-code-issued` и по значению на каждый отказ (`authorize-client-unknown`, `authorize-redirect-unregistered`, `authorize-state-below-floor`, `authorize-login-required`, `authorize-step-up-required` и прочие), у полос обмена — `token-code-exchanged`, `token-refreshed`, `token-grant-refused`, `token-client-refused`, `token-request-refused`, `token-unavailable` |
+| `kaname_ceremony_outcomes_total` | `outcome` | исходы обращений к церемонии. Набор значений закрытый: у эндпоинта авторизации — `authorize-code-issued` и по значению на каждый отказ (`authorize-client-unknown`, `authorize-redirect-unregistered`, `authorize-state-below-floor`, `authorize-login-required`, `authorize-step-up-required` и прочие, в том числе отказы по темпу `authorize-source-pace-exceeded` и `authorize-in-flight-ceiling-reached`), у полос обмена — `token-code-exchanged`, `token-refreshed`, `token-grant-refused`, `token-client-refused`, `token-request-refused`, `token-unavailable` |
 
 | `outcome="…"` | Кто чинит |
 |---|---|

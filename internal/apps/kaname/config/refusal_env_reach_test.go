@@ -179,15 +179,17 @@ func auditRefusalNamedEnv(profiles []refusalProfile, world refusalWorld) ([]stri
 
 // refusalProfilesUnderTest — профили, на которых спрашивают стража.
 //
-// Четыре, а не один: половина отказов производится только в боевом режиме, а
+// Три, а не один: половина отказов производится только в боевом режиме, а
 // часть — только на объявленной полосе посадки личности. Профиль, оставшийся вне
 // обхода, унёс бы с собой все переменные, которые называют только его отказы.
+//
+// Профиля «полоса external» здесь больше нет (#424): посадка снята фундаментом
+// (PRO-Robotech/corelib#30), и такой профиль отказывает разбором ещё до стража
+// — отказов полосы он не производит, и переменных, которые называли бы только
+// они, у него нет.
 func refusalProfilesUnderTest() []refusalProfile {
 	return []refusalProfile{
 		{Name: "боевой, ничего не объявлено", Env: map[string]string{}},
-		{Name: "боевой, полоса external", Env: map[string]string{
-			"KANAME_AUTHN__IDENTITY_PROVIDER": "external",
-		}},
 		{Name: "боевой, полоса own", Env: map[string]string{
 			"KANAME_AUTHN__IDENTITY_PROVIDER": "own",
 		}},

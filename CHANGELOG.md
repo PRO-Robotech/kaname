@@ -33,6 +33,23 @@
 
 Состояние вершины ствола. Записи станут первой версией, когда она будет выпущена.
 
+### Сроки кода и семейства собственной церемонии называет установка
+
+- **ЛОМАЕТ старт посадки `own`.** Две новые обязательные величины:
+  `authn.ceremony.code-ttl` (`KANAME_AUTHN__CEREMONY__CODE_TTL`) — срок кода
+  авторизации от выдачи, и `authn.ceremony.refresh-ttl`
+  (`KANAME_AUTHN__CEREMONY__REFRESH_TTL`) — срок семейства токенов обновления
+  от первой выдачи; оборот его не продлевает. Умолчания нет: незаданная,
+  нулевая или отрицательная величина и величина выше потолка фундамента
+  (`tokenpolicy.MaxAuthorizationCodeTTL`, `tokenpolicy.MaxRefreshTokenFamilyTTL`)
+  отвергают старт с именем ручки. Под `external` ручки не читаются.
+- **Что сделать:** под `own` назвать обе величины. Прежнее поведение — `60s` и
+  `168h`; так их называют поставляемый профиль чарта (`authn.ceremony.codeTtl`,
+  `authn.ceremony.refreshTtl`) и оба стенда. Журнал старта «own OAuth ceremony
+  is on» называет обе применённые величины. Приёмка —
+  `docs/engineering/acceptance/ceremony-lifespans-are-declared-within-their-ceilings.md`.
+  Kaname#318.
+
 ### Ответ `Create` интерактивного клиента несёт секрет, показанный один раз
 
 - **ЛОМАЕТ контракт.** Операция `InternalInteractiveClientService.Create`
