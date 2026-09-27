@@ -72,7 +72,9 @@ DEFAULT_SUITE = "tests/newman"
 FIXTURES = pathlib.Path("tests") / "authz-fixtures"
 CENSUS = pathlib.Path(".github") / "scripts" / "newman-suite-debt.py"
 
-# Посев, создающий условие волны. Его ещё нет — и это печатается долгом.
+# Посев, создающий условие волны: предъявитель человека своей церемонией службы
+# на стенде посадки `own` (`stand-chart.sh seed-ceremony`). Пока файла нет, это
+# печатается долгом (`--debt`).
 SEED_NAME = "seed_ceremony.py"
 
 RC_FINDING = 1
