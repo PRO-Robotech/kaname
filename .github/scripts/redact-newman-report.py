@@ -73,6 +73,22 @@
 У каждой части ДВА суда — срез и проверка выхода, — и у каждого суда есть
 свидетель в самопробе (см. «СУДЫ» ниже): снятие любого краснит её.
 
+ВИДЫ УДОСТОВЕРЕНИЙ ПОЛОСЫ ВТОРОГО ФАКТОРА (kaname#417). Секрет кода по времени
+режется именем `secret`, параметром `secret=` адреса `otpauth` и — в прозе —
+своим видом; запасной код и код по времени формы не имеют и режутся ИМЕНЕМ
+КОДА (`code`, `secondFactor.code`, `backupCodes`, `sfCode`, `sfBackupCode0`),
+кроме кода состояния — одной–трёх цифр, законного близнеца на том же месте.
+Довод и замеры — у `TOTP_SECRET_RE` и `_named_code`.
+
+ГРАНИЦА НАЗВАНА: ТЕКСТ УПАВШЕГО УТВЕРЖДЕНИЯ — ПРОЗА. Общие помощники
+генератора (`assert_status`, `assert_grpc_code`) кладут в сообщение утверждения
+тело ответа, то есть JSON внутри прозы; имён внутри такой строки срез не видит
+и судит её только формой. Для полосы второго фактора это закрыто источником:
+утверждения набора значений не получают вовсе
+(`tests/newman/scripts/second_factor_assertion_values_test.py`). У прочих
+наборов короткое удостоверение без формы, попавшее в сообщение упавшего
+утверждения, срез не вырезает.
+
 ЧТО ОСТАЁТСЯ. Имена ключей, имена заголовков, пути запросов, коды, тексты
 утверждений, числа и времена — то есть РАЗБОР ПАДЕНИЯ. Чистка, съедающая имя
 ключа, неотличима от удаления файла, и проба требует обратного прямо. Имя
@@ -95,7 +111,9 @@
 base64; тройка, заслонённая короткой; один проход до чистого выхода) — они
 судят отсутствие любого куска секрета, а не чистый остаток; ось полноты по
 частям документа (инъекция в каждую часть и близнец) и второго взгляда по
-ним; перепись судов — у каждого свидетель; пустой обход обязан дать отказ.
+ним; перепись судов — у каждого свидетель; ось видов полосы второго фактора
+(каждый вид в той позиции, куда его кладёт набор, и безобидный текст на тех
+же местах); пустой обход обязан дать отказ.
 """
 
 from __future__ import annotations
@@ -141,11 +159,15 @@ CHECK_EVERY_COPY = "проверка: каждая копия повторённ
 CHECK_JSON_BODY = "проверка: тело, разобранное как JSON"
 CHECK_BYTES = "проверка: байтовый массив тела"
 CHECK_TEXT_FILE = "проверка: текстовый файл"
+CUT_KIND_TOTP_SECRET = "срез: вид секрета кода по времени"
+CUT_NAMED_CODE = "срез: значение под именем кода"
+CHECK_NAMED_CODE = "проверка: значение под именем кода"
 JUDGMENTS = (
     CUT_KIND_JWT, CUT_KIND_BEARER, CUT_QUERY, CUT_CRITERION, CUT_NAMED_STRING,
     CUT_NAMED_NUMBER, CUT_MEMBER_NAME, CUT_EVERY_COPY, CUT_JSON_BODY, CUT_BYTES,
     CUT_TEXT_FILE, CHECK_NAMED_STRING, CHECK_NAMED_NUMBER, CHECK_SHAPE,
     CHECK_MEMBER_NAME, CHECK_EVERY_COPY, CHECK_JSON_BODY, CHECK_BYTES, CHECK_TEXT_FILE,
+    CUT_KIND_TOTP_SECRET, CUT_NAMED_CODE, CHECK_NAMED_CODE,
 )
 
 _OFF: set[str] = set()
@@ -204,6 +226,78 @@ def _named_secret(key_hint: str | None) -> bool:
     """Имя называет значение секретом? ОДИН предикат для среза и для проверки
     выхода: разойдись они здесь — срез оставил бы то, что проверка назовёт."""
     return bool(key_hint) and SECRET_NAME_RE.search(key_hint) is not None
+
+
+# ── ПОЛОСА ВТОРОГО ФАКТОРА: ЕЁ ВИДЫ УДОСТОВЕРЕНИЙ (kaname#417) ────────────────
+#
+# Набор `kaname-second-factor` несёт три вида, которых прежний срез не знал, и у
+# двух из них ФОРМЫ НЕТ ВОВСЕ: запасной код — десять знаков Crockford, код по
+# времени — шесть цифр. Оба короче любого порога критерия и неотличимы по виду
+# от слова и числа. Поэтому они судятся ИМЕНЕМ, и имя у них одно — КОД: поле
+# `code` тела подтверждения, `secondFactor.code` входа, массив `backupCodes`
+# ответа подтверждения, переменные набора `sfCode`, `sfBackupCode0`.
+#
+# ИМЯ КОДА — СЛОВО, А НЕ ПОДСТРОКА: последнее слово имени — `code` либо `codes`
+# (camelCase, `_`, `-`), за ним разве что цифры. Подстрока резала бы `encode`,
+# `opcode`, `unicode`, а `backupCodesRemaining` — остаток набора, число, которое
+# утверждает набор, — осталась бы названной кодом, хотя последнее слово в нём
+# другое.
+#
+# ПОД ИМЕНЕМ КОДА СТОИТ И БЕЗОБИДНОЕ: код отказа числом (`{"code": 16}` отказа
+# службы, `response.code` отчёта newman), код состояния строкой, которую набор
+# кладёт в окружение (`String(pm.response.code)`). Их форма — одна–три цифры, и
+# она НЕ срезается: это законный близнец на том же месте, и без него срез съел
+# бы разбор каждого падения. Всё прочее под именем кода срезается. Цена названа:
+# системный код ошибки запроса (`ECONNREFUSED` под `code` ошибки newman) срезан;
+# тот же код стоит в `message` той же ошибки и выживает. Замер по 47 коллекциям
+# дерева (строки под именем кода в телах запросов и в записях окружения): кроме
+# кода состояния, там стоят только коды полос входа — `code` восстановления
+# (`AAAAA-AAAAA`) и второго фактора (`000000`, `123456`, `{{sfCode}}`, запасные
+# коды), и переменная `sfCode`; код состояния строкой пишут `_extAbsentCode` и
+# `rdAuthzDeniedCode`, и он выживает.
+#
+# СЕКРЕТ КОДА ПО ВРЕМЕНИ ФОРМУ ИМЕЕТ — base32 без дополнения от 20 байт, 32 знака
+# алфавита `A–Z2–7`, — и под именем `secret` он срезается и без этого вида, в
+# адресе `otpauth` — параметром `secret=`. Вид нужен ПРОЗЕ: тексту упавшего
+# утверждения и выводу прогонщика, где имени у значения нет, а пробег короче
+# сорока знаков критерию не виден. Вид — пробег 16–39 знаков алфавита base32,
+# ограниченный не-знаками base64, с буквой И цифрой: слово из заглавных цифр не
+# несёт, а число — букв. Замер по дереву до этой правки (`git ls-files`, 3706
+# файлов): такой пробег один — алфавит base32, вписанный в скрипт набора одной
+# строкой (3 вхождения в 2 файлах); теперь набор пишет его двумя. Цена названа:
+# секрет без единой цифры (≈0,13 % секретов этой длины) вид не ловит — в прозу
+# его не пускает источник (`tests/newman/scripts/second_factor_assertion_values_test.py`).
+#
+# ПРОВЕРКЕ ВЫХОДА ЭТОТ ВИД НЕ ВИДЕН — как короткий JWT и предъявление Bearer:
+# критерий у среза и проверки один, и его порогов вид не проходит. Держит вид
+# ось самопробы, утверждающая отсутствие значения в выложенном, а свидетеля
+# суда — перепись судов.
+TOTP_SECRET_RE = re.compile(
+    r"(?<![A-Za-z0-9+/=_-])(?=[A-Z2-7]*[A-Z])(?=[A-Z2-7]*[2-7])[A-Z2-7]{16,39}(?![A-Za-z0-9+/=_-])")
+_NAME_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+STATUS_CODE_RE = re.compile(r"[0-9]{1,3}")
+
+
+def _named_code(key_hint: str | None) -> bool:
+    """Последнее слово имени — `code`/`codes` (за ним разве что цифры)?"""
+    words = _NAME_WORD_RE.findall(key_hint or "")
+    while words and words[-1].isdigit():
+        words.pop()
+    return bool(words) and words[-1].lower() in ("code", "codes")
+
+
+def _code_value(node: object) -> bool:
+    """Значение под именем кода — удостоверение? Код состояния (одна–три цифры)
+    и пустое — нет. ОДИН предикат для среза и для проверки выхода."""
+    if isinstance(node, bool) or node is None:
+        return False
+    if isinstance(node, str):
+        text = node
+    elif isinstance(node, (int, float)):
+        text = str(node)
+    else:
+        return False
+    return text != "" and text != REDACTED and STATUS_CODE_RE.fullmatch(text) is None
 
 REDACTED = "«ВЫРЕЗАНО ПЕРЕД ПУБЛИКАЦИЕЙ»"
 
@@ -293,6 +387,12 @@ def scrub_text(text: str) -> Scrubbed:
     k = 0
     if _on(CUT_CRITERION):
         out, k = _cut_by_criterion(out)
+    # Вид секрета кода по времени — ПОСЛЕ критерия: тройки и длинные пробеги уже
+    # срезаны целиком, и короткий вид не рвёт их на куски, которые критерий потом
+    # не узнал бы. Замена не несёт ни знака base32, поэтому нового пробега вид
+    # после себя не оставляет.
+    if _on(CUT_KIND_TOTP_SECRET):
+        out = sub(TOTP_SECRET_RE, out)
     return Scrubbed(out, n, k)
 
 
@@ -309,6 +409,7 @@ class Census:
         self.strings = 0
         self.numbers = 0
         self.numbers_cut = 0
+        self.codes_cut = 0
         self.flags = 0
         self.lines = 0
         self.buffers = 0
@@ -449,7 +550,8 @@ def _pair_name(node: Members) -> str | None:
     Копий `key` может быть несколько: значение судится именем секрета, если
     секретом названа ЛЮБАЯ из них."""
     names = [v for k, v in node.pairs if k == "key" and isinstance(v, str)]
-    return next((n for n in names if _named_secret(n)), names[-1] if names else None)
+    return next((n for n in names if _named_secret(n)),
+                next((n for n in names if _named_code(n)), names[-1] if names else None))
 
 
 def _byte_array(node: Members, name: str, value: object) -> bytes | None:
@@ -517,6 +619,12 @@ def _walk(node: object, key_hint: str | None, c: Census) -> object:
         if _on(CUT_NAMED_STRING) and _named_secret(key_hint) and node:
             c.redacted_by_name += 1
             return REDACTED
+        # Код полосы второго фактора — строка под именем кода (запасной код, код
+        # по времени), кроме кода состояния: он законный близнец на том же месте.
+        if _on(CUT_NAMED_CODE) and _named_code(key_hint) and _code_value(node):
+            c.redacted_by_name += 1
+            c.codes_cut += 1
+            return REDACTED
         # Строка, которая сама есть JSON (тело запроса `body.raw`), несёт имена
         # ВНУТРИ себя — форма 8, та же, что у байтового массива тела ответа.
         return _scrub_body(node, c)
@@ -529,6 +637,12 @@ def _walk(node: object, key_hint: str | None, c: Census) -> object:
     if _on(CUT_NAMED_NUMBER) and _named_secret(key_hint):
         c.redacted_by_name += 1
         c.numbers_cut += 1
+        return REDACTED
+    # Код по времени числом (шесть цифр) под именем кода; код отказа (`16`) и
+    # код состояния (`200`) — одна–три цифры — остаются.
+    if _on(CUT_NAMED_CODE) and _named_code(key_hint) and _code_value(node):
+        c.redacted_by_name += 1
+        c.codes_cut += 1
         return REDACTED
     return node
 
@@ -882,12 +996,18 @@ def residue(node: object, path: str, found: list[str],
             found.append(f"{path} — значение ключа {_printable(key_hint)} не вырезано "
                          f"(длина {len(node)})")
             return
+        if _on(CHECK_NAMED_CODE) and _named_code(key_hint) and _code_value(node):
+            found.append(f"{path} — значение под именем кода {_printable(key_hint)} не вырезано "
+                         f"(длина {len(node)})")
+            return
         # Строка-тело (`body.raw`), разбираемая как JSON, — та же форма 8.
         _residue_body(node, path, None, found)
         return
     if isinstance(node, (int, float)) and not isinstance(node, bool):
         if _on(CHECK_NAMED_NUMBER) and _named_secret(key_hint):
             found.append(f"{path} — число под ключом {_printable(key_hint)} не вырезано")
+        elif _on(CHECK_NAMED_CODE) and _named_code(key_hint) and _code_value(node):
+            found.append(f"{path} — число под именем кода {_printable(key_hint)} не вырезано")
 
 
 # ── ФАЙЛЫ ────────────────────────────────────────────────────────────────────
@@ -950,6 +1070,7 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
     print(f"  копий повторённых имён: {c.copies} (каждая судится на своём месте)")
     print(f"  значений-строк:        {c.strings}")
     print(f"  значений-чисел:        {c.numbers} (под именем секрета срезано {c.numbers_cut})")
+    print(f"  под именем кода срезано: {c.codes_cut} (код состояния — одна–три цифры — остаётся)")
     print(f"  логических и null:     {c.flags} (удостоверение нести нечем)")
     print(f"  строк текстовых файлов: {c.lines}")
     print(f"строк осмотрено:         {c.strings + c.lines}")
@@ -2143,6 +2264,176 @@ def _self_test_residue_injections() -> None:
                    rc == want, out[-400:])
 
 
+CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _second_factor_values() -> dict[str, object]:
+    """Удостоверения полосы второго фактора в ФОРМЕ ПРОДУКТА, детерминированно.
+
+    Формы взяты из контракта полосы (`internal/handler/loginlanehttp`, Ф12):
+    секрет — base32 без дополнения от 20 байт (32 знака); запасной код — десять
+    знаков Crockford; код по времени — шесть цифр. Подделка короче или «словом»
+    сделала бы фикстуру снисходительнее продукта: срез, судящий форму, прошёл бы
+    на ней и провалился на настоящем значении."""
+    import base64
+    import hashlib
+    secret = base64.b32encode(hashlib.sha1(b"kaname#417 totp secret").digest()).decode()
+    backup = []
+    for i in range(10):
+        d = hashlib.sha256(f"kaname#417 backup code {i}".encode()).digest()
+        backup.append("".join(CROCKFORD[b % 32] for b in d[:10]))
+    otp = f"{int.from_bytes(hashlib.sha256(b'kaname#417 otp').digest()[:4], 'big') % 1000000:06d}"
+    return {"secret": secret, "backup": backup, "otp": otp}
+
+
+def _second_factor_report(v: dict[str, object]) -> dict:
+    """Отчёт newman 6.2.2 полосы второго фактора: каждое удостоверение полосы — в
+    той позиции, куда его кладёт набор `kaname-second-factor` (окружение, тело
+    запроса, тело ответа байтовым массивом, текст упавшего утверждения), и рядом
+    на тех же местах — безобидный текст (законные близнецы)."""
+    secret, backup, otp = v["secret"], v["backup"], v["otp"]
+    otpauth = (f"otpauth://totp/kaname:login-lane-2fa%40stand.invalid?secret={secret}"
+               "&issuer=kaname&algorithm=SHA1&digits=6&period=30")
+
+    def ex(name: str, raw: str | None, body: object, code: int = 200) -> dict:
+        req: dict = {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}],
+                     "url": {"raw": f"https://127.0.0.1:9443/iam/v1/auth/{name}",
+                             "path": ["iam", "v1", "auth", name], "query": []}}
+        if raw is not None:
+            req["body"] = {"mode": "raw", "raw": raw}
+        return {"item": {"name": f"IAM-2FA :: {name}"}, "request": req,
+                "response": {"code": code, "status": "OK" if code == 200 else "Unauthorized",
+                             "header": [{"key": "Content-Type", "value": "application/json"}],
+                             "stream": _buffer(json.dumps(body))},
+                "assertions": [{"assertion": f"{name}: утверждение", "error": None}]}
+
+    return {
+        "collection": {"item": [{"name": "IAM-2FA :: confirm", "event": [{"listen": "prerequest", "script": {
+            "exec": ["const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
+                     "pm.environment.set('sfBackupCode0', j.backupCodes[0]);"]}}]}]},
+        "environment": {"values": [
+            {"key": "loginLaneBaseUrl", "value": "https://127.0.0.1:9443"},
+            {"key": "sfSecret", "value": secret},
+            {"key": "sfCode", "value": otp},
+            {"key": "sfBackupCode0", "value": backup[0]},
+            {"key": "sfBackupCode1", "value": backup[1]},
+            {"key": "sfStep0", "value": "59301234"},
+        ]},
+        "run": {
+            "stats": {"assertions": {"total": 9, "failed": 2}},
+            "failures": [
+                {"error": {"name": "AssertionError", "test": "ENROLL: секрет base32",
+                           "message": f"ENROLL: секрет: expected '{secret}' to match /^[A-Z2-7]{{32}}$/"}},
+                {"error": {"name": "AssertionError", "test": "REPLAY: текст отказа фиксирован",
+                           "message": "REPLAY: expected 'authentication failed' to deeply equal 'x'"}},
+                {"error": {"name": "Error", "code": "ECONNREFUSED",
+                           "message": "connect ECONNREFUSED 127.0.0.1:9443"}},
+            ],
+            "executions": [
+                ex("second-factor/enroll", '{"csrfToken":"kept-shape-not-a-token"}',
+                   {"secret": secret, "otpauthUri": otpauth, "expiresAt": "2026-09-26T10:00:00Z"}),
+                ex("second-factor/confirm", json.dumps({"code": otp, "csrfToken": ""}),
+                   {"backupCodes": backup, "session": {"assuranceLevel": "2"},
+                    "assurance": {"level": "2", "level2Reachable": True, "missingForLevel2": []}}),
+                ex("login", json.dumps({"email": "login-lane-2fa@stand.invalid",
+                                        "secondFactor": {"method": "totp", "code": otp}}),
+                   {"session": {"assuranceLevel": "2"}}),
+                ex("step-up", json.dumps({"method": "lookup_secret", "code": backup[0]}),
+                   {"session": {"assuranceLevel": "2"}, "backupCodesRemaining": 9}),
+                ex("second-factor", None,
+                   {"totp": {"enrolled": True}, "backupCodes": {"remaining": 10, "total": 10}}),
+                ex("login-refused", json.dumps({"secondFactor": {"method": "totp", "code": "404"}}),
+                   {"code": 16, "message": "authentication failed", "details": []}, code=401),
+            ],
+        },
+    }
+
+
+def _self_test_second_factor_lane() -> None:
+    """ОСЬ ВИДОВ УДОСТОВЕРЕНИЙ ПОЛОСЫ ВТОРОГО ФАКТОРА (kaname#417).
+
+    Каждый вид — в той позиции, куда его кладёт набор: секрет кода по времени
+    (тело ответа `enroll`, параметр адреса `otpauthUri`, окружение, ПРОЗА текста
+    упавшего утверждения и вывода прогонщика), запасной код (массив `backupCodes`
+    тела ответа, `code` тела запроса, окружение), код по времени (`code` и
+    `secondFactor.code` тела запроса, окружение). Инъекция: код 0 и значения нет
+    нигде в выложенном. Законный близнец стоит на ТОМ ЖЕ месте: код отказа числом
+    под `code`, код состояния строкой под `code`, сводка набора `backupCodes`
+    числами, остаток `backupCodesRemaining`, ступень времени в окружении,
+    безобидный текст упавшего утверждения, алфавит base32, разорванный в
+    скрипте, и системный код ошибки в её тексте — всё выжило.
+    """
+    import tempfile
+    print("  ── виды удостоверений полосы второго фактора")
+    v = _second_factor_values()
+    secret, backup, otp = v["secret"], v["backup"], v["otp"]
+    _c("предпосылка: секрет — base32 от 20 байт (32 знака, буква и цифра 2–7)",
+       len(secret) == 32 and re.fullmatch(r"[A-Z2-7]{32}", secret) is not None
+       and re.search(r"[2-7]", secret) is not None and re.search(r"[A-Z]", secret) is not None)
+    _c("предпосылка: запасной код — десять знаков Crockford, код по времени — шесть цифр",
+       all(re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{10}", b) for b in backup)
+       and re.fullmatch(r"[0-9]{6}", otp) is not None)
+    _c("предпосылка: ни секрет, ни коды критерию проверки НЕ видны (ось — про вид)",
+       residue_shaped(secret) is None and all(residue_shaped(b) is None for b in backup)
+       and residue_shaped(otp) is None)
+
+    with tempfile.TemporaryDirectory(prefix="redact-second-factor-") as td:
+        tmp = pathlib.Path(td)
+        src, dst = tmp / "out", tmp / "out-public"
+        src.mkdir()
+        (src / "kaname-second-factor.json").write_text(
+            json.dumps(_second_factor_report(v)), encoding="utf-8")
+        (src / "kaname-second-factor.cli").write_text(
+            "  1. AssertionError  ENROLL: секрет base32\n"
+            f"     ENROLL: секрет: expected '{secret}' to match /^[A-Z2-7]{{32}}$/\n"
+            "  2. AssertionError  REPLAY: текст отказа фиксирован\n", encoding="utf-8")
+        rc, out = _run_quiet(src, dst)
+        seen = _published(dst) if dst.is_dir() else ""
+        _c("чистка отчёта полосы прошла (код 0)", rc == 0, out[-400:])
+        _c("секрет кода по времени: в выложенном его нет нигде — ни целиком, ни половиной",
+           secret not in seen and secret[:16] not in seen and secret[16:] not in seen)
+        left = [b for b in backup if b in seen]
+        _c(f"запасные коды: в выложенном нет ни одного из {len(backup)}", not left,
+           f"осталось {len(left)}")
+        _c("код по времени: в выложенном его нет нигде", otp not in seen)
+        cli = (dst / "kaname-second-factor.cli").read_text(encoding="utf-8") \
+            if (dst / "kaname-second-factor.cli").is_file() else ""
+        _c("вывод прогонщика: секрета нет, строка упавшего утверждения выжила",
+           secret not in cli and "ENROLL: секрет: expected '" in cli
+           and "REPLAY: текст отказа фиксирован" in cli,
+           "секрет в выводе остался (строка не печатается)" if secret in cli else cli)
+        doc = json.loads((dst / "kaname-second-factor.json").read_text(encoding="utf-8")) \
+            if (dst / "kaname-second-factor.json").is_file() else {}
+        env = {e["key"]: e["value"] for e in doc.get("environment", {}).get("values", [])}
+        _c("имена переменных окружения выжили все",
+           list(env) == ["loginLaneBaseUrl", "sfSecret", "sfCode", "sfBackupCode0",
+                         "sfBackupCode1", "sfStep0"], f"{list(env)}")
+        _c("близнец в окружении: ступень времени и адрес полосы выжили",
+           env.get("sfStep0") == "59301234" and env.get("loginLaneBaseUrl") == "https://127.0.0.1:9443")
+        bodies = [json.loads(bytes(e["response"]["stream"]["data"]).decode("utf-8"))
+                  for e in doc.get("run", {}).get("executions", [])]
+        _c("близнец под `code`: код отказа числом выжил, текст отказа тоже",
+           len(bodies) == 6 and bodies[5] == {"code": 16, "message": "authentication failed",
+                                             "details": []}, f"{bodies[5:] if bodies else bodies}")
+        _c("близнец под `backupCodes`: сводка набора числами выжила",
+           len(bodies) == 6 and bodies[4].get("backupCodes") == {"remaining": 10, "total": 10})
+        _c("близнец рядом с именем кода: остаток `backupCodesRemaining` выжил",
+           len(bodies) == 6 and bodies[3].get("backupCodesRemaining") == 9)
+        _c("имена членов тела выжили: `secret`, `backupCodes`, `otpauthUri`",
+           len(bodies) == 6 and set(bodies[0]) == {"secret", "otpauthUri", "expiresAt"}
+           and "backupCodes" in bodies[1] and bodies[0].get("expiresAt") == "2026-09-26T10:00:00Z")
+        raws = [e["request"].get("body", {}).get("raw", "")
+                for e in doc.get("run", {}).get("executions", [])]
+        _c("близнец под `code` тела запроса: код состояния строкой выжил",
+           len(raws) == 6 and '"404"' in raws[5], f"{raws[5:] if raws else raws}")
+        fails = [f["error"].get("message") for f in doc.get("run", {}).get("failures", [])]
+        _c("близнец в тексте утверждения: безобидный текст и текст системной ошибки выжили",
+           len(fails) == 3 and fails[1] == "REPLAY: expected 'authentication failed' to deeply equal 'x'"
+           and fails[2] == "connect ECONNREFUSED 127.0.0.1:9443", f"{fails}")
+        _c("близнец в скрипте: алфавит base32, разорванный на две строки, выжил",
+           "'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567'" in seen)
+
+
 def _self_test_empty_walk() -> None:
     """ОСЬ ПУСТОГО ОБХОДА: отказ, а не «чисто»."""
     import tempfile
@@ -2196,6 +2487,12 @@ def _self_test_second_look() -> None:
         (CUT_TEXT_FILE,
          {"r.json": json.dumps(probe), "r.cli": f"GET /iam/v1/me\n  token {_jwt('KCLI')}\n"},
          "r.cli:2 — ", "KCLI"),
+        # Код полосы второго фактора формы не имеет: снятый срез по имени кода
+        # ловит ТОЛЬКО проверка по тому же имени — и строкой, и числом.
+        (CUT_NAMED_CODE, {"r.json": stream('{"code":"7K2M9QXR4T","attempts":1}')},
+         "[байтовый массив, JSON].code — значение под именем кода", "7K2M9QXR4T"),
+        (CUT_NAMED_CODE, {"r.json": stream('{"secondFactor":{"code":804213}}')},
+         "[байтовый массив, JSON].secondFactor.code — число под именем кода", "804213"),
     )
     with tempfile.TemporaryDirectory(prefix="redact-second-look-") as td:
         for n, (cut, files, where, mark) in enumerate(cases):
@@ -2221,7 +2518,8 @@ def _axes(light: bool) -> None:
     axes = [_self_test_forms, _self_test_query_and_log, _self_test_one_criterion,
             _self_test_cut_mechanics, _self_test_pem_and_std_base64, _self_test_pem_headers,
             _self_test_hidden_triple_and_one_pass, _self_test_every_part,
-            _self_test_second_look, _self_test_residue_injections, _self_test_empty_walk]
+            _self_test_second_look, _self_test_residue_injections, _self_test_second_factor_lane,
+            _self_test_empty_walk]
     if not light:
         axes.append(_self_test_seeded_samples)
     for axis in axes:
