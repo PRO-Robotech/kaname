@@ -60,6 +60,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -103,9 +104,9 @@ func newReadAuthzFixture(t *testing.T) *readAuthzFixture {
 	repo := kanamepg.New(pool, nil)
 
 	// ТА ЖЕ дверь, что провязывает композиционный корень (cmd/kaname:
-	// authzcascade.Wrap(relverdict.NewAsker(pool))). Собрать её здесь иначе
+	// authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))). Собрать её здесь иначе
 	// значило бы проверять не тот путь, по которому идёт продукт.
-	f := &readAuthzFixture{pool: pool, repo: repo, gates: authzcascade.Wrap(relverdict.NewAsker(pool))}
+	f := &readAuthzFixture{pool: pool, repo: repo, gates: authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))}
 
 	// владелец + его аккаунт (круговая ссылка owner_user_id разрешается парой
 	// строк в одной транзакции).

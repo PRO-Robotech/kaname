@@ -35,8 +35,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
 // rollbackGrace — сколько отпущено САМОМУ снятию транзакции.
@@ -136,18 +134,6 @@ func (a *Asker) LabelArmGrounds() (mirror, iamDirect, earlyStops int64) {
 		return 0, 0, 0
 	}
 	return a.labelMirror.Load(), a.labelIAMDirect.Load(), a.earlyStops.Load()
-}
-
-// PersonMarks — отметки подтверждения адреса названных идентификаторов
-// (kaname#456, Р4а): дверь решения спрашивает её у ТОЙ ЖЕ формы, что отвечает о
-// праве, — тем же пулом и единственным оператором чтения отметки
-// (`personmarks.Read`). Ответ — строки людей; идентификатор, которому строки
-// человека нет, в нём отсутствует.
-func (a *Asker) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
-	if a == nil || a.pool == nil {
-		return nil, fmt.Errorf("relverdict: asker has no pool to read address marks")
-	}
-	return personmarks.Read(ctx, a.pool, ids)
 }
 
 // UndeclaredTypeDenials — сколько отказов дано по основанию «тип не объявлен

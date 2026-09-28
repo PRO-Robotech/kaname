@@ -55,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
@@ -284,7 +285,7 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		ctx: ctx, pool: pool, lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
 		clock: clock, sessions: sessions, methods: methods, users: users, hasher: hasher, secondF: sf,
 		failApply: failApply,
-		door:      authzcascade.Wrap(relverdict.NewAsker(pool)),
+		door:      authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)),
 	}
 }
 

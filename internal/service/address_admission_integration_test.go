@@ -28,6 +28,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -51,7 +52,7 @@ func newAdmWorld(t *testing.T) *admWorld {
 	pool, err := coredb.NewPool(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
-	door := authzcascade.Wrap(relverdict.NewAsker(pool))
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	ci := &ciWorld{pool: pool, svc: service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: door, ClusterAdminChecker: door,
 	})}

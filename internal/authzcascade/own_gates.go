@@ -39,6 +39,17 @@ import (
 // переходником и не тянет за собой pgx, а проба может подставить форму, которая
 // НЕ ОТВЕЧАЕТ, — иначе исход «форма не ответила» непроверяем, а он тут главный.
 type Asker interface {
+	VerdictForm
+	// PersonMarks — строки людей среди названных идентификаторов и подтверждён
+	// ли их ТЕКУЩИЙ адрес (kaname#456, Р4а): тот же предикат допуска, что у
+	// правила выдачи и у рубежа слушателей. Ошибка — «спросить не смогли», а не
+	// «подтверждён».
+	admission.Marks
+}
+
+// VerdictForm — та часть формы, что отвечает о ПРАВЕ; читатель отметок к ней
+// приставляется [WrapAdmitted] — форма вердикта остаётся тем, что она есть.
+type VerdictForm interface {
 	// Allowed — вердикт об объекте. Ошибка означает «ответа нет».
 	Allowed(ctx context.Context, subject, objectType, objectID, relation string,
 		condCtx map[string]any) (bool, error)
@@ -59,11 +70,6 @@ type Asker interface {
 	// списка отказами и состоит.
 	DirectRelationsMany(ctx context.Context, subject, objectType string, objectIDs []string,
 		limit int) (map[string][]string, error)
-	// PersonMarks — строки людей среди названных идентификаторов и подтверждён
-	// ли их ТЕКУЩИЙ адрес (kaname#456, Р4а): тот же предикат допуска, что у
-	// правила выдачи и у рубежа слушателей, спрошенный у формы, отвечающей о
-	// праве. Ошибка — «спросить не смогли», а не «подтверждён».
-	admission.Marks
 }
 
 // Client — дверь решения поверх формы.
@@ -79,6 +85,33 @@ type Client struct {
 // (`ownGateWiringComplaint`), а не надежда.
 func Wrap(form Asker) *Client {
 	return &Client{form: form}
+}
+
+// WrapAdmitted собирает дверь из формы вердикта и читателя отметок того же
+// хранилища (kaname#456, Р4а). nil-форма — то же, что у [Wrap]; nil-читатель —
+// читатель, отвечающий ошибкой на каждый вопрос: «не провязан» не становится
+// «подтверждён».
+func WrapAdmitted(form VerdictForm, marks admission.Marks) *Client {
+	if form == nil {
+		return &Client{}
+	}
+	if marks == nil {
+		marks = unwiredMarks{}
+	}
+	return &Client{form: admittedForm{VerdictForm: form, Marks: marks}}
+}
+
+// admittedForm — форма вердикта с приставленным читателем отметок.
+type admittedForm struct {
+	VerdictForm
+	admission.Marks
+}
+
+// unwiredMarks — читатель отметок, которого не провязали.
+type unwiredMarks struct{}
+
+func (unwiredMarks) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return nil, fmt.Errorf("authzcascade: дверь собрана без читателя отметок адреса — спросить не у кого")
 }
 
 // FormReachable — есть ли у двери чем отвечать. Читает страж старта.

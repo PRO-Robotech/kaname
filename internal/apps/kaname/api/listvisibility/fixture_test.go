@@ -29,7 +29,7 @@
 //
 // Поэтому: `iampgtest.NewTestPostgres` (контейнер, промигрирован) плюс ТА ЖЕ дверь
 // решения, которую композиционный корень провязывает стражам в проде —
-// `authzcascade.Wrap(relverdict.NewAsker(pool))` поверх той же базы.
+// `authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))` поверх той же базы.
 //
 // Здесь стоял поднятый контейнером внешний движок отношений. Он снят целиком (S6):
 // вердикт считает форма поверх собственных таблиц iam, и вопрос о доступе теперь
@@ -67,6 +67,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -119,7 +120,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		pool:       pool,
 		repo:       kanamepg.New(pool, nil),
-		gates:      authzcascade.Wrap(relverdict.NewAsker(pool)),
+		gates:      authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)),
 		probeRoles: map[string]string{},
 		base:       time.Now().UTC().Truncate(time.Second).Add(time.Hour),
 	}

@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
@@ -257,7 +258,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// то, на чём отстаёт реплика: отзыв, действующий «с коммита», на реплике
 	// действовал бы «с момента, когда доехало».
 	verdictAsker := relverdict.NewAsker(pool)
-	relationStore := authzcascade.Wrap(verdictAsker)
+	relationStore := authzcascade.WrapAdmitted(verdictAsker, personmarks.New(pool))
 	// Разбор оснований выходит НАРУЖУ, а не копится в никуда.
 	//
 	// Форма считает две вещи, у которых нет иного признака: сколько раз доступ

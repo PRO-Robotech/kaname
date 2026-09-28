@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
@@ -70,7 +71,7 @@ func formDoor(t *testing.T) (*authzcascade.Client, *pgxpool.Pool) {
 	// Тогда «не выполнилось» приходит к читателю под видом красного, и вердикта
 	// нет НИ У ОДНОЙ пробы пакета, включая прошедшие.
 	pgtest.ClosePoolAtEnd(t, pool)
-	return authzcascade.Wrap(relverdict.NewAsker(pool)), pool
+	return authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)), pool
 }
 
 // seedExpandFixture кладёт арендную обвязку, группу с двумя людьми и выдачу.

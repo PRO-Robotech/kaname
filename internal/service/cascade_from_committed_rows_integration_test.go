@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -94,7 +95,7 @@ func newCIWorld(t *testing.T) *ciWorld {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	door := authzcascade.Wrap(relverdict.NewAsker(pool))
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	require.True(t, door.FormReachable(),
 		"ПРЕДПОСЫЛКА: дверь собрана без формы — тогда КАЖДЫЙ вопрос ниже вернул бы ошибку, "+
 			"а не вердикт, и ни одно утверждение файла не было бы о доступе")
