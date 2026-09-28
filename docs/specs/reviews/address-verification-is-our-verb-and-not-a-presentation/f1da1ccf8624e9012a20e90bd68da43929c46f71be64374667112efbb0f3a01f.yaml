@@ -52,6 +52,14 @@ effective_approval:
   issues_when: >-
     Никогда в роли приёмки. Исход предмета — боковое терминальное состояние «замещено»
     (B12), которому вердикт ревью не нужен.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Санкции запись не выдаёт и не отзывает. Учётка названа, потому что гейт записей ревью
+      (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в subject.task этой
+      учёткой: без неё запись не судима, и его исход — «не выполнилось».
 
 event:
   type: issue_comment

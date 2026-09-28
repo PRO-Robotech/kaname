@@ -63,6 +63,14 @@ effective_approval:
     f2d1fe852333af54…; его событие полномочия опубликовано на PRO-Robotech/kaname#456 учётной
     записью pointpu (перечитано gh api repos/PRO-Robotech/kaname/issues/456/comments). Эта запись
     его не касается ни в одну сторону.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Санкции запись не выдаёт и не отзывает. Учётка названа, потому что гейт записей ревью
+      (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в subject.task этой
+      учёткой: без неё запись не судима, и его исход — «не выполнилось».
 
 event:
   type: issue_comment
