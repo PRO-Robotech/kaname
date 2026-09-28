@@ -730,6 +730,11 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 //
 // NULL-срок означает «не назначен» и активацию не отвергает: иначе колонка,
 // заведённая позже строк, обесценила бы каждое приглашение, выданное раньше.
+//
+// ОТМЕТКА ПОДТВЕРЖДЕНИЯ — третье условие того же оператора (kaname#456, Р11):
+// приглашение активирует только подтверждение адреса, а оно ставит отметку той
+// же транзакцией раньше активации. Путь хука поставщика отметки нашей полосы
+// не несёт и приглашения не активирует.
 func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, externalID domain.ExternalSubject, displayName domain.DisplayName) (domain.User, error) {
 	q := fmt.Sprintf(`
 		UPDATE users
@@ -739,6 +744,7 @@ func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, e
 		 WHERE id = $3
 		   AND invite_status = 'PENDING'
 		   AND (invite_expires_at IS NULL OR invite_expires_at > now())
+		   AND email_verified_at IS NOT NULL
 		RETURNING %s`, userCols)
 	row := w.tx.QueryRow(ctx, q, string(externalID), string(displayName), string(userID))
 	out, err := scanUser(row)
@@ -755,15 +761,17 @@ func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, e
 // каждый говорит человеку СВОЙ следующий шаг.
 func (w *userWriter) explainRefusedActivation(ctx context.Context, userID domain.UserID) error {
 	var (
-		status  string
-		expired bool
+		status   string
+		expired  bool
+		verified bool
 	)
 	const q = `
 		SELECT invite_status,
-		       (invite_expires_at IS NOT NULL AND invite_expires_at <= now()) AS expired
+		       (invite_expires_at IS NOT NULL AND invite_expires_at <= now()) AS expired,
+		       (email_verified_at IS NOT NULL) AS verified
 		  FROM users
 		 WHERE id = $1`
-	if err := w.tx.QueryRow(ctx, q, string(userID)).Scan(&status, &expired); err != nil {
+	if err := w.tx.QueryRow(ctx, q, string(userID)).Scan(&status, &expired, &verified); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found in PENDING state", userID)
 		}
@@ -772,6 +780,13 @@ func (w *userWriter) explainRefusedActivation(ctx context.Context, userID domain
 	if status == string(domain.InviteStatusPending) && expired {
 		return iamerr.Wrapf(iamerr.ErrInviteExpired,
 			"Invite for User %s has expired — ask an account administrator to invite again", userID)
+	}
+	if status == string(domain.InviteStatusPending) && !verified {
+		// Приглашение живо, адрес не подтверждён нашей полосой (kaname#456,
+		// Р11): активирует его только подтверждение. Свой признак — не «не
+		// найдено» и не «срок истёк».
+		return iamerr.Wrapf(iamerr.ErrInviteNotVerified,
+			"Invite for User %s is activated only by confirming the address", userID)
 	}
 	// Строка есть и уже не PENDING — её активировал конкурент либо участие
 	// сняли. Тон отказа тот же, что был до появления срока: он не менялся.

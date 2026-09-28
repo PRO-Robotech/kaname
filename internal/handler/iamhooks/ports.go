@@ -71,6 +71,10 @@ type UserRevocationLookup interface {
 	// exists. The error is surfaced rather than folded into "no cutoff" so the
 	// caller can fail closed: an unavailable store is not an answer of "no".
 	UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error)
+	// PersonMarks — отметка подтверждения адреса владельца-человека
+	// (kaname#456, Р5): второй вопрос того же правила выдачи; своего чтения
+	// отметки у полосы нет.
+	PersonMarks(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 // AuditEmitter — append-only audit log.

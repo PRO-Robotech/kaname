@@ -317,6 +317,17 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.Login.ValidateRecovery())
 		},
 	},
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ручек без умолчания; письмо
+	// подтверждения — условие входа дальше экрана подтверждения, и полоса без
+	// величин не поднимается.
+	{
+		Lanes:   laneOwn,
+		Element: "пять величин подтверждения адреса объявлены: срок и предел попыток кода, промежуток, число и окно писем",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateVerification())
+		},
+	},
 	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5): срок кода и срок семейства
 	// объявляет профиль, не выше потолков фундамента. Церемония собирается только
 	// под `own`, и под `external` ручки не судятся.

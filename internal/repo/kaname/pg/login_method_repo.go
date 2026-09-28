@@ -229,6 +229,18 @@ func (r *LoginMethodRepo) PasswordCostClasses(ctx context.Context) ([]loginmetho
 	return out, nil
 }
 
+// markEmailVerifiedSQL — ЕДИНСТВЕННЫЙ оператор отметки подтверждения: сверка
+// адреса (без различия регистра — ключ почты, F4d-52) и запись — один
+// оператор. Его исполняет пул (писатель адаптера способа входа) либо
+// транзакция исхода подтверждения (`humanSessionWriter.MarkEmailVerified`).
+const markEmailVerifiedSQL = `
+		WITH person AS (SELECT 1 FROM users WHERE id = $1),
+		     marked AS (
+		       UPDATE users SET email_verified_at = $3
+		        WHERE id = $1 AND lower(email) = lower($2)
+		       RETURNING 1)
+		SELECT EXISTS (SELECT 1 FROM person), EXISTS (SELECT 1 FROM marked)`
+
 // MarkEmailVerified записывает момент подтверждения ТОЛЬКО на подтверждённое
 // значение: сверка адреса и запись отметки — один оператор, поэтому смена
 // адреса, зафиксированная раньше, делает запись пустой, а зафиксированная позже
@@ -244,15 +256,8 @@ func (r *LoginMethodRepo) MarkEmailVerified(ctx context.Context, userID domain.U
 	if userID == "" {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	const q = `
-		WITH person AS (SELECT 1 FROM users WHERE id = $1),
-		     marked AS (
-		       UPDATE users SET email_verified_at = $3
-		        WHERE id = $1 AND email = $2
-		       RETURNING 1)
-		SELECT EXISTS (SELECT 1 FROM person), EXISTS (SELECT 1 FROM marked)`
 	var exists, marked bool
-	if err := r.pool.QueryRow(ctx, q, string(userID), string(address), at).Scan(&exists, &marked); err != nil {
+	if err := r.pool.QueryRow(ctx, markEmailVerifiedSQL, string(userID), string(address), at).Scan(&exists, &marked); err != nil {
 		return mapErr(err, "User.MarkEmailVerified", string(userID))
 	}
 	switch {

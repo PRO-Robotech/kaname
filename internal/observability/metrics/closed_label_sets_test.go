@@ -190,6 +190,12 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "ноль заведений за всю жизнь и непровязанный глагол выглядят одинаково без клетки",
 	},
+	// ── ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456) — тот же конструктор ─────────────
+	AddressVerificationOutcomesMetric: {
+		Cells: len(humansession.VerificationOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказы глаголов подтверждения и отказы положения не различимы снаружи; «ноль отказов» обязан быть отличим от «полоса не исполнялась»",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },

@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -71,4 +72,44 @@ func TestEV90_FiveKnobsWithoutDefaults(t *testing.T) {
 			require.Truef(t, found, "EV-90: опись обязательных настроек не несёт authn.login.%s", k.short)
 		}
 	})
+}
+
+// TestEV90_KnobsBeyondTheirBoundsRefuseTheStart — условие аудита поверхности:
+// величина за границей — отказ старта с именем ключа; ровно на границе —
+// старт (близнец, отличающийся одним фактом — величиной).
+func TestEV90_KnobsBeyondTheirBoundsRefuseTheStart(t *testing.T) {
+	for _, tc := range []struct {
+		key           string
+		atBound, over func(*config.LoginLaneConfig)
+	}{
+		{"verification-code-attempts",
+			func(l *config.LoginLaneConfig) { l.VerificationCodeAttempts = config.VerificationCodeAttemptsCeiling },
+			func(l *config.LoginLaneConfig) {
+				l.VerificationCodeAttempts = config.VerificationCodeAttemptsCeiling + 1
+			}},
+		{"verification-code-ttl",
+			func(l *config.LoginLaneConfig) { l.VerificationCodeTTL = config.VerificationCodeTTLCeiling },
+			func(l *config.LoginLaneConfig) {
+				l.VerificationCodeTTL = config.VerificationCodeTTLCeiling + time.Second
+			}},
+		{"verification-resend-interval",
+			func(l *config.LoginLaneConfig) { l.VerificationResendInterval = config.VerificationResendIntervalFloor },
+			func(l *config.LoginLaneConfig) {
+				l.VerificationResendInterval = config.VerificationResendIntervalFloor - time.Second
+			}},
+		{"verification-resend-limit",
+			func(l *config.LoginLaneConfig) { l.VerificationResendLimit = config.VerificationResendLimitCeiling },
+			func(l *config.LoginLaneConfig) { l.VerificationResendLimit = config.VerificationResendLimitCeiling + 1 }},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			at := laneCfg(config.IdentityProviderOwn)
+			tc.atBound(&at.AuthN.Login)
+			require.NoError(t, at.Validate(), "ровно на границе — старт")
+			over := laneCfg(config.IdentityProviderOwn)
+			tc.over(&over.AuthN.Login)
+			err := over.Validate()
+			require.Error(t, err, "за границей — отказ старта")
+			require.Contains(t, err.Error(), "authn.login."+tc.key, "отказ называет ключ")
+		})
+	}
 }

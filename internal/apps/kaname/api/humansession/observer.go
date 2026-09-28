@@ -109,11 +109,18 @@ const (
 	RecoveryRequestNoRow       RecoveryRequestOutcome = "no-row"       // адреса нет ни у кого
 	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён (Ф1-25)
 	RecoveryRequestStoreFailed RecoveryRequestOutcome = "store-failed" // хранилище не ответило
+	// Пределы запроса (kaname#456): окно обращений источника полно · окно писем
+	// адресата полно · работа вне пути ответа не принята — предел одновременных
+	// работ исчерпан. Ответ вызывающему у всех трёх тот же.
+	RecoveryRequestSourcePaced     RecoveryRequestOutcome = "source-paced"
+	RecoveryRequestRecipientPaced  RecoveryRequestOutcome = "recipient-paced"
+	RecoveryRequestDispatchDropped RecoveryRequestOutcome = "dispatch-dropped"
 )
 
 // RecoveryRequestOutcomes — закрытый перечень.
 func RecoveryRequestOutcomes() []RecoveryRequestOutcome {
-	return []RecoveryRequestOutcome{RecoveryRequestQueued, RecoveryRequestNoRow, RecoveryRequestUnverified, RecoveryRequestStoreFailed}
+	return []RecoveryRequestOutcome{RecoveryRequestQueued, RecoveryRequestNoRow, RecoveryRequestUnverified, RecoveryRequestStoreFailed,
+		RecoveryRequestSourcePaced, RecoveryRequestRecipientPaced, RecoveryRequestDispatchDropped}
 }
 
 // RecoveryCompletionOutcome — исход предъявления кода (Ф5-03…08, Ф5-17).

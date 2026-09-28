@@ -526,7 +526,8 @@ func TestRecovery_WrongCodeRefusalIsTheSameForNobodyAndForSomeone(t *testing.T) 
 func TestRecovery_ClosedOutcomeSetsAreDeclared(t *testing.T) {
 	require.ElementsMatch(t, []humansession.RecoveryRequestOutcome{
 		humansession.RecoveryRequestQueued, humansession.RecoveryRequestNoRow, humansession.RecoveryRequestUnverified,
-		humansession.RecoveryRequestStoreFailed,
+		humansession.RecoveryRequestStoreFailed, humansession.RecoveryRequestSourcePaced,
+		humansession.RecoveryRequestRecipientPaced, humansession.RecoveryRequestDispatchDropped,
 	}, humansession.RecoveryRequestOutcomes())
 	require.ElementsMatch(t, []humansession.RecoveryCompletionOutcome{
 		humansession.RecoveryCompletionIssued, humansession.RecoveryCompletionNoRow, humansession.RecoveryCompletionCodeRejected,

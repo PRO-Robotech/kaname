@@ -33,6 +33,7 @@ package iamhooks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -337,6 +338,18 @@ func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domai
 		// post-date the revoke-all (fail-safe, never a silent allow).
 		if revocationpolicy.Forbids(cutoff, authTime) {
 			return true, "user_revoked", nil
+		}
+	}
+	// Второй вопрос того же правила (kaname#456, Р5): адрес владельца-человека
+	// подтверждён ли — о каждой строке личности; не ответили — отказ.
+	for _, u := range users {
+		verdict, err := revocationpolicy.OwnerAdmission(ctx, h.revocations, string(u.ID))
+		switch verdict {
+		case revocationpolicy.Allowed:
+		case revocationpolicy.Unverified:
+			return true, "user_unverified", nil
+		default:
+			return false, "", fmt.Errorf("refresh_hook: address mark verdict %q: %w", verdict, err)
 		}
 	}
 	return false, "", nil

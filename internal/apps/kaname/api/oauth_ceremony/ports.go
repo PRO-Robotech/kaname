@@ -70,6 +70,9 @@ type Login struct {
 	Level     string
 	// ExpiresAt — срок сессии: граница семейства, выданного в ней.
 	ExpiresAt time.Time
+	// EmailVerified — положение сессии по ТЕКУЩЕЙ отметке (kaname#456, Р1):
+	// сессия в положении подтверждения кода авторизации не получает (Р5).
+	EmailVerified bool
 }
 
 // LoginAuthority — шов авторитета входа. Производитель — наш вход (Ф1):

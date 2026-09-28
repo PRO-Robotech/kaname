@@ -151,6 +151,17 @@ func (l *TokenLane) refuseExchange(r *http.Request, w http.ResponseWriter, clien
 		w.Header().Set("Retry-After", "1")
 		l.refuse(r, w, http.StatusServiceUnavailable, "temporarily_unavailable", OutcomeExchangeUnavailable,
 			clientID, "client secret checker at capacity")
+	case errors.Is(err, domain.ErrGrantOwnerUnverified):
+		// Правило выдачи: владелец-человек не подтвердил адрес (kaname#456,
+		// Р5б). Тон — `invalid_grant`, как у всякого отказа после именования
+		// кода; оборот откатан единицей работы, семейство не отозвано.
+		l.refuse(r, w, http.StatusBadRequest, "invalid_grant", OutcomeExchangeOwnerUnverified, clientID,
+			"the owner of the grant has not verified the email address")
+	case errors.Is(err, domain.ErrGrantRuleUndecidable):
+		// Правило выдачи спросить не смогли — отказ операции: живой токен
+		// обновления клиент выбрасывать не должен.
+		l.refuse(r, w, http.StatusServiceUnavailable, "temporarily_unavailable", OutcomeExchangeUnavailable, clientID,
+			"the issuance rule could not be asked: "+err.Error())
 	case errors.Is(err, domain.ErrAccessTokenFamilyNotLive):
 		// Запись выпуска отвергнута: семейство гранта умерло ВО ВРЕМЯ операции
 		// (одновременный повтор токена обновления отозвал его раньше, чем этот

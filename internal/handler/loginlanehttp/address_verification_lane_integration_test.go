@@ -195,15 +195,18 @@ func TestEV12_SecondFactorAndStepUpAreRefusedOnEachOfSixPaths(t *testing.T) {
 
 	b := h.register(t, freshAddress("ev12b"))
 	h.mark(t, b)
+	// Якорь близнеца — ПЕРВЫМ: церемония повышения в перечне ниже при верном
+	// пароле перевыпускает носитель, и чтение состояния после неё прежним
+	// носителем судило бы носитель, а не положение.
+	anchor := send(b, calls[0])
+	require.Equal(t, http.StatusOK, anchor.status, "EV-12 (б) якорь: чтение состояния фактора — 200: %s", anchor.body)
+	require.JSONEq(t, `{"totp":{"enrolled":false}}`, anchor.body)
 	for _, c := range calls {
 		r := send(b, c)
 		if r.status >= 400 {
 			require.NotEqual(t, "EMAIL_NOT_VERIFIED", parseRefusal(t, r.body).reason(), "EV-12 (б) %s: своего сегодняшнего исхода", c.path)
 		}
 	}
-	anchor := send(b, calls[0])
-	require.Equal(t, http.StatusOK, anchor.status, "EV-12 (б) якорь: чтение состояния фактора — 200: %s", anchor.body)
-	require.JSONEq(t, `{"totp":{"enrolled":false}}`, anchor.body)
 }
 
 // TestEV13_PositionRefusalLeavesTheSessionAlive — EV-13.
@@ -341,6 +344,10 @@ func TestEV24_DailyLimitCountsTheRegistrationLetter(t *testing.T) {
 	require.Len(t, h.letters(t, s.user), avLimitProfile, "EV-24 (а): строки нет")
 
 	h.clock.Advance(wantRetry)
+	// Сессия регистрации своё отжила (срок стенда — те же сутки, что окно):
+	// близнец спрашивает о том же человеке новой сессией — предел считается по
+	// человеку, а не по сессии.
+	s = h.login(t, s)
 	rb := h.requestLetter(t, s)
 	require.Equal(t, http.StatusOK, rb.status, "EV-24 (б): письмо 1 вышло из окна — 200: %s", rb.body)
 	require.Len(t, h.letters(t, s.user), avLimitProfile+1)

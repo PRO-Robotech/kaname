@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
@@ -58,6 +59,11 @@ type Asker interface {
 	// списка отказами и состоит.
 	DirectRelationsMany(ctx context.Context, subject, objectType string, objectIDs []string,
 		limit int) (map[string][]string, error)
+	// PersonMarks — строки людей среди названных идентификаторов и подтверждён
+	// ли их ТЕКУЩИЙ адрес (kaname#456, Р4а): тот же предикат допуска, что у
+	// правила выдачи и у рубежа слушателей, спрошенный у формы, отвечающей о
+	// праве. Ошибка — «спросить не смогли», а не «подтверждён».
+	admission.Marks
 }
 
 // Client — дверь решения поверх формы.
@@ -85,6 +91,41 @@ func (c *Client) FormReachable() bool { return c != nil && c.form != nil }
 // отказа модели.
 var ErrFormNotWired = fmt.Errorf("authzcascade: дверь решения собрана без формы — спросить не у кого")
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ДОПУСК СУБЪЕКТА — ПОД КАЖДОЙ ФОРМОЙ, ОТВЕЧАЮЩЕЙ ВЕРДИКТОМ ИЛИ ДЕРЖАТЕЛЯМИ
+//
+// Приёмка `access-beyond-login-needs-a-verified-address.md` (kaname#456, Р4а):
+// всякий вопрос «держит ли субъект `user:<id>` отношение на объекте» отвечается
+// «нет», если адрес этого человека не подтверждён, — ДО вычисления отношения и
+// независимо от записей о выдаче: прямая выдача, выдача группе, отношение,
+// выполнимое подстановочным знаком, выдача администратора облака и откат к ней.
+// Предикат один (`admission`) и стоит ЗДЕСЬ, где отвечаются вопросы отношения,
+// чтобы ни одна дверь его не обошла. Перепись по формам:
+//
+//   - под предикатом — Check, CheckWithContext, CheckWithContextConsistent,
+//     BatchCheckWithContext (вердикт) и ListSubjects, ListUsers (держатели:
+//     неподтверждённый человек не называется);
+//   - отвечают ЗАПИСЯМИ для разбора и текста отказа — Sources, DirectRelations,
+//     DirectRelationsMany: предикатом не судятся (записи о выдаче
+//     неподтверждённому существуют и видны разбору);
+//   - живость формы — FormReachable.
+//
+// Это не право в модели и не самодельная проверка поверх неё: решается, допущен
+// ли субъект к решению ВООБЩЕ; ни одного права модель при этом не теряет, и
+// выдачи, заведённые до подтверждения, действуют после него без повторной
+// выдачи.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// SubjectAdmitted — допущен ли субъект модели прав к решению (Р4а): false —
+// человек с неподтверждённым адресом. Его спрашивает и дверь службы, называя
+// причину отказа `email_not_verified`; своего чтения отметки у неё нет.
+func (c *Client) SubjectAdmitted(ctx context.Context, subject string) (bool, error) {
+	if c == nil || c.form == nil {
+		return false, ErrFormNotWired
+	}
+	return admission.Subject(ctx, c.form, subject)
+}
+
 // Check — clients.RelationStore / authzguard.RelationChecker.
 func (c *Client) Check(ctx context.Context, subject, relation, object string) (bool, error) {
 	return c.CheckWithContext(ctx, subject, relation, object, nil)
@@ -103,6 +144,10 @@ func (c *Client) CheckWithContext(
 		// Неразобранный объект — НЕ отказ. Вернув «нет», дверь превратила бы
 		// опечатку в законный отказ, который никто никогда не найдёт.
 		return false, fmt.Errorf("authzcascade: объект %q не разбирается как «тип:идентификатор»", object)
+	}
+	admitted, err := admission.Subject(ctx, c.form, subject)
+	if err != nil || !admitted {
+		return false, err
 	}
 	return c.form.Allowed(ctx, subject, ref.Type, ref.ID, relation, condCtx)
 }
@@ -152,6 +197,15 @@ func (c *Client) BatchCheckWithContext(
 		}
 		ids[i] = ref.ID
 	}
+	admitted, err := admission.Subject(ctx, c.form, subject)
+	if err != nil {
+		return nil, err
+	}
+	if !admitted {
+		// Ответ той же длины и в том же порядке: субъект один на партию, и
+		// «нет» — на каждом пункте.
+		return make([]bool, len(objects)), nil
+	}
 	return c.form.AllowedMany(ctx, subject, objectType, ids, relation, condCtx)
 }
 
@@ -165,7 +219,33 @@ func (c *Client) ListSubjects(
 	if c == nil || c.form == nil {
 		return nil, "", ErrFormNotWired
 	}
-	return c.form.SubjectsPage(ctx, objectType, objectID, relation, pageToken, pageSize)
+	subjects, next, err := c.form.SubjectsPage(ctx, objectType, objectID, relation, pageToken, pageSize)
+	if err != nil {
+		return nil, "", err
+	}
+	admitted, err := c.admittedHolders(ctx, subjects)
+	if err != nil {
+		return nil, "", err
+	}
+	// Курсор проходит насквозь: страница, сужённая предикатом, короче, но
+	// продолжение то же — остаток достижим.
+	return admitted, next, nil
+}
+
+// admittedHolders — держатели, допущенные к решению (Р4а): неподтверждённый
+// человек среди держателей не называется. Один вопрос о всей странице.
+func (c *Client) admittedHolders(ctx context.Context, subjects []string) ([]string, error) {
+	verdicts, err := admission.Subjects(ctx, c.form, subjects)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(subjects))
+	for i, s := range subjects {
+		if verdicts[i] {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 // ListUsers — access_binding.PrincipalLister: развёрнутый набор принципалов.
@@ -195,6 +275,10 @@ func (c *Client) ListUsers(
 	const maxPages = 64
 	for page := 0; page < maxPages; page++ {
 		subjects, next, err := c.form.SubjectsPage(ctx, objectType, objectID, relation, after, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		subjects, err = c.admittedHolders(ctx, subjects)
 		if err != nil {
 			return nil, false, err
 		}

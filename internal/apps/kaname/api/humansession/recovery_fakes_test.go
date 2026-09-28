@@ -111,6 +111,25 @@ func (w *fakeWriter) EmitRecoveryMail(_ context.Context, in humansession.Recover
 		// Адаптер: отказ очереди писем — без класса словаря, до базы.
 		return errors.New("recovery mail intent: recipient and user required")
 	}
+	// Окно писем адресата (kaname#456) — как у адаптера: предел не объявлен —
+	// отказ до базы; списание — свой оператор; окно полно — ErrLetterWindowFull.
+	if in.Limit.MaxPerWindow <= 0 || in.Limit.Window <= 0 {
+		return errors.New("recovery mail: the letter window of the recipient is not declared")
+	}
+	w.store.trip()
+	w.store.mu.Lock()
+	if w.store.mailWindow == nil {
+		w.store.mailWindow = map[string]int{}
+	}
+	key := strings.ToLower(strings.TrimSpace(in.To))
+	full := w.store.mailWindow[key] >= in.Limit.MaxPerWindow
+	if !full {
+		w.store.mailWindow[key]++
+	}
+	w.store.mu.Unlock()
+	if full {
+		return humansession.ErrLetterWindowFull
+	}
 	w.store.trip()
 	if err := w.fail("emit-mail"); err != nil {
 		return err

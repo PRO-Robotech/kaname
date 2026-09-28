@@ -153,7 +153,13 @@ type HumanSession struct {
 	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	// Assurance level by the Ф11 rule (`internal/assurance`): password → "1".
 	AssuranceLevel string `protobuf:"bytes,6,opt,name=assurance_level,json=assuranceLevel,proto3" json:"assurance_level,omitempty"`
-	// Whether the CURRENT e-mail value has been verified (Ф2 П1).
+	// Whether the CURRENT e-mail value has been verified (Ф2 П1). `false` also
+	// names the VERIFICATION POSITION of the session (kaname#456): the session
+	// then acts only for the verification screens — requesting the letter,
+	// presenting the code, "who am I" and signing out; every other call is
+	// refused with `EMAIL_NOT_VERIFIED`, and no right of the person acts. The
+	// position is derived from the current mark on every request and is not
+	// stored in the session.
 	EmailVerified bool `protobuf:"varint,7,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -293,6 +293,25 @@ data:
         {{- with .recoveryCodeTtl }}
         recovery-code-ttl: {{ . | quote }}
         {{- end }}
+        {{- /* ПОДТВЕРЖДЕНИЕ АДРЕСА на той же полосе (kaname#456, Р7, Р9): пять
+             величин без умолчания — срок и предел попыток кода, промежуток,
+             число и окно писем. Под `own` незаданная — отказ старта с именем
+             ключа и переменной (KANAME_AUTHN__LOGIN__VERIFICATION_*). */}}
+        {{- with .verificationCodeTtl }}
+        verification-code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "verificationCodeAttempts" }}
+        verification-code-attempts: {{ int64 .verificationCodeAttempts }}
+        {{- end }}
+        {{- with .verificationResendInterval }}
+        verification-resend-interval: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "verificationResendLimit" }}
+        verification-resend-limit: {{ int64 .verificationResendLimit }}
+        {{- end }}
+        {{- with .verificationResendWindow }}
+        verification-resend-window: {{ . | quote }}
+        {{- end }}
       {{- end }}
 
       {{- with $authn.registration }}

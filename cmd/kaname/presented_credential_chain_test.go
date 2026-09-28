@@ -65,6 +65,12 @@ func (chainRevocations) RevokedBefore(context.Context, string) (time.Time, bool,
 }
 
 // FamilyRevoked — семейства, отозванного у этой сцены, нет.
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (chainRevocations) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 func (chainRevocations) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 
 // chainReader строит читателя и годный токен к нему.

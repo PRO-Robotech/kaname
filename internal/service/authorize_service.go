@@ -42,6 +42,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
+	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -148,7 +149,24 @@ type AuthorizeService struct {
 	// Optional / nil-safe: an unwired checker never short-circuits (the
 	// ordinary FGA path is the sole decision — backward-compatible).
 	clusterAdmin authzguard.RelationChecker
+	// admission — допуск субъекта к решению (kaname#456, Р4а): та же дверь, что
+	// отвечает о праве; своего чтения отметки у службы нет. nil — дверь без
+	// предиката (проба с дублёром): отказ по отметке тогда выносит сама дверь, а
+	// причину `email_not_verified` назвать нечем.
+	admission SubjectAdmission
 }
+
+// SubjectAdmission — допуск субъекта к решению: false — человек с
+// неподтверждённым адресом (kaname#456, Р4а). Реализует дверь решения
+// (`authzcascade.Client.SubjectAdmitted`).
+type SubjectAdmission interface {
+	SubjectAdmitted(ctx context.Context, subject string) (bool, error)
+}
+
+// DenyReasonEmailNotVerified — причина отказа в ответе двери, когда субъект —
+// человек с неподтверждённым адресом (Р4а). Одно значение на Check, пункт
+// BatchCheck и CheckRelation.
+const DenyReasonEmailNotVerified = admission.DenyReason
 
 // AuthorizeServiceConfig — вход сборщика.
 type AuthorizeServiceConfig struct {
@@ -168,10 +186,26 @@ type AuthorizeServiceConfig struct {
 
 // NewAuthorizeService — builder.
 func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
+	adm, _ := cfg.Relations.(SubjectAdmission)
 	return &AuthorizeService{
 		relations:    cfg.Relations,
 		clusterAdmin: cfg.ClusterAdminChecker,
+		admission:    adm,
 	}
+}
+
+// admissionDenied — допуск субъекта раньше вычисления отношения (Р4а): true —
+// субъект не допущен, и отказ называет `email_not_verified`. Не ответили —
+// ошибка недоступности, а не «допущен».
+func (s *AuthorizeService) admissionDenied(ctx context.Context, subject string) (bool, error) {
+	if s.admission == nil {
+		return false, nil
+	}
+	admitted, err := s.admission.SubjectAdmitted(ctx, subject)
+	if err != nil {
+		return false, fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+	}
+	return !admitted, nil
 }
 
 // CheckRequest — input for `Check`.
@@ -344,6 +378,14 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	p := planCheck(ctx, req, now)
 	if p.invalid != nil {
 		return result, p.invalid
+	}
+	denied, derr := s.admissionDenied(ctx, p.subject)
+	if derr != nil {
+		return result, derr
+	}
+	if denied {
+		result.DenyReasons = []string{DenyReasonEmailNotVerified}
+		return result, nil
 	}
 	if p.superGateDecides {
 		// Вопроса об объекте нет — спросить форму «наугад» значило бы получить
@@ -538,6 +580,23 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 		s.readSubjectRelations(ctx, subject, object))
 }
 
+// NeutralDenyReasons — текст отказа, который дверь дала бы ПОДТВЕРЖДЁННОМУ
+// субъекту без отношения на объекте (kaname#456, раскрытие Р3): тот, кто
+// спросил о ДРУГОМ человеке, не узнаёт из ответа, подтверждён ли его адрес.
+// Разбор пункта тот же, что у вопроса (`planCheck`); хвост — «прямых отношений
+// нет»: записи о выдаче неподтверждённому, существующие у него, спросившему о
+// нём наружу не называются.
+func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequest) []string {
+	p := planCheck(ctx, req, time.Now().UTC())
+	if p.invalid != nil {
+		return []string{p.invalid.Error()}
+	}
+	if p.superGateDecides {
+		return []string{p.denyReason}
+	}
+	return []string{denyReasonText(p.subject, p.relation, p.object, p.action, nil)}
+}
+
 // denyReasonText собирает текст отказа из УЖЕ ПРОЧИТАННОЙ диагностики.
 //
 // Отделено от чтения намеренно: диагностику для страницы читают ОДНИМ вопросом
@@ -658,6 +717,15 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	}
 	if req.Object == "" {
 		return result, fmt.Errorf("Illegal argument object: required")
+	}
+
+	denied, derr := s.admissionDenied(ctx, req.Subject)
+	if derr != nil {
+		return result, derr
+	}
+	if denied {
+		result.DenyReasons = []string{DenyReasonEmailNotVerified}
+		return result, nil
 	}
 
 	// Server forces current_time into the conditions context.
@@ -785,6 +853,9 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	plans := make([]checkPlan, len(reqs))
 	runs := make(map[string]*batchRun, len(reqs))
 	order := make([]*batchRun, 0, len(reqs))
+	// Допуск субъекта (kaname#456, Р4а) — по вопросу на СУБЪЕКТ прохода, до
+	// прогонов: неподтверждённому «нет» на каждом его пункте, с причиной.
+	denied := make(map[string]bool, 1)
 	for i, req := range reqs {
 		p := planCheck(ctx, req, now)
 		plans[i] = p
@@ -793,6 +864,19 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 			// deterministic + leak-free) surfaces as allowed=false + deny=[err];
 			// the whole batch does NOT fail.
 			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{p.invalid.Error()}, CheckedAt: now}
+			continue
+		}
+		d, seen := denied[p.subject]
+		if !seen {
+			var derr error
+			d, derr = s.admissionDenied(ctx, p.subject)
+			if derr != nil {
+				return nil, derr
+			}
+			denied[p.subject] = d
+		}
+		if d {
+			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{DenyReasonEmailNotVerified}, CheckedAt: now}
 			continue
 		}
 		key := runKeyOf(p)

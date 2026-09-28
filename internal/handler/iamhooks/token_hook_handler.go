@@ -567,6 +567,10 @@ func (h *TokenHookHandler) revokedAtIssuance(ctx context.Context, p service.Reso
 		return false, ""
 	case revocationpolicy.Revoked:
 		return true, "user_revoked"
+	case revocationpolicy.Unverified:
+		// Адрес владельца-человека не подтверждён (kaname#456, Р5): то же
+		// слово наружу, что на отсечке, своя причина в журнале и аудите.
+		return true, "user_unverified"
 	case revocationpolicy.Undecidable:
 		h.logger.ErrorContext(ctx, "token_hook: revoke-all lookup failed — failing closed",
 			"user_id", p.UserID, "err", err)

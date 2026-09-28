@@ -76,13 +76,16 @@ func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// Seed a PENDING invite row by email (no external_id yet).
+	// Seed a PENDING invite row by email (no external_id yet). Приглашение путь
+	// хука активирует только при отметке подтверждения нашей полосы
+	// (kaname#456, Р11 п. 5): строка её несёт — предмет пробы событие, а не
+	// отметка.
 	owner, accID := seedUserAccount(t, ctx, env.pool, "usr14upd")
 	_ = owner
 	pendingID := domain.UserID("usr0000000000005214pp")
 	_, err := env.pool.Exec(ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, '', $3, $4, 'PENDING')`,
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, '', $3, $4, 'PENDING', now())`,
 		string(pendingID), string(accID), "u-5214-activate@example.com", "Pending Invitee")
 	require.NoError(t, err)
 

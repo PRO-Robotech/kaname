@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -124,6 +125,7 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	lane := &loginLane{
 		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
 		freshness: 15 * time.Minute, keys: kanamepg.NewAccessKeyRepo(nil), keyFreshness: kanamepg.NewHumanSessionFreshness(nil),
+		letterWindow: 24 * time.Hour, limits: humansession.Limits{SourceWindow: time.Hour},
 	}
 	require.True(t, lane.wired())
 	require.Equal(t, []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}, lane.signInMethods())
@@ -136,7 +138,10 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	for _, s := range retention.WithHumanSessions(nil, reapers) {
 		names[s.Name] = s.Grace
 	}
-	require.Len(t, names, 5, "пятый — испытания ключей доступа (Ф7)")
+	require.Len(t, names, 8, "пятый — испытания ключей доступа (Ф7); шестой–восьмой — коды подтверждения адреса, окна источника, письма с открытым кодом (kaname#456)")
+	require.Equal(t, 24*time.Hour, names[retention.SubjectVerificationCodes])
+	require.Equal(t, time.Hour, names[retention.SubjectSourceRequestWindows])
+	require.Contains(t, names, retention.SubjectBearerLetters)
 	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
 	require.Contains(t, names, retention.SubjectAccessKeyChallenges)
 

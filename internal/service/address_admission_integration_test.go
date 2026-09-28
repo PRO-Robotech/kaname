@@ -95,7 +95,7 @@ func TestEV50_DirectGrantDoesNotActForTheUnverified(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, person = "acc-ev50", "usr-ev50own", "usr-ev50"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, person, acc)
+		w.ci.seedUnverifiedUser(t, person, acc)
 		w.ci.factThroughJournal(t, "user:"+person, "admin", "account", acc)
 		if verified {
 			w.mark(t, person)
@@ -112,7 +112,7 @@ func TestEV51_WildcardRelationDoesNotActForTheUnverified(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, person = "acc-ev51", "usr-ev51own", "usr-ev51"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, person, acc)
+		w.ci.seedUnverifiedUser(t, person, acc)
 		w.ci.factThroughJournal(t, "user:*", "viewer", "cluster", "cluster_root")
 		if verified {
 			w.mark(t, person)
@@ -130,7 +130,7 @@ func TestEV52_CloudAdministratorDoesNotActWhileUnverified(t *testing.T) {
 		const accA, ownA, accB, ownB, admin, abn, role = "acc-ev52a", "usr-ev52oa", "acc-ev52b", "usr-ev52ob", "usr-ev52adm", "abn-ev52", "rol-ev52"
 		w.ci.seedAccountWithOwner(t, accA, ownA)
 		w.ci.seedAccountWithOwner(t, accB, ownB)
-		w.ci.seedUser(t, admin, accA)
+		w.ci.seedUnverifiedUser(t, admin, accA)
 		w.ci.seedRole(t, role, accB)
 		w.ci.seedBinding(t, abn, ownB, role, "account", accB)
 		w.ci.factThroughJournal(t, "user:"+admin, "system_admin", "cluster", "cluster_root")
@@ -162,7 +162,7 @@ func TestEV53_GroupGrantDoesNotActForTheUnverified(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, member, grp = "acc-ev53", "usr-ev53own", "usr-ev53m", "grp-ev53"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, member, acc)
+		w.ci.seedUnverifiedUser(t, member, acc)
 		w.ci.exec(t, `INSERT INTO kaname.groups (id, account_id, name) VALUES ($1, $2, $1)`, grp, acc)
 		w.ci.exec(t, `INSERT INTO kaname.group_members (group_id, member_type, member_id) VALUES ($1, 'user', $2)`, grp, member)
 		w.ci.factThroughJournal(t, "group:"+grp+"#member", "admin", "account", acc)
@@ -181,13 +181,13 @@ func TestEV54_BatchQuestion(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, person, role = "acc-ev54", "usr-ev54own", "usr-ev54", "rol-ev54"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, person, acc)
+		w.ci.seedUnverifiedUser(t, person, acc)
 		w.ci.seedRole(t, role, acc)
 		w.ci.factThroughJournal(t, "user:"+person, "admin", "account", acc)
 		reqs := make([]service.CheckRequest, 0, 3)
 		for _, b := range []string{"abn-ev54a", "abn-ev54b", "abn-ev54c"} {
 			grantee := "usr-" + strings.TrimPrefix(b, "abn-")
-			w.ci.seedUser(t, grantee, acc)
+			w.ci.seedUnverifiedUser(t, grantee, acc)
 			w.ci.seedBinding(t, b, grantee, role, "account", acc)
 			reqs = append(reqs, service.CheckRequest{Subject: "user:" + person, Resource: service.ResourceRef{Type: "iam_access_binding", ID: b},
 				Action: "probe.address.v_delete", RequiredRelation: "v_delete"})
@@ -214,8 +214,8 @@ func TestEV55_HoldersExcludeTheUnverified(t *testing.T) {
 	w := newAdmWorld(t)
 	const acc, owner, p, q = "acc-ev55", "usr-ev55own", "usr-ev55p", "usr-ev55q"
 	w.ci.seedAccountWithOwner(t, acc, owner)
-	w.ci.seedUser(t, p, acc)
-	w.ci.seedUser(t, q, acc)
+	w.ci.seedUnverifiedUser(t, p, acc)
+	w.ci.seedUnverifiedUser(t, q, acc)
 	w.ci.factThroughJournal(t, "user:"+p, "admin", "account", acc)
 	w.ci.factThroughJournal(t, "user:"+q, "admin", "account", acc)
 	w.mark(t, p)
@@ -248,7 +248,7 @@ func TestEV56_AGrantToTheUnverifiedActsAfterVerification(t *testing.T) {
 	const acc, owner, q = "acc-ev56", "usr-ev56own", "usr-ev56q"
 	w.ci.seedAccountWithOwner(t, acc, owner)
 	w.mark(t, owner)
-	w.ci.seedUser(t, q, acc)
+	w.ci.seedUnverifiedUser(t, q, acc)
 	w.ci.factThroughJournal(t, "user:"+q, "admin", "account", acc)
 	requireNotAdmitted(t, "EV-56", w.check(t, "user:"+q, "account", acc, "admin"))
 	w.mark(t, q)
@@ -263,7 +263,7 @@ func TestEV57_OwnVerbChecksOfTheService(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, editor = "acc-ev57", "usr-ev57own", "usr-ev57ed"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, editor, acc)
+		w.ci.seedUnverifiedUser(t, editor, acc)
 		w.ci.factThroughJournal(t, "user:"+editor, "editor", "account", acc)
 		if verified {
 			w.mark(t, editor)
@@ -281,7 +281,7 @@ func TestAdmissionThirdOutcomeIsNotVerified(t *testing.T) {
 	w := newAdmWorld(t)
 	const acc, owner, person = "acc-adm3", "usr-adm3own", "usr-adm3"
 	w.ci.seedAccountWithOwner(t, acc, owner)
-	w.ci.seedUser(t, person, acc)
+	w.ci.seedUnverifiedUser(t, person, acc)
 	w.ci.factThroughJournal(t, "user:"+person, "admin", "account", acc)
 	w.mark(t, person)
 	require.True(t, w.check(t, "user:"+person, "account", acc, "admin").Allowed, "близнец: хранилище отвечает")
@@ -316,8 +316,8 @@ func TestAdmissionReasonIsDisclosedOnlyToTheSubjectOrAPeer(t *testing.T) {
 		w := newAdmWorld(t)
 		const acc, owner, admin, stranger = "acc-disc", "usr-discown", "usr-discadm", "usr-discstr"
 		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUser(t, admin, acc)
-		w.ci.seedUser(t, stranger, acc)
+		w.ci.seedUnverifiedUser(t, admin, acc)
+		w.ci.seedUnverifiedUser(t, stranger, acc)
 		w.ci.factThroughJournal(t, "user:"+admin, "admin", "account", acc)
 		w.mark(t, admin)
 		if strangerHolds {

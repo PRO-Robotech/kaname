@@ -86,8 +86,8 @@ func seedForceLogoutUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID),
 		"ext-"+string(uid), fmt.Sprintf("u-%s@example.com", uid), "Force Logout Target")
 	require.NoError(t, err, "seed user")

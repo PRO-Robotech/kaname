@@ -103,6 +103,12 @@ func loginLaneSettings() config.LoginLaneConfig {
 		VerifierCapacity:   4,
 		MemoryReserveBytes: 256 << 20,
 		RecoveryCodeTTL:    5 * time.Minute,
+		// Подтверждение адреса (kaname#456, Р9) — величины профиля продукта.
+		VerificationCodeTTL:        30 * time.Minute,
+		VerificationCodeAttempts:   5,
+		VerificationResendInterval: 60 * time.Second,
+		VerificationResendLimit:    5,
+		VerificationResendWindow:   24 * time.Hour,
 	}
 }
 

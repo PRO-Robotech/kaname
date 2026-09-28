@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/corelib/servicehost"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
@@ -50,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 
@@ -857,6 +859,16 @@ func runServe(cfg config.Config) error {
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
 		presentedcred.Presented)
 
+	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
+	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
+	// неподтверждённым адресом получает отказ Р3 раньше пола системного
+	// читателя, пола ступени, анти-анонима, двери и обработчика. Вид принципала
+	// — строкой людей (`personmarks`), не утверждением токена.
+	addressGate := authzguard.NewAddressGate(personmarks.New(pool)).
+		WithRefusalObserver(func() {
+			metricsReg.LoginLaneRecorder().AddressVerificationObserved(humansession.VerificationPositionRefusedListener)
+		})
+
 	// СОБСТВЕННАЯ ДВЕРЬ iam — пообъектный вопрос о доступе на публичном
 	// слушателе.
 	//
@@ -993,6 +1005,7 @@ func runServe(cfg config.Config) error {
 	}, publicIdentityUnary(cfg, presentedReader)...)
 	publicUnary = append(publicUnary,
 		publicCallerPolicy.Unary(),
+		addressGate.Unary(),
 		authzguard.AntiAnonymousUnary(logger),
 		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
 		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
@@ -1008,6 +1021,7 @@ func runServe(cfg config.Config) error {
 	}, publicIdentityStream(cfg, presentedReader)...)
 	publicStream = append(publicStream,
 		publicCallerPolicy.Stream(),
+		addressGate.Stream(),
 		authzguard.AntiAnonymousStream(logger),
 		// Та же дверь на второй полосе. Стримовых RPC у iam сегодня НОЛЬ
 		// (`git grep -c 'returns (stream' -- proto/kaname/cloud/iam/v1` → 0),
@@ -1082,6 +1096,7 @@ func runServe(cfg config.Config) error {
 	}, identityUnary(cfg)...)
 	internalUnary = append(internalUnary,
 		internalCallerPolicy.Unary(),
+		addressGate.Unary(),
 		internalSystemViewerFloor.Unary(),
 		internalACRFloor.Unary(),
 	)
@@ -1091,6 +1106,7 @@ func runServe(cfg config.Config) error {
 	}, identityStream(cfg)...)
 	internalStream = append(internalStream,
 		internalCallerPolicy.Stream(),
+		addressGate.Stream(),
 		internalSystemViewerFloor.Stream(),
 		internalACRFloor.Stream(),
 	)

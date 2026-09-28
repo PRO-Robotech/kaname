@@ -60,6 +60,16 @@ func (s InviteStatus) MayAuthenticate() bool {
 	return s == InviteStatusActive
 }
 
+// MaySignInToOwnLane reports whether a person in this state may sign in on OUR
+// sign-in lane and hold a session there (kaname#456, Р11 п. 1). Wider than
+// [InviteStatus.MayAuthenticate] by exactly one state: an invitee who registered
+// by the invite's address (PENDING) signs in to the verification position — the
+// only screens a session reaches before the address is confirmed — while a
+// token is issued to nobody in that position. BLOCKED never signs in.
+func (s InviteStatus) MaySignInToOwnLane() bool {
+	return s == InviteStatusActive || s == InviteStatusPending
+}
+
 func (s InviteStatus) Validate() error {
 	switch s {
 	case InviteStatusPending, InviteStatusActive, InviteStatusBlocked:

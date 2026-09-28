@@ -182,7 +182,7 @@ func (w *writeTx) EmitReconcileEvent(ctx context.Context, eventType, objectType,
 // ошибкой: отказ по частоте обязан быть неотличим для вызывающего от ответа в
 // норме (Р9), и различать их вправе только счётчик исходов у use-case.
 func (w *writeTx) EmitInviteMail(ctx context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
-	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, intent.To, intent.Limit)
+	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowInvite, intent.To, intent.Limit)
 	if err != nil {
 		return false, err
 	}
@@ -209,7 +209,12 @@ func (w *writeTx) EmitInviteMail(ctx context.Context, intent outboxtypes.InviteM
 //
 // Непозитивное ограничение — ОТКАЗ, а не «сколько угодно»: значения «без
 // ограничения» у ручки не существует (MAIL-43), и здесь оно не изобретается.
-func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit outboxtypes.InviteMailRateLimit) (bool, error) {
+//
+// Окно — у ПАРЫ «вид письма, адрес» (kaname#456): приглашение и восстановление
+// списываются каждое своим окном под той же величиной ограничения — одно
+// ограничение на каждый наш глагол, отправляющий письмо (Р22), и письмо одного
+// вида не выедает окно другого.
+func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, kind mailWindowKind, to string, limit outboxtypes.InviteMailRateLimit) (bool, error) {
 	if limit.MaxPerWindow <= 0 || limit.Window <= 0 {
 		return false, fmt.Errorf(
 			"invite mail rate limit: max-per-window=%d window=%s — both must be positive; there is "+
@@ -225,9 +230,9 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit o
 		windowSeconds = 1
 	}
 	tag, err := tx.Exec(ctx, `
-		INSERT INTO invite_mail_windows AS w (recipient, window_started_at, sent, updated_at)
-		VALUES ($1, now(), 1, now())
-		ON CONFLICT (recipient) DO UPDATE
+		INSERT INTO invite_mail_windows AS w (kind, recipient, window_started_at, sent, updated_at)
+		VALUES ($4, $1, now(), 1, now())
+		ON CONFLICT (kind, recipient) DO UPDATE
 		   SET window_started_at = CASE
 		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
 		           THEN now() ELSE w.window_started_at END,
@@ -238,12 +243,21 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit o
 		 WHERE CASE
 		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
 		           THEN 1 ELSE w.sent + 1 END <= $2`,
-		recipient, limit.MaxPerWindow, windowSeconds)
+		recipient, limit.MaxPerWindow, windowSeconds, string(kind))
 	if err != nil {
 		return false, mapErr(err, "", recipient)
 	}
 	return tag.RowsAffected() > 0, nil
 }
+
+// mailWindowKind — вид письма в ключе окна частоты: словарь ограничения
+// `invite_mail_windows_kind_check` (миграция `20260927190000`).
+type mailWindowKind string
+
+const (
+	mailWindowInvite   mailWindowKind = "invite"
+	mailWindowRecovery mailWindowKind = "recovery"
+)
 
 // InsertRecoveryCompletion — idempotency-gate INSERT on THIS writer-tx
 // (recovery_completions, migration 0015). ON CONFLICT DO NOTHING

@@ -114,9 +114,34 @@ func issued() oauthceremony.AuthorizationResult {
 	return oauthceremony.AuthorizationResult{RedirectURI: knownTarget + "?code=c", Delivery: oauthceremony.DeliveryQuery}
 }
 
+// liveLogin — сессия в обычном положении: адрес подтверждён (kaname#456, Р5 —
+// в положении подтверждения кода авторизации нет).
 func liveLogin(level string, expires time.Time) *authority {
 	return &authority{found: true, login: Login{Subject: "usr-1", SessionID: "hss-1", AuthTime: clockAt.Add(-time.Minute),
-		Level: level, ExpiresAt: expires}}
+		Level: level, ExpiresAt: expires, EmailVerified: true}}
+}
+
+// TestAuthorizeExecute_VerificationPositionGetsNoCode — kaname#456, Р5:
+// сессия в положении подтверждения получает отказ протокола `access_denied`
+// на доверенную цель раньше суждения о ступени; близнец — та же сессия в
+// обычном положении получает код.
+func TestAuthorizeExecute_VerificationPositionGetsNoCode(t *testing.T) {
+	unverified := liveLogin("1", clockAt.Add(time.Hour))
+	unverified.login.EmailVerified = false
+	e := &engine{result: issued()}
+	uc := newAuthorizeRig(t, &directory{}, unverified, e)
+	in := baseInput()
+	in.AcrValues = "2"
+	res := uc.Execute(context.Background(), trusted(t, uc), in)
+	if res.Verdict != VerdictRefusedByRedirect || res.Wire != "access_denied" {
+		t.Fatalf("положение подтверждения: ожидался отказ access_denied перенаправлением раньше ступени, получено %+v", res)
+	}
+
+	twin := liveLogin("1", clockAt.Add(time.Hour))
+	uc2 := newAuthorizeRig(t, &directory{}, twin, &engine{result: issued()})
+	if got := uc2.Execute(context.Background(), trusted(t, uc2), baseInput()); got.Verdict != VerdictIssued {
+		t.Fatalf("близнец: обычное положение получает код, получено %+v", got)
+	}
 }
 
 func baseInput() AuthorizeInput {

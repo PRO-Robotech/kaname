@@ -56,8 +56,8 @@ func ownerFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc, ow
 	// в идентификаторе, в имени отвергается.
 	run(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)
 	     ON CONFLICT DO NOTHING`, acc, accName, owner)
-	run(`INSERT INTO kaname.users (id, external_id, email, account_id)
-	     VALUES ($1, $1, $1 || '@kacho.local', $2) ON CONFLICT DO NOTHING`, owner, acc)
+	run(`INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+	     VALUES ($1, $1, $1 || '@kacho.local', $2, now()) ON CONFLICT DO NOTHING`, owner, acc)
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	     VALUES ('account', $1, 'owner', 'user:' || $2),
 	            ('account', $1, 'v_get', 'user:' || $2)`, acc, owner)

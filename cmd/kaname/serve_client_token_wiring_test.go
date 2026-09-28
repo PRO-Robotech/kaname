@@ -161,3 +161,9 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 
 var _ = client_token.Input{}
 var _ = clientassertion.OutcomeAccepted
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (wiringCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

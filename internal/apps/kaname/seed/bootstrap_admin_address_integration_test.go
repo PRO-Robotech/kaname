@@ -33,7 +33,7 @@ func TestEV80_UnverifiedSeedAddressGetsNoGrant(t *testing.T) {
 		pool, err := coredb.NewPool(ctx, setupBootstrapDB(t))
 		require.NoError(t, err)
 		const email = "seed-ev80@example.test"
-		uid := seedBootstrapUser(t, ctx, pool, email)
+		uid := seedUnverifiedBootstrapUser(t, ctx, pool, email)
 		if verified {
 			_, err = pool.Exec(ctx, `UPDATE users SET email_verified_at = now() WHERE id = $1`, uid)
 			require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestEV81_TheSkipReasonIsNotTerminal(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 	const email = "seed-ev81@example.test"
-	uid := seedBootstrapUser(t, ctx, pool, email)
+	uid := seedUnverifiedBootstrapUser(t, ctx, pool, email)
 	run := func(ctx context.Context) (seed.BootstrapAdminResult, error) {
 		return seed.RunBootstrapAdmin(ctx, pool, slog.New(slog.DiscardHandler), seed.BootstrapAdminInput{Email: email})
 	}
@@ -107,7 +107,7 @@ func TestSeedGrantOnlyExistsWhenTheMarkIsCommitted(t *testing.T) {
 	defer pool.Close()
 	for i := 0; i < 50; i++ {
 		email := "seed-race-" + time.Now().Format("150405.000000") + "@example.test"
-		uid := seedBootstrapUser(t, ctx, pool, email)
+		uid := seedUnverifiedBootstrapUser(t, ctx, pool, email)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
@@ -127,7 +127,7 @@ func TestSeedGrantOnlyExistsWhenTheMarkIsCommitted(t *testing.T) {
 		// Строка, так и не подтверждённая, выдачи не получает.
 		_, _ = pool.Exec(ctx, `DELETE FROM cluster_admin_grants WHERE subject_id = $1`, uid)
 	}
-	unverified := seedBootstrapUser(t, ctx, pool, "seed-race-never@example.test")
+	unverified := seedUnverifiedBootstrapUser(t, ctx, pool, "seed-race-never@example.test")
 	for i := 0; i < 5; i++ {
 		_, _ = seed.RunBootstrapAdmin(ctx, pool, slog.New(slog.DiscardHandler), seed.BootstrapAdminInput{Email: "seed-race-never@example.test"})
 	}

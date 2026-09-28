@@ -336,3 +336,9 @@ func TestIssuanceLanesAssemblyRefusalStopsTheStart(t *testing.T) {
 		t.Fatalf("законный близнец: с обработчиком поверхность обязана строиться и подниматься, err=%v", err)
 	}
 }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (storeCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

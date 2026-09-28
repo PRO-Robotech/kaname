@@ -41,9 +41,40 @@ func TestEV26_VerificationLetterCarriesTheCodeTermAndTheScreenAddress(t *testing
 		}
 	}
 
+	require.Contains(t, body, "Никому не сообщайте этот код", "условие аудита: письмо предупреждает не передавать код")
+
 	recovery := string(clients.RenderMail(relay, clients.MailEvent{
 		Kind: clients.EventRecoveryMailSend, To: "person@example.invalid", Code: code, CodeValidMinutes: 5,
 	}))
 	require.Contains(t, recovery, code, "EV-26 близнец: письмо восстановления несёт код")
 	require.NotContains(t, recovery, "/verification", "EV-26 близнец: адреса экрана подтверждения в нём нет")
+}
+
+// TestNoLetterAddressCarriesAQueryOrAFragment — условие аудита поверхности:
+// во всех трёх видах письма (приглашение, восстановление, подтверждение) ни
+// один адрес не несёт `?` и `#` — ни из настройки установки, ни из нагрузки
+// очереди. Инъекция: адрес с параметром и фрагментом в нагрузке и в настройке;
+// законный близнец — адрес без них — доезжает до письма как есть.
+func TestNoLetterAddressCarriesAQueryOrAFragment(t *testing.T) {
+	const withQuery = "https://console.example.invalid/login?code=ABCDE-FGH12#frag"
+	relay := clients.MailRelay{From: "noreply@example.invalid", LoginURL: withQuery}
+	kinds := []string{clients.EventInviteMailSend, clients.EventRecoveryMailSend, "mail.verification.send"}
+	var seen int
+	for _, kind := range kinds {
+		body := string(clients.RenderMail(relay, clients.MailEvent{
+			Kind: kind, To: "person@example.invalid", Code: "ABCDE-FGH12", CodeValidMinutes: 5, LoginURL: withQuery,
+		}))
+		urls := urlInLetter.FindAllString(body, -1)
+		require.NotEmptyf(t, urls, "%s: письмо несёт адрес — иначе проверять нечего", kind)
+		for _, u := range urls {
+			seen++
+			require.NotContainsf(t, u, "?", "%s: адрес письма без параметров: %s", kind, u)
+			require.NotContainsf(t, u, "#", "%s: адрес письма без фрагмента: %s", kind, u)
+		}
+	}
+	t.Logf("осмотрено видов письма %d, адресов %d", len(kinds), seen)
+
+	twin := string(clients.RenderMail(clients.MailRelay{From: "noreply@example.invalid", LoginURL: "https://console.example.invalid/login"},
+		clients.MailEvent{Kind: clients.EventInviteMailSend, To: "person@example.invalid"}))
+	require.Contains(t, twin, "https://console.example.invalid/login", "законный близнец: адрес без параметров доезжает как есть")
 }

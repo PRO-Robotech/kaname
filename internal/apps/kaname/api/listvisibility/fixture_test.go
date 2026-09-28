@@ -169,8 +169,8 @@ func (e *env) seedUserWithAccount(t *testing.T, suffix string) (domain.UserID, d
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6)`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"-"+lastSix(string(uid))+"@example.com", "User "+suffix, uAt)
 	require.NoError(t, err, "seed user %s", suffix)
@@ -223,8 +223,8 @@ func (e *env) seedUser(t *testing.T, acc domain.AccountID, suffix string) string
 	t.Helper()
 	id := ids.NewID(domain.PrefixUser)
 	_, err := e.pool.Exec(context.Background(), `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6)`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, now())`,
 		id, string(acc), "ext-"+suffix+"-"+id,
 		"u-"+suffix+"-"+lastSix(id)+"@example.com", "User "+suffix, e.at())
 	require.NoError(t, err, "seed user %s", suffix)

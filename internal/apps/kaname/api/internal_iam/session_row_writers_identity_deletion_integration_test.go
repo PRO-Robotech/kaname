@@ -95,6 +95,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
@@ -197,7 +198,9 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 	require.NoError(t, err)
 	l.request, err = humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: s.sessions, CodeTTL: 5 * time.Minute, Dispatcher: humansession.SyncDispatcher{}, Observer: nop,
-		Now: time.Now, Logger: logger,
+		Sources: s.sessions, SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 10000, Window: time.Hour},
+		Now:       time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	l.complete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{

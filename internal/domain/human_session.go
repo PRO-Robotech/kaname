@@ -254,6 +254,11 @@ const (
 	//     причины не несёт. Совпадение намеренное: предмет у обеих записей
 	//     один — принудительный выход.
 	RevokeReasonAdminForceLogout = "admin-force-logout"
+	// RevokeReasonEmailVerified — подтверждение адреса снимает ПРОЧИЕ сессии
+	// человека (kaname#456, Р10 п. 3): обычное положение получает только та
+	// сессия, в которой код предъявлен. Причина снятия записи сессии; отсечки
+	// подтверждение не пишет.
+	RevokeReasonEmailVerified = "email-verified"
 )
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
@@ -272,6 +277,7 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonPasswordChange,
 		RevokeReasonSecondFactorRemoved,
 		RevokeReasonAdminForceLogout,
+		RevokeReasonEmailVerified,
 	}
 }
 
@@ -298,9 +304,15 @@ const (
 	// фактора, ветвью пароля (Ф11-09), и признак семейства ей не годится.
 	FormSecondFactor FormKind = "second-factor"
 	FormStepUp       FormKind = "step-up"
+	// Подтверждение адреса (kaname#456, Р6; имена ратифицированы — Ф6 Р15):
+	// запрос письма и предъявление кода — две формы, два вида, и признак одного
+	// другому не годится.
+	FormVerifyEmail        FormKind = "verify-email"
+	FormVerifyEmailConfirm FormKind = "verify-email-confirm"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete, FormSecondFactor, FormStepUp}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete,
+	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

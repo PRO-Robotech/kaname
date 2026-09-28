@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -67,8 +68,14 @@ func (h *avLane) invite(t *testing.T, inv avSession, acc domain.AccountID, prj d
 	})
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): выдача роли на проект")
 	require.NoError(t, w.AccessBindingsW().InsertSubjects(h.ctx, ab.ID, []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(row.ID)}}))
+	// Право приглашённого на P — прямым фактом журнала: каталог прав стенд не
+	// компилирует (строк `role_verb` в свежей базе ноль), и выдача строкой без
+	// него ни о чём не говорит двери. Факт — тот же, что даёт выдача роли
+	// администратора проекта; предмет проб — допуск субъекта, а не план выдачи.
 	require.NoError(t, w.EmitFGARelationWrite(h.ctx, []outboxtypes.RelationTuple{{
 		User: "project:" + string(prj), Relation: "project", Object: "iam_access_binding:" + string(ab.ID),
+	}, {
+		User: "user:" + string(row.ID), Relation: "admin", Object: "project:" + string(prj),
 	}}))
 	require.NoError(t, w.Commit(h.ctx))
 	return avInvite{user: row.ID, email: email, account: acc, project: prj, inviter: inv}
@@ -90,7 +97,7 @@ func (h *avLane) inviteState(t *testing.T, iv avInvite) (userStatus, membership,
 // projectAllowed — вопрос двери решения о приглашённом на проекте.
 func (h *avLane) projectAllowed(t *testing.T, iv avInvite) bool {
 	t.Helper()
-	ok, err := h.door.Check(h.ctx, "user:"+string(iv.user), "v_get", "project:"+string(iv.project))
+	ok, err := h.door.Check(h.ctx, "user:"+string(iv.user), "admin", "project:"+string(iv.project))
 	require.NoError(t, err)
 	return ok
 }
@@ -403,7 +410,7 @@ func TestSeededNonPersonRowIsNotClaimedByRegistration(t *testing.T) {
 // регистраций по источнику ДО транзакции; сверх него — единый отказ, ни строки
 // человека, ни строки письма. Близнец — другой источник проходит.
 func TestRegistrationIsBoundedPerSource(t *testing.T) {
-	h := newAVLane(t)
+	h := newAVLaneWith(t, avOptions{registrationsPerSource: avRegistrationPerSource})
 	registerFrom := func(source, email string) reply {
 		tok, ctxCk := h.lane.csrf(t, h.c, string(domain.FormRegister), nil)
 		return h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathRegister,
@@ -435,7 +442,7 @@ func TestRegistrationIsBoundedPerSource(t *testing.T) {
 // писем восстановления на адресата списывается тем же оператором, что
 // постановка, и сверх него письмо молча не ставится при неизменном ответе.
 func TestRecoveryRequestIsBoundedPerRecipient(t *testing.T) {
-	h := newAVLane(t)
+	h := newAVLaneWith(t, avOptions{recoveryLettersPerRecipient: avRecoveryPerRecipient})
 	s := h.register(t, freshAddress("rcv"))
 	h.mark(t, s)
 	request := func(email string) reply {
@@ -461,3 +468,71 @@ const (
 	avRegistrationPerSource = 3
 	avRecoveryPerRecipient  = 3
 )
+
+// TestParallelLetterRequestsQueueExactlyOne — условие аудита поверхности:
+// предел писем решается одним условным оператором под замком строки человека.
+// 20 одновременных запросов письма одного человека после промежутка — ровно
+// одна строка очереди и 19 отказов по частоте со сроком; повторов не меньше
+// 10, распределение печатается. Близнец — последовательная пара EV-23.
+func TestParallelLetterRequestsQueueExactlyOne(t *testing.T) {
+	h := newAVLane(t)
+	h.requireVerbs(t, "параллельные запросы письма")
+	const (
+		repeats  = 10
+		parallel = 20
+	)
+	dist := map[int]int{}
+	for i := 0; i < repeats; i++ {
+		s := h.register(t, freshAddress("parletter"))
+		h.clock.Advance(avIntervalProfile + time.Second)
+		before := len(h.letters(t, s.user))
+		statuses := make([]int, parallel)
+		var wg sync.WaitGroup
+		for j := 0; j < parallel; j++ {
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				statuses[j] = h.requestLetter(t, s).status
+			}(j)
+		}
+		wg.Wait()
+		var ok, paced int
+		for _, st := range statuses {
+			switch st {
+			case http.StatusOK:
+				ok++
+			case http.StatusTooManyRequests:
+				paced++
+			default:
+				t.Fatalf("повтор %d: исход, которого у запроса письма нет: %d", i, st)
+			}
+		}
+		require.Equal(t, 1, ok, "повтор %d: ровно одно письмо из %d одновременных", i, parallel)
+		require.Equal(t, parallel-1, paced, "повтор %d: прочие — отказ по частоте", i)
+		require.Len(t, h.letters(t, s.user), before+1, "повтор %d: в очереди ровно одна новая строка", i)
+		dist[ok]++
+	}
+	t.Logf("повторов %d · распределение числа поставленных писем: %v", repeats, dist)
+}
+
+// TestSecondRegistrationOnTheInviteRowIsRefused — условие аудита поверхности:
+// вторая регистрация тем же адресом на строку приглашения, у которой способ
+// входа уже записан, — единый отказ; материал первого не замещается, второго
+// письма нет. Близнец — EV-70.
+func TestSecondRegistrationOnTheInviteRowIsRefused(t *testing.T) {
+	h := newAVLane(t)
+	inv, acc, prj := h.inviter(t)
+	iv := h.invite(t, inv, acc, prj, freshAddress("secondreg"), 7*24*time.Hour)
+	h.registerInvitee(t, iv)
+	letters := len(h.letters(t, iv.user))
+
+	const secondPassword = "a-second-registrant-password-7"
+	tok, ctxCk := h.lane.csrf(t, h.c, string(domain.FormRegister), nil)
+	r := h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathRegister,
+		map[string]any{"email": iv.email, "password": secondPassword, "csrfToken": tok}, fwd(), ctxCk)
+	require.Equal(t, http.StatusBadRequest, r.status, "вторая регистрация — единый отказ: %s", r.body)
+	require.Equal(t, "REGISTRATION_REFUSED", parseRefusal(t, r.body).reason())
+	require.Len(t, h.letters(t, iv.user), letters, "второго письма нет")
+	require.Equal(t, http.StatusOK, h.loginReply(t, iv.email, integrationPassword).status, "пароль первого входит")
+	require.Equal(t, http.StatusUnauthorized, h.loginReply(t, iv.email, secondPassword).status, "пароль второго — единый отказ входа")
+}

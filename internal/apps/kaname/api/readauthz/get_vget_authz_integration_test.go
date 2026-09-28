@@ -494,8 +494,8 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"@example.com", "User "+suffix)
 	require.NoError(t, err)
@@ -520,8 +520,8 @@ func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ac
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"-"+string(uid)[len(uid)-6:]+"@example.com", "User "+suffix)
 	require.NoError(t, err)

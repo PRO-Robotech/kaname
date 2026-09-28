@@ -116,6 +116,18 @@ const (
 	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
 	// заводит начало церемонии либо предъявления под живой сессией.
 	SubjectAccessKeyChallenges = "access_key_challenges"
+	// SubjectVerificationCodes — коды подтверждения адреса (kaname#456, Р7,
+	// Р9): строки старше окна писем, которые ни предъявление, ни предел писем
+	// уже не прочтут. Темп задаёт человек: строку заводит письмо подтверждения.
+	SubjectVerificationCodes = "email_verification_codes"
+	// SubjectSourceRequestWindows — окна обращений без удостоверения по
+	// источнику (регистрация, запрос восстановления): строка на источник, темп
+	// задаёт внешний.
+	SubjectSourceRequestWindows = "source_request_windows"
+	// SubjectBearerLetters — строки очереди писем с истёкшим кодом
+	// (восстановление, подтверждение): открытое значение кода без предмета
+	// снимается и у недоставленного письма.
+	SubjectBearerLetters = "bearer_letters"
 )
 
 // HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
@@ -130,6 +142,29 @@ type HumanSessionReapers struct {
 	Challenges       AccessKeyChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
+	// Подтверждение адреса (kaname#456): коды, окна источника, письма с
+	// истёкшим кодом; LetterWindow — окно писем подтверждения, SourceWindow —
+	// окно обращений источника.
+	VerificationCodes VerificationCodeReaper
+	SourceWindows     SourceWindowReaper
+	BearerLetters     BearerLetterReaper
+	LetterWindow      time.Duration
+	SourceWindow      time.Duration
+}
+
+// VerificationCodeReaper — порт уборщика кодов подтверждения адреса.
+type VerificationCodeReaper interface {
+	SweepUnservableVerificationCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// SourceWindowReaper — порт уборщика окон обращений источника.
+type SourceWindowReaper interface {
+	SweepAgedSourceWindows(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// BearerLetterReaper — порт уборщика писем с истёкшим кодом.
+type BearerLetterReaper interface {
+	SweepExpiredBearerLetters(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
 // HumanSessionReaper — порт уборщика истёкших и снятых записей сессии.
@@ -162,7 +197,8 @@ type AccessKeyChallengeReaper interface {
 // функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
 // под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 ||
+		r.VerificationCodes == nil || r.SourceWindows == nil || r.BearerLetters == nil || r.LetterWindow <= 0 || r.SourceWindow <= 0 {
 		return base
 	}
 	return append(base,
@@ -202,6 +238,25 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			// Ф7-54), снятое — тоже (Ф7-03, Ф7-53); граница включающая у обоих.
 			Grace: 0,
 			Sweep: r.Challenges.SweepUnservableChallenges,
+		},
+		Subject{
+			Name: SubjectVerificationCodes,
+			// Порог — окно писем: строки кодов считают предел писем за окно, и
+			// снятая раньше строка удлинила бы предел.
+			Grace: r.LetterWindow,
+			Sweep: r.VerificationCodes.SweepUnservableVerificationCodes,
+		},
+		Subject{
+			Name: SubjectSourceRequestWindows,
+			// Порог — окно источника: вышедшее окно начинается заново.
+			Grace: r.SourceWindow,
+			Sweep: r.SourceWindows.SweepAgedSourceWindows,
+		},
+		Subject{
+			Name: SubjectBearerLetters,
+			// Порог — срок кода, записанный в строке: запаса сверх него не нужно.
+			Grace: 0,
+			Sweep: r.BearerLetters.SweepExpiredBearerLetters,
 		},
 	)
 }

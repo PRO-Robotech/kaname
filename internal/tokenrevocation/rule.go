@@ -40,6 +40,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/PRO-Robotech/kaname/internal/admission"
 )
 
 // Reader — хранилище отсечек.
@@ -54,6 +56,11 @@ import (
 type Reader interface {
 	RevokedBefore(ctx context.Context, subject string) (time.Time, bool, error)
 	FamilyReader
+	// PersonMarks — второй вопрос правила (kaname#456, Р5а): токен, чей
+	// субъект — человек с неподтверждённым адресом, недействителен. Вопрос
+	// задаётся тому же предикату допуска, что у двери решения (`admission`);
+	// своего чтения отметки у правила нет, и копии в поверхности нет.
+	admission.Marks
 }
 
 // FamilyReader — хранилище принадлежности выпуска семейству.
@@ -163,5 +170,19 @@ func Revoked(ctx context.Context, r Reader, claims jwt.MapClaims) (bool, error) 
 	// законного нового выпуска нет, и токен, выпущенный после отметки отзыва
 	// (опередивший гонку повтора), снимается так же, как выпущенный до неё.
 	jti, _ := claims["jti"].(string)
-	return FamilyRevoked(ctx, r, jti)
+	familyRevoked, err := FamilyRevoked(ctx, r, jti)
+	if err != nil || familyRevoked {
+		return familyRevoked, err
+	}
+	// Субъект — человек с неподтверждённым ТЕКУЩИМ адресом: токен
+	// недействителен на предъявлении, пока адрес не подтверждён, и снова
+	// действителен после — до своего срока и своих отсечек (Р5а). Отсечкой это
+	// не записывается: отсечка не покрыла бы выданного до посадки и была бы
+	// вторым выражением одного факта.
+	sub, _ := claims["sub"].(string)
+	admitted, err := admission.ID(ctx, r, sub)
+	if err != nil {
+		return false, err
+	}
+	return !admitted, nil
 }

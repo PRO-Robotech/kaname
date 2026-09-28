@@ -226,6 +226,12 @@ func (noRevocations) RevokedBefore(context.Context, string) (time.Time, bool, er
 }
 
 // FamilyRevoked — семейства, отозванного у этой сцены, нет.
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (noRevocations) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 func (noRevocations) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 
 var _ = jwt.MapClaims{}

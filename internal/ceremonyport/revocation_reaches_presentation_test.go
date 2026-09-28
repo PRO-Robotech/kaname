@@ -882,3 +882,9 @@ func TestClientSecrets_ProveTheClientThroughTheCeremony(t *testing.T) {
 	require.NoError(t, err, "близнец: верный секрет не обменял код")
 	require.NotEmpty(t, tokens.AccessToken)
 }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*memFamilies) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

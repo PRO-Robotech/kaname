@@ -46,10 +46,13 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -129,7 +132,20 @@ type avLane struct {
 type avOptions struct {
 	// logger — журнал процесса глаголов; nil — молчащий.
 	logger *slog.Logger
+	// registrationsPerSource — окно регистраций одного источника; 0 — величина
+	// стенда по умолчанию, не мешающая пробам с одним источником.
+	registrationsPerSource int
+	// recoveryLettersPerRecipient — окно писем восстановления адресату; 0 —
+	// величина стенда по умолчанию.
+	recoveryLettersPerRecipient int
 }
+
+// Величины стенда по умолчанию для окон условий аудита: столько обращений ни
+// одна проба стенда с общим источником не делает.
+const (
+	avDefaultPerSource    = 10000
+	avDefaultPerRecipient = 10000
+)
 
 // newAVLane — стенд над настоящими глаголами полосы.
 func newAVLane(t *testing.T) *avLane {
@@ -187,12 +203,27 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	users := kanamepg.New(pool, nil)
 	limits := humansession.Limits{AddressAttempts: 50, AddressWindow: 10 * time.Minute, SourceAttempts: 500, SourceWindow: 10 * time.Minute}
 	nop := humansession.NopObserver{}
+	pace := humansession.VerificationPace{
+		CodeTTL: avCodeTTLProfile, Attempts: avAttemptsProfile, Interval: avIntervalProfile,
+		Limit: avLimitProfile, Window: avWindowProfile,
+	}
+	perSource := avDefaultPerSource
+	if opts.registrationsPerSource > 0 {
+		perSource = opts.registrationsPerSource
+	}
+	perRecipient := avDefaultPerRecipient
+	if opts.recoveryLettersPerRecipient > 0 {
+		perRecipient = opts.recoveryLettersPerRecipient
+	}
+	registrationPG := kanamepg.NewRegistrationStore(pool)
 
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
-		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Now: clock.Now, Logger: logger,
+		Store: pgRegistrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Letter: pace,
+		Sources: sessions, SourcePace: humansession.SourcePace{Limit: perSource, Window: time.Hour},
+		Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
@@ -227,19 +258,78 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, clock.Now)
 	require.NoError(t, err)
 	recovery, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: nop, Now: clock.Now, Logger: logger,
+		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{},
+		Sources: sessions, SourcePace: humansession.SourcePace{Limit: avDefaultPerSource, Window: time.Hour},
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
+		Observer:  nop, Now: clock.Now, Logger: logger,
 	})
+	require.NoError(t, err)
+	failApply := &atomic.Bool{}
+	vdeps := humansession.VerificationDeps{
+		Store: avVerificationStore{sessions: sessions, inner: registrationPG, failApply: failApply}, Pace: pace,
+		Now: clock.Now, Logger: logger,
+	}
+	requestV, err := humansession.NewRequestVerificationUseCase(vdeps)
+	require.NoError(t, err)
+	confirmV, err := humansession.NewConfirmVerificationUseCase(vdeps)
+	require.NoError(t, err)
+	position, err := humansession.NewPositionUseCase(sessions, clock.Now)
 	require.NoError(t, err)
 
 	verbs := avVerbs{stubLane: &stubLane{}, register: register, login: login, logout: logout, change: change,
-		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery}
+		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
+		requestV: requestV, confirmV: confirmV, position: position}
 	l := newLaneOver(t, verbs, "")
 	return &avLane{
 		ctx: ctx, pool: pool, lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
 		clock: clock, sessions: sessions, methods: methods, users: users, hasher: hasher, secondF: sf,
-		failApply: &atomic.Bool{},
+		failApply: failApply,
 		door:      authzcascade.Wrap(relverdict.NewAsker(pool)),
 	}
+}
+
+// avVerificationStore — хранилище глагола подтверждения тем же составом, что в
+// композиционном корне (`verificationStore`); failApply — хранилище отказывает
+// на операции применения кода (EV-42), прочее — настоящий адаптер.
+type avVerificationStore struct {
+	sessions  *kanamepg.HumanSessionRepo
+	inner     *kanamepg.RegistrationStore
+	failApply *atomic.Bool
+}
+
+func (s avVerificationStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s avVerificationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (humansession.VerificationWriter, error) {
+	w, err := s.inner.VerificationWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return avVerificationWriter{RegistrationWriter: w, failApply: s.failApply}, nil
+}
+
+type avVerificationWriter struct {
+	*kanamepg.RegistrationWriter
+	failApply *atomic.Bool
+}
+
+func (w avVerificationWriter) PresentVerificationCode(ctx context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time, attempts int) (humansession.PresentedCode, domain.Email, error) {
+	if w.failApply.Load() {
+		return humansession.CodeNotFound, "", errors.New("injected: the store did not answer the code application")
+	}
+	return w.RegistrationWriter.PresentVerificationCode(ctx, userID, digest, now, attempts)
+}
+
+func (w avVerificationWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
+	res, err := user.ActivateInviteOnVerificationTx(ctx, w.MirrorWriter(), pending, string(pending.ID))
+	if err != nil {
+		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
+			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
+		}
+		return humansession.InviteActivation{}, err
+	}
+	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
 // avVerbs — глаголы слушателя стенда: настоящие варианты использования.
@@ -256,6 +346,21 @@ type avVerbs struct {
 	remove    *humansession.RemoveSecondFactorUseCase
 	regen     *humansession.RegenerateBackupCodesUseCase
 	recovery  *humansession.RequestRecoveryUseCase
+	requestV  *humansession.RequestVerificationUseCase
+	confirmV  *humansession.ConfirmVerificationUseCase
+	position  *humansession.PositionUseCase
+}
+
+func (v avVerbs) RequestEmailVerification(ctx context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
+	return v.requestV.Execute(ctx, b)
+}
+
+func (v avVerbs) ConfirmEmailVerification(ctx context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error) {
+	return v.confirmV.Execute(ctx, in)
+}
+
+func (v avVerbs) AddressPosition(ctx context.Context, b domain.SessionBearer) (humansession.Position, error) {
+	return v.position.Execute(ctx, b)
 }
 
 func (v avVerbs) RequestRecovery(ctx context.Context, in humansession.RequestRecoveryInput) error {

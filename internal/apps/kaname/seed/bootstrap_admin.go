@@ -24,7 +24,6 @@ package seed
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -36,8 +35,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/PRO-Robotech/corelib/db/pgfault"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/PRO-Robotech/corelib/db/pgfault"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -76,6 +76,10 @@ const (
 	BootstrapSkipNotActive BootstrapSkipReason = "user not active"
 	// BootstrapSkipConcurrentRace — выдачу закоммитила соседняя реплика (23505).
 	BootstrapSkipConcurrentRace BootstrapSkipReason = "concurrent race (23505)"
+	// BootstrapSkipNotVerified — строка действует, адрес не подтверждён
+	// (kaname#456, Р12). Не терминально: согласователь повторяет проход, и
+	// первый проход после подтверждения выдаёт.
+	BootstrapSkipNotVerified BootstrapSkipReason = "user not verified"
 )
 
 // AllBootstrapSkipReasons — перечень причин пропуска для проб полноты.
@@ -88,6 +92,7 @@ var AllBootstrapSkipReasons = []BootstrapSkipReason{
 	BootstrapSkipNotRegistered,
 	BootstrapSkipNotActive,
 	BootstrapSkipConcurrentRace,
+	BootstrapSkipNotVerified,
 }
 
 // BootstrapAdminResult — bootstrap-run result (observability / tests).
@@ -127,54 +132,29 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 
 	// Step 1: какой строке принадлежит этот адрес почты.
 	//
-	// Один человек = N строк с одним адресом (по одной на аккаунт): глобальная
-	// уникальность почты снята намеренно (миграция 0011), уникальность живёт
-	// внутри аккаунта и по lower(email). Поэтому запрос обязан сказать ровно
-	// две вещи, и обе — одним обращением:
+	// Запрос обязан сказать две вещи:
 	//
-	//   active_id — каноническая строка личности: старейшая ДЕЙСТВУЮЩАЯ, тот же
+	//   строка — каноническая строка личности: старейшая ДЕЙСТВУЮЩАЯ, тот же
 	//     выбор, что делают остальные пути резолва по адресу
 	//     (FindActiveByEmail / LookupSubject). Без ORDER BY выбор оставался за
-	//     физическим порядком строк: тот же стенд, тот же адрес — а права
-	//     уровня кластера получала то одна строка, то другая. `id` вторым
-	//     ключом закрывает совпадение отметок времени.
-	//   any_row  — существует ли вообще строка с этим адресом. Нужна, чтобы
-	//     отличить «администратор ещё не зарегистрировался» от «строка есть, но
-	//     не действует»: иначе оператор ищет опечатку в адресе, которой нет.
+	//     физическим порядком строк. `id` вторым ключом закрывает совпадение
+	//     отметок времени;
+	//   есть ли вообще строка с этим адресом — отдельным вопросом, только когда
+	//     действующей нет: отличить «администратор ещё не зарегистрировался» от
+	//     «строка есть, но не действует», иначе оператор ищет опечатку в адресе,
+	//     которой нет.
 	//
 	// Состояние решает, а не фильтрует: заблокированная строка и
 	// неподтверждённое приглашение существуют обе, и права уровня кластера не
-	// сеются ни на ту, ни на другую. Приглашение вдобавок не несёт external_id
-	// — подтвердит его тот, кто первым войдёт по этому адресу.
-	var (
-		activeID sql.NullString
-		anyRow   bool
-	)
-	err := pool.QueryRow(ctx, `
-		SELECT
-		  (SELECT id FROM users
-		     WHERE lower(email) = lower($1) AND invite_status = 'ACTIVE'
-		     ORDER BY created_at ASC, id ASC
-		     LIMIT 1)                                                  AS active_id,
-		  EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1))   AS any_row`,
-		email).Scan(&activeID, &anyRow)
-	if err != nil {
-		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", err)
-	}
-	if !activeID.Valid {
-		if anyRow {
-			logger.WarnContext(ctx,
-				"bootstrap admin row exists but may not authenticate, skipping cluster admin grant",
-				slog.String("email", email))
-			return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotActive}, nil
-		}
-		logger.InfoContext(ctx, "bootstrap admin user not registered yet, skipping cluster admin grant",
-			slog.String("email", email))
-		return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotRegistered}, nil
-	}
-	userID := activeID.String
-
-	// Step 2: Atomic TX — cluster_admin_grant + fga_outbox + audit_outbox.
+	// сеются ни на ту, ни на другую; приглашение активирует подтверждение адреса
+	// приглашённым (kaname#456, Р11).
+	//
+	// Шаги 1 и 2 — ОДНА транзакция (kaname#456, Р12): строка, которой
+	// выдаётся право, читается вместе с отметкой подтверждения ОДНИМ
+	// оператором под замком строки (`FOR SHARE`), и выдача ложится в ту же
+	// транзакцию. Подтверждение, идущее одновременно, либо закоммичено до
+	// чтения — и отметка видна, — либо ждёт фиксации посева; выдачи строке без
+	// закоммиченной отметки не бывает ни в одном порядке.
 	now := in.NowFn()
 	grantID := domain.NewKac127ID(domain.PrefixClusterAdminGrant)
 	// fgaOutboxID is assigned on a successful INSERT in step 2b (bigserial id from RETURNING).
@@ -186,6 +166,41 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck // best-effort rollback on error path
+
+	var (
+		userID   string
+		verified bool
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT id, (email_verified_at IS NOT NULL) AS verified
+		  FROM users
+		 WHERE lower(email) = lower($1) AND invite_status = 'ACTIVE'
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT 1
+		   FOR SHARE`, email).Scan(&userID, &verified)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		var anyRow bool
+		if qerr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1))`, email).Scan(&anyRow); qerr != nil {
+			return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", qerr)
+		}
+		if anyRow {
+			logger.WarnContext(ctx,
+				"bootstrap admin row exists but may not authenticate, skipping cluster admin grant",
+				slog.String("email", email))
+			return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotActive}, nil
+		}
+		logger.InfoContext(ctx, "bootstrap admin user not registered yet, skipping cluster admin grant",
+			slog.String("email", email))
+		return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotRegistered}, nil
+	case err != nil:
+		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", err)
+	}
+	if !verified {
+		logger.InfoContext(ctx, "bootstrap admin address not verified yet, skipping cluster admin grant",
+			slog.String("user_id", userID))
+		return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotVerified, UserID: userID}, nil
+	}
 
 	// 2a: cluster_admin_grant
 	_, err = tx.Exec(ctx,

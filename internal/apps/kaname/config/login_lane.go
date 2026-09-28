@@ -62,6 +62,24 @@ type LoginLaneConfig struct {
 	// RecoveryCodeTTL — срок кода восстановления доступа (Ф5 Р1; перенос Ф1
 	// §4.1 — 5 минут — объявляется профилем).
 	RecoveryCodeTTL time.Duration `mapstructure:"recovery-code-ttl"`
+
+	// Подтверждение адреса (kaname#456, Р7, Р9; Ф6 Р16) — пять ручек, у каждой
+	// нет умолчания. Величины профиля продукта — 30m · 5 · 60s · 5 · 24h.
+	//
+	// VerificationCodeTTL — срок кода подтверждения; своя величина, не равная
+	// сроку кода восстановления (Ф6 Р16).
+	VerificationCodeTTL time.Duration `mapstructure:"verification-code-ttl"`
+	// VerificationCodeAttempts — предел неподошедших предъявлений на код: столько
+	// тратит код, и дальше он не подходит и верным значением.
+	VerificationCodeAttempts int `mapstructure:"verification-code-attempts"`
+	// VerificationResendInterval — наименьший промежуток между двумя письмами
+	// одного человека.
+	VerificationResendInterval time.Duration `mapstructure:"verification-resend-interval"`
+	// VerificationResendLimit — писем одному человеку за скользящее окно; письмо
+	// регистрации в счёт.
+	VerificationResendLimit int `mapstructure:"verification-resend-limit"`
+	// VerificationResendWindow — скользящее окно числа писем.
+	VerificationResendWindow time.Duration `mapstructure:"verification-resend-window"`
 }
 
 // loginLaneKnob — пара «ключ настройки ↔ переменная среды» одной ручки полосы.
@@ -91,6 +109,11 @@ var LoginLaneKnobs = []loginLaneKnob{
 	{loginLaneKeyPrefix + "verifier-capacity", "KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY"},
 	{loginLaneKeyPrefix + "memory-reserve-bytes", "KANAME_AUTHN__LOGIN__MEMORY_RESERVE_BYTES"},
 	{loginLaneKeyPrefix + "recovery-code-ttl", "KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL"},
+	{loginLaneKeyPrefix + "verification-code-ttl", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL"},
+	{loginLaneKeyPrefix + "verification-code-attempts", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_ATTEMPTS"},
+	{loginLaneKeyPrefix + "verification-resend-interval", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_INTERVAL"},
+	{loginLaneKeyPrefix + "verification-resend-limit", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_LIMIT"},
+	{loginLaneKeyPrefix + "verification-resend-window", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_WINDOW"},
 }
 
 func loginLaneEnv(key string) string {
@@ -321,6 +344,76 @@ func (l LoginLaneConfig) ValidateRecovery() error {
 	return nil
 }
 
+// Границы величин подтверждения адреса (kaname#456, условие аудита
+// поверхности): величина за границей — отказ старта с именем ключа. Без границ
+// профиль мог бы молча выключить защиту от подбора кода (миллион попыток,
+// бессрочный код, письма без промежутка) — а ручки, выключающей рубеж, у
+// полосы нет. Граница — не умолчание: величину называет профиль, граница
+// только отвергает выключающую.
+const (
+	// VerificationCodeAttemptsCeiling — предел попыток на код не выше.
+	VerificationCodeAttemptsCeiling = 10
+	// VerificationCodeTTLCeiling — срок кода не дольше.
+	VerificationCodeTTLCeiling = 24 * time.Hour
+	// VerificationResendIntervalFloor — промежуток между письмами не короче.
+	VerificationResendIntervalFloor = 30 * time.Second
+	// VerificationResendLimitCeiling — писем за окно не больше.
+	VerificationResendLimitCeiling = 20
+)
+
+// ValidateVerification — пять ручек подтверждения адреса (kaname#456, Р9,
+// EV-90): незаданная — отказ старта с именем ключа и переменной. Промежуток
+// между письмами короче окна: иначе предел числа писем за окно не исполнялся
+// бы никогда, и ручка объявляла бы свойство, которого у полосы нет. Величина за
+// границей — тоже отказ старта (см. границы выше).
+func (l LoginLaneConfig) ValidateVerification() error {
+	var errs error
+	beyond := func(short string, value any, bound string) {
+		key := loginLaneKeyPrefix + short
+		errs = multierr.Append(errs, fmt.Errorf("%s (%s) = %v за границей %s: такая величина выключала бы защиту от подбора кода",
+			key, loginLaneEnv(key), value, bound))
+	}
+	if l.VerificationCodeAttempts > VerificationCodeAttemptsCeiling {
+		beyond("verification-code-attempts", l.VerificationCodeAttempts, fmt.Sprintf("«не больше %d»", VerificationCodeAttemptsCeiling))
+	}
+	if l.VerificationCodeTTL > VerificationCodeTTLCeiling {
+		beyond("verification-code-ttl", l.VerificationCodeTTL, "«не дольше "+VerificationCodeTTLCeiling.String()+"»")
+	}
+	if l.VerificationResendInterval > 0 && l.VerificationResendInterval < VerificationResendIntervalFloor {
+		beyond("verification-resend-interval", l.VerificationResendInterval, "«не короче "+VerificationResendIntervalFloor.String()+"»")
+	}
+	if l.VerificationResendLimit > VerificationResendLimitCeiling {
+		beyond("verification-resend-limit", l.VerificationResendLimit, fmt.Sprintf("«не больше %d»", VerificationResendLimitCeiling))
+	}
+	if l.VerificationCodeTTL <= 0 {
+		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-code-ttl",
+			"срок кода подтверждения адреса — своя величина посадки без умолчания в коде (Ф6 Р16); величина профиля продукта — 30m"))
+	}
+	if l.VerificationCodeAttempts <= 0 {
+		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-code-attempts",
+			"предел неподошедших предъявлений на код подтверждения; величина профиля продукта — 5"))
+	}
+	if l.VerificationResendInterval <= 0 {
+		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-resend-interval",
+			"наименьший промежуток между письмами подтверждения одному человеку; величина профиля продукта — 60s"))
+	}
+	if l.VerificationResendLimit <= 0 {
+		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-resend-limit",
+			"писем подтверждения одному человеку за окно, письмо регистрации в счёт; величина профиля продукта — 5"))
+	}
+	if l.VerificationResendWindow <= 0 {
+		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-resend-window",
+			"скользящее окно числа писем подтверждения; величина профиля продукта — 24h"))
+	}
+	if l.VerificationResendInterval > 0 && l.VerificationResendWindow > 0 && l.VerificationResendInterval >= l.VerificationResendWindow {
+		errs = multierr.Append(errs, fmt.Errorf("%s (%s) = %s не короче %s (%s) = %s: предел числа писем за окно не исполнялся бы никогда",
+			loginLaneKeyPrefix+"verification-resend-interval", loginLaneEnv(loginLaneKeyPrefix+"verification-resend-interval"),
+			l.VerificationResendInterval, loginLaneKeyPrefix+"verification-resend-window",
+			loginLaneEnv(loginLaneKeyPrefix+"verification-resend-window"), l.VerificationResendWindow))
+	}
+	return errs
+}
+
 // ValidateAll — все стражи настройки полосы разом (страж старта посадки `own`).
 func (l LoginLaneConfig) ValidateAll() error {
 	return multierr.Combine(
@@ -330,5 +423,6 @@ func (l LoginLaneConfig) ValidateAll() error {
 		l.ValidateHasher(),
 		l.ValidateCapacity(),
 		l.ValidateRecovery(),
+		l.ValidateVerification(),
 	)
 }
