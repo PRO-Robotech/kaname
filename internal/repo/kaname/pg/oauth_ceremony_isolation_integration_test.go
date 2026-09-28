@@ -1043,6 +1043,18 @@ var sessionEnderDoors = []sessionEnderDoor{
 			return endOneSession(ctx, w, sc)
 		},
 	},
+	{
+		// Подтверждение своего адреса (kaname#456): транзакция, открытая
+		// замком строки личности, снимает прочие сессии человека.
+		name: "RegistrationStore.VerificationWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewRegistrationStore(pool).VerificationWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailVerified)
+		},
+	},
 }
 
 // TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily — ОБРАТНАЯ сцена пары
