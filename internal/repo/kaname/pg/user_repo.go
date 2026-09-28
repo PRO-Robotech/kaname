@@ -997,8 +997,12 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 	return nil
 }
 
+func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
+	return scanUserInto(row, out, created)
+}
+
 func scanUserWithInserted(row scanner, out *domain.User, inserted *bool) error {
-	return scanUserInto(row, out, inserted)
+	return scanUserWithCreated(row, out, inserted)
 }
 
 func nullableInvitedBy(id domain.UserID) any {
