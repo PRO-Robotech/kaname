@@ -32,7 +32,7 @@ import (
 func minimalClaimsFor(t *testing.T, subject string) map[string]any {
 	t.Helper()
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		nil,
 	)
 	claims := svc.MinimalClaims(subject)

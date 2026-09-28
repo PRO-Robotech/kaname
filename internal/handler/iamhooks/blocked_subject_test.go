@@ -186,7 +186,7 @@ func TestSubjectState_OneVerdictForBothHooks(t *testing.T) {
 // is exactly how the issuing hook ended up minting for a blocked user.
 func TestEnrichClaims_BlockedUser_IsNotNotFound(t *testing.T) {
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blockedUserRow()}})
 
 	_, _, err := svc.EnrichClaims(context.Background(), blockedSubject, service.TokenHookContext{})
@@ -200,7 +200,7 @@ func TestEnrichClaims_ActiveUser_Unaffected(t *testing.T) {
 	const sub = "kratos-active-sub"
 	active := activeUserRow(sub)
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{active}})
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
@@ -218,7 +218,7 @@ func TestEnrichClaims_MixedMembership_PicksTheActiveRow(t *testing.T) {
 	active := activeUserRow(sub)
 
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blocked, active}})
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
@@ -237,7 +237,7 @@ func TestTokenHook_BlockedUserPersonalToken_Refused(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{owner}},
 	).WithUserTokenPort(&fakeBlockedOwnerTokens{clientID: clientID, owner: owner})
 	audit := &fakeAudit{}
@@ -245,7 +245,6 @@ func TestTokenHook_BlockedUserPersonalToken_Refused(t *testing.T) {
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		}, enricher, newFakeRevocations(), audit, logger)
 
 	w := postHook(t, h, "/iam/v1/hooks/token", "secret-hook-token",

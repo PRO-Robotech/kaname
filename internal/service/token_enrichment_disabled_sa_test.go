@@ -84,7 +84,7 @@ func (p fedSAPortWithState) FindByExternalSubject(_ context.Context, _, _ string
 
 func newSAEnricher(port TokenEnrichmentSAPort) *TokenEnrichmentService {
 	return NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{},
 	).WithSAPort(port)
 }

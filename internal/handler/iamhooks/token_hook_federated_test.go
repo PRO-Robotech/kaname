@@ -89,11 +89,11 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).WithSAPort(saPort)
 	h := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "api.test.cloud"},
 		enricher,
 		newFakeRevocations(),
 		&fakeAudit{},
@@ -165,11 +165,11 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	saPort := &fakeSAPort{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "x", HydraIssuer: "y"},
+		service.TokenEnrichmentConfig{Domain: "x"},
 		users,
 	).WithSAPort(saPort)
 	h := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "x", HydraIssuer: "y"},
+		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "x"},
 		enricher,
 		newFakeRevocations(),
 		&fakeAudit{},

@@ -86,7 +86,7 @@ func newExpirySAEnricher(t *testing.T, expiresAt *time.Time, now time.Time) *Tok
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{t: t},
 	).WithSAPort(sa)
 	svc.now = func() time.Time { return now }
@@ -194,7 +194,7 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{t: t},
 	).WithSAPort(port)
 	svc.now = func() time.Time { return now }

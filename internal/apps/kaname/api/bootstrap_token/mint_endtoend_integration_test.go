@@ -136,7 +136,7 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 	userRepo := kanamepg.NewUserOAuthClientRepo(pool)
 	users := kanamepg.NewUserPoolRepo(pool)
 	claims := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: testIssuer},
+		service.TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		users,
 	).
 		WithSAPort(enrichSAPort{sa: saRepo}).

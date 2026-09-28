@@ -163,7 +163,7 @@ func newIssuanceHook(
 ) *iamhooks.TokenHookHandler {
 	t.Helper()
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	)
 	if sas != nil {
@@ -176,7 +176,6 @@ func newIssuanceHook(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: issuanceHookSecret,
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher, revs, audit,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
