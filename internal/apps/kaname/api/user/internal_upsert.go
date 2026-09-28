@@ -119,6 +119,11 @@ const (
 	// наказать человека за чужую забывчивость — и наказать отказом, из которого
 	// не видно, что делать.
 	activationOutcomeExpired = "expired"
+	// activationOutcomeNotVerified — приглашение живо, адрес приглашённого не
+	// подтверждён нашей полосой (kaname#456, Р11 п. 5): путь хука поставщика
+	// приглашение не активирует. СВОЯ клетка — не «уже активна» и не «срок
+	// истёк»; вход прерывается названным отказом, до заведения личных ресурсов.
+	activationOutcomeNotVerified = "not_verified"
 )
 
 // ActivationObserver — наблюдатель исходов активации приглашения.
@@ -344,6 +349,19 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 				// Считается СВОЕЙ клеткой — иначе систематически истекающие
 				// приглашения выглядели бы поломкой, а мёртвая доставка письма —
 				// здоровьем.
+				// Адрес приглашённого не подтверждён нашей полосой: активирует
+				// приглашение только подтверждение (kaname#456, Р11 п. 5). Путь
+				// хука отметки нашей полосы не несёт, и заводить по нему личные
+				// ресурсы строке PENDING нельзя — отказ называется, а не
+				// сворачивается в «уже активна».
+				if errors.Is(aerr, iamerr.ErrInviteNotVerified) {
+					uc.observeActivation(activationOutcomeNotVerified)
+					if uc.logger != nil {
+						uc.logger.Info("invite not activated: address not verified by our lane",
+							"user_id", string(p.ID))
+					}
+					return nil, shared.MapRepoErr(aerr)
+				}
 				if errors.Is(aerr, iamerr.ErrInviteExpired) {
 					uc.observeActivation(activationOutcomeExpired)
 					if uc.logger != nil {

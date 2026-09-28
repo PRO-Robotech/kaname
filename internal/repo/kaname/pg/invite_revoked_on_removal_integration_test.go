@@ -66,6 +66,7 @@ func TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite(t *testing.T)
 	// Первый вход после исключения: строка НЕ активируется.
 	w3, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, pending.ID)
 	_, aerr := w3.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail46a"), domain.DisplayName("Real"))
 	_ = w3.Rollback(ctx)
@@ -132,6 +133,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	// Приглашение во ВТОРОЙ аккаунт по-прежнему выкупается.
 	w4, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, aerr := w4.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail46b"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "исключение из ОДНОГО аккаунта отняло приглашение в остальные")

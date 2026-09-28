@@ -193,6 +193,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Корневой кластер заводится схемой; писателя у службы нет.
 	"clusters": nil,
+	// Код подтверждения адреса (kaname#456): идентификатор, дайджест, адрес
+	// строки человека, сроки и счёт попыток чеканит служба.
+	"email_verification_codes": nil,
 	// Доверенный издатель: издатель, субъект, ключ и его алгоритм прислал
 	// вызывающий; срок — арифметикой от присланного ttl.
 	"federated_trusted_issuers": {caller: []string{
@@ -403,6 +406,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 		service: []string{"session_revocations_revoked_by_check"},
 	},
+	// Окно запросов с адреса источника (kaname#456): полосу называет служба,
+	// адрес источника ставит край, счёт ведёт служба.
+	"source_request_windows": nil,
 	// Очередь изменений субъекта — пишет служба.
 	"subject_change_outbox": nil,
 	// Семейство токенов: идентификатор, живость, отзыв и выданную область решает

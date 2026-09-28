@@ -28,7 +28,15 @@
      способ входа и сессия одним исходом глагола;
   3. снова вход — это и есть утверждение посева. Утверждается СПОСОБНОСТЬ
      («этот человек входит этим паролем»), а не наличие строки: регистрация,
-     ответившая 200, после которой вход отвергнут, — находка, а не успех.
+     ответившая 200, после которой вход отвергнут, — находка, а не успех;
+  4. вход в положении подтверждения (`session.emailVerified: false`,
+     kaname#456) — подтверждение адреса глаголом полосы: код из письма, которое
+     служба сдала приёмнику писем стенда (`.github/scripts/stand-mailbox.py`),
+     предъявляется `POST /iam/v1/auth/verify-email/confirm`; письма в приёмнике
+     нет — оно запрашивается `POST /iam/v1/auth/verify-email`. Утверждение —
+     следующий вход в ОБЫЧНОМ положении: без него церемония отвечает
+     `access_denied`, а второй фактор — отказом положения. Отметку в базу посев
+     не пишет.
 
 ПОЧЕМУ ЛИСТ С ИМЕНЕМ КРАЯ ЗАКОНЕН ЗДЕСЬ. Слушатель полосы допускает РОВНО край —
 по короткому имени службы из SAN проверенного клиентского листа (Р7, Р16), и
@@ -55,8 +63,11 @@
 САМОПРОВЕРКА — `--self-test`: подставная полоса по каждой оси — человек есть,
 человека нет, лист не края (403), регистрация без носителя, отказ регистрации,
 отказ входа после регистрации, полоса молчит, учётных данных нет, ответ 5xx на
-входе; и сходимость объявленных ключей с записью в обе стороны, и поверхность,
-которую выводит перепись долга из самой переменной адреса.
+входе; подтверждение адреса — код письма регистрации, письмо запрошено, письмо не
+дошло, приёмник молчит, код отвергнут, 200 без отметки, вход после кода снова в
+положении подтверждения, ответ без положения, и разбор кода из письма с законным
+близнецом без строки кода; и сходимость объявленных ключей с записью в обе
+стороны, и поверхность, которую выводит перепись долга из самой переменной адреса.
 """
 
 from __future__ import annotations
@@ -69,6 +80,7 @@ import pathlib
 import socket
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -82,7 +94,8 @@ ROOT = HERE.parents[1]
 # Запись окружения — ОДНА на оба посева, а не вторая копия рядом: копия
 # разошлась бы с первой молча (иной порядок, иной тип добавленного ключа).
 sys.path.insert(0, str(HERE))
-from seed_own_stand import Unmet, write_env  # noqa: E402
+from seed_own_stand import (  # noqa: E402
+    LETTER_BUDGET_S, Mailbox, Unmet, await_code, code_of, write_env)
 
 # Ключи окружения, которые пишет этот посев. Перепись долга
 # (`.github/scripts/newman-suite-debt.py`) спрашивает их у САМОГО посева флагом
@@ -107,6 +120,8 @@ SOURCE = "203.0.113.11"
 CSRF = "/iam/v1/auth/csrf"
 LOGIN = "/iam/v1/auth/login"
 REGISTER = "/iam/v1/auth/register"
+VERIFY = "/iam/v1/auth/verify-email"
+VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
 SESSION_COOKIE = "kaname_session"
 FORM_COOKIE = "kaname_form"
 
@@ -180,9 +195,9 @@ def message_of(text: str) -> str:
 # ─────────────────────────── глаголы полосы ──────────────────────────────────
 
 
-def form_token(http, form: str) -> tuple[str, str]:
+def form_token(http, form: str, cookies: dict | None = None) -> tuple[str, str]:
     """Признак формы и контекст формы (печенье), под которым он выдан."""
-    code, sc, text = http.ask("GET", f"{CSRF}?form={form}")
+    code, sc, text = http.ask("GET", f"{CSRF}?form={form}", cookies=cookies)
     if code == 403:
         raise Finding(
             f"признак формы {form!r}: полоса ответила 403 ({message_of(text)!r}) — "
@@ -203,22 +218,42 @@ def form_token(http, form: str) -> tuple[str, str]:
     return token, ctx
 
 
-def login(http, email: str, password: str) -> bool:
-    """Вошёл ли человек. 401 — «нет» (исход контракта), прочее не-200 — находка."""
+def position_of(text: str, what: str) -> bool:
+    """`session.emailVerified` ответа — положение сессии (kaname#456, Р5).
+
+    Поле обязано быть логическим: ответ, который положения не называет, не
+    отличает «подтверждён» от «неизвестно», и посев на нём решал бы наугад.
+    """
+    try:
+        view = json.loads(text or "{}").get("session")
+    except (json.JSONDecodeError, AttributeError):
+        view = None
+    verified = view.get("emailVerified") if isinstance(view, dict) else None
+    if not isinstance(verified, bool):
+        raise Finding(f"{what}: ответ 200 не называет положение сессии "
+                      f"(session.emailVerified логическим значением нет) — "
+                      f"подтверждён ли адрес, не сказано")
+    return verified
+
+
+def login(http, email: str, password: str) -> dict | None:
+    """Вход. None — 401 («нет», исход контракта); иначе носитель сессии и её
+    положение. Прочее не-200 — находка."""
     token, ctx = form_token(http, "login")
     code, sc, text = http.ask("POST", LOGIN,
                               body={"email": email, "password": password,
                                     "csrfToken": token},
                               cookies={FORM_COOKIE: ctx})
     if code == 401:
-        return False
+        return None
     if code != 200:
         raise Finding(f"вход: ждали 200 либо 401, получили {code} "
                       f"({message_of(text)!r})")
-    if not cookie_value(sc, SESSION_COOKIE):
+    bearer = cookie_value(sc, SESSION_COOKIE)
+    if not bearer:
         raise Finding(f"вход ответил 200 без печенья {SESSION_COOKIE} — "
                       f"сессия не выдана, а успех объявлен")
-    return True
+    return {"bearer": bearer, "verified": position_of(text, "вход")}
 
 
 def register(http, email: str, password: str) -> None:
@@ -237,15 +272,84 @@ def register(http, email: str, password: str) -> None:
                       f"три следствия одним исходом не наступили")
 
 
-def seed(http, email: str, password: str) -> str:
-    """«есть» либо «заведён»; утверждение — способность войти."""
-    if login(http, email, password):
-        return "есть"
-    register(http, email, password)
-    if not login(http, email, password):
-        raise Finding("регистрация ответила 200, а вход тем же паролем отвергнут "
-                      "(401) — человек заведён без способа войти")
-    return "заведён"
+# ─────────────────────────── подтверждение адреса ────────────────────────────
+#
+# С kaname#456 сессия человека, чей адрес не подтверждён, стоит в ПОЛОЖЕНИИ
+# ПОДТВЕРЖДЕНИЯ: дальше входа и экрана подтверждения ей не открыто ничего —
+# церемония отвечает `access_denied`, второй фактор и смена пароля — отказом
+# положения. Человек стенда, заведённый регистрацией, поэтому доводится до
+# подтверждённого адреса ТЕМ ЖЕ глаголом, которым это делает человек: код берётся
+# из письма, которое служба сдала почтовому узлу стенда (приёмник писем —
+# `.github/scripts/stand-mailbox.py`), и предъявляется полосе. Обратного
+# заполнения отметки нет: запись в базу закрыла бы именно то, что судит набор.
+
+# Приёмник писем стенда, разбор кода и ожидание письма — те же, что у
+# машинного посева (`seed_own_stand.py`, импорт выше): одна реализация на оба.
+
+
+def request_letter(http, bearer: str) -> None:
+    token, ctx = form_token(http, "verify-email", {SESSION_COOKIE: bearer})
+    code, _sc, text = http.ask("POST", VERIFY, body={"csrfToken": token},
+                               cookies={FORM_COOKIE: ctx, SESSION_COOKIE: bearer})
+    if code != 200:
+        raise Finding(f"запрос письма подтверждения: ждали 200, получили {code} "
+                      f"({message_of(text)!r})")
+
+
+def confirm(http, bearer: str, code_value: str) -> None:
+    token, ctx = form_token(http, "verify-email-confirm", {SESSION_COOKIE: bearer})
+    code, _sc, text = http.ask("POST", VERIFY_CONFIRM,
+                               body={"code": code_value, "csrfToken": token},
+                               cookies={FORM_COOKIE: ctx, SESSION_COOKIE: bearer})
+    if code != 200:
+        raise Finding(f"предъявление кода подтверждения из письма: ждали 200, "
+                      f"получили {code} ({message_of(text)!r})")
+    if position_of(text, "предъявление кода") is not True:
+        raise Finding("предъявление кода ответило 200, а session.emailVerified "
+                      "не true — отметка не поставлена, а успех объявлен")
+
+
+def verify_address(http, mailbox, email: str, bearer: str, sleep) -> None:
+    """Код из письма, уже лежащего в приёмнике (письмо регистрации), иначе из
+    письма, запрошенного глаголом; предъявляется полосе."""
+    letters = mailbox.letters(email)
+    code_value = code_of(letters[-1]) if letters else None
+    if code_value is None:
+        request_letter(http, bearer)
+        code_value = await_code(mailbox, email, len(letters), sleep)
+    if code_value is None:
+        raise Finding(f"письмо подтверждения адреса человеку стенда не дошло до "
+                      f"приёмника писем стенда за {LETTER_BUDGET_S} с (либо пришло "
+                      f"без строки кода) — служба не сдала его узлу, названному "
+                      f"посадкой стенда")
+    confirm(http, bearer, code_value)
+
+
+def seed(http, mailbox, email: str, password: str, sleep=time.sleep) -> str:
+    """«есть» либо «заведён» (и «адрес подтверждён», если подтверждал посев);
+    утверждение — способность войти в обычном положении."""
+    session = login(http, email, password)
+    state = "есть"
+    if session is None:
+        register(http, email, password)
+        # Письмо регистрации ставится тем же исходом глагола: ждать его здесь,
+        # а не запрашивать второе, — иначе промежуток между письмами отвечал бы
+        # отказом по частоте.
+        await_code(mailbox, email, 0, sleep)
+        session = login(http, email, password)
+        if session is None:
+            raise Finding("регистрация ответила 200, а вход тем же паролем отвергнут "
+                          "(401) — человек заведён без способа войти")
+        state = "заведён"
+    if session["verified"]:
+        return state
+    verify_address(http, mailbox, email, session["bearer"], sleep)
+    session = login(http, email, password)
+    if session is None or not session["verified"]:
+        raise Finding("код подтверждения принят, а следующий вход снова в положении "
+                      "подтверждения (session.emailVerified false) — отметка не "
+                      "действует на следующем запросе")
+    return state + " · адрес подтверждён"
 
 
 def env_patch(base_url: str, email: str, password: str) -> dict:
@@ -267,8 +371,9 @@ def credentials() -> tuple[str, str]:
 def run(args: argparse.Namespace) -> int:
     email, password = credentials()
     http = LaneHttp(args.base_url, pathlib.Path(args.pki))
-    state = seed(http, email, password)
-    say(f"  ok   человек стенда {state} и входит паролем через полосу {http.base}")
+    state = seed(http, Mailbox(args.mailbox_url), email, password)
+    say(f"  ok   человек стенда {state} и входит паролем через полосу {http.base} "
+        f"в обычном положении")
     patch = env_patch(http.base, email, password)
     replaced = write_env(patch, pathlib.Path(args.env_file),
                          pathlib.Path(args.env_template))
@@ -296,14 +401,36 @@ class _FakeLane:
 
     def __init__(self, humans=None, csrf_code=200, register_code=200,
                  register_cookie=True, login_after_register=True, login_code=None,
-                 down=False):
+                 down=False, verified=None, mailbox=None, confirm_code=200,
+                 confirm_verifies=True, position_named=True, letter_on_register=True,
+                 stays_unverified=False):
         self.humans = dict(humans or {})
         self.csrf_code, self.register_code = csrf_code, register_code
         self.register_cookie = register_cookie
         self.login_after_register = login_after_register
         self.login_code, self.down = login_code, down
-        self.registered = 0
+        # Отметка адреса — по человеку; письма с кодом — в подставной приёмник
+        # стенда, как это делает служба: письмо регистрации ставится тем же
+        # исходом, что заводит человека, и жив последний выданный код.
+        self.verified = set(verified or ())
+        self.mailbox = mailbox if mailbox is not None else _FakeMailbox()
+        self.confirm_code, self.confirm_verifies = confirm_code, confirm_verifies
+        self.position_named, self.letter_on_register = position_named, letter_on_register
+        self.stays_unverified = stays_unverified
+        self.live_code: dict[str, str] = {}
+        self.registered = self.requested = self.confirmed = 0
         self.base = "https://127.0.0.1:1"
+
+    def _letter(self, email: str) -> None:
+        code = f"K{len(self.live_code) + self.requested + 1:04d}-STAND"
+        self.live_code[email] = code
+        self.mailbox.deliver(email, _letter_text(code))
+
+    def _session(self, email: str) -> tuple[list[str], str]:
+        view = {"expiresAt": "2026-01-01T00:00:00Z", "assuranceLevel": 1}
+        if self.position_named:
+            view["emailVerified"] = email in self.verified
+        return [f"{SESSION_COOKIE}=s-{email}; Path=/"], json.dumps({"session": view})
 
     def ask(self, method, path, body=None, cookies=None):
         if self.down:
@@ -312,21 +439,72 @@ class _FakeLane:
             if self.csrf_code != 200:
                 return self.csrf_code, [], '{"code":7,"message":"permission denied"}'
             return 200, [f"{FORM_COOKIE}=ctx; Path=/; HttpOnly"], '{"csrfToken":"t"}'
+        owner = ((cookies or {}).get(SESSION_COOKIE) or "")[2:]
         if path == LOGIN:
             if self.login_code is not None:
                 return self.login_code, [], '{"code":13,"message":"internal"}'
             ok = self.humans.get(body["email"]) == body["password"]
             if ok and (self.registered == 0 or self.login_after_register):
-                return 200, [f"{SESSION_COOKIE}=s; Path=/"], '{"user":{}}'
+                return (200, *self._session(body["email"]))
             return 401, [], '{"code":16,"message":"credentials are not accepted"}'
         if path == REGISTER:
             self.registered += 1
             if self.register_code != 200:
                 return self.register_code, [], '{"code":3,"message":"request not performed"}'
             self.humans[body["email"]] = body["password"]
-            sc = [f"{SESSION_COOKIE}=s; Path=/"] if self.register_cookie else []
-            return 200, sc, '{"user":{}}'
+            if self.letter_on_register:
+                self._letter(body["email"])
+            sc, text = self._session(body["email"])
+            return 200, (sc if self.register_cookie else []), text
+        if path == VERIFY:
+            if owner not in self.humans:
+                return 401, [], '{"code":16,"message":"authentication failed"}'
+            self.requested += 1
+            self._letter(owner)
+            return 200, [], "{}"
+        if path == VERIFY_CONFIRM:
+            if owner not in self.humans:
+                return 401, [], '{"code":16,"message":"authentication failed"}'
+            if self.confirm_code != 200:
+                return self.confirm_code, [], '{"code":9,"message":"email address is already verified"}'
+            if body.get("code") != self.live_code.get(owner):
+                return 401, [], '{"code":16,"message":"authentication failed"}'
+            self.confirmed += 1
+            if self.confirm_verifies and not self.stays_unverified:
+                self.verified.add(owner)
+            view = {"emailVerified": self.confirm_verifies}
+            return 200, [f"{SESSION_COOKIE}=s-{owner}; Path=/"], json.dumps({"session": view})
         return 404, [], "{}"
+
+
+class _FakeMailbox:
+    """Подставной приёмник писем стенда: письма по адресату, по порядку."""
+
+    def __init__(self, down=False, drops=False):
+        self.down, self.drops = down, drops
+        self.box: dict[str, list[str]] = {}
+        self.reads = 0
+
+    def deliver(self, to: str, text: str) -> None:
+        if not self.drops:
+            self.box.setdefault(to, []).append(text)
+
+    def letters(self, to: str) -> list[str]:
+        self.reads += 1
+        if self.down:
+            raise Unmet("приёмник писем стенда недостижим: connection refused")
+        return list(self.box.get(to, []))
+
+
+def _letter_text(code: str) -> str:
+    """Тело письма подтверждения той формы, что собирает служба
+    (`internal/clients/invite_mail.go`, RenderVerificationMail)."""
+    return ("From: kaname@kaname.local\r\nTo: human@stand.invalid\r\n"
+            "Subject: =?UTF-8?B?0JrQvtC0?=\r\n\r\n"
+            "Подтвердите адрес почты, чтобы продолжить работу.\r\n\r\n"
+            "Код подтверждения:\r\n\r\n"
+            f"    {code}\r\n\r\n"
+            "Код действует 30 мин. с момента отправки и применяется один раз.\r\n")
 
 
 def _outcome(fn) -> tuple[str, str]:
@@ -336,6 +514,8 @@ def _outcome(fn) -> tuple[str, str]:
         return "finding", str(e)
     except Unmet as e:
         return "unmet", str(e)
+    except Exception as e:  # noqa: BLE001 — сбой пробы назван, а не проглочен
+        return "crash", f"{type(e).__name__}: {e}"
 
 
 def _census_surface_for_lane_address() -> str | None:
@@ -355,37 +535,88 @@ def self_test() -> int:
     E, P = "human@stand.invalid", "correct-horse"
     print("=== посев полосы входа: различение исходов ===")
 
+    def sow(lane, box=None):
+        return _outcome(lambda: seed(lane, lane.mailbox if box is None else box, E, P,
+                                     sleep=lambda _s: None))
+
     lane = _FakeLane()
-    got = _outcome(lambda: seed(lane, E, P))
-    _c("(−) человека нет — заведён, и вход им доказан", got == ("ok", "заведён")
-       and lane.registered == 1, f"{got}, регистраций {lane.registered}")
+    got = sow(lane)
+    _c("(−) человека нет — заведён, адрес подтверждён кодом письма регистрации, и "
+       "вход им доказан",
+       got == ("ok", "заведён · адрес подтверждён") and lane.registered == 1
+       and lane.confirmed == 1 and lane.requested == 0 and E in lane.verified,
+       f"{got}, регистраций {lane.registered}, подтверждений {lane.confirmed}, "
+       f"запросов письма {lane.requested}")
 
+    lane = _FakeLane(humans={E: P}, verified={E})
+    got = sow(lane)
+    _c("(−) человек есть и подтверждён — ни регистрации, ни письма, ни кода",
+       got == ("ok", "есть") and lane.registered == 0 and lane.confirmed == 0
+       and lane.requested == 0 and lane.mailbox.reads == 0,
+       f"{got}, регистраций {lane.registered}, подтверждений {lane.confirmed}, "
+       f"чтений приёмника {lane.mailbox.reads}")
+
+    print("=== подтверждение адреса человека стенда ===")
     lane = _FakeLane(humans={E: P})
-    got = _outcome(lambda: seed(lane, E, P))
-    _c("(−) человек есть — второй регистрации нет", got == ("ok", "есть")
-       and lane.registered == 0, f"{got}, регистраций {lane.registered}")
+    got = sow(lane)
+    _c("(−) человек есть, адрес не подтверждён, письма нет — письмо запрошено "
+       "глаголом, код из него принят",
+       got == ("ok", "есть · адрес подтверждён") and lane.requested == 1
+       and lane.confirmed == 1, f"{got}, запросов {lane.requested}, "
+       f"подтверждений {lane.confirmed}")
 
-    got = _outcome(lambda: seed(_FakeLane(csrf_code=403), E, P))
+    got = sow(_FakeLane(mailbox=_FakeMailbox(drops=True)))
+    _c("(+) письмо не дошло до приёмника стенда — находка, названы письмо и приёмник",
+       got[0] == "finding" and "письм" in got[1] and "приёмник" in got[1], f"{got}")
+
+    got = sow(_FakeLane(mailbox=_FakeMailbox(down=True)))
+    _c("(+) приёмник писем стенда молчит — условие не создано, а не находка",
+       got[0] == "unmet", f"{got}")
+
+    got = sow(_FakeLane(confirm_code=400))
+    _c("(+) предъявление кода отвергнуто — находка с кодом ответа",
+       got[0] == "finding" and "400" in got[1], f"{got}")
+
+    got = sow(_FakeLane(confirm_verifies=False))
+    _c("(+) код принят (200), а ответ не несёт emailVerified: true — находка",
+       got[0] == "finding" and "emailVerified" in got[1], f"{got}")
+
+    got = sow(_FakeLane(stays_unverified=True))
+    _c("(+) код принят, а следующий вход снова в положении подтверждения — находка",
+       got[0] == "finding" and "положени" in got[1], f"{got}")
+
+    got = sow(_FakeLane(position_named=False))
+    _c("(+) вход не называет положение (нет session.emailVerified) — находка",
+       got[0] == "finding" and "emailVerified" in got[1], f"{got}")
+
+    got = _outcome(lambda: code_of(_letter_text("ABCDE-FGHIJ")))
+    _c("код разбирается из письма той формы, что собирает служба",
+       got == ("ok", "ABCDE-FGHIJ"), f"{got}")
+    got = _outcome(lambda: code_of("Subject: x\r\n\r\nПодтвердите адрес.\r\n"))
+    _c("ЗАКОННЫЙ БЛИЗНЕЦ: письмо без строки кода — кода нет, а не первая строка тела",
+       got == ("ok", "None"), f"{got}")
+
+    got = sow(_FakeLane(csrf_code=403))
     _c("(+) лист не края — 403 на признаке формы — находка, названа причина",
        got[0] == "finding" and "край" in got[1], f"{got}")
 
-    got = _outcome(lambda: seed(_FakeLane(register_cookie=False), E, P))
+    got = sow(_FakeLane(register_cookie=False))
     _c("(+) регистрация 200 без носителя сессии — находка",
        got[0] == "finding" and SESSION_COOKIE in got[1], f"{got}")
 
-    got = _outcome(lambda: seed(_FakeLane(register_code=400), E, P))
+    got = sow(_FakeLane(register_code=400))
     _c("(+) регистрация отвергнута — находка с кодом ответа",
        got[0] == "finding" and "400" in got[1], f"{got}")
 
-    got = _outcome(lambda: seed(_FakeLane(login_after_register=False), E, P))
+    got = sow(_FakeLane(login_after_register=False))
     _c("(+) заведён, а войти не может — находка, а не успех",
        got[0] == "finding" and "вход тем же паролем" in got[1], f"{got}")
 
-    got = _outcome(lambda: seed(_FakeLane(login_code=500), E, P))
+    got = sow(_FakeLane(login_code=500))
     _c("(+) вход 5xx — находка, а не «человека нет»",
        got[0] == "finding" and "500" in got[1], f"{got}")
 
-    got = _outcome(lambda: seed(_FakeLane(down=True), E, P))
+    got = sow(_FakeLane(down=True))
     _c("(+) полоса молчит — условие не создано, а не находка", got[0] == "unmet",
        f"{got}")
 
@@ -428,9 +659,10 @@ def self_test() -> int:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_SELF)} — {', '.join(_SELF)}",
               file=sys.stderr)
         return 1
-    print("ДОКАЗАНО: способность входа утверждается исходом, «полоса молчит» и "
-          "«листа нет» отличимы от находки кодом, объявленные ключи сходятся с "
-          "записью, а поверхность — с переписью долга.")
+    print("ДОКАЗАНО: способность входа в обычном положении утверждается исходом, "
+          "код подтверждения берётся из письма приёмника стенда, «полоса молчит», "
+          "«приёмник молчит» и «листа нет» отличимы от находки кодом, объявленные "
+          "ключи сходятся с записью, а поверхность — с переписью долга.")
     return 0
 
 
@@ -441,6 +673,9 @@ def main() -> int:
                          "он же уезжает в окружение")
     ap.add_argument("--pki", default="",
                     help="каталог с edge.crt, edge.key и ca.crt")
+    ap.add_argument("--mailbox-url", default="",
+                    help="адрес чтения приёмника писем стенда (stand-mailbox.py): "
+                         "из него берётся код подтверждения адреса")
     ap.add_argument("--env-file",
                     default=str(ROOT / "tests" / "newman" / "environments"
                                 / "local.postman_environment.json"))
@@ -463,8 +698,9 @@ def main() -> int:
     if args.self_test:
         return self_test()
     try:
-        if not args.base_url or not args.pki:
-            raise Unmet("не названы --base-url и --pki — полосы, которую сеять, нет")
+        if not args.base_url or not args.pki or not args.mailbox_url:
+            raise Unmet("не названы --base-url, --pki и --mailbox-url — полосы, "
+                        "которую сеять, либо приёмника писем стенда нет")
         return run(args)
     except Unmet as e:
         print(f"УСЛОВИЕ НЕ СОЗДАНО: {e}", file=sys.stderr)

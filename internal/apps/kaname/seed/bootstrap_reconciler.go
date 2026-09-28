@@ -57,6 +57,10 @@ const (
 	BootstrapOutcomeNotActive = "not_active"
 	// BootstrapOutcomeConcurrentRace — выдачу закоммитила соседняя реплика.
 	BootstrapOutcomeConcurrentRace = "concurrent_race"
+	// BootstrapOutcomeNotVerified — строка действует, адрес не подтверждён
+	// (kaname#456, Р12; не терминально — первый проход после подтверждения
+	// выдаёт).
+	BootstrapOutcomeNotVerified = "not_verified"
 	// BootstrapOutcomeFailed — исполнитель вернул отказ.
 	//
 	// Отдельно от пропусков намеренно: «стенд сломан» и «условие не создано» —
@@ -72,6 +76,7 @@ var BootstrapOutcomes = []string{
 	BootstrapOutcomeNotRegistered,
 	BootstrapOutcomeNotActive,
 	BootstrapOutcomeConcurrentRace,
+	BootstrapOutcomeNotVerified,
 	BootstrapOutcomeFailed,
 }
 
@@ -84,6 +89,7 @@ var skipReasonOutcome = map[BootstrapSkipReason]string{
 	BootstrapSkipEmailEmpty:     BootstrapOutcomeDisabled,
 	BootstrapSkipNotRegistered:  BootstrapOutcomeNotRegistered,
 	BootstrapSkipNotActive:      BootstrapOutcomeNotActive,
+	BootstrapSkipNotVerified:    BootstrapOutcomeNotVerified,
 	BootstrapSkipConcurrentRace: BootstrapOutcomeConcurrentRace,
 }
 

@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -122,7 +123,15 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
-	issuer, err := ceremonyport.NewAccessTokens(signer, keys, store)
+	// Правило выдачи удостоверениям человека (kaname#456, Р5б) — то же, что у
+	// токен-эндпоинта и хуков, под тем же пределом; читает в транзакции
+	// запроса обмена либо единицы работы оборота, которую держит церемония:
+	// второй связи из пула в этом окне не берёт никто.
+	issuanceRule, err := revocationpolicy.WithDeadline(kanamepg.NewCeremonyIssuanceRule(pool), credentialLanePeerTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
+	issuer, err := ceremonyport.NewAccessTokens(signer, keys, store, issuanceRule)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}

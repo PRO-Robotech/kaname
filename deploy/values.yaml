@@ -485,6 +485,12 @@ authn:
   #     memoryReserveBytes: 268435456 # резерв памяти процесса сверх проверяющего
   #     recoveryCodeTtl: 5m           # срок кода восстановления доступа от чеканки
   #                                   # (Ф5 Р1; KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL)
+  #     verificationCodeTtl: 30m      # срок кода подтверждения адреса (kaname#456 Р7;
+  #                                   # KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL)
+  #     verificationCodeAttempts: 5   # неподошедших предъявлений на код до его траты
+  #     verificationResendInterval: 60s # промежуток между письмами одному человеку
+  #     verificationResendLimit: 5    # писем за окно, письмо регистрации в счёт
+  #     verificationResendWindow: 24h # скользящее окно числа писем
   #   registration:                   # регистрация нашей полосой (Ф4 Р5, Ф4-18/19)
   #     admissionsPerWindow: 3        # заведений аккаунтов одной личностью за окно,
   #                                   # СЧИТАЯ первое; первое заведение носителя

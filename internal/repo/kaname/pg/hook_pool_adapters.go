@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
 // Session/force-logout audit_outbox taxonomy. Values satisfy
@@ -216,6 +217,12 @@ func (s *SessionRevocationsAdapter) IsRevoked(ctx context.Context, jti string) (
 // refresh-hook user-level gate.
 func (s *SessionRevocationsAdapter) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
 	return s.userRepo.RevokedBefore(ctx, userID)
+}
+
+// PersonMarks — отметка подтверждения адреса (kaname#456, Р5): второй вопрос
+// правила выдачи тем же пулом и единственным оператором чтения отметки.
+func (s *SessionRevocationsAdapter) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	return personmarks.Read(ctx, s.pool, ids)
 }
 
 // GetByJTI делегирует (used by IsRevoked enrichment in the gRPC service).

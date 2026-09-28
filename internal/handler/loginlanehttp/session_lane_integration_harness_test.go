@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
@@ -83,6 +84,17 @@ const (
 	laneRecoveryTTL   = 5 * time.Minute
 	laneProbeDomain   = "console.example.invalid"
 	laneWrongPassword = "this-is-not-the-password-7"
+)
+
+// Величины стенда полосы для подтверждения адреса и окон источника и адресата
+// (kaname#456): профиль продукта для письма; окна — не мешающие пробам с
+// одним источником.
+var (
+	laneLetterPace = humansession.VerificationPace{
+		CodeTTL: 30 * time.Minute, Attempts: 5, Interval: 60 * time.Second, Limit: 5, Window: 24 * time.Hour,
+	}
+	laneSourcePace = humansession.SourcePace{Limit: 10000, Window: time.Hour}
+	laneMailLimit  = outboxtypes.InviteMailRateLimit{MaxPerWindow: 10000, Window: time.Hour}
 )
 
 // sessionVerbs — глаголы слушателя: шесть настоящих, остальные — дублёр (их
@@ -207,6 +219,7 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	register, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
+		Letter: laneLetterPace, Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: laneSourcePace,
 	})
 	require.NoError(t, err)
 	email := "sl-" + ids.NewID("tst")[3:11] + "@example.invalid"
@@ -264,6 +277,7 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	require.NoError(t, err)
 	request, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: nop, Now: time.Now, Logger: logger,
+		Sources: sessions, SourcePace: laneSourcePace, MailLimit: laneMailLimit,
 	})
 	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{

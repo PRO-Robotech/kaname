@@ -29,7 +29,7 @@
 //
 // Поэтому: `iampgtest.NewTestPostgres` (контейнер, промигрирован) плюс ТА ЖЕ дверь
 // решения, которую композиционный корень провязывает стражам в проде —
-// `authzcascade.Wrap(relverdict.NewAsker(pool))` поверх той же базы.
+// `authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))` поверх той же базы.
 //
 // Здесь стоял поднятый контейнером внешний движок отношений. Он снят целиком (S6):
 // вердикт считает форма поверх собственных таблиц iam, и вопрос о доступе теперь
@@ -67,6 +67,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -119,7 +120,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		pool:       pool,
 		repo:       kanamepg.New(pool, nil),
-		gates:      authzcascade.Wrap(relverdict.NewAsker(pool)),
+		gates:      authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)),
 		probeRoles: map[string]string{},
 		base:       time.Now().UTC().Truncate(time.Second).Add(time.Hour),
 	}
@@ -169,8 +170,8 @@ func (e *env) seedUserWithAccount(t *testing.T, suffix string) (domain.UserID, d
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6)`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"-"+lastSix(string(uid))+"@example.com", "User "+suffix, uAt)
 	require.NoError(t, err, "seed user %s", suffix)
@@ -223,8 +224,8 @@ func (e *env) seedUser(t *testing.T, acc domain.AccountID, suffix string) string
 	t.Helper()
 	id := ids.NewID(domain.PrefixUser)
 	_, err := e.pool.Exec(context.Background(), `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6)`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, created_at, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, now())`,
 		id, string(acc), "ext-"+suffix+"-"+id,
 		"u-"+suffix+"-"+lastSix(id)+"@example.com", "User "+suffix, e.at())
 	require.NoError(t, err, "seed user %s", suffix)

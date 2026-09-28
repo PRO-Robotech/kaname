@@ -45,6 +45,9 @@ const (
 	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
 	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
 	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
+	// Подтверждение адреса (kaname#456, П13): исходы глаголов подтверждения и
+	// отказы положения на путях полосы.
+	AddressVerificationOutcomesMetric = Namespace + "_address_verification_outcomes_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -69,6 +72,7 @@ type LoginLaneRecorder struct {
 	sfPresent    *prometheus.CounterVec
 	sfRefuse     *prometheus.CounterVec
 	sfEvent      *prometheus.CounterVec
+	addrVerify   *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -172,9 +176,16 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
 					"regenerated, a backup code consumed.",
 			}, []string{"event"}),
+			addrVerify: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: AddressVerificationOutcomesMetric,
+				Help: "Outcomes of the address-verification verbs and position refusals: letter queued or paced, " +
+					"already verified, no session, confirmed, code mismatched or not found, invite not valid, store " +
+					"failed, and refusals of lane paths while the address is not verified. No address and no code.",
+			}, []string{"outcome"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
-			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent)
+			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
+			rec.addrVerify)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -221,6 +232,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.SecondFactorEvents() {
 			rec.sfEvent.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.VerificationOutcomes() {
+			rec.addrVerify.WithLabelValues(string(o)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -295,9 +309,15 @@ func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFacto
 	l.sfEvent.WithLabelValues(string(o)).Inc()
 }
 
+// AddressVerificationObserved — исход подтверждения адреса (kaname#456, П13).
+func (l *LoginLaneRecorder) AddressVerificationObserved(o humansession.VerificationOutcome) {
+	l.addrVerify.WithLabelValues(string(o)).Inc()
+}
+
 var (
-	_ humansession.Observer           = (*LoginLaneRecorder)(nil)
-	_ passwordverify.Observer         = (*LoginLaneRecorder)(nil)
-	_ passwordverify.EnvelopeObserver = (*LoginLaneRecorder)(nil)
-	_ registration.Observer           = (*LoginLaneRecorder)(nil)
+	_ humansession.Observer                    = (*LoginLaneRecorder)(nil)
+	_ humansession.AddressVerificationObserver = (*LoginLaneRecorder)(nil)
+	_ passwordverify.Observer                  = (*LoginLaneRecorder)(nil)
+	_ passwordverify.EnvelopeObserver          = (*LoginLaneRecorder)(nil)
+	_ registration.Observer                    = (*LoginLaneRecorder)(nil)
 )

@@ -28,16 +28,31 @@ package main
 // делят его, поэтому проба о первом чтении обязана быть единственной, кто до
 // него доходит. Пакет `main` службы к `authzmodel` не обращался ни одним
 // файлом до этой работы (предикат: `git grep -l authzmodel --
-// 'services/iam/cmd/kaname/*'` → пусто), значит здесь состояние чистое.
+// 'services/iam/cmd/kaname/*'` → пусто), значит здесь состояние было чистым.
+//
+// ПРЕДПОСЫЛКА ПЕРЕСТАЛА БЫТЬ ВЕРНОЙ, И ПОЭТОМУ ПРОБА ИДЁТ СВОИМ ПРОЦЕССОМ.
+// Пробы корня kaname#456 (`address_disclosure_root_integration_test.go`)
+// спрашивают дверь решения собранного корня, а она читает модель процесса;
+// файл идёт раньше этого по порядку, и замок встречал пробу уже закрытым —
+// «установка после первого чтения», то есть красное о порядке проб, а не о
+// порядке старта. Порядок проб в бинаре не объявлен никем, поэтому проба больше
+// на него не опирается: тело исполняется в ДОЧЕРНЕМ процессе того же тестового
+// бинаря, где до модели не дошёл никто, а родитель утверждает, что дочерний
+// процесс эту пробу исполнил и она прошла (`--- PASS` её имени, а не «тестов
+// нет»).
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
@@ -101,6 +116,41 @@ resources:
 // возможная форма: установка модели процесса необратима, поэтому вправе быть
 // исполнена ровно один раз за бинарь (см. шапку файла).
 func TestBootComposesJudgesAndInstallsTheModel(t *testing.T) {
+	if os.Getenv(modelComposeChildEnv) != "1" {
+		runInOwnProcess(t, "TestBootComposesJudgesAndInstallsTheModel")
+		return
+	}
+	bootComposesJudgesAndInstallsTheModel(t)
+}
+
+// modelComposeChildEnv — признак дочернего процесса пробы установки модели.
+const modelComposeChildEnv = "KANAME_TEST_MODEL_COMPOSE_CHILD"
+
+// runInOwnProcess исполняет пробу `name` в дочернем процессе того же тестового
+// бинаря: состояние процесса (модель прочитана или нет) у него своё. Утверждается
+// исход дочернего И то, что проба в нём исполнилась: «тестов нет» и пропуск
+// зелёным не считаются.
+func runInOwnProcess(t *testing.T, name string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("условие не создано: тестовый бинарь не назван: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^"+name+"$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), modelComposeChildEnv+"=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("проба %s в своём процессе не прошла: %v\n%s", name, err, out)
+	}
+	if !strings.Contains(string(out), "--- PASS: "+name+" ") {
+		t.Fatalf("дочерний процесс не исполнил пробу %s (нет строки PASS) — исход без "+
+			"исполненного не вердикт:\n%s", name, out)
+	}
+}
+
+func bootComposesJudgesAndInstallsTheModel(t *testing.T) {
 	// Предпосылка: вход и вправду тот, о котором проба. Манифест обязан
 	// разобраться — иначе «установка прошла» означало бы лишь то, что разбор
 	// сорвался раньше, чем дошёл бы до модели.

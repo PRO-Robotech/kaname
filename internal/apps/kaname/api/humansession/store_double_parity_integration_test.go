@@ -567,7 +567,8 @@ func parityCases() []parityCase {
 	} {
 		wr("EmitRecoveryMail", "письмо её личности, "+c.form, func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 			return said(w.EmitRecoveryMail(ctx, humansession.RecoveryMailIntent{UserID: p.user.ID, AccountID: p.user.AccountID,
-				To: string(p.user.Email), Code: c.code(p), ValidFor: 5 * time.Minute}), "поставлено")
+				To: string(p.user.Email), Code: c.code(p), ValidFor: 5 * time.Minute,
+				Limit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 1000, Window: time.Hour}}), "поставлено")
 		})
 	}
 	wr("InsertRecoveryCompletion", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {

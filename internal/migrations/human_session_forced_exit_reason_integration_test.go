@@ -110,8 +110,11 @@ func serReadCatalog(t *testing.T) serCatalog {
 		body, err := fs.ReadFile(migrations.FS, name)
 		require.NoError(t, err, "Дано: тело миграции %s", name)
 		up := migrations.MigrationUpSection(string(body))
-		if strings.Contains(up, serEndedReasonCheck) && strings.Contains(up, "'"+serForcedExit+"'") {
-			require.Zero(t, c.forced, "Дано: слово вводят ДВЕ миграции (%s и %s) — вопрос «предшествующая версия» не имеет ответа", c.file, name)
+		// ВВОДИТ слово миграция, в которой оно появилось ПЕРВЫМ: каталог читается
+		// по возрастанию версий, и поздняя миграция, переобъявляющая словарь целиком
+		// (kaname#456 добавила `email-verified` тем же ограничением), слово уже не
+		// вводит, а несёт дальше.
+		if c.forced == 0 && strings.Contains(up, serEndedReasonCheck) && strings.Contains(up, "'"+serForcedExit+"'") {
 			c.forced, c.file = v, name
 		}
 	}
@@ -456,8 +459,10 @@ func TestHumanSessionSchema_KN_SER_07_DomainListAndTheBaseAgreeBothWays(t *testi
 	assert.Empty(t, onlyBase, "значения %s, которых нет в перечне домена: %v", serEndedReasonCheck, onlyBase)
 	assert.NotContains(t, list.values, serCutoffOnlyReason,
 		"%q — причина отсечки, а не снятия сессии (§0.2): в перечне словаря снятия её быть не должно", serCutoffOnlyReason)
-	assert.Len(t, list.values, 4, "на голове N = 4")
-	assert.Len(t, base, 4, "на голове M = 4")
+	// На голове значений пять: к четырём этой миграции kaname#456 добавила
+	// `email-verified` (подтверждение адреса снимает прочие сессии).
+	assert.Len(t, list.values, 5, "на голове N = 5")
+	assert.Len(t, base, 5, "на голове M = 5")
 }
 
 // TestHumanSessionMigration_KN_SER_08_UpDoesNotRewriteLyingRows — накат не

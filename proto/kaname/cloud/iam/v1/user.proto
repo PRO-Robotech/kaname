@@ -45,8 +45,8 @@ message User {
   // ID of the user (kaname internal id).
   string id = 1;
 
-  // External identity provider id (Kratos `sub` claim). Может быть пустым для
-  // PENDING (invited but never logged in).
+  // External identity provider id (Kratos `sub` claim). Пусто у PENDING:
+  // личность пишет активация приглашения (kaname#456).
   string external_id = 2;
 
   // Email (case-insensitive lookup). При Invite — email указывается admin'ом;
@@ -60,7 +60,10 @@ message User {
   google.protobuf.Timestamp created_at = 5;
 
   // invite-status.
-  // PENDING — invited, еще не login'нулся.
+  // PENDING — приглашение не активировано: адрес приглашённого не подтверждён
+  //   (kaname#456). Приглашённый, зарегистрировавшийся адресом приглашения,
+  //   входит в положение подтверждения; приглашение активирует подтверждение
+  //   адреса, пока приглашение живо.
   // ACTIVE  — login'нулся через Kratos, external_id заполнен.
   // BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
   //   `UserService.Unblock`).

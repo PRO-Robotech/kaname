@@ -52,5 +52,7 @@ func (a *SessionAuthority) Resolve(ctx context.Context, bearer domain.SessionBea
 		AuthTime:  view.Session.AuthenticatedAt,
 		Level:     view.Session.AssuranceLevel,
 		ExpiresAt: view.Session.ExpiresAt,
+		// Положение сессии — из той же отметки, что несёт ответ краю (Р1).
+		EmailVerified: view.EmailVerified,
 	}, true, nil
 }

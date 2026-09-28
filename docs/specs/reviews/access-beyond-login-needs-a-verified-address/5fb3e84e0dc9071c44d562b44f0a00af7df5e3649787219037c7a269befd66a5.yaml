@@ -1,0 +1,227 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: 5fb3e84e0dc9071c44d562b44f0a00af7df5e3649787219037c7a269befd66a5
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Токен DRAFT в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 2 — эта запись,
+    одобрение (когда оно будет) выводится из записи и внешнего события, а не из слова в заголовке.
+  base_commit: c083ad5bbfa7887cf4101efbef0046930639f04b
+  content_commit: 26758cccf14f211513ba442e114cb2d0899ccbb6
+  branch: '456'
+  branch_on_origin: false
+  wave_base: c083ad5bbfa7887cf4101efbef0046930639f04b
+  trunk: cbbac984b7b17f22bcc4a83f7533fff3494c809a
+  pull_request: none
+  task: PRO-Robotech/kaname#456
+  console_pair: PRO-Robotech/kacho#2898
+  lines: 1477
+  round: 2
+  predecessor_record: docs/specs/reviews/access-beyond-login-needs-a-verified-address/32dd2b23e46e335da185a1b3df2b61290144694e5046b2edaf92e1f3f0ac78f1.yaml
+  fingerprint_predicate: >-
+    sha256sum документа в рабочей копии ветки 456 и git show 26758cccf:<путь> | sha256sum — оба
+    дают 5fb3e84e0dc90710…, совпало с заданием дословно; wc -l → 1477.
+  measurement_revisions: >-
+    Замеры службы сняты на 26758cccf (голова ветки 456). Дельта c083ad5bb..26758cccf — два файла,
+    сам документ и запись круга 1, поэтому числа кода верны и для ревизии, названной документом.
+    Фундамент — corelib v1.10.0-rc.2 (go.mod:8). Край — PRO-Robotech/kacho@499ad3085fd, ревизия,
+    названная документом. Политика полномочий — kacho-workspace@13e0d0c1.
+  task_premise_remeasured: >-
+    (1) Отпечаток 5fb3e84e… — ПОДТВЕРДИЛОСЬ своим sha256sum. (2) Круг 2 — ПОДТВЕРДИЛОСЬ: в каталоге
+    записей одна запись, круга 1, на 32dd2b23…; записи на этот отпечаток нет. (3) Замечания круга 1
+    из задания (B1 — внутренний слушатель, B2 — предъявление) совпали с записью круга 1 дословно.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-27T17:40:00Z'
+
+# ─── ПОЛЕ ВЫДАЧИ ОДОБРЕНИЯ ───────────────────────────────────────────────────
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 2 — CHANGES_REQUESTED, блокирующее одно. Отказу внешнее полномочие не нужно;
+    запрет #1 на объём §3.1 остаётся в силе. Санкции на код по этому документу НЕТ.
+  note_for_the_next_round: >-
+    Круг, который придёт к одобрению, санкции без внешнего события не даст: политика называет
+    единственного, кто выпускает действующее одобрение приёмки, — pointpu; агент в роли им не
+    является. Форма события — issue_comment с полями role, verdict, subject, subject_revision,
+    subject_sha256, как у соседних каталогов.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом)
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: ff087e513f8a42d5f92a8f374cdcf4e1790b0b4630d4b611224ccbd16b4b9c24
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · 5fb3e84e0dc9071c44d562b44f0a00af7df5e3649787219037c7a269befd66a5'
+  reason: >-
+    Третья категория — не выполнилось, а не да и не нет: событие публикует оркестратор. Для
+    отказа это безвредно — отказ полномочия не выдаёт и ничего не открывает.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+
+scope:
+  reviewed: >-
+    Документ целиком, §0…§12: решения Р1…Р15 с Р4в и Р5а, 59 сценариев, производители §4 и §6,
+    ведомость §7, инварианты §8, DoD §9, красное до кода §10. Сверено с деревом службы на
+    26758cccf и с деревом края на 499ad3085fd.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+# ─── ЗАМЕЧАНИЯ КРУГА 1 — ИСХОД КАЖДОГО ──────────────────────────────────────
+round1_findings:
+  - {id: B1, kind: COVERAGE, outcome: closed, how: 'Р4в — закрытая таблица 19 методов круга; сверена с GatewayFrontedInternalRPCs построчно, 19 из 19 по имени; EV-62…EV-64; гейт таблицы в §9 п. 5'}
+  - {id: B2, kind: COVERAGE, outcome: closed, how: 'Р5а, EV-68, EV-69; край на 499ad3085fd судит наши токены сверкой RFC 7662 с кешем (main.go, PlatformTokenRevocationURL), IsRevoked — только для чужой чеканки; кеш читателя предъявленного назван (EV-69 в)'}
+  - {id: B3, kind: NEGATIVE, outcome: closed, how: 'Р11 п. 3–4, EV-75, EV-76; посев S1…S3 ниже встал ровно по документу'}
+  - {id: B4, kind: NEGATIVE, outcome: closed, how: 'EV-43 — два значения проигравшего; признак формы судится по контексту формы (JudgeFormToken), а не по живости сессии, поэтому третьего значения от него нет'}
+  - {id: B5, kind: TWIN, outcome: closed, how: 'EV-35 — близнецы различаются только отметкой применения кода'}
+  - {id: B6, kind: SCOPE, outcome: closed, how: 'kacho#2900, kacho#2901, kaname#458 открыты, метки линии identity-own; kacho#1773 и kacho#2792 на месте'}
+  - {id: B7, kind: FORMAT, outcome: closed, how: 'EV-61 (б) дословно совпал с corelib validate.PageSize и errors.InvalidArgument; ListMine зовёт ValidateRawPagination первым'}
+  - {id: N1, outcome: closed}
+  - {id: N2, outcome: closed}
+  - {id: N3, outcome: closed}
+  - {id: N4, outcome: closed, how: '10 форм own_gates.go совпали; Sources — только ExpandRelations, DirectRelations и DirectRelationsMany — только текст отказа'}
+  - {id: N5, outcome: closed}
+
+# ─── ПЕРЕСЧЁТ §1 И §7 — КАЖДОЕ ЧИСЛО СВОЕЙ КОМАНДОЙ ─────────────────────────
+numbers_remeasured:
+  all_confirmed: true
+  rows:
+    - {section: '1.1', declared: 4, measured: 4}
+    - {section: '1.2', declared: '2 / 3', measured: '2 / 3'}
+    - {section: '1.3', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.4', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.5', declared: '13 · 8 · 0 · 2', measured: '13 · 8 · 0 · 2'}
+    - {section: '1.6', declared: '2 вида · 2 строки', measured: '2 вида · 2 строки'}
+    - {section: '1.7', declared: 3, measured: 3}
+    - {section: '1.8', declared: 4, measured: 4}
+    - {section: '1.9', declared: '5 · 6 · 6 · 3 · 10', measured: '5 · 6 · 6 · 3 · 10'}
+    - {section: '1.10', declared: 4, measured: 4}
+    - {section: '1.11', declared: '19 · 5 · 1 · 8', measured: '19 · 5 · 1 · 8'}
+    - {section: '1.12', declared: '1 · 1 · 1', measured: '1 · 1 · 1'}
+    - {section: '1.13', declared: '4 · 0', measured: '4 · 0'}
+    - {section: '7', predicate: "grep -cE '^\\*\\*EV-[0-9]{2} — '", declared: 59, measured: 59, note: 'повторов 0; раскладка по двенадцати полосам 3·4·7·14·8·5·5·7·2·2·1·1 совпала; уровень E у 8 — совпало'}
+  census_extra:
+    - {what: 'методы внутренних служб в контракте', measured: 32, note: 'в круге 19, вне круга 13'}
+    - {what: 'пути полосы формы против строк Р2', measured: '13 из 13'}
+
+# ─── ПОСЕВ «ДАНО» ────────────────────────────────────────────────────────────
+constructibility:
+  method: >-
+    Временная проба в пакете internal/repo/kaname/pg против настоящего Postgres (pgtest, все
+    миграции применены) настоящими операторами хранилища (InsertPending, RemoveMembership,
+    ActivateInvite); прогнана один раз и удалена до коммита: в дереве её нет.
+  run: >-
+    go test ./internal/repo/kaname/pg/ -run TestIntegration_Review456Round2SeedProbe -count=1 -v → PASS 3.49s
+  attempts: 3
+  stood: 3
+  not_performed: 4
+  rows:
+    - {id: S1, given: 'EV-70 и EV-75 (а): приглашённый PENDING без личности, способ входа, живая сессия; снятие последнего членства', result: 'встало; членств 0, срок строки погашен, активация отвергнута ErrInviteExpired; сессия и способ входа живы'}
+    - {id: S2, given: 'EV-76 (а): повторное приглашение той же почты после S1', result: 'встало; та же строка, срок жив, членство PENDING заведено; активация — ACTIVE, членство ACTIVE'}
+    - {id: S3, given: 'EV-75 (б): близнец без снятия', result: 'встало; активация — ACTIVE'}
+  not_performed_rows:
+    - {given: 'строки кода EV-35 и EV-43', reason: 'хранилище кодов подтверждения заказано этой задачей (§9 п. 7, П2); посеять не во что'}
+    - {given: 'вызов краем от лица человека на внутреннем слушателе, EV-62…EV-64', reason: 'обвязка mTLS и переданной личности этим кругом не поднималась'}
+    - {given: 'наш токен человека T, EV-68 и EV-69', reason: 'подписант этим кругом не поднимался'}
+    - {given: 'уровень E', reason: 'стенд не поднимался'}
+  level_e: >-
+    Не выполнилось, а не красное и не зелёное; в вердикт не зачитывается.
+
+# ─── БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────────────────
+blocking:
+  - id: B1
+    kind: COVERAGE
+    where: 'Р5 (строка о полосе, заводимой позже), §0, §1.9, §8 инв. 5, §4.2 П7'
+    finding: >-
+      Полоса обмена кода и оборота токена обновления собственной церемонии не будущая: она есть
+      на ревизии замера и смонтирована на /iam/v1/token (виды выдачи фундамента — authorization_code
+      и refresh_token). Выпуск токена этой полосы не спрашивает ни правила выдачи, ни отметки. Р5
+      называет её заводимой позже, в таблице Р5 её строки нет, поэтому вердикт unverified до неё не
+      доходит, а §0 и инв. 5 утверждают обратное. Это и третья поверхность предъявления нашего
+      удостоверения человека — токена обновления, — которой нет в Р5а.
+    predicate: >-
+      git grep -l 'internal/revocationpolicy"' -- '*.go' ':!*_test.go' | grep -cE
+      'ceremonyport|oauth_ceremony|ceremonyhttp' → 0; контроль — та же команда без сужения даёт 6,
+      среди них соседняя полоса того же эндпоинта. Виды выдачи полосы — словарь фундамента
+      oauthceremony.GrantKinds, и полоса провязана тем же эндпоинтом, что клетки Р5.
+    required: >-
+      Строка Р5 на обе полосы церемонии с наблюдаемым отказом (единый тон полосы после названного
+      кода или токена обновления — 400 и invalid_grant) и решением о семействе выдачи — сохраняется
+      до подтверждения по Р13 или снимается; полоса спрашивает то же правило; пара сценариев:
+      оборот при стоящей отметке — токен, при снятой — отказ, ни нового токена доступа, ни нового
+      токена обновления; §1.9, §8 инв. 5, §10 и §9 п. 13 приведены к переписи полос.
+
+# ─── НЕ БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────────────
+non_blocking:
+  - id: N1
+    kind: FORMAT
+    finding: >-
+      §3.2, первая строка: край спрашивает службу о каждом неосвобождённом методе — неточно. На
+      499ad3085fd у края кеш решений, хранящий только разрешено, срок по умолчанию 5 с, сброс по
+      потоку изменений субъекта; снятие отметки этот поток не питает (производителей 5, все —
+      выдачи и членства). Сегодня отметку снимает только смена адреса, а производственного
+      пути смены адреса нет (Upsert без производственных вызывающих), поэтому окно достижимо лишь
+      в момент посадки. Назвать окно кеша решений спрашивающих, как Р5а называет окно сверки, и
+      записать: будущий путь смены адреса питает поток изменений субъекта. Там же назвать
+      положительный кеш собственной двери публичного слушателя — рубеж Р4б стоит раньше неё.
+  - id: N2
+    kind: TWIN
+    finding: >-
+      Близнецы EV-60 (б), EV-62 (б) и контроль вида принципала в EV-62 утверждают только отсутствие
+      EMAIL_NOT_VERIFIED и зелены на любом другом отказе. Назвать хотя бы для якорного метода
+      положительный исход, как сделано у EV-12.
+  - id: N3
+    kind: COVERAGE
+    finding: >-
+      Р4в объясняет методы вне круга четырьмя родами, а их 13: сверх названных там выпуск
+      токена первого администратора по списку сертификатов, две двери базового секрета,
+      GetRoleCompiled, PollSubjectChanges, RegisterResource, UnregisterResource,
+      InternalUserService/Get. Довод, почему рубежа на них нет, верен и сильнее записанного:
+      круг отправителей общий, модули передают человека на записи материализации, и рубеж там
+      клинил бы очередь. Дать закрытую классификацию 13 методов той же формой, что таблица Р4в.
+  - id: N4
+    kind: SCOPE
+    finding: >-
+      Р11 п. 4: приглашённый, чьё приглашение сняли и не повторили, остаётся с адресом, занятым
+      строкой PENDING, без пути ни к подтверждению, ни к новой регистрации. Назвать это состояние
+      исходом решения либо отнести к kaname#458.
+
+found_on_the_way: >-
+  Утверждения, требовавшие сверки с деревом, подтвердились: звено приписывания причины отказ с
+  ErrorInfo не трогает (deny_details.go, hasErrorInfo); deny_reasons в контракте Check есть;
+  Revoke возвращает Operation и несёт token_jti и user_id; ListByUser несёт ступень 1; снятие
+  участия отвергается при живых выдачах (FAILED_PRECONDITION), поэтому порядок EV-75 верен; токен
+  клиента, которым владеет человек, несёт sub человека, так что Р5а его покрывает; читатель сессии
+  поставщика на крае снят на 499ad3085fd (kacho#2792 влит в волну 2797); тексты credential refused,
+  credential is not accepted, owner-revoked, user_revoked и тело introspection_unavailable — на
+  месте.
+
+limits: >-
+  Консоль не читалась. Уровень E не исполнялся. Край читался только по ссылкам документа и по
+  двум вопросам этого круга — путь суждения о токене и кеш решений. Величины Р6…Р9 (30m, 5, 60s,
+  5, 24h) приняты как решения автора: доводы названы, противоречия со спекой не найдено.

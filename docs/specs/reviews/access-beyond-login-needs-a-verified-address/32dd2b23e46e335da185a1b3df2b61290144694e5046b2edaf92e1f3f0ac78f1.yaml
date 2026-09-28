@@ -1,0 +1,269 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: 32dd2b23e46e335da185a1b3df2b61290144694e5046b2edaf92e1f3f0ac78f1
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Токен DRAFT в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 1 — эта запись,
+    одобрение (когда оно будет) выводится из записи и внешнего события, а не из слова в заголовке.
+  base_commit: c083ad5bbfa7887cf4101efbef0046930639f04b
+  content_commit: 2f65942fa2beae29114abb1f00783575762bcf39
+  branch: '456'
+  branch_on_origin: false
+  wave_base: c083ad5bbfa7887cf4101efbef0046930639f04b
+  trunk: cbbac984b7b17f22bcc4a83f7533fff3494c809a
+  pull_request: none
+  task: PRO-Robotech/kaname#456
+  console_pair: PRO-Robotech/kacho#2898
+  lines: 1117
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md в рабочей
+    копии ветки 456 и git show 2f65942fa:<путь> | sha256sum — оба дают 32dd2b23e46e335d…,
+    совпало с заданием дословно; wc -l → 1117.
+  measurement_revisions: >-
+    Все замеры сняты на 2f65942fa (голова ветки 456). Дельта c083ad5bb..2f65942fa — один файл,
+    сам документ, поэтому числа кода верны и для ревизии, названной документом. Фундамент —
+    corelib v1.10.0-rc.2 (go.mod:8). Политика полномочий — kacho-workspace@13e0d0c1.
+  task_premise_remeasured: >-
+    (1) Отпечаток 32dd2b23… — ПОДТВЕРДИЛОСЬ своим sha256sum. (2) Круг 1 — ПОДТВЕРДИЛОСЬ: каталога
+    docs/specs/reviews/access-beyond-login-needs-a-verified-address/ до этой записи нет. (3) Шапка
+    документа о носителях §3.2 «задача не заведена» — ПОДТВЕРДИЛОСЬ: в последних 15 задачах
+    PRO-Robotech/kacho и 8 задачах PRO-Robotech/kaname на 2026-09-27 задачи края, фикстур и
+    записи на чужой адрес нет; консольная пара kacho#2898 есть.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-27T16:05:00Z'
+
+# ─── ПОЛЕ ВЫДАЧИ ОДОБРЕНИЯ ───────────────────────────────────────────────────
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 1 — CHANGES_REQUESTED, блокирующих семь. Отказу внешнее полномочие не нужно;
+    запрет #1 на объём §3.1 остаётся в силе. Санкции на код по этому документу НЕТ.
+  note_for_the_next_round: >-
+    Круг, который придёт к одобрению, санкции без внешнего события не даст: политика называет
+    единственного, кто выпускает действующее одобрение приёмки, — pointpu; агент в роли им не
+    является. Форма события — issue_comment с полями role, verdict, subject, subject_revision,
+    subject_sha256, как у соседних каталогов.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом)
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: ff087e513f8a42d5f92a8f374cdcf4e1790b0b4630d4b611224ccbd16b4b9c24
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · 32dd2b23e46e335da185a1b3df2b61290144694e5046b2edaf92e1f3f0ac78f1'
+  reason: >-
+    Третья категория — не выполнилось, а не да и не нет: событие публикует оркестратор. Для
+    отказа это безвредно — отказ полномочия не выдаёт и ничего не открывает.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+
+scope:
+  reviewed: >-
+    Документ целиком, §0…§12: решения Р1…Р15, 51 сценарий, производители §4 и §6, ведомость §7,
+    инварианты §8, DoD §9, красное до кода §10. Сверено с деревом службы на 2f65942fa.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+# ─── ПЕРЕСЧЁТ §1 И §7 — КАЖДОЕ ЧИСЛО СВОЕЙ КОМАНДОЙ ─────────────────────────
+numbers_remeasured:
+  all_confirmed: true
+  rows:
+    - {section: '1.1', predicate: "git grep IssueSession( вне проб", declared: 4, measured: 4}
+    - {section: '1.2', predicate: "git grep MarkEmailVerified( / EmailVerification( вне проб", declared: '2 / 3', measured: '2 / 3'}
+    - {section: '1.3', predicate: 'присваивание email_verified_at в миграциях / SET email_verified_at в коде', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.4', predicate: 'EmailVerified в resolve.go / "emailVerified" в handler.go', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.5', predicate: 'HandleFunc · FormKind · пути verif · контроль recovery', declared: '13 · 8 · 0 · 2', measured: '13 · 8 · 0 · 2'}
+    - {section: '1.6', predicate: 'OurMailKinds · event_type = ANY в миграции восстановления', declared: '2 вида · 2 строки', measured: '2 вида · 2 строки'}
+    - {section: '1.7', predicate: 'ActivateInviteTx( вне проб', declared: 3, measured: 3}
+    - {section: '1.8', predicate: 'BootstrapSkip… = ', declared: 4, measured: 4}
+    - {section: '1.9', predicate: 'методы AuthorizeService · файлы с откатом к супер-доступу · импортёры revocationpolicy', declared: '5 · 6 · 6', measured: '5 · 6 · 6'}
+    - {section: '1.10', predicate: 'ended_reason = ANY, первая строка', declared: 4, measured: 4}
+    - {section: '7', predicate: "grep -cE '^\\*\\*EV-[0-9]{2} — '", declared: 51, measured: 51, note: 'дубликатов меток 0; раскладка по двенадцати полосам совпала; уровень E у 8 сценариев — совпало'}
+
+# ─── ПОСЕВ «ДАНО» ────────────────────────────────────────────────────────────
+constructibility:
+  method: >-
+    Временная проба в пакете internal/migrations против настоящего Postgres (pgtest, все миграции
+    применены), прогнана один раз и удалена до коммита: в дереве её нет. Сеялись нетривиальные
+    Дано документа и два опыта о решениях.
+  run: >-
+    go test ./internal/migrations/ -run TestIntegration_Review456SeedProbe -count=1 -v → PASS 3.65s
+  attempts: 11
+  stood: 7
+  refused_as_the_document_predicts: 2
+  refused_by_schema_about_a_decision: 1
+  experiment_on_a_decision: 1
+  not_performed: 0
+  rows:
+    - {id: G1, given: 'человек без отметки, способ входа паролем, живая сессия', result: встало}
+    - {id: G2, given: 'отметка, поставленная напрямую', result: встало}
+    - {id: G3, given: 'отметка снята БЕЗ смены адреса', result: 'встало; адрес не изменился'}
+    - {id: G4, given: 'отметка снята сменой адреса (механизм базы)', result: 'встало; отметки нет'}
+    - {id: G5, given: 'приглашённый PENDING, способ входа, живая сессия', result: 'встало; членство PENDING'}
+    - {id: G6, given: 'PENDING со своей отчеканенной личностью', result: 'отказ 23514 users_invite_status_consistency'}
+    - {id: G7, given: 'отметка на строке PENDING (близнец EV-74)', result: встало}
+    - {id: G8, given: 'выдача администратора облака неподтверждённому', result: встало}
+    - {id: G9, given: "причина конца email-verified до новой миграции", result: 'отказ 23514 human_sessions_ended_reason_check; контроль logout встал'}
+    - {id: G10, given: 'строка очереди mail.verification.send до новой миграции', result: 'отказ 23514 invite_mail_outbox_event_type_check; контроль mail.recovery.send встал'}
+    - {id: G11, given: 'снятие приглашения распорядителем, затем активация', result: 'снятие выражено сроком строки; активация со сроком — 0 строк, без суда о сроке — 1 строка; членство после активации 0'}
+  level_e: >-
+    Уровень E не сеялся: стенд этим кругом не поднимался. Это не выполнилось, а не красное и не
+    зелёное; в вердикт не зачитывается.
+
+# ─── БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────────────────
+blocking:
+  - id: B1
+    kind: COVERAGE
+    where: 'Р2, Р4б, EV-60, §9 п. 5'
+    finding: >-
+      Р4б и перепись EV-60 охватывают только публичный слушатель. Методов внутреннего слушателя,
+      которые край зовёт от лица человека, в дереве 19 (authzguard.GatewayFrontedInternalRPCs); ни
+      Р2, ни Р4б их не классифицирует. Среди них есть самоадресное чтение, решаемое без вопроса к
+      модели, — его не покрывает и Р4а. Правило «authN и authZ на каждом запросе, внутренний
+      слушатель не освобождён» требует того же рубежа на обоих.
+    predicate: >-
+      awk '/^func GatewayFrontedInternalRPCs/,/^}/' internal/authzguard/caller_policy.go | grep -c
+      '"/kaname' → 19; контроль: строк с InternalClusterService 5 = 4 записи + 1 комментарий
+    required: >-
+      Закрытый перечень для 19 методов (доступно в положении подтверждения / отказ Р3) по форме Р2,
+      рубеж по действующему принципалу-человеку на обоих слушателях, пара сценариев и перепись с
+      печатью числа.
+  - id: B2
+    kind: COVERAGE
+    where: 'Р1, Р5, §1.9'
+    finding: >-
+      Вердикт Р5 ставится в правило ВЫДАЧИ (revocationpolicy, 6 импортёров). Суждение о нашем
+      токене при ПРЕДЪЯВЛЕНИИ живёт отдельным правилом (tokenrevocation; читает его сверка
+      /internal/tokens/introspect, которую край спрашивает на каждом предъявлении) и вердикта не
+      получает. Токен, выданный до посадки или до снятия отметки, судится действующим до срока, а Р1
+      обещает действие на следующем запросе. Класс «контроль на выдаче, но не на предъявлении»
+      назван в security-hardening.md.
+    predicate: >-
+      git grep -l 'internal/tokenrevocation"' вне проб → 4 файла, среди них
+      internal/handler/tokenintrospecthttp/handler.go; тот же файл среди импортёров
+      revocationpolicy — 0
+    required: >-
+      Решение: предъявление судит отметку владельца-человека, либо названо, почему Р4а и Р4б
+      достаточны и что остаётся досягаемым; сценарий-пара «выдан подтверждённому, отметка снята →
+      суждение предъявления» с близнецом «отметка на месте».
+  - id: B3
+    kind: NEGATIVE
+    where: 'Р11, EV-70…EV-74'
+    finding: >-
+      Р11 разрешает активацию подтверждением и после срока приглашения. Снятие приглашения
+      распорядителем выражено тем же сроком строки: снятие членства PENDING ставит срок в now(). Посев
+      G11: активация без суда о сроке активирует снятое приглашение (1 строка), членство не
+      возвращается (0). Исхода для приглашения, снятого между регистрацией и подтверждением, в
+      документе нет.
+    predicate: 'посев G11; оператор ActivateInvite в internal/repo/kaname/pg/user_repo.go судит срок в WHERE'
+    required: >-
+      Развести срок и снятие решением; сценарий «снято после регистрации → подтверждение не
+      активирует, Check — нет» с близнецом «не снято → активировано».
+  - id: B4
+    kind: NEGATIVE
+    where: 'EV-35, конкурентная часть'
+    finding: >-
+      Утверждение «второе — 401 при любом порядке фиксации» решениями не производится. EV-39 и
+      EV-40 задают порядок проверок: сессия, затем подтверждённость, затем код. Проигравший, чья
+      сессия прочитана до фиксации победителя, а отметка после, получает 400 и 9 по Р15.
+    required: >-
+      Назвать допустимое множество исходов проигравшего либо решить суждение одним оператором;
+      утверждать инварианты: ровно один 200, одна отметка, одна живая сессия.
+  - id: B5
+    kind: TWIN
+    where: 'EV-35 (а) против (б)'
+    finding: >-
+      (а) и (б) различаются больше чем одним фактом: K применён И уже не последний (выдан K3), а при
+      снятии отметки сменой адреса — ещё и привязан к прежнему значению. Реализация без
+      однократности, но с «последний жив» даёт зелёное (а).
+    predicate: 'посев G3: отметка снимается без смены адреса — близнец строится на одном факте'
+    required: 'Близнец, отличающийся только тем, применён ли код; адрес не менять.'
+  - id: B6
+    kind: SCOPE
+    where: '§3.2'
+    finding: >-
+      Три строки «вне объёма» называют носителя, которого нет: край (отказ Р3 на путях платформы и
+      ретрансляция двух путей), фикстуры и ручки в чартах (тот же заказ), запись на чужой адрес.
+      Край — половина механизма решения владельца. Отложенное без предмета нарушает ban #11.
+    required: 'Завести задачи, вписать номера и предикат возврата.'
+  - id: B7
+    kind: FORMAT
+    where: 'EV-61 (б)'
+    finding: >-
+      Близнец утверждает текст, которого производитель не даёт. Отказ формата страницы идёт из
+      corelib validate.PageSize: сообщение invalid argument, в BadRequest поле page_size с описанием
+      page_size must be in [0..1000] (0 means default). В записанном виде положительный контроль
+      зелёным быть не может.
+    predicate: 'corelib v1.10.0-rc.2 validate/validate.go:252 и errors/errors.go:80; ListMine зовёт ValidateRawPagination'
+    required: 'Утверждать код, сообщение и нарушение поля дословно.'
+
+# ─── НЕ БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────────────
+non_blocking:
+  - id: N1
+    kind: CONSTRUCTIBILITY
+    finding: >-
+      Схема запрещает строку PENDING со своей личностью (посев G6, 23514
+      users_invite_status_consistency). Назвать: регистрация приглашённого личности не пишет, и
+      какую личность пишет активация на шаге 5 Р10.
+  - id: N2
+    kind: TWIN
+    finding: >-
+      EV-95 утверждает отсутствие адреса и кода; без положительного контроля (тот же читатель
+      находит адрес там, где он законно лежит, либо внесённую строку) проба зелена на пустом журнале.
+  - id: N3
+    kind: CONSTRUCTIBILITY
+    finding: >-
+      EV-13: два запроса письма одному человеку в пределах интервала Р9 дадут 429. Развести людей
+      либо сдвигать управляемые часы — сказать в Дано.
+  - id: N4
+    kind: COVERAGE
+    finding: >-
+      Дверь решения authzcascade.Client отвечает пятью формами вопроса: Check, CheckWithContext,
+      CheckWithContextConsistent, BatchCheckWithContext, ListSubjects. §9 п. 4 называет один порт и
+      пакетный вопрос; перепись вести по формам вопроса двери, а не по имени порта.
+  - id: N5
+    kind: FORMAT
+    finding: >-
+      Р5: не названы исход токен-эндпоинта (своя клетка) и четвёртое значение закрытого словаря
+      вердиктов revocationpolicy (сейчас три). EV-85: после EV-30 носитель S новый — назвать B2.
+
+found_on_the_way: >-
+  Всё названное документом в §4.1 в дереве есть: тексты отказов полосы, признаки
+  SESSION_NOT_FRESH и FORM_TOKEN_REJECTED, домен отказов, тело второго фактора, refuseByRedirect,
+  canInviteUsers, события iam.user.updated и iam.cluster_admin.granted, гейты
+  TestEveryMailKindHasExactlyOneSender, TestEveryDrainedQueueDeclaresItsOrdering,
+  TestNoDeferredWorkInTheTree. Кэша вердиктов на пути вопроса о праве в службе нет — Р1 выполним.
+
+limits: >-
+  Край и консоль не читались глубже ссылок документа. Уровень E не исполнялся. Решения Р6…Р9 о
+  величинах (30m, 5, 60s, 5, 24h) приняты как решения автора: доводы названы, противоречия со
+  спекой не найдено.

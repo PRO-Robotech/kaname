@@ -95,9 +95,11 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 		return humansession.Resolved{}, humansession.NoSessionEnded, nil
 	case out.Session.Expired(now):
 		return humansession.Resolved{}, humansession.NoSessionExpired, nil
-	case domain.InviteStatus(inviteState) != domain.InviteStatusActive:
-		// Заблокированная — и всякая иная, кроме активной: живая сессия бывает
-		// только у активной личности (F4d-30, Ф3-10 N4).
+	case !domain.InviteStatus(inviteState).MaySignInToOwnLane():
+		// Заблокированная — и всякая иная, кроме активной и приглашённой:
+		// живая сессия бывает у активной личности (F4d-30, Ф3-10 N4) и у
+		// приглашённого, зарегистрировавшегося адресом приглашения, — в
+		// положении подтверждения (kaname#456, Р11 п. 1).
 		return humansession.Resolved{}, humansession.NoSessionBlocked, nil
 	}
 	out.Session.PresentedMethods = methods

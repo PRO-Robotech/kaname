@@ -270,14 +270,11 @@ func TestCeremonyVaults_WhatTheSchemaCannotExpressIsRefused(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	sc := ceremonyScene(t, ctx, pool, "vxd1")
 	v := ceremonyVaults(t, pool)
-	repo := kanamepg.NewOAuthCeremonyRepo(pool)
 	code := ceremonyDigest(0x7a0004)
 	storeVaultCode(t, ctx, v, sc, code)
 	live := ceremonyDigest(0x7a0104)
-	_, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest: code, RefreshTokenDigest: live, RefreshTokenTTL: time.Hour,
-	})
-	require.NoError(t, err, "посев живого токена обновления")
+	seeded, err := newCeremonyWalk(t, pool).exchange(ctx, code, live)
+	requireWalkIssued(t, seeded, err, "посев живого токена обновления")
 
 	out, err := v.DropRefreshToken(ctx, ceremonyDigest(0x7a0999))
 	require.NoError(t, err, "близнец: снятие несуществующего")

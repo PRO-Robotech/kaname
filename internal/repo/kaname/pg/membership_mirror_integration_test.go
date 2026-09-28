@@ -128,6 +128,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 	{
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
+		markAddressVerified(t, ctx, pool, pendingID)
 		_, err = w.UsersW().ActivateInvite(ctx, pendingID,
 			domain.ExternalSubject("ext-mir1-activated"), domain.DisplayName("Pending"))
 		require.NoError(t, err)

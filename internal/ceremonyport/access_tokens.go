@@ -19,6 +19,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/publishedkey"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -57,6 +59,10 @@ type AccessTokens struct {
 	signer   Signer
 	keys     KeySetSource
 	recorder IssuanceRecorder
+	// rule — ОДНО правило выдачи удостоверениям человека (`revocationpolicy`;
+	// kaname#456, Р5б): обмен кода и оборот токена обновления спрашивают его
+	// о субъекте гранта с якорем в моменте аутентификации сессии семейства.
+	rule revocationpolicy.Lookup
 }
 
 var _ oauthceremony.AccessTokenIssuer = (*AccessTokens)(nil)
@@ -64,8 +70,11 @@ var _ oauthceremony.AccessTokenIssuer = (*AccessTokens)(nil)
 // NewAccessTokens собирает адаптер. Без подписанта выпускать нечем, без набора
 // нечем опознавать, без писателя записи выпуска некуда записать семейство
 // выданного — сборка отказывает, а не отвечает на первом запросе.
-func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder) (*AccessTokens, error) {
+func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder, rule revocationpolicy.Lookup) (*AccessTokens, error) {
 	switch {
+	case rule == nil:
+		return nil, errors.New("ceremonyport: access token issuer needs the issuance rule reader; " +
+			"a lane issuing past the rule would give a person a token the rule refuses")
 	case signer == nil:
 		return nil, errors.New("ceremonyport: access token issuer needs the service signer")
 	case keys == nil:
@@ -76,7 +85,7 @@ func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder
 	case strings.TrimSpace(signer.Issuer()) == "":
 		return nil, errors.New("ceremonyport: the service signer names no issuer")
 	}
-	return &AccessTokens{signer: signer, keys: keys, recorder: recorder}, nil
+	return &AccessTokens{signer: signer, keys: keys, recorder: recorder, rule: rule}, nil
 }
 
 // IssueAccessToken выпускает токен доступа по гранту (K2) и записывает выпуск в
@@ -146,6 +155,23 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 			grant.Session.ACR)
 	case grant.Session.AuthTime.IsZero():
 		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no moment of authentication")
+	}
+
+	// Правило выдачи (kaname#456, Р5б) — ПОСЛЕ суждения о коде и токене
+	// обновления (их судит церемония раньше: повтор отзывает семейство по
+	// действующему правилу и при неподтверждённом владельце) и ДО подписи.
+	// Субъект гранта — человек нашего входа; якорь — момент аутентификации
+	// сессии семейства.
+	switch verdict, verr := revocationpolicy.AtIssuance(ctx, a.rule, service.ResolvedPrincipal{
+		Kind: service.PrincipalUser, UserID: grant.Session.Subject,
+	}, grant.Session.AuthTime); verdict {
+	case revocationpolicy.Allowed:
+	case revocationpolicy.Unverified:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w", domain.ErrGrantOwnerUnverified)
+	case revocationpolicy.Revoked:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w", domain.ErrAccessTokenFamilyNotLive)
+	default:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w: %v", domain.ErrGrantRuleUndecidable, verr)
 	}
 
 	claims := map[string]any{

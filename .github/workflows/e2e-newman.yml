@@ -1002,6 +1002,12 @@ jobs:
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_login_lane.py --self-test
 
+      # Приёмник писем стенда судит, дошло ли письмо подтверждения адреса: его
+      # приём поверх TLS и чтение по адресату доказываются до подъёма.
+      - name: приёмник писем стенда способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 .github/scripts/stand-mailbox.py --self-test
+
       - name: посев церемонии способен упасть (самопроба инъекцией)
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_ceremony.py --self-test

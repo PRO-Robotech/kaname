@@ -47,6 +47,10 @@ import (
 // заведён: обращение к форме там, где обращения быть не должно, прошло бы молча.
 type askerNeverAsked struct{ t *testing.T }
 
+func (a askerNeverAsked) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return nil, a.fail("PersonMarks")
+}
+
 func (a askerNeverAsked) fail(method string) error {
 	a.t.Helper()
 	a.t.Fatalf("страж провязки спросил форму (%s) — он обязан лишь установить, что она ЕСТЬ", method)

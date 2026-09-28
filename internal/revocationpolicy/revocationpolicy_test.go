@@ -327,3 +327,15 @@ func TestWithDeadline_RefusesANonPositiveLimitAtBuild(t *testing.T) {
 		require.NotNil(t, got)
 	})
 }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*cutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*deadlineCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

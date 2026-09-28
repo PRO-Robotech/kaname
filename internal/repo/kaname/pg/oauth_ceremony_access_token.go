@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
 // issuanceFamilyFK — ограничение, которым база отвергает выпуск в
@@ -249,6 +250,12 @@ func familyRevokedOf(ctx context.Context, q rowQuerier, jti string) (bool, error
 		return false, wrapPgErr(err, "AccessToken", "")
 	}
 	return revoked, nil
+}
+
+// PersonMarks — второй вопрос правила предъявления (kaname#456, Р5а): тем же
+// пулом и единственным оператором чтения отметки (`personmarks.Read`).
+func (r *MintedTokenRevocationRepo) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	return personmarks.Read(ctx, r.pool, ids)
 }
 
 // FamilyRevoked — ответ о семействе выпуска для авторитета отзыва и читателя

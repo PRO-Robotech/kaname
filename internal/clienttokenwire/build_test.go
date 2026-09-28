@@ -354,3 +354,9 @@ func TestTheDeclaredPaceReachesTheBuiltEndpoint(t *testing.T) {
 	require.Equalf(t, http.StatusTooManyRequests, rec.Code,
 		"величина темпа, поданная сборке, не дошла до эндпоинта: %s", rec.Body.String())
 }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*recordingCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

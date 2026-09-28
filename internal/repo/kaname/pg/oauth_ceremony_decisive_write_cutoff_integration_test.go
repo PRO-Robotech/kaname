@@ -61,15 +61,14 @@ func requireRefreshNotRotatedNorFamilyRevoked(t *testing.T, ctx context.Context,
 	require.False(t, revoked, "отказ по отсечке отозвал семейство — разобран как повтор")
 }
 
-// seedLiveRefresh — живой токен обновления первого поколения сцены.
+// seedLiveRefresh — живой токен обновления первого поколения сцены: обмен кода
+// ходом движка над хранилищами (`ceremonyWalk`).
 func seedLiveRefresh(t *testing.T, ctx context.Context, pool *pgxpool.Pool, v *kanamepg.CeremonyVaults,
 	sc domain.CeremonyContext, code, rt string) {
 	t.Helper()
 	storeVaultCode(t, ctx, v, sc, code)
-	_, err := kanamepg.NewOAuthCeremonyRepo(pool).ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest: code, RefreshTokenDigest: rt, RefreshTokenTTL: time.Hour,
-	})
-	require.NoError(t, err, "посев живого токена обновления")
+	out, err := newCeremonyWalk(t, pool).exchange(ctx, code, rt)
+	requireWalkIssued(t, out, err, "посев живого токена обновления")
 }
 
 func TestCeremonyVaults_CodeConsumptionJudgesACutoffCommittedAfterTheRead(t *testing.T) {
@@ -188,55 +187,6 @@ func TestCeremonyVaults_RotationWriteJudgesACutoffCommittedAfterTheLock(t *testi
 			}
 			require.NoError(t, err, "близнец: оборот при отсечке раньше аутентификации")
 			require.EqualValues(t, 1, out.Rows(), "близнец: оборот не записан")
-		})
-	}
-}
-
-// Обмен и оборот слоя доступа исполняют ТЕ ЖЕ операторы, и их разбор нуля
-// строк обязан знать отсечку: без неё ноль строк у живой строки в сроке
-// разбирался бы как «условие и разбор разошлись».
-func TestOAuthCeremonyRepo_ExchangeAndRotationNameTheSubjectCutoff(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	for i, cell := range cutoffCells {
-		t.Run("обмен кода/"+cell.name, func(t *testing.T) {
-			ctx, pool := catalogPool(t)
-			sc := ceremonyScene(t, ctx, pool, "vdw4")
-			v := ceremonyVaults(t, pool)
-			sig := ceremonyDigest(0x7f0701 + i)
-			storeVaultCode(t, ctx, v, sc, sig)
-			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
-
-			_, err := kanamepg.NewOAuthCeremonyRepo(pool).ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-				CodeDigest: sig, RefreshTokenDigest: ceremonyDigest(0x7f0711 + i), RefreshTokenTTL: time.Hour,
-			})
-			if cell.refusing {
-				require.ErrorIsf(t, err, domain.ErrCeremonySubjectCutOff,
-					"обмен кода сессии, аутентифицированной до отсечки, прошёл либо отказал не отсечкой: %v", err)
-				requireCodeNotConsumedNorFamilyRevoked(t, ctx, pool, sig)
-				return
-			}
-			require.NoError(t, err, "близнец: обмен при отсечке раньше аутентификации")
-		})
-		t.Run("оборот токена обновления/"+cell.name, func(t *testing.T) {
-			ctx, pool := catalogPool(t)
-			sc := ceremonyScene(t, ctx, pool, "vdw5")
-			v := ceremonyVaults(t, pool)
-			rt := ceremonyDigest(0x7f0801 + i)
-			seedLiveRefresh(t, ctx, pool, v, sc, ceremonyDigest(0x7f0811+i), rt)
-			writeCutoff(t, ctx, pool, sc, sessionAuthenticatedAt(t, ctx, pool, sc).Add(cell.shift))
-
-			_, err := kanamepg.NewOAuthCeremonyRepo(pool).RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-				PresentedDigest: rt, SuccessorDigest: ceremonyDigest(0x7f0821 + i), TTL: time.Hour,
-			})
-			if cell.refusing {
-				require.ErrorIsf(t, err, domain.ErrCeremonySubjectCutOff,
-					"оборот токена сессии, аутентифицированной до отсечки, прошёл либо отказал не отсечкой: %v", err)
-				requireRefreshNotRotatedNorFamilyRevoked(t, ctx, pool, rt)
-				return
-			}
-			require.NoError(t, err, "близнец: оборот при отсечке раньше аутентификации")
 		})
 	}
 }

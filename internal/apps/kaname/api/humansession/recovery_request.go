@@ -20,13 +20,16 @@ package humansession
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
 // recoveryCodeIDPrefix — приставка идентификатора потока восстановления в
@@ -42,20 +45,30 @@ type RequestRecoveryInput struct {
 
 // RequestRecoveryUseCase — запрос кода.
 type RequestRecoveryUseCase struct {
-	store    Store
-	codeTTL  time.Duration
-	dispatch Dispatcher
-	observer Observer
-	now      func() time.Time
-	logger   *slog.Logger
+	store      Store
+	codeTTL    time.Duration
+	dispatch   Dispatcher
+	sources    SourcePacer
+	sourcePace SourcePace
+	mailLimit  outboxtypes.InviteMailRateLimit
+	observer   Observer
+	now        func() time.Time
+	logger     *slog.Logger
 }
 
 // RequestRecoveryDeps — зависимости; срок кода — величина настройки без
 // умолчания (Ф5-06): нулевой — отказ построения.
+//
+// Пределы запроса (kaname#456) обязательны: окно обращений источника —
+// для запроса о ЛЮБОМ адресе, окно писем адресата — тем же оператором, что
+// ставит письмо. Ни один не меняет ответа вызывающему.
 type RequestRecoveryDeps struct {
 	Store      Store
 	CodeTTL    time.Duration
 	Dispatcher Dispatcher
+	Sources    SourcePacer
+	SourcePace SourcePace
+	MailLimit  outboxtypes.InviteMailRateLimit
 	Observer   Observer
 	Now        func() time.Time
 	Logger     *slog.Logger
@@ -70,6 +83,13 @@ func NewRequestRecoveryUseCase(d RequestRecoveryDeps) (*RequestRecoveryUseCase, 
 		return nil, fmt.Errorf("recovery request: recovery code ttl must be positive")
 	case d.Dispatcher == nil:
 		return nil, fmt.Errorf("recovery request: dispatcher required")
+	case d.Sources == nil:
+		return nil, fmt.Errorf("recovery request: source pacer required")
+	case d.MailLimit.MaxPerWindow <= 0 || d.MailLimit.Window <= 0:
+		return nil, fmt.Errorf("recovery request: letter window of the recipient must be declared")
+	}
+	if err := d.SourcePace.Validate(); err != nil {
+		return nil, fmt.Errorf("recovery request: %w", err)
 	}
 	if d.Observer == nil {
 		d.Observer = NopObserver{}
@@ -81,7 +101,8 @@ func NewRequestRecoveryUseCase(d RequestRecoveryDeps) (*RequestRecoveryUseCase, 
 		d.Logger = slog.Default()
 	}
 	return &RequestRecoveryUseCase{
-		store: d.Store, codeTTL: d.CodeTTL, dispatch: d.Dispatcher, observer: d.Observer, now: d.Now, logger: d.Logger,
+		store: d.Store, codeTTL: d.CodeTTL, dispatch: d.Dispatcher, sources: d.Sources, sourcePace: d.SourcePace,
+		mailLimit: d.MailLimit, observer: d.Observer, now: d.Now, logger: d.Logger,
 	}, nil
 }
 
@@ -91,6 +112,20 @@ func (uc *RequestRecoveryUseCase) Execute(ctx context.Context, in RequestRecover
 	addressKey := AddressKey(in.Email)
 	if addressKey == "" {
 		return FieldRequired("email")
+	}
+	// Окно обращений источника — для запроса о ЛЮБОМ адресе и ДО чтения
+	// адреса (kaname#456): полное окно отвечает тем же ответом, что всякий
+	// запрос, и цена обеих полос чтения этим не различается.
+	if src := strings.TrimSpace(in.Source); src != "" {
+		admitted, perr := uc.sources.ChargeSource(ctx, SourceLaneRecoveryRequest, src, uc.now().UTC(), uc.sourcePace)
+		if perr != nil {
+			uc.observer.RecoveryRequestObserved(RecoveryRequestStoreFailed)
+			return ErrStoreUnavailable
+		}
+		if !admitted {
+			uc.observer.RecoveryRequestObserved(RecoveryRequestSourcePaced)
+			return nil
+		}
 	}
 	target, found, err := uc.store.RecoveryTarget(ctx, domain.Email(addressKey))
 	if err != nil {
@@ -129,6 +164,11 @@ func (uc *RequestRecoveryUseCase) mintAndEnqueue(ctx context.Context, user domai
 		IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(uc.codeTTL),
 	}
 	if err := uc.write(ctx, user, code, value); err != nil {
+		if errors.Is(err, ErrLetterWindowFull) {
+			// Окно писем адресата полно: письма нет, ответ вызывающему тот же.
+			uc.observer.RecoveryRequestObserved(RecoveryRequestRecipientPaced)
+			return
+		}
 		uc.observer.RecoveryRequestObserved(RecoveryRequestStoreFailed)
 		uc.logger.Error("recovery request: code and letter not recorded", "err", err.Error(), "user_id", string(user.ID))
 		return
@@ -150,6 +190,7 @@ func (uc *RequestRecoveryUseCase) write(ctx context.Context, user domain.User, c
 	}
 	if err := w.EmitRecoveryMail(ctx, RecoveryMailIntent{
 		UserID: user.ID, AccountID: user.AccountID, To: string(user.Email), Code: value, ValidFor: uc.codeTTL,
+		Limit: uc.mailLimit,
 	}); err != nil {
 		return err
 	}

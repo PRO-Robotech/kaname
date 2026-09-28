@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -61,6 +62,11 @@ type Authorizer interface {
 	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
 	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
 	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
+	// NeutralDenyReasons — отказ, который дверь дала бы подтверждённому субъекту
+	// без отношения (`disclosed`). Метод порта, а не необязательное умение:
+	// декоратор между транспортом и решателем обязан его пропустить, и
+	// компилятор держит это на каждой сборке корня.
+	NeutralDenyReasons(ctx context.Context, req service.CheckRequest) []string
 }
 
 // Handler — gRPC server.
@@ -160,9 +166,34 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	}
 	return &iamv1.AuthorizeCheckResponse{
 		Allowed:     res.Allowed,
-		DenyReasons: res.DenyReasons,
+		DenyReasons: h.disclosed(ctx, reqToService(req), res.DenyReasons),
 		CheckedAt:   shared.TimestampProto(res.CheckedAt),
 	}, nil
+}
+
+// disclosed — причина `email_not_verified` уходит ТОЛЬКО самому субъекту
+// (kaname#456, раскрытие Р3): принципал, спросивший о другом человеке, получает
+// нейтральный отказ — побайтно тот же, что у подтверждённого субъекта без
+// отношения. Иначе распорядитель любого ресурса узнавал бы из ответа, подтвердил
+// ли адрес произвольный человек.
+func (h *Handler) disclosed(ctx context.Context, req service.CheckRequest, reasons []string) []string {
+	if len(reasons) != 1 || reasons[0] != service.DenyReasonEmailNotVerified {
+		return reasons
+	}
+	if caller, ok := operations.PrincipalFromContextOK(ctx); ok && "user:"+caller.ID == req.Subject {
+		return reasons
+	}
+	return h.svc.NeutralDenyReasons(ctx, req)
+}
+
+// reqToService — пункт вопроса в форме службы.
+func reqToService(req *iamv1.AuthorizeCheckRequest) service.CheckRequest {
+	return service.CheckRequest{
+		Subject:          req.GetSubject(),
+		Resource:         service.ResourceRef{Type: req.GetResource().GetType(), ID: req.GetResource().GetId()},
+		Action:           req.GetAction(),
+		RequiredRelation: req.GetRequiredRelation(),
+	}
 }
 
 // BatchCheck — see iamv1.AuthorizeServiceServer.
@@ -213,7 +244,7 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 	for i, r := range results {
 		out.Responses[i] = &iamv1.AuthorizeCheckResponse{
 			Allowed:     r.Allowed,
-			DenyReasons: r.DenyReasons,
+			DenyReasons: h.disclosed(ctx, reqs[i], r.DenyReasons),
 			CheckedAt:   shared.TimestampProto(r.CheckedAt),
 		}
 	}

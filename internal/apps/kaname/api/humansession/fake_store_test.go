@@ -80,6 +80,8 @@ type fakeStore struct {
 	opened []*fakeWriter
 	// trips — операторы базы, которые исполнил бы адаптер (шапка файла).
 	trips atomic.Int64
+	// mailWindow — окна писем восстановления по адресату (kaname#456).
+	mailWindow map[string]int
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.

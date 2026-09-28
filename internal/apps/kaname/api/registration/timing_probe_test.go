@@ -186,6 +186,20 @@ func (w *timingWriter) RememberFirstAuthentication(context.Context, domain.UserI
 
 func (w *timingWriter) EmitAudit(context.Context, outboxtypes.AuditEvent) error { return nil }
 
+// Письмо подтверждения (kaname#456) — те же шаги в полосе «предел»; полоса
+// «занят» до них не доходит, как не доходит и до сессии.
+func (w *timingWriter) SupersedeVerificationCodes(context.Context, domain.UserID, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (w *timingWriter) InsertVerificationCodePaced(context.Context, domain.VerificationCode, humansession.VerificationPace) (humansession.LetterRefusal, error) {
+	return humansession.LetterRefusal{}, nil
+}
+
+func (w *timingWriter) EmitVerificationMail(context.Context, humansession.VerificationMailIntent) error {
+	return nil
+}
+
 func (w *timingWriter) Commit(context.Context) error {
 	if w.store.extra != nil {
 		w.store.extra()
@@ -210,6 +224,7 @@ func TestRegisterTiming_F4_14_15_Live(t *testing.T) {
 	build := func(store registration.Store) *registration.RegisterUseCase {
 		uc, err := registration.NewRegisterUseCase(registration.Deps{
 			Store: store, Rule: rule, Hasher: hasher, Lane: lane, TTL: time.Hour, Logger: slog.New(slog.DiscardHandler),
+			Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace,
 		})
 		require.NoError(t, err)
 		return uc

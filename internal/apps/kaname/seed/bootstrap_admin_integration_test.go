@@ -61,9 +61,11 @@ func seedBootstrapUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, em
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Адрес подтверждён (kaname#456, Р12): посев выдаёт только подтверждённому;
+	// строку без отметки сеет `seedUnverifiedBootstrapUser`.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		uid, accID, "ext-"+uid, email, "Bootstrap Admin")
 	require.NoError(t, err)
 	// accounts.name must match the single resource-name form of the tree — derive a valid lowercase
@@ -181,4 +183,14 @@ func TestRunBootstrapAdmin_Idempotent_NoDuplicate(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM cluster_admin_grants WHERE subject_id=$1`, uid).Scan(&grants))
 	assert.Equal(t, 1, grants, "no duplicate grant on re-run")
+}
+
+// seedUnverifiedBootstrapUser — действующая строка с адресом посева БЕЗ отметки
+// подтверждения (kaname#456, Р12): предмет проб полосы И.
+func seedUnverifiedBootstrapUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email string) string {
+	t.Helper()
+	uid := seedBootstrapUser(t, ctx, pool, email)
+	_, err := pool.Exec(ctx, `UPDATE users SET email_verified_at = NULL WHERE id = $1`, uid)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): снятие отметки")
+	return uid
 }

@@ -52,12 +52,9 @@ func TestIntegration_EndingSessionsRevokesTheirTokenFamilies(t *testing.T) {
 		TTL:                 time.Minute,
 	}), "посев кода и семейства")
 
-	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         ceremonyDigest(9001),
-		RefreshTokenDigest: ceremonyDigest(9002),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.NoError(t, err, "обмен кода на обновляющий токен")
+	// Обмен — ходом движка над хранилищами прод-сборки (`ceremonyWalk`).
+	exchanged, err := newCeremonyWalk(t, pool).exchange(ctx, ceremonyDigest(9001), ceremonyDigest(9002))
+	requireWalkIssued(t, exchanged, err, "обмен кода на обновляющий токен")
 
 	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: до снятия сессии семейство живо и токен активен.
 	var revokedReason *string

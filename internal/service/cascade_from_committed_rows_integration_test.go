@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -94,7 +95,7 @@ func newCIWorld(t *testing.T) *ciWorld {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	door := authzcascade.Wrap(relverdict.NewAsker(pool))
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	require.True(t, door.FormReachable(),
 		"ПРЕДПОСЫЛКА: дверь собрана без формы — тогда КАЖДЫЙ вопрос ниже вернул бы ошибку, "+
 			"а не вердикт, и ни одно утверждение файла не было бы о доступе")
@@ -137,13 +138,26 @@ func (w *ciWorld) seedAccountWithOwner(t *testing.T, accountID, ownerUserID stri
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $1, $2)`,
 		accountID, ownerUserID)
 	require.NoErrorf(t, err, "посев аккаунта %s", accountID)
-	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id)
-	                       VALUES ($1, $1, $1 || '@example.test', $2)`, ownerUserID, accountID)
+	// Владелец действует в мире пробы — его адрес подтверждён (kaname#456,
+	// Р4а: права неподтверждённого не действуют).
+	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+	                       VALUES ($1, $1, $1 || '@example.test', $2, now())`, ownerUserID, accountID)
 	require.NoErrorf(t, err, "посев владельца %s", ownerUserID)
 	require.NoError(t, tx.Commit(ctx))
 }
 
+// seedUser — человек, действующий в мире пробы: адрес подтверждён
+// (kaname#456, Р4а — права неподтверждённого не действуют, и мир, где человек
+// действует, обязан это условие создать).
 func (w *ciWorld) seedUser(t *testing.T, id, accountID string) {
+	t.Helper()
+	w.exec(t, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+	           VALUES ($1, $1, $1 || '@example.test', $2, now())`, id, accountID)
+}
+
+// seedUnverifiedUser — человек с неподтверждённым адресом: предмет проб полосы
+// Д приёмки kaname#456.
+func (w *ciWorld) seedUnverifiedUser(t *testing.T, id, accountID string) {
 	t.Helper()
 	w.exec(t, `INSERT INTO kaname.users (id, external_id, email, account_id)
 	           VALUES ($1, $1, $1 || '@example.test', $2)`, id, accountID)

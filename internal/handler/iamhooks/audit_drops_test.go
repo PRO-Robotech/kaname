@@ -5,13 +5,15 @@ package iamhooks_test
 
 // audit_drops_test.go — счёт незаписанного журнала полос хука: отказ записи
 // сосчитан и возвращён обработчику как есть, запись — не сосчитана, сборка без
-// приёмника отказывает (kaname#389). Через сборку корня то же держит
+// приёмника отказывает (kaname#389), а срезанная пределом запись сосчитана при
+// любом порядке счёта и предела (kaname#436). Через сборку корня то же держит
 // `TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake`.
 
 import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -53,4 +55,53 @@ func TestObserveAuditDrops_LeavesAnUnwiredSinkUnwired(t *testing.T) {
 	got, err := iamhooks.ObserveAuditDrops(nil, dropCounter{})
 	require.NoError(t, err)
 	require.Nil(t, got, "обёртка над неподанной записью журнала прошла бы мимо ветви «журнал не провязан»")
+}
+
+// hangingAudit — запись журнала, которую отпускает только конец контекста.
+type hangingAudit struct{}
+
+func (hangingAudit) Emit(ctx context.Context, _ iamhooks.AuditEvent) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestObserveAuditDrops_CountsTheCutWriteOnEitherSideOfTheCallDeadline — запись,
+// срезанная пределом на вызов, сосчитана и когда счёт надет поверх предела, и когда
+// под ним (kaname#436, находка 3: опыт J3 опроверг довод шапки «счёт под пределом
+// её бы не увидел»). Контекст вызывающего несёт ОТМЕНУ через много пределов, а не
+// срок: запись обязан отпустить предел обёртки, и иначе проба назовёт отмену.
+func TestObserveAuditDrops_CountsTheCutWriteOnEitherSideOfTheCallDeadline(t *testing.T) {
+	const limit = 20 * time.Millisecond
+	orders := map[string]func(drops dropCounter) iamhooks.AuditEmitter{
+		"счёт поверх предела": func(drops dropCounter) iamhooks.AuditEmitter {
+			bounded, err := iamhooks.WithCallDeadline(iamhooks.IssuancePorts{Audit: hangingAudit{}}, limit)
+			require.NoError(t, err)
+			counted, err := iamhooks.ObserveAuditDrops(bounded.Audit, drops)
+			require.NoError(t, err)
+			return counted
+		},
+		"счёт под пределом": func(drops dropCounter) iamhooks.AuditEmitter {
+			counted, err := iamhooks.ObserveAuditDrops(hangingAudit{}, drops)
+			require.NoError(t, err)
+			bounded, err := iamhooks.WithCallDeadline(iamhooks.IssuancePorts{Audit: counted}, limit)
+			require.NoError(t, err)
+			return bounded.Audit
+		},
+	}
+	for name, build := range orders {
+		t.Run(name, func(t *testing.T) {
+			drops := dropCounter{}
+			sink := build(drops)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stop := time.AfterFunc(100*limit, cancel)
+			defer stop.Stop()
+
+			err := sink.Emit(ctx, iamhooks.AuditEvent{EventType: iamhooks.AuditTokenIssued})
+			require.ErrorIs(t, err, context.DeadlineExceeded,
+				"зависшая запись отпущена не пределом обёртки, а %v", err)
+			require.Equal(t, dropCounter{iamhooks.AuditTokenIssued: 1}, drops,
+				"%s: запись срезана пределом и не записана, а счёт её не увидел", name)
+		})
+	}
 }

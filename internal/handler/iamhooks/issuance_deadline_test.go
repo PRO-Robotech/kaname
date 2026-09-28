@@ -16,6 +16,7 @@ package iamhooks_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -100,6 +101,25 @@ func (l logAudit) Emit(ctx context.Context, _ iamhooks.AuditEvent) error {
 	return errFromStore
 }
 
+// portPresenceFault судит поле входа обёртки ДО обращения к нему: подан ли порт
+// пробой и дошёл ли поданный через обёртку. Пусто — порт на месте.
+//
+// Причины две и названы РАЗНЫМИ словами (kaname#436, находка 5). Поле входа,
+// которое `loggedPorts` не заполняет, — дефект ПРОБЫ: порт не подан, и обёртка над
+// ним не судима. Поданный порт, которого после обёртки нет, — дефект ОБЁРТКИ.
+// Прежде оба случая краснели вторым текстом, и новое поле входа называлось
+// потерянным обёрткой, хотя его не подавали.
+func portPresenceFault(name string, given, wrapped reflect.Value) string {
+	switch {
+	case given.IsNil():
+		return fmt.Sprintf("порт %s пробой НЕ ПОДАН: loggedPorts не заполняет это поле входа, и обёртка "+
+			"над ним не судима — заведите ему логирующий порт", name)
+	case wrapped.IsNil():
+		return fmt.Sprintf("порт %s подан, а после обёртки его нет", name)
+	}
+	return ""
+}
+
 func loggedPorts(l *portLog) iamhooks.IssuancePorts {
 	return iamhooks.IssuancePorts{
 		Users:           logUsers{l},
@@ -116,8 +136,10 @@ func loggedPorts(l *portLog) iamhooks.IssuancePorts {
 func TestWithCallDeadline_EveryPortMethodCarriesItsOwnLimit(t *testing.T) {
 	const limit = 2 * time.Second
 	log := &portLog{}
-	bounded, err := iamhooks.WithCallDeadline(loggedPorts(log), limit)
+	given := loggedPorts(log)
+	bounded, err := iamhooks.WithCallDeadline(given, limit)
 	require.NoError(t, err)
+	gv := reflect.ValueOf(given)
 
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	errType := reflect.TypeOf((*error)(nil)).Elem()
@@ -132,8 +154,8 @@ func TestWithCallDeadline_EveryPortMethodCarriesItsOwnLimit(t *testing.T) {
 			continue
 		}
 		ports++
-		if port.IsNil() {
-			t.Errorf("порт %s подан, а после обёртки его нет", field.Name)
+		if fault := portPresenceFault(field.Name, gv.Field(i), port); fault != "" {
+			t.Error(fault)
 			continue
 		}
 		for m := 0; m < field.Type.NumMethod(); m++ {
@@ -162,7 +184,10 @@ func TestWithCallDeadline_EveryPortMethodCarriesItsOwnLimit(t *testing.T) {
 				continue
 			}
 			last := out[len(out)-1]
-			if last.Type() != errType || !errors.Is(last.Interface().(error), errFromStore) {
+			// Чтение исхода не паникует на пустом: обёртка, проглотившая отказ
+			// порта, обязана краснеть этим текстом, а не паникой приведения типа.
+			outcome, _ := last.Interface().(error)
+			if last.Type() != errType || !errors.Is(outcome, errFromStore) {
 				t.Errorf("%s.%s: исход порта не дошёл до вызывающего как есть: %v", field.Name, name, last)
 				continue
 			}
@@ -181,6 +206,24 @@ func TestWithCallDeadline_EveryPortMethodCarriesItsOwnLimit(t *testing.T) {
 		t.Fatal("обход входа обёртки не нашёл ни одного метода порта — предел НЕ ИЗМЕРЕН, это не зелёное")
 	}
 	t.Logf("перепись: портов %d · методов %d · под пределом %s — %d", ports, methods, limit, carried)
+}
+
+// TestPortPresenceFault_NamesTheCauseItFinds — судья присутствия порта называет
+// неподанный порт дефектом пробы, потерянный — дефектом обёртки, и молчит на
+// порте, поданном и дошедшем. Вход — синтетическая пара полей того же вида, что у
+// входа обёртки: интерфейсное поле, пустое либо заполненное.
+func TestPortPresenceFault_NamesTheCauseItFinds(t *testing.T) {
+	type pair struct{ Users iamhooks.UserLookupPort }
+	set := reflect.ValueOf(pair{Users: logUsers{&portLog{}}}).Field(0)
+	unset := reflect.ValueOf(pair{}).Field(0)
+
+	require.Contains(t, portPresenceFault("Users", unset, unset), "НЕ ПОДАН",
+		"поле, которое проба не заполнила, названо не неподанным")
+	require.NotContains(t, portPresenceFault("Users", unset, unset), "после обёртки",
+		"неподанный порт назван потерянным обёрткой")
+	require.Contains(t, portPresenceFault("Users", set, unset), "подан, а после обёртки его нет",
+		"порт, потерянный обёрткой, назван не ею")
+	require.Empty(t, portPresenceFault("Users", set, set), "законный близнец: порт подан и дошёл")
 }
 
 // TestWithCallDeadline_AbsentPortStaysAbsent — неподанный порт обёртка не
@@ -212,4 +255,11 @@ func TestWithCallDeadline_RefusesANonPositiveLimitAtBuild(t *testing.T) {
 	bounded, err := iamhooks.WithCallDeadline(loggedPorts(&portLog{}), time.Nanosecond)
 	require.NoError(t, err, "законный близнец: наименьшая положительная величина собирается")
 	require.NotNil(t, bounded.Users)
+}
+
+// PersonMarks — второй вопрос правила выдачи (kaname#456): тем же пределом,
+// что отсечка, и с тем же исходом порта.
+func (l logCutoffs) PersonMarks(ctx context.Context, _ []string) (map[string]bool, error) {
+	l.record(ctx, "Cutoffs", "PersonMarks")
+	return nil, errFromStore
 }

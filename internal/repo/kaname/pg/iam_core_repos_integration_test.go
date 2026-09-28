@@ -86,8 +86,8 @@ func kac127SeedUserAndAccount(t *testing.T, ctx context.Context, pool *pgxpool.P
 		accID, "kac127-"+suffix, uid)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx,
-		`INSERT INTO users (id, external_id, email, account_id, invite_status)
-		 VALUES ($1, $2, $3, $4, 'ACTIVE')`,
+		`INSERT INTO users (id, external_id, email, account_id, invite_status, email_verified_at)
+		 VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
 		uid, "ext-"+suffix, "u-"+suffix+"@kac127.local", accID)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
@@ -585,6 +585,9 @@ func TestIamExtRepos_6_10_1_Bootstrap_Happy(t *testing.T) {
 	// Set email to a known value.
 	_, err := pool.Exec(ctx, `UPDATE users SET email='root@kacho.cloud' WHERE id=$1`, uid)
 	require.NoError(t, err)
+	// Смена адреса снимает отметку (триггер схемы); посев выдаёт права только
+	// подтвердившему (kaname#456, Р4а) — Дано: новый адрес подтверждён.
+	markAddressVerified(t, ctx, pool, uid)
 
 	res, err := seedpkg.RunBootstrapAdmin(ctx, pool, slog.Default(), seedpkg.BootstrapAdminInput{
 		Email: "root@kacho.cloud",
@@ -610,6 +613,9 @@ func TestIamExtRepos_6_10_2_Bootstrap_Idempotent(t *testing.T) {
 	uid, _ := kac127SeedUserAndAccount(t, ctx, pool, "boot2")
 	_, err := pool.Exec(ctx, `UPDATE users SET email='idem@kacho.cloud' WHERE id=$1`, uid)
 	require.NoError(t, err)
+	// Смена адреса снимает отметку (триггер схемы); посев выдаёт права только
+	// подтвердившему (kaname#456, Р4а) — Дано: новый адрес подтверждён.
+	markAddressVerified(t, ctx, pool, uid)
 
 	// First run.
 	res1, err := seedpkg.RunBootstrapAdmin(ctx, pool, slog.Default(), seedpkg.BootstrapAdminInput{
@@ -641,6 +647,9 @@ func TestIamExtRepos_6_10_5_Bootstrap_ConcurrentHA_OneWinner(t *testing.T) {
 	uid, _ := kac127SeedUserAndAccount(t, ctx, pool, "boot5")
 	_, err := pool.Exec(ctx, `UPDATE users SET email='ha@kacho.cloud' WHERE id=$1`, uid)
 	require.NoError(t, err)
+	// Смена адреса снимает отметку (триггер схемы); посев выдаёт права только
+	// подтвердившему (kaname#456, Р4а) — Дано: новый адрес подтверждён.
+	markAddressVerified(t, ctx, pool, uid)
 
 	const N = 5
 	var wg sync.WaitGroup

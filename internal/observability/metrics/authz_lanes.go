@@ -70,6 +70,7 @@ type subjectAuthorizer interface {
 	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
 	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
 	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
+	NeutralDenyReasons(ctx context.Context, req service.CheckRequest) []string
 }
 
 // InstrumentedSubjectAuthorizer — сквозной декоратор публичного решателя.
@@ -144,4 +145,11 @@ func (d *InstrumentedSubjectAuthorizer) ListSubjects(ctx context.Context, req se
 
 func (d *InstrumentedSubjectAuthorizer) ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error) {
 	return d.inner.ExpandRelations(ctx, req)
+}
+
+// NeutralDenyReasons — сквозной проход БЕЗ наблюдения: это текст отказа, а не
+// вопрос о доступе, и в счёт проверок он не входит. Ответ возвращается дословно —
+// транспорт сверяет его побайтно с отказом подтверждённому субъекту.
+func (d *InstrumentedSubjectAuthorizer) NeutralDenyReasons(ctx context.Context, req service.CheckRequest) []string {
+	return d.inner.NeutralDenyReasons(ctx, req)
 }

@@ -45,6 +45,11 @@ import (
 // Параметр, который никто не читает, — объявление зависимости, которой нет:
 // следующий провяжет его «как положено» и будет прав по форме и неправ по делу.
 //
+// Отказ сборки полос выдачи ВОЗВРАЩАЕТСЯ вызывающему ошибкой (kaname#440), и
+// корень отказывает старту С ЭТОЙ ПРИЧИНОЙ (`hooksLaneSurface`). Строки журнала
+// и пустого обработчика вместо неё нет: отказ, выведенный из отсутствия
+// обработчика, называл бы «обслуживать нечем», а не то, что сломалось.
+//
 // Реконсайлер тоже ПРОКИДЫВАЕТСЯ, а не строится здесь, и это не единообразие
 // ради единообразия: собранный здесь экземпляр не нёс приёмника размера, поэтому
 // материализации живой полосы первого входа в гистограмму не попадали, а она
@@ -63,7 +68,7 @@ func buildHooksMux(
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
-) http.Handler {
+) (http.Handler, error) {
 	hookSecret := cfg.AuthN.ResolveHookSharedSecret()
 	domain := cfg.AuthN.ResolveDomain()
 	hydraIssuer := cfg.AuthN.ResolveHydraIssuer()
@@ -86,12 +91,9 @@ func buildHooksMux(
 		Audit:      &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit},
 	}, metricsReg.AuthnHookAuditDropsRecorder(handlerinternal.AuditEventTypes()), logger)
 	if err != nil {
-		// Отказ сборки полос выдачи — отказ старта, а не полоса без пределов:
-		// без обработчика поверхность с объявленным адресом не строится
-		// (`servicecontract.NewSurface`: «обслуживать нечем»), и корень не
-		// поднимается. Причину называет эта строка журнала.
-		logger.Error("hooks: issuance lanes refused to assemble", "err", err)
-		return nil
+		// Отказ сборки полос выдачи — отказ старта, а не полоса без пределов, и
+		// причину называет значение, а не строка журнала.
+		return nil, fmt.Errorf("обработчики хуков выдачи: %w", err)
 	}
 
 	// Provision hook (C4): Kratos registration/login → UpsertFromIdentity.
@@ -146,7 +148,7 @@ func buildHooksMux(
 	wrapped := handlerinternal.LoggerMiddleware(mux, func(method, path string, status int) {
 		logger.Info("hooks http", "method", method, "path", path, "status", status)
 	})
-	return wrapped
+	return wrapped, nil
 }
 
 // userProvisionAdapter maps the iamhooks.UserProvisioner port to the
@@ -321,14 +323,19 @@ func buildIssuanceHooks(
 // `hooks_lane_posture_test.go`.
 //
 // build — сборка обработчика полосы; зовётся, только когда поверхность
-// поднимается.
+// поднимается. Её отказ — отказ построителя С ЕЁ ПРИЧИНОЙ (kaname#440): корень
+// не стартует и называет, что не собралось.
 func hooksLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog.Logger,
-	tlsCfg *tls.Config, build func() http.Handler,
+	tlsCfg *tls.Config, build func() (http.Handler, error),
 ) (servicecontract.SurfaceDescriptor, error) {
 	addr := hooksListenAddress(cfg)
 	var handler http.Handler
 	if cfg.AuthN.HasExternalIdentityProvider() {
-		handler = build()
+		built, err := build()
+		if err != nil {
+			return servicecontract.SurfaceDescriptor{}, fmt.Errorf("полоса вебхуков поставщика личности не собрана: %w", err)
+		}
+		handler = built
 	}
 	if handler == nil {
 		tlsCfg = nil

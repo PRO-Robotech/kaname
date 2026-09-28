@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/oauthceremony"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -81,9 +82,11 @@ func TestIntegration_LoginLaneCutoffWriterWritesBothRecords(t *testing.T) {
 // сессий (смена пароля, снятие второго фактора, завершение восстановления)
 // отзывает выданное в них.
 //
-// Ротацию обновляющего токена останавливает РОВНО отзыв семейства: запрос
-// ротации не читает ни отметку окончания сессии, ни одну из отсечек. Значит
-// сессия, снятая без отзыва, снята только в записи.
+// Отметку окончания сессии ротация НЕ читает: прод-путь (ход движка над
+// хранилищами, `ceremonyWalk`) останавливают отзыв семейства и отсечка
+// субъекта. Значит сессия, снятая без отзыва, снята только в записи, и
+// предмет судит строка семейства — отозвано ли оно причиной «сессия окончена»;
+// отказ ротации — его следствие.
 func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
@@ -104,20 +107,13 @@ func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
 		ACR:                 "1",
 		TTL:                 time.Minute,
 	}))
-	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         ceremonyDigest(7101),
-		RefreshTokenDigest: ceremonyDigest(7102),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.NoError(t, err)
+	walk := newCeremonyWalk(t, pool)
+	exchanged, err := walk.exchange(ctx, ceremonyDigest(7101), ceremonyDigest(7102))
+	requireWalkIssued(t, exchanged, err, "обмен кода")
 
 	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: до снятия обновляющий токен РОТИРУЕТСЯ.
-	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: ceremonyDigest(7102),
-		SuccessorDigest: ceremonyDigest(7103),
-		TTL:             time.Hour,
-	})
-	require.NoError(t, err, "до снятия ротация обязана проходить — иначе отрицание ниже беспредметно")
+	rotated, err := walk.rotate(ctx, ceremonyDigest(7102), ceremonyDigest(7103))
+	requireWalkIssued(t, rotated, err, "до снятия ротация обязана проходить — иначе отрицание ниже беспредметно")
 
 	// ПРЕДМЕТ: снять ПРОЧИЕ сессии (сохраняемой сессии у этой личности нет,
 	// поэтому снимается посевная) — тем же путём, каким это делает смена пароля.
@@ -132,12 +128,9 @@ func TestIntegration_EndingOtherSessionsRevokesTheirFamilies(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Преемник, выданный ротацией, больше не ротируется: семейство отозвано.
-	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: ceremonyDigest(7103),
-		SuccessorDigest: ceremonyDigest(7104),
-		TTL:             time.Hour,
-	})
-	require.Error(t, err,
+	rotated, err = walk.rotate(ctx, ceremonyDigest(7103), ceremonyDigest(7104))
+	require.Errorf(t, err, "исход хода %s", rotated)
+	require.ErrorIs(t, err, oauthceremony.ErrGrantNotFound,
 		"после снятия сессии обновляющий токен ПРОДОЛЖАЕТ ротироваться в свежие: "+
 			"снятие записи ротацию не останавливает, её останавливает только отзыв семейства")
 
@@ -175,20 +168,13 @@ func TestIntegration_EndingOneSessionRevokesItsFamily(t *testing.T) {
 		ACR:                 "1",
 		TTL:                 time.Minute,
 	}))
-	_, err = ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         ceremonyDigest(8201),
-		RefreshTokenDigest: ceremonyDigest(8202),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.NoError(t, err)
+	walk := newCeremonyWalk(t, pool)
+	exchanged, err := walk.exchange(ctx, ceremonyDigest(8201), ceremonyDigest(8202))
+	requireWalkIssued(t, exchanged, err, "обмен кода")
 
 	// ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: до выхода ротация ПРОХОДИТ.
-	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: ceremonyDigest(8202),
-		SuccessorDigest: ceremonyDigest(8203),
-		TTL:             time.Hour,
-	})
-	require.NoError(t, err, "до выхода ротация обязана проходить — иначе отрицание беспредметно")
+	rotated, err := walk.rotate(ctx, ceremonyDigest(8202), ceremonyDigest(8203))
+	requireWalkIssued(t, rotated, err, "до выхода ротация обязана проходить — иначе отрицание беспредметно")
 
 	// ПРЕДМЕТ: человек выходит САМ — тем же оператором, каким его выводит выход.
 	sessions := kanamepg.NewHumanSessionRepo(pool)
@@ -200,12 +186,9 @@ func TestIntegration_EndingOneSessionRevokesItsFamily(t *testing.T) {
 	require.True(t, ended, "запись обязана быть снята этим вызовом")
 	require.NoError(t, w.Commit(ctx))
 
-	_, err = ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: ceremonyDigest(8203),
-		SuccessorDigest: ceremonyDigest(8204),
-		TTL:             time.Hour,
-	})
-	require.Error(t, err,
+	rotated, err = walk.rotate(ctx, ceremonyDigest(8203), ceremonyDigest(8204))
+	require.Errorf(t, err, "исход хода %s", rotated)
+	require.ErrorIs(t, err, oauthceremony.ErrGrantNotFound,
 		"после СОБСТВЕННОГО выхода человека обновляющий токен продолжает ротироваться "+
 			"в свежие: запись помечена окончённой, а выданное в ней живо")
 
