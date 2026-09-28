@@ -7,7 +7,10 @@
 // `docs/specs/sub-phase-F6b-console-and-edge-confirmed-address-gate-acceptance.md`,
 // край и служба; приёмка службы
 // `docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md`;
-// задача PRO-Robotech/kaname#464).
+// задача PRO-Robotech/kaname#464). Половина, судящая миграции, — адрес И
+// отметка его подтверждения, формы определения схемы и строки триггера, ведомость
+// применённых миграций — в `people_address_writers_migrations.go` (задача
+// PRO-Robotech/kaname#471).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ
@@ -26,6 +29,12 @@
 // новой строки прежнего адреса нет — и находкой не является; оно считается в
 // переписи операторов записи в строки людей.
 //
+// Корпус — ДВА вида входа, и оба судит один разбор текста SQL: строковые
+// выражения непроверочного Go и тексты миграций. Предмет у них разный: в Go —
+// адрес (у отметки подтверждения в Go есть законный писатель — глагол
+// подтверждения), в миграции — адрес и отметка (у миграции законного писателя
+// отметки нет).
+//
 // ─────────────────────────────────────────────────────────────────────────────
 // СУДИТСЯ СПИСОК SET ОПЕРАТОРА, А НЕ ПОДСТРОКА
 //
@@ -41,9 +50,13 @@
 //
 //	UPDATE [ONLY] [kaname.]users [[AS] u] SET … email = …        ветвь UPDATE
 //	UPDATE users SET (…, email, …) = (…)                          та же ветвь
+//	IF … THEN UPDATE users SET … · правило DO UPDATE users SET …   та же ветвь
 //	INSERT INTO users … ON CONFLICT … DO UPDATE SET … email = …    ветвь ON CONFLICT
 //	MERGE INTO users … WHEN MATCHED THEN UPDATE SET … email = …    ветвь MERGE
 //	любая из них внутри CTE, в склейке, в формате fmt.Sprintf, в строке SQL
+//
+// и формы вне списка SET — определение схемы, переписывающее значения строк, и
+// присваивание строке триггера (`people_address_writers_migrations.go`).
 //
 // Имя без кавычек сравнивается без регистра ASCII, в кавычках — побайтово (так
 // разрешает база; лексер общий).
@@ -94,10 +107,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
 //
-//  1. Корпус — непроверочный Go дерева (`ProductionGoFile`). Операторы вне Go —
-//     миграции, триггеры и функции базы — не судятся: исторический посев
-//     названной строки адрес в миграции пишет, и применённая миграция не
-//     правится. Новый писатель адреса в миграции этим гейтом не виден.
+//  1. Корпус — непроверочный Go дерева и миграции службы (`PeopleAddressInput`).
+//     Места в ПРИМЕНЁННЫХ миграциях, которые правке не подлежат (ban #5),
+//     названы ведомостью поимённо — точной координатой
+//     (`people_address_writers_migrations.go`); у Go ведомости нет.
 //  2. Текст, собранный во время исполнения, судится по звеньям, которые
 //     сворачиваются (литерал, склейка, константа). Колонка адреса, дошедшая до
 //     списка SET не словом свёрнутого текста — из данных либо значением,
@@ -125,6 +138,8 @@ const (
 	PeopleRowsTable = "users"
 	// PeopleAddressColumn — колонка адреса человека.
 	PeopleAddressColumn = "email"
+	// PeopleMarkColumn — колонка отметки подтверждения адреса человека.
+	PeopleMarkColumn = "email_verified_at"
 	// peopleRowsSchema — схема службы: имя со схемой судится только в ней.
 	peopleRowsSchema = "kaname"
 )
@@ -136,6 +151,19 @@ const (
 	SetListMerge    = "MERGE … THEN UPDATE SET"
 )
 
+// peopleGoSubject и peopleMigrationSubject — колонки, запись которых судится в
+// своём виде входа.
+var (
+	peopleGoSubject        = map[string]bool{PeopleAddressColumn: true}
+	peopleMigrationSubject = map[string]bool{PeopleAddressColumn: true, PeopleMarkColumn: true}
+)
+
+// PeopleAddressInput — отбор корпуса гейта: непроверочный Go и миграции
+// службы. Объявлен один раз: гейт дерева и его перепись судят один отбор.
+func PeopleAddressInput(rel string) bool {
+	return ProductionGoFile(rel) || IsMigrationFile(rel)
+}
+
 // Виды операторов записи в строки людей — ключи переписи.
 const (
 	PeopleStmtUpdate = "UPDATE"
@@ -144,13 +172,13 @@ const (
 	PeopleStmtMerge  = "MERGE"
 )
 
-// PeopleAddressCensus — объём осмотренного.
-type PeopleAddressCensus struct {
-	// Files — разобранные файлы корпуса.
+// PeopleAddressHalf — объём осмотренного одного вида входа.
+type PeopleAddressHalf struct {
+	// Files — разобранные файлы.
 	Files int
-	// StringValues — свёрнутые строковые значения: по одному на наибольшее
-	// свёрнутое выражение.
-	StringValues int
+	// Texts — судимые тексты: у Go — свёрнутые строковые значения (по одному на
+	// наибольшее свёрнутое выражение), у миграций — файлы.
+	Texts int
 	// Statements — операторы записи в строки людей по виду.
 	Statements map[string]int
 	// SetLists — прочитанные списки SET над строками людей по ветви.
@@ -163,38 +191,97 @@ type PeopleAddressCensus struct {
 	AssignmentPieces int
 	// Columns — колонки строк людей, которые пишут прочитанные списки SET.
 	Columns map[string]int
-	// Writers — координаты записи адреса в существующую строку.
-	Writers []string
-	// Undecided — координаты операторов, которые разбор не решает.
-	Undecided []string
+	// TableAlters — операторы ALTER TABLE над строками людей.
+	TableAlters int
+	// Routines — прочитанные тела подпрограмм (`CREATE FUNCTION … AS строка`).
+	Routines int
+	// Triggers — прочитанные объявления триггеров; TriggersOverPeople — из них
+	// над строками людей.
+	Triggers, TriggersOverPeople int
+	// RowAssignments — присваивания строке триггера (`NEW.колонка := …`,
+	// `NEW := …`, `INTO NEW.колонка`) в телах подпрограмм, любой колонки.
+	RowAssignments int
+}
+
+func newPeopleAddressHalf() PeopleAddressHalf {
+	return PeopleAddressHalf{Statements: map[string]int{}, SetLists: map[string]int{}, Columns: map[string]int{}}
 }
 
 // StatementsTotal — всего операторов записи в строки людей.
-func (c PeopleAddressCensus) StatementsTotal() int {
+func (h PeopleAddressHalf) StatementsTotal() int {
 	n := 0
-	for _, v := range c.Statements {
+	for _, v := range h.Statements {
 		n += v
 	}
 	return n
 }
 
-// String — строка переписи для вывода проб.
-func (c PeopleAddressCensus) String() string {
-	cols := make([]string, 0, len(c.Columns))
-	for k, v := range c.Columns {
+// String — перепись вида входа словами.
+func (h PeopleAddressHalf) String() string {
+	cols := make([]string, 0, len(h.Columns))
+	for k, v := range h.Columns {
 		cols = append(cols, fmt.Sprintf("%s×%d", k, v))
 	}
 	sort.Strings(cols)
-	return fmt.Sprintf("файлов %d · строковых значений %d · операторов записи в строки людей %d "+
+	return fmt.Sprintf("операторов записи в строки людей %d "+
 		"(UPDATE %d · INSERT %d · DELETE %d · MERGE %d) · списков SET: %s %d · %s %d · %s %d, "+
-		"из них закрыто в тексте %d · колонки [%s] · звеньев-присваиваний %d · писателей адреса %d · "+
-		"не решается разбором %d",
-		c.Files, c.StringValues, c.StatementsTotal(),
-		c.Statements[PeopleStmtUpdate], c.Statements[PeopleStmtInsert], c.Statements[PeopleStmtDelete],
-		c.Statements[PeopleStmtMerge],
-		SetListUpdate, c.SetLists[SetListUpdate], SetListConflict, c.SetLists[SetListConflict],
-		SetListMerge, c.SetLists[SetListMerge], c.SetListsClosed, strings.Join(cols, " "), c.AssignmentPieces,
-		len(c.Writers), len(c.Undecided))
+		"из них закрыто в тексте %d · колонки [%s] · звеньев-присваиваний %d · ALTER TABLE над строками людей %d · "+
+		"тел подпрограмм %d · триггеров %d (над строками людей %d) · присваиваний строке триггера %d",
+		h.StatementsTotal(),
+		h.Statements[PeopleStmtUpdate], h.Statements[PeopleStmtInsert], h.Statements[PeopleStmtDelete],
+		h.Statements[PeopleStmtMerge],
+		SetListUpdate, h.SetLists[SetListUpdate], SetListConflict, h.SetLists[SetListConflict],
+		SetListMerge, h.SetLists[SetListMerge], h.SetListsClosed, strings.Join(cols, " "), h.AssignmentPieces,
+		h.TableAlters, h.Routines, h.Triggers, h.TriggersOverPeople, h.RowAssignments)
+}
+
+// add — прибавить к переписи вида входа итог разбора одного текста.
+func (h *PeopleAddressHalf) add(p *peopleText) {
+	for k, v := range p.stmts {
+		h.Statements[k] += v
+	}
+	for k, v := range p.sets {
+		h.SetLists[k] += v
+	}
+	for k, v := range p.columns {
+		h.Columns[k] += v
+	}
+	h.SetListsClosed += p.closed
+	h.AssignmentPieces += p.pieces
+	h.TableAlters += p.alters
+	h.Routines += p.routines
+	h.Triggers += len(p.triggers)
+	for _, tr := range p.triggers {
+		if tr.table == tablePeople {
+			h.TriggersOverPeople++
+		}
+	}
+	h.RowAssignments += p.rowAssigns
+}
+
+// PeopleAddressCensus — объём осмотренного по обоим видам входа.
+type PeopleAddressCensus struct {
+	// Go и Migrations — исходники Go и миграции службы.
+	Go, Migrations PeopleAddressHalf
+	// Writers — координаты записи адреса (в миграции — и отметки) мимо глагола.
+	Writers []string
+	// Undecided — координаты операторов, которые разбор не решает.
+	Undecided []string
+	// Applied — места применённых миграций, названные ведомостью: разобраны на
+	// этом прогоне, находкой не являются.
+	Applied []string
+	// LedgerEntries — записей ведомости; LedgerStale — из них без предмета
+	// (находка); LedgerOutOfCorpus — о файлах, которых в корпусе нет.
+	LedgerEntries, LedgerStale, LedgerOutOfCorpus int
+}
+
+// String — строка переписи для вывода проб.
+func (c PeopleAddressCensus) String() string {
+	return fmt.Sprintf("исходники Go: файлов %d · строковых значений %d · %s; "+
+		"миграции: файлов %d · %s; писателей %d · не решается разбором %d · "+
+		"названо ведомостью применённых миграций %d (записей %d, без предмета %d, о файлах вне корпуса %d)",
+		c.Go.Files, c.Go.Texts, c.Go, c.Migrations.Files, c.Migrations,
+		len(c.Writers), len(c.Undecided), len(c.Applied), c.LedgerEntries, c.LedgerStale, c.LedgerOutOfCorpus)
 }
 
 // addressWriterFinding — текст отказа на месте записи адреса: называет, с чем
@@ -211,11 +298,29 @@ func addressWriterFinding(where, branch string) string {
 		"и приёмка службы access-beyond-login-needs-a-verified-address.md", where, branch)
 }
 
+// markWriterFinding — текст отказа на месте записи отметки подтверждения.
+func markWriterFinding(where, branch string) string {
+	return fmt.Sprintf("%s — оператор пишет отметку подтверждения адреса человека (kaname.users.email_verified_at) "+
+		"мимо глагола подтверждения (%s). У отметки два писателя, и третьего не заводится: ставит её только "+
+		"предъявление кода подтверждения — оператор `markEmailVerifiedSQL` службы, сверяющий адрес в том же "+
+		"операторе; снимает — база на смене адреса (триггер users_email_change_drops_verification). "+
+		"Источник — приёмка службы access-beyond-login-needs-a-verified-address.md (Р7) и задача kaname#471",
+		where, branch)
+}
+
+// peopleSubjectWords — предмет вида входа словами находки «не решается».
+func peopleSubjectWords(subject map[string]bool) string {
+	if subject[PeopleMarkColumn] {
+		return "адрес человека либо отметку его подтверждения (kaname.users.email, kaname.users.email_verified_at)"
+	}
+	return "адрес человека (kaname.users.email)"
+}
+
 // undecidedFinding — текст отказа на форме, которую разбор не решает.
-func undecidedFinding(where, why string) string {
-	return fmt.Sprintf("%s — %s: разбор не решает, пишет ли оператор адрес человека (kaname.users.email). "+
+func undecidedFinding(where, why, subject string) string {
+	return fmt.Sprintf("%s — %s: разбор не решает, пишет ли оператор %s. "+
 		"Список колонок и таблица обязаны сворачиваться при разборе (литерал, склейка, константа); "+
-		"форма, которую гейт не решает, — находка, а не молчание", where, why)
+		"форма, которую гейт не решает, — находка, а не молчание", where, why, subject)
 }
 
 // peopleTableKind — что стоит на месте таблицы оператора.
@@ -231,12 +336,15 @@ const (
 // peopleMark — место в тексте, о котором говорит находка.
 type peopleMark struct {
 	at     int
+	column string // у писателя: какую колонку предмета он пишет
 	branch string // у писателя
 	why    string // у формы, которую разбор не решает
 }
 
 // peopleText — итог разбора одного текста.
 type peopleText struct {
+	// subject — колонки, запись которых судится в этом виде входа.
+	subject           map[string]bool
 	writes, undecided []peopleMark
 	stmts, sets       map[string]int
 	columns           map[string]int
@@ -248,10 +356,19 @@ type peopleText struct {
 	// уровня пакета, которое свёртка подставляет в каждое обращение, и звеном
 	// оно судится там, где к нему обращаются.
 	noPieces bool
+	// routine — подпрограмма, чьё тело этот текст; пусто — текст не тело.
+	routine peopleRoutine
+	// alters — операторы ALTER TABLE над строками людей; routines — тела
+	// подпрограмм; rowAssigns — присваивания строке триггера любой колонки.
+	alters, routines, rowAssigns int
+	// triggers — объявления триггеров; assigns — присваивания строке триггера
+	// колонки предмета либо строки целиком: решаются привязкой по всему корпусу.
+	triggers []peopleTrigger
+	assigns  []peopleAssign
 }
 
-func newPeopleText() *peopleText {
-	return &peopleText{stmts: map[string]int{}, sets: map[string]int{}, columns: map[string]int{}}
+func newPeopleText(subject map[string]bool) *peopleText {
+	return &peopleText{subject: subject, stmts: map[string]int{}, sets: map[string]int{}, columns: map[string]int{}}
 }
 
 // peopleLockingPrev — слова, после которых UPDATE — не оператор: блокировка
@@ -523,10 +640,10 @@ func (p *peopleText) judgeSetItems(items []setItem, at int, people bool, branch 
 			switch {
 			case c.hole || c.bad:
 				p.undecided = append(p.undecided, peopleMark{at: it.at, why: "колонка списка SET — подстановка либо не имя (" + branch + ")"})
-			case c.name == PeopleAddressColumn && people:
-				p.writes = append(p.writes, peopleMark{at: it.at, branch: branch})
-			case c.name == PeopleAddressColumn:
-				p.undecided = append(p.undecided, peopleMark{at: it.at, why: "оператор пишет колонку адреса, а таблица — подстановка (" + branch + ")"})
+			case p.subject[c.name] && people:
+				p.writes = append(p.writes, peopleMark{at: it.at, column: c.name, branch: branch})
+			case p.subject[c.name]:
+				p.undecided = append(p.undecided, peopleMark{at: it.at, why: "оператор пишет колонку " + c.name + ", а таблица — подстановка (" + branch + ")"})
 			case people:
 				p.columns[c.name]++
 			}
@@ -563,11 +680,21 @@ func judgePeopleText(src string, depth int, p *peopleText) {
 	toks := sqlTokens(src)
 	dep := sqlDepths(toks)
 	consumed := map[int]bool{}
+	// bodies — строки, являющиеся телом подпрограммы, по индексу лексемы;
+	// prose — строки-данные, которые база не исполняет никогда (текст
+	// комментария объекта, формат сообщения RAISE).
+	bodies := map[int]peopleRoutine{}
+	prose := peopleProse(toks, dep)
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
 		switch {
+		case t.kind == sqlTokString && prose[i]:
 		case t.kind == sqlTokString:
-			judgeNestedPeopleText(t, depth, p)
+			judgeNestedPeopleText(t, depth, p, bodies[i])
+		case failureRowIsWord(t, "alter"):
+			p.judgeAlterTableAt(toks, dep, i)
+		case failureRowIsWord(t, "create"):
+			p.judgeCreateAt(toks, dep, i, bodies)
 		case failureRowIsWord(t, "update"):
 			judgeUpdateAt(toks, dep, i, consumed, p)
 		case failureRowIsWord(t, "insert") || failureRowIsWord(t, "merge"):
@@ -603,11 +730,14 @@ func judgePeopleText(src string, depth int, p *peopleText) {
 		items, _ := readSetItems(toks, dep, i+1, dep[i])
 		for _, it := range items {
 			for _, c := range it.cols {
-				if c.name == PeopleAddressColumn {
-					p.undecided = append(p.undecided, peopleMark{at: it.at, why: "список SET называет колонку адреса, а оператор, которому он принадлежит, собирается вне текста"})
+				if p.subject[c.name] {
+					p.undecided = append(p.undecided, peopleMark{at: it.at, why: "список SET называет колонку " + c.name + ", а оператор, которому он принадлежит, собирается вне текста"})
 				}
 			}
 		}
+	}
+	if p.routine.name != "" {
+		p.judgeRowAssignments(toks)
 	}
 	if !p.noPieces {
 		p.judgeAssignmentPiece(toks, dep)
@@ -634,9 +764,9 @@ func (p *peopleText) judgeAssignmentPiece(toks []sqlTok, dep []int) {
 		}
 		piece = true
 		for _, c := range it.cols {
-			if c.name == PeopleAddressColumn {
+			if p.subject[c.name] {
 				p.undecided = append(p.undecided, peopleMark{at: it.at, why: "звено списка присваиваний без оператора и без SET " +
-					"называет колонку адреса в голове элемента — к какому оператору его приставляют во время исполнения, " +
+					"называет колонку " + c.name + " в голове элемента — к какому оператору его приставляют во время исполнения, " +
 					"разбор не решает; звено условия отбора неотличимо от звена списка SET и пишется со своим словом " +
 					"(WHERE, AND, OR) либо выражением над колонкой (`lower(email) = lower($1)`)"})
 			}
@@ -648,21 +778,39 @@ func (p *peopleText) judgeAssignmentPiece(toks []sqlTok, dep []int) {
 }
 
 // judgeNestedPeopleText — содержимое строки SQL судится как текст SQL ещё раз
-// (динамический SQL, тело `DO $$ … $$`); глубже sqlMaxNesting — без грамматики.
-func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText) {
-	for _, r := range t.readings {
-		inner := newPeopleText()
+// (динамический SQL, тело `DO $$ … $$`, тело подпрограммы routine); глубже
+// sqlMaxNesting — без грамматики. Место внутри дословного прочтения называется
+// своим смещением в объемлющем тексте, прочие — началом строки.
+func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText, routine peopleRoutine) {
+	for ri, r := range t.readings {
+		inner := newPeopleText(p.subject)
+		inner.routine = routine
 		if depth < sqlMaxNesting {
 			judgePeopleText(r, depth+1, inner)
-		} else if sqlWordFold(r, PeopleAddressColumn) && sqlWordFold(r, "set") {
-			inner.undecided = append(inner.undecided, peopleMark{why: "строка SQL глубже предела вложенности называет колонку адреса и SET"})
+		} else {
+			for _, col := range sortedSubject(p.subject) {
+				if sqlWordFold(r, col) && sqlWordFold(r, "set") {
+					inner.undecided = append(inner.undecided, peopleMark{why: "строка SQL глубже предела вложенности называет колонку " + col + " и SET"})
+				}
+			}
+		}
+		at := func(m int) int {
+			if ri == 0 && t.verbatim {
+				return t.at + t.bodyOff + m
+			}
+			return t.at
 		}
 		for _, w := range inner.writes {
-			p.writes = append(p.writes, peopleMark{at: t.at, branch: w.branch + ", внутри строки SQL"})
+			p.writes = append(p.writes, peopleMark{at: at(w.at), column: w.column, branch: w.branch + ", внутри строки SQL"})
 		}
 		for _, u := range inner.undecided {
-			p.undecided = append(p.undecided, peopleMark{at: t.at, why: u.why + ", внутри строки SQL"})
+			p.undecided = append(p.undecided, peopleMark{at: at(u.at), why: u.why + ", внутри строки SQL"})
 		}
+		for _, a := range inner.assigns {
+			a.at = at(a.at)
+			p.assigns = append(p.assigns, a)
+		}
+		p.triggers = append(p.triggers, inner.triggers...)
 		for k, v := range inner.stmts {
 			p.stmts[k] += v
 		}
@@ -674,11 +822,25 @@ func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText) {
 		}
 		p.closed += inner.closed
 		p.pieces += inner.pieces
-		if len(inner.writes)+len(inner.undecided)+len(inner.stmts)+inner.pieces > 0 {
+		p.alters += inner.alters
+		p.routines += inner.routines
+		p.rowAssigns += inner.rowAssigns
+		if len(inner.writes)+len(inner.undecided)+len(inner.stmts)+inner.pieces+inner.alters+
+			inner.routines+inner.rowAssigns+len(inner.triggers) > 0 {
 			// Второе прочтение той же строки (обратная коса) — то же место.
 			return
 		}
 	}
+}
+
+// sortedSubject — колонки предмета в устойчивом порядке.
+func sortedSubject(subject map[string]bool) []string {
+	out := make([]string, 0, len(subject))
+	for col := range subject {
+		out = append(out, col)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // judgeUpdateAt — слово UPDATE в i: действие конфликта, действие MERGE либо
@@ -686,10 +848,11 @@ func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText) {
 func judgeUpdateAt(toks []sqlTok, dep []int, i int, consumed map[int]bool, p *peopleText) {
 	if i > 0 {
 		prev := toks[i-1]
-		if failureRowIsWord(prev, "do") || failureRowIsWord(prev, "then") {
-			if i+1 >= len(toks) || !failureRowIsWord(toks[i+1], "set") {
-				return
-			}
+		// За DO и THEN стоит SET — это действие конфликта либо MERGE. Стоит
+		// таблица — это оператор: после THEN в PL/pgSQL (`IF … THEN UPDATE
+		// users SET …`) и после DO в правиле (`DO UPDATE users SET …`).
+		if (failureRowIsWord(prev, "do") || failureRowIsWord(prev, "then")) &&
+			i+1 < len(toks) && failureRowIsWord(toks[i+1], "set") {
 			consumed[i+1] = true
 			branch, opener := SetListConflict, "insert"
 			if prev.name == "then" {
@@ -793,36 +956,20 @@ func runLine(f *lvFile, run []ast.Expr, texts []string, at int) int {
 // его к оператору там. Обращение, которое не вошло в наибольшее свёрнутое
 // выражение (`q += set`, элемент `[]string{…}`, довод вызова), судится звеном в
 // месте обращения.
-func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
+func scanPeopleTexts(ix *lvIndex, f *lvFile, half *PeopleAddressHalf, sc *peopleScan) {
 	report := func(p *peopleText, fn string, line func(at int) int) {
-		where := func(at int) string {
-			loc := fmt.Sprintf("%s:%d", f.rel, line(at))
+		sc.collect(p, half, f.rel, false, func(at int) (int, string) {
+			l := line(at)
+			loc := fmt.Sprintf("%s:%d", f.rel, l)
 			if fn == "" {
-				return loc + " вне функции (объявление пакета)"
+				return l, loc + " вне функции (объявление пакета)"
 			}
-			return loc + " в " + fn + "()"
-		}
-		for _, w := range p.writes {
-			census.Writers = append(census.Writers, addressWriterFinding(where(w.at), w.branch))
-		}
-		for _, u := range p.undecided {
-			census.Undecided = append(census.Undecided, undecidedFinding(where(u.at), u.why))
-		}
-		for k, v := range p.stmts {
-			census.Statements[k] += v
-		}
-		for k, v := range p.sets {
-			census.SetLists[k] += v
-		}
-		for k, v := range p.columns {
-			census.Columns[k] += v
-		}
-		census.SetListsClosed += p.closed
-		census.AssignmentPieces += p.pieces
+			return l, loc + " в " + fn + "()"
+		})
 	}
 	judge := func(text, fn string, line func(at int) int, pieces bool) {
-		census.StringValues++
-		p := newPeopleText()
+		half.Texts++
+		p := newPeopleText(peopleGoSubject)
 		p.noPieces = !pieces
 		judgePeopleText(text, 0, p)
 		report(p, fn, line)
@@ -906,7 +1053,7 @@ func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
 				// там, где оно объявлено, — второй суд того же текста удвоил бы и
 				// перепись, и находку. Здесь оно судится только звеном.
 				toks := sqlTokens(text)
-				p := newPeopleText()
+				p := newPeopleText(peopleGoSubject)
 				p.judgeAssignmentPiece(toks, sqlDepths(toks))
 				report(p, fn, line)
 				return false
@@ -927,27 +1074,70 @@ func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
 	}
 }
 
-// JudgePeopleAddressWriters — ВЕРДИКТ над корпусом непроверочного Go: находки
-// (места записи адреса, формы, которые разбор не решает, пустой обход) и
-// перепись. Корпус приходит параметром: инъекция подаёт синтетику в тот же
-// вердикт, что судит дерево.
+// JudgePeopleAddressWriters — ВЕРДИКТ над корпусом непроверочного Go и миграций
+// службы: находки (места записи адреса, в миграции — и отметки; формы, которые
+// разбор не решает; записи ведомости применённых миграций без предмета; пустой
+// обход любого из двух видов входа) и перепись. Корпус приходит параметром:
+// инъекция подаёт синтетику в тот же вердикт, что судит дерево. Файл вне обоих
+// видов входа — ошибка, а не молчание.
 func JudgePeopleAddressWriters(corpus TreeCorpus) ([]string, PeopleAddressCensus, error) {
-	census := PeopleAddressCensus{Statements: map[string]int{}, SetLists: map[string]int{}, Columns: map[string]int{}}
-	ix, files, _, err := newLVIndex(corpus, PeopleRowsTable)
+	return judgePeopleAddressWriters(corpus, peopleAppliedMigrationSites)
+}
+
+func judgePeopleAddressWriters(corpus TreeCorpus, ledger []PeopleAppliedSite) ([]string, PeopleAddressCensus, error) {
+	census := PeopleAddressCensus{Go: newPeopleAddressHalf(), Migrations: newPeopleAddressHalf(), LedgerEntries: len(ledger)}
+	goCorpus, migrations := TreeCorpus{}, TreeCorpus{}
+	for _, rel := range corpus.Rels() {
+		switch {
+		case strings.HasSuffix(rel, ".go"):
+			goCorpus[rel] = corpus[rel]
+		case IsMigrationFile(rel):
+			migrations[rel] = corpus[rel]
+		default:
+			return nil, census, fmt.Errorf("%s — вне обоих видов входа гейта (исходник Go, миграция каталога %s): "+
+				"гейт не вправе судить файл, грамматики которого он не знает", rel, MigrationsDirRel)
+		}
+	}
+	var sc peopleScan
+	ix, files, _, err := newLVIndex(goCorpus, PeopleRowsTable)
 	if err != nil {
 		return nil, census, err
 	}
 	for _, f := range files {
-		census.Files++
-		scanPeopleTexts(ix, f, &census)
+		census.Go.Files++
+		scanPeopleTexts(ix, f, &census.Go, &sc)
 	}
-	findings := append(append([]string{}, census.Writers...), census.Undecided...)
+	for _, rel := range migrations.Rels() {
+		census.Migrations.Files++
+		scanPeopleMigration(rel, migrations[rel], &census.Migrations, &sc)
+	}
+	sc.resolveRowAssignments()
+
+	sites, applied, stale, outside := matchPeopleLedger(sc.sites, ledger, migrations)
+	census.Applied, census.LedgerStale, census.LedgerOutOfCorpus = applied, len(stale), outside
+	for _, s := range sites {
+		if s.kind == siteUndecided {
+			census.Undecided = append(census.Undecided, s.finding())
+		} else {
+			census.Writers = append(census.Writers, s.finding())
+		}
+	}
+	findings := append(append(append([]string{}, census.Writers...), census.Undecided...), stale...)
 	switch {
-	case census.Files == 0:
+	case census.Go.Files == 0:
 		findings = append(findings, "обход пуст — ни одного файла Go не разобрано: «писателей адреса 0» здесь означало бы «прочитано 0»")
-	case census.StatementsTotal() == 0:
+	case census.Go.StatementsTotal() == 0:
 		findings = append(findings, fmt.Sprintf("операторов записи в строки людей не найдено ни одного (файлов %d, строковых значений %d) — "+
-			"распознаватель слеп либо корпус не тот; молчание о писателях адреса сказано ни о чём", census.Files, census.StringValues))
+			"распознаватель слеп либо корпус не тот; молчание о писателях адреса сказано ни о чём", census.Go.Files, census.Go.Texts))
+	}
+	switch {
+	case census.Migrations.Files == 0:
+		findings = append(findings, "обход миграций пуст — ни одной миграции не прочитано: «писателей адреса и отметки в миграциях 0» "+
+			"здесь означало бы «прочитано 0»")
+	case census.Migrations.StatementsTotal() == 0:
+		findings = append(findings, fmt.Sprintf("в миграциях операторов записи в строки людей не найдено ни одного (миграций %d) — "+
+			"распознаватель слеп либо корпус не тот; молчание о писателях адреса и отметки в миграциях сказано ни о чём",
+			census.Migrations.Files))
 	}
 	sort.Strings(findings)
 	return findings, census, nil

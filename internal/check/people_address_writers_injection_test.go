@@ -64,6 +64,12 @@ func realPeopleWriter(t *testing.T) string {
 	return string(b)
 }
 
+// realWriterCorpus — настоящий файл писателя строк людей и якорь миграций: без
+// него корпус без миграций дал бы находку «обход миграций пуст».
+func realWriterCorpus(src string) check.TreeCorpus {
+	return check.TreeCorpus{peopleWriterRel: src, peopleMigrationAnchorRel: peopleMigrationAnchor}
+}
+
 func judgePeople(t *testing.T, corpus check.TreeCorpus) ([]string, check.PeopleAddressCensus) {
 	t.Helper()
 	findings, census, err := check.JudgePeopleAddressWriters(corpus)
@@ -105,8 +111,8 @@ func mutate(t *testing.T, src, from, to string) string {
 func TestPeopleAddressWriterInjection_RealWriterWithOneChangedFact(t *testing.T) {
 	t.Parallel()
 	src := realPeopleWriter(t)
-	control, census := judgePeople(t, check.TreeCorpus{peopleWriterRel: src})
-	if census.SetLists[check.SetListUpdate] == 0 || census.SetLists[check.SetListConflict] == 0 {
+	control, census := judgePeople(t, realWriterCorpus(src))
+	if census.Go.SetLists[check.SetListUpdate] == 0 || census.Go.SetLists[check.SetListConflict] == 0 {
 		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: в настоящем файле не прочитаны списки SET обеих ветвей: %s", census)
 	}
 
@@ -129,7 +135,7 @@ func TestPeopleAddressWriterInjection_RealWriterWithOneChangedFact(t *testing.T)
 		},
 	}
 	for _, tc := range cases {
-		injected, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, tc.to)})
+		injected, _ := judgePeople(t, realWriterCorpus(mutate(t, src, tc.from, tc.to)))
 		added := newFindings(control, injected)
 		if len(added) != 1 {
 			t.Fatalf("%s: инъекция колонки адреса дала новых находок %d, ждали 1: %v", tc.name, len(added), added)
@@ -146,7 +152,7 @@ func TestPeopleAddressWriterInjection_RealWriterWithOneChangedFact(t *testing.T)
 
 		twinTo := strings.Replace(tc.to, "email = $3", "display_name = $3", 1)
 		twinTo = strings.Replace(twinTo, "email = EXCLUDED.email", "labels = EXCLUDED.labels", 1)
-		twin, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, twinTo)})
+		twin, _ := judgePeople(t, realWriterCorpus(mutate(t, src, tc.from, twinTo)))
 		if extra := newFindings(control, twin); len(extra) != 0 {
 			t.Errorf("%s: законный близнец (другая колонка той же строки) дал находки: %v", tc.name, extra)
 		}
@@ -163,8 +169,8 @@ func TestPeopleAddressWriterInjection_RealWriterWithOneChangedFact(t *testing.T)
 func TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime(t *testing.T) {
 	t.Parallel()
 	src := realPeopleWriter(t)
-	control, census := judgePeople(t, check.TreeCorpus{peopleWriterRel: src})
-	if census.SetLists[check.SetListUpdate] == 0 || census.SetLists[check.SetListConflict] == 0 {
+	control, census := judgePeople(t, realWriterCorpus(src))
+	if census.Go.SetLists[check.SetListUpdate] == 0 || census.Go.SetLists[check.SetListConflict] == 0 {
 		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: в настоящем файле не прочитаны списки SET обеих ветвей: %s", census)
 	}
 
@@ -207,7 +213,7 @@ func TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime(t *testing.T) 
 		},
 	}
 	for _, tc := range cases {
-		injected, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, tc.to)})
+		injected, _ := judgePeople(t, realWriterCorpus(mutate(t, src, tc.from, tc.to)))
 		added := newFindings(control, injected)
 		if len(added) != 1 {
 			t.Errorf("%s: инъекция дала новых находок %d, ждали 1: %v", tc.name, len(added), added)
@@ -219,7 +225,7 @@ func TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime(t *testing.T) 
 			t.Errorf("%s: находка не называет координату, функцию %s, ветвь %s и форму «не решается»: %s", tc.name, tc.fn, tc.branch, got)
 		}
 
-		twin, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, tc.twin)})
+		twin, _ := judgePeople(t, realWriterCorpus(mutate(t, src, tc.from, tc.twin)))
 		if extra := newFindings(control, twin); len(extra) != 0 {
 			t.Errorf("%s: законный близнец дал находки: %v", tc.name, extra)
 		}
@@ -227,13 +233,15 @@ func TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime(t *testing.T) 
 }
 
 // peopleAnchor — оператор записи в строки людей, без которого корпус из одного
-// файла дал бы находку «операторов не найдено».
+// файла дал бы находку «операторов не найдено»; якорь миграций — рядом с
+// половиной миграций (people_address_writers_migration_injection_test.go).
 const peopleAnchor = "package anchor\n\nfunc drop() { _ = \"DELETE FROM users WHERE id = $1\" }\n"
 
 func peopleProbe(body string) check.TreeCorpus {
 	return check.TreeCorpus{
 		"internal/anchor/anchor.go":   peopleAnchor,
 		"internal/probe/pg/writer.go": "package pg\n\nfunc (w *userWriter) Probe(col, tbl, rest, cols string) {\n\t" + body + "\n}\n",
+		peopleMigrationAnchorRel:      peopleMigrationAnchor,
 	}
 }
 
@@ -259,6 +267,31 @@ func TestPeopleAddressWriterInjection_EveryLawfulFormIsFound(t *testing.T) {
 		"формат":        `_ = fmt.Sprintf("UPDATE users SET email = $1 RETURNING %s", cols)`,
 		"строка SQL":    `_ = "DO $$ BEGIN UPDATE users SET email = 'x' WHERE id = 'y'; END $$"`,
 		"сырой литерал": "_ = `\n\t\tUPDATE users\n\t\t   SET email = $1\n\t\t WHERE id = $2`",
+
+		// Оператор PL/pgSQL после THEN и действие правила после DO — оператор, а
+		// не действие конфликта либо MERGE: за словом стоит таблица, а не SET.
+		"PL/pgSQL после THEN": `_ = "DO $$ BEGIN IF true THEN UPDATE kaname.users SET email = 'x' WHERE id = 'y'; END IF; END $$"`,
+		"правило DO UPDATE":   `_ = "CREATE RULE r AS ON INSERT TO audit DO UPDATE users SET email = NEW.email WHERE id = NEW.id"`,
+
+		// Определение схемы, переписывающее значения лежащих строк.
+		"колонка адреса с умолчанием":   `_ = "ALTER TABLE kaname.users ADD COLUMN IF NOT EXISTS email text DEFAULT 'x'"`,
+		"вычисляемая колонка адреса":    `_ = "ALTER TABLE users ADD email text GENERATED ALWAYS AS (lower(display_name)) STORED"`,
+		"смена типа с выражением":       `_ = "ALTER TABLE users ALTER COLUMN email TYPE text USING lower(email)"`,
+		"SET DATA TYPE с выражением":    `_ = "ALTER TABLE ONLY users ALTER email SET DATA TYPE text USING trim(email)"`,
+		"смена выражения":               `_ = "ALTER TABLE users ALTER COLUMN email SET EXPRESSION AS (lower(display_name))"`,
+		"переименование в адрес":        `_ = "ALTER TABLE IF EXISTS users RENAME COLUMN legacy_email TO email"`,
+		"таблица переименована в людей": `_ = "ALTER TABLE staged_people RENAME TO users"`,
+
+		// Присваивание строке триггера, привязанного к строкам людей на смене.
+		"присваивание NEW в триггере": "_ = `CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.email := lower(NEW.email); RETURN NEW; END $$;\n" +
+			"CREATE TRIGGER t BEFORE INSERT OR UPDATE ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.f()`",
+		"присваивание NEW знаком =": "_ = `CREATE OR REPLACE FUNCTION f() RETURNS trigger AS $$ BEGIN IF true THEN NEW.email = 'x'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE OF display_name ON users FOR EACH ROW EXECUTE PROCEDURE f()`",
+		"умолчание адреса": `_ = "ALTER TABLE users ALTER COLUMN email SET DEFAULT ''"`,
+		"триггер заведения строки": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.email := lower(NEW.email); RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION f()`",
+		"SELECT INTO NEW": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN SELECT lower(o.email) INTO STRICT NEW.email FROM other o; RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION f()`",
 	}
 	for name, body := range forms {
 		findings, census := judgePeople(t, peopleProbe(body))
@@ -312,6 +345,21 @@ func TestPeopleAddressWriterInjection_UndecidedFormIsAFinding(t *testing.T) {
 		"звено-кортеж":                 `_ = "(display_name, email) = ($1, $2)"`,
 		"звено-константа за значением": "const set = \"email = $3\"\n\t_ = strings.Join([]string{rest, set}, \", \")",
 		"константа за переменной":      "const column = \"email\"\n\t_ = \"UPDATE \" + tbl + \" SET \" + column + \" = $1\"",
+
+		// Определение схемы с подстановкой: колонка либо таблица вне текста.
+		"переименование в подстановку": `_ = fmt.Sprintf("ALTER TABLE users RENAME COLUMN legacy TO %s", col)`,
+		"таблица подстановкой в DDL":   `_ = fmt.Sprintf("ALTER TABLE %s RENAME COLUMN legacy TO email", tbl)`,
+		"подстановка вместо колонки":   `_ = fmt.Sprintf("ALTER TABLE users ALTER COLUMN %s TYPE text USING lower(%s)", col, col)`,
+
+		// Присваивание строке триггера, чью привязку разбор не решает.
+		"функция без триггера": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.email := 'x'; RETURN NEW; END $$ LANGUAGE plpgsql`",
+		"запись строки целиком": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW := jsonb_populate_record(NEW, '{}'); RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION f()`",
+		"строка триггера целиком через INTO": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN SELECT * INTO NEW FROM staged s WHERE s.id = NEW.id; RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION f()`",
+		"таблица из подстановки в людей": `_ = fmt.Sprintf("ALTER TABLE %s RENAME TO users", tbl)`,
+		"триггер над подстановкой": "_ = fmt.Sprintf(`CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.email := 'x'; RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON %s FOR EACH ROW EXECUTE FUNCTION f()`, tbl)",
 	}
 	for name, body := range forms {
 		findings, census := judgePeople(t, peopleProbe(body))
@@ -378,6 +426,26 @@ func TestPeopleAddressWriterInjection_LawfulTwinsAreSilent(t *testing.T) {
 		"константа другой колонки за переменной": "const column = \"display_name\"\n\t_ = \"UPDATE \" + tbl + \" SET \" + column + \" = $1\"",
 		"звено условия выражением над колонкой":  `_ = fmt.Sprintf("lower(email) = lower($%d)", n)`,
 		"адрес не в голове сообщения":            `_ = fmt.Errorf("subject not found by email=%s", col)`,
+
+		// Близнецы определения схемы: новая колонка без значения, умолчание для
+		// новых строк, ограничение, тип без выражения, адрес прочь, чужая таблица.
+		"колонка адреса без умолчания":     `_ = "ALTER TABLE kaname.users ADD COLUMN IF NOT EXISTS email text"`,
+		"умолчание NULL":                   `_ = "ALTER TABLE users ADD COLUMN email text DEFAULT NULL"`,
+		"ограничение над адресом":          `_ = "ALTER TABLE ONLY kaname.users ADD CONSTRAINT users_email_check CHECK (length(email) > 2)"`,
+		"умолчание адреса снято":           `_ = "ALTER TABLE users ALTER COLUMN email DROP DEFAULT, ALTER COLUMN email SET NOT NULL, ALTER COLUMN email SET DEFAULT NULL"`,
+		"тип без выражения":                `_ = "ALTER TABLE users ALTER COLUMN email TYPE text COLLATE \"C\""`,
+		"адрес переименован прочь":         `_ = "ALTER TABLE users RENAME COLUMN email TO email_legacy"`,
+		"переименование чужой колонки":     `_ = "ALTER TABLE memberships RENAME COLUMN note TO email"`,
+		"таблица людей переименована":      `_ = "ALTER TABLE users RENAME TO users_archive"`,
+		"переименование ограничения":       `_ = "ALTER TABLE users RENAME CONSTRAINT users_email_check TO users_address_check"`,
+		"выражение другой колонки":         `_ = "ALTER TABLE users ALTER COLUMN labels TYPE jsonb USING labels::jsonb"`,
+		"оператор PL/pgSQL другой колонки": `_ = "DO $$ BEGIN IF true THEN UPDATE kaname.users SET display_name = 'x' WHERE id = 'y'; END IF; END $$"`,
+
+		// Близнецы присваивания строке триггера.
+		"триггер чужой таблицы": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.email := lower(NEW.email); RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON kaname.email_verification_codes FOR EACH ROW EXECUTE FUNCTION f()`",
+		"адрес в условии триггера": "_ = `CREATE FUNCTION f() RETURNS trigger AS $$ DECLARE v text; BEGIN v := NEW.email; IF NEW.email IS DISTINCT FROM OLD.email THEN NEW.display_name := v; END IF; RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON users FOR EACH ROW WHEN (OLD.email IS DISTINCT FROM NEW.email) EXECUTE FUNCTION f()`",
 	}
 	for name, body := range twins {
 		findings, census := judgePeople(t, peopleProbe(body))
@@ -388,19 +456,26 @@ func TestPeopleAddressWriterInjection_LawfulTwinsAreSilent(t *testing.T) {
 }
 
 // TestPeopleAddressWriterInjection_EmptyWalkIsNotAVerdict — пустой обход и
-// корпус без операторов записи в строки людей — находка; неразобранный файл —
-// ошибка.
+// корпус без операторов записи в строки людей — находка; неразобранный файл и
+// файл вне обоих видов входа — ошибка.
 func TestPeopleAddressWriterInjection_EmptyWalkIsNotAVerdict(t *testing.T) {
 	t.Parallel()
 	findings, _ := judgePeople(t, check.TreeCorpus{})
-	if len(findings) != 1 || !strings.Contains(findings[0], "обход пуст") {
-		t.Errorf("пустой обход — не вердикт: %v", findings)
+	joined := strings.Join(findings, "\n")
+	if len(findings) != 2 || !strings.Contains(joined, "обход пуст — ни одного файла Go") || !strings.Contains(joined, "обход миграций пуст") {
+		t.Errorf("пустой обход обоих видов входа — не вердикт, по находке на вид: %v", findings)
 	}
-	findings, _ = judgePeople(t, check.TreeCorpus{"internal/x/x.go": "package x\n\nvar _ = \"SELECT 1\"\n"})
-	if len(findings) != 1 || !strings.Contains(findings[0], "операторов записи в строки людей не найдено") {
-		t.Errorf("корпус без операторов записи в строки людей — не вердикт: %v", findings)
+	findings, _ = judgePeople(t, check.TreeCorpus{
+		"internal/x/x.go":        "package x\n\nvar _ = \"SELECT 1\"\n",
+		peopleMigrationAnchorRel: peopleMigrationAnchor,
+	})
+	if len(findings) != 1 || !strings.HasPrefix(findings[0], "операторов записи в строки людей не найдено") {
+		t.Errorf("корпус Go без операторов записи в строки людей — не вердикт: %v", findings)
 	}
 	if _, _, err := check.JudgePeopleAddressWriters(check.TreeCorpus{"internal/x/x.go": "package x\n\nfunc {"}); err == nil {
 		t.Error("неразобранный файл — ошибка, а не молчание")
+	}
+	if _, _, err := check.JudgePeopleAddressWriters(check.TreeCorpus{"internal/migrations/README.md": "UPDATE users SET email = 1"}); err == nil {
+		t.Error("файл вне обоих видов входа — ошибка, а не молчание")
 	}
 }
