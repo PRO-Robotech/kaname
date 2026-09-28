@@ -248,7 +248,7 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 
 	// Один экземпляр службы состава на все полосы.
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).
 		WithUserTokenPort(&fakeUserTokenPort{client: uoc, user: users.users[0]}).
@@ -260,7 +260,6 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 			iamhooks.TokenHookConfig{
 				HookSharedSecret: issuanceHookSecret,
 				Domain:           "api.test.cloud",
-				HydraIssuer:      "https://hydra.test.cloud",
 			},
 			enricher, revs, &fakeAudit{}, discard,
 		)
@@ -339,7 +338,6 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 				iamhooks.RefreshHookConfig{
 					HookSharedSecret: "secret",
 					Domain:           "api.test.cloud",
-					HydraIssuer:      "https://hydra.test.cloud",
 				},
 				users, enricher, revs, &fakeAudit{}, discard,
 			)
