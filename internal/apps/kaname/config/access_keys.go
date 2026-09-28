@@ -271,8 +271,16 @@ func (c AccessKeysConfig) Validate() error {
 // Binding — привязка в форме проверяющего: имя, нормализованные происхождения
 // (пустые при «никого»), разобранный перечень алгоритмов. Страж выше не
 // допускает негодных величин; здесь негодное отбрасывается, а не подставляется.
+//
+// Объявленный перечень приезжает объявленным: при «никого» — пустой, но НЕ nil.
+// Потребитель (`access_keys.Deps`) читает nil как «не задан» и отказывает в
+// старте; отдать nil за «никого» значило уронить посадку, которую страж выше
+// принял (kaname#454). Незаданный перечень остаётся nil.
 func (c AccessKeysConfig) Binding() webauthnverify.Binding {
 	b := webauthnverify.Binding{RPID: strings.TrimSpace(c.RPID)}
+	if c.Origins != nil {
+		b.Origins = []string{}
+	}
 	if !c.originsAreNone() {
 		for _, raw := range c.Origins {
 			if norm, why := normalizeOrigin(raw); why == "" {
