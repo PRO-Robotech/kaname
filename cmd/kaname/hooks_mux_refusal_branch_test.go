@@ -30,6 +30,11 @@ package main
 // не тем, что сломалось), и отказ, не несущий отказа сборки (причина потеряна).
 // Отказ корня с причиной на шве держит `TestIssuanceLanesAssemblyRefusalReachesTheStartWithItsCause`.
 //
+// Сборок в корне две, и долг ветви у них один (kaname#441): полосы выдачи
+// (`buildIssuanceHooks`) и хуки заведения и восстановления (`buildLifecycleHooks`).
+// Перечень сборок — [hooksMuxAssemblies]; сборка, вызова которой в `buildHooksMux`
+// нет, — находка, а не молчание.
+//
 // Законные формы записи, которые разбор знает: присваивание и следом `if <err> !=
 // nil`; то же с присваиванием в заголовке `if`. Любая другая форма — находка с
 // именем формы, а не молчание.
@@ -47,14 +52,19 @@ import (
 // refusalBranchVerdict — сколько вызовов сборки полос найдено в функции и что с
 // их ветвями отказа не так.
 type refusalBranchVerdict struct {
-	calls  int
-	faults []string
+	calls      int
+	byAssembly map[string]int
+	faults     []string
 }
+
+// hooksMuxAssemblies — сборки обработчиков, которые зовёт `buildHooksMux`, и
+// ветвь отказа каждой судится одним правилом.
+var hooksMuxAssemblies = []string{"buildIssuanceHooks", "buildLifecycleHooks"}
 
 // judgeRefusalBranches разбирает src и судит в функции fn ветвь отказа каждого
 // вызова `buildIssuanceHooks`.
 func judgeRefusalBranches(src, fn string) (refusalBranchVerdict, error) {
-	var v refusalBranchVerdict
+	v := refusalBranchVerdict{byAssembly: map[string]int{}}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "hooks_mux.go", src, 0)
 	if err != nil {
@@ -73,22 +83,24 @@ func judgeRefusalBranches(src, fn string) (refusalBranchVerdict, error) {
 	walk = func(list []ast.Stmt) {
 		for i, st := range list {
 			if ifs, ok := st.(*ast.IfStmt); ok {
-				if as, ok := ifs.Init.(*ast.AssignStmt); ok && callsAssembly(as) {
+				if as, ok := ifs.Init.(*ast.AssignStmt); ok && callsAssembly(as) != "" {
 					v.calls++
+					v.byAssembly[callsAssembly(as)]++
 					v.faults = append(v.faults, judgeOneBranch(fset, as, ifs)...)
 					walk(ifs.Body.List)
 					continue
 				}
 			}
-			if as, ok := st.(*ast.AssignStmt); ok && callsAssembly(as) {
+			if as, ok := st.(*ast.AssignStmt); ok && callsAssembly(as) != "" {
 				v.calls++
+				v.byAssembly[callsAssembly(as)]++
 				var next *ast.IfStmt
 				if i+1 < len(list) {
 					next, _ = list[i+1].(*ast.IfStmt)
 				}
 				if next == nil {
-					v.faults = append(v.faults, fmt.Sprintf("%s: за вызовом buildIssuanceHooks нет проверки "+
-						"его отказа — отказ сборки проходит мимо", fset.Position(as.Pos())))
+					v.faults = append(v.faults, fmt.Sprintf("%s: за вызовом %s нет проверки "+
+						"его отказа — отказ сборки проходит мимо", fset.Position(as.Pos()), callsAssembly(as)))
 					continue
 				}
 				v.faults = append(v.faults, judgeOneBranch(fset, as, next)...)
@@ -102,17 +114,26 @@ func judgeRefusalBranches(src, fn string) (refusalBranchVerdict, error) {
 	return v, nil
 }
 
-// callsAssembly — присваивание результатов вызова `buildIssuanceHooks`.
-func callsAssembly(as *ast.AssignStmt) bool {
+// callsAssembly — имя сборки из [hooksMuxAssemblies], результаты вызова которой
+// присваиваются; пусто — присваивание не из сборки.
+func callsAssembly(as *ast.AssignStmt) string {
 	if len(as.Rhs) != 1 {
-		return false
+		return ""
 	}
 	call, ok := as.Rhs[0].(*ast.CallExpr)
 	if !ok {
-		return false
+		return ""
 	}
 	id, ok := call.Fun.(*ast.Ident)
-	return ok && id.Name == "buildIssuanceHooks"
+	if !ok {
+		return ""
+	}
+	for _, name := range hooksMuxAssemblies {
+		if id.Name == name {
+			return name
+		}
+	}
+	return ""
 }
 
 // judgeOneBranch — ветвь отказа одного вызова: проверка ошибки ИМЕННО этого
@@ -151,7 +172,7 @@ func judgeOneBranch(fset *token.FileSet, as *ast.AssignStmt, ifs *ast.IfStmt) []
 		out = append(out, fmt.Sprintf("%s: ветвь отказа пуста — сборка продолжается с пустыми обработчиками", at))
 	} else if _, ok := list[len(list)-1].(*ast.ReturnStmt); !ok {
 		out = append(out, fmt.Sprintf("%s: ветвь отказа кончается не возвратом — корень идёт дальше и собирает "+
-			"мультиплексор с пустыми обработчиками выдачи", at))
+			"мультиплексор с пустыми обработчиками", at))
 	}
 	return out
 }
@@ -167,8 +188,8 @@ func judgeRefusalReturn(fset *token.FileSet, ret *ast.ReturnStmt, errName string
 	}
 	var out []string
 	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "nil" {
-		out = append(out, fmt.Sprintf("%s: ветвь отказа сборки полос возвращает ОБРАБОТЧИК, а не nil — "+
-			"поверхность с объявленным адресом поднимется без хуков выдачи", at))
+		out = append(out, fmt.Sprintf("%s: ветвь отказа сборки возвращает ОБРАБОТЧИК, а не nil — "+
+			"поверхность с объявленным адресом поднимется без хуков, которые не собрались", at))
 	}
 	refusal := ret.Results[1]
 	if id, ok := refusal.(*ast.Ident); ok && id.Name == "nil" {
@@ -190,7 +211,8 @@ func judgeRefusalReturn(fset *token.FileSet, ret *ast.ReturnStmt, errName string
 }
 
 // TestHooksMuxAssemblyRefusalYieldsNoHandler — в `buildHooksMux` ветвь отказа
-// сборки полос выдачи возвращает nil обработчиком и отказ, несущий причину сборки.
+// каждой сборки обработчиков возвращает nil обработчиком и отказ, несущий
+// причину сборки.
 func TestHooksMuxAssemblyRefusalYieldsNoHandler(t *testing.T) {
 	src, err := os.ReadFile("hooks_mux.go")
 	if err != nil {
@@ -200,10 +222,13 @@ func TestHooksMuxAssemblyRefusalYieldsNoHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("предпосылка: %v", err)
 	}
-	t.Logf("перепись: вызовов buildIssuanceHooks в buildHooksMux %d · находок %d", v.calls, len(v.faults))
-	if v.calls == 0 {
-		t.Fatal("в buildHooksMux нет ни одного вызова buildIssuanceHooks — проба беспредметна: она молчала бы " +
-			"и тогда, когда полосы выдачи собираются мимо неё")
+	t.Logf("перепись: сборок %d · вызовов в buildHooksMux %d (%v) · находок %d",
+		len(hooksMuxAssemblies), v.calls, v.byAssembly, len(v.faults))
+	for _, name := range hooksMuxAssemblies {
+		if v.byAssembly[name] == 0 {
+			t.Errorf("в buildHooksMux нет ни одного вызова %s — проба беспредметна для этой сборки: она молчала бы "+
+				"и тогда, когда обработчики собираются мимо неё", name)
+		}
 	}
 	for _, f := range v.faults {
 		t.Error(f)
@@ -245,6 +270,16 @@ func TestHooksMuxRefusalBranchJudgeRedsOnTheMutantsItIsFor(t *testing.T) {
 		{"мутант: проверяется чужая ошибка",
 			wrap(call + "\tif other != nil {\n\t\treturn nil, other\n\t}"), 1, "не проверка"},
 		{"беспредметно: вызова сборки нет", wrap("\t_ = cfg"), 0, ""},
+		// Сборка хуков заведения и восстановления (kaname#441) — та же ветвь отказа,
+		// тот же долг: обработчика нет, причина доходит до старта.
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: сборка хуков заведения и восстановления, отказ с причиной",
+			wrap("\tprovisionHook, recoveryHook, err := buildLifecycleHooks(secret, ports, logger)\n" +
+				"\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"обработчики хуков заведения и восстановления: %w\", err)\n\t}"), 1, ""},
+		{"мутант: ветвь отказа сборки хуков заведения и восстановления возвращает обработчик",
+			wrap("\tprovisionHook, recoveryHook, err := buildLifecycleHooks(secret, ports, logger)\n" +
+				"\tif err != nil {\n\t\treturn http.NotFoundHandler(), fmt.Errorf(\"x: %w\", err)\n\t}"), 1, "ОБРАБОТЧИК"},
+		{"мутант: отказ сборки хуков заведения и восстановления не проверен",
+			wrap("\tprovisionHook, recoveryHook, err := buildLifecycleHooks(secret, ports, logger)\n\t_ = provisionHook"), 1, "нет проверки"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
