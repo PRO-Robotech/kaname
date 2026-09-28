@@ -89,7 +89,6 @@ func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 
 	assert.Equal(t, map[string]any{
 		"kaname_external_id":       "client-abc",
-		"kaname_hydra_client_id":   "client-abc",
 		"kaname_principal_type":    "user",
 		"kaname_principal_id":      "usr-abc",
 		"kaname_user_id":           "usr-abc",

@@ -31,6 +31,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -268,4 +269,40 @@ func TestNoIssuanceLaneStampsTheIssuerClaim(t *testing.T) {
 		}
 	}
 	t.Logf("перепись: полос %d · непустых составов %d · несут %s — %d", len(lanes), len(lanes), issuerClaim, carrying)
+}
+
+// TestNoIssuanceLaneNamesTheRetiredProvider — kaname#375: ни одно имя
+// утверждения не содержит имени поставщика, ни одно строковое значение его не
+// несёт.
+func TestNoIssuanceLaneNamesTheRetiredProvider(t *testing.T) {
+	lanes, fixture := npIssuanceLanes(t)
+	npRequireFixtureFreeOfProvider(t, fixture)
+	npRequireLanesAnswered(t, lanes)
+
+	var names, values, byName, byValue int
+	for _, l := range lanes {
+		keys := make([]string, 0, len(l.claims))
+		for k := range l.claims {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			names++
+			if strings.Contains(strings.ToLower(k), check.RetiredIssuerName) {
+				byName++
+				t.Errorf("полоса %q: имя утверждения %s называет прежнего поставщика", l.name, k)
+			}
+			s, ok := l.claims[k].(string)
+			if !ok {
+				continue
+			}
+			values++
+			if strings.Contains(strings.ToLower(s), check.RetiredIssuerName) {
+				byValue++
+				t.Errorf("полоса %q: значение утверждения %s = %q называет прежнего поставщика", l.name, k, s)
+			}
+		}
+	}
+	t.Logf("перепись: полос %d · имён утверждений %d · строковых значений %d · находок по имени %d, по значению %d",
+		len(lanes), names, values, byName, byValue)
 }
