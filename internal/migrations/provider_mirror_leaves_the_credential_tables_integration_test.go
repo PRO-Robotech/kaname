@@ -493,16 +493,20 @@ VALUES ('uoc_00000000000000c01', 'usr00000000000000bat', 'previous-issuer-late',
 	done := make(chan error, 1)
 	go func() { done <- goose.UpTo(db, ".", own) }()
 
-	// Накат обязан ЖДАТЬ писателя: захват таблиц — первый его оператор.
+	// Накат обязан встать в ОЖИДАНИЕ писателя. Условие — любое ожидание
+	// захвата в этой базе, а не текст оператора: проба судит исход (увидел ли
+	// накат строку), и ждать ей нужно лишь того, что накат уже упёрся в
+	// писателя, каким бы оператором он ни упёрся.
 	require.Eventually(t, func() bool {
 		var waiting int
 		if qerr := db.QueryRow(`
 			SELECT count(*) FROM pg_stat_activity
-			 WHERE wait_event_type = 'Lock' AND query ILIKE '%LOCK TABLE%'`).Scan(&waiting); qerr != nil {
+			 WHERE datname = current_database() AND wait_event_type = 'Lock'
+			   AND pid <> pg_backend_pid()`).Scan(&waiting); qerr != nil {
 			return false
 		}
 		return waiting > 0
-	}, 20*time.Second, 50*time.Millisecond, "накат не встал в ожидание захвата — конкурирующая строка не проверяется")
+	}, 20*time.Second, 50*time.Millisecond, "накат не встал в ожидание писателя — конкурирующая строка не проверяется")
 
 	require.NoError(t, writer.Commit(), "писатель коммитит строку, пока накат ждёт")
 
