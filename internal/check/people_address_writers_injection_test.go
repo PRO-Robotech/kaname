@@ -10,8 +10,17 @@
 //     тремя условиями глагола смены адреса) либо другая колонка той же строки
 //     (законный близнец — молчит). Прогонов три: контроль, инъекция, близнец;
 //     инъекция обязана добавить к контролю ровно одну находку;
+//   - НАСТОЯЩИЙ вход, продолженный во время исполнения: к списку SET того же
+//     файла приставлен хвост, в значение элемента поставлена подстановка либо
+//     условие отбора по адресу записано звеном-присваиванием (находка «не
+//     решается» с координатой и ветвью); тот же хвост и та же подстановка после
+//     слова, закрывающего список, и условие выражением над колонкой — законный
+//     близнец, молчит;
 //   - каждая законная форма записи адреса — находка; каждая форма, которую
-//     разбор не решает, — находка «не решается»; законные близнецы тех же
+//     разбор не решает, — находка «не решается», в том числе список SET,
+//     полный в литерале и продолженный во время исполнения (`+=`, склейка с
+//     переменной, `strings.Join`, построитель, подстановка в значении), и
+//     звено-присваивание адреса без оператора; законные близнецы тех же
 //     форм — молчат;
 //   - пустой обход и корпус без операторов записи в строки людей — находка, а
 //     не зелёное; неразобранный файл — ошибка, а не молчание.
@@ -144,6 +153,79 @@ func TestPeopleAddressWriterInjection_RealWriterWithOneChangedFact(t *testing.T)
 	}
 }
 
+// TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime — настоящий
+// файл, ветви UPDATE и ON CONFLICT: список SET, полный в литерале, продолжен во
+// время исполнения — хвостом за списком либо подстановкой в значении элемента;
+// звено условия отбора по адресу записано присваиванием. Инъекция — ровно одна
+// новая находка «не решается» с координатой, функцией и ветвью; близнец — тот
+// же хвост либо та же подстановка после слова, закрывающего список, и условие
+// выражением над колонкой — молчит.
+func TestPeopleAddressWriterInjection_RealWriterExtendedAtRunTime(t *testing.T) {
+	t.Parallel()
+	src := realPeopleWriter(t)
+	control, census := judgePeople(t, check.TreeCorpus{peopleWriterRel: src})
+	if census.SetLists[check.SetListUpdate] == 0 || census.SetLists[check.SetListConflict] == 0 {
+		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: в настоящем файле не прочитаны списки SET обеих ветвей: %s", census)
+	}
+
+	cases := []struct {
+		name, from, to, twin, fn, branch string
+	}{
+		{
+			name:   "UPDATE, хвост за списком",
+			from:   "`UPDATE users SET labels = $2 WHERE id = $1 RETURNING %s`",
+			to:     "`UPDATE users SET labels = $2` + tail + ` WHERE id = $1 RETURNING %s`",
+			twin:   "`UPDATE users SET labels = $2 WHERE id = $1` + tail + ` RETURNING %s`",
+			fn:     "userWriter.UpdateLabels",
+			branch: check.SetListUpdate,
+		},
+		{
+			name:   "UPDATE, подстановка в значении",
+			from:   "`UPDATE users SET labels = $2 WHERE id = $1 RETURNING %s`",
+			to:     "`UPDATE users SET labels = %s WHERE id = $1 RETURNING %s`",
+			twin:   "`UPDATE users SET labels = $2 WHERE id = %s RETURNING %s`",
+			fn:     "userWriter.UpdateLabels",
+			branch: check.SetListUpdate,
+		},
+		{
+			// Звено условия отбора `email = $N` неотличимо от звена списка SET;
+			// дерево пишет его выражением над колонкой.
+			name:   "звено-присваивание адреса",
+			from:   `fmt.Sprintf("lower(email) = lower($%d)", argIdx)`,
+			to:     `fmt.Sprintf("email = $%d", argIdx)`,
+			twin:   `fmt.Sprintf("lower(email) = $%d", argIdx)`,
+			fn:     "userReader.List",
+			branch: "звено списка присваиваний",
+		},
+		{
+			name:   "ON CONFLICT, хвост за списком",
+			from:   "       END\n\t\t\tRETURNING %s, (xmax = 0) AS inserted",
+			to:     "       END` + tail + `\n\t\t\tRETURNING %s, (xmax = 0) AS inserted",
+			twin:   "       END\n\t\t\tRETURNING %s` + tail + `, (xmax = 0) AS inserted",
+			fn:     "userWriter.InsertPending",
+			branch: check.SetListConflict,
+		},
+	}
+	for _, tc := range cases {
+		injected, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, tc.to)})
+		added := newFindings(control, injected)
+		if len(added) != 1 {
+			t.Errorf("%s: инъекция дала новых находок %d, ждали 1: %v", tc.name, len(added), added)
+			continue
+		}
+		got := added[0]
+		if !strings.HasPrefix(got, peopleWriterRel+":") || !strings.Contains(got, tc.fn+"()") ||
+			!strings.Contains(got, tc.branch) || !strings.Contains(got, "разбор не решает") {
+			t.Errorf("%s: находка не называет координату, функцию %s, ветвь %s и форму «не решается»: %s", tc.name, tc.fn, tc.branch, got)
+		}
+
+		twin, _ := judgePeople(t, check.TreeCorpus{peopleWriterRel: mutate(t, src, tc.from, tc.twin)})
+		if extra := newFindings(control, twin); len(extra) != 0 {
+			t.Errorf("%s: законный близнец дал находки: %v", tc.name, extra)
+		}
+	}
+}
+
 // peopleAnchor — оператор записи в строки людей, без которого корпус из одного
 // файла дал бы находку «операторов не найдено».
 const peopleAnchor = "package anchor\n\nfunc drop() { _ = \"DELETE FROM users WHERE id = $1\" }\n"
@@ -197,8 +279,9 @@ func TestPeopleAddressWriterInjection_EveryLawfulFormIsFound(t *testing.T) {
 }
 
 // TestPeopleAddressWriterInjection_UndecidedFormIsAFinding — форма, в которой
-// колонка либо таблица собирается вне свёрнутого текста, — находка «не
-// решается», а не молчание.
+// колонка либо таблица собирается вне свёрнутого текста, список SET продолжен
+// во время исполнения либо звено-присваивание адреса приставлено к оператору вне
+// текста, — находка «не решается» с координатой и функцией, а не молчание.
 func TestPeopleAddressWriterInjection_UndecidedFormIsAFinding(t *testing.T) {
 	t.Parallel()
 	forms := map[string]string{
@@ -212,6 +295,23 @@ func TestPeopleAddressWriterInjection_UndecidedFormIsAFinding(t *testing.T) {
 		"кортеж с подстановкой":        `_ = fmt.Sprintf("UPDATE users SET (display_name, %s) = ($1, $2)", col)`,
 		"подстановка списка целиком":   `_ = fmt.Sprintf("UPDATE users SET %s WHERE id = $1", rest)`,
 		"подстановка после псевдонима": `_ = fmt.Sprintf("UPDATE users u %s", rest)`,
+
+		// Список SET, полный в литерале и продолженный во время исполнения.
+		"список дописан +=":                      "q := \"UPDATE users SET labels = $2\"\n\tq += \", email = $3\"\n\t_ = q",
+		"хвост за полным списком":                `_ = "UPDATE users SET labels = $2" + rest`,
+		"подстановка в значении":                 `_ = fmt.Sprintf("UPDATE users SET labels = %s WHERE id = $1", rest)`,
+		"хвост за списком конфликта":             `_ = "INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO UPDATE SET labels = $2" + rest`,
+		"звенья strings.Join":                    `_ = strings.Join([]string{"UPDATE users SET labels = $1", "email = $2"}, ", ")`,
+		"константа и хвост":                      "const q = \"UPDATE users SET labels = $2\"\n\t_ = q + rest",
+		"построитель":                            "var b strings.Builder\n\tb.WriteString(\"UPDATE users SET labels = $2\")\n\tb.WriteString(rest)\n\t_ = b.String()",
+		"таблица подстановкой, список не закрыт": `_ = fmt.Sprintf("UPDATE %s SET display_name = $1", tbl)`,
+
+		// Звено-присваивание адреса без оператора.
+		"звено-присваивание":           `_ = "email = $2"`,
+		"звено за подстановкой":        `_ = fmt.Sprintf("%s, email = $3", rest)`,
+		"звено-кортеж":                 `_ = "(display_name, email) = ($1, $2)"`,
+		"звено-константа за значением": "const set = \"email = $3\"\n\t_ = strings.Join([]string{rest, set}, \", \")",
+		"константа за переменной":      "const column = \"email\"\n\t_ = \"UPDATE \" + tbl + \" SET \" + column + \" = $1\"",
 	}
 	for name, body := range forms {
 		findings, census := judgePeople(t, peopleProbe(body))
@@ -221,8 +321,9 @@ func TestPeopleAddressWriterInjection_UndecidedFormIsAFinding(t *testing.T) {
 			continue
 		}
 		for _, f := range findings {
-			if !strings.Contains(f, "разбор не решает") || !strings.HasPrefix(f, "internal/probe/pg/writer.go:") {
-				t.Errorf("форма %q: находка не названа формой «не решается» с координатой: %s", name, f)
+			if !strings.Contains(f, "разбор не решает") || !strings.HasPrefix(f, "internal/probe/pg/writer.go:") ||
+				!strings.Contains(f, "userWriter.Probe()") {
+				t.Errorf("форма %q: находка не названа формой «не решается» с координатой и функцией: %s", name, f)
 			}
 		}
 	}
@@ -231,24 +332,25 @@ func TestPeopleAddressWriterInjection_UndecidedFormIsAFinding(t *testing.T) {
 // TestPeopleAddressWriterInjection_LawfulTwinsAreSilent — законные близнецы:
 // адрес в условии, в цели конфликта, в заведении строки; другая таблица, другая
 // схема, другая колонка; блокировка, триггер, право, настройка сеанса, текст
-// ошибки, комментарии — молчат.
+// ошибки, комментарии; продолжение после закрытого списка SET и звено без
+// присваивания адреса — молчат.
 func TestPeopleAddressWriterInjection_LawfulTwinsAreSilent(t *testing.T) {
 	t.Parallel()
 	twins := map[string]string{
 		"отметка, адрес в условии":    `_ = "UPDATE users SET email_verified_at = $3 WHERE id = $1 AND email = $2"`,
 		"адрес в функции условия":     `_ = "UPDATE users SET display_name = $1 WHERE lower(email) = lower($2)"`,
 		"заведение строки":            `_ = "INSERT INTO users (id, email) VALUES ($1, $2)"`,
-		"адрес в цели конфликта":      `_ = "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT (lower(email)) DO UPDATE SET display_name = users.display_name"`,
+		"адрес в цели конфликта":      `_ = "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT (lower(email)) DO UPDATE SET display_name = users.display_name RETURNING id"`,
 		"другая таблица":              `_ = "UPDATE memberships SET email = $1"`,
 		"другое имя":                  `_ = "UPDATE users_archive SET email = $1"`,
 		"другая схема":                `_ = "UPDATE other.users SET email = $1"`,
-		"другая колонка в кавычках":   `_ = "UPDATE users SET \"Email\" = $1"`,
+		"другая колонка в кавычках":   `_ = "UPDATE users SET \"Email\" = $1 WHERE id = $2"`,
 		"конфликт чужой вставки":      `_ = "INSERT INTO memberships (id) VALUES ($1) ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email"`,
 		"блокировка":                  `_ = "SELECT email FROM users WHERE id = $1 FOR UPDATE"`,
 		"комментарий SQL":             "_ = \"SELECT id FROM users -- UPDATE users SET email = $1\\n\"",
 		"комментарий Go":              "// UPDATE users SET email = $1\n\t_ = col",
 		"формат в RETURNING":          `_ = fmt.Sprintf("UPDATE users SET labels = $2 WHERE id = $1 RETURNING %s", cols)`,
-		"таблица подстановкой":        `_ = fmt.Sprintf("UPDATE %s SET display_name = $1", tbl)`,
+		"таблица подстановкой":        `_ = fmt.Sprintf("UPDATE %s SET display_name = $1 WHERE id = $2", tbl)`,
 		"событие триггера":            `_ = "CREATE TRIGGER t BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION f()"`,
 		"право":                       `_ = "GRANT SELECT, UPDATE ON users TO reader"`,
 		"действие ключа":              `_ = "ALTER TABLE memberships ADD FOREIGN KEY (user_id) REFERENCES users (id) ON UPDATE SET NULL"`,
@@ -257,6 +359,25 @@ func TestPeopleAddressWriterInjection_LawfulTwinsAreSilent(t *testing.T) {
 		"адрес в RETURNING":           `_ = "UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id, email"`,
 		"адрес в RETURNING конфликта": `_ = "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET labels = $3 RETURNING id, email"`,
 		"адрес в строке вне SET":      `_ = "SELECT 'email' FROM users"`,
+
+		// Близнецы форм, продолженных во время исполнения, — каждый меняет ОДИН
+		// факт против своей формы «не решается»: продолжение после слова,
+		// закрывающего список SET, колонки в него не допишет; звено без
+		// присваивания адреса в голове элемента — не звено списка SET.
+		"закрытый список и хвост":                `_ = "UPDATE users SET labels = $2 WHERE id = $1" + rest`,
+		"закрытый точкой с запятой":              `_ = "UPDATE users SET labels = $2;" + rest`,
+		"закрытый конфликт и хвост":              `_ = "INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO UPDATE SET labels = $2 RETURNING id" + rest`,
+		"подстановка в условии":                  `_ = fmt.Sprintf("UPDATE users SET labels = $1 WHERE id = %s", rest)`,
+		"закрытая константа и хвост":             "const q = \"UPDATE users SET labels = $2 WHERE id = $1\"\n\t_ = q + rest",
+		"построитель закрытого списка":           "var b strings.Builder\n\tb.WriteString(\"UPDATE users SET labels = $2 WHERE id = $1\")\n\tb.WriteString(rest)\n\t_ = b.String()",
+		"звено другой колонки":                   `_ = fmt.Sprintf("%s, display_name = $3", rest)`,
+		"звено перечня колонок":                  `_ = fmt.Sprintf("%s, email", rest)`,
+		"звено условия":                          `_ = " AND email = $2"`,
+		"звено колонок вставки":                  `_ = "(display_name, email) VALUES ($1, $2)"`,
+		"звено-константа другой колонки":         "const set = \"display_name = $3\"\n\t_ = strings.Join([]string{rest, set}, \", \")",
+		"константа другой колонки за переменной": "const column = \"display_name\"\n\t_ = \"UPDATE \" + tbl + \" SET \" + column + \" = $1\"",
+		"звено условия выражением над колонкой":  `_ = fmt.Sprintf("lower(email) = lower($%d)", n)`,
+		"адрес не в голове сообщения":            `_ = fmt.Errorf("subject not found by email=%s", col)`,
 	}
 	for name, body := range twins {
 		findings, census := judgePeople(t, peopleProbe(body))

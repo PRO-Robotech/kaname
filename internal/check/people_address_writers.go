@@ -31,9 +31,12 @@
 //
 // Текст — значение строкового выражения Go, свёрнутое тем же проходом, что у
 // гейтов значений строк (`newLVIndex`: литерал, склейка, константа, связанное
-// имя пакета), и разобранный общим лексером SQL (`sqlTokens`). Колонка
-// читается в голове элемента списка SET; адрес в условии, в цели конфликта
-// (`ON CONFLICT (lower(email))`) и в списке колонок вставки записью не является.
+// имя пакета), и разобранный общим лексером SQL (`sqlTokens`). Склейка, которая
+// целиком не свернулась, судится звеньями, и звенья, сворачивающиеся подряд за
+// значением времени исполнения (`tbl + " SET " + column + " = $1"`), — одним
+// текстом. Колонка читается в голове элемента списка SET; адрес в условии, в
+// цели конфликта (`ON CONFLICT (lower(email))`) и в списке колонок вставки
+// записью не является.
 // Законные формы записи, каждая доказана инъекцией:
 //
 //	UPDATE [ONLY] [kaname.]users [[AS] u] SET … email = …        ветвь UPDATE
@@ -48,12 +51,45 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ФОРМА, КОТОРУЮ РАЗБОР НЕ РЕШАЕТ, — НАХОДКА, А НЕ МОЛЧАНИЕ
 //
-// Оператор записи в строки людей, чей список SET обрывается на конце текста,
-// пуст, несёт в голове элемента подстановку формата (`%s`) либо не ту лексему,
-// — и оператор с подстановкой вместо таблицы, пишущий адрес либо колонку из
-// подстановки, — находка «не решается разбором». Так же — список SET без
-// оператора в том же тексте, называющий адрес. Иначе колонку, собранную во
-// время исполнения, гейт пропустил бы молча.
+// «Не решается разбором» — каждая из форм ниже, и каждая доказана инъекцией:
+//
+//   - список SET над строками людей пуст, несёт пустой элемент, в голове
+//     элемента — подстановку формата (`%s`) либо не имя;
+//   - UPDATE строк людей без списка SET в тексте;
+//   - оператор с подстановкой вместо таблицы (либо вне текста), пишущий адрес
+//     либо колонку из подстановки;
+//   - список SET без оператора в том же тексте, называющий адрес.
+//
+// СПИСОК, ПОЛНЫЙ В ЛИТЕРАЛЕ И ПРОДОЛЖЕННЫЙ ВО ВРЕМЯ ИСПОЛНЕНИЯ. Гейт не
+// прослеживает значение до исполнителя запроса, поэтому список SET над
+// строками людей (либо над таблицей, которую текст не называет, — подстановка
+// вместо таблицы либо оператор вне текста), чьи элементы решены и адреса не
+// пишут, судится ещё раз:
+//
+//   - не закрыт в тексте — кончается концом текста, а не WHERE, FROM,
+//     RETURNING, `;` либо скобкой: хвост, приставленный склейкой с переменной,
+//     `+=`, `strings.Join` либо построителем, дописал бы колонку;
+//   - несёт подстановку формата в значении элемента (`labels = %s`):
+//     подставленный текст дописал бы колонку.
+//
+// Закрытый в своём тексте список продолжение колонкой не пополнит — хвост и
+// подстановка после закрывающего слова молчат. Полная запись без хвоста тоже
+// обязана закрыть список (`RETURNING`, `WHERE` либо `;`): отличить её от
+// продолженной гейт не берётся. Пустой список над таблицей, которую текст не
+// называет, колонок не несёт — его колонки приставляются звеньями и судятся
+// звеньями.
+//
+// ЗВЕНО-ПРИСВАИВАНИЕ. Текст, начатый списком присваиваний без оператора и без
+// SET (`email = $2`, продолжение `, email = $3` либо `%s, email = $3`, кортеж
+// `(display_name, email) = (…)`), приставляют к списку SET во время исполнения;
+// голова элемента, называющая адрес, — «не решается». Звено условия отбора
+// `email = $N` от звена списка SET неотличимо и пишется со своим словом (WHERE,
+// AND, OR) либо выражением над колонкой — так пишет дерево
+// (`lower(email) = lower($%d)`). Значение константы и имени уровня пакета
+// звеном судится в месте обращения, не вошедшем в свёрнутое выражение
+// (`q += set`, элемент `[]string{…}`): свёртка подставляет его туда.
+//
+// Иначе колонку, собранную во время исполнения, гейт пропустил бы молча.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
@@ -62,10 +98,17 @@
 //     миграции, триггеры и функции базы — не судятся: исторический посев
 //     названной строки адрес в миграции пишет, и применённая миграция не
 //     правится. Новый писатель адреса в миграции этим гейтом не виден.
-//  2. Текст, собранный вызовом во время исполнения (`strings.Join`, построитель),
-//     судится по звеньям-литералам; звено «UPDATE users SET » краснеет формой
-//     «не решается», звено с одним списком колонок без оператора — только если
-//     называет адрес.
+//  2. Текст, собранный во время исполнения, судится по звеньям, которые
+//     сворачиваются (литерал, склейка, константа). Колонка адреса, дошедшая до
+//     списка SET не словом свёрнутого текста — из данных либо значением,
+//     подставленным в формат (`fmt.Sprintf("%s = $1", column)`), — видна только
+//     там, где ей негде встать молча: пустой список, пустой элемент, подстановка
+//     в голове либо в значении, список, не закрытый в тексте. Приставленная к
+//     списку, чья таблица в тексте не названа (`"UPDATE " + tbl + " SET "`),
+//     либо вставленная в закрытый текст заменой (`strings.Replace`), она не
+//     видна: адреса нет ни в одном слове, которое разбор читает. Звено с
+//     подстановкой в голове (`%s = $%d`) звеном-присваиванием адреса не
+//     считается — так же пишется условие любого построителя отбора.
 //  3. Ветвь MERGE в дереве сегодня пуста: её держит инъекция, а не перепись.
 package check
 
@@ -112,6 +155,12 @@ type PeopleAddressCensus struct {
 	Statements map[string]int
 	// SetLists — прочитанные списки SET над строками людей по ветви.
 	SetLists map[string]int
+	// SetListsClosed — из них закрытые в своём тексте (WHERE, FROM, RETURNING,
+	// `;`, скобка): продолжение во время исполнения колонки в них не допишет.
+	SetListsClosed int
+	// AssignmentPieces — звенья: тексты, начатые списком присваиваний без
+	// оператора и без SET.
+	AssignmentPieces int
 	// Columns — колонки строк людей, которые пишут прочитанные списки SET.
 	Columns map[string]int
 	// Writers — координаты записи адреса в существующую строку.
@@ -137,13 +186,15 @@ func (c PeopleAddressCensus) String() string {
 	}
 	sort.Strings(cols)
 	return fmt.Sprintf("файлов %d · строковых значений %d · операторов записи в строки людей %d "+
-		"(UPDATE %d · INSERT %d · DELETE %d · MERGE %d) · списков SET: %s %d · %s %d · %s %d · "+
-		"колонки [%s] · писателей адреса %d · не решается разбором %d",
+		"(UPDATE %d · INSERT %d · DELETE %d · MERGE %d) · списков SET: %s %d · %s %d · %s %d, "+
+		"из них закрыто в тексте %d · колонки [%s] · звеньев-присваиваний %d · писателей адреса %d · "+
+		"не решается разбором %d",
 		c.Files, c.StringValues, c.StatementsTotal(),
 		c.Statements[PeopleStmtUpdate], c.Statements[PeopleStmtInsert], c.Statements[PeopleStmtDelete],
 		c.Statements[PeopleStmtMerge],
 		SetListUpdate, c.SetLists[SetListUpdate], SetListConflict, c.SetLists[SetListConflict],
-		SetListMerge, c.SetLists[SetListMerge], strings.Join(cols, " "), len(c.Writers), len(c.Undecided))
+		SetListMerge, c.SetLists[SetListMerge], c.SetListsClosed, strings.Join(cols, " "), c.AssignmentPieces,
+		len(c.Writers), len(c.Undecided))
 }
 
 // addressWriterFinding — текст отказа на месте записи адреса: называет, с чем
@@ -189,6 +240,14 @@ type peopleText struct {
 	writes, undecided []peopleMark
 	stmts, sets       map[string]int
 	columns           map[string]int
+	// closed — списки SET над строками людей, закрытые в своём тексте.
+	closed int
+	// pieces — звенья: тексты, начатые списком присваиваний без оператора.
+	pieces int
+	// noPieces — текст звеном не судится: это значение константы либо имени
+	// уровня пакета, которое свёртка подставляет в каждое обращение, и звеном
+	// оно судится там, где к нему обращаются.
+	noPieces bool
 }
 
 func newPeopleText() *peopleText {
@@ -289,24 +348,30 @@ type setColumn struct {
 // setItem — элемент списка SET.
 type setItem struct {
 	at    int
+	head  int // индекс лексемы головы
 	cols  []setColumn
 	empty bool
+	// assign — за головой стоит `=`: элемент — присваивание (`a = …`,
+	// `(a, b) = …`), а не имя в перечне и не выражение условия.
+	assign bool
 }
 
-// readSetItems — элементы списка SET с лексемы s на глубине d. Список кончается
-// словом конца на своей глубине вне CASE, `;` либо закрывающей скобкой
-// объемлющего.
-func readSetItems(toks []sqlTok, dep []int, s, d int) []setItem {
+// readSetItems — элементы списка SET с лексемы s на глубине d и индекс лексемы,
+// на которой список кончился; end == len(toks) — список кончился концом текста,
+// то есть в тексте не закрыт. Закрывает список слово конца на своей глубине вне
+// CASE, `;` либо закрывающая скобка объемлющего.
+func readSetItems(toks []sqlTok, dep []int, s, d int) (items []setItem, end int) {
 	var (
-		items    []setItem
 		cur      = setItem{empty: true}
 		caseOpen int
 		seen     bool
 	)
 	flush := func() { items = append(items, cur); cur = setItem{empty: true} }
+	end = len(toks)
 	for k := s; k < len(toks); k++ {
 		t := toks[k]
 		if dep[k] < d {
+			end = k
 			break
 		}
 		if dep[k] == d {
@@ -318,6 +383,7 @@ func readSetItems(toks []sqlTok, dep []int, s, d int) []setItem {
 			}
 			if caseOpen == 0 {
 				if isOp(t, ';') || t.kind == sqlTokName && t.form == SQLFormBare && peopleSetEnd[t.name] {
+					end = k
 					break
 				}
 				if isOp(t, ',') {
@@ -331,14 +397,16 @@ func readSetItems(toks []sqlTok, dep []int, s, d int) []setItem {
 		if !cur.empty {
 			continue
 		}
-		cur.empty, cur.at = false, t.at
+		cur.empty, cur.at, cur.head = false, t.at, k
 		switch {
 		case isOp(t, '(') && dep[k] == d:
 			cur.cols = readTupleColumns(toks, dep, k+1, d+1)
+			cur.assign = tupleAssigned(toks, dep, k, d)
 		case formatHoleEnd(toks, k) >= 0:
 			cur.cols = []setColumn{{hole: true}}
 		case t.kind == sqlTokName:
 			cur.cols = []setColumn{{name: t.name}}
+			cur.assign = k+1 < len(toks) && isOp(toks[k+1], '=')
 		default:
 			cur.cols = []setColumn{{bad: true}}
 		}
@@ -346,7 +414,18 @@ func readSetItems(toks []sqlTok, dep []int, s, d int) []setItem {
 	if seen {
 		flush()
 	}
-	return items
+	return items, end
+}
+
+// tupleAssigned — кортеж, открытый скобкой в k на глубине d, закрыт в тексте, и
+// за ним стоит `=`: голова присваивания `(a, b) = (…)`.
+func tupleAssigned(toks []sqlTok, dep []int, k, d int) bool {
+	for m := k + 1; m < len(toks); m++ {
+		if dep[m] == d {
+			return isOp(toks[m], ')') && m+1 < len(toks) && isOp(toks[m+1], '=')
+		}
+	}
+	return false
 }
 
 // readTupleColumns — колонки кортежа `(a, b, …)` списка SET на глубине d.
@@ -380,21 +459,59 @@ func readTupleColumns(toks []sqlTok, dep []int, s, d int) []setColumn {
 }
 
 // judgeSetList — список SET с лексемы s на глубине d над таблицей kind.
+//
+// Список, каждый элемент которого решён и ни один не пишет адреса, судится ещё
+// раз — на продолжение во время исполнения: не закрытый в тексте (кончается
+// концом текста) либо несущий подстановку формата в значении — «не решается».
+// Гейт не прослеживает значение до исполнителя запроса, поэтому хвост,
+// приставленный склейкой, `+=`, `strings.Join` либо построителем, и текст,
+// подставленный в значение, неотличимы от колонки, дописанной в список; закрыт
+// список в своём тексте — продолжение колонки в него не допишет.
 func (p *peopleText) judgeSetList(toks []sqlTok, dep []int, s, d int, at int, kind peopleTableKind, branch string) {
 	if kind == tableOther {
 		return
 	}
 	people := kind == tablePeople
+	items, end := readSetItems(toks, dep, s, d)
 	if people {
 		p.sets[branch]++
-	}
-	items := readSetItems(toks, dep, s, d)
-	if len(items) == 0 {
-		if people {
-			p.undecided = append(p.undecided, peopleMark{at: at, why: "список SET над строками людей пуст либо собирается вне текста (" + branch + ")"})
+		if end < len(toks) {
+			p.closed++
 		}
+	}
+	marked := len(p.writes) + len(p.undecided)
+	if len(items) == 0 && people {
+		p.undecided = append(p.undecided, peopleMark{at: at, why: "список SET над строками людей пуст либо собирается вне текста (" + branch + ")"})
+	}
+	p.judgeSetItems(items, at, people, branch)
+	if len(p.writes)+len(p.undecided) > marked {
+		// Список уже назвал себя находкой; продолжение ничего к ней не прибавит.
 		return
 	}
+	over := "строками людей"
+	if !people {
+		over = "таблицей, которую текст не называет"
+	}
+	// Пустой список над таблицей, которую текст не называет, колонки не несёт:
+	// голова оператора, чьи колонки приставляются звеньями, — они судятся
+	// звеньями (`judgeAssignmentPiece`). Пустой список над строками людей —
+	// находка выше.
+	if end == len(toks) && len(items) > 0 {
+		p.undecided = append(p.undecided, peopleMark{at: at, why: "список SET над " + over + " не закрыт в тексте — " +
+			"кончается концом текста, а не WHERE, FROM, RETURNING, `;` либо скобкой; хвост, приставленный во время " +
+			"исполнения (склейка с переменной, +=, strings.Join, построитель), дописал бы в него колонку, а значение до " +
+			"исполнителя запроса гейт не прослеживает — список закрывается в своём тексте (" + branch + ")"})
+	}
+	for k := s; k < end; k++ {
+		if formatHoleEnd(toks, k) >= 0 {
+			p.undecided = append(p.undecided, peopleMark{at: toks[k].at, why: "подстановка формата в значении списка SET над " +
+				over + " — подставленный текст дописал бы в список колонку (" + branch + ")"})
+		}
+	}
+}
+
+// judgeSetItems — головы элементов списка SET: адрес, подстановка, не имя.
+func (p *peopleText) judgeSetItems(items []setItem, at int, people bool, branch string) {
 	for _, it := range items {
 		if it.empty {
 			if people {
@@ -483,13 +600,50 @@ func judgePeopleText(src string, depth int, p *peopleText) {
 		if !failureRowIsWord(t, "set") || consumed[i] {
 			continue
 		}
-		for _, it := range readSetItems(toks, dep, i+1, dep[i]) {
+		items, _ := readSetItems(toks, dep, i+1, dep[i])
+		for _, it := range items {
 			for _, c := range it.cols {
 				if c.name == PeopleAddressColumn {
 					p.undecided = append(p.undecided, peopleMark{at: it.at, why: "список SET называет колонку адреса, а оператор, которому он принадлежит, собирается вне текста"})
 				}
 			}
 		}
+	}
+	if !p.noPieces {
+		p.judgeAssignmentPiece(toks, dep)
+	}
+}
+
+// judgeAssignmentPiece — звено: текст, начатый списком присваиваний без
+// оператора и без SET (`a = …, b = …`, продолжение `, b = …` либо `%s, b = …`,
+// кортеж `(a, b) = (…)`). Во время исполнения его приставляют к списку SET,
+// собранному вне текста, и к какому оператору — разбор не решает; голова
+// элемента, называющая адрес, — находка «не решается». Элемент пустой либо с
+// подстановкой в голове — продолжение приставленного текста; первый элемент, не
+// являющийся присваиванием (слово оператора, условия, имя в перечне), звено
+// кончает.
+func (p *peopleText) judgeAssignmentPiece(toks []sqlTok, dep []int) {
+	items, _ := readSetItems(toks, dep, 0, 0)
+	piece := false
+	for _, it := range items {
+		if it.empty || formatHoleEnd(toks, it.head) >= 0 {
+			continue
+		}
+		if !it.assign {
+			break
+		}
+		piece = true
+		for _, c := range it.cols {
+			if c.name == PeopleAddressColumn {
+				p.undecided = append(p.undecided, peopleMark{at: it.at, why: "звено списка присваиваний без оператора и без SET " +
+					"называет колонку адреса в голове элемента — к какому оператору его приставляют во время исполнения, " +
+					"разбор не решает; звено условия отбора неотличимо от звена списка SET и пишется со своим словом " +
+					"(WHERE, AND, OR) либо выражением над колонкой (`lower(email) = lower($1)`)"})
+			}
+		}
+	}
+	if piece {
+		p.pieces++
 	}
 }
 
@@ -518,7 +672,9 @@ func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText) {
 		for k, v := range inner.columns {
 			p.columns[k] += v
 		}
-		if len(inner.writes)+len(inner.undecided)+len(inner.stmts) > 0 {
+		p.closed += inner.closed
+		p.pieces += inner.pieces
+		if len(inner.writes)+len(inner.undecided)+len(inner.stmts)+inner.pieces > 0 {
 			// Второе прочтение той же строки (обратная коса) — то же место.
 			return
 		}
@@ -598,15 +754,130 @@ func peopleFuncLabel(fd *ast.FuncDecl) string {
 	return fd.Name.Name
 }
 
+// plusOperands — звенья склейки `a + b + …` по порядку, сквозь скобки: склейка
+// строк ассоциативна, а дерево разбора левое, и без выпрямления звенья,
+// стоящие подряд за значением времени исполнения, судились бы порознь.
+func plusOperands(e ast.Expr) []ast.Expr {
+	switch n := e.(type) {
+	case *ast.BinaryExpr:
+		if n.Op == token.ADD {
+			return append(plusOperands(n.X), plusOperands(n.Y)...)
+		}
+	case *ast.ParenExpr:
+		if inner := plusOperands(n.X); len(inner) > 1 {
+			return inner
+		}
+	}
+	return []ast.Expr{e}
+}
+
+// runLine — строка исходника для смещения at в тексте звеньев run, свёрнутых
+// подряд в texts.
+func runLine(f *lvFile, run []ast.Expr, texts []string, at int) int {
+	off := 0
+	for i, e := range run {
+		if at < off+len(texts[i]) || i == len(run)-1 {
+			return peopleLine(f, e, texts[i], at-off)
+		}
+		off += len(texts[i])
+	}
+	return f.fset.Position(run[0].Pos()).Line
+}
+
 // scanPeopleTexts — свёрнутые строковые значения файла: наибольшее свёрнутое
-// выражение судится целиком, не свернулось — судятся звенья.
+// выражение судится целиком; склейка, которая целиком не свернулась, судится
+// звеньями, и звенья, сворачивающиеся подряд, — одним текстом.
+//
+// Значение константы и имени уровня пакета судится там, где объявлено, — но
+// звеном не судится: свёртка подставляет его в каждое обращение, и приставляют
+// его к оператору там. Обращение, которое не вошло в наибольшее свёрнутое
+// выражение (`q += set`, элемент `[]string{…}`, довод вызова), судится звеном в
+// месте обращения.
 func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
-	var visit func(root ast.Node, fn string)
-	visit = func(root ast.Node, fn string) {
+	report := func(p *peopleText, fn string, line func(at int) int) {
+		where := func(at int) string {
+			loc := fmt.Sprintf("%s:%d", f.rel, line(at))
+			if fn == "" {
+				return loc + " вне функции (объявление пакета)"
+			}
+			return loc + " в " + fn + "()"
+		}
+		for _, w := range p.writes {
+			census.Writers = append(census.Writers, addressWriterFinding(where(w.at), w.branch))
+		}
+		for _, u := range p.undecided {
+			census.Undecided = append(census.Undecided, undecidedFinding(where(u.at), u.why))
+		}
+		for k, v := range p.stmts {
+			census.Statements[k] += v
+		}
+		for k, v := range p.sets {
+			census.SetLists[k] += v
+		}
+		for k, v := range p.columns {
+			census.Columns[k] += v
+		}
+		census.SetListsClosed += p.closed
+		census.AssignmentPieces += p.pieces
+	}
+	judge := func(text, fn string, line func(at int) int, pieces bool) {
+		census.StringValues++
+		p := newPeopleText()
+		p.noPieces = !pieces
+		judgePeopleText(text, 0, p)
+		report(p, fn, line)
+	}
+
+	var visit func(root ast.Node, fn string, bound ast.Expr)
+	// runs — склейка, которая целиком не свернулась.
+	runs := func(sum *ast.BinaryExpr, fn string) {
+		ops := plusOperands(sum)
+		for i := 0; i < len(ops); {
+			j := i
+			var texts []string
+			for j < len(ops) {
+				t, ok := ix.fold(f, ops[j])
+				if !ok {
+					break
+				}
+				texts = append(texts, t)
+				j++
+			}
+			switch {
+			case j == i:
+				visit(ops[i], fn, nil)
+				i++
+				continue
+			case j-i == 1:
+				visit(ops[i], fn, nil)
+			default:
+				run := ops[i:j]
+				judge(strings.Join(texts, ""), fn, func(at int) int { return runLine(f, run, texts, at) }, true)
+			}
+			i = j
+		}
+	}
+	visit = func(root ast.Node, fn string, bound ast.Expr) {
 		ast.Inspect(root, func(n ast.Node) bool {
-			if vs, ok := n.(*ast.ValueSpec); ok {
-				for _, v := range vs.Values {
-					visit(v, fn)
+			if gd, ok := n.(*ast.GenDecl); ok {
+				if gd.Tok == token.IMPORT {
+					return false
+				}
+				for _, s := range gd.Specs {
+					vs, ok := s.(*ast.ValueSpec)
+					if !ok {
+						visit(s, fn, nil)
+						continue
+					}
+					for _, v := range vs.Values {
+						// Обращение к константе и к имени уровня пакета свёртка
+						// заменяет значением; к локальной переменной — нет.
+						var b ast.Expr
+						if fn == "" || gd.Tok == token.CONST {
+							b = v
+						}
+						visit(v, fn, b)
+					}
 				}
 				return false
 			}
@@ -616,44 +887,31 @@ func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
 			}
 			text, ok := ix.fold(f, e)
 			if !ok {
-				if sel, isSel := e.(*ast.SelectorExpr); isSel {
-					visit(sel.X, fn)
+				switch x := e.(type) {
+				case *ast.SelectorExpr:
+					visit(x.X, fn, nil)
 					return false
+				case *ast.BinaryExpr:
+					if x.Op == token.ADD {
+						runs(x, fn)
+						return false
+					}
 				}
 				return true
 			}
+			line := func(at int) int { return peopleLine(f, e, text, at) }
 			switch e.(type) {
 			case *ast.Ident, *ast.SelectorExpr:
 				// Обращение к константе либо связанному имени: его значение судится
 				// там, где оно объявлено, — второй суд того же текста удвоил бы и
-				// перепись, и находку.
+				// перепись, и находку. Здесь оно судится только звеном.
+				toks := sqlTokens(text)
+				p := newPeopleText()
+				p.judgeAssignmentPiece(toks, sqlDepths(toks))
+				report(p, fn, line)
 				return false
 			}
-			census.StringValues++
-			p := newPeopleText()
-			judgePeopleText(text, 0, p)
-			where := func(at int) string {
-				loc := fmt.Sprintf("%s:%d", f.rel, peopleLine(f, e, text, at))
-				if fn == "" {
-					return loc + " вне функции (объявление пакета)"
-				}
-				return loc + " в " + fn + "()"
-			}
-			for _, w := range p.writes {
-				census.Writers = append(census.Writers, addressWriterFinding(where(w.at), w.branch))
-			}
-			for _, u := range p.undecided {
-				census.Undecided = append(census.Undecided, undecidedFinding(where(u.at), u.why))
-			}
-			for k, v := range p.stmts {
-				census.Statements[k] += v
-			}
-			for k, v := range p.sets {
-				census.SetLists[k] += v
-			}
-			for k, v := range p.columns {
-				census.Columns[k] += v
-			}
+			judge(text, fn, line, e != bound)
 			return false
 		})
 	}
@@ -661,12 +919,10 @@ func scanPeopleTexts(ix *lvIndex, f *lvFile, census *PeopleAddressCensus) {
 		switch v := d.(type) {
 		case *ast.FuncDecl:
 			if v.Body != nil {
-				visit(v.Body, peopleFuncLabel(v))
+				visit(v.Body, peopleFuncLabel(v), nil)
 			}
 		case *ast.GenDecl:
-			if v.Tok != token.IMPORT {
-				visit(v, "")
-			}
+			visit(v, "", nil)
 		}
 	}
 }
