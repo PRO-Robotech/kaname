@@ -45,7 +45,12 @@ import (
 // Параметр, который никто не читает, — объявление зависимости, которой нет:
 // следующий провяжет его «как положено» и будет прав по форме и неправ по делу.
 //
-// Отказ сборки полос выдачи ВОЗВРАЩАЕТСЯ вызывающему ошибкой (kaname#440), и
+// Каждый хук этого слушателя идёт под своим пределом обращения: полосы выдачи —
+// на каждом обращении к базе (`buildIssuanceHooks`, kaname#389), хуки заведения и
+// восстановления — на обращении к своему use-case (`buildLifecycleHooks`,
+// kaname#441).
+//
+// Отказ обеих сборок ВОЗВРАЩАЕТСЯ вызывающему ошибкой (kaname#440), и
 // корень отказывает старту С ЭТОЙ ПРИЧИНОЙ (`hooksLaneSurface`). Строки журнала
 // и пустого обработчика вместо неё нет: отказ, выведенный из отсутствия
 // обработчика, называл бы «обслуживать нечем», а не то, что сломалось.
@@ -110,11 +115,6 @@ func buildHooksMux(
 		// ЖИВОЙ путь первого входа: именно здесь активируются приглашения на
 		// настоящем трафике. Счётчик без этой провязки был бы всегда нулевым.
 		WithActivationObserver(metricsReg.InviteActivationRecorder())
-	provisionHook := handlerinternal.NewProvisionHookHandler(
-		handlerinternal.ProvisionHookConfig{HookSharedSecret: hookSecret},
-		&userProvisionAdapter{uc: userUpsert},
-		logger,
-	)
 
 	// Recovery hook: завершение восстановления пароля. До этой проводки провайдер
 	// бил в ЛЕГАСИ gRPC-порт с REST-подобным путём — тот же дефект, что чинили у
@@ -122,11 +122,14 @@ func buildHooksMux(
 	// доступ оставался заблокированным, и прежние сессии переживали
 	// восстановление. Use-case существовал всё это время; не хватало маршрута.
 	recoveryUC := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).WithLogger(logger)
-	recoveryHook := handlerinternal.NewRecoveryHookHandler(
-		handlerinternal.RecoveryHookConfig{HookSharedSecret: hookSecret},
-		&userRecoveryAdapter{uc: recoveryUC},
-		logger,
-	)
+
+	provisionHook, recoveryHook, err := buildLifecycleHooks(hookSecret, handlerinternal.LifecyclePorts{
+		Provisioner: &userProvisionAdapter{uc: userUpsert},
+		Recovery:    &userRecoveryAdapter{uc: recoveryUC},
+	}, logger)
+	if err != nil {
+		return nil, fmt.Errorf("обработчики хуков заведения и восстановления: %w", err)
+	}
 
 	mux := handlerinternal.NewMux(handlerinternal.Handlers{
 		TokenHook:     tokenHook,
@@ -306,6 +309,43 @@ func buildIssuanceHooks(
 		logger,
 	)
 	return tokenHook, refreshHook, nil
+}
+
+// buildLifecycleHooks собирает хуки поставщика личности: заведение человека по
+// первому входу и завершение восстановления доступа.
+//
+// Вход — порты, а не use-case: сборка обязана проверяться без базы, и проба
+// подаёт сюда свои порты, чтобы увидеть, с каким сроком их позвали и чем хук
+// ответил на зависший. Порты оборачиваются здесь ОДИН раз
+// ([handlerinternal.WithLifecycleDeadline]) объявленным пределом на вызов — тем
+// же, что у полос выдачи на этом слушателе ([credentialLanePeerTimeout]): их
+// зовёт поставщик личности, и неотвечающая база держала бы обработчик столько,
+// сколько ждёт он. Держит проба через эту сборку
+// (`TestLifecycleHooksAnswerAHangingPortWithinTheDeclaredLimit`).
+//
+// Отказ обёртки (неподанный порт, неположительный предел) — отказ сборки
+// значением, и корень отказывает старту с этой причиной, как у полос выдачи
+// (kaname#440).
+func buildLifecycleHooks(
+	hookSecret string,
+	ports handlerinternal.LifecyclePorts,
+	logger *slog.Logger,
+) (*handlerinternal.ProvisionHookHandler, *handlerinternal.RecoveryHookHandler, error) {
+	bounded, err := handlerinternal.WithLifecycleDeadline(ports, credentialLanePeerTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("хуки заведения и восстановления: %w", err)
+	}
+	provisionHook := handlerinternal.NewProvisionHookHandler(
+		handlerinternal.ProvisionHookConfig{HookSharedSecret: hookSecret},
+		bounded.Provisioner,
+		logger,
+	)
+	recoveryHook := handlerinternal.NewRecoveryHookHandler(
+		handlerinternal.RecoveryHookConfig{HookSharedSecret: hookSecret},
+		bounded.Recovery,
+		logger,
+	)
+	return provisionHook, recoveryHook, nil
 }
 
 // hooksLaneSurface — профиль поверхности вебхуков провайдера личности.
