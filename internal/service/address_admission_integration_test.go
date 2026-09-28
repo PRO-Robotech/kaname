@@ -11,6 +11,10 @@
 // решателю края; строки сеются тем производителем, каким их кладёт продукт
 // (строки — строками, прямой факт — строкой журнала). У каждого отрицания —
 // близнец, отличающийся ОДНИМ фактом: подтверждён ли адрес.
+//
+// Раскрытие Р3 (кому уходит причина `email_not_verified`) — свойство
+// обработчика КРАЯ в сборке корня и держится пробой корня
+// `cmd/kaname/address_disclosure_root_integration_test.go`.
 package service_test
 
 import (
@@ -23,15 +27,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
-	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 const reasonEmailNotVerified = "email_not_verified"
@@ -304,42 +305,4 @@ func TestAdmissionThirdOutcomeIsNotVerified(t *testing.T) {
 	}
 	require.True(t, strings.Contains(err.Error(), "unavailable") || strings.Contains(err.Error(), "context"),
 		"третий исход — ошибка недоступности: %v", err)
-}
-
-// TestAdmissionReasonIsDisclosedOnlyToTheSubjectOrAPeer — условие аудита
-// поверхности (раскрытие Р3): причина `email_not_verified` уходит только самому
-// субъекту, модулю либо администратору облака; распорядитель ресурса,
-// спросивший о другом человеке, получает нейтральный отказ — побайтно тот же,
-// что у подтверждённого субъекта без отношения.
-func TestAdmissionReasonIsDisclosedOnlyToTheSubjectOrAPeer(t *testing.T) {
-	ask := func(t *testing.T, strangerVerified, strangerHolds bool) (*iamv1.AuthorizeCheckResponse, *iamv1.AuthorizeCheckResponse) {
-		t.Helper()
-		w := newAdmWorld(t)
-		const acc, owner, admin, stranger = "acc-disc", "usr-discown", "usr-discadm", "usr-discstr"
-		w.ci.seedAccountWithOwner(t, acc, owner)
-		w.ci.seedUnverifiedUser(t, admin, acc)
-		w.ci.seedUnverifiedUser(t, stranger, acc)
-		w.ci.factThroughJournal(t, "user:"+admin, "admin", "account", acc)
-		w.mark(t, admin)
-		if strangerHolds {
-			w.ci.factThroughJournal(t, "user:"+stranger, "editor", "account", acc)
-		}
-		if strangerVerified {
-			w.mark(t, stranger)
-		}
-		h := authorize.NewHandler(w.ci.svc, nil).WithCallerAuthority(w.door)
-		req := &iamv1.AuthorizeCheckRequest{Subject: "user:" + stranger, Resource: &iamv1.ResourceRef{Type: "account", Id: acc},
-			Action: "iam.account.edit", RequiredRelation: "editor"}
-		delegated, err := h.Check(operations.WithPrincipal(context.Background(), operations.Principal{ID: admin, Type: "user"}), req)
-		require.NoError(t, err)
-		self, err := h.Check(operations.WithPrincipal(context.Background(), operations.Principal{ID: stranger, Type: "user"}), req)
-		require.NoError(t, err)
-		return delegated, self
-	}
-	delegated, self := ask(t, false, true)
-	twin, _ := ask(t, true, false)
-	require.False(t, delegated.GetAllowed())
-	require.Equal(t, twin.GetDenyReasons(), delegated.GetDenyReasons(),
-		"распорядителю — нейтральный отказ, побайтно как у подтверждённого субъекта без отношения")
-	require.Equal(t, []string{reasonEmailNotVerified}, self.GetDenyReasons(), "самому субъекту — email_not_verified")
 }

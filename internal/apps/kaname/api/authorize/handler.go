@@ -62,6 +62,11 @@ type Authorizer interface {
 	BatchCheck(ctx context.Context, reqs []service.CheckRequest) ([]*service.CheckResult, error)
 	ListSubjects(ctx context.Context, req service.ListSubjectsRequest) (*service.ListSubjectsResult, error)
 	ExpandRelations(ctx context.Context, req service.ExpandRequest) (*service.ExpandResult, error)
+	// NeutralDenyReasons — отказ, который дверь дала бы подтверждённому субъекту
+	// без отношения (`disclosed`). Метод порта, а не необязательное умение:
+	// декоратор между транспортом и решателем обязан его пропустить, и
+	// компилятор держит это на каждой сборке корня.
+	NeutralDenyReasons(ctx context.Context, req service.CheckRequest) []string
 }
 
 // Handler — gRPC server.
@@ -178,23 +183,8 @@ func (h *Handler) disclosed(ctx context.Context, req service.CheckRequest, reaso
 	if caller, ok := operations.PrincipalFromContextOK(ctx); ok && "user:"+caller.ID == req.Subject {
 		return reasons
 	}
-	if n, ok := h.svc.(neutralDenier); ok {
-		return n.NeutralDenyReasons(ctx, req)
-	}
-	// Служба, не умеющая назвать нейтральный текст, — не повод раскрыть
-	// причину: наружу уходит отказ без подробности.
-	return []string{neutralDenyFallback}
+	return h.svc.NeutralDenyReasons(ctx, req)
 }
-
-// neutralDenier — служба, называющая отказ подтверждённому субъекту без
-// отношения (`service.AuthorizeService.NeutralDenyReasons`).
-type neutralDenier interface {
-	NeutralDenyReasons(ctx context.Context, req service.CheckRequest) []string
-}
-
-// neutralDenyFallback — отказ без подробности, когда нейтральный текст назвать
-// нечем.
-const neutralDenyFallback = "no path"
 
 // reqToService — пункт вопроса в форме службы.
 func reqToService(req *iamv1.AuthorizeCheckRequest) service.CheckRequest {
