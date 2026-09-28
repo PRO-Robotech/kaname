@@ -254,13 +254,13 @@ func (r *HumanSessionRepo) ChargeSource(ctx context.Context, lane humansession.S
 
 var _ humansession.SourcePacer = (*HumanSessionRepo)(nil)
 
-// sweepExpiredBearerLettersSQL — строки очереди писем, чей КОД истёк: письмо
+// sweepExpiredCodeLettersSQL — строки очереди писем, чей КОД истёк: письмо
 // восстановления и письмо подтверждения несут открытое значение кода до сдачи
 // узлу, и строка, код которой уже ничего не подтверждает и ничего не
 // восстанавливает, держит предъявителя без предмета. Снимается и
 // недоставленная: отравленная строка отметки доставки не получит никогда, а
 // общий уборщик доставленных её не снимает (kaname#456, условие аудита).
-const sweepExpiredBearerLettersSQL = `
+const sweepExpiredCodeLettersSQL = `
 	DELETE FROM invite_mail_outbox
 	 WHERE ctid IN (
 	       SELECT ctid FROM invite_mail_outbox
@@ -274,7 +274,7 @@ func (r *HumanSessionRepo) SweepExpiredBearerLetters(ctx context.Context, grace 
 	if batch <= 0 {
 		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
 	}
-	tag, err := r.pool.Exec(ctx, sweepExpiredBearerLettersSQL, grace, batch)
+	tag, err := r.pool.Exec(ctx, sweepExpiredCodeLettersSQL, grace, batch)
 	if err != nil {
 		return 0, false, mapErr(err, "BearerLetters.Sweep", "")
 	}
