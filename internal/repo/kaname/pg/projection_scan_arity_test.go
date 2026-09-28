@@ -103,12 +103,6 @@ func TestProjectionScanArityMatchesItsColumns(t *testing.T) {
 
 		{"userCols/scanUser", userCols, 0,
 			func(d *destCounter) { _, _ = scanUser(d) }},
-		{"userCols/scanUserWithCreated", userCols, 1,
-			func(d *destCounter) {
-				var u domain.User
-				var created bool
-				_ = scanUserWithCreated(d, &u, &created)
-			}},
 		{"userCols/scanUserWithInserted", userCols, 1,
 			func(d *destCounter) {
 				var u domain.User

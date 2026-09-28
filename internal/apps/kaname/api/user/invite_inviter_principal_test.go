@@ -285,9 +285,6 @@ func (w *invPrincUserWtr) InsertPending(_ context.Context, u domain.User, _ time
 	return u, true, nil
 }
 
-func (w *invPrincUserWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
-	return u, false, nil
-}
 func (w *invPrincUserWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domain.ExternalSubject, _ domain.DisplayName) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }

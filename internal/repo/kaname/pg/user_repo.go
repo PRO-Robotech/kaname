@@ -550,71 +550,6 @@ type userWriter struct {
 	membershipHintSink *string
 }
 
-// Upsert — legacy path retained for backward-compat with integration tests
-// that call Upsert directly (TestUser_2_0_15a/15b).
-//
-// Ключ по external_id — ГЛОБАЛЬНЫЙ (partial WHERE external_id<>”): один внешний
-// субъект есть одна строка. Upsert делает INSERT с {AccountID +
-// invite_status='ACTIVE'}; при дубле по external_id → UPDATE email/display_name
-// и добавление членства в названном аккаунте.
-//
-// Production paths use InsertPending / ActivateInvite / InsertActive directly
-// — not Upsert.
-func (w *userWriter) Upsert(ctx context.Context, u domain.User) (domain.User, bool, error) {
-	now := time.Now().UTC()
-	accountID := nullableAccountID(u.AccountID)
-	inviteStatus := string(u.InviteStatus)
-	if inviteStatus == "" {
-		inviteStatus = string(domain.InviteStatusActive)
-	}
-	invitedBy := nullableInvitedBy(u.InvitedBy)
-
-	// Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта
-	// (`users_identity_external_id_uniq`, миграция 20260823050000), а не пара с
-	// аккаунтом: человек есть одна строка, в скольких бы аккаунтах он ни
-	// состоял. Пер-аккаунтный арбитр заводил бы ему вторую строку — второй
-	// идентификатор, второй набор прав, из которых действует один.
-	//
-	// Предикат `WHERE external_id <> ''` выбирает ИМЕННО этот индекс: предикат
-	// пер-состоянийного `users_active_external_id_uniq` им не подразумевается,
-	// поэтому вывод индекса однозначен.
-	//
-	// Членство пишется ЯВНО и в той же транзакции: при попадании в конфликт
-	// строка не переписывается, зеркалящий триггер не срабатывает, и членство в
-	// названном аккаунте не появилось бы вовсе.
-	q := fmt.Sprintf(`
-		WITH ins AS (
-			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (external_id) WHERE external_id <> '' DO UPDATE
-			   SET email = EXCLUDED.email,
-			       display_name = EXCLUDED.display_name
-			RETURNING %s, (xmax = 0) AS created
-		), membership AS (
-			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
-			SELECT membership_mirror_id(i.id, $2), i.id, $2,
-			       CASE WHEN i.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
-			       $7, $8, $8
-			  FROM ins i
-			 WHERE $2 IS NOT NULL AND $2 <> ''
-			ON CONFLICT (user_id, account_id) DO NOTHING
-		)
-		SELECT %s, created FROM ins`, userCols, userCols)
-	row := w.tx.QueryRow(ctx, q,
-		string(u.ID), accountID, string(u.ExternalID), string(u.Email), string(u.DisplayName),
-		inviteStatus, invitedBy, now,
-	)
-	var (
-		out     domain.User
-		created bool
-	)
-	err := scanUserWithCreated(row, &out, &created)
-	if err != nil {
-		return domain.User{}, false, mapErr(err, "", string(u.ExternalID))
-	}
-	return out, created, nil
-}
-
 // InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно и
 // идемпотентно.
 //
@@ -1004,7 +939,7 @@ func scanUser(row scanner) (domain.User, error) {
 
 // scanUserInto — ЕДИНСТВЕННОЕ объявление порядка назначений под userCols.
 // `extra` — приёмники, дописанные запросом ПОСЛЕ проекции (признак вставки у
-// CTE-форм InsertPending/Upsert); без них это обычное чтение userCols.
+// CTE-формы InsertPending); без них это обычное чтение userCols.
 //
 // Порядок объявлен один раз намеренно. Прежде его несли два независимых списка
 // — `scanUser` и этот, — и компилятор их не связывал: расхождение выражалось бы
@@ -1062,19 +997,8 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 	return nil
 }
 
-func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
-	return scanUserInto(row, out, created)
-}
-
 func scanUserWithInserted(row scanner, out *domain.User, inserted *bool) error {
-	return scanUserWithCreated(row, out, inserted)
-}
-
-func nullableAccountID(id domain.AccountID) any {
-	if id == "" {
-		return nil
-	}
-	return string(id)
+	return scanUserInto(row, out, inserted)
 }
 
 func nullableInvitedBy(id domain.UserID) any {
