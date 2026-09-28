@@ -20,6 +20,7 @@
 package check_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,6 +229,161 @@ func TestPeopleAddressMigrationInjection_EveryLawfulFormIsFound(t *testing.T) {
 	}
 }
 
+// triggerOverPeople — подпрограмма триггера с телом body и её привязка к
+// строкам людей до смены строки.
+func triggerOverPeople(body string) string {
+	return "CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE plpgsql AS $$\n" + body + "\n$$;\n" +
+		"CREATE TRIGGER t BEFORE UPDATE ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.f();"
+}
+
+// lineOf — строка файла, на которой стоит первое вхождение marker; нет —
+// прогон «не выполнился».
+func lineOf(t *testing.T, src, marker string) int {
+	t.Helper()
+	i := strings.Index(src, marker)
+	if i < 0 {
+		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: метки %q в тексте инъекции нет", marker)
+	}
+	return 1 + strings.Count(src[:i], "\n")
+}
+
+// TestPeopleAddressMigrationInjection_TriggerRowWrittenPastTheAssignment —
+// строка, которую пишет база, — та, которую ВЕРНУЛА подпрограмма триггера, и
+// менять её можно не только присваиванием `NEW.колонка := …` в начале
+// оператора. Каждая форма ниже исполнена на Postgres 16 и ставит отметку либо
+// пишет адрес в лежащую строку; каждая — находка с координатой своей строки:
+// писатель, если колонка названа, «не решается», если строка пишется целиком.
+func TestPeopleAddressMigrationInjection_TriggerRowWrittenPastTheAssignment(t *testing.T) {
+	t.Parallel()
+	forms := []struct {
+		name, body, at string
+		// column — слово колонки в находке писателя; пусто — «не решается».
+		column string
+	}{
+		{name: "возврат копии строки, изменённой в переменной",
+			body: "DECLARE r kaname.users;\nBEGIN\n  r := NEW;\n  r.email_verified_at := now();\n  RETURN r;\nEND;", at: "RETURN r"},
+		{name: "возврат строки, собранной выражением",
+			body: "BEGIN\n  RETURN jsonb_populate_record(NEW, jsonb_build_object('email_verified_at', now()));\nEND;", at: "RETURN jsonb"},
+		{name: "возврат не строки под CASE",
+			body: "DECLARE r kaname.users := NEW;\nBEGIN\n  r.email_verified_at := now();\n  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE r END;\nEND;",
+			at:   "RETURN CASE"},
+		{name: "псевдоним строки",
+			body: "DECLARE r ALIAS FOR new;\nBEGIN\n  r.email_verified_at := now();\n  RETURN NEW;\nEND;", at: "r.email_verified_at",
+			column: markColumnWord},
+		{name: "псевдоним псевдонима",
+			body: "DECLARE a ALIAS FOR NEW;\n  b ALIAS FOR a;\nBEGIN\n  b.email := lower(b.email);\n  RETURN b;\nEND;", at: "b.email :=",
+			column: addressColumnWord},
+		{name: "строка под меткой подпрограммы",
+			body: "BEGIN\n  f.new.email_verified_at := now();\n  RETURN NEW;\nEND;", at: "f.new", column: markColumnWord},
+		{name: "цель GET DIAGNOSTICS",
+			body: "BEGIN\n  GET DIAGNOSTICS NEW.email = ROW_COUNT;\n  RETURN NEW;\nEND;", at: "NEW.email =", column: addressColumnWord},
+		{name: "цель FOR по запросу",
+			body: "BEGIN\n  FOR NEW IN SELECT u.* FROM kaname.users u LOOP\n  END LOOP;\n  RETURN NEW;\nEND;", at: "FOR NEW"},
+		{name: "цель FOR под меткой цикла",
+			body: "BEGIN\n  <<fill>> FOR NEW.email_verified_at IN SELECT now() LOOP\n  END LOOP fill;\n  RETURN NEW;\nEND;",
+			at:   "<<fill>>", column: markColumnWord},
+		{name: "цель FOREACH",
+			body: "BEGIN\n  FOREACH NEW.email_verified_at IN ARRAY ARRAY[now()] LOOP\n  END LOOP;\n  RETURN NEW;\nEND;",
+			at:   "FOREACH", column: markColumnWord},
+		{name: "выходной аргумент CALL — строка",
+			body: "BEGIN\n  CALL kaname.set_mark(NEW);\n  RETURN NEW;\nEND;", at: "CALL"},
+		{name: "выходной аргумент CALL — колонка по имени",
+			body: "BEGIN\n  CALL kaname.set_ts(1, t => NEW.email_verified_at);\n  RETURN NEW;\nEND;", at: "CALL",
+			column: markColumnWord},
+		{name: "OLD изменён и возвращён",
+			body: "BEGIN\n  OLD.email_verified_at := now();\n  RETURN OLD;\nEND;", at: "OLD.email_verified_at", column: markColumnWord},
+	}
+	for _, tc := range forms {
+		src := triggerOverPeople(tc.body)
+		findings, census := judgeNewMigration(t, src)
+		wantW, wantU := 0, 1
+		if tc.column != "" {
+			wantW, wantU = 1, 0
+		}
+		if len(census.Writers) != wantW || len(census.Undecided) != wantU || len(findings) != 1 {
+			t.Errorf("форма %q: писателей %d, не решается %d, находок %d — ждали %d · %d · 1: %v",
+				tc.name, len(census.Writers), len(census.Undecided), len(findings), wantW, wantU, findings)
+			continue
+		}
+		prefix := fmt.Sprintf("%s:%d ", injectedMigrationRel, lineOf(t, src, tc.at))
+		if !strings.HasPrefix(findings[0], prefix) {
+			t.Errorf("форма %q: находка не называет строку формы (ждали %q): %s", tc.name, prefix, findings[0])
+		}
+		switch {
+		case tc.column != "" && !strings.Contains(findings[0], tc.column):
+			t.Errorf("форма %q: находка писателя не называет колонку %s: %s", tc.name, tc.column, findings[0])
+		case tc.column == "" && !strings.Contains(findings[0], "разбор не решает"):
+			t.Errorf("форма %q: находка не названа формой «не решается»: %s", tc.name, findings[0])
+		}
+	}
+}
+
+// TestPeopleAddressMigrationInjection_TriggerBodyTheParseDoesNotRead — триггер
+// над строками людей зовёт подпрограмму, тела которой разбор не читает: тела
+// нет в корпусе (подпрограмма расширения пишет колонку, названную аргументом)
+// либо тело на другом языке. Какие колонки пишет возвращённая строка, разбор не
+// решает — находка с координатой объявления триггера (тела нет) либо
+// подпрограммы (тело не прочитано).
+func TestPeopleAddressMigrationInjection_TriggerBodyTheParseDoesNotRead(t *testing.T) {
+	t.Parallel()
+	forms := map[string]struct{ body, at string }{
+		"тело вне корпуса": {
+			body: "CREATE TRIGGER t BEFORE UPDATE ON kaname.users FOR EACH ROW EXECUTE FUNCTION moddatetime(email_verified_at);",
+			at:   "CREATE TRIGGER"},
+		"тело на другом языке": {
+			body: "CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE plpython3u AS $$\nTD[\"new\"][\"email_verified_at\"] = \"now\"\nreturn \"MODIFY\"\n$$;\n" +
+				"CREATE TRIGGER t BEFORE UPDATE ON kaname.users FOR EACH ROW EXECUTE PROCEDURE kaname.f();",
+			at: "CREATE FUNCTION"},
+	}
+	for name, tc := range forms {
+		findings, census := judgeNewMigration(t, tc.body)
+		if len(census.Writers) != 0 || len(census.Undecided) != 1 || len(findings) != 1 {
+			t.Errorf("форма %q: писателей %d, не решается %d, находок %d — ждали 0 · 1 · 1: %v",
+				name, len(census.Writers), len(census.Undecided), len(findings), findings)
+			continue
+		}
+		prefix := fmt.Sprintf("%s:%d ", injectedMigrationRel, lineOf(t, tc.body, tc.at))
+		if !strings.HasPrefix(findings[0], prefix) || !strings.Contains(findings[0], "разбор не решает") {
+			t.Errorf("форма %q: находка не названа формой «не решается» со строкой объявления триггера (%q): %s",
+				name, prefix, findings[0])
+		}
+	}
+}
+
+// TestPeopleAddressMigrationInjection_TriggerRowTwinsAreSilent — законные
+// близнецы тех же форм: возвращается сама строка триггера либо ничего, цель
+// присваивания — не строка триггера либо другая её колонка, тело прочитано.
+func TestPeopleAddressMigrationInjection_TriggerRowTwinsAreSilent(t *testing.T) {
+	t.Parallel()
+	twins := map[string]string{
+		"RETURN NEW":        triggerOverPeople("BEGIN\n  RETURN NEW;\nEND;"),
+		"RETURN NULL":       triggerOverPeople("BEGIN\n  RETURN NULL;\nEND;"),
+		"RETURN OLD":        triggerOverPeople("BEGIN\n  RETURN OLD;\nEND;"),
+		"RETURN (NEW)":      triggerOverPeople("BEGIN\n  RETURN (NEW);\nEND;"),
+		"RETURN CASE строк": triggerOverPeople("BEGIN\n  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE CASE WHEN true THEN NEW END END;\nEND;"),
+		"строка под меткой возвращена": triggerOverPeople("BEGIN\n  RETURN f.new;\nEND;"),
+		"псевдоним только читается": triggerOverPeople("DECLARE r ALIAS FOR new;\nBEGIN\n  IF r.email IS NULL THEN RAISE EXCEPTION 'нет адреса'; END IF;\n" +
+			"  RETURN r;\nEND;"),
+		"псевдоним параметра":          triggerOverPeople("DECLARE a ALIAS FOR $1;\nBEGIN\n  a := 1;\n  RETURN NEW;\nEND;"),
+		"другая колонка под меткой":    triggerOverPeople("BEGIN\n  f.new.display_name := 'x';\n  RETURN NEW;\nEND;"),
+		"GET DIAGNOSTICS в переменную": triggerOverPeople("DECLARE n int;\nBEGIN\n  GET DIAGNOSTICS n = ROW_COUNT;\n  RETURN NEW;\nEND;"),
+		"FOR по переменной": triggerOverPeople("DECLARE v record;\nBEGIN\n  FOR v IN SELECT u.* FROM kaname.users u LOOP\n  END LOOP;\n" +
+			"  FOR i IN 1..3 LOOP\n  END LOOP;\n  RETURN NEW;\nEND;"),
+		"CALL с выражением над строкой": triggerOverPeople("BEGIN\n  CALL kaname.note(lower(NEW.email), NEW.display_name);\n  RETURN NEW;\nEND;"),
+		"язык строкой": "CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE 'plpgsql' AS $$ BEGIN RETURN NEW; END $$;\n" +
+			"CREATE TRIGGER t BEFORE UPDATE ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.f();",
+		"подпрограмма не триггера возвращает значение": "CREATE FUNCTION kaname.g() RETURNS jsonb LANGUAGE plpgsql AS $$ " +
+			"BEGIN RETURN jsonb_build_object('email_verified_at', now()); END $$;",
+		"тело вне корпуса у чужой таблицы": "CREATE TRIGGER t BEFORE UPDATE ON kaname.audit FOR EACH ROW EXECUTE FUNCTION moddatetime(changed_at);",
+	}
+	for name, body := range twins {
+		findings, census := judgeNewMigration(t, body)
+		if len(findings) != 0 {
+			t.Errorf("близнец %q дал находки (%s): %v", name, census, findings)
+		}
+	}
+}
+
 // TestPeopleAddressMigrationInjection_UndecidedFormIsAFinding — форма, в которой
 // таблица, колонка либо привязка собирается вне текста миграции, — находка «не
 // решается» с координатой новой миграции.
@@ -237,7 +393,9 @@ func TestPeopleAddressMigrationInjection_UndecidedFormIsAFinding(t *testing.T) {
 		"таблица и колонка из данных": "DO $$ BEGIN EXECUTE format('UPDATE kaname.%I SET %I = now()', 'users', 'email_verified_at'); END $$;",
 		"склейка динамического SQL":   "DO $$ BEGIN EXECUTE 'UPDATE kaname.users SET ' || quote_ident('x') || ' = now()'; END $$;",
 		"функция без триггера":        "CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.email_verified_at := now(); RETURN NEW; END $$;",
-		"переименование в данные":     "DO $$ BEGIN EXECUTE format('ALTER TABLE kaname.users RENAME COLUMN invite_expires_at TO %I', 'x'); END $$;",
+		"функция без триггера возвращает не строку": "CREATE FUNCTION kaname.f() RETURNS trigger LANGUAGE plpgsql AS $$ " +
+			"BEGIN RETURN jsonb_populate_record(NEW, '{}'); END $$;",
+		"переименование в данные": "DO $$ BEGIN EXECUTE format('ALTER TABLE kaname.users RENAME COLUMN invite_expires_at TO %I', 'x'); END $$;",
 	}
 	for name, body := range forms {
 		findings, census := judgeNewMigration(t, body)

@@ -103,6 +103,7 @@ func TestPeopleAddressHasNoWriterInServiceCode(t *testing.T) {
 		{"тел подпрограмм", m.Routines},
 		{"триггеров над строками людей", m.TriggersOverPeople},
 		{"присваиваний строке триггера", m.RowAssignments},
+		{"возвратов из подпрограмм триггера", m.TriggerReturns},
 		{"мест, названных ведомостью и сверенных", len(census.Applied)},
 	} {
 		if c.n == 0 {

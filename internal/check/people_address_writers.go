@@ -198,9 +198,14 @@ type PeopleAddressHalf struct {
 	// Triggers — прочитанные объявления триггеров; TriggersOverPeople — из них
 	// над строками людей.
 	Triggers, TriggersOverPeople int
-	// RowAssignments — присваивания строке триггера (`NEW.колонка := …`,
-	// `NEW := …`, `INTO NEW.колонка`) в телах подпрограмм, любой колонки.
+	// RowAssignments — присваивания строке триггера (NEW, OLD, их псевдонимы и
+	// то же под меткой блока) в телах подпрограмм на PL/pgSQL, любой колонки, во
+	// всех целях присваивания его грамматики: начало оператора, INTO, GET
+	// DIAGNOSTICS, FOR, FOREACH, аргумент CALL.
 	RowAssignments int
+	// TriggerReturns — операторы RETURN в телах подпрограмм триггера на
+	// PL/pgSQL: база пишет ту строку, которую подпрограмма вернула.
+	TriggerReturns int
 }
 
 func newPeopleAddressHalf() PeopleAddressHalf {
@@ -226,13 +231,14 @@ func (h PeopleAddressHalf) String() string {
 	return fmt.Sprintf("операторов записи в строки людей %d "+
 		"(UPDATE %d · INSERT %d · DELETE %d · MERGE %d) · списков SET: %s %d · %s %d · %s %d, "+
 		"из них закрыто в тексте %d · колонки [%s] · звеньев-присваиваний %d · ALTER TABLE над строками людей %d · "+
-		"тел подпрограмм %d · триггеров %d (над строками людей %d) · присваиваний строке триггера %d",
+		"тел подпрограмм %d · триггеров %d (над строками людей %d) · присваиваний строке триггера %d · "+
+		"возвратов из подпрограмм триггера %d",
 		h.StatementsTotal(),
 		h.Statements[PeopleStmtUpdate], h.Statements[PeopleStmtInsert], h.Statements[PeopleStmtDelete],
 		h.Statements[PeopleStmtMerge],
 		SetListUpdate, h.SetLists[SetListUpdate], SetListConflict, h.SetLists[SetListConflict],
 		SetListMerge, h.SetLists[SetListMerge], h.SetListsClosed, strings.Join(cols, " "), h.AssignmentPieces,
-		h.TableAlters, h.Routines, h.Triggers, h.TriggersOverPeople, h.RowAssignments)
+		h.TableAlters, h.Routines, h.Triggers, h.TriggersOverPeople, h.RowAssignments, h.TriggerReturns)
 }
 
 // add — прибавить к переписи вида входа итог разбора одного текста.
@@ -257,6 +263,7 @@ func (h *PeopleAddressHalf) add(p *peopleText) {
 		}
 	}
 	h.RowAssignments += p.rowAssigns
+	h.TriggerReturns += p.returns
 }
 
 // PeopleAddressCensus — объём осмотренного по обоим видам входа.
@@ -359,12 +366,16 @@ type peopleText struct {
 	// routine — подпрограмма, чьё тело этот текст; пусто — текст не тело.
 	routine peopleRoutine
 	// alters — операторы ALTER TABLE над строками людей; routines — тела
-	// подпрограмм; rowAssigns — присваивания строке триггера любой колонки.
-	alters, routines, rowAssigns int
-	// triggers — объявления триггеров; assigns — присваивания строке триггера
-	// колонки предмета либо строки целиком: решаются привязкой по всему корпусу.
+	// подпрограмм; rowAssigns — присваивания строке триггера любой колонки;
+	// returns — операторы RETURN в телах подпрограмм триггера.
+	alters, routines, rowAssigns, returns int
+	// triggers — объявления триггеров; assigns — записи строки триггера
+	// (присваивание колонке предмета либо строке целиком, возврат не строки
+	// триггера, тело, которого разбор не читает): решаются привязкой по всему
+	// корпусу; declared — имена подпрограмм, чьё тело в этом тексте.
 	triggers []peopleTrigger
 	assigns  []peopleAssign
+	declared []string
 }
 
 func newPeopleText(subject map[string]bool) *peopleText {
@@ -736,8 +747,8 @@ func judgePeopleText(src string, depth int, p *peopleText) {
 			}
 		}
 	}
-	if p.routine.name != "" {
-		p.judgeRowAssignments(toks)
+	if p.routine.name != "" && p.routine.lang == peoplePLpgSQL {
+		p.judgeRowAssignments(toks, dep)
 	}
 	if !p.noPieces {
 		p.judgeAssignmentPiece(toks, dep)
@@ -810,7 +821,11 @@ func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText, routine peopleRou
 			a.at = at(a.at)
 			p.assigns = append(p.assigns, a)
 		}
-		p.triggers = append(p.triggers, inner.triggers...)
+		for _, tr := range inner.triggers {
+			tr.at = at(tr.at)
+			p.triggers = append(p.triggers, tr)
+		}
+		p.declared = append(p.declared, inner.declared...)
 		for k, v := range inner.stmts {
 			p.stmts[k] += v
 		}
@@ -825,8 +840,9 @@ func judgeNestedPeopleText(t sqlTok, depth int, p *peopleText, routine peopleRou
 		p.alters += inner.alters
 		p.routines += inner.routines
 		p.rowAssigns += inner.rowAssigns
+		p.returns += inner.returns
 		if len(inner.writes)+len(inner.undecided)+len(inner.stmts)+inner.pieces+inner.alters+
-			inner.routines+inner.rowAssigns+len(inner.triggers) > 0 {
+			inner.routines+inner.rowAssigns+inner.returns+len(inner.triggers)+len(inner.assigns) > 0 {
 			// Второе прочтение той же строки (обратная коса) — то же место.
 			return
 		}

@@ -35,14 +35,37 @@
 // Колонка либо таблица такого определения — подстановка формата (динамический
 // SQL, `format('… %I …')`) — «не решается».
 //
-// Присваивание строке триггера в теле подпрограммы — `NEW.колонка := …`,
-// `NEW.колонка = …` в начале оператора, `… INTO [STRICT] NEW.колонка`, строка
-// целиком `NEW := …`. Какую таблицу пишет NEW, решает ПРИВЯЗКА: объявление
-// `CREATE TRIGGER … ON таблица … EXECUTE FUNCTION|PROCEDURE имя()` где угодно в
-// корпусе (функция и триггер бывают в разных миграциях). Привязана к строкам
-// людей — писатель (событие не различается: заведённая строка, которую пишет
-// триггер, — тоже строка, которой сам триггер не заводил); только к чужим
-// таблицам — молчание; к таблице из подстановки либо ни к какой — «не решается».
+// Запись строки триггера в теле подпрограммы на PL/pgSQL. База пишет ту
+// строку, которую подпрограмма триггера ВЕРНУЛА, поэтому судятся две вещи.
+//
+//   - Цель присваивания, называющая строку триггера. Строку называют NEW, OLD,
+//     их псевдонимы (`имя ALIAS FOR new`, псевдоним псевдонима) и любое из них
+//     под меткой блока (`метка.new.колонка`; внешний блок помечен именем
+//     подпрограммы). Цели — все, какие есть в грамматике PL/pgSQL: начало
+//     оператора (`цель := …`, `цель = …`, с индексом `[…]`), `INTO [STRICT]
+//     цель[, …]`, `GET [CURRENT|STACKED] DIAGNOSTICS цель = …`, `FOR цель[, …]
+//     IN` (и под меткой цикла `<<метка>>`), `FOREACH цель … IN ARRAY`, аргумент
+//     `CALL` целиком (позиционный либо `имя =>`: выходной параметр процедуры
+//     пишет в него). Колонка названа — присваивание колонке; нет — строке
+//     целиком.
+//   - RETURN в подпрограмме, объявленной `RETURNS trigger`: законно вернуть саму
+//     строку триггера (NEW, OLD, псевдоним, под меткой, в скобках), NULL, ничего
+//     и CASE, каждая ветвь которого законна. Прочее (`RETURN r` после `r :=
+//     NEW; r.колонка := …`, `RETURN jsonb_populate_record(NEW, …)`) — строка,
+//     которая не строка триггера: база пишет её целиком.
+//
+// Тело подпрограммы триггера на языке, отличном от PL/pgSQL, разбор не читает —
+// оно пишет строку целиком. Какую таблицу пишет подпрограмма, решает
+// ПРИВЯЗКА: объявление `CREATE TRIGGER … ON таблица … EXECUTE
+// FUNCTION|PROCEDURE имя()` где угодно в корпусе (функция и триггер бывают в
+// разных миграциях). Привязана к строкам людей — писатель, если колонка
+// названа, и «не решается», если строка пишется целиком (событие не
+// различается: заведённая строка, которую пишет триггер, — тоже строка, которой
+// сам триггер не заводил); только к чужим таблицам — молчание; к таблице из
+// подстановки либо ни к какой — «не решается». Триггер над строками людей
+// либо над таблицей из подстановки, чья подпрограмма тела в корпусе не имеет
+// (подпрограмма расширения пишет колонку, названную аргументом триггера), —
+// «не решается» с координатой объявления триггера.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ВЕДОМОСТЬ ПРИМЕНЁННЫХ МИГРАЦИЙ — И ПОЧЕМУ ВЕДОМОСТЬ, А НЕ «ТОЛЬКО ДОБАВЛЕННОЕ»
@@ -72,7 +95,12 @@
 //     разбор этого не прослеживает; триггер, снятый позже (`DROP TRIGGER`),
 //     привязку не отзывает — лишняя находка, не пропуск.
 //  2. Подпрограмма, которую миграция ЗОВЁТ, судится там, где объявлено её тело;
-//     тело, объявленное вне корпуса, не видно.
+//     тело, объявленное вне корпуса, не видно (у подпрограммы триггера над
+//     строками людей это не молчание, а «не решается» — выше).
+//     Момент и уровень триггера не различаются: присваивание в подпрограмме
+//     триггера AFTER либо FOR EACH STATEMENT (возвращённая строка не пишется) и
+//     присваивание OLD в подпрограмме, возвращающей NEW, — лишняя находка, не
+//     пропуск.
 //  3. Запись через представление, правило над представлением и подмена
 //     подпрограммы-снимателя отметки (`CREATE OR REPLACE` без присваивания,
 //     снятие её триггера) — не формы записи колонки и этим разбором не
@@ -89,31 +117,64 @@ import (
 	"strings"
 )
 
+// peoplePLpgSQL — язык тел, которые разбор читает как PL/pgSQL.
+const peoplePLpgSQL = "plpgsql"
+
 // peopleRoutine — подпрограмма, чьё тело судится: имя без схемы (ключ
-// привязки) и написание для находки.
+// привязки), написание для находки, возвращает ли она строку триггера
+// (`RETURNS trigger`) и язык тела.
 type peopleRoutine struct {
 	name, label string
+	trigger     bool
+	lang        string
 }
 
-// peopleTrigger — объявление триггера: какую подпрограмму зовёт и над чем.
+// peopleTrigger — объявление триггера: какую подпрограмму зовёт, над чем и где
+// стоит.
 type peopleTrigger struct {
-	function string
-	table    peopleTableKind
+	function, label string
+	table           peopleTableKind
+	at              int
 }
 
-// peopleAssign — присваивание строке триггера колонки предмета; column пусто —
-// строка целиком.
+// peopleAssignForm — чем подпрограмма пишет строку триггера.
+type peopleAssignForm int
+
+const (
+	// assignTarget — строка триггера либо её колонка — цель присваивания.
+	assignTarget peopleAssignForm = iota
+	// assignReturned — подпрограмма триггера возвращает строку, которая не
+	// строка триггера: база пишет её целиком.
+	assignReturned
+	// assignUnread — тело подпрограммы триггера на языке, которого разбор не
+	// читает.
+	assignUnread
+)
+
+// peopleAssign — запись строки триггера: колонка предмета (column) либо
+// строка целиком (column пусто).
 type peopleAssign struct {
 	routine peopleRoutine
 	column  string
 	at      int
+	form    peopleAssignForm
 }
 
-func (a peopleAssign) target() string {
-	if a.column == "" {
-		return "NEW целиком"
+// act — что подпрограмма делает со строкой триггера, словами находки.
+func (a peopleAssign) act() string {
+	switch {
+	case a.form == assignReturned:
+		return "возвращает строку, которая не строка триггера (RETURN не NEW, не OLD и не NULL), — база пишет возвращённую строку"
+	case a.form == assignUnread:
+		lang := a.routine.lang
+		if lang == "" {
+			lang = "без объявления языка"
+		}
+		return "возвращает строку триггера из тела на языке " + lang + ", которого разбор не читает"
+	case a.column == "":
+		return "присваивает строке триггера целиком"
 	}
-	return "NEW." + a.column
+	return "присваивает колонке строки триггера " + a.column
 }
 
 // peopleSiteKind — род места: писатель либо форма, которую разбор не решает.
@@ -147,17 +208,25 @@ func (s peopleSite) finding() string {
 	return addressWriterFinding(s.where, s.branch)
 }
 
-// peoplePendingAssign — присваивание строке триггера, ждущее привязки.
+// peoplePendingAssign — запись строки триггера, ждущая привязки.
 type peoplePendingAssign struct {
 	peopleAssign
 	site peopleSite
 }
 
-// peopleScan — места, присваивания и триггеры по всему корпусу.
+// peoplePendingTrigger — объявление триггера с местом.
+type peoplePendingTrigger struct {
+	peopleTrigger
+	site peopleSite
+}
+
+// peopleScan — места, записи строки триггера, триггеры и тела подпрограмм по
+// всему корпусу.
 type peopleScan struct {
 	sites    []peopleSite
 	assigns  []peoplePendingAssign
-	triggers []peopleTrigger
+	triggers []peoplePendingTrigger
+	declared map[string]bool
 }
 
 // collect — итог разбора одного текста: места с координатой и перепись.
@@ -180,13 +249,24 @@ func (sc *peopleScan) collect(p *peopleText, half *PeopleAddressHalf, rel string
 	for _, a := range p.assigns {
 		sc.assigns = append(sc.assigns, peoplePendingAssign{peopleAssign: a, site: site(a.at)})
 	}
-	sc.triggers = append(sc.triggers, p.triggers...)
+	for _, tr := range p.triggers {
+		sc.triggers = append(sc.triggers, peoplePendingTrigger{peopleTrigger: tr, site: site(tr.at)})
+	}
+	if sc.declared == nil {
+		sc.declared = map[string]bool{}
+	}
+	for _, name := range p.declared {
+		sc.declared[name] = true
+	}
 	half.add(p)
 }
 
-// resolveRowAssignments — присваивания строке триггера по привязке во всём
-// корпусе: к строкам людей — писатель; к таблице из подстановки либо ни к какой
-// — «не решается»; только к чужим таблицам — молчание.
+// resolveRowAssignments — записи строки триггера по привязке во всём корпусе:
+// к строкам людей — писатель (колонка названа) либо «не решается» (строка
+// целиком); к таблице из подстановки либо ни к какой — «не решается»; только к
+// чужим таблицам — молчание. Триггер над строками людей либо над таблицей из
+// подстановки, чья подпрограмма не имеет тела в корпусе, — «не решается»: какую
+// строку она возвращает, разбор не видит.
 func (sc *peopleScan) resolveRowAssignments() {
 	byFunction := map[string][]peopleTableKind{}
 	for _, tr := range sc.triggers {
@@ -201,21 +281,35 @@ func (sc *peopleScan) resolveRowAssignments() {
 		s := a.site
 		switch {
 		case len(byFunction[a.routine.name]) == 0:
-			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмма %s присваивает строке триггера (%s), а триггера, "+
-				"который её зовёт, в корпусе нет — к какой таблице она привязана, разбор не решает", a.routine.label, a.target())
+			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмма %s %s, а триггера, который её зовёт, в корпусе нет — "+
+				"к какой таблице она привязана, разбор не решает", a.routine.label, a.act())
 		case people && a.column == "":
-			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмма %s, которую зовёт триггер над строками людей, "+
-				"присваивает строку триггера целиком — какие колонки она пишет, разбор не решает", a.routine.label)
+			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмма %s, которую зовёт триггер над строками людей, %s — "+
+				"какие колонки она пишет, разбор не решает", a.routine.label, a.act())
 		case people:
 			s.kind, s.column = siteWriter, a.column
-			s.branch = fmt.Sprintf("присваивание строке триггера %s в подпрограмме %s, которую зовёт триггер над строками людей",
-				a.target(), a.routine.label)
+			s.branch = fmt.Sprintf("подпрограмма %s, которую зовёт триггер над строками людей, %s",
+				a.routine.label, a.act())
 		case hole:
-			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмму %s, присваивающую строке триггера (%s), зовёт триггер "+
-				"над таблицей из подстановки", a.routine.label, a.target())
+			s.kind, s.why = siteUndecided, fmt.Sprintf("подпрограмма %s %s, и зовёт её триггер над таблицей из подстановки",
+				a.routine.label, a.act())
 		default:
 			continue
 		}
+		sc.sites = append(sc.sites, s)
+	}
+	for _, tr := range sc.triggers {
+		if sc.declared[tr.function] || tr.table != tablePeople && tr.table != tableHole {
+			continue
+		}
+		over := "над строками людей"
+		if tr.table == tableHole {
+			over = "над таблицей из подстановки"
+		}
+		s := tr.site
+		s.kind, s.why = siteUndecided, fmt.Sprintf("триггер %s зовёт подпрограмму %s, тела которой в корпусе нет (подпрограмма "+
+			"расширения пишет колонку, названную аргументом триггера), — какую строку она возвращает, разбор не решает",
+			over, tr.label)
 		sc.sites = append(sc.sites, s)
 	}
 }
@@ -254,8 +348,9 @@ func readRoutineName(toks []sqlTok, k int) (routine peopleRoutine, next int, ok 
 }
 
 // judgeCreateAt — слово CREATE в i: тело подпрограммы (`CREATE [OR REPLACE]
-// FUNCTION|PROCEDURE имя … AS строка`) отмечается для разбора присваиваний
-// строке триггера; объявление триггера записывается для привязки.
+// FUNCTION|PROCEDURE имя … AS строка`) отмечается для разбора записи строки
+// триггера вместе с тем, возвращает ли подпрограмма строку триггера и на каком
+// языке тело; объявление триггера записывается для привязки.
 func (p *peopleText) judgeCreateAt(toks []sqlTok, dep []int, i int, bodies map[int]peopleRoutine) {
 	j := i + 1
 	if isWordAt(toks, j, "or") && isWordAt(toks, j+1, "replace") {
@@ -268,18 +363,28 @@ func (p *peopleText) judgeCreateAt(toks []sqlTok, dep []int, i int, bodies map[i
 		if !ok {
 			return
 		}
-		for ; k < len(toks) && dep[k] >= d; k++ {
-			if dep[k] != d {
-				continue
+		body := -1
+		for ; k < len(toks) && dep[k] >= d && (dep[k] != d || !isOp(toks[k], ';')); k++ {
+			switch {
+			case dep[k] != d:
+			case isWordAt(toks, k, "returns"):
+				if ret, _, ok := readRoutineName(toks, k+1); ok && ret.name == "trigger" {
+					routine.trigger = true
+				}
+			case isWordAt(toks, k, "language") && k+1 < len(toks):
+				routine.lang = routineLanguage(toks[k+1])
+			case isWordAt(toks, k, "as") && body < 0 && k+1 < len(toks) && toks[k+1].kind == sqlTokString:
+				body = k + 1
 			}
-			if isOp(toks[k], ';') {
-				return
-			}
-			if isWordAt(toks, k, "as") && k+1 < len(toks) && toks[k+1].kind == sqlTokString {
-				bodies[k+1] = routine
-				p.routines++
-				return
-			}
+		}
+		if body < 0 {
+			return
+		}
+		bodies[body] = routine
+		p.routines++
+		p.declared = append(p.declared, routine.name)
+		if routine.trigger && routine.lang != peoplePLpgSQL {
+			p.assigns = append(p.assigns, peopleAssign{routine: routine, at: toks[i].at, form: assignUnread})
 		}
 	case isWordAt(toks, j, "trigger") || isWordAt(toks, j, "constraint") && isWordAt(toks, j+1, "trigger"):
 		k := j + 1
@@ -315,12 +420,23 @@ func (p *peopleText) judgeCreateAt(toks []sqlTok, dep []int, i int, bodies map[i
 			}
 			if isWordAt(toks, k, "execute") && (isWordAt(toks, k+1, "function") || isWordAt(toks, k+1, "procedure")) {
 				if routine, _, ok := readRoutineName(toks, k+2); ok {
-					p.triggers = append(p.triggers, peopleTrigger{function: routine.name, table: table})
+					p.triggers = append(p.triggers, peopleTrigger{function: routine.name, label: routine.label, table: table, at: toks[i].at})
 				}
 				return
 			}
 		}
 	}
+}
+
+// routineLanguage — язык тела по лексеме после LANGUAGE: имя либо строка.
+func routineLanguage(t sqlTok) string {
+	switch {
+	case t.kind == sqlTokName:
+		return t.name
+	case t.kind == sqlTokString && len(t.readings) > 0:
+		return strings.ToLower(t.readings[0])
+	}
+	return ""
 }
 
 // peopleRaiseLevels — уровни RAISE, после которых стоит формат сообщения.
@@ -364,9 +480,13 @@ func peopleProse(toks []sqlTok, dep []int) map[int]bool {
 	return out
 }
 
-// peopleStatementStart — лексема k начинает оператор PL/pgSQL.
+// peopleStatementStart — лексема k начинает оператор PL/pgSQL: после `;`, после
+// слов, за которыми начинается оператор, и после метки `<<метка>>`.
 func peopleStatementStart(toks []sqlTok, k int) bool {
 	if k == 0 || isOp(toks[k-1], ';') {
+		return true
+	}
+	if k >= 2 && isOp(toks[k-1], '>') && isOp(toks[k-2], '>') {
 		return true
 	}
 	prev := toks[k-1]
@@ -387,57 +507,245 @@ func assignAt(toks []sqlTok, k int) bool {
 func (p *peopleText) recordAssign(column string, at int) {
 	p.rowAssigns++
 	if column == "" || p.subject[column] {
-		p.assigns = append(p.assigns, peopleAssign{routine: p.routine, column: column, at: at})
+		p.assigns = append(p.assigns, peopleAssign{routine: p.routine, column: column, at: at, form: assignTarget})
 	}
 }
 
-// judgeRowAssignments — присваивания строке триггера в теле подпрограммы:
-// `NEW.колонка := …` и `NEW := …` в начале оператора, цели `INTO`.
-func (p *peopleText) judgeRowAssignments(toks []sqlTok) {
+// triggerRowNames — имена, которыми тело называет строку триггера: NEW, OLD и
+// их псевдонимы (`имя ALIAS FOR new`, псевдоним псевдонима — тоже).
+func triggerRowNames(toks []sqlTok) map[string]bool {
+	rows := map[string]bool{"new": true, "old": true}
+	for grown := true; grown; {
+		grown = false
+		for k := 0; k+3 < len(toks); k++ {
+			if toks[k].kind != sqlTokName || rows[toks[k].name] || !isWordAt(toks, k+1, "alias") || !isWordAt(toks, k+2, "for") {
+				continue
+			}
+			if column, _, ok := triggerRowRef(toks, k+3, rows); ok && column == "" {
+				rows[toks[k].name], grown = true, true
+			}
+		}
+	}
+	return rows
+}
+
+// triggerRowRef — ссылка на строку триггера в k: `строка[.колонка]` либо
+// `метка.строка[.колонка]` (имя тела квалифицируется меткой блока, внешний блок
+// помечен именем подпрограммы). ok — ссылка называет строку триггера; column
+// пусто — строку целиком; next — индекс после составного имени.
+func triggerRowRef(toks []sqlTok, k int, rows map[string]bool) (column string, next int, ok bool) {
+	var parts []string
+	next = k
+	for next < len(toks) && toks[next].kind == sqlTokName {
+		parts = append(parts, toks[next].name)
+		next++
+		if next+1 >= len(toks) || !isOp(toks[next], '.') || toks[next+1].kind != sqlTokName {
+			break
+		}
+		next++
+	}
+	for i := 0; i < len(parts) && i < 2; i++ {
+		if rows[parts[i]] {
+			if i+1 < len(parts) {
+				column = parts[i+1]
+			}
+			return column, next, true
+		}
+	}
+	return "", next, false
+}
+
+// skipSubscripts — индекс после индексов элемента `[…]`, начатых в k.
+func skipSubscripts(toks []sqlTok, dep []int, k int) int {
+	for k < len(toks) && isOp(toks[k], '[') {
+		d := dep[k]
+		for k++; k < len(toks) && (!isOp(toks[k], ']') || dep[k] != d); k++ {
+		}
+		if k < len(toks) {
+			k++
+		}
+	}
+	return k
+}
+
+// judgeRowAssignments — запись строки триггера в теле подпрограммы на
+// PL/pgSQL. Цели присваивания — все, какие есть в грамматике PL/pgSQL: начало
+// оператора (`цель := …`, `цель = …`), `INTO [STRICT] цель[, …]`, `GET
+// [CURRENT|STACKED] DIAGNOSTICS цель = …`, `FOR цель[, …] IN`, `FOREACH цель …
+// IN ARRAY`, аргумент `CALL` (выходной параметр процедуры пишет в него). В
+// подпрограмме триггера судится и RETURN: база пишет ту строку, которую
+// подпрограмма вернула.
+func (p *peopleText) judgeRowAssignments(toks []sqlTok, dep []int) {
+	rows := triggerRowNames(toks)
 	for k := 0; k < len(toks); k++ {
 		if isWordAt(toks, k, "into") {
-			p.judgeIntoTargets(toks, k+1)
+			p.judgeTargets(toks, dep, k+1, rows)
 			continue
 		}
-		if !isWordAt(toks, k, "new") || !peopleStatementStart(toks, k) {
+		if !peopleStatementStart(toks, k) {
 			continue
 		}
 		switch {
-		case k+2 < len(toks) && isOp(toks[k+1], '.') && toks[k+2].kind == sqlTokName && assignAt(toks, k+3):
-			p.recordAssign(toks[k+2].name, toks[k].at)
-		case assignAt(toks, k+1):
-			p.recordAssign("", toks[k].at)
+		case isWordAt(toks, k, "get"):
+			p.judgeDiagnosticsTargets(toks, dep, k+1, rows)
+		case isWordAt(toks, k, "for") || isWordAt(toks, k, "foreach"):
+			p.judgeTargets(toks, dep, k+1, rows)
+		case isWordAt(toks, k, "call"):
+			p.judgeCallArguments(toks, dep, k+1, rows)
+		case isWordAt(toks, k, "return"):
+			if p.routine.trigger {
+				p.judgeTriggerReturn(toks, dep, k, rows)
+			}
+		default:
+			if column, next, ok := triggerRowRef(toks, k, rows); ok && assignAt(toks, skipSubscripts(toks, dep, next)) {
+				p.recordAssign(column, toks[k].at)
+			}
 		}
 	}
 }
 
-// judgeIntoTargets — цели `INTO [STRICT] цель[, цель…]` с лексемы j: цель
-// `NEW.колонка` — присваивание колонке, `NEW` — строке целиком.
-func (p *peopleText) judgeIntoTargets(toks []sqlTok, j int) {
+// judgeTargets — список целей с лексемы j: `[STRICT] цель[, цель…]` (INTO, FOR,
+// FOREACH): цель, называющая строку триггера, — присваивание ей.
+func (p *peopleText) judgeTargets(toks []sqlTok, dep []int, j int, rows map[string]bool) {
 	if isWordAt(toks, j, "strict") {
 		j++
 	}
-	for j < len(toks) {
-		switch {
-		case isWordAt(toks, j, "new") && j+2 < len(toks) && isOp(toks[j+1], '.') && toks[j+2].kind == sqlTokName:
-			p.recordAssign(toks[j+2].name, toks[j].at)
-			j += 3
-		case isWordAt(toks, j, "new"):
-			p.recordAssign("", toks[j].at)
-			j++
-		case toks[j].kind == sqlTokName:
-			j++
-			if j+1 < len(toks) && isOp(toks[j], '.') && toks[j+1].kind == sqlTokName {
-				j += 2
-			}
-		default:
-			return
+	for j < len(toks) && toks[j].kind == sqlTokName {
+		column, next, ok := triggerRowRef(toks, j, rows)
+		if ok {
+			p.recordAssign(column, toks[j].at)
 		}
+		j = skipSubscripts(toks, dep, next)
 		if j >= len(toks) || !isOp(toks[j], ',') {
 			return
 		}
 		j++
 	}
+}
+
+// judgeDiagnosticsTargets — `[CURRENT|STACKED] DIAGNOSTICS цель = элемент[, …]`
+// с лексемы j.
+func (p *peopleText) judgeDiagnosticsTargets(toks []sqlTok, dep []int, j int, rows map[string]bool) {
+	if isWordAt(toks, j, "current") || isWordAt(toks, j, "stacked") {
+		j++
+	}
+	if !isWordAt(toks, j, "diagnostics") {
+		return
+	}
+	d := dep[j]
+	for j++; j < len(toks); j++ {
+		if column, next, ok := triggerRowRef(toks, j, rows); ok && assignAt(toks, skipSubscripts(toks, dep, next)) {
+			p.recordAssign(column, toks[j].at)
+		}
+		for j < len(toks) && (dep[j] != d || !isOp(toks[j], ',') && !isOp(toks[j], ';')) {
+			j++
+		}
+		if j >= len(toks) || !isOp(toks[j], ',') {
+			return
+		}
+	}
+}
+
+// judgeCallArguments — `CALL имя(аргумент[, …])` с имени в j: аргумент, который
+// целиком называет строку триггера либо её колонку (позиционно либо `имя =>`),
+// — присваивание: выходной параметр процедуры пишет в него.
+func (p *peopleText) judgeCallArguments(toks []sqlTok, dep []int, j int, rows map[string]bool) {
+	_, j, ok := readRoutineName(toks, j)
+	if !ok || j >= len(toks) || !isOp(toks[j], '(') {
+		return
+	}
+	d := dep[j] + 1
+	s := j + 1
+	for k := s; k < len(toks); k++ {
+		if dep[k] > d || dep[k] == d && !isOp(toks[k], ',') {
+			continue
+		}
+		a := s
+		if a+2 < k && toks[a].kind == sqlTokName &&
+			(isOp(toks[a+1], '=') && isOp(toks[a+2], '>') || isOp(toks[a+1], ':') && isOp(toks[a+2], '=')) {
+			a += 3
+		}
+		if column, next, ok := triggerRowRef(toks, a, rows); ok && skipSubscripts(toks, dep, next) == k {
+			p.recordAssign(column, toks[a].at)
+		}
+		if dep[k] < d {
+			return
+		}
+		s = k + 1
+	}
+}
+
+// judgeTriggerReturn — оператор RETURN в k: законно вернуть саму строку
+// триггера (NEW, OLD, их псевдоним, в скобках, под меткой), NULL, ничего и CASE,
+// каждая ветвь которого законна; прочее — строка, которая не строка триггера.
+func (p *peopleText) judgeTriggerReturn(toks []sqlTok, dep []int, k int, rows map[string]bool) {
+	p.returns++
+	e := k + 1
+	for e < len(toks) && dep[e] >= dep[k] && (dep[e] != dep[k] || !isOp(toks[e], ';')) {
+		e++
+	}
+	if !lawfulTriggerReturn(toks, dep, k+1, e, rows) {
+		p.assigns = append(p.assigns, peopleAssign{routine: p.routine, at: toks[k].at, form: assignReturned})
+	}
+}
+
+// lawfulTriggerReturn — выражение [s, e) возвращает саму строку триггера либо
+// ничего.
+func lawfulTriggerReturn(toks []sqlTok, dep []int, s, e int, rows map[string]bool) bool {
+	for wrapsGroup(toks, dep, s, e) {
+		s, e = s+1, e-1
+	}
+	switch {
+	case s >= e:
+		return true
+	case e == s+1 && isWordAt(toks, s, "null"):
+		return true
+	case isWordAt(toks, s, "case") && isWordAt(toks, e-1, "end"):
+		return lawfulCaseResults(toks, dep, s, e, rows)
+	}
+	column, next, ok := triggerRowRef(toks, s, rows)
+	return ok && column == "" && next == e
+}
+
+// wrapsGroup — [s, e) целиком — одна группа в скобках.
+func wrapsGroup(toks []sqlTok, dep []int, s, e int) bool {
+	if e-s < 2 || !isOp(toks[s], '(') || !isOp(toks[e-1], ')') {
+		return false
+	}
+	for k := s + 1; k < e-1; k++ {
+		if dep[k] <= dep[s] {
+			return false
+		}
+	}
+	return true
+}
+
+// lawfulCaseResults — каждая ветвь результата CASE [s, e) законна; CASE без
+// ELSE возвращает NULL.
+func lawfulCaseResults(toks []sqlTok, dep []int, s, e int, rows map[string]bool) bool {
+	d, nest, start := dep[s], 0, -1
+	for k := s + 1; k < e-1; k++ {
+		if dep[k] != d {
+			continue
+		}
+		switch {
+		case isWordAt(toks, k, "case"):
+			nest++
+		case isWordAt(toks, k, "end"):
+			nest--
+		case nest == 0 && (isWordAt(toks, k, "when") || isWordAt(toks, k, "else")):
+			if start >= 0 && !lawfulTriggerReturn(toks, dep, start, k, rows) {
+				return false
+			}
+			start = -1
+			if isWordAt(toks, k, "else") {
+				start = k + 1
+			}
+		case nest == 0 && isWordAt(toks, k, "then"):
+			start = k + 1
+		}
+	}
+	return start < 0 || lawfulTriggerReturn(toks, dep, start, e-1, rows)
 }
 
 // peopleAddNotColumn — слова после ADD, начинающие не колонку.
