@@ -52,7 +52,8 @@
 -- ОКНА: ПИСЬМА НА АДРЕС ПО ВИДУ, ОБРАЩЕНИЯ ПО ИСТОЧНИКУ
 -- =============================================================================
 -- Окно писем на адрес (`invite_mail_windows`) получает вид письма в ключе:
--- приглашение и восстановление списываются каждое своим окном. Окно обращений
+-- приглашение и восстановление списываются каждое своим окном; умолчания у
+-- вида нет, писатель называет его сам. Окно обращений
 -- по источнику (`source_request_windows`) — новое: регистрация и запрос
 -- восстановления списывают его ДО своей работы. Списание и переход окна — один
 -- оператор с замком строки окна, как у окна писем.
@@ -117,8 +118,12 @@ CREATE INDEX email_verification_codes_issued_at_idx
 
 ALTER TABLE kaname.email_verification_codes ALTER COLUMN code_digest SET STATISTICS 0;
 
--- Окно писем на адрес — по виду письма.
+-- Окно писем на адрес — по виду письма. Умолчание заполняет только прежние
+-- строки (до этой миграции окна вели одни приглашения) и снимается тем же
+-- накатом: писатель, не назвавший вид, получает отказ схемы, а не строку окна
+-- приглашений.
 ALTER TABLE kaname.invite_mail_windows ADD COLUMN kind text DEFAULT 'invite' NOT NULL;
+ALTER TABLE kaname.invite_mail_windows ALTER COLUMN kind DROP DEFAULT;
 ALTER TABLE kaname.invite_mail_windows
     ADD CONSTRAINT invite_mail_windows_kind_check CHECK ((kind = ANY (ARRAY['invite'::text, 'recovery'::text])));
 ALTER TABLE kaname.invite_mail_windows DROP CONSTRAINT invite_mail_windows_pkey;
