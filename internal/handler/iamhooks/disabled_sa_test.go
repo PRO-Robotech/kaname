@@ -78,7 +78,7 @@ func newStateSAHook(t *testing.T, enabled bool, audit *fakeAudit) *iamhooks.Toke
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{},
 	).WithSAPort(&fakeStateSAPort{
 		clientID: disabledSAClient,
@@ -92,7 +92,6 @@ func newStateSAHook(t *testing.T, enabled bool, audit *fakeAudit) *iamhooks.Toke
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		}, enricher, newFakeRevocations(), audit, logger)
 }
 

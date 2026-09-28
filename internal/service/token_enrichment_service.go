@@ -124,12 +124,16 @@ type TokenEnrichmentUserTokenPort interface {
 	GetUser(ctx context.Context, id domain.UserID) (domain.User, error)
 }
 
-// TokenEnrichmentConfig — static issuer/audience metadata stamped into claims.
+// TokenEnrichmentConfig — static metadata stamped into claims.
+//
+// It carries the audience and nothing about the issuer. An issuer claim used to
+// ride here, filled with the address of the provider this service is retiring:
+// nothing in the service, the platform or the foundation ever read it, and on a
+// landing without that provider it named a server that answers nothing. The
+// token's own `iss` is the signer's, stated by whichever lane signs.
 type TokenEnrichmentConfig struct {
 	// Domain — public Kachō audience.
 	Domain string
-	// HydraIssuer — token issuer URL.
-	HydraIssuer string
 }
 
 // TokenHookContext — transport-agnostic projection of the inbound token-hook
@@ -496,7 +500,6 @@ func (s *TokenEnrichmentService) userClaims(primary domain.User, subject string,
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 
@@ -526,7 +529,6 @@ func (s *TokenEnrichmentService) userClaims(primary domain.User, subject string,
 func (s *TokenEnrichmentService) saClaims(soc domain.ServiceAccountOAuthClient, sa domain.ServiceAccount, subject string, hookCtx TokenHookContext) map[string]any {
 	claims := map[string]any{
 		"kaname_external_id":       subject,
-		"kaname_hydra_client_id":   subject,
 		domain.ClaimPrincipalType:  "service_account",
 		domain.ClaimPrincipalID:    string(soc.SvaID),
 		"kaname_sa_key_id":         string(soc.ID),
@@ -535,7 +537,6 @@ func (s *TokenEnrichmentService) saClaims(soc domain.ServiceAccountOAuthClient, 
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 	if sa.ID != "" {
@@ -554,7 +555,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 	claims := map[string]any{
 		// kaname_external_id stays the external assertion sub for audit.
 		"kaname_external_id":        externalSub,
-		"kaname_hydra_client_id":    hookCtx.OAuthClientID,
 		domain.ClaimPrincipalType:   "service_account",
 		domain.ClaimPrincipalID:     string(soc.SvaID),
 		"kaname_sa_key_id":          string(soc.ID),
@@ -566,7 +566,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 		"kaname_x5t_s256":           hookCtx.CnfX5tS256,
 		"kaname_acr":                hookCtx.ACR,
 		"kaname_audience":           s.cfg.Domain,
-		"kaname_issuer":             s.cfg.HydraIssuer,
 		"kaname_issued_at":          s.now().Unix(),
 	}
 	if sa.ID != "" {
@@ -584,7 +583,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u domain.User, subject string, hookCtx TokenHookContext) map[string]any {
 	claims := map[string]any{
 		"kaname_external_id":       subject,
-		"kaname_hydra_client_id":   subject,
 		domain.ClaimPrincipalType:  "user",
 		domain.ClaimPrincipalID:    string(uoc.UserID),
 		"kaname_user_id":           string(uoc.UserID),
@@ -594,7 +592,6 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 	if u.ID != "" {
@@ -649,7 +646,6 @@ func (s *TokenEnrichmentService) MinimalClaims(subject string) map[string]any {
 		"kaname_external_id":       subject,
 		domain.ClaimPrincipalType:  "user",
 		"kaname_device_compliance": "unknown",
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_audience":          s.cfg.Domain,
 		"kaname_issued_at":         s.now().Unix(),
 	}

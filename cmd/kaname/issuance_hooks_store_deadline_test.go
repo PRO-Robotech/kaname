@@ -247,9 +247,8 @@ func TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit(t *testing.T) {
 		store := &laneStore{user: human}
 		sc.state(store)
 		tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
-			hookSecret:  secret,
-			domain:      "api.test.cloud",
-			hydraIssuer: "https://hydra.test.cloud",
+			hookSecret: secret,
+			domain:     "api.test.cloud",
 		}, store.portsOf(), &auditDropSpy{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatalf("%s: сборка полос отказала с объявленным пределом %s: %v", sc.name, credentialLanePeerTimeout, err)

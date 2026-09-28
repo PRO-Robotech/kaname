@@ -89,11 +89,11 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).WithSAPort(saPort)
 	h := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "api.test.cloud"},
 		enricher,
 		newFakeRevocations(),
 		&fakeAudit{},
@@ -148,7 +148,10 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	assert.Equal(t, "https://token.actions.githubusercontent.com", claims["kaname_federation_issuer"])
 	assert.Equal(t, "repo:acme/infra:ref:refs/heads/main", claims["kaname_federation_subject"])
 	assert.Equal(t, "jwt-bearer", claims["kaname_federation_mode"])
-	assert.Equal(t, "hydra-cli-fake", claims["kaname_hydra_client_id"])
+	// Утверждения, названного по поставщику, нет (kaname#375): клиент назван
+	// нашим идентификатором ключа.
+	assert.NotContains(t, claims, "kaname_hydra_client_id")
+	assert.Equal(t, "soc_01abcdefghjkmnpqr", claims["kaname_sa_key_id"])
 }
 
 // TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded — when grant
@@ -165,11 +168,11 @@ func TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded(t *testing.T) {
 	saPort := &fakeSAPort{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "x", HydraIssuer: "y"},
+		service.TokenEnrichmentConfig{Domain: "x"},
 		users,
 	).WithSAPort(saPort)
 	h := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "x", HydraIssuer: "y"},
+		iamhooks.TokenHookConfig{HookSharedSecret: "tok", Domain: "x"},
 		enricher,
 		newFakeRevocations(),
 		&fakeAudit{},

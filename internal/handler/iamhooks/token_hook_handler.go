@@ -29,7 +29,6 @@ import (
 type TokenHookConfig struct {
 	HookSharedSecret string
 	Domain           string
-	HydraIssuer      string
 }
 
 // TokenEnricher — service-layer use-case the handler delegates claims

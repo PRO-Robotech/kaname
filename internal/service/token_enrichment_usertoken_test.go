@@ -59,7 +59,7 @@ func (s stubUserTokenPort) GetUser(_ context.Context, _ domain.UserID) (domain.U
 
 func newUserTokenEnricher(users TokenEnrichmentUserPort, ut TokenEnrichmentUserTokenPort, now time.Time) *TokenEnrichmentService {
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		TokenEnrichmentConfig{Domain: "kacho.cloud"},
 		users,
 	).WithUserTokenPort(ut)
 	svc.now = func() time.Time { return now }
@@ -89,7 +89,6 @@ func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 
 	assert.Equal(t, map[string]any{
 		"kaname_external_id":       "client-abc",
-		"kaname_hydra_client_id":   "client-abc",
 		"kaname_principal_type":    "user",
 		"kaname_principal_id":      "usr-abc",
 		"kaname_user_id":           "usr-abc",
@@ -99,7 +98,6 @@ func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 		"kaname_x5t_s256":          "x5t-thumb",
 		"kaname_acr":               "3",
 		"kaname_audience":          "kacho.cloud",
-		"kaname_issuer":            "https://hydra.kacho.local",
 		"kaname_issued_at":         fixed.Unix(),
 		"kaname_account_id":        "acc-xyz",
 		"kaname_active_account":    "acc-xyz",

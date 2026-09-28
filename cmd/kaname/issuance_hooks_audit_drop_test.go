@@ -163,9 +163,8 @@ func TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake(t *testing.T) {
 				drops := &auditDropSpy{}
 
 				tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
-					hookSecret:  secret,
-					domain:      "api.test.cloud",
-					hydraIssuer: "https://hydra.test.cloud",
+					hookSecret: secret,
+					domain:     "api.test.cloud",
 				}, ports, drops, slog.New(slog.NewTextHandler(io.Discard, nil)))
 				if err != nil {
 					t.Fatalf("сборка полос отказала с поданным приёмником потерь: %v", err)
@@ -253,7 +252,7 @@ func TestIssuanceHookLanesCountTheAuditRecordTheStoreDidNotTake(t *testing.T) {
 // приёмника потерь журнала отказывает; законный близнец с приёмником строится.
 func TestIssuanceHooksAssemblyRefusesWithoutAnAuditDropObserver(t *testing.T) {
 	store := &laneStore{}
-	cfg := issuanceHookConfig{hookSecret: "s", domain: "api.test.cloud", hydraIssuer: "https://hydra.test.cloud"}
+	cfg := issuanceHookConfig{hookSecret: "s", domain: "api.test.cloud"}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	if _, _, err := buildIssuanceHooks(cfg, store.portsOf(), nil, quiet); !errors.Is(err, handlerinternal.ErrAuditDropObserverMissing) {

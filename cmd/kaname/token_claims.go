@@ -30,10 +30,7 @@ func newAssertionClaimsComposer(pool *pgxpool.Pool, cfg config.Config) *service.
 	userClients := kanamepg.NewUserOAuthClientRepo(pool)
 
 	return service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{
-			Domain:      cfg.AuthN.ResolveDomain(),
-			HydraIssuer: cfg.AuthN.ResolveHydraIssuer(),
-		},
+		service.TokenEnrichmentConfig{Domain: cfg.AuthN.ResolveDomain()},
 		users,
 	).
 		WithSAPort(&tokenEnrichSAAdapter{saClients: saClients}).

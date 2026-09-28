@@ -139,7 +139,7 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	saClients := kanamepg.NewSAOAuthClientRepo(f.pool)
 	userClients := kanamepg.NewUserOAuthClientRepo(f.pool)
 	claims := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "kacho.local", HydraIssuer: ctIssuer},
+		service.TokenEnrichmentConfig{Domain: "kacho.local"},
 		users,
 	).
 		WithSAPort(&ctSAAdapter{saClients: saClients}).
