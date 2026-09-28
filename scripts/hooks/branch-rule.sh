@@ -25,8 +25,10 @@
 #   · подпись — только корневая учётная запись (`git config --global user.*`);
 #     -c user.*, --local/--worktree user.*, GIT_AUTHOR_*/GIT_COMMITTER_* её не
 #     переопределяют;
-#   · атрибуции нет: трейлер Co-Authored-By с Claude/anthropic, строка
+#   · атрибуции нет: трейлер Co-Authored-By с ЛЮБЫМ значением, строка
 #     Claude-Session:, «Generated with [Claude Code]», ссылка claude.ai/code.
+#     Правило запрещает ключ, а не значение (kacho-workspace#861): соавтор-
+#     человек — тоже трейлер атрибуции, и предикат у четырёх деревьев один.
 #
 # T0 — граница истории. Коммит с датой автора до T0 по форме и подписи не
 # судится: ветки, открытые до правила, не переименовываются, main не
@@ -88,13 +90,15 @@ branch_rule_subject_task() {
 branch_rule_merge_form() { [[ "$1" =~ ^#[0-9]+\ merge\ (#[0-9]+|main)([^0-9A-Za-z_]|$) ]]; }
 
 # branch_rule_attribution <текст> — печатает первую строку атрибуции; 1 — её нет.
-# Регистр не различается. Co-Authored-By без Claude/anthropic — законный соавтор.
+# Регистр не различается. Трейлер — строка, НАЧАТАЯ его именем: то же имя в
+# середине строки — упоминание, а не трейлер. Co-Authored-By судится по ключу,
+# значение не читается (#861).
 branch_rule_attribution() {
     local line found=1 restore
     restore="$(shopt -p nocasematch)"
     shopt -s nocasematch
     while IFS= read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*co-authored-by:.*(claude|anthropic) ]] ||
+        if [[ "$line" =~ ^[[:space:]]*co-authored-by: ]] ||
             [[ "$line" =~ ^[[:space:]]*claude-session: ]] ||
             [[ "$line" =~ generated[[:space:]]+with[[:space:]]+\[?claude[[:space:]]+code ]] ||
             [[ "$line" =~ claude\.ai/code ]]; then
