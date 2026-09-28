@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 764
+Всего кейсов: 780
 
 ## Перепись по модулям
 
@@ -70,7 +70,7 @@
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
-| `cases/kaname-login-lane.py` | 4 |
+| `cases/kaname-login-lane.py` | 20 |
 | `cases/kaname-recovery-lane.py` | 3 |
 | `cases/kaname-second-factor.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1048,7 +1048,7 @@
 - `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
 - `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
-## `cases/kaname-login-lane.py` — 4 кейса
+## `cases/kaname-login-lane.py` — 20 кейсов
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
 > формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
@@ -1063,6 +1063,22 @@
 - `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
 - `IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT`
 - `IAM-LOGINLANE-NEG-CSRF-MISSING`
+- `IAM-LOGINLANE-NEG-REFUSAL-ONE-FOR-ALL`
+- `IAM-LOGINLANE-OK-LOGIN-EMAIL-CASE-FOLDED`
+- `IAM-LOGINLANE-NEG-FORM-FIELDS`
+- `IAM-LOGINLANE-OK-UNVERIFIED-LOGIN`
+- `IAM-LOGINLANE-OK-COOKIE-HOST-ONLY`
+- `IAM-LOGINLANE-OK-TWO-SESSIONS-DISTINCT`
+- `IAM-LOGINLANE-OK-LOGOUT-SAME-ANSWER`
+- `IAM-LOGINLANE-OK-PASSWORD-CHANGE-ROUNDTRIP`
+- `IAM-LOGINLANE-NEG-PASSWORD-CHANGE-REFUSALS`
+- `IAM-LOGINLANE-NEG-NEW-PASSWORD-RULE`
+- `IAM-LOGINLANE-SEC-FORWARDED-PRINCIPAL-IGNORED`
+- `IAM-LOGINLANE-NEG-RATE-BY-ADDRESS`
+- `IAM-LOGINLANE-NEG-RATE-ADDRESS-CASE-FOLDED`
+- `IAM-LOGINLANE-OK-RATE-RESET-ON-SUCCESS`
+- `IAM-LOGINLANE-NEG-RATE-BY-SOURCE`
+- `IAM-LOGINLANE-OK-NOT-COUNTED`
 
 ## `cases/kaname-recovery-lane.py` — 3 кейса
 
