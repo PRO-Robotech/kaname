@@ -94,7 +94,8 @@ ROOT = HERE.parents[1]
 # Запись окружения — ОДНА на оба посева, а не вторая копия рядом: копия
 # разошлась бы с первой молча (иной порядок, иной тип добавленного ключа).
 sys.path.insert(0, str(HERE))
-from seed_own_stand import Unmet, write_env  # noqa: E402
+from seed_own_stand import (  # noqa: E402
+    LETTER_BUDGET_S, Mailbox, Unmet, await_code, code_of, write_env)
 
 # Ключи окружения, которые пишет этот посев. Перепись долга
 # (`.github/scripts/newman-suite-debt.py`) спрашивает их у САМОГО посева флагом
@@ -282,56 +283,8 @@ def register(http, email: str, password: str) -> None:
 # `.github/scripts/stand-mailbox.py`), и предъявляется полосе. Обратного
 # заполнения отметки нет: запись в базу закрыла бы именно то, что судит набор.
 
-# Сколько ждать письма в приёмнике и с какой паузой спрашивать. Письмо
-# регистрации ставится той же транзакцией, что заводит человека, и дренаж
-# очереди отдаёт его узлу за секунды; предел — с запасом на повтор отправки.
-LETTER_BUDGET_S = 90
-LETTER_POLL_S = 2
-
-
-class Mailbox:
-    """Приёмник писем стенда: `GET /messages?to=<адрес>` — письма по порядку."""
-
-    def __init__(self, base_url: str):
-        self.base = base_url.rstrip("/")
-
-    def letters(self, to: str) -> list[str]:
-        url = f"{self.base}/messages?" + urllib.parse.urlencode({"to": to})
-        try:
-            with urllib.request.urlopen(url, timeout=15) as r:
-                doc = json.loads(r.read().decode("utf-8", "replace"))
-        except (urllib.error.URLError, OSError, socket.timeout,
-                json.JSONDecodeError) as e:
-            raise Unmet(f"приёмник писем стенда по адресу {self.base} недостижим "
-                        f"либо ответил не перечнем: {e}") from None
-        msgs = doc.get("messages") if isinstance(doc, dict) else None
-        if not isinstance(msgs, list):
-            raise Unmet(f"приёмник писем стенда ответил без перечня messages: {doc!r:.200}")
-        return [m.get("data", "") for m in msgs if isinstance(m, dict)]
-
-
-def code_of(letter: str) -> str | None:
-    """Код из письма подтверждения: первая непустая строка после строки
-    «Код подтверждения:». Письмо без неё кода не несёт."""
-    lines = letter.replace("\r\n", "\n").split("\n")
-    for i, line in enumerate(lines):
-        if line.strip() == "Код подтверждения:":
-            for nxt in lines[i + 1:]:
-                if nxt.strip():
-                    return nxt.strip()
-            return None
-    return None
-
-
-def await_code(mailbox, email: str, seen: int, sleep) -> str | None:
-    """Код ПОСЛЕДНЕГО письма, пришедшего сверх `seen` уже прочитанных. None —
-    за предел письма не пришло."""
-    for _ in range(max(1, LETTER_BUDGET_S // LETTER_POLL_S)):
-        letters = mailbox.letters(email)
-        if len(letters) > seen:
-            return code_of(letters[-1])
-        sleep(LETTER_POLL_S)
-    return None
+# Приёмник писем стенда, разбор кода и ожидание письма — те же, что у
+# машинного посева (`seed_own_stand.py`, импорт выше): одна реализация на оба.
 
 
 def request_letter(http, bearer: str) -> None:
