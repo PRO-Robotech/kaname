@@ -176,12 +176,12 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		},
 		{
 			name: "применимость ШИРЕ антецедента: поле требует, страж молчит",
-			table: mutate(cloneTable(), "authn.hydra-jwks-url", func(s *config.RequiredSetting) {
+			table: mutate(cloneTable(), "authn.hydra-token-url", func(s *config.RequiredSetting) {
 				s.WhenOwnPublicRESTFront = true
 			}),
 			wantFinding: true,
-			coordinate:  "authn.hydra-jwks-url",
-			why: "набор ключей внешнего поставщика к поднятости СОБСТВЕННОГО фронта отношения не " +
+			coordinate:  "authn.hydra-token-url",
+			why: "адрес обмена у внешнего поставщика к поднятости СОБСТВЕННОГО фронта отношения не " +
 				"имеет: на посадке own с фронтом страж его не требует, а поле объявило бы требование. " +
 				"Т1 ловит это с другой стороны — снятая строка обязана дать отказ на КАЖДОЙ посадке, " +
 				"где объявлена применимой",

@@ -447,73 +447,56 @@ type providerPublicHop struct {
 	whatItISFor string
 }
 
-// validateProductionProviderPublicHops holds the two hops to the provider's
-// PUBLIC listener to the same discipline the ADMIN hop already has: the address
-// is DECLARED, never worked out from a neighbour's, and TLS is never claimed
-// without something to verify the peer against.
+// validateProductionProviderPublicHops holds the hop to the provider's PUBLIC
+// listener to the same discipline the ADMIN hop already has: the address is
+// DECLARED, never worked out from a neighbour's, and TLS is never claimed without
+// something to verify the peer against.
 //
-// DECLARED, NOT DERIVED. Both addresses fall back to a derivation from the issuer
-// — `<issuer>/.well-known/jwks.json` and `<issuer>/oauth2/token`. A derivation is
-// never empty, so the facade reads as configured on a profile that declared
-// neither, while addressing the PUBLIC ingress hostname: in-cluster that name
-// usually does not resolve at all (the JWKS mirror then fail-closes 502 and every
-// docker pull gets a 401, with no line at start-up naming why), and where it does
-// resolve it is not the process the operator meant. This is the platform rule that
-// the address of a dependency an access decision rests on is never derived.
+// DECLARED, NOT DERIVED. The address falls back to a derivation from the issuer —
+// `<issuer>/oauth2/token`. A derivation is never empty, so the facade reads as
+// configured on a profile that declared nothing, while addressing the PUBLIC
+// ingress hostname: in-cluster that name usually does not resolve at all, and
+// where it does resolve it is not the process the operator meant. This is the
+// platform rule that the address of a dependency an access decision rests on is
+// never derived.
 //
-// WHAT EACH HOP CARRIES, because the two are not interchangeable:
-//   - the JWKS upstream is the ONLY thing that decides which signatures the
-//     data-plane accepts. iam re-serves the fetched keyset verbatim on its
-//     cluster-internal mirror, so whatever answers this address chooses the
-//     platform's verification keys.
-//   - the token endpoint carries a signed client assertion out and the minted
-//     bearer back in the response body.
+// WHAT THE HOP CARRIES: the token endpoint carries a signed client assertion out
+// and the minted bearer back in the response body. The second public hop — the
+// upstream of the key-set mirror — left together with the mirror (kaname#361).
 //
 // TRANSPORT IS NOT ASSERTED HERE, and that is a boundary, not an oversight. The
 // provider serves its public listener in plain http on every profile, and the
 // per-listener TLS override this version does NOT support was measured false on
 // 2026-07-30 — see the note in
 // deploy/helm/umbrella/templates/hydra-admin-certificate.yaml. Moving the public
-// listener moves the ingress, the JWKS mirror and the token endpoint together; it
-// is its own change with its own acceptance. Requiring https here would only add a
+// listener moves the ingress and the token endpoint together; it is its own
+// change with its own acceptance. Requiring https here would only add a
 // second reason for the same stand not to boot, and the fix for it would not be
 // this guard's.
 //
 // WHAT IS ASSERTED IS THE HALF THAT CAN BE GOT WRONG SILENTLY: the moment a
 // profile writes https, an anchor must be pinned with it. Without one the process
 // verifies against the SYSTEM roots, which an internal-CA certificate never chains
-// to — so the address reads as hardened while every fetch fails on an unknown
-// authority, and the JWKS mirror answers 502 to the whole data-plane.
+// to — so the address reads as hardened while every call fails on an unknown
+// authority.
 //
 // Only the explicit sources count as declared — the YAML setting and its ENV
 // override — because those are the two an operator actually writes. dev keeps the
 // derivation and tolerates anything: an in-process fixture has no provider.
-// providerPublicHopKind — какой из двух публичных контуров проверяется. Их
-// разделили, потому что таблица требований полос называет их РАЗНЫМИ
-// обязательными элементами: набор проверочных ключей решает, чьи подписи
-// принимает data-plane, а адрес обмена возит подписанное утверждение. Отказ по
-// одному не есть отказ по другому, и клетка произведения у каждого своя.
+// providerPublicHopKind — какой публичный контур проверяется. Контур
+// остался один — адрес обмена (второй, верхний хоп зеркала набора ключей, снят
+// вместе с зеркалом, kaname#361); вид сохранён, потому что строка таблицы
+// требований полос называет контур по нему, а не по номеру в перечне.
 type providerPublicHopKind int
 
 const (
-	providerHopJWKS providerPublicHopKind = iota
-	providerHopToken
+	providerHopToken providerPublicHopKind = iota
 )
 
-// providerPublicHops — объявление обоих контуров. Одно место: тексты отказов
-// часть контракта оператора, и вторая копия разошлась бы с первой молча.
+// providerPublicHops — объявление контура. Одно место: тексты отказов часть
+// контракта оператора, и вторая копия разошлась бы с первой молча.
 func (c Config) providerPublicHops() []providerPublicHop {
 	return []providerPublicHop{
-		{
-			setting:   "authn.hydra-jwks-url",
-			env:       "KANAME_HYDRA_JWKS_URL",
-			declared:  c.AuthN.DeclaredHydraJWKSURL(),
-			caSetting: "authn.hydra-jwks-ca-file",
-			caEnv:     "KANAME_HYDRA_JWKS_CA_FILE",
-			caFile:    c.AuthN.ResolveHydraJWKSCAFile(),
-			whatItISFor: "the keyset this process mirrors on its cluster-internal listener is the " +
-				"data-plane's only anchor for deciding whether a token was signed by the provider",
-		},
 		{
 			setting:   "authn.hydra-token-url",
 			env:       "KANAME_HYDRA_TOKEN_URL",

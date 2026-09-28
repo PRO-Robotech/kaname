@@ -109,13 +109,12 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			TrustDomainName:              "kacho.cloud",
 			HydraAdminURL:                "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
 			HydraAdminCAFile:             "/etc/kaname/tls/server/ca.crt",
-			// Both hops to the provider's PUBLIC listener declared, in the plain
+			// The hop to the provider's PUBLIC listener declared, in the plain
 			// http the provider actually serves there — the shape the deployed
-			// profiles carry. They are part of the fixture, not of any test's
-			// subject: production refuses a DERIVED address on either
-			// (validateProductionProviderPublicHops), so leaving them empty would
+			// profiles carry. It is part of the fixture, not of any test's
+			// subject: production refuses a DERIVED address
+			// (validateProductionProviderPublicHops), so leaving it empty would
 			// make every unrelated production case fail for a reason it is not about.
-			HydraJWKSURL:  "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json",
 			HydraTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
 		},
 	}

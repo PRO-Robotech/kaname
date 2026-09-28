@@ -25,9 +25,10 @@ import (
 // ПРИЗНАК задачи #1125, закрытый: боевая посадка, своя чеканка, НИ ОДНОГО адреса
 // внешнего поставщика — старт проходит.
 //
-// До полосности этот же вход давал ТРИ отказа сразу (authn.hydra-admin-url,
-// authn.hydra-jwks-url, authn.hydra-token-url), и отдельный клон в боевой
-// посадке не поднимался, сколько бы кода ни переехало.
+// До полосности этот же вход давал ТРИ отказа сразу (административный адрес,
+// адрес набора ключей и адрес обмена), и отдельный клон в боевой посадке не
+// поднимался, сколько бы кода ни переехало. Адрес набора ключей снят вместе с
+// зеркалом (kaname#361); два оставшихся судятся ниже.
 func TestF4d_OwnPostureBootsWithoutASingleProviderAddress(t *testing.T) {
 	cfg := postureWithoutProviderAddresses(t, config.IdentityProviderOwn)
 
@@ -37,7 +38,7 @@ func TestF4d_OwnPostureBootsWithoutASingleProviderAddress(t *testing.T) {
 }
 
 // Положительный контроль того же входа: строки полосы `external` те же пустые
-// адреса НЕ пропускают, и отказов ровно три — по одному на адрес. Без него
+// адреса НЕ пропускают, и отказов ровно два — по одному на адрес. Без него
 // зелёное выше означало бы «стражи сняты», а не «стражи полосные».
 //
 // Строки судятся напрямую, а не проверкой старта: посадка снята фундаментом
@@ -52,7 +53,7 @@ func TestF4d_ExternalLaneRowsStillRefuseTheSameEmptyAddresses(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, setting := range []string{
-		"authn.hydra-admin-url", "authn.hydra-jwks-url", "authn.hydra-token-url",
+		"authn.hydra-admin-url", "authn.hydra-token-url",
 	} {
 		if !strings.Contains(msg, setting) {
 			t.Fatalf("отказ обязан называть %s, получено: %q", setting, msg)
@@ -63,8 +64,14 @@ func TestF4d_ExternalLaneRowsStillRefuseTheSameEmptyAddresses(t *testing.T) {
 	if !strings.Contains(msg, "is not declared (env override KANAME_HYDRA_ADMIN_URL)") {
 		t.Fatalf("текст провайдерского отказа обязан быть сохранён дословно, получено: %q", msg)
 	}
-	if n := strings.Count(msg, "declare authn.identity-provider=own and this requirement is lifted"); n != 3 {
-		t.Fatalf("каждый полосный отказ обязан назвать снимающее значение; таких строк %d, ожидалось 3", n)
+	if n := strings.Count(msg, "declare authn.identity-provider=own and this requirement is lifted"); n != 2 {
+		t.Fatalf("каждый полосный отказ обязан назвать снимающее значение; таких строк %d, ожидалось 2", n)
+	}
+	// Адрес набора ключей поставщика не требуется НИ ОДНОЙ строкой: верхнего
+	// хопа зеркала больше нет (kaname#361), и отказ о нём был бы требованием
+	// ручки, которую никто не читает.
+	if strings.Contains(msg, "hydra-jwks") {
+		t.Fatalf("строки полосы external требуют адрес набора ключей поставщика, а его читателя нет: %q", msg)
 	}
 }
 
@@ -98,13 +105,11 @@ func externalLaneRefusal(c config.Config) error {
 func postureWithoutProviderAddresses(t *testing.T, p config.IdentityProvider) config.Config {
 	t.Helper()
 	t.Setenv("KANAME_HYDRA_ADMIN_URL", "")
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
 
 	cfg := laneCfg(p)
 	cfg.AuthN.HydraAdminURL = ""
 	cfg.AuthN.HydraAdminCAFile = ""
-	cfg.AuthN.HydraJWKSURL = ""
 	cfg.AuthN.HydraTokenURL = ""
 	return cfg
 }
@@ -184,9 +189,6 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		t.Setenv("KANAME_HYDRA_ADMIN_URL", "")
 		broken.AuthN.HydraAdminURL = ""
 		broken.AuthN.HydraAdminCAFile = ""
-	case "набор проверочных ключей внешнего поставщика":
-		t.Setenv("KANAME_HYDRA_JWKS_URL", "")
-		broken.AuthN.HydraJWKSURL = ""
 	case "адрес обмена утверждения у внешнего поставщика":
 		t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
 		broken.AuthN.HydraTokenURL = ""
@@ -229,11 +231,9 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.AccessKeys.Origins = nil
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
-	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.
+	// Строка ниже требует ОТСУТСТВИЯ, поэтому ломается наличием.
 	case "дорога к внешнему поставщику не строится":
 		w.ProviderAdminHopBuilt = true
-	case "запись зеркала чужого набора ключей не публикуется":
-		w.ProviderKeySetMirrorPublished = true
 	default:
 		// Новая строка таблицы без способа её сломать — НАХОДКА, а не пропуск:
 		// иначе клетка была бы «покрыта» случаем, который ничего не проверяет.
@@ -251,11 +251,10 @@ func wiredLane() config.LaneWiring {
 		HumanCredentialsWired: true,
 		HumanSessionsWired:    true,
 		// Полностью провязанная полоса `own` — это в том числе полоса, у
-		// которой дороги к внешнему поставщику НЕТ: два поля ниже требуются
-		// отсутствующими, поэтому «всё выполнено» для них означает false.
-		ProviderAdminHopBuilt:         false,
-		ProviderKeySetMirrorPublished: false,
-		PresentableACRs:               []string{"1", "2"},
+		// которой дороги к внешнему поставщику НЕТ: поле ниже требуется
+		// отсутствующим, поэтому «всё выполнено» для него означает false.
+		ProviderAdminHopBuilt: false,
+		PresentableACRs:       []string{"1", "2"},
 		CatalogFloors: config.CatalogFloors{
 			Readable: true,
 			ByLevel:  map[string]int{"1": 285, "2": 32},

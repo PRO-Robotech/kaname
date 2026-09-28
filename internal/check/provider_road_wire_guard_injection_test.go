@@ -159,15 +159,16 @@ func (c *HydraAdminClient) roadIsBuilt() bool {
 // TestProviderRoadWire_SilentOnAnotherTypeWithTheSameFieldName — ЗАКОННЫЙ
 // БЛИЗНЕЦ: разбор судит по ТИПУ ПОЛУЧАТЕЛЯ, а не по имени поля.
 //
-// Ось несущая: `BaseURL` — имя обычное, оно стоит у клиентов набора ключей, у
-// обмена токена и у соседних служб. Гейт, судящий по имени поля, краснел бы на
-// каждом из них — и был бы снят как непонятный.
+// Ось несущая: `BaseURL` — имя обычное, его заводит любой HTTP-клиент, в том
+// числе у соседних служб. Гейт, судящий по имени поля, краснел бы на каждом из
+// них — и был бы снят как непонятный. Тип ниже синтетический: его предмет —
+// получатель, не совпадающий с судимым, а не какой-то живой клиент.
 func TestProviderRoadWire_SilentOnAnotherTypeWithTheSameFieldName(t *testing.T) {
 	t.Parallel()
 	src := `package clients
 
-func (c *JWKSMirrorClient) Fetch(ctx context.Context) error {
-	return c.get(ctx, c.BaseURL+"/.well-known/jwks.json")
+func (c *CatalogFetcher) Fetch(ctx context.Context) error {
+	return c.get(ctx, c.BaseURL+"/catalog")
 }
 `
 	ms, census := scanWire(t, src)

@@ -9,32 +9,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-// TestResolveHydraJWKSURL_Precedence — the internal JWKS-proxy upstream mirrors the
-// KANAME_HYDRA_TOKEN_URL precedence (authn.go): explicit field → env
-// KANAME_HYDRA_JWKS_URL (cluster-internal hydra-public) → derived
-// ResolveHydraIssuer()+"/.well-known/jwks.json" (back-compat).
-func TestResolveHydraJWKSURL_Precedence(t *testing.T) {
-	// Default: derived from the Hydra issuer's well-known path. Домен объявлен
-	// ЯВНО: умолчания у него нет (задача #2127), и предмет пробы — деривация, а
-	// не умолчание.
-	c := config.AuthNConfig{Domain: "access.example.invalid"}
-	if got := c.ResolveHydraJWKSURL(); got != "https://hydra.access.example.invalid/.well-known/jwks.json" {
-		t.Fatalf("default ResolveHydraJWKSURL() = %q; want derived issuer well-known", got)
-	}
-
-	// Env override: the cluster-internal hydra-public Service (mirror of the token URL).
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json")
-	if got := c.ResolveHydraJWKSURL(); got != "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json" {
-		t.Fatalf("env-override ResolveHydraJWKSURL() = %q; want the cluster-internal URL", got)
-	}
-
-	// Explicit field wins over env.
-	c2 := config.AuthNConfig{HydraJWKSURL: "http://explicit:4444/.well-known/jwks.json"}
-	if got := c2.ResolveHydraJWKSURL(); got != "http://explicit:4444/.well-known/jwks.json" {
-		t.Fatalf("field-override ResolveHydraJWKSURL() = %q; want the explicit field", got)
-	}
-}
-
 // TestJWKSProxyListenAddress — the api-server.jwks-proxy.endpoint normalises like
 // the other listeners; empty disables it.
 func TestJWKSProxyListenAddress(t *testing.T) {

@@ -56,7 +56,7 @@ const mtlsEnvPrefix = EnvPrefix
 //   - InternalServerMTLS — gRPC internal listener (:9091), grpc.ServerOption.
 //   - HooksServerMTLS    — HTTP Hydra/Kratos hooks listener (:9092), *tls.Config.
 //   - MetricsServerMTLS  — HTTP Prometheus /metrics listener (:9095), *tls.Config.
-//   - JWKSProxyServerMTLS     — HTTP Hydra-JWKS proxy (:9097), *tls.Config.
+//   - JWKSProxyServerMTLS     — HTTP key-set publisher (:9097), *tls.Config.
 //   - RegistryTokenServerMTLS — HTTP docker-token shim (:9096), *tls.Config.
 //
 // gRPC-ребра отдают grpc.ServerOption (передается в grpcsrv.NewServer);
@@ -131,8 +131,8 @@ type MTLSConfig struct {
 	// Неизвестный режим → fail-closed.
 	MetricsClientAuthMode string `envconfig:"METRICS_SERVER_MTLS_CLIENTAUTHMODE"`
 
-	// JWKSProxyServerMTLS — server-creds для HTTP Hydra-JWKS proxy listener
-	// (:9097, cluster-internal `GET /.well-known/jwks.json`). Data-plane
+	// JWKSProxyServerMTLS — server-creds для HTTP key-set publisher listener
+	// (:9097, cluster-internal `GET <authn.token-signing.key-set-path>`). Data-plane
 	// verification keys (public OIDC material), served internal-only over
 	// ONE-WAY server-TLS (internal-CA leaf; NOT mutual — see JWKSProxyClientAuthMode
 	// default server-tls-only). The route is unauthenticated-by-design (public keys,

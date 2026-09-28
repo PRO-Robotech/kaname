@@ -567,17 +567,6 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.hydra-admin-ca-file is empty",
 	},
 	{
-		Key:    "authn.hydra-jwks-url",
-		Env:    "KANAME_HYDRA_JWKS_URL",
-		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderExternal},
-		Sample: "http://hydra-public.kacho.svc:4444/.well-known/jwks.json",
-		Why: "набор проверочных ключей поставщика — единственная опора, по которой решается, его ли " +
-			"подписью подписан предъявленный токен. Незаданный адрес выводится из издателя ровно так же, " +
-			"как административный выше",
-		Refusal: "authn.hydra-jwks-url is not declared",
-	},
-	{
 		Key:    "authn.hydra-token-url",
 		Env:    "KANAME_HYDRA_TOKEN_URL",
 		Supply: SupplyEnv,

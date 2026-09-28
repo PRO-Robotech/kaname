@@ -44,8 +44,9 @@ func TestKeySet_AfterRotationOurRecordCarriesTheNewKey(t *testing.T) {
 		}
 	}
 
-	// И ни одного чужого: наша запись содержит ТОЛЬКО наши ключи, чужие живут
-	// в отдельной записи зеркала и в нашу не попадают.
+	// И ни одного чужого: наша запись содержит ТОЛЬКО наши ключи. Второй
+	// записи у публикатора нет (kaname#361), и чужому ключу попасть некуда,
+	// кроме как в нашу — это утверждение и держит.
 	for _, foreign := range []string{"provider-1", "upstream-kid-1", "attacker-1"} {
 		if strings.Contains(body, foreign) {
 			t.Fatalf("в НАШЕЙ записи оказался чужой ключ %q: %s", foreign, body)

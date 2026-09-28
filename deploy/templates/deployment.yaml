@@ -245,7 +245,7 @@ spec:
             # установки обещал оператору внешнюю достижимость (задача #2337).
             - name: registry-token
               containerPort: {{ include "kaname-svc.processDefaultPort" "registryToken" }}
-            # Зеркало публичных ключей проверки. Его читает плоскость данных
+            # Публикатор набора ключей проверки. Его читает плоскость данных
             # реестра; порта у него тоже не было.
             - name: http-jwks
               containerPort: {{ include "kaname-svc.processDefaultPort" "jwksProxy" }}

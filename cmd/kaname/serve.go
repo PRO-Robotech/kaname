@@ -40,7 +40,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
@@ -83,21 +82,6 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	case <-time.After(timeout):
 		srv.Stop()
 	}
-}
-
-// providerKeySetMirrorIsPublished — ПОПАДЁТ ЛИ запись зеркала ЧУЖОГО набора
-// проверочных ключей в перечень публикуемых (задача kaname#21).
-//
-// Читателей ровно два, и оба обязаны получить ОДНО значение: место публикации
-// ниже в этой же функции и наблюдатель провязки, который об этом отчитывается
-// стражу посадки. Своё условие у каждого разошлось бы молча.
-//
-// ДВЕ ОСИ, И ВТОРАЯ БЫЛА УПУЩЕНА ЛИТЕРАЛОМ. Записи нет, когда внешнего
-// поставщика не существует (посадка `own`) — и когда слушателя публикатора не
-// подняли вовсе: блок публикации тогда не исполняется, и добавлять запись
-// некуда. Прежний литерал `true` докладывал её опубликованной в обоих случаях.
-func providerKeySetMirrorIsPublished(cfg config.Config) bool {
-	return cfg.APIServer.JWKSProxy.ListenAddress() != "" && cfg.AuthN.HasExternalIdentityProvider()
 }
 
 func runServe(cfg config.Config) error {
@@ -1169,8 +1153,8 @@ func runServe(cfg config.Config) error {
 	//
 	// Решение владельца (XC-7, в-1): не-gRPC слушатели входят в контур ОТДЕЛЬНЫМ
 	// профилем, а не полями общего дескриптора. У iam их четыре, и предметы у них
-	// РАЗНЫЕ — приём вебхуков провайдера личности, выдача docker-токена, зеркало
-	// публичных ключей проверки, скрейп. Профиль их не смешивает: разницу несут
+	// РАЗНЫЕ — приём вебхуков провайдера личности, выдача docker-токена,
+	// публикатор набора ключей проверки, скрейп. Профиль их не смешивает: разницу несут
 	// значения двух осей — откуда поверхность досягаема и чем аутентифицирует, — и
 	// именно их пара судится (снаружи досягаемая поверхность с объявленным
 	// ОТСУТСТВИЕМ аутентификации не поднимается вовсе).
@@ -1386,13 +1370,8 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
 	}
 
-	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
-	// Назван здесь потому, что клиент собирается в этом корне, а обработчику
-	// обязана достаться ТА ЖЕ величина, с которой клиент построен: два места с
-	// двумя числами — то, как они расходятся.
-	const jwksUpstreamTimeout = 5 * time.Second
-
-	// (4) Зеркало ПУБЛИЧНЫХ ключей проверки (`GET /.well-known/jwks.json`).
+	// (4) Публикатор ПУБЛИЧНЫХ ключей проверки — наша запись набора на пути
+	// `authn.token-signing.key-set-path`.
 	//
 	// Здесь аутентификация снята — и это ЗАДОКУМЕНТИРОВАННОЕ исключение, а не
 	// упущение (§AuthN+AuthZ ВЕЗДЕ): поверхность выставлена только на
@@ -1406,64 +1385,19 @@ func runServe(cfg config.Config) error {
 	jwksProxyAddr := cfg.APIServer.JWKSProxy.ListenAddress()
 	var jwksProxyHandler http.Handler
 	if jwksProxyAddr != "" {
-		// (4а) ЗАПИСЬ ЗЕРКАЛА ЧУЖОГО НАБОРА — ТОЛЬКО ТАМ, ГДЕ ЧУЖОЙ НАБОР ЕСТЬ
-		// (задача kaname#21).
+		// (4а) ЗАПИСЬ ОДНА — НАША (kaname#361).
 		//
-		// Прежде запись добавлялась БЕЗУСЛОВНО. На посадке без внешнего
-		// поставщика это давало запись, чей издатель ВЫВЕДЕН из доменного имени,
-		// чей верхний хоп не существует, и которая отвечала бы каждому
-		// спросившему «верхний хоп недоступен» вместо честного отказа.
+		// Рядом с ней стояла запись зеркала публичного набора прежнего
+		// издателя; она ушла вместе с ним, и её верхнего хопа, его якоря и
+		// счётчиков в корне больше нет. Вторую запись привязка отвергает в
+		// старте: вернувшись, она снова поставила бы ключ другого издателя
+		// рядом с нашим на том же слушателе.
 		//
-		// Условие читается ТЕМ ЖЕ предикатом, которым о нём отчитывается
-		// наблюдатель провязки: доложенное и сделанное — одно значение.
-		//
-		// Записей у публикатора ДВЕ, и у каждой свой ОБЪЯВЛЕННЫЙ путь.
-		// Объединять наборы в один документ было бы дешевле и уничтожило бы
-		// ровно ту защиту, ради которой развязка заводится: ключ одного
-		// издателя проверял бы токен, объявляющий другого.
-		//
-		// Запись зеркала остаётся на своём прежнем пути ДО последней фазы: её
-		// адрес объявлен у каждого сегодняшнего потребителя, и перенос сменил
-		// бы его у всех разом — цена, которой эта фаза не предусматривала.
+		// Записи нет, когда своя чеканка выключена: публиковать тогда нечего, и
+		// привязка отказывает в старте, называя ручку слушателя, — слушатель,
+		// объявленный профилем и не несущий ни одной записи, отвечал бы каждому
+		// спросившему отказом.
 		var records []jwksproxyhttp.Record
-		if providerKeySetMirrorIsPublished(cfg) {
-			// Клиент верхнего хопа собирается ЗДЕСЬ, а не внутри зеркала: якорь хопа —
-			// настройка развёртывания, и непригодная обязана отказать в старте, а не
-			// деградировать зеркало, от которого зависит вся плоскость данных.
-			jwksUpstreamClient, jerr := clients.ProviderHopHTTPClient(
-				jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
-			if jerr != nil {
-				return fmt.Errorf("jwks-proxy upstream: %w", jerr)
-			}
-			// Зеркало собирается ИМЕНОВАННЫМ: построенное прямо в аргументе, оно
-			// никому не отдаёт своих счётчиков, и «отказов не было» тогда неотличимо
-			// от «сюда никто не приходил» — а это разница между работающим зеркалом и
-			// мёртвой плоскостью данных.
-			jwksMirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
-				UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
-				Client:      jwksUpstreamClient,
-				Timeout:     jwksUpstreamTimeout,
-				Logger:      logger.With(slog.String("component", "jwks_proxy")),
-			})
-			// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
-			// (§Hardening-инвариант 8), а причина отказа держится отдельно:
-			// «не ответил» проходит со временем, «по адресу не то» — никогда.
-			// Свойство «читатель есть» держит гейт по дереву
-			// TestDeclaredAccumulatorsHaveANonTestReader.
-			metricsReg.NewJWKSMirrorCollector(func() metrics.JWKSMirrorCounts {
-				stats := jwksMirror.Stats()
-				return metrics.JWKSMirrorCounts{
-					Served:        stats.Served,
-					Unavailable:   stats.Unavailable,
-					Misconfigured: stats.Misconfigured,
-				}
-			})
-			records = append(records, jwksproxyhttp.Record{
-				Issuer:  cfg.AuthN.ResolveHydraIssuer(),
-				Path:    jwksproxyhttp.WellKnownJWKSPath,
-				Handler: jwksMirror,
-			})
-		}
 		if signingKeystore != nil {
 			ourKeySet := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
 				Source: signingKeystore,
@@ -1492,10 +1426,11 @@ func runServe(cfg config.Config) error {
 		}
 		binding, berr := jwksproxyhttp.NewBinding(records)
 		if berr != nil {
-			// Издатель, объявленный принимаемым, но не имеющий записи
-			// источника, — ОТКАЗ В СТАРТЕ, а не молчаливый перебор записей и
-			// не путь, выведенный из самого издателя.
-			return fmt.Errorf("привязка «издатель → источник набора»: %w", berr)
+			// Издатель без записи источника, вторая запись рядом с нашей или
+			// слушатель без единой записи — ОТКАЗ В СТАРТЕ, а не молчаливый
+			// перебор записей и не путь, выведенный из самого издателя.
+			return fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
+				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr)
 		}
 		jwksMux, merr := jwksproxyhttp.NewMux(binding)
 		if merr != nil {
@@ -1538,7 +1473,7 @@ func runServe(cfg config.Config) error {
 		jwksProxyHandler = jwksMux
 	}
 	jwksProxySurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
+		Name:    "публикатор набора ключей проверки (authn.token-signing.key-set-path)",
 		Mode:    surfaceMode,
 		Logger:  logger,
 		Addr:    addrAxis(jwksProxyAddr, knobJWKSProxy+" не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
@@ -1551,7 +1486,7 @@ func runServe(cfg config.Config) error {
 		TLS: jwksProxyTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности зеркала ключей: %w", err)
+		return fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err)
 	}
 
 	// (5) и (6) Собственные REST-фронты службы — публичный и внутренний.

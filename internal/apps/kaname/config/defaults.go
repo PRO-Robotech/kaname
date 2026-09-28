@@ -63,15 +63,13 @@ func RegisterDefaults(v *viper.Viper) {
 	// TestDocumentedEnvName_KeyMaterialWindowUntil.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
 	v.SetDefault("api-server.registry-token.key-material-window-until", "")
-	// Cluster-INTERNAL listener of verification KEY SETS — a SEPARATE port
+	// Cluster-INTERNAL listener of the verification KEY SET — a SEPARATE port
 	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
-	// (never external, ban #6) over one-way server-TLS. It publishes records BY
-	// ISSUER (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
-	// `authn.token-signing.key-set-path` — the signer of every token we mint — and,
-	// at the canonical `/.well-known/jwks.json`, a short-TTL mirror of the previous
-	// issuer's PUBLIC JWKS, kept only while tokens of its issue are still
-	// presentable (kacho#2564). Consumers pick the record by the token's declared
-	// issuer; there is no fallback across records.
+	// (never external, ban #6) over one-way server-TLS. It publishes ONE record
+	// (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
+	// `authn.token-signing.key-set-path` — the signer of every token we mint. The
+	// previous issuer's mirror record left with that issuer (kaname#361), and the
+	// binding refuses a second record at start.
 	// Override via KANAME_API_SERVER__JWKS_PROXY__ENDPOINT.
 	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
 
@@ -209,7 +207,6 @@ func RegisterDefaults(v *viper.Viper) {
 	// Ключ привязан к окружению явно (load.go) — без этого `AutomaticEnv` не
 	// разрешил бы переменную вовсе.
 	v.SetDefault("authn.hydra-issuer", "")       // resolved via ResolveHydraIssuer() when empty
-	v.SetDefault("authn.hydra-jwks-url", "")     // resolved via ResolveHydraJWKSURL() (env KANAME_HYDRA_JWKS_URL)
 	v.SetDefault("authn.hook-shared-secret", "") // no default — security-sensitive
 	v.SetDefault("authn.hook-shared-secret-env", "KANAME_HOOK_TOKEN")
 	// Административный предъявитель внешнего поставщика: в YAML пишется ИМЯ
