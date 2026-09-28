@@ -313,7 +313,10 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 
 	// (4) Блокировка — после проверки, чтобы полоса «заблокирована» стоила то
 	// же, что «пароль не тот» (Ф1-05, Ф1-48).
-	if !found || user.InviteStatus != domain.InviteStatusActive {
+	// Приглашённый, зарегистрировавшийся адресом приглашения (строка PENDING
+	// со способом входа), ко входу допускается — в положение подтверждения
+	// (kaname#456, Р11 п. 1); заблокированный — нет.
+	if !found || !user.InviteStatus.MaySignInToOwnLane() {
 		outcome := LoginOutcomeNoRow
 		if found {
 			outcome = LoginOutcomeBlocked

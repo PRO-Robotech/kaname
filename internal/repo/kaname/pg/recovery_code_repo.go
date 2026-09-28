@@ -138,10 +138,21 @@ func (w *humanSessionWriter) ConsumeRecoveryCode(ctx context.Context, userID dom
 	return out, true, nil
 }
 
-// EmitRecoveryMail — намерение письма той же транзакцией (Ф5-09).
+// EmitRecoveryMail — намерение письма той же транзакцией (Ф5-09), после
+// списания окна писем адресата тем же оператором, что у приглашения
+// (`chargeInviteMailWindowTx`, окно вида `recovery`; kaname#456). Окно полно —
+// `humansession.ErrLetterWindowFull`: письма нет, строка кода откатывается
+// вместе с транзакцией.
 func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansession.RecoveryMailIntent) error {
 	if in.Code.IsZero() {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument recovery_mail.code: required")
+	}
+	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowRecovery, in.To, in.Limit)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return humansession.ErrLetterWindowFull
 	}
 	if err := invite_mail_outbox.EmitRecoveryTx(ctx, w.tx, string(in.UserID), string(in.AccountID), in.To, in.Code.Letter(), in.ValidFor); err != nil {
 		return mapErr(err, "RecoveryMail.Emit", string(in.UserID))

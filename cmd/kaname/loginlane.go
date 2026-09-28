@@ -59,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -78,6 +79,15 @@ const breachCheckTimeout = 5 * time.Second
 // recoveryDispatchTimeout — предел одной постановки письма восстановления вне
 // пути ответа: запись двух строк одной транзакцией, а не разговор с узлом.
 const recoveryDispatchTimeout = 30 * time.Second
+
+// recoveryDispatchInFlight — предел одновременных постановок письма
+// восстановления вне пути ответа (kaname#456): запрос приходит без
+// удостоверения, и горутина с транзакцией записи на каждый запрос без предела
+// была бы ценой, которую назначает вызывающий. Величина — число соединений
+// записи, которое постановки вправе занять разом, не отнимая пул у глаголов на
+// пути ответа; сверх предела работа не принимается и считается клеткой
+// `dispatch-dropped`, а ответ вызывающему тот же.
+const recoveryDispatchInFlight = 16
 
 // envelopeCensusTimeout — предел переписи классов стоимости при старте: один
 // последовательный проход по таблице способов (индекса по материалу нет
@@ -112,6 +122,9 @@ type loginLane struct {
 	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
 	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
 	verifier *passwordverify.Verifier
+	// letterWindow — окно писем подтверждения адреса (kaname#456, Р9): порог
+	// уборки строк кодов, по которым считается предел писем.
+	letterWindow time.Duration
 }
 
 // secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
@@ -188,7 +201,9 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
-		Challenges: l.keys,
+		Challenges:        l.keys,
+		VerificationCodes: l.sessions, SourceWindows: l.sessions, BearerLetters: l.sessions,
+		LetterWindow: l.letterWindow, SourceWindow: l.limits.SourceWindow,
 	}
 }
 
@@ -511,17 +526,33 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if !ok {
 		return nil, fmt.Errorf("sign-in lane: registration lane %q is not declared in registration.Lanes", registration.LanePassword)
 	}
+	// Подтверждение адреса (kaname#456, Р7, Р9): пять величин полосы; письмо
+	// регистрации ставится той же транзакцией, что заводит человека.
+	letterPace := humansession.VerificationPace{
+		CodeTTL: login.VerificationCodeTTL, Attempts: login.VerificationCodeAttempts,
+		Interval: login.VerificationResendInterval, Limit: login.VerificationResendLimit,
+		Window: login.VerificationResendWindow,
+	}
+	// Окно обращений по источнику для регистрации и запроса восстановления —
+	// ось источника полосы входа, те же величины (kaname#456).
+	sourcePace := humansession.SourcePace{Limit: login.SourceAttempts, Window: login.SourceWindow}
+	registrationPG := kanamepg.NewRegistrationStore(pool)
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
-		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
+		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
+		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	// Восстановление доступа (Ф5): постановка письма — вне пути ответа (Р2).
-	dispatcher := humansession.NewGoDispatcher(recoveryDispatchTimeout)
+	dispatcher := humansession.NewGoDispatcher(recoveryDispatchTimeout).WithCap(recoveryDispatchInFlight, func() {
+		rec.RecoveryRequestObserved(humansession.RecoveryRequestDispatchDropped)
+	})
 	requestUC, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher, Observer: rec, Now: time.Now, Logger: logger,
+		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher,
+		Sources: sessions, SourcePace: sourcePace, MailLimit: inviteMailRateLimit(cfg),
+		Observer: rec, Now: time.Now, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -569,6 +600,24 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Подтверждение адреса (kaname#456, Р6–Р10): два глагола под сессией и
+	// положение сессии, читаемое из текущей отметки на каждом запросе.
+	verificationDeps := humansession.VerificationDeps{
+		Store: verificationStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
+		Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
+	}
+	requestVerificationUC, err := humansession.NewRequestVerificationUseCase(verificationDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmVerificationUC, err := humansession.NewConfirmVerificationUseCase(verificationDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	positionUC, err := humansession.NewPositionUseCase(sessions, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -576,9 +625,11 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
+		Verification:  rec,
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -588,7 +639,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
-		verifier: verifier,
+		verifier: verifier, letterWindow: login.VerificationResendWindow,
 	}, nil
 }
 
@@ -611,6 +662,45 @@ type registrationWriter struct{ *kanamepg.RegistrationWriter }
 
 func (w registrationWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
 	return userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), in)
+}
+
+// verificationStore — адаптер хранилища глагола подтверждения к порту:
+// сессия — читатель записи сессии, транзакция исхода — писатель регистрации,
+// открытый замком писателя нескольких сессий на строке человека. Активацию
+// приглашения (Р11 п. 2) исполняет `user.ActivateInviteOnVerificationTx` над
+// писателем зеркала той же транзакции — здесь, в композиционном корне, как и
+// зеркало регистрации.
+type verificationStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+}
+
+func (s verificationStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s verificationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (humansession.VerificationWriter, error) {
+	w, err := s.inner.VerificationWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return verificationWriter{RegistrationWriter: w}, nil
+}
+
+type verificationWriter struct{ *kanamepg.RegistrationWriter }
+
+// ActivateInviteOnVerification — см. порт: срок и снятие приглашения — один
+// исход «не активируется» (Р11 п. 3); строка, уже не PENDING, — тот же исход:
+// активировать нечего.
+func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
+	res, err := userapp.ActivateInviteOnVerificationTx(ctx, w.MirrorWriter(), pending, string(pending.ID))
+	if err != nil {
+		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
+			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
+		}
+		return humansession.InviteActivation{}, err
+	}
+	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
 // ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:
@@ -638,6 +728,22 @@ type laneVerbs struct {
 	remove     *humansession.RemoveSecondFactorUseCase
 	regenerate *humansession.RegenerateBackupCodesUseCase
 	stepUp     *humansession.StepUpUseCase
+	// Подтверждение адреса (kaname#456).
+	requestVerification *humansession.RequestVerificationUseCase
+	confirmVerification *humansession.ConfirmVerificationUseCase
+	position            *humansession.PositionUseCase
+}
+
+func (v laneVerbs) RequestEmailVerification(ctx context.Context, bearer domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
+	return v.requestVerification.Execute(ctx, bearer)
+}
+
+func (v laneVerbs) ConfirmEmailVerification(ctx context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error) {
+	return v.confirmVerification.Execute(ctx, in)
+}
+
+func (v laneVerbs) AddressPosition(ctx context.Context, bearer domain.SessionBearer) (humansession.Position, error) {
+	return v.position.Execute(ctx, bearer)
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {

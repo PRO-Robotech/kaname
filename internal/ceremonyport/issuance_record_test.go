@@ -78,10 +78,10 @@ func TestNewAccessTokens_RefusesWithoutTheIssuanceRecorder(t *testing.T) {
 	ring := newKeyRing(t, testKID)
 	signer := newSigner(t, ring, time.Now)
 
-	_, err := ceremonyport.NewAccessTokens(signer, ring, nil)
+	_, err := ceremonyport.NewAccessTokens(signer, ring, nil, admitAll{})
 	require.Error(t, err, "адаптер выпуска собран без писателя записи выпуска")
 
-	a, err := ceremonyport.NewAccessTokens(signer, ring, &issuanceLog{})
+	a, err := ceremonyport.NewAccessTokens(signer, ring, &issuanceLog{}, admitAll{})
 	require.NoError(t, err, "близнец: с писателем записи адаптер не собран")
 	require.NotNil(t, a)
 }

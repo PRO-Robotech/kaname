@@ -256,3 +256,10 @@ func TestWithCallDeadline_RefusesANonPositiveLimitAtBuild(t *testing.T) {
 	require.NoError(t, err, "законный близнец: наименьшая положительная величина собирается")
 	require.NotNil(t, bounded.Users)
 }
+
+// PersonMarks — второй вопрос правила выдачи (kaname#456): тем же пределом,
+// что отсечка, и с тем же исходом порта.
+func (l logCutoffs) PersonMarks(ctx context.Context, _ []string) (map[string]bool, error) {
+	l.record(ctx, "Cutoffs", "PersonMarks")
+	return nil, errFromStore
+}

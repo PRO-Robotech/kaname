@@ -82,6 +82,9 @@ type RecoveryMailIntent struct {
 	Code      domain.RecoveryCodeValue
 	// ValidFor — срок кода, как его назовёт письмо.
 	ValidFor time.Duration
+	// Limit — окно писем адресата (kaname#456): списывается тем же оператором,
+	// что ставит письмо; окно полно — ErrLetterWindowFull, письма нет.
+	Limit outboxtypes.InviteMailRateLimit
 }
 
 // FailureScope — ось счёта неверных предъявлений (Р10): по адресу и по
@@ -226,7 +229,9 @@ type Writer interface {
 	// либо истёк; различать это вызывающему незачем — отказ один (Ф5-04, Ф5-07).
 	ConsumeRecoveryCode(ctx context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time) (domain.RecoveryCode, bool, error)
 	// EmitRecoveryMail — намерение отправить письмо восстановления той же
-	// транзакцией, что строка кода (Ф5-09, Р3).
+	// транзакцией, что строка кода (Ф5-09, Р3), ПОСЛЕ списания окна писем
+	// адресата тем же оператором (kaname#456); окно полно —
+	// ErrLetterWindowFull.
 	EmitRecoveryMail(ctx context.Context, in RecoveryMailIntent) error
 	// InsertRecoveryCompletion — журнал завершений по ключу потока (Р4, форма
 	// Ф-а): inserted=false — ключ уже стоит, побочных записей делать нельзя.

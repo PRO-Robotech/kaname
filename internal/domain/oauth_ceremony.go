@@ -68,6 +68,17 @@ var (
 	// строка семейства, а не этот отказ.
 	ErrAccessTokenFamilyNotLive = errors.New("access token: family is unknown or revoked")
 
+	// ErrGrantOwnerUnverified — правило выдачи удостоверениям человека ответило
+	// «владелец-человек не подтвердил адрес» (kaname#456, Р5б): пары нет,
+	// предъявленный токен обновления не обёрнут (оборот и выдача — одна единица
+	// работы), семейство не отозвано. Наружу — тот же тон `invalid_grant`, что
+	// у всякого отказа после именования кода.
+	ErrGrantOwnerUnverified = errors.New("ceremony grant: the owner has not verified the email address")
+	// ErrGrantRuleUndecidable — правило выдачи спросить не смогли: отказ
+	// операции (`temporarily_unavailable`), а не `invalid_grant` — клиент,
+	// получивший `invalid_grant`, выбросил бы живой токен обновления.
+	ErrGrantRuleUndecidable = errors.New("ceremony grant: the issuance rule could not be asked")
+
 	// ErrVerifierAtCapacity — проверяющий секрета занят: все места ёмкости
 	// (`passwordverify`) заняты другими проверками. Отказ ПОВТОРЯЕМЫЙ и наш, а не
 	// «секрет неверен»: несостоявшаяся сверка вердиктом не становится.

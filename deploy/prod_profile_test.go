@@ -254,6 +254,13 @@ var configBridge = []bridged{
 	// ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271): срок кода — ключ того же блока
 	// `login`, та же ветвь `with`.
 	{configKey: "authn.login.recovery-code-ttl", valuePath: []string{"authn", "login", "recoveryCodeTtl"}, omitEmpty: true},
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ключей того же блока `login`;
+	// числа ветвятся по `hasKey`, сроки — по `with`.
+	{configKey: "authn.login.verification-code-ttl", valuePath: []string{"authn", "login", "verificationCodeTtl"}, omitEmpty: true},
+	{configKey: "authn.login.verification-code-attempts", valuePath: []string{"authn", "login", "verificationCodeAttempts"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-interval", valuePath: []string{"authn", "login", "verificationResendInterval"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-limit", valuePath: []string{"authn", "login", "verificationResendLimit"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-window", valuePath: []string{"authn", "login", "verificationResendWindow"}, omitEmpty: true},
 	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; задача #205): предел ветвится по
 	// `hasKey` (ноль законен), окно — по `with`. `omitEmpty` у предела НЕ
 	// ставится по тому же доводу, что у собственных потолков: ноль — величина,

@@ -1,0 +1,242 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Токен DRAFT в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 3 — эта запись,
+    действующее одобрение выводится из неё и внешнего события, а не из слова в заголовке.
+  base_commit: c083ad5bbfa7887cf4101efbef0046930639f04b
+  content_commit: fb8189dad10537f1157cfc88b52d98b0ebc67fe7
+  branch: '456'
+  branch_on_origin: false
+  wave_base: c083ad5bbfa7887cf4101efbef0046930639f04b
+  trunk: cbbac984b7b17f22bcc4a83f7533fff3494c809a
+  pull_request: none
+  task: PRO-Robotech/kaname#456
+  console_pair: PRO-Robotech/kacho#2898
+  lines: 1705
+  round: 3
+  predecessor_record: docs/specs/reviews/access-beyond-login-needs-a-verified-address/5fb3e84e0dc9071c44d562b44f0a00af7df5e3649787219037c7a269befd66a5.yaml
+  fingerprint_predicate: >-
+    sha256sum документа в рабочей копии ветки 456 и git show fb8189dad:<путь> | sha256sum — оба
+    дают f2d1fe852333af54…, совпало с заданием дословно; wc -l → 1705.
+  measurement_revisions: >-
+    Замеры службы сняты на fb8189dad (голова ветки 456). Дельта c083ad5bb..fb8189dad — три файла:
+    сам документ и записи кругов 1 и 2, поэтому числа кода верны и для ревизии, названной
+    документом. Фундамент — corelib v1.10.0-rc.2 (go.mod:8), читан из кеша модулей. Край —
+    PRO-Robotech/kacho@499ad3085fd, ревизия, названная документом. Политика полномочий —
+    kacho-workspace@13e0d0c1.
+  task_premise_remeasured: >-
+    (1) Отпечаток f2d1fe85… — ПОДТВЕРДИЛОСЬ своим sha256sum. (2) Круг 3 — ПОДТВЕРДИЛОСЬ: в каталоге
+    записей две записи, на 32dd2b23… и 5fb3e84e…; записи на этот отпечаток нет. (3) Замечание круга 2
+    из задания (B1 — полосы церемонии) совпало с записью круга 2 дословно.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-27T17:41:22Z'
+
+# ─── ПОЛЕ ВЫДАЧИ ОДОБРЕНИЯ ───────────────────────────────────────────────────
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: true
+  why: >-
+    Вердикт круга 3 — APPROVED: блокирующих ноль, единственное блокирующее круга 2 закрыто, четыре
+    не блокирующих круга 2 закрыты. Санкция на объём §3.1 (ban #1) этой записью НЕ выдаётся: её
+    выпускает внешнее событие полномочия, а политика называет единственного допущенного актора
+    роли — pointpu; агент в роли им не является. До события ban1_lifted — false, и это третья
+    категория, а не отказ.
+  issues_when: >-
+    Внешнее событие issue_comment на PRO-Robotech/kaname#456 от pointpu с полями role, verdict,
+    subject, subject_revision, subject_sha256 по ЭТОМУ отпечатку опубликовано и дописано к записи
+    отдельным коммитом; правка документа после записи вердикт не переносит.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом)
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: ff087e513f8a42d5f92a8f374cdcf4e1790b0b4630d4b611224ccbd16b4b9c24
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#456
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body_for_publication: 'acceptance-reviewer · APPROVED · f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853'
+  required_body_fields: [role, verdict, subject, subject_revision, subject_sha256]
+  subject_revision: fb8189dad10537f1157cfc88b52d98b0ebc67fe7
+  subject_sha256: f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853
+  reason: >-
+    Третья категория — не выполнилось: событие публикует курьер под допущенной учётной записью,
+    а не рецензент. Эта запись задним числом не правится; событие дописывается соседним коммитом.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
+
+scope:
+  reviewed: >-
+    Документ целиком, §0…§12: решения Р1…Р15 с Р4в, Р5а и Р5б, 62 сценария, производители §4 и §6,
+    ведомость §7, инварианты §8, DoD §9, красное до кода §10. Сверено с деревом службы на
+    fb8189dad, с движком фундамента v1.10.0-rc.2 и с деревом края на 499ad3085fd.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+# ─── ЗАМЕЧАНИЯ КРУГА 2 — ИСХОД КАЖДОГО ──────────────────────────────────────
+round2_findings:
+  - id: B1
+    kind: COVERAGE
+    outcome: closed
+    how: >-
+      Р5 — две строки полос церемонии с отказом 400 и побайтово invalid_grant; Р5б — вопрос
+      правила, порядок суждения, исходы по четырём вердиктам, семейство сохраняется до
+      подтверждения по Р13 с доводом; Р5а — третья поверхность; EV-77…EV-79 — пары при стоящей и
+      снятой отметке, оборот в своей и в чужой сессии, повтор раньше отметки, вопрос без ответа;
+      §1.9, §1.14, инв. 4–6 и 13, §9 пп. 13 и 15, §10 приведены к шести полосам.
+  - id: N1
+    kind: FORMAT
+    outcome: closed
+    how: >-
+      §3.2 называет окно кеша решений края величиной края; на 499ad3085fd
+      gateway/internal/config/config.go:609–610 — KACHO_API_GATEWAY_AUTHZ_CACHE_TTL_SECONDS, умолчание 5;
+      internal/authzguard/own_door.go в дереве есть.
+  - {id: N2, kind: TWIN, outcome: closed, how: 'EV-60 — якорь WhoAmI, EV-62 — якорь ListByUser о себе, оба с положительным исходом'}
+  - id: N3
+    kind: COVERAGE
+    outcome: closed
+    how: >-
+      Таблица 13 методов вне круга сверена с контрактом: comm методов внутренних служб (32) против
+      перечня GatewayFrontedInternalRPCs (19) даёт ровно 13 строк таблицы, по имени 13 из 13; строк
+      круга вне контракта 0.
+  - {id: N4, kind: SCOPE, outcome: closed, how: 'Р11 п. 4 — состояние названо исходом решения, выход один — повторное приглашение (EV-76)'}
+
+# ─── ПЕРЕСЧЁТ §1 И §7 — КАЖДОЕ ЧИСЛО СВОЕЙ КОМАНДОЙ ─────────────────────────
+numbers_remeasured:
+  all_confirmed: true
+  rows:
+    - {section: '1.1', declared: 4, measured: 4}
+    - {section: '1.2', declared: '2 / 3', measured: '2 / 3'}
+    - {section: '1.3', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.4', declared: '1 / 1', measured: '1 / 1'}
+    - {section: '1.5', declared: '13 · 8 · 0 · 2', measured: '13 · 8 · 0 · 2'}
+    - {section: '1.6', declared: '2 вида · 2 строки', measured: '2 вида · 2 строки'}
+    - {section: '1.7', declared: 3, measured: 3}
+    - {section: '1.8', declared: 4, measured: 4}
+    - {section: '1.9', declared: '5 · 6 · 6 · 0 · 3 · 10', measured: '5 · 6 · 6 · 0 · 3 · 10', note: 'шесть файлов правила — client_token/issue.go, clienttokenwire/build.go, три файла iamhooks, basic_credential_repo.go; четыре полосы'}
+    - {section: '1.10', declared: 4, measured: 4}
+    - {section: '1.11', declared: '19 · 5 · 1 · 8 · 32', measured: '19 · 5 · 1 · 8 · 32'}
+    - {section: '1.12', declared: '1 · 1 · 1', measured: '1 · 1 · 1'}
+    - {section: '1.13', declared: '4 · 0', measured: '4 · 0'}
+    - {section: '1.14', declared: '/iam/v1/token · 1 · 1 · 0 · 6 · 6 · 1 · 2', measured: '/iam/v1/token · 1 · 1 · 0 · 6 · 6 · 1 · 2'}
+    - {section: '7', predicate: 'grep -cE по заголовкам сценариев и uniq -d по меткам', declared: '62 · 0', measured: '62 · 0', note: 'раскладка по двенадцати полосам 3·4·7·14·8·5·8·7·2·2·1·1 совпала; у каждой метки строка §6'}
+
+# ─── ЧТЕНИЯ, ОТ КОТОРЫХ ЗАВИСЯТ НОВЫЕ ДАНО ───────────────────────────────────
+readings_confirmed:
+  - {claim: 'погашение кода переживает отказ выдачи', where: 'oauth_ceremony_vaults.go OpenRequest — settle откатывает к точке сохранения за погашением и закрепляет погашение', result: 'подтвердилось'}
+  - {claim: 'код гасится при предъявлении, раньше выпуска', where: 'фундамент oauthceremony/bridge.go consumeCode — первое из двух погашений движка', result: 'подтвердилось'}
+  - {claim: 'отказ порта выпуска доходит до классификатора полосы цепочкой', where: 'фундамент bridge.go fromPort сохраняет цепочку; ceremonyhttp/token.go refuseExchange уже различает domain.ErrAccessTokenFamilyNotLive', result: 'подтвердилось — своя клетка token-owner-unverified выразима без правки фундамента'}
+  - {claim: 'перевыпуск носителя сохраняет запись сессии', where: 'human_session_repo.go RotateBearer; снятие сессии отзывает семейства причиной session-ended в обоих снимающих методах', result: 'подтвердилось'}
+  - {claim: 'отсечка на полосах церемонии — тот же предикат, что Forbids правила', where: 'oauth_ceremony_repo.go sessionCutOffBySubjectSQL: revoke_before не раньше authenticated_at', result: 'подтвердилось — якорь Р5б совпадает с якорем хранилища'}
+
+# ─── ПОСЕВ «ДАНО» ────────────────────────────────────────────────────────────
+constructibility:
+  method: >-
+    Временная проба в пакете cmd/kaname на мире церемонии (ceremony_world_integration_test.go:
+    настоящий Postgres, вся цепь миграций, поверхность выдачи собрана вызовами корня и сверена с
+    ним); отметка ставится продуктовым писателем MarkEmailVerified и снимается без смены адреса
+    (форма посева G3 круга 1). Прогнана один раз и удалена до коммита: в дереве её нет.
+  run: >-
+    go test ./cmd/kaname/ -run TestReview456R3_ -count=1 -v → PASS, S1…S5 5.98s, S6 4.25s
+  attempts: 6
+  stood: 6
+  not_performed: 1
+  rows:
+    - {id: S1, given: 'EV-78 (а): пара в S при стоящей отметке, затем отметка снята', result: 'встало; до кода оборот — 200 и R1 обёрнут, как §10'}
+    - {id: S2, given: 'EV-79 (а): R1 обёрнут при стоящей отметке, преемник R2 жив, отметка снята, повтор R1', result: 'встало; 400 invalid_grant, семейство отозвано причиной refresh-replay, R2 — 400; первая половина зелена до кода, как §10'}
+    - {id: S3, given: 'EV-77 (а): код C выдан при стоящей отметке, затем отметка снята', result: 'встало; до кода обмен — 200, как §10; повтор C — 400 invalid_grant'}
+    - {id: S4, given: 'механизм EV-78 (в): перевыпуск носителя S и снятие прочих сессий формой смены пароля', result: 'встало; S′ снята, семейство S живо, оборот R1 — 200'}
+    - {id: S5, given: 'механизм EV-78 (г): снятие S при сохранённой S′', result: 'встало; семейство отозвано причиной session-ended, оборот R1 — 400 invalid_grant'}
+    - {id: S6, given: 'EV-79 (б) до кода: хранилище отметок не отвечает — замок таблицы людей чужой связью, форма ceremony_store_stall', result: 'встало; до кода оборот таблицы людей не читает — 200, как §10'}
+  not_performed_rows:
+    - {given: 'уровень E', reason: 'стенд не поднимался'}
+  unchanged_given_note: >-
+    Дано кругов 1 и 2, не тронутые редакцией 3, этим кругом не пересевались; их исходы — в
+    записях кругов 1 и 2 и сюда не переносятся.
+
+blocking: []
+
+# ─── НЕ БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────────────
+non_blocking:
+  - id: N1
+    kind: FORMAT
+    where: '§1.14, второй абзац; Р5б п. 1'
+    finding: >-
+      На полосе оборота движок фундамента зовёт порт выпуска ДО единицы работы и до оборота
+      (corelib v1.10.0-rc.2, internal/oauth2/handler/oauth2/flow_refresh.go,
+      PopulateTokenEndpointResponse: GenerateAccessToken раньше MaybeBeginTx и RotateRefreshToken).
+      Отказ в порту выпуска до оборота не доходит; отказ внутри единицы работы оборот откатывает.
+      R1 необёрнут в обоих случаях, и EV-78 (а) верен, но §1.14 называет только второй механизм.
+      Назвать, где встаёт вопрос П15, и что оператор отсечки хранилища остаётся — он часть
+      неразделимой записи оборота, исход у него та же клетка token-grant-refused.
+  - id: N2
+    kind: DoD
+    where: '§9 п. 15'
+    finding: >-
+      Знаменатель гейта назван видами выдачи, а число — полосами. Два машинных вида эндпоинта
+      (client_credentials и jwt-bearer) идут одной полосой — один вызов правила в
+      client_token/issue.go (weighCutoff). По видам осмотренных семь, по полосам шесть. Назвать
+      единицу, которую гейт печатает.
+  - id: N3
+    kind: COVERAGE
+    where: 'EV-85; Р13, новый пункт о семействах'
+    finding: >-
+      Сценарий перехода перечисляет каждое следствие Р13, кроме нового — семейства церемонии.
+      Состояние держит EV-78 (семейство живо, отметки нет — правило судит текущую отметку), но
+      EV-85 его не называет. Добавить семейство в Дано EV-85 либо назвать EV-78 держателем пункта.
+
+decisions_ruled:
+  - {decision: 'Р5б — семейство сохраняется до подтверждения', ruling: 'принято', why: 'выдач нет до подтверждения на каждом обороте, токены доступа недействительны на предъявлении (Р5а); после подтверждения живо только семейство сессии подтверждения — посев S4 и S5 это подтвердил'}
+  - {decision: 'Р5б — undecidable отвечает 503 temporarily_unavailable', ruling: 'принято', why: 'слово уже производится полосой (refuseExchange); клиент не выбрасывает живой токен обновления'}
+
+open_questions: none
+
+route_signs:
+  proto: 'да — комментарии полей контракта (§9 п. 9), новых полей нет'
+  schema: 'да — новые миграции: вид письма, причина конца сессии, хранилище кодов'
+  public_rpc: 'да — два пути полосы формы, рубеж на публичном слушателе'
+  ui: 'да — потребитель, консольная пара вне объёма'
+  new_domain: 'нет'
+  security_surface: 'да'
+
+found_on_the_way: >-
+  Утверждения редакции 3, требовавшие сверки с деревом, подтвердились: словарь исходов полос обмена
+  — шесть значений и DeclaredOutcomes засеян при сборке; FamilyRevokedBySessionEnd — session-ended;
+  тон invalid_grant после названного кода — шапка TokenLane; виды полосы — словарь фундамента
+  GrantKinds (types.go:39); поле Ceremony конфигурации эндпоинта решает, есть ли виды церемонии в
+  перечне; названные документом гейты TestFamilyVerdictHasOneReaderAndEverySurfaceAsksTheRule,
+  TestEveryMailKindHasExactlyOneSender, TestEveryDrainedQueueDeclaresItsOrdering и
+  TestNoDeferredWorkInTheTree в дереве есть.
+
+limits: >-
+  Консоль не читалась. Уровень E не исполнялся. Край читался только по ссылке §3.2. Величины Р6…Р9
+  (30m, 5, 60s, 5, 24h) приняты как решения автора: доводы названы, противоречия со спекой не
+  найдено.

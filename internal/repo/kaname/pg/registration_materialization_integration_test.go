@@ -88,6 +88,8 @@ func TestRegistrationMaterialization_F4_20_22_SessionIsValidBeforeDelivery(t *te
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: regStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: lane,
 		TTL: 24 * time.Hour, Now: time.Now, Logger: slog.New(slog.DiscardHandler),
+		Letter:  humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
+		Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
 		// Реконсайлер НЕ провязан: окно до доставки наблюдаемо.
 	})
 	require.NoError(t, err)

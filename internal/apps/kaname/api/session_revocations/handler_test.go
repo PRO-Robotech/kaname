@@ -95,6 +95,12 @@ type fakeReader struct {
 	familyAsked []string
 }
 
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (*fakeReader) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 func (f *fakeReader) FamilyRevoked(_ context.Context, jti string) (bool, error) {
 	f.familyAsked = append(f.familyAsked, jti)
 	if f.familyErr != nil {

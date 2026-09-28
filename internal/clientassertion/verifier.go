@@ -166,6 +166,11 @@ const (
 	// человек, вышедший отовсюду, остаётся активным, и слитые в один счётчик
 	// эти события неотличимы для того, кто разбирает отказы.
 	OutcomeOwnerRevoked Outcome = "owner-revoked"
+	// OutcomeOwnerUnverified — владелец ключа — человек с неподтверждённым
+	// адресом (kaname#456, Р5). Своя клетка рядом с «вышел отовсюду»: отсечку
+	// и неподтверждённость снимают разные действия (войти заново против
+	// подтвердить адрес), и слитый счётчик не сказал бы, что чинить.
+	OutcomeOwnerUnverified Outcome = "owner-unverified"
 	// OutcomeRevocationCheckFailed — отсечку отзыва-всех владельца спросить не
 	// удалось. Отказ НАШЕЙ стороны, а не предъявителя: слитый с «выпуск не
 	// состоялся» он прятал бы недоступность хранилища отсечек среди сбоев
@@ -219,6 +224,7 @@ func Outcomes() []Outcome {
 		OutcomeClientExpired,
 		OutcomeOwnerNotActive,
 		OutcomeOwnerRevoked,
+		OutcomeOwnerUnverified,
 		OutcomeRevocationCheckFailed,
 		OutcomeIssuanceFailed,
 	}

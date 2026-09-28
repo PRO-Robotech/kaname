@@ -228,6 +228,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	{
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
+		markAddressVerified(t, ctx, pool, excluded)
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
 			domain.ExternalSubject("ext-rmres-activated"), domain.DisplayName("Excluded"))
 		require.NoError(t, err)
@@ -255,6 +256,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	{
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
+		markAddressVerified(t, ctx, pool, kept)
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
 			domain.ExternalSubject("ext-rmres-kept"), domain.DisplayName("Kept"))
 		require.NoError(t, err)

@@ -42,6 +42,10 @@ const (
 	OutcomeExchangeUnavailable    Outcome = "token-unavailable"
 	OutcomeExchangeCodeExchanged  Outcome = "token-code-exchanged"
 	OutcomeExchangeRefreshed      Outcome = "token-refreshed"
+	// OutcomeExchangeOwnerUnverified — правило выдачи ответило «владелец не
+	// подтвердил адрес» (kaname#456, Р5б). Своя клетка рядом с отказом гранта:
+	// отсечку и неподтверждённость снимают разные действия.
+	OutcomeExchangeOwnerUnverified Outcome = "token-owner-unverified"
 )
 
 // Outcomes — словарь целиком, КОПИЕЙ.
@@ -53,6 +57,7 @@ func Outcomes() []Outcome {
 		OutcomeAuthorizeIssued, OutcomeAuthorizeSourcePaceExceeded, OutcomeAuthorizeInFlightCeilingReached,
 		OutcomeExchangeRequestRefused, OutcomeExchangeClientRefused, OutcomeExchangeGrantRefused,
 		OutcomeExchangeUnavailable, OutcomeExchangeCodeExchanged, OutcomeExchangeRefreshed,
+		OutcomeExchangeOwnerUnverified,
 	}
 }
 

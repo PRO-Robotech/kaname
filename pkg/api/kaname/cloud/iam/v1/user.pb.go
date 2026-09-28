@@ -97,8 +97,8 @@ type User struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the user (kaname internal id).
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// External identity provider id (Kratos `sub` claim). Может быть пустым для
-	// PENDING (invited but never logged in).
+	// External identity provider id (Kratos `sub` claim). Пусто у PENDING:
+	// личность пишет активация приглашения (kaname#456).
 	ExternalId string `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	// Email (case-insensitive lookup). При Invite — email указывается admin'ом;
 	// при first-login через Kratos — матчится с identity email.
@@ -108,7 +108,12 @@ type User struct {
 	// Creation timestamp.
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// invite-status.
-	// PENDING — invited, еще не login'нулся.
+	// PENDING — приглашение не активировано: адрес приглашённого не подтверждён
+	//
+	//	(kaname#456). Приглашённый, зарегистрировавшийся адресом приглашения,
+	//	входит в положение подтверждения; приглашение активирует подтверждение
+	//	адреса, пока приглашение живо.
+	//
 	// ACTIVE  — login'нулся через Kratos, external_id заполнен.
 	// BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
 	//

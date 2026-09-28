@@ -16,7 +16,7 @@ import dedent from 'ts-dedent'
 [Идентичность и токены](/architecture/identity)). Под `own` это **единственный** вход
 человека в продукт.
 
-Путей у полосы **тринадцать**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
+Путей у полосы **пятнадцать**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
 (`internal/handler/loginlanehttp/handler.go`); перечень ниже сверяется с ним пробой, а не
 выписан.
 
@@ -36,8 +36,42 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/verify-email</code></td><td>запрос письма с кодом подтверждения адреса</td><td><code>verify-email</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/verify-email/confirm</code></td><td>предъявление кода подтверждения; новый носитель той же сессии</td><td><code>verify-email-confirm</code></td><td>да</td></tr>
   </tbody>
 </table>
+
+## Положение подтверждения — дальше экрана подтверждения нельзя {#verification-position}
+
+Сессия человека, чей текущий адрес почты **не подтверждён**, находится в **положении
+подтверждения**; подтверждён — в обычном. Положение не хранится в сессии: его читает каждый,
+кто решает, из отметки в строке человека — на **каждом** запросе, поэтому снятие отметки и
+подтверждение действуют на следующем же запросе. Ответ входа и регистрации несёт его полем
+`session.emailVerified`.
+
+В положении подтверждения доступны вход и регистрация, выход, признак формы, запрос письма,
+предъявление кода, «кто я» края и восстановление доступа. Смена пароля, второй фактор и
+церемония повышения отвечают **отказом положения**: `403`, код `7`,
+`email address is not verified`, `ErrorInfo.reason` — `EMAIL_NOT_VERIFIED`; печенья не
+трогаются, сессия остаётся живой. Тот же отказ тем же значением дают методы обоих
+gRPC-слушателей службы, права человека не действуют, токены ему не выдаются, а выданные
+раньше на предъявлении недействительны до подтверждения. Каждый путь полосы объявлен одной из
+двух строк — `loginlanehttp.PathPositions()`, — и путь без объявления есть находка гейта.
+
+### Подтверждение адреса — два обращения под сессией
+
+`POST /iam/v1/auth/verify-email` с `{ "csrfToken" }` ставит письмо с **кодом** — десять знаков,
+вводятся руками; адрес берётся из строки человека, а не из формы (поле `email` в теле —
+`Illegal argument email: unknown field`). Успех — `200 {}` без печений; `Retry-After`
+называет промежуток до следующего разрешённого письма. Письмо регистрации ставится той же
+транзакцией, что заводит человека.
+
+`POST /iam/v1/auth/verify-email/confirm` с `{ "code", "csrfToken" }`: верный код в срок ставит
+отметку, выдаёт **новый** носитель той же сессии, снимает прочие сессии человека и, если
+строка человека — приглашение, активирует его. Ответ — `{"session": {…, "emailVerified": true}}`.
+Регистр, пробелы и дефисы кода не значимы. Код однократен, жив последний выданный, у кода свой
+срок и предел неподошедших попыток; писем одному человеку — не чаще промежутка и не больше
+предела за окно, письмо регистрации в счёт.
 
 Совпадение путей **точное**: параметры запроса к пути не относятся, а `/iam/v1/auth/` —
 не приставка, под которой всякий новый маршрут получал бы те же свойства. «Кто я»
@@ -101,7 +135,8 @@ SAN проверенного клиентского сертификата по�
 печеньем `kaname_form`. Признак — свёртка HMAC-SHA256 над видом формы с ключом-контекстом:
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
-`recovery`, `recovery-complete`, `second-factor`, `step-up`.
+`recovery`, `recovery-complete`, `second-factor`, `step-up`, `verify-email`,
+`verify-email-confirm`.
 
 <CodeBlock language="bash">
   {dedent`
@@ -111,7 +146,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -351,12 +386,15 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
   <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
   <tbody>
     <tr><td>400</td><td>3</td><td><code>Illegal argument &lt;поле&gt;: required</code> · <code>… unknown field</code> · <code>Illegal argument body: malformed JSON</code> · <code>… trailing content</code> · правило пароля · форма кода</td><td>—</td><td>форма негодна; состояние не изменено, в счёт частоты не идёт</td></tr>
-    <tr><td>400</td><td>9</td><td><code>registration refused</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · приглашение уже активировано · приглашение истекло · потолок темпа заведения исчерпан — <strong>один</strong> отказ на все четыре, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration refused</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · способ входа на строку приглашения уже записан · приглашение истекло · потолок темпа заведения исчерпан · окно регистраций источника полно — <strong>один</strong> отказ на все, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса</td></tr>
     <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль</td></tr>
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
+    <tr><td>400</td><td>9</td><td><code>email address is already verified</code></td><td><code>EMAIL_ALREADY_VERIFIED</code></td><td>запрос письма либо предъявление кода подтверждённым: письмо не ставится, отметка не переписывается</td></tr>
+    <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл, а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена; выход — повторное приглашение</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована или ни разу не входила · код не тот · код истёк или применён · код приложен при незаведённом факторе (на входе) · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
     <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора при предъявлении старше окна свежести</td></tr>
+    <tr><td>403</td><td>7</td><td><code>email address is not verified</code></td><td><code>EMAIL_NOT_VERIFIED</code></td><td>отказ положения подтверждения: путь объявлен отказом, адрес владельца сессии не подтверждён</td></tr>
     <tr><td>403</td><td>7</td><td><code>permission denied</code></td><td>—</td><td>вызывающий — не край: тело не читалось</td></tr>
     <tr><td>405</td><td>3</td><td><code>method not allowed</code></td><td>—</td><td>путь есть, метод не тот; заголовок <code>Allow</code> называет допустимый</td></tr>
     <tr><td>409</td><td>6</td><td><code>second factor is already enrolled</code></td><td><code>SECOND_FACTOR_ALREADY_ENROLLED</code></td><td>повторное заведение</td></tr>
@@ -375,5 +413,8 @@ kaname#211.
 и завершения восстановления, отказов формы, второго фактора, ключей доступа —
 [Наблюдаемость](/advanced/observability).
 Величины полосы — срок сессии, домен печенья, окна частоты, правило пароля, стоимость хеша,
-срок кода восстановления, окно свежести, ключи обёртки секретов фактора — обязательны под
-`own` и названы в [Конфигурации](/install/configuration#login-lane) и `INSTALL.md` §3.
+срок кода восстановления, окно свежести, ключи обёртки секретов фактора и пять величин
+подтверждения адреса (`authn.login.verification-code-ttl`, `verification-code-attempts`,
+`verification-resend-interval`, `verification-resend-limit`, `verification-resend-window`) —
+обязательны под `own` и названы в [Конфигурации](/install/configuration#login-lane) и
+`INSTALL.md` §3.

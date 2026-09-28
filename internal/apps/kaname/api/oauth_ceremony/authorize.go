@@ -203,6 +203,11 @@ func (uc *AuthorizeUseCase) Execute(ctx context.Context, target Target, in Autho
 			Why: "login authority did not answer: " + err.Error()}
 	case !found:
 		return AuthorizeResult{Verdict: VerdictLoginRequired}
+	case !login.EmailVerified:
+		// Положение подтверждения (kaname#456, Р5): кода авторизации сессия не
+		// получает — отказ протокола на доверенную цель тем же путём, что прочие.
+		// Раньше ступени: «допущен ли вообще» решается раньше «чего недостаёт».
+		return refusedByRedirect("access_denied", "the address of the person is not verified")
 	case required > 0 && acrlevel.Rank(login.Level) < required:
 		return AuthorizeResult{Verdict: VerdictStepUpRequired, Subject: login.Subject,
 			AcrValues: strings.TrimSpace(in.AcrValues)}

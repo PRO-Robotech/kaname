@@ -9,7 +9,7 @@ package accesssnapshot
 // Здесь инструмент работает целиком, как он будет работать на стадиях, меняющих
 // доступ: страницы объектов берутся курсором из НАСТОЯЩЕЙ базы, вопрос о доступе
 // задаётся НАСТОЯЩЕЙ решающей стороне — той же двери, которую композиционный
-// корень выдаёт стражам службы (`authzcascade.Wrap(relverdict.NewAsker(pool))`,
+// корень выдаёт стражам службы (`authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))`,
 // см. cmd/kaname/wiring.go).
 //
 // ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ И ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ. Прежняя редакция спрашивала
@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
@@ -156,17 +157,18 @@ func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 
 	// Дверь решения — ТА ЖЕ, что у продукта: форма поверх ведущего пула.
-	door := authzcascade.Wrap(relverdict.NewAsker(pool))
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 
 	accA, projectsA := seedAccountWithProjects(t, ctx, pool, "snapa", 3)
 	accBID, projectsB := seedAccountWithProjects(t, ctx, pool, "snapb", 3)
 
 	const subject = "user:usr0000000000snapusr"
-	// Субъект выдачи — настоящий пользователь: строка привязки на него ссылается.
+	// Субъект выдачи — настоящий пользователь: строка привязки на него ссылается;
+	// адрес подтверждён — права действуют только подтвердившему (kaname#456, Р4а).
 	const subjectUser = "usr0000000000snapusr"
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.users (id, external_id, email, account_id)
-		VALUES ($1, $1, $1 || '@example.test', $2)`, subjectUser, accA)
+		INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+		VALUES ($1, $1, $1 || '@example.test', $2, now())`, subjectUser, accA)
 	require.NoError(t, err)
 
 	// Выдача РОВНО на один проект аккаунта A.

@@ -126,7 +126,7 @@ func newAccessTokens(t *testing.T, ring *keyRing, clock func() time.Time) *cerem
 // newRecordingAccessTokens — то же над названным писателем записи выпуска.
 func newRecordingAccessTokens(t *testing.T, ring *keyRing, clock func() time.Time, rec ceremonyport.IssuanceRecorder) *ceremonyport.AccessTokens {
 	t.Helper()
-	a, err := ceremonyport.NewAccessTokens(newSigner(t, ring, clock), ring, rec)
+	a, err := ceremonyport.NewAccessTokens(newSigner(t, ring, clock), ring, rec, admitAll{})
 	require.NoError(t, err)
 	return a
 }
@@ -157,4 +157,17 @@ func grantWithin(bound time.Time) oauthceremony.GrantRecord {
 			Claims:    map[string]any{"session_only_claim": "session-only-value"},
 		},
 	}
+}
+
+// admitAll — правило выдачи, допускающее всякого (kaname#456): предмет проб
+// порта — выпуск и опознание, а не отметка адреса; её держат пробы полос
+// церемонии над базой.
+type admitAll struct{}
+
+func (admitAll) UserRevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+func (admitAll) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }

@@ -220,6 +220,8 @@ type ceremonyWorld struct {
 	session ceremonySession
 	// ic1 — ACTIVE, цели R, R2, RQ; ic2 — ACTIVE, цель R; gone — DELETING.
 	ic1, ic2, gone *ceremonyClient
+	// census — перепись исходов поверхности церемонии, собранной миром.
+	census *ceremonyhttp.Census
 }
 
 // lockedBuffer — журнал пробы: обработчики пишут в него конкурентно.
@@ -408,9 +410,12 @@ func (w *ceremonyWorld) seedPerson() {
 	if _, err := tx.Exec(w.ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		w.fixture("отложенные ограничения посева: %v", err)
 	}
+	// Человек мира — в обычном положении: адрес подтверждён (kaname#456, Р5 —
+	// в положении подтверждения церемония кода не выдаёт). Пробы полосы Ж
+	// снимают отметку сами (`unmarkPerson`).
 	if _, err := tx.Exec(w.ctx, `
-		INSERT INTO users (id, external_id, email, display_name, account_id, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, external_id, email, display_name, account_id, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(w.user), "ext-"+string(w.user), w.email, "ceremony person", account); err != nil {
 		w.fixture("посев человека: %v", err)
 	}
@@ -630,6 +635,7 @@ func (w *ceremonyWorld) buildSurface() {
 	mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
 	mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
 	w.surface = mux
+	w.census = ceremony.Census
 	w.surfaceAuth = issuingSurfaceAuthOf(mux)
 }
 

@@ -36,10 +36,39 @@ type fakeRevocations struct {
 	// Cutoffs keyed by user_id.
 	userBefore    map[string]time.Time
 	userBeforeErr error // when non-nil, UserRevokedBefore returns this error
+	// persons — строки людей мира и подтверждён ли их текущий адрес (kaname#456,
+	// Р4): тот же читатель, что читатель отсечки, — у полос нет своего чтения
+	// отметки. Человек мира по умолчанию подтверждён: предмет соседних проб —
+	// отсечка, а не отметка.
+	persons  map[string]bool
+	marksErr error
 }
 
 func newFakeRevocations() *fakeRevocations {
-	return &fakeRevocations{userBefore: map[string]time.Time{}}
+	return &fakeRevocations{userBefore: map[string]time.Time{}, persons: map[string]bool{cutoffUserID: true}}
+}
+
+// setVerified — подтверждён ли адрес человека id.
+func (f *fakeRevocations) setVerified(id string, verified bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.persons[id] = verified
+}
+
+// PersonMarks — из названных идентификаторов строки людей и их отметка.
+func (f *fakeRevocations) PersonMarks(_ context.Context, ids []string) (map[string]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.marksErr != nil {
+		return nil, f.marksErr
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if v, ok := f.persons[id]; ok {
+			out[id] = v
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRevocations) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {

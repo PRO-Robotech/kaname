@@ -23,6 +23,12 @@ import (
 // formStub — подставная форма. НЕ снисходительнее настоящей: она не «глотает»
 // вход, а записывает, о чём именно её спросили, чтобы проба утверждала переданный
 // вопрос, а не факт вызова.
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — формы
+// двери, а не допуск субъекта (его держат пробы полосы Д над базой).
+func (f *formStub) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 type formStub struct {
 	allowed   bool
 	err       error

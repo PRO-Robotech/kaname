@@ -66,6 +66,25 @@ type unitWriter struct {
 	sessions            []domain.HumanSession
 	audits              []outboxtypes.AuditEvent
 	methods             []domain.LoginMethod
+	codes               []domain.VerificationCode
+	letters             []humansession.VerificationMailIntent
+}
+
+// Величины проб глагола: письмо подтверждения — профиль продукта; окно
+// источника — пропускающее всё (предмет проб пакета — не темп источника).
+var (
+	unitLetterPace = humansession.VerificationPace{
+		CodeTTL: 30 * time.Minute, Attempts: 5, Interval: 60 * time.Second, Limit: 5, Window: 24 * time.Hour,
+	}
+	unitSourcePace = humansession.SourcePace{Limit: 1, Window: time.Hour}
+)
+
+// admitEverySource — окно источника, пропускающее всякое обращение: темп
+// источника судят пробы полосы над базой.
+type admitEverySource struct{}
+
+func (admitEverySource) ChargeSource(context.Context, humansession.SourceLane, string, time.Time, humansession.SourcePace) (bool, error) {
+	return true, nil
 }
 
 func (w *unitWriter) Mirror(_ context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
@@ -105,6 +124,25 @@ func (w *unitWriter) RememberFirstAuthentication(context.Context, domain.UserID,
 func (w *unitWriter) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) error {
 	w.store.rec.record("audit:" + ev.EventType)
 	w.audits = append(w.audits, ev)
+	return nil
+}
+
+// Письмо подтверждения (kaname#456, Р9) — той же транзакцией, что заводит
+// человека: три шага одного производителя письма.
+func (w *unitWriter) SupersedeVerificationCodes(context.Context, domain.UserID, time.Time) (int, error) {
+	w.store.rec.record("letter-supersede")
+	return 0, nil
+}
+
+func (w *unitWriter) InsertVerificationCodePaced(_ context.Context, c domain.VerificationCode, _ humansession.VerificationPace) (humansession.LetterRefusal, error) {
+	w.store.rec.record("letter-code")
+	w.codes = append(w.codes, c)
+	return humansession.LetterRefusal{}, nil
+}
+
+func (w *unitWriter) EmitVerificationMail(_ context.Context, in humansession.VerificationMailIntent) error {
+	w.store.rec.record("letter-mail")
+	w.letters = append(w.letters, in)
 	return nil
 }
 
@@ -170,6 +208,7 @@ func newUnit(t *testing.T, mut func(*unitStore)) *unit {
 		Store: store, Rule: rule, Hasher: &recordingHasher{rec: rec, inner: inner}, Lane: lane,
 		TTL: 24 * time.Hour, Observer: obs, Now: func() time.Time { return unitBase },
 		Logger: slog.New(slog.DiscardHandler),
+		Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace,
 	})
 	require.NoError(t, err)
 	return &unit{rec: rec, store: store, obs: obs, uc: uc}
@@ -187,8 +226,8 @@ func TestRegister_F4_01_ThreeConsequencesInOneWriterInDeclaredOrder(t *testing.T
 	out, err := u.register(t, "Ann@Example.Invalid")
 	require.NoError(t, err)
 	require.Equal(t, []string{"hash", "writer", "mirror", "login-method", "session", "first-auth",
-		"audit:" + registration.AuditUserRegistered, "commit", "rollback"}, u.rec.steps,
-		"хеш до транзакции; один writer; зеркало → адрес → сессия; откат после фиксации — no-op")
+		"audit:" + registration.AuditUserRegistered, "letter-supersede", "letter-code", "letter-mail", "commit", "rollback"}, u.rec.steps,
+		"хеш до транзакции; один writer; зеркало → адрес → сессия → письмо подтверждения (kaname#456, Р9); откат после фиксации — no-op")
 	require.Len(t, u.store.writers, 1)
 	w := u.store.writers[0]
 	require.True(t, w.committed)
@@ -272,7 +311,8 @@ func TestRegister_R4_LaneMustDeclareEveryConsequence(t *testing.T) {
 	deps := func(lane registration.Lane) registration.Deps {
 		inner, _ := passwordverify.NewHasher(floorHasher())
 		rule, _ := humansession.NewPasswordRule(12, nil, humansession.NopObserver{}, slog.New(slog.DiscardHandler))
-		return registration.Deps{Store: &unitStore{rec: &recorder{}}, Rule: rule, Hasher: inner, Lane: lane, TTL: time.Hour}
+		return registration.Deps{Store: &unitStore{rec: &recorder{}}, Rule: rule, Hasher: inner, Lane: lane, TTL: time.Hour,
+			Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace}
 	}
 	full, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)

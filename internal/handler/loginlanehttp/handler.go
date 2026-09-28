@@ -87,16 +87,61 @@ const (
 	PathSecondFactorRemove      = "/iam/v1/auth/second-factor/remove"
 	PathSecondFactorBackupCodes = "/iam/v1/auth/second-factor/backup-codes"
 	PathStepUp                  = "/iam/v1/auth/step-up"
+	// Подтверждение адреса (kaname#456, Р6; имена ратифицированы — Ф6 Р15):
+	// запрос письма и предъявление кода — два глагола под сессией человека.
+	PathVerifyEmail        = "/iam/v1/auth/verify-email"
+	PathVerifyEmailConfirm = "/iam/v1/auth/verify-email/confirm"
 )
 
-// Paths — тринадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// Paths — пятнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
 // для ретрансляции (§8 инв. 7).
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
-		PathSecondFactorBackupCodes, PathStepUp,
+		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
 	}
+}
+
+// PathPosition — что путь полосы делает в ПОЛОЖЕНИИ ПОДТВЕРЖДЕНИЯ (kaname#456,
+// Р2). Перечень строк закрыт; нулевое значение — «не объявлено», и путь без
+// объявления есть находка гейта, а не умолчание в любую сторону.
+type PathPosition int
+
+const (
+	// PathAvailableInVerification — доступно в положении подтверждения.
+	PathAvailableInVerification PathPosition = iota + 1
+	// PathRefusedInVerification — отказ положения (Р3).
+	PathRefusedInVerification
+)
+
+// pathPositions — объявление Р2 для каждого пути полосы. Путь, заводимый
+// позже, объявляет себя здесь той же правкой, что заводит путь.
+var pathPositions = map[string]PathPosition{
+	PathRegister:                PathAvailableInVerification,
+	PathLogin:                   PathAvailableInVerification,
+	PathCSRF:                    PathAvailableInVerification,
+	PathLogout:                  PathAvailableInVerification,
+	PathVerifyEmail:             PathAvailableInVerification,
+	PathVerifyEmailConfirm:      PathAvailableInVerification,
+	PathRecovery:                PathAvailableInVerification,
+	PathRecoveryComplete:        PathAvailableInVerification,
+	PathPassword:                PathRefusedInVerification,
+	PathSecondFactor:            PathRefusedInVerification,
+	PathSecondFactorEnroll:      PathRefusedInVerification,
+	PathSecondFactorConfirm:     PathRefusedInVerification,
+	PathSecondFactorRemove:      PathRefusedInVerification,
+	PathSecondFactorBackupCodes: PathRefusedInVerification,
+	PathStepUp:                  PathRefusedInVerification,
+}
+
+// PathPositions — объявление Р2 копией.
+func PathPositions() map[string]PathPosition {
+	out := make(map[string]PathPosition, len(pathPositions))
+	for k, v := range pathPositions {
+		out[k] = v
+	}
+	return out
 }
 
 // Имена печений (Р3). Имя носителя отлично от имени носителя поставщика
@@ -137,6 +182,12 @@ type Lane interface {
 	RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error)
 	RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error)
 	StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error)
+	// Подтверждение адреса (kaname#456, Р6): запрос письма и предъявление кода.
+	RequestEmailVerification(ctx context.Context, bearer domain.SessionBearer) (humansession.RequestVerificationOutput, error)
+	ConfirmEmailVerification(ctx context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error)
+	// AddressPosition — положение сессии носителя по ТЕКУЩЕЙ отметке (Р1):
+	// его спрашивает отказ положения на путях, объявленных отказом Р2.
+	AddressPosition(ctx context.Context, bearer domain.SessionBearer) (humansession.Position, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -149,6 +200,9 @@ type Config struct {
 	RefusalDomain string
 	Logger        *slog.Logger
 	Observer      humansession.Observer
+	// Verification — клетки отказов положения на путях полосы (kaname#456,
+	// П13); nil — не считаются.
+	Verification humansession.AddressVerificationObserver
 }
 
 // Handler — слушатель полосы формы.
@@ -175,6 +229,9 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	if cfg.Observer == nil {
 		cfg.Observer = humansession.NopObserver{}
 	}
+	if cfg.Verification == nil {
+		cfg.Verification = humansession.NopObserver{}
+	}
 	h := &Handler{cfg: cfg, lane: lane, mux: http.NewServeMux()}
 	h.mux.HandleFunc(PathLogin, h.method(http.MethodPost, h.login))
 	h.mux.HandleFunc(PathLogout, h.method(http.MethodPost, h.logout))
@@ -189,6 +246,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathSecondFactorRemove, h.method(http.MethodPost, h.removeSecondFactor))
 	h.mux.HandleFunc(PathSecondFactorBackupCodes, h.method(http.MethodPost, h.regenerateBackupCodes))
 	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
+	h.mux.HandleFunc(PathVerifyEmail, h.method(http.MethodPost, h.requestEmailVerification))
+	h.mux.HandleFunc(PathVerifyEmailConfirm, h.method(http.MethodPost, h.confirmEmailVerification))
 	return h, nil
 }
 
@@ -291,6 +350,18 @@ type recoveryRequestForm struct {
 	CSRFToken string `json:"csrfToken"`
 }
 
+// verifyEmailForm — запрос письма подтверждения: только признак. Адреса в теле
+// НЕТ by construction (Р6): поле `email` — отказ разбора.
+type verifyEmailForm struct {
+	CSRFToken string `json:"csrfToken"`
+}
+
+// verifyEmailConfirmForm — предъявление кода подтверждения.
+type verifyEmailConfirmForm struct {
+	Code      string `json:"code"`
+	CSRFToken string `json:"csrfToken"`
+}
+
 // recoveryCompleteForm — предъявление: адрес, код и новый пароль. Текущего
 // пароля здесь НЕТ by construction — код и есть доказательство (Ф5 Р1).
 type recoveryCompleteForm struct {
@@ -374,6 +445,32 @@ func (h *Handler) judgeForm(w http.ResponseWriter, r *http.Request, kind domain.
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 	}
 	return false
+}
+
+// admitted — отказ положения подтверждения (Р2, Р3) на пути, объявленном
+// отказом: положение читается из ТЕКУЩЕЙ отметки на каждом запросе (Р1).
+// Сессии нет — судить нечего: отказ сессии выносит глагол. Отказ положения
+// Set-Cookie не пишет, сессию и контекст формы не трогает. Путь, объявленный
+// доступным, этой ступени не проходит — её зов с таким путём есть дефект
+// провязки, и он отвечает отказом, а не проходом.
+func (h *Handler) admitted(w http.ResponseWriter, r *http.Request, path string, unavailableText string) bool {
+	if pathPositions[path] != PathRefusedInVerification {
+		h.cfg.Logger.Error("login lane: position step on a path not declared refused", "path", path)
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
+		return false
+	}
+	pos, err := h.lane.AddressPosition(r.Context(), h.bearer(r))
+	if err != nil {
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
+		return false
+	}
+	if pos == humansession.PositionVerification {
+		h.cfg.Verification.AddressVerificationObserved(humansession.VerificationPositionRefusedLane)
+		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextEmailNotVerified,
+			&errorInfo{Reason: humansession.ReasonEmailNotVerified, Domain: h.cfg.RefusalDomain})
+		return false
+	}
+	return true
 }
 
 // --- глаголы ---
@@ -508,6 +605,9 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormPassword, form.CSRFToken) {
 		return
 	}
+	if !h.admitted(w, r, PathPassword, humansession.TextRequestNotPerformed) {
+		return
+	}
 	if err := requireFields(map[string]string{"currentPassword": form.CurrentPassword, "newPassword": form.NewPassword}); err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
@@ -618,6 +718,9 @@ func (h *Handler) enrollSecondFactor(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
 		return
 	}
+	if !h.admitted(w, r, PathSecondFactorEnroll, humansession.TextRequestNotPerformed) {
+		return
+	}
 	out, err := h.lane.EnrollSecondFactor(r.Context(), humansession.EnrollInput{Bearer: h.bearer(r)})
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
@@ -638,6 +741,9 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathSecondFactorConfirm, humansession.TextRequestNotPerformed) {
 		return
 	}
 	if err := requireFields(map[string]string{"code": form.Code}); err != nil {
@@ -662,6 +768,9 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 // secondFactorStatus — чтение состояния (Р4): без признака; две формы тела —
 // `pending` и `active`; ключ `backupCodes` — только у заведённого.
 func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.admitted(w, r, PathSecondFactor, humansession.TextRequestNotPerformed) {
+		return
+	}
 	out, err := h.lane.SecondFactorStatus(r.Context(), humansession.StatusInput{Bearer: h.bearer(r)})
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
@@ -689,6 +798,9 @@ func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathSecondFactorRemove, humansession.TextRequestNotPerformed) {
 		return
 	}
 	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
@@ -719,6 +831,9 @@ func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathSecondFactorBackupCodes, humansession.TextRequestNotPerformed) {
 		return
 	}
 	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
@@ -752,6 +867,9 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormStepUp, form.CSRFToken) {
 		return
 	}
+	if !h.admitted(w, r, PathStepUp, humansession.TextRequestNotPerformed) {
+		return
+	}
 	method, err := humansession.ParseStepUpMethod("method", form.Method)
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
@@ -773,6 +891,51 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 		body["backupCodesRemaining"] = *out.BackupCodesRemaining
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// --- подтверждение адреса (kaname#456, Р6) ---
+
+// requestEmailVerification — запрос письма подтверждения: `200 {}` без печений;
+// `Retry-After` называет промежуток до следующего разрешённого письма (по нему
+// экран ведёт отсчёт, своих правил у него нет).
+func (h *Handler) requestEmailVerification(w http.ResponseWriter, r *http.Request) {
+	var form verifyEmailForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormVerifyEmail, form.CSRFToken) {
+		return
+	}
+	out, err := h.lane.RequestEmailVerification(r.Context(), h.bearer(r))
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(out.NextAllowedIn))))
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// confirmEmailVerification — предъявление кода: успех — тело `session` с
+// `emailVerified: true` и НОВЫЙ носитель той же сессии; контекст формы прежний.
+func (h *Handler) confirmEmailVerification(w http.ResponseWriter, r *http.Request) {
+	var form verifyEmailConfirmForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormVerifyEmailConfirm, form.CSRFToken) {
+		return
+	}
+	out, err := h.lane.ConfirmEmailVerification(r.Context(), humansession.ConfirmVerificationInput{
+		Bearer: h.bearer(r), Code: form.Code,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
 }
 
 // source — адрес источника: значение заголовка допущенного вызывающего как
@@ -872,6 +1035,17 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrSessionNotFresh):
 		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextSessionNotFresh,
 			&errorInfo{Reason: humansession.ReasonSessionNotFresh, Domain: h.cfg.RefusalDomain})
+	// Подтверждение адреса (kaname#456, Р6, Р11, Р15): состояние — 400 с
+	// признаком; отказ положения — значение Р3.
+	case errors.Is(err, humansession.ErrEmailAlreadyVerified):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextEmailAlreadyVerified,
+			&errorInfo{Reason: humansession.ReasonEmailAlreadyVerified, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrInviteNotValid):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextInviteNotValid,
+			&errorInfo{Reason: humansession.ReasonInviteNotValid, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrEmailNotVerified):
+		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextEmailNotVerified,
+			&errorInfo{Reason: humansession.ReasonEmailNotVerified, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrSecondFactorUnavailable):
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextSecondFactorUnavailable, nil)
 	case errors.Is(err, humansession.ErrStoreUnavailable), errors.Is(err, humansession.ErrBreachAuthorityMisconfigured):

@@ -352,6 +352,9 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 		// снаружи так же, как всякий другой, — различимый отказ сообщал бы
 		// предъявителю, что владелец вышел отовсюду.
 		clientassertion.OutcomeOwnerRevoked,
+		// Владелец-человек не подтвердил адрес (kaname#456, Р5): тот же
+		// неразличимый отказ, своя клетка.
+		clientassertion.OutcomeOwnerUnverified,
 		clientassertion.OutcomeRevocationCheckFailed,
 		clientassertion.OutcomeIssuanceFailed,
 	}

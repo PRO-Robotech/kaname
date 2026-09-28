@@ -86,10 +86,10 @@ func ceremonyScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tag st
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'ceremony', 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, 'ceremony', 'ACTIVE', now())`,
 		user, account, "ext-"+tag, tag+"@example.invalid")
-	require.NoError(t, err, "посев человека")
+	require.NoError(t, err, "посев человека (адрес подтверждён: kaname#456, Р5)")
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, user)
 	require.NoError(t, err, "посев аккаунта")
