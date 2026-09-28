@@ -25,7 +25,16 @@
     NOOP, QUIT; объявлено `8BITMIME` — тело письма службы в 8 битах;
   · чтение принятого — `GET /messages?to=<адрес>`: письма этому адресату в
     порядке приёма, `{"messages": [{"from", "to", "receivedAt", "data"}]}`;
-    `GET /healthz` — 200.
+    `GET /healthz` — 200;
+  · чтение КОДОВ — `GET /codes?to=<адрес>&after=<строка>`: по письму на
+    элемент, в порядке приёма, первая непустая строка после строки, равной
+    `after`, либо null — `{"codes": [...]}`. Его зовёт сквозной набор
+    (`tests/newman/cases/kaname-recovery-lane.py`): отчёт прогона выкладывается
+    артефактом публичного репозитория, а тело письма несёт код прозой, которую
+    чистка отчёта (`.github/scripts/redact-newman-report.py`) не режет. Под
+    именем `codes` значение срезается ИМЕНЕМ, поэтому набор читает узел только
+    этой дверью. Строку-заголовок называет вызывающий: формы писем службы узел
+    не знает.
 
   Удостоверения у узла нет, и отправителю службы его не задают: подделывать
   чужое письмо на стенде некому, а половина настройки удостоверения была бы
@@ -203,6 +212,21 @@ def make_smtp_handler(store: Store, ctx: ssl.SSLContext):
     return Handler
 
 
+def code_after(data: str, heading: str) -> str | None:
+    """Первая непустая строка после строки, равной `heading`; нет такой — None.
+
+    Строку-заголовок называет ВЫЗЫВАЮЩИЙ: узел формы писем службы не знает и
+    своего разбора её не заводит."""
+    lines = data.replace("\r\n", "\n").split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == heading.strip():
+            for nxt in lines[i + 1:]:
+                if nxt.strip():
+                    return nxt.strip()
+            return None
+    return None
+
+
 def make_http_handler(store: Store):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # журнал пода не несёт адресов писем
@@ -221,12 +245,21 @@ def make_http_handler(store: Store):
             if u.path == "/healthz":
                 self._send(200, {"status": "ok"})
                 return
-            if u.path == "/messages":
-                to = urllib.parse.parse_qs(u.query).get("to", [""])[0]
+            q = urllib.parse.parse_qs(u.query)
+            if u.path in ("/messages", "/codes"):
+                to = q.get("to", [""])[0]
                 if not to:
                     self._send(400, {"message": "Illegal argument to: required"})
                     return
+            if u.path == "/messages":
                 self._send(200, {"messages": store.to(to)})
+                return
+            if u.path == "/codes":
+                after = q.get("after", [""])[0]
+                if not after:
+                    self._send(400, {"message": "Illegal argument after: required"})
+                    return
+                self._send(200, {"codes": [code_after(m["data"], after) for m in store.to(to)]})
                 return
             self._send(404, {"message": "not found"})
 
@@ -298,6 +331,17 @@ def _read(port: int, to: str) -> list[dict]:
         return json.loads(r.read().decode("utf-8"))["messages"]
 
 
+def _codes(port: int, to: str, after: str) -> tuple[int, object]:
+    import urllib.error
+    import urllib.request
+    url = f"http://127.0.0.1:{port}/codes?" + urllib.parse.urlencode({"to": to, "after": after})
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            return r.status, json.loads(r.read().decode("utf-8"))["codes"]
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode("utf-8")).get("message")
+
+
 def self_test() -> int:
     import smtplib
 
@@ -342,6 +386,17 @@ def self_test() -> int:
            and all("other" not in m["data"] for m in got_a), f"{got_b}")
         _c("неизвестному адресату перечень пуст", _read(hport, "none@stand.invalid") == [], "")
 
+        codes = _codes(hport, "a@stand.invalid", "Код подтверждения:") if sent == "ok" else None
+        _c("коды читаются по письму на элемент в порядке приёма: код после названной строки, "
+           "у письма без неё — null", codes == (200, ["ABCDE-FGHIJ", None]), f"{codes}")
+        other = _codes(hport, "a@stand.invalid", "Код восстановления:") if sent == "ok" else None
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: иная строка-заголовок кода того же письма не находит",
+           other == (200, [None, None]), f"{other}")
+        _c("чужому адресату кодов нет",
+           _codes(hport, "none@stand.invalid", "Код подтверждения:") == (200, []), "")
+        _c("чтение кодов без строки-заголовка — 400 с именем поля",
+           _codes(hport, "a@stand.invalid", "") == (400, "Illegal argument after: required"), "")
+
         plain = "сдано"
         try:
             with socket.create_connection(("127.0.0.1", sport), timeout=5) as raw:
@@ -361,7 +416,8 @@ def self_test() -> int:
         return RC_FINDING
     print("ДОКАЗАНО: узел принимает письма только поверх TLS, разворачивает удвоенную "
           "точку, тело в 8 битах доезжает дословно, чтение отдаёт письма адресата по "
-          "порядку и не отдаёт чужих.")
+          "порядку и не отдаёт чужих, а чтение кодов — код после названной строки по "
+          "письму на элемент.")
     return 0
 
 

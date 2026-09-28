@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 780
+Всего кейсов: 785
 
 ## Перепись по модулям
 
@@ -71,7 +71,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 20 |
-| `cases/kaname-recovery-lane.py` | 3 |
+| `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-second-factor.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -1080,18 +1080,24 @@
 - `IAM-LOGINLANE-NEG-RATE-BY-SOURCE`
 - `IAM-LOGINLANE-OK-NOT-COUNTED`
 
-## `cases/kaname-recovery-lane.py` — 3 кейса
+## `cases/kaname-recovery-lane.py` — 8 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
-> посадки `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Счастливого
-> завершения с настоящим кодом здесь нет: код уходит письмом, и через край его не
-> прочитать — предмет Ф5-14 (`kacho#1773`). Гоняет набор задание `chart-own`
-> процесса `e2e-newman.yml` тем же вызовом прогонщика, что набор входа, после него.
+> посадки `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Код
+> завершения набор берёт из письма у приёмника писем стенда (`standMailboxUrl`,
+> дверь `GET /codes`), людей заводит сам — регистрацией и подтверждением адреса.
+> Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
+> прогонщика, что набор входа, после него.
 
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
 - `IAM-RECOVERY-NEG-CSRF-MISSING`
+- `IAM-RECOVERY-OK-CODE-IN-TIME`
+- `IAM-RECOVERY-NEG-CODE-SECOND-TIME`
+- `IAM-RECOVERY-NEG-RATE-LIMIT`
+- `IAM-RECOVERY-OK-NEW-PASSWORD-SIGNS-IN`
+- `IAM-RECOVERY-OK-ENDS-EVERY-SESSION`
 
 ## `cases/kaname-second-factor.py` — 4 кейса
 

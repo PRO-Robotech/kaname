@@ -9,7 +9,10 @@
 (`loginLaneBaseUrl`) и человека со способом входа паролем (`loginLaneEmail`,
 `loginLanePassword`). Пока их не пишет никто, каждый шаг набора уходит в
 «условие не создано» помеченным утверждением — набор исполняется и не утверждает
-ничего. Этот посев пишет все три, и пишет только их.
+ничего. Этот посев пишет все три и четвёртым — адрес чтения приёмника писем
+стенда (`standMailboxUrl`), по которому сам доказал код подтверждения: из него
+набор восстановления (`kaname-recovery-lane`) читает код письма своих людей.
+Больше он не пишет ничего (`MINTED_KEYS`).
 
 ГДЕ ОН ИСПОЛНЯЕТСЯ. На стенде чарта посадки `own`
 (`KANAME_STAND_IDENTITY_PROVIDER=own .github/scripts/stand-chart.sh`): зовёт его
@@ -100,7 +103,7 @@ from seed_own_stand import (  # noqa: E402
 # Ключи окружения, которые пишет этот посев. Перепись долга
 # (`.github/scripts/newman-suite-debt.py`) спрашивает их у САМОГО посева флагом
 # `--minted-keys`; сходимость объявления с записью держит самопроверка.
-MINTED_KEYS = ("loginLaneBaseUrl", "loginLaneEmail", "loginLanePassword")
+MINTED_KEYS = ("loginLaneBaseUrl", "loginLaneEmail", "loginLanePassword", "standMailboxUrl")
 
 # Поверхность, которой зачитываются эти ключи. Перепись выводит её у коллекции из
 # переменной адреса (`surface_of`), и у всех трёх адресов собственных HTTP-дверей
@@ -352,11 +355,17 @@ def seed(http, mailbox, email: str, password: str, sleep=time.sleep) -> str:
     return state + " · адрес подтверждён"
 
 
-def env_patch(base_url: str, email: str, password: str) -> dict:
-    """ЧИСТАЯ функция — что уезжает в окружение; её судит самопроверка."""
+def env_patch(base_url: str, email: str, password: str, mailbox_url: str) -> dict:
+    """ЧИСТАЯ функция — что уезжает в окружение; её судит самопроверка.
+
+    Адрес приёмника писем стенда уезжает ТЕМ ЖЕ посевом, что доказал по нему
+    код подтверждения: набор восстановления читает из него код письма
+    (`GET /codes`, `.github/scripts/stand-mailbox.py`), и адрес, по которому
+    посев не читал, был бы адресом без доказанной способности."""
     return {"loginLaneBaseUrl": base_url.rstrip("/"),
             "loginLaneEmail": email,
-            "loginLanePassword": password}
+            "loginLanePassword": password,
+            "standMailboxUrl": mailbox_url.rstrip("/")}
 
 
 def credentials() -> tuple[str, str]:
@@ -374,7 +383,7 @@ def run(args: argparse.Namespace) -> int:
     state = seed(http, Mailbox(args.mailbox_url), email, password)
     say(f"  ok   человек стенда {state} и входит паролем через полосу {http.base} "
         f"в обычном положении")
-    patch = env_patch(http.base, email, password)
+    patch = env_patch(http.base, email, password, args.mailbox_url)
     replaced = write_env(patch, pathlib.Path(args.env_file),
                          pathlib.Path(args.env_template))
     say(f"посев полосы входа: ключей записано {len(patch)} (заменено {replaced}) "
@@ -632,7 +641,7 @@ def self_test() -> int:
         got = _outcome(lambda: LaneHttp("https://127.0.0.1:1", pathlib.Path(tmp)))
         _c("(+) листа края нет — условие не создано", got[0] == "unmet", f"{got}")
 
-        patch = env_patch("https://127.0.0.1:1/", E, P)
+        patch = env_patch("https://127.0.0.1:1/", E, P, "http://127.0.0.1:2/")
         _c("объявленные ключи = записываемые (в обе стороны)",
            set(patch) == set(MINTED_KEYS), f"{sorted(patch)} против {sorted(MINTED_KEYS)}")
         env = pathlib.Path(tmp) / "env.json"
@@ -645,7 +654,8 @@ def self_test() -> int:
         _c("запись доезжает всеми ключами, тип secret у пароля сохранён",
            all(doc.get(k, {}).get("value") for k in MINTED_KEYS)
            and doc["loginLanePassword"].get("type") == "secret"
-           and doc["loginLaneBaseUrl"]["value"] == "https://127.0.0.1:1", f"{doc}")
+           and doc["loginLaneBaseUrl"]["value"] == "https://127.0.0.1:1"
+           and doc["standMailboxUrl"]["value"] == "http://127.0.0.1:2", f"{doc}")
 
     try:
         census = _census_surface_for_lane_address()
