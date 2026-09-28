@@ -234,9 +234,6 @@ func (w *updUserWriter) Rollback(context.Context) error                 { return
 
 type updUserWtr struct{ parent *updUserRepo }
 
-func (w *updUserWtr) Upsert(context.Context, domain.User) (domain.User, bool, error) {
-	return domain.User{}, false, nil
-}
 func (w *updUserWtr) InsertPending(context.Context, domain.User, time.Time) (domain.User, bool, error) {
 	return domain.User{}, false, nil
 }

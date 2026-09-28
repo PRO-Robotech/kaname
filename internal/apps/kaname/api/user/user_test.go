@@ -498,13 +498,6 @@ type fakeUserUW struct {
 	parent *fakeUserRepo
 }
 
-func (w *fakeUserUW) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
-	w.parent.mu.Lock()
-	w.parent.upsertCount++
-	w.parent.mu.Unlock()
-	u.CreatedAt = time.Now().UTC()
-	return u, true, nil
-}
 func (w *fakeUserUW) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	u.CreatedAt = time.Now().UTC()
 	return u, true, nil
@@ -516,11 +509,9 @@ func (w *fakeUserUW) ActivateInvite(_ context.Context, userID domain.UserID, ext
 	return domain.User{ID: userID, ExternalID: ext, DisplayName: dn, InviteStatus: domain.InviteStatusActive}, nil
 }
 
-// InsertActive — bootstrap-path; для совместимости с старым тестом
-// `TestUpsertFromIdentity_Sync_OK_OpReturned` (он считает Upsert-calls) этот
-// fake инкрементит тот же счетчик: legacy Upsert и new InsertActive семантически
-// эквивалентны для admin-tooling-stub-теста (оба фиксируют «row создана через
-// upsert-from-identity worker»).
+// InsertActive — bootstrap-path; счётчик `upsertCount` считает строки,
+// заведённые воркером upsert-from-identity (его читает
+// `TestUpsertFromIdentity_Sync_OK_OpReturned`).
 func (w *fakeUserUW) InsertActive(_ context.Context, u domain.User) (domain.User, error) {
 	w.parent.mu.Lock()
 	w.parent.upsertCount++
