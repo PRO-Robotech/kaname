@@ -85,6 +85,15 @@ WRAPKEY_FILE="$RUNDIR/wrapping.key"
 BOOTSTRAP_KEY_FILE="$RUNDIR/bootstrap-sa.key"
 SECOND_FACTOR_KEY_FILE="$RUNDIR/second-factor.key"
 
+# ПРИЁМНИК ПИСЕМ СТЕНДА (`stand-mailbox.py`). С kaname#456 человек, чей адрес не
+# подтверждён, дальше входа не проходит, а выдачи на него не действуют; посев
+# заводит людей регистрацией и доводит их до подтверждённого адреса кодом из
+# письма, которое служба сдала этому узлу. Узел — процесс машины на 127.0.0.1:
+# служба идёт сетью машины, и лист у узла тот же, что у базы, — лист службы
+# (`localhost` в SAN, тот же УЦ).
+MAIL_SMTP_PORT="${KANAME_STAND_MAIL_SMTP_PORT:-14465}"
+MAIL_HTTP_PORT="${KANAME_STAND_MAIL_HTTP_PORT:-18025}"
+
 # SPIFFE-имя, которым стенд зовёт чеканку бутстрап-удостоверения. Это ТО ЖЕ имя,
 # что стоит в SAN сертификата стенда (см. make_pki): круг вызывающих у чеканки
 # задаётся ИМЕНАМИ, а не сетевым положением, поэтому «кто вправе» на этом стенде
@@ -268,6 +277,12 @@ stand_env() {
   export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_INTERVAL=60s
   export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_LIMIT=5
   export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_WINDOW=24h
+  # Почтовая полоса службы — приёмник писем стенда: TLS с первого байта, лист
+  # проверяется якорем стенда. Без узла письмо подтверждения не уходит никуда.
+  export KANAME_INVITE_MAIL__RELAY="localhost:$MAIL_SMTP_PORT"
+  export KANAME_INVITE_MAIL__FROM=kaname@kaname.local
+  export KANAME_INVITE_MAIL__TLS_MODE=implicit
+  export KANAME_INVITE_MAIL__CA_BUNDLE_FILE="$PKI/ca.crt"
   # Ёмкость проверяющего и резерв памяти страж сверяет с ПРЕДЕЛОМ ПАМЯТИ СРЕДЫ,
   # и предела он требует: без него старт отказывает. Предел накладывает
   # контейнер службы (`SERVICE_MEMORY` ниже), и сверку выносит сам страж.
@@ -454,6 +469,32 @@ migrate() {
 # контейнера идёт на ПЕРЕДНЕМ плане под `nohup`: процесс клиента живёт ровно
 # столько, сколько служба, и различение «страж отказал» от «слушатель не
 # поднялся» остаётся прежним — по живости процесса и по портам.
+# start_mailbox — приёмник писем стенда процессом машины. Не поднялся — условие
+# не создано: вердикта о дереве нет.
+start_mailbox() {
+  need_tool python3
+  mkdir -p "$RUNDIR"
+  if [ -f "$RUNDIR/mailbox.pid" ]; then
+    kill "$(cat "$RUNDIR/mailbox.pid")" 2>/dev/null
+    rm -f "$RUNDIR/mailbox.pid"
+  fi
+  nohup python3 "$HERE/stand-mailbox.py" serve --host 127.0.0.1 \
+    --smtp-port "$MAIL_SMTP_PORT" --http-port "$MAIL_HTTP_PORT" \
+    --cert "$PKI/srv.crt" --key "$PKI/srv.key" > "$RUNDIR/mailbox.log" 2>&1 < /dev/null &
+  echo $! > "$RUNDIR/mailbox.pid"
+  local i
+  for i in $(seq 1 20); do
+    if python3 -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:$MAIL_HTTP_PORT/healthz', timeout=2)" 2>/dev/null; then
+      say "приёмник писем стенда поднят: SMTP поверх TLS 127.0.0.1:$MAIL_SMTP_PORT, чтение 127.0.0.1:$MAIL_HTTP_PORT"
+      return 0
+    fi
+    kill -0 "$(cat "$RUNDIR/mailbox.pid")" 2>/dev/null || break
+    sleep 1
+  done
+  unmet "приёмник писем стенда не поднялся: $(tail -2 "$RUNDIR/mailbox.log" 2>/dev/null | tr '\n' ' ')"
+  exit "$RC_UNMET"
+}
+
 SERVICE_NAME="${KANAME_STAND_SERVICE_NAME:-kaname-stand-svc}"
 SERVICE_IMAGE="${KANAME_STAND_SERVICE_IMAGE:-$PG_IMAGE}"
 SERVICE_MEMORY="${KANAME_STAND_SERVICE_MEMORY:-1280m}"
@@ -547,6 +588,10 @@ down() {
   if [ -f "$RUNDIR/kaname.pid" ]; then
     kill "$(cat "$RUNDIR/kaname.pid")" 2>/dev/null
     rm -f "$RUNDIR/kaname.pid"
+  fi
+  if [ -f "$RUNDIR/mailbox.pid" ]; then
+    kill "$(cat "$RUNDIR/mailbox.pid")" 2>/dev/null
+    rm -f "$RUNDIR/mailbox.pid"
   fi
   command -v docker >/dev/null 2>&1 && docker rm -f "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
   say "стенд снесён"
@@ -907,7 +952,7 @@ case "${1:-}" in
   up)
     say "===== автономный стенд службы: подъём ====="
     need_tool openssl
-    make_pki; start_pg; stand_env; build_binaries; migrate; start_service
+    make_pki; start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
     say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
     listeners_report
     exit 0

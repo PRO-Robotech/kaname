@@ -39,7 +39,11 @@
   2. регистрация человека — `POST /iam/v1/auth/register` на слушателе полосы
      входа :9100, признаком формы от `GET /iam/v1/auth/csrf`. Глагол заводит
      человека, его личный аккаунт, проект по умолчанию и выдачу владельца — то
-     есть АРЕНДАТОРА;
+     есть АРЕНДАТОРА. Адрес заведённого подтверждается тем же путём, что у
+     человека (kaname#456): код из письма регистрации, которое служба сдала
+     приёмнику писем стенда (`.github/scripts/stand-mailbox.py`), предъявляется
+     `POST /iam/v1/auth/verify-email/confirm` под сессией регистрации — иначе
+     выдачи на человека не действуют и раскрытие отношений его не называет;
   3. выпуск удостоверения субъекта — `UserTokenService/Issue` и
      `SAKeyService/Issue`. Приватный ключ показывается ОДИН раз;
   4. обмен — `POST /iam/v1/token` на :9096: подписанное утверждение клиента
@@ -75,7 +79,9 @@ service_account»). Под посадкой `own` — единственной �
 объявленный перечень записываемых ключей сходится с тем, что запись действительно
 производит (в обе стороны), что `--minted-surface` отвечает ровно одной строкой,
 что отказ полосы входа (403 листу не края, регистрация без печенья сессии,
-регистрация не 200) — находка, а 200 с печеньем — молчание, что ни одна объявленная пара
+регистрация не 200) — находка, а 200 с печеньем — молчание, что подтверждение адреса
+кодом письма регистрации молчит на законном мире и различает недошедшее письмо,
+молчащий приёмник, отвергнутый код и 200 без отметки, что ни одна объявленная пара
 «идентификатор ↔ предъявитель» не покрыта ПОЛОВИНОЙ, что фронт, который после
 отзыва всё ещё принимает предъявителя, даёт находку, и что пустой набор ключей
 собственной чеканки даёт находку.
@@ -159,9 +165,14 @@ OWN_JWKS_PATH = "/.well-known/kaname/jwks.json"
 # каждого раздельный, и попытки посева не съедают окно прогона.
 LANE_CSRF = "/iam/v1/auth/csrf"
 LANE_REGISTER = "/iam/v1/auth/register"
+LANE_VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
 LANE_SESSION_COOKIE = "kaname_session"
 LANE_FORM_COOKIE = "kaname_form"
 LANE_SOURCE = "203.0.113.12"
+
+# Адрес чтения приёмника писем автономного стенда (`stand-own.sh`,
+# `KANAME_STAND_MAIL_HTTP_PORT`, умолчание то же).
+DEFAULT_MAILBOX_URL = "http://127.0.0.1:18025"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # КЛЮЧИ ОКРУЖЕНИЯ, КОТОРЫЕ ЭТОТ ПОСЕВ ПИШЕТ
@@ -509,7 +520,7 @@ def person_password() -> str:
     return secrets.token_urlsafe(24)
 
 
-def register_person(lane, email: str, password: str) -> None:
+def register_person(lane, email: str, password: str) -> str:
     """Регистрация человека полосой входа. Утверждается и статус, и носитель.
 
     Пароль и почта в текст отказа НЕ попадают: журнал прогона публичного
@@ -539,9 +550,110 @@ def register_person(lane, email: str, password: str) -> None:
     if code != 200:
         raise Finding(f"регистрация человека: ждали 200, получили {code} "
                       f"({text[:200]!r})")
-    if not lane_cookie(sc, LANE_SESSION_COOKIE):
+    bearer = lane_cookie(sc, LANE_SESSION_COOKIE)
+    if not bearer:
         raise Finding(f"регистрация ответила 200 без печенья {LANE_SESSION_COOKIE} — "
                       f"следствия регистрации одним исходом не наступили")
+    return bearer
+
+
+# ─── ПОДТВЕРЖДЕНИЕ АДРЕСА ЗАВЕДЁННОГО ЧЕЛОВЕКА (kaname#456) ──────────────────
+#
+# Человек, чей адрес не подтверждён, дальше входа не проходит, и выдачи на него
+# не действуют: дверь решения отвечает ему `email_not_verified`, раскрытие
+# отношений его не называет. Люди стенда — владельцы аккаунтов и цели выдач
+# наборов, поэтому каждый заведённый доводится до подтверждённого адреса ТЕМ ЖЕ
+# глаголом, что человек: код из письма регистрации, которое служба сдала
+# приёмнику писем стенда (`.github/scripts/stand-mailbox.py`), предъявляется
+# полосе под сессией регистрации. Отметку в базу посев не пишет.
+#
+# Приёмник и разбор кода — ОДНИ на оба посева (посев стенда чарта их отсюда
+# импортирует): вторая копия разошлась бы с первой молча.
+
+# Сколько ждать письма в приёмнике и с какой паузой спрашивать. Письмо
+# регистрации ставится той же транзакцией, что заводит человека, и дренаж
+# очереди отдаёт его узлу за секунды; предел — с запасом на повтор отправки.
+LETTER_BUDGET_S = 90
+LETTER_POLL_S = 2
+
+
+class Mailbox:
+    """Приёмник писем стенда: `GET /messages?to=<адрес>` — письма по порядку."""
+
+    def __init__(self, base_url: str):
+        self.base = base_url.rstrip("/")
+
+    def letters(self, to: str) -> list[str]:
+        url = f"{self.base}/messages?" + urllib.parse.urlencode({"to": to})
+        try:
+            with urllib.request.urlopen(url, timeout=15) as r:
+                doc = json.loads(r.read().decode("utf-8", "replace"))
+        except (urllib.error.URLError, OSError, socket.timeout,
+                json.JSONDecodeError) as e:
+            raise Unmet(f"приёмник писем стенда по адресу {self.base} недостижим "
+                        f"либо ответил не перечнем: {e}") from None
+        msgs = doc.get("messages") if isinstance(doc, dict) else None
+        if not isinstance(msgs, list):
+            raise Unmet(f"приёмник писем стенда ответил без перечня messages: {doc!r:.200}")
+        return [m.get("data", "") for m in msgs if isinstance(m, dict)]
+
+
+def code_of(letter: str) -> str | None:
+    """Код из письма подтверждения: первая непустая строка после строки
+    «Код подтверждения:» (`internal/clients/invite_mail.go`,
+    RenderVerificationMail). Письмо без неё кода не несёт."""
+    lines = letter.replace("\r\n", "\n").split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == "Код подтверждения:":
+            for nxt in lines[i + 1:]:
+                if nxt.strip():
+                    return nxt.strip()
+            return None
+    return None
+
+
+def await_code(mailbox, email: str, seen: int, sleep) -> str | None:
+    """Код ПОСЛЕДНЕГО письма, пришедшего сверх `seen` уже прочитанных. None —
+    за предел письма не пришло."""
+    for _ in range(max(1, LETTER_BUDGET_S // LETTER_POLL_S)):
+        letters = mailbox.letters(email)
+        if len(letters) > seen:
+            return code_of(letters[-1])
+        sleep(LETTER_POLL_S)
+    return None
+
+
+def confirm_person(lane, mailbox, email: str, bearer: str, sleep=time.sleep) -> None:
+    """Код письма регистрации предъявляется полосе под сессией регистрации;
+    утверждается `session.emailVerified: true` ответа."""
+    code_value = await_code(mailbox, email, 0, sleep)
+    if code_value is None:
+        raise Finding(f"письмо подтверждения адреса заведённому человеку не дошло до "
+                      f"приёмника писем стенда за {LETTER_BUDGET_S} с (либо пришло без "
+                      f"строки кода) — служба не сдала его узлу, названному посадкой "
+                      f"стенда")
+    code, sc, text = lane.ask("GET", f"{LANE_CSRF}?form=verify-email-confirm",
+                              cookies={LANE_SESSION_COOKIE: bearer})
+    try:
+        token = json.loads(text or "{}").get("csrfToken") if code == 200 else None
+    except json.JSONDecodeError:
+        token = None
+    ctx = lane_cookie(sc, LANE_FORM_COOKIE)
+    if code != 200 or not isinstance(token, str) or not token or not ctx:
+        raise Finding(f"признак формы подтверждения: код {code} — форму отправить нечем")
+    code, _sc, text = lane.ask("POST", LANE_VERIFY_CONFIRM,
+                               body={"code": code_value, "csrfToken": token},
+                               cookies={LANE_FORM_COOKIE: ctx, LANE_SESSION_COOKIE: bearer})
+    if code != 200:
+        raise Finding(f"предъявление кода подтверждения из письма: ждали 200, получили "
+                      f"{code} ({text[:200]!r})")
+    try:
+        view = json.loads(text or "{}").get("session")
+    except (json.JSONDecodeError, AttributeError):
+        view = None
+    if not isinstance(view, dict) or view.get("emailVerified") is not True:
+        raise Finding("предъявление кода ответило 200, а session.emailVerified не true — "
+                      "отметка не поставлена, а успех объявлен")
 
 
 def resolve_tenant(http: Http, public: str, token: str, email: str,
@@ -998,6 +1110,7 @@ def run(args: argparse.Namespace) -> int:
 
     http = Http(pki)
     lane_http = LaneHttp(lane_url, pki)
+    mailbox = Mailbox(args.mailbox_url)
 
     say(f"===== машинный посев автономного стенда (прогон {run_id}) =====")
 
@@ -1012,8 +1125,10 @@ def run(args: argparse.Namespace) -> int:
     tenants = {}
     for lane in ("a", "b"):
         email = f"seed-{run_id}-{lane}@kaname.local"
-        register_person(lane_http, email, person_password())
+        bearer = register_person(lane_http, email, person_password())
         step(f"человек {lane.upper()} зарегистрирован полосой входа")
+        confirm_person(lane_http, mailbox, email, bearer)
+        step(f"и подтвердил адрес кодом письма регистрации (приёмник писем стенда)")
         tenants[lane] = resolve_tenant(http, public, boot, email)
         t = tenants[lane]
         step(f"и стала арендатором: человек {t['userId']}, аккаунт "
@@ -1110,8 +1225,10 @@ def run(args: argparse.Namespace) -> int:
     # бы дать предъявителя с пустым уровнем подтверждения личности — тот самый
     # случай, который эта же полоса измерила выше.
     nob_email = f"seed-{run_id}-nob@kaname.local"
-    register_person(lane_http, nob_email, person_password())
+    bearer = register_person(lane_http, nob_email, person_password())
     step("человек БЕЗ ВЫДАЧ зарегистрирован полосой входа")
+    confirm_person(lane_http, mailbox, nob_email, bearer)
+    step("и подтвердил адрес кодом письма регистрации")
     tenants["nob"] = resolve_tenant(http, public, boot, nob_email)
     user_nob = tenants["nob"]["userId"]
     if tenants["nob"]["accountId"] in (tenants["a"]["accountId"],
@@ -1131,8 +1248,10 @@ def run(args: argparse.Namespace) -> int:
     # у соседних наборов не должно зависеть от того, чьим членом его сделала
     # группа. Предъявителя у него нет по той же причине, что у `userNOBId`.
     inv_email = f"seed-{run_id}-inv@kaname.local"
-    register_person(lane_http, inv_email, person_password())
+    bearer = register_person(lane_http, inv_email, person_password())
     step("человек — цель привязки членства — зарегистрирован полосой входа")
+    confirm_person(lane_http, mailbox, inv_email, bearer)
+    step("и подтвердил адрес кодом письма регистрации")
     tenants["inv"] = resolve_tenant(http, public, boot, inv_email)
     user_inv = tenants["inv"]["userId"]
     if user_inv in (user_nob, tenants["a"]["userId"], tenants["b"]["userId"]):
@@ -1440,6 +1559,69 @@ def self_test() -> int:
            f"ожидалось {want.__name__ if want else 'молчание'}, "
            f"получено {got.__name__ if got else 'молчание'}")
 
+    # Ось 2в: ПОДТВЕРЖДЕНИЕ АДРЕСА заведённого человека (kaname#456). Человек с
+    # неподтверждённым адресом дальше входа не проходит, и выдачи на него не
+    # действуют: посев доводит каждого заведённого до подтверждённого адреса
+    # кодом из письма регистрации в приёмнике писем стенда. Каждый мир меняет
+    # ОДИН факт против законного близнеца (первая строка).
+    class _Box:
+        def __init__(self, letters=None, down=False):
+            self.letters_by, self.down = dict(letters or {}), down
+
+        def letters(self, to):
+            if self.down:
+                raise Unmet("приёмник писем стенда недостижим: connection refused")
+            return list(self.letters_by.get(to, []))
+
+    def _letter(code):
+        return ("Subject: x\r\n\r\nКод подтверждения:\r\n\r\n    " + code
+                + "\r\n\r\nКод действует 30 мин.\r\n")
+
+    class _VLane:
+        def __init__(self, code=200, verifies=True):
+            self.code, self.verifies, self.seen = code, verifies, []
+
+        def ask(self, method, path, body=None, cookies=None):
+            if path.startswith(LANE_CSRF):
+                return 200, [f"{LANE_FORM_COOKIE}=f; Path=/"], '{"csrfToken":"t"}'
+            if path == LANE_VERIFY_CONFIRM:
+                self.seen.append((body or {}).get("code"))
+                if (cookies or {}).get(LANE_SESSION_COOKIE) != "s":
+                    return 401, [], '{"code":16,"message":"authentication failed"}'
+                if self.code != 200 or (body or {}).get("code") != "ABCDE-FGHIJ":
+                    return 401, [], '{"code":16,"message":"authentication failed"}'
+                return (200, [f"{LANE_SESSION_COOKIE}=s2; Path=/"],
+                        json.dumps({"session": {"emailVerified": self.verifies}}))
+            return 404, [], "{}"
+
+    who = "who@stand.invalid"
+    for label, lane_world, box, want in (
+            ("код письма регистрации принят — молчит", _VLane(),
+             _Box({who: [_letter("ABCDE-FGHIJ")]}), None),
+            ("письмо не дошло до приёмника — НАХОДКА", _VLane(), _Box(), Finding),
+            ("приёмник писем молчит — УСЛОВИЕ НЕ СОЗДАНО", _VLane(), _Box(down=True), Unmet),
+            ("код отвергнут полосой (401) — НАХОДКА", _VLane(code=401),
+             _Box({who: [_letter("ABCDE-FGHIJ")]}), Finding),
+            ("200 без emailVerified: true — НАХОДКА", _VLane(verifies=False),
+             _Box({who: [_letter("ABCDE-FGHIJ")]}), Finding)):
+        try:
+            confirm_person(lane_world, box, who, "s", sleep=lambda _s: None)
+            got = None
+        except Unmet:
+            got = Unmet
+        except Finding:
+            got = Finding
+        except Exception as e:  # noqa: BLE001 — сбой пробы назван, а не проглочен
+            got = type(e)
+        _c("подтверждение адреса: " + label, got is want,
+           f"ожидалось {want.__name__ if want else 'молчание'}, "
+           f"получено {got.__name__ if got else 'молчание'}")
+
+    _c("код разбирается из письма той формы, что собирает служба",
+       code_of(_letter("ABCDE-FGHIJ")) == "ABCDE-FGHIJ", f"{code_of(_letter('ABCDE-FGHIJ'))!r}")
+    _c("ЗАКОННЫЙ БЛИЗНЕЦ: письмо без строки кода — кода нет",
+       code_of("Subject: x\r\n\r\nПодтвердите адрес.\r\n") is None, "")
+
     # Ось 3: успешный статус с ПУСТЫМ захватом — находка, а не проход.
     # Законный близнец рядом: тот же код, но захват на месте — молчит.
     class _Fake:
@@ -1650,6 +1832,9 @@ def main() -> int:
     ap.add_argument("--port-token", type=int, default=9096)
     ap.add_argument("--port-jwks", type=int, default=9097)
     ap.add_argument("--port-grpc", type=int, default=9091)
+    ap.add_argument("--mailbox-url", default=DEFAULT_MAILBOX_URL,
+                    help="адрес чтения приёмника писем стенда: из него берётся код "
+                         "подтверждения адреса заведённых людей")
     ap.add_argument("--run-id", default="")
     ap.add_argument("--env-file",
                     default=str(ROOT / "tests" / "newman" / "environments"
