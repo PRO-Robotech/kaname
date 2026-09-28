@@ -58,6 +58,63 @@ mkdir -p "$HOME"
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$HOME/.gitconfig"
 PRE=@1700000000 # 2023-11-14 — история до T0
 
+# ── НАСТОЯЩИЙ ВХОД (kacho-workspace#861) ─────────────────────────────────────
+# Сообщения трёх коммитов, записанных с трейлерами: PRO-Robotech/kacho, ветка
+# 2840-trailered-b81c695 (d838c9ce779, 82f0e455536, b81c69568a9); адрес сессии в
+# фикстуре заменён. Близнец — то же сообщение без завершающего блока трейлеров,
+# выведенный из него же: отличие ровно одно.
+cat > "$tmp/real.all" <<'REAL'
+#2840 deploy: проба порядка cert-manager исполняема в индексе
+
+TestShebangScriptsAreExecutable на голове 82f0e455536: неисполняемых 1
+(проба заведена с режимом 100644, в чистом клоне не запустится). После
+git add --chmod=+x: неисполняемых 0 из 337 файлов с shebang.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01fixture
+%%
+#2840 deploy: состояние релиза cert-manager спрашивается без helm list -a
+
+Живой stack-up на kind (helm v4.2.4) показал: у helm v4 флага -a нет,
+и ветка «наш релиз» отказывала бы на каждом повторном подъёме. Проба
+этого не видела: подставной helm принимал любой флаг.
+
+Подставные kubectl и helm теперь сперва разбирают флаги настоящим
+инструментом (<args> --help) и отказывают его текстом. До правки
+рецепта: 10 из 10, находок 2 (Б2, Б3 — unknown shorthand flag 'a');
+после: 10 из 10, находок 0.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01fixture
+%%
+#2840 deploy: stack-up ставит cert-manager тем же местом, что dev-up
+
+Порядок «cert-manager отдельным релизом → его вебхук → продукт» жил
+строками внутри dev-up; stack-up применял умбреллу с
+cert-manager.enabled=false и релиза не ставил, поэтому на чистом
+кластере цепочка упиралась в отсутствие CRD Certificate/Issuer.
+
+Порядок вынесен в цель cert-manager-up (страж guard-declared-context),
+её зовут оба пути подъёма раньше продукта. Исходы по владельцу CRD:
+нет — ставит; наш той же версии — не переставляет; наш другой версии —
+доводит; чужой (a8f60d) — не трогает; не прочитано — отказ.
+
+Проба tests/helm/cert-manager-release-before-product-test.sh: до правки
+10 из 10 исполнено, 9 находок; после — 10 из 10, находок 0.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01fixture
+REAL
+awk -v d="$tmp" '/^%%$/ { n++; next } { print > (d "/real-" (n + 1) ".msg") }' "$tmp/real.all"
+REAL_N=0
+for m in "$tmp"/real-*.msg; do
+    [ -f "$m" ] || continue
+    REAL_N=$((REAL_N + 1))
+    sed '/^Co-Authored-By:/,$d' "$m" > "${m%.msg}.twin"
+done
+[ "$REAL_N" = 3 ] || { echo "branch-rule-inject: настоящий вход не разобран ($REAL_N из 3) — предпосылки нет" >&2; exit 2; }
+REAL_TRAILER="Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+
 # ── Набор оснастки под судом: настоящий либо с воссозданным дефектом ─────────
 kit_from_tree() { # $1 — каталог набора
     mkdir -p "$1/scripts/hooks" "$1/.github/scripts"
@@ -116,6 +173,7 @@ commit_msg_cases() { # $1 — набор
     rule_commit "$r" "$1"
     k="$("${G[@]}" rev-parse HEAD)"
     "${G[@]}" checkout -q -b 7
+    "${G[@]}" checkout -q -b 2840
     "${G[@]}" checkout -q -b 8 main
     "${G[@]}" commit -q --allow-empty -m "#8 восьмая"
     b8="$("${G[@]}" rev-parse HEAD)"
@@ -133,7 +191,7 @@ commit_msg_cases() { # $1 — набор
     at() { # $1 — ветка; сбрасывает её к исходной вершине
         "${G[@]}" checkout -q -f "$1" 2> /dev/null
         case "$1" in
-            7) "${G[@]}" reset -q --hard "$k" ;;
+            7 | 2840) "${G[@]}" reset -q --hard "$k" ;;
             old) "${G[@]}" reset -q --hard "$c1" ;;
             feature-old) "${G[@]}" reset -q --hard "$c1" ;;
         esac
@@ -148,7 +206,17 @@ commit_msg_cases() { # $1 — набор
     expect "коммит: «#8» на ветке 7" refuse "«#8» на ветке «7»" "$rc" "$out"
 
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "коммит: законный соавтор" pass - "$rc" "$out"
+    expect "коммит: соавтор-человек — запрещён ключ, а не значение (#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Co-authored-by: Ivan <ivan@example.invalid> — подставлялась"
+    expect "коммит: ключ Co-Authored-By в середине строки прозы — упоминание" pass - "$rc" "$out"
+    at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Claude-Session: https://example.invalid/s — подставлялась"
+    expect "коммит: ключ Claude-Session в середине строки прозы — упоминание" pass - "$rc" "$out"
+    for i in 1 2 3; do
+        at 2840; run git commit -q --allow-empty -F "$tmp/real-$i.msg"
+        expect "коммит: настоящий вход $i — отказ, названа строка" refuse "атрибуция в сообщении: «$REAL_TRAILER»" "$rc" "$out"
+        at 2840; run git commit -q --allow-empty -F "$tmp/real-$i.twin"
+        expect "коммит: близнец настоящего входа $i без блока трейлеров" pass - "$rc" "$out"
+    done
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     expect "коммит: трейлер Co-Authored-By с Claude" refuse "атрибуция" "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Claude-Session: https://example.invalid/s"
@@ -234,6 +302,11 @@ push_fixture() { # $1 — набор
     "${G[@]}" checkout -q -b 23 20; "${G[@]}" commit -q --allow-empty -m "#24 чужой номер"
     "${G[@]}" checkout -q -b 25 20; "${G[@]}" commit -q --allow-empty --author="Other <other@example.invalid>" -m "#25 чужой автор"
     "${G[@]}" checkout -q -b 26 20; GIT_COMMITTER_EMAIL=other@example.invalid "${G[@]}" commit -q --allow-empty -m "#26 чужой коммиттер"
+    # #861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
+    "${G[@]}" checkout -q -b 2840 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.msg"
+    "${G[@]}" checkout -q -b 2840t 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.twin"
+    "${G[@]}" checkout -q -b 27 20; "${G[@]}" commit -q --allow-empty -m "#27 задача" -m "Co-authored-by: Ivan <ivan@example.invalid>"
+    "${G[@]}" checkout -q -b 28 20; "${G[@]}" commit -q --allow-empty -m "#28 задача" -m "Снята строка шаблона Co-authored-by: Ivan <ivan@example.invalid> — подставлялась"
     "${G[@]}" checkout -q -b old-feature main
     "${G[@]}" commit -q --allow-empty --date="$PRE" -m "старая работа"
     "${G[@]}" commit -q --allow-empty -m "#33 доводка"
@@ -277,6 +350,14 @@ push_rule_cases() {
     expect "отправка: коммиттер не корневой" refuse "коммиттер «probe <other@example.invalid>»" "$rc" "$out"
     rule_run "$(line old-feature)"
     expect "отправка: ветка до правила — имя не судится" pass - "$rc" "$out"
+    rule_run "$(line 2840)"
+    expect "отправка: настоящий вход мимо хука коммита — назван sha" refuse "$(git -C "$PP" rev-parse --short=10 2840) атрибуция в сообщении: «$REAL_TRAILER»" "$rc" "$out"
+    rule_run "$(line 2840t 2840)"
+    expect "отправка: близнец настоящего входа без блока трейлеров" pass - "$rc" "$out"
+    rule_run "$(line 27)"
+    expect "отправка: соавтор-человек — назван sha (#861)" refuse "$(git -C "$PP" rev-parse --short=10 27) атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    rule_run "$(line 28)"
+    expect "отправка: ключ в середине строки прозы — упоминание" pass - "$rc" "$out"
     rule_run "$(line old-trailer)"
     expect "отправка: неопубликованный коммит до T0 с трейлером" refuse "атрибуция" "$rc" "$out"
     rule_run "$(line wip/old)"
@@ -329,7 +410,7 @@ pr_cases() {
     pr_run 21 origin/20 21 "#21 задача, Generated with [Claude Code](https://example.invalid)" "обычное тело"
     expect "запрос: атрибуция в заголовке" refuse "заголовок: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "запрос: законный соавтор в теле" pass - "$rc" "$out"
+    expect "запрос: соавтор-человек в теле — запрещён ключ (#861)" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     expect "запрос: тело с трейлером Claude" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"🤖 Generated with [Claude Code](https://example.invalid)"
