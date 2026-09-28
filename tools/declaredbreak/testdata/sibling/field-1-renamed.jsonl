@@ -1,0 +1,2 @@
+{"path":"kaname/cloud/iam/v1/role_service.proto","start_line":161,"start_column":3,"end_line":161,"end_column":24,"type":"FIELD_SAME_JSON_NAME","message":"Field \"1\" with name \"page_limit\" on message \"ListRolesRequest\" changed option \"json_name\" from \"pageSize\" to \"pageLimit\"."}
+{"path":"kaname/cloud/iam/v1/role_service.proto","start_line":161,"start_column":9,"end_line":161,"end_column":19,"type":"FIELD_SAME_NAME","message":"Field \"1\" on message \"ListRolesRequest\" changed name from \"page_size\" to \"page_limit\"."}
