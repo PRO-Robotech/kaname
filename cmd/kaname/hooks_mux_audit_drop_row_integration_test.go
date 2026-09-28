@@ -78,7 +78,10 @@ func TestHooksMuxCountsARefusedAuditRecordOnTheRegistryRow(t *testing.T) {
 	serve := func(t *testing.T) (int, map[string]float64, int) {
 		t.Helper()
 		reg := metrics.NewRegistry()
-		h := buildHooksMux(pool, nil, nil, nil, reg, cfg, quietLogger())
+		h, err := buildHooksMux(pool, nil, nil, nil, reg, cfg, quietLogger())
+		if err != nil {
+			t.Fatalf("предпосылка: корень отказал в сборке полосы хуков (%v) — судить не у чего", err)
+		}
 		if h == nil {
 			t.Fatal("предпосылка: корень не собрал полосу хуков — судить не у чего")
 		}

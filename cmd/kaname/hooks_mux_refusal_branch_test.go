@@ -21,8 +21,14 @@ package main
 // Вызвать `buildHooksMux` так, чтобы сборка отказала, нечем без шва в корне, а шов
 // ради пробы — правка продукта. Поэтому ветвь судится по разбору файла: за вызовом
 // `buildIssuanceHooks` стоит проверка его отказа, и КАЖДЫЙ выход из неё возвращает
-// `nil`, а последний оператор ветви — возврат (ветвь, которая пишет строку журнала и
-// идёт дальше, собрала бы мультиплексор с пустыми обработчиками выдачи).
+// `nil` обработчиком и отказ, в который входит отказ сборки, а последний оператор
+// ветви — возврат (ветвь, которая пишет строку журнала и идёт дальше, собрала бы
+// мультиплексор с пустыми обработчиками выдачи).
+//
+// Отказ вторым значением — форма kaname#440: причина доходит до старта значением.
+// Поэтому находка и `return nil, nil` (корень откажет словами «обслуживать нечем», а
+// не тем, что сломалось), и отказ, не несущий отказа сборки (причина потеряна).
+// Отказ корня с причиной на шве держит `TestIssuanceLanesAssemblyRefusalReachesTheStartWithItsCause`.
 //
 // Законные формы записи, которые разбор знает: присваивание и следом `if <err> !=
 // nil`; то же с присваиванием в заголовке `if`. Любая другая форма — находка с
@@ -110,7 +116,8 @@ func callsAssembly(as *ast.AssignStmt) bool {
 }
 
 // judgeOneBranch — ветвь отказа одного вызова: проверка ошибки ИМЕННО этого
-// вызова, каждый возврат — `nil`, последний оператор — возврат.
+// вызова, каждый возврат — `nil` и отказ с причиной (`judgeRefusalReturn`),
+// последний оператор — возврат.
 func judgeOneBranch(fset *token.FileSet, as *ast.AssignStmt, ifs *ast.IfStmt) []string {
 	at := fset.Position(ifs.Pos())
 	errVar, ok := as.Lhs[len(as.Lhs)-1].(*ast.Ident)
@@ -136,15 +143,7 @@ func judgeOneBranch(fset *token.FileSet, as *ast.AssignStmt, ifs *ast.IfStmt) []
 		if !ok {
 			return true
 		}
-		if len(ret.Results) != 1 {
-			out = append(out, fmt.Sprintf("%s: возврат из ветви отказа несёт %d значений вместо одного nil",
-				fset.Position(ret.Pos()), len(ret.Results)))
-			return true
-		}
-		if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "nil" {
-			out = append(out, fmt.Sprintf("%s: ветвь отказа сборки полос возвращает ОБРАБОТЧИК, а не nil — "+
-				"поверхность с объявленным адресом поднимется без хуков выдачи", fset.Position(ret.Pos())))
-		}
+		out = append(out, judgeRefusalReturn(fset, ret, errVar.Name)...)
 		return true
 	})
 	list := ifs.Body.List
@@ -157,8 +156,41 @@ func judgeOneBranch(fset *token.FileSet, as *ast.AssignStmt, ifs *ast.IfStmt) []
 	return out
 }
 
+// judgeRefusalReturn — один возврат из ветви отказа: ровно два значения, первое —
+// `nil` (обработчика нет), второе — отказ, в который входит отказ сборки errName
+// (причина доходит до старта, kaname#440).
+func judgeRefusalReturn(fset *token.FileSet, ret *ast.ReturnStmt, errName string) []string {
+	at := fset.Position(ret.Pos())
+	if len(ret.Results) != 2 {
+		return []string{fmt.Sprintf("%s: возврат из ветви отказа несёт %d значений вместо двух — "+
+			"nil обработчиком и отказа сборки", at, len(ret.Results))}
+	}
+	var out []string
+	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "nil" {
+		out = append(out, fmt.Sprintf("%s: ветвь отказа сборки полос возвращает ОБРАБОТЧИК, а не nil — "+
+			"поверхность с объявленным адресом поднимется без хуков выдачи", at))
+	}
+	refusal := ret.Results[1]
+	if id, ok := refusal.(*ast.Ident); ok && id.Name == "nil" {
+		return append(out, fmt.Sprintf("%s: ветвь отказа возвращает nil вместо отказа — корень откажет старту "+
+			"словами «обслуживать нечем», а не тем, что не собралось", at))
+	}
+	carries := false
+	ast.Inspect(refusal, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == errName {
+			carries = true
+		}
+		return !carries
+	})
+	if !carries {
+		out = append(out, fmt.Sprintf("%s: отказ из ветви не несёт отказа сборки «%s» — причина сборки "+
+			"теряется до старта", at, errName))
+	}
+	return out
+}
+
 // TestHooksMuxAssemblyRefusalYieldsNoHandler — в `buildHooksMux` ветвь отказа
-// сборки полос выдачи возвращает nil и только nil.
+// сборки полос выдачи возвращает nil обработчиком и отказ, несущий причину сборки.
 func TestHooksMuxAssemblyRefusalYieldsNoHandler(t *testing.T) {
 	src, err := os.ReadFile("hooks_mux.go")
 	if err != nil {
@@ -179,10 +211,11 @@ func TestHooksMuxAssemblyRefusalYieldsNoHandler(t *testing.T) {
 }
 
 // TestHooksMuxRefusalBranchJudgeRedsOnTheMutantsItIsFor — судья ветви краснеет на
-// каждом мутанте ветви и молчит на законных близнецах обеих форм записи.
+// каждом мутанте ветви и молчит на законных близнецах обеих форм записи. Синтетика
+// несёт ту же сигнатуру, что настоящая сборка: обработчик и отказ (kaname#440).
 func TestHooksMuxRefusalBranchJudgeRedsOnTheMutantsItIsFor(t *testing.T) {
 	wrap := func(body string) string {
-		return "package main\n\nfunc buildHooksMux() http.Handler {\n" + body + "\n\treturn mux\n}\n"
+		return "package main\n\nfunc buildHooksMux() (http.Handler, error) {\n" + body + "\n\treturn mux, nil\n}\n"
 	}
 	const call = "\ttokenHook, refreshHook, err := buildIssuanceHooks(cfg, ports, drops, logger)\n"
 	cases := []struct {
@@ -191,18 +224,26 @@ func TestHooksMuxRefusalBranchJudgeRedsOnTheMutantsItIsFor(t *testing.T) {
 		calls     int
 		wantFault string // пусто — молчание
 	}{
-		{"ЗАКОННЫЙ БЛИЗНЕЦ: присваивание, затем if err != nil { return nil }",
-			wrap(call + "\tif err != nil {\n\t\tlogger.Error(\"x\", \"err\", err)\n\t\treturn nil\n\t}"), 1, ""},
-		{"ЗАКОННЫЙ БЛИЗНЕЦ: присваивание в заголовке if",
-			wrap("\tif _, _, berr := buildIssuanceHooks(cfg, ports, drops, logger); berr != nil {\n\t\treturn nil\n\t}"), 1, ""},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: присваивание, затем if err != nil { return nil, fmt.Errorf(…%w, err) }",
+			wrap(call + "\tif err != nil {\n\t\tlogger.Error(\"x\", \"err\", err)\n\t\treturn nil, fmt.Errorf(\"обработчики хуков выдачи: %w\", err)\n\t}"), 1, ""},
+		{"ЗАКОННЫЙ БЛИЗНЕЦ: присваивание в заголовке if, отказ возвращается как есть",
+			wrap("\tif _, _, berr := buildIssuanceHooks(cfg, ports, drops, logger); berr != nil {\n\t\treturn nil, berr\n\t}"), 1, ""},
 		{"мутант B1: ветвь отказа возвращает обработчик",
-			wrap(call + "\tif err != nil {\n\t\treturn http.NotFoundHandler()\n\t}"), 1, "ОБРАБОТЧИК"},
+			wrap(call + "\tif err != nil {\n\t\treturn http.NotFoundHandler(), fmt.Errorf(\"x: %w\", err)\n\t}"), 1, "ОБРАБОТЧИК"},
+		{"мутант B1 без отказа: ветвь отказа возвращает обработчик и nil",
+			wrap(call + "\tif err != nil {\n\t\treturn http.NotFoundHandler(), nil\n\t}"), 1, "ОБРАБОТЧИК"},
+		{"мутант: ветвь отказа возвращает nil вместо отказа",
+			wrap(call + "\tif err != nil {\n\t\treturn nil, nil\n\t}"), 1, "вместо отказа"},
+		{"мутант: отказ из ветви не несёт причины сборки",
+			wrap(call + "\tif err != nil {\n\t\treturn nil, errors.New(\"полоса не собрана\")\n\t}"), 1, "причина"},
+		{"мутант: возврат прежней формы — одно значение",
+			wrap(call + "\tif err != nil {\n\t\treturn nil\n\t}"), 1, "вместо двух"},
 		{"мутант: ветвь отказа пишет журнал и идёт дальше",
 			wrap(call + "\tif err != nil {\n\t\tlogger.Error(\"x\", \"err\", err)\n\t}"), 1, "не возвратом"},
 		{"мутант: отказ сборки не проверен",
 			wrap(call + "\t_ = tokenHook"), 1, "нет проверки"},
 		{"мутант: проверяется чужая ошибка",
-			wrap(call + "\tif other != nil {\n\t\treturn nil\n\t}"), 1, "не проверка"},
+			wrap(call + "\tif other != nil {\n\t\treturn nil, other\n\t}"), 1, "не проверка"},
 		{"беспредметно: вызова сборки нет", wrap("\t_ = cfg"), 0, ""},
 	}
 	for _, c := range cases {

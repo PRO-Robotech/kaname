@@ -136,7 +136,11 @@ func TestHooksMuxSeedsTheAuditDropRowForEveryDeclaredKind(t *testing.T) {
 	}
 	cfg := roadCfg(config.IdentityProviderExternal, "9097")
 	reg := metrics.NewRegistry()
-	if h := buildHooksMux(nil, nil, nil, nil, reg, cfg, quietLogger()); h == nil {
+	h, err := buildHooksMux(nil, nil, nil, nil, reg, cfg, quietLogger())
+	if err != nil {
+		t.Fatalf("предпосылка: корень отказал в сборке полосы хуков (%v) — ряд судить не у чего", err)
+	}
+	if h == nil {
 		t.Fatal("предпосылка: корень не собрал полосу хуков (обработчика нет) — ряд судить не у чего")
 	}
 	cells := scrapeAuditDropRow(t, reg)
