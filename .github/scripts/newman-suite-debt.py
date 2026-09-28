@@ -147,9 +147,11 @@ EDGE_VARS = frozenset({"baseUrl", "internalBaseUrl", "externalBaseUrl"})
 # один — он контракт с посевом стенда (`--minted-surface`), а не описание порта.
 OWN_VARS = frozenset({"ownRestBaseUrl", "ownInternalRestBaseUrl", "loginLaneBaseUrl"})
 # Поверхности, которые служба поднимает, но чей ОТВЕТ зависит от недостижимого
-# соседа: зеркало набора ключей и полоса docker-токена.
+# соседа: публикатор набора ключей и полоса docker-токена. Адрес публичного
+# эндпоинта поставщика здесь больше не стоит: его читал только оракул сверки
+# зеркала набора ключей, снятого вместе с зеркалом (kaname#361).
 NEIGHBOUR_VARS = frozenset({"iamJwksBaseUrl", "iamRegistryTokenBaseUrl",
-                            "providerPublicBaseUrl", "registryDataPlaneBaseUrl"})
+                            "registryDataPlaneBaseUrl"})
 # ─────────────── СОСТОЯНИЕ КЛЮЧА: ТРИ, А НЕ ДВА ────────────────────────────
 #
 # Непосеянность — не одно состояние, и разные состояния ЛОМАЮТСЯ ПО-РАЗНОМУ.
