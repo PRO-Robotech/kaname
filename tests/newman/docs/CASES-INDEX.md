@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 764
+Всего кейсов: 775
 
 ## Перепись по модулям
 
@@ -72,7 +72,8 @@
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-recovery-lane.py` | 3 |
-| `cases/kaname-second-factor.py` | 4 |
+| `cases/kaname-registration.py` | 2 |
+| `cases/kaname-second-factor.py` | 13 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -1077,19 +1078,44 @@
 - `IAM-RECOVERY-NEG-WRONG-CODE`
 - `IAM-RECOVERY-NEG-CSRF-MISSING`
 
-## `cases/kaname-second-factor.py` — 4 кейса
+## `cases/kaname-registration.py` — 2 кейса
+
+> Регистрация нашей полосой (Ф4, kacho#1270): глагол `POST /iam/v1/auth/register`
+> собственного слушателя формы и сессия, которую он выдаёт. Адресуется
+> `loginLaneBaseUrl`; человека набор заводит сам — адрес свой у прогона, домен
+> берётся у адреса человека посева, сам человек посева не трогается. На
+> автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие не
+> создано». Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же
+> вызовом прогонщика, что вход и второй фактор, последним.
+
+- `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
+- `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
+
+## `cases/kaname-second-factor.py` — 13 кейсов
 
 > Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
 > на автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие
-> не создано». Код по времени вычисляет посев из `secret` ответа `enroll`; вход с
-> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08). Гоняет
-> набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом прогонщика,
-> что вход и восстановление, последним (kaname#417); утверждения набора значений
-> удостоверений не печатают — держит `scripts/second_factor_assertion_values_test.py`.
+> не создано». Код по времени вычисляет посев из `secret` ответа `enroll`;
+> последний принятый шаг набор держит сам, и код, которому в окне ±1 ещё нет
+> ступени старше принятой, ждёт её опросом признака формы с настоящей паузой.
+> Кейсы идут одним человеком посева по состояниям строки: нет → `pending` →
+> `active` → снят. Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем
+> же вызовом прогонщика, что вход и восстановление, последним (kaname#417);
+> утверждения набора значений удостоверений не печатают — держит
+> `scripts/second_factor_assertion_values_test.py`.
 
+- `IAM-2FA-NEG-NOT-ENROLLED-STATE`
+- `IAM-2FA-OK-ENROLL-PENDING-IS-NOT-A-METHOD`
 - `IAM-2FA-OK-ENROLL-CONFIRM-LOGIN-LEVEL2`
 - `IAM-2FA-OK-BACKUP-CODE-STEP-UP`
+- `IAM-2FA-OK-LOGIN-WITH-BACKUP-CODE`
+- `IAM-2FA-OK-BACKUP-CODE-ONCE-EACH`
+- `IAM-2FA-OK-STEP-UP-TOTP-AND-REPLAY`
+- `IAM-2FA-OK-REGENERATE-BACKUP-CODES`
+- `IAM-2FA-OK-BACKUP-CODES-EXHAUSTED`
+- `IAM-2FA-BVA-TOTP-WINDOW`
+- `IAM-2FA-NEG-REMOVE-REFUSALS`
 - `IAM-2FA-OK-REMOVE-BY-CODE`
 - `IAM-2FA-NEG-FORMS-AND-STATE`
 
