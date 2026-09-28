@@ -42,9 +42,10 @@ reviewed_at: '2026-09-27T17:41:22Z'
 
 # ─── ПОЛЕ ВЫДАЧИ ОДОБРЕНИЯ ───────────────────────────────────────────────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
-  pending_external_event: true
+  issued: true
+  issued_at: '2026-09-27T18:30:55Z'
+  ban1_lifted: true
+  pending_external_event: false
   why: >-
     Вердикт круга 3 — APPROVED: блокирующих ноль, единственное блокирующее круга 2 закрыто, четыре
     не блокирующих круга 2 закрыты. Санкция на объём §3.1 (ban #1) этой записью НЕ выдаётся: её
@@ -73,16 +74,28 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#456
-  status: not_performed
-  published: false
-  publication_expected_from_orchestrator: true
-  body_for_publication: 'acceptance-reviewer · APPROVED · f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853'
-  required_body_fields: [role, verdict, subject, subject_revision, subject_sha256]
-  subject_revision: fb8189dad10537f1157cfc88b52d98b0ebc67fe7
+  status: performed
+  published: true
+  database_id: 5858582161
+  node_id: IC_kwDOUO26pM8AAAABXTLekQ
+  url: https://github.com/PRO-Robotech/kaname/issues/456#issuecomment-5858582161
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5858582161
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/456
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-27T18:30:55Z'
+  body_sha256: 2ffe49d1adc0a73c09c69ccc4505120af844ef92336e2ee598222cf3e15df434
   subject_sha256: f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853
-  reason: >-
-    Третья категория — не выполнилось: событие публикует курьер под допущенной учётной записью,
-    а не рецензент. Эта запись задним числом не правится; событие дописывается соседним коммитом.
+  subject_revision: fb8189dad10537f1157cfc88b52d98b0ebc67fe7
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; заключение рецензента не правилось.
+    Отпечаток предмета сверен: git show fb8189dad:<путь> | sha256sum даёт f2d1fe852333af54…,
+    совпал с объявленным. Отпечаток тела снят с сырого ответа API
+    (gh api repos/PRO-Robotech/kaname/issues/comments/5858582161).
 
 attribution:
   reviewer_kind: claude_agent

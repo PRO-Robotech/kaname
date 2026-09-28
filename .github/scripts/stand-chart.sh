@@ -82,7 +82,12 @@
 #   · ЧЕЛОВЕК СО СПОСОБОМ ВХОДА ПАРОЛЕМ. Заводит его посев
 #     (`tests/authz-fixtures/seed_login_lane.py`) глаголом продукта на той же
 #     двери, учётные данные живут Secret'ом стенда (`<релиз>-login-lane-human`)
-#     и в дерево не попадают.
+#     и в дерево не попадают. Адрес человека посев подтверждает тоже глаголом:
+#     с kaname#456 неподтверждённому дальше входа не открыто ничего, и код он
+#     берёт из письма, которое служба сдала ПРИЁМНИКУ ПИСЕМ СТЕНДА
+#     (`.github/scripts/stand-mailbox.py`, Service `<релиз>-mail`, SMTP поверх
+#     TLS листом УЦ стенда). Узел накладка `own` называет почтовой полосой
+#     службы (`inviteMail`) — это координата установки, а не посадка.
 #
 # Третье условие — ПРЕДЪЯВИТЕЛЬ ЧЕЛОВЕКА СВОЕЙ ЦЕРЕМОНИЕЙ (`seed-ceremony`,
 # `tests/authz-fixtures/seed_ceremony.py`, kaname#398). Для него накладка `own`
@@ -198,6 +203,11 @@ CREATED_MARK="$WORK/cluster-created-by-stand"
 
 # Переадресация порта полосы входа живёт между шагами: посев доказывает по ней
 # способность, прогон набора ходит по ней же. Снимает её `down`.
+# ПРИЁМНИК ПИСЕМ СТЕНДА — только под `own`. С kaname#456 человек, чей адрес не
+# подтверждён, дальше входа не проходит, а подтверждает адрес код из письма:
+# посев полосы входа доводит человека стенда до обычного положения кодом из
+# письма, которое служба сдала этому узлу (`.github/scripts/stand-mailbox.py`).
+MAIL_SVC="$RELEASE-mail"
 LANE_FORWARD_PID="$WORK/login-lane-forward.pid"
 LANE_FORWARD_LOG="$WORK/login-lane-forward.log"
 EDGE_DIR="$WORK/edge"
@@ -262,6 +272,10 @@ make_pki() {
 	if [ "$IDENTITY" = "own" ]; then
 		_leaf edge "URI:spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA" "clientAuth"
 		say "стенд: четвёртый лист — клиентский, с именем края ($EDGE_SA) для полосы входа"
+		# Лист приёмника писем стенда — серверный, тем же УЦ: служба проверяет
+		# узел якорем, который уже несёт её серверный секрет (`ca.crt`).
+		_leaf mail "DNS:$MAIL_SVC,DNS:$MAIL_SVC.$NS,DNS:$MAIL_SVC.$NS.svc,DNS:$MAIL_SVC.$NS.svc.cluster.local" "serverAuth"
+		say "стенд: пятый лист — серверный, приёмника писем стенда ($MAIL_SVC)"
 	fi
 }
 
@@ -452,6 +466,62 @@ EOF
 	say "стенд: база поднята, канал шифруется (ssl=on)"
 }
 
+# start_mailbox — приёмник писем стенда (только под `own`): SMTP поверх TLS с
+# первого байта и чтение принятого. Образ — тот же зеркальный источник, что у
+# узла базы; сценарий — файлом дерева через ConfigMap, а не образом: судится
+# ровно тот текст, чью самопроверку гоняет конвейер. Не поднялся — условие не
+# создано: вердикта о дереве нет.
+start_mailbox() {
+	[ "$IDENTITY" = "own" ] || return 0
+	"${KCTL[@]}" create namespace "$NS" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" delete secret "$MAIL_SVC-tls" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create secret generic "$MAIL_SVC-tls" \
+		--from-file=tls.crt="$PKI/mail.crt" --from-file=tls.key="$PKI/mail.key" >/dev/null
+	"${KCTL[@]}" -n "$NS" delete configmap "$MAIL_SVC-script" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create configmap "$MAIL_SVC-script" \
+		--from-file=stand-mailbox.py="$SCRIPT_DIR/stand-mailbox.py" >/dev/null
+	"${KCTL[@]}" apply -f - <<EOF >/dev/null
+apiVersion: v1
+kind: Service
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  selector: { app: $MAIL_SVC }
+  ports:
+    - { name: smtps, port: 465, targetPort: 1465 }
+    - { name: http, port: 8025, targetPort: 8025 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: $MAIL_SVC } }
+  template:
+    metadata: { labels: { app: $MAIL_SVC } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534 }
+      volumes:
+        - { name: tls, secret: { secretName: $MAIL_SVC-tls } }
+        - { name: script, configMap: { name: $MAIL_SVC-script } }
+      containers:
+        - name: mailbox
+          image: mirror.gcr.io/library/python:3.12-alpine
+          command: ["python3","/app/stand-mailbox.py","serve","--smtp-port","1465","--http-port","8025","--cert","/tls/tls.crt","--key","/tls/tls.key"]
+          ports: [{ containerPort: 1465 }, { containerPort: 8025 }]
+          volumeMounts:
+            - { name: tls, mountPath: /tls, readOnly: true }
+            - { name: script, mountPath: /app, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8025 }
+            periodSeconds: 2
+EOF
+	"${KCTL[@]}" -n "$NS" rollout status "deploy/$MAIL_SVC" --timeout=180s >/dev/null || {
+		unmet "приёмник писем стенда не поднялся за 180 с"
+		exit "$RC_UNMET"
+	}
+	say "стенд: приёмник писем поднят — $MAIL_SVC (SMTP поверх TLS :465, чтение :8025)"
+}
+
 make_secrets() {
 	local s
 	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-provider-ca" "$RELEASE-authn"; do
@@ -625,6 +695,15 @@ authn:
   ceremony:
     codeTtl: 60s
     refreshTtl: 168h
+# Почтовый узел — приёмник писем стенда (start_mailbox): посадка полосы
+# implicit, лист узла проверяется якорем серверного секрета службы. Без узла
+# письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
+# положении подтверждения (kaname#456).
+inviteMail:
+  relay: "$MAIL_SVC.$NS.svc.cluster.local:465"
+  from: "kaname@$DOMAIN"
+  tlsMode: implicit
+  caBundleFile: /etc/kaname/tls/server/ca.crt
 secrets:
   KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM:
     secretName: $RELEASE-bootstrap
@@ -1134,10 +1213,13 @@ seed_login_lane() {
 	password="$(secret_value "$human" password || true)"
 
 	start_lane_forward
+	# Код подтверждения адреса посев берёт из письма в приёмнике писем стенда.
+	ensure_forward mailbox "$MAIL_SVC" http
+	local mailbox="http://127.0.0.1:$FORWARD_PORT"
 	local rc=0
 	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
 		python3 "$ROOT/tests/authz-fixtures/seed_login_lane.py" \
-		--base-url "$LANE_URL" --pki "$EDGE_DIR" || rc=$?
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" || rc=$?
 	return "$rc"
 }
 
@@ -1231,6 +1313,7 @@ case "${1:-}" in
 		check_alert_rules_kind
 		make_pki
 		start_pg
+		start_mailbox
 		make_secrets
 		build_image
 		write_overlay
