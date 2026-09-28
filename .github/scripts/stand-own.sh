@@ -260,6 +260,14 @@ stand_env() {
   export KANAME_AUTHN__LOGIN__HASHER_ITERATIONS=3
   export KANAME_AUTHN__LOGIN__HASHER_PARALLELISM=4
   export KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL=5m
+  # Пять величин подтверждения адреса (kaname#456, Р9): умолчаний у них нет, и
+  # без любой из них старт под `own` отказывает, называя ключ. Числа — те же,
+  # что в блоке `authn.login` боевого профиля.
+  export KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL=30m
+  export KANAME_AUTHN__LOGIN__VERIFICATION_CODE_ATTEMPTS=5
+  export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_INTERVAL=60s
+  export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_LIMIT=5
+  export KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_WINDOW=24h
   # Ёмкость проверяющего и резерв памяти страж сверяет с ПРЕДЕЛОМ ПАМЯТИ СРЕДЫ,
   # и предела он требует: без него старт отказывает. Предел накладывает
   # контейнер службы (`SERVICE_MEMORY` ниже), и сверку выносит сам страж.
