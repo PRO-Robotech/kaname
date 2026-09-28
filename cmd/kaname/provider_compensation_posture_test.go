@@ -50,6 +50,7 @@ import (
 	"go/token"
 	"io"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -137,6 +138,53 @@ func TestCompensationDrainerPosture_RootSchedulesTheTaskOnlyWhenItExists(t *test
 	t.Logf("%s", census.Summary())
 	if err != nil {
 		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: %v", err)
+	}
+	for _, f := range findings {
+		t.Error(f)
+	}
+}
+
+// TestCompensationDrainerPosture_NoCallerOutsideTheRootBody — судья тела корня
+// видит ровно одно тело. Сборщик, позванный ещё где-то в пакете корня, собрал
+// бы задачу, постановку которой не судит никто, поэтому обходится весь пакет.
+func TestCompensationDrainerPosture_NoCallerOutsideTheRootBody(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("чтение каталога корня: %v", err)
+	}
+	fset := token.NewFileSet()
+	var (
+		parsed, refs int
+		declSeen     bool
+		findings     []string
+	)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if perr != nil {
+			t.Fatalf("разбор %s: %v — непрочитанный файл есть НАХОДКА, а не зелёное", name, perr)
+		}
+		parsed++
+		seen, n, f := judgeBuilderReferencesOutsideRoot(fset, file)
+		declSeen = declSeen || seen
+		refs += n
+		findings = append(findings, f...)
+	}
+	t.Logf("прод-файлов корня разобрано %d · объявление %s найдено: %t · упоминаний вне "+
+		"тела %s %d · находок %d", parsed, compensationBuilderName, declSeen,
+		compensationRootFunc, refs, len(findings))
+
+	if parsed == 0 {
+		t.Fatal("НЕ-ВЫПОЛНИЛОСЬ: обход не разобрал ни одного прод-файла корня — «ноль " +
+			"находок» неотличим от «ноль прочитанного»")
+	}
+	if !declSeen {
+		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ: обход не нашёл объявления %s (разобрано %d файлов) — "+
+			"перепись слепа к предмету, либо сборщик снят и проба обязана уйти с ним",
+			compensationBuilderName, parsed)
 	}
 	for _, f := range findings {
 		t.Error(f)
@@ -354,6 +402,40 @@ func judgeCompensationScheduling(fset *token.FileSet, file *ast.File) (
 		}
 	}
 	return c, findings, nil
+}
+
+// judgeBuilderReferencesOutsideRoot — упоминания сборщика в одном разобранном
+// файле вне тела корня и вне его собственного объявления. Каждое — находка:
+// задача, собранная там, лежит вне судьи тела корня, и её постановку в группу
+// не судит никто. Первым значением возвращается, встречено ли объявление, —
+// без него «ноль упоминаний» неотличим от обхода, не видящего предмета.
+func judgeBuilderReferencesOutsideRoot(fset *token.FileSet, file *ast.File) (
+	declSeen bool, refs int, findings []string,
+) {
+	for _, d := range file.Decls {
+		fn, isFunc := d.(*ast.FuncDecl)
+		if isFunc && fn.Recv == nil && fn.Name.Name == compensationRootFunc {
+			continue
+		}
+		var own *ast.Ident
+		if isFunc && fn.Recv == nil && fn.Name.Name == compensationBuilderName {
+			declSeen = true
+			own = fn.Name
+		}
+		ast.Inspect(d, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok || id == own || id.Name != compensationBuilderName {
+				return true
+			}
+			refs++
+			findings = append(findings, fmt.Sprintf("%s — %s упомянут вне тела %s: "+
+				"задачу, собранную здесь, судья тела корня не видит, и её постановку в "+
+				"группу не судит никто", fset.Position(id.Pos()), compensationBuilderName,
+				compensationRootFunc))
+			return true
+		})
+	}
+	return declSeen, refs, findings
 }
 
 func nilBranchActionFinding(where string) string {

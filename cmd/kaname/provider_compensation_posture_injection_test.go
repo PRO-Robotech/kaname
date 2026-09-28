@@ -365,3 +365,66 @@ func markerLine(src string) int {
 	}
 	return 0
 }
+
+// Обход пакета: упоминание сборщика вне тела корня — находка, объявление и
+// тело корня — молчание.
+func TestCompensationDrainerPostureInjection_SweepRedsACallerOutsideTheRootAndSeesTheDeclaration(t *testing.T) {
+	const declAndRoot = `package main
+
+func buildProviderCompensationDrainer() (func(context.Context) error, error) { return nil, nil }
+
+func runServe() error {
+	compensationDrainerTask, cerr := buildProviderCompensationDrainer()
+	_, _ = compensationDrainerTask, cerr
+	return nil
+}
+`
+	const helperCallsTheBuilder = `package main
+
+func startCompensation() {
+	task, _ := /*here*/buildProviderCompensationDrainer()
+	go task(ctx)
+}
+`
+	// ЗАКОННЫЙ БЛИЗНЕЦ: та же форма, другой сборщик.
+	const helperCallsAnotherBuilder = `package main
+
+func startMail() {
+	task, _ := buildInviteMailDrainer()
+	go task(ctx)
+}
+`
+	for _, tc := range []struct {
+		name      string
+		src       string
+		wantDecl  bool
+		wantCount int
+	}{
+		{"объявление и тело корня — молчание", declAndRoot, true, 0},
+		{"помощник зовёт сборщик — находка", helperCallsTheBuilder, false, 1},
+		{"помощник зовёт другой сборщик — молчание", helperCallsAnotherBuilder, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "helper.go", tc.src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatalf("синтетика не разобрана: %v", err)
+			}
+			declSeen, refs, findings := judgeBuilderReferencesOutsideRoot(fset, file)
+			t.Logf("объявление найдено: %t · упоминаний вне тела корня %d", declSeen, refs)
+			if declSeen != tc.wantDecl {
+				t.Fatalf("объявление найдено=%t, ожидалось %t — перепись не отличает "+
+					"предмет от его отсутствия", declSeen, tc.wantDecl)
+			}
+			if len(findings) != tc.wantCount {
+				t.Fatalf("находок %d, ожидалось %d: %v", len(findings), tc.wantCount, findings)
+			}
+			if line := markerLine(tc.src); line > 0 {
+				coord := "helper.go:" + strconv.Itoa(line) + ":"
+				if !anyContains(findings, coord) || !anyContains(findings, "вне тела runServe") {
+					t.Errorf("находка не называет строку %s и причину: %v", coord, findings)
+				}
+			}
+		})
+	}
+}
