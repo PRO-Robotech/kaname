@@ -70,37 +70,57 @@ type Finding struct {
 // Coordinate — координата находки для сопоставления и для текста.
 func (f Finding) Coordinate() string { return f.Type + " " + f.Path + " " + f.Symbol() }
 
-// Symbol — имя снятого символа. buf называет его В КАВЫЧКАХ, и это предпосылка,
-// а не догадка: она снята с настоящего вывода buf 1.72.0 и проверяется пробой.
+// Symbol — символ находки: то, по чему запись перечня называет РОВНО ЭТОТ разрыв.
+// buf называет предмет В КАВЫЧКАХ, и это предпосылка, а не догадка: она снята с
+// настоящего вывода buf 1.72.0 и проверяется пробой на нём —
+// TestSymbolNamesTheSubjectInsideItsContainer.
+//
+// ГДЕ СООБЩЕНИЕ НАЗЫВАЕТ ОБЪЕМЛЮЩИЙ СИМВОЛ, символ — `<контейнер>.<предмет>`:
+//
+//	Previously present field "1" with name "id" on message "Role" was deleted.  → Role.1
+//	Previously present enum value "4" on enum "CredentialKind" was deleted.     → CredentialKind.4
+//	Previously present RPC "Get" on service "RoleService" was deleted.          → RoleService.Get
+//	Message "M" had required field "2" deleted. …                               → M.2
+//
+// Предмет — ПЕРВОЕ кавычечное вхождение до контейнера: у поля и значения
+// перечисления это НОМЕР, у RPC, oneof и зарезервированного имени — имя, у
+// зарезервированного диапазона — его запись. Номер, а не имя поля, потому что
+// номер buf печатает у поля ВСЕГДА, а имя — не всегда: у переименования поля
+// описание идёт без имени, и одно поле получило бы два написания.
+//
+// Контейнер обязателен, и это не украшение (kaname#474). Имени значения
+// перечисления buf не печатает вовсе, и прежний выбор «первое вхождение вида имени»
+// делал символом САМО ПЕРЕЧИСЛЕНИЕ; у поля символом было имя без сообщения. Запись
+// о снятии одного значения прощала снятие любого соседнего, запись о поле одного
+// сообщения — одноимённое поле соседнего. Обе стороны оставались синтаксически
+// верными, и сопоставление не отличало одно от другого.
+//
+// ГДЕ КОНТЕЙНЕРА В СООБЩЕНИИ НЕТ, символ — первое кавычечное вхождение вида имени
+// (снятое сообщение, перечисление, служба; параметр сообщения). Номер именем не
+// является и отсеивается `nameRe`. Различить два таких разрыва одного файла
+// нечем, и держит их не символ, а расходование записи (Adjudicate): одна запись
+// прощает ровно один разрыв.
 //
 // У снятия ФАЙЛА символ совпадает с путём: предмет такой находки — сам файл, и
 // другого имени у неё нет.
+//
+// Контейнер назван, а предмета до него нет — пустой символ: ParseFindings
+// отказывает, а не делает символом контейнер.
 func (f Finding) Symbol() string {
 	if f.Type == fileDeletionRule {
 		return f.Path
 	}
-	m := quotedNameRe.FindAllStringSubmatch(f.Message, -1)
-	// Имя символа — ПЕРВОЕ кавычечное вхождение ВИДА ИМЕНИ, и это не мелочь
-	// порядка: сообщение называет сперва номер поля, затем СНЯТЫЙ символ, и лишь
-	// потом объемлющее сообщение либо службу —
-	//
-	//	Previously present field "1" with name "id" on message "Role" was deleted.
-	//	Previously present RPC "Get" on service "RoleService" was deleted.
-	//
-	// Предмет находки — то, что СНЯЛИ (`id`, `Get`), а не то, ОТКУДА сняли
-	// (`Role`, `RoleService`). Последнее вхождение дало бы контейнер, и запись
-	// ведомости назвала бы не тот символ, что находка: сопоставление рассыпалось
-	// бы молча — обе стороны остались бы синтаксически верными.
-	//
-	// Номер поля (`"1"`) именем не является и отсеивается `nameRe` — он начинается
-	// с цифры. Ровно поэтому первое вхождение ВИДА ИМЕНИ и первое вхождение в
-	// кавычках — разные вещи.
-	//
-	// Комментарий здесь до задачи #127 говорил «ПОСЛЕДНЕЕ», описывая при этом
-	// верный порядок сообщения: читатель, поверивший слову, а не коду, «починил»
-	// бы разбор под него. Утверждает выбор проба на НАСТОЯЩЕМ выводе buf —
-	// TestSymbolTakesTheRemovedNameNotItsContainer.
-	for _, g := range m {
+	if m := requiredFieldRe.FindStringSubmatch(f.Message); m != nil {
+		return m[1] + "." + m[2]
+	}
+	if loc := containerRe.FindStringSubmatchIndex(f.Message); loc != nil {
+		subject := quotedNameRe.FindStringSubmatch(f.Message[:loc[0]])
+		if subject == nil {
+			return ""
+		}
+		return f.Message[loc[2]:loc[3]] + "." + subject[1]
+	}
+	for _, g := range quotedNameRe.FindAllStringSubmatch(f.Message, -1) {
 		if nameRe.MatchString(g[1]) {
 			return g[1]
 		}
@@ -119,7 +139,13 @@ var (
 	quotedProtoRe = regexp.MustCompile(`"([^"]+\.proto)"`)
 	quotedNameRe  = regexp.MustCompile(`"([^"]+)"`)
 	nameRe        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
-	ruleRe        = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
+	// containerRe — объемлющий символ предмета: так buf пишет его во всех
+	// формах сообщения, где он есть (описание поля, значение перечисления,
+	// RPC, oneof, зарезервированные имя и диапазон).
+	containerRe = regexp.MustCompile(` on (?:message|enum|service) "([^"]+)"`)
+	// requiredFieldRe — единственная форма, где контейнер стоит ПЕРВЫМ.
+	requiredFieldRe = regexp.MustCompile(`^Message "([^"]+)" had required field "([^"]+)" `)
+	ruleRe          = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
 	// Ссылка на задачу ОБЯЗАНА быть разрешимой: по голому `#71` объявление не
 	// может истечь даже в принципе — ни человеком, ни машиной.
 	issueRe = regexp.MustCompile(
@@ -263,6 +289,11 @@ type Result struct {
 	// Findings — сколько находок разобрано, Declarations — сколько записей прочитано.
 	Findings     int
 	Declarations int
+
+	// spent — индексы Undeclared, чей символ совпал с записью, уже простившей
+	// другой разрыв. Без пометки читатель увидел бы «вне перечня» у символа,
+	// который в перечне стоит, и искал бы опечатку.
+	spent map[int]bool
 }
 
 // Clean — гейт зелен только когда пусты ВСЕ три половины.
@@ -271,6 +302,14 @@ func (r Result) Clean() bool {
 }
 
 // Adjudicate — сопоставление находок с объявлениями.
+//
+// ЗАПИСЬ ПРОЩАЕТ РОВНО ОДИН РАЗРЫВ: простившая запись расходуется, и следующая
+// находка с тем же символом ищет СВОЮ запись. Без этого одна запись прощала бы
+// сколько угодно находок, которые её символ не различает (kaname#474): у
+// параметра сообщения buf имени сообщения не печатает, у одноимённых вложенных
+// сообщений одного файла контейнер назван одним и тем же простым именем. Два
+// неразличимых разрыва объявляются двумя записями — тогда число записей и есть
+// утверждение объявившего, сколько таких разрывов он допускает.
 func Adjudicate(findings []Finding, decls []Declaration) Result {
 	res := Result{Findings: len(findings), Declarations: len(decls)}
 	used := make([]bool, len(decls))
@@ -281,18 +320,30 @@ func Adjudicate(findings []Finding, decls []Declaration) Result {
 		}
 	}
 	for _, f := range findings {
-		hit := false
+		hit, spent := -1, false
 		for i, d := range decls {
-			if d.matches(f) {
-				used[i] = true
-				hit = true
-				res.Matched++
-				break
+			if !d.matches(f) {
+				continue
 			}
+			if used[i] {
+				spent = true
+				continue
+			}
+			hit = i
+			break
 		}
-		if !hit {
-			res.Undeclared = append(res.Undeclared, f)
+		if hit >= 0 {
+			used[hit] = true
+			res.Matched++
+			continue
 		}
+		if spent {
+			if res.spent == nil {
+				res.spent = map[int]bool{}
+			}
+			res.spent[len(res.Undeclared)] = true
+		}
+		res.Undeclared = append(res.Undeclared, f)
 	}
 	for i, d := range decls {
 		if !used[i] {
@@ -309,8 +360,13 @@ func (r Result) Report() string {
 	fmt.Fprintf(&b, "адъюдикация разрывов: находок разобрано %d · записей перечня %d · "+
 		"объявлено и найдено %d · вне перечня %d · записей без предмета %d · негодных записей %d\n",
 		r.Findings, r.Declarations, r.Matched, len(r.Undeclared), len(r.Expired), len(r.Invalid))
-	for _, f := range r.Undeclared {
-		fmt.Fprintf(&b, "  РАЗРЫВ ВНЕ ПЕРЕЧНЯ: %s — %s\n", f.Coordinate(), truncate(f.Message, 200))
+	for i, f := range r.Undeclared {
+		fmt.Fprintf(&b, "  РАЗРЫВ ВНЕ ПЕРЕЧНЯ: %s (строка %d) — %s\n",
+			f.Coordinate(), f.Line, truncate(f.Message, 200))
+		if r.spent[i] {
+			fmt.Fprintf(&b, "    запись с этим символом уже простила другой разрыв — запись прощает "+
+				"ровно один разрыв, и каждый разрыв с неразличимым символом объявляется своей записью\n")
+		}
 	}
 	for _, d := range r.Expired {
 		fmt.Fprintf(&b, "  ЗАПИСИ НЕЧЕГО ПРОЩАТЬ: %s %s %s (%s) — разрыв стал историей "+
