@@ -13,9 +13,11 @@
 # настоящим `git push` в голый репозиторий, запрос — синтетическим диапазоном.
 #
 # Проба доказывает и свою способность упасть: тот же набор гоняется против
-# пяти воссозданных дефектов — слепой атрибуции, старой формы ветки
-# `issue-<N>`, потерянного T0, хука отправки без стража и обхода проверок,
-# поставленного раньше стража, — и от каждого требует хотя бы одного провала.
+# восьми воссозданных дефектов — слепой атрибуции, старой формы ветки
+# `issue-<N>`, потерянного T0, хука отправки без стража, обхода проверок,
+# поставленного раньше стража, и трёх дефектов ведомости известных нарушений
+# (#482): прощение не применено, прощение шире записи, причина не судится, —
+# и от каждого требует хотя бы одного провала.
 #
 # T0 выводится из истории (коммит, заведший scripts/hooks/commit-msg), поэтому в
 # каждой фикстуре он ЗАКОММИЧЕН: история до правила — коммиты с датой автора
@@ -312,9 +314,64 @@ push_fixture() { # $1 — набор
     "${G[@]}" commit -q --allow-empty -m "#33 доводка"
     "${G[@]}" checkout -q -b old-trailer main
     "${G[@]}" commit -q --allow-empty --date="$PRE" -m "старая работа" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+    ledger_fixture
     "${G[@]}" checkout -q main
     "${G[@]}" fetch -q origin
     equip "$PP" "$1"
+}
+
+# ── Ведомость известных нарушений (#482): НАСТОЯЩИЙ ВХОД ─────────────────────
+# Серверное слияние запроса площадкой: коммиттер — она, тема — заголовок
+# запроса, форма — у PRO-Robotech/kaname f2c8696bfa81 («#406 приёмка
+# client-revoke в волну 366»), номера — фикстуры (задача 41, волна 20). У него
+# два нарушения, как у настоящего: форма слияния и чужой номер на ветке-номере.
+#
+# Близнецы отличаются от записанного ОДНИМ фактом:
+#   LV_TWIN  — то же сообщение, та же форма, тот же коммиттер, другой момент,
+#              значит другой sha;
+#   LV_OTHER — серверное слияние другой задачи, другой sha;
+#   LV_ATTR  — записанная форма плюс трейлер атрибуции.
+# Время — после T0 (коммит правила выше), разное у каждого: одинаковое дало бы
+# один и тот же sha.
+LV_SERVER=(GIT_COMMITTER_NAME=GitHub GIT_COMMITTER_EMAIL=noreply@github.com)
+ledger_fixture() {
+    local G=(git -C "$PP")
+    local now
+    now="$(date +%s)"
+    LV_T_KNOWN=$((now + 100)) LV_T_TWIN=$((now + 200)) LV_T_OTHER=$((now + 300)) LV_T_ATTR=$((now + 400))
+    "${G[@]}" checkout -q -b 41 20; "${G[@]}" commit -q --allow-empty -m "#41 приёмка client-revoke"
+    "${G[@]}" checkout -q -b 42 20; "${G[@]}" commit -q --allow-empty -m "#42 приёмка другого"
+    "${G[@]}" checkout -q -b 40k 20
+    env "${LV_SERVER[@]}" GIT_AUTHOR_DATE="@$LV_T_KNOWN" GIT_COMMITTER_DATE="@$LV_T_KNOWN" \
+        "${G[@]}" merge -q --no-ff 41 -m "#41 приёмка client-revoke в волну 20"
+    "${G[@]}" checkout -q -b 40t 20
+    env "${LV_SERVER[@]}" GIT_AUTHOR_DATE="@$LV_T_TWIN" GIT_COMMITTER_DATE="@$LV_T_TWIN" \
+        "${G[@]}" merge -q --no-ff 41 -m "#41 приёмка client-revoke в волну 20"
+    "${G[@]}" checkout -q -b 40o 20
+    env "${LV_SERVER[@]}" GIT_AUTHOR_DATE="@$LV_T_OTHER" GIT_COMMITTER_DATE="@$LV_T_OTHER" \
+        "${G[@]}" merge -q --no-ff 42 -m "#42 приёмка другого в волну 20"
+    "${G[@]}" checkout -q -b 40a 20
+    env "${LV_SERVER[@]}" GIT_AUTHOR_DATE="@$LV_T_ATTR" GIT_COMMITTER_DATE="@$LV_T_ATTR" \
+        "${G[@]}" merge -q --no-ff 41 -m "#41 приёмка client-revoke в волну 20" -m "Co-authored-by: Ivan <ivan@example.invalid>"
+    LV_KNOWN="$("${G[@]}" rev-parse 40k)" LV_TWIN="$("${G[@]}" rev-parse 40t)"
+    LV_OTHER="$("${G[@]}" rev-parse 40o)" LV_ATTR="$("${G[@]}" rev-parse 40a)"
+    LV_LAWFUL="$("${G[@]}" rev-parse 20m)"
+}
+
+# lv_row <sha> <день> <задача> <причина> — строка ведомости (поля через TAB).
+lv_row() { printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4"; }
+lv_day() { date -u -d "@$1" +%F; }
+
+# lv_ledger [строка…] — ведомость фикстуры; без строк — файла нет вовсе.
+LV_FILE_REL=.github/scripts/pr-rule-known-violations.tsv
+lv_ledger() {
+    rm -f "$PP/$LV_FILE_REL"
+    [ "$#" -gt 0 ] || return 0
+    printf '# ведомость фикстуры\n' > "$PP/$LV_FILE_REL"
+    local r
+    for r in "$@"; do
+        [ -n "$r" ] && printf '%s\n' "$r" >> "$PP/$LV_FILE_REL"
+    done
 }
 
 rule_run() { # $1 — строки входа git; дальше — окружение
@@ -452,12 +509,97 @@ pr_cases() {
     expect "мелкий клон: T0 не берётся с границы" cannot "T0 не выведен" "$rc" "$out"
 }
 
+# expect_text <метка> <текст> <вывод> — вывод НАЗЫВАЕТ предмет, а не только краснеет.
+expect_text() {
+    if [[ "$3" == *"$2"* ]]; then ok "$1"
+    else fail "$1: в выводе нет «$2»: $(printf '%s' "$3" | tr '\n' '|' | cut -c1-300)"; fi
+}
+
+# ── Ведомость известных нарушений на запросе (#482) ──────────────────────────
+# Прощение — ровно полный sha из записи. Контроль: без записи записанный коммит
+# красный тем же текстом, что и настоящий f2c8696bfa. Дальше каждое утверждение
+# меняет один факт: коммит (близнец, чужое серверное слияние, атрибуция) либо
+# запись (без причины, префикс, чужой день, нет в клоне, повтор, поля, задача,
+# прощать нечего).
+ledger_cases() {
+    local why="серверное слияние запроса площадкой, тема из заголовка"
+    local dk; dk="$(lv_day "$LV_T_KNOWN")"
+    local W=(20 origin/main)
+
+    lv_ledger
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: записи нет — записанный коммит красный (контроль)" refuse "${LV_KNOWN:0:10} слияние не по форме" "$rc" "$out"
+    expect_text "ведомость: записи нет — второе нарушение того же коммита" "${LV_KNOWN:0:10} «#41» на ветке «20»" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "$why")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: записанный полный sha проходит" pass - "$rc" "$out"
+    expect_text "ведомость: прощённое названо полным sha, а не умолчано" "прощено ведомостью: $LV_KNOWN" "$out"
+    expect_text "ведомость: прощённое названо поимённо" "${LV_KNOWN:0:10} «#41» на ветке «20»" "$out"
+
+    pr_run "${W[@]}" 40t "#20 волна" "обычное тело"
+    expect "ведомость: тот же текст и форма, другой sha — красный" refuse "${LV_TWIN:0:10} слияние не по форме" "$rc" "$out"
+    pr_run "${W[@]}" 40o "#20 волна" "обычное тело"
+    expect "ведомость: серверное слияние с другим sha — красное" refuse "${LV_OTHER:0:10} слияние не по форме" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_ATTR" "$(lv_day "$LV_T_ATTR")" "#482" "$why")"
+    pr_run "${W[@]}" 40a "#20 волна" "обычное тело"
+    expect "ведомость: атрибуцию запись не прощает" refuse "${LV_ATTR:0:10} атрибуция в сообщении" "$rc" "$out"
+    expect_text "ведомость: форма того же коммита прощена" "прощено ведомостью: $LV_ATTR" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: запись без причины — красная" refuse "причина пуста" "$rc" "$out"
+    expect_text "ведомость: запись без причины ничего не прощает" "${LV_KNOWN:0:10} слияние не по форме" "$out"
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "   ")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: причина из пробелов — красная" refuse "причина пуста" "$rc" "$out"
+
+    lv_ledger "$(lv_row "${LV_KNOWN:0:10}" "$dk" "#482" "$why")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: префикс sha — красный" refuse "не полный" "$rc" "$out"
+    expect_text "ведомость: префикс ничего не прощает" "${LV_KNOWN:0:10} слияние не по форме" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "2001-01-01" "#482" "$why")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: день не коммита — красный" refuse "не день коммита" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "задача" "$why")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: задача не по форме — красная" refuse "задача «задача»" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "$why")"$'\t'"лишнее"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: пятое поле — красное" refuse "полей 5" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "$why")" "$(lv_row "$LV_KNOWN" "$dk" "#482" "$why")"
+    pr_run "${W[@]}" 40k "#20 волна" "обычное тело"
+    expect "ведомость: повтор записи — красный" refuse "записан повторно" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_LAWFUL" "$(lv_day "$(git -C "$PP" show -s --format=%ct 20m)")" "#482" "$why")"
+    pr_run "${W[@]}" 20m "#20 волна" "обычное тело"
+    expect "ведомость: запись в диапазоне ничего не прощает — красная" refuse "ничего не прощает" "$rc" "$out"
+
+    lv_ledger "$(lv_row 0123456789abcdef0123456789abcdef01234567 "$dk" "#482" "$why")"
+    pr_run 21 origin/20 21 "#21 задача" "обычное тело"
+    expect "ведомость: коммита записи в клоне нет — красная и вне диапазона" refuse "в клоне нет" "$rc" "$out"
+
+    lv_ledger "$(lv_row "$LV_KNOWN" "$dk" "#482" "$why")"
+    pr_run 21 origin/20 21 "#21 задача" "обычное тело"
+    expect "ведомость: запись вне диапазона молчит" pass - "$rc" "$out"
+    lv_ledger ""
+    pr_run 21 origin/20 21 "#21 задача" "обычное тело"
+    expect "ведомость: пустая ведомость — законный запрос проходит" pass - "$rc" "$out"
+    lv_ledger
+}
+
 suite() { # $1 — набор, $2 — метка
     TAG="$2"; FAILS=0; CASES=0
     commit_msg_cases "$1"
     push_fixture "$1"
     push_rule_cases
     pr_cases
+    ledger_cases
     hook_cases
     printf '%s %s\n' "$FAILS" "$CASES" > "$tmp/result.$2"
 }
@@ -477,6 +619,15 @@ defect() { # $1 — метка, $2 — описание; правит копию
         # Обход проверок, поставленный ДО стража, снял бы и страж.
         skipfirst) sed -i '0,/^set -uo pipefail$/s//set -uo pipefail\n[ "${KANAME_SKIP_PREPUSH:-0}" = 1 ] \&\& exit 0/' "$k/scripts/hooks/pre-push"
                 grep -q '^\[ "${KANAME_SKIP_PREPUSH:-0}" = 1 \] && exit 0$' "$k/scripts/hooks/pre-push" || return 1 ;;
+        # Ведомость (#482): запись прочитана, но прощение не применено.
+        ledgerblind) sed -i 's|^BR_EXEMPT="$exempt"$|BR_EXEMPT=""|' "$k/.github/scripts/pr-rule-check.sh"
+                grep -q '^BR_EXEMPT=""$' "$k/.github/scripts/pr-rule-check.sh" || return 1 ;;
+        # Прощение шире записи: непустая ведомость прощает любой коммит.
+        ledgerwide) printf '\nbranch_rule_exempt() { [ -n "$BR_EXEMPT" ]; }\n' >> "$k/scripts/hooks/branch-rule.sh" ;;
+        # Причина записи не судится.
+        ledgerloose) grep -q 'причина пуста' "$k/.github/scripts/pr-rule-check.sh" || return 1
+                sed -i '/причина пуста/d' "$k/.github/scripts/pr-rule-check.sh"
+                ! grep -q 'причина пуста' "$k/.github/scripts/pr-rule-check.sh" || return 1 ;;
     esac
 }
 
@@ -485,7 +636,7 @@ suite "$tmp/kit-real" настоящий
 read -r real_fails real_cases < "$tmp/result.настоящий"
 
 declare -A dfails
-for d in blind issue t0 noguard skipfirst; do
+for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
     if defect "$d"; then
         echo
         echo "── проба против дефекта «$d» (ждём хотя бы один провал)"
@@ -493,7 +644,7 @@ for d in blind issue t0 noguard skipfirst; do
         read -r dfails[$d] _ < "$tmp/result.дефект-$d"
         grep -c '^  FAIL' "$tmp/out.$d" | sed 's/^/   провалов: /'
         # Какие утверждения дефект уронил — чтобы красное было видно ПО ПРЕДМЕТУ.
-        LC_ALL=C sed -n -E 's/^  FAIL \[[^]]*\] (.*): (законный случай отвергнут|ждали) .*/     · \1/p' "$tmp/out.$d"
+        LC_ALL=C sed -n -E 's/^  FAIL \[[^]]*\] (.*): (законный случай отвергнут|ждали|в выводе нет) .*/     · \1/p' "$tmp/out.$d"
     else
         dfails[$d]="н/д"
     fi
@@ -505,8 +656,8 @@ printf '  утверждений у настоящего: %s, провалов %
 rc=0
 [ "$real_fails" = 0 ] || { echo "ОТКАЗ: настоящая оснастка нарушает свои утверждения" >&2; rc=1; }
 [ "${real_cases:-0}" -gt 0 ] || { echo "ОТКАЗ: ни одного утверждения не исполнено" >&2; rc=1; }
-for d in blind issue t0 noguard skipfirst; do
-    printf '  дефект %-8s провалов %s (норма ≥1)\n' "$d" "${dfails[$d]}"
+for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
+    printf '  дефект %-11s провалов %s (норма ≥1)\n' "$d" "${dfails[$d]}"
     if [ "${dfails[$d]}" = "н/д" ]; then
         echo "ОТКАЗ: дефект «$d» не воссоздан — форма оснастки изменилась" >&2; rc=1
     elif [ "${dfails[$d]}" -lt 1 ]; then

@@ -10,6 +10,11 @@
 #   scripts/hooks/prepush-rule.sh     имя ветки и отправляемые коммиты (зовёт pre-push);
 #   .github/scripts/pr-rule-check.sh  заголовок, голова, тело запроса и его коммиты.
 #
+# Прощение по полному sha (BR_EXEMPT, #482) задаёт только третий: его ведомость
+# известных исторических нарушений — .github/scripts/pr-rule-known-violations.tsv.
+# У соседнего продукта этой ведомости нет — прощать там нечего, — и это
+# отличие копии, а не второй предикат: без BR_EXEMPT суждение то же.
+#
 # КОПИЯ, И ЭТО ПРИЗНАНО. Тот же предикат стоит у соседнего продукта
 # (PRO-Robotech/kacho#2793, одноимённые пути): правило одно — решения владельца
 # 2026-09-22, — а хук коммита и отправки исполняется из дерева той рабочей
@@ -132,6 +137,36 @@ branch_rule_has_pre_t0() {
     return 1
 }
 
+# ПРОЩЕНИЕ ПО ВЕДОМОСТИ (PRO-Robotech/kaname#482) — только у проверки запроса.
+#
+# BR_EXEMPT — полные sha, по одному на строку: нарушения ФОРМЫ первой строки
+# этих коммитов прощены ведомостью потребителя (первая строка «#<N> », форма
+# слияния, номер ветки-номера). Хуки коммита и отправки BR_EXEMPT не задают, и
+# прощённого у них нет. Сличается строка sha ЦЕЛИКОМ: префикс, автор,
+# коммиттер и дата основанием прощения не служат. Атрибуция и подпись не
+# прощаются никогда — их исход иной (переписать сообщение; подписать корневой).
+#
+# Прощённое уходит в BR_EXCUSED записью «<полный sha><TAB><находка>»; каждый
+# встреченный записанный sha — в BR_EXEMPT_SEEN (по строке), чтобы потребитель
+# отличил «запись в диапазоне, прощать нечего» от «записи в диапазоне нет».
+BR_EXEMPT=""
+BR_EXCUSED=()
+BR_EXEMPT_SEEN=""
+
+# branch_rule_exempt <полный sha> — записан ли sha в BR_EXEMPT строкой целиком.
+branch_rule_exempt() {
+    [ -n "$BR_EXEMPT" ] && [[ $'\n'"$BR_EXEMPT"$'\n' == *$'\n'"$1"$'\n'* ]]
+}
+
+# branch_rule_form_finding <прощён: 0|1> <полный sha> <находка> — нарушение формы.
+branch_rule_form_finding() {
+    if [ "$1" = 1 ]; then
+        BR_EXCUSED+=("$2"$'\t'"$3")
+    else
+        BR_FINDINGS+=("$3")
+    fi
+}
+
 # branch_rule_judge_commits <ветка> <владеемые sha> <подпись> <аргументы rev-list…>
 #
 # Судит каждый коммит диапазона. <владеемые sha> — первые родители, принадлежащие
@@ -139,14 +174,15 @@ branch_rule_has_pre_t0() {
 # <подпись> — «имя <адрес>» корневой учётной записи, «-» — подпись здесь не
 # судится, «?» — судить не с чем (корневая не задана).
 #
-# Пополняет BR_FINDINGS; считает BR_SEEN (коммитов в диапазоне), BR_AFTER_T0
-# (из них судимых по форме), BR_NO_ROOT (подпись не сверена: корневой нет).
+# Пополняет BR_FINDINGS (и BR_EXCUSED — у коммитов из BR_EXEMPT); считает
+# BR_SEEN (коммитов в диапазоне), BR_AFTER_T0 (из них судимых по форме),
+# BR_NO_ROOT (подпись не сверена: корневой нет).
 BR_FINDINGS=()
 BR_SEEN=0
 BR_AFTER_T0=0
 BR_NO_ROOT=0
 branch_rule_judge_commits() {
-    local name="$1" owned="$2" ident="$3" log rec h at parents author committer body subj n attr np
+    local name="$1" owned="$2" ident="$3" log rec h at parents author committer body subj n attr np exempt
     shift 3
     log="$(git -c log.showSignature=false log --no-color --encoding=UTF-8 \
         --format='%H%x1f%at%x1f%P%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e' "$@")" || {
@@ -160,6 +196,11 @@ branch_rule_judge_commits() {
         IFS=$'\x1f' read -r -d '' h at parents author committer body <<< "$rec"
         [ -n "${h:-}" ] || continue
         BR_SEEN=$((BR_SEEN + 1))
+        exempt=0
+        if branch_rule_exempt "$h"; then
+            exempt=1
+            BR_EXEMPT_SEEN+="$h"$'\n'
+        fi
         subj="${body%%$'\n'*}"
         if attr="$(branch_rule_attribution "$body")"; then
             BR_FINDINGS+=("${h:0:10} атрибуция в сообщении: «$attr»")
@@ -167,14 +208,14 @@ branch_rule_judge_commits() {
         [ "$at" -ge "$BRANCH_RULE_T0" ] || continue
         BR_AFTER_T0=$((BR_AFTER_T0 + 1))
         if ! n="$(branch_rule_subject_task "$subj")"; then
-            BR_FINDINGS+=("${h:0:10} первая строка не начинается с «#<N> »: «$subj»")
+            branch_rule_form_finding "$exempt" "$h" "${h:0:10} первая строка не начинается с «#<N> »: «$subj»"
         else
             np="$(wc -w <<< "$parents")"
             if [ "$np" -ge 2 ] && ! branch_rule_merge_form "$subj"; then
-                BR_FINDINGS+=("${h:0:10} слияние не по форме «#<N> merge #<M>: …» / «#<N> merge main: …»: «$subj»")
+                branch_rule_form_finding "$exempt" "$h" "${h:0:10} слияние не по форме «#<N> merge #<M>: …» / «#<N> merge main: …»: «$subj»"
             fi
             if branch_rule_is_number "$name" && [[ $'\n'"$owned"$'\n' == *$'\n'"$h"$'\n'* ]] && [ "$n" != "$name" ]; then
-                BR_FINDINGS+=("${h:0:10} «#$n» на ветке «$name»: первая строка ветки-номера несёт её номер")
+                branch_rule_form_finding "$exempt" "$h" "${h:0:10} «#$n» на ветке «$name»: первая строка ветки-номера несёт её номер"
             fi
         fi
         case "$ident" in
