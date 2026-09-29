@@ -46,31 +46,52 @@ func roadCfg(p config.IdentityProvider, jwksEndpoint string) config.Config {
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// ДОРОГА: под `own` не строится, под `external` строится.
+// ДОРОГА: под `own` не строится, под `external` строится — и достаётся ТОЛЬКО
+// ветви построенной посадки (задача kaname#338).
+//
+// Развилка судится исходом, а не ответом: какая ветвь исполнилась и что она
+// получила. Под `own` ветвь с дорогой не исполняется НИ РАЗУ — значит клиента
+// без адреса, который прежде уходил потребителям значением, не получает никто.
 func TestCompositionRoot_AdminRoadIsBuiltOnlyWhereAProviderExists(t *testing.T) {
-	own, ownBuilt := mustProviderAdminClient(roadCfg(config.IdentityProviderOwn, "9097"), nil)
-	if ownBuilt {
-		t.Error("под own строитель ОБЪЯВИЛ дорогу построенной — ответ о посадке, " +
-			"который читают все потребители, назвал бы им несуществующее")
+	type taken struct {
+		built, absent int
+		road          *providerAdminRoad
 	}
-	if own == nil {
-		t.Fatal("mustProviderAdminClient() = nil под own; потребителям нужен объект, " +
-			"отказывающий по имени, а не пустой указатель")
-	}
-	if own.BaseURL != "" {
-		t.Errorf("под own дорога построена на адрес %q — а внешнего поставщика "+
-			"на этой посадке нет вовсе", own.BaseURL)
+	fork := func(cfg config.Config) taken {
+		var got taken
+		_, _ = onProviderAdminRoad(cfg, nil,
+			func(road *providerAdminRoad) (struct{}, error) {
+				got.built++
+				got.road = road
+				return struct{}{}, nil
+			},
+			func() (struct{}, error) {
+				got.absent++
+				return struct{}{}, nil
+			})
+		return got
 	}
 
-	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external дорога обязана быть.
-	ext, extBuilt := mustProviderAdminClient(roadCfg(config.IdentityProviderExternal, "9097"), nil)
-	if !extBuilt {
-		t.Error("под external строитель НЕ объявил дорогу построенной — потребители " +
-			"ушли бы на собственную полосу там, где исполняет чужой поставщик")
+	own := fork(roadCfg(config.IdentityProviderOwn, "9097"))
+	if own.built != 0 || own.road != nil {
+		t.Errorf("под own исполнена ветвь С ДОРОГОЙ (%d раз, клиент %v) — потребитель "+
+			"получил дорогу к поставщику, которого на этой посадке нет", own.built, own.road)
 	}
-	if ext == nil || ext.BaseURL == "" {
-		t.Fatal("под external дорога НЕ построена — отрицание выше зеленело бы на " +
-			"корне, который не строит никогда")
+	if own.absent != 1 {
+		t.Fatalf("под own ветвь без дороги исполнена %d раз, а не один — потребитель "+
+			"остался без своего решения", own.absent)
+	}
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external дорога обязана быть и прийти ветви.
+	ext := fork(roadCfg(config.IdentityProviderExternal, "9097"))
+	if ext.absent != 0 {
+		t.Errorf("под external исполнена ветвь без дороги (%d раз) — потребители ушли бы "+
+			"на собственную полосу там, где исполняет чужой поставщик", ext.absent)
+	}
+	if ext.built != 1 || ext.road == nil || ext.road.BaseURL == "" {
+		t.Fatalf("под external дорога НЕ пришла ветви построенной посадки (исполнена %d раз, "+
+			"клиент %v) — отрицание выше зеленело бы на развилке, которая не строит никогда",
+			ext.built, ext.road)
 	}
 }
 
