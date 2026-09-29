@@ -141,11 +141,11 @@ func tokenHandler() http.Handler {
 
 // The pinned anchor makes the hop work over TLS — the capability that was missing
 // entirely, so an operator could not move the address to https at all.
-func TestHydraTokenClient_PinnedAnchor_CompletesTheExchange(t *testing.T) {
+func TestProviderTokenClient_PinnedAnchor_CompletesTheExchange(t *testing.T) {
 	ca := newTestCA(t, "kacho-internal-ca")
 	srv := tlsServer(t, ca, tokenHandler())
 
-	c, err := clients.NewHydraTokenClientWithCA(srv.URL, ca.caPEMPath)
+	c, err := clients.NewProviderTokenClientWithCA(srv.URL, ca.caPEMPath)
 	if err != nil {
 		t.Fatalf("a usable anchor must be accepted, got: %v", err)
 	}
@@ -165,18 +165,18 @@ func TestHydraTokenClient_PinnedAnchor_CompletesTheExchange(t *testing.T) {
 // КЛИЕНТ СТРОИТСЯ ТЕМ ЖЕ ПОСТРОИТЕЛЕМ, ЧТО И В ПРОДЕ, и это несущая часть пробы,
 // а не стиль. Прежняя редакция звала `NewHydraTokenClient` — построитель, у
 // которого в дереве НОЛЬ производственных вызывающих: полосу «без якоря» в проде
-// строит `NewHydraTokenClientWithCA` с пустым якорем (`provider_hop.go`).
+// строит `NewProviderTokenClientWithCA` с пустым якорем (`provider_hop.go`).
 // Проба тем самым утверждала о дороге, по которой процесс не идёт ни разу, и
 // оставалась ЗЕЛЁНОЙ, когда производственная ветка пустого якоря переставала
 // проверять пира вовсе. Замер: мутация этой ветки на `InsecureSkipVerify` не
 // роняла эту пробу — краснел только сосед ниже, и краснел он на СТРУКТУРНОМ
 // признаке («транспорт остался умолчанием»), а не на том свойстве, которое
 // названо здесь.
-func TestHydraTokenClient_NoAnchor_RefusesTheInternalCAPeer(t *testing.T) {
+func TestProviderTokenClient_NoAnchor_RefusesTheInternalCAPeer(t *testing.T) {
 	ca := newTestCA(t, "kacho-internal-ca")
 	srv := tlsServer(t, ca, tokenHandler())
 
-	c, err := clients.NewHydraTokenClientWithCA(srv.URL, "")
+	c, err := clients.NewProviderTokenClientWithCA(srv.URL, "")
 	if err != nil {
 		t.Fatalf("пустой якорь — законный вход производственного построителя, получено: %v", err)
 	}
@@ -188,12 +188,12 @@ func TestHydraTokenClient_NoAnchor_RefusesTheInternalCAPeer(t *testing.T) {
 // An anchor for one authority does not accept a peer signed by another. This is
 // the substitution case: something else answering that address, with a
 // well-formed response, is refused rather than believed.
-func TestHydraTokenClient_ForeignPeer_IsRefusedByThePinnedAnchor(t *testing.T) {
+func TestProviderTokenClient_ForeignPeer_IsRefusedByThePinnedAnchor(t *testing.T) {
 	legit := newTestCA(t, "kacho-internal-ca")
 	impostor := newTestCA(t, "impostor-ca")
 	srv := tlsServer(t, impostor, tokenHandler())
 
-	c, err := clients.NewHydraTokenClientWithCA(srv.URL, legit.caPEMPath)
+	c, err := clients.NewProviderTokenClientWithCA(srv.URL, legit.caPEMPath)
 	if err != nil {
 		t.Fatalf("a usable anchor must be accepted, got: %v", err)
 	}
@@ -205,8 +205,8 @@ func TestHydraTokenClient_ForeignPeer_IsRefusedByThePinnedAnchor(t *testing.T) {
 // No anchor ⇒ the default transport, unchanged: a plaintext in-cluster address
 // needs none, and inventing one would refuse a stand deliberately configured that
 // way. The boot guard is what forbids the combination in production.
-func TestHydraTokenClient_NoAnchorConfigured_LeavesDefaultTransport(t *testing.T) {
-	c, err := clients.NewHydraTokenClientWithCA("http://hydra-public:4444/oauth2/token", "")
+func TestProviderTokenClient_NoAnchorConfigured_LeavesDefaultTransport(t *testing.T) {
+	c, err := clients.NewProviderTokenClientWithCA("http://hydra-public:4444/oauth2/token", "")
 	if err != nil {
 		t.Fatalf("no anchor must be accepted, got: %v", err)
 	}
@@ -217,8 +217,8 @@ func TestHydraTokenClient_NoAnchorConfigured_LeavesDefaultTransport(t *testing.T
 
 // An anchor that cannot be read, or that holds no certificate, REFUSES and names
 // the setting — the refusal is what an operator reads to fix the stand.
-func TestHydraTokenClient_UnusableAnchor_RefusesNamingTheSetting(t *testing.T) {
-	if _, err := clients.NewHydraTokenClientWithCA(
+func TestProviderTokenClient_UnusableAnchor_RefusesNamingTheSetting(t *testing.T) {
+	if _, err := clients.NewProviderTokenClientWithCA(
 		"https://hydra-public:4444/oauth2/token", filepath.Join(t.TempDir(), "absent.crt"),
 	); err == nil {
 		t.Fatal("an unreadable anchor must refuse, got nil")
@@ -230,7 +230,7 @@ func TestHydraTokenClient_UnusableAnchor_RefusesNamingTheSetting(t *testing.T) {
 	if err := os.WriteFile(empty, []byte("not a certificate\n"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	if _, err := clients.NewHydraTokenClientWithCA("https://hydra-public:4444/oauth2/token", empty); err == nil {
+	if _, err := clients.NewProviderTokenClientWithCA("https://hydra-public:4444/oauth2/token", empty); err == nil {
 		t.Fatal("an anchor holding no certificate must refuse, got nil")
 	}
 }
