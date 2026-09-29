@@ -22,8 +22,10 @@
 // из которого тем же изменением сняты шесть строк роста, найденного задачей
 // #323: две пробы полос хуков задавали адрес прежнего издателя, которого не
 // судят. На сведённом дереве сборки волны 4 (#483) записи приведены вниз к
-// факту: полосы волны снимали привязки, ещё не зная этой ведомости. Каждая
-// запись уходит вниз вместе с изменением, снимающим её привязки.
+// факту: полосы волны снимали привязки, ещё не зная этой ведомости. Где полоса
+// ПЕРЕНОСИЛА привязку из файла в файл, запись нового файла заведена по правилу
+// переноса выше, и сумма каждой такой полосы убыла. Каждая запись уходит вниз
+// вместе с изменением, снимающим её привязки.
 package check
 
 // RetiredVendorLedger — точное число привязок по файлу, по возрастанию пути.
@@ -48,6 +50,8 @@ var RetiredVendorLedger = []RetiredVendorLedgerEntry{
 		Bindings: 3},
 	{File: "cmd/kaname/serve_registry_token_wiring_test.go",
 		Bindings: 5},
+	{File: "cmd/kaname/token_claims_no_provider_test.go",
+		Bindings: 1},
 	{File: "cmd/kaname/wiring.go",
 		Bindings: 5},
 	{File: "deploy/foreign_operator_declared_injection_test.go",
@@ -170,8 +174,10 @@ var RetiredVendorLedger = []RetiredVendorLedgerEntry{
 		Bindings: 12},
 	{File: "internal/check/retired_vendor_bindings.go",
 		Bindings: 1},
+	{File: "internal/check/token_claim_retired_provider_injection_test.go",
+		Bindings: 6},
 	{File: "internal/clients/hydra_admin_client.go",
-		Bindings: 9},
+		Bindings: 15},
 	{File: "internal/clients/hydra_admin_trust_anchor_test.go",
 		Bindings: 11},
 	{File: "internal/clients/hydra_interactive_clients.go",
@@ -232,6 +238,10 @@ var RetiredVendorLedger = []RetiredVendorLedgerEntry{
 		Bindings: 13},
 	{File: "internal/migrations/20260917015400_recovery_code_is_our_record.sql",
 		Bindings: 1},
+	{File: "internal/migrations/20260928231124_provider_mirror_leaves_the_credential_tables.sql",
+		Bindings: 23},
+	{File: "internal/migrations/provider_mirror_leaves_the_credential_tables_integration_test.go",
+		Bindings: 6},
 	{File: "internal/observability/metrics/provider_road_parity_injection_test.go",
 		Bindings: 7},
 	{File: "internal/observability/metrics/provider_road_parity_test.go",
