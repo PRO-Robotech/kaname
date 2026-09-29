@@ -189,8 +189,12 @@ Coverage (техники: классы эквивалентности состо
 #   · Ф12-32 — недоступность материала (Ф12-35) и исчерпание ёмкости
 #     проверяющего на запасном коде (PWV-15): «Дано» стенд не строит (перекатка
 #     процесса с другим ключом обёртки, подставной проверяющий), позиция —
-#     «E + I», эти два исхода держит уровень I (kaname#480); отказ по свежести
-#     несёт кейс IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED, прочие четыре исхода —
+#     «E + I», эти два исхода держит уровень I — пробы
+#     TestF12_32_UnreadableMaterialIsNotAnAttempt и
+#     TestF12_32_ExhaustedCapacityOnABackupCodeIsNotAnAttempt
+#     (internal/apps/kaname/api/humansession/second_factor_not_an_attempt_test.go);
+#     отказ по свежести — кейс IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED и проба
+#     TestF12_32_FreshnessRefusalIsNotAnAttempt того же файла; прочие четыре исхода —
 #     кейс IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS;
 #   · неразличимость по времени Ф12-33 — измерительная, приборы этой формы в
 #     дереве — ручка уровня I;
