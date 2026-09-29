@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 807
+Всего кейсов: 806
 
 ## Перепись по модулям
 
@@ -66,7 +66,7 @@
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-grant-visibility.py` | 1 |
-| `cases/iam-token-facade-conformance.py` | 7 |
+| `cases/iam-token-facade-conformance.py` | 6 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
@@ -895,12 +895,11 @@
 
 - `IAM-ACB-SYSGRANT-VISIBLE-OK`
 
-## `cases/iam-token-facade-conformance.py` — 7 кейсов
+## `cases/iam-token-facade-conformance.py` — 6 кейсов
 
 > Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
 
 - `IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS`
-- `IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER`
 - `IBT-05-CREDENTIAL-LIFECYCLE-THROUGH-FACADE-RPCS`
 - `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
 - `IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR`

@@ -36,14 +36,14 @@ named here so the rule is not read as three-quarters covered:
 Three lanes and the negatives that make each of them mean something:
 
   verification  IBT-04 — the Bearer the edge accepts is verified by key material the
-                         FACADE serves (its `kid` is published by exactly one of the
-                         facade's key-set records), and the edge answers 200 — neither
-                         401 nor 403.
-                IBT-12 — the MIRROR record is faithful to the provider's public keyset
-                         (same kids, same moduli): on that record iam is a proxy and
-                         not an issuer. Сказано про ЗАПИСЬ, а не про платформу: своя
-                         ключница у неё есть, и её набор отдаёт ВТОРАЯ запись того же
-                         публикатора.
+                         FACADE serves (its `kid` is published by the facade's own
+                         key-set record), and the edge answers 200 — neither 401 nor
+                         403.
+                IBT-12 — RETIRED with its subject. It held the MIRROR record of the
+                         provider's public keyset faithful to the provider; the mirror
+                         left together with the provider (kaname#361), the publisher
+                         carries ONE record — ours — and there is nothing left to
+                         compare.
   issuance      IBT-05 — a credential is issued AND revoked through iam's own RPCs
                          (SAKeyService.Issue/Revoke, UserTokenService.Issue/Revoke),
                          and the acr-exempt service principal is not step-up-challenged.
@@ -67,7 +67,8 @@ IBT-04/05/06/10 are the four e2e-conformance scenarios named in the acceptance
 numbers in the same family (IBT-01..IBT-11 + IBT-A1..A3 + IBT-T5 are taken): the
 acceptance was written about the BOOTSTRAP MINT, so it has no scenario for the
 mirror, the hook, the docker handle or the provider surfaces — the four lanes the
-facade rule names. Following the tree over the text, three divergences are recorded
+facade rule named. The mirror lane (IBT-12) is retired with the mirror
+(kaname#361); its number is not reused. Following the tree over the text, three divergences are recorded
 here rather than papered over:
 
   1. IBT-06 predicts `404 Not Found` for the mint on both listeners, "additionally
@@ -117,7 +118,10 @@ here rather than papered over:
      changed is what the cases assert: every lane-specific literal (one algorithm,
      one key-set record, one claim placement, `sub` is not the principal) is replaced
      by the property that holds across BOTH lanes, and each case comment says which
-     literal it replaced and why the replacement is not a relaxation.
+     literal it replaced and why the replacement is not a relaxation. The key-set
+     axis has since narrowed back: the provider's mirror record left with the
+     provider (kaname#361), and the kid is looked up in the facade's one record —
+     ours — which is what the platform now publishes, not a lane literal.
      This is not hypothetical tidiness. Written for one lane, this file went red
      against a correct platform in FIVE of its seven cases at once — two on the key
      material (the algorithm, and the record the kid is looked up in), one on the
@@ -137,7 +141,7 @@ carry was produced by exactly that exchange. That is no longer true on a stand w
 the bootstrap credential is minted by the platform's own signer, and saying otherwise
 would be claiming a lane is covered when nothing here reaches it. What IBT-04 witnesses
 is what it says: the credential this suite presents is accepted, and the key that
-verifies it is published by the facade — whichever of its records published it.
+verifies it is published by the facade in its own key-set record.
 
 HOW THE PROBES REACH WHAT THEY PROBE
 ====================================
@@ -156,17 +160,14 @@ not stay here.
   {{iamJwksBaseUrl}}          iam key-publisher listener (:9097). Cluster-internal,
                               server-TLS with an internal-CA leaf → the steps carry
                               `insecure_tls` (the tunnel's trust chain is not the
-                              subject; WHAT IS SERVED is). TWO paths are read on it,
-                              one per accepted issuer: the mirror of the provider and
-                              the platform's own key-set record. Both are declared as
-                              module constants next to `_jwks_step`, and each fetch
-                              asserts 200 — a record that moved makes this suite name
-                              the address it asked for, never pass having read nothing.
-  {{providerPublicBaseUrl}}   the signing provider's PUBLIC endpoint (:4444). Read by
-                              the TEST as an oracle for the mirror comparison — this
-                              is the one place a direct provider read is legitimate,
-                              and it is legitimate because it is the measurement, not
-                              a client path.
+                              subject; WHAT IS SERVED is). ONE path is read on it —
+                              the platform's own key-set record, declared as a module
+                              constant next to `_jwks_step` — and each fetch asserts
+                              200: a record that moved makes this suite name the
+                              address it asked for, never pass having read nothing.
+                              The provider's PUBLIC endpoint is no longer read by any
+                              case: it was the oracle of the mirror comparison, and
+                              the mirror is gone (kaname#361).
 
 Idempotence: every fixture this file creates carries `{{runId}}` in its name and is
 torn down by the case that made it (SA created → key issued → key revoked → SA
@@ -265,14 +266,13 @@ _CLAIM_READER = [
 # ---------------------------------------------------------------------------
 # WHAT THE FACADE PUBLISHES, AND WHERE.
 #
-# The publisher on the facade listener carries one record PER ACCEPTED ISSUER,
-# each on its own DECLARED path — the union of the two is "the key material this
-# facade serves". Merging them into one document is what the platform refuses to
-# do, and for the reason this suite exists to keep true: a key of one issuer
-# would then verify a token declaring another.
+# The publisher on the facade listener carries ONE record — ours — on its
+# DECLARED path: that record IS "the key material this facade serves". The
+# mirror record of the provider's public keyset stood beside it until the
+# provider was retired (kaname#361); the publisher now refuses a second record
+# at start, for the reason this suite exists to keep true: a key of one issuer
+# would otherwise sit beside the keys of another.
 #
-#   `_MIRROR_JWKS_PATH`  the byte-faithful mirror of the external provider's
-#                        public keyset. IBT-12 compares it against the provider.
 #   `_OWN_JWKS_PATH`     the platform's OWN record — a projection of its keyring.
 #                        Declared by the deployment profile
 #                        (`config.authn.tokenSigning.keySetPath`) and defaulted
@@ -284,13 +284,12 @@ _CLAIM_READER = [
 # a keyset that is not there.
 # ---------------------------------------------------------------------------
 
-_MIRROR_JWKS_PATH = "/.well-known/jwks.json"
 _OWN_JWKS_PATH = "/.well-known/kaname/jwks.json"
 
 
-def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
-               kids_var="_facadeKids", by_kid_var="_facadeByKid"):
-    """A GET of ONE record of the FACADE's key publisher, at its own listener.
+def _jwks_step(name, why, path=_OWN_JWKS_PATH, record="own",
+               kids_var="_facadeOwnKids", by_kid_var="_facadeOwnByKid"):
+    """A GET of the record of the FACADE's key publisher, at its own listener.
 
     Every case that needs the served key material fetches it ITSELF instead of
     reading a variable another case left behind: a case whose precondition is
@@ -302,9 +301,8 @@ def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
     ----------------------------------------------------------------
     They used to demand `kty=RSA` + `alg=RS256` of every key of every record.
     That was a statement about ONE issuer's key choice, and it stopped being a
-    statement about the FACADE the moment the publisher grew a second record:
-    the platform's own keyring is EC/ES256, so the old form was red on correct
-    key material.
+    statement about the FACADE the moment the platform's own record appeared:
+    its keyring is EC/ES256, so the old form was red on correct key material.
 
     What replaces it is not looser — it is a different, stronger axis. Each key
     must declare a key type this platform publishes, its `alg` must be the one
@@ -314,10 +312,6 @@ def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
     check below is written for, arriving by another door. A key whose header
     algorithm and key type disagree fails on the second — that is the shape an
     alg-confusion forgery needs, seen from the publishing side.
-
-    What the mirror record ALSO holds — that it is byte-faithful to the provider,
-    keyset for keyset — is asserted by IBT-12, which is the case whose subject
-    that is.
     """
     from_gen = require_env_url("iamJwksBaseUrl", path, why)
     return Step(
@@ -359,8 +353,8 @@ def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
             "      ' — an incomplete public half verifies nothing').to.be.a('string').with.length.greaterThan(0));",
             "  });",
             "});",
-            # Private JWK members on this surface would leak the signing key —
-            # of the provider on the mirror record, of the platform on its own.
+            # Private JWK members on this surface would leak the platform's
+            # signing key.
             "pm.test('facade JWKS [' + _record + ']: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
             "  const priv = ['d', 'p', 'q', 'dp', 'dq', 'qi'];",
             "  (_jwks.keys || []).forEach(k => {",
@@ -378,12 +372,6 @@ def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
     )
 
 
-def _own_record_step(name, why):
-    """The facade's OWN key-set record — the platform's keyring, published."""
-    return _jwks_step(name, why, path=_OWN_JWKS_PATH, record="own",
-                      kids_var="_facadeOwnKids", by_kid_var="_facadeOwnByKid")
-
-
 # Reading the public half of a published key, whatever its type. The RSA
 # modulus is the textbook alg-confusion key (CWE-347); for an EC key the
 # analogous public material is the point, for OKP the encoded public key. What
@@ -398,9 +386,8 @@ _PUBLIC_MATERIAL_JS = [
     "  return '';",
     "}",
     "function _facadeKeyByKid(kid) {",
-    "  const _m = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
     "  const _o = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
-    "  return _m[kid] || _o[kid] || null;",
+    "  return _o[kid] || null;",
     "}",
 ]
 
@@ -415,15 +402,13 @@ _PUBLIC_MATERIAL_JS = [
 # Together they close the verification lane: this exact credential's `kid` is one
 # the facade publishes, and the edge admits it.
 #
-# BOTH RECORDS ARE READ, AND THAT IS THE PROPERTY — NOT A CONVENIENCE.
-# The publisher carries one record per accepted issuer. Asking only the mirror
-# was the same mistake as reading only the nested claim form: it asserted a
-# property of ONE lane while the platform runs two, and it was red on correct key
-# material the moment the bootstrap credential moved to the platform's own signer.
-# Reading both lets the case say something the single-record form could not: the
-# kid is served by EXACTLY ONE record. A kid appearing in both would mean one
-# issuer's key verifies another issuer's token — the very thing the publisher
-# refuses to do by keeping the records apart.
+# THE RECORD READ IS OURS, AND IT IS THE ONLY ONE.
+# The publisher used to carry a record per accepted issuer, and this case read
+# both and required the kid to sit in EXACTLY ONE of them. The provider's mirror
+# record left together with the provider (kaname#361): the publisher now carries
+# one record and refuses a second at start, so the kid of an accepted Bearer is
+# required to be served by OUR record — a kid the facade does not publish means
+# the edge verifies against key material that is not the platform's.
 #
 # The algorithm assertion moved from "RS256" to "asymmetric, and the same
 # algorithm the publishing record declares for that kid". It is not weaker: the
@@ -435,15 +420,11 @@ _PUBLIC_MATERIAL_JS = [
 
 CASES.append(Case(
     id="IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS",
-    title="The facade publishes — in exactly one of its key-set records — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
+    title="The facade publishes — in its own key-set record — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
     classes=["SEC", "CONF"],
     priority="P0",
     steps=[
         _jwks_step(
-            "facade-jwks",
-            "verification lane — the key material the edge verifies with is served by iam",
-        ),
-        _own_record_step(
             "facade-own-key-set",
             "verification lane — the OWN record of the facade; the platform signs with its own "
             "keyring and publishes the verifying half here",
@@ -480,27 +461,19 @@ CASES.append(Case(
                 "  pm.expect(_hdr.kid, JSON.stringify(_hdr)).to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 # THE SUBSTANCE OF THE LANE.
-                "const _mirrorByKid = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
                 "const _ownByKid = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
-                "pm.test('BOTH facade records were captured (an empty keyset is satisfied by nothing)', () => {",
-                "  pm.expect(Object.keys(_mirrorByKid).length, 'mirror record, captured by the jwks step')",
-                "    .to.be.greaterThan(0);",
+                "pm.test('the facade record was captured (an empty keyset is satisfied by nothing)', () => {",
                 "  pm.expect(Object.keys(_ownByKid).length, 'own record, captured by the jwks step')",
                 "    .to.be.greaterThan(0);",
                 "});",
-                "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by EXACTLY "
-                "ONE of its records', () => {",
-                "  const _serving = [];",
-                "  if (_mirrorByKid[_hdr.kid]) { _serving.push('mirror'); }",
-                "  if (_ownByKid[_hdr.kid]) { _serving.push('own'); }",
-                "  pm.expect(_serving, 'kid ' + _hdr.kid + ' — served by [' + _serving.join(',') + '];'",
-                "    + ' none means the edge verifies against key material this facade does not publish,'",
-                "    + ' both means the key of one issuer would verify the token of another'",
-                "    + ' (records read: mirror=' + Object.keys(_mirrorByKid).length"
-                " + ', own=' + Object.keys(_ownByKid).length + ')').to.have.lengthOf(1);",
+                "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by its OWN "
+                "key-set record', () => {",
+                "  pm.expect(_ownByKid[_hdr.kid], 'kid ' + _hdr.kid + ' — not in the facade record'",
+                "    + ' (keys read: ' + Object.keys(_ownByKid).length + '): the edge verifies against'",
+                "    + ' key material this facade does not publish').to.be.an('object');",
                 "});",
                 "pm.test('the publishing record declares the SAME algorithm the Bearer header names', () => {",
-                "  const _k = _mirrorByKid[_hdr.kid] || _ownByKid[_hdr.kid];",
+                "  const _k = _ownByKid[_hdr.kid];",
                 "  pm.expect(_k, 'no facade key published for kid ' + _hdr.kid).to.be.an('object');",
                 "  pm.expect(_k.alg, 'header alg ' + _hdr.alg + ' against the alg the facade publishes for '",
                 "    + _hdr.kid + ' — a header naming an algorithm the key material does not support is'",
@@ -513,119 +486,6 @@ CASES.append(Case(
                 "  pm.expect(aud.length, 'aud claim: an audience-less token is not edge-addressed')",
                 "    .to.be.greaterThan(0);",
                 "});",
-            ],
-        ),
-    ],
-))
-
-
-# ===========================================================================
-# IBT-12 — the facade's JWKS is a MIRROR of the provider's, not a second keyset.
-#
-# Why this is a separate case and not an extra assertion on IBT-04: IBT-04 holds
-# just as well if iam started signing tokens with its own keys and serving its own
-# JWKS — every kid would match, the edge would accept, and the platform would have
-# quietly grown a second issuer. What forbids that is the mirror property, and the
-# only way to witness it black-box is to read both and compare.
-#
-# The BOTH-NON-EMPTY assertion is not decoration: two empty keysets compare equal,
-# and an "equal" that is satisfied by nothing is the classic vacuous negative.
-# ===========================================================================
-
-CASES.append(Case(
-    id="IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER",
-    title="iam's JWKS-proxy is byte-faithful to the provider's public JWKS (same kids, same moduli) — iam proxies, never mints",
-    classes=["SEC", "CONF"],
-    priority="P0",
-    steps=[
-        _jwks_step(
-            "facade-jwks-for-mirror",
-            "mirror comparison — the facade side of the pair",
-        ),
-        Step(
-            name="provider-jwks",
-            method="GET",
-            path="/.well-known/jwks.json",
-            auth="anonymous",
-            pre_script=require_env_url(
-                "providerPublicBaseUrl", "/.well-known/jwks.json",
-                "mirror comparison — the provider side of the pair, read by the TEST as an "
-                "oracle (this is the measurement, not a client path)"),
-            test_script=[
-                *assert_answered("provider JWKS"),
-                *assert_status(200),
-                "const _up = pm.response.json();",
-                "const _mirror = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
-                "pm.test('both keysets are non-empty (an equality satisfied by nothing is not an equality)', () => {",
-                "  pm.expect((_up.keys || []).length, 'provider keys').to.be.greaterThan(0);",
-                "  pm.expect(Object.keys(_mirror).length, 'facade keys').to.be.greaterThan(0);",
-                "});",
-                "const _upBy = (_up.keys || []).reduce((a, k) => { a[k.kid] = k; return a; }, {});",
-                "pm.test('kid sets are identical in BOTH directions', () => {",
-                "  const up = Object.keys(_upBy).sort();",
-                "  const mi = Object.keys(_mirror).sort();",
-                "  pm.expect(mi, 'facade kids vs provider kids: a kid the facade serves and the '",
-                "    + 'provider does not is a key iam minted itself').to.eql(up);",
-                "});",
-                "pm.test('every mirrored key is the provider key value-for-value (kty/alg/n/e)', () => {",
-                "  Object.keys(_mirror).forEach(kid => {",
-                "    const u = _upBy[kid];",
-                "    pm.expect(u, 'provider has no key ' + kid).to.be.an('object');",
-                "    pm.expect(_mirror[kid].kty, 'kty of ' + kid).to.eql(u.kty);",
-                "    pm.expect(_mirror[kid].alg, 'alg of ' + kid).to.eql(u.alg);",
-                "    pm.expect(_mirror[kid].n, 'modulus of ' + kid + ' differs — the facade is not '",
-                "      + 'mirroring this key, it is publishing another one').to.eql(u.n);",
-                "    pm.expect(_mirror[kid].e, 'exponent of ' + kid).to.eql(u.e);",
-                "  });",
-                "});",
-            ],
-        ),
-        # WHY THE NARROWNESS OF THE PROXY IS ASSERTED IN *THIS* CASE.
-        #
-        # A comparison of two fetches is evidence only if the two are different
-        # things. Point `iamJwksBaseUrl` at the provider by mistake and every
-        # assertion above still passes — the provider is trivially a faithful mirror
-        # of itself — so the mirror lane would report GREEN having measured nothing.
-        # These two steps make that mis-set observable: the facade JWKS listener
-        # serves ITS ONE PATH and 404s everything else, while the provider serves its
-        # discovery document and its token endpoint at the same origin (measured
-        # 2026-08-09: facade 404/404, provider 200 on discovery).
-        #
-        # It is not merely a guard against a harness mistake. It is a property worth
-        # holding on its own: the mirror is a narrow, single-purpose proxy, not a
-        # general passthrough that would park the provider's whole surface behind an
-        # iam address.
-        Step(
-            name="facade-jwks-listener-is-a-narrow-proxy-discovery",
-            method="GET",
-            path="/.well-known/openid-configuration",
-            auth="anonymous",
-            insecure_tls=True,
-            pre_script=require_env_url(
-                "iamJwksBaseUrl", "/.well-known/openid-configuration",
-                "mirror lane — the facade listener must NOT be a general provider passthrough, "
-                "and this is what tells the facade apart from the provider"),
-            test_script=[
-                *assert_answered("facade listener, provider discovery document"),
-                "pm.test('the facade JWKS listener does NOT serve the provider discovery document "
-                "(if it did, this variable points at the provider and the comparison above "
-                "compared the provider with itself)',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
-            ],
-        ),
-        Step(
-            name="facade-jwks-listener-is-a-narrow-proxy-token-endpoint",
-            method="POST",
-            path="/oauth2/token",
-            auth="anonymous",
-            insecure_tls=True,
-            pre_script=require_env_url(
-                "iamJwksBaseUrl", "/oauth2/token",
-                "mirror lane — the facade listener must not expose the provider token endpoint"),
-            test_script=[
-                *assert_answered("facade listener, provider token endpoint"),
-                "pm.test('the facade JWKS listener does NOT expose the provider token endpoint',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
             ],
         ),
     ],
@@ -1222,23 +1082,28 @@ CASES.append(Case(
 #   /oauth2/token             the exchange, reachable through the edge would make the
 #                             "direct only for the final exchange" exception a
 #                             platform-published endpoint rather than a provider one;
-#   /.well-known/jwks.json    the verification material. The facade serves it on a
-#                             CLUSTER-INTERNAL listener by documented decision
+#   the facade key set       the verification material, at the path of the facade's
+#                             own record (`_OWN_JWKS_PATH`). The facade serves it on
+#                             a CLUSTER-INTERNAL listener by documented decision
 #                             (security.md, iam JWKS-route exception). Publishing it
 #                             at the edge would not be a vulnerability — it is public
 #                             material — but it would move the surface, and the
-#                             decision is that it does not live there.
+#                             decision is that it does not live there. Here stood the
+#                             provider's `/.well-known/jwks.json`; the facade stopped
+#                             serving it when the mirror left (kaname#361), so that
+#                             path had no positive control any more and a negative
+#                             on it would have been satisfied by nothing.
 #
 # The positive control is what makes the third statement real rather than empty:
-# IBT-04 and IBT-12 both fetch that exact path successfully at the facade listener,
-# so "not 2xx here" is isolation, not a typo. Fired against a nonsense control on
+# the first step fetches that exact path successfully at the facade listener, so
+# "not 2xx here" is isolation, not a typo. Fired against a nonsense control on
 # each listener for the same reason as IBT-06.
 # ===========================================================================
 
 _PROVIDER_SURFACES = [
     ("admin-client-registration", "/admin/clients", "POST"),
     ("provider-token-endpoint", "/oauth2/token", "POST"),
-    ("provider-jwks-at-the-edge", "/.well-known/jwks.json", "GET"),
+    ("key-set-at-the-edge", _OWN_JWKS_PATH, "GET"),
 ]
 
 
@@ -1261,8 +1126,8 @@ def _provider_surface_steps():
             body={} if method == "POST" else None,
             pre_script=require_env_url(
                 "internalBaseUrl", path,
-                "IBT-15 — a provider surface must not be reachable on the internal "
-                "listener either"),
+                "IBT-15 — a provider surface or the facade key set must not be reachable "
+                "on the internal listener either"),
             test_script=_never_2xx(f"{path} on the internal listener", "_ibtCtlInternal2"),
         ))
     return steps
@@ -1270,13 +1135,13 @@ def _provider_surface_steps():
 
 CASES.append(Case(
     id="IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE",
-    title="Provider admin-client registration, token endpoint and JWKS are not served by any api-gateway listener (the facade cannot be routed around)",
+    title="Provider admin-client registration and token endpoint, and the facade key set, are not served by any api-gateway listener (the facade cannot be routed around)",
     classes=["SEC", "NEG", "CONF"],
     priority="P0",
     steps=[
         _jwks_step(
-            "control-facade-serves-the-jwks-path",
-            "IBT-15 positive control — the JWKS path IS served, at the facade listener, "
+            "control-facade-serves-the-key-set-path",
+            "IBT-15 positive control — the key-set path IS served, at the facade listener, "
             "so NOT-at-the-edge is isolation and not a misspelling",
         ),
         Step(
@@ -1330,14 +1195,16 @@ CASES.append(Case(
 # system-admin.
 #
 # WHY THE MATERIAL IS READ BY KEY TYPE AND NOT AS "the modulus".
-# The publisher carries a record per accepted issuer, and their key types differ —
-# the mirror is RSA, the platform's own keyring is EC. Reading `n` alone found
-# nothing for an EC key, so the forgery could not be built at all: the case then
+# The publisher carried a record per accepted issuer, and their key types differed
+# — the provider's mirror was RSA, the platform's own keyring is EC. Reading `n`
+# alone found nothing for an EC key, so the forgery could not be built at all: the case then
 # failed on its own precondition, which is the correct behaviour of a probe that
 # refuses to report a passing refusal for a forgery it never made — and exactly
 # why that guard is kept below. What was wrong was the lookup, not the guard.
 # `_publicMaterial` reads the public half of whichever key type published the kid,
-# so the HMAC key stays "material the facade itself serves" on both lanes.
+# so the HMAC key stays "material the facade itself serves" whatever key type the
+# keyring holds. The mirror record is gone (kaname#361); the facade material is
+# read from its one record.
 #
 # The case id keeps the acceptance's scenario number even though "RS256" in it now
 # names one lane of two; see divergence 4 in the module docstring.
@@ -1353,14 +1220,9 @@ CASES.append(Case(
     priority="P0",
     steps=[
         _jwks_step(
-            "facade-jwks-for-forgery",
-            "IBT-10 — the public material used as the HMAC key of the alg-confusion forgery, "
-            "mirror record",
-        ),
-        _own_record_step(
             "facade-own-key-set-for-forgery",
-            "IBT-10 — the same, for the OWN record of the facade: the kid that signed the "
-            "accepted Bearer may be published by either",
+            "IBT-10 — the public material used as the HMAC key of the alg-confusion forgery, "
+            "from the OWN record of the facade",
         ),
         Step(
             name="positive-control-real-bearer",

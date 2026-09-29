@@ -299,15 +299,14 @@ func (c AuthNConfig) ResolveHydraTokenURL() string {
 	return c.ResolveHydraTokenEndpoint()
 }
 
-// DeclaredHydraTokenURL / DeclaredHydraJWKSURL return the address an operator
-// actually WROTE — the YAML setting or its ENV override — and the empty string
-// when neither is set.
+// DeclaredHydraTokenURL returns the address an operator actually WROTE — the
+// YAML setting or its ENV override — and the empty string when neither is set.
 //
-// They exist for the same reason DeclaredHydraAdminURL does: the Resolve* form
+// It exists for the same reason DeclaredHydraAdminURL does: the Resolve* form
 // never returns empty, so "declared" and "guessed" are indistinguishable at the
 // call sites, and the guessed value is the PUBLIC ingress hostname. The
-// production boot guard (validateProductionProviderPublicHops) reads THESE, not
-// the resolved values.
+// production boot guard (validateProductionProviderPublicHops) reads THIS, not
+// the resolved value.
 func (c AuthNConfig) DeclaredHydraTokenURL() string {
 	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
 		return v
@@ -315,16 +314,9 @@ func (c AuthNConfig) DeclaredHydraTokenURL() string {
 	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_TOKEN_URL"))
 }
 
-func (c AuthNConfig) DeclaredHydraJWKSURL() string {
-	if v := strings.TrimSpace(c.HydraJWKSURL); v != "" {
-		return v
-	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_JWKS_URL"))
-}
-
-// ResolveHydraTokenCAFile / ResolveHydraJWKSCAFile — path to the PEM bundle each
-// hop to the provider's PUBLIC listener is verified against. Explicit setting,
-// then ENV; empty when neither is set.
+// ResolveHydraTokenCAFile — path to the PEM bundle the hop to the provider's
+// PUBLIC listener is verified against. Explicit setting, then ENV; empty when
+// neither is set.
 //
 // Deliberately NOT derived from any other path (not even from the admin hop's
 // anchor, which happens to be the same bundle today): an anchor that is always
@@ -335,37 +327,6 @@ func (c AuthNConfig) ResolveHydraTokenCAFile() string {
 		return v
 	}
 	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_TOKEN_CA_FILE"))
-}
-
-func (c AuthNConfig) ResolveHydraJWKSCAFile() string {
-	if v := strings.TrimSpace(c.HydraJWKSCAFile); v != "" {
-		return v
-	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_JWKS_CA_FILE"))
-}
-
-// ResolveHydraJWKSURL — the upstream Hydra PUBLIC JWKS URL the cluster-internal
-// jwks-proxy listener mirrors (`GET /.well-known/jwks.json`). Precedence mirrors
-// ResolveHydraTokenURL: the explicit `authn.hydra-jwks-url` / ENV
-// KANAME_HYDRA_JWKS_URL override (a cluster-internal Service, e.g.
-// http://kacho-umbrella-hydra-public.<ns>.svc:4444/.well-known/jwks.json), then the
-// derived `<issuer>/.well-known/jwks.json` (back-compat).
-//
-// Провайдер остаётся подписантом СВОЕЙ записи, и зеркало байт-в-байт: отдаются
-// его настоящие подписные kid. Меняется только сетевая цель — `iss`
-// проверенного токена остаётся внешним издателем.
-//
-// Здесь стояло «iam has no keyset of its own — it mints nothing». Это верно про
-// ЗЕРКАЛО и неверно про платформу: у неё своя ключница (`authn.token-signing`),
-// и её набор публикуется ВТОРОЙ записью по своему пути
-// (`authn.token-signing.key-set-path`). Утверждение об исключительности,
-// сказанное у одной записи, читается как свойство всей выдачи — и посылает
-// разбирающего искать причину не там.
-func (c AuthNConfig) ResolveHydraJWKSURL() string {
-	if v := c.DeclaredHydraJWKSURL(); v != "" {
-		return v
-	}
-	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/.well-known/jwks.json"
 }
 
 // HooksHTTPListenAddress — normalised listen-addr for the webhook HTTP

@@ -45,136 +45,9 @@
   ],
   "item": [
     {
-      "name": "IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS — The facade publishes — in exactly one of its key-set records — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
+      "name": "IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS — The facade publishes — in its own key-set record — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
       "description": "class:SEC | class:CONF | priority:P0",
       "item": [
-        {
-          "name": "IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS :: facade-jwks",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                ".well-known",
-                "jwks.json"
-              ]
-            }
-          },
-          "protocolProfileBehavior": {
-            "strictSSL": false
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — iamJwksBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — verification lane — the key material the edge verifies with is served by iam', () => {",
-                  "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"facade-jwks: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "function _b64urlToText(s) {",
-                  "  var t = String(s).replace(/-/g, '+').replace(/_/g, '/');",
-                  "  while (t.length % 4 !== 0) { t += '='; }",
-                  "  return CryptoJS.enc.Base64.parse(t).toString(CryptoJS.enc.Utf8);",
-                  "}",
-                  "function _b64urlFromText(s) {",
-                  "  return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(s))",
-                  "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');",
-                  "}",
-                  "function _sentBearer() {",
-                  "  var h = pm.request.headers.get('Authorization') || '';",
-                  "  return h.replace(/^Bearer\\s+/i, '');",
-                  "}",
-                  "const _record = \"mirror\";",
-                  "const _jwks = pm.response.json();",
-                  "pm.test('facade JWKS [' + _record + ']: keys is a non-empty array', () => {",
-                  "  pm.expect(_jwks.keys, JSON.stringify(_jwks)).to.be.an('array');",
-                  "  pm.expect(_jwks.keys.length, 'a facade record serving zero keys verifies nothing')",
-                  "    .to.be.greaterThan(0);",
-                  "});",
-                  "const _KTY_ALG = {RSA: 'RS256', EC: 'ES256', OKP: 'EdDSA'};",
-                  "const _KTY_MEMBERS = {RSA: ['n', 'e'], EC: ['crv', 'x', 'y'], OKP: ['crv', 'x']};",
-                  "pm.test('facade JWKS [' + _record + ']: every key is ASYMMETRIC verification material — kty and alg agree, and the public half is complete', () => {",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    pm.expect(Object.keys(_KTY_ALG), 'kty ' + k.kty + ' of ' + k.kid +",
-                  "      ' — a facade publishing a symmetric key is publishing a SIGNING SECRET')",
-                  "      .to.include(k.kty);",
-                  "    pm.expect(k.alg, 'alg of ' + k.kid + ' against its key type ' + k.kty +",
-                  "      ' — a key whose header algorithm its material cannot support is the alg-confusion shape seen from the publishing side').to.eql(_KTY_ALG[k.kty]);",
-                  "    pm.expect(k.kid, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
-                  "    (_KTY_MEMBERS[k.kty] || []).forEach(m => pm.expect(k[m], 'member ' + m + ' of ' + k.kid +",
-                  "      ' — an incomplete public half verifies nothing').to.be.a('string').with.length.greaterThan(0));",
-                  "  });",
-                  "});",
-                  "pm.test('facade JWKS [' + _record + ']: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
-                  "  const priv = ['d', 'p', 'q', 'dp', 'dq', 'qi'];",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    priv.forEach(m => pm.expect(k[m], 'private JWK member ' + m +",
-                  "      ' on the facade: what is published is what VERIFIES, never what signs').to.be.undefined);",
-                  "  });",
-                  "});",
-                  "pm.environment.set(\"_facadeKids\", JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
-                  "pm.environment.set(\"_facadeByKid\", JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
-                  "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e, crv: k.crv, x: k.x, y: k.y};",
-                  "  return a;",
-                  "}, {})));"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS :: facade-own-key-set",
           "request": {
@@ -402,25 +275,18 @@
                   "pm.test('presented Bearer names a kid', () => {",
                   "  pm.expect(_hdr.kid, JSON.stringify(_hdr)).to.be.a('string').with.length.greaterThan(0);",
                   "});",
-                  "const _mirrorByKid = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
                   "const _ownByKid = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
-                  "pm.test('BOTH facade records were captured (an empty keyset is satisfied by nothing)', () => {",
-                  "  pm.expect(Object.keys(_mirrorByKid).length, 'mirror record, captured by the jwks step')",
-                  "    .to.be.greaterThan(0);",
+                  "pm.test('the facade record was captured (an empty keyset is satisfied by nothing)', () => {",
                   "  pm.expect(Object.keys(_ownByKid).length, 'own record, captured by the jwks step')",
                   "    .to.be.greaterThan(0);",
                   "});",
-                  "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by EXACTLY ONE of its records', () => {",
-                  "  const _serving = [];",
-                  "  if (_mirrorByKid[_hdr.kid]) { _serving.push('mirror'); }",
-                  "  if (_ownByKid[_hdr.kid]) { _serving.push('own'); }",
-                  "  pm.expect(_serving, 'kid ' + _hdr.kid + ' — served by [' + _serving.join(',') + '];'",
-                  "    + ' none means the edge verifies against key material this facade does not publish,'",
-                  "    + ' both means the key of one issuer would verify the token of another'",
-                  "    + ' (records read: mirror=' + Object.keys(_mirrorByKid).length + ', own=' + Object.keys(_ownByKid).length + ')').to.have.lengthOf(1);",
+                  "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by its OWN key-set record', () => {",
+                  "  pm.expect(_ownByKid[_hdr.kid], 'kid ' + _hdr.kid + ' — not in the facade record'",
+                  "    + ' (keys read: ' + Object.keys(_ownByKid).length + '): the edge verifies against'",
+                  "    + ' key material this facade does not publish').to.be.an('object');",
                   "});",
                   "pm.test('the publishing record declares the SAME algorithm the Bearer header names', () => {",
-                  "  const _k = _mirrorByKid[_hdr.kid] || _ownByKid[_hdr.kid];",
+                  "  const _k = _ownByKid[_hdr.kid];",
                   "  pm.expect(_k, 'no facade key published for kid ' + _hdr.kid).to.be.an('object');",
                   "  pm.expect(_k.alg, 'header alg ' + _hdr.alg + ' against the alg the facade publishes for '",
                   "    + _hdr.kid + ' — a header naming an algorithm the key material does not support is'",
@@ -433,405 +299,6 @@
                   "  pm.expect(aud.length, 'aud claim: an audience-less token is not edge-addressed')",
                   "    .to.be.greaterThan(0);",
                   "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER — iam's JWKS-proxy is byte-faithful to the provider's public JWKS (same kids, same moduli) — iam proxies, never mints",
-      "description": "class:SEC | class:CONF | priority:P0",
-      "item": [
-        {
-          "name": "IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER :: facade-jwks-for-mirror",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                ".well-known",
-                "jwks.json"
-              ]
-            }
-          },
-          "protocolProfileBehavior": {
-            "strictSSL": false
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — iamJwksBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — mirror comparison — the facade side of the pair', () => {",
-                  "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"facade-jwks-for-mirror: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "function _b64urlToText(s) {",
-                  "  var t = String(s).replace(/-/g, '+').replace(/_/g, '/');",
-                  "  while (t.length % 4 !== 0) { t += '='; }",
-                  "  return CryptoJS.enc.Base64.parse(t).toString(CryptoJS.enc.Utf8);",
-                  "}",
-                  "function _b64urlFromText(s) {",
-                  "  return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(s))",
-                  "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');",
-                  "}",
-                  "function _sentBearer() {",
-                  "  var h = pm.request.headers.get('Authorization') || '';",
-                  "  return h.replace(/^Bearer\\s+/i, '');",
-                  "}",
-                  "const _record = \"mirror\";",
-                  "const _jwks = pm.response.json();",
-                  "pm.test('facade JWKS [' + _record + ']: keys is a non-empty array', () => {",
-                  "  pm.expect(_jwks.keys, JSON.stringify(_jwks)).to.be.an('array');",
-                  "  pm.expect(_jwks.keys.length, 'a facade record serving zero keys verifies nothing')",
-                  "    .to.be.greaterThan(0);",
-                  "});",
-                  "const _KTY_ALG = {RSA: 'RS256', EC: 'ES256', OKP: 'EdDSA'};",
-                  "const _KTY_MEMBERS = {RSA: ['n', 'e'], EC: ['crv', 'x', 'y'], OKP: ['crv', 'x']};",
-                  "pm.test('facade JWKS [' + _record + ']: every key is ASYMMETRIC verification material — kty and alg agree, and the public half is complete', () => {",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    pm.expect(Object.keys(_KTY_ALG), 'kty ' + k.kty + ' of ' + k.kid +",
-                  "      ' — a facade publishing a symmetric key is publishing a SIGNING SECRET')",
-                  "      .to.include(k.kty);",
-                  "    pm.expect(k.alg, 'alg of ' + k.kid + ' against its key type ' + k.kty +",
-                  "      ' — a key whose header algorithm its material cannot support is the alg-confusion shape seen from the publishing side').to.eql(_KTY_ALG[k.kty]);",
-                  "    pm.expect(k.kid, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
-                  "    (_KTY_MEMBERS[k.kty] || []).forEach(m => pm.expect(k[m], 'member ' + m + ' of ' + k.kid +",
-                  "      ' — an incomplete public half verifies nothing').to.be.a('string').with.length.greaterThan(0));",
-                  "  });",
-                  "});",
-                  "pm.test('facade JWKS [' + _record + ']: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
-                  "  const priv = ['d', 'p', 'q', 'dp', 'dq', 'qi'];",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    priv.forEach(m => pm.expect(k[m], 'private JWK member ' + m +",
-                  "      ' on the facade: what is published is what VERIFIES, never what signs').to.be.undefined);",
-                  "  });",
-                  "});",
-                  "pm.environment.set(\"_facadeKids\", JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
-                  "pm.environment.set(\"_facadeByKid\", JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
-                  "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e, crv: k.crv, x: k.x, y: k.y};",
-                  "  return a;",
-                  "}, {})));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER :: provider-jwks",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                ".well-known",
-                "jwks.json"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — providerPublicBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('providerPublicBaseUrl') || pm.variables.get('providerPublicBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: providerPublicBaseUrl is set — mirror comparison — the provider side of the pair, read by the TEST as an oracle (this is the measurement, not a client path)', () => {",
-                  "    pm.expect.fail('providerPublicBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"provider JWKS: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "const _up = pm.response.json();",
-                  "const _mirror = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
-                  "pm.test('both keysets are non-empty (an equality satisfied by nothing is not an equality)', () => {",
-                  "  pm.expect((_up.keys || []).length, 'provider keys').to.be.greaterThan(0);",
-                  "  pm.expect(Object.keys(_mirror).length, 'facade keys').to.be.greaterThan(0);",
-                  "});",
-                  "const _upBy = (_up.keys || []).reduce((a, k) => { a[k.kid] = k; return a; }, {});",
-                  "pm.test('kid sets are identical in BOTH directions', () => {",
-                  "  const up = Object.keys(_upBy).sort();",
-                  "  const mi = Object.keys(_mirror).sort();",
-                  "  pm.expect(mi, 'facade kids vs provider kids: a kid the facade serves and the '",
-                  "    + 'provider does not is a key iam minted itself').to.eql(up);",
-                  "});",
-                  "pm.test('every mirrored key is the provider key value-for-value (kty/alg/n/e)', () => {",
-                  "  Object.keys(_mirror).forEach(kid => {",
-                  "    const u = _upBy[kid];",
-                  "    pm.expect(u, 'provider has no key ' + kid).to.be.an('object');",
-                  "    pm.expect(_mirror[kid].kty, 'kty of ' + kid).to.eql(u.kty);",
-                  "    pm.expect(_mirror[kid].alg, 'alg of ' + kid).to.eql(u.alg);",
-                  "    pm.expect(_mirror[kid].n, 'modulus of ' + kid + ' differs — the facade is not '",
-                  "      + 'mirroring this key, it is publishing another one').to.eql(u.n);",
-                  "    pm.expect(_mirror[kid].e, 'exponent of ' + kid).to.eql(u.e);",
-                  "  });",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER :: facade-jwks-listener-is-a-narrow-proxy-discovery",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/.well-known/openid-configuration",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                ".well-known",
-                "openid-configuration"
-              ]
-            }
-          },
-          "protocolProfileBehavior": {
-            "strictSSL": false
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — iamJwksBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/openid-configuration');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — mirror lane — the facade listener must NOT be a general provider passthrough, and this is what tells the facade apart from the provider', () => {",
-                  "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"facade listener, provider discovery document: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('the facade JWKS listener does NOT serve the provider discovery document (if it did, this variable points at the provider and the comparison above compared the provider with itself)',",
-                  "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER :: facade-jwks-listener-is-a-narrow-proxy-token-endpoint",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/oauth2/token",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "oauth2",
-                "token"
-              ]
-            }
-          },
-          "protocolProfileBehavior": {
-            "strictSSL": false
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — iamJwksBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/oauth2/token');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — mirror lane — the facade listener must not expose the provider token endpoint', () => {",
-                  "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"facade listener, provider token endpoint: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('the facade JWKS listener does NOT expose the provider token endpoint',",
-                  "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));"
                 ]
               }
             }
@@ -3320,11 +2787,11 @@
       ]
     },
     {
-      "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE — Provider admin-client registration, token endpoint and JWKS are not served by any api-gateway listener (the facade cannot be routed around)",
+      "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE — Provider admin-client registration and token endpoint, and the facade key set, are not served by any api-gateway listener (the facade cannot be routed around)",
       "description": "class:SEC | class:NEG | class:CONF | priority:P0",
       "item": [
         {
-          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: control-facade-serves-the-jwks-path",
+          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: control-facade-serves-the-key-set-path",
           "request": {
             "method": "GET",
             "header": [
@@ -3334,12 +2801,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
+              "raw": "{{baseUrl}}/.well-known/kaname/jwks.json",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 ".well-known",
+                "kaname",
                 "jwks.json"
               ]
             }
@@ -3359,9 +2827,9 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/kaname/jwks.json');",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — IBT-15 positive control — the JWKS path IS served, at the facade listener, so NOT-at-the-edge is isolation and not a misspelling', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — IBT-15 positive control — the key-set path IS served, at the facade listener, so NOT-at-the-edge is isolation and not a misspelling', () => {",
                   "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -3393,7 +2861,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"control-facade-serves-the-jwks-path: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "pm.test(\"control-facade-serves-the-key-set-path: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -3412,7 +2880,7 @@
                   "  var h = pm.request.headers.get('Authorization') || '';",
                   "  return h.replace(/^Bearer\\s+/i, '');",
                   "}",
-                  "const _record = \"mirror\";",
+                  "const _record = \"own\";",
                   "const _jwks = pm.response.json();",
                   "pm.test('facade JWKS [' + _record + ']: keys is a non-empty array', () => {",
                   "  pm.expect(_jwks.keys, JSON.stringify(_jwks)).to.be.an('array');",
@@ -3440,8 +2908,8 @@
                   "      ' on the facade: what is published is what VERIFIES, never what signs').to.be.undefined);",
                   "  });",
                   "});",
-                  "pm.environment.set(\"_facadeKids\", JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
-                  "pm.environment.set(\"_facadeByKid\", JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
+                  "pm.environment.set(\"_facadeOwnKids\", JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
+                  "pm.environment.set(\"_facadeOwnByKid\", JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
                   "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e, crv: k.crv, x: k.x, y: k.y};",
                   "  return a;",
                   "}, {})));"
@@ -3810,7 +3278,7 @@
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/admin/clients');",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface must not be reachable on the internal listener either', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface or the facade key set must not be reachable on the internal listener either', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -4039,7 +3507,7 @@
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/oauth2/token');",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface must not be reachable on the internal listener either', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface or the facade key set must not be reachable on the internal listener either', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -4108,7 +3576,7 @@
           ]
         },
         {
-          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: provider-jwks-at-the-edge-on-public",
+          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: key-set-at-the-edge-on-public",
           "request": {
             "method": "GET",
             "header": [
@@ -4118,12 +3586,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
+              "raw": "{{baseUrl}}/.well-known/kaname/jwks.json",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 ".well-known",
+                "kaname",
                 "jwks.json"
               ]
             }
@@ -4171,7 +3640,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"/.well-known/jwks.json on the public listener: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the public listener: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4186,17 +3655,17 @@
                   "    violation: v.type, action: (info.metadata || {}).action",
                   "  });",
                   "}",
-                  "pm.test(\"/.well-known/jwks.json on the public listener: NEVER 2xx \\u2014 there is no door here\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the public listener: NEVER 2xx \\u2014 there is no door here\", () => {",
                   "  pm.expect(pm.response.code, pm.response.text()).to.not.be.within(200, 299);",
                   "});",
-                  "pm.test(\"/.well-known/jwks.json on the public listener: refused with the SAME SHAPE as a nonsense path on the same listener \\u2014 i.e. the address is not a routed endpoint at all\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the public listener: refused with the SAME SHAPE as a nonsense path on the same listener \\u2014 i.e. the address is not a routed endpoint at all\", () => {",
                   "  const ctl = pm.environment.get('_ibtCtlPublic2');",
                   "  pm.expect(ctl, 'control shape not captured — the control step did not run').to.be.a('string');",
                   "  pm.expect(_refusalShape(pm.response),",
                   "    'this address answers DIFFERENTLY from a typo on the same listener: something '",
                   "    + 'is routed here. Body: ' + pm.response.text()).to.eql(ctl);",
                   "});",
-                  "pm.test(\"/.well-known/jwks.json on the public listener: the refusal carries an EMPTY action \\u2014 no permission-catalog entry, so no such RPC is exposed\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the public listener: the refusal carries an EMPTY action \\u2014 no permission-catalog entry, so no such RPC is exposed\", () => {",
                   "  const j = pm.response.json();",
                   "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
                   "  pm.expect(info, JSON.stringify(j)).to.be.an('object');",
@@ -4208,7 +3677,7 @@
           ]
         },
         {
-          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: provider-jwks-at-the-edge-on-internal",
+          "name": "IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE :: key-set-at-the-edge-on-internal",
           "request": {
             "method": "GET",
             "header": [
@@ -4218,12 +3687,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
+              "raw": "{{baseUrl}}/.well-known/kaname/jwks.json",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 ".well-known",
+                "kaname",
                 "jwks.json"
               ]
             }
@@ -4248,9 +3718,9 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('internalBaseUrl') || pm.variables.get('internalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/kaname/jwks.json');",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface must not be reachable on the internal listener either', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: internalBaseUrl is set — IBT-15 — a provider surface or the facade key set must not be reachable on the internal listener either', () => {",
                   "    pm.expect.fail('internalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -4282,7 +3752,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"/.well-known/jwks.json on the internal listener: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the internal listener: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
                   "    .to.be.a('number');",
@@ -4297,17 +3767,17 @@
                   "    violation: v.type, action: (info.metadata || {}).action",
                   "  });",
                   "}",
-                  "pm.test(\"/.well-known/jwks.json on the internal listener: NEVER 2xx \\u2014 there is no door here\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the internal listener: NEVER 2xx \\u2014 there is no door here\", () => {",
                   "  pm.expect(pm.response.code, pm.response.text()).to.not.be.within(200, 299);",
                   "});",
-                  "pm.test(\"/.well-known/jwks.json on the internal listener: refused with the SAME SHAPE as a nonsense path on the same listener \\u2014 i.e. the address is not a routed endpoint at all\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the internal listener: refused with the SAME SHAPE as a nonsense path on the same listener \\u2014 i.e. the address is not a routed endpoint at all\", () => {",
                   "  const ctl = pm.environment.get('_ibtCtlInternal2');",
                   "  pm.expect(ctl, 'control shape not captured — the control step did not run').to.be.a('string');",
                   "  pm.expect(_refusalShape(pm.response),",
                   "    'this address answers DIFFERENTLY from a typo on the same listener: something '",
                   "    + 'is routed here. Body: ' + pm.response.text()).to.eql(ctl);",
                   "});",
-                  "pm.test(\"/.well-known/jwks.json on the internal listener: the refusal carries an EMPTY action \\u2014 no permission-catalog entry, so no such RPC is exposed\", () => {",
+                  "pm.test(\"/.well-known/kaname/jwks.json on the internal listener: the refusal carries an EMPTY action \\u2014 no permission-catalog entry, so no such RPC is exposed\", () => {",
                   "  const j = pm.response.json();",
                   "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
                   "  pm.expect(info, JSON.stringify(j)).to.be.an('object');",
@@ -4324,133 +3794,6 @@
       "name": "IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED — Anonymous, alg=none and an HS256 alg-confusion forgery of the SAME payload keyed with the facade's own published material are all 401; the untouched facade Bearer is 200",
       "description": "class:SEC | class:NEG | class:CONF | priority:P0",
       "item": [
-        {
-          "name": "IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED :: facade-jwks-for-forgery",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/.well-known/jwks.json",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                ".well-known",
-                "jwks.json"
-              ]
-            }
-          },
-          "protocolProfileBehavior": {
-            "strictSSL": false
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — iamJwksBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('iamJwksBaseUrl') || pm.variables.get('iamJwksBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/jwks.json');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — IBT-10 — the public material used as the HMAC key of the alg-confusion forgery, mirror record', () => {",
-                  "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"facade-jwks-for-forgery: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
-                  "  pm.expect(pm.response && pm.response.code,",
-                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
-                  "    .to.be.a('number');",
-                  "});",
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "function _b64urlToText(s) {",
-                  "  var t = String(s).replace(/-/g, '+').replace(/_/g, '/');",
-                  "  while (t.length % 4 !== 0) { t += '='; }",
-                  "  return CryptoJS.enc.Base64.parse(t).toString(CryptoJS.enc.Utf8);",
-                  "}",
-                  "function _b64urlFromText(s) {",
-                  "  return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(s))",
-                  "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');",
-                  "}",
-                  "function _sentBearer() {",
-                  "  var h = pm.request.headers.get('Authorization') || '';",
-                  "  return h.replace(/^Bearer\\s+/i, '');",
-                  "}",
-                  "const _record = \"mirror\";",
-                  "const _jwks = pm.response.json();",
-                  "pm.test('facade JWKS [' + _record + ']: keys is a non-empty array', () => {",
-                  "  pm.expect(_jwks.keys, JSON.stringify(_jwks)).to.be.an('array');",
-                  "  pm.expect(_jwks.keys.length, 'a facade record serving zero keys verifies nothing')",
-                  "    .to.be.greaterThan(0);",
-                  "});",
-                  "const _KTY_ALG = {RSA: 'RS256', EC: 'ES256', OKP: 'EdDSA'};",
-                  "const _KTY_MEMBERS = {RSA: ['n', 'e'], EC: ['crv', 'x', 'y'], OKP: ['crv', 'x']};",
-                  "pm.test('facade JWKS [' + _record + ']: every key is ASYMMETRIC verification material — kty and alg agree, and the public half is complete', () => {",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    pm.expect(Object.keys(_KTY_ALG), 'kty ' + k.kty + ' of ' + k.kid +",
-                  "      ' — a facade publishing a symmetric key is publishing a SIGNING SECRET')",
-                  "      .to.include(k.kty);",
-                  "    pm.expect(k.alg, 'alg of ' + k.kid + ' against its key type ' + k.kty +",
-                  "      ' — a key whose header algorithm its material cannot support is the alg-confusion shape seen from the publishing side').to.eql(_KTY_ALG[k.kty]);",
-                  "    pm.expect(k.kid, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
-                  "    (_KTY_MEMBERS[k.kty] || []).forEach(m => pm.expect(k[m], 'member ' + m + ' of ' + k.kid +",
-                  "      ' — an incomplete public half verifies nothing').to.be.a('string').with.length.greaterThan(0));",
-                  "  });",
-                  "});",
-                  "pm.test('facade JWKS [' + _record + ']: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
-                  "  const priv = ['d', 'p', 'q', 'dp', 'dq', 'qi'];",
-                  "  (_jwks.keys || []).forEach(k => {",
-                  "    priv.forEach(m => pm.expect(k[m], 'private JWK member ' + m +",
-                  "      ' on the facade: what is published is what VERIFIES, never what signs').to.be.undefined);",
-                  "  });",
-                  "});",
-                  "pm.environment.set(\"_facadeKids\", JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
-                  "pm.environment.set(\"_facadeByKid\", JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
-                  "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e, crv: k.crv, x: k.x, y: k.y};",
-                  "  return a;",
-                  "}, {})));"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED :: facade-own-key-set-for-forgery",
           "request": {
@@ -4490,7 +3833,7 @@
                   "if (__cfgUrl) {",
                   "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/.well-known/kaname/jwks.json');",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — IBT-10 — the same, for the OWN record of the facade: the kid that signed the accepted Bearer may be published by either', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamJwksBaseUrl is set — IBT-10 — the public material used as the HMAC key of the alg-confusion forgery, from the OWN record of the facade', () => {",
                   "    pm.expect.fail('iamJwksBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -4893,9 +4236,8 @@
                   "  return '';",
                   "}",
                   "function _facadeKeyByKid(kid) {",
-                  "  const _m = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
                   "  const _o = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
-                  "  return _m[kid] || _o[kid] || null;",
+                  "  return _o[kid] || null;",
                   "}",
                   "const _real = pm.environment.get('_ibtRealBearer') || '';",
                   "const _p = _real.split('.');",

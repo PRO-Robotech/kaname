@@ -378,11 +378,9 @@ const issuingListenerRootGuardReason = "режим слушателя выдач
 	"истекает, когда страж корня станет достижим стражу настройки"
 
 var restatedDeliberately = map[string]string{
-	// КОНТУРЫ К ВНЕШНЕМУ ПОСТАВЩИКУ — одна причина на все шесть записей.
+	// КОНТУРЫ К ВНЕШНЕМУ ПОСТАВЩИКУ — одна причина на все четыре записи.
 	"env.KANAME_HYDRA_ADMIN_URL":     withdrawnProviderRoadReason,
 	"env.KANAME_HYDRA_ADMIN_CA_FILE": withdrawnProviderRoadReason,
-	"env.KANAME_HYDRA_JWKS_URL":      withdrawnProviderRoadReason,
-	"env.KANAME_HYDRA_JWKS_CA_FILE":  withdrawnProviderRoadReason,
 	"env.KANAME_HYDRA_TOKEN_URL":     withdrawnProviderRoadReason,
 	"env.KANAME_HYDRA_TOKEN_CA_FILE": withdrawnProviderRoadReason,
 	// ПОЛОСА ВХОДА ПАРОЛЕМ — одна причина на все записи, и она названа у каждой:
@@ -505,7 +503,7 @@ var restatedDeliberately = map[string]string{
 		"колонки — provider_admin_pair_test.go, и она краснеет ровно на снятии этой строки " +
 		"из поставляемого профиля",
 	// Ручка ЗАВЕДЕНА задачей #2476: профиль включает свою чеканку, а вместе с ней
-	// на слушателе зеркала ключей поднимается АВТОРИТЕТ ОТЗЫВА. Без неё боевая
+	// на слушателе публикатора ключей поднимается АВТОРИТЕТ ОТЗЫВА. Без неё боевая
 	// посадка не стартовала НИ ПРИ КАКОМ входе — и проба профиля этого не видела,
 	// потому что условие жило встроенной ветвью подъёма, а не именованным стражем.
 	"env.KANAME_JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE": "ручка НЕСУЩАЯ, но её страж " +

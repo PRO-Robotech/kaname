@@ -178,14 +178,11 @@ type APIServerConfig struct {
 	// Умолчания нет по той же причине, что у публичного.
 	InternalRESTEndpoint string `mapstructure:"internal-rest-endpoint"`
 	// JWKSProxy — the cluster-INTERNAL key-set publisher HTTP listener (default
-	// `tcp://0.0.0.0:9097`). Записей у него ДВЕ, каждая по своему объявленному
-	// пути: зеркало ПУБЛИЧНОГО набора провайдера на каноническом
-	// `GET /.well-known/jwks.json` и НАША — проекция ключницы iam по
-	// `authn.token-signing.key-set-path`. Плоскость данных берёт ключи проверки у
-	// iam и никогда не звонит провайдеру напрямую.
+	// `tcp://0.0.0.0:9097`). Запись у него ОДНА — НАША, проекция ключницы iam по
+	// `authn.token-signing.key-set-path`; запись зеркала набора прежнего
+	// провайдера снята вместе с ним (kaname#361). Плоскость данных берёт ключи
+	// проверки у iam.
 	//
-	// Здесь стояло «while Hydra stays the issuer/signer» — утверждение верно про
-	// ЗАПИСЬ ЗЕРКАЛА и неверно про платформу: свои токены она подписывает сама.
 	// Разбор — в шапке jwks_proxy.go, второго места об этом предмете здесь нет.
 	//
 	// Served ONLY on the cluster-internal `kaname-internal` Service (never
@@ -379,18 +376,15 @@ type AuthNConfig struct {
 	// спросить (задача #2471).
 	ProviderAdminAuth string `mapstructure:"provider-admin-auth"`
 	HydraTokenURL     string `mapstructure:"hydra-token-url"`
-	// HydraTokenCAFile / HydraJWKSCAFile — the same anchor discipline for the two
-	// hops to the provider's PUBLIC listener: the token exchange (a signed client
-	// assertion out, the minted bearer back) and the JWKS upstream (the keyset the
-	// data-plane verifies every token against). Empty ⇒ the default transport,
+	// HydraTokenCAFile — the same anchor discipline for the hop to the provider's
+	// PUBLIC listener: the token exchange (a signed client assertion out, the
+	// minted bearer back). Empty ⇒ the default transport,
 	// which is what a plaintext in-cluster address needs and all it needs. Set ⇒
 	// the bundle becomes the ONLY anchor, and one that cannot be read refuses the
 	// start rather than falling back to the system roots — that fallback is the
 	// state nobody can see, because the operator configured verification against
 	// the internal CA and the process is not doing it.
 	HydraTokenCAFile        string `mapstructure:"hydra-token-ca-file"`
-	HydraJWKSURL            string `mapstructure:"hydra-jwks-url"`
-	HydraJWKSCAFile         string `mapstructure:"hydra-jwks-ca-file"`
 	HookSharedSecret        string `mapstructure:"hook-shared-secret"`
 	HookSharedSecretEnv     string `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`

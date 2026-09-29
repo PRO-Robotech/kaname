@@ -655,7 +655,6 @@ secrets:
     secretKey: jwks-encryption-key-hex
 env:
   KANAME_HYDRA_ADMIN_URL: "https://127.0.0.1:14445"
-  KANAME_HYDRA_JWKS_URL: "https://127.0.0.1:14444/.well-known/jwks.json"
   KANAME_HYDRA_TOKEN_URL: "https://127.0.0.1:14444/oauth2/token"
 EOF
 	rm -f "$WORK/values.stand-own.yaml"

@@ -235,13 +235,13 @@ func TestProviderTokenClient_UnusableAnchor_RefusesNamingTheSetting(t *testing.T
 	}
 }
 
-// The JWKS upstream is built from the same helper, so the mirror gets the same
-// property: a client pinned to one authority will not accept a keyset served by
-// another. The handler-level consequence (fail-closed 502 rather than a cached
-// substitute) is asserted in the jwksproxyhttp package.
+// Every hop to the provider is built from the same helper, so each gets the same
+// property: a client pinned to one authority will not accept a peer certified by
+// another. The setting named here is the helper's input only — the refusal text
+// carries it, and this case asserts the pool, not the text.
 func TestProviderHopHTTPClient_PinnedAnchorIsTheOnlyPool(t *testing.T) {
 	ca := newTestCA(t, "kacho-internal-ca")
-	c, err := clients.ProviderHopHTTPClient(5*time.Second, ca.caPEMPath, clients.JWKSHopCASetting)
+	c, err := clients.ProviderHopHTTPClient(5*time.Second, ca.caPEMPath, "authn.probe-ca-file (env KANAME_PROBE_CA_FILE)")
 	if err != nil {
 		t.Fatalf("a usable anchor must be accepted, got: %v", err)
 	}

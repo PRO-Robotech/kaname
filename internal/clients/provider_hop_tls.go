@@ -7,9 +7,9 @@
 //
 // It exists because there were three hops and one of them had the property. The
 // admin hop was moved to TLS with a pinned anchor and a boot guard; the two hops to
-// the provider's PUBLIC listener — the token exchange and the JWKS upstream — were
-// still built as `&http.Client{Timeout: …}`, i.e. with no way to be given an anchor
-// at all. That is not merely a missing knob: it made the obvious fix impossible,
+// the provider's PUBLIC listener — the token exchange and the key-set mirror's
+// upstream (since removed with the mirror, kaname#361) — were still built as
+// `&http.Client{Timeout: …}`, i.e. with no way to be given an anchor at all. That is not merely a missing knob: it made the obvious fix impossible,
 // because flipping such an address to https lands on the SYSTEM roots, which an
 // internal-CA certificate never chains to. So "cannot be done" was true of the
 // code and read as true of the platform.
@@ -37,10 +37,6 @@ const (
 	// matches on the identifier containing "token". Same class, and same treatment,
 	// as the header/metadata key names in gateway/internal/principalmeta/keys.go.
 	tokenHopCASetting = "authn.hydra-token-ca-file (env KANAME_HYDRA_TOKEN_CA_FILE)"
-	// JWKSHopCASetting is exported because the JWKS upstream client is assembled
-	// at the composition root (the mirror handler takes an injected client), so
-	// the refusal has to be able to name the setting from there.
-	JWKSHopCASetting = "authn.hydra-jwks-ca-file (env KANAME_HYDRA_JWKS_CA_FILE)"
 )
 
 // ProviderHopHTTPClient builds the HTTP client for one hop to the identity

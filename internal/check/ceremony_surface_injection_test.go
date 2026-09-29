@@ -730,7 +730,7 @@ func ceremonyInjections() []ceremonyInjection {
 
 		{"I6b_root_delegation", func(f *ceremonyFixture) {
 			serve(f, anchorIntrospect, `jwksMux.Handle("/", registryTokenHandler)`)
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "зеркало публичных ключей"}},
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "публикатор набора ключей"}},
 
 		{"I7_trailing_slash", func(f *ceremonyFixture) {
 			serve(f, anchorMetrics, `metricsMux.Handle("/iam/v1/authorize/", authorizehttp.New())`)
@@ -767,7 +767,7 @@ func ceremonyInjections() []ceremonyInjection {
 			f.insertBefore(ceremonyRootDir, "serve.go", "", anchorBinding,
 				"records = append(records, jwksproxyhttp.Record{Issuer: \"https://probe.invalid\", "+
 					"Path: authorizehttp.AuthorizePath, Handler: authorizehttp.New()})")
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "зеркало публичных ключей"}},
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "публикатор набора ключей"}},
 
 		{"I14_gateway_http_rule", func(f *ceremonyFixture) {
 			f.replaceExpr("pkg/api/kaname/cloud/iam/v1", "authorize_service.pb.gw.go", "",
@@ -1394,7 +1394,7 @@ func TestCeremonySurfaceFindingNamesBothRegistrations(t *testing.T) {
 	requireFinding(t, report,
 		fixtureAuthorizePath,
 		"«выдача токенов (/iam/token, /iam/v1/token)» "+reachExternalMark,
-		"«зеркало публичных ключей проверки (/.well-known/jwks.json)» "+reachInternalMark,
+		"«публикатор набора ключей проверки (authn.token-signing.key-set-path)» "+reachInternalMark,
 		fmt.Sprintf("cmd/kaname/serve.go:%d", mountLine),
 		fmt.Sprintf("cmd/kaname/serve.go:%d", injLine))
 }
