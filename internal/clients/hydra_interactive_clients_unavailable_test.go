@@ -118,10 +118,10 @@ func TestInteractiveProvider_RejectedInput_StaysTerminal(t *testing.T) {
 			t.Fatalf("%d: отвергнутый вход объявлен повторяемым (%v) — одинаковый повтор "+
 				"не изменит ни одного из входов, и вызывающий будет повторять вечно", code, err)
 		}
-		var apiErr *HydraAPIError
+		var apiErr *ProviderAPIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != code {
 			t.Fatalf("%d: отказ поставщика перестал быть распознаваемым по коду (%v) — "+
-				"на этом признаке стоит идемпотентность создания (409 у *HydraAPIError)", code, err)
+				"на этом признаке стоит идемпотентность создания (409 у *ProviderAPIError)", code, err)
 		}
 	}
 }

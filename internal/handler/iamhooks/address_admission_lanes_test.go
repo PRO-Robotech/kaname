@@ -35,17 +35,17 @@ func TestEV65_UnverifiedOwnerGetsNoTokenOnAnyIssuanceLane(t *testing.T) {
 	users := cutoffUser()
 	uoc := domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair, ID: laneOurUserKey, UserID: cutoffUserID,
-		OAuthClientID: laneUserMirror, CreatedAt: keyIssued,
+		CreatedAt: keyIssued,
 	}
 	soc := domain.ServiceAccountOAuthClient{
-		CredentialKind: domain.CredentialKindKeypair, ID: laneOurSAKey, SvaID: laneSAID, OAuthClientID: laneSAMirror,
+		CredentialKind: domain.CredentialKindKeypair, ID: laneOurSAKey, SvaID: laneSAID,
 	}
 	sa := domain.ServiceAccount{ID: laneSAID, AccountID: cutoffAccountID, Enabled: true}
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"}, users,
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"}, users,
 	).
-		WithUserTokenPort(&fakeUserTokenPort{client: uoc, user: users.users[0]}).
-		WithSAPort(&fakeIssuanceSAPort{clientID: laneSAMirror, mapping: soc, sa: sa}).
+		WithUserTokenPort(&fakeUserTokenPort{user: users.users[0]}).
+		WithSAPort(&fakeIssuanceSAPort{clientID: laneOurSAKey, mapping: soc, sa: sa}).
 		WithOwnClientPort(laneOwnClients{uoc: uoc, soc: soc})
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -81,7 +81,7 @@ func TestEV65_UnverifiedOwnerGetsNoTokenOnAnyIssuanceLane(t *testing.T) {
 		// Хук выпуска: сессия человека.
 		audit := &fakeAudit{}
 		hook := iamhooks.NewTokenHookHandler(iamhooks.TokenHookConfig{
-			HookSharedSecret: issuanceHookSecret, Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud",
+			HookSharedSecret: issuanceHookSecret, Domain: "api.test.cloud",
 		}, enricher, revs, audit, discard)
 		body := capturedBody(t, "provider-token-hook-authorization-code.json")
 		sessionClaims(t, body)["auth_time"] = sessionAt.Format(time.RFC3339)
@@ -101,7 +101,7 @@ func TestEV65_UnverifiedOwnerGetsNoTokenOnAnyIssuanceLane(t *testing.T) {
 		sessionClaims(t, rbody)["auth_time"] = sessionAt.Format(time.RFC3339)
 		raudit := &fakeAudit{}
 		rh := iamhooks.NewRefreshHookHandler(iamhooks.RefreshHookConfig{
-			HookSharedSecret: "secret", Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud",
+			HookSharedSecret: "secret", Domain: "api.test.cloud",
 		}, users, enricher, revs, raudit, discard)
 		rw := postCapturedRefresh(t, rh, rbody)
 		if verified {

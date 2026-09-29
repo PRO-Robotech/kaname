@@ -51,7 +51,7 @@ type stubMappedSA struct {
 	sa    domain.ServiceAccount
 }
 
-func (s stubMappedSA) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (s stubMappedSA) LookupByClientID(_ context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	if s.found {
 		return s.soc, nil
 	}
@@ -66,12 +66,8 @@ func (s stubMappedSA) FindByExternalSubject(_ context.Context, _, _ string) (dom
 	return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no trusted subject")
 }
 
-// stubUserTokens — personal-access-token mapping lookup; resolves nothing.
+// stubUserTokens — owner read of a personal access token; resolves nothing.
 type stubUserTokens struct{}
-
-func (stubUserTokens) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such user-token client")
-}
 
 func (stubUserTokens) GetUser(_ context.Context, _ domain.UserID) (domain.User, error) {
 	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such user")
@@ -84,14 +80,13 @@ func newFullyWiredTokenHook(t *testing.T, users *fakeUserLookup, sas stubMappedS
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).WithSAPort(sas).WithUserTokenPort(stubUserTokens{})
 	return iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
 		newFakeRevocations(),
@@ -275,7 +270,6 @@ func TestTokenHook_ClientCredentials_MappedSAKey_StillMints(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "soc_01abcdefghjkmnpqr",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

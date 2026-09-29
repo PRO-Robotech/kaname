@@ -136,11 +136,10 @@ func TestBAT1_21_TheSecretIsInNoWrittenPath(t *testing.T) {
 		t.Error("хеш строки не признаёт выданную секретную часть")
 	}
 	for name, v := range map[string]string{
-		"public_key_pem":  row.PublicKeyPEM,
-		"key_algorithm":   row.KeyAlgorithm,
-		"description":     string(row.Description),
-		"name":            string(row.Name),
-		"hydra_client_id": string(row.OAuthClientID),
+		"public_key_pem": row.PublicKeyPEM,
+		"key_algorithm":  row.KeyAlgorithm,
+		"description":    string(row.Description),
+		"name":           string(row.Name),
 	} {
 		if v != "" && strings.Contains(v, p.SecretPart) {
 			t.Errorf("секретная часть найдена в колонке %s", name)
@@ -189,14 +188,17 @@ func TestBAT1_11_UnnamedKindKeepsTheKeypairBehaviourVerbatim(t *testing.T) {
 	}
 }
 
-// BAT-1-14 — LEGACY, названный явно, отвергается ВСЕГДА и с именем поля.
+// BAT-1-14 — LEGACY, названный явно, отвергается ВСЕГДА и с именем поля. Вид
+// снят из словаря вместе со столбцом имени клиента у прежнего издателя
+// (kaname#362), и отвергается он теперь как значение вне словаря — тем же
+// кодом и с тем же именем поля.
 func TestBAT1_14_ExplicitLegacyKindIsRefusedWithTheFieldName(t *testing.T) {
 	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
 		CreatedByUserID: "usr00000000000000001",
-		CredentialKind:  domain.CredentialKindLegacy,
+		CredentialKind:  domain.CredentialKind("LEGACY"),
 	})
 	if err == nil {
 		t.Fatal("вид LEGACY выпущен — его не производит ни один глагол")

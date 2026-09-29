@@ -4,8 +4,10 @@
 // hydra_admin_client.go — client for the Ory Hydra Admin API.
 //
 // Carries the shared connection config (base URL, bearer, HTTP client) for the
-// Hydra admin surfaces iam actually drives, each in its own file:
-//   - hydra_oauth_clients.go — OAuth2 client lifecycle (/admin/clients).
+// Hydra admin surfaces iam actually drives, and the OAuth2 client lifecycle
+// itself (/admin/clients: CreateOAuthClient, DeleteOAuthClient — below). The
+// wire types that lifecycle carries live under the port's role name, in
+// provider_oauth_clients.go.
 //
 // It no longer publishes or deletes JWKs, и причина — НЕ в том, что своих
 // ключей у платформы нет.
@@ -29,6 +31,12 @@
 package clients
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -117,4 +125,128 @@ func NewHydraAdminClientWithCA(baseURL, bearerToken, caFile string) (*HydraAdmin
 	}
 	c.HTTPClient = httpClient
 	return c, nil
+}
+
+// CreateOAuthClient registers a new client_credentials OAuth2 client with
+// Hydra.
+//
+// When `req.TokenEndpointAuthMethod == "private_key_jwt"` the
+// caller supplies `req.JWKS` with the public half of the keypair; Hydra
+// validates `client_assertion` (RFC 7521/7523) signatures against it and
+// returns NO `client_secret`. Otherwise (legacy `client_secret_basic`)
+// Hydra mints + returns the plaintext `client_secret` exactly once.
+func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAuthClientRequest) (ProviderOAuthClient, error) {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return ProviderOAuthClient{}, c.refuseAbsentRoad("create-client")
+	}
+	authMethod := req.TokenEndpointAuthMethod
+	if authMethod == "" {
+		authMethod = defaultStr(req.AuthMethod, "client_secret_basic")
+	}
+	grants := req.GrantTypes
+	if len(grants) == 0 {
+		grants = []string{"client_credentials"}
+	}
+	responseTypes := req.ResponseTypes
+	if len(responseTypes) == 0 {
+		responseTypes = []string{"token"}
+	}
+	payload := ProviderOAuthClient{
+		ClientID:                    req.ClientID,
+		ClientName:                  req.ClientName,
+		GrantTypes:                  grants,
+		ResponseTypes:               responseTypes,
+		RedirectURIs:                req.RedirectURIs,
+		PostLogoutRedirectURIs:      req.PostLogoutRedirectURIs,
+		Scope:                       req.Scope,
+		Audience:                    req.Audience,
+		Owner:                       req.Owner,
+		TokenEndpointAuthMethod:     authMethod,
+		TokenEndpointAuthSigningAlg: req.TokenEndpointAuthSigningAlg,
+		JWKS:                        req.JWKS,
+		AccessTokenLifespan:         req.AccessTokenLifespan,
+
+		DPoPBoundAccessTokens:                 req.DPoPBoundAccessTokens,
+		TLSClientCertificateBoundAccessTokens: req.TLSClientCertificateBoundAccessTokens,
+	}
+	// #nosec G117 -- client_secret is a legitimate field of the Hydra OAuth2 client-registration payload, not a leaked credential.
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ProviderOAuthClient{}, fmt.Errorf("marshal create-client: %w", err)
+	}
+	url := c.BaseURL + "/admin/clients"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return ProviderOAuthClient{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.BearerToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.BearerToken)
+	}
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		c.observeTransportFailure()
+		return ProviderOAuthClient{}, fmt.Errorf("hydra create-client: %w", err)
+	}
+	defer resp.Body.Close()
+	c.observeStatus(resp.StatusCode)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode/100 != 2 {
+		return ProviderOAuthClient{}, providerAPIError(resp.StatusCode, respBody)
+	}
+	var out ProviderOAuthClient
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return ProviderOAuthClient{}, fmt.Errorf("unmarshal hydra response: %w", err)
+	}
+	if out.ClientID == "" {
+		return ProviderOAuthClient{}, errors.New("hydra returned empty client_id")
+	}
+	return out, nil
+}
+
+// DeleteOAuthClient revokes an OAuth2 client. Returns nil on success or if
+// Hydra returns 404 (idempotent).
+func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID string) error {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return c.refuseAbsentRoad("delete-client")
+	}
+	url := c.BaseURL + "/admin/clients/" + clientID
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	if c.BearerToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.BearerToken)
+	}
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		c.observeTransportFailure()
+		return fmt.Errorf("hydra delete-client: %w", err)
+	}
+	defer resp.Body.Close()
+	// Учёт стоит ДО развилки: 404 здесь остаётся успехом вызова (см. разбор
+	// размена в provider_road.go), и без учёта он был бы НЕВИДИМ — а именно он
+	// отличает идемпотентное снятие от адреса, по которому наших клиентов нет.
+	c.observeStatus(resp.StatusCode)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return providerAPIError(resp.StatusCode, body)
+	}
+	return nil
+}
+
+func defaultStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }

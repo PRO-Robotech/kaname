@@ -163,7 +163,7 @@ func newIssuanceHook(
 ) *iamhooks.TokenHookHandler {
 	t.Helper()
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	)
 	if sas != nil {
@@ -176,7 +176,6 @@ func newIssuanceHook(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: issuanceHookSecret,
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher, revs, audit,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -301,68 +300,13 @@ func TestTokenHook_NoCutoff_IsIssued(t *testing.T) {
 }
 
 // --- the standing personal credential ---------------------------------------
-
-// TestTokenHook_PersonalToken_IssuedBeforeCutoff_NoUsableToken — a personal
-// access token has no session, so the instant to weigh is its own issuance. One
-// issued BEFORE the administrator forced the owner out is part of what "log
-// this person out everywhere" means.
 //
-// This is the case with no other point of enforcement anywhere: the grant it is
-// presented under has no refresh hook, so a token minted through it is never
-// re-examined after issuance. It also does not depend on where the session's
-// authentication instant is carried — this exchange has no session at all.
-func TestTokenHook_PersonalToken_IssuedBeforeCutoff_NoUsableToken(t *testing.T) {
-	body := capturedBody(t, "provider-token-hook-client-credentials.json")
-	machineShaped(t, body, capturedMachine)
-
-	issued := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	users := cutoffUser()
-	revs := newFakeRevocations()
-	revs.MarkUserRevokedBefore(cutoffUserID, issued.Add(time.Hour))
-	h := newIssuanceHook(t, users, revs, &fakeAudit{}, &fakeUserTokenPort{
-		client: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
-			// словарь таблицы отвергает строку, вида не назвавшую.
-			CredentialKind: domain.CredentialKindKeypair,
-			ID:             "utk_01abcdefghjkmnpqx", UserID: cutoffUserID,
-			OAuthClientID: capturedMachine, CreatedAt: issued,
-		},
-		user: users.users[0],
-	}, nil)
-
-	w := postCaptured(t, h, "/iam/v1/hooks/token", body)
-	require.Equal(t, http.StatusForbidden, w.Code, "body: %s", w.Body.String())
-	claims, any := mintedClaims(t, w)
-	assert.Falsef(t, any, "a personal token predating the force-logout must not mint, got %v", claims)
-}
-
-// TestTokenHook_PersonalToken_IssuedAfterCutoff_IsIssued — the same subject
-// mints a NEW personal token after being forced out. It post-dates the cutoff,
-// so it works: the cutoff ends sessions, it does not brick the account.
-func TestTokenHook_PersonalToken_IssuedAfterCutoff_IsIssued(t *testing.T) {
-	body := capturedBody(t, "provider-token-hook-client-credentials.json")
-	machineShaped(t, body, capturedMachine)
-
-	cutoff := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	users := cutoffUser()
-	revs := newFakeRevocations()
-	revs.MarkUserRevokedBefore(cutoffUserID, cutoff)
-	h := newIssuanceHook(t, users, revs, &fakeAudit{}, &fakeUserTokenPort{
-		client: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
-			// словарь таблицы отвергает строку, вида не назвавшую.
-			CredentialKind: domain.CredentialKindKeypair,
-			ID:             "utk_01abcdefghjkmnpqy", UserID: cutoffUserID,
-			OAuthClientID: capturedMachine, CreatedAt: cutoff.Add(time.Hour),
-		},
-		user: users.users[0],
-	}, nil)
-
-	w := postCaptured(t, h, "/iam/v1/hooks/token", body)
-	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-	_, any := mintedClaims(t, w)
-	assert.True(t, any)
-}
+// A personal access token is no longer presented to this hook: the previous
+// provider registers no personal token, and the branch that resolved one by the
+// provider's client name is gone with its column (kaname#362). Its revoke-all
+// cutoff — weighed against the token's own issuance — is held on the lane that
+// does present it, the platform token endpoint
+// (`revocation_lanes_agree_test.go`, axis «ключ человека»).
 
 // TestTokenHook_ServiceAccountKey_UnaffectedByUserCutoff — a service account's
 // key is not a person's session. Forcing a USER out must not silently disable
@@ -474,19 +418,10 @@ func postCapturedRefresh(t *testing.T, h http.Handler, body map[string]any) *htt
 
 // --- doubles ----------------------------------------------------------------
 
-// fakeUserTokenPort — a personal access token and its owner. It answers
-// NotFound for any other client, so a case cannot pass by the port being
-// indiscriminate.
+// fakeUserTokenPort — the owner of a personal access token. It answers NotFound
+// for any other user, so a case cannot pass by the port being indiscriminate.
 type fakeUserTokenPort struct {
-	client domain.UserOAuthClient
-	user   domain.User
-}
-
-func (f *fakeUserTokenPort) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	if id == f.client.OAuthClientID {
-		return f.client, nil
-	}
-	return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no user token for %s", id)
+	user domain.User
 }
 
 func (f *fakeUserTokenPort) GetUser(_ context.Context, id domain.UserID) (domain.User, error) {
@@ -505,7 +440,7 @@ type fakeIssuanceSAPort struct {
 	sa       domain.ServiceAccount
 }
 
-func (f *fakeIssuanceSAPort) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (f *fakeIssuanceSAPort) LookupByClientID(_ context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	if string(id) == f.clientID {
 		return f.mapping, nil
 	}

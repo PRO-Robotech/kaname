@@ -821,9 +821,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// означает «выведен по одной полосе и работает по другой».
 		WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(pool))
 
-	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
-	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg,
-		metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
+	// ── SAKey wiring (Class A static SA keys of service accounts) ─────────
+	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
@@ -1227,62 +1226,42 @@ func saKeyIssuanceIsOurs(cfg config.Config) bool {
 	return cfg.SAKeyIssuanceIsOurs()
 }
 
-// buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
-// via Hydra OAuth2 client_credentials.
+// buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys of
+// service accounts.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
-	compObs clients.CompensationEmitObserver, roadObs clients.ProviderRoadObserver,
 	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
 
 	// ОТВЕТ О ПОСАДКЕ ПРИНИМАЕТСЯ ЗДЕСЬ.
 	//
-	// Контур выдачи ключей служебных учёток зависит от дороги НЕ ЦЕЛИКОМ, и
-	// измерено это по коду, а не выведено:
+	// Ключевая пара и федеративный ключ обмениваются ТОКЕН-ЭНДПОИНТОМ платформы
+	// (`authn.client-token.enabled`), и другого исполнителя обмена у ключа нет:
+	// регистрация клиента у внешнего поставщика снята вместе со столбцом, где
+	// лежало назначенное им имя (kaname#362). Без эндпоинта эти два вида
+	// отвергаются на выдаче синхронно, с именем ручки; секрет эндпоинта не
+	// требует и выдаётся. Дороги к поставщику эта сборка не строит вовсе.
 	//
-	//   · выдача. `IssueSAKeyUseCase.nameClient` зовёт поставщика ТОЛЬКО на
-	//     непереведённом контуре; на переведённом (`saKeyIssuanceIsOurs`) имя
-	//     клиента чеканим мы, и дорога на этом пути не участвует вовсе;
-	//   · компенсация. Намерение снять созданное адресуется КООРДИНАТОЙ У
-	//     ПОСТАВЩИКА, а на переведённом контуре она пуста — значит намерение не
-	//     записывается, и очередь компенсаций под `own` производителя не имеет;
-	//   · снятие. `RevokeSAKeyUseCase` зовёт поставщика ПОСЛЕ коммита, и его
-	//     отказ глотается намеренно: снятие уже состоялось тем, что строка
-	//     отображения ушла. Отставленная дорога даёт здесь строку в журнале, а
-	//     не отказ вызывающему.
+	// В БОЕВЫХ РЕЖИМАХ ПОСАДКА БЕЗ ЭНДПОИНТА НЕ ПОДНИМАЕТСЯ. Её отвергает
+	// страж старта — строка контура выдачи в таблице требований полос
+	// (`config.LaneRequirements`, задача #337); вердикт стража по режимам держит
+	// `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`, а то, что
+	// отказ стража завершает процесс в `main` до этой сборки, —
+	// `TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring`. Чарт её
+	// не собирает ни в каком режиме (`kaname-svc.requireClientTokenEndpoint`).
 	//
-	// НЕ ИСПОЛНЯЕТСЯ ОДНА КОМБИНАЦИЯ: посадка `own` при НЕпереведённом контуре
-	// (`authn.client-token.enabled` не включён). Там выдача уходит к
-	// поставщику, которого нет, и отказывает на всяком входе.
-	//
-	// В БОЕВЫХ РЕЖИМАХ ВЕТВЬ НИЖЕ НЕДОСТИЖИМА, и держится это двумя половинами.
-	// Комбинацию отвергает страж старта — строка контура выдачи в таблице
-	// требований полос (`config.LaneRequirements`, задача #337); вердикт стража
-	// по режимам держит `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
-	// Отказ стража завершает процесс в `main` до этой сборки; порядок держит
-	// `TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring`, исполняя
-	// настоящий `main` в дочернем процессе. Чарт её не собирает ни в каком режиме
-	// (`kaname-svc.requireClientTokenEndpoint`, та же задача): на стенде,
-	// поставленном чартом, ветвь не исполняется.
-	//
-	// ДОСТИЖИМА ОНА В РЕЖИМЕ РАЗРАБОТЧИКА. Требования полосы вне боевых режимов
-	// не предъявляются (внутрипроцессная фикстура стендом не является), и
-	// процесс с этой комбинацией поднимается. Второго отказа старта здесь не
-	// заводится: у комбинации он один и живёт в таблице полос, а второй, в
-	// сборке, был бы вторым местом об одном предмете и разошёлся бы с первым
-	// по режиму. Поэтому ответ о посадке ЧИТАЕТСЯ: неработающая комбинация
-	// называется при старте, один раз и с обеими ручками, — молчание здесь
-	// оставило бы дефект до пути запроса. Что в этом режиме предупреждение
-	// печатается ровно один раз и называет, чем снимается, держит та же
-	// `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
-	hydraAdmin, providerRoadBuilt := mustProviderAdminClient(cfg, roadObs)
-	if !providerRoadBuilt && !saKeyIssuanceIsOurs(cfg) {
-		logger.Warn("выдача ключей служебных учёток на этой посадке не исполняется: "+
-			"внешнего поставщика нет, а контур выдачи на свою чеканку не переведён — "+
-			"всякая выдача отказывает обращением к дороге, которой не существует",
+	// В РЕЖИМЕ РАЗРАБОТЧИКА ОНА ПОДНИМАЕТСЯ, и потому неработающая выдача
+	// называется при старте один раз, с ручкой, которой снимается: молчание
+	// оставило бы дефект до пути запроса. Второго отказа старта здесь не
+	// заводится — у комбинации он один и живёт в таблице полос.
+	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	if !ownIssuance {
+		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток на этой посадке "+
+			"отказывает: ключ обменивается токен-эндпоинтом платформы, а он не включён — "+
+			"выдаётся только секрет",
 			"authn.identity-provider", cfg.AuthN.IdentityProvider.String(),
 			"authn.client-token.enabled", cfg.AuthN.ClientToken.Enabled,
 			"снимается", "включением authn.client-token.enabled — контур выдачи на свою чеканку "+
-				"(задача kacho#1120) — либо объявлением внешнего поставщика")
+				"(задача kacho#1120)")
 	}
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
@@ -1290,20 +1269,12 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// key-mapping mutation (запрет #10). Payload carries no key material.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
-	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
-	// Переведён ли контур выдачи ключей на свою чеканку (задача kacho#1120). Решается
-	// ЗДЕСЬ, в единственном месте сборки: «переведён» — свойство посадки, и
-	// use-case его не выводит.
-	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
+	// Есть ли у посадки токен-эндпоинт — решается ЗДЕСЬ, в единственном месте
+	// сборки: это свойство посадки, и use-case его не выводит.
 	if ownIssuance {
 		issueUC.WithOwnIssuance()
 	}
-	// Always whitelist the configured registry service audience on every issued
-	// SA-key's Hydra client (#320) — the SAME value the `/iam/token` Docker-
-	// Registry shim requests during the client_credentials exchange
-	// (serve.go passes it as registrytokenwire.BuildConfig.Service). Without it
-	// Hydra rejects a docker-login exchange as an un-whitelisted audience.
-	issueUC.RegistryAudience = cfg.APIServer.RegistryToken.TokenService()
 	// Перечень доверенных издателей федеративного ключа — НАША таблица (#1124):
 	// писатель провязан здесь, читает её проверка утверждения на пути запроса.
 	issueUC.WithTrustedIssuerWriter(kanamepg.NewTrustedIssuerRepo(pool))
@@ -1321,52 +1292,20 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// what a machine authenticates with, and machine principals are exempt from
 	// step-up (a machine has no second factor) — that exemption holds only while
 	// the credential itself is time-bounded. DefaultTTL replaces the old
-	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling;
-	// AccessTokenLifespan pins the per-client token TTL so minted tokens do not
-	// inherit whatever the identity provider defaults to.
+	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling.
 	issueUC.DefaultTTL = cfg.AuthN.SAKeyDefaultTTL
 	issueUC.MaxTTL = cfg.AuthN.SAKeyMaxTTL
-	issueUC.AccessTokenLifespan = cfg.AuthN.SAKeyAccessTokenTTL
-	// Sender-constrained tokens for the machine credential. Issuance half of the
-	// binding control; the gateway enforces the other half. Must be enabled
-	// FIRST — enforcement without issuance can only reject.
-	issueUC.BindDPoP = cfg.AuthN.SAKeyBindDPoP
 	// Surface redaction failures (error / give-up / recovered panic) of the
 	// detached redaction goroutine — the only place a key can stay un-redacted.
 	issueUC.WithLogger(logger)
-	// Durable-приёмник компенсирующих намерений. Клиент у провайдера создаётся ДО
-	// коммита нашей строки (строка обязана нести назначенный провайдером
-	// client_id), поэтому провал коммита обязан снять созданное. Прямой вызов
-	// снятия остаётся ЗАПАСНЫМ путём: он сам может отказать, а процесс — умереть
-	// между провалом и уборкой; durable намерение доставит дренаж.
-	issueUC.WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).WithEmitObserver(compObs))
-	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
-	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
 	revokeUC.WithLogger(logger)
 	listKeysUC := sakeysapp.NewListSAKeysUseCase(saClientRepo)
 
-	// Посадка контура печатается ВСЕГДА, включая непереведённую: «зеркала больше
-	// не заводим» иначе невидимо ниоткуда, а оператору, разбирающему выдачу, это
-	// первое, что нужно знать — у ключа, выданного переведённым контуром, записи у
-	// прежнего издателя нет и искать её негде.
-	//
-	// АДРЕС БЕРЁТСЯ У ПОСТРОЕННОГО КЛИЕНТА, А НЕ РЕЗОЛВИТСЯ ВТОРОЙ РАЗ
-	// (задачи kacho#2573, kaname#21). Здесь стояло отдельное чтение
-	// `cfg.AuthN.ResolveHydraAdminURL()`, и оно не спрашивало полосу: резолвер
-	// пустого не возвращает НИКОГДА — при незаданной ручке он выводит адрес из
-	// доменного имени. На посадке `own`, где внешнего поставщика нет вовсе и
-	// строитель отдаёт отставленного клиента, перепись всё равно печатала
-	// административный адрес — то есть называла настроенной дорогу, по которой
-	// процесс не пойдёт ни разу.
-	//
-	// Клиент несёт адрес ровно тогда, когда дорога построена, поэтому пустое
-	// значение здесь означает «дороги нет», а не «поле не заполнено»; булев
-	// факт о ней печатает перепись полосы (`provider_admin_hop_built`) и здесь
-	// не повторяется — два места об одном предмете разошлись бы молча.
-	logger.Info("sa_keys wired",
-		"hydra_admin", hydraAdmin.BaseURL,
-		"own_issuance", ownIssuance)
+	// Посадка контура печатается ВСЕГДА: оператору, разбирающему выдачу, это
+	// первое, что нужно знать.
+	logger.Info("sa_keys wired", "own_issuance", ownIssuance)
 
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
 }

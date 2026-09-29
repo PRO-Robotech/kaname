@@ -1,8 +1,8 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// hydra_token_exchange.go — client for the Ory Hydra PUBLIC OAuth2 token
-// endpoint (`POST /oauth2/token`). Used by the Docker Registry v2 `/iam/token`
+// provider_token_exchange.go — client for the external provider's PUBLIC OAuth2
+// token endpoint (`POST /oauth2/token`). Used by the Docker Registry v2 `/iam/token`
 // shim: the shim signs an ES256 client_assertion from the presented SA-key and
 // brokers a `client_credentials` + `private_key_jwt` exchange, returning the
 // provider's access_token to the docker client.
@@ -18,12 +18,12 @@
 // зеркало ничего не переподписывает.)
 //
 // Failure classification (fail-closed, no-leak):
-//   - network failure / timeout / 5xx / malformed 2xx  → ErrHydraUnavailable
+//   - network failure / timeout / 5xx / malformed 2xx  → ErrProviderTokenUnavailable
 //     (the issuer is a hard dependency of the mint path; the shim returns 503).
-//   - 4xx OAuth2 error (invalid_client / invalid_grant) → ErrHydraRejected
+//   - 4xx OAuth2 error (invalid_client / invalid_grant) → ErrProviderTokenRejected
 //     (bad/expired/revoked credential; the shim returns a 401 challenge).
 //
-// The raw Hydra body is never embedded in the returned sentinel (no auth oracle).
+// The raw provider body is never embedded in the returned sentinel (no auth oracle).
 package clients
 
 import (
@@ -38,18 +38,18 @@ import (
 	"time"
 )
 
-// ErrHydraUnavailable — the Hydra token endpoint is unreachable or misbehaving
-// (network / timeout / 5xx / malformed response). Fail-closed: no token.
-var ErrHydraUnavailable = errors.New("hydra token endpoint unavailable")
+// ErrProviderTokenUnavailable — the provider's token endpoint is unreachable or
+// misbehaving (network / timeout / 5xx / malformed response). Fail-closed: no token.
+var ErrProviderTokenUnavailable = errors.New("provider token endpoint unavailable")
 
-// ErrHydraRejected — Hydra rejected the exchange (4xx OAuth2 error). The
-// credential is invalid / expired / revoked; the client re-authenticates.
-var ErrHydraRejected = errors.New("hydra rejected the token exchange")
+// ErrProviderTokenRejected — the provider rejected the exchange (4xx OAuth2 error).
+// The credential is invalid / expired / revoked; the client re-authenticates.
+var ErrProviderTokenRejected = errors.New("provider rejected the token exchange")
 
-// HydraTokenClient — HTTP client for the Hydra public `/oauth2/token` endpoint.
-type HydraTokenClient struct {
+// ProviderTokenClient — HTTP client for the provider's public `/oauth2/token` endpoint.
+type ProviderTokenClient struct {
 	// TokenURL — the FULL token endpoint URL the shim POSTs to (cluster-internal
-	// in production, e.g. http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token).
+	// in production: the provider's public service, path `/oauth2/token`).
 	TokenURL   string
 	HTTPClient *http.Client
 
@@ -58,17 +58,17 @@ type HydraTokenClient struct {
 }
 
 // WithRoadObserver подключает счётчик исходов дороги обмена. Composition-root only.
-func (c *HydraTokenClient) WithRoadObserver(obs ProviderRoadObserver) *HydraTokenClient {
+func (c *ProviderTokenClient) WithRoadObserver(obs ProviderRoadObserver) *ProviderTokenClient {
 	c.roadObserver = obs
 	return c
 }
 
 // observeRoad — единая точка учёта исхода обмена.
-func (c *HydraTokenClient) observeRoad(outcome string) {
+func (c *ProviderTokenClient) observeRoad(outcome string) {
 	observeProviderRoad(c.roadObserver, ProviderRoadTokenExchange, outcome)
 }
 
-// NewHydraTokenClientWithCA builds the client and, when an anchor is configured,
+// NewProviderTokenClientWithCA builds the client and, when an anchor is configured,
 // verifies the provider against THAT bundle and nothing else.
 //
 // This hop carries a signed client assertion out and the minted bearer back in the
@@ -76,12 +76,12 @@ func (c *HydraTokenClient) observeRoad(outcome string) {
 // credential handed to whoever answered. The anchor semantics (empty ⇒ default
 // transport; set ⇒ the only pool; unusable ⇒ refuse) live in one place,
 // ProviderHopHTTPClient, shared with every other hop to the provider.
-func NewHydraTokenClientWithCA(tokenURL, caFile string) (*HydraTokenClient, error) {
+func NewProviderTokenClientWithCA(tokenURL, caFile string) (*ProviderTokenClient, error) {
 	httpClient, err := ProviderHopHTTPClient(tokenHopTimeout, caFile, tokenHopCASetting)
 	if err != nil {
 		return nil, err
 	}
-	return &HydraTokenClient{TokenURL: tokenURL, HTTPClient: httpClient}, nil
+	return &ProviderTokenClient{TokenURL: tokenURL, HTTPClient: httpClient}, nil
 }
 
 // tokenHopTimeout — per-call ceiling on the exchange. Named so both constructors
@@ -91,24 +91,24 @@ const tokenHopTimeout = 10 * time.Second
 // ClientCredentialsRequest — inputs for the private_key_jwt exchange.
 type ClientCredentialsRequest struct {
 	// ClientAssertion — the signed ES256 JWS (RFC 7523) proving possession of the
-	// SA-key private half; identifies the Hydra client (iss=sub=client_id).
+	// SA-key private half; identifies the client at the provider (iss=sub=client_id).
 	ClientAssertion string
 	// Audience — requested `aud` for the minted token (the registry service).
-	// Empty → not sent (Hydra falls back to the client's configured audience).
+	// Empty → not sent (the provider falls back to the client's configured audience).
 	Audience string
 	// Scope — requested scope. Empty → not sent.
 	Scope string
 }
 
-// TokenResponse — the subset of the Hydra token response the shim relays.
+// TokenResponse — the subset of the provider's token response the shim relays.
 type TokenResponse struct {
 	AccessToken string
 	ExpiresIn   int
 }
 
 // ClientCredentials brokers a `grant_type=client_credentials` exchange with a
-// `private_key_jwt` client_assertion and returns Hydra's access_token.
-func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCredentialsRequest) (TokenResponse, error) {
+// `private_key_jwt` client_assertion and returns the provider's access_token.
+func (c *ProviderTokenClient) ClientCredentials(ctx context.Context, req ClientCredentialsRequest) (TokenResponse, error) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 	form.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
@@ -122,7 +122,7 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("%w: build token request: %v", ErrHydraUnavailable, err)
+		return TokenResponse{}, fmt.Errorf("%w: build token request: %v", ErrProviderTokenUnavailable, err)
 	}
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	httpReq.Header.Set("Accept", "application/json")
@@ -131,7 +131,7 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 	if err != nil {
 		// Network failure / timeout / connection refused — issuer down.
 		c.observeRoad(ProviderRoadOutcomeUnavailable)
-		return TokenResponse{}, fmt.Errorf("%w: %v", ErrHydraUnavailable, err)
+		return TokenResponse{}, fmt.Errorf("%w: %v", ErrProviderTokenUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
@@ -156,7 +156,7 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 			// Клетка здесь — НАСТРОЙКА, а не сбой: тело, не разбираемое по
 			// контракту токен-эндпоинта, доказывает, что по адресу стоит не он.
 			c.observeRoad(ProviderRoadOutcomeMisconfigured)
-			return TokenResponse{}, fmt.Errorf("%w: malformed token response", ErrHydraUnavailable)
+			return TokenResponse{}, fmt.Errorf("%w: malformed token response", ErrProviderTokenUnavailable)
 		}
 		c.observeRoad(ProviderRoadOutcomeOK)
 		return TokenResponse{AccessToken: parsed.AccessToken, ExpiresIn: parsed.ExpiresIn}, nil
@@ -164,10 +164,10 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 		// OAuth2 client/grant rejection — invalid/expired/revoked credential.
 		// The raw body is intentionally NOT included (no auth oracle).
 		c.observeRoad(classifyProviderRoadStatus(resp.StatusCode))
-		return TokenResponse{}, ErrHydraRejected
+		return TokenResponse{}, ErrProviderTokenRejected
 	default:
 		// 5xx and anything else — issuer failure.
 		c.observeRoad(classifyProviderRoadStatus(resp.StatusCode))
-		return TokenResponse{}, fmt.Errorf("%w: token endpoint status %d", ErrHydraUnavailable, resp.StatusCode)
+		return TokenResponse{}, fmt.Errorf("%w: token endpoint status %d", ErrProviderTokenUnavailable, resp.StatusCode)
 	}
 }

@@ -94,6 +94,12 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 			})
 		}
 	}
+	// Вид разбирается ДО операции: номер вне словаря отвергается синхронно,
+	// с именем поля.
+	kind, err := CredentialKindFromProto(req.GetCredentialKind())
+	if err != nil {
+		return nil, err
+	}
 	op, err := h.issue.Execute(ctx, IssueInput{
 		ServiceAccountID:       domain.ServiceAccountID(req.GetServiceAccountId()),
 		Description:            req.GetDescription(),
@@ -106,7 +112,7 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		Name:   req.GetName(),
 		Labels: labelsFromProto(req.GetLabels()),
 		// Вид удостоверения. Не назван — прежнее поведение дословно.
-		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
+		CredentialKind: kind,
 		// Federation OUT — caller-supplied external audience(s).
 		// Пусто → адресата не назвали. Приставка не провязана (решение #2575),
 		// поэтому умолчание приходит от посадки, а не отсюда.

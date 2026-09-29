@@ -9,8 +9,8 @@ package iamhooks
 // Полосы, чеканящие токен человеку (хук выпуска и хук обновления), зовёт
 // поставщик, и контекст запроса несёт ЕГО срок — либо никакого. До этой обёртки
 // под своим пределом шло одно чтение отсечки отзыва-всех (kaname#379), а
-// соседние обращения тех же полос — разрешение субъекта, ключа, персонального
-// токена и запись аудита — ждали неотвечающую базу столько, сколько ждал
+// соседние обращения тех же полос — разрешение субъекта, ключа и запись
+// аудита — ждали неотвечающую базу столько, сколько ждал
 // поставщик. Одна полоса, несущая разный предел на разных обращениях, — то же
 // расхождение, что обёртка отсечки снимала между полосами.
 
@@ -34,9 +34,11 @@ type IssuancePorts struct {
 	// интерактивной сессии хука выпуска.
 	Users UserLookupPort
 	// ServiceAccounts — ключ служебной учётки и сама учётка.
+	//
+	// Персонального токена в перечне нет: полосы хука его не предъявляют —
+	// поставщик персональных токенов не регистрирует, и ветвь, резолвившая их
+	// по его имени клиента, снята вместе со столбцом этого имени (kaname#362).
 	ServiceAccounts service.TokenEnrichmentSAPort
-	// UserTokens — персональный токен человека и его владелец.
-	UserTokens service.TokenEnrichmentUserTokenPort
 	// Cutoffs — отсечка отзыва-всех человека.
 	Cutoffs revocationpolicy.Lookup
 	// Audit — запись журнала выдачи и отказа.
@@ -65,9 +67,6 @@ func WithCallDeadline(p IssuancePorts, timeout time.Duration) (IssuancePorts, er
 	}
 	if p.ServiceAccounts != nil {
 		out.ServiceAccounts = deadlineServiceAccounts{inner: p.ServiceAccounts, timeout: timeout}
-	}
-	if p.UserTokens != nil {
-		out.UserTokens = deadlineUserTokens{inner: p.UserTokens, timeout: timeout}
 	}
 	if p.Audit != nil {
 		out.Audit = deadlineAudit{inner: p.Audit, timeout: timeout}
@@ -99,10 +98,10 @@ type deadlineServiceAccounts struct {
 	timeout time.Duration
 }
 
-func (d deadlineServiceAccounts) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (d deadlineServiceAccounts) LookupByClientID(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	return d.inner.LookupByOAuthClientID(ctx, id)
+	return d.inner.LookupByClientID(ctx, id)
 }
 
 func (d deadlineServiceAccounts) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
@@ -115,24 +114,6 @@ func (d deadlineServiceAccounts) FindByExternalSubject(ctx context.Context, issu
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	return d.inner.FindByExternalSubject(ctx, issuer, sub)
-}
-
-// deadlineUserTokens — персональный токен со СВОИМ пределом на вызов.
-type deadlineUserTokens struct {
-	inner   service.TokenEnrichmentUserTokenPort
-	timeout time.Duration
-}
-
-func (d deadlineUserTokens) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.timeout)
-	defer cancel()
-	return d.inner.LookupByOAuthClientID(ctx, id)
-}
-
-func (d deadlineUserTokens) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.timeout)
-	defer cancel()
-	return d.inner.GetUser(ctx, id)
 }
 
 // deadlineAudit — запись журнала со СВОИМ пределом на вызов.

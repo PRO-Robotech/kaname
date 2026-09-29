@@ -204,6 +204,10 @@ func TestUnparsableOutputIsTheThirdCategory(t *testing.T) {
 		"нет пути и нет файла в кавычках": `{"type":"FILE_NO_DELETE","message":"something was deleted."}` + "\n",
 		"два файла в кавычках": `{"type":"FILE_NO_DELETE","message":"files "` +
 			`\"a.proto\" and \"b.proto\" were deleted."}` + "\n",
+		// Контейнер назван, а предмет до него — нет: символом стал бы контейнер,
+		// и запись прощала бы любой разрыв внутри него (kaname#474).
+		"контейнер без предмета": `{"path":"a.proto","type":"FIELD_NO_DELETE",` +
+			`"message":"Previously present field on message \"Role\" was deleted."}` + "\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := declaredbreak.ParseFindings(strings.NewReader(in)); err == nil {

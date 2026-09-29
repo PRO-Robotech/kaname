@@ -139,11 +139,11 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	saClients := kanamepg.NewSAOAuthClientRepo(f.pool)
 	userClients := kanamepg.NewUserOAuthClientRepo(f.pool)
 	claims := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "kacho.local", HydraIssuer: ctIssuer},
+		service.TokenEnrichmentConfig{Domain: "kacho.local"},
 		users,
 	).
 		WithSAPort(&ctSAAdapter{saClients: saClients}).
-		WithUserTokenPort(&ctUserAdapter{userClients: userClients, users: users}).
+		WithUserTokenPort(&ctUserAdapter{users: users}).
 		WithOwnClientPort(&ctOwnAdapter{userClients: userClients, saClients: saClients})
 
 	h, err := clienttokenwire.FromPool(f.pool, clienttokenwire.BuildConfig{
@@ -172,8 +172,8 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 
 type ctSAAdapter struct{ saClients *kanamepg.SAOAuthClientRepo }
 
-func (a *ctSAAdapter) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	return a.saClients.GetByOAuthClientID(ctx, id)
+func (a *ctSAAdapter) LookupByClientID(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	return a.saClients.GetByClientID(ctx, id)
 }
 func (a *ctSAAdapter) FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {
 	return a.saClients.FindByExternalSubject(ctx, issuer, sub)
@@ -183,13 +183,9 @@ func (a *ctSAAdapter) GetServiceAccount(ctx context.Context, id domain.ServiceAc
 }
 
 type ctUserAdapter struct {
-	userClients *kanamepg.UserOAuthClientRepo
-	users       *kanamepg.UserPoolRepo
+	users *kanamepg.UserPoolRepo
 }
 
-func (a *ctUserAdapter) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	return a.userClients.GetByOAuthClientID(ctx, id)
-}
 func (a *ctUserAdapter) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
 	return a.users.GetByID(ctx, id)
 }
@@ -242,8 +238,8 @@ func TestF2_39_F2_40_ClientCredentialsContourIssuesForBothClientKinds(t *testing
 		userClientID = "uoc_ctnr0000000000001"
 		saClientID   = "soc_ctnr0000000000002"
 	)
-	f.seedUserClient(t, userClientID, "mirror-user-contour", userKey.publicPEM, tokenpolicy.AlgES256, nil)
-	f.seedSAClient(t, saClientID, "mirror-sa-contour", saKey.publicPEM, tokenpolicy.AlgES256)
+	f.seedUserClient(t, userClientID, userKey.publicPEM, tokenpolicy.AlgES256, nil)
+	f.seedSAClient(t, saClientID, saKey.publicPEM, tokenpolicy.AlgES256)
 
 	for _, lane := range []struct {
 		name     string
