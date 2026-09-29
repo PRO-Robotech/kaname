@@ -342,7 +342,7 @@ func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 // не меняет ни одного из входов, и вызывающий повторял бы вечно (задача #2481).
 func TestCreate_ProviderRejectedTheInput_IsNotAnnouncedRetryable(t *testing.T) {
 	repo := &insertFailsRepo{}
-	prov := &failingProvider{registerErr: errors.New("hydra admin api: status 400: bad redirect_uri")}
+	prov := &failingProvider{registerErr: errors.New("provider admin api: status 400: bad redirect_uri")}
 	ops := &fakeOps{}
 
 	_, err := NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil).
