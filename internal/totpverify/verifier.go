@@ -21,7 +21,9 @@
 // которого один — `Reveal`. Его вызывающих держит гейт дерева `internal/check`
 // `TestLoginVerifierStaysInside`: разрешение дано ФАЙЛУ с причиной. Оттого
 // снятие обёртки, вычисление HMAC и сравнение стоят здесь; наружу уходят только
-// ИСХОД и ЧИСЛО (ступень принятого кода). Секрет в памяти — тип `Secret`, который
+// ИСХОД и ЧИСЛО (ступень принятого кода), а у переобёртки под первый ключ
+// перечня (`Rewrap`, kaname#259 п.3) — новая обёртка того же секрета в типе
+// строки способа. Секрет в памяти — тип `Secret`, который
 // не печатается и не сериализуется; клиенту он уходит один раз, ответом
 // заведения, через `Base32` и `OtpauthURI`.
 //
@@ -52,6 +54,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -315,4 +318,52 @@ func hotp(secret []byte, step int64) string {
 	off := sum[len(sum)-1] & 0x0f
 	bin := (uint32(sum[off])&0x7f)<<24 | uint32(sum[off+1])<<16 | uint32(sum[off+2])<<8 | uint32(sum[off+3])
 	return fmt.Sprintf("%0*d", Digits, bin%digitsModulus)
+}
+
+// ErrSecretUnreadable — хранимый секрет не открывает ни один ключ перечня либо
+// материал не является base64 обёртки. Для сверки это недоступность
+// (OutcomeMaterialUnreadable), для переобёртки — строка, которую писать нечем:
+// вызывающий считает её отдельно и ничего в ней не меняет. Причина между
+// «не тот ключ» и «повреждено» не различается — по той же причине, что у
+// обёртки (`keywrap.ErrUnwrap`).
+var ErrSecretUnreadable = errors.New("totp verifier: stored secret opens with no key of the wrapping list")
+
+// Rewrap — хранимый секрет под ПЕРВЫМ ключом перечня (kaname#259 п.3):
+// переобёртка, которой прежний ключ обёртки выводится из перечня.
+//
+// Секрет не меняется — меняется только обёртка, поэтому приложение человека
+// продолжает давать те же коды, а принятый шаг строки остаётся в силе. Живёт
+// в ЭТОМ файле по той же причине, что `Verify`: снятие обёртки хранимого
+// материала — предмет файла, которому разрешён выход `Reveal` (гейт
+// `TestLoginVerifierStaysInside`). Наружу уходит новое значение в типе строки
+// способа и признак «уже под первым ключом»; открытый секрет не покидает
+// обёртки.
+//
+// Исходы: (stored, true) — секрет уже под первым ключом, писать нечего;
+// (новое, false) — тот же секрет под первым ключом; ErrSecretUnreadable —
+// материал не открывается перечнем. Пустой материал — отказ иного слова:
+// строки второго фактора без материала схема не допускает, и прочитать такую
+// значит найти дефект, а не «нечитаемый секрет».
+func (v *Verifier) Rewrap(stored domain.LoginVerifier) (domain.LoginVerifier, bool, error) {
+	if stored.IsZero() {
+		return domain.LoginVerifier{}, false, errors.New("totp verifier: nothing to rewrap")
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(stored.Reveal())
+	if err != nil {
+		return domain.LoginVerifier{}, false, ErrSecretUnreadable
+	}
+	moved, alreadyFirst, err := v.wrapper.Rewrap(raw)
+	switch {
+	case errors.Is(err, keywrap.ErrUnwrap), errors.Is(err, keywrap.ErrNotWrapped):
+		return domain.LoginVerifier{}, false, ErrSecretUnreadable
+	case err != nil:
+		return domain.LoginVerifier{}, false, fmt.Errorf("totp verifier: %w", err)
+	case alreadyFirst:
+		return stored, true, nil
+	}
+	out, err := domain.NewLoginVerifier(base64.RawStdEncoding.EncodeToString(moved))
+	if err != nil {
+		return domain.LoginVerifier{}, false, fmt.Errorf("totp verifier: %w", err)
+	}
+	return out, false, nil
 }
