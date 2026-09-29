@@ -40,6 +40,10 @@ const (
 	// токен-эндпоинта: один контроль — одно имя на всех полосах, которые его
 	// исполняют.
 	BasicRefusalOwnerRevoked BasicCredentialRefusalReason = "owner-revoked"
+	// BasicRefusalOwnerUnverified — владелец-человек удостоверения не
+	// подтвердил адрес (kaname#456, Р5). Имя то же, что у исхода полосы ключа
+	// токен-эндпоинта: один вердикт правила выдачи — одно имя.
+	BasicRefusalOwnerUnverified BasicCredentialRefusalReason = "owner-unverified"
 )
 
 // BasicCredentialRefusalReasons — закрытый словарь целиком, в объявленном
@@ -51,6 +55,7 @@ func BasicCredentialRefusalReasons() []BasicCredentialRefusalReason {
 		BasicRefusalNotFound,
 		BasicRefusalSecretMismatch,
 		BasicRefusalOwnerRevoked,
+		BasicRefusalOwnerUnverified,
 	}
 }
 

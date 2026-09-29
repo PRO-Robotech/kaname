@@ -158,6 +158,8 @@ func TestAccessKeys_F7_13_OriginsEmptyMeansNobody(t *testing.T) {
 			c.Origins = origins
 			require.NoError(t, c.Validate())
 			require.True(t, c.Nobody())
+			// Пустой, но объявленный: nil потребитель читает как «не задан» (kaname#454).
+			require.NotNil(t, c.Binding().Origins)
 			require.Empty(t, c.Binding().Origins)
 		})
 	}

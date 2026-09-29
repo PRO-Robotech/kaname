@@ -217,9 +217,6 @@ type fakeUsrWtr struct {
 	parent *fakeUsrRepo
 }
 
-func (w *fakeUsrWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
-	return u, false, nil
-}
 func (w *fakeUsrWtr) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	return u, false, nil
 }

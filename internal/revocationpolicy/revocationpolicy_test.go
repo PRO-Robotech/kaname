@@ -271,20 +271,71 @@ func (d *deadlineCutoffs) UserRevokedBefore(ctx context.Context, _ string) (time
 func TestWithDeadline_EachReadCarriesItsOwnLimitAndAnAbsentReaderStaysAbsent(t *testing.T) {
 	const limit = 2 * time.Second
 	inner := &deadlineCutoffs{}
-	_, _, err := revocationpolicy.WithDeadline(inner, limit).UserRevokedBefore(context.Background(), "usr_x")
+	wrapped, err := revocationpolicy.WithDeadline(inner, limit)
+	require.NoError(t, err)
+	_, _, err = wrapped.UserRevokedBefore(context.Background(), "usr_x")
 	require.NoError(t, err)
 	require.True(t, inner.called, "чтение обязано дойти до читателя")
 	require.True(t, inner.had, "чтение обязано нести свой срок и при контексте без срока")
 	require.LessOrEqual(t, time.Until(inner.deadline), limit)
 	require.Positive(t, time.Until(inner.deadline))
 
-	require.Nil(t, revocationpolicy.WithDeadline(nil, limit),
+	absent, err := revocationpolicy.WithDeadline(nil, limit)
+	require.NoError(t, err)
+	require.Nil(t, absent,
 		"обёртка над неподанным читателем обязана остаться неподанной: иначе «не провязан» неотличим от «провязан»")
 
 	// Неподанный читатель через обёртку — по-прежнему Undecidable, а не паника
 	// и не выдача.
-	v, err := revocationpolicy.AtIssuance(context.Background(), revocationpolicy.WithDeadline(nil, limit),
-		person("usr_x", nil), cutoff)
+	v, err := revocationpolicy.AtIssuance(context.Background(), absent, person("usr_x", nil), cutoff)
 	require.Equal(t, revocationpolicy.Undecidable, v)
 	require.ErrorIs(t, err, revocationpolicy.ErrNoLookup)
+}
+
+// TestWithDeadline_RefusesANonPositiveLimitAtBuild — неположительный предел —
+// отказ построения, а не обёртка, чей каждый вызов истекает раньше, чем начался.
+//
+// Нуль и отрицательная величина дали бы контекст, истёкший в момент вызова:
+// каждое чтение кончалось бы ошибкой, то есть [revocationpolicy.Undecidable], и
+// полоса отказывала бы в выдаче ВСЕМ — на первом запросе, а не на старте.
+// Законный близнец — наименьшая положительная величина: граница между отказом
+// и сборкой проходит ровно по нулю. Неподанный читатель предела не отменяет:
+// величина неверна независимо от того, что оборачивается.
+func TestWithDeadline_RefusesANonPositiveLimitAtBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		inner revocationpolicy.Lookup
+		limit time.Duration
+	}{
+		{"нуль", &deadlineCutoffs{}, 0},
+		{"наименьшая отрицательная", &deadlineCutoffs{}, -time.Nanosecond},
+		{"отрицательная", &deadlineCutoffs{}, -3 * time.Second},
+		{"нуль при неподанном читателе", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := revocationpolicy.WithDeadline(tc.inner, tc.limit)
+			require.ErrorIs(t, err, revocationpolicy.ErrLimitNotPositive,
+				"предел %s обязан отказывать построением", tc.limit)
+			require.Contains(t, err.Error(), tc.limit.String(), "отказ обязан называть поданную величину")
+			require.Nil(t, got, "отказ построения не отдаёт обёртки")
+		})
+	}
+
+	t.Run("законный близнец: наименьшая положительная", func(t *testing.T) {
+		got, err := revocationpolicy.WithDeadline(&deadlineCutoffs{}, time.Nanosecond)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+	})
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*cutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*deadlineCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }

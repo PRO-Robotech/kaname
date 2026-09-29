@@ -9,6 +9,14 @@ package pg
 // `20260920175117_authorization_code_is_our_record.sql`,
 // `20260920175118_interactive_client_carries_its_secret_verifier.sql`).
 //
+// Обмен кода и оборот токена обновления исполняет движок фундамента над
+// хранилищами церемонии (`oauth_ceremony_vaults.go`, kaname#423). Своих
+// композиций обмена и оборота у этого файла НЕТ (kaname#434): здесь лежат
+// операторы, которые хранилища исполняют, — погашение (`exchangeCodeSQL`),
+// оборот (`rotateRefreshSQL`), замки семейства, заведение токена
+// (`insertRefreshSQL`), разбор нуля строк, — и писатели без копий у хранилищ:
+// выдача кода, отзыв семейства, запись выпуска, проверочное значение клиента.
+//
 // # ОДНА ИНСТРУКЦИЯ — ЭТО ИНВАРИАНТ, А НЕ АККУРАТНОСТЬ
 //
 // «Жив ли код» и «погасить его» здесь НЕДЕЛИМЫ, и неделимыми их делает сам
@@ -22,17 +30,22 @@ package pg
 // реализации зелен целиком. Отличает её только проба с конкурирующими
 // транзакциями — `oauth_ceremony_race_integration_test.go`.
 //
-// # НОЛЬ ЗАТРОНУТЫХ СТРОК — ЭТО ТРИ РАЗНЫХ ИСХОДА, А НЕ ОДИН
+// # «НЕ ОБМЕНЯЛОСЬ» — НЕ ОДИН ИСХОД
 //
-// Ноль строк означает, что условие не выполнилось; ПОЧЕМУ — говорит разбор,
-// идущий ПОСЛЕ отката транзакции выдачи:
+// Порт фундамента различает исходы предъявления, и различение стоит на строке,
+// а не на тексте отказа:
 //
-//   - строки нет вовсе → `domain.ErrAuthorizationCodeUnknown`;
-//   - строка есть и НЕАКТИВНА → ПОВТОР. Кодом уже воспользовались, второй
+//   - строки нет вовсе либо она жива, но срок вышел → «записи нет»
+//     (`oauthceremony.ErrGrantNotFound` у выборки хранилищ). Отзыва не влечёт:
+//     истечение — не признак похищения;
+//   - строка ПОГАШЕНА (обёрнута) → ПОВТОР. Кодом уже воспользовались, второй
 //     предъявитель — либо похититель, либо тот, у кого похитили, и различить их
-//     нельзя. Поэтому отзывается ВСЁ семейство (RFC 6819 §5.2.1.1);
-//   - строка активна, но срок вышел → истечение. Отзыва не влечёт: это не
-//     признак похищения.
+//     нельзя. Поэтому движок отзывает ВСЁ семейство (RFC 6819 §5.2.1.1):
+//     выборка отдаёт запись вместе с признаком погашения, а ноль строк
+//     решающей записи после живой выборки — одновременный повтор;
+//   - сессия строки отрезана отсечкой субъекта → тоже «записи нет», на
+//     решающей записи — с причиной `domain.ErrCeremonySubjectCutOff` в цепочке.
+//     Это не повтор, и семейство по нему не отзывается.
 //
 // Ради этого различения использованный код и отротированный токен ПОМЕЧАЮТСЯ
 // неактивными и ЖИВУТ до истечения. Удалить строку значило бы сделать повтор
@@ -60,10 +73,10 @@ package pg
 //     получает 23503 и транзакция выдачи откатывается; успела вставка — каскад
 //     проставляет свежей строке признак. Гасить `active` руками не может НИКТО:
 //     запись в неё отвергается кодом 428C9;
-//   - ПОРЯДОК ЗАМКОВ «родитель → ребёнок» на обоих путях: обмен и ротация берут
-//     семейство первыми (`lockFamilyOfCodeSQL`, `lockFamilyOfRefreshSQL`), иначе
-//     встречный порядок с каскадом отзыва даёт цикл, жертвой которого движок
-//     выбирал сам отзыв;
+//   - ПОРЯДОК ЗАМКОВ «родитель → ребёнок» на обоих путях: погашение кода и оборот
+//     токена обновления берут семейство первыми (`lockFamilyOfCodeSQL`,
+//     `lockFamilyOfRefreshSQL`), иначе встречный порядок с каскадом отзыва даёт
+//     цикл, жертвой которого движок выбирал сам отзыв;
 //   - «одно поколение на номер в семействе» — `refresh_tokens_generation_uk`;
 //   - форма свёрток, испытания PKCE и словари причин — ограничения схемы.
 
@@ -108,27 +121,14 @@ type NewAuthorizationCode struct {
 	RedirectURI         string
 	CodeChallenge       string
 	CodeChallengeMethod string
+	// ACR — уровень аутентификации ГРАНТА: снимок уровня сессии на выдаче кода
+	// (колонка `token_families.acr`, миграция `20260925121413`). Приходит от
+	// того, кто выдаёт, — у сессии уровень подвижен (шаг вверх), и прочитать его
+	// там при обмене значило бы перенести в токен уровень, которого код не нёс.
+	ACR string
 	// TTL — срок жизни кода. Приходит ВХОДОМ, а не константой этого файла: у
 	// величины нет владельца в слое доступа, и копия разошлась бы с политикой.
 	TTL time.Duration
-}
-
-// CodeExchange — предъявление кода к обмену вместе со свёрткой обновляющего
-// токена, который встанет в семейство ПЕРВЫМ поколением.
-//
-// Свёртка преемника приходит ВХОДОМ, а не чеканится здесь: сам токен уходит
-// вызывающему, и слой доступа его не видит — он видит только свёртку.
-type CodeExchange struct {
-	CodeDigest         string
-	RefreshTokenDigest string
-	RefreshTokenTTL    time.Duration
-}
-
-// RefreshRotation — предъявление обновляющего токена к ротации.
-type RefreshRotation struct {
-	PresentedDigest string
-	SuccessorDigest string
-	TTL             time.Duration
 }
 
 // ── Порядок замков заведения ────────────────────────────────────────────────
@@ -271,16 +271,55 @@ SELECT 1 FROM kaname.human_sessions WHERE id = $1 FOR SHARE`
 // вставлено. Ноль первых — сессии НЕТ (прежняя форма давала здесь отказ с
 // именем внешнего ключа, и терять это различение нельзя); ноль вторых при
 // единице первых — сессия есть, но не жива.
+//
+// # ЖИВОСТЬ СЕССИИ ВКЛЮЧАЕТ ОТСЕЧКУ СУБЪЕКТА
+//
+// Сессия, отрезанная отсечкой своего человека (`sessionCutOffBySubjectSQL`), —
+// тоже «не жива», хотя отметки снятия на ней нет: отсечку кладут и писатели,
+// сессий не снимающие. Условие стоит в том же операторе, что запись.
 const insertFamilyOnLiveSessionSQL = `
 WITH s AS (
-    SELECT ended_at, expires_at FROM kaname.human_sessions WHERE id = $4
+    SELECT user_id, authenticated_at, ended_at, expires_at FROM kaname.human_sessions WHERE id = $4
 ), ins AS (
-    INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-    SELECT $1, $2, $3, $4, $5 FROM s
-     WHERE s.ended_at IS NULL AND s.expires_at > now()
+    INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+    SELECT $1, $2, $3, $4, $5, $6 FROM s
+     WHERE s.ended_at IS NULL AND s.expires_at > now() AND NOT ` + sessionCutOffBySubjectSQL + `
     RETURNING 1
 )
 SELECT (SELECT count(*) FROM s)::int, (SELECT count(*) FROM ins)::int`
+
+// sessionCutOffBySubjectSQL — сессия `s` отрезана отсечкой своего субъекта:
+// аутентифицирована НЕ ПОЗЖЕ `user_token_revocations.revoke_before`. Правило то
+// же, что у края на браузерной полосе: действительна сессия, аутентифицированная
+// строго ПОЗЖЕ отсечки.
+//
+// Выдача церемонии читает его на КАЖДОМ своём ходе тем же оператором, что
+// живость: заведение семейства, выборка кода и токена обновления к обмену
+// (`oauth_ceremony_vaults.go`) и РЕШАЮЩИЕ условные записи — погашение кода
+// (`exchangeCodeSQL`), замок оборота (`lockRefreshForRotationSQL`) и сам оборот
+// (`rotateRefreshSQL`). Предъявление судит токены по отметке выпуска, и выпуск
+// после отсечки из сессии, аутентифицированной до неё, предъявление
+// пропустило бы. Чтения одного мало: движок читает строку ДО записи, и
+// отсечка, зафиксированная между чтением и записью, чтением не видна — судит
+// её запись (возврат ревью схемы сборки 425, N1). Строку отсечки пишет
+// `UserTokenRevocationRepo`; этот предикат её только читает, и написан он один
+// раз — на алиас сессии `s`.
+const sessionCutOffBySubjectSQL = `EXISTS (
+    SELECT 1 FROM kaname.user_token_revocations r
+     WHERE r.user_id = s.user_id AND r.revoke_before >= s.authenticated_at)`
+
+// codeSessionCutOffSQL, refreshSessionCutOffSQL — тот же предикат на сессии
+// предъявленной строки: кода (алиас `c`) и токена обновления (алиас `t`).
+// Условная запись и разбор её нуля строк читают ОДИН текст: разойдись они, ноль
+// строк от отсечки разбирался бы как «условие и разбор разошлись».
+const (
+	codeSessionCutOffSQL = `EXISTS (
+    SELECT 1 FROM kaname.human_sessions s
+     WHERE s.id = c.session_id AND ` + sessionCutOffBySubjectSQL + `)`
+	refreshSessionCutOffSQL = `EXISTS (
+    SELECT 1 FROM kaname.human_sessions s
+     WHERE s.id = t.session_id AND ` + sessionCutOffBySubjectSQL + `)`
+)
 
 // IssueAuthorizationCode заводит семейство и его код ОДНОЙ транзакцией.
 //
@@ -299,6 +338,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	}
 	if in.RedirectURI == "" {
 		return fmt.Errorf("Illegal argument authorization_code.redirect_uri: required")
+	}
+	if err := domain.ValidateCeremonyLevel(in.ACR); err != nil {
+		return err
 	}
 	if in.TTL <= 0 {
 		return fmt.Errorf("Illegal argument authorization_code.ttl: must be positive")
@@ -327,7 +369,7 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 	var sessionRows, inserted int
 	if err = tx.QueryRow(ctx, insertFamilyOnLiveSessionSQL,
 		in.Context.FamilyID, in.Context.ClientID, in.Context.UserID,
-		in.Context.SessionID, in.Context.Scope).Scan(&sessionRows, &inserted); err != nil {
+		in.Context.SessionID, in.Context.Scope, in.ACR).Scan(&sessionRows, &inserted); err != nil {
 		return wrapPgErr(err, "TokenFamily", in.Context.FamilyID)
 	}
 	switch {
@@ -337,8 +379,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 		// отказ значило бы потерять различение, которое уже было.
 		return fmt.Errorf("%w: session %s", domain.ErrCeremonySessionUnknown, in.Context.SessionID)
 	case inserted == 0:
-		// Сессия ЕСТЬ, но не жива. Снятую и истёкшую предъявителю различать
-		// незачем: обе означают «входа, в котором идёт церемония, больше нет».
+		// Сессия ЕСТЬ, но не жива. Снятую, истёкшую и отрезанную отсечкой
+		// субъекта предъявителю различать незачем: все три означают «входа, в
+		// котором идёт церемония, больше нет».
 		return fmt.Errorf("%w: session %s", domain.ErrCeremonySessionNotLive, in.Context.SessionID)
 	}
 	if _, err = tx.Exec(ctx, `
@@ -364,9 +407,9 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 // # ЗАЧЕМ ОН СТОИТ ЗДЕСЬ И ПОЧЕМУ ЕГО НЕЛЬЗЯ СНЕСТИ
 //
 // Отзыв семейства ходит от РОДИТЕЛЯ К ДЕТЯМ: он берёт ключевой замок на строке
-// семейства, а `ON UPDATE CASCADE` затем идёт за замками всех его детей. Обмен
-// без этого оператора шёл НАВСТРЕЧУ — условный `UPDATE` брал замок на РЕБЁНКЕ,
-// и лишь вставка преемника бралась за семейство. Два встречных порядка дают
+// семейства, а `ON UPDATE CASCADE` затем идёт за замками всех его детей.
+// Погашение без этого оператора шло НАВСТРЕЧУ — условный `UPDATE` брал замок на
+// РЕБЁНКЕ, и лишь вставка первого поколения бралась за семейство. Два встречных порядка дают
 // цикл, и движок снимал одного из двоих.
 //
 // Снимал он ОТЗЫВ: 6 прогонов из 6 на postgres:16-alpine жертвой становилась
@@ -376,7 +419,8 @@ func (r *OAuthCeremonyRepo) IssueAuthorizationCode(ctx context.Context, in NewAu
 //
 // Поэтому замок на семействе берётся ПЕРВЫМ, и оба порядка становятся
 // «родитель → ребёнок». Повтор лечил бы симптом и оставлял бы контроль
-// зависимым от поведения клиента.
+// зависимым от поведения клиента. Держит `TestOAuthExchangeTakesTheFamilyBeforeTheChild`
+// на прод-пути хранилищ.
 //
 // # ЭТО НЕ НАРУШАЕТ ban #10
 //
@@ -397,12 +441,17 @@ SELECT 1 FROM kaname.token_families
 // в неё база отвергает (428C9). Отдельного условия «семейство не отозвано» здесь
 // тоже НЕТ и быть не должно: живость семейства входит в саму производную, и
 // второе её написание разошлось бы с первым молча.
+//
+// Отсечка субъекта сессии кода — в том же операторе (`codeSessionCutOffSQL`):
+// зафиксированная после выборки кода, она отказывает погашению здесь, а не
+// проходит мимо.
 const exchangeCodeSQL = `
 UPDATE kaname.authorization_codes AS c
    SET deactivated_at = now(), deactivated_reason = 'redeemed'
  WHERE c.code_digest = $1
    AND c.active
    AND c.expires_at > now()
+   AND NOT ` + codeSessionCutOffSQL + `
 RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
           c.redirect_uri, c.code_challenge, c.code_challenge_method`
 
@@ -417,17 +466,18 @@ RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
 //
 // # ПОЧЕМУ READ COMMITTED
 //
-// Одноинструкционный обмен держит строчный замок, и проигравший, СТОЯВШИЙ на
-// строке победителя, после фиксации победителя перепроверяет условие `WHERE` по
-// НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
-// разбирает `refuseCode`, перечитывая помеченную строку, и исход проигравшего —
-// ПОВТОР (LINE-A-1-13, LINE-A-1-17). Перепроверку по новой версии делает ТОЛЬКО
-// этот уровень: при REPEATABLE READ и SERIALIZABLE движок ту же строку не
-// перепроверяет, а отказывает транзакции целиком (40001), и разбору нуля строк
-// вход не достаётся вовсе.
+// Одноинструкционное погашение держит строчный замок, и проигравший, СТОЯВШИЙ
+// на строке победителя, после фиксации победителя перепроверяет условие `WHERE`
+// по НОВОЙ версии строки: код уже неактивен — затронуто ноль строк. Ноль строк
+// разбирает `adjudicatePresented` в той же транзакции и отдаёт порту фундамента
+// нулём, а движок читает его одновременным ПОВТОРОМ (LINE-A-1-13, LINE-A-1-17).
+// Перепроверку по новой версии делает ТОЛЬКО этот уровень: при REPEATABLE READ
+// и SERIALIZABLE движок ту же строку не перепроверяет, а отказывает транзакции
+// целиком (40001), и разбору нуля строк вход не достаётся вовсе.
 //
-// Устройство то же у остальных писателей порта, и потому решение одно на всех:
-// ротация, отзыв семейства (вторая отметка — пустая, а не отказ), запись
+// Устройство то же у остальных писателей, и потому решение одно на всех:
+// оборот токена обновления (единица работы хранилищ открывается этим же
+// уровнем), отзыв семейства (вторая отметка — пустая, а не отказ), запись
 // выпуска токена доступа (заведение, стоявшее на отзыве своего семейства,
 // перепроверяет ключ и получает «семейство не живо», kaname#319),
 // проверочное значение клиента. Исход каждого под конкуренцией — перепроверка
@@ -496,126 +546,172 @@ func (r *OAuthCeremonyRepo) execWriter(ctx context.Context, sql string, args ...
 	return tag, nil
 }
 
-// ExchangeAuthorizationCode обменивает код на первое поколение обновляющего
-// токена семейства.
-//
-// Транзакция — на названном уровне (`ceremonyWriterTx()`): исход проигравшего
-// одновременного обмена решает именно он.
-//
-// Гашение и выдача идут ОДНОЙ транзакцией: ноль затронутых строк означает
-// откат ВСЕЙ транзакции выдачи — токена в семействе не появляется. Разбор
-// причины идёт ПОСЛЕ отката, по пулу: откаченная транзакция читать уже не
-// вправе, а держать её открытой ради разбора значило бы держать замок на время
-// разбора.
-func (r *OAuthCeremonyRepo) ExchangeAuthorizationCode(ctx context.Context, in CodeExchange) (domain.RedeemedCode, error) {
-	if err := domain.ValidateCeremonyDigest("authorization_code.code_digest", in.CodeDigest); err != nil {
-		return domain.RedeemedCode{}, err
-	}
-	if err := domain.ValidateCeremonyDigest("refresh_token.token_digest", in.RefreshTokenDigest); err != nil {
-		return domain.RedeemedCode{}, err
-	}
-	if in.RefreshTokenTTL <= 0 {
-		return domain.RedeemedCode{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
-	}
+// insertRefreshSQL — заведение обновляющего токена в семейство: ОДИН
+// литерал на оба пути, которыми токен ложится в семейство, — первое поколение
+// обмена кода и преемник оборота, оба в единице работы церемонии фундамента
+// (`oauth_ceremony_vaults.go`). Согласие контекста с семейством
+// держит составной ключ `refresh_tokens_family_context_fk`, живость семейства —
+// `refresh_tokens_family_live_fk`: писатель их не проверяет.
+const insertRefreshSQL = `
+INSERT INTO kaname.refresh_tokens
+       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`
 
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
+// insertRefreshTokenTx — заведение обновляющего токена в транзакции
+// вызывающего. Срок — от времени БАЗЫ: сравнивают его тоже операторы базы.
+func insertRefreshTokenTx(ctx context.Context, tx pgx.Tx, digest string, c domain.CeremonyContext,
+	generation int32, ttl time.Duration,
+) error {
+	if _, err := tx.Exec(ctx, insertRefreshSQL,
+		digest, c.FamilyID, c.ClientID, c.UserID, c.SessionID, c.Scope, generation, ttl.Seconds()); err != nil {
+		return wrapPgErr(err, "RefreshToken", c.FamilyID)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ. Порядок замков, а не проверка: см.
-	// `lockFamilyOfCodeSQL`. Ноль строк здесь законен и ничего не решает.
-	if _, err = tx.Exec(ctx, lockFamilyOfCodeSQL, in.CodeDigest); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "TokenFamily", "")
-	}
-
-	var out domain.RedeemedCode
-	err = tx.QueryRow(ctx, exchangeCodeSQL, in.CodeDigest).Scan(
-		&out.Context.FamilyID, &out.Context.ClientID, &out.Context.UserID,
-		&out.Context.SessionID, &out.Context.Scope,
-		&out.RedirectURI, &out.CodeChallenge, &out.CodeChallengeMethod)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		// Транзакция выдачи откачена ЗДЕСЬ, до разбора: разбор идёт по пулу.
-		_ = tx.Rollback(ctx)
-		return domain.RedeemedCode{}, r.refuseCode(ctx, in.CodeDigest)
-	}
-	if err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", "")
-	}
-
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO kaname.refresh_tokens
-		       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,0, now() + make_interval(secs => $7))`,
-		in.RefreshTokenDigest, out.Context.FamilyID, out.Context.ClientID, out.Context.UserID,
-		out.Context.SessionID, out.Context.Scope, in.RefreshTokenTTL.Seconds()); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.RedeemedCode{}, wrapPgErr(err, "AuthorizationCode", out.Context.FamilyID)
-	}
-	return out, nil
+	return nil
 }
 
-// refuseCode называет ПРИЧИНУ, по которой условие обмена не выполнилось, и —
-// если это ПОВТОР — отзывает всё семейство.
+// ConsumeAuthorizationCode гасит код — ТЕМ ЖЕ оператором, что обмен
+// (`exchangeCodeSQL`), после замка семейства (`lockFamilyOfCodeSQL`), на
+// названном уровне (`ceremonyWriterTx()`). Возвращает число погашенных строк:
+// 1 — погасил этот вызов; 0 — условие не выполнилось (уже погашен, истёк либо
+// семейство отозвано). Разбор нуля — забота вызывающего: у церемонии
+// фундамента (`oauth_ceremony_vaults.go`) повтор узнаётся выборкой кода, а ноль
+// строк после живой выборки — одновременный повтор (контракт
+// `oauthceremony.AuthorizationCodeVault`).
 //
-// Корзины «прочее» у разбора нет, и исходов РОВНО ТРИ: строка либо
-// отсутствует, либо неактивна, либо истекла. Четвёртого на сегодняшней схеме не
-// существует, и появление его означало бы, что условие обмена и этот разбор
-// разошлись — поэтому он отдельный ГРОМКИЙ отказ, а не тихое «повтор».
-//
-// ОТОЗВАННОЕ СЕМЕЙСТВО ОТДЕЛЬНОЙ ВЕТВЬЮ НЕ СТОИТ, И ЭТО НЕ УПУЩЕНИЕ: признак
-// активности строки ПРОИЗВОДЕН от живости семейства, поэтому отозванное
-// семейство наблюдается здесь как `!active` и разбирается первой же ветвью.
-// Ветвь, стоявшая ниже неё, не получала управления ни при каком входе — а
-// закрытый `switch` с ветвью, которой не достаётся вход, читается следующим как
-// живая. Семейство больше не опрашивается вовсе: соединение с ним отвечало на
-// вопрос, ответ на который теперь несёт сама строка.
-func (r *OAuthCeremonyRepo) refuseCode(ctx context.Context, digest string) error {
-	var (
-		active   bool
-		expired  bool
-		familyID string
-	)
-	err := r.pool.QueryRow(ctx, `
-		SELECT c.active, c.expires_at <= now(), c.family_id
-		  FROM kaname.authorization_codes c
-		 WHERE c.code_digest = $1`, digest).Scan(&active, &expired, &familyID)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: digest not found", domain.ErrAuthorizationCodeUnknown)
+// Первого поколения обновляющего токена здесь нет, и это не сокращение: движок
+// фундамента гасит код при ПРЕДЪЯВЛЕНИИ, до сверки доказательства, а пару
+// кладёт позже, своей единицей работы (`CeremonyVaults.StoreRefreshToken`).
+func (r *OAuthCeremonyRepo) ConsumeAuthorizationCode(ctx context.Context, digest string) (int64, error) {
+	if err := domain.ValidateCeremonyDigest("authorization_code.code_digest", digest); err != nil {
+		return 0, err
 	}
+	tx, err := r.beginWriter(ctx)
 	if err != nil {
-		return wrapPgErr(err, "AuthorizationCode", "")
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	consumed, err := consumeCodeTx(ctx, tx, digest)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	return consumed, nil
+}
+
+// consumeCodeTx — погашение кода в транзакции вызывающего: замок семейства
+// ПЕРВЫМ (`lockFamilyOfCodeSQL`, порядок «родитель → ребёнок»), затем оператор
+// обмена (`exchangeCodeSQL`). Число погашенных строк — 1 либо 0.
+//
+// Ноль строк от ОТСЕЧКИ СУБЪЕКТА — не ноль, а отказ
+// `domain.ErrCeremonySubjectCutOff`: ноль строк у порта фундамента — повтор, и
+// повтор отзывает семейство, а журнал назвал бы атакой отзыв доступа. Причина
+// читается ТЕМ ЖЕ предикатом, что в условии (`codeRefusalSQL`), в той же
+// транзакции — второй связи из пула погашение не берёт.
+func consumeCodeTx(ctx context.Context, tx pgx.Tx, digest string) (int64, error) {
+	if _, err := tx.Exec(ctx, lockFamilyOfCodeSQL, digest); err != nil {
+		return 0, wrapPgErr(err, "TokenFamily", "")
+	}
+	rows, err := tx.Query(ctx, exchangeCodeSQL, digest)
+	if err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	var consumed int64
+	for rows.Next() {
+		consumed++
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, wrapPgErr(err, "AuthorizationCode", "")
+	}
+	if consumed != 0 {
+		return consumed, nil
+	}
+	why, familyID, err := adjudicatePresented(ctx, tx, codeRefusalSQL, digest, "AuthorizationCode")
+	if err != nil {
+		return 0, err
+	}
+	if why == presentedCutOff {
+		return 0, fmt.Errorf("%w: family %s", domain.ErrCeremonySubjectCutOff, familyID)
+	}
+	return 0, nil
+}
+
+// presentedRefusal — чем предъявленная строка не прошла условную запись
+// погашения либо оборота. Корзины «прочее» нет: пятая причина на этой схеме —
+// расхождение условия и разбора, и она названа своим значением.
+//
+// Вызывающие различают ОДНУ причину — отсечку (`consumeCodeTx`,
+// `refuseCutOffRefresh`): она отказ «записи нет», а не ноль строк. Прочие
+// уходят порту фундамента нулём строк, и движок читает его одновременным
+// повтором. Разбор нужен и им: без него неактивная строка отрезанной сессии
+// читалась бы отсечкой, и повтор остался бы без отзыва (порядок —
+// `adjudicatePresented`).
+type presentedRefusal int
+
+const (
+	presentedUnknown  presentedRefusal = iota // строки нет
+	presentedReplay                           // строка неактивна: погашена, обёрнута либо семейство отозвано
+	presentedCutOff                           // сессия строки отрезана отсечкой субъекта
+	presentedExpired                          // строка активна, но срок вышел
+	presentedDiverged                         // жива, в сроке и не отрезана — условие и разбор разошлись
+)
+
+// codeRefusalSQL, refreshRefusalSQL — разбор нуля строк условной записи: те же
+// признаки, что в её условии, и тот же предикат отсечки. Читает их транзакция
+// решающей записи: второй связи из пула разбор не берёт.
+const (
+	codeRefusalSQL = `
+SELECT c.active, ` + codeSessionCutOffSQL + `, c.expires_at <= now(), c.family_id
+  FROM kaname.authorization_codes c
+ WHERE c.code_digest = $1`
+	refreshRefusalSQL = `
+SELECT t.active, ` + refreshSessionCutOffSQL + `, t.expires_at <= now(), t.family_id
+  FROM kaname.refresh_tokens t
+ WHERE t.token_digest = $1`
+)
+
+// adjudicatePresented называет причину нуля строк. Порядок — от решения,
+// которое дороже всего потерять: неактивная строка — повтор (по нему отзывается
+// семейство) при любой отсечке; живая, но отрезанная — отсечка; затем срок.
+func adjudicatePresented(ctx context.Context, q rowQuerier, sql, digest, entity string) (presentedRefusal, string, error) {
+	var (
+		active, cutOff, expired bool
+		familyID                string
+	)
+	err := q.QueryRow(ctx, sql, digest).Scan(&active, &cutOff, &expired, &familyID)
 	switch {
+	case stderrors.Is(err, pgx.ErrNoRows):
+		return presentedUnknown, "", nil
+	case err != nil:
+		return 0, "", wrapPgErr(err, entity, "")
 	case !active:
-		// ПОВТОР. Отзыв семейства — следствие, неотделимое от решения: вернуть
-		// «повтор», не отозвав, значило бы объявить похищение и ничего по нему
-		// не сделать.
-		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByCodeReplay); rErr != nil {
-			return fmt.Errorf("authorization code replay on family %s: revoking the family: %w", familyID, rErr)
-		}
-		return fmt.Errorf("%w: family %s revoked", domain.ErrAuthorizationCodeReplayed, familyID)
+		return presentedReplay, familyID, nil
+	case cutOff:
+		return presentedCutOff, familyID, nil
 	case expired:
-		return fmt.Errorf("%w: family %s", domain.ErrAuthorizationCodeExpired, familyID)
-	default:
-		return fmt.Errorf("authorization code %s: exchange affected no row while the row is live "+
-			"and unexpired — the exchange condition and this adjudication have diverged", familyID)
+		return presentedExpired, familyID, nil
 	}
+	return presentedDiverged, familyID, nil
 }
 
 // lockFamilyOfRefreshSQL — ЗАМОК, А НЕ ПРОВЕРКА, и по той же причине, что
-// `lockFamilyOfCodeSQL`: ротация обязана брать семейство ПЕРВОЙ, иначе её
-// порядок замков встречен порядку отзыва и жертвой цикла становится отзыв.
+// `lockFamilyOfCodeSQL`: оборот (`CeremonyVaults.RotateRefreshToken`) обязан
+// брать семейство ПЕРВЫМ, иначе его порядок замков встречен порядку отзыва и
+// жертвой цикла становится отзыв. Держит
+// `TestOAuthRotationTakesTheFamilyBeforeTheChild`.
 const lockFamilyOfRefreshSQL = `
 SELECT 1 FROM kaname.token_families
  WHERE id = (SELECT family_id FROM kaname.refresh_tokens WHERE token_digest = $1)
    FOR KEY SHARE`
 
-// rotateRefreshSQL — ТОТ ЖЕ механизм, что у обмена кода: условие на прежнее
-// состояние и возврат затронутой строки.
+// rotateRefreshSQL — ТОТ ЖЕ механизм, что у погашения кода: условие на
+// прежнее состояние и возврат затронутой строки. Исполняет его второй шаг
+// оборота хранилищ (`CeremonyVaults.StoreRefreshToken`). Отсечка субъекта
+// сессии токена — в том же операторе (`refreshSessionCutOffSQL`): замок оборота
+// строку токена держит, а строку отсечки нет, и отсечка, зафиксированная между
+// замком и оборотом, отказывает обороту здесь.
 const rotateRefreshSQL = `
 UPDATE kaname.refresh_tokens AS t
    SET deactivated_at = now(), deactivated_reason = 'rotated',
@@ -623,95 +719,8 @@ UPDATE kaname.refresh_tokens AS t
  WHERE t.token_digest = $1
    AND t.active
    AND t.expires_at > now()
+   AND NOT ` + refreshSessionCutOffSQL + `
 RETURNING t.family_id, t.client_id, t.user_id, t.session_id, t.scope, t.generation`
-
-// RotateRefreshToken ротирует обновляющий токен: предъявленный помечается
-// отротированным, преемник встаёт следующим поколением — ОДНОЙ транзакцией.
-func (r *OAuthCeremonyRepo) RotateRefreshToken(ctx context.Context, in RefreshRotation) (domain.RotatedRefreshToken, error) {
-	if err := domain.ValidateCeremonyDigest("refresh_token.token_digest", in.PresentedDigest); err != nil {
-		return domain.RotatedRefreshToken{}, err
-	}
-	if err := domain.ValidateCeremonyDigest("refresh_token.successor_digest", in.SuccessorDigest); err != nil {
-		return domain.RotatedRefreshToken{}, err
-	}
-	if in.PresentedDigest == in.SuccessorDigest {
-		return domain.RotatedRefreshToken{}, fmt.Errorf(
-			"Illegal argument refresh_token.successor_digest: must differ from the presented one")
-	}
-	if in.TTL <= 0 {
-		return domain.RotatedRefreshToken{}, fmt.Errorf("Illegal argument refresh_token.ttl: must be positive")
-	}
-
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// ЗАМОК СЕМЕЙСТВА — ПЕРВЫМ, по той же причине, что у обмена.
-	if _, err = tx.Exec(ctx, lockFamilyOfRefreshSQL, in.PresentedDigest); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "TokenFamily", "")
-	}
-
-	var out domain.RotatedRefreshToken
-	err = tx.QueryRow(ctx, rotateRefreshSQL, in.PresentedDigest, in.SuccessorDigest).Scan(
-		&out.Context.FamilyID, &out.Context.ClientID, &out.Context.UserID,
-		&out.Context.SessionID, &out.Context.Scope, &out.Generation)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		_ = tx.Rollback(ctx)
-		return domain.RotatedRefreshToken{}, r.refuseRefresh(ctx, in.PresentedDigest)
-	}
-	if err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", "")
-	}
-
-	if _, err = tx.Exec(ctx, `
-		INSERT INTO kaname.refresh_tokens
-		       (token_digest, family_id, client_id, user_id, session_id, scope, generation, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`,
-		in.SuccessorDigest, out.Context.FamilyID, out.Context.ClientID, out.Context.UserID,
-		out.Context.SessionID, out.Context.Scope, out.Generation+1, in.TTL.Seconds()); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.RotatedRefreshToken{}, wrapPgErr(err, "RefreshToken", out.Context.FamilyID)
-	}
-	out.Generation++
-	return out, nil
-}
-
-// refuseRefresh — разбор нуля затронутых строк ротации, тот же по устройству,
-// что и у обмена кода: исходов РОВНО ТРИ, и отозванное семейство приходит сюда
-// как `!active` — признак производен от его живости.
-func (r *OAuthCeremonyRepo) refuseRefresh(ctx context.Context, digest string) error {
-	var (
-		active   bool
-		expired  bool
-		familyID string
-	)
-	err := r.pool.QueryRow(ctx, `
-		SELECT t.active, t.expires_at <= now(), t.family_id
-		  FROM kaname.refresh_tokens t
-		 WHERE t.token_digest = $1`, digest).Scan(&active, &expired, &familyID)
-	if stderrors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: digest not found", domain.ErrRefreshTokenUnknown)
-	}
-	if err != nil {
-		return wrapPgErr(err, "RefreshToken", "")
-	}
-	switch {
-	case !active:
-		if _, rErr := r.RevokeFamily(ctx, familyID, domain.FamilyRevokedByRefreshReplay); rErr != nil {
-			return fmt.Errorf("refresh token replay on family %s: revoking the family: %w", familyID, rErr)
-		}
-		return fmt.Errorf("%w: family %s revoked", domain.ErrRefreshTokenReplayed, familyID)
-	case expired:
-		return fmt.Errorf("%w: family %s", domain.ErrRefreshTokenExpired, familyID)
-	default:
-		return fmt.Errorf("refresh token of family %s: rotation affected no row while the row is "+
-			"live and unexpired — the rotation condition and this adjudication have diverged", familyID)
-	}
-}
 
 // RevokeFamily отзывает семейство целиком ОДНОЙ транзакцией: отметка на
 // семействе и снятие всего живого, что по нему выдано, — включая записи
@@ -861,45 +870,13 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 
 // ── Проверочное значение секрета интерактивного клиента ─────────────────────
 
-// SetClientSecretVerifier кладёт проверочное значение секрета клиента.
-//
-// Материал уходит в базу АРГУМЕНТОМ оператора и в этом файле больше нигде не
-// участвует: разрешение на выход `domain.LoginVerifier.Reveal` дано ЭТОМУ файлу
-// с причиной в `internal/check/login_verifier_containment_test.go`.
-//
-// Снятие значения — отдельный глагол (`ClearClientSecretVerifier`), а не пустой
-// вход сюда: «положить пустое» и «снять» читались бы одинаково, и опечатка
-// вызывающего молча разоружала бы клиента.
-func (r *OAuthCeremonyRepo) SetClientSecretVerifier(ctx context.Context, clientID string, verifier domain.LoginVerifier) error {
-	if clientID == "" {
-		return fmt.Errorf("Illegal argument interactive_client.client_id: required")
-	}
-	if verifier.IsZero() {
-		return fmt.Errorf("Illegal argument interactive_client.secret_verifier: required")
-	}
-	// Транзакция СВОЯ, а не `execWriter`: материал уходит аргументом ровно
-	// этого оператора, и разрешение гейта удержания стоит на нём, а не на
-	// общем исполнителе, которому материал мог бы прийти откуда угодно.
-	tx, err := r.beginWriter(ctx)
-	if err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `
-		UPDATE kaname.interactive_clients
-		   SET secret_verifier = $2, secret_verifier_set_at = now()
-		 WHERE client_id = $1`, clientID, verifier.Reveal())
-	if err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	if tag.RowsAffected() == 0 {
-		return refuseNoSuchClient(clientID)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return wrapPgErr(err, "InteractiveClient", clientID)
-	}
-	return nil
-}
+// ПИСАТЕЛЯ проверочного значения в этом файле НЕТ, и это решение (задача
+// kaname#405, Р5). Значение кладёт вставка строки клиента ТЕМ ЖЕ оператором
+// (`InteractiveClientRepo.Insert`): отдельная запись после вставки открывала бы
+// окно «клиент со способом секретом есть, предъявить нечего», а сбой между
+// двумя операторами оставлял бы клиента, которого нельзя доказать никогда.
+// Прежний глагол записи снят вместе с разрешением гейта удержания; второго
+// писателя держит гейт `TestInteractiveClientSecretMaterialHasOneWriter`.
 
 // ClearClientSecretVerifier снимает проверочное значение: секрета у клиента
 // больше нет. Способ аутентификации при этом НЕ меняется — публичным клиента

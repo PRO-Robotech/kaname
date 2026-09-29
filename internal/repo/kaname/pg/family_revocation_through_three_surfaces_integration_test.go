@@ -18,6 +18,12 @@
 // закрытого словаря. Каждый повод подаётся ОТДЕЛЬНЫМ входом: реализация,
 // судящая одну причину, зелена на половине класса.
 //
+// Повторы исполняет ПРОД-ПУТЬ: ход движка над хранилищами (`ceremonyWalk`,
+// kaname#434) — сигнал повтора даёт хранилище, отзыв пишет настоящий адаптер
+// порта отзыва (`ceremonyport.Grants`) настоящим писателем; подставлено только
+// решение движка отозвать по сигналу, и его держат пробы с настоящим движком
+// (шапка `oauth_ceremony_walk_integration_test.go`).
+//
 // ВЫПУСК — НЕ НАСТОЯЩИЙ, и это граница пробы, а не её свойство. `issueIn`
 // подписывает токен и пишет запись выпуска настоящим писателем
 // (`RecordAccessToken`) в том порядке, в каком это делает адаптер порта выпуска
@@ -92,6 +98,7 @@ func recorderOf(t *testing.T, repo *kanamepg.OAuthCeremonyRepo) accessTokenRecor
 type familyRig struct {
 	pool     *pgxpool.Pool
 	ceremony *kanamepg.OAuthCeremonyRepo
+	walk     ceremonyWalk
 	recorder accessTokenRecorder
 	signer   *tokensigner.Signer
 	keys     issuanceKeys
@@ -111,7 +118,7 @@ func newFamilyRig(t *testing.T, pool *pgxpool.Pool) familyRig {
 	require.NoError(t, err)
 	ceremony := kanamepg.NewOAuthCeremonyRepo(pool)
 	return familyRig{
-		pool: pool, ceremony: ceremony, recorder: recorderOf(t, ceremony),
+		pool: pool, ceremony: ceremony, walk: newCeremonyWalk(t, pool), recorder: recorderOf(t, ceremony),
 		signer: signer, keys: rig.keys, rig: rig,
 	}
 }
@@ -253,12 +260,11 @@ func (f familyRig) exchangeIn(t *testing.T, scene domain.CeremonyContext, base i
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 time.Minute,
 	}), "выдача кода")
-	_, err := f.ceremony.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest: code, RefreshTokenDigest: rt, RefreshTokenTTL: time.Hour,
-	})
-	require.NoError(t, err, "обмен кода")
+	out, err := f.walk.exchange(ctx, code, rt)
+	requireWalkIssued(t, out, err, "обмен кода")
 	return codeScene{ctx: scene, code: code, rt: rt, at: f.issueIn(t, scene)}
 }
 
@@ -296,14 +302,11 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 			twin: true,
 			apply: func(t *testing.T, f familyRig, a codeScene) string {
 				// rt-1 законно ротирован в rt-2 (LINE-A-1-20), затем повторён.
-				_, err := f.ceremony.RotateRefreshToken(context.Background(), kanamepg.RefreshRotation{
-					PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x7e56), TTL: time.Hour,
-				})
-				require.NoError(t, err, "законная ротация rt-1 → rt-2")
-				_, err = f.ceremony.RotateRefreshToken(context.Background(), kanamepg.RefreshRotation{
-					PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x7e57), TTL: time.Hour,
-				})
-				require.True(t, domain.IsRefreshTokenReplay(err), "повтор обязан быть опознан: %v", err)
+				out, err := f.walk.rotate(context.Background(), a.rt, ceremonyDigest(0x7e56))
+				requireWalkIssued(t, out, err, "законная ротация rt-1 → rt-2")
+				out, err = f.walk.rotate(context.Background(), a.rt, ceremonyDigest(0x7e57))
+				require.NoError(t, err, "повтор обязан быть опознан, а не отказать")
+				require.Equal(t, walkReplay, out, "повтор обязан быть опознан")
 				return string(domain.FamilyRevokedByRefreshReplay)
 			},
 		},
@@ -312,10 +315,9 @@ func TestLINE_A_1_21_FamilyRevocationReachesEveryPresentationSurface(t *testing.
 			tag:  "fcr",
 			twin: true,
 			apply: func(t *testing.T, f familyRig, a codeScene) string {
-				_, err := f.ceremony.ExchangeAuthorizationCode(context.Background(), kanamepg.CodeExchange{
-					CodeDigest: a.code, RefreshTokenDigest: ceremonyDigest(0x7e58), RefreshTokenTTL: time.Hour,
-				})
-				require.True(t, domain.IsAuthorizationCodeReplay(err), "повтор обязан быть опознан: %v", err)
+				out, err := f.walk.exchange(context.Background(), a.code, ceremonyDigest(0x7e58))
+				require.NoError(t, err, "повтор обязан быть опознан, а не отказать")
+				require.Equal(t, walkReplay, out, "повтор обязан быть опознан")
 				return string(domain.FamilyRevokedByCodeReplay)
 			},
 		},
@@ -411,20 +413,20 @@ func TestLINE_A_1_20_LawfulRotationRevokesNothing(t *testing.T) {
 	scene := ceremonyScene(t, ctx, pool, "frtn")
 
 	a := f.exchangeIn(t, scene, 0x3000)
-	rotated, err := f.ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x3002), TTL: time.Hour,
-	})
-	require.NoError(t, err, "законная ротация")
-	require.EqualValues(t, 1, rotated.Generation, "ротация обязана дать следующее поколение")
+	rotated, err := f.walk.rotate(ctx, a.rt, ceremonyDigest(0x3002))
+	requireWalkIssued(t, rotated, err, "законная ротация")
+	var generation int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT generation FROM kaname.refresh_tokens WHERE token_digest = $1`,
+		ceremonyDigest(0x3002)).Scan(&generation))
+	require.Equal(t, 1, generation, "ротация обязана дать следующее поколение")
 	after := f.issueIn(t, scene)
 
 	f.requireAccepted(t, a.at, "выпуск до законной ротации")
 	f.requireAccepted(t, after, "выпуск после законной ротации")
 
-	_, err = f.ceremony.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-		PresentedDigest: a.rt, SuccessorDigest: ceremonyDigest(0x3003), TTL: time.Hour,
-	})
-	require.True(t, domain.IsRefreshTokenReplay(err), "повтор старого обязан быть опознан: %v", err)
+	replayed, err := f.walk.rotate(ctx, a.rt, ceremonyDigest(0x3003))
+	require.NoError(t, err, "повтор старого обязан быть опознан, а не отказать")
+	require.Equal(t, walkReplay, replayed, "повтор старого обязан быть опознан")
 
 	f.requireRefusedByAll(t, a.at, "выпуск до ротации после повтора")
 	f.requireRefusedByAll(t, after, "выпуск после ротации после повтора")

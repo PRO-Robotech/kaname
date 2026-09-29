@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
@@ -70,7 +71,7 @@ func formDoor(t *testing.T) (*authzcascade.Client, *pgxpool.Pool) {
 	// Тогда «не выполнилось» приходит к читателю под видом красного, и вердикта
 	// нет НИ У ОДНОЙ пробы пакета, включая прошедшие.
 	pgtest.ClosePoolAtEnd(t, pool)
-	return authzcascade.Wrap(relverdict.NewAsker(pool)), pool
+	return authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)), pool
 }
 
 // seedExpandFixture кладёт арендную обвязку, группу с двумя людьми и выдачу.
@@ -101,8 +102,8 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	     VALUES ('acc_A', 'home-account', 'usr_owner-----------'), ('acc_B', 'foreign-account', 'usr_owner-----------')
 	     ON CONFLICT DO NOTHING`)
 	for _, u := range []string{"usr_owner-----------", "usr_auditor---------", "usr_m1", "usr_m2", "usr_secret_b"} {
-		run(`INSERT INTO kaname.users (id, external_id, email, account_id)
-		     VALUES ($1, $1, $1 || '@kacho.local', 'acc_A') ON CONFLICT DO NOTHING`, u)
+		run(`INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+		     VALUES ($1, $1, $1 || '@kacho.local', 'acc_A', now()) ON CONFLICT DO NOTHING`, u)
 	}
 	run(`INSERT INTO kaname.groups (id, account_id, name) VALUES ('grp_team', 'acc_A', 'team-group')
 	     ON CONFLICT DO NOTHING`)

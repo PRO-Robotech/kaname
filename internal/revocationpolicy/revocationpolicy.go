@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -57,15 +58,22 @@ type Lookup interface {
 	// Ошибка не сворачивается в «отсечки нет»: недоступное хранилище — не
 	// ответ «нет».
 	UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error)
+	// PersonMarks — второй вопрос правила (kaname#456, Р5): строки людей среди
+	// названных идентификаторов и подтверждён ли их текущий адрес. Тот же
+	// предикат допуска, что у двери решения и рубежа слушателей
+	// (`admission`); своего чтения отметки у правила нет.
+	admission.Marks
 }
 
-// Verdict — исход сверки. Закрытый словарь из ТРЁХ значений.
+// Verdict — исход сверки. Закрытый словарь из ЧЕТЫРЁХ значений.
 //
-// Трёх, а не двух: «выдавать», «не выдавать — человек вышел отовсюду» и «не
-// выдавать — ответить на вопрос нечем» чинятся разными людьми, и слитый с
-// «можно» третий исход превратил бы отказ хранилища в выдачу. Нулевое значение
-// типа НЕ является ни одним из трёх: вызывающий, получивший его, обязан
-// отказать — это закрытый словарь, а не корзина «прочее».
+// Не двух: «выдавать», «не выдавать — человек вышел отовсюду», «не выдавать —
+// адрес владельца-человека не подтверждён» и «не выдавать — ответить на
+// вопрос нечем» чинятся разными людьми и разными действиями (войти заново
+// против подтвердить адрес против починить хранилище), и слитый счётчик не
+// сказал бы оператору, что чинить. Нулевое значение типа НЕ является ни одним
+// из четырёх: вызывающий, получивший его, обязан отказать — это закрытый
+// словарь, а не корзина «прочее».
 type Verdict string
 
 const (
@@ -76,15 +84,25 @@ const (
 	Revoked Verdict = "revoked"
 	// Undecidable — вопрос задать нечем либо не у кого: хранилище не ответило,
 	// читатель не подан, принципал-человек не назван идентификатором. Отказ,
-	// а не разрешение: правило авторитетно и закрывается на неизвестном.
+	// а не разрешение: правило авторитетно и закрывается на неизвестном. Не
+	// ответивший о любом из двух вопросов — этот вердикт.
 	Undecidable Verdict = "undecidable"
+	// Unverified — владелец-человек с неподтверждённым адресом (kaname#456,
+	// Р5): удостоверение человеку не выдаётся, пока адрес не подтверждён.
+	Unverified Verdict = "unverified"
 )
+
+// Verdicts — закрытый словарь вердиктов, копией.
+func Verdicts() []Verdict { return []Verdict{Allowed, Revoked, Undecidable, Unverified} }
 
 // ErrNoLookup — читатель отсечки не подан.
 var ErrNoLookup = errors.New("revocationpolicy: revoke-all cutoff reader is not wired")
 
 // ErrUnknownPrincipalKind — вид принципала вне словаря [service.PrincipalKind].
 var ErrUnknownPrincipalKind = errors.New("revocationpolicy: principal kind is outside the closed dictionary")
+
+// ErrLimitNotPositive — предел на вызов, поданный обёртке, не положителен.
+var ErrLimitNotPositive = errors.New("revocationpolicy: per-call limit must be a positive duration")
 
 // ErrPrincipalWithoutID — принципал назван человеком, но без идентификатора,
 // по которому отсечка ключуется.
@@ -146,11 +164,31 @@ func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal
 	if err != nil {
 		return Undecidable, fmt.Errorf("revocationpolicy: revoke-all cutoff lookup: %w", err)
 	}
-	if !found {
-		return Allowed, nil
-	}
-	if Forbids(cutoff, Anchor(p, sessionAuthTime)) {
+	if found && Forbids(cutoff, Anchor(p, sessionAuthTime)) {
 		return Revoked, nil
+	}
+	return OwnerAdmission(ctx, cutoffs, p.UserID)
+}
+
+// OwnerAdmission — второй вопрос правила о владельце-человеке (kaname#456,
+// Р5): подтверждён ли его текущий адрес. Allowed — подтверждён (либо
+// идентификатор не называет строки человека); Unverified — не подтверждён;
+// Undecidable — спросить не смогли. Полоса, судящая отсечку своим оператором
+// (базовый секрет, хук обновления), спрашивает этот вопрос здесь же, а не
+// копией.
+func OwnerAdmission(ctx context.Context, marks admission.Marks, userID string) (Verdict, error) {
+	if marks == nil {
+		return Undecidable, ErrNoLookup
+	}
+	if userID == "" {
+		return Undecidable, ErrPrincipalWithoutID
+	}
+	admitted, err := admission.ID(ctx, marks, userID)
+	if err != nil {
+		return Undecidable, fmt.Errorf("revocationpolicy: address mark lookup: %w", err)
+	}
+	if !admitted {
+		return Unverified, nil
 	}
 	return Allowed, nil
 }
@@ -169,13 +207,22 @@ func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal
 // поздно не появится — молча. Истёкший предел — ошибка чтения, то есть
 // [Undecidable], а не «отсечки нет».
 //
+// Неположительный предел — ОТКАЗ ПОСТРОЕНИЯ ([ErrLimitNotPositive]), а не
+// обёртка: контекст с таким сроком истёк в момент вызова, каждое чтение
+// кончалось бы ошибкой, и полоса отказывала бы в выдаче всем — на первом
+// запросе, а не на старте. Предел судится раньше читателя: величина неверна
+// независимо от того, что оборачивается.
+//
 // Неподанный читатель остаётся неподанным: обёртка над nil вернула бы
 // непустое значение, и «читатель не провязан» перестал бы быть различимым.
-func WithDeadline(inner Lookup, timeout time.Duration) Lookup {
-	if inner == nil {
-		return nil
+func WithDeadline(inner Lookup, timeout time.Duration) (Lookup, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("%w, got %s", ErrLimitNotPositive, timeout)
 	}
-	return deadlineLookup{inner: inner, timeout: timeout}
+	if inner == nil {
+		return nil, nil
+	}
+	return deadlineLookup{inner: inner, timeout: timeout}, nil
 }
 
 // deadlineLookup — чтение отсечки со СВОИМ пределом времени.
@@ -188,4 +235,12 @@ func (d deadlineLookup) UserRevokedBefore(ctx context.Context, userID string) (t
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	return d.inner.UserRevokedBefore(ctx, userID)
+}
+
+// PersonMarks — второй вопрос тем же пределом на вызов: чтение одной строки
+// одним запросом, как и отсечка.
+func (d deadlineLookup) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	return d.inner.PersonMarks(ctx, ids)
 }

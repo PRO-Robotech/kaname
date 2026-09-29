@@ -33,7 +33,9 @@ import (
 // Generic T — domain-тип, возвращаемый action'ом. Go infer'ит его из closure.
 //
 // Все ошибки из репо (action error + Writer/Commit) маппятся через
-// MapRepoErr — caller получает уже gRPC-status.
+// MapRepoErrAt на контексте, на котором шли вызовы, — caller получает уже
+// gRPC-status, и отказ хранилища на кончившемся контексте приходит
+// недоступностью, а не поломкой (kaname#383).
 func DoWithWriteTx[T any](
 	ctx context.Context,
 	repo kanamerepo.Repository,
@@ -42,7 +44,7 @@ func DoWithWriteTx[T any](
 	var zero T
 	w, err := repo.Writer(ctx)
 	if err != nil {
-		return zero, MapRepoErr(err)
+		return zero, MapRepoErrAt(ctx, err)
 	}
 	committed := false
 	defer func() {
@@ -53,10 +55,10 @@ func DoWithWriteTx[T any](
 
 	result, err := action(ctx, w)
 	if err != nil {
-		return zero, MapRepoErr(err)
+		return zero, MapRepoErrAt(ctx, err)
 	}
 	if err := w.Commit(ctx); err != nil {
-		return zero, MapRepoErr(err)
+		return zero, MapRepoErrAt(ctx, err)
 	}
 	committed = true
 	return result, nil

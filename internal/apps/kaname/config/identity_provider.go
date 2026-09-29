@@ -22,9 +22,14 @@ type IdentityProvider = identityposture.Provider
 
 // Значения — те же, что в общем фундаменте. Псевдонимы констант, а не вторая
 // их нумерация: собственная нумерация разъехалась бы с общей молча.
+//
+// IdentityProviderExternal — снятая посадка (PRO-Robotech/corelib#30): словарь
+// её не называет, разбор не производит, проверка старта отвергает её
+// Provider.Validate (#424). Имя держат строки полосы `external`, которые старт
+// больше не судит, и уходит оно вместе с полосой (#363).
 const (
 	IdentityProviderUnset    = identityposture.Unset
-	IdentityProviderExternal = identityposture.External
+	IdentityProviderExternal = identityposture.External //nolint:staticcheck // снятая посадка: имя держат строки её полосы до #363, старт её отвергает Validate (#424)
 	IdentityProviderOwn      = identityposture.Own
 )
 

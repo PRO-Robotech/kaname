@@ -250,7 +250,7 @@ func TestForeignOperatorInjection_RemedyThatDoesNotRemoveIsAFinding(t *testing.T
 
 	dir := chartCopy(t)
 	patchInCopy(t, dir, filepath.Join("templates", "prometheusrule.yaml"),
-		"{{- if .Values.alertRules.enabled }}", "{{- if true }}")
+		`{{- if include "kaname-svc.blockEnabled" (list $ "alertRules") }}`, "{{- if true }}")
 
 	off := renderedChartObjects(t,
 		renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"}, row.Knob+"="+row.RemedyValue))

@@ -17,8 +17,8 @@ import (
 )
 
 // mailLawfulSender — ЗАКОННЫЙ БЛИЗНЕЦ оси транспорта: единственный путь,
-// отправляющий оба наших вида — приглашение и восстановление (с Ф5). Дословная
-// форма сегодняшнего дерева.
+// отправляющий все три наших вида — приглашение, восстановление (с Ф5) и
+// подтверждение адреса (с kaname#456). Дословная форма сегодняшнего дерева.
 const mailLawfulSender = `package clients
 
 import (
@@ -27,6 +27,7 @@ import (
 
 const EventInviteMailSend = "mail.invite.send"
 const EventRecoveryMailSend = "mail.recovery.send"
+const EventVerificationMailSend = "mail.verification.send"
 
 func send(c *smtp.Client) error { return nil }
 `
@@ -63,15 +64,16 @@ const eventKind = "mail.invite.send"
 func resend(c *smtp.Client) error { return nil }
 `
 
-// mailInjectedForeignKind — ось 1, дефект Б: наш путь отправки ЧУЖОГО вида.
-// Против близнеца выше меняется ровно один факт — слово вида в литерале.
+// mailInjectedForeignKind — ось 1, дефект Б: наш путь отправки вида ВНЕ
+// перечня. Против близнеца выше меняется ровно один факт — слово вида в
+// литерале; вид `newsletter` не переезжал к нам ни одной приёмкой.
 const mailInjectedForeignKind = `package clients
 
 import (
 	"net/smtp"
 )
 
-const EventVerificationMailSend = "mail.verification.send"
+const EventNewsletterMailSend = "mail.newsletter.send"
 
 func send(c *smtp.Client) error { return nil }
 `
@@ -160,17 +162,17 @@ func TestMAIL47Injection_SecondSenderOfTheSameKind(t *testing.T) {
 func TestMAIL47Injection_ForeignKindIsNamed(t *testing.T) {
 	t.Parallel()
 	got := findingsFor(t, map[string]string{
-		"internal/clients/verification_mail.go": mailInjectedForeignKind,
+		"internal/clients/newsletter_mail.go": mailInjectedForeignKind,
 	})
 	var transport, vocabulary bool
 	for _, f := range got {
-		if !strings.Contains(f.What, "verification") {
+		if !strings.Contains(f.What, "newsletter") {
 			continue
 		}
 		switch f.Axis {
 		case "transport":
 			transport = true
-			if !strings.Contains(f.Where, "internal/clients/verification_mail.go") {
+			if !strings.Contains(f.Where, "internal/clients/newsletter_mail.go") {
 				t.Errorf("находка оси транспорта без координаты: %q", f.Where)
 			}
 		case "vocabulary":
@@ -187,43 +189,44 @@ func TestMAIL47Injection_ForeignKindIsNamed(t *testing.T) {
 
 // TestMAIL47Injection_VocabularyAxisSeesASenderWithoutTransport — ось 2
 // отдельно: чужой вид в словаре очереди — находка ДАЖЕ без транспорта рядом.
-// Чужой здесь — подтверждение адреса (за поставщиком до Ф6); законный близнец —
-// то же хранилище с видом `invite` (проверен выше) и с видом `recovery`, который
-// наш с Ф5 (ниже).
+// Чужой здесь — вид `newsletter`, не переезжавший к нам; законный близнец — то же
+// хранилище с видами `invite`, `recovery` (наш с Ф5) и `verification` (наш с
+// kaname#456), ниже.
 func TestMAIL47Injection_VocabularyAxisSeesASenderWithoutTransport(t *testing.T) {
 	t.Parallel()
 	got := findingsFor(t, map[string]string{
 		"internal/clients/invite_mail.go": mailLawfulSender,
-		"internal/repo/kaname/pg/verification_mail_outbox/store.go": `package verification_mail_outbox
+		"internal/repo/kaname/pg/newsletter_mail_outbox/store.go": `package newsletter_mail_outbox
 
-const EventSend = "mail.verification.send"
+const EventSend = "mail.newsletter.send"
 `,
 	})
 	var found bool
 	for _, f := range got {
-		if f.Axis == "vocabulary" && strings.Contains(f.What, "verification") {
+		if f.Axis == "vocabulary" && strings.Contains(f.What, "newsletter") {
 			found = true
-			if !strings.Contains(f.Where, "verification_mail_outbox/store.go") {
+			if !strings.Contains(f.Where, "newsletter_mail_outbox/store.go") {
 				t.Errorf("находка словаря без координаты: %q", f.Where)
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("вид `verification` в словаре очереди НЕ найден: %+v", got)
+		t.Fatalf("вид `newsletter` в словаре очереди НЕ найден: %+v", got)
 	}
 
-	// Законный близнец Ф5: вид восстановления в словаре очереди рядом с
-	// единственным путём, отправляющим оба наших вида, — молчание.
+	// Законный близнец: виды восстановления и подтверждения в словаре очереди
+	// рядом с единственным путём, отправляющим все три наших вида, — молчание.
 	twin := findingsFor(t, map[string]string{
 		"internal/clients/invite_mail.go": mailLawfulSender,
 		"internal/repo/kaname/pg/invite_mail_outbox/store.go": `package invite_mail_outbox
 
 const EventSend = "mail.invite.send"
 const EventRecoverySend = "mail.recovery.send"
+const EventVerificationSend = "mail.verification.send"
 `,
 	})
 	if len(twin) != 0 {
-		t.Fatalf("законный близнец (оба наших вида, один путь) дал находки: %+v", twin)
+		t.Fatalf("законный близнец (все три наших вида, один путь) дал находки: %+v", twin)
 	}
 	// И обратная сторона перечня: путь, отправляющий ТОЛЬКО приглашение, при
 	// живом виде восстановления в словаре — «путей отправки вида recovery — ноль».

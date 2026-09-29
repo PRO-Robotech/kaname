@@ -21,6 +21,11 @@ package pg_test
 //   - отзыв идёт «родитель → дети»: ключевое обновление семейства, за которым
 //     `ON UPDATE CASCADE` идёт за замками всех его строк.
 //
+// Выдача здесь — обмен кода ПРОД-ПУТИ: ход движка над хранилищами
+// (`ceremonyWalk`, kaname#434), где погашение берёт семейство первым
+// (`consumeCodeTx`), а первое поколение токена обновления ложится единицей
+// работы следом.
+//
 // Встречные порядки дают цикл, и движок снимает одного. Снимал он ОТЗЫВ: 6
 // прогонов из 6 на postgres:16-alpine жертвой становилась транзакция отзыва —
 // семейство оставалось ЖИВЫМ, а выданный по нему токен АКТИВНЫМ.
@@ -48,6 +53,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -138,6 +144,7 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 	}
 	ctx, pool := catalogPool(t)
 	repo := kanamepg.NewOAuthCeremonyRepo(pool)
+	walk := newCeremonyWalk(t, pool)
 
 	// Сцены различаются РОВНО ОДНИМ фактом — кто стартует раньше.
 	scenes := []struct {
@@ -164,27 +171,25 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: "S256",
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}), "посев кода")
 
 			var (
 				wg                     sync.WaitGroup
+				exchanged              walkOutcome
 				exchangeErr, revokeErr error
 			)
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
 				time.Sleep(scene.exchangeLate)
-				_, exchangeErr = repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-					CodeDigest:         code,
-					RefreshTokenDigest: ceremonyDigest(0x200000 + si*100 + run),
-					RefreshTokenTTL:    time.Hour,
-				})
+				exchanged, exchangeErr = walk.exchange(ctx, code, ceremonyDigest(0x200000+si*100+run))
 			}()
 			go func() {
 				defer wg.Done()
 				time.Sleep(scene.revokeLate)
-				_, revokeErr = repo.RevokeFamily(ctx, base.FamilyID, domain.FamilyRevokedByLogout)
+				_, revokeErr = repo.RevokeFamily(ctx, base.FamilyID, domain.FamilyRevokedBySessionEnd)
 			}()
 			wg.Wait()
 
@@ -218,9 +223,9 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 				  FROM kaname.token_families f WHERE f.id = $1`,
 				base.FamilyID).Scan(&live, &liveTokens, &liveCodes, &rowTokens, &rowCodes))
 
-			t.Logf("сцена %q прогон %d: отзыв=%v · обмен=%v · семейство живо=%v · "+
+			t.Logf("сцена %q прогон %d: отзыв=%v · обмен=%v (%v) · семейство живо=%v · "+
 				"токенов %d, из них живых %d · кодов %d, из них живых %d",
-				scene.name, run, revokeErr, exchangeErr, live, rowTokens, liveTokens, rowCodes, liveCodes)
+				scene.name, run, revokeErr, exchanged, exchangeErr, live, rowTokens, liveTokens, rowCodes, liveCodes)
 
 			require.NoError(t, revokeErr,
 				"сцена %q прогон %d: ОТЗЫВ обязан пройти — он контроль безопасности, "+
@@ -239,10 +244,10 @@ func TestOAuthFamilyRevocationDoesNotDeadlockWithIssuance(t *testing.T) {
 				"сцена %q прогон %d: живого кода у отозванного семейства быть не может "+
 					"(строк кода %d)", scene.name, run, rowCodes)
 
-			// Токен появляется только там, где обмен ВЫИГРАЛ. Тогда — и только
-			// тогда — «живых ноль» есть утверждение о существующей строке, и
-			// знаменатель требуется именно в этой ветви.
-			if exchangeErr == nil {
+			// Токен появляется только там, где обмен ВЫИГРАЛ — выдача закреплена.
+			// Тогда — и только тогда — «живых ноль» есть утверждение о
+			// существующей строке, и знаменатель требуется именно в этой ветви.
+			if exchangeErr == nil && exchanged == walkIssued {
 				require.Positive(t, rowTokens,
 					"сцена %q прогон %d: обмен прошёл, значит строка обновляющего токена "+
 						"обязана существовать — иначе судить нечего", scene.name, run)
@@ -286,6 +291,7 @@ func TestOAuthExchangeTakesTheFamilyBeforeTheChild(t *testing.T) {
 	}
 	ctx, pool := catalogPool(t)
 	repo := kanamepg.NewOAuthCeremonyRepo(pool)
+	walk := newCeremonyWalk(t, pool)
 	base := lockOrderScene(t, ctx, pool, 900)
 
 	code := ceremonyDigest(0x900001)
@@ -295,63 +301,23 @@ func TestOAuthExchangeTakesTheFamilyBeforeTheChild(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: "S256",
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 
-	// Посторонний держатель семейства. `FOR UPDATE` конфликтует с `FOR KEY
-	// SHARE`, который берёт обмен, — значит обмен обязан встать здесь.
-	holder, err := pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = holder.Rollback(ctx) }()
-	var held int
-	require.NoError(t, holder.QueryRow(ctx,
-		`SELECT 1 FROM kaname.token_families WHERE id = $1 FOR UPDATE`, base.FamilyID).Scan(&held))
+	holder := holdFamilyForUpdate(t, ctx, pool, base.FamilyID)
 
-	done := make(chan error, 1)
+	type exchangeResult struct {
+		out walkOutcome
+		err error
+	}
+	done := make(chan exchangeResult, 1)
 	go func() {
-		_, exErr := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-			CodeDigest:         code,
-			RefreshTokenDigest: ceremonyDigest(0x900002),
-			RefreshTokenTTL:    time.Hour,
-		})
-		done <- exErr
+		out, exErr := walk.exchange(ctx, code, ceremonyDigest(0x900002))
+		done <- exchangeResult{out, exErr}
 	}()
 
-	// Ждём, пока обмен ВСТАНЕТ. Ожидание — по наблюдаемому состоянию движка, а
-	// не по «достаточной» паузе: пауза на медленной машине даёт зелёное на
-	// пустом месте.
-	//
-	// Ожидание строчного замка НЕ выглядит как незахваченный замок на
-	// отношении: движок кладёт ждущего на `transactionid` держателя, и
-	// `pg_locks.relation` у такой записи пуст. Поэтому ждущий опознаётся по
-	// `pg_stat_activity.wait_event_type = 'Lock'`, а не по отношению.
-	var waiterPID int
-	for i := 0; i < 200; i++ {
-		err := pool.QueryRow(ctx, `
-			SELECT a.pid FROM pg_stat_activity a
-			 WHERE a.datname = current_database()
-			   AND a.wait_event_type = 'Lock'
-			   AND a.state = 'active'
-			 LIMIT 1`).Scan(&waiterPID)
-		if err == nil && waiterPID != 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	require.NotZero(t, waiterPID,
-		"обмен обязан ВСТАТЬ на семействе: если он не встал, он его не берёт — "+
-			"а значит порядок замков не упорядочен и проба судит не тот предмет")
-
-	// Встал он именно НА СЕМЕЙСТВЕ: ждущий висит на транзакции держателя, а
-	// держатель — это наш `FOR UPDATE` на строке семейства.
-	var waitsForHolder bool
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT EXISTS (
-		  SELECT 1 FROM pg_locks w
-		   WHERE w.pid = $1 AND NOT w.granted
-		     AND (w.relation = 'kaname.token_families'::regclass
-		          OR w.locktype IN ('transactionid','tuple')))`, waiterPID).Scan(&waitsForHolder))
-	require.True(t, waitsForHolder, "ждущий обязан стоять на держателе семейства")
+	waiterPID := awaitWaiterOnTheFamilyHolder(t, ctx, pool, "обмен")
 
 	// ВОТ УТВЕРЖДЕНИЕ: стоя на семействе, обмен НЕ ДЕРЖИТ РЕБЁНКА.
 	//
@@ -373,9 +339,138 @@ func TestOAuthExchangeTakesTheFamilyBeforeTheChild(t *testing.T) {
 	// Отпускаем держателя — обмен обязан доехать, а не остаться висеть.
 	require.NoError(t, holder.Rollback(ctx))
 	select {
-	case exErr := <-done:
-		require.NoError(t, exErr, "обмен обязан завершиться после снятия постороннего замка")
+	case got := <-done:
+		requireWalkIssued(t, got.out, got.err, "обмен обязан завершиться выдачей после снятия постороннего замка")
 	case <-time.After(30 * time.Second):
 		t.Fatal("обмен не завершился после снятия постороннего замка")
+	}
+}
+
+// awaitWaiterOnTheFamilyHolder — процесс хода, ВСТАВШИЙ на постороннем держателе
+// семейства.
+//
+// Ожидание — по наблюдаемому состоянию движка, а не по «достаточной» паузе:
+// пауза на медленной машине даёт зелёное на пустом месте.
+//
+// Ожидание строчного замка НЕ выглядит как незахваченный замок на отношении:
+// движок кладёт ждущего на `transactionid` держателя, и `pg_locks.relation` у
+// такой записи пуст. Поэтому ждущий опознаётся по
+// `pg_stat_activity.wait_event_type = 'Lock'`, а не по отношению.
+func awaitWaiterOnTheFamilyHolder(t *testing.T, ctx context.Context, pool *pgxpool.Pool, who string) int {
+	t.Helper()
+	var waiterPID int
+	for i := 0; i < 200; i++ {
+		err := pool.QueryRow(ctx, `
+			SELECT a.pid FROM pg_stat_activity a
+			 WHERE a.datname = current_database()
+			   AND a.wait_event_type = 'Lock'
+			   AND a.state = 'active'
+			 LIMIT 1`).Scan(&waiterPID)
+		if err == nil && waiterPID != 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.NotZerof(t, waiterPID,
+		"%s обязан ВСТАТЬ на семействе: если он не встал, он его не берёт — "+
+			"а значит порядок замков не упорядочен и проба судит не тот предмет", who)
+
+	// Встал он именно НА СЕМЕЙСТВЕ: ждущий висит на транзакции держателя, а
+	// держатель — это наш `FOR UPDATE` на строке семейства.
+	var waitsForHolder bool
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM pg_locks w
+		   WHERE w.pid = $1 AND NOT w.granted
+		     AND (w.relation = 'kaname.token_families'::regclass
+		          OR w.locktype IN ('transactionid','tuple')))`, waiterPID).Scan(&waitsForHolder))
+	require.Truef(t, waitsForHolder, "%s: ждущий обязан стоять на держателе семейства", who)
+	return waiterPID
+}
+
+// holdFamilyForUpdate — посторонний держатель семейства. `FOR UPDATE`
+// конфликтует с `FOR KEY SHARE`, который берут обмен и оборот, — значит они
+// обязаны встать здесь.
+func holdFamilyForUpdate(t *testing.T, ctx context.Context, pool *pgxpool.Pool, familyID string) pgx.Tx {
+	t.Helper()
+	holder, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+	var held int
+	require.NoError(t, holder.QueryRow(ctx,
+		`SELECT 1 FROM kaname.token_families WHERE id = $1 FOR UPDATE`, familyID).Scan(&held))
+	return holder
+}
+
+// TestOAuthRotationTakesTheFamilyBeforeTheChild — тот же инвариант у ОБОРОТА
+// токена обновления прод-пути (`CeremonyVaults.RotateRefreshToken`: замок
+// семейства, затем строка токена `FOR UPDATE`).
+//
+// Стоя на семействе, оборот не держит строчного захвата на `refresh_tokens`:
+// `RowShareLock` на отношении берёт замок строки токена, `RowExclusiveLock` —
+// оборот и вставка преемника. На форме без замка семейства оборот успевает
+// взять строку токена, обернуть её и встаёт лишь на вставке преемника — захват
+// на ребёнке БУДЕТ всегда. Выборка токена до единицы работы идёт другим
+// соединением пула и в счёт не входит: судится процесс, который стоит.
+func TestOAuthRotationTakesTheFamilyBeforeTheChild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx, pool := catalogPool(t)
+	repo := kanamepg.NewOAuthCeremonyRepo(pool)
+	walk := newCeremonyWalk(t, pool)
+	base := lockOrderScene(t, ctx, pool, 901)
+
+	code := ceremonyDigest(0x901001)
+	require.NoError(t, repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
+		Context:             base,
+		CodeDigest:          code,
+		RedirectURI:         "https://app.example.test/cb",
+		CodeChallenge:       ceremonyChallenge,
+		CodeChallengeMethod: "S256",
+		ACR:                 "1",
+		TTL:                 5 * time.Minute,
+	}), "посев кода")
+	first := ceremonyDigest(0x901002)
+	seeded, err := walk.exchange(ctx, code, first)
+	requireWalkIssued(t, seeded, err, "посев первого поколения")
+
+	holder := holdFamilyForUpdate(t, ctx, pool, base.FamilyID)
+	type rotateResult struct {
+		out walkOutcome
+		err error
+	}
+	done := make(chan rotateResult, 1)
+	go func() {
+		out, rErr := walk.rotate(ctx, first, ceremonyDigest(0x901003))
+		done <- rotateResult{out, rErr}
+	}()
+	waiterPID := awaitWaiterOnTheFamilyHolder(t, ctx, pool, "оборот")
+
+	var childModes []string
+	rows, err := pool.Query(ctx, `
+		SELECT l.mode FROM pg_locks l
+		 WHERE l.pid = $1 AND l.granted
+		   AND l.relation = 'kaname.refresh_tokens'::regclass
+		   AND l.mode IN ('RowShareLock', 'RowExclusiveLock')
+		 ORDER BY l.mode`, waiterPID)
+	require.NoError(t, err)
+	for rows.Next() {
+		var mode string
+		require.NoError(t, rows.Scan(&mode))
+		childModes = append(childModes, mode)
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+	require.Empty(t, childModes,
+		"оборот, стоящий на семействе, НЕ ДОЛЖЕН держать строчного захвата на refresh_tokens: "+
+			"захват на ребёнке раньше родителя — встречный порядок, дающий цикл с каскадом отзыва")
+
+	require.NoError(t, holder.Rollback(ctx))
+	select {
+	case got := <-done:
+		requireWalkIssued(t, got.out, got.err, "оборот обязан завершиться выдачей после снятия постороннего замка")
+	case <-time.After(30 * time.Second):
+		t.Fatal("оборот не завершился после снятия постороннего замка")
 	}
 }

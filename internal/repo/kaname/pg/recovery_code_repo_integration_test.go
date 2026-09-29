@@ -25,6 +25,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -72,6 +73,7 @@ func TestRecoveryCodes_F5_09_MailIntentIsAtomicWithTheCodeRow(t *testing.T) {
 	code, value := rcCode(t, "rcv-09a", user, hsBase)
 	intent := humansession.RecoveryMailIntent{
 		UserID: user, AccountID: "acc-rc09", To: "rc09-00@example.invalid", Code: value, ValidFor: rcTTL,
+		Limit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 1000, Window: time.Hour},
 	}
 
 	w, err := repo.Writer(ctx)

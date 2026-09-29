@@ -524,3 +524,9 @@ func audienceStrings(v any) []string {
 		return nil
 	}
 }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (*stubCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

@@ -101,6 +101,13 @@ func liveAuthLaneContract() authLaneContract {
 			humansession.ReasonEnrollmentNotPending,
 			humansession.ReasonSessionNotFresh,
 			registration.ReasonRegistrationRefused,
+			// Подтверждение адреса и положение подтверждения (kaname#456).
+			humansession.TextEmailNotVerified,
+			humansession.TextEmailAlreadyVerified,
+			humansession.TextInviteNotValid,
+			humansession.ReasonEmailNotVerified,
+			humansession.ReasonEmailAlreadyVerified,
+			humansession.ReasonInviteNotValid,
 		},
 		Cookies: []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
 	}

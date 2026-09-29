@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
@@ -126,6 +127,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	require.NoError(t, err)
 	h.recoveryRequest, err = humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: h.store, CodeTTL: rcCodeTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: h.obs, Now: now, Logger: logger,
+		Sources: admitEverySource{}, SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 10000, Window: time.Hour},
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
@@ -726,3 +729,11 @@ func (b *fakeBreach) Check(_ context.Context, password string) (humansession.Bre
 }
 
 var _ = errors.Is
+
+// admitEverySource — окно источника, пропускающее всякое обращение: темп
+// источника судят пробы полосы над базой (kaname#456).
+type admitEverySource struct{}
+
+func (admitEverySource) ChargeSource(context.Context, humansession.SourceLane, string, time.Time, humansession.SourcePace) (bool, error) {
+	return true, nil
+}

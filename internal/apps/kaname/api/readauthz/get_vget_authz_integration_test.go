@@ -60,6 +60,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -103,9 +104,9 @@ func newReadAuthzFixture(t *testing.T) *readAuthzFixture {
 	repo := kanamepg.New(pool, nil)
 
 	// ТА ЖЕ дверь, что провязывает композиционный корень (cmd/kaname:
-	// authzcascade.Wrap(relverdict.NewAsker(pool))). Собрать её здесь иначе
+	// authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))). Собрать её здесь иначе
 	// значило бы проверять не тот путь, по которому идёт продукт.
-	f := &readAuthzFixture{pool: pool, repo: repo, gates: authzcascade.Wrap(relverdict.NewAsker(pool))}
+	f := &readAuthzFixture{pool: pool, repo: repo, gates: authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))}
 
 	// владелец + его аккаунт (круговая ссылка owner_user_id разрешается парой
 	// строк в одной транзакции).
@@ -494,8 +495,8 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"@example.com", "User "+suffix)
 	require.NoError(t, err)
@@ -520,8 +521,8 @@ func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ac
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err := pool.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"-"+string(uid)[len(uid)-6:]+"@example.com", "User "+suffix)
 	require.NoError(t, err)

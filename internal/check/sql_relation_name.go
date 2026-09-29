@@ -157,6 +157,9 @@ type sqlTok struct {
 	readings []string
 	// op — у прочей лексемы: её знак (`;`, `=`, `<`, `.`, `(`, `$` параметра).
 	op byte
+	// at — смещение начала лексемы в тексте: по нему вызывающий называет строку
+	// исходника, на которой лексема стоит.
+	at int
 }
 
 // sqlStrKind — вид строковой константы: от него зависит раскрытие содержимого.
@@ -183,7 +186,15 @@ func isSQLIdentCont(c byte) bool {
 // sqlTokens — лексемы текста; пробелы и комментарии не порождают ничего.
 func sqlTokens(src string) []sqlTok {
 	var toks []sqlTok
+	// Смещение ставится лексемам прошлого шага в начале следующего: ветви ниже
+	// выходят из шага и `continue`, и общего места после разбора лексемы у них
+	// нет.
+	start, before := 0, 0
 	for i := 0; i < len(src); {
+		for k := before; k < len(toks); k++ {
+			toks[k].at = start
+		}
+		start, before = i, len(toks)
 		c := src[i]
 		switch {
 		case isSQLSpace(c):
@@ -251,6 +262,9 @@ func sqlTokens(src string) []sqlTok {
 		default:
 			toks, i = append(toks, sqlTok{kind: sqlTokOther, op: c}), i+1
 		}
+	}
+	for k := before; k < len(toks); k++ {
+		toks[k].at = start
 	}
 	return toks
 }

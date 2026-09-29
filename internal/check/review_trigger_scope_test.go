@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // review_trigger_scope_test.go — ГЕЙТ: запрос в ветку линии (волны, эпика)
-// идёт тем же конвейером, что запрос в ствол, а `push` судит только ствол
-// (задача PRO-Robotech/kaname#394).
+// идёт тем же конвейером, что запрос в ствол, а `push` у процесса проверки
+// судит только ствол (задача PRO-Robotech/kaname#394); процесс публикации по
+// `push` идёт и в ствол, и в ветки линии (задача PRO-Robotech/kaname#429).
 //
 // Предмет и оси — в шапке `review_trigger_scope.go`; здесь они не
 // пересказываются. Способность гейта упасть и смолчать доказана инъекцией
-// настоящим входом — review_trigger_scope_injection_test.go.
+// настоящим входом — review_trigger_scope_injection_test.go и
+// review_trigger_publisher_injection_test.go.
 package check_test
 
 import (
@@ -44,6 +46,11 @@ func TestReviewIntoALineRunsTheTrunkPipeline(t *testing.T) {
 	if census.OnBranchPush == 0 {
 		t.Fatal("процессов, идущих по push в ветки, ноль — требование «процесс ствола идёт на " +
 			"запросе» сказано ни о чём")
+	}
+	if census.PublishAtLine != census.PublishersDeclared {
+		t.Errorf("публикующих посаженное объявлено %d, а по push в {%s} идут %d — голова линии "+
+			"без опубликованного артефакта (kaname#429)", census.PublishersDeclared,
+			strings.Join(check.ReviewBaseBranches(), ", "), census.PublishAtLine)
 	}
 	if census.Conditions == 0 {
 		t.Fatal("условий `if:` осмотрено ноль — разбор не дошёл до заданий, и молчание оси " +

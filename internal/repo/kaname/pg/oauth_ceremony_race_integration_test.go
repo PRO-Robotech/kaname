@@ -18,6 +18,10 @@ package pg_test
 // ЧИСЛО: выдач ровно одна, остальные — отказ ПОВТОРА, семейство отозвано.
 // Та же проба ставится на ротацию.
 //
+// Обмен и ротация — ПРОД-ПУТЬ: ход движка над хранилищами (`ceremonyWalk`,
+// kaname#434). Своих композиций обмена и ротации у слоя доступа нет, и проба,
+// судившая их, о прод-пути ничего не говорила.
+//
 // # Два плеча и состояние семейства У ПРОИГРАВШЕГО (kaname#316)
 //
 // Каждая проба гоняется в двух плечах — умолчание сессий продукта и
@@ -36,6 +40,7 @@ package pg_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -44,6 +49,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/corelib/oauthceremony"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -79,10 +86,10 @@ func ceremonyScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tag st
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'ceremony', 'ACTIVE')`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, 'ceremony', 'ACTIVE', now())`,
 		user, account, "ext-"+tag, tag+"@example.invalid")
-	require.NoError(t, err, "посев человека")
+	require.NoError(t, err, "посев человека (адрес подтверждён: kaname#456, Р5)")
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, user)
 	require.NoError(t, err, "посев аккаунта")
@@ -125,6 +132,7 @@ func TestOAuthCodeExchangeUnderConcurrentTransactions(t *testing.T) {
 		t.Run(sh.name, func(t *testing.T) {
 			pool := sh.pool
 			repo := kanamepg.NewOAuthCeremonyRepo(pool)
+			walk := newCeremonyWalk(t, pool)
 			scene := ceremonyScene(t, ctx, sh.seed, "cerxchg")
 
 			code := ceremonyDigest(0xc0de)
@@ -134,6 +142,7 @@ func TestOAuthCodeExchangeUnderConcurrentTransactions(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: domain.PKCEMethodS256,
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}), "выдача кода — положительный контроль")
 
@@ -152,29 +161,25 @@ func TestOAuthCodeExchangeUnderConcurrentTransactions(t *testing.T) {
 					<-start
 					c, cancel := context.WithTimeout(ctx, 30*time.Second)
 					defer cancel()
-					_, err := repo.ExchangeAuthorizationCode(c, kanamepg.CodeExchange{
-						CodeDigest:         code,
-						RefreshTokenDigest: ceremonyDigest(0x1000 + i),
-						RefreshTokenTTL:    30 * 24 * time.Hour,
-					})
+					out, err := walk.exchange(c, code, ceremonyDigest(0x1000+i))
 					// Состояние семейства — У ЭТОГО проигравшего, сразу по возврату.
 					var st familyState
 					var stErr error
-					if domain.IsAuthorizationCodeReplay(err) {
+					if err == nil && out == walkReplay {
 						st, stErr = readFamily(ctx, sh.seed, scene.FamilyID)
 					}
 					mu.Lock()
 					defer mu.Unlock()
 					switch {
-					case err == nil:
+					case err == nil && out == walkIssued:
 						issued[i] = true
-					case domain.IsAuthorizationCodeReplay(err):
+					case err == nil && out == walkReplay:
 						replays[i] = true
 						if stErr != nil || !st.revoked {
 							liveAtLoser = append(liveAtLoser, fmt.Sprintf("гонщик %d: %+v %v", i, st, stErr))
 						}
 					default:
-						others = append(others, err.Error())
+						others = append(others, fmt.Sprintf("гонщик %d: %v: %v", i, out, err))
 					}
 				}(i)
 			}
@@ -239,6 +244,7 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 		t.Run(sh.name, func(t *testing.T) {
 			pool := sh.pool
 			repo := kanamepg.NewOAuthCeremonyRepo(pool)
+			walk := newCeremonyWalk(t, pool)
 			scene := ceremonyScene(t, ctx, sh.seed, "cerrttn")
 
 			code := ceremonyDigest(0xc0df)
@@ -248,19 +254,23 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 				RedirectURI:         "https://app.example.test/cb",
 				CodeChallenge:       ceremonyChallenge,
 				CodeChallengeMethod: domain.PKCEMethodS256,
+				ACR:                 "1",
 				TTL:                 5 * time.Minute,
 			}))
 			first := ceremonyDigest(0x2000)
-			_, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-				CodeDigest:         code,
-				RefreshTokenDigest: first,
-				RefreshTokenTTL:    30 * 24 * time.Hour,
-			})
-			require.NoError(t, err, "обмен кода — положительный контроль")
+			exchanged, err := walk.exchange(ctx, code, first)
+			requireWalkIssued(t, exchanged, err, "обмен кода — положительный контроль")
 
 			const racers = 16
 			rotated := make([]bool, racers)
 			replays := make([]bool, racers)
+			// notFoundRevoked — выборка токена, пришедшая ПОСЛЕ отзыва семейства
+			// другим проигравшим: контракт выборки называет такое «записи нет»
+			// (`FetchRefreshToken`: отозванное семейство — ErrGrantNotFound, и
+			// проверяется раньше обёртки). Это отказ, а не выдача, и законен он
+			// только при отозванном у этого гонщика семействе — иначе он «иной
+			// исход».
+			notFoundRevoked := make([]bool, racers)
 			var others, liveAtLoser []string
 			var mu sync.Mutex
 
@@ -273,35 +283,33 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 					<-start
 					c, cancel := context.WithTimeout(ctx, 30*time.Second)
 					defer cancel()
-					_, err := repo.RotateRefreshToken(c, kanamepg.RefreshRotation{
-						PresentedDigest: first,
-						SuccessorDigest: ceremonyDigest(0x3000 + i),
-						TTL:             30 * 24 * time.Hour,
-					})
+					out, err := walk.rotate(c, first, ceremonyDigest(0x3000+i))
 					var st familyState
 					var stErr error
-					if domain.IsRefreshTokenReplay(err) {
+					if (err == nil && out == walkReplay) || errors.Is(err, oauthceremony.ErrGrantNotFound) {
 						st, stErr = readFamily(ctx, sh.seed, scene.FamilyID)
 					}
 					mu.Lock()
 					defer mu.Unlock()
 					switch {
-					case err == nil:
+					case err == nil && out == walkIssued:
 						rotated[i] = true
-					case domain.IsRefreshTokenReplay(err):
+					case err == nil && out == walkReplay:
 						replays[i] = true
 						if stErr != nil || !st.revoked {
 							liveAtLoser = append(liveAtLoser, fmt.Sprintf("гонщик %d: %+v %v", i, st, stErr))
 						}
+					case errors.Is(err, oauthceremony.ErrGrantNotFound) && stErr == nil && st.revoked:
+						notFoundRevoked[i] = true
 					default:
-						others = append(others, err.Error())
+						others = append(others, fmt.Sprintf("гонщик %d: %v: %v (семейство %+v %v)", i, out, err, st, stErr))
 					}
 				}(i)
 			}
 			close(start)
 			wg.Wait()
 
-			var rotatedN, replayN int
+			var rotatedN, replayN, notFoundN int
 			for i := 0; i < racers; i++ {
 				if rotated[i] {
 					rotatedN++
@@ -309,12 +317,18 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 				if replays[i] {
 					replayN++
 				}
+				if notFoundRevoked[i] {
+					notFoundN++
+				}
 			}
-			t.Logf("плечо %s, перепись: гонщиков %d, ротаций %d, отказов-повторов %d, иных исходов %d, "+
-				"проигравших при живом семействе %d", sh.name, racers, rotatedN, replayN, len(others), len(liveAtLoser))
+			t.Logf("плечо %s, перепись: гонщиков %d, ротаций %d, отказов-повторов %d, «записи нет» при "+
+				"отозванном семействе %d, иных исходов %d, проигравших при живом семействе %d",
+				sh.name, racers, rotatedN, replayN, notFoundN, len(others), len(liveAtLoser))
 			require.Equal(t, 1, rotatedN,
 				"ротаций обязана быть РОВНО одна: %d означает разветвление семейства", rotatedN)
-			assert.Equal(t, racers, rotatedN+replayN, "иные исходы: %v", others)
+			require.Positive(t, replayN,
+				"ни один проигравший не опознал повтора — семейство отозвать было некому")
+			assert.Equal(t, racers, rotatedN+replayN+notFoundN, "иные исходы: %v", others)
 			assert.Empty(t, others, "иной исход означает отказ не о том: %v", others)
 			assert.Empty(t, liveAtLoser,
 				"проигравший, получивший ПОВТОР, обязан застать семейство отозванным: %v", liveAtLoser)
@@ -341,26 +355,30 @@ func TestOAuthRefreshRotationUnderConcurrentTransactions(t *testing.T) {
 	}
 }
 
-// TestOAuthCeremonyDistinguishesUnknownFromInactive — «не найден» и «неактивен»
-// РАЗЛИЧАЮТСЯ. Без этого различения обнаружение повтора невыразимо.
+// TestOAuthCeremonyDistinguishesUnknownFromInactive — «не найден» и «погашен»
+// РАЗЛИЧАЮТСЯ на выборке кода к обмену (контракт
+// `oauthceremony.AuthorizationCodeVault`): строки нет — «записи нет» без
+// записи; погашен — запись ВМЕСТЕ с ErrAuthorizationCodeConsumed, и по её
+// гранту движок отзывает семейство. Без этого различения обнаружение повтора
+// невыразимо.
 func TestOAuthCeremonyDistinguishesUnknownFromInactive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	ctx, pool := catalogPool(t)
 	repo := kanamepg.NewOAuthCeremonyRepo(pool)
+	walk := newCeremonyWalk(t, pool)
 	scene := ceremonyScene(t, ctx, pool, "cerdstn")
 
-	_, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         ceremonyDigest(0xdead),
-		RefreshTokenDigest: ceremonyDigest(0xbeef),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.ErrorIs(t, err, domain.ErrAuthorizationCodeUnknown,
-		"кода, которого не выдавали, обязан быть ОТДЕЛЬНЫЙ исход")
-	require.False(t, domain.IsAuthorizationCodeReplay(err),
+	_, err := walk.v.FetchAuthorizationCode(ctx, ceremonyDigest(0xdead))
+	require.ErrorIs(t, err, oauthceremony.ErrGrantNotFound,
+		"кода, которого не выдавали, обязан быть ОТДЕЛЬНЫЙ исход — «записи нет»")
+	require.NotErrorIs(t, err, oauthceremony.ErrAuthorizationCodeConsumed,
 		"неизвестный код повтором не является: слив этих исходов снял бы отзыв семейства "+
 			"с единственного признака похищения")
+	out, err := walk.exchange(ctx, ceremonyDigest(0xdead), ceremonyDigest(0xbeef))
+	require.ErrorIs(t, err, oauthceremony.ErrGrantNotFound, "обмен неизвестного кода: исход %s", out)
+	require.NotEqual(t, walkReplay, out, "обмен неизвестного кода опознан повтором")
 
 	code := ceremonyDigest(0xc0e0)
 	require.NoError(t, repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
@@ -369,23 +387,22 @@ func TestOAuthCeremonyDistinguishesUnknownFromInactive(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}))
-	redeemed, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         code,
-		RefreshTokenDigest: ceremonyDigest(0x4000),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.NoError(t, err, "положительный контроль обмена")
-	assert.Equal(t, "https://app.example.test/cb", redeemed.RedirectURI)
-	assert.Equal(t, ceremonyChallenge, redeemed.CodeChallenge)
-	assert.Equal(t, scene.Scope, redeemed.Context.Scope)
+	rec, err := walk.v.FetchAuthorizationCode(ctx, code)
+	require.NoError(t, err, "положительный контроль: выданный код жив")
+	assert.Equal(t, []string{"https://app.example.test/cb"}, rec.Grant.Form["redirect_uri"])
+	assert.Equal(t, ceremonyChallenge, rec.ProofKey.Challenge)
+	assert.Equal(t, scene.Scope, rec.Grant.GrantedScopes)
+	out, err = walk.exchange(ctx, code, ceremonyDigest(0x4000))
+	requireWalkIssued(t, out, err, "положительный контроль обмена")
 
-	_, err = repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-		CodeDigest:         code,
-		RefreshTokenDigest: ceremonyDigest(0x4001),
-		RefreshTokenTTL:    time.Hour,
-	})
-	require.ErrorIs(t, err, domain.ErrAuthorizationCodeReplayed,
+	rec, err = walk.v.FetchAuthorizationCode(ctx, code)
+	require.ErrorIs(t, err, oauthceremony.ErrAuthorizationCodeConsumed,
 		"второе предъявление ТОГО ЖЕ кода обязано быть ПОВТОРОМ, а не «неизвестен»")
+	require.Equal(t, scene.FamilyID, rec.Grant.GrantID, "повтор отдан без гранта — отзывать нечего")
+	out, err = walk.exchange(ctx, code, ceremonyDigest(0x4001))
+	require.NoError(t, err)
+	require.Equal(t, walkReplay, out, "второй обмен ТОГО ЖЕ кода обязан быть ПОВТОРОМ")
 }

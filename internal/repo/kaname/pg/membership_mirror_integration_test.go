@@ -10,8 +10,8 @@
 //
 // # Почему зеркало держит база, а не Go
 //
-// Писателей строки пользователя больше одного, и они не однородны: четыре пути
-// репозитория (Upsert · InsertPending · InsertActive · Delete) — и ТРИ
+// Писателей строки пользователя больше одного, и они не однородны: три пути
+// репозитория (InsertPending · InsertActive · Delete) — и ТРИ
 // применённые миграции, которые сеют служебные строки-якоря сырым SQL. Зеркало,
 // написанное в Go, эти три не покрывает by construction, как не покроет ни
 // восстановление из дампа, ни следующую посевную миграцию. Инвариант,
@@ -128,6 +128,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 	{
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
+		markAddressVerified(t, ctx, pool, pendingID)
 		_, err = w.UsersW().ActivateInvite(ctx, pendingID,
 			domain.ExternalSubject("ext-mir1-activated"), domain.DisplayName("Pending"))
 		require.NoError(t, err)

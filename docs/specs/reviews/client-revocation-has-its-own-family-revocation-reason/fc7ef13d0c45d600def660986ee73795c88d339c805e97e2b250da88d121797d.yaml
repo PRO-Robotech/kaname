@@ -1,0 +1,249 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/client-revocation-has-its-own-family-revocation-reason.md
+  sha256: fc7ef13d0c45d600def660986ee73795c88d339c805e97e2b250da88d121797d
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Прежние записи каталога (392a74f1… круга 1 и
+    08fadfac… круга 2) не тронуты: редакция 3 получает соседнюю запись по своему отпечатку.
+  base_commit: f2c8696bfa81d4b7c2654a5d75574cb1296f367d
+  base_commit_note: >-
+    База ветки `339` — `origin/366` @ f2c8696bf (слияние приёмки #406, PR #431); измерено `git
+    merge-base HEAD origin/366`.
+  content_commit: baad613de1ea5147f32c328172e21e9809c3aa12
+  content_commit_note: >-
+    Редакция 3 внесена одним коммитом baad613de поверх f2c8696bf. `git show baad613de:<путь> |
+    sha256sum` → fc7ef13d…, совпал с рабочей копией и с заданием. На origin ветки `339` нет
+    (`git ls-remote origin refs/heads/339` → пусто).
+  branch: '339'
+  wave_branch: '366'
+  pull_request: none
+  task: PRO-Robotech/kaname#339
+  document_task: PRO-Robotech/kaname#406
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 1581
+  round: 1
+  round_note: >-
+    Круг 1 изменения #339 (так его называет задание). В каталоге этого документа это третья
+    запись: круг 1 (392a74f1…, CHANGES_REQUESTED) и круг 2 (08fadfac…, APPROVED) судили
+    редакции 1 и 2 для #406.
+  predecessor_record: >-
+    docs/specs/reviews/client-revocation-has-its-own-family-revocation-reason/08fadfac47b846979da104f14f9597a31d4df70f77bcd9e14bb150395eab432e.yaml
+  predecessor_note: >-
+    Последняя одобренная — редакция 2 (08fadfac…, событие 5846063540 в kaname#406). Её вердикт на
+    редакцию 3 не переносится (change-graph.md §2). Санкция #406 привязана к отпечатку 08fadfac…,
+    и эта запись её не отзывает.
+  fingerprint_predicate: >-
+    sha256sum <путь> в рабочей копии ветки 339 @ baad613de и git show baad613de:<путь> | sha256sum
+    дают fc7ef13d0c45d600def660986ee73795c88d339c805e97e2b250da88d121797d, совпал с объявленным в
+    задании. wc -l → 1581. К редакции 2 (f2c8696bf) `git diff --numstat` → 652 48. Гунков в §4
+    выше KN-FRV-06 нет: «Тогда» 01–05 и 12 не менялись, как и объявляет журнал редакций.
+  measurement_revisions: >-
+    Служба: T2 = origin/406 @ 335a5f444 (ствол + 366 + дифф 406, как в шапке ред. 3). T3 и T4 —
+    выгрузки T2 в отдельном worktree, в запрос не входят. Фундамент: corelib v1.10.0-rc.2 по пину
+    go.mod. Воркспейс: origin/main 6eddaa5e.
+  task_premise_remeasured: >-
+    (1) Отпечаток — ПОДТВЕРЖДЁН. (2) Решение A+C по #339 — ПОДТВЕРЖДЕНО: комментарий 5852027436
+    (pointpu, 2026-09-27T02:39:47Z) называет оба слова отдельными строками с доводом, одну новую
+    миграцию и одну редакцию приёмки. (3) Писателей в продукте нет — ПОДТВЕРЖДЕНО на T2: перепись
+    констант 1·1·2·0·0·0, `git log --all -S` по обеим константам в не-тестовом Go → 0 и 0,
+    контроль в другую сторону (FamilyRevokedBySessionEnd) → 2. (4) Выход пишет session-ended, снятие
+    клиента — каскад с пустой живостью — ПОДТВЕРЖДЕНО прогоном держателей (см. constructibility).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-27'
+
+effective_approval:
+  issued: false
+  issued_at: null
+  ban1_lifted: false
+  why: >-
+    Блокирующее одно, род DoD: §7.6 п.5 объявляет зелёными на дереве Т3 две пробы, которые на
+    нём красны (KN-FRV-10/2 после повторного наката и сосед #404 после повторного наката).
+    Измерено прогоном. Санкции на миграцию, домен, гейт и пробы #339 по этой редакции нет (ban #1).
+    Отказу внешнее полномочие не нужно; событие возврата публикует курьер. Санкция #406 (редакция 2,
+    событие 5846063540) этой записью не затронута.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Третья категория, «не выполнилось». Рецензент событий не публикует; публикует курьер. Тело —
+    в строке `event_body` ниже.
+  event_body: 'acceptance-reviewer · CHANGES_REQUESTED · fc7ef13d0c45d600def660986ee73795c88d339c805e97e2b250da88d121797d'
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком. Дельта редакций 2 → 3 (шапка, §0.8, §1.1 п.8, §2, Р7, §4 KN-FRV-06…11, §5,
+    §6 пп. 7, §7 целиком) — против тела и комментария 5852027436 задачи #339 и против дерева T2.
+    Каждая команда §7.0 и §7.6 пп. 2, 3, 7, 11 перепрогнана на T2, выводы совпали: координаты
+    домена :113 :115 :117 :119 :121 :127, перечень :132-137, Validate :141; перепись констант
+    1·1·2·0·0·0; ссылок на снятые константы в пробах 5 и посевов литералом 2 (координаты §7.0.5
+    дословно); всего ссылок 11, литералов в домене 2; литерал logout в пробах 24, client-removed 0,
+    из 19 прочих ни одна не сеет семейство (просмотрены поимённо); revoked_reason вне проб 5 строк,
+    SELECT ноль, proto 0; NO TRANSACTION в миграциях #404 и #406 нет; откатывающих проб 17 (16 в
+    internal/migrations, 1 в internal/repo/kaname/pg); client-removed в docs/engineering/components
+    и internal/domain — 1. Координаты §7.0.3 сверены по строкам: logout.go:78,
+    human_session_repo.go:439-455 и :562, oauth_ceremony_repo.go:813,
+    interactive_client_repo.go:224-226, …175117.sql:192-193, …231545.sql:79-82,
+    oauth_ceremony_access_token.go:66. Абзац 31-deployment.md:503 называет четыре повода, logout и
+    client-removed не называет.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+checks:
+  scope_339: >-
+    Предикат снятия #339 п.1 — KN-FRV-17 (гейт, объём осмотренного, пустой обход красен); п.2 —
+    комментарий 5852027436 и Р8, таблица — §7.6 п.14; п.3 — §7.1 п.1 и §7.6 п.1. DoD #339: падающий
+    гейт до правки — Т2 (17 красен); миграция новая — §7.6 п.1; приёмка APPROVED — этот круг. Вне
+    объёма названо §7.2. Over-scope нет.
+  producer_per_then: '17 из 17 строк §5; у 15–17 координата, куда ляжет производитель, и красный названы'
+  twin_per_negative: >-
+    6 из 6 в дельте ред. 3: 07 — три пары, дельта в написание; 13 — ротация до выхода; 14 — приём
+    всеми тремя до снятия (близнеца по семейству нет по определению, это сказано); 15 — причина P
+    и причина Q; 16 — logout против session-ended на той же строке; 17 — Т2 против дерева
+    вливания и синтетические близнецы.
+  conventions: >-
+    ban #5: миграция новая, применённые не правятся (§7.2). ban #10: словарь держит CHECK. Проводной
+    контракт, RPC, proto не тронуты (§7.6 п.9). Поведение для предъявителя не меняется: причину не
+    читает ни один SELECT.
+  disclosure: 'Уровень словаря и схемы. Пути к дефекту защиты текст ред. 3 не собирает.'
+  open_questions: none
+  doc_gates: >-
+    go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure'
+    на ветке 339 @ baad613de → 68 PASS · 0 FAIL · 0 SKIP, в том числе
+    TestAcceptancePathCoordinateResolves и TestAcceptanceProbeCoordinateResolves.
+
+constructibility:
+  seeded: >-
+    T4 = T2 + суженный домен + перевод проб §7.0.5 и ожидаемых перечней §7.5 + черновая миграция
+    #339 (четыре слова, накат с проверкой строк, откат — определение #406) + черновые пробы 15 и 16;
+    всё вне запроса. go test ./internal/migrations/ → 176 PASS · 0 FAIL · 0 SKIP: 07 в новой форме
+    (logout и client-removed отвергнуты 23514, три слова приняты), 08 (перепись 4 = 4), 09, 10 обе
+    половины (10/1 — версия #406 после отказа, раздел #339 зафиксирован), сосед #404 с четырьмя
+    расхождениями, 15/1…15/4 (отказ 23514, версия и строки не тронуты; близнецы накатились), 16
+    (эталон 6 слов, откат прошёл, два расхождения, повторный накат пуст, logout отвергнут,
+    session-ended принят), все 16 откатывающих файлов пакета. internal/repo/kaname/pg:
+    TestLINE_A_1_21 — 8 подслучаев PASS (4 повода + 4 прямых), EndingOneSession, RepeatedEndSession,
+    KN_FRV_05, DoesNotDeadlockWithIssuance, IamExt RoundTripDownUp — PASS.
+    TestLogout_KN_SER_03 — PASS. internal/ceremonyport и internal/domain — ok.
+  named_fixture_not_seeded: >-
+    KN-FRV-17 — гейт не написан. Фикстура названа (форма token_family_sole_writer.go), входы
+    доступны: domain.FamilyRevocationReasons, oauthceremony.RevocationReasons по пину,
+    экспортированный ceremonyport.FamilyReasonOf; ожидаемая перепись 1·1·2·0 совпала с замером.
+  counts: 'посеяно 10 из 11 сценариев, затронутых ред. 3; названной фикстурой 1; не выполнилось 0'
+
+findings:
+  blocking:
+    - id: B1
+      kind: DoD
+      where: '§7.6 п.5, дерево Т3, список «Зелены»'
+      statement: >-
+        Т3 объявляет зелёными «10 обе половины» и «сосед #404 в форме §7.5». На Т3 обе пробы
+        красны. Причина та же, что у 08: голова Т3 — миграция #406 (шесть слов), домен — четыре.
+        Последнее «Тогда» обеих проб — «повторный накат, сверка словарей пуста» — находит два
+        расхождения, logout и client-removed, база шире домена. Отказ-часть 10/2 (три
+        расхождения) и соседа (четыре) на Т3 зелена: до повторного наката пробы доходят. Пункт
+        не выполним как написан: исполнитель либо не сдаст п.5, либо сделает повторный накат
+        зелёным на Т3 и тем ослабит утверждённое «Тогда».
+      measured: >-
+        T3 = origin/406 @ 335a5f444 + суженный домен + перевод проб §7.0.5 и перечней §7.5, без
+        миграции #339. go test ./internal/migrations/ -count=1 → 170 PASS · 4 FAIL:
+        TestIntegration_RevocationVocabularyAgreesWithTheDomain (:225),
+        TestTokenFamilySchema_KN_FRV_07 (:153, logout принят),
+        TestTokenFamilyMigration_KN_FRV_10 (family_revocation_reason_client_revoke_integration_test.go:261,
+        после goose.Up — два расхождения), TestIntegration_ConsentLeavingRollsBackToTheSameStructure
+        (consent_leaves_the_schema_integration_test.go:382, после повторного наката — те же два).
+        На T4 (T3 + черновая миграция) все четыре зелёные.
+      fix: >-
+        В §7.6 п.5 перенести из «Зелены» Т3 в «Красны» Т3 две строки: KN-FRV-10/2 (повторный
+        накат) и соседа #404 (повторный накат), с причиной «после повторного наката база шире
+        домена — logout, client-removed, как у 08». В «Зелены» Т3 оставить 10/1 и отказ-части
+        10/2 и соседа. Тем же изменением выровнять §7.4 и §7.5, если они это повторяют.
+  non_blocking:
+    - id: N1
+      kind: FORMAT
+      where: '§7.6 п.8, последнее предложение'
+      statement: >-
+        «Близнецу наката #404 годится любое слово, которое принимает версия перед #404» —
+        неточно. Близнец идёт через накат #404 с проверкой лежащих строк, поэтому слово обязано
+        приниматься и определением наката #404. consent-withdrawn версия перед #404 принимает, а
+        накат на нём отказывает. Годятся литерал client-removed и session-ended: литерал
+        client-removed проверен на T3 и T4 (ConsentLeavingRefusesAFamilyCarryingTheWithdrawnReason
+        — PASS).
+
+twins_and_producers:
+  producer_per_then: '17 из 17'
+  twin_per_negative: '6 из 6 в дельте ред. 3; 01–05 и 12 не менялись, их близнецы подтверждены кругом 2'
+
+predicates_run:
+  - where: kaname 339 @ baad613de
+    command: 'sha256sum <путь>; git show baad613de:<путь> | sha256sum; wc -l; git diff --numstat f2c8696bf baad613de'
+    got: 'fc7ef13d… дважды · 1581 · 652 48'
+  - where: T2 = origin/406 @ 335a5f444
+    command: 'перепись констант §7.0.2; git log --all -S по двум константам; контроль по FamilyRevokedBySessionEnd'
+    got: '1 · 1 · 2 · 0 · 0 · 0; 0 и 0 при 2292 коммитах клона; контроль 2'
+  - where: T2
+    command: 'git grep §7.0.5, §7.6 пп. 2, 3, 7, 11; git grep revoked_reason вне проб; git grep NO TRANSACTION'
+    got: '5 ссылок + 2 посева; 11 и 2; 2; 17; 1; 5 строк, SELECT 0; маркера нет в #404 и #406'
+  - where: T3 (выгрузка, вне запроса)
+    command: 'go test ./internal/migrations/ -count=1 -p 1 -v'
+    got: '170 PASS · 4 FAIL — 08 :225, 07 :153, 10 :261, сосед #404 :382'
+  - where: T4 (выгрузка, вне запроса)
+    command: 'go test ./internal/migrations/ -count=1 -p 1 -v'
+    got: '176 PASS · 0 FAIL · 0 SKIP'
+  - where: T4
+    command: 'go test ./internal/repo/kaname/pg/ -run LINE_A_1_21|EndingOneSession|RepeatedEndSession|KN_FRV_05|DoesNotDeadlock|RoundTripDownUp; ./internal/apps/kaname/api/internal_iam/ -run KN_SER_03; ./internal/ceremonyport/ ./internal/domain/'
+    got: 'все PASS; LINE_A_1_21 — 8 подслучаев'
+  - where: kaname 339 @ baad613de
+    command: "go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure' -count=1 -v"
+    got: '68 PASS · 0 FAIL · 0 SKIP'
+  - where: GitHub
+    command: 'gh issue view 339; gh api issues/339/comments'
+    got: 'тело: предикат пп. 1–3, DoD; комментарий 5852027436 — решение A+C по строке на слово'
+
+seed_attempt:
+  performed: true
+  outcome: red
+  note: >-
+    Посев «Дано» — 10 из 11, все строятся. Красное на T3 — не дефект продукта и не дефект
+    сценария: два «Тогда» верны и зелены на T4. Неверен прогноз DoD п.5 о дереве Т3 (B1).
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+next_step_note: >-
+  acceptance-author правит §7.6 п.5 по B1 (и по желанию N1) новой редакцией. Короткий круг 2 для
+  #339 — только по этим местам. Запрет #1 на код #339 в силе до APPROVED новой редакции и события.
+  Санкция #406 (08fadfac…) не затронута.

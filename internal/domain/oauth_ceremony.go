@@ -7,20 +7,15 @@
 // Домен здесь описывает ЗНАЧЕНИЯ и ИСХОДЫ; хранение, свёртки и операторы живут
 // у слоя доступа. Чистый Go, только stdlib.
 //
-// # Почему исходов обмена ТРИ, а не два
+// # Исходов ПРЕДЪЯВЛЕНИЯ здесь нет, и это не пропуск
 //
-// «Не обменялось» — не исход, а корзина. Различать обязаны:
-//
-//   - ErrAuthorizationCodeUnknown — строки нет. Кода не выдавали, либо он уже
-//     убран уборкой после истечения;
-//   - ErrAuthorizationCodeReplayed — строка ЕСТЬ и неактивна. Это ПОВТОР, и по
-//     нему отзывается ВСЁ семейство: кодом уже воспользовались, и второй
-//     предъявитель — либо похититель, либо тот, у кого похитили;
-//   - ErrAuthorizationCodeExpired — строка есть, активна, срок вышел. Отзыва
-//     семейства не влечёт: истечение — не признак похищения.
-//
-// Слив их в один отказ сделал бы обнаружение повтора невыразимым: «неактивен» и
-// «не найден» перестали бы различаться, а на этом различении стоит весь приём.
+// Обмен кода и оборот токена обновления исполняет движок фундамента
+// (`corelib/oauthceremony`) над хранилищами слоя доступа, и исходы предъявления
+// называет контракт его портов: «записи нет», погашен, обёрнут. Прежняя тройка
+// исходов обмена и ротации принадлежала композициям слоя доступа, у которых
+// прод-вызывающих не было, и снята вместе с ними (kaname#434). Здесь остаются
+// исходы, которых у порта нет: заведение семейства в сессию, отсечка субъекта
+// предъявленной строки, запись выпуска, занятость проверяющего секрета.
 package domain
 
 import (
@@ -29,23 +24,9 @@ import (
 	"regexp"
 )
 
-// ── Исходы обмена и ротации ─────────────────────────────────────────────────
+// ── Исходы церемонии, которых нет у порта фундамента ───────────────────────
 
 var (
-	// ErrAuthorizationCodeUnknown — строки кода НЕТ.
-	ErrAuthorizationCodeUnknown = errors.New("authorization code: unknown")
-	// ErrAuthorizationCodeReplayed — строка есть и НЕАКТИВНА: повтор.
-	ErrAuthorizationCodeReplayed = errors.New("authorization code: already redeemed")
-	// ErrAuthorizationCodeExpired — строка активна, но срок вышел.
-	ErrAuthorizationCodeExpired = errors.New("authorization code: expired")
-
-	// ErrRefreshTokenUnknown — строки обновляющего токена НЕТ.
-	ErrRefreshTokenUnknown = errors.New("refresh token: unknown")
-	// ErrRefreshTokenReplayed — строка есть и НЕАКТИВНА: повтор отротированного.
-	ErrRefreshTokenReplayed = errors.New("refresh token: already rotated")
-	// ErrRefreshTokenExpired — строка активна, но срок вышел.
-	ErrRefreshTokenExpired = errors.New("refresh token: expired")
-
 	// ErrCeremonySessionUnknown — строки сессии, в которую заводится семейство,
 	// НЕТ ВОВСЕ.
 	//
@@ -62,9 +43,21 @@ var (
 	// одно — «входа, в котором идёт церемония, больше нет». Третьего состояния
 	// («сессии нет») здесь НЕТ — у него свой признак выше.
 	//
-	// Исход ЗАВЕДЕНИЯ, а не предъявления, поэтому он стоит отдельно от тройки
-	// выше: там разбирается предъявленная строка, здесь — право завести новую.
+	// Исход ЗАВЕДЕНИЯ, а не предъявления: разбирается не предъявленная строка,
+	// а право завести новую.
 	ErrCeremonySessionNotLive = errors.New("ceremony session: not live")
+
+	// ErrCeremonySubjectCutOff — предъявленная строка (код либо токен
+	// обновления) есть, активна и в сроке, но сессия, в которой она выдана,
+	// аутентифицирована НЕ ПОЗЖЕ отсечки своего субъекта
+	// (`user_token_revocations.revoke_before`).
+	//
+	// Исход ПРЕДЪЯВЛЕНИЯ, и у порта фундамента своего слова у него нет: это не
+	// повтор — семейство по нему не отзывается, и журнал не называет атакой отзыв
+	// доступа, — и не истечение. Порту он уходит «записи нет»
+	// (`oauthceremony.ErrGrantNotFound`), причиной в цепочке: гранта, по которому
+	// предъявитель пришёл, больше нет.
+	ErrCeremonySubjectCutOff = errors.New("ceremony session: authenticated no later than its subject's cutoff")
 
 	// ErrAccessTokenFamilyNotLive — выпуск токена доступа не записан: семейства,
 	// в которое он заводится, нет либо оно отозвано (kaname#319).
@@ -74,30 +67,23 @@ var (
 	// нет», — и токен клиенту уезжать не должен. Различает их, если понадобится,
 	// строка семейства, а не этот отказ.
 	ErrAccessTokenFamilyNotLive = errors.New("access token: family is unknown or revoked")
+
+	// ErrGrantOwnerUnverified — правило выдачи удостоверениям человека ответило
+	// «владелец-человек не подтвердил адрес» (kaname#456, Р5б): пары нет,
+	// предъявленный токен обновления не обёрнут (оборот и выдача — одна единица
+	// работы), семейство не отозвано. Наружу — тот же тон `invalid_grant`, что
+	// у всякого отказа после именования кода.
+	ErrGrantOwnerUnverified = errors.New("ceremony grant: the owner has not verified the email address")
+	// ErrGrantRuleUndecidable — правило выдачи спросить не смогли: отказ
+	// операции (`temporarily_unavailable`), а не `invalid_grant` — клиент,
+	// получивший `invalid_grant`, выбросил бы живой токен обновления.
+	ErrGrantRuleUndecidable = errors.New("ceremony grant: the issuance rule could not be asked")
+
+	// ErrVerifierAtCapacity — проверяющий секрета занят: все места ёмкости
+	// (`passwordverify`) заняты другими проверками. Отказ ПОВТОРЯЕМЫЙ и наш, а не
+	// «секрет неверен»: несостоявшаяся сверка вердиктом не становится.
+	ErrVerifierAtCapacity = errors.New("secret verifier: at capacity")
 )
-
-// ЗДЕСЬ СТОЯЛ ЧЕТВЁРТЫЙ ИСХОД — `ErrTokenFamilyRevoked`, «семейство отозвано».
-// Он снят, и раздел выше («Почему исходов обмена ТРИ, а не два») теперь
-// описывает то, что есть: исходов ровно три.
-//
-// Снят он не сокращением, а потому, что отдельным исходом быть перестал.
-// Признак активности кода и обновляющего токена ПРОИЗВОДЕН от живости их
-// семейства (`GENERATED ALWAYS … STORED` поверх `family_live`), поэтому
-// отозванное семейство наблюдается предъявителю как неактивная строка — то есть
-// как ПОВТОР, с отзывом семейства в качестве следствия. Производителей у
-// четвёртого значения не осталось ни одного, а объявленный исход, которого
-// никто не возвращает, читается вызывающим как возможный и не наступает ни при
-// каком входе.
-
-// IsAuthorizationCodeReplay — отвергнуто ли предъявление как ПОВТОР кода.
-// Предикат, а не сравнение на месте: вызывающие обёртывают ошибку контекстом.
-func IsAuthorizationCodeReplay(err error) bool {
-	return errors.Is(err, ErrAuthorizationCodeReplayed)
-}
-
-// IsRefreshTokenReplay — отвергнуто ли предъявление как ПОВТОР обновляющего
-// токена.
-func IsRefreshTokenReplay(err error) bool { return errors.Is(err, ErrRefreshTokenReplayed) }
 
 // ── Причины отзыва семейства ────────────────────────────────────────────────
 
@@ -105,7 +91,10 @@ func IsRefreshTokenReplay(err error) bool { return errors.Is(err, ErrRefreshToke
 // с ограничением `token_families_revoked_reason_ck`: корзины «прочее» у него
 // нет, и значение вне перечня — наша ошибка, а не чужая. Совпадение в обе
 // стороны держит проба живой схемы
-// `TestIntegration_RevocationVocabularyAgreesWithTheDomain`.
+// `TestIntegration_RevocationVocabularyAgreesWithTheDomain`, а то, что у
+// каждого слова есть писатель, — гейт
+// `TestFamilyRevocationVocabulary_KN_FRV_17_EveryWordHasAWriter`: слово, которого
+// никто не пишет, перечень превращает в обещание (kaname#339).
 type FamilyRevocationReason string
 
 const (
@@ -113,20 +102,22 @@ const (
 	FamilyRevokedByCodeReplay FamilyRevocationReason = "code-replay"
 	// FamilyRevokedByRefreshReplay — повторное предъявление обновляющего токена.
 	FamilyRevokedByRefreshReplay FamilyRevocationReason = "refresh-replay"
-	// FamilyRevokedByLogout — человек вышел.
-	FamilyRevokedByLogout FamilyRevocationReason = "logout"
 	// FamilyRevokedBySessionEnd — сессия, в которой шла церемония, снята.
 	FamilyRevokedBySessionEnd FamilyRevocationReason = "session-ended"
-	// FamilyRevokedByClientRemoval — клиент снят.
-	FamilyRevokedByClientRemoval FamilyRevocationReason = "client-removed"
+	// FamilyRevokedByClientRevocation — клиент, которому выдан грант, сам
+	// попросил отзыва (RFC 7009). Написание — дословно причина фундамента
+	// `oauthceremony.RevocationClientRevoke`: адаптер порта отзыва сопрягает
+	// словари ПО ЗНАЧЕНИЮ (`ceremonyport.FamilyReasonOf`), и другое написание
+	// оставило бы причину без слова (kaname#406).
+	FamilyRevokedByClientRevocation FamilyRevocationReason = "client-revoke"
 )
 
 // FamilyRevocationReasons — перечень целиком, КОПИЕЙ: вызывающий не может
 // расширить его на месте.
 func FamilyRevocationReasons() []FamilyRevocationReason {
 	return []FamilyRevocationReason{
-		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedByLogout,
-		FamilyRevokedBySessionEnd, FamilyRevokedByClientRemoval,
+		FamilyRevokedByCodeReplay, FamilyRevokedByRefreshReplay, FamilyRevokedBySessionEnd,
+		FamilyRevokedByClientRevocation,
 	}
 }
 
@@ -180,6 +171,35 @@ func ValidatePKCEChallenge(challenge, method string) error {
 	return nil
 }
 
+// ValidateCeremonyLevel — уровень аутентификации гранта из той же закрытой оси,
+// что у сессии (`assuranceLevelValues`, Ф11): семейство несёт СНИМОК уровня
+// сессии на выдаче кода (миграция `20260925121413`), и второго словаря у этого
+// предмета нет.
+func ValidateCeremonyLevel(level string) error {
+	for _, l := range assuranceLevelValues {
+		if level == l {
+			return nil
+		}
+	}
+	return fmt.Errorf("Illegal argument token_family.acr: must be one of %v", assuranceLevelValues)
+}
+
+// CeremonyScopeOpenID — область интерактивного входа: её запрашивает
+// первопартийный клиент (консоль, CLI), и она проецируется в утверждение
+// `scope` выданного токена доступа (RFC 9068 §2.2.3).
+//
+// Прав область НЕ несёт: решение о доступе принимает модель (приёмка LINE-A-1
+// Р9), и выданное по коду судится так же, как всякий наш токен. Токена личности
+// церемония не выдаёт (`corelib/oauthceremony`, doc.go) — область называет вид
+// гранта, а не обещание ID-токена.
+const CeremonyScopeOpenID = "openid"
+
+// CeremonyScopes — ЗАКРЫТЫЙ перечень областей, которые интерактивный клиент
+// вправе запросить у точки авторизации. Копией: вызывающий не расширит его на
+// месте. Область вне перечня отвергается движком церемонии (`invalid_scope`) —
+// принять её и ничего по ней не сделать было бы «принято и проигнорировано».
+func CeremonyScopes() []string { return []string{CeremonyScopeOpenID} }
+
 // ── Значения церемонии ──────────────────────────────────────────────────────
 
 // CeremonyContext — контекст церемонии: он один на семейство, код и всякий
@@ -213,17 +233,6 @@ func (c CeremonyContext) Validate() error {
 		}
 	}
 	return nil
-}
-
-// RedeemedCode — то, что вернул ОДИН оператор обмена: контекст церемонии и
-// условия, под которыми код был выдан. Читается вызывающим для сверки
-// верификатора PKCE и адреса возврата — сверка идёт ПОСЛЕ гашения, потому что
-// гашение и есть то, что обязано быть неделимым.
-type RedeemedCode struct {
-	Context             CeremonyContext
-	RedirectURI         string
-	CodeChallenge       string
-	CodeChallengeMethod string
 }
 
 // RotatedRefreshToken — то, что вернул ОДИН оператор ротации.

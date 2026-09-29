@@ -120,8 +120,9 @@ func TestIntegration_ConsentWithdrawnLeavesTheRevocationVocabulary(t *testing.T)
 		"снятая причина обязана быть отвергнута словарём базы")
 
 	// БЛИЗНЕЦ: та же строка, тот же оператор, другая причина. Без него «отзыв
-	// отвергнут» было бы истинно и в мире, где отзыв невыразим вовсе.
-	_, err = db.Exec(revokeFamilySQL, family, string(domain.FamilyRevokedByClientRemoval))
+	// отвергнут» было бы истинно и в мире, где отзыв невыразим вовсе. Слово —
+	// живое слово словаря головы: `client-removed` снят #339.
+	_, err = db.Exec(revokeFamilySQL, family, string(domain.FamilyRevokedBySessionEnd))
 	require.NoError(t, err, "законная причина обязана проходить тем же оператором")
 }
 
@@ -163,6 +164,20 @@ func domainRevocationReasons() []string {
 	return out
 }
 
+// onlyInBase — находка сверки о значении, которое база принимает, а домен не
+// знает. Сторона входит в текст находки: «есть расхождение» не отличает базу,
+// откаченную туда, от откаченной не туда. Форма объявлена здесь одна, и пробы,
+// называющие ожидаемую находку, берут её отсюда.
+func onlyInBase(v string) string {
+	return fmt.Sprintf("%q: база принимает, домен не знает", v)
+}
+
+// onlyInDomain — находка сверки о значении, которое домен объявляет, а база
+// отвергает. Форма — та же, что у [onlyInBase].
+func onlyInDomain(v string) string {
+	return fmt.Sprintf("%q: домен объявляет, база отвергает", v)
+}
+
 // revocationVocabularyFindings — расхождения двух объявлений словаря, в ОБЕ
 // стороны. Половина сравнения пропускала бы свою сторону молча.
 func revocationVocabularyFindings(dbSide, domainSide []string) []string {
@@ -175,12 +190,12 @@ func revocationVocabularyFindings(dbSide, domainSide []string) []string {
 	for _, v := range dbSide {
 		inDB[v] = true
 		if !inDomain[v] {
-			out = append(out, fmt.Sprintf("%q: база принимает, домен не знает", v))
+			out = append(out, onlyInBase(v))
 		}
 	}
 	for _, v := range domainSide {
 		if !inDB[v] {
-			out = append(out, fmt.Sprintf("%q: домен объявляет, база отвергает", v))
+			out = append(out, onlyInDomain(v))
 		}
 	}
 	return out
@@ -268,9 +283,12 @@ func TestIntegration_ConsentLeavingRefusesAFamilyCarryingTheWithdrawnReason(t *t
 		`SELECT revoked_reason FROM kaname.token_families WHERE id = $1`, family).Scan(&reason))
 	require.Equal(t, withdrawnReason, reason, "отказавший накат не вправе переписать причину")
 
-	// БЛИЗНЕЦ: та же строка, другая причина — накат проходит.
+	// БЛИЗНЕЦ: та же строка, другая причина — накат проходит. Слово обязано
+	// приниматься и версией перед предметом, и определением его наката
+	// (`20260923225650_…sql:64-67`); `session-ended` — в обоих и жив на голове
+	// (приёмка §7.6 п.8).
 	_, err = db.Exec(`UPDATE kaname.token_families SET revoked_reason = $2 WHERE id = $1`,
-		family, string(domain.FamilyRevokedByClientRemoval))
+		family, string(domain.FamilyRevokedBySessionEnd))
 	require.NoError(t, err)
 	require.NoError(t, goose.UpTo(db, ".", own), "без строки со снимаемой причиной накат обязан проходить")
 	require.Zero(t, kanameRelationCount(t, db, "consent_grants"), "после наката таблицы согласий быть не должно")
@@ -346,12 +364,21 @@ func TestIntegration_ConsentLeavingRollsBackToTheSameStructure(t *testing.T) {
 	require.Equal(t, want, got,
 		"откат обязан вернуть строение ровно таким, каким оно стояло до наката")
 
-	// Сверка словарей на ОТКАЧЕННОЙ базе обязана найти расхождение: база снова
-	// принимает снятую причину, а домен её уже не знает. Молчание здесь значило
-	// бы, что сверка не читает живой каталог.
+	// Сверка словарей на ОТКАЧЕННОЙ базе обязана найти расхождения, и их
+	// ЧЕТЫРЕ, каждое со своей стороной. Откат идёт с головы и проходит через
+	// миграцию, снявшую два слова без писателя (kaname#339), и через миграцию,
+	// которая ввела слово отзыва клиентом (kaname#406): база снова принимает
+	// три слова, которых домен уже не знает, и отвергает слово, которое домен
+	// уже объявил. Молчание здесь значило бы, что сверка не читает живой
+	// каталог; «непусто» или «хотя бы одно» зеленели бы и на базе, откаченной
+	// не туда.
 	findings := revocationVocabularyFindings(dbRevocationReasons(t, after), domainRevocationReasons())
-	require.Len(t, findings, 1, "на откаченной базе расхождение обязано быть ровно одно: %v", findings)
-	require.Contains(t, findings[0], withdrawnReason, "расхождение обязано назвать снятую причину")
+	require.ElementsMatch(t, []string{
+		onlyInBase(withdrawnReason),
+		onlyInBase(removedLogoutReason),
+		onlyInBase(removedClientRemovalReason),
+		onlyInDomain(clientRevokeReason),
+	}, findings, "на откаченной базе расхождений ровно четыре, и каждое называет слово и сторону")
 
 	// Повторный накат снимает предмет снова.
 	require.NoError(t, goose.Up(after, "."), "цепочка обязана накатываться снова")

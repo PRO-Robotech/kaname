@@ -291,6 +291,7 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 	// Activate
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, err := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("external-sub-s05"),
 		domain.DisplayName("Real Name"))
@@ -329,6 +330,7 @@ func TestUserInvite_S05b_ActivateInvite_NotPending_NotFound(t *testing.T) {
 	adminID, _ := bootstrapAdmin(t, ctx, repo, "s05b")
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, adminID)
 	_, err = w.UsersW().ActivateInvite(ctx, adminID,
 		domain.ExternalSubject("new-sub"), domain.DisplayName("X"))
 	_ = w.Rollback(ctx)

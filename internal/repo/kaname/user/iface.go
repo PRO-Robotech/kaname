@@ -89,15 +89,6 @@ type ReaderIface interface {
 }
 
 type WriterIface interface {
-	// Upsert — InternalUserService.UpsertFromIdentity (legacy path; ACTIVE-only).
-	// Kept for backward compatibility with tests; production-path —
-	// `InsertPending` / `ActivateInvite` / `bootstrapNewIdentity` use-case.
-	// Создаёт строку, если внешний субъект новый, иначе UPDATE
-	// email/display_name; членство в названном аккаунте пишется в том же
-	// стейтменте. Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта, не пара с
-	// аккаунтом. Caller должен заполнить AccountID + InviteStatus=ACTIVE.
-	Upsert(ctx context.Context, u domain.User) (domain.User, bool /*created*/, error)
-
 	// InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно
 	// и идемпотентно: строка человека (арбитр — ГЛОБАЛЬНЫЙ ключ почты
 	// `users_identity_email_uniq`) плюс его членство в названном аккаунте, одним

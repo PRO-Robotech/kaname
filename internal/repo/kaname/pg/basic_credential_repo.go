@@ -16,6 +16,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
@@ -167,14 +168,15 @@ SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::time
 // ЖИВОСТЬ, СПРОШЕННАЯ ПО ИДЕНТИФИКАТОРУ. Хеш не читается вовсе: спрашивающий
 // секрета не предъявляет и предъявить не может, а лишняя колонка в проекции —
 // это значение, которое кто-нибудь однажды вернёт наружу. Читается ровно то,
-// что нужно решению об отсечке: момент выдачи и сама отсечка.
+// что нужно решению об отсечке и о допуске владельца: момент выдачи, сама
+// отсечка и идентификатор владельца (kaname#456).
 const liveUserCredentialSQL = `
-SELECT c.created_at, r.revoke_before` +
+SELECT c.created_at, r.revoke_before, u.id` +
 	userBasicRowSource + `
  WHERE c.id = $1` + liveUserCredentialPredicate
 
 const liveSACredentialSQL = `
-SELECT c.created_at, NULL::timestamptz` +
+SELECT c.created_at, NULL::timestamptz, s.id` +
 	saBasicRowSource + `
  WHERE c.id = $1` + liveSACredentialPredicate
 
@@ -272,6 +274,13 @@ func (r *BasicCredentialRepo) ResolveBasic(ctx context.Context, presented string
 	if ownerCutoffForbids(ownerCutoff, issuedAt) {
 		return domain.BasicCredential{}, domain.RefuseBasicCredential(domain.BasicRefusalOwnerRevoked)
 	}
+	// Второй вопрос правила выдачи (kaname#456, Р5) — тем же местом, после
+	// сверки хеша, и тем же единым отказом наружу.
+	if principalType == "user" {
+		if rerr := r.ownerAdmission(qctx, principalID); rerr != nil {
+			return domain.BasicCredential{}, rerr
+		}
+	}
 
 	var exp time.Time
 	if expiresAt.Valid {
@@ -326,10 +335,11 @@ func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID s
 	var (
 		issuedAt    time.Time
 		ownerCutoff sql.NullTime
+		owner       string
 	)
 	qctx, cancel := context.WithTimeout(ctx, r.callTimeout)
 	defer cancel()
-	err := r.pool.QueryRow(qctx, lane.liveSQL, credentialID).Scan(&issuedAt, &ownerCutoff)
+	err := r.pool.QueryRow(qctx, lane.liveSQL, credentialID).Scan(&issuedAt, &ownerCutoff, &owner)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return domain.RefuseBasicCredential(domain.BasicRefusalNotFound)
@@ -341,7 +351,34 @@ func (r *BasicCredentialRepo) CheckBasicLive(ctx context.Context, credentialID s
 	if ownerCutoffForbids(ownerCutoff, issuedAt) {
 		return domain.RefuseBasicCredential(domain.BasicRefusalOwnerRevoked)
 	}
+	if lane.principalType == "user" {
+		return r.ownerAdmission(qctx, owner)
+	}
 	return nil
+}
+
+// ownerAdmission — второй вопрос правила выдачи о владельце-человеке
+// (`revocationpolicy.OwnerAdmission`): nil — допущен; единый отказ причиной
+// owner-unverified — адрес не подтверждён; иная ошибка — авторитет не ответил,
+// и это не «не живо».
+func (r *BasicCredentialRepo) ownerAdmission(ctx context.Context, owner string) error {
+	verdict, err := revocationpolicy.OwnerAdmission(ctx, basicMarks{r: r}, owner)
+	switch verdict {
+	case revocationpolicy.Allowed:
+		return nil
+	case revocationpolicy.Unverified:
+		return domain.RefuseBasicCredential(domain.BasicRefusalOwnerUnverified)
+	default:
+		return fmt.Errorf("pg: basic credential owner admission: %w", err)
+	}
+}
+
+// basicMarks — читатель отметок авторитета: тот же пул, единственный оператор
+// чтения отметки (`personmarks.Read`).
+type basicMarks struct{ r *BasicCredentialRepo }
+
+func (m basicMarks) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	return personmarks.Read(ctx, m.r.pool, ids)
 }
 
 // TouchLastUsed отмечает предъявление ОДНИМ оператором с предикатом дросселя:

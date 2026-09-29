@@ -72,6 +72,9 @@ type RevocationLookup interface {
 	// UserRevokedBefore — отсечка человека и признак её наличия. Ошибка не
 	// сворачивается в «отсечки нет».
 	UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error)
+	// PersonMarks — отметка подтверждения адреса владельца-человека
+	// (kaname#456, Р5): второй вопрос того же правила.
+	PersonMarks(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 // Config — объявленная настройка выдачи. Каждое поле обязательно.
@@ -273,6 +276,9 @@ func (u *UseCase) weighCutoff(
 	case revocationpolicy.Revoked:
 		return clientassertion.OutcomeOwnerRevoked,
 			fmt.Errorf("client_token: owner of client %s is logged out of everything no earlier than the key was issued", client.ID)
+	case revocationpolicy.Unverified:
+		return clientassertion.OutcomeOwnerUnverified,
+			fmt.Errorf("client_token: owner of client %s has not verified the email address", client.ID)
 	case revocationpolicy.Undecidable:
 		return clientassertion.OutcomeRevocationCheckFailed,
 			fmt.Errorf("client_token: revoke-all cutoff of the owner of client %s: %w", client.ID, err)

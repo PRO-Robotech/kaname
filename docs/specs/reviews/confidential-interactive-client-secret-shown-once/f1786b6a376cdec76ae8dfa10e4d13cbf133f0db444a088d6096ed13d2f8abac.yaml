@@ -1,0 +1,222 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+  sha256: f1786b6a376cdec76ae8dfa10e4d13cbf133f0db444a088d6096ed13d2f8abac
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Строку истории ревью в шапку вписывает
+    автор тем же изменением, что и следующую редакцию; слово DRAFT не трогается.
+  base_commit: fc9f5aff19cfff9ec310f2ff35338b80f24379b1
+  content_commit: f90c05cc9469741078a307fd761978f71beb2ce1
+  content_commit_note: >-
+    Ветка `acc-405` от `origin/366` (fc9f5aff1). `git diff --stat origin/366...f90c05cc9` —
+    один файл, документ, 490 строк. На origin ветки нет (`git ls-remote origin
+    refs/heads/acc-405` → пусто). Рабочее дерево чистое до записи.
+  branch: acc-405
+  pull_request: null
+  task: PRO-Robotech/kaname#405
+  wave: PRO-Robotech/kaname#366
+  epic: PRO-Robotech/kaname#357
+  line_goal: PRO-Robotech/kacho#2564
+  lines: 490
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+    и git show f90c05cc9:<тот же путь> | sha256sum — оба
+    f1786b6a376cdec76ae8dfa10e4d13cbf133f0db444a088d6096ed13d2f8abac, совпал с объявленным в
+    задании.
+  measurement_revisions: >-
+    Служба: origin/366 fc9f5aff1 (база) и origin/425 685f8ad17 (факты «ветка 425»). Фундамент:
+    corelib v1.10.0-rc.2 из кэша модулей (пин go.mod:8 на обеих ревизиях). Платформа: kacho
+    1d42a6728bf (origin/main). Воркспейс: origin/main 6eddaa5e; LINE-A-1 — ветка 822,
+    отпечаток b755886f пересчитан.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: отпечаток совпал; круг 1 — каталога записей у документа не было
+    (`git log --all -- docs/specs/reviews/confidential-interactive-client-secret-shown-once*`
+    → 0 коммитов); канон дома записи — docs/specs/reviews/<документ>/<sha256>.yaml, как у
+    соседей службы.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-26'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующее одно, род TWIN. Санкции на контракт, код и пробы по этой редакции нет
+    (ban #1). Отказу внешнее полномочие не нужно; событие возврата публикует курьер.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (origin/main 6eddaa5e); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Третья категория, «не выполнилось». Событие публикует курьер; тело — в строке
+    `event_body` ниже.
+  event_body: 'acceptance-reviewer · CHANGES_REQUESTED · f1786b6a376cdec76ae8dfa10e4d13cbf133f0db444a088d6096ed13d2f8abac'
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: null
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком, §1…§8, против тела #405 (ПРИЗНАК, ПРЕДИКАТ СНЯТИЯ пп. 1–2, DoD) и против
+    опоры LINE-A-1 ред. 3 (Р3, строка 3 §6, сценарии 10, 12, 24; §10 п.1 — строки 740–741).
+    Команды §1 перепрогнаны на origin/366, выводы совпали: ownPublicClientAuthMethod — 3
+    строки (:91, :94, :145); адаптер поставщика :126 — 1; SetClientSecretVerifier в
+    не-тестовом Go — 3; `secret` в двух proto ресурса — 0; `secret_bearing) = true` — 7;
+    записей перечня подметальщика — 2 (secret_backstop.go:124, :125); `audit` в пакете
+    ресурса — 0; `kaname#405` на origin/425 в tests и .github — 8. Чтением сверены: две
+    миграции и имена ограничений (строки 3, 4); usecases.go:290 и :294; issueSecretSync
+    (sa_keys/usecases.go:655); окна затирания 120 с (config/defaults.go:279, :283);
+    LookupClient ветки 425 (oauth_ceremony_vaults.go:333, признак публичности по способу);
+    ClientSecrets и его приманка; порт фундамента ports.go:596-651 и bridge.go:317-356;
+    абзац translate.go:257; credsecret 130 бит; values.prod.yaml:260 `external`; край
+    платформы mux.go:829-841 и пин go.mod:120; гейт
+    cmd/kaname/secret_bearing_ledger_test.go:130; комментарий запроса об audiences.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+constructibility:
+  seeded: >-
+    (а) База в контейнере с применёнными миграциями ветки 425, черновая проба вне запроса
+    (выгрузка origin/425 в каталоге сессии). Одним оператором вставки строка со способом
+    client_secret_basic, проверочным значением argon2id от хешера паролей и моментом
+    установки принята — это целевое состояние 01 и 03. Порт ClientSecrets над ней: S —
+    совпал, S с одним изменённым знаком — не совпал, никогда не заводившийся clientId — не
+    совпал (03, 07). LookupClient такой строки — public=false (06). Второе имя —
+    23505 interactive_clients_name_uk, строк под именем 1 (04, 05). Способ none с материалом
+    — 23514 interactive_clients_secret_verifier_method_ck (11). После удаления строки пара
+    K,S — не совпал, LookupClient — ErrGrantNotFound, как у незаведённого (10). Строка со
+    способом секретом без материала схемой принята — «секрета нет при способе секретом»
+    держит только вставка (Р5), а не схема.
+    (б) Копия фундамента corelib v1.10.0-rc.2, черновая проба Ceremony.Exchange на
+    конфиденциальном клиенте проб: верный Basic — выдача; без заголовка и без client_id в
+    форме — invalid_request, 400; client_id в форме без секрета — invalid_client, 401; Basic
+    с изменённым знаком — invalid_client, 401; Basic неизвестного клиента — invalid_client,
+    401 (06, 07, 10 — находка 1).
+  named_fixture_not_seeded: >-
+    02 (строка kaname.operations — чтение пулом), 08 и 09 (зависят от глагола 01), 12 (гейт
+    TestBAT1_73_… есть, записи нового типа нет — заказана), 13 (захват журнала; строка исхода
+    обмена ceremony token issued есть в token.go ветки 425). E-уровень на стенде chart-own не
+    поднимался: находка 1 установлена экспериментом без стенда; chart-own на ветке 425
+    гоняет только kaname-login-lane и kaname-recovery-lane, что DoD п.7 и называет долгом.
+  counts: 'посеяно 8 из 13 (01, 03, 04, 05, 06, 07, 10, 11); названной фикстурой 5; не выполнилось 0'
+
+findings:
+  blocking:
+    - id: 1
+      kind: TWIN
+      where: 'IC-SECRET-06, второе And; §6 п.7'
+      statement: >-
+        Отрицательный близнец 06 объявлен так: тот же обмен без заголовка Authorization либо с
+        S, где изменён один знак, → 401 invalid_client, отличие ровно в одном факте. У формы 06
+        client_id в теле нет — клиента называет только заголовок Basic. Снятие заголовка
+        снимает сразу два факта: имя клиента и доказательство. Церемония на такой запрос
+        отвечает invalid_request, 400, а не invalid_client, 401. Полоса токена ветки 425
+        переводит этот случай в 400 invalid_request (token.go, refuseExchange, ветка по
+        умолчанию). Проба, написанная по тексту, покраснеет на верном продукте, либо продукт
+        подгонят под неё — вопреки LINE-A-1-24, где отказы формы различимы. Живой свидетель в
+        дереве: набор ветки 425 IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED шлёт случай без секрета
+        с body_client_id=True, то есть с client_id в теле.
+      experiment: >-
+        Черновая проба в копии corelib rc.2 над Ceremony.Exchange (помощники проб фундамента,
+        конфиденциальный клиент svc-console). ClientID, секрет и способ пустые — CodeOf
+        invalid_request, провод invalid_request, 400. Только секрет пуст, client_id в форме —
+        invalid_client, 401. Изменён один знак секрета — invalid_client, 401. Выдача на верном
+        Basic прошла. Обмен повторён пять раз, по свежему коду на каждый.
+      required: >-
+        Ветку без секрета переписать: заголовка нет, в теле формы client_id = clientId K, секрета
+        нет → 401 invalid_client. Тогда отличие от 06 — ровно доказательство. Либо снять эту
+        ветку и оставить изменённый знак. Если форма без client_id нужна, это отдельный случай с
+        исходом 400 invalid_request и своим близнецом, а не половина LINE-A-1-12. Согласовать §6
+        п.7.
+  non_blocking:
+    - id: 2
+      kind: DoD
+      where: 'Р4 последний абзац, §1 строка 14, DoD п.1'
+      statement: >-
+        «Читателей тела ответа в обоих деревьях — ноль» неверно на базе. В службе тело ответа
+        Create разбирает internal/apps/kaname/api/interactive_client/name_canon_test.go:33 —
+        UnmarshalTo в InteractiveClient; то же на origin/425. Перепись строки 14 охватила только
+        newman и посев платформы. Добавить Go в предикат, например git grep -n
+        'GetResponse().UnmarshalTo' -- internal/apps/kaname/api/interactive_client/ → 1, и
+        назвать читателя, переписываемого тем же изменением.
+    - id: 3
+      kind: DoD
+      where: 'DoD п.8 против п.7'
+      statement: >-
+        Предикат git grep -n 'kaname#405' -- tests .github | wc -l → 0 шире утверждения: он
+        считает любое упоминание задачи. Запись долга в .github/scripts/newman-suite-debt.py,
+        которую требует п.7, и новые пробы, ссылающиеся на задачу, сделают его красным на
+        верной работе. Сузить до строк, называющих производителя отсутствующим.
+    - id: 4
+      kind: FORMAT
+      where: 'IC-SECRET-09 (в)'
+      statement: >-
+        Текст unknown field in update_mask: client_secret лежит в details BadRequest,
+        fieldViolations[0].description при field = update_mask. Сообщение статуса —
+        invalid argument (corelib validate.go:304-309, errors.go:80). У (г) текст стоит и в
+        сообщении (shared/errdetails.go:21-29). Назвать место текста, иначе проба по message
+        краснеет на верном ответе.
+    - id: 5
+      kind: FORMAT
+      where: 'IC-SECRET-04, первое Then; Given кода для K; IC-SECRET-01'
+      statement: >-
+        409 синхронный: вызов операции не возвращает (usecases.go:254-258). «Операция несёт
+        error» наблюдаемо только на I, строкой kaname.operations, — назвать уровень. R в Given
+        кода не привязан к redirectUris из 01, а там стоит заполнитель <APIDomain>. Назвать R
+        как redirectUris[0] заведения 01.
+    - id: 6
+      kind: FORMAT
+      where: 'шапка, «Опора»'
+      statement: >-
+        Координата kacho-workspace:docs/specs/sub-phase-LINE-A-1-… на origin/main воркспейса
+        6eddaa5e не разрешается (ls-tree → 0). Документ лежит на ветках 771, 822 и других —
+        назвать ветку или ревизию, как это делает тело #405 (ветка 771).
+    - id: 7
+      kind: CONSTRUCTIBILITY
+      where: 'IC-SECRET-13, последнее And; IC-SECRET-03, последнее And'
+      statement: >-
+        В 13 у отказа до INTERNAL нет Когда: не назван сбой, которым его вызвать, например
+        закрытый пул на вставке, и не назван фиксированный текст. В 03 «ни в какой момент» не
+        держит ни одна проба, способная покраснеть: схема строку со способом секретом без
+        материала принимает (посев выше), а атомарность одного оператора изнутри транзакции не
+        видна. Назвать держателя, например пробу на то, что единственный оператор вставки
+        называет secret_verifier, либо переписать в наблюдаемое утверждение после ответа.
+
+twins_and_producers:
+  producer_per_then: '13 из 13 — таблица §5 полна; строки 06 и 13 честно названы условием сведения с 425'
+  twin_per_negative: >-
+    у отрицаний 02, 03, 04, 05, 07, 08, 09 (в, г), 10, 11, 12, 13 близнецы названы, дельта в
+    один факт; у второй ветки отрицательной половины 06 дельта в два факта и неверный исход
+    (находка 1)
+
+route_signs:
+  proto: true
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true

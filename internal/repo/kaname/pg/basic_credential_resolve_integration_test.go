@@ -59,9 +59,9 @@ INSERT INTO accounts (id, name, owner_user_id)
 VALUES ('acc0000000000000bat1', 'bat-1', 'usr0000000000000bat1') ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
-INSERT INTO users (id, external_id, email, account_id, invite_status)
-VALUES ('usr0000000000000bat1', 'ext-bat-1', 'bat1@example.invalid', 'acc0000000000000bat1', 'ACTIVE'),
-       ('usr0000000000000bat2', 'ext-bat-2', 'bat2@example.invalid', 'acc0000000000000bat1', 'ACTIVE')
+INSERT INTO users (id, external_id, email, account_id, invite_status, email_verified_at)
+VALUES ('usr0000000000000bat1', 'ext-bat-1', 'bat1@example.invalid', 'acc0000000000000bat1', 'ACTIVE', now()),
+       ('usr0000000000000bat2', 'ext-bat-2', 'bat2@example.invalid', 'acc0000000000000bat1', 'ACTIVE', now())
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `

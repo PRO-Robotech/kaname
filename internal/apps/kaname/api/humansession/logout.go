@@ -68,7 +68,10 @@ func (uc *LogoutUseCase) Execute(ctx context.Context, bearer domain.SessionBeare
 		uc.observer.NoSessionObserved(reason)
 		return false, nil
 	}
-	w, err := uc.store.Writer(ctx)
+	// Строка личности — ПЕРВОЙ, до строки сессии (kaname#382): отсечка ниже
+	// берёт её проверкой внешнего ключа, и без этого выход держал бы запись
+	// сессии и ждал личность навстречу её удалению.
+	w, err := uc.store.PersonWriter(ctx, resolved.User.ID)
 	if err != nil {
 		uc.observer.LogoutStoreFailureObserved()
 		return false, ErrStoreUnavailable

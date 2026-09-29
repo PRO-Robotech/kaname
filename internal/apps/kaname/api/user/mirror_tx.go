@@ -21,9 +21,9 @@ package user
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
 
@@ -382,28 +382,34 @@ type MirrorResult struct {
 	User           domain.User
 	OwnerBindingID domain.AccessBindingID
 	AccountID      domain.AccountID
-	// Activated — адрес нёс приглашение, и оно активировано (Ф4-23).
-	Activated bool
+	// Invited — адрес нёс живое приглашение: регистрация записала способ входа и
+	// сессию на строку приглашения, а приглашение НЕ активировала — его
+	// активирует подтверждение адреса (kaname#456, Р11 п. 1).
+	Invited bool
 }
 
 // RegisterMirrorTx — зеркало пользователя для регистрации нашей полосой, ОДНИМ
-// writer'ом вызывающего (Ф4 Р1, Р6).
+// writer'ом вызывающего (Ф4 Р1, Р6; kaname#456, Р11 п. 1).
 //
-// Порядок: приглашение по адресу → активация ТОЙ ЖЕ полосой (Р6: второго
-// личного аккаунта не заводится, третьей полосы нет) → заведение личных
-// ресурсов. Без приглашения — новая строка человека. Занятость адреса судит
-// ключ базы (`users_identity_email_uniq`), не проверка-перед-вставкой: два
-// одновременных заведения дают ровно одно `ACTIVE`, второе — 23505 (Ф1-62).
+// Приглашение по адресу регистрация НЕ активирует: личность и личные ресурсы
+// приглашённому пишет активация в исходе подтверждения адреса. Годное
+// приглашение — строка остаётся PENDING и становится строкой, на которую
+// вызывающий пишет способ входа и сессию; личности на ней нет (строка PENDING
+// её не несёт по ограничению схемы). Без приглашения — новая строка человека.
+// Занятость адреса судит ключ базы (`users_identity_email_uniq`), не
+// проверка-перед-вставкой: два одновременных заведения дают ровно одно
+// `ACTIVE`, второе — 23505 (Ф1-62).
 //
 // Отказы возвращаются сентинелами адаптера — вызывающий облекает их в единый
 // отказ регистрации:
 //   - ErrAlreadyExists — адрес принадлежит действующей либо заблокированной
-//     личности (ключ почты), либо приглашение уже активировал конкурент
-//     (строка больше не PENDING — тот же смысл: адрес занят);
-//   - ErrInviteExpired — приглашение пережило срок. Строка остаётся PENDING и
-//     держит ключ почты, поэтому регистрация этим адресом невозможна до
-//     уборки строки — паритет с полосой поставщика (ID-MAIL-1, MAIL-23), где
-//     истёкшая строка не активируется; для вызывающего это тот же отказ.
+//     личности (ключ почты); либо строка PENDING по адресу — не приглашение
+//     (её никто не приглашал: посеянная строка установки), и присвоить её
+//     регистрацией нельзя ни при каком сроке; либо способ входа на строку
+//     приглашения уже записан первой регистрацией — это отвергает вставка
+//     способа вызывающего (простая вставка без замещения);
+//   - ErrInviteExpired — приглашение пережило срок (либо снято: снятие выражено
+//     сроком строки). Строка остаётся PENDING и держит ключ почты.
 func RegisterMirrorTx(ctx context.Context, w Writer, in MirrorInput) (MirrorResult, error) {
 	pendings, err := w.Users().FindPendingByEmail(ctx, in.Email)
 	if err != nil {
@@ -412,21 +418,19 @@ func RegisterMirrorTx(ctx context.Context, w Writer, in MirrorInput) (MirrorResu
 	if len(pendings) > 0 {
 		// Ключ почты полный (`lower(email)`), поэтому строка приглашения по
 		// адресу ровно одна.
-		activated, aerr := ActivateInviteTx(ctx, w, pendings[0], in.ExternalID, "", in.Actor)
-		if aerr != nil {
-			if errors.Is(aerr, iamerr.ErrNotFound) {
-				return MirrorResult{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "invite already activated")
-			}
-			return MirrorResult{}, aerr
+		p := pendings[0]
+		if p.InvitedBy == "" {
+			// Строку PENDING без пригласившего завела установка, а не
+			// распорядитель: она не приглашение, и регистрация её не присваивает.
+			return MirrorResult{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "address is held by a row that is not an invitation")
 		}
-		res, berr := BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
-			CandidateUserID: string(activated.ID), ExternalID: in.ExternalID, Email: in.Email,
-			DisplayName: activated.DisplayName, Actor: in.Actor, NewIdentity: false,
-		})
-		if berr != nil {
-			return MirrorResult{}, berr
+		// Срок судится по часам службы тем же сравнением, что у строки
+		// (`User.InviteExpired`); окончательное суждение выносит оператор
+		// активации в исходе подтверждения — часами базы, одним оператором.
+		if p.InviteExpired(time.Now().UTC()) {
+			return MirrorResult{}, iamerr.Wrapf(iamerr.ErrInviteExpired, "invite expired")
 		}
-		return MirrorResult{User: res.User, OwnerBindingID: res.OwnerBindingID, AccountID: res.AccountID, Activated: true}, nil
+		return MirrorResult{User: p, AccountID: p.AccountID, Invited: true}, nil
 	}
 	res, err := BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
 		CandidateUserID: string(in.CandidateUserID), ExternalID: in.ExternalID, Email: in.Email,
@@ -436,4 +440,26 @@ func RegisterMirrorTx(ctx context.Context, w Writer, in MirrorInput) (MirrorResu
 		return MirrorResult{}, err
 	}
 	return MirrorResult{User: res.User, OwnerBindingID: res.OwnerBindingID, AccountID: res.AccountID}, nil
+}
+
+// ActivateInviteOnVerificationTx — активация приглашения В ИСХОДЕ
+// ПОДТВЕРЖДЕНИЯ адреса, ОДНИМ writer'ом вызывающего (kaname#456, Р10 п. 5,
+// Р11 п. 2): тот же оператор активации, что сегодня, — состояние PENDING, живой
+// срок и отметка подтверждения, поставленная той же транзакцией раньше, стоят
+// в его условии, — затем личность, отчеканенная нашей полосой в момент
+// подтверждения (форма та же, что у регистрации, F4d-52), и личные ресурсы.
+//
+// Отказы — сентинелами адаптера, как у [ActivateInviteTx]: ErrInviteExpired —
+// приглашение истекло либо снято; ErrNotFound — строка уже не PENDING. Функция
+// НЕ коммитит и НЕ откатывает: транзакция принадлежит вызывающему.
+func ActivateInviteOnVerificationTx(ctx context.Context, w Writer, pending domain.User, actor string) (BootstrapResult, error) {
+	externalID := domain.NewOwnLaneSubject()
+	activated, err := ActivateInviteTx(ctx, w, pending, externalID, "", actor)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	return BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
+		CandidateUserID: string(activated.ID), ExternalID: externalID, Email: activated.Email,
+		DisplayName: activated.DisplayName, Actor: actor, NewIdentity: false,
+	})
 }

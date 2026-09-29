@@ -144,6 +144,15 @@ func (s recordingStore) SessionSetWriter(ctx context.Context, userID domain.User
 	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
 }
 
+func (s recordingStore) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	defer s.rec("PersonWriter")()
+	w, err := s.inner.PersonWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
+}
+
 // recordingWriter — humansession.Writer с журналом.
 type recordingWriter struct {
 	inner humansession.Writer
@@ -155,6 +164,11 @@ var _ humansession.Writer = recordingWriter{}
 
 func (w recordingWriter) rec(name string) func() {
 	return record(w.j, w.meter, storeOp{Port: "writer", Name: name})
+}
+
+func (w recordingWriter) LockPersonForLogin(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
+	defer w.rec("LockPersonForLogin")()
+	return w.inner.LockPersonForLogin(ctx, userID)
 }
 
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {

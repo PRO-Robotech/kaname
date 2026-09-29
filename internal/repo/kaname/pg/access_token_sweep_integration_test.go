@@ -51,6 +51,7 @@ func TestAccessTokenSweepRemovesOnlyWhatNoSurfaceCanStillAccept(t *testing.T) {
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 time.Minute,
 	}), "семейство сцены")
 

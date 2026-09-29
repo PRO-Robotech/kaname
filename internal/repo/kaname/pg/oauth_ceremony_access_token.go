@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
 // issuanceFamilyFK — ограничение, которым база отвергает выпуск в
@@ -145,6 +146,16 @@ func (r *OAuthCeremonyRepo) RecordAccessToken(ctx context.Context, jti, familyID
 	case !expiresAt.After(issuedAt):
 		return issuanceDefect(ctx, familyID, "expires_at", "must be after issued_at")
 	}
+	// Выпуск ОБМЕНА КОДА записывается в транзакции запроса, открытой погашением
+	// (`oauth_ceremony_vaults.go`): замок строки кода держит отставших, пока
+	// запись и пара опередившего не закреплены. Вне обмена кода — своя
+	// транзакция на названном уровне.
+	if tx, ok := requestTx(ctx); ok {
+		if _, err := tx.Exec(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
+			return issuanceRefusal(ctx, err, jti, familyID)
+		}
+		return nil
+	}
 	if _, err := r.execWriter(ctx, recordIssuanceSQL, jti, familyID, issuedAt, expiresAt); err != nil {
 		return issuanceRefusal(ctx, err, jti, familyID)
 	}
@@ -239,6 +250,12 @@ func familyRevokedOf(ctx context.Context, q rowQuerier, jti string) (bool, error
 		return false, wrapPgErr(err, "AccessToken", "")
 	}
 	return revoked, nil
+}
+
+// PersonMarks — второй вопрос правила предъявления (kaname#456, Р5а): тем же
+// пулом и единственным оператором чтения отметки (`personmarks.Read`).
+func (r *MintedTokenRevocationRepo) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	return personmarks.Read(ctx, r.pool, ids)
 }
 
 // FamilyRevoked — ответ о семействе выпуска для авторитета отзыва и читателя

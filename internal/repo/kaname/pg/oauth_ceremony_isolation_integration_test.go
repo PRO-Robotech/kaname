@@ -78,6 +78,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,18 +107,23 @@ import (
 // У уборщика сцены «стоит на строке держателя» нет по построению (раздел «Чего
 // проба НЕ различает»); что его транзакция открыта названным уровнем, держит
 // перепись открытий.
+//
+// Обмена кода и оборота токена обновления в перечне НЕТ, и это не пропуск: своих
+// композиций у слоя доступа больше нет (kaname#434). Прод исполняет их движком
+// фундамента над хранилищами (`CeremonyVaults`), и их сцены под конкуренцией —
+// `contendedSubjects` ходом движка (`ceremonyWalk`); погашение кода, которое
+// хранилища зовут, стоит здесь писателем.
 var ceremonyPortClassification = map[string]string{
 	"IssueAuthorizationCode":    "writer",
-	"ExchangeAuthorizationCode": "writer",
-	"RotateRefreshToken":        "writer",
 	"RevokeFamily":              "writer",
-	"SetClientSecretVerifier":   "writer",
 	"ClearClientSecretVerifier": "writer",
 	"ClientSecretVerifier":      "reader",
 	// Запись выпуска токена доступа в его семейство (kaname#319).
 	"RecordAccessToken": "writer",
 	// Уборка записей выпуска (kaname#319).
 	"SweepExpiredAccessTokens": "sweeper",
+	// Погашение кода для движка фундамента (kaname#423).
+	"ConsumeAuthorizationCode": "writer",
 }
 
 // TestOAuthCeremonyPortMethodsAreClassified — предпосылка перечня: он называет
@@ -326,18 +332,17 @@ func readFamily(ctx context.Context, pool *pgxpool.Pool, familyID string) (famil
 }
 
 // contendedSubject — предмет, за который спорят победитель и проигравший:
-// код авторизации (обмен) либо обновляющий токен (ротация).
+// код авторизации (обмен) либо обновляющий токен (ротация). Спорный вызов —
+// ПРОД-ПУТЬ: ход движка над хранилищами (`ceremonyWalk`, kaname#434).
 type contendedSubject struct {
 	name string
 	// prepare заводит предмет в сцене и возвращает предъявляемую свёртку и
 	// поколение, которое займёт преемник победителя.
-	prepare func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo,
+	prepare func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, walk ceremonyWalk,
 		sc domain.CeremonyContext, n int) (presented string, successorGen int)
-	// present — сам спорный вызов порта.
-	present func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo,
-		presented, successor string) error
-	isReplay func(error) bool
-	reason   domain.FamilyRevocationReason
+	// present — сам спорный ход.
+	present func(ctx context.Context, walk ceremonyWalk, presented, successor string) (walkOutcome, error)
+	reason  domain.FamilyRevocationReason
 	// tokensAfterReplay — обновляющих токенов в семействе победителя после
 	// сцены повтора: выданное победителем и ничего от проигравшего.
 	tokensAfterReplay int
@@ -354,6 +359,7 @@ func issueCeremonyCode(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCe
 		RedirectURI:         "https://app.example.test/cb",
 		CodeChallenge:       ceremonyChallenge,
 		CodeChallengeMethod: domain.PKCEMethodS256,
+		ACR:                 "1",
 		TTL:                 5 * time.Minute,
 	}), "посев кода")
 	return code
@@ -361,44 +367,30 @@ func issueCeremonyCode(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCe
 
 var contendedSubjects = []contendedSubject{
 	{
-		name: "ExchangeAuthorizationCode",
-		prepare: func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo,
+		name: "CeremonyVaults.ConsumeAuthorizationCode",
+		prepare: func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, _ ceremonyWalk,
 			sc domain.CeremonyContext, n int) (string, int) {
 			return issueCeremonyCode(t, ctx, repo, sc, n), 0
 		},
-		present: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, presented, successor string) error {
-			_, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-				CodeDigest:         presented,
-				RefreshTokenDigest: successor,
-				RefreshTokenTTL:    time.Hour,
-			})
-			return err
+		present: func(ctx context.Context, walk ceremonyWalk, presented, successor string) (walkOutcome, error) {
+			return walk.exchange(ctx, presented, successor)
 		},
-		isReplay:          domain.IsAuthorizationCodeReplay,
 		reason:            domain.FamilyRevokedByCodeReplay,
 		tokensAfterReplay: 1,
 	},
 	{
-		name: "RotateRefreshToken",
-		prepare: func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo,
+		name: "CeremonyVaults.RotateRefreshToken",
+		prepare: func(t *testing.T, ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, walk ceremonyWalk,
 			sc domain.CeremonyContext, n int) (string, int) {
 			code := issueCeremonyCode(t, ctx, repo, sc, n)
 			first := ceremonyDigest(0x317000 + n)
-			_, err := repo.ExchangeAuthorizationCode(ctx, kanamepg.CodeExchange{
-				CodeDigest: code, RefreshTokenDigest: first, RefreshTokenTTL: time.Hour,
-			})
-			require.NoError(t, err, "посев первого поколения")
+			out, err := walk.exchange(ctx, code, first)
+			requireWalkIssued(t, out, err, "посев первого поколения")
 			return first, 1
 		},
-		present: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, presented, successor string) error {
-			_, err := repo.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-				PresentedDigest: presented,
-				SuccessorDigest: successor,
-				TTL:             time.Hour,
-			})
-			return err
+		present: func(ctx context.Context, walk ceremonyWalk, presented, successor string) (walkOutcome, error) {
+			return walk.rotate(ctx, presented, successor)
 		},
-		isReplay:          domain.IsRefreshTokenReplay,
 		reason:            domain.FamilyRevokedByRefreshReplay,
 		tokensAfterReplay: 2,
 	},
@@ -406,6 +398,7 @@ var contendedSubjects = []contendedSubject{
 
 // contendedOutcome — исходы сцены и состояние, снятое У ПРОИГРАВШЕГО.
 type contendedOutcome struct {
+	winnerOut, loserOut walkOutcome
 	winnerErr, loserErr error
 	// atLoser — состояние семейства, чей предмет предъявил проигравший,
 	// прочитанное СРАЗУ по возврату его вызова.
@@ -422,10 +415,11 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 ) (winnerScene, otherScene domain.CeremonyContext, winnerSuccessor, loserSuccessor string, out contendedOutcome) {
 	t.Helper()
 	repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
+	walk := newCeremonyWalk(t, sh.pool)
 	winnerScene = lockOrderScene(t, ctx, sh.seed, base)
 	otherScene = lockOrderScene(t, ctx, sh.seed, base+1)
-	winnerPresented, gen := subj.prepare(t, ctx, repo, winnerScene, base)
-	otherPresented, _ := subj.prepare(t, ctx, repo, otherScene, base+1)
+	winnerPresented, gen := subj.prepare(t, ctx, repo, walk, winnerScene, base)
+	otherPresented, _ := subj.prepare(t, ctx, repo, walk, otherScene, base+1)
 	// У каждого семейства — выпуск токена доступа, записанный ДО сцены: по нему
 	// судится, дошёл ли отзыв до места предъявления.
 	recordIssuance(t, ctx, repo, winnerScene.FamilyID)
@@ -437,8 +431,15 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	winnerDone := make(chan error, 1)
-	go func() { winnerDone <- subj.present(callCtx, repo, winnerPresented, winnerSuccessor) }()
+	type presented struct {
+		out walkOutcome
+		err error
+	}
+	winnerDone := make(chan presented, 1)
+	go func() {
+		out, err := subj.present(callCtx, walk, winnerPresented, winnerSuccessor)
+		winnerDone <- presented{out, err}
+	}()
 	winnerPID := awaitBlockedBy(t, ctx, sh.seed, holderPID, "победитель "+subj.name)
 
 	loserPresented, loserFamily := otherPresented, otherScene.FamilyID
@@ -448,7 +449,7 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 	loserDone := make(chan contendedOutcome, 1)
 	go func() {
 		var o contendedOutcome
-		o.loserErr = subj.present(callCtx, repo, loserPresented, loserSuccessor)
+		o.loserOut, o.loserErr = subj.present(callCtx, walk, loserPresented, loserSuccessor)
 		o.atLoser, o.atLoserErr = readFamily(ctx, sh.seed, loserFamily)
 		loserDone <- o
 	}()
@@ -490,11 +491,13 @@ func runContended(t *testing.T, ctx context.Context, sh ceremonyShoulder, subj c
 		}
 	}
 	select {
-	case out.winnerErr = <-winnerDone:
+	case w := <-winnerDone:
+		out.winnerOut, out.winnerErr = w.out, w.err
 	case <-time.After(30 * time.Second):
 		t.Fatal("победитель не завершился после снятия держателя")
 	}
-	out.loserErr, out.atLoser, out.atLoserErr = loser.loserErr, loser.atLoser, loser.atLoserErr
+	out.loserOut, out.loserErr = loser.loserOut, loser.loserErr
+	out.atLoser, out.atLoserErr = loser.atLoser, loser.atLoserErr
 	return winnerScene, otherScene, winnerSuccessor, loserSuccessor, out
 }
 
@@ -511,15 +514,15 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 		for i, subj := range contendedSubjects {
 			t.Run(sh.name+"/"+subj.name, func(t *testing.T) {
 				winner, _, winnerSuccessor, _, out := runContended(t, ctx, sh, subj, 100+10*i, true)
-				t.Logf("плечо %s: победитель=%v · проигравший=%v · семейство у проигравшего %+v",
-					sh.name, out.winnerErr, out.loserErr, out.atLoser)
+				t.Logf("плечо %s: победитель=%v (%v) · проигравший=%v (%v) · семейство у проигравшего %+v",
+					sh.name, out.winnerOut, out.winnerErr, out.loserOut, out.loserErr, out.atLoser)
 
-				require.NoError(t, out.winnerErr, "победитель обязан пройти")
+				requireWalkIssued(t, out.winnerOut, out.winnerErr, "победитель обязан пройти")
 				// Каждое утверждение ниже — СВОЁ: исход проигравшего и состояние
 				// семейства краснеют независимо друг от друга.
-				assert.True(t, subj.isReplay(out.loserErr),
-					"проигравший, стоявший на строке победителя, обязан получить ПОВТОР, а получил: %v",
-					out.loserErr)
+				assert.True(t, out.loserErr == nil && out.loserOut == walkReplay,
+					"проигравший, стоявший на строке победителя, обязан получить ПОВТОР, а получил: %v (%v)",
+					out.loserOut, out.loserErr)
 				require.NoError(t, out.atLoserErr, "чтение семейства у проигравшего")
 				assert.True(t, out.atLoser.revoked,
 					"к возврату проигравшего семейство обязано быть ОТОЗВАНО: отказ без отзыва "+
@@ -548,13 +551,8 @@ func TestOAuthCeremonyLoserWaitingOnTheWinnerIsAReplay(t *testing.T) {
 					`SELECT active FROM kaname.refresh_tokens WHERE token_digest = $1`,
 					winnerSuccessor).Scan(&active))
 				assert.False(t, active, "токен победителя обязан быть снят отзывом семейства")
-				repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
-				_, rotErr := repo.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-					PresentedDigest: winnerSuccessor,
-					SuccessorDigest: ceremonyDigest(0x31a000 + i),
-					TTL:             time.Hour,
-				})
-				assert.Error(t, rotErr, "токен победителя обязан НЕ ротироваться после повтора")
+				rotated, rotErr := newCeremonyWalk(t, sh.pool).rotate(ctx, winnerSuccessor, ceremonyDigest(0x31a000+i))
+				assert.Errorf(t, rotErr, "токен победителя обязан НЕ ротироваться после повтора (исход %s)", rotated)
 
 			})
 		}
@@ -575,11 +573,13 @@ func TestOAuthCeremonyConcurrentPresentationsOfDifferentSubjectsBothPass(t *test
 		for i, subj := range contendedSubjects {
 			t.Run(sh.name+"/"+subj.name, func(t *testing.T) {
 				winner, other, winnerSuccessor, loserSuccessor, out := runContended(t, ctx, sh, subj, 200+10*i, false)
-				t.Logf("плечо %s: первый=%v · второй=%v · семейство второго %+v",
-					sh.name, out.winnerErr, out.loserErr, out.atLoser)
+				t.Logf("плечо %s: первый=%v (%v) · второй=%v (%v) · семейство второго %+v",
+					sh.name, out.winnerOut, out.winnerErr, out.loserOut, out.loserErr, out.atLoser)
 
-				assert.NoError(t, out.winnerErr, "первый обязан пройти")
-				assert.NoError(t, out.loserErr, "второй, предъявивший СВОЙ предмет, обязан пройти")
+				assert.True(t, out.winnerErr == nil && out.winnerOut == walkIssued,
+					"первый обязан пройти: %v (%v)", out.winnerOut, out.winnerErr)
+				assert.True(t, out.loserErr == nil && out.loserOut == walkIssued,
+					"второй, предъявивший СВОЙ предмет, обязан пройти: %v (%v)", out.loserOut, out.loserErr)
 				require.NoError(t, out.atLoserErr)
 				assert.False(t, out.atLoser.revoked, "семейство второго обязано остаться живым")
 				require.True(t, out.atLoser.issuanceRecorded,
@@ -588,19 +588,16 @@ func TestOAuthCeremonyConcurrentPresentationsOfDifferentSubjectsBothPass(t *test
 				assert.False(t, out.atLoser.issuanceRevoked,
 					"выпуск живого семейства второго обязан приниматься на предъявлении")
 
-				repo := kanamepg.NewOAuthCeremonyRepo(sh.pool)
+				walk := newCeremonyWalk(t, sh.pool)
 				for j, fam := range []struct {
 					id, token string
 				}{{winner.FamilyID, winnerSuccessor}, {other.FamilyID, loserSuccessor}} {
 					st, err := readFamily(ctx, sh.seed, fam.id)
 					require.NoError(t, err)
 					assert.False(t, st.revoked, "семейство %s обязано остаться живым", fam.id)
-					_, rotErr := repo.RotateRefreshToken(ctx, kanamepg.RefreshRotation{
-						PresentedDigest: fam.token,
-						SuccessorDigest: ceremonyDigest(0x31b000 + 10*i + j),
-						TTL:             time.Hour,
-					})
-					assert.NoError(t, rotErr, "выданное в семействе %s обязано ротироваться", fam.id)
+					rotated, rotErr := walk.rotate(ctx, fam.token, ceremonyDigest(0x31b000+10*i+j))
+					assert.True(t, rotErr == nil && rotated == walkIssued,
+						"выданное в семействе %s обязано ротироваться: %v (%v)", fam.id, rotated, rotErr)
 				}
 			})
 		}
@@ -630,7 +627,44 @@ func holdingTx(t *testing.T, ctx context.Context, seed *pgxpool.Pool, what, sql 
 	return backendPID(t, ctx, tx), func() { require.NoError(t, tx.Commit(ctx), "фиксация держателя: %s", what) }
 }
 
+// consumeSceneCodes — код сцены погашения по семейству: держатель заводит его,
+// писатель предъявляет тот же.
+var consumeSceneCodes sync.Map
+
 var heldWriterCases = []heldWriterCase{
+	{
+		// Два погашения одного кода (kaname#423): держатель погасил код и держит
+		// строку, погашение стоит на ней. Исход — ноль строк: код погашен другим,
+		// и это перепроверка условия, а не отказ сериализации.
+		name: "ConsumeAuthorizationCode",
+		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, n int) (int, func()) {
+			code := issueCeremonyCode(t, ctx, repo, sc, n)
+			consumeSceneCodes.Store(sc.FamilyID, code)
+			return holdingTx(t, ctx, sh.seed, "погашение кода", `
+				UPDATE kaname.authorization_codes SET deactivated_at = now(), deactivated_reason = 'redeemed'
+				 WHERE code_digest = $1`, code)
+		},
+		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
+			code, ok := consumeSceneCodes.Load(sc.FamilyID)
+			if !ok {
+				return fmt.Errorf("сцена не завела код семейства %s", sc.FamilyID)
+			}
+			rows, err := repo.ConsumeAuthorizationCode(ctx, code.(string))
+			if err == nil && rows != 0 {
+				return fmt.Errorf("погашение, стоявшее на погашенной строке, затронуло строк %d вместо нуля", rows)
+			}
+			return err
+		},
+		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
+			sc domain.CeremonyContext, err error) {
+			assert.NoError(t, err, "погашение, стоявшее на погашенной строке, обязано дать ноль строк, а не отказ")
+			var active bool
+			require.NoError(t, sh.seed.QueryRow(ctx,
+				`SELECT active FROM kaname.authorization_codes WHERE family_id = $1`, sc.FamilyID).Scan(&active))
+			assert.False(t, active, "код остался активным после погашения держателем")
+		},
+	},
 	{
 		// Сессия снята одновременно с выдачей: держатель ставит отметку снятия,
 		// выдача стоит на строке сессии. Исход — «сессия не жива».
@@ -644,7 +678,7 @@ var heldWriterCases = []heldWriterCase{
 		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
 			return repo.IssueAuthorizationCode(ctx, kanamepg.NewAuthorizationCode{
 				Context: sc, CodeDigest: ceremonyDigest(0x31c001), RedirectURI: "https://app.example.test/cb",
-				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, TTL: time.Minute,
+				CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256, ACR: "1", TTL: time.Minute,
 			})
 		},
 		check: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
@@ -741,33 +775,10 @@ var heldWriterCases = []heldWriterCase{
 		},
 	},
 	{
-		// Проверочное значение кладётся, пока строку клиента правит посторонний
-		// писатель реестра. Исход — значение положено.
-		name: "SetClientSecretVerifier",
-		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, _ *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, _ int) (int, func()) {
-			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
-			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
-				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
-				 WHERE client_id = $1`, sc.ClientID)
-		},
-		act: func(ctx context.Context, repo *kanamepg.OAuthCeremonyRepo, sc domain.CeremonyContext) error {
-			return repo.SetClientSecretVerifier(ctx, sc.ClientID, verifierForCases)
-		},
-		check: func(t *testing.T, ctx context.Context, _ ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
-			sc domain.CeremonyContext, err error) {
-			assert.NoError(t, err, "значение обязано лечь")
-			_, has, vErr := repo.ClientSecretVerifier(ctx, sc.ClientID)
-			require.NoError(t, vErr)
-			assert.True(t, has, "у клиента обязан появиться секрет")
-		},
-	},
-	{
 		name: "ClearClientSecretVerifier",
 		hold: func(t *testing.T, ctx context.Context, sh ceremonyShoulder, repo *kanamepg.OAuthCeremonyRepo,
 			sc domain.CeremonyContext, _ int) (int, func()) {
 			declareSecretClient(t, ctx, sh.seed, sc.ClientID)
-			require.NoError(t, repo.SetClientSecretVerifier(ctx, sc.ClientID, verifierForCases), "посев значения")
 			return holdingTx(t, ctx, sh.seed, "посторонний писатель реестра клиентов", `
 				UPDATE kaname.interactive_clients SET redirect_uris = redirect_uris
 				 WHERE client_id = $1`, sc.ClientID)
@@ -785,18 +796,25 @@ var heldWriterCases = []heldWriterCase{
 	},
 }
 
-// declareSecretClient — клиент сцены объявляется способом СЕКРЕТОМ до сцен
-// проверочного значения. Сцена заводит клиента публичным (`none`), а материал
-// лежит только у клиента, предъявляющего секрет
-// (`interactive_clients_secret_verifier_method_ck`, kaname#317): без этого
-// посева писатель получал бы отказ схемы, а не свой исход под конкуренцией.
+// declareSecretClient — клиент сцены становится клиентом С СЕКРЕТОМ до сцены
+// снятия проверочного значения: способ секретом и материал одним оператором
+// посева. Сцена заводит клиента посевом публичным (`none`), а материал лежит
+// только у клиента, предъявляющего секрет
+// (`interactive_clients_secret_verifier_method_ck`, kaname#317).
+//
+// Продуктового писателя материала, кроме вставки строки, нет (kaname#405, Р5):
+// строку сцены кладёт посев, поэтому и материал кладёт посев — Given,
+// сконструированный посевом, тем же одним оператором, что у продукта, а не
+// второй глагол записи ради пробы.
 func declareSecretClient(t *testing.T, ctx context.Context, seed *pgxpool.Pool, clientID string) {
 	t.Helper()
 	tag, err := seed.Exec(ctx, `
-		UPDATE kaname.interactive_clients SET token_endpoint_auth_method = 'client_secret_basic'
-		 WHERE client_id = $1`, clientID)
-	require.NoError(t, err, "посев способа секретом")
-	require.EqualValues(t, 1, tag.RowsAffected(), "посев способа секретом: клиента сцены нет")
+		UPDATE kaname.interactive_clients
+		   SET token_endpoint_auth_method = 'client_secret_basic',
+		       secret_verifier = $2, secret_verifier_set_at = now()
+		 WHERE client_id = $1`, clientID, verifierForCases.Reveal())
+	require.NoError(t, err, "посев клиента с секретом")
+	require.EqualValues(t, 1, tag.RowsAffected(), "посев клиента с секретом: клиента сцены нет")
 }
 
 // verifierForCases — проверочное значение объявленной формы.
@@ -889,8 +907,8 @@ func holdCodeDigest(t *testing.T, ctx context.Context, seed *pgxpool.Pool,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope)
-		VALUES ($1, $2, $3, $4, $5)`,
+		INSERT INTO kaname.token_families (id, client_id, user_id, session_id, scope, acr)
+		VALUES ($1, $2, $3, $4, $5, '1')`,
 		other.FamilyID, other.ClientID, other.UserID, other.SessionID, other.Scope)
 	require.NoError(t, err, "держатель: семейство чужой сцены")
 	_, err = tx.Exec(ctx, `
@@ -959,10 +977,25 @@ func endAllSessionsOf(ctx context.Context, w interface {
 
 var sessionEnderDoors = []sessionEnderDoor{
 	{
-		// Собственный выход человека.
+		// Открытие без личности. Снятие записи ему представимо, и судится
+		// дверь, а не вызывающий; собственный выход человека с kaname#382
+		// открывается ключевым замком строки личности (сцена ниже).
 		name: "HumanSessionRepo.Writer",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).Writer(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
+		// Собственный выход человека, вход, повышение, подтверждение второго
+		// фактора, перечеканка запасных кодов — транзакция, открытая ключевым
+		// замком строки личности (kaname#382).
+		name: "HumanSessionRepo.PersonWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).PersonWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}
@@ -1004,6 +1037,18 @@ var sessionEnderDoors = []sessionEnderDoor{
 			return endOneSession(ctx, w, sc)
 		},
 	},
+	{
+		// Подтверждение своего адреса (kaname#456): транзакция, открытая
+		// замком строки личности, снимает прочие сессии человека.
+		name: "RegistrationStore.VerificationWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewRegistrationStore(pool).VerificationWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailVerified)
+		},
+	},
 }
 
 // TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily — ОБРАТНАЯ сцена пары
@@ -1037,6 +1082,7 @@ func TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily(t *testing.T) {
 					issued <- repo.IssueAuthorizationCode(callCtx, kanamepg.NewAuthorizationCode{
 						Context: sc, CodeDigest: code, RedirectURI: "https://app.example.test/cb",
 						CodeChallenge: ceremonyChallenge, CodeChallengeMethod: domain.PKCEMethodS256,
+						ACR: "1",
 						TTL: time.Minute,
 					})
 				}()

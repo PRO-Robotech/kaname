@@ -84,16 +84,8 @@ func TestProviderRoad_OwnLaneWithoutTheProviderRoadPasses(t *testing.T) {
 	}
 }
 
-// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 2: полосность. На `external` дорога и запись зеркала
-// — обязательная часть посадки, и их наличие требованием не нарушает ничего.
-func TestProviderRoad_ExternalLaneIsNotAskedToGiveUpTheRoad(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderExternal)
-
-	w := wiredLane()
-	w.ProviderAdminHopBuilt = true
-	w.ProviderKeySetMirrorPublished = true
-
-	if err := config.ValidateLaneWiring(cfg, w); err != nil {
-		t.Fatalf("ValidateLaneWiring() = %v; под external дорога к поставщику законна", err)
-	}
-}
+// ЗДЕСЬ СТОЯЛ ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 2 «на `external` дорога и запись зеркала
+// законны». Посадка снята фундаментом (PRO-Robotech/corelib#30): проверка
+// старта отвергает её раньше требований любой полосы (#424), а половина
+// провязки при посадке вне словаря не судит ничего — случай зеленел бы на
+// этом молчании, а не на полосности.

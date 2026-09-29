@@ -60,11 +60,13 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 )
 
 // SupplyPath — каким путём оператор подаёт величину процессу.
@@ -247,6 +249,26 @@ func (s RequiredSetting) FileValue(l Landing) any {
 	return v
 }
 
+// OnlyOnWithdrawnPostures сообщает, что строка обязательна ТОЛЬКО на посадках
+// вне словаря — снятых (PRO-Robotech/corelib#30). Такую посадку объявить нельзя:
+// разбор её не производит, а число мимо разбора отвергает проверка старта
+// (#424). Значит, ни на одной объявимой посадке строка не обязательна, и
+// документ оператора её не печатает.
+//
+// Строка, применимая ещё и при поднятом собственном публичном фронте, сюда не
+// относится: фронт поднимается на любой посадке.
+func (s RequiredSetting) OnlyOnWithdrawnPostures() bool {
+	if len(s.Lanes) == 0 || s.WhenOwnPublicRESTFront {
+		return false
+	}
+	for _, l := range s.Lanes {
+		if l.IsLegal() {
+			return false
+		}
+	}
+	return true
+}
+
 // LaneNames — имена полос посадки личности, на которых величина обязательна.
 // Пустой перечень означает «на любой».
 //
@@ -312,12 +334,15 @@ var RequiredSettings = []RequiredSetting{
 		SampleIsLane: true,
 		// ВЫВЕДЕНО из словаря посадки, а не выписано: второе перечисление
 		// канонических имён разошлось бы с типом на первом же новом значении,
-		// и разошлось бы молча (гейт pkg/identityposture).
-		Sample: IdentityProviderExternal.String(),
-		Why: "чем установка проверяет человека: внешним поставщиком удостоверений (external) " +
-			"или собственной чеканкой платформы (own). Умолчания нет намеренно — оно в одну сторону " +
-			"потребовало бы адресов поставщика у установки, у которой его нет, в другую молча сняло бы " +
-			"это требование с установки, которая на него опирается",
+		// и разошлось бы молча. Образец — законное значение словаря: снятая
+		// посадка `external` (PRO-Robotech/corelib#30) печатается числом вне
+		// словаря, и образец, собранный из неё, называл бы величину, которую
+		// разбор не принимает (#424).
+		Sample: IdentityProviderOwn.String(),
+		Why: "чем установка проверяет человека. Законное значение одно — собственная чеканка " +
+			"платформы (own): посадка внешнего поставщика удостоверений снята, и разбор её не принимает. " +
+			"Умолчания нет намеренно — оно молча подняло бы профиль, посадки не выбравший, в том числе " +
+			"написанный под снятую посадку и не обновлённый",
 		Refusal: "authn.identity-provider is not declared",
 	},
 	{
@@ -399,12 +424,31 @@ var RequiredSettings = []RequiredSetting{
 	loginLaneRequirement("hasher-parallelism", "4",
 		"параметр стоимости argon2id: параллелизм"),
 	loginLaneRequirement("verifier-capacity", "4",
-		"сколько проверок пароля идут одновременно; ёмкость × память на потолке + резерв обязаны помещаться в предел памяти контейнера — страж старта сверяет числа"),
+		"сколько проверок пароля идут одновременно; ёмкость × память на потолке + резерв обязаны помещаться в предел памяти контейнера — страж старта сверяет числа; сверка секрета клиента церемонии занимает не больше половины ёмкости, и под церемонией ёмкость меньше 2 — отказ старта"),
 	loginLaneRequirement("memory-reserve-bytes", "268435456",
 		"резерв памяти процесса сверх проверок пароля, байт"),
 	// ВОССТАНОВЛЕНИЕ ДОСТУПА на той же полосе (Ф5, kacho#1271).
 	loginLaneRequirement("recovery-code-ttl", "5m",
 		"срок кода восстановления доступа, от чеканки; код однократен и после срока не оживает. Умолчания нет: перенос прежней величины (5 мин) объявляется профилем, а не построением"),
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА на той же полосе (kaname#456, Р7, Р9): пять ручек без
+	// умолчания, образцы — величины профиля продукта.
+	loginLaneRequirement("verification-code-ttl", "30m",
+		"срок кода подтверждения адреса, от выдачи письма; своя величина, не равная сроку кода восстановления: подтверждение человек часто откладывает"),
+	loginLaneRequirement("verification-code-attempts", "5",
+		"сколько неподошедших предъявлений тратит код подтверждения; дальше он не подходит и верным значением, нужен новый код"),
+	loginLaneRequirement("verification-resend-interval", "60s",
+		"наименьший промежуток между двумя письмами подтверждения одному человеку; раньше него запрос письма — отказ по частоте со сроком"),
+	loginLaneRequirement("verification-resend-limit", "5",
+		"сколько писем подтверждения одному человеку за окно, письмо регистрации в счёт"),
+	loginLaneRequirement("verification-resend-window", "24h",
+		"скользящее окно числа писем подтверждения; промежуток между письмами обязан быть короче окна"),
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318) — величины посадки `own`; строки
+	// ВЫВОДЯТСЯ из таблицы ручек сроков, потолок в объяснении — из константы
+	// фундамента. Образцы — поведение сборки до ручек, равное потолкам.
+	ceremonyLifespanRequirement("code-ttl", "60s",
+		"срок кода авторизации собственной церемонии от его выдачи: столько перехваченный код остаётся обмениваемым"),
+	ceremonyLifespanRequirement("refresh-ttl", "168h",
+		"срок семейства токенов обновления собственной церемонии от первой выдачи; оборот его не продлевает, и семейство кончается не позже сессии, в которой выдан код"),
 	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13) — величины посадки
 	// `own`; строки ВЫВОДЯТСЯ из перечня ручек привязки. Образцы намеренно
 	// НЕРЕЗОЛВИМЫЕ (RFC 2606) и согласованы между собой: хост происхождения
@@ -489,6 +533,15 @@ var RequiredSettings = []RequiredSetting{
 			"намеренно — это чужое имя, и совпадение подставленного с настоящим не выбирал бы никто",
 		Refusal: "api-server.registry-token.service is not declared",
 	},
+	// ЧЕТЫРЕ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` — адреса внешнего
+	// поставщика. Посадка снята фундаментом (PRO-Robotech/corelib#30):
+	// объявить её профиль не может — разбор её не производит, а число мимо
+	// разбора отвергает проверка старта (#424). Поэтому строки не обязательны
+	// ни на одной посадке, которую можно объявить (OnlyOnWithdrawnPostures), и
+	// документ оператора их не печатает: требование величины, без которой
+	// служба поднимается, было бы ложью. В таблице они остаются как
+	// объявление владельца о СВОЁМ имени переменной у этих ключей (его читает
+	// гейт исходящих полос поставки) и снимаются вместе с полосой целиком (#363).
 	{
 		Key:    "authn.hydra-admin-url",
 		Env:    "KANAME_HYDRA_ADMIN_URL",
@@ -647,9 +700,12 @@ var RequiredSettings = []RequiredSetting{
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
 	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
-	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а четыре
-	// его величины — его собственным стражем, то есть только после того, как
-	// эндпоинт включён. Образец перечня адресатов несёт образец адресата
+	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а восемь
+	// его величин (четыре F2 и четыре темпа токен-эндпоинта, #315) — его
+	// собственным стражем [ClientTokenConfig.Validate], то есть только после
+	// того, как эндпоинт включён. Две величины темпа точки авторизации требует
+	// [AuthNConfig.ValidateCeremonyPace]: их условие — собранная церемония.
+	// Образец перечня адресатов несёт образец адресата
 	// докерной полосы (`api-server.registry-token.service` выше): страж той
 	// полосы требует его внутри перечня, и несогласованные образцы отверг бы он.
 	{
@@ -709,6 +765,80 @@ var RequiredSettings = []RequiredSetting{
 		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
 			"читал бы сколько прислали",
 		Refusal: "authn.client-token.body-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.exchanges-per-client-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "5",
+		Why: "темп обменов в секунду на идентификатор клиента, на реплику. Судится по заявленному " +
+			"идентификатору до обращения к реестру, тратят его только принятые предъявления; " +
+			"превышение — ответ 429 со сроком ожидания. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.exchanges-per-client-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "32",
+		Why: "потолок одновременных обменов на реплику, все четыре вида выдачи. Обмен сверх потолка " +
+			"отвергается до проверки ответом 503 и Retry-After: 1, а не ждёт места. Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.in-flight-ceiling must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proofs-per-source",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "50",
+		Why: "неудавшихся доказательств клиента за окно на источник, на реплику: отказов проверки " +
+			"утверждения машинных полос и invalid_client полос церемонии. Отказы нашей стороны, формы и " +
+			"темпа не считаются. Источник — адрес от края при сертификате края, иначе адрес пира. " +
+			"Превышение — ответ 429 со сроком. Таблица окна держит не больше " +
+			strconv.Itoa(failurewindow.MaxStoredFailures) + " засчитанных отказов " +
+			"на все источники: под потоком источников забывается источник ниже предела, источник на " +
+			"пределе — никогда; предел выше этого числа — отказ старта. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.failed-proofs-per-source must be declared",
+	},
+	{
+		Key:         "authn.client-token.failed-proof-window",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "15m",
+		Why: "скользящее окно отказов доказательства на источник. Отказ в окне, пока с него прошло " +
+			"меньше длины окна. Ноль означал бы «без окна»",
+		Refusal: "authn.client-token.failed-proof-window must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-per-source-per-sec",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "10",
+		Why: "запросов авторизации в секунду на источник, на реплику; обязательна при собранной " +
+			"церемонии (own и включённый эндпоинт). Тратит его всякий запрос, прошедший проверку метода; " +
+			"превышение — ответ 429 до справочника клиентов. Ноль означал бы «без ограничения»",
+		Refusal: "authn.client-token.authorize-per-source-per-sec must be declared",
+	},
+	{
+		Key:         "authn.client-token.authorize-in-flight-ceiling",
+		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING",
+		Supply:      SupplyEnv,
+		Lanes:       []IdentityProvider{IdentityProviderOwn},
+		Conditional: true,
+		Sample:      "32",
+		Why: "потолок одновременных запросов авторизации на реплику, свой — не общий с потолком " +
+			"обменов; обязательна при собранной церемонии. Превышение — ответ 503 и Retry-After: 1. " +
+			"Ноль означал бы «без потолка»",
+		Refusal: "authn.client-token.authorize-in-flight-ceiling must be declared",
 	},
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -54,6 +55,28 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 	w, err := beginHumanSessionWriter(ctx, s.pool)
 	if err != nil {
 		return nil, mapErr(err, "Registration.Writer", "")
+	}
+	return &RegistrationWriter{
+		humanSessionWriter: w,
+		mirror:             &writeTx{readTx: readTx{tx: w.tx}},
+		tx:                 w.tx,
+	}, nil
+}
+
+// VerificationWriter — транзакция исхода подтверждения адреса (kaname#456,
+// Р10): тот же состав, что у регистрации (писатель сессии и писатель зеркала
+// над ОДНОЙ `pgx.Tx`, — активация приглашения идёт тем же исходом), но ПЕРВЫМ
+// оператором взята строка человека замком писателя нескольких сессий:
+// подтверждение снимает прочие сессии человека, а запрос письма судит предел
+// писем, и одновременные обращения одного человека сериализованы этим замком.
+func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
+	w, err := beginHumanSessionWriter(ctx, s.pool)
+	if err != nil {
+		return nil, mapErr(err, "Verification.Writer", "")
+	}
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,

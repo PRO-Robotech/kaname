@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package invite_mail_outbox — writer намерения отправить письмо в
-// `kaname.invite_mail_outbox`: приглашение (ID-MAIL-1) и, с фазы Ф5, код
-// восстановления доступа (`kacho#1271`, Р3 — второй вид в ТОЙ ЖЕ очереди).
+// `kaname.invite_mail_outbox`: приглашение (ID-MAIL-1), с фазы Ф5 — код
+// восстановления доступа (`kacho#1271`, Р3 — второй вид в ТОЙ ЖЕ очереди) и
+// код подтверждения адреса (kaname#456, Р8 — третий вид).
 //
 // Намерение пишется В ТОЙ ЖЕ транзакции, что строка предмета (приглашения либо
 // кода), и это несущее свойство, а не оптимизация: при откате предмета
@@ -46,10 +47,16 @@ const (
 	// EventRecoverySend — вид события письма восстановления (Ф5 Р3); заведён
 	// миграцией `20260917015400_recovery_code_is_our_record`.
 	EventRecoverySend = "mail.recovery.send"
+	// EventVerificationSend — вид события письма подтверждения адреса
+	// (kaname#456, Р8); заведён миграцией
+	// `20260927190000_address_verification_is_our_verb`.
+	EventVerificationSend = "mail.verification.send"
 	// kind — resource_kind денормализованной колонки приглашения.
 	kind = "InviteMail"
 	// recoveryKind — resource_kind письма восстановления.
 	recoveryKind = "RecoveryMail"
+	// verificationKind — resource_kind письма подтверждения адреса.
+	verificationKind = "VerificationMail"
 )
 
 // EmitTx кладёт намерение отправить письмо приглашения на транзакцию
@@ -122,6 +129,47 @@ func EmitRecoveryTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, code 
 	}
 	if err := outbox.Emit(ctx, tx, Table, recoveryKind, userID, EventRecoverySend, payload); err != nil {
 		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventRecoverySend, err)
+	}
+	return nil
+}
+
+// EmitVerificationTx кладёт намерение отправить письмо подтверждения адреса на
+// транзакцию вызывающего — ту же, что пишет строку кода (kaname#456, Р8, Р9).
+//
+// Письмо НЕСЁТ предъявителя — код в форме для человека: предъявитель и есть его
+// предмет (тот же размен, что у восстановления). Адреса экрана подтверждения
+// намерение не несёт: его собирает применитель из адреса консоли, объявленного
+// настройкой установки, — строка очереди не становится вторым местом этой
+// величины. Кода в адресе нет по построению: адрес ведёт на экран, код вводится
+// руками.
+//
+// userID — ключ партиции порядка, как у прочих видов.
+func EmitVerificationTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, code string, validFor time.Duration) error {
+	if tx == nil {
+		return fmt.Errorf("invite_mail_outbox: tx must not be nil")
+	}
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("invite_mail_outbox: recipient required — a letter to nobody has no subject")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("invite_mail_outbox: user id required — it is the ordering partition key")
+	}
+	if strings.TrimSpace(code) == "" {
+		return fmt.Errorf("invite_mail_outbox: verification code required — a verification letter without a code confirms nothing")
+	}
+	minutes := int(validFor / time.Minute)
+	if minutes <= 0 && validFor > 0 {
+		minutes = 1
+	}
+	payload := map[string]any{
+		"to":                 to,
+		"account_id":         accountID,
+		"user_id":            userID,
+		"code":               code,
+		"code_valid_minutes": minutes,
+	}
+	if err := outbox.Emit(ctx, tx, Table, verificationKind, userID, EventVerificationSend, payload); err != nil {
+		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventVerificationSend, err)
 	}
 	return nil
 }

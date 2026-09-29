@@ -17,7 +17,10 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/publishedkey"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -56,6 +59,10 @@ type AccessTokens struct {
 	signer   Signer
 	keys     KeySetSource
 	recorder IssuanceRecorder
+	// rule — ОДНО правило выдачи удостоверениям человека (`revocationpolicy`;
+	// kaname#456, Р5б): обмен кода и оборот токена обновления спрашивают его
+	// о субъекте гранта с якорем в моменте аутентификации сессии семейства.
+	rule revocationpolicy.Lookup
 }
 
 var _ oauthceremony.AccessTokenIssuer = (*AccessTokens)(nil)
@@ -63,8 +70,11 @@ var _ oauthceremony.AccessTokenIssuer = (*AccessTokens)(nil)
 // NewAccessTokens собирает адаптер. Без подписанта выпускать нечем, без набора
 // нечем опознавать, без писателя записи выпуска некуда записать семейство
 // выданного — сборка отказывает, а не отвечает на первом запросе.
-func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder) (*AccessTokens, error) {
+func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder, rule revocationpolicy.Lookup) (*AccessTokens, error) {
 	switch {
+	case rule == nil:
+		return nil, errors.New("ceremonyport: access token issuer needs the issuance rule reader; " +
+			"a lane issuing past the rule would give a person a token the rule refuses")
 	case signer == nil:
 		return nil, errors.New("ceremonyport: access token issuer needs the service signer")
 	case keys == nil:
@@ -75,7 +85,7 @@ func NewAccessTokens(signer Signer, keys KeySetSource, recorder IssuanceRecorder
 	case strings.TrimSpace(signer.Issuer()) == "":
 		return nil, errors.New("ceremonyport: the service signer names no issuer")
 	}
-	return &AccessTokens{signer: signer, keys: keys, recorder: recorder}, nil
+	return &AccessTokens{signer: signer, keys: keys, recorder: recorder, rule: rule}, nil
 }
 
 // IssueAccessToken выпускает токен доступа по гранту (K2) и записывает выпуск в
@@ -147,8 +157,32 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 		return oauthceremony.IssuedAccessToken{}, errors.New("ceremonyport: the grant names no moment of authentication")
 	}
 
+	// Правило выдачи (kaname#456, Р5б) — ПОСЛЕ суждения о коде и токене
+	// обновления (их судит церемония раньше: повтор отзывает семейство по
+	// действующему правилу и при неподтверждённом владельце) и ДО подписи.
+	// Субъект гранта — человек нашего входа; якорь — момент аутентификации
+	// сессии семейства.
+	switch verdict, verr := revocationpolicy.AtIssuance(ctx, a.rule, service.ResolvedPrincipal{
+		Kind: service.PrincipalUser, UserID: grant.Session.Subject,
+	}, grant.Session.AuthTime); verdict {
+	case revocationpolicy.Allowed:
+	case revocationpolicy.Unverified:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w", domain.ErrGrantOwnerUnverified)
+	case revocationpolicy.Revoked:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w", domain.ErrAccessTokenFamilyNotLive)
+	default:
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w: %v", domain.ErrGrantRuleUndecidable, verr)
+	}
+
 	claims := map[string]any{
 		"client_id": grant.ClientID,
+		// Вид и идентификатор принципала — обязательная пара читателя
+		// предъявленного (`presentedcred.principalFrom`; приёмка LINE-A-1 Р6):
+		// без неё край не узнал бы, за кого говорит токен. Грант церемонии
+		// выдаётся только ЧЕЛОВЕКУ нашего входа — шов авторитета входа отвечает
+		// сессией человека, — поэтому вид один и назван словом домена.
+		domain.ClaimPrincipalType: domain.PrincipalTypeUser,
+		domain.ClaimPrincipalID:   grant.Session.Subject,
 		// Контекст входа — из полей сеанса (см. шапку); `auth_time` — целые
 		// секунды эпохи (OpenID Connect Core 1.0 §2).
 		"acr":       grant.Session.ACR,
@@ -169,10 +203,12 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 		Claims:   claims,
 	})
 	if err != nil {
-		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w", err)
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	if err := a.recorder.RecordAccessToken(ctx, tok.JTI, grant.GrantID, tok.IssuedAt, tok.ExpiresAt); err != nil {
-		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: record access token issuance: %w", err)
+		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: record access token issuance: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	return oauthceremony.IssuedAccessToken{
 		Token:     tok.Token,
@@ -209,7 +245,8 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 func (a *AccessTokens) IdentifyAccessToken(ctx context.Context, token string) (string, error) {
 	keys, err := a.keys.PublishedSet(ctx)
 	if err != nil {
-		return "", fmt.Errorf("ceremonyport: identify access token: the published key set is unavailable: %w", err)
+		return "", fmt.Errorf("ceremonyport: identify access token: the published key set is unavailable: %w",
+			iamerr.OnEndedCall(ctx, err))
 	}
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(

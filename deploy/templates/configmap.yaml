@@ -293,6 +293,25 @@ data:
         {{- with .recoveryCodeTtl }}
         recovery-code-ttl: {{ . | quote }}
         {{- end }}
+        {{- /* ПОДТВЕРЖДЕНИЕ АДРЕСА на той же полосе (kaname#456, Р7, Р9): пять
+             величин без умолчания — срок и предел попыток кода, промежуток,
+             число и окно писем. Под `own` незаданная — отказ старта с именем
+             ключа и переменной (KANAME_AUTHN__LOGIN__VERIFICATION_*). */}}
+        {{- with .verificationCodeTtl }}
+        verification-code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "verificationCodeAttempts" }}
+        verification-code-attempts: {{ int64 .verificationCodeAttempts }}
+        {{- end }}
+        {{- with .verificationResendInterval }}
+        verification-resend-interval: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "verificationResendLimit" }}
+        verification-resend-limit: {{ int64 .verificationResendLimit }}
+        {{- end }}
+        {{- with .verificationResendWindow }}
+        verification-resend-window: {{ . | quote }}
+        {{- end }}
       {{- end }}
 
       {{- with $authn.registration }}
@@ -314,6 +333,24 @@ data:
         {{- end }}
         {{- with .admissionWindow }}
         admission-window: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
+      {{- with $authn.ceremony }}
+      # СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318): срок кода авторизации от его
+      # выдачи и срок семейства токенов обновления от первой выдачи. Обе —
+      # условие старта под `authn.identityProvider: own`, умолчания нет ни у
+      # одной: незаданная — отказ старта с именем ручки
+      # (KANAME_AUTHN__CEREMONY__*). Потолки держит фундамент
+      # (tokenpolicy.MaxAuthorizationCodeTTL, tokenpolicy.MaxRefreshTokenFamilyTTL),
+      # судит их страж старта, а не рендер. Под `external` блок не читается:
+      # церемонии там нет.
+      ceremony:
+        {{- with .codeTtl }}
+        code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- with .refreshTtl }}
+        refresh-ttl: {{ . | quote }}
         {{- end }}
       {{- end }}
 
@@ -380,7 +417,7 @@ data:
       {{- end }}
 
       {{- $ts := $authn.tokenSigning | default dict }}
-      {{- if $ts.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.tokenSigning") }}
       # СВОЯ ЧЕКАНКА ТОКЕНОВ (#897): ключница, подписант, ротация и публикация
       # набора проверочных ключей.
       #
@@ -415,7 +452,7 @@ data:
         {{- end }}
       {{- end }}
       {{- $pc := $authn.presentedCredential | default dict }}
-      {{- if $pc.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.presentedCredential") }}
       # ПРИЁМ УДОСТОВЕРЕНИЯ, ПРЕДЪЯВЛЕННОГО САМИМ АРЕНДАТОРОМ, на публичном
       # слушателе (#2077, #2191).
       #
@@ -450,7 +487,7 @@ data:
         {{- end }}
       {{- end }}
       {{- $ct := $authn.clientToken | default dict }}
-      {{- if $ct.enabled }}
+      {{- if include "kaname-svc.blockEnabled" (list $ "authn.clientToken") }}
       # ТОКЕН-ЭНДПОИНТ ПЛАТФОРМЫ (#898): ключ служебной учётки обменивается на
       # токен НАШЕЙ чеканкой, а не у внешнего поставщика (задача #337).
       #
@@ -462,7 +499,8 @@ data:
       # оператора.
       #
       # Блок рендерится ТОЛЬКО при enabled — та же форма, что у чеканки выше.
-      # Четыре величины отданы ветвью без умолчаний шаблона; незаданную при
+      # Величины выдачи и шесть величин темпа поверхности выдачи (kaname#315)
+      # отданы ветвью без умолчаний шаблона; незаданную при
       # включённом эндпоинте отвергает рендер тем же помощником, одним перечнем,
       # а согласованность заданных судит страж старта. Целое проходит через
       # `int64` — тот же довод, что у блока `login`.
@@ -479,6 +517,24 @@ data:
         {{- end }}
         {{- with $ct.bodyCeiling }}
         body-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.inFlightCeiling }}
+        in-flight-ceiling: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.exchangesPerClientPerSec }}
+        exchanges-per-client-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofsPerSource }}
+        failed-proofs-per-source: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.failedProofWindow }}
+        failed-proof-window: {{ . | quote }}
+        {{- end }}
+        {{- with $ct.authorizePerSourcePerSec }}
+        authorize-per-source-per-sec: {{ int64 . }}
+        {{- end }}
+        {{- with $ct.authorizeInFlightCeiling }}
+        authorize-in-flight-ceiling: {{ int64 . }}
         {{- end }}
       {{- end }}
 

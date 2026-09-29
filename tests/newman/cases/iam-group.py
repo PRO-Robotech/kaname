@@ -34,7 +34,16 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
+  Poll hits /operations/{id} on the service's own front (iop* → kaname).
+
+ГДЕ ГОНЯЕТСЯ (e2e-flow.md §7а; kaname#415). Производитель каждого утверждения —
+служба: CRUD группы и её членов — её глаголы, членство держит триггер её базы, а
+пины отказа — `md.scope` СВОЕЙ двери (коммит #50); `md.resource` ставит только
+край и здесь не читается. Поэтому шаги идут на собственный публичный фронт
+(`ownRestBaseUrl`, `address_own_front` в конце модуля), и гоняет модуль задание
+`stand` процесса `e2e-newman.yml`. Все ключи окружения, включая цель привязки
+`userINVId`, пишет посев автономного стенда
+(`tests/authz-fixtures/seed_own_stand.py --minted-keys`).
 
 Gotchas:
   - AddMember with non-existent user/SA → FailedPrecondition (9) via
@@ -296,7 +305,7 @@ CASES.append(Case(
 # «нет объекта» становится оракулом существования аккаунтов чужих тенантов.
 CASES.append(Case(
     id="IAM-GRP-CR-NEG-ACCOUNT-MISSING",
-    title="Create group under an account with no authorization path → 403 PERMISSION_DENIED at the edge (anti-oracle)",
+    title="Create group under an account with no authorization path → 403 PERMISSION_DENIED at the service's door (anti-oracle)",
     classes=["NEG", "AUTHZ"],
     priority="P1",
     steps=[
@@ -307,10 +316,12 @@ CASES.append(Case(
             body={"accountId": "acc00000000000notfnd", "name": "grpbadacc{{runId}}"},
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(403),
-                *assert_grpc_code(7, "PERMISSION_DENIED"),
-                "pm.test('отказ называет действие, а не судьбу объекта', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.groups.create'));",
+                # Действие отказ называет в `ErrorInfo.metadata`, а не в тексте: текст
+                # отказа службы дословный «permission denied» (deny_details.go), и
+                # вхождение действия в `message` падало на верном ответе своей двери
+                # (тот же класс, что IAM-ROL-UP-NEG-SYSTEM-NO-PATH, сборка 435). Ярус
+                # `account`: строка каталога берёт область из `account_id`.
+                *assert_scoped_authz_deny("iam.groups.create", "account"),
                 # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
                 # «доступа нет».
                 "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
@@ -1447,3 +1458,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "набора группы нет поверхности, которую он судит")

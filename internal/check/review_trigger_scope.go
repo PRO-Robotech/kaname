@@ -5,7 +5,8 @@ package check
 
 // review_trigger_scope.go — РАЗБОР ТРИГГЕРОВ процессов: запрос в ветку ЛИНИИ
 // (волны, эпика) идёт тем же конвейером, что запрос в ствол, а `push` судит
-// только ствол (задача PRO-Robotech/kaname#394).
+// только ствол (задача PRO-Robotech/kaname#394); производитель образа по `push`
+// публикует и ствол, и ветку линии (задача PRO-Robotech/kaname#429).
 //
 // # ПРЕДМЕТ
 //
@@ -30,10 +31,12 @@ package check
 //     ни уже (запрос в линию без вердикта), ни шире (прогон на запросе в ветку
 //     полосы, ревью, спасения — тот расход, ради которого фильтр и заведён).
 //     Сверяется РАВЕНСТВО, а не вхождение: вхождение молчало бы на `'**'`;
-//  2. СТВОЛ ПО `push`. `on.push.branches` равен {main}: вердикт линии даёт её
-//     ЗАПРОС, а не каждая отправка в неё. Держатель `trunkverdict` сужен по
-//     стволу своим условием и судится своим гейтом (trunk_verdict_holder.go),
-//     здесь это не повторяется;
+//  2. СТВОЛ ПО `push`. У процесса ПРОВЕРКИ `on.push.branches` равен {main}:
+//     вердикт линии даёт её ЗАПРОС, а не каждая отправка в неё. У процесса
+//     ПУБЛИКАЦИИ (linePublishers) — равен ReviewBaseBranches: процесс идёт и в
+//     ствол, и в линию, а посаженное от ветки задачи отличает его шаг (раздел
+//     «ОСЬ 2: ПРОВЕРКА И ПУБЛИКАЦИЯ»). Держатель `trunkverdict` сужен по стволу своим условием и
+//     судится своим гейтом (trunk_verdict_holder.go), здесь это не повторяется;
 //  3. ПУТИ НЕ СУЖАЮТ ЗАПРОС. Защита ствола требует контексты ПОИМЁННО, а
 //     контекст, который не начался, остаётся «ожидается» — ни зелёного, ни
 //     красного, и слияние стоит;
@@ -41,6 +44,34 @@ package check
 //     запроса, даёт запросу в линию ДРУГОЙ состав заданий при том же триггере —
 //     ровно то, что запрещает ось 1, этажом ниже. Как это распознаётся — в
 //     разделе «ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ».
+//
+// # ОСЬ 2: ПРОВЕРКА И ПУБЛИКАЦИЯ
+//
+// Запрет `push` в линию стоит ради процесса ПРОВЕРКИ: его прогон на отправке в
+// линию повторил бы вердикт, уже вынесенный её запросом, — второй полный прогон
+// того же дерева. У процесса ПУБЛИКАЦИИ предмет другой: запрос собирает образ и
+// не публикует его, и опубликованный образ посаженного состояния даёт только
+// `push`. Сужение до ствола оставляло голову ветки эпика без образа: тегов
+// `357-*` и `366-*` в реестре ноль, а связку линии выкатить было не из чего
+// (задача PRO-Robotech/kaname#429).
+//
+// Поэтому у публикующего `on.push.branches` РАВЕН ReviewBaseBranches — тому же
+// множеству, что базы запроса. Сверяется РАВЕНСТВО, как у оси 1: уже — голова
+// линии без образа, шире — процесс идёт на ветки, которых в линии нет вовсе.
+//
+// ФИЛЬТР ШИРЕ ПОСАЖЕННОГО, и эта ось этого не видит. Ветки задач названы
+// номером так же, как ветки волн и эпиков: `'[0-9]+'` пропускает и `366`, и
+// `429`. Отличить линию от задачи по тексту глоба нельзя, поэтому публикацию
+// решает ШАГ производителя — переписью запросов с базой этой ветки, — и судит
+// его проба TestImageProducerTagsALineHeadLikeTheTrunk (image_line_tag_test.go),
+// а не эта ось.
+//
+// Публикующий назван в закрытом перечне linePublishers по имени объявления —
+// провайдер различает процессы ровно им, — и каждая запись несёт причину.
+// Запись, чьего объявления в корпусе нет, — находка: исключение без предмета.
+// Публикующий, не идущий по `push` в ветки вовсе, — тоже находка: посаженное
+// он не публикует. Процесс вне перечня с `push` в линию краснеет по-прежнему:
+// послабление принадлежит производителю, а не оси.
 //
 // # ОСЬ 4: СУДИТСЯ ЗВЕНО, А НЕ ПУТЬ
 //
@@ -158,6 +189,25 @@ const LineBranchPattern = "[0-9]+"
 // провайдеру не объявить), и разойтись копиям не даёт этот разбор.
 func ReviewBaseBranches() []string {
 	return []string{TrunkBranch, LineBranchPattern}
+}
+
+// linePublishers — ЗАКРЫТЫЙ перечень процессов ПУБЛИКАЦИИ: имя объявления в
+// `.github/workflows` → причина. У них `on.push.branches` равен
+// ReviewBaseBranches, у всех остальных — {main} (шапка, «ОСЬ 2: ПРОВЕРКА И
+// ПУБЛИКАЦИЯ»).
+var linePublishers = map[string]string{
+	"docker-build.yml": "образ службы публикуется только по `push`: запрос его собирает, но не " +
+		"публикует, и без `push` в линию голова ветки эпика и волны остаётся без образа (kaname#429)",
+}
+
+// LinePublishers — имена объявлений процессов публикации, по порядку.
+func LinePublishers() []string {
+	names := make([]string, 0, len(linePublishers))
+	for n := range linePublishers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // reviewEvent — событие запроса, на котором процесс ОБЯЗАН идти, и только оно.
@@ -415,6 +465,12 @@ type ReviewTriggerCensus struct {
 	ReviewAtLine   int
 	// OnBranchPush — идущих по `push` в ветки (не только в метки).
 	OnBranchPush int
+	// PublishersDeclared — записей в перечне публикующих; PublishersRead — из
+	// них объявлений, прочитанных в корпусе; PublishAtLine — из прочитанных
+	// тех, у кого `on.push.branches` РАВЕН ReviewBaseBranches.
+	PublishersDeclared int
+	PublishersRead     int
+	PublishAtLine      int
 	// Conditions — условий `if:` осмотрено (заданий и шагов вместе);
 	// ConditionLinks — звеньев в них прочитано. Условия есть, а звеньев ноль —
 	// разбор лексем ослеп, и молчание оси 4 сказано ни о чём.
@@ -429,11 +485,14 @@ type ReviewTriggerCensus struct {
 // «ноль прочитанного», поэтому печатаются все величины.
 func (c ReviewTriggerCensus) String() string {
 	return fmt.Sprintf("объявлений процессов %d · идут на запросе %d · из них на %s %d · "+
-		"из них с базами {%s} %d · идут по push в ветки %d · условий if: осмотрено %d · "+
+		"из них с базами {%s} %d · идут по push в ветки %d · публикующих посаженное "+
+		"объявлено %d · прочитано %d · из них по push в {%s} %d · условий if: осмотрено %d · "+
 		"звеньев в них прочитано %d · псевдонимов YAML разрешено %d",
 		c.Files, c.OnReview, reviewTargetEvent, c.OnReviewTarget,
 		strings.Join(ReviewBaseBranches(), ", "), c.ReviewAtLine,
-		c.OnBranchPush, c.Conditions, c.ConditionLinks, c.Aliases)
+		c.OnBranchPush, c.PublishersDeclared, c.PublishersRead,
+		strings.Join(ReviewBaseBranches(), ", "), c.PublishAtLine,
+		c.Conditions, c.ConditionLinks, c.Aliases)
 }
 
 // eventFilter — фильтр одного события в той форме, в какой он записан.
@@ -449,7 +508,7 @@ type eventFilter struct {
 // Вход — имя объявления → его текст. Чистая функция от корпуса затем, чтобы
 // способность упасть доказывалась подачей входа, а не правкой дерева.
 func AuditReviewTriggers(corpus map[string]string) ([]string, ReviewTriggerCensus, error) {
-	census := ReviewTriggerCensus{Files: len(corpus)}
+	census := ReviewTriggerCensus{Files: len(corpus), PublishersDeclared: len(linePublishers)}
 	if census.Files == 0 {
 		return nil, census, fmt.Errorf("объявлений процессов прочитано ноль — вердикт беспредметен")
 	}
@@ -462,12 +521,20 @@ func AuditReviewTriggers(corpus map[string]string) ([]string, ReviewTriggerCensu
 
 	var findings []string
 	for _, name := range names {
-		perFile, title, err := auditOneProcess(corpus[name], &census)
+		perFile, title, err := auditOneProcess(name, corpus[name], &census)
 		if err != nil {
 			return nil, census, fmt.Errorf("%s: %w", name, err)
 		}
 		for _, f := range perFile {
 			findings = append(findings, fmt.Sprintf("%s (процесс %q): %s", name, title, f))
+		}
+	}
+
+	// Запись перечня публикующих без объявления — исключение без предмета.
+	for _, name := range LinePublishers() {
+		if _, ok := corpus[name]; !ok {
+			findings = append(findings, fmt.Sprintf("перечень публикующих называет %s, а объявления "+
+				"в корпусе нет — запись без предмета: снять её тем же изменением, что сняло процесс", name))
 		}
 	}
 
@@ -479,7 +546,7 @@ func AuditReviewTriggers(corpus map[string]string) ([]string, ReviewTriggerCensu
 	return findings, census, nil
 }
 
-func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string, error) {
+func auditOneProcess(name, raw string, census *ReviewTriggerCensus) ([]string, string, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(raw), &root); err != nil {
 		return nil, "", fmt.Errorf("объявление процесса не разобрано: %w", err)
@@ -531,8 +598,22 @@ func auditOneProcess(raw string, census *ReviewTriggerCensus) ([]string, string,
 	}
 
 	// (2) — СТВОЛ ПО `push`; процесс ствола без запроса — ось 1.
-	if push, ok := events["push"]; ok {
-		fs, onBranches := auditPushFilter(push)
+	_, publisher := linePublishers[name]
+	if publisher {
+		census.PublishersRead++
+	}
+	push, onPush := events["push"]
+	if publisher && !onPush {
+		findings = append(findings, fmt.Sprintf("процесс публикации по push в ветки не идёт: "+
+			"посаженное состояние {%s} остаётся без опубликованного артефакта — нужен "+
+			"`push` с `branches` {%s}", strings.Join(ReviewBaseBranches(), ", "),
+			strings.Join(ReviewBaseBranches(), ", ")))
+	}
+	if onPush {
+		fs, onBranches := auditPushFilter(push, publisher)
+		if publisher && onBranches && len(fs) == 0 {
+			census.PublishAtLine++
+		}
 		if onBranches {
 			census.OnBranchPush++
 			if !onPR && !onTarget {
@@ -716,7 +797,11 @@ func auditReviewFilter(f eventFilter) ([]string, bool) {
 }
 
 // auditPushFilter — ось 2. Второе значение — идёт ли процесс по push в ветки.
-func auditPushFilter(f eventFilter) ([]string, bool) {
+// `publisher` — процесс из перечня публикующих: его множество — ReviewBaseBranches.
+func auditPushFilter(f eventFilter, publisher bool) ([]string, bool) {
+	if publisher {
+		return auditPublishFilter(f)
+	}
 	if f.Keys["branches-ignore"] {
 		return []string{"`push` сужен ИСКЛЮЧЕНИЕМ (`branches-ignore`): каждая ветка вне перечня " +
 			"идёт по отправке, а вердикт линии даёт её ЗАПРОС — нужен `branches: [main]`"}, true
@@ -742,6 +827,40 @@ func auditPushFilter(f eventFilter) ([]string, bool) {
 			"состояния выносить не о чем", TrunkBranch))
 	}
 	return findings, true
+}
+
+// auditPublishFilter — ось 2 для процесса публикации: `on.push.branches` РАВЕН
+// ReviewBaseBranches. Второе значение — идёт ли процесс по push в ветки.
+func auditPublishFilter(f eventFilter) ([]string, bool) {
+	want := ReviewBaseBranches()
+	wantText := strings.Join(want, ", ")
+	if f.Keys["branches-ignore"] {
+		return []string{fmt.Sprintf("`push` публикации сужен ИСКЛЮЧЕНИЕМ (`branches-ignore`): "+
+			"публикуется каждая ветка вне перечня, а не посаженное {%s}", wantText)}, true
+	}
+	if !f.Bare && !f.Keys["branches"] && (f.Keys["tags"] || f.Keys["tags-ignore"]) {
+		return []string{fmt.Sprintf("процесс публикации по push в ветки не идёт — только в метки: "+
+			"посаженное {%s} остаётся без опубликованного артефакта", wantText)}, false
+	}
+	if f.Bare || !f.Keys["branches"] {
+		return []string{fmt.Sprintf("`push` публикации не сужен по ветке: публикуется каждая "+
+			"отправка в каждую ветку, а не посаженное {%s}", wantText)}, true
+	}
+	missing, extra := setDiff(f.Branches, want)
+	if len(missing) == 0 && len(extra) == 0 {
+		return nil, true
+	}
+	var why []string
+	if len(missing) > 0 {
+		why = append(why, fmt.Sprintf("недостаёт %s — голова линии остаётся без образа, и "+
+			"связку линии выкатить не из чего", quoteAll(missing)))
+	}
+	if len(extra) > 0 {
+		why = append(why, fmt.Sprintf("лишние %s — публикуется состояние, никуда не влитое",
+			quoteAll(extra)))
+	}
+	return []string{fmt.Sprintf("`push` публикации %s ≠ {%s}: %s",
+		quoteAll(f.Branches), wantText, strings.Join(why, "; "))}, true
 }
 
 // auditBaseReadingConditions — ось 4: условия `if:` заданий и их шагов.

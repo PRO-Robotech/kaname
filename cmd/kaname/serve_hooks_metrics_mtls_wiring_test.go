@@ -44,8 +44,14 @@ func TestHooksMetricsMTLS_ServeWiresTLSListeners(t *testing.T) {
 	// в трёх соседних комментариях этого же файла, и счётчик по ней был бы зелен
 	// при любой утерянной проводке. Каждое имя ниже — присваивание конкретного
 	// собранного транспорта конкретному объявлению, и в прозе оно не встречается.
+	//
+	// Транспорт вебхуков доезжает до объявления через построитель поверхности
+	// (`hooksLaneSurface`, kaname#360): сюда он ПЕРЕДАЁТСЯ, а в поле профиля его
+	// кладёт построитель — это утверждает на поведении проба
+	// `TestHooksLaneAnswersEveryRouteWhereTheProviderExists`
+	// (hooks_lane_posture_test.go, сверка `desc.Spec().TLS` с переданным).
 	for _, want := range []string{
-		"TLS: hooksTLSConfig,",
+		"hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig,",
 		"TLS: metricsTLSConfig,",
 		"TLS: registryTokenTLSConfig,",
 		"TLS: jwksProxyTLSConfig,",

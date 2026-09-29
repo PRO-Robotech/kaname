@@ -7,7 +7,6 @@ package pg_test
 //
 // Покрытие:
 // - 15a: Upsert NEW (created=true).
-// - 15b: Upsert EXISTING external_id → UPDATE email/display_name, created=false.
 // - 16b: GetByEmail happy + NotFound (case-insensitive).
 // - 41a: Delete без refs → OK.
 // - 41b: Delete с GroupMember → FailedPrecondition.
@@ -111,44 +110,6 @@ func TestUser_15a_Upsert_New(t *testing.T) {
 	assert.True(t, strings.HasPrefix(string(u.ID), "usr"))
 	assert.Equal(t, domain.Email("new15a@example.com"), u.Email)
 	assert.WithinDuration(t, time.Now(), u.CreatedAt, 30*time.Second)
-}
-
-// ── 15b: Upsert EXISTING (account_id, external_id) → created=false, profile updated.
-// : UPSERT теперь per-Account; второй вызов должен указывать тот же
-// AccountID, что и первый.
-func TestUser_15b_Upsert_Existing_UpdatesProfile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-	repo := kanamepg.New(pool, nil)
-
-	first, created1 := upsertUser(t, ctx, repo, "zit-15b", "old15b@example.com", "Old Name")
-	require.True(t, created1)
-
-	// Второй Upsert тот же (account_id, external_id), новый email/name.
-	u2 := domain.User{
-		ID:           domain.UserID(ids.NewID(domain.PrefixUser)), // ignored on conflict
-		AccountID:    first.AccountID,
-		ExternalID:   "zit-15b",
-		Email:        "new15b@example.com",
-		DisplayName:  "New Name",
-		InviteStatus: domain.InviteStatusActive,
-	}
-	w, err := repo.Writer(ctx)
-	require.NoError(t, err)
-	out, created2, err := w.UsersW().Upsert(ctx, u2)
-	require.NoError(t, err)
-	require.NoError(t, w.Commit(ctx))
-
-	assert.False(t, created2, "second Upsert → created=false")
-	assert.Equal(t, first.ID, out.ID, "row id preserved (xmin's update doesn't change id)")
-	assert.Equal(t, domain.Email("new15b@example.com"), out.Email)
-	assert.Equal(t, domain.DisplayName("New Name"), out.DisplayName)
 }
 
 // ── 16b: GetByEmail case-insensitive ────────────────────────────────────────

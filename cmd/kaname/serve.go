@@ -34,19 +34,24 @@ import (
 	"github.com/PRO-Robotech/corelib/servicehost"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 
@@ -654,6 +659,9 @@ func runServe(cfg config.Config) error {
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
 		return err
 	}
+	if err := requireIssuingListenerAsksForACertificate(cfg, mtlsCfg); err != nil {
+		return err
+	}
 	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
 		return err
 	}
@@ -662,7 +670,7 @@ func runServe(cfg config.Config) error {
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
 	// профиль, о них умолчавший, поднимал три слушателя открытым текстом.
 	declaredPlaintext, err := requireHTTPEdgeTLS(productionMode, iamHTTPEdges(
-		cfg.AuthN.HooksHTTPListenAddress(),
+		hooksListenAddress(cfg),
 		cfg.APIServer.MetricsListenAddress(),
 		cfg.APIServer.JWKSProxy.ListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
@@ -851,6 +859,16 @@ func runServe(cfg config.Config) error {
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
 		presentedcred.Presented)
 
+	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
+	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
+	// неподтверждённым адресом получает отказ Р3 раньше пола системного
+	// читателя, пола ступени, анти-анонима, двери и обработчика. Вид принципала
+	// — строкой людей (`personmarks`), не утверждением токена.
+	addressGate := authzguard.NewAddressGate(personmarks.New(pool)).
+		WithRefusalObserver(func() {
+			metricsReg.LoginLaneRecorder().AddressVerificationObserved(humansession.VerificationPositionRefusedListener)
+		})
+
 	// СОБСТВЕННАЯ ДВЕРЬ iam — пообъектный вопрос о доступе на публичном
 	// слушателе.
 	//
@@ -987,6 +1005,7 @@ func runServe(cfg config.Config) error {
 	}, publicIdentityUnary(cfg, presentedReader)...)
 	publicUnary = append(publicUnary,
 		publicCallerPolicy.Unary(),
+		addressGate.Unary(),
 		authzguard.AntiAnonymousUnary(logger),
 		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
 		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
@@ -1002,6 +1021,7 @@ func runServe(cfg config.Config) error {
 	}, publicIdentityStream(cfg, presentedReader)...)
 	publicStream = append(publicStream,
 		publicCallerPolicy.Stream(),
+		addressGate.Stream(),
 		authzguard.AntiAnonymousStream(logger),
 		// Та же дверь на второй полосе. Стримовых RPC у iam сегодня НОЛЬ
 		// (`git grep -c 'returns (stream' -- proto/kaname/cloud/iam/v1` → 0),
@@ -1076,6 +1096,7 @@ func runServe(cfg config.Config) error {
 	}, identityUnary(cfg)...)
 	internalUnary = append(internalUnary,
 		internalCallerPolicy.Unary(),
+		addressGate.Unary(),
 		internalSystemViewerFloor.Unary(),
 		internalACRFloor.Unary(),
 	)
@@ -1085,6 +1106,7 @@ func runServe(cfg config.Config) error {
 	}, identityStream(cfg)...)
 	internalStream = append(internalStream,
 		internalCallerPolicy.Stream(),
+		addressGate.Stream(),
 		internalSystemViewerFloor.Stream(),
 		internalACRFloor.Stream(),
 	)
@@ -1169,23 +1191,18 @@ func runServe(cfg config.Config) error {
 	defer stopSurfaces()
 
 	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
-	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
-	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
-	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
-	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
-	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
-		svcs.bindingReconciler, metricsReg, cfg, logger)
-	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "вебхуки провайдера личности",
-		Mode:    surfaceMode,
-		Logger:  logger,
-		Addr:    addrAxis(hooksAddr, knobHooks+" не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
-		Handler: hooksHandler,
-		Reach:   servicecontract.ReachClusterInternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
-		TLS: hooksTLSConfig,
+	// provision/recovery). Cluster-internal-only (запрет #6), отдельный порт от
+	// gRPC. Только посадкой с внешним поставщиком: под `own` полоса не
+	// собирается и слушатель не поднимается (hooksLaneSurface, kaname#360).
+	//
+	// Носитель готовности строится ЗДЕСЬ и отдаётся тому, кто его монтирует, и
+	// гашению: оно переводит `/readyz` в 503 ДО остановки серверов (см.
+	// triggerShutdown ниже). Без этого носитель был бы, а дёрнуть его было бы
+	// некому (#1752).
+	readiness := buildReadiness(pool, metricsReg)
+	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() (http.Handler, error) {
+		return buildHooksMux(pool, kanameRepo, opsRepo,
+			svcs.bindingReconciler, metricsReg, cfg, logger)
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности вебхуков: %w", err)
@@ -1194,18 +1211,21 @@ func runServe(cfg config.Config) error {
 	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
 	// кардинальность туда не выносится.
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
-	metricsMux := http.NewServeMux()
+	// Живость и готовность пода — на ЭТОЙ поверхности (kaname#360): она есть
+	// при любой посадке, а слушатель вебхуков под `own` не поднимается.
+	metricsMux := diagnostics.NewMux(diagnostics.Handlers{Health: readiness})
 	metricsMux.Handle("/metrics", metricsReg.Handler())
 	metricsSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "диагностика (/metrics)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа, живости и готовности пода на этой посадке нет"),
 		Handler: metricsMux,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
 			"снята осознанно: поверхность выставлена только на внутренний Service и несёт " +
-				"счётчики процесса — ни секретов, ни данных арендатора на проводе нет"),
+				"счётчики процесса, живость и готовность по ИМЕНАМ зависимостей — ни секретов, " +
+				"ни данных арендатора на проводе нет"),
 		TLS: metricsTLSConfig,
 	})
 	if err != nil {
@@ -1291,7 +1311,24 @@ func runServe(cfg config.Config) error {
 		// утверждение получает ПРОИЗВОДСТВЕННОГО вызывающего. Проверяющий без
 		// него выглядит исправным ровно потому, что его пробы подают ему то,
 		// что он умеет разобрать.
-		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)
+		// Церемония OAuth `authorization_code` нашими силами (приёмка LINE-A-1,
+		// kaname#423) — под `own` и при поднятом токен-эндпоинте: её полосы
+		// обмена живут на нём, а эндпоинт авторизации и метаданные обнаружения
+		// монтируются на ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше
+		// (сценарий 23). Под `external` — nil, и её пути здесь не резолвятся.
+		//
+		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
+		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
+		// только при проверенном сертификате края, иначе адрес пира. Режим
+		// слушателя, при котором край вообще узнаваем, требует страж
+		// requireIssuingListenerAsksForACertificate выше.
+		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), issuingSource, logger)
+		if cerr != nil {
+			return fmt.Errorf("ceremony: %w", cerr)
+		}
+		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony, issuingSource)
 		if cterr != nil {
 			return fmt.Errorf("client token endpoint: %w", cterr)
 		}
@@ -1309,6 +1346,19 @@ func runServe(cfg config.Config) error {
 			// перепись: полнота витрины тогда не зависит от чужого засева.
 			metricsReg.NewClientTokenOutcomeCollector(
 				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
+			// Перепись правила адреса источника — там же: её клетки есть
+			// измеренное свидетельство того, что край и служба сошлись.
+			metricsReg.NewIssuingSourceFallbackCollector(issuingSourceFallbackCells(), issuingSourceFallbackReader(issuingSource))
+		}
+		if ceremony != nil {
+			// Объявление поверхности называет эти пути, потому что маршрутизатор
+			// их разрешает (issuingSurfaceAuthOf ниже), а не по флагу рядом.
+			mux.Handle(ceremonyhttp.AuthorizePath, ceremony.Authorize)
+			mux.Handle(ceremonyhttp.DiscoveryPath, ceremony.Discovery)
+			// Читатель переписи исходов — вплотную к монтажу, как у соседних
+			// полос выдачи: наружу отказы церемонии неразличимы, различимость —
+			// здесь.
+			metricsReg.NewCeremonyOutcomeCollector(ceremonyhttp.DeclaredOutcomes(), ceremony.Census.Read)
 		}
 		registryTokenHandler = mux
 	}
@@ -1319,11 +1369,8 @@ func runServe(cfg config.Config) error {
 		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"два вида предъявления, у каждого своя проверка на каждом запросе: подпись ключом " +
-				"служебной учётки на пути docker-токена и подписанное утверждение клиента, " +
-				"сверяемое открытым ключом из нашего реестра, на пути выдачи по учётным данным " +
-				"клиента; второй выпускает НАШ подписант"),
+		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
+		// Транспорт поверхности — TLS, собранный из профиля развёртывания выше.
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
@@ -1657,7 +1704,7 @@ func runServe(cfg config.Config) error {
 		// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
 		// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
 		// есть предмет: флип после остановки не успевает ничего.
-		hooksHealth.SetShuttingDown()
+		readiness.SetShuttingDown()
 		stopAdmission()
 		stopGRPCBounded(internalSrv, gracefulTimeout)
 		stopGRPCBounded(grpcSrv, gracefulTimeout)

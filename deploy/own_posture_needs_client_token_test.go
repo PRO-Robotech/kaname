@@ -14,10 +14,9 @@
 // быть на неё неспособен: рендер отказывает и называет обе ручки — ту же пару,
 // что называет страж процесса.
 //
-// Вторая ось — величины включённого эндпоинта. Профиля `own` в поставке нет
-// (INSTALL.md §1): перевод — накладка оператора, и объявить величины негде,
-// кроме неё. Поэтому включённый эндпоинт без величин тоже отвергается рендером,
-// одним перечнем. Шаблон судит только ОБЪЯВЛЕННОСТЬ; согласованность величин
+// Вторая ось — величины включённого эндпоинта. Боевой профиль объявляет их
+// заглушками (#424, INSTALL.md §1), накладка оператора их переопределяет, и
+// снятая любая из них — отказ рендера, одним перечнем. Шаблон судит только ОБЪЯВЛЕННОСТЬ; согласованность величин
 // (адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
 // тела положителен) остаётся предметом стража старта, и второго места о ней
 // здесь не заводится.
@@ -25,17 +24,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ЕСТЬ
 //
-//	О1  own без эндпоинта — отказ рендера с обеими ручками; ручка не задана
-//	    профилем и ручка задана ложью — два входа одного отказа;
+//	О1  own без эндпоинта — отказ рендера с обеими ручками;
 //	О2  законный близнец: own с эндпоинтом и его величинами — рендер проходит,
 //	    блок в карте настроек, и вход принимает страж старта;
-//	О3  external без блока — рендер проходит, блока нет, явная ложь и явный
-//	    external дают тот же рендер байт в байт;
 //	О4  включённый эндпоинт без величин — отказ рендера; ПОПУЛЯЦИЯ величин
 //	    берётся у стража (`config.RequiredSettings`), а не выписывается: каждая
 //	    недостающая названа, названная — только она.
 //
 // Пода проба НЕ поднимает: об установке в кластере она не утверждает ничего.
+//
+// Случая О3 («external без блока — рендер проходит, явная ложь и явный external
+// дают тот же рендер») здесь больше нет (#424): посадка `external` снята
+// фундаментом (PRO-Robotech/corelib#30), боевой профиль стоит на `own` и
+// эндпоинт включает, и поставляемого рендера без блока не существует. По той
+// же причине в О1 нет входа «ручка не задана профилем» — профиль её задаёт, — а
+// О4 судит одну посадку `own`.
 package deploy_test
 
 import (
@@ -48,6 +51,7 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/postureoverlay"
 )
 
 // Ручки пары — ключи ЗНАЧЕНИЙ чарта, как их пишет оператор.
@@ -59,18 +63,10 @@ const (
 // ownPostureOverlay — накладка оператора, переводящая боевую цепочку на `own`
 // (INSTALL.md §1): посадка, включённый эндпоинт и его четыре величины.
 //
-// Величины согласованы с заглушками боевого профиля, а не взяты образцами
-// таблицы стража: образец перечня адресатов называет адресат докерной полосы
-// ДРУГОЙ установки, и страж старта, требующий его внутри перечня, отверг бы
-// накладку поверх ЭТОГО профиля.
-var ownPostureOverlay = []string{
-	identityProviderKnob + "=own",
-	clientTokenEnabledKnob + "=true",
-	`authn.clientToken.allowedAudiences=registry.example.invalid\,https://access.example.invalid`,
-	"authn.clientToken.defaultAudience=https://access.example.invalid",
-	"authn.clientToken.tokenTtl=15m",
-	"authn.clientToken.bodyCeiling=65536",
-}
+// Берётся у ЕДИНСТВЕННОГО источника накладок (`postureoverlay.Own`): её же
+// читает гейт покрытия полос, засчитывая посадку, объявленную накладкой,
+// объявленной (kaname#232). Своя копия здесь разошлась бы с его молча.
+var ownPostureOverlay = postureoverlay.Own.Sets()
 
 // withOwnPosture — накладка `own` плюс названные `--set`; копия, а не общий
 // срез: append в общий срез переписал бы его соседям.
@@ -104,8 +100,6 @@ func TestChartRefusesOwnPostureWithoutTheClientTokenEndpoint(t *testing.T) {
 		name string
 		sets []string
 	}{
-		// Боевой профиль ручку не задаёт; ложь приходит из базовых значений.
-		{name: "ручка эндпоинта не задана профилем", sets: []string{identityProviderKnob + "=own"}},
 		{name: "ручка эндпоинта задана ложью", sets: []string{identityProviderKnob + "=own", clientTokenEnabledKnob + "=false"}},
 	}
 	for _, c := range cases {
@@ -119,6 +113,11 @@ func TestChartRefusesOwnPostureWithoutTheClientTokenEndpoint(t *testing.T) {
 // ── О2 ───────────────────────────────────────────────────────────────────────
 
 func TestChartRendersOwnPostureWithTheClientTokenEndpoint(t *testing.T) {
+	// Накладка объявляет, ПОВЕРХ ЧЕГО она ложится, и рендер кладёт её ровно
+	// туда: иначе гейт покрытия полос засчитывал бы посадку по накладке поверх
+	// профиля, поверх которого её никто не рендерил.
+	require.Equal(t, chartProfiles[len(chartProfiles)-1], postureoverlay.Own.Base(),
+		"накладка `own` объявляет своим профилем не тот, поверх которого её рендерит эта проба")
 	rendered := renderStandaloneChart(t, chartProfiles, ownPostureOverlay...)
 	in := readRenderedInput(t, rendered)
 	tree := renderedConfigTree(t, rendered)
@@ -143,28 +142,6 @@ func TestChartRendersOwnPostureWithTheClientTokenEndpoint(t *testing.T) {
 			"под с этим входом не поднимется")
 	t.Logf("перепись: накладка %d ключей · документов рендера %d · величин блока %d",
 		len(ownPostureOverlay), in.Docs, len(want))
-}
-
-// ── О3 ───────────────────────────────────────────────────────────────────────
-
-func TestExternalPostureRenderCarriesNoClientTokenBlock(t *testing.T) {
-	asDelivered := renderStandaloneChart(t, chartProfiles)
-	in := readRenderedInput(t, asDelivered)
-	require.Equal(t, "external", configString(renderedConfigTree(t, asDelivered), "authn.identity-provider"),
-		"боевой профиль больше не стоит на `external` — близнец проверял бы не ту посадку")
-	require.NotContains(t, in.ConfigBody, "client-token",
-		"под `external` с невключённым эндпоинтом карта настроек несёт блок authn.client-token")
-
-	for _, sets := range [][]string{
-		{clientTokenEnabledKnob + "=false"},
-		{identityProviderKnob + "=external"},
-		{identityProviderKnob + "=external", clientTokenEnabledKnob + "=false"},
-	} {
-		require.Equalf(t, asDelivered, renderStandaloneChart(t, chartProfiles, sets...),
-			"рендер боевого профиля с %v отличается от поставляемого: названная явно ложь "+
-				"обязана значить то же, что умолчание", sets)
-	}
-	t.Logf("перепись: байт рендера %d · близнецов, совпавших байт в байт, 3", len(asDelivered))
 }
 
 // ── О4 ───────────────────────────────────────────────────────────────────────
@@ -211,8 +188,14 @@ func TestChartRefusesAnEnabledClientTokenWithoutItsValues(t *testing.T) {
 	rows := clientTokenValueRows(t)
 	var renders int
 
-	for _, posture := range []string{"own", "external"} {
-		base := []string{identityProviderKnob + "=" + posture, clientTokenEnabledKnob + "=true"}
+	// Величины, которые боевой профиль объявляет заглушками, снимаются явно:
+	// иначе «без величины» проверяло бы профиль, в котором она есть.
+	unset := make([]string, 0, len(rows))
+	for _, r := range rows {
+		unset = append(unset, valuesKeyOf(r.Key)+"=null")
+	}
+	for _, posture := range []string{"own"} {
+		base := append([]string{identityProviderKnob + "=" + posture, clientTokenEnabledKnob + "=true"}, unset...)
 
 		t.Run(posture+"/ни одной величины", func(t *testing.T) {
 			out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, base...)
@@ -255,7 +238,51 @@ func TestChartRefusesAnEnabledClientTokenWithoutItsValues(t *testing.T) {
 			renders++
 			require.NoErrorf(t, err, "включённый эндпоинт со всеми величинами стража отвергнут "+
 				"рендером — шаблон строже стража:\n%s", out)
+			// KN-PACE-38b: карта настроек несёт каждую величину дословно — рендер,
+			// прошедший и потерявший ключ, отдал бы процессу нулевую величину.
+			tree := renderedConfigTreeOf(out)
+			require.NotNil(t, tree, "в рендере нет карты настроек")
+			for _, r := range rows {
+				require.Equalf(t, r.Sample, configScalar(tree, r.Key),
+					"карта настроек не несёт %s дословно", r.Key)
+			}
 		})
 	}
-	t.Logf("перепись: величин эндпоинта в таблице стража %d · посадок 2 · рендеров %d", len(rows), renders)
+	t.Logf("перепись: величин эндпоинта в таблице стража %d · посадок 1 · рендеров %d", len(rows), renders)
+}
+
+// configScalar — значение по точечному ключу карты настроек строкой, какого бы
+// типа оно ни было в YAML; ключа нет — пустая строка.
+func configScalar(tree map[string]any, key string) string {
+	cur := any(tree)
+	for _, seg := range strings.Split(key, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		if cur, ok = m[seg]; !ok {
+			return ""
+		}
+	}
+	return fmt.Sprint(cur)
+}
+
+// TestKNPACE39_ProdProfileDeclaresTheIssuingListenerMode — боевой профиль
+// объявляет режим слушателя выдачи `optional-mutual` и корень внутреннего УЦ
+// для проверки клиентских сертификатов (приёмка
+// ceremony-pace-is-named-by-number.md, KN-PACE-39): без режима собранная
+// церемония не стартует, а без корня режим не собирается.
+func TestKNPACE39_ProdProfileDeclaresTheIssuingListenerMode(t *testing.T) {
+	in := readRenderedInput(t, renderStandaloneChart(t, chartProfiles))
+	require.Equal(t, config.IssuingListenerRequestingModeName(), in.Envs["KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE"],
+		"окружение пода не объявляет режим слушателя выдачи")
+	roots := in.Envs["KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES"]
+	require.NotEmpty(t, roots, "окружение пода не несёт корня УЦ для проверки клиентских сертификатов слушателя выдачи")
+	var mounted bool
+	for _, m := range in.Mounts {
+		if strings.HasPrefix(roots, strings.TrimSuffix(m, "/")+"/") {
+			mounted = true
+		}
+	}
+	require.Truef(t, mounted, "корень %s не лежит ни под одним томом контейнера %v", roots, in.Mounts)
 }

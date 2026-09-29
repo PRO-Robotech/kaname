@@ -31,6 +31,7 @@ package clientassertion
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -47,8 +48,8 @@ import (
 // ЗАПИСИ ДОВЕРИЯ, погашение однократности — последним:
 //
 //	форма → заголовок (дубли · пометки) → алгоритм словаря → личность →
-//	наш издатель запрещён → перечень доверия → срок доверия → алгоритм
-//	ЗАПИСИ → подпись → адресат → время → однократность
+//	наш издатель запрещён → ТЕМП → перечень доверия → срок доверия →
+//	алгоритм ЗАПИСИ → подпись → адресат → время → однократность
 func (v *Verifier) VerifyFederated(ctx context.Context, raw string) (Result, error) {
 	// (1) Форма, дублирующиеся имена членов, пометка «обязателен к пониманию».
 	env, res, err := decodeEnvelope(raw)
@@ -88,6 +89,18 @@ func (v *Verifier) VerifyFederated(ctx context.Context, raw string) (Result, err
 		return refuse(OutcomeIssuerUntrusted, "our own issuer identifier is never a trusted external issuer")
 	}
 
+	// (4а) Темп ЗАЯВЛЕННОЙ пары — до перечня доверия (kaname#315): тот же довод,
+	// что на полосе клиента.
+	return v.paced(paceKeyFederated(issuer, subject), func() (Result, error) {
+		return v.verifyTrusted(ctx, raw, alg, issuer, subject, claims)
+	})
+}
+
+// verifyTrusted — хвост федеративной полосы от перечня доверия до
+// однократности.
+func (v *Verifier) verifyTrusted(
+	ctx context.Context, raw, alg, issuer, subject string, claims map[string]json.RawMessage,
+) (Result, error) {
 	// (5) Перечень доверенных издателей — НАША таблица. Пустая означает «не
 	// доверяем никому», и это не вырожденный случай, а состояние, ради
 	// которого перечень заведён: величина, которая может быть пустой и не

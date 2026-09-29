@@ -51,8 +51,9 @@
 #     соединения при старте не делает. Пути, которым поставщик нужен, отвечают
 #     честным отказом — и это ровно то состояние, в котором служба стоит у того,
 #     у кого поставщика нет;
-#   · УМОЛЧАНИЕМ он НЕ поднимает посадку `own` — его предмет ПОСТАВЛЯЕМЫЙ
-#     профиль, а тот объявляет `external`. Посадку `own` он поднимает по ручке
+#   · УМОЛЧАНИЕМ он поднимает ПОСТАВЛЯЕМЫЙ профиль как есть, а тот объявляет
+#     `own` сам (kaname#424): другой посадки у службы нет. Условия сквозного
+#     набора полосы входа (лист края, человек, церемония) он создаёт по ручке
 #     `KANAME_STAND_IDENTITY_PROVIDER=own` — см. раздел «ПОСАДКА `own`» ниже;
 #   · он НЕ утверждает ничего о поведении API за пределами того, что перечислено
 #     в `assert`: это подъём, а не сквозной прогон. Сквозной прогон полосы входа
@@ -81,7 +82,26 @@
 #   · ЧЕЛОВЕК СО СПОСОБОМ ВХОДА ПАРОЛЕМ. Заводит его посев
 #     (`tests/authz-fixtures/seed_login_lane.py`) глаголом продукта на той же
 #     двери, учётные данные живут Secret'ом стенда (`<релиз>-login-lane-human`)
-#     и в дерево не попадают.
+#     и в дерево не попадают. Адрес человека посев подтверждает тоже глаголом:
+#     с kaname#456 неподтверждённому дальше входа не открыто ничего, и код он
+#     берёт из письма, которое служба сдала ПРИЁМНИКУ ПИСЕМ СТЕНДА
+#     (`.github/scripts/stand-mailbox.py`, Service `<релиз>-mail`, SMTP поверх
+#     TLS листом УЦ стенда). Узел накладка `own` называет почтовой полосой
+#     службы (`inviteMail`) — это координата установки, а не посадка.
+#
+# Третье условие — ПРЕДЪЯВИТЕЛЬ ЧЕЛОВЕКА СВОЕЙ ЦЕРЕМОНИЕЙ (`seed-ceremony`,
+# `tests/authz-fixtures/seed_ceremony.py`, kaname#398). Для него накладка `own`
+# несёт ещё две величины, и обе — координаты этой установки, а не посадка:
+#
+#   · КЛЮЧ БУТСТРАП-КОНТУРА (Secret `<релиз>-bootstrap`) и круг вызывающих его
+#     чеканки — ровно лист службы. Первое машинное удостоверение `system_admin`
+#     на дереве без личностей выдаёт только эта чеканка;
+#   · ИМЯ КРАЯ В КРУГЕ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ рядом с именем службы. Глагол
+#     `Create` интерактивного клиента фронтируется краем
+#     (`GatewayFrontedInternalRPCs`): хоп собственного фронта его не проходит
+#     by construction, и пересланный принципал принимается только от
+#     доверенного пересылающего. В боевом профиле этот круг и есть край; стенд
+#     дописывает его к имени службы, а не заменяет.
 #
 # Посадку, с которой процесс поднялся, `assert` сверяет по самоотчёту: под этой
 # ручкой ось `identity_provider=own` добавляется к шести осям боевой посадки.
@@ -183,6 +203,11 @@ CREATED_MARK="$WORK/cluster-created-by-stand"
 
 # Переадресация порта полосы входа живёт между шагами: посев доказывает по ней
 # способность, прогон набора ходит по ней же. Снимает её `down`.
+# ПРИЁМНИК ПИСЕМ СТЕНДА — только под `own`. С kaname#456 человек, чей адрес не
+# подтверждён, дальше входа не проходит, а подтверждает адрес код из письма:
+# посев полосы входа доводит человека стенда до обычного положения кодом из
+# письма, которое служба сдала этому узлу (`.github/scripts/stand-mailbox.py`).
+MAIL_SVC="$RELEASE-mail"
 LANE_FORWARD_PID="$WORK/login-lane-forward.pid"
 LANE_FORWARD_LOG="$WORK/login-lane-forward.log"
 EDGE_DIR="$WORK/edge"
@@ -247,6 +272,10 @@ make_pki() {
 	if [ "$IDENTITY" = "own" ]; then
 		_leaf edge "URI:spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA" "clientAuth"
 		say "стенд: четвёртый лист — клиентский, с именем края ($EDGE_SA) для полосы входа"
+		# Лист приёмника писем стенда — серверный, тем же УЦ: служба проверяет
+		# узел якорем, который уже несёт её серверный секрет (`ca.crt`).
+		_leaf mail "DNS:$MAIL_SVC,DNS:$MAIL_SVC.$NS,DNS:$MAIL_SVC.$NS.svc,DNS:$MAIL_SVC.$NS.svc.cluster.local" "serverAuth"
+		say "стенд: пятый лист — серверный, приёмника писем стенда ($MAIL_SVC)"
 	fi
 }
 
@@ -437,6 +466,62 @@ EOF
 	say "стенд: база поднята, канал шифруется (ssl=on)"
 }
 
+# start_mailbox — приёмник писем стенда (только под `own`): SMTP поверх TLS с
+# первого байта и чтение принятого. Образ — тот же зеркальный источник, что у
+# узла базы; сценарий — файлом дерева через ConfigMap, а не образом: судится
+# ровно тот текст, чью самопроверку гоняет конвейер. Не поднялся — условие не
+# создано: вердикта о дереве нет.
+start_mailbox() {
+	[ "$IDENTITY" = "own" ] || return 0
+	"${KCTL[@]}" create namespace "$NS" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" delete secret "$MAIL_SVC-tls" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create secret generic "$MAIL_SVC-tls" \
+		--from-file=tls.crt="$PKI/mail.crt" --from-file=tls.key="$PKI/mail.key" >/dev/null
+	"${KCTL[@]}" -n "$NS" delete configmap "$MAIL_SVC-script" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create configmap "$MAIL_SVC-script" \
+		--from-file=stand-mailbox.py="$SCRIPT_DIR/stand-mailbox.py" >/dev/null
+	"${KCTL[@]}" apply -f - <<EOF >/dev/null
+apiVersion: v1
+kind: Service
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  selector: { app: $MAIL_SVC }
+  ports:
+    - { name: smtps, port: 465, targetPort: 1465 }
+    - { name: http, port: 8025, targetPort: 8025 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: $MAIL_SVC } }
+  template:
+    metadata: { labels: { app: $MAIL_SVC } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534 }
+      volumes:
+        - { name: tls, secret: { secretName: $MAIL_SVC-tls } }
+        - { name: script, configMap: { name: $MAIL_SVC-script } }
+      containers:
+        - name: mailbox
+          image: mirror.gcr.io/library/python:3.12-alpine
+          command: ["python3","/app/stand-mailbox.py","serve","--smtp-port","1465","--http-port","8025","--cert","/tls/tls.crt","--key","/tls/tls.key"]
+          ports: [{ containerPort: 1465 }, { containerPort: 8025 }]
+          volumeMounts:
+            - { name: tls, mountPath: /tls, readOnly: true }
+            - { name: script, mountPath: /app, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8025 }
+            periodSeconds: 2
+EOF
+	"${KCTL[@]}" -n "$NS" rollout status "deploy/$MAIL_SVC" --timeout=180s >/dev/null || {
+		unmet "приёмник писем стенда не поднялся за 180 с"
+		exit "$RC_UNMET"
+	}
+	say "стенд: приёмник писем поднят — $MAIL_SVC (SMTP поверх TLS :465, чтение :8025)"
+}
+
 make_secrets() {
 	local s
 	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-provider-ca" "$RELEASE-authn"; do
@@ -481,6 +566,22 @@ make_secrets() {
 			--from-file=tls.crt="$PKI/edge.crt" --from-file=tls.key="$PKI/edge.key" \
 			--from-file=ca.crt="$PKI/ca.crt" >/dev/null
 		say "стенд: шестой секрет — клиентский лист с именем края"
+		# КЛЮЧ БУТСТРАП-КОНТУРА — седьмой секрет, и только под `own`. Посев
+		# церемонии (`seed-ceremony`) заводит интерактивных клиентов ГЛАГОЛОМ
+		# `Create`, а у глагола пол — машинный `system_admin`; первое такое
+		# удостоверение на дереве без личностей выдаёт ровно чеканка бутстрапа
+		# (`InternalBootstrapTokenService` на :9091). Ключ — P-256 PKCS#8, как у
+		# автономного стенда (`stand-own.sh`): его открытой половиной служба
+		# заводит строку соответствия бутстрап-клиента при старте.
+		( umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+			-out "$PKI/bootstrap-sa.key" >/dev/null 2>&1 ) || {
+			unmet "ключ бутстрап-контура не выпустился (openssl)"
+			exit "$RC_UNMET"
+		}
+		"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-bootstrap" >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-bootstrap" \
+			--from-file=private-key-pem="$PKI/bootstrap-sa.key" >/dev/null
+		say "стенд: седьмой секрет — ключ бутстрап-контура для посева церемонии"
 	fi
 }
 
@@ -509,6 +610,12 @@ build_image() {
 
 # Накладка несёт ТОЛЬКО координаты этой установки. Посадку объявляет боевой
 # профиль чарта, и он подключается как есть — см. шапку.
+#
+# Адресаты токен-эндпоинта (`authn.clientToken`) — тоже КООРДИНАТЫ установки, как
+# имя докерной полосы: профиль несёт заглушки `.example.invalid`, а страж старта
+# требует, чтобы адресат докерной полосы стоял ВНУТРИ перечня. Без них профиль,
+# объявивший `own` с включённым эндпоинтом (kaname#424), не поднимался на
+# координатах стенда: `registry.$DOMAIN` вне перечня заглушек.
 write_overlay() {
 	cat > "$WORK/values.stand.yaml" <<EOF
 image: "$IMAGE"
@@ -528,6 +635,9 @@ authn:
     issuer: "https://$DOMAIN"
   presentedCredential:
     audience: "https://$DOMAIN"
+  clientToken:
+    allowedAudiences: "https://$DOMAIN,registry.$DOMAIN"
+    defaultAudience: "https://$DOMAIN"
 apiServer:
   registryToken:
     issuer: "https://$DOMAIN/iam/token"
@@ -553,21 +663,53 @@ EOF
 	# НАКЛАДКА ОПЕРАТОРА `own` — отдельным файлом и ПОСЛЕ накладки координат:
 	# она меняет посадку, а не координаты, и читатель рендера видит её целиком.
 	#
-	# Перечень адресатов несёт адресат докерной полосы — страж старта требует
-	# его ВНУТРИ перечня. Срок токена ни одним шагом этого стенда не расходуется
+	# Перечень адресатов — координата установки и стоит в накладке координат
+	# выше. Срок токена ни одним шагом этого стенда не расходуется
 	# (набор полосы входа токенов не чеканит): величина — законная ниже потолка
 	# платформы 30m, та, с которой посадка перемерена живым стартом (INSTALL.md
 	# §1). Потолок тела — тот же, что у автономного стенда, и довод тот же
-	# (`stand-own.sh`, «СРОК ТОКЕНА И ПОТОЛОК ТЕЛА»).
+	# (`stand-own.sh`, «СРОК ТОКЕНА И ПОТОЛОК ТЕЛА»). Сроки церемонии (kaname#318)
+	# накладка называет сама, а не берёт у профиля поставки: церемонию собирает
+	# именно эта посадка, и величины — перенос поведения сборки до ручек,
+	# равного потолкам фундамента; коллекции церемонии судят прежнее поведение.
 	cat > "$WORK/values.stand-own.yaml" <<EOF
 authn:
   identityProvider: own
+  trustedForwarderSANs:
+    - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
+    - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"
   clientToken:
     enabled: true
-    allowedAudiences: "https://$DOMAIN,registry.$DOMAIN"
-    defaultAudience: "https://$DOMAIN"
     tokenTtl: 15m
     bodyCeiling: 16384
+    # Темп поверхности выдачи — числа §3 приёмки
+    # ceremony-pace-is-named-by-number.md (kaname#315): без любой из шести
+    # величин чарт включённый эндпоинт не собирает. Режим слушателя выдачи
+    # optional-mutual и его корень объявляет боевой профиль.
+    inFlightCeiling: 32
+    exchangesPerClientPerSec: 5
+    failedProofsPerSource: 50
+    failedProofWindow: 15m
+    authorizePerSourcePerSec: 10
+    authorizeInFlightCeiling: 32
+  ceremony:
+    codeTtl: 60s
+    refreshTtl: 168h
+# Почтовый узел — приёмник писем стенда (start_mailbox): посадка полосы
+# implicit, лист узла проверяется якорем серверного секрета службы. Без узла
+# письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
+# положении подтверждения (kaname#456).
+inviteMail:
+  relay: "$MAIL_SVC.$NS.svc.cluster.local:465"
+  from: "kaname@$DOMAIN"
+  tlsMode: implicit
+  caBundleFile: /etc/kaname/tls/server/ca.crt
+secrets:
+  KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM:
+    secretName: $RELEASE-bootstrap
+    secretKey: private-key-pem
+env:
+  KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS: "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
 EOF
 }
 
@@ -970,6 +1112,56 @@ start_lane_forward() {
 	say "стенд: полоса входа переадресована — $LANE_URL (порт службы $remote)"
 }
 
+# ensure_forward <тег> <Service> <имя порта> — переадресация порта Service на
+# 127.0.0.1 для поверхностей, которые зовёт посев церемонии. Порт службы читается
+# у Service ПО ИМЕНИ, местный выбирает ядро; итог — в FORWARD_PORT.
+#
+# ЖИВАЯ ПЕРЕАДРЕСАЦИЯ ТОГО ЖЕ ТЕГА ПЕРЕИСПОЛЬЗУЕТСЯ, А НЕ ПЕРЕЗАПУСКАЕТСЯ: адрес,
+# уже записанный посевом в окружение, обязан остаться верным до прогона набора.
+# Снимает их `down` (stop_forwards).
+FORWARD_PORT=""
+ensure_forward() {
+	local tag="$1" svc="$2" pname="$3" remote pid i port=""
+	local pidf="$WORK/forward-$tag.pid" logf="$WORK/forward-$tag.log"
+	remote="$("${KCTL[@]}" -n "$NS" get svc "$svc" \
+		-o "jsonpath={.spec.ports[?(@.name==\"$pname\")].port}" 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у Service $svc нет порта $pname — чарт не объявил поверхность, которую зовёт посев"
+		exit 1
+	fi
+	if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+		port="$(forward_port_of "$logf" "$remote")"
+	fi
+	if [ -z "$port" ]; then
+		if [ -f "$pidf" ]; then kill "$(cat "$pidf")" 2>/dev/null || true; fi
+		nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "svc/$svc" ":$remote" \
+			> "$logf" 2>&1 < /dev/null &
+		pid=$!
+		echo "$pid" > "$pidf"
+		for i in $(seq 1 30); do
+			port="$(forward_port_of "$logf" "$remote")"
+			[ -n "$port" ] && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+	fi
+	if [ -z "$port" ]; then
+		unmet "переадресация $tag ($svc:$pname) не встала: $(tail -2 "$logf" 2>/dev/null | tr '\n' ' ')"
+		exit "$RC_UNMET"
+	fi
+	FORWARD_PORT="$port"
+	say "стенд: $tag переадресована — 127.0.0.1:$port (порт службы $remote)"
+}
+
+stop_forwards() {
+	local f
+	for f in "$WORK"/forward-*.pid; do
+		[ -f "$f" ] || continue
+		kill "$(cat "$f")" 2>/dev/null || true
+		rm -f "$f"
+	done
+}
+
 # secret_value <имя объекта> <ключ> — значение ключа Secret стенда.
 secret_value() {
 	local key="${2//./\\.}"
@@ -1021,15 +1213,80 @@ seed_login_lane() {
 	password="$(secret_value "$human" password || true)"
 
 	start_lane_forward
+	# Код подтверждения адреса посев берёт из письма в приёмнике писем стенда.
+	ensure_forward mailbox "$MAIL_SVC" http
+	local mailbox="http://127.0.0.1:$FORWARD_PORT"
 	local rc=0
 	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
 		python3 "$ROOT/tests/authz-fixtures/seed_login_lane.py" \
-		--base-url "$LANE_URL" --pki "$EDGE_DIR" || rc=$?
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" || rc=$?
+	return "$rc"
+}
+
+# ─── ПОСЕВ ЦЕРЕМОНИИ ────────────────────────────────────────────────────────
+#
+# Отдельная подкоманда ПОСЛЕ `seed-login-lane`: человек и его вход — условие
+# этого посева, и отказ церемонии не должен выглядеть отказом входа. Исходы — те
+# же три. Посев куёт предъявителя человека СВОЕЙ церемонией службы (вход → код →
+# обмен → приём фронтом) и заводит двух конфиденциальных клиентов глаголом
+# `Create`; разбор шагов и границ — шапка `tests/authz-fixtures/seed_ceremony.py`.
+#
+# Листы — из Secret'ов стенда, как у посева полосы: лист службы (круг чеканки
+# бутстрапа) и лист края (единственная дверь к глаголу, который фронтирует край, и
+# к полосе). Поверхностей четыре; полоса переиспользует уже живую переадресацию
+# посева полосы, и адрес, записанный им в окружение, остаётся верным.
+seed_ceremony() {
+	if [ "$IDENTITY" != "own" ]; then
+		printf 'seed-ceremony — посев стенда посадки own: задайте KANAME_STAND_IDENTITY_PROVIDER=own\n' >&2
+		exit 2
+	fi
+	need_tool python3; need_tool base64; need_tool grpcurl
+	local cdir="$WORK/ceremony-pki" k f
+	mkdir -p "$cdir"; chmod 700 "$cdir"
+	for k in "$RELEASE-server-tls:tls.crt:srv.crt" "$RELEASE-server-tls:tls.key:srv.key" \
+		"$RELEASE-server-tls:ca.crt:ca.crt" "$RELEASE-edge-client-tls:tls.crt:edge.crt" \
+		"$RELEASE-edge-client-tls:tls.key:edge.key"; do
+		f="$cdir/${k##*:}"
+		secret_value "${k%%:*}" "$(printf '%s' "$k" | cut -d: -f2)" > "$f" || true
+		[ -s "$f" ] || { unmet "лист не вынесен из Secret ${k%%:*} — стенд поднят не под own?"; exit "$RC_UNMET"; }
+	done
+	chmod 600 "$cdir/srv.key" "$cdir/edge.key"
+
+	local human="$RELEASE-login-lane-human" email password
+	email="$(secret_value "$human" email || true)"
+	password="$(secret_value "$human" password || true)"
+	if [ -z "$email" ] || [ -z "$password" ]; then
+		unmet "человека нет: Secret $human не заведён — сначала seed-login-lane"
+		exit "$RC_UNMET"
+	fi
+
+	local lane grpc issuance own
+	if [ -f "$LANE_FORWARD_PID" ] && kill -0 "$(cat "$LANE_FORWARD_PID")" 2>/dev/null; then
+		lane="$(forward_port_of "$LANE_FORWARD_LOG" \
+			"$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+				-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null)")"
+	fi
+	if [ -n "${lane:-}" ]; then
+		LANE_URL="https://127.0.0.1:$lane"
+		say "стенд: полоса входа — живая переадресация посева полосы, $LANE_URL"
+	else
+		start_lane_forward
+	fi
+	ensure_forward grpc-internal "$RELEASE-internal" grpc-internal; grpc="127.0.0.1:$FORWARD_PORT"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+
+	local rc=0
+	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
+		python3 "$ROOT/tests/authz-fixtures/seed_ceremony.py" \
+		--lane-url "$LANE_URL" --issuance-url "$issuance" --own-url "$own" \
+		--grpc-addr "$grpc" --pki "$cdir" || rc=$?
 	return "$rc"
 }
 
 down() {
 	stop_lane_forward
+	stop_forwards
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 		if [ -f "$CREATED_MARK" ]; then
 			kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
@@ -1056,6 +1313,7 @@ case "${1:-}" in
 		check_alert_rules_kind
 		make_pki
 		start_pg
+		start_mailbox
 		make_secrets
 		build_image
 		write_overlay
@@ -1073,12 +1331,16 @@ case "${1:-}" in
 		need_tool kubectl
 		seed_login_lane
 		;;
+	seed-ceremony)
+		need_tool kubectl
+		seed_ceremony
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac
