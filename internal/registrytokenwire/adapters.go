@@ -31,7 +31,7 @@ import (
 // ── Hydra token exchange ────────────────────────────────────────────────────
 
 // hydraClientCredentials — the Hydra public token endpoint (satisfied by
-// clients.HydraTokenClient).
+// clients.ProviderTokenClient).
 type hydraClientCredentials interface {
 	ClientCredentials(ctx context.Context, req clients.ClientCredentialsRequest) (clients.TokenResponse, error)
 }
@@ -59,7 +59,7 @@ func (a *HydraExchangeAdapter) Exchange(ctx context.Context, in registrytokenuc.
 		Scope:           in.Scope,
 	})
 	if err != nil {
-		if errors.Is(err, clients.ErrHydraUnavailable) {
+		if errors.Is(err, clients.ErrProviderTokenUnavailable) {
 			// Причина ОБОРАЧИВАЕТСЯ, а не подменяется: наружу отказ всё равно
 			// уйдёт фиксированным текстом (собирает use-case), а в журнал
 			// попадёт то, что ответила сеть. Голый sentinel здесь означал бы
