@@ -95,8 +95,7 @@ func newRefreshHandler(t *testing.T, users *fakeUserLookup, revs *fakeRevocation
 	// один состав, а подставной сборщик отвечал бы за них обеих.
 	claims := service.NewTokenEnrichmentService(
 		service.TokenEnrichmentConfig{
-			Domain:      "api.test.cloud",
-			HydraIssuer: "https://hydra.test.cloud",
+			Domain: "api.test.cloud",
 		},
 		users,
 	)
@@ -104,7 +103,6 @@ func newRefreshHandler(t *testing.T, users *fakeUserLookup, revs *fakeRevocation
 		iamhooks.RefreshHookConfig{
 			HookSharedSecret: "secret",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		users, claims, revs, audit, logger,
 	)

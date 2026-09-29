@@ -76,24 +76,19 @@ func buildHooksMux(
 ) (http.Handler, error) {
 	hookSecret := cfg.AuthN.ResolveHookSharedSecret()
 	domain := cfg.AuthN.ResolveDomain()
-	hydraIssuer := cfg.AuthN.ResolveHydraIssuer()
 
 	// Repo adapters (pool-scoped).
 	users := kanamepg.NewUserPoolRepo(pool)
 	auditPg := kanamepg.NewAuditEmitterAdapter(pool)
 
 	tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
-		hookSecret:  hookSecret,
-		domain:      domain,
-		hydraIssuer: hydraIssuer,
+		hookSecret: hookSecret,
+		domain:     domain,
 	}, handlerinternal.IssuancePorts{
 		Users:           users,
 		ServiceAccounts: &tokenEnrichSAAdapter{saClients: kanamepg.NewSAOAuthClientRepo(pool)},
-		// User-token principal mapping: минтованный из UserOAuthClient токен резолвится
-		// в принципал `user:<id>` (net-new относительно SA-key → serviceAccount:<id>).
-		UserTokens: &tokenEnrichUserTokenAdapter{userClients: kanamepg.NewUserOAuthClientRepo(pool), users: users},
-		Cutoffs:    kanamepg.NewSessionRevocationsAdapter(pool),
-		Audit:      &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit},
+		Cutoffs:         kanamepg.NewSessionRevocationsAdapter(pool),
+		Audit:           &handlerinternal.AuditAdapter{EmitFn: auditPg.Emit},
 	}, metricsReg.AuthnHookAuditDropsRecorder(handlerinternal.AuditEventTypes()), logger)
 	if err != nil {
 		// Отказ сборки полос выдачи — отказ старта, а не полоса без пределов, и
@@ -191,8 +186,8 @@ func (a *userRecoveryAdapter) CompleteRecovery(ctx context.Context, in handlerin
 
 // tokenEnrichSAAdapter — pool-scoped read adapter for
 // service.TokenEnrichmentSAPort. Every read it forwards belongs to the
-// SAOAuthClient pool repo, which serves both the hydra_client_id reverse lookup
-// and the ServiceAccount row behind it.
+// SAOAuthClient pool repo, which serves both the lookup of a key by its client
+// id and the ServiceAccount row behind it.
 //
 // The ServiceAccount read used to be a query written out here instead. Living
 // in the composition root, it was reachable by no test, and it selected only
@@ -202,8 +197,8 @@ type tokenEnrichSAAdapter struct {
 	saClients *kanamepg.SAOAuthClientRepo
 }
 
-func (a *tokenEnrichSAAdapter) LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	return a.saClients.GetByOAuthClientID(ctx, hydraClientID)
+func (a *tokenEnrichSAAdapter) LookupByClientID(ctx context.Context, clientID domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	return a.saClients.GetByClientID(ctx, clientID)
 }
 
 // FindByExternalSubject — federation-in: resolve the SA mapping by
@@ -217,16 +212,10 @@ func (a *tokenEnrichSAAdapter) GetServiceAccount(ctx context.Context, id domain.
 }
 
 // tokenEnrichUserTokenAdapter — pool-scoped read adapter for
-// service.TokenEnrichmentUserTokenPort. Резолвит принципал `user:<id>` для токена,
-// минтованного из UserOAuthClient (личный access-токен) — обратный lookup по
-// hydra_client_id + чтение владеющего User.
+// service.TokenEnrichmentUserTokenPort: чтение владельца личного access-токена,
+// чьё состояние полоса судит до выпуска.
 type tokenEnrichUserTokenAdapter struct {
-	userClients *kanamepg.UserOAuthClientRepo
-	users       *kanamepg.UserPoolRepo
-}
-
-func (a *tokenEnrichUserTokenAdapter) LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	return a.userClients.GetByOAuthClientID(ctx, hydraClientID)
+	users *kanamepg.UserPoolRepo
 }
 
 func (a *tokenEnrichUserTokenAdapter) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
@@ -234,11 +223,10 @@ func (a *tokenEnrichUserTokenAdapter) GetUser(ctx context.Context, id domain.Use
 }
 
 // issuanceHookConfig — объявленная настройка обеих полос хука, чеканящих токен
-// человеку. У полос она одна: секрет обратного вызова, домен и издатель.
+// человеку. У полос она одна: секрет обратного вызова и домен.
 type issuanceHookConfig struct {
-	hookSecret  string
-	domain      string
-	hydraIssuer string
+	hookSecret string
+	domain     string
 }
 
 // buildIssuanceHooks собирает обе полосы хука, чеканящие токен человеку: хук
@@ -280,14 +268,13 @@ func buildIssuanceHooks(
 		return nil, nil, fmt.Errorf("полосы хука выдачи: %w", err)
 	}
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: cfg.domain, HydraIssuer: cfg.hydraIssuer},
+		service.TokenEnrichmentConfig{Domain: cfg.domain},
 		bounded.Users,
-	).WithSAPort(bounded.ServiceAccounts).WithUserTokenPort(bounded.UserTokens)
+	).WithSAPort(bounded.ServiceAccounts)
 	tokenHook := handlerinternal.NewTokenHookHandler(
 		handlerinternal.TokenHookConfig{
 			HookSharedSecret: cfg.hookSecret,
 			Domain:           cfg.domain,
-			HydraIssuer:      cfg.hydraIssuer,
 		},
 		enricher,
 		bounded.Cutoffs,
@@ -298,7 +285,6 @@ func buildIssuanceHooks(
 		handlerinternal.RefreshHookConfig{
 			HookSharedSecret: cfg.hookSecret,
 			Domain:           cfg.domain,
-			HydraIssuer:      cfg.hydraIssuer,
 		},
 		bounded.Users,
 		// The SAME producer the token hook enriches with. One claim set per

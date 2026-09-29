@@ -63,14 +63,13 @@ func newTokenHookWithSAPort(t *testing.T, users *fakeUserLookup, sas *fakeSAPort
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).WithSAPort(sas)
 	return iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
 		newFakeRevocations(),
@@ -126,7 +125,6 @@ func TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "soc_01abcdefghjkmnpqr",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

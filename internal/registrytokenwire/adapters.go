@@ -75,19 +75,19 @@ func (a *HydraExchangeAdapter) Exchange(ctx context.Context, in registrytokenuc.
 	return registrytokenuc.ExchangeOutput{AccessToken: out.AccessToken, ExpiresIn: out.ExpiresIn}, nil
 }
 
-// saClientByIDReader — reverse lookup of an SA-OAuth-client by Hydra client_id,
-// plus the ServiceAccount it belongs to (satisfied by the SA repo). The account
-// read is part of this port because the docker path decides on the account's
-// state, and a port that could not answer for it would leave that decision
-// resting on a field nobody loaded.
+// saClientByIDReader — lookup of an SA key by its client id (the id of its row;
+// kaname#362), plus the ServiceAccount it belongs to (satisfied by the SA repo).
+// The account read is part of this port because the docker path decides on the
+// account's state, and a port that could not answer for it would leave that
+// decision resting on a field nobody loaded.
 type saClientByIDReader interface {
-	GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error)
+	GetByClientID(ctx context.Context, clientID domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error)
 	GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error)
 }
 
 // ── SA-key lookup by client_id ──────────────────────────────────────────────
 
-// SAClientLookupAdapter — resolves the registered SA-key for a Hydra client_id.
+// SAClientLookupAdapter — resolves the registered SA-key for a client id.
 type SAClientLookupAdapter struct {
 	repo saClientByIDReader
 }
@@ -99,7 +99,7 @@ func NewSAClientLookup(repo saClientByIDReader) *SAClientLookupAdapter {
 
 var _ registrytokenuc.SAClientLookup = (*SAClientLookupAdapter)(nil)
 
-// KeyByClientID returns the registered key material for a Hydra client_id,
+// KeyByClientID returns the registered key material for a client id,
 // together with whether the owning ServiceAccount may authenticate.
 //
 // The owner's state is resolved here, on the lookup, because the validator
@@ -107,7 +107,7 @@ var _ registrytokenuc.SAClientLookup = (*SAClientLookupAdapter)(nil)
 // zero value for the state, and every docker login in the platform would be
 // refused by a check that never saw a row.
 func (a *SAClientLookupAdapter) KeyByClientID(ctx context.Context, clientID string) (registrytokenuc.RegisteredKey, error) {
-	row, err := a.repo.GetByOAuthClientID(ctx, domain.OAuthClientID(clientID))
+	row, err := a.repo.GetByClientID(ctx, domain.SAOAuthClientID(clientID))
 	if err != nil {
 		return registrytokenuc.RegisteredKey{}, fmt.Errorf("registrytokenwire: lookup client %s: %w", clientID, err)
 	}
@@ -116,7 +116,7 @@ func (a *SAClientLookupAdapter) KeyByClientID(ctx context.Context, clientID stri
 		return registrytokenuc.RegisteredKey{}, fmt.Errorf("registrytokenwire: lookup service account %s: %w", row.SvaID, err)
 	}
 	return registrytokenuc.RegisteredKey{
-		ClientID:       string(row.OAuthClientID),
+		ClientID:       string(row.ID),
 		KeyID:          string(row.ID),
 		Subject:        string(row.SvaID),
 		PublicKeyPEM:   row.PublicKeyPEM,

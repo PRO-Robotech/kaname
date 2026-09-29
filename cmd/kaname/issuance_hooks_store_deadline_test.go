@@ -74,16 +74,15 @@ type storeCall struct {
 
 func (c storeCall) name() string { return c.port + "." + c.method }
 
-// laneStore — база полос, как её видят порты: строка человека, учётка за
-// ключом и персональный токен. Какая из строк есть, решает сценарий.
+// laneStore — база полос, как её видят порты: строка человека и учётка за
+// ключом. Какая из строк есть, решает сценарий.
 type laneStore struct {
 	mu    sync.Mutex
 	calls []storeCall
 
-	user      domain.User
-	saClient  *domain.ServiceAccountOAuthClient
-	sa        domain.ServiceAccount
-	userToken *domain.UserOAuthClient
+	user     domain.User
+	saClient *domain.ServiceAccountOAuthClient
+	sa       domain.ServiceAccount
 }
 
 func (s *laneStore) record(ctx context.Context, port, method string) {
@@ -122,9 +121,9 @@ func (s storeUsers) GetByID(ctx context.Context, id domain.UserID) (domain.User,
 
 type storeServiceAccounts struct{ *laneStore }
 
-func (s storeServiceAccounts) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	s.record(ctx, "ServiceAccounts", "LookupByOAuthClientID")
-	if s.saClient == nil || s.saClient.OAuthClientID != id {
+func (s storeServiceAccounts) LookupByClientID(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	s.record(ctx, "ServiceAccounts", "LookupByClientID")
+	if s.saClient == nil || s.saClient.ID != id {
 		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no sa client %s", id)
 	}
 	return *s.saClient, nil
@@ -141,24 +140,6 @@ func (s storeServiceAccounts) GetServiceAccount(ctx context.Context, id domain.S
 func (s storeServiceAccounts) FindByExternalSubject(ctx context.Context, _, _ string) (domain.ServiceAccountOAuthClient, error) {
 	s.record(ctx, "ServiceAccounts", "FindByExternalSubject")
 	return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no trusted subject")
-}
-
-type storeUserTokens struct{ *laneStore }
-
-func (s storeUserTokens) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	s.record(ctx, "UserTokens", "LookupByOAuthClientID")
-	if s.userToken == nil || s.userToken.OAuthClientID != id {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no user token %s", id)
-	}
-	return *s.userToken, nil
-}
-
-func (s storeUserTokens) GetUser(ctx context.Context, id domain.UserID) (domain.User, error) {
-	s.record(ctx, "UserTokens", "GetUser")
-	if id != s.user.ID {
-		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "no user %s", id)
-	}
-	return s.user, nil
 }
 
 type storeCutoffs struct{ *laneStore }
@@ -180,7 +161,6 @@ func (s *laneStore) portsOf() handlerinternal.IssuancePorts {
 	return handlerinternal.IssuancePorts{
 		Users:           storeUsers{s},
 		ServiceAccounts: storeServiceAccounts{s},
-		UserTokens:      storeUserTokens{s},
 		Cutoffs:         storeCutoffs{s},
 		Audit:           storeAudit{s},
 	}
@@ -227,14 +207,8 @@ func TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit(t *testing.T) {
 			"provider-token-hook-authorization-code.json", func(*laneStore) {}},
 		{"хук выпуска, ключ служебной учётки", "token", tokenPath,
 			"provider-token-hook-client-credentials.json", func(s *laneStore) {
-				s.saClient = &domain.ServiceAccountOAuthClient{ID: "sak_deadline", SvaID: "sva_deadline",
-					OAuthClientID: capturedMachineClient}
+				s.saClient = &domain.ServiceAccountOAuthClient{ID: capturedMachineClient, SvaID: "sva_deadline"}
 				s.sa = domain.ServiceAccount{ID: "sva_deadline", AccountID: human.AccountID, Enabled: true}
-			}},
-		{"хук выпуска, персональный токен", "token", tokenPath,
-			"provider-token-hook-client-credentials.json", func(s *laneStore) {
-				s.userToken = &domain.UserOAuthClient{ID: "uoc_deadline", UserID: human.ID,
-					OAuthClientID: capturedMachineClient, CreatedAt: time.Now().Add(-time.Hour)}
 			}},
 		{"хук обновления", "refresh", "/iam/v1/hooks/refresh",
 			"provider-refresh-hook.json", func(*laneStore) {}},
@@ -247,9 +221,8 @@ func TestIssuanceHookLanesCallTheStoreUnderTheDeclaredLimit(t *testing.T) {
 		store := &laneStore{user: human}
 		sc.state(store)
 		tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
-			hookSecret:  secret,
-			domain:      "api.test.cloud",
-			hydraIssuer: "https://hydra.test.cloud",
+			hookSecret: secret,
+			domain:     "api.test.cloud",
 		}, store.portsOf(), &auditDropSpy{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatalf("%s: сборка полос отказала с объявленным пределом %s: %v", sc.name, credentialLanePeerTimeout, err)

@@ -247,13 +247,11 @@ apiServer:
   # `global.kacho.registry.serviceAud` — ОДИН раз на обе стороны полосы; здесь
   # (одиночная установка чарта) его объявляют этим ключом.
   #
-  #   `service` — это НЕ только fallback для `?service=`. Оно же уходит в
-  #   issueUC.RegistryAudience (#321) → whitelist'ится как audience в Hydra-клиенте
-  #   КАЖДОГО выпускаемого SA-ключа. Если оно расходится с тем, что docker шлёт в
-  #   `?service=`, Hydra отвергает обмен:
-  #     "Requested audience '<host>' has not been whitelisted by the OAuth 2.0 Client"
-  #   → shim отдаёт 401 → `docker login: unauthorized`. Ключи, выпущенные с неверным
-  #   значением, придётся ПЕРЕВЫПУСТИТЬ (audience фиксируется в клиенте при создании).
+  #   `service` — это НЕ только fallback для `?service=`: адресат докерной полосы
+  #   обязан входить в перечень адресатов токен-эндпоинта
+  #   (`authn.clientToken.allowedAudiences`), иначе обмен отвергается и docker
+  #   получает `unauthorized`. Регистрации адресата у внешнего поставщика на
+  #   каждом ключе больше нет (kaname#362).
   #
   #   `issuer` — `iss` + realm в WWW-Authenticate; должен совпадать с realm'ом,
   #   который анонсирует data-plane реестра (KACHO_REGISTRY_TOKEN_REALM).

@@ -52,25 +52,6 @@ type UserOAuthClient struct {
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// ID пользователя, которому принадлежит токен.
 	UserId string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Идентификатор клиента у ВНЕШНЕГО поставщика удостоверений.
-	//
-	// ПУСТО у токенов, выпущенных платформой: она больше не заводит клиента у
-	// внешнего поставщика, и пустое значение здесь означает ровно это —
-	// регистрации нет. Непустое значение принадлежит токену прежнего выпуска;
-	// отчеканенные для него поставщиком токены действительны до собственного
-	// истечения.
-	//
-	// Адресацией НЕ является ни в каком случае: подписывать `client_assertion`
-	// надо `id` строки.
-	//
-	// УХОДИТ ИЗ КОНТРАКТА. Снимается ломающим изменением с резервированием
-	// номера 3 и имени — и только когда окно закрыто СЧЁТОМ, а не сроком: ряд
-	// `kaname_provider_mirror_rows{table="user_oauth_clients"}` равен нулю.
-	// Решение и порядок —
-	// docs/engineering/architecture/provider-mirror-column-retirement.md.
-	//
-	// Deprecated: Marked as deprecated in kaname/cloud/iam/v1/user_oauth_client.proto.
-	HydraClientId string `protobuf:"bytes,3,opt,name=hydra_client_id,json=hydraClientId,proto3" json:"hydra_client_id,omitempty"`
 	// Свободное описание (например `laptop CLI`). 0-256 символов.
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Опциональный срок действия. Не заполнен = бессрочный токен.
@@ -140,14 +121,6 @@ func (x *UserOAuthClient) GetId() string {
 func (x *UserOAuthClient) GetUserId() string {
 	if x != nil {
 		return x.UserId
-	}
-	return ""
-}
-
-// Deprecated: Marked as deprecated in kaname/cloud/iam/v1/user_oauth_client.proto.
-func (x *UserOAuthClient) GetHydraClientId() string {
-	if x != nil {
-		return x.HydraClientId
 	}
 	return ""
 }
@@ -226,11 +199,10 @@ var File_kaname_cloud_iam_v1_user_oauth_client_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_user_oauth_client_proto_rawDesc = "" +
 	"\n" +
-	"+kaname/cloud/iam/v1/user_oauth_client.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\"\x9b\x05\n" +
+	"+kaname/cloud/iam/v1/user_oauth_client.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\"\x86\x05\n" +
 	"\x0fUserOAuthClient\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12*\n" +
-	"\x0fhydra_client_id\x18\x03 \x01(\tB\x02\x18\x01R\rhydraClientId\x12 \n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x129\n" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12<\n" +
@@ -247,7 +219,7 @@ const file_kaname_cloud_iam_v1_user_oauth_client_proto_rawDesc = "" +
 	"\x0fcredential_kind\x18\r \x01(\x0e2#.kaname.cloud.iam.v1.CredentialKindR\x0ecredentialKind\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\x0fhydra_client_idBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_user_oauth_client_proto_rawDescOnce sync.Once

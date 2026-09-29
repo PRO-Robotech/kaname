@@ -90,17 +90,19 @@ type TokenEnrichmentUserPort interface {
 }
 
 // TokenEnrichmentSAPort — read-side dependency: resolve a ServiceAccount and
-// its OAuth-client mapping. Used for the Phase 3a SA-token path
-// (`client_credentials` → Hydra mints a token whose `subject` is the Hydra
-// client id; we map it back to the kacho SA and stamp principal_type/id/
-// account_id claims) AND the Phase 3b federation-IN path (Hydra forwards an
-// external OIDC assertion `(iss, sub)` plus its own `client_id`; we recover
-// the SA mapping by matching `trusted_subjects[*].issuer` + regex on `sub`).
+// its key row. Used for the SA-token path (`client_credentials` — the subject
+// is the client id, which for a service-account key IS the id of its row) AND
+// the federation-IN path (an external OIDC assertion `(iss, sub)` plus the
+// client id; the key row is recovered by matching `trusted_subjects[*].issuer`
+// + the literal subject).
 type TokenEnrichmentSAPort interface {
-	// LookupByOAuthClientID resolves the kaname SA + OAuth-client mapping
-	// from a Hydra `client_id`. Returns iamerr.ErrNotFound when the client
-	// id is unknown (e.g. legacy Hydra registration outside kaname).
-	LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error)
+	// LookupByClientID resolves the key row a client id names. The client id of
+	// a service-account key is the id of its row (kaname#362: the second name
+	// the previous external issuer used to assign is gone with its column). Only
+	// the kinds exchanged as a client answer — KEYPAIR and FEDERATED; a SECRET is
+	// presented as is and is never a client. Returns iamerr.ErrNotFound when no
+	// such key exists.
+	LookupByClientID(ctx context.Context, clientID domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error)
 	// GetServiceAccount fetches the SA referenced by a mapping row.
 	GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error)
 	// FindByExternalSubject resolves the Phase 3b federated SA mapping by
@@ -109,27 +111,30 @@ type TokenEnrichmentSAPort interface {
 	FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error)
 }
 
-// TokenEnrichmentUserTokenPort — read-side dependency: resolve a User + its
-// personal-access-token (UserOAuthClient) mapping from a Hydra `client_id`.
-// Used for the User-token path (`client_credentials` → Hydra mints a token whose
-// `subject` is the Hydra client id; we map it back to the kacho User and stamp
-// principal_type=user + principal_id/account_id claims — the net-new mapping that
-// lets a personal token authenticate as `user:<id>` rather than a service account).
+// TokenEnrichmentUserTokenPort — read-side dependency of the personal-token
+// lane: the owning User of a personal access token, whose state the lane judges
+// before it mints.
+//
+// It used to resolve the token row as well, by the name the previous external
+// issuer gave its client. That lookup is gone with the column it read
+// (kaname#362): the issuer registers no personal token, so there was no row it
+// could find. The row is read by OUR id on the own lane
+// ([TokenEnrichmentOwnClientPort]).
 type TokenEnrichmentUserTokenPort interface {
-	// LookupByOAuthClientID resolves the kaname User-token (UserOAuthClient)
-	// mapping from a Hydra `client_id`. Returns iamerr.ErrNotFound when the
-	// client id is not a User-token client.
-	LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error)
 	// GetUser fetches the User referenced by a mapping row.
 	GetUser(ctx context.Context, id domain.UserID) (domain.User, error)
 }
 
-// TokenEnrichmentConfig — static issuer/audience metadata stamped into claims.
+// TokenEnrichmentConfig — static metadata stamped into claims.
+//
+// It carries the audience and nothing about the issuer. An issuer claim used to
+// ride here, filled with the address of the provider this service is retiring:
+// nothing in the service, the platform or the foundation ever read it, and on a
+// landing without that provider it named a server that answers nothing. The
+// token's own `iss` is the signer's, stated by whichever lane signs.
 type TokenEnrichmentConfig struct {
 	// Domain — public Kachō audience.
 	Domain string
-	// HydraIssuer — token issuer URL.
-	HydraIssuer string
 }
 
 // TokenHookContext — transport-agnostic projection of the inbound token-hook
@@ -275,11 +280,11 @@ func (s *TokenEnrichmentService) WithSAPort(p TokenEnrichmentSAPort) *TokenEnric
 	return s
 }
 
-// WithUserTokenPort wires the User-token lookup port enabling personal-access-token
-// enrichment (`kaname_principal_type=user` + principal_id + account_id claims for a
-// token minted from a UserOAuthClient client_credentials client). Returning the
-// receiver keeps the constructor chainable; nil-wiring keeps User-token enrichment
-// disabled.
+// WithUserTokenPort wires the owner read of the personal-token lane
+// (`kaname_principal_type=user` + principal_id + account_id claims for a token
+// exchanged by a UserOAuthClient). Returning the receiver keeps the constructor
+// chainable; without it the own lane refuses a personal token rather than mint
+// for an owner it could not judge.
 func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPort) *TokenEnrichmentService {
 	s.userTokens = p
 	return s
@@ -299,15 +304,11 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 //  1. Federated SA (Phase 3b): `GrantType == urn:ietf:params:oauth:grant-
 //     type:jwt-bearer` AND `(ExternalIssuer, subject)` matches a
 //     `trusted_subjects` entry on a SA-OAuth-client mapping.
-//  2. SA by Hydra client_id (Phase 3a `client_credentials`). For federated
-//     tokens this is also tried as a fallback using `OAuthClientID`.
-//  3. User-token by Hydra client_id (personal-access-token `client_credentials`):
-//     `subject` is the client_id of a UserOAuthClient; mapped back to the owning
-//     User → `principal_type=user`. Tried after the SA lookup (a client_id is
-//     either an SA-key or a User-token client, never both). Skipped when the
-//     User-token port is unwired.
-//  4. User by external_id (interactive Kratos sessions).
-//  5. iamerr.ErrNotFound — nothing answers to this subject. What the caller does
+//  2. SA key by client id (Phase 3a `client_credentials`) — the client id of a
+//     key is the id of its row. For federated tokens this is also tried as a
+//     fallback using `OAuthClientID`.
+//  3. User by external_id (interactive sessions).
+//  4. iamerr.ErrNotFound — nothing answers to this subject. What the caller does
 //     with that depends on the request: the token hook refuses a MACHINE
 //     credential (its client is not a kacho credential) and falls back to
 //     MinimalClaims only for an interactive identity whose mirror has not
@@ -348,15 +349,15 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	}
 
 	// 2. ServiceAccount path (Phase 3a). `subject` for client_credentials is
-	//    the Hydra client_id. For the federated fallthrough above we instead
-	//    try `OAuthClientID` so a misconfigured assertion still produces
-	//    deterministic claims tied to the kacho SA.
+	//    the client id — the id of the key row. For the federated fallthrough
+	//    above we instead try `OAuthClientID` so a misconfigured assertion
+	//    still produces deterministic claims tied to the kacho SA.
 	if s.sas != nil {
 		lookupID := subject
 		if hookCtx.OAuthClientID != "" && hookCtx.GrantType == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
 			lookupID = hookCtx.OAuthClientID
 		}
-		soc, err := s.sas.LookupByOAuthClientID(ctx, domain.OAuthClientID(lookupID))
+		soc, err := s.sas.LookupByClientID(ctx, domain.SAOAuthClientID(lookupID))
 		if err == nil {
 			if s.expired(soc.ExpiresAt) {
 				return nil, ResolvedPrincipal{}, fmt.Errorf("sa-key %s: %w", soc.ID, ErrCredentialExpired)
@@ -383,45 +384,6 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 		}
 		if !stderrors.Is(err, iamerr.ErrNotFound) {
 			return nil, ResolvedPrincipal{}, fmt.Errorf("lookup sa oauth client %s: %w", lookupID, err)
-		}
-	}
-
-	// 2b. User-token path (client_credentials with a personal access token).
-	//     `subject` is the Hydra client_id of a UserOAuthClient; map it back to
-	//     the owning User so the minted token's principal is `user:<id>` (net-new
-	//     relative to SA-keys, which map to serviceAccount:<id>). Tried after the
-	//     SA lookup (a client_id is either an SA-key or a User-token client, never
-	//     both — the UNIQUE hydra_client_id spans both tables via distinct rows).
-	if s.userTokens != nil {
-		uoc, err := s.userTokens.LookupByOAuthClientID(ctx, domain.OAuthClientID(subject))
-		if err == nil {
-			if s.expired(uoc.ExpiresAt) {
-				return nil, ResolvedPrincipal{}, fmt.Errorf("user-token %s: %w", uoc.ID, ErrCredentialExpired)
-			}
-			u, uErr := s.userTokens.GetUser(ctx, uoc.UserID)
-			if uErr != nil && !stderrors.Is(uErr, iamerr.ErrNotFound) {
-				return nil, ResolvedPrincipal{}, fmt.Errorf("get user %s: %w", uoc.UserID, uErr)
-			}
-			// A personal token is its owner's authority, so it cannot outlive
-			// the owner's ability to authenticate. This path resolves the owner
-			// BY ID, which applies no state filter at all — so before this check
-			// a blocked user's personal token minted the FULL claim set,
-			// principal id and account included: strictly more than the
-			// interactive path handed the same user.
-			if uErr == nil && !u.InviteStatus.MayAuthenticate() {
-				return nil, ResolvedPrincipal{}, fmt.Errorf("user-token %s owner %s: %w", uoc.ID, uoc.UserID, ErrSubjectNotActive)
-			}
-			// A personal token carries no session, so the instant its authority
-			// dates from is its own issuance.
-			issued := uoc.CreatedAt
-			return s.userTokenClaims(uoc, u, subject, hookCtx), ResolvedPrincipal{
-				Kind:                       PrincipalUser,
-				UserID:                     string(uoc.UserID),
-				StandingCredentialIssuedAt: &issued,
-			}, nil
-		}
-		if !stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, ResolvedPrincipal{}, fmt.Errorf("lookup user-token oauth client %s: %w", subject, err)
 		}
 	}
 
@@ -496,7 +458,6 @@ func (s *TokenEnrichmentService) userClaims(primary domain.User, subject string,
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 
@@ -526,7 +487,6 @@ func (s *TokenEnrichmentService) userClaims(primary domain.User, subject string,
 func (s *TokenEnrichmentService) saClaims(soc domain.ServiceAccountOAuthClient, sa domain.ServiceAccount, subject string, hookCtx TokenHookContext) map[string]any {
 	claims := map[string]any{
 		"kaname_external_id":       subject,
-		"kaname_hydra_client_id":   subject,
 		domain.ClaimPrincipalType:  "service_account",
 		domain.ClaimPrincipalID:    string(soc.SvaID),
 		"kaname_sa_key_id":         string(soc.ID),
@@ -535,7 +495,6 @@ func (s *TokenEnrichmentService) saClaims(soc domain.ServiceAccountOAuthClient, 
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 	if sa.ID != "" {
@@ -554,7 +513,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 	claims := map[string]any{
 		// kaname_external_id stays the external assertion sub for audit.
 		"kaname_external_id":        externalSub,
-		"kaname_hydra_client_id":    hookCtx.OAuthClientID,
 		domain.ClaimPrincipalType:   "service_account",
 		domain.ClaimPrincipalID:     string(soc.SvaID),
 		"kaname_sa_key_id":          string(soc.ID),
@@ -566,7 +524,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 		"kaname_x5t_s256":           hookCtx.CnfX5tS256,
 		"kaname_acr":                hookCtx.ACR,
 		"kaname_audience":           s.cfg.Domain,
-		"kaname_issuer":             s.cfg.HydraIssuer,
 		"kaname_issued_at":          s.now().Unix(),
 	}
 	if sa.ID != "" {
@@ -584,7 +541,6 @@ func (s *TokenEnrichmentService) federatedClaims(soc domain.ServiceAccountOAuthC
 func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u domain.User, subject string, hookCtx TokenHookContext) map[string]any {
 	claims := map[string]any{
 		"kaname_external_id":       subject,
-		"kaname_hydra_client_id":   subject,
 		domain.ClaimPrincipalType:  "user",
 		domain.ClaimPrincipalID:    string(uoc.UserID),
 		"kaname_user_id":           string(uoc.UserID),
@@ -594,7 +550,6 @@ func (s *TokenEnrichmentService) userTokenClaims(uoc domain.UserOAuthClient, u d
 		"kaname_x5t_s256":          hookCtx.CnfX5tS256,
 		"kaname_acr":               hookCtx.ACR,
 		"kaname_audience":          s.cfg.Domain,
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 	if u.ID != "" {
@@ -649,7 +604,6 @@ func (s *TokenEnrichmentService) MinimalClaims(subject string) map[string]any {
 		"kaname_external_id":       subject,
 		domain.ClaimPrincipalType:  "user",
 		"kaname_device_compliance": "unknown",
-		"kaname_issuer":            s.cfg.HydraIssuer,
 		"kaname_audience":          s.cfg.Domain,
 		"kaname_issued_at":         s.now().Unix(),
 	}
