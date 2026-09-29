@@ -127,9 +127,11 @@ func TestInteractiveProvider_RejectedInput_StaysTerminal(t *testing.T) {
 }
 
 // Контроль предпосылки: дорога, которой НЕТ, остаётся своим отказом и
-// недоступностью не притворяется — её повтор не лечит вовсе.
+// недоступностью не притворяется — её повтор не лечит вовсе. Клиент без адреса —
+// нулевое значение типа: производителя его нарочно в корне больше нет (развилка
+// посадки, kaname#338), и классификация судит запасной отказ по умолчанию.
 func TestInteractiveProvider_AbsentRoad_IsNotUnavailable(t *testing.T) {
-	p := NewInteractiveClientProvider(NewAbsentProviderAdminClient())
+	p := NewInteractiveClientProvider(new(HydraAdminClient))
 
 	_, err := p.Register(context.Background(), spec())
 	if err == nil {

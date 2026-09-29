@@ -86,10 +86,10 @@ func TestProviderRoad_AdminTransportFailureIsUnavailableNotMisconfigured(t *test
 }
 
 func TestProviderRoad_AbsentRoadIsNotCountedAsAnAnswer(t *testing.T) {
-	// Посадка без внешнего поставщика дороги не строит вовсе. Считать такой
+	// Клиент без адреса — нулевое значение типа — не звонит вовсе. Считать его
 	// отказ исходом ОБРАЩЕНИЯ значило бы утверждать, что по дороге ходили.
 	spy := &roadSpy{}
-	c := NewAbsentProviderAdminClient().WithRoadObserver(spy)
+	c := new(HydraAdminClient).WithRoadObserver(spy)
 	require.Error(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
 	require.Empty(t, spy.seen, "несобранная дорога обращением не является")
 }

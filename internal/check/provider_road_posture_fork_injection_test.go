@@ -20,6 +20,9 @@
 package check_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -330,4 +333,118 @@ func TestRoadForkPremise_NoBuilderIsNotAVerdict(t *testing.T) {
 		[]string{providerRoadFork}, live, providerRoadFork); err != nil {
 		t.Fatalf("предпосылка отвергает ЖИВОЙ обход: %v", err)
 	}
+}
+
+// ── ось 7: настоящий вход из дерева ───────────────────────────────────────────
+//
+// Настоящий `cmd/kaname/wiring.go` — законный близнец: его развилки молчат.
+// Дефект вносится ПО ПОЗИЦИЯМ из разбора, а не текстовой заменой, в развилку
+// `interactiveClientProvider`, и прогонов три: контроль без инъекции, ветвь
+// посадки без поставщика заменена на `nil`, ветвь построенной посадки отдаёт
+// дорогу второму потребителю (второй результат её возврата заменён на `road`).
+// Каждая инъекция меняет РОВНО один узел, и находка приходит ровно одна — у
+// предмета инъекции, а не у соседа.
+
+const (
+	roadRealWiringSuffix = "cmd/kaname/wiring.go"
+	roadRealConsumer     = "interactiveClientProvider"
+)
+
+func TestRoadForkInjection_RealWiringIsFoundOnlyWhereInjected(t *testing.T) {
+	t.Parallel()
+	files := providerRoadTree(t)
+	at := -1
+	for i, f := range files {
+		if strings.HasSuffix(f.rel, roadRealWiringSuffix) {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("предмет инъекции не найден: %s в составе дерева нет — инъекция беспредметна",
+			roadRealWiringSuffix)
+	}
+	absentArm, secondResult := roadRealInjectionSites(t, files[at].src)
+
+	control := scanProviderRoad(t, files)
+	if n := len(roadFindingsIn(control.Findings, roadRealConsumer)); n != 0 {
+		t.Fatalf("контроль: у настоящего %s уже есть находки (%d) — близнец обязан молчать",
+			roadRealConsumer, n)
+	}
+
+	for _, inj := range []struct {
+		name string
+		site [2]int
+		with string
+		kind string
+	}{
+		{"ветвь посадки без поставщика — nil", absentArm, "nil", check.RoadFindingArmNil},
+		{"ветвь отдаёт дорогу второму потребителю", secondResult, "road", check.RoadFindingSharedDecision},
+	} {
+		src := files[at].src
+		mutated := make([]byte, 0, len(src))
+		mutated = append(mutated, src[:inj.site[0]]...)
+		mutated = append(mutated, inj.with...)
+		mutated = append(mutated, src[inj.site[1]:]...)
+
+		tree := append([]providerRoadTreeFile(nil), files...)
+		tree[at] = providerRoadTreeFile{rel: files[at].rel, src: mutated}
+		got := roadFindingsIn(scanProviderRoad(t, tree).Findings, roadRealConsumer)
+		if len(got) != 1 || got[0].Kind != inj.kind {
+			t.Errorf("%s: у %s ожидалась ровно одна находка вида %q, получено %+v",
+				inj.name, roadRealConsumer, inj.kind, got)
+		}
+	}
+}
+
+func roadFindingsIn(found []check.ProviderRoadFinding, fn string) []check.ProviderRoadFinding {
+	var out []check.ProviderRoadFinding
+	for _, f := range found {
+		if f.Func == fn {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// roadRealInjectionSites — байтовые границы двух узлов настоящей развилки:
+// ветви посадки без поставщика и второго результата возврата ветви с дорогой.
+func roadRealInjectionSites(t *testing.T, src []byte) (absentArm, secondResult [2]int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, roadRealWiringSuffix, src, 0)
+	if err != nil {
+		t.Fatalf("разбор %s: %v", roadRealWiringSuffix, err)
+	}
+	span := func(n ast.Node) [2]int {
+		return [2]int{fset.Position(n.Pos()).Offset, fset.Position(n.End()).Offset}
+	}
+	var call *ast.CallExpr
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != roadRealConsumer || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if c, isCall := n.(*ast.CallExpr); isCall && call == nil {
+				if id, isIdent := c.Fun.(*ast.Ident); isIdent && id.Name == providerRoadFork {
+					call = c
+				}
+			}
+			return call == nil
+		})
+	}
+	if call == nil || len(call.Args) != 4 {
+		t.Fatalf("предмет инъекции не найден: в %s() нет вызова %s с четырьмя доводами — "+
+			"инъекция беспредметна", roadRealConsumer, providerRoadFork)
+	}
+	built, ok := call.Args[2].(*ast.FuncLit)
+	if !ok || len(built.Body.List) == 0 {
+		t.Fatalf("предмет инъекции не найден: ветвь построенной посадки в %s() не литерал", roadRealConsumer)
+	}
+	ret, ok := built.Body.List[len(built.Body.List)-1].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 2 {
+		t.Fatalf("предмет инъекции не найден: ветвь построенной посадки в %s() не кончается "+
+			"возвратом двух значений", roadRealConsumer)
+	}
+	return span(call.Args[3]), span(ret.Results[1])
 }
