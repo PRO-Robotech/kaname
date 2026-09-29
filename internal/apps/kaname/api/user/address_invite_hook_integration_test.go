@@ -73,7 +73,7 @@ func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
 		obs := &recordingActivationObserver{}
 		uc := NewUpsertFromIdentityUseCase(repo, nil).WithActivationObserver(obs)
 		_, upErr := uc.doUpsert(ctx, activationCandidateID, UpsertFromIdentityInput{
-			ExternalID: "kratos-ev74-subject", Email: email, DisplayName: "Invitee",
+			ExternalID: "ext-ev74-subject", Email: email, DisplayName: "Invitee",
 		}, "system")
 
 		var status, membership string

@@ -13,6 +13,9 @@
   {{loginLaneBaseUrl}}   — слушатель формы (посадка `own`; под `external` не поднят)
   {{loginLaneEmail}}     — почта человека с заведённым способом входа паролем (посев)
   {{loginLanePassword}}  — его пароль (посев)
+  {{standMailboxUrl}}    — чтение приёмника писем стенда (`stand-mailbox.py`; посев):
+                           им кейсы со своим человеком читают код подтверждения
+                           адреса и код восстановления
 
 ТРЕТЬЯ КАТЕГОРИЯ НАЗВАНА ВСЛУХ — та же, что у набора входа: на автономном стенде
 службы посадка `own` не поднята, `loginLaneBaseUrl` пуст, и каждый шаг уходит в
@@ -36,7 +39,9 @@
 вход с кодом) → запасные коды (церемония, вход, однократность) → код по времени
 в церемонии и повтор → перечеканка → исчерпание → окно ±1 → отказы снятия →
 снятие → формы. Последний кейс возвращает посев в исходное: следующий прогон
-снова заводит фактор с нуля.
+снова заводит фактор с нуля. Кейсы со СВОИМ человеком (Ф12-19, Ф12-31, Ф12-32,
+Ф12-46) стоят после хребта и человека посева не трогают: у каждого свой адрес,
+свой источник и свой принятый шаг строки.
 
 СЧЁТ НЕВЕРНЫХ ПРЕДЪЯВЛЕНИЙ ОБЩИЙ У ВСЕХ КЕЙСОВ, и набор его ведёт. По адресу
 человека счёт обнуляет только предъявление, доводящее вход до уровня всех
@@ -135,6 +140,29 @@ Coverage (техники: классы эквивалентности состо
                                             вне словаря — 400; `confirm` без ожидающего
                                             заведения — 400 ENROLLMENT_NOT_PENDING
                                             (Ф12-04 в)
+  IAM-2FA-OK-ASSURANCE-NAMES-WHAT-IS-MISSING
+                                          — Ф12-19: сессия восстановления личности с
+                                            фактором кодом по времени — «1»,
+                                            недостаёт пароля; затем пароль и код —
+                                            «2»; сессия входа паролем той же
+                                            личности кодом — «2»; личность без
+                                            фактора паролем — «1», путь к «2» закрыт
+  IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET
+                                          — Ф12-46: вход паролем между неверными
+                                            кодами счёт по адресу не обнуляет —
+                                            (N+1)-й код 429; близнец — верный код
+                                            между сериями обнуляет: во второй серии
+                                            N-й 401, (N+1)-й 429
+  IAM-2FA-NEG-CODE-GUESSING-RATE          — Ф12-31: (а) N неверных, (N+1)-й верный
+                                            — 429 и не сверяется; (б) N−1 неверных
+                                            паролей и неверный код — один счёт; (в)
+                                            по источнику — 429 при незадетом адресе,
+                                            тот же код со своего источника — 200;
+                                            (д) успех кода обнуляет счёт
+  IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS    — Ф12-32: после N−1 неверных отказ формы
+                                            и отказ признака счёта не растят; у
+                                            личности без фактора — отказы «не
+                                            заведён» и «нет ожидающего заведения»
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — и почему; идентификаторы здесь стоят КОММЕНТАРИЕМ,
@@ -142,11 +170,14 @@ Coverage (техники: классы эквивалентности состо
 # позицию несомой по строковому литералу модуля, и упоминание «не утверждаем»
 # строкой зачло бы её набору.
 #   · гонки Ф12-07 и Ф12-24 — уровень I, интеграция;
-#   · подбор Ф12-31, Ф12-32, Ф12-46 и ответ церемонии на трёх сессиях Ф12-19 — на
-#     человеке посева N неверных в одном окне закрыли бы ему адрес на всё окно
-#     профиля, и следующий кейс и прогон стали бы красными по частоте; их место —
-#     кейсы со своим человеком на прогон, чей код подтверждения набор прочтёт из
-#     приёмника писем стенда (запись долга в `newman-suite-debt.py`);
+#   · Ф12-31 (г) — верный код после окна: окно профиля 15 мин, часов службы у
+#     чёрного ящика нет, а ожидание окна в предел шага прогона не помещается;
+#     прочие четыре ветви несёт кейс IAM-2FA-NEG-CODE-GUESSING-RATE;
+#   · Ф12-32 — отказ по свежести (Ф12-09), недоступность материала (Ф12-35) и
+#     исчерпание ёмкости проверяющего на запасном коде (PWV-15): «Дано» стенд не
+#     строит (окно свежести профиля, перекатка с другим ключом обёртки,
+#     подставной проверяющий), позиция — «E + I», эти три держит уровень I;
+#     прочие четыре исхода несёт кейс IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS;
 #   · неразличимость по времени Ф12-33 — измерительная, приборы этой формы в
 #     дереве — ручка уровня I;
 #   · свежесть Ф12-09/10 и истёкшее заведение Ф12-04 (а, б) — окно профиля
@@ -1217,5 +1248,638 @@ CASES.append(Case(
         _post("confirm-without-pending-enrollment", _CONFIRM, {"code": "123456", "csrfToken": "{{sfCsrfSecondFactor}}"}, [],
               _refusal(400, 9, "no pending enrollment: begin with enroll", "NOT-PENDING", reason="ENROLLMENT_NOT_PENDING")),
         *_logout_steps("after-negatives"),
+    ],
+))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# СВОЙ НА ПРОГОН ЧЕЛОВЕК С ФАКТОРОМ (Ф12-19, Ф12-31, Ф12-32, Ф12-46).
+#
+# Частоту подбора и ответ церемонии на трёх сессиях нельзя мерить на человеке
+# посева: N неверных в одном окне запирают его адрес на окно профиля, и
+# следующий кейс, набор и прогон краснеют по частоте, а восстановление меняет
+# ему пароль. Поэтому каждый кейс ниже заводит людей сам — глаголами полосы:
+# регистрация → код письма регистрации у приёмника стенда (`GET /codes`, та же
+# дверь, что у набора восстановления) → подтверждение адреса → заведение и
+# подтверждение фактора. Адрес — `{{runId}}` и случайная добавка, источник — свой
+# у каждого человека: счёт по источнику успехом не обнуляется.
+#
+# ПРИНЯТЫЙ ШАГ — У СТРОКИ КАЖДОГО ЧЕЛОВЕКА (Р5): свой `<p>LastStep`, и код берётся
+# ступенью `max(последний + 1, текущая)` — как у человека посева (`_TOTP_JS`).
+#
+# ВЕЛИЧИНЫ ЧАСТОТЫ — ИЗ ПРОФИЛЯ, С КОТОРЫМ СТЕНД ПОДНЯТ: `chart-own` ставит
+# `deploy/values.prod.yaml` как есть, и N, окно и N источника читаются оттуда
+# (та же форма, что у набора входа, `kaname-login-lane.py`).
+# ═══════════════════════════════════════════════════════════════════════════
+
+import pathlib as _fp_pathlib
+import re as _fp_re
+import urllib.parse as _fp_urlparse
+
+_FP_PROFILE = _fp_pathlib.Path(__file__).resolve().parents[3] / "deploy" / "values.prod.yaml"
+
+
+def _fp_profile(key):
+    found = _fp_re.findall(rf"^    {key}: (\S+)\s*$", _FP_PROFILE.read_text(encoding="utf-8"), _fp_re.M)
+    if len(found) != 1:
+        raise SystemExit(f"kaname-second-factor: ключ профиля authn.login.{key} найден "
+                         f"{len(found)} раз в {_FP_PROFILE} — ждали ровно один")
+    return found[0]
+
+
+def _fp_seconds(duration):
+    m = _fp_re.fullmatch(r"(\d+)([smh])", duration)
+    if m is None:
+        raise SystemExit(f"kaname-second-factor: срок {duration!r} не в форме <число><s|m|h>")
+    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+_N_ADDR = int(_fp_profile("addressAttempts"))
+_T_ADDR = _fp_seconds(_fp_profile("addressWindow"))
+_N_SRC = int(_fp_profile("sourceAttempts"))
+_T_SRC = _fp_seconds(_fp_profile("sourceWindow"))
+if _N_ADDR < 2:
+    raise SystemExit("kaname-second-factor: addressAttempts < 2 — близнецы N−1 и серии Ф12-31 (д) не строятся")
+
+_FP_MAILBOX_WHY = ("чтение приёмника писем стенда посадки `own`; адрес пишет посев "
+                   "полосы входа — вне стенда `own` приёмника нет, и это условие, "
+                   "которого стенд не создал")
+_FP_REGISTER = "/iam/v1/auth/register"
+_FP_RECOVERY = "/iam/v1/auth/recovery"
+_FP_RECOVERY_COMPLETE = "/iam/v1/auth/recovery/complete"
+_FP_VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
+_FP_HEADS = {"Verify": "Код подтверждения:", "Recovery": "Код восстановления:"}
+_FP_MAIL_WAIT_CAP = 90
+_FP_MAIL_WAIT_MS = 1000
+_TOO_MANY = "too many attempts; try again later"
+
+# Ядро кода по времени — то же вычисление, что `_TOTP_JS`, без переменных
+# человека посева: строки до определения ступени.
+_FP_TOTP_CORE = _TOTP_JS[:_TOTP_JS.index("const __stepNow = () => Math.floor(Date.now() / 1000 / 30);") + 1]
+
+
+def _fp(p, name):
+    return p + name
+
+
+def _fp_totp_js(p):
+    return [
+        *_FP_TOTP_CORE,
+        f"const __lastStep = () => parseInt(pm.environment.get({js_str(_fp(p, 'LastStep'))}) || '0', 10);",
+        "const __freshStep = () => Math.max(__lastStep() + 1, __stepNow());",
+        "const __wrongCode = (secretB32) => {",
+        "  const now = __stepNow();",
+        "  const near = [now - 1, now, now + 1].map(s => __totp(secretB32, s));",
+        "  for (let i = 0; i < 1000; i++) { const c = String(i).padStart(6, '0'); if (!near.includes(c)) { return c; } }",
+        "  return '999999';",
+        "};",
+    ]
+
+
+def _fp_src(p, var="Src"):
+    return [f"pm.request.headers.upsert({{key: 'X-Forwarded-For', value: pm.environment.get({js_str(_fp(p, var))}) || ''}});"]
+
+
+def _fp_cookies(p, with_session):
+    pairs = [("kaname_form", _fp(p, "FormCookie"))]
+    if with_session:
+        pairs.append(("kaname_session", _fp(p, with_session)))
+    return _with_cookies(*pairs)
+
+
+def _fp_init(p, tag):
+    return [
+        "{",
+        "  const __nonce = () => Math.floor(Math.random() * 2176782336).toString(36);",
+        "  const __domain = String(pm.environment.get('loginLaneEmail') || '').split('@')[1] || 'kaname.local';",
+        f"  pm.environment.set({js_str(_fp(p, 'Email'))}, ({js_str('sf-' + tag + '-')} + pm.environment.get('runId') + '-' + __nonce() + '@' + __domain).toLowerCase());",
+        f"  pm.environment.set({js_str(_fp(p, 'Password'))}, 'Pw-' + __nonce() + __nonce() + '-first');",
+        f"  pm.environment.set({js_str(_fp(p, 'NewPassword'))}, 'Pw-' + __nonce() + __nonce() + '-renewed');",
+        f"  pm.environment.set({js_str(_fp(p, 'Src'))}, '198.20.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+        *(f"  pm.environment.set({js_str(_fp(p, kind + 'Seen'))}, '0');" for kind in _FP_HEADS),
+        *(f"  pm.environment.unset({js_str(_fp(p, n))});" for n in (
+            "FormCookie", "SessionCookie", "LoginSessionCookie", "RecoveredCookie", "Csrf", "Secret",
+            "LastStep", "PresentedStep", "Code", "VerifyCode", "RecoveryCode", "BackupCodes", "BackupCode")),
+        "}",
+    ]
+
+
+def _fp_status(code, label):
+    return [f"pm.test({js_str(label + f': ответ {code}')}, () => pm.expect(pm.response.code, 'код ответа').to.eql({code}));"]
+
+
+def _fp_refused(status, grpc, text, label, reason=None):
+    out = [
+        *_fp_status(status, label),
+        "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
+        f"pm.test({js_str(label + f': код отказа {grpc}')}, () => pm.expect(__r.code, 'код отказа').to.eql({grpc}));",
+        f"pm.test({js_str(label + ': текст отказа фиксирован')}, () => pm.expect(__r.message, 'текст отказа').to.eql({js_str(text)}));",
+        f"pm.test({js_str(label + ': носитель сессии НЕ выдан')}, () => "
+        "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' "
+        "&& h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
+    ]
+    if reason:
+        out += [
+            "const __info = (Array.isArray(__r.details) ? __r.details : [])"
+            ".filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
+            f"pm.test({js_str(label + ': признак отказа ' + reason)}, () => pm.expect(__info.reason, 'признак отказа').to.eql({js_str(reason)}));",
+        ]
+    return out
+
+
+def _fp_too_many(label, window):
+    return [
+        *_fp_refused(429, 8, _TOO_MANY, label, reason="TOO_MANY_ATTEMPTS"),
+        f"pm.test({js_str(label + ': Retry-After — секунды до конца окна, в [1, ' + str(window) + ']')}, () => {{",
+        "  const ra = pm.response.headers.get('Retry-After');",
+        f"  pm.expect(/^[0-9]+$/.test(String(ra)) && Number(ra) >= 1 && Number(ra) <= {window}, 'Retry-After в окне').to.eql(true);",
+        "});",
+    ]
+
+
+def _fp_capture(p, cookie, var, label, required=True):
+    lines = [
+        "{",
+        "  const __sc = pm.response.headers.all()"
+        f".filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith({js_str(cookie + '=')}));",
+    ]
+    if required:
+        lines.append(f"  pm.test({js_str(label + ': ответ ставит печенье ' + cookie)}, () => pm.expect(__sc.length, {js_str('печений ' + cookie)}).to.eql(1));")
+    lines += [
+        f"  if (__sc.length === 1) {{ pm.environment.set({js_str(_fp(p, var))}, __sc[0].value.split(';')[0].slice({len(cookie) + 1})); }}",
+        "}",
+    ]
+    return lines
+
+
+def _fp_csrf(p, name, form, *, with_session="SessionCookie", init=None, src="Src"):
+    path = f"{_CSRF}?form={form}"
+    label = name.upper()
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*(init or []), *require_env_url("loginLaneBaseUrl", path, _LANE_WHY),
+                    *_fp_src(p, src), *_fp_cookies(p, with_session)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_fp_status(200, label),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.test({js_str(label + ': признак формы выдан строкой')}, () => "
+            "pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0, 'признак формы').to.eql(true));",
+            f"pm.environment.set({js_str(_fp(p, 'Csrf'))}, __j.csrfToken || '');",
+            *_fp_capture(p, "kaname_form", "FormCookie", label, required=False),
+        ],
+    )
+
+
+def _fp_post(p, name, path, body, *, with_session=None, pre=(), tests=(), src="Src"):
+    return Step(
+        name=name, method="POST", path=path, body=body,
+        pre_script=[*require_env_url("loginLaneBaseUrl", path, _LANE_WHY), *_fp_src(p, src),
+                    *_fp_cookies(p, with_session), *pre],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=list(tests),
+    )
+
+
+def _fp_await_letter(p, name, kind):
+    """Письмо вида `kind` СВЕРХ уже прочитанных: петля с настоящей паузой.
+
+    Утверждения исполняются на КАЖДОМ опросе и краснеют только при исчерпанном
+    пределе: письма нет — «не дошло в пределе», а не «пока нет»."""
+    heading = _FP_HEADS[kind]
+    path = f"/codes?to={{{{{_fp(p, 'Email')}}}}}&after={_fp_urlparse.quote(heading)}"
+    counter = f"_sfmb_{p}_{name}".replace("-", "_")
+    seen, store, label = _fp(p, kind + "Seen"), _fp(p, kind + "Code"), name.upper()
+    return Step(
+        name=name, method="GET", path=path, auth="anonymous", cookie_jar=False,
+        pre_script=[*require_env_url("standMailboxUrl", path, _FP_MAILBOX_WHY)],
+        test_script=[
+            f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+            f"const __seen = parseInt(pm.environment.get({js_str(seen)}) || '0', 10);",
+            "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+            "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+            "const __ready = __got.length > __seen;",
+            *_fp_status(200, label),
+            f"pm.test({js_str(label + ': письмо дошло до приёмника стенда в пределе ожидания')}, () => "
+            f"pm.expect(__ready || __n < {_FP_MAIL_WAIT_CAP}, 'письмо дошло').to.eql(true));",
+            f"if (pm.response.code === 200 && !__ready && __n < {_FP_MAIL_WAIT_CAP}) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+            f"  const _sfd = Date.now(); while (Date.now() - _sfd < {_FP_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "} else {",
+            f"  pm.environment.unset({js_str(counter)});",
+            "  if (__ready) {",
+            f"    pm.environment.set({js_str(store)}, __got[__got.length - 1]);",
+            f"    pm.environment.set({js_str(seen)}, String(__got.length));",
+            "  }",
+            "}",
+        ],
+    )
+
+
+def _fp_person(p, tag, *, factor=True):
+    """Человек кейса: регистрация → код письма → адрес подтверждён → (фактор).
+
+    С фактором — строка `active` (подтверждение кодом ступени «сейчас»), секрет в
+    `<p>Secret`, набор запасных кодов в `<p>BackupCodes`, принятый шаг в
+    `<p>LastStep`; носитель подтверждения — в `<p>SessionCookie`."""
+    up = tag.upper()
+    steps = [
+        _fp_csrf(p, f"{tag}-csrf-register", "register", with_session=None, init=_fp_init(p, tag)),
+        _fp_post(p, f"{tag}-register", _FP_REGISTER,
+                 {"email": f"{{{{{_fp(p, 'Email')}}}}}", "password": f"{{{{{_fp(p, 'Password')}}}}}",
+                  "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                 tests=[*_fp_status(200, f"{up}-REGISTER"),
+                        *_fp_capture(p, "kaname_session", "SessionCookie", f"{up}-REGISTER"),
+                        *_fp_capture(p, "kaname_form", "FormCookie", f"{up}-REGISTER", required=False)]),
+        _fp_await_letter(p, f"{tag}-verify-letter", "Verify"),
+        _fp_csrf(p, f"{tag}-csrf-verify", "verify-email-confirm"),
+        _fp_post(p, f"{tag}-verify", _FP_VERIFY_CONFIRM,
+                 {"code": f"{{{{{_fp(p, 'VerifyCode')}}}}}", "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                 with_session="SessionCookie",
+                 tests=[*_fp_status(200, f"{up}-VERIFY"),
+                        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                        f"pm.test({js_str(up + '-VERIFY: адрес подтверждён')}, () => "
+                        "pm.expect(!!(__j.session && __j.session.emailVerified === true), 'адрес подтверждён').to.eql(true));",
+                        *_fp_capture(p, "kaname_session", "SessionCookie", f"{up}-VERIFY")]),
+    ]
+    if not factor:
+        return steps
+    return steps + [
+        _fp_csrf(p, f"{tag}-csrf-enroll", "second-factor"),
+        _fp_post(p, f"{tag}-enroll", _ENROLL, {"csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                 with_session="SessionCookie",
+                 tests=[*_fp_status(200, f"{up}-ENROLL"),
+                        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                        f"pm.test({js_str(up + '-ENROLL: секрет base32 выдан')}, () => "
+                        "pm.expect(/^[A-Z2-7]{32}$/.test(String(__j.secret)), 'форма секрета').to.eql(true));",
+                        f"pm.environment.set({js_str(_fp(p, 'Secret'))}, __j.secret || '');",
+                        f"pm.environment.unset({js_str(_fp(p, 'LastStep'))});"]),
+        _fp_post(p, f"{tag}-confirm-factor", _CONFIRM,
+                 {"code": f"{{{{{_fp(p, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                 with_session="SessionCookie", pre=_fp_present(p, f"{up}-CONFIRM"),
+                 tests=[*_fp_status(200, f"{up}-CONFIRM"),
+                        *_fp_accepted(p),
+                        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                        f"pm.test({js_str(up + '-CONFIRM: фактор заведён — сессия «2», десять запасных кодов')}, () => "
+                        "pm.expect(!!__j.session && __j.session.assuranceLevel === '2' && Array.isArray(__j.backupCodes) "
+                        "&& __j.backupCodes.length === 10, 'фактор заведён').to.eql(true));",
+                        f"if (Array.isArray(__j.backupCodes)) {{ pm.environment.set({js_str(_fp(p, 'BackupCodes'))}, JSON.stringify(__j.backupCodes)); }}",
+                        *_fp_capture(p, "kaname_session", "SessionCookie", f"{up}-CONFIRM")]),
+    ]
+
+
+def _fp_present(p, label):
+    """Pre-script: код ступени `max(последний + 1, текущая)` в `<p>Code`."""
+    return [
+        *_fp_totp_js(p),
+        "const __s = __freshStep();",
+        f"pm.environment.set({js_str(_fp(p, 'PresentedStep'))}, String(__s));",
+        f"pm.environment.set({js_str(_fp(p, 'Code'))}, __totp(pm.environment.get({js_str(_fp(p, 'Secret'))}), __s));",
+        f"pm.test({js_str(label + ': ступень кода старше принятой и в окне ±1')}, () => "
+        "pm.expect(__s <= __stepNow() + 1, 'ступень в окне').to.eql(true));",
+    ]
+
+
+def _fp_wrong(p):
+    """Pre-script: код, которого нет ни на одной ступени окна, — в `<p>Code`."""
+    return [*_fp_totp_js(p),
+            f"pm.environment.set({js_str(_fp(p, 'Code'))}, __wrongCode(pm.environment.get({js_str(_fp(p, 'Secret'))})));"]
+
+
+def _fp_backup(p, index, label):
+    return [
+        "let __set = [];",
+        f"try {{ __set = JSON.parse(pm.environment.get({js_str(_fp(p, 'BackupCodes'))}) || '[]'); }} catch (e) {{ __set = []; }}",
+        f"pm.test({js_str(label + ': набор запасных кодов захвачен подтверждением фактора')}, () => "
+        f"pm.expect(Array.isArray(__set) && typeof __set[{index}] === 'string', 'набор на месте').to.eql(true));",
+        f"pm.environment.set({js_str(_fp(p, 'BackupCode'))}, Array.isArray(__set) && typeof __set[{index}] === 'string' ? __set[{index}] : '');",
+    ]
+
+
+def _fp_accepted(p):
+    return [f"if (pm.response.code === 200) {{ pm.environment.set({js_str(_fp(p, 'LastStep'))}, pm.environment.get({js_str(_fp(p, 'PresentedStep'))})); }}"]
+
+
+def _fp_await_step(p, name, form, session_var, label):
+    """Ожидание ступени часов: код ступени `последний + 1` должен лечь в окно ±1
+    (часы — не младше `последний`). Опрос признака формы `form` с настоящей
+    паузой и конечным пределом; его последний признак нужен следующему шагу."""
+    path = f"{_CSRF}?form={form}"
+    polls = f"_sfaw_{p}_{name}".replace("-", "_")
+    cap = 70 * 2
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*require_env_url("loginLaneBaseUrl", path, _LANE_WHY), *_fp_src(p),
+                    *_fp_cookies(p, session_var)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_fp_status(200, label),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.environment.set({js_str(_fp(p, 'Csrf'))}, __j.csrfToken || '');",
+            f"const __last = parseInt(pm.environment.get({js_str(_fp(p, 'LastStep'))}) || '0', 10);",
+            f"const __polls = parseInt(pm.environment.get({js_str(polls)}) || '0', 10);",
+            "const __ready = Math.floor(Date.now() / 30000) + 1 >= __last + 1;",
+            f"pm.test({js_str(label + ': часы дошли до нужной ступени либо ожидание в пределе')}, () => "
+            f"pm.expect(__ready || __polls < {cap}, 'ступень часов').to.eql(true));",
+            f"if (!__ready && __polls < {cap}) {{",
+            f"  pm.environment.set({js_str(polls)}, String(__polls + 1));",
+            "  const _w = Date.now(); while (Date.now() - _w < 500) void 0;",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "} else {",
+            f"  pm.environment.unset({js_str(polls)});",
+            "}",
+        ],
+    )
+
+
+def _fp_login(p, name, *, password_var="Password", level="1", into="LoginSessionCookie", src="Src"):
+    up = name.upper()
+    return [
+        _fp_csrf(p, f"{name}-csrf", "login", with_session=None, src=src),
+        _fp_post(p, name, _LOGIN,
+                 {"email": f"{{{{{_fp(p, 'Email')}}}}}", "password": f"{{{{{_fp(p, password_var)}}}}}",
+                  "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"}, src=src,
+                 tests=[*_fp_status(200, up),
+                        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                        f"pm.test({js_str(up + ': сессия уровня ' + level)}, () => "
+                        f"pm.expect(!!__j.session && __j.session.assuranceLevel === {js_str(level)}, 'уровень сессии').to.eql(true));",
+                        *_fp_capture(p, "kaname_session", into, up),
+                        *_fp_capture(p, "kaname_form", "FormCookie", up, required=False)]),
+    ]
+
+
+def _fp_wrong_logins(p, prefix, count):
+    """`count` неверных паролей на входе — 401 каждый."""
+    out = [_fp_csrf(p, f"{prefix}-csrf", "login", with_session=None)]
+    for i in range(1, count + 1):
+        out.append(_fp_post(p, f"{prefix}-{i}", _LOGIN,
+                            {"email": f"{{{{{_fp(p, 'Email')}}}}}", "password": f"not-the-password-{i}-{{{{runId}}}}",
+                             "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                            tests=_fp_refused(401, 16, _AUTH_FAILED, f"{prefix.upper()}-{i}")))
+    return out
+
+
+def _fp_step_up_wrong(p, name, session_var, *, src="Src", tests=None):
+    return _fp_post(p, name, _STEP_UP,
+                    {"method": "totp", "code": f"{{{{{_fp(p, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                    with_session=session_var, pre=_fp_wrong(p), src=src,
+                    tests=tests if tests is not None else _fp_refused(401, 16, _AUTH_FAILED, name.upper()))
+
+
+def _fp_wrong_codes(p, prefix, count, session_var, *, src="Src"):
+    """`count` неверных кодов в церемонии — 401 каждый; признак формы один."""
+    return [_fp_csrf(p, f"{prefix}-csrf", "step-up", with_session=session_var, src=src),
+            *[_fp_step_up_wrong(p, f"{prefix}-{i}", session_var, src=src) for i in range(1, count + 1)]]
+
+
+def _fp_step_up_right(p, name, session_var, tests, *, src="Src"):
+    return _fp_post(p, name, _STEP_UP,
+                    {"method": "totp", "code": f"{{{{{_fp(p, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                    with_session=session_var, pre=_fp_present(p, name.upper()), src=src,
+                    tests=[*tests, *_fp_accepted(p)])
+
+
+def _fp_level(label, level, reachable, missing):
+    return [
+        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+        f"pm.test({js_str(label + ': assurance — уровень ' + level + ', level2Reachable ' + str(reachable).lower() + ', missingForLevel2 ' + _json_compact(missing))}, () => "
+        "pm.expect(JSON.stringify(__j.assurance), 'assurance').to.eql("
+        f"{js_str(_json_compact({'level': level, 'level2Reachable': reachable, 'missingForLevel2': missing}))}));",
+    ]
+
+
+def _json_compact(obj):
+    import json as _json
+    return _json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф12-19: ответ церемонии называет достигнутый уровень и чего не хватает — на
+# трёх сессиях. (б) идёт первым: сессия входа той же личности поднимается кодом
+# ступени `t₀ + 1`, которая в окне сразу; (а) ждёт следующую ступень.
+# ───────────────────────────────────────────────────────────────────────────
+_P19, _P19N = "sfAs", "sfAn"
+CASES.append(Case(
+    id="IAM-2FA-OK-ASSURANCE-NAMES-WHAT-IS-MISSING",
+    title="Ответ церемонии на трёх сессиях: восстановление с фактором кодом — «1», недостаёт пароля; вход паролем кодом — «2»; без фактора паролем — «1», путь к «2» закрыт (Ф12-19)",
+    classes=["SEC", "CRUD"],
+    priority="P0",
+    steps=[
+        *_fp_person(_P19, "f19a"),
+        # (б) сессия «1» входом паролем той же личности; предъявлен код по времени.
+        *_fp_login(_P19, "f19b-login"),
+        _fp_csrf(_P19, "f19b-csrf-step-up", "step-up", with_session="LoginSessionCookie"),
+        _fp_step_up_right(_P19, "f19b-step-up-totp", "LoginSessionCookie",
+                          [*_fp_status(200, "F19B"), *_fp_level("F19B", "2", True, [])]),
+        # (а) сессия восстановления: запрос кода, код из письма, новый пароль.
+        _fp_csrf(_P19, "f19a-csrf-recovery", "recovery", with_session=None),
+        _fp_post(_P19, "f19a-request-recovery", _FP_RECOVERY,
+                 {"email": f"{{{{{_fp(_P19, 'Email')}}}}}", "csrfToken": f"{{{{{_fp(_P19, 'Csrf')}}}}}"},
+                 tests=[*_fp_status(200, "F19A-REQUEST")]),
+        _fp_await_letter(_P19, "f19a-recovery-letter", "Recovery"),
+        _fp_csrf(_P19, "f19a-csrf-complete", "recovery-complete", with_session=None),
+        _fp_post(_P19, "f19a-complete", _FP_RECOVERY_COMPLETE,
+                 {"email": f"{{{{{_fp(_P19, 'Email')}}}}}", "code": f"{{{{{_fp(_P19, 'RecoveryCode')}}}}}",
+                  "newPassword": f"{{{{{_fp(_P19, 'NewPassword')}}}}}", "csrfToken": f"{{{{{_fp(_P19, 'Csrf')}}}}}"},
+                 tests=[*_fp_status(200, "F19A-COMPLETE"),
+                        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                        "pm.test('F19A-COMPLETE: сессия восстановления — «1»', () => "
+                        "pm.expect(!!__j.session && __j.session.assuranceLevel === '1', 'уровень сессии').to.eql(true));",
+                        *_fp_capture(_P19, "kaname_session", "RecoveredCookie", "F19A-COMPLETE"),
+                        *_fp_capture(_P19, "kaname_form", "FormCookie", "F19A-COMPLETE", required=False)]),
+        _fp_await_step(_P19, "f19a-await-step", "step-up", "RecoveredCookie", "F19A-AWAIT"),
+        _fp_step_up_right(_P19, "f19a-step-up-totp-only", "RecoveredCookie",
+                          [*_fp_status(200, "F19A"), *_fp_level("F19A", "1", True, ["password"]),
+                           *_fp_capture(_P19, "kaname_session", "RecoveredCookie", "F19A")]),
+        # (а), затем заданный пароль и код — «2» (Ф11-29). Код — запасной: предмет
+        # здесь порядок предъявлений, а не способ, и ступени часов ждать незачем.
+        _fp_csrf(_P19, "f19a-csrf-password", "step-up", with_session="RecoveredCookie"),
+        _fp_post(_P19, "f19a-step-up-password", _STEP_UP,
+                 {"method": "password", "password": f"{{{{{_fp(_P19, 'NewPassword')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_P19, 'Csrf')}}}}}"},
+                 with_session="RecoveredCookie",
+                 tests=[*_fp_status(200, "F19A-PASSWORD"),
+                        *_fp_capture(_P19, "kaname_session", "RecoveredCookie", "F19A-PASSWORD")]),
+        _fp_post(_P19, "f19a-step-up-code-after-password", _STEP_UP,
+                 {"method": "lookup_secret", "code": f"{{{{{_fp(_P19, 'BackupCode')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_P19, 'Csrf')}}}}}"},
+                 with_session="RecoveredCookie", pre=_fp_backup(_P19, 0, "F19A-CODE"),
+                 tests=[*_fp_status(200, "F19A-CODE"), *_fp_level("F19A-CODE", "2", True, [])]),
+        # (в) личность без фактора, сессия «1»; предъявлен пароль.
+        *_fp_person(_P19N, "f19c", factor=False),
+        _fp_csrf(_P19N, "f19c-csrf-step-up", "step-up"),
+        _fp_post(_P19N, "f19c-step-up-password", _STEP_UP,
+                 {"method": "password", "password": f"{{{{{_fp(_P19N, 'Password')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_P19N, 'Csrf')}}}}}"},
+                 with_session="SessionCookie",
+                 tests=[*_fp_status(200, "F19C"), *_fp_level("F19C", "1", False, [])]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф12-46: успех ПЕРВОГО фактора счёт подбора кода не обнуляет; обнуляет успех
+# КОДА. Две личности — отличающий факт один: что предъявлено успешно между
+# сериями, пароль (а) либо код, доводящий до «2» (б).
+# ───────────────────────────────────────────────────────────────────────────
+_P46A, _P46B = "sfLa", "sfLb"
+_F46_FIRST = 2
+CASES.append(Case(
+    id="IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET",
+    title=f"N={_N_ADDR}: вход паролем между неверными кодами счёт не обнуляет — (N+1)-й код 429; верный код между сериями обнуляет — вторая серия N-й 401, (N+1)-й 429 (Ф12-46)",
+    classes=["SEC", "BVA", "NEG"],
+    priority="P0",
+    steps=[
+        *_fp_person(_P46A, "f46a"),
+        *_fp_login(_P46A, "f46a-login"),
+        *_fp_wrong_codes(_P46A, "f46a-before-login", _F46_FIRST, "LoginSessionCookie"),
+        *_fp_login(_P46A, "f46a-password-success-between"),
+        *_fp_wrong_codes(_P46A, "f46a-after-login", _N_ADDR - _F46_FIRST, "LoginSessionCookie"),
+        _fp_step_up_wrong(_P46A, "f46a-code-n-plus-1", "LoginSessionCookie",
+                          tests=_fp_too_many("F46A-N+1", _T_ADDR)),
+        *_fp_person(_P46B, "f46b"),
+        *_fp_login(_P46B, "f46b-login"),
+        *_fp_wrong_codes(_P46B, "f46b-first-series", _N_ADDR - 1, "LoginSessionCookie"),
+        _fp_step_up_right(_P46B, "f46b-right-code", "LoginSessionCookie",
+                          [*_fp_status(200, "F46B-RIGHT"), *_fp_level("F46B-RIGHT", "2", True, []),
+                           *_fp_capture(_P46B, "kaname_session", "LoginSessionCookie", "F46B-RIGHT")]),
+        *_fp_wrong_codes(_P46B, "f46b-second-series", _N_ADDR, "LoginSessionCookie"),
+        _fp_step_up_wrong(_P46B, "f46b-code-n-plus-1", "LoginSessionCookie",
+                          tests=_fp_too_many("F46B-N+1", _T_ADDR)),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф12-31: N неверных кодов → отказ по частоте; счёт общий с паролем; по
+# источнику; обнуление. Ветвь (г) — «после окна» — не строится: окно профиля
+# 15 мин, часов службы у чёрного ящика нет, и ожидание окна прогоном набора не
+# помещается в предел шага (запись — в шапке набора).
+#
+# (в) — ЛИЧНОСТЕЙ СТОЛЬКО, СКОЛЬКО НУЖНО, ЧТОБЫ АДРЕСНЫЙ СЧЁТ НЕ ЗАДЕТЬ. Приёмка
+# кладёт по одному коду на личность, чтобы отказ пришёл по источнику, а не по
+# адресу. Тем же условием служит не больше N − 1 кодов на личность: адресный счёт
+# каждой остаётся ниже N. Личностей ⌈N_источник / (N − 1)⌉ вместо N_источник —
+# свойство то же (отказ по источнику, адрес не задет ни у одной), а заведение
+# человека с фактором — семь обращений и письмо.
+# ───────────────────────────────────────────────────────────────────────────
+_P31A, _P31B, _P31E = "sfGa", "sfGb", "sfGe"
+_P31C = [f"sfGc{i}" for i in range(1, -(-_N_SRC // (_N_ADDR - 1)) + 1)]
+_P31C_NEXT = "sfGcx"
+_F31C_SPLIT = [min(_N_ADDR - 1, _N_SRC - i * (_N_ADDR - 1)) for i in range(len(_P31C))]
+if sum(_F31C_SPLIT) != _N_SRC or max(_F31C_SPLIT) > _N_ADDR - 1 or min(_F31C_SPLIT) < 1:
+    raise SystemExit(f"kaname-second-factor: раскладка Ф12-31 (в) {_F31C_SPLIT} не даёт N_источник={_N_SRC} "
+                     f"при не больше {_N_ADDR - 1} на личность")
+# Общий источник ветви (в): свой у прогона, записан первым шагом.
+_F31C_SRC_INIT = ["pm.environment.set('sfGcSharedSrc', '198.21.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));"]
+
+
+def _f31c_on_shared(p):
+    """Источник общей ветви — переменная человека `<p>SharedSrc`."""
+    return [f"pm.environment.set({js_str(_fp(p, 'SharedSrc'))}, pm.environment.get('sfGcSharedSrc') || '');"]
+
+
+_F31C_STEPS = []
+for _i, (_p, _k) in enumerate(zip(_P31C, _F31C_SPLIT), start=1):
+    _F31C_STEPS += [*_fp_person(_p, f"f31c-{_i}"), *_fp_login(_p, f"f31c-{_i}-login")]
+    _csrf = _fp_csrf(_p, f"f31c-{_i}-csrf-shared", "step-up", with_session="LoginSessionCookie", src="SharedSrc")
+    _csrf.pre_script = [*_f31c_on_shared(_p), *_csrf.pre_script]
+    _F31C_STEPS += [_csrf, *[_fp_step_up_wrong(_p, f"f31c-{_i}-wrong-{_j}", "LoginSessionCookie", src="SharedSrc")
+                             for _j in range(1, _k + 1)]]
+_F31C_STEPS += [*_fp_person(_P31C_NEXT, "f31c-next"), *_fp_login(_P31C_NEXT, "f31c-next-login")]
+_csrf = _fp_csrf(_P31C_NEXT, "f31c-next-csrf-shared", "step-up", with_session="LoginSessionCookie", src="SharedSrc")
+_csrf.pre_script = [*_f31c_on_shared(_P31C_NEXT), *_csrf.pre_script]
+_F31C_STEPS += [
+    _csrf,
+    _fp_step_up_right(_P31C_NEXT, "f31c-next-right-code-refused-by-source", "LoginSessionCookie",
+                      _fp_too_many("F31C-SOURCE", _T_SRC), src="SharedSrc"),
+    # Близнец: тот же код той же личности со своего источника — адрес не задет.
+    _fp_csrf(_P31C_NEXT, "f31c-next-csrf-own-source", "step-up", with_session="LoginSessionCookie"),
+    _fp_step_up_right(_P31C_NEXT, "f31c-next-right-code-own-source", "LoginSessionCookie",
+                      [*_fp_status(200, "F31C-OWN-SOURCE"), *_fp_level("F31C-OWN-SOURCE", "2", True, [])]),
+]
+_F31C_STEPS[0].pre_script = [*_F31C_SRC_INIT, *_F31C_STEPS[0].pre_script]
+
+CASES.append(Case(
+    id="IAM-2FA-NEG-CODE-GUESSING-RATE",
+    title=f"N={_N_ADDR}, N_источник={_N_SRC}: (N+1)-й верный код — 429 и не сверяется; пароль и код — один счёт; по источнику — 429 при незадетом адресе; успех кода обнуляет счёт (Ф12-31)",
+    classes=["SEC", "BVA", "NEG"],
+    priority="P0",
+    steps=[
+        # (а) N неверных, затем верный — 429, носитель не перевыпущен.
+        *_fp_person(_P31A, "f31a"),
+        *_fp_login(_P31A, "f31a-login"),
+        *_fp_wrong_codes(_P31A, "f31a-wrong", _N_ADDR, "LoginSessionCookie"),
+        _fp_step_up_right(_P31A, "f31a-right-code-refused", "LoginSessionCookie",
+                          [*_fp_too_many("F31A", _T_ADDR),
+                           "pm.test('F31A: верный код не сверен — носитель не перевыпущен, уровень прежний', () => "
+                           "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, 'печений').to.eql(0));"]),
+        # (б) N − 1 неверных паролей, N-й — неверный код, (N + 1)-й — верный код.
+        *_fp_person(_P31B, "f31b"),
+        *_fp_login(_P31B, "f31b-login"),
+        *_fp_wrong_logins(_P31B, "f31b-wrong-password", _N_ADDR - 1),
+        *_fp_wrong_codes(_P31B, "f31b-wrong-code", 1, "LoginSessionCookie"),
+        _fp_step_up_right(_P31B, "f31b-right-code-refused", "LoginSessionCookie", _fp_too_many("F31B", _T_ADDR)),
+        # (в) по источнику.
+        *_F31C_STEPS,
+        # (д) N − 1 неверных, верный, снова N − 1 неверных, верный — оба 200.
+        *_fp_person(_P31E, "f31e"),
+        *_fp_login(_P31E, "f31e-login"),
+        *_fp_wrong_codes(_P31E, "f31e-first-series", _N_ADDR - 1, "LoginSessionCookie"),
+        _fp_step_up_right(_P31E, "f31e-first-right", "LoginSessionCookie",
+                          [*_fp_status(200, "F31E-FIRST"),
+                           *_fp_capture(_P31E, "kaname_session", "LoginSessionCookie", "F31E-FIRST")]),
+        *_fp_wrong_codes(_P31E, "f31e-second-series", _N_ADDR - 1, "LoginSessionCookie"),
+        # Второй верный — запасной код: предмет — обнуление успехом кода, и ступени
+        # часов ждать незачем.
+        _fp_post(_P31E, "f31e-second-right", _STEP_UP,
+                 {"method": "lookup_secret", "code": f"{{{{{_fp(_P31E, 'BackupCode')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_P31E, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", pre=_fp_backup(_P31E, 0, "F31E-SECOND"),
+                 tests=[*_fp_status(200, "F31E-SECOND")]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф12-32: что попыткой НЕ считается. N − 1 неверных плюс любой сосчитанный
+# промежуточный дали бы N, и верное предъявление получило бы 429.
+# Отказ по свежести (Ф12-09), недоступность материала (Ф12-35) и исчерпание
+# ёмкости проверяющего (PWV-15) стенд не строит — их держит уровень I позиции
+# («E + I»), запись — в шапке набора.
+# ───────────────────────────────────────────────────────────────────────────
+_P32A, _P32B = "sfNa", "sfNb"
+CASES.append(Case(
+    id="IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS",
+    title=f"N={_N_ADDR}: после N−1 неверных отказ формы и отказ признака счёта не растят — верный код проходит; у личности без фактора SECOND_FACTOR_NOT_ENROLLED и ENROLLMENT_NOT_PENDING — тоже (Ф12-32)",
+    classes=["SEC", "BVA", "NEG"],
+    priority="P1",
+    steps=[
+        *_fp_person(_P32A, "f32a"),
+        *_fp_login(_P32A, "f32a-login"),
+        *_fp_wrong_codes(_P32A, "f32a-wrong", _N_ADDR - 1, "LoginSessionCookie"),
+        _fp_post(_P32A, "f32a-form-refusal", _STEP_UP, {"method": "totp", "csrfToken": f"{{{{{_fp(_P32A, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie",
+                 tests=_fp_refused(400, 3, "Illegal argument code: required", "F32A-FORM")),
+        _fp_csrf(_P32A, "f32a-csrf-foreign-kind", "logout", with_session="LoginSessionCookie"),
+        _fp_post(_P32A, "f32a-token-refusal", _STEP_UP,
+                 {"method": "totp", "code": "000000", "csrfToken": f"{{{{{_fp(_P32A, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie",
+                 tests=_fp_refused(403, 7, "form token rejected", "F32A-TOKEN", reason="FORM_TOKEN_REJECTED")),
+        _fp_csrf(_P32A, "f32a-csrf-right", "step-up", with_session="LoginSessionCookie"),
+        _fp_step_up_right(_P32A, "f32a-right-code", "LoginSessionCookie",
+                          [*_fp_status(200, "F32A-RIGHT"), *_fp_level("F32A-RIGHT", "2", True, [])]),
+        *_fp_person(_P32B, "f32b", factor=False),
+        *_fp_wrong_logins(_P32B, "f32b-wrong-password", _N_ADDR - 1),
+        _fp_csrf(_P32B, "f32b-csrf-step-up", "step-up"),
+        _fp_post(_P32B, "f32b-not-enrolled", _STEP_UP,
+                 {"method": "totp", "code": "000000", "csrfToken": f"{{{{{_fp(_P32B, 'Csrf')}}}}}"},
+                 with_session="SessionCookie",
+                 tests=_fp_refused(400, 9, _NOT_ENROLLED[0], "F32B-NOT-ENROLLED", reason=_NOT_ENROLLED[1])),
+        _fp_csrf(_P32B, "f32b-csrf-confirm", "second-factor"),
+        _fp_post(_P32B, "f32b-not-pending", _CONFIRM,
+                 {"code": "000000", "csrfToken": f"{{{{{_fp(_P32B, 'Csrf')}}}}}"},
+                 with_session="SessionCookie",
+                 tests=_fp_refused(400, 9, "no pending enrollment: begin with enroll", "F32B-NOT-PENDING",
+                                   reason="ENROLLMENT_NOT_PENDING")),
+        *_fp_login(_P32B, "f32b-right-password"),
     ],
 ))

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 796
+Всего кейсов: 806
 
 ## Перепись по модулям
 
@@ -73,7 +73,8 @@
 | `cases/kaname-login-lane.py` | 20 |
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
-| `cases/kaname-second-factor.py` | 13 |
+| `cases/kaname-address-verification.py` | 6 |
+| `cases/kaname-second-factor.py` | 17 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -1113,7 +1114,29 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-second-factor.py` — 13 кейсов
+## `cases/kaname-address-verification.py` — 6 кейсов
+
+> Подтверждение адреса и положение подтверждения (kaname#456, приёмка
+> `access-beyond-login-needs-a-verified-address.md`, позиции уровня E): сессия
+> человека с неподтверждённым адресом, что ей доступно, запрос письма и
+> предъявление кода — на том же слушателе формы, что вход. Адресуется
+> `loginLaneBaseUrl`, код письма читает у приёмника писем стенда
+> (`standMailboxUrl`, `GET /codes`); людей набор заводит сам регистрацией.
+> Отсутствие письма судит барьер — письмо, законно запрошенное тем же человеком
+> позже (письма одному человеку уходят в порядке постановки), а интервал между
+> письмами ждёт по `Retry-After` ответа службы. На автономном стенде посадки
+> `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Гоняет набор
+> задание `chart-own` процесса `e2e-newman.yml` тем же вызовом прогонщика,
+> последним.
+
+- `IAM-ADDRVERIFY-OK-REGISTRATION-OPENS-THE-POSITION`
+- `IAM-ADDRVERIFY-OK-LETTER-ONLY-ON-REQUEST`
+- `IAM-ADDRVERIFY-OK-LOGOUT-FOR-BOTH`
+- `IAM-ADDRVERIFY-NEG-PASSWORD-CHANGE-REFUSED`
+- `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
+- `IAM-ADDRVERIFY-NEG-WRONG-CODE`
+
+## `cases/kaname-second-factor.py` — 17 кейсов
 
 > Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
@@ -1125,7 +1148,10 @@
 > `active` → снят. Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем
 > же вызовом прогонщика, что вход и восстановление, последним (kaname#417);
 > утверждения набора значений удостоверений не печатают — держит
-> `scripts/second_factor_assertion_values_test.py`.
+> `scripts/second_factor_assertion_values_test.py`. Четыре последних кейса
+> (Ф12-19, Ф12-31, Ф12-32, Ф12-46) заводят своих людей — регистрацией,
+> подтверждением адреса кодом из письма (`standMailboxUrl`) и заведением фактора, —
+> и человека посева не трогают.
 
 - `IAM-2FA-NEG-NOT-ENROLLED-STATE`
 - `IAM-2FA-OK-ENROLL-PENDING-IS-NOT-A-METHOD`
@@ -1140,6 +1166,10 @@
 - `IAM-2FA-NEG-REMOVE-REFUSALS`
 - `IAM-2FA-OK-REMOVE-BY-CODE`
 - `IAM-2FA-NEG-FORMS-AND-STATE`
+- `IAM-2FA-OK-ASSURANCE-NAMES-WHAT-IS-MISSING`
+- `IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET`
+- `IAM-2FA-NEG-CODE-GUESSING-RATE`
+- `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 
