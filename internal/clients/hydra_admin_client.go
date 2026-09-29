@@ -85,22 +85,15 @@ func (c *HydraAdminClient) observeTransportFailure() {
 // литерал потребитель обязан был бы угадать, а угаданные числа расходятся молча.
 const ProviderAdminHopTimeout = 10 * time.Second
 
-// NewHydraAdminClient — constructor without a pinned trust anchor. Kept for call
-// sites that address a plaintext in-cluster admin API (a developer stand);
-// production addresses it over TLS and must therefore use
-// NewHydraAdminClientWithCA.
-func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
-	return &HydraAdminClient{
-		BaseURL:     strings.TrimRight(baseURL, "/"),
-		BearerToken: bearerToken,
-		HTTPClient: &http.Client{
-			Timeout: ProviderAdminHopTimeout,
-		},
-	}
-}
-
-// NewHydraAdminClientWithCA builds the client and, when an anchor is configured,
-// verifies the provider against THAT bundle and nothing else.
+// NewHydraAdminClientWithCA — ЕДИНСТВЕННЫЙ конструктор клиента: им собирает
+// клиента композиционный корень, и им же — пробы. Здесь стоял второй,
+// без якоря, «для мест, адресующих открытый админ-API стенда разработчика»;
+// таких мест в не-тестовом коде не было — корень всегда звал этот, а пустой
+// caFile даёт ровно то, что давал второй. Второй конструктор собирал клиента
+// иначе, чем корень, и пробы, звавшие его, судили не ту сборку.
+//
+// It builds the client and, when an anchor is configured, verifies the provider
+// against THAT bundle and nothing else.
 //
 // caFile empty ⇒ the default transport, unchanged. That is not an oversight: an
 // in-cluster admin API served over plaintext http needs no anchor, and inventing
@@ -118,13 +111,15 @@ func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
 // CA, the process is not doing it, and everything works until a certificate
 // rotates.
 func NewHydraAdminClientWithCA(baseURL, bearerToken, caFile string) (*HydraAdminClient, error) {
-	c := NewHydraAdminClient(baseURL, bearerToken)
-	httpClient, err := ProviderHopHTTPClient(c.HTTPClient.Timeout, caFile, adminHopCASetting)
+	httpClient, err := ProviderHopHTTPClient(ProviderAdminHopTimeout, caFile, adminHopCASetting)
 	if err != nil {
 		return nil, err
 	}
-	c.HTTPClient = httpClient
-	return c, nil
+	return &HydraAdminClient{
+		BaseURL:     strings.TrimRight(baseURL, "/"),
+		BearerToken: bearerToken,
+		HTTPClient:  httpClient,
+	}, nil
 }
 
 // CreateOAuthClient registers a new client_credentials OAuth2 client with
@@ -189,7 +184,7 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		c.observeTransportFailure()
-		return ProviderOAuthClient{}, fmt.Errorf("hydra create-client: %w", err)
+		return ProviderOAuthClient{}, fmt.Errorf("provider admin create-client: %w", err)
 	}
 	defer resp.Body.Close()
 	c.observeStatus(resp.StatusCode)
@@ -199,10 +194,10 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 	}
 	var out ProviderOAuthClient
 	if err := json.Unmarshal(respBody, &out); err != nil {
-		return ProviderOAuthClient{}, fmt.Errorf("unmarshal hydra response: %w", err)
+		return ProviderOAuthClient{}, fmt.Errorf("provider admin create-client: unmarshal response: %w", err)
 	}
 	if out.ClientID == "" {
-		return ProviderOAuthClient{}, errors.New("hydra returned empty client_id")
+		return ProviderOAuthClient{}, errors.New("provider admin create-client: response carries no client_id")
 	}
 	return out, nil
 }
@@ -227,7 +222,7 @@ func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID strin
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		c.observeTransportFailure()
-		return fmt.Errorf("hydra delete-client: %w", err)
+		return fmt.Errorf("provider admin delete-client: %w", err)
 	}
 	defer resp.Body.Close()
 	// Учёт стоит ДО развилки: 404 здесь остаётся успехом вызова (см. разбор

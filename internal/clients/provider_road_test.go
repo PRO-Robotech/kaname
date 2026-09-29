@@ -39,7 +39,9 @@ func adminAgainst(t *testing.T, status int, body string) (*HydraAdminClient, *ro
 	}))
 	t.Cleanup(srv.Close)
 	spy := &roadSpy{}
-	return NewHydraAdminClient(srv.URL, "").WithRoadObserver(spy), spy
+	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
+	require.NoError(t, err)
+	return c.WithRoadObserver(spy), spy
 }
 
 func TestProviderRoad_AdminDeleteClassifiesEveryAnswerIntoItsOwnCell(t *testing.T) {
@@ -76,7 +78,8 @@ func TestProviderRoad_AdminDeleteClassifiesEveryAnswerIntoItsOwnCell(t *testing.
 func TestProviderRoad_AdminTransportFailureIsUnavailableNotMisconfigured(t *testing.T) {
 	// Отказ транспорта лечится временем и обязан лежать отдельно от настройки:
 	// смешав их, оператор получил бы «поставщик лежит» на неверном адресе.
-	c := NewHydraAdminClient("http://127.0.0.1:1", "")
+	c, err := NewHydraAdminClientWithCA("http://127.0.0.1:1", "", "")
+	require.NoError(t, err)
 	c.HTTPClient = &http.Client{Timeout: 200 * time.Millisecond}
 	spy := &roadSpy{}
 	c = c.WithRoadObserver(spy)
@@ -150,6 +153,7 @@ func TestProviderRoad_NilObserverChangesNothing(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	c := NewHydraAdminClient(srv.URL, "")
+	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
+	require.NoError(t, err)
 	require.NoError(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
 }

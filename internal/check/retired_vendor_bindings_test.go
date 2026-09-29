@@ -41,6 +41,14 @@ func TestRetiredVendorBindingsDoNotGrow(t *testing.T) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
 	t.Log(verdict.Census)
+	// Предпосылка законной формы: каталог истории схемы — там, где его ищет
+	// судья. Переехавший каталог дал бы «миграций 0», и форма молча перестала
+	// бы действовать — снятие столбца снова выглядело бы ростом.
+	if verdict.Census.HistoryMigrations == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: в %s не прочитано ни одной миграции — каталог истории "+
+			"схемы переехал, а константа пути осталась", check.RetiredVendorSchemaHistoryDir)
+	}
+	t.Logf("сняты историей схемы, %d: %v", len(verdict.RemovedBySchemaHistory), verdict.RemovedBySchemaHistory)
 	t.Logf("перечень (привязок · файл), файлов %d:\n%s", verdict.Census.Files, verdict.Roster())
 	for _, f := range verdict.Findings {
 		t.Error(f)

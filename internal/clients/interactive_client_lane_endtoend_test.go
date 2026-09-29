@@ -80,7 +80,7 @@ func (o *laneOps) Cancel(context.Context, string) error { return nil }
 func TestInteractiveClientLane_ProviderUnreachable_ReachesTheCallerAsUnavailable(t *testing.T) {
 	repo := &laneRepo{}
 	ops := &laneOps{}
-	prov := interactiveProvider(unreachableURL(t))
+	prov := interactiveProvider(t, unreachableURL(t))
 
 	uc := interactiveclient.NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil)
 	_, err := uc.Execute(context.Background(), &iamv1.CreateInteractiveClientRequest{
@@ -108,7 +108,7 @@ func TestInteractiveClientLane_ProviderUnreachable_ReachesTheCallerAsUnavailable
 func TestInteractiveClientLane_ProviderRejectedInput_IsNotUnavailable(t *testing.T) {
 	repo := &laneRepo{}
 	ops := &laneOps{}
-	prov := interactiveProvider(srvWithStatus(t, http.StatusBadRequest).URL)
+	prov := interactiveProvider(t, srvWithStatus(t, http.StatusBadRequest).URL)
 
 	uc := interactiveclient.NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil)
 	_, err := uc.Execute(context.Background(), &iamv1.CreateInteractiveClientRequest{

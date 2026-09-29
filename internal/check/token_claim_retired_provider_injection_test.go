@@ -4,15 +4,25 @@
 // token_claim_retired_provider_injection_test.go — падучесть гейта в ОБЕ
 // стороны: дефект краснеет и называет координату, законный близнец той же
 // формы молчит, пустой обход — не зелёный.
+//
+// Имя поставщика во входах берётся из словаря гейта (`check.RetiredIssuerName`),
+// а не пишется литералом — так же, как во фикстурах гейта привязок
+// (`retired_vendor_bindings_injection_test.go`): проба гоняет тот словарь, с
+// которым гейт исполняется на дереве, и новой привязки к поставщику не заводит —
+// привязка у класса одна, строка словаря.
 package check_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 )
+
+// capitalized — имя с первой прописной: иной регистр того же имени.
+func capitalized(name string) string { return strings.ToUpper(name[:1]) + name[1:] }
 
 // claimNamingJudge — разбор синтетического файла ТЕМ ЖЕ разбором, что у гейта
 // на дереве, и суд над ним тем же телом.
@@ -36,24 +46,25 @@ func claimNamingJudge(t *testing.T, src string) ([]check.ClaimNamingRetiredIssue
 // названный по поставщику, — находка с координатой и именем ключа.
 func TestClaimNaming_RedOnAKeyNamingTheProvider(t *testing.T) {
 	t.Parallel()
-	got, census := claimNamingJudge(t, `package service
+	key := "kaname_" + check.RetiredIssuerName + "_client_id"
+	got, census := claimNamingJudge(t, fmt.Sprintf(`package service
 
 func saClaims(subject string) map[string]any {
 	return map[string]any{
-		"kaname_external_id":     subject,
-		"kaname_hydra_client_id": subject,
-		"kaname_audience":        "api.test.cloud",
+		"kaname_external_id": subject,
+		%q: subject,
+		"kaname_audience":    "api.test.cloud",
 	}
 }
-`)
+`, key))
 	if len(got) != 1 {
 		t.Fatalf("ключ, названный по поставщику, НЕ стал находкой: %+v (%s)", got, census)
 	}
 	f := got[0]
-	if f.File != "internal/service/lane.go" || f.Line != 4 || f.Func != "saClaims" || f.Key != "kaname_hydra_client_id" {
+	if f.File != "internal/service/lane.go" || f.Line != 4 || f.Func != "saClaims" || f.Key != key {
 		t.Errorf("находка не называет координату, функцию и ключ: %+v", f)
 	}
-	if !strings.Contains(f.String(), "kaname_hydra_client_id") || !strings.Contains(f.String(), "internal/service/lane.go:4") {
+	if !strings.Contains(f.String(), key) || !strings.Contains(f.String(), "internal/service/lane.go:4") {
 		t.Errorf("текст находки не называет причину: %s", f)
 	}
 	if census.Assemblies != 1 || census.Keys != 3 || census.Findings != 1 {
@@ -65,17 +76,21 @@ func saClaims(subject string) map[string]any {
 // регистре — тоже находка.
 func TestClaimNaming_RedOnAnyLetterCase(t *testing.T) {
 	t.Parallel()
-	got, _ := claimNamingJudge(t, `package service
+	key := "kaname_" + capitalized(check.RetiredIssuerName) + "_Sub"
+	if key == strings.ToLower(key) {
+		t.Fatalf("предпосылка: ключ %q не отличается регистром — проба судила бы строчное имя", key)
+	}
+	got, _ := claimNamingJudge(t, fmt.Sprintf(`package service
 
 func userClaims(subject string) map[string]any {
 	return map[string]any{
 		"kaname_external_id": subject,
-		"kaname_Hydra_Sub":   subject,
+		%q: subject,
 		"kaname_audience":    "api.test.cloud",
 	}
 }
-`)
-	if len(got) != 1 || got[0].Key != "kaname_Hydra_Sub" {
+`, key))
+	if len(got) != 1 || got[0].Key != key {
 		t.Fatalf("имя поставщика в ином регистре НЕ стало находкой: %+v", got)
 	}
 }
@@ -85,16 +100,16 @@ func userClaims(subject string) map[string]any {
 // ЗНАЧЕНИЕ — предмет гейта имя, значение судят пробы полос.
 func TestClaimNaming_SilentOnTheOwnNameTwin(t *testing.T) {
 	t.Parallel()
-	got, census := claimNamingJudge(t, `package service
+	got, census := claimNamingJudge(t, fmt.Sprintf(`package service
 
 func saClaims(subject string) map[string]any {
 	return map[string]any{
 		"kaname_external_id": subject,
-		"kaname_client_id":   "hydra-mirror-client",
+		"kaname_client_id":   %q,
 		"kaname_audience":    "api.test.cloud",
 	}
 }
-`)
+`, check.RetiredIssuerName+"-mirror-client"))
 	if len(got) != 0 {
 		t.Fatalf("законный близнец объявлен находкой: %+v", got)
 	}

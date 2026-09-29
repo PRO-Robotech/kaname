@@ -38,7 +38,7 @@ import (
 // при незаданной настройке поставщика не несёт ни утверждения издателя, ни
 // значения с именем поставщика.
 func TestOwnLaneClaimsCarryNoProviderAddressWithTheSettingUnset(t *testing.T) {
-	t.Setenv("KANAME_HYDRA_ISSUER", "")
+	t.Setenv(config.ProviderIssuerEnv, "")
 	cfg := config.Config{}
 	cfg.AuthN.Domain = "api.own.test"
 	if strings.Contains(strings.ToLower(cfg.AuthN.Domain), check.RetiredIssuerName) {

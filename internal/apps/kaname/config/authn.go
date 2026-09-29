@@ -202,16 +202,24 @@ func (c AuthNConfig) ResolveDomain() string {
 	return strings.TrimSpace(c.Domain)
 }
 
+// ProviderIssuerEnv — переменная окружения, переопределяющая издателя внешнего
+// поставщика: второе звено порядка в ResolveHydraIssuer. Имя записано здесь
+// один раз — читатель ниже и пробы, задающие или гасящие переменную, берут его
+// отсюда. Выписанное пробой заново, оно разошлось бы с читателем молча: проба
+// гасила бы переменную, которой процесс не читает.
+const ProviderIssuerEnv = "KANAME_HYDRA_ISSUER"
+
 // ResolveHydraIssuer returns the Hydra issuer. Precedence: explicit HydraIssuer
-// field → KANAME_HYDRA_ISSUER env → derived `https://hydra.<Domain>`. The env
-// fallback lets a deployment whose Hydra advertises a non-derivable issuer (e.g. a
-// dev-stand behind a path-prefixed public URL) align the shim's client_assertion
-// audience with Hydra's real issuer — otherwise the exchange fails invalid_client.
+// field → ProviderIssuerEnv (`KANAME_HYDRA_ISSUER`) env → derived
+// `https://hydra.<Domain>`. The env fallback lets a deployment whose Hydra
+// advertises a non-derivable issuer (e.g. a dev-stand behind a path-prefixed
+// public URL) align the shim's client_assertion audience with Hydra's real
+// issuer — otherwise the exchange fails invalid_client.
 func (c AuthNConfig) ResolveHydraIssuer() string {
 	if iss := strings.TrimSpace(c.HydraIssuer); iss != "" {
 		return iss
 	}
-	if v := strings.TrimSpace(os.Getenv("KANAME_HYDRA_ISSUER")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(ProviderIssuerEnv)); v != "" {
 		return v
 	}
 	return "https://hydra." + c.ResolveDomain()

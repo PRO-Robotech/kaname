@@ -59,5 +59,5 @@ func (c *HydraAdminClient) roadIsBuilt() bool {
 // Один на все методы: три копии одного текста разошлись бы, и разошлась бы та,
 // которую правили последней.
 func (c *HydraAdminClient) refuseAbsentRoad(op string) error {
-	return fmt.Errorf("hydra %s: %w", op, ErrNoExternalIdentityProvider)
+	return fmt.Errorf("provider admin %s: %w", op, ErrNoExternalIdentityProvider)
 }
