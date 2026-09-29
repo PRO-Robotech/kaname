@@ -24,7 +24,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
 // the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
 // client assertion with it; nothing symmetric is exchanged, and kaname stores
-// only the public half plus the `hydra_client_id` → ServiceAccount mapping in
+// only the public half plus the key → ServiceAccount mapping in
 // `service_account_oauth_clients`.
 //
 // `private_key_pem` is returned EXACTLY ONCE in the Issue response and is never
@@ -172,8 +172,9 @@ message IssueSAKeyRequest {
   // доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
   // АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
   //
-  // LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
-  // глагол.
+  // Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
+  // потока — отвергается синхронно с именем поля, а не выпускается ключевой
+  // парой.
   CredentialKind credential_kind = 9;
 }
 

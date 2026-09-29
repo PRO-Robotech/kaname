@@ -385,7 +385,6 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{
 			"service_account_oauth_clients_credential_kind_ck",
 			"service_account_oauth_clients_credential_shape_ck",
-			"service_account_oauth_clients_hydra_client_id_check",
 			"service_account_oauth_clients_id_check",
 			"service_account_oauth_clients_key_algorithm_check",
 			"service_account_oauth_clients_trusted_subjects_array_ck",
@@ -445,7 +444,6 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{
 			"user_oauth_clients_credential_kind_ck",
 			"user_oauth_clients_credential_shape_ck",
-			"user_oauth_clients_hydra_client_id_check",
 			"user_oauth_clients_id_check",
 			"user_oauth_clients_key_algorithm_check",
 		},

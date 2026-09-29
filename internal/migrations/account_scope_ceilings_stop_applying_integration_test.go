@@ -344,9 +344,9 @@ func scopeLossAddCredential(db *sql.DB, svaID, createdBy string) error {
 		return fmt.Errorf("свёртка секрета: %w", err)
 	}
 	_, err := db.Exec(`INSERT INTO kaname.service_account_oauth_clients
-	    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
+	    (id, sva_id, created_by_user_id, credential_kind, secret_hash,
 	     public_key_pem, key_algorithm, trusted_subjects, expires_at)
-	  VALUES ($1, $2, NULL, $3, 'SECRET', $4, '', '', '[]'::jsonb, now() + interval '30 days')`,
+	  VALUES ($1, $2, $3, 'SECRET', $4, '', '', '[]'::jsonb, now() + interval '30 days')`,
 		id, svaID, createdBy, hash)
 	return err
 }

@@ -85,7 +85,7 @@ func providerExchangeFor(cfg BuildConfig) (registrytokenuc.TokenExchanger, error
 	// туда и выпущенный токен обратно. Когда профиль пинит якорь, этот якорь —
 	// единственное доверие хопа; непригодный якорь здесь ОШИБКА, а не тихий
 	// откат к системным корням, и вызывающий отказывается стартовать на ней.
-	tokenClient, err := clients.NewHydraTokenClientWithCA(cfg.HydraTokenURL, cfg.HydraTokenCAFile)
+	tokenClient, err := clients.NewProviderTokenClientWithCA(cfg.HydraTokenURL, cfg.HydraTokenCAFile)
 	if err != nil {
 		return nil, err
 	}

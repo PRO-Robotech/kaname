@@ -125,7 +125,6 @@ func TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "soc_01abcdefghjkmnpqr",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

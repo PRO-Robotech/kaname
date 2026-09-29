@@ -77,31 +77,31 @@ ON CONFLICT DO NOTHING`)
 }
 
 // insertSACred — вставка строки удостоверения служебной учётки.
-func insertSACred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM, keyAlg string, mirror *string, trusted string, ttlDays int) error {
+func insertSACred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM, keyAlg string, trusted string, ttlDays int) error {
 	expires := "NULL"
 	if ttlDays > 0 {
 		expires = fmt.Sprintf("now() + interval '%d days'", ttlDays)
 	}
 	_, err := db.Exec(fmt.Sprintf(`
 INSERT INTO kaname.service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, trusted_subjects, expires_at)
-VALUES ($1, 'sva00000000000000bat', $2, 'usr00000000000000bat', $3, $4, $5, $6, $7::jsonb, %s)`, expires),
-		id, mirror, kind, secretHash, publicKeyPEM, keyAlg, trusted)
+    (id, sva_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, trusted_subjects, expires_at)
+VALUES ($1, 'sva00000000000000bat', 'usr00000000000000bat', $2, $3, $4, $5, $6::jsonb, %s)`, expires),
+		id, kind, secretHash, publicKeyPEM, keyAlg, trusted)
 	return err
 }
 
 // insertUserCred — вставка строки удостоверения человека. Колонки называются
 // поимённо, чтобы отказ указывал на предмет, а не на порядок значений.
-func insertUserCred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM, keyAlg string, mirror *string, ttlDays int) error {
+func insertUserCred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM, keyAlg string, ttlDays int) error {
 	expires := "NULL"
 	if ttlDays > 0 {
 		expires = fmt.Sprintf("now() + interval '%d days'", ttlDays)
 	}
 	_, err := db.Exec(fmt.Sprintf(`
 INSERT INTO kaname.user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, expires_at)
-VALUES ($1, 'usr00000000000000bat', $2, 'usr00000000000000bat', $3, $4, $5, $6, %s)`, expires),
-		id, mirror, kind, secretHash, publicKeyPEM, keyAlg)
+    (id, user_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, expires_at)
+VALUES ($1, 'usr00000000000000bat', 'usr00000000000000bat', $2, $3, $4, $5, %s)`, expires),
+		id, kind, secretHash, publicKeyPEM, keyAlg)
 	return err
 }
 
@@ -120,19 +120,17 @@ func TestBAT1_19_LawfulSecretRowInsertsAndUnlawfulOnesAreRefusedByTheDatabase(t 
 	for i := range hash {
 		hash[i] = byte(i + 1)
 	}
-	mirror := "legacy-mirror-bat-1"
 
 	// Законная строка вида SECRET: хеш есть, ключевого материала нет, срок
-	// есть, зеркала у поставщика НЕТ.
+	// есть.
 	require.NoError(t,
-		insertUserCred(db, "uoc_00000000000000001", "SECRET", hash, "", "", nil, 30),
+		insertUserCred(db, "uoc_00000000000000001", "SECRET", hash, "", "", 30),
 		"законная строка вида SECRET обязана записываться — иначе Given прочих сценариев неисполним")
 
-	// Зеркальный контроль: ослабление ЧАСТИЧНОЕ, а не снятие — законная строка
-	// вида KEYPAIR со значением в колонке зеркала записывается.
+	// Законная строка вида KEYPAIR записывается.
 	require.NoError(t,
-		insertUserCred(db, "uoc_00000000000000002", "KEYPAIR", noHash, "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", &mirror, 0),
-		"законная строка вида KEYPAIR со значением зеркала обязана записываться")
+		insertUserCred(db, "uoc_00000000000000002", "KEYPAIR", noHash, "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", 0),
+		"законная строка вида KEYPAIR обязана записываться")
 
 	for name, tc := range map[string]struct {
 		id     string
@@ -147,25 +145,20 @@ func TestBAT1_19_LawfulSecretRowInsertsAndUnlawfulOnesAreRefusedByTheDatabase(t 
 		"SECRET без срока":             {"uoc_00000000000000012", "SECRET", hash, "", "", 0},
 		"KEYPAIR с хешем секрета":      {"uoc_00000000000000013", "KEYPAIR", hash, "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", 0},
 	} {
-		err := insertUserCred(db, tc.id, tc.kind, tc.hash, tc.pubKey, tc.alg, nil, tc.ttl)
+		err := insertUserCred(db, tc.id, tc.kind, tc.hash, tc.pubKey, tc.alg, tc.ttl)
 		require.Error(t, err, "%s: строка записалась, ожидался отказ базы", name)
 	}
 
-	// Зеркало у ЛИЧНОСТИ: выдача его не заводит с #1121, поэтому KEYPAIR без
-	// зеркала здесь ЗАКОНЕН — это положительный контроль, а не отказ. Половина
-	// BAT-1-19 про «ослабили ≠ сняли» относится к таблице служебной учётки, где
-	// колонка непуста всегда; там она и утверждается.
-	require.NoError(t, insertUserCred(db, "uoc_00000000000000020", "KEYPAIR", noHash,
-		"-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", nil, 0),
-		"KEYPAIR личности без зеркала отвергнут — ограничение противоречит #1121")
-
-	// Неизвестный вид — словарь закрыт.
-	err = insertUserCred(db, "uoc_00000000000000021", "SOMETHING", noHash, "", "", &mirror, 0)
+	// Неизвестный вид — словарь закрыт. LEGACY — такой же вид вне словаря:
+	// снят вместе со столбцом имени клиента у поставщика (kaname#362).
+	err = insertUserCred(db, "uoc_00000000000000021", "SOMETHING", noHash, "", "", 0)
 	require.Error(t, err, "вид вне закрытого словаря записался")
+	err = insertUserCred(db, "uoc_00000000000000023", "LEGACY", noHash, "", "", 0)
+	require.Error(t, err, "снятый вид LEGACY записался")
 
 	// FEDERATED у личности недостижим by construction — поля, которым он
 	// задаётся, в её контракте нет.
-	err = insertUserCred(db, "uoc_00000000000000022", "FEDERATED", noHash, "", "", &mirror, 0)
+	err = insertUserCred(db, "uoc_00000000000000022", "FEDERATED", noHash, "", "", 0)
 	require.Error(t, err, "FEDERATED записан в таблицу личности, где его быть не может")
 }
 
@@ -182,7 +175,7 @@ func TestBAT1_20_UpdatesThatBreakTheSecretShapeAreRefused(t *testing.T) {
 	var err error
 	hash := make([]byte, 32)
 	hash[0] = 7
-	require.NoError(t, insertUserCred(db, "uoc_00000000000000030", "SECRET", hash, "", "", nil, 30))
+	require.NoError(t, insertUserCred(db, "uoc_00000000000000030", "SECRET", hash, "", "", 30))
 
 	_, err = db.Exec(`UPDATE kaname.user_oauth_clients SET expires_at = NULL WHERE id = 'uoc_00000000000000030'`)
 	require.Error(t, err, "срок снят правкой — бессрочный секрет стал выразим")
@@ -214,23 +207,21 @@ func TestBAT1_24_DuplicateSecretHashIsRefusedAsABackstop(t *testing.T) {
 	h2 := make([]byte, 32)
 	h2[0] = 2
 
-	require.NoError(t, insertUserCred(db, "uoc_00000000000000040", "SECRET", h1, "", "", nil, 30))
-	err = insertUserCred(db, "uoc_00000000000000041", "SECRET", h1, "", "", nil, 30)
+	require.NoError(t, insertUserCred(db, "uoc_00000000000000040", "SECRET", h1, "", "", 30))
+	err = insertUserCred(db, "uoc_00000000000000041", "SECRET", h1, "", "", 30)
 	require.Error(t, err, "дубль хеша записался — бэкстопа нет")
 
 	// Положительный контроль: разные хеши записываются оба.
-	require.NoError(t, insertUserCred(db, "uoc_00000000000000042", "SECRET", h2, "", "", nil, 30),
+	require.NoError(t, insertUserCred(db, "uoc_00000000000000042", "SECRET", h2, "", "", 30),
 		"строка с ДРУГИМ хешем отвергнута — индекс шире своего предмета")
 }
 
-// BAT-1-19 (половина про КОЛОНКУ ЗЕРКАЛА) — таблица служебной учётки.
-//
-// Требование поставлено ЗДЕСЬ, а не у личности, и это измерено, а не выведено
-// по аналогии: у служебной учётки колонка непуста ВСЕГДА (на переведённом
-// контуре в неё кладётся наш собственный идентификатор строки, и докерная
-// полоса ищет строку по нему), тогда как у личности выдача зеркала не заводит
-// с #1121. Требовать значение у KEYPAIR личности значило бы сломать её выдачу.
-func TestBAT1_19_ServiceAccountMirrorRelaxationIsPartialNotRemoval(t *testing.T) {
+// BAT-1-19 — таблица служебной учётки: у каждого вида своя форма, и держит её
+// база. Столбца имени клиента у внешнего поставщика больше нет (kaname#362):
+// ключевая пара и федеративный ключ записываются без него, а поперечную форму
+// видов держит проба снятия столбца
+// (`provider_mirror_leaves_the_credential_tables_integration_test.go`).
+func TestBAT1_19_ServiceAccountKindsHoldTheirShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
@@ -241,39 +232,25 @@ func TestBAT1_19_ServiceAccountMirrorRelaxationIsPartialNotRemoval(t *testing.T)
 	var err error
 	hash := make([]byte, 32)
 	hash[0] = 9
-	mirror := "sa-mirror-bat-1"
-	mirrorFed := "sa-mirror-bat-1-fed"
 	pem := "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----"
+	trusted := `[{"issuer":"https://idp.example.invalid","subject_pattern":"^x$"}]`
 
-	// Законная строка вида SECRET: зеркала НЕТ.
 	require.NoError(t,
-		insertSACred(db, "soc_00000000000000001", "SECRET", hash, "", "", nil, "[]", 30),
-		"законная строка SECRET служебной учётки обязана записываться без зеркала")
-
-	// Зеркальный контроль: KEYPAIR со значением зеркала записывается.
+		insertSACred(db, "soc_00000000000000001", "SECRET", hash, "", "", "[]", 30),
+		"законная строка SECRET служебной учётки обязана записываться")
 	require.NoError(t,
-		insertSACred(db, "soc_00000000000000002", "KEYPAIR", noHash, pem, "ES256", &mirror, "[]", 0),
-		"законная строка KEYPAIR со значением зеркала обязана записываться")
-
-	// Ослабление ЧАСТИЧНОЕ: KEYPAIR без зеркала отвергается.
-	err = insertSACred(db, "soc_00000000000000003", "KEYPAIR", noHash, pem, "ES256", nil, "[]", 0)
-	require.Error(t, err, "KEYPAIR служебной учётки без зеркала записался — ослабление стало снятием")
-
-	// SECRET СО значением зеркала отвергается: регистрации у поставщика у этого
-	// вида нет by construction, и колонка не получает синтетических значений.
-	err = insertSACred(db, "soc_00000000000000004", "SECRET", hash, "", "", &mirror, "[]", 30)
-	require.Error(t, err, "SECRET получил значение в колонке настоящих зеркал")
-
-	// FEDERATED — четвёртый элемент словаря, у личности недостижимый.
+		insertSACred(db, "soc_00000000000000002", "KEYPAIR", noHash, pem, "ES256", "[]", 0),
+		"законная строка KEYPAIR служебной учётки обязана записываться")
 	require.NoError(t,
-		insertSACred(db, "soc_00000000000000005", "FEDERATED", noHash, "", "", &mirrorFed,
-			`[{"issuer":"https://idp.example.invalid","subject_pattern":"^x$"}]`, 0),
+		insertSACred(db, "soc_00000000000000005", "FEDERATED", noHash, "", "", trusted, 0),
 		"FEDERATED с непустым перечнем доверенных субъектов обязан записываться")
 
 	// SECRET с непустым перечнем доверенных субъектов — отказ.
-	err = insertSACred(db, "soc_00000000000000006", "SECRET", hash, "", "", nil,
-		`[{"issuer":"https://idp.example.invalid","subject_pattern":"^x$"}]`, 30)
+	err = insertSACred(db, "soc_00000000000000006", "SECRET", hash, "", "", trusted, 30)
 	require.Error(t, err, "SECRET с перечнем доверенных субъектов записался")
+	// Снятый вид LEGACY — отказ словаря.
+	err = insertSACred(db, "soc_00000000000000007", "LEGACY", noHash, pem, "ES256", "[]", 0)
+	require.Error(t, err, "снятый вид LEGACY записался")
 }
 
 // noHash — пустой хеш. Именно ПУСТОЙ, а не NULL: колонка объявлена NOT NULL

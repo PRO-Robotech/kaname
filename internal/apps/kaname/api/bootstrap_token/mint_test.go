@@ -237,7 +237,6 @@ func TestMintBootstrapToken_Idempotent_ReusesExistingMapping(t *testing.T) {
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             domain.SAOAuthClientID(DeriveIdentity().SocID),
 		SvaID:          domain.ServiceAccountID(DeriveIdentity().SvaID),
-		OAuthClientID:  domain.OAuthClientID(DeriveIdentity().ClientID),
 	}
 	store := &fakeStore{existing: &existing}
 	uc := newUseCase(t, store, okMinter(), Config{})
@@ -277,7 +276,6 @@ func TestDeriveIdentity_MatchesMigrationSeed(t *testing.T) {
 	id := DeriveIdentity()
 	require.Equal(t, "svab91854890de887e6d", id.SvaID)
 	require.Equal(t, "soc_db27d17291ff453b6", id.SocID)
-	require.Equal(t, "kacho-bootstrap-admin", id.ClientID)
 	require.Equal(t, "usr1a18042d81fb438d6", id.CreatedByUserID)
 	require.True(t, strings.HasPrefix(id.SvaID, "sva"))
 }

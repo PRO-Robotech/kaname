@@ -160,9 +160,9 @@ func insertUserCredentialFull(ctx context.Context, pool *pgxpool.Pool, userID, c
 		// требует лишь, чтобы он был позже создания.
 		_, err := pool.Exec(ctx, `
 			INSERT INTO user_oauth_clients
-			    (id, user_id, hydra_client_id, created_by_user_id, credential_kind,
+			    (id, user_id, created_by_user_id, credential_kind,
 			     secret_hash, public_key_pem, key_algorithm, created_at, expires_at)
-			VALUES ($1, $2, NULL, $5, $3, ''::bytea, $4, 'ES256',
+			VALUES ($1, $2, $5, $3, ''::bytea, $4, 'ES256',
 			        now() - interval '60 days', now() - interval '1 day')`,
 			id, userID, kind, credPublicKey, createdBy)
 		return err
@@ -170,40 +170,39 @@ func insertUserCredentialFull(ctx context.Context, pool *pgxpool.Pool, userID, c
 	if expiry == nil {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO user_oauth_clients
-			    (id, user_id, hydra_client_id, created_by_user_id, credential_kind,
+			    (id, user_id, created_by_user_id, credential_kind,
 			     secret_hash, public_key_pem, key_algorithm)
-			VALUES ($1, $2, NULL, $6, $3, ''::bytea, $4, $5)`,
+			VALUES ($1, $2, $6, $3, ''::bytea, $4, $5)`,
 			id, userID, kind, pubKey, alg, createdBy)
 		return err
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO user_oauth_clients
-		    (id, user_id, hydra_client_id, created_by_user_id, credential_kind,
+		    (id, user_id, created_by_user_id, credential_kind,
 		     secret_hash, public_key_pem, key_algorithm, expires_at)
-		VALUES ($1, $2, NULL, $5, $3, $4, '', '', now() + interval '30 days')`,
+		VALUES ($1, $2, $5, $3, $4, '', '', now() + interval '30 days')`,
 		id, userID, kind, hash, createdBy)
 	return err
 }
 
-// insertSACredential — то же для служебной учётки. У неё зеркало поставщика
-// непусто у всякого вида, кроме секрета, — это ограничение её таблицы.
+// insertSACredential — то же для служебной учётки.
 func insertSACredential(ctx context.Context, pool *pgxpool.Pool, svaID, createdBy, kind string) error {
 	id := ids.NewID(domain.PrefixSAOAuthClient)
 	if kind == "SECRET" {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO service_account_oauth_clients
-			    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind,
+			    (id, sva_id, created_by_user_id, credential_kind,
 			     secret_hash, public_key_pem, key_algorithm, trusted_subjects, expires_at)
-			VALUES ($1, $2, $3, $4, 'SECRET', $5, '', '', '[]'::jsonb, now() + interval '30 days')`,
-			id, svaID, id, createdBy, credSecretHash())
+			VALUES ($1, $2, $3, 'SECRET', $4, '', '', '[]'::jsonb, now() + interval '30 days')`,
+			id, svaID, createdBy, credSecretHash())
 		return err
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO service_account_oauth_clients
-		    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind,
+		    (id, sva_id, created_by_user_id, credential_kind,
 		     secret_hash, public_key_pem, key_algorithm, trusted_subjects)
-		VALUES ($1, $2, $3, $4, $5, ''::bytea, $6, 'ES256', '[]'::jsonb)`,
-		id, svaID, id, createdBy, kind, credPublicKey)
+		VALUES ($1, $2, $3, $4, ''::bytea, $5, 'ES256', '[]'::jsonb)`,
+		id, svaID, createdBy, kind, credPublicKey)
 	return err
 }
 

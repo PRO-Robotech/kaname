@@ -60,8 +60,8 @@ func (l logUsers) GetByID(ctx context.Context, _ domain.UserID) (domain.User, er
 
 type logServiceAccounts struct{ *portLog }
 
-func (l logServiceAccounts) LookupByOAuthClientID(ctx context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	l.record(ctx, "ServiceAccounts", "LookupByOAuthClientID")
+func (l logServiceAccounts) LookupByClientID(ctx context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	l.record(ctx, "ServiceAccounts", "LookupByClientID")
 	return domain.ServiceAccountOAuthClient{}, errFromStore
 }
 
@@ -73,18 +73,6 @@ func (l logServiceAccounts) GetServiceAccount(ctx context.Context, _ domain.Serv
 func (l logServiceAccounts) FindByExternalSubject(ctx context.Context, _, _ string) (domain.ServiceAccountOAuthClient, error) {
 	l.record(ctx, "ServiceAccounts", "FindByExternalSubject")
 	return domain.ServiceAccountOAuthClient{}, errFromStore
-}
-
-type logUserTokens struct{ *portLog }
-
-func (l logUserTokens) LookupByOAuthClientID(ctx context.Context, _ domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	l.record(ctx, "UserTokens", "LookupByOAuthClientID")
-	return domain.UserOAuthClient{}, errFromStore
-}
-
-func (l logUserTokens) GetUser(ctx context.Context, _ domain.UserID) (domain.User, error) {
-	l.record(ctx, "UserTokens", "GetUser")
-	return domain.User{}, errFromStore
 }
 
 type logCutoffs struct{ *portLog }
@@ -124,7 +112,6 @@ func loggedPorts(l *portLog) iamhooks.IssuancePorts {
 	return iamhooks.IssuancePorts{
 		Users:           logUsers{l},
 		ServiceAccounts: logServiceAccounts{l},
-		UserTokens:      logUserTokens{l},
 		Cutoffs:         logCutoffs{l},
 		Audit:           logAudit{l},
 	}

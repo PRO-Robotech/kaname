@@ -8,10 +8,12 @@ package service_test
 //
 // # Что здесь утверждается
 //
-// Полос, получающих состав от этой службы, восемь: четыре ветви обратного
-// вызова поставщика (интерактивная сессия, ключ служебной учётки, федеративное
-// утверждение, персональный токен), уменьшенный состав первого входа, состав
-// полосы обновления и два вида клиента НАШЕГО токен-эндпоинта. Каждая
+// Полос, получающих состав от этой службы, семь: три ветви обратного вызова
+// поставщика (интерактивная сессия, ключ служебной учётки, федеративное
+// утверждение), уменьшенный состав первого входа, состав полосы обновления и
+// два вида клиента НАШЕГО токен-эндпоинта. Ветви персонального токена у
+// обратного вызова нет: поставщик персональных токенов не регистрирует, и она
+// снята вместе со столбцом имени клиента у него (kaname#362). Каждая
 // спрашивается здесь своим входом, и каждая обязана отдать непустой состав —
 // иначе «утверждения нет» неотличимо от «состава нет».
 //
@@ -49,11 +51,8 @@ import (
 const (
 	npDomain       = "api.test.cloud"
 	npHumanSubject = "np-human-external-sub"
-	npSAMirror     = "np-sa-mirror-client"
-	npUTMirror     = "np-ut-mirror-client"
 	npFedIssuer    = "https://ci.example.org"
 	npFedSubject   = "repo:acme/infra:ref:refs/heads/main"
-	npFedClient    = "np-fed-client"
 	npUserID       = "usr_np0000000000000001"
 	npAccountID    = "acc_np0000000000000001"
 	npSAID         = "sva_np0000000000000001"
@@ -72,15 +71,15 @@ func (p npUsers) FindByExternalID(_ context.Context, ext domain.ExternalSubject)
 }
 
 type npSAs struct {
-	byMirror, byFed domain.ServiceAccountOAuthClient
+	byClient, byFed domain.ServiceAccountOAuthClient
 	sa              domain.ServiceAccount
 }
 
-func (p npSAs) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	if id != p.byMirror.OAuthClientID {
+func (p npSAs) LookupByClientID(_ context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	if id != p.byClient.ID {
 		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no sa client %s", id)
 	}
-	return p.byMirror, nil
+	return p.byClient, nil
 }
 
 func (p npSAs) GetServiceAccount(_ context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
@@ -98,15 +97,7 @@ func (p npSAs) FindByExternalSubject(_ context.Context, issuer, sub string) (dom
 }
 
 type npUserTokens struct {
-	uoc  domain.UserOAuthClient
 	user domain.User
-}
-
-func (p npUserTokens) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	if id != p.uoc.OAuthClientID {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no user token %s", id)
-	}
-	return p.uoc, nil
 }
 
 func (p npUserTokens) GetUser(_ context.Context, id domain.UserID) (domain.User, error) {
@@ -152,24 +143,24 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 		InviteStatus: domain.InviteStatusActive,
 	}
 	sa := domain.ServiceAccount{ID: npSAID, AccountID: npAccountID, Enabled: true}
-	socMirror := domain.ServiceAccountOAuthClient{
+	socKey := domain.ServiceAccountOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair,
-		ID:             npSAKeyID, SvaID: npSAID, OAuthClientID: npSAMirror,
+		ID:             npSAKeyID, SvaID: npSAID,
 	}
 	socFed := domain.ServiceAccountOAuthClient{
-		CredentialKind: domain.CredentialKindKeypair,
-		ID:             npFedKeyID, SvaID: npSAID, OAuthClientID: npFedClient,
+		CredentialKind: domain.CredentialKindFederated,
+		ID:             npFedKeyID, SvaID: npSAID,
 	}
 	uoc := domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair,
-		ID:             npUserTokenID, UserID: npUserID, OAuthClientID: npUTMirror,
+		ID:             npUserTokenID, UserID: npUserID,
 		CreatedAt: fixed.Add(-time.Hour),
 	}
 
 	svc := service.NewTokenEnrichmentService(service.TokenEnrichmentConfig{Domain: npDomain}, npUsers{user: user}).
-		WithSAPort(npSAs{byMirror: socMirror, byFed: socFed, sa: sa}).
-		WithUserTokenPort(npUserTokens{uoc: uoc, user: user}).
-		WithOwnClientPort(npOwnClients{uoc: uoc, soc: socMirror}).
+		WithSAPort(npSAs{byClient: socKey, byFed: socFed, sa: sa}).
+		WithUserTokenPort(npUserTokens{user: user}).
+		WithOwnClientPort(npOwnClients{uoc: uoc, soc: socKey}).
 		WithClock(func() time.Time { return fixed })
 
 	// Привязка — НЕПУСТАЯ: пустые значения не несли бы ничего, что можно
@@ -202,13 +193,12 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 	fed := bound
 	fed.GrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 	fed.ExternalIssuer = npFedIssuer
-	fed.OAuthClientID = npFedClient
+	fed.OAuthClientID = npFedKeyID
 
 	lanes := []npLane{
 		enrich("обратный вызов: интерактивная сессия", npHumanSubject, bound),
-		enrich("обратный вызов: ключ служебной учётки", npSAMirror, cc),
+		enrich("обратный вызов: ключ служебной учётки", npSAKeyID, cc),
 		enrich("обратный вызов: федеративное утверждение", npFedSubject, fed),
-		enrich("обратный вызов: персональный токен", npUTMirror, cc),
 		{name: "уменьшенный состав первого входа", claims: svc.MinimalClaims(npHumanSubject)},
 		{name: "полоса обновления", claims: svc.UserClaims(user, npHumanSubject, bound)},
 		assertion("наш эндпоинт: клиент персонального токена", domain.AssertionClient{
@@ -220,7 +210,7 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 	}
 
 	fixture := []string{
-		npDomain, npHumanSubject, npSAMirror, npUTMirror, npFedIssuer, npFedSubject, npFedClient,
+		npDomain, npHumanSubject, npFedIssuer, npFedSubject,
 		npUserID, npAccountID, npSAID, npSAKeyID, npFedKeyID, npUserTokenID,
 		bound.ACR, bound.CnfJkt, bound.CnfX5tS256,
 	}

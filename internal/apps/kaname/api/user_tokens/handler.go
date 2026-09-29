@@ -110,6 +110,12 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 		// надзором администратора облака.
 		createdBy = req.GetUserId()
 	}
+	// Вид разбирается ДО операции: номер вне словаря отвергается синхронно,
+	// с именем поля.
+	kind, err := CredentialKindFromProto(req.GetCredentialKind())
+	if err != nil {
+		return nil, err
+	}
 	op, err := h.issue.Execute(ctx, IssueInput{
 		UserID:          domain.UserID(req.GetUserId()),
 		Description:     req.GetDescription(),
@@ -120,7 +126,7 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 		Name:   req.GetName(),
 		Labels: labelsFromProto(req.GetLabels()),
 		// Вид удостоверения. Не назван — прежнее поведение дословно.
-		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
+		CredentialKind: kind,
 	})
 	if err != nil {
 		return nil, err

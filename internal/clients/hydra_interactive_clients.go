@@ -70,13 +70,13 @@ func classifyProviderCall(err error) error {
 	if errors.Is(err, ErrNoExternalIdentityProvider) {
 		return err
 	}
-	var apiErr *HydraAPIError
+	var apiErr *ProviderAPIError
 	if errors.As(err, &apiErr) {
 		if apiErr.StatusCode >= 500 {
 			return fmt.Errorf("%w: %w", iamerr.ErrUnavailable, err)
 		}
 		// 4xx — вход отвергнут; повтор его не изменит. Цепочка остаётся целой:
-		// на `*HydraAPIError` стоит распознавание 409.
+		// на `*ProviderAPIError` стоит распознавание 409.
 		return err
 	}
 	// Неполадка доставки: запрос не дошёл либо ответ не вернулся. Признак берётся

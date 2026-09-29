@@ -115,7 +115,7 @@ func TestProviderRoad_TokenExchangeSplitsUnavailableFromMisconfigured(t *testing
 			}))
 			defer srv.Close()
 			spy := &roadSpy{}
-			c := (&HydraTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}).WithRoadObserver(spy)
+			c := (&ProviderTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}).WithRoadObserver(spy)
 			_, _ = c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
 			require.Equal(t, []string{ProviderRoadTokenExchange + "/" + tc.outcome}, spy.seen)
 		})
@@ -131,16 +131,16 @@ func TestProviderRoad_TokenExchangeSentinelIsUnchangedByTheSplit(t *testing.T) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}))
 	defer srv.Close()
-	c := &HydraTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}
+	c := &ProviderTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}
 	_, err := c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
-	// ИМЕННО `ErrHydraRejected`, и это не описка. 405 — четырёхсотый, и прежняя
+	// ИМЕННО `ErrProviderTokenRejected`, и это не описка. 405 — четырёхсотый, и прежняя
 	// ветка отдавала на нём сентинел отказа удостоверения. Клетка счётчика
 	// теперь называет его настройкой, а сентинел ОСТАЛСЯ прежним: расщепление
 	// клеток не имеет права сменить код, который получит докерный клиент.
 	//
 	// Первая редакция этой пробы ждала здесь сентинел недоступности — я взял его
 	// из прозы шапки файла, не перемерив ветку. Проба опровергла постановку.
-	require.ErrorIs(t, err, ErrHydraRejected,
+	require.ErrorIs(t, err, ErrProviderTokenRejected,
 		"сентинел обмена сменился бы вместе с клеткой — это уже не правка наблюдаемости")
 }
 

@@ -14,16 +14,19 @@
 // спрашивает другое: один принципал, одна отсечка — один вердикт на всех
 // полосах, предъявляющих одно и то же полномочие.
 //
-// # Осей сравнения ДВЕ, и они охватывают разное
+// # Осей ТРИ, и они охватывают разное
 //
 // Отсечка взвешивается против момента, от которого считается полномочие, а он
-// у полномочий разный. У КЛЮЧА человека это момент его выдачи — ключ
-// предъявляют хук выпуска и наш эндпоинт. У СЕССИИ человека — момент её входа,
-// и сессию предъявляют хук выпуска и хук обновления; у эндпоинта сессии нет, у
-// хука обновления нет ключа (выдача по ключу не выдаёт обновляемого токена).
-// Свести оси в одну значило бы либо потребовать от полосы полномочия, которого
-// она не предъявляет, либо оставить полосу вне сравнения. Хук выпуска стоит на
-// обеих осях — это одна полоса с двумя видами полномочия.
+// у полномочий разный. У КЛЮЧА человека это момент его выдачи, и предъявляет
+// такой ключ ОДНА полоса — наш эндпоинт: прежний поставщик персональных токенов
+// не регистрирует, и ветвь хука, резолвившая их по его имени клиента, снята
+// вместе со столбцом этого имени (kaname#362). Ось ключа человека поэтому —
+// проба одной полосы, названная так, а не сравнение. КЛЮЧ СЛУЖЕБНОЙ УЧЁТКИ
+// предъявляют хук выпуска и наш эндпоинт, и отсечка человека не вправе снять
+// его ни на одной из них. У СЕССИИ человека — момент её входа, и сессию
+// предъявляют хук выпуска и хук обновления; у эндпоинта сессии нет, у хука
+// обновления нет ключа (выдача по ключу не выдаёт обновляемого токена). Хук
+// выпуска стоит на двух осях — это одна полоса с двумя видами полномочия.
 //
 // Полоса предъявления базового секрета человека токена не чеканит и здесь не
 // сличается: её отсечка читается оператором базы вместе со строкой
@@ -44,7 +47,8 @@
 // запрещающей). Числа не выписываются: полоса, которую забыли завести, или
 // полоса, не читающая отсечку, меняют их, а литерал — нет. Ось, сличившая
 // меньше двух полос, — не сравнение, а проба одной полосы, и падает с названной
-// причиной; ни одной исполненной полосы — «не выполнилось», а не зелёное.
+// причиной, если сравнением объявлена; ни одной исполненной полосы — «не
+// выполнилось», а не зелёное.
 package iamhooks_test
 
 import (
@@ -74,15 +78,13 @@ var _ client_token.RevocationLookup = iamhooks.UserRevocationLookup(nil)
 var _ iamhooks.UserRevocationLookup = client_token.RevocationLookup(nil)
 
 const (
-	laneUserMirror = "cap-machine"
-	laneSAMirror   = "cap-machine-sa"
 	laneOurUserKey = "uoc_01abcdefghjkmnpqx"
 	laneOurSAKey   = "soc_01abcdefghjkmnpqx"
 	laneSAID       = "sva_01abcdefghjkmnpqx"
 )
 
 // laneOwnClients — чтение строки реестра по НАШЕМУ идентификатору. Отдаёт ТЕ ЖЕ
-// строки, что порты прежнего пути отдают по зеркальному значению.
+// строки, что порт прежнего пути отдаёт по имени клиента — идентификатору строки.
 type laneOwnClients struct {
 	uoc domain.UserOAuthClient
 	soc domain.ServiceAccountOAuthClient
@@ -201,7 +203,8 @@ func ranOn(lanes []revocationLane, seen map[string]*laneObservation) int {
 
 // TestRevokeAllCutoff_BothIssuanceLanesAgree — один принципал, одна отсечка,
 // один вердикт на каждой полосе, предъявляющей то же полномочие: по оси ключа
-// (хук выпуска и наш эндпоинт) и по оси сессии (хук выпуска и хук обновления).
+// служебной учётки (хук выпуска и наш эндпоинт) и по оси сессии (хук выпуска и
+// хук обновления); ключ человека — проба единственной его полосы.
 func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 	keyIssued := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	unavailable := errors.New("user_token_revocations: backend unavailable")
@@ -211,13 +214,16 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 	// обе полосы сессии: запись обновления получает его же.
 	sessionAt := capturedAuthTime(t, capturedBody(t, "provider-token-hook-authorization-code.json"))
 
-	keyCases := []laneInput{
+	personKeyCases := []laneInput{
 		{name: "ключ человека, отсечки нет", kind: domain.AssertionClientUser, wantIssue: true},
 		{name: "ключ человека выдан до отсечки", kind: domain.AssertionClientUser, cutoff: at(keyIssued.Add(time.Hour))},
 		{name: "ключ человека выдан ровно в момент отсечки", kind: domain.AssertionClientUser, cutoff: at(keyIssued)},
 		{name: "ключ человека выдан после отсечки", kind: domain.AssertionClientUser,
 			cutoff: at(keyIssued.Add(-time.Hour)), wantIssue: true},
 		{name: "хранилище отсечек не ответило", kind: domain.AssertionClientUser, lookupErr: unavailable},
+	}
+	saKeyCases := []laneInput{
+		{name: "ключ служебной учётки, отсечки нет", kind: domain.AssertionClientServiceAccount, wantIssue: true},
 		{name: "ключ служебной учётки при отсечке человека", kind: domain.AssertionClientServiceAccount,
 			cutoff: at(keyIssued.Add(365 * 24 * time.Hour)), wantIssue: true},
 	}
@@ -235,14 +241,12 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             laneOurUserKey,
 		UserID:         cutoffUserID,
-		OAuthClientID:  laneUserMirror,
 		CreatedAt:      keyIssued,
 	}
 	soc := domain.ServiceAccountOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             laneOurSAKey,
 		SvaID:          laneSAID,
-		OAuthClientID:  laneSAMirror,
 	}
 	sa := domain.ServiceAccount{ID: laneSAID, AccountID: cutoffAccountID, Enabled: true}
 
@@ -251,8 +255,8 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		users,
 	).
-		WithUserTokenPort(&fakeUserTokenPort{client: uoc, user: users.users[0]}).
-		WithSAPort(&fakeIssuanceSAPort{clientID: laneSAMirror, mapping: soc, sa: sa}).
+		WithUserTokenPort(&fakeUserTokenPort{user: users.users[0]}).
+		WithSAPort(&fakeIssuanceSAPort{clientID: laneOurSAKey, mapping: soc, sa: sa}).
 		WithOwnClientPort(laneOwnClients{uoc: uoc, soc: soc})
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tokenHook := func(revs *fakeRevocations) *iamhooks.TokenHookHandler {
@@ -290,38 +294,37 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 		laneRefreshHook = "хук обновления"
 		laneEndpoint    = "наш токен-эндпоинт"
 	)
-	keyLanes := []revocationLane{
-		{name: laneTokenHook, issue: func(t *testing.T, in laneInput, revs *fakeRevocations) bool {
+	endpointLane := revocationLane{name: laneEndpoint, issue: func(t *testing.T, in laneInput, revs *fakeRevocations) bool {
+		t.Helper()
+		uc, err := client_token.New(client_token.Config{
+			AllowedAudiences: []string{"https://api.test.cloud"},
+			DefaultAudience:  "https://api.test.cloud",
+			TokenTTL:         15 * time.Minute,
+			Clock:            func() time.Time { return keyIssued.Add(48 * time.Hour) },
+		}, laneSigner{}, enricher, revs)
+		require.NoError(t, err)
+		cl := domain.AssertionClient{ID: laneOurUserKey, Kind: in.kind, OwnerID: cutoffUserID, OwnerActive: true}
+		if in.kind == domain.AssertionClientServiceAccount {
+			cl.ID, cl.OwnerID = laneOurSAKey, laneSAID
+		}
+		out, outcome, err := uc.Issue(context.Background(), client_token.Input{Client: cl})
+		if err != nil {
+			return false
+		}
+		require.Equal(t, clientassertion.OutcomeAccepted, outcome)
+		require.NotEmpty(t, out.AccessToken)
+		return true
+	}}
+	// Ключ человека предъявляет одна полоса — наш эндпоинт.
+	personKeyLanes := []revocationLane{endpointLane}
+	saKeyLanes := []revocationLane{
+		{name: laneTokenHook, issue: func(t *testing.T, _ laneInput, revs *fakeRevocations) bool {
 			t.Helper()
-			mirror := laneUserMirror
-			if in.kind == domain.AssertionClientServiceAccount {
-				mirror = laneSAMirror
-			}
 			body := capturedBody(t, "provider-token-hook-client-credentials.json")
-			machineShaped(t, body, mirror)
+			machineShaped(t, body, laneOurSAKey)
 			return hookIssued(t, postCaptured(t, tokenHook(revs), "/iam/v1/hooks/token", body), laneTokenHook)
 		}},
-		{name: laneEndpoint, issue: func(t *testing.T, in laneInput, revs *fakeRevocations) bool {
-			t.Helper()
-			uc, err := client_token.New(client_token.Config{
-				AllowedAudiences: []string{"https://api.test.cloud"},
-				DefaultAudience:  "https://api.test.cloud",
-				TokenTTL:         15 * time.Minute,
-				Clock:            func() time.Time { return keyIssued.Add(48 * time.Hour) },
-			}, laneSigner{}, enricher, revs)
-			require.NoError(t, err)
-			cl := domain.AssertionClient{ID: laneOurUserKey, Kind: in.kind, OwnerID: cutoffUserID, OwnerActive: true}
-			if in.kind == domain.AssertionClientServiceAccount {
-				cl.ID, cl.OwnerID = laneOurSAKey, laneSAID
-			}
-			out, outcome, err := uc.Issue(context.Background(), client_token.Input{Client: cl})
-			if err != nil {
-				return false
-			}
-			require.Equal(t, clientassertion.OutcomeAccepted, outcome)
-			require.NotEmpty(t, out.AccessToken)
-			return true
-		}},
+		endpointLane,
 	}
 	sessionLanes := []revocationLane{
 		{name: laneTokenHook, issue: func(t *testing.T, in laneInput, revs *fakeRevocations) bool {
@@ -346,7 +349,8 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 	}
 
 	seen := map[string]*laneObservation{}
-	comparedKey := compareLanes(t, "ключ", keyLanes, keyCases, seen)
+	comparedPersonKey := compareLanes(t, "ключ человека", personKeyLanes, personKeyCases, seen)
+	comparedSAKey := compareLanes(t, "ключ служебной учётки", saKeyLanes, saKeyCases, seen)
 	comparedSession := compareLanes(t, "сессия", sessionLanes, sessionCases, seen)
 
 	// Перепись — из исполненного.
@@ -363,13 +367,16 @@ func TestRevokeAllCutoff_BothIssuanceLanesAgree(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	ranKey, ranSession := ranOn(keyLanes, seen), ranOn(sessionLanes, seen)
-	t.Logf("перепись: полос выдачи исполнено %d %v · сверяют отсечку %d · по осям: ключ %d, сессия %d "+
-		"· входов сличено: ключ %d, сессия %d", ran, names, honoring, ranKey, ranSession, comparedKey, comparedSession)
+	ranPersonKey, ranSAKey, ranSession := ranOn(personKeyLanes, seen), ranOn(saKeyLanes, seen), ranOn(sessionLanes, seen)
+	t.Logf("перепись: полос выдачи исполнено %d %v · сверяют отсечку %d · по осям: ключ человека %d, "+
+		"ключ служебной учётки %d, сессия %d · входов: ключ человека %d, ключ служебной учётки %d, сессия %d",
+		ran, names, honoring, ranPersonKey, ranSAKey, ranSession, comparedPersonKey, comparedSAKey, comparedSession)
 
 	require.NotZerof(t, ran, "не исполнилось ни одной полосы — перепись не выполнилась, это не зелёное")
-	require.GreaterOrEqualf(t, ranKey, 2,
-		"ось ключа сличила %d полос: сравнение одной полосы с самой собой ничего не сравнивает", ranKey)
+	require.Equalf(t, 1, ranPersonKey,
+		"ключ человека предъявляет одна полоса, исполнилось %d", ranPersonKey)
+	require.GreaterOrEqualf(t, ranSAKey, 2,
+		"ось ключа служебной учётки сличила %d полос: сравнение одной полосы с самой собой ничего не сравнивает", ranSAKey)
 	require.GreaterOrEqualf(t, ranSession, 2,
 		"ось сессии сличила %d полос: сравнение одной полосы с самой собой ничего не сравнивает", ranSession)
 	require.Equalf(t, ran, honoring,
