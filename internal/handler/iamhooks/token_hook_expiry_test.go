@@ -75,14 +75,13 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 		},
 	}
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{},
 	).WithSAPort(saPort)
 	return iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
 		newFakeRevocations(),

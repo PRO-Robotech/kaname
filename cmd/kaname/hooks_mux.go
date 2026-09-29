@@ -76,16 +76,14 @@ func buildHooksMux(
 ) (http.Handler, error) {
 	hookSecret := cfg.AuthN.ResolveHookSharedSecret()
 	domain := cfg.AuthN.ResolveDomain()
-	hydraIssuer := cfg.AuthN.ResolveHydraIssuer()
 
 	// Repo adapters (pool-scoped).
 	users := kanamepg.NewUserPoolRepo(pool)
 	auditPg := kanamepg.NewAuditEmitterAdapter(pool)
 
 	tokenHook, refreshHook, err := buildIssuanceHooks(issuanceHookConfig{
-		hookSecret:  hookSecret,
-		domain:      domain,
-		hydraIssuer: hydraIssuer,
+		hookSecret: hookSecret,
+		domain:     domain,
 	}, handlerinternal.IssuancePorts{
 		Users:           users,
 		ServiceAccounts: &tokenEnrichSAAdapter{saClients: kanamepg.NewSAOAuthClientRepo(pool)},
@@ -234,11 +232,10 @@ func (a *tokenEnrichUserTokenAdapter) GetUser(ctx context.Context, id domain.Use
 }
 
 // issuanceHookConfig — объявленная настройка обеих полос хука, чеканящих токен
-// человеку. У полос она одна: секрет обратного вызова, домен и издатель.
+// человеку. У полос она одна: секрет обратного вызова и домен.
 type issuanceHookConfig struct {
-	hookSecret  string
-	domain      string
-	hydraIssuer string
+	hookSecret string
+	domain     string
 }
 
 // buildIssuanceHooks собирает обе полосы хука, чеканящие токен человеку: хук
@@ -280,14 +277,13 @@ func buildIssuanceHooks(
 		return nil, nil, fmt.Errorf("полосы хука выдачи: %w", err)
 	}
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: cfg.domain, HydraIssuer: cfg.hydraIssuer},
+		service.TokenEnrichmentConfig{Domain: cfg.domain},
 		bounded.Users,
 	).WithSAPort(bounded.ServiceAccounts).WithUserTokenPort(bounded.UserTokens)
 	tokenHook := handlerinternal.NewTokenHookHandler(
 		handlerinternal.TokenHookConfig{
 			HookSharedSecret: cfg.hookSecret,
 			Domain:           cfg.domain,
-			HydraIssuer:      cfg.hydraIssuer,
 		},
 		enricher,
 		bounded.Cutoffs,
@@ -298,7 +294,6 @@ func buildIssuanceHooks(
 		handlerinternal.RefreshHookConfig{
 			HookSharedSecret: cfg.hookSecret,
 			Domain:           cfg.domain,
-			HydraIssuer:      cfg.hydraIssuer,
 		},
 		bounded.Users,
 		// The SAME producer the token hook enriches with. One claim set per

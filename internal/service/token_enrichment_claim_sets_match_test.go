@@ -160,7 +160,7 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 	// Одна служба, одни часы, оба входа. Порт прежнего пути и порт нашего
 	// отдают ОДНУ И ТУ ЖЕ строку — иначе сверялись бы два разных принципала.
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		TokenEnrichmentConfig{Domain: "kacho.cloud"},
 		stubUserPort{t: t},
 	).
 		WithUserTokenPort(stubUserTokenPortForClaimSets{mirror: mirrorUser, uoc: uoc, user: user}).

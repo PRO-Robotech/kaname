@@ -80,7 +80,7 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		bootstrapUserPort{t: t},
 	).WithSAPort(sa)
 	svc.now = func() time.Time { return fixed }
@@ -106,7 +106,7 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 func TestEnrichClaims_UnknownClient_NotBootstrapSA(t *testing.T) {
 	sa := stubSAPort{socErr: iamerr.ErrNotFound}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		fallthroughUserPort{},
 	).WithSAPort(sa)
 	_, _, err := svc.EnrichClaims(context.Background(), "some-other-client", TokenHookContext{})
