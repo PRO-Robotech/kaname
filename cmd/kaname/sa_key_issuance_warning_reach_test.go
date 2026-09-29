@@ -8,11 +8,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ
 //
-// Ветвь в `buildSAKeysHandler` срабатывает на одной комбинации: посадка `own`
-// (дороги к внешнему поставщику нет) при непереведённом контуре выдачи
-// (`authn.client-token.enabled` не включён). Страж старта из задачи #337 эту
-// комбинацию в боевых режимах отвергает, а требования полосы вне боевых
-// режимов не предъявляются вовсе. Значит ветвь исполняется ТОЛЬКО в режиме
+// Ветвь в `buildSAKeysHandler` срабатывает, когда контур выдачи не переведён
+// (`authn.client-token.enabled` не включён): ключевую пару и федеративный ключ
+// обменивает только токен-эндпоинт платформы, и без него их выдача отказывает
+// на любой посадке — регистрации у внешнего поставщика выдача больше не заводит
+// (kaname#362). Страж старта из задачи #337 посадку `own` без эндпоинта в
+// боевых режимах отвергает, а требования полосы вне боевых режимов не
+// предъявляются вовсе. Значит на посадке `own` ветвь исполняется ТОЛЬКО в режиме
 // разработчика.
 //
 // «Недостижима в боевых режимах» — утверждение из ДВУХ половин, и держатель
@@ -34,9 +36,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ЗАКОННЫЕ БЛИЗНЕЦЫ
 //
-// Без них «предупреждение напечатано» зеленело бы на ветви, печатающей всегда:
-// тот же вход с включённым токен-эндпоинтом и тот же вход на посадке
-// `external` (дорога построена) не печатают ничего.
+// Без него «предупреждение напечатано» зеленело бы на ветви, печатающей всегда:
+// тот же вход с включённым токен-эндпоинтом не печатает ничего. Посадка
+// `external` близнецом больше не служит: дорога к поставщику выдачу ключа не
+// исполняет, и без эндпоинта ветвь печатает там так же.
 //
 // Близнец ОБЯЗАН подниматься: молчание, измеренное на входе, который страж
 // старта отвергает, есть молчание процесса, до сборки не дошедшего, и о ветви
@@ -132,7 +135,7 @@ func saKeysWarnings(t *testing.T, cfg config.Config) []map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	if h := buildSAKeysHandler(nil, nil, cfg, nil, nil, logger); h == nil {
+	if h := buildSAKeysHandler(nil, nil, cfg, logger); h == nil {
 		t.Fatal("buildSAKeysHandler() = nil: сборка ключей не состоялась, судить нечего")
 	}
 	var (
@@ -226,18 +229,8 @@ func TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes(t *testing.T) {
 			"иначе проба судит не достижимость ветви, а неподнявшуюся фикстуру", err)
 	}
 
-	warns := saKeysWarnings(t, cfg)
-	if len(warns) != 1 {
-		t.Fatalf("предупреждений %d, ожидалось ровно одно: dev-посадка own без своего "+
-			"контура выдачи поднимается, и всякая выдача ключа на ней отказывает", len(warns))
-	}
-	lift, _ := warns[0]["снимается"].(string)
-	for _, want := range []string{"authn.client-token.enabled", "kacho#1120"} {
-		if !strings.Contains(lift, want) {
-			t.Errorf("предупреждение обязано называть, чем снимается, через %q; получено «снимается»=%q",
-				want, lift)
-		}
-	}
+	requireOneLiftingWarning(t, saKeysWarnings(t, cfg), "dev-посадка own без своего контура выдачи "+
+		"поднимается, и выдача ключевой пары и федеративного ключа на ней отказывает")
 
 	for _, mode := range []config.Mode{config.ModeProduction, config.ModeProductionStrict} {
 		t.Run(mode.String(), func(t *testing.T) {
@@ -253,6 +246,22 @@ func TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes(t *testing.T) {
 				t.Fatalf("отказ старта обязан прийти строкой контура выдачи (задача #337), получено: %v", err)
 			}
 		})
+	}
+}
+
+// requireOneLiftingWarning — ровно одно предупреждение, и оно называет, чем
+// снимается: ручку и задачу контура выдачи.
+func requireOneLiftingWarning(t *testing.T, warns []map[string]any, why string) {
+	t.Helper()
+	if len(warns) != 1 {
+		t.Fatalf("предупреждений %d, ожидалось ровно одно: %s", len(warns), why)
+	}
+	lift, _ := warns[0]["снимается"].(string)
+	for _, want := range []string{"authn.client-token.enabled", "kacho#1120"} {
+		if !strings.Contains(lift, want) {
+			t.Errorf("предупреждение обязано называть, чем снимается, через %q; получено «снимается»=%q",
+				want, lift)
+		}
 	}
 }
 
@@ -381,9 +390,9 @@ func runMainChild(t *testing.T, overrides map[string]string) ([]map[string]any, 
 	return records, code, "stderr: " + stderr.String() + " stdout: " + stdout.String()
 }
 
-// TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor — законные
-// близнецы: у выдачи есть исполнитель, и предупреждения нет. Каждый близнец
-// поднимается и меняет против входа случая ровно один факт.
+// TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor — законный
+// близнец: у выдачи есть исполнитель, и предупреждения нет. Близнец поднимается
+// и меняет против входа случая ровно один факт.
 func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
 	t.Run("own со своим контуром выдачи", func(t *testing.T) {
 		cfg := devOwnWithoutOwnSAKeyIssuance()
@@ -397,14 +406,17 @@ func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
 			t.Fatalf("предупреждений %d при переведённом контуре: %v", len(warns), warns)
 		}
 	})
-	t.Run("external без своего контура выдачи", func(t *testing.T) {
-		cfg := devOwnWithoutOwnSAKeyIssuance()
-		cfg.AuthN.IdentityProvider = config.IdentityProviderExternal
-		requireOneFactTwin(t, devOwnWithoutOwnSAKeyIssuance(), cfg, "AuthN.IdentityProvider")
-		requireStartableTwin(t, cfg)
-		if warns := saKeysWarnings(t, cfg); len(warns) != 0 {
-			t.Fatalf("предупреждений %d там, где зеркало заводится у существующего поставщика: %v",
-				len(warns), warns)
-		}
-	})
+}
+
+// TestSAKeyIssuanceWarning_ReachedWhereverTheEndpointIsOff — без токен-эндпоинта
+// у выдачи ключевой пары нет исполнителя ни на одной посадке: дорога к внешнему
+// поставщику её больше не исполняет (kaname#362), и ветвь печатает и там.
+// Вход меняет против случая ровно один факт — посадку.
+func TestSAKeyIssuanceWarning_ReachedWhereverTheEndpointIsOff(t *testing.T) {
+	cfg := devOwnWithoutOwnSAKeyIssuance()
+	cfg.AuthN.IdentityProvider = config.IdentityProviderExternal
+	requireOneFactTwin(t, devOwnWithoutOwnSAKeyIssuance(), cfg, "AuthN.IdentityProvider")
+	requireStartableTwin(t, cfg)
+	requireOneLiftingWarning(t, saKeysWarnings(t, cfg), "посадка с дорогой к поставщику без своего "+
+		"контура выдачи: ключевую пару обменять негде и здесь")
 }

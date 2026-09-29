@@ -1,8 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// hydra_oauth_clients.go — Hydra Admin API for OAuth2 client CRUD,
-// supporting Class A static service-account keys.
+// hydra_oauth_clients.go — Hydra Admin API for OAuth2 client CRUD, for the
+// lanes that still register at the external provider (the interactive client
+// and the drain that compensates it). Service-account keys and personal tokens
+// register nothing here (kaname#362, #1121).
 //
 // Endpoints used:
 //
@@ -11,10 +13,8 @@
 //	GET    /admin/clients/{client_id}  — get OAuth2 client (no secret).
 //	DELETE /admin/clients/{client_id}  — delete OAuth2 client.
 //
-// The plaintext `client_secret` is returned EXACTLY ONCE by Create — we
-// propagate it back through Operation.response.IssueSAKeyResponse and never
-// persist it (security rule: secrets are never stored; only `hydra_client_id`
-// is kept in `service_account_oauth_clients`).
+// The plaintext `client_secret` is returned EXACTLY ONCE by Create and is never
+// persisted (security rule: secrets are never stored).
 package clients
 
 import (

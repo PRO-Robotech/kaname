@@ -16,9 +16,9 @@ package audit_test
 // identity does not get handed new credentials. If the writer, the column and
 // the gate ever stop lining up, this is the test that says so in one sentence.
 //
-// Only the OAuth provider is faked. Everything between the action and the
-// verdict — use-cases, transactions, both repository adapters, the real
-// Postgres schema — is the production path.
+// Nothing is faked. Everything between the action and the verdict —
+// use-cases, transactions, both repository adapters, the real Postgres schema —
+// is the production path; the issuance calls nobody outside the service.
 //
 // This file lives in this package because this is where the full-service
 // Postgres harness lives; it is not about the audit trail (the sibling file
@@ -28,7 +28,6 @@ package audit_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,27 +36,9 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys"
 	service_account "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/service_account"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
-
-// fakeOAuthProvider stands in for the external authorization server — the ONE
-// thing that cannot run in a test container here. It always succeeds, so a
-// refusal observed below can only have come from our own decision, never from
-// the provider being unavailable.
-//
-// Each registration gets a DISTINCT client id, because the real one does and the
-// schema holds it unique. A constant here made the second issuance collide, and
-// the collision surfaced only as "one key where two were expected" — a fixture
-// defect wearing the clothes of the product defect under test.
-type fakeOAuthProvider struct{ created int }
-
-func (f *fakeOAuthProvider) CreateOAuthClient(context.Context, clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
-	f.created++
-	return clients.HydraOAuthClient{ClientID: fmt.Sprintf("fake-client-id-%d", f.created)}, nil
-}
-func (f *fakeOAuthProvider) DeleteOAuthClient(context.Context, string) error { return nil }
 
 func TestDisabledServiceAccount_IsRefusedACredential_AndWorksAgainAfterEnable(t *testing.T) {
 	env := newTestEnv(t)
@@ -75,13 +56,12 @@ func TestDisabledServiceAccount_IsRefusedACredential_AndWorksAgainAfterEnable(t 
 		`SELECT id FROM kaname.service_accounts WHERE name = $1 AND account_id = $2`,
 		"ci-bot-issuance", string(accID)))
 
-	provider := &fakeOAuthProvider{}
+	// The landing runs the platform token endpoint — the key is exchangeable.
 	issue := sa_keys.NewIssueSAKeyUseCase(
 		kanamepg.NewSAOAuthClientRepo(env.pool),
 		kanamepg.NewPoolTxBeginner(env.pool),
-		provider,
 		env.opsRepo,
-	)
+	).WithOwnIssuance()
 	issueOnce := func(name string) error {
 		_, ierr := issue.Execute(withPrincipal(owner), sa_keys.IssueInput{
 			ServiceAccountID: saID,
@@ -144,9 +124,6 @@ func TestDisabledServiceAccount_IsRefusedACredential_AndWorksAgainAfterEnable(t 
 	require.Equal(t, 1, keysOnRecord(),
 		"and nothing was written — a refusal that still left a usable key behind would be no "+
 			"refusal at all, only a slower one")
-	require.Equal(t, 1, provider.created,
-		"nor was a client registered with the provider: the refusal happens before anything "+
-			"outside this service is asked for")
 
 	// ── 4. Enable: the same request works again. ───────────────────────────────
 	_, err = service_account.NewEnableServiceAccountUseCase(env.repo, env.opsRepo).

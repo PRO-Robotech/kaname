@@ -4,29 +4,20 @@
 // Package user_tokens — use-cases UserTokenService (персональные access-токены
 // пользователя, поток private_key_jwt).
 //
-// # Зеркала у внешнего поставщика здесь НЕТ (задача #1121, подфаза Ф4б-3)
+// # Регистрации у внешнего поставщика здесь НЕТ (задачи #1121, kaname#362)
 //
 // Выдача не заводит клиента у внешнего поставщика, а отзыв его не снимает.
 // Клиентом это удостоверение называется по идентификатору СВОЕЙ строки
 // (`uoc…`): им подписывается `client_assertion`, и по нему же разрешает клиента
-// наш реестр утверждений — зеркальная колонка на этом пути не участвует вовсе
-// (см. repo/kaname/pg.AssertionClientRepo). Второе имя, которое прежде приезжало
-// от поставщика, вызывающему выдавалось в поле `client_id` ответа и нашим
-// издателем не разрешалось НИ ПРИ КАКОМ входе.
-//
-// ОКНО ДВУХ ИЗДАТЕЛЕЙ НАЗВАНО СРОКОМ УЖЕ ВЫДАННЫХ ТОКЕНОВ. Строки прежнего
-// выпуска своё зеркало сохраняют, и токены, отчеканенные для них поставщиком,
-// действительны до собственного истечения — платформа их не отзывает и отозвать
-// не может. Остаток окна СЧИТАЕТСЯ, а не оценивается:
-//
-//	SELECT count(*) FROM kaname.user_oauth_clients WHERE hydra_client_id IS NOT NULL;
+// наш реестр утверждений (см. repo/kaname/pg.AssertionClientRepo). Второго имени
+// у него нет: столбец, где лежало имя клиента у поставщика, снят вместе с
+// видом LEGACY, и миграция снятия не допускала ни одной строки прежнего выпуска.
 //
 // На Issue:
 //
 //  1. Генерируем пару ключей ECDSA P-256 локально; приватная половина НИКОГДА не
 //     покидает response kaname и НИКОГДА не хранится в БД.
-//  2. Персистим строку `user_oauth_clients` (public PEM + algorithm; зеркало
-//     поставщика пусто).
+//  2. Персистим строку `user_oauth_clients` (public PEM + algorithm).
 //  3. Возвращаем IssueUserTokenResponse с plaintext приватным PEM + kid в
 //     `Operation.response` (одноразовая выдача; затирается post-completion
 //     OpsResponseRedactor'ом, так что re-poll Operation.Get секрета не отдаёт).
@@ -491,15 +482,14 @@ func (u *IssueUserTokenUseCase) redactSecretFields(ctx context.Context, opID str
 // компенсировать которое было бы нечем: единственный след — своя строка, и она
 // либо закоммичена, либо откачена.
 func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.UserOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
-	// 1. Mint ECDSA P-256 keypair локально. JWK `kid` — id строки реестра
-	//    (`uoc…`), так что утверждения вызывающего self-describing.
-	key, err := generateES256Key(string(tokenID))
+	// 1. Mint ECDSA P-256 keypair локально. Утверждение вызывающий подписывает
+	//    ИМЕНЕМ клиента — идентификатором строки реестра (`uoc…`).
+	key, err := generateES256Key()
 	if err != nil {
 		return nil, fmt.Errorf("generate user token keypair: %w", err)
 	}
 
-	// 2. Персистим строку удостоверения в TX. Зеркало поставщика ПУСТО, и
-	//    пустое здесь означает ровно «регистрации у него нет».
+	// 2. Персистим строку удостоверения в TX.
 	row := domain.UserOAuthClient{
 		ID:              tokenID,
 		UserID:          in.UserID,
@@ -723,14 +713,9 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	//     `id` этой строки, и авторитет отзыва читает её НА ПРЕДЪЯВЛЕНИИ
 	//     (миграция 898002).
 	//
-	// Строка ПРЕЖНЕГО выпуска несёт зеркало, и его регистрация у поставщика эту
-	// строку переживает. Снимать её отсюда больше не пытаемся: клиент, чьей
-	// строки нет, не резолвится ни в один принципал, поэтому получить у
-	// поставщика новый токен им нельзя — остаётся гигиена инвентаря, а не
-	// безопасность, и уходит она вместе с самим поставщиком (подфазы #1123/#1125).
-	// Чего отзыв не делает — не отзывает уже выданное ПОСТАВЩИКОМ: такой токен
-	// самодостаточен и живёт до своего истечения. Это и есть окно двух издателей,
-	// и величина у него одна — срок уже выданных токенов.
+	// Строк прежнего выпуска с регистрацией у внешнего поставщика больше нет:
+	// миграция снятия столбца зеркала отказывала, пока хоть одна лежала
+	// (kaname#362), — снимать у него нечего.
 	return revokeUserTokenResponse(in.TokenID)
 }
 
@@ -813,7 +798,6 @@ func userTokenToProto(c domain.UserOAuthClient) *iamv1.UserOAuthClient {
 	pb := &iamv1.UserOAuthClient{
 		Id:              string(c.ID),
 		UserId:          string(c.UserID),
-		HydraClientId:   string(c.OAuthClientID),
 		Description:     string(c.Description),
 		CreatedByUserId: string(c.CreatedByUserID),
 		PublicKeyPem:    c.PublicKeyPEM,
@@ -842,26 +826,31 @@ func credentialKindToProto(k domain.CredentialKind) iamv1.CredentialKind {
 		return iamv1.CredentialKind_CREDENTIAL_KIND_SECRET
 	case domain.CredentialKindFederated:
 		return iamv1.CredentialKind_CREDENTIAL_KIND_FEDERATED
-	case domain.CredentialKindLegacy:
-		return iamv1.CredentialKind_CREDENTIAL_KIND_LEGACY
 	default:
 		return iamv1.CredentialKind_CREDENTIAL_KIND_UNSPECIFIED
 	}
 }
 
 // CredentialKindFromProto — обратное отображение, для входа выдачи.
-func CredentialKindFromProto(k iamv1.CredentialKind) domain.CredentialKind {
+//
+// Номер вне словаря — ОТКАЗ с именем поля, а не «вид не назван». Вид назван, и
+// назван тем, чего нет: отобразить его в UNSPECIFIED значило бы выпустить
+// ключевую пару на запрос, просивший другого, — принять параметр и молча его
+// проигнорировать. Номер снятого вида (4, LEGACY, kaname#362) стал ровно таким
+// номером и отвергается этой же ветвью.
+func CredentialKindFromProto(k iamv1.CredentialKind) (domain.CredentialKind, error) {
 	switch k {
+	case iamv1.CredentialKind_CREDENTIAL_KIND_UNSPECIFIED:
+		return domain.CredentialKindUnspecified, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_KEYPAIR:
-		return domain.CredentialKindKeypair
+		return domain.CredentialKindKeypair, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_SECRET:
-		return domain.CredentialKindSecret
+		return domain.CredentialKindSecret, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_FEDERATED:
-		return domain.CredentialKindFederated
-	case iamv1.CredentialKind_CREDENTIAL_KIND_LEGACY:
-		return domain.CredentialKindLegacy
+		return domain.CredentialKindFederated, nil
 	default:
-		return domain.CredentialKindUnspecified
+		return "", status.Errorf(codes.InvalidArgument,
+			"%s: unknown credential kind %d", domain.ErrCredentialKindField, int32(k))
 	}
 }
 

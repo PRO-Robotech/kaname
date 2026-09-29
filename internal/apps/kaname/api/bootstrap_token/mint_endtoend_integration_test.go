@@ -83,8 +83,8 @@ func (k *memKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 // композиционный корень. Тонкие: ни одной строки политики.
 type enrichSAPort struct{ sa *kanamepg.SAOAuthClientRepo }
 
-func (p enrichSAPort) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	return p.sa.GetByOAuthClientID(ctx, id)
+func (p enrichSAPort) LookupByClientID(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	return p.sa.GetByClientID(ctx, id)
 }
 
 func (p enrichSAPort) FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {

@@ -38,7 +38,7 @@ type fakeSAPort struct {
 	sa        domain.ServiceAccount
 }
 
-func (f *fakeSAPort) LookupByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (f *fakeSAPort) LookupByClientID(ctx context.Context, clientID domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "not found")
 }
 func (f *fakeSAPort) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {

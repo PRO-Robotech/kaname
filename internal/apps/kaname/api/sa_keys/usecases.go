@@ -1,37 +1,31 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package sa_keys — SAKeyService use-cases (Class A static SA-keys via
-// OAuth2 client_credentials + private_key_jwt).
+// Package sa_keys — SAKeyService use-cases (Class A static SA-keys: a key
+// pair, a federated key or a basic secret of a service account).
 //
 // On Issue (private_key_jwt mode):
 //
 //  1. Generate an ECDSA P-256 keypair locally; the private half NEVER
 //     leaves kaname's response and is NEVER stored in DB.
-//  2. Name the client. НА ПЕРЕВЕДЁННОМ КОНТУРЕ имя назначаем МЫ и оно совпадает
-//     с идентификатором нашей строки; к прежнему издателю обращения нет вовсе
-//     (задача kacho#1120, разбор — `nameClient` ниже и
-//     `docs/engineering/architecture/sa-key-issuance-leaves-the-provider.md`).
-//     Пока контур не переведён — регистрируется OAuth2-клиент у прежнего
-//     издателя с `token_endpoint_auth_method=private_key_jwt`,
-//     `grant_types=[client_credentials]`, `jwks={keys:[<public JWK>]}`,
-//     `owner=<sva_id>`; `client_secret` не возвращается — его не существует.
-//  3. Persist `service_account_oauth_clients` row (`hydra_client_id` carries the
-//     name the client answers to — ours or the previous issuer's, see step 2 —
-//     + public PEM + algorithm).
+//  2. Name the client. Имя клиента назначаем МЫ, и оно совпадает с
+//     идентификатором нашей строки: подписанное утверждение называет им себя,
+//     а обменивает его токен-эндпоинт платформы (`authn.client-token.enabled`).
+//     Посадка без эндпоинта ключ, который обменять негде, не выдаёт
+//     (kaname#362). Регистрации у внешнего поставщика выдача не заводит и
+//     имени, назначенного им, не хранит — столбец, где оно лежало, снят.
+//  3. Persist `service_account_oauth_clients` row (public PEM + algorithm).
 //  4. Return IssueSAKeyResponse with the plaintext PRIVATE PEM + kid
 //     in `Operation.response` (one-shot delivery; redacted post-completion
 //     by OpsResponseRedactor so re-polling Operation.Get yields no secret).
 //
 // On Revoke:
 //
-//  1. Fetch row by id, scoped by sva_id (Authorization Cross-Tenant check).
-//  2. Delete row + DELETE the provider's OAuth2 client (idempotent — 404 is OK).
-//     Обращение остаётся безусловным намеренно: строки, заведённые ДО перевода
-//     контура, своё зеркало сохраняют и снимать его надо, а отказ этого вызова
-//     и без того не мешает отзыву состояться.
+//  1. Delete the row, scoped by sva_id in the same statement (Authorization
+//     Cross-Tenant check). Removal of the row cuts off what the key minted
+//     (trigger of the schema); no call leaves the service.
 //
-// On List: paged read of own SA's clients (no Hydra round-trip).
+// On List: paged read of own SA's clients.
 package sa_keys
 
 import (
@@ -39,7 +33,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -57,7 +50,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -89,12 +81,6 @@ type SAClientRepo interface {
 	// #60 analog for SA-keys (see Execute). Deterministic (never caller-chosen),
 	// so it opens no created_by-spoofing surface. Missing SA → ErrNotFound.
 	OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error)
-}
-
-// OAuthClientAdmin abstracts hydra-admin operations needed by Issue/Revoke.
-type OAuthClientAdmin interface {
-	CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error)
-	DeleteOAuthClient(ctx context.Context, clientID string) error
 }
 
 // TrustedIssuerWriter — запись НАШЕГО перечня доверенных издателей (#1124).
@@ -132,25 +118,20 @@ type OpsResponseRedactor interface {
 
 // ───────────────── Issue use-case ─────────────────
 
-// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
-// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
-// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
-// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
-type providerCompensationEmitter interface {
-	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
-}
-
-// IssueSAKeyUseCase mints a new Hydra OAuth2 client + persists the mapping.
+// IssueSAKeyUseCase mints a new SA key + persists its row.
 type IssueSAKeyUseCase struct {
 	repo    SAClientRepo
 	tx      service.TxBeginner
-	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
 	// trustedIssuers — писатель нашего перечня доверенных издателей. Nil на
 	// федеративной выдаче — ОТКАЗ, а не «пропустить»: ключ, чей перечень не
 	// записан, не примет никого, и выдача ответила бы успехом на невыполнимое.
 	trustedIssuers TrustedIssuerWriter
-	// ownIssuance — контур переведён на свою чеканку (задача kacho#1120).
+	// ownIssuance — посадка обменивает ключ своим токен-эндпоинтом (задача
+	// kacho#1120, `authn.client-token.enabled`). Без него ключевая пара и
+	// федеративный ключ не выдаются: другого исполнителя обмена у ключа нет
+	// (kaname#362). Умолчание — отказ: полусобранная сборка не выдаёт ключ,
+	// который нечем обменять.
 	ownIssuance bool
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
@@ -161,11 +142,7 @@ type IssueSAKeyUseCase struct {
 	// audit — durable audit_outbox emitter. nil → no audit row
 	// (purely-additive; mutation contract unchanged). See WithAuditEmitter.
 	audit auditEmitter
-	// compensation — durable-приёмник компенсирующих намерений для клиента,
-	// зарегистрированного у провайдера до того, как своя строка закоммичена.
-	// nil → компенсация деградирует в прямой (best-effort) вызов снятия.
-	compensation providerCompensationEmitter
-	now          func() time.Time
+	now   func() time.Time
 	// graceTimer — injectable grace-window timer (defaults to time.After).
 	// Tests substitute a channel they control so the grace expiry is driven
 	// deterministically instead of racing wall-clock; production leaves it nil.
@@ -179,26 +156,8 @@ type IssueSAKeyUseCase struct {
 	// чтобы прочитать и сохранить ключ до его вычистки. 0 → без окна (тест/legacy).
 	redactGrace time.Duration
 
-	// HydraClientNamePrefix — used to compose the Hydra `client_name`
-	// (default "kaname-sak-<svaID>"). Configurable via env at wire-time.
-	HydraClientNamePrefix string
-	// AudiencePrefix — приставка достроенного адресата `<приставка>/sa/<svaID>`.
-	//
-	// НЕ ПРОВЯЗАНА, и это РЕШЕНИЕ (задача #2575), а не забывчивость: умолчание
-	// адресата живёт у ПОСАДКИ (`authn.client-token.allowed-audiences` и
-	// `declared_audiences` строки ключа), а не здесь. Композиционный корень её
-	// не присваивает — из семи экспортируемых ручек этой структуры она
-	// единственная такая, — поэтому на поднятом стенде ветка достройки ниже
-	// НЕДОСТИЖИМА, и достроенного адресата не выпускал никогда ни один стенд.
-	//
-	// Отсюда «окна двух написаний нет»: у обоих написаний приставки нет
-	// производителя, значит и принимать второе не у кого.
-	//
-	// Держатель решения — `cmd/kaname/sakey_audience_prefix_unwired_test.go`:
-	// провязка краснит его, и решение придётся пересмотреть тем же изменением.
-	AudiencePrefix string
 	// MaxTTL — inclusive ceiling on `ttl_seconds`. A request above it is
-	// refused with InvalidArgument before any Hydra client is registered.
+	// refused with InvalidArgument before anything is written.
 	// Zero → no ceiling (degraded/legacy wiring); the composition root sets it
 	// from config so the machine credential cannot outlive policy.
 	MaxTTL time.Duration
@@ -207,32 +166,9 @@ type IssueSAKeyUseCase struct {
 	// deployment is unchanged until the knob is wired). A non-zero value is
 	// what turns "0 means never expires" into "0 means the policy default".
 	DefaultTTL time.Duration
-	// BindDPoP — register the key's OAuth2 client so the provider mints
-	// SENDER-CONSTRAINED access tokens (RFC 9449 `cnf.jkt`) instead of plain
-	// bearers. Binding is per-client registration metadata, so it must be
-	// requested at issue time; a key registered before this was enabled keeps
-	// minting unbound tokens until it is rotated.
-	//
-	// Default false. This is the issuance half of the control whose enforcement
-	// half lives at the edge (api-gateway
-	// KACHO_API_GATEWAY_AUTHN_REQUIRE_MACHINE_TOKEN_BINDING) — enforcement
-	// without issuance can only reject, so issuance is enabled first.
-	BindDPoP bool
-	// AccessTokenLifespan — per-client `access_token_lifespan` stamped on the
-	// Hydra OAuth2 client registered for this key, so tokens minted from a
-	// machine credential do not silently inherit the provider-global default.
-	// Zero → field omitted (provider default applies).
-	AccessTokenLifespan time.Duration
-	// RegistryAudience — the configured registry service audience (the same
-	// value the `/iam/token` Docker-Registry shim requests from Hydra during the
-	// client_credentials exchange, sourced from
-	// `api-server.registry-token.service`). ALWAYS whitelisted on every issued
-	// SA-key's Hydra client so a docker/registry key works out of the box —
-	// without it Hydra rejects the exchange with "Requested audience … has not
-	// been whitelisted by the OAuth 2.0 Client" (#320). Empty → not added
-	// (test / registry-disabled wiring). Set in the composition root.
-	RegistryAudience string
 }
+
+// WithResponseRedactor wires the post-Issue secret redactor.}
 
 // WithResponseRedactor wires the post-Issue secret redactor.
 func (u *IssueSAKeyUseCase) WithResponseRedactor(r OpsResponseRedactor) *IssueSAKeyUseCase {
@@ -254,21 +190,14 @@ func (u *IssueSAKeyUseCase) WithTrustedIssuerWriter(w TrustedIssuerWriter) *Issu
 	return u
 }
 
-// WithOwnIssuance объявляет контур выдачи ПЕРЕВЕДЁННЫМ на свою чеканку
-// (задача kacho#1120).
+// WithOwnIssuance объявляет, что посадка обменивает ключ СВОИМ токен-эндпоинтом
+// (задача kacho#1120, `authn.client-token.enabled`).
 //
-// Composition-root only: «переведён ли контур» — свойство ПОСАДКИ, а не запроса,
-// и вызывающий его не выбирает.
+// Composition-root only: есть ли у посадки эндпоинт — её свойство, а не
+// запроса, и вызывающий его не выбирает. Без объявления ключевая пара и
+// федеративный ключ отвергаются синхронно (kaname#362).
 func (u *IssueSAKeyUseCase) WithOwnIssuance() *IssueSAKeyUseCase {
 	u.ownIssuance = true
-	return u
-}
-
-// WithCompensationEmitter wires the durable sink for compensating intents.
-// Composition-root only. nil → the half-done registration is compensated by a
-// direct best-effort release only (см. clients.ProviderCompensationOutbox).
-func (u *IssueSAKeyUseCase) WithCompensationEmitter(c providerCompensationEmitter) *IssueSAKeyUseCase {
-	u.compensation = c
 	return u
 }
 
@@ -289,14 +218,12 @@ func (u *IssueSAKeyUseCase) WithRedactGrace(d time.Duration) *IssueSAKeyUseCase 
 }
 
 // NewIssueSAKeyUseCase constructs.
-func NewIssueSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *IssueSAKeyUseCase {
+func NewIssueSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, ops operations.Repo) *IssueSAKeyUseCase {
 	return &IssueSAKeyUseCase{
-		repo:                  r,
-		tx:                    tx,
-		hydra:                 h,
-		opsRepo:               ops,
-		now:                   time.Now,
-		HydraClientNamePrefix: "kaname-sak-",
+		repo:    r,
+		tx:      tx,
+		opsRepo: ops,
+		now:     time.Now,
 	}
 }
 
@@ -328,10 +255,8 @@ type IssueInput struct {
 	CredentialKind domain.CredentialKind
 
 	// TrustedSubjects — Federation IN. When non-empty, the use-case
-	// switches to FEDERATED mode: no keypair is generated, the Hydra OAuth2
-	// client is registered with `grant_types=[urn:ietf:params:oauth:grant-
-	// type:jwt-bearer]` + `token_endpoint_auth_method=none` (no JWKS), and
-	// the response omits `private_key_pem` / `public_key_pem`. External
+	// switches to FEDERATED mode: no keypair is generated and the response
+	// omits `private_key_pem` / `public_key_pem`. External
 	// workloads sign their own assertions through the IdP that emitted one
 	// of the listed `(issuer, subject_pattern)` tuples; наш проверяющий
 	// принимает утверждение тогда и только тогда, когда пара (iss, sub) есть
@@ -339,17 +264,11 @@ type IssueInput struct {
 	// ключом издателя (#1124). Empty slice = private_key_jwt mode.
 	TrustedSubjects []domain.TrustedSubject
 
-	// Audience — Federation OUT. When non-empty, the Hydra OAuth2
-	// client is registered with this exact `audience` list (replacing the
-	// `AudiencePrefix`-built audience, которой на стенде нет), so every
-	// access_token minted for this client lands the values in its `aud`
-	// claim. Required for OIDC-trust-federation with external IdPs — the
-	// `audience` value must match exactly what the remote IdP expects (its
-	// token-exchange endpoint or resource URI).
-	// Order preserved; empty entries dropped; duplicates collapsed.
-	// Пустой перечень = адресата не назвали; на поднятом стенде это НЕ
-	// «внутренний адресат по умолчанию» (приставка не провязана, см. её
-	// объявление), а перечень из одного адресата реестра либо пустой.
+	// Audience — сужение адресатов, объявленное заказчиком (#1136): ключ
+	// сможет заказать только адресатов из этого перечня и только внутри
+	// перечня посадки (`authn.client-token.allowed-audiences`). Порядок
+	// сохраняется, пустые элементы снимаются, повторы схлопываются. Пустой
+	// перечень = сужения не объявлено; действует перечень посадки.
 	Audience []string
 }
 
@@ -420,6 +339,19 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Ключевая пара и федеративный ключ предъявляются ОБМЕНОМ, и обменивает их
+	// только токен-эндпоинт платформы. Посадка без него выдала бы ключ, который
+	// обменять негде, — объявленную возможность, не исполнимую ни при каком
+	// входе. Отказ синхронный и стоит ПОСЛЕ разбора запроса: сформированный
+	// неверно запрос получает свой отказ с именем поля на любой посадке, а
+	// верный — ответ, известный до всякого чтения и записи. Секрет обмена не
+	// требует — его предъявляют как есть.
+	if kind != domain.CredentialKindSecret && !u.ownIssuance {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"credential_kind %s: authn.client-token.enabled is false — this key is exchanged for a "+
+				"token on the platform token endpoint, and this landing does not run one", kind)
 	}
 
 	// Resolve the owning account so the Operation metadata carries account_id —
@@ -678,7 +610,7 @@ func (u *IssueSAKeyUseCase) issueSecretSync(
 			SecretHash:      hash,
 			ExpiresAt:       &expires,
 		}
-		persisted, err := u.commitMapping(ctx, row, "", actor, "")
+		persisted, err := u.commitMapping(ctx, row, actor, "")
 		if err != nil {
 			return nil, err
 		}
@@ -709,84 +641,21 @@ func (u *IssueSAKeyUseCase) issueSecretSync(
 	return nil
 }
 
-// hydraUnavailable maps a failed Hydra-admin call to a fixed, opaque
-// codes.Unavailable status and logs the raw cause.
-//
-// This runs on the async operations worker (operations.Run). That worker maps any
-// UNRECOGNIZED error — anything status.FromError can't read as a gRPC status,
-// including a plain fmt.Errorf even when it wraps iamerr.ErrUnavailable — to a
-// generic codes.Internal "internal worker error" and logs NOTHING. So the previous
-// `fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)` degraded a
-// peer-UNREACHABLE hydra-admin (e.g. KANAME_HYDRA_ADMIN_URL absent → issuer-derived
-// public host unresolvable in-cluster) into an opaque INTERNAL with zero diagnostics.
-//
-// Returning an explicit UNAVAILABLE keeps the mutation fail-closed per the
-// peer-unavailable convention; the raw driver/URL text is LOGGED, never returned, so
-// it never leaks infra topology on the wire (hardening: INTERNAL/UNAVAILABLE opaque).
-func (u *IssueSAKeyUseCase) hydraUnavailable(ctx context.Context, action string, err error) error {
-	if u.logger != nil {
-		u.logger.ErrorContext(ctx, "hydra admin call failed",
-			slog.String("action", action), slog.Any("error", err))
-	}
-	// Текст НЕ называет ни поставщика, ни его административный API: арендатору
-	// о них знать не полагается, а знание не даёт ему следующего шага — тот же
-	// довод, которым `shared.MapRepoErr` держит фиксированный текст на признаке
-	// недоступности. Подробность остаётся в цепочке и уходит в журнал.
-	return status.Error(codes.Unavailable, shared.UnavailableMessage)
-}
-
-// doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, name the client (registering it
-// with the previous issuer only while the contour is not translated — see
-// nameClient), persist mapping with PublicKeyPEM + KeyAlgorithm, return
-// PrivateKeyPEM exactly once.
+// doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, persist the row with
+// PublicKeyPEM + KeyAlgorithm, return PrivateKeyPEM exactly once. The client is
+// named by the id of the row: that name signs the assertion (`iss`/`sub`), and
+// the platform token endpoint resolves it.
 func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
-	// 1. Mint ECDSA P-256 keypair locally. The JWK `kid` is the kaname
-	//    SA-OAuth-client id (`soc_*`) so caller→Hydra assertions are
-	//    self-describing.
-	key, err := generateES256Key(string(keyID))
+	// 1. Mint ECDSA P-256 keypair locally.
+	key, err := generateES256Key()
 	if err != nil {
 		return nil, fmt.Errorf("generate sa keypair: %w", err)
 	}
 
-	// 2. Собрать регистрацию клиента: private_key_jwt + публичный JWK.
-	//
-	//    ЗАПРОС СТРОИТСЯ ВСЕГДА, А ОТПРАВЛЯЕТСЯ НЕ ВСЕГДА. Перечень адресатов
-	//    из него уезжает в ответ выдачи и на непереведённом контуре — в саму
-	//    регистрацию; отправлять ли её, решает nameClient. Строить перечень
-	//    внутри ветки значило бы завести ВТОРОЕ место, вычисляющее адресатов, и
-	//    ответ переведённого контура разошёлся бы с ответом прежнего молча.
-	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
-	// #nosec G101 -- "client_credentials" is the OAuth2 grant-type identifier (RFC 6749 section 4.4),
-	// not a credential. Same applies to "private_key_jwt" (RFC 7521 client_assertion_type).
-	hydraReq := clients.CreateOAuthClientRequest{
-		ClientName:              clientName,
-		Owner:                   string(in.ServiceAccountID),
-		GrantTypes:              []string{"client_credentials"},
-		TokenEndpointAuthMethod: "private_key_jwt",
-		// Hydra обязан проверять client_assertion тем же alg, что несёт ключ (ES256);
-		// без этого Hydra дефолтит на RS256 → invalid_client на ES256-assertion.
-		TokenEndpointAuthSigningAlg: key.JWK.Alg,
-		JWKS:                        &clients.JWKS{Keys: []clients.JWK{key.JWK}},
-	}
-	hydraReq.Audience = u.resolveAudience(in)
-	// Pin the per-client access-token lifetime. Without it every token minted
-	// from a machine credential inherits the provider-global default, which is
-	// set by whatever the identity provider happens to ship with.
-	hydraReq.AccessTokenLifespan = u.accessTokenLifespan()
-	// Ask for sender-constrained tokens. Without this the minted token is an
-	// ordinary bearer: whoever holds the bytes can replay it, and the asymmetric
-	// key that authenticated the client is irrelevant to that replay.
-	hydraReq.DPoPBoundAccessTokens = u.BindDPoP
-	identity, err := u.nameClient(ctx, keyID, hydraReq)
-	if err != nil {
-		return nil, err
-	}
-
-	// 3. Persist mapping row in TX.
+	// 2. Persist the row in TX.
 	row := domain.ServiceAccountOAuthClient{
 		ID:              keyID,
 		SvaID:           in.ServiceAccountID,
-		OAuthClientID:   domain.OAuthClientID(identity.ClientID),
 		Description:     domain.Description(in.Description),
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		PublicKeyPEM:    key.PublicPEM,
@@ -801,61 +670,38 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	if exp := u.resolveExpiry(in); exp != nil {
 		row.ExpiresAt = exp
 	}
-	persisted, err := u.commitMapping(ctx, row, identity.ProviderCoordinate, actor, key.Algorithm)
+	persisted, err := u.commitMapping(ctx, row, actor, key.Algorithm)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Build response — return PRIVATE PEM + kid ONCE. `client_secret`
+	// 3. Build response — return PRIVATE PEM + kid ONCE. `client_secret`
 	//    is kept empty (deprecated field, retained for wire-compat).
 	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:           pbKey,
-		ClientId:      identity.ClientID,
+		ClientId:      string(keyID),
 		ClientSecret:  "", // private_key_jwt: no shared secret exists.
 		PrivateKeyPem: key.PrivatePEM,
 		PublicKeyPem:  key.PublicPEM,
 		Algorithm:     key.Algorithm,
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа. На переведённом контуре это ЗАПИСАННОЕ
-		// сужение, на непереведённом — перечень зеркала: см. responseAudiences.
-		Audiences: u.responseAudiences(hydraReq.Audience, persisted.DeclaredAudiences),
+		// Перечень адресатов ключа — ЗАПИСАННОЕ сужение (#1136). Пустой перечень
+		// — утверждение, а не умолчание: «сужения нет, действует перечень
+		// посадки».
+		Audiences: persisted.DeclaredAudiences,
 	}
 	return anypb.New(resp)
-}
-
-// responseAudiences — что ответ выдачи называет перечнем адресатов ключа.
-//
-// # Почему величина зависит от контура, а не одна на оба
-//
-// Она отвечает на вопрос «что этот ключ сможет заказать», и ответ на него на
-// двух контурах даёт РАЗНАЯ величина. Пока зеркало заводится, решает его
-// перечень: обмен идёт у прежнего издателя, и он сверяет с ним. На переведённом
-// контуре зеркала нет — перечень зеркала не регистрируется нигде и не читается
-// ничем, — а решает записанное на строке сужение (задача #1136).
-//
-// Отдать одно вместо другого значило бы назвать адресатов, которых ключ заказать
-// не сможет, и не назвать тех, кого сможет. Поле объявлено справочным, но
-// справка, которая неверна, хуже её отсутствия: по ней принимают решение.
-//
-// Пустой перечень на переведённом контуре — утверждение, а не умолчание:
-// «сужения нет, действует перечень посадки».
-func (u *IssueSAKeyUseCase) responseAudiences(mirror, declared []string) []string {
-	if u.ownIssuance {
-		return declared
-	}
-	return mirror
 }
 
 // declaredAudiences — сужение адресатов в той форме, в какой его объявляет
 // контракт выдачи: порядок сохраняется, пустые элементы снимаются, повторы
 // схлопываются.
 //
-// ЗДЕСЬ НЕТ НИ ОДНОГО ЗНАЧЕНИЯ СВЕРХ НАЗВАННЫХ ЗАКАЗЧИКОМ, и это отличает его от
-// `resolveAudience`. Тот строит перечень ЗЕРКАЛА и добавляет к нему адресат
-// реестра и внутреннее умолчание — величины, нужные обмену у прежнего издателя.
-// Попади они в сужение, ключ получил бы доступ к адресатам, которых заказчик не
-// называл: расширение вместо сужения, молча и в сторону большего.
+// ЗДЕСЬ НЕТ НИ ОДНОГО ЗНАЧЕНИЯ СВЕРХ НАЗВАННЫХ ЗАКАЗЧИКОМ. Попади сюда что-то
+// сверх — адресат реестра, внутреннее умолчание, — ключ получил бы доступ к
+// адресатам, которых заказчик не называл: расширение вместо сужения, молча и в
+// сторону большего.
 //
 // Пустой элемент снимается потому, что заказать его нельзя ничем: он не совпал
 // бы ни с одним запросом и молча сузил бы ключ до недостижимого.
@@ -881,152 +727,15 @@ func declaredAudiences(in IssueInput) []string {
 	return out
 }
 
-// clientNaming — идентификатор, которым выданный клиент себя называет, и
-// координата его записи у прежнего издателя.
-//
-// ПОЧЕМУ ДВЕ ВЕЛИЧИНЫ, А НЕ ОДНА. Пока чеканил прежний издатель, они совпадали —
-// он и заводил запись, и назначал имя. На переведённом контуре имя назначаем мы,
-// а записи у него нет вовсе, и «нечего снимать» обязано быть выражено ОТСУТСТВИЕМ
-// координаты, а не выводом «имя похоже на наше». Вывод по форме имени пережил бы
-// первую же смену формата идентификатора, и пережил бы молча: компенсация
-// уехала бы к постороннему с просьбой снять то, чего он не заводил.
-type clientNaming struct {
-	// ClientID — то, чем клиент себя называет. Он же уходит в строку реестра,
-	// в ответ выдачи и в подписанное утверждение (`iss`/`sub`).
-	ClientID string
-	// ProviderCoordinate — координата записи у прежнего издателя. Пусто, когда
-	// записи нет: снимать тогда нечего.
-	ProviderCoordinate string
-}
-
-// nameClient называет клиента и, если контур не переведён, заводит его зеркало.
-//
-// ПЕРЕВЕДЁННЫЙ КОНТУР К ПРЕЖНЕМУ ИЗДАТЕЛЮ НЕ ХОДИТ. Клиента резолвит НАШ реестр
-// утверждений, и резолвит он по нашему идентификатору — зеркальная колонка на
-// том пути не участвует ни как второй ключ поиска, ни как запасной
-// (`repo/kaname/pg/assertion_client_repo.go`). Значит зеркало на переведённом
-// контуре — запись у постороннего, которую никто не читает, при живой
-// административной дороге к нему.
-//
-// ГРАНИЦА НАЗВАНА: ЗЕРКАЛО СНИМАЕТСЯ ТОЛЬКО У ПЕРЕВЕДЁННОГО КОНТУРА. Пока
-// подписант не подключён, прежний издатель — ЕДИНСТВЕННЫЙ производитель токена
-// на этом ключе, и ключ без зеркала обменять было бы негде ни одним путём.
-//
-// ПОЧЕМУ НАШ ИДЕНТИФИКАТОР, А НЕ ПУСТО. У клиента ровно одно имя, и именно им он
-// себя называет: докерная полоса ищет строку по имени клиента, состав утверждений
-// кладёт его значением, а снятие ключа адресует им же. Пустое имя оставило бы
-// каждого из этих читателей без величины — то есть сняло бы не зеркало, а
-// возможность.
-func (u *IssueSAKeyUseCase) nameClient(
-	ctx context.Context, keyID domain.SAOAuthClientID, req clients.CreateOAuthClientRequest,
-) (clientNaming, error) {
-	if u.ownIssuance {
-		return clientNaming{ClientID: string(keyID)}, nil
-	}
-	mirrored, err := u.hydra.CreateOAuthClient(ctx, req)
-	if err != nil {
-		return clientNaming{}, u.hydraUnavailable(ctx, "create-client", err)
-	}
-	return clientNaming{ClientID: mirrored.ClientID, ProviderCoordinate: mirrored.ClientID}, nil
-}
-
-// resolveAudience derives the Hydra `audience` whitelist for a new SA client.
-//
-// Audience semantics (each layer is unioned, order-preserving, deduplicated):
-//   - in.Audience non-empty → its entries lead the list (empties dropped).
-//     External-federation rollout requires the audience to match what the
-//     external IdP expects — those caller values are preserved verbatim.
-//   - in.Audience empty AND AudiencePrefix set → append the legacy
-//     kaname-internal audience `<prefix>/sa/<svaID>`. НА ПОДНЯТОМ СТЕНДЕ ЭТА
-//     ПОЛОСА НЕ ИСПОЛНЯЕТСЯ: приставку не присваивает ни один прод-файл
-//     (решение #2575, держатель — `cmd/kaname/sakey_audience_prefix_unwired_test.go`).
-//     Полоса остаётся достижимой только из проб. (Skipped when the caller
-//     supplied an explicit audience, keeping the external-federation contract:
-//     the internal default is not force-mixed into a deliberate external list.)
-//   - RegistryAudience set → ALWAYS appended so a docker/registry SA-key works
-//     out of the box. The `/iam/token` shim requests `audience=<registry
-//     service>` during the client_credentials exchange; Hydra rejects that
-//     exchange unless this client whitelists that audience (#320). Whitelisting
-//     it is additive — it never changes the `aud` a token actually carries
-//     (that is chosen per-exchange by the requested `audience` param).
-//   - everything empty → nil (Hydra mints tokens with no `aud` claim; valid for
-//     the kacho-internal API gateway (ПЛАТФОРМЕННЫЙ край — не наш) which doesn't require aud).
-func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
-	seen := make(map[string]struct{}, len(in.Audience)+2)
-	out := make([]string, 0, len(in.Audience)+2)
-	add := func(a string) {
-		if a == "" {
-			return
-		}
-		if _, dup := seen[a]; dup {
-			return
-		}
-		seen[a] = struct{}{}
-		out = append(out, a)
-	}
-
-	for _, a := range in.Audience {
-		add(a)
-	}
-	// Ветка достройки. На поднятом стенде условие ниже ложно ВСЕГДА: приставка
-	// не провязана (решение #2575). Ветка сохранена достижимой из проб и снята
-	// не будет молча — её провязку стережёт держатель решения.
-	if len(out) == 0 && u.AudiencePrefix != "" {
-		add(strings.TrimRight(u.AudiencePrefix, "/") + "/sa/" + string(in.ServiceAccountID))
-	}
-	// Always whitelist the configured registry service audience (#320).
-	add(u.RegistryAudience)
-
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 // doIssueFederated — выдача федеративного ключа: ключевого материала у него нет,
 // а его перечень доверенных издателей пишется НАШЕЙ таблицей в той же
 // транзакции, что и строка ключа (задача #1124).
 //
-// # Что изменилось и почему это одно изменение, а не два
-//
-// Прежде здесь стояла пара обращений к поставщику: зеркало клиента и веер
-// доверительных грантов. Первое было нужно затем, что внешняя нагрузка
-// обменивала своё утверждение У НЕГО; второе — затем, что перечень доверенных
-// издателей вёл он же. Обе причины — одна: решение о федеративном ключе
-// принималось не нами.
-//
-// Теперь утверждение проверяет наш проверяющий (`internal/clientassertion`,
-// федеративная полоса) по нашему перечню, и обе причины исчезли вместе. На
-// переведённом контуре зеркало не заводится — как и на полосе ключа с ключевым
-// материалом (kacho#1120); решение принимает `nameClient`, а не эта ветка.
+// Утверждение внешней нагрузки проверяет наш проверяющий
+// (`internal/clientassertion`, федеративная полоса) по нашему перечню, а
+// обменивает его токен-эндпоинт платформы. Регистрации у внешнего поставщика
+// эта выдача не заводит.
 func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
-	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
-	hydraReq := clients.CreateOAuthClientRequest{
-		ClientName: clientName,
-		Owner:      string(in.ServiceAccountID),
-		// Вид выдачи по RFC 7521/7523. Запрос СТРОИТСЯ всегда, а отправляется
-		// не всегда: на переведённом контуре зеркала нет, и решает это
-		// nameClient. Перечень адресатов уезжает из него в ответ выдачи на
-		// обеих посадках, поэтому строить его внутри ветки значило бы завести
-		// второе место, вычисляющее адресатов.
-		GrantTypes: []string{tokenpolicy.GrantTypeJWTBearer},
-		// Аутентификации клиента здесь нет: утверждение И ЕСТЬ основание
-		// выдачи, а подписал его внешний издатель.
-		TokenEndpointAuthMethod: "none",
-		// Своего ключевого материала федеративная строка не несёт: подпись
-		// проверяется ключом издателя из нашего перечня доверенных издателей.
-		JWKS: nil,
-	}
-	hydraReq.Audience = u.resolveAudience(in)
-	// Pin the per-client access-token lifetime. Without it every token minted
-	// from a machine credential inherits the provider-global default, which is
-	// set by whatever the identity provider happens to ship with.
-	hydraReq.AccessTokenLifespan = u.accessTokenLifespan()
-	// Ask for sender-constrained tokens. Without this the minted token is an
-	// ordinary bearer: whoever holds the bytes can replay it, and the asymmetric
-	// key that authenticated the client is irrelevant to that replay.
-	hydraReq.DPoPBoundAccessTokens = u.BindDPoP
-
 	// Писатель перечня обязателен ЗДЕСЬ, до всякой записи. Ключ, чей перечень
 	// не записан, не примет никого, и выдача ответила бы успехом на
 	// невыполнимое — то есть объявила бы возможность, которой нет.
@@ -1035,15 +744,9 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 			"trusted issuer list writer is not wired: a federated key without its list would trust nobody")
 	}
 
-	identity, err := u.nameClient(ctx, keyID, hydraReq)
-	if err != nil {
-		return nil, err
-	}
-
 	row := domain.ServiceAccountOAuthClient{
 		ID:              keyID,
 		SvaID:           in.ServiceAccountID,
-		OAuthClientID:   domain.OAuthClientID(identity.ClientID),
 		Description:     domain.Description(in.Description),
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		// PublicKeyPEM + KeyAlgorithm intentionally empty — no key
@@ -1064,7 +767,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	//
 	// Перечень доверенных издателей уезжает в ТУ ЖЕ транзакцию, что строка
 	// ключа: откат снимает оба, полусделанного состояния между ними не бывает.
-	persisted, err := u.commitMapping(ctx, row, identity.ProviderCoordinate, actor, "")
+	persisted, err := u.commitMapping(ctx, row, actor, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1072,7 +775,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:      pbKey,
-		ClientId: identity.ClientID,
+		ClientId: string(keyID),
 		// Federated: no key material. Algorithm + KeyId are likewise empty
 		// because the asserting party owns its own kid scheme.
 		ClientSecret:  "",
@@ -1080,9 +783,8 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		PublicKeyPem:  "",
 		Algorithm:     "",
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа: записанное сужение на переведённом контуре,
-		// перечень зеркала на непереведённом (см. responseAudiences).
-		Audiences: u.responseAudiences(hydraReq.Audience, persisted.DeclaredAudiences),
+		// Перечень адресатов ключа — записанное сужение (#1136).
+		Audiences: persisted.DeclaredAudiences,
 	}
 	return anypb.New(resp)
 }
@@ -1108,72 +810,15 @@ func (u *IssueSAKeyUseCase) resolveExpiry(in IssueInput) *time.Time {
 	return &t
 }
 
-// accessTokenLifespan renders the per-client `access_token_lifespan` for the
-// Hydra registration. Empty string → field omitted → provider default.
-func (u *IssueSAKeyUseCase) accessTokenLifespan() string {
-	if u.AccessTokenLifespan <= 0 {
-		return ""
-	}
-	return u.AccessTokenLifespan.String()
-}
-
-// compensationOriginSAKey — атрибуция саги в компенсирующем намерении.
-const compensationOriginSAKey = "sa_key"
-
-// providerReleaseTimeout — верхняя граница на снятие уже созданного клиента
-// (запись намерения ИЛИ прямой вызов). Отвязан от отмены вызывающего: снятие
-// обязано исполниться, даже если запрос уже отменён.
-const providerReleaseTimeout = 5 * time.Second
-
-// releaseProviderClient снимает OAuth-клиента, созданного у провайдера до того,
-// как своя строка была закоммичена.
-//
-// Порядок обратный порядку захвата и ровно из одного шага: клиент — последнее и
-// единственное, что сага заняла у провайдера к этому моменту.
-//
-// Первичный путь — DURABLE намерение (переживает смерть процесса и провал
-// самого снятия, доставляется дренажом at-least-once). Прямой вызов остаётся
-// ЗАПАСНЫМ и срабатывает только если намерение записать не удалось: тогда мы не
-// хуже прежнего, и это видно в логе. Оба пути идемпотентны — повторное снятие
-// уже снятого клиента провайдер отдаёт как исполненное.
-func (u *IssueSAKeyUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
-	if clientID == "" {
-		return
-	}
-	// Отвязано от отмены вызывающего, baggage (trace/request-id) сохранено.
-	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
-	defer cancel()
-
-	if u.compensation != nil {
-		if err := u.compensation.EmitHydraClientDelete(relCtx, clientID, compensationOriginSAKey, reason); err == nil {
-			return
-		} else if u.logger != nil {
-			u.logger.ErrorContext(relCtx,
-				"sa key: durable compensation intent could not be recorded, falling back to a direct release",
-				"provider_client_id", clientID, "reason", reason, "err", err.Error())
-		}
-	}
-	if err := u.hydra.DeleteOAuthClient(relCtx, clientID); err != nil && u.logger != nil {
-		// Ни намерения, ни снятия — клиент остался у провайдера, и назвать его
-		// потом можно только по этой строке лога.
-		u.logger.ErrorContext(relCtx,
-			"sa key: provider registration left behind after a failed issue",
-			"provider_client_id", clientID, "reason", reason, "err", err.Error())
-	}
-}
-
-// commitMapping persists the SA-OAuth-client mapping row in a fresh tx and
-// rolls back + releases the Hydra client on failure. Shared by both the
-// private_key_jwt and federated paths.
+// commitMapping persists the SA key row in a fresh tx. Shared by all three
+// kinds.
 //
 // The durable iam.sa_key.issued audit_outbox row is emitted in the SAME tx as
-// the Insert (atomic, запрет #10): the audit row commits iff the mapping
-// commits, so a rolled-back Insert (e.g. sva_unique 23505) leaves no orphan
-// compliance row. The Hydra client is created BEFORE this tx (external side-
-// effect); on failure it is released through releaseProviderClient (durable
-// intent, direct call as fallback) — the compensating intent CANNOT ride this
-// tx, because this tx is precisely the one that rolls back.
-func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
+// the Insert (atomic, запрет #10): the audit row commits iff the row commits, so
+// a rolled-back Insert (e.g. sva_unique 23505) leaves no orphan compliance row.
+// Nothing is created outside the service before this tx, so a failed tx leaves
+// nothing to compensate.
+func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
 	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
 	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
@@ -1182,14 +827,12 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")
 		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.mappingTxBegin", err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback(ctx)
-			u.releaseProviderClient(ctx, hydraClientID, "mapping row was not committed")
 		}
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)
@@ -1229,23 +872,21 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 
 // ───────────────── Revoke use-case ─────────────────
 
-// RevokeSAKeyUseCase deletes both the kaname mapping row and the Hydra
-// OAuth2 client.
+// RevokeSAKeyUseCase deletes the key row; the schema cuts off what it minted.
 type RevokeSAKeyUseCase struct {
 	repo    SAClientRepo
 	tx      service.TxBeginner
-	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
 	// audit — durable audit_outbox emitter. nil → no audit row.
 	audit auditEmitter
-	// logger — surfaces the eventual-consistency Hydra orphan-cleanup warning
-	// after the DB delete commits. nil → warning is skipped (degraded wiring).
+	// logger — reader of the mapped-error detail (mapPGErrLogged). nil → the
+	// process default.
 	logger *slog.Logger
 }
 
 // NewRevokeSAKeyUseCase constructs.
-func NewRevokeSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *RevokeSAKeyUseCase {
-	return &RevokeSAKeyUseCase{repo: r, tx: tx, hydra: h, opsRepo: ops}
+func NewRevokeSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, ops operations.Repo) *RevokeSAKeyUseCase {
+	return &RevokeSAKeyUseCase{repo: r, tx: tx, opsRepo: ops}
 }
 
 // WithAuditEmitter wires the durable audit_outbox emitter.
@@ -1255,8 +896,8 @@ func (u *RevokeSAKeyUseCase) WithAuditEmitter(a auditEmitter) *RevokeSAKeyUseCas
 	return u
 }
 
-// WithLogger wires the logger used to surface the post-commit Hydra
-// orphan-cleanup warning. Composition-root only; returns the receiver.
+// WithLogger wires the reader of the mapped-error detail. Composition-root only;
+// returns the receiver.
 func (u *RevokeSAKeyUseCase) WithLogger(l *slog.Logger) *RevokeSAKeyUseCase {
 	u.logger = l
 	return u
@@ -1334,6 +975,34 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 // the call: `scope_extractor` takes the `iam_service_account` object out of the
 // `service_account_id` field (sa_key_service.proto). The key id is not checked
 // there — narrowing it is what the statement below does.
+//
+// # How fast a revocation takes effect
+//
+// At commit the key can obtain NOTHING FURTHER: the row IS the authority on
+// whether a client is a kacho credential, and with it gone the key resolves to
+// no principal on every exchange.
+//
+// What the key minted before is cut off by the SAME transaction: the trigger
+// `sa_oauth_client_removal_cuts_minted_tokens` writes a revocation addressed by
+// the id of our row. The claim set of our token carries that id
+// (`kaname_sa_key_id`), it is in the closed list of cut-off keys of the
+// revocation rule, and both accepting surfaces ask the rule ON THE REQUEST PATH
+// — the revocation authority on the internal listener and the reader of the
+// presented credential on the public one. So the residual window is the cache
+// lifetime of a positive verdict at the reader — a value the OPERATOR declares
+// and sees — not the lifetime of the credential itself.
+//
+// ПОВЕРХНОСТЕЙ, ЧИТАЮЩИХ ОТСЕЧКУ: 2
+//
+// The number above is checked against the tree by `revoke_window_doc_test.go`,
+// which counts the call sites itself.
+//
+// No call leaves the service. A key row used to carry the name a previous
+// external issuer gave its client, and revocation deleted that registration
+// after the commit; the column and every registration it named are gone
+// (kaname#362, order of the removal —
+// docs/engineering/architecture/provider-mirror-column-retirement.md), so
+// there is nothing outside to remove.
 func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor string) (*anypb.Any, error) {
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
@@ -1350,10 +1019,9 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.deleteOwnedByID", err)
 	}
 	if !found {
-		// Nothing to remove. The tx rolls back (there is no removal to persist),
-		// no audit row is emitted — there is no event without a state change —
-		// and no provider call is made: calling out on a foreign or absent id
-		// would be the same oracle again, only in someone else's log.
+		// Nothing to remove. The tx rolls back (there is no removal to persist)
+		// and no audit row is emitted — there is no event without a state
+		// change.
 		return revokeSAKeyResponse(in.KeyID)
 	}
 	// Emit the durable iam.sa_key.revoked audit row in the SAME tx as the
@@ -1372,67 +1040,6 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.commit", err)
 	}
 	committed = true
-	// Delete from Hydra (idempotent — 404 OK).
-	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
-		// The DB delete already committed, so the RPC stays successful and the
-		// provider-side client registration outlives it. There is no cleanup
-		// worker in this service and deliberately none is added: what makes a
-		// revocation a revocation is that the credential stops working, and
-		// that no longer depends on this call succeeding.
-		//
-		// The mapping row IS the authority on whether a client is a kacho
-		// credential, and the token hook consults it on every single mint. With
-		// the row gone the surviving client resolves to no principal, so the
-		// hook refuses it (`invalid_client`, 403) and records an
-		// `authn.token.denied` with reason `principal_not_found` each time it
-		// tries — see handler/iamhooks/token_hook_handler.go. So at commit this
-		// key can obtain NOTHING FURTHER, and that no longer waits on the
-		// provider being reachable.
-		//
-		// СКОЛЬКО ЖИВЁТ УЖЕ ВЫДАННОЕ — ответ РАЗНЫЙ ДЛЯ ДВУХ ПОЛОС ВЫДАЧИ, и
-		// раньше здесь стоял только один из двух.
-		//
-		// ПОВЕРХНОСТЕЙ, ЧИТАЮЩИХ ОТСЕЧКУ: 2
-		//
-		// НАША ЧЕКАНКА. Снятие этой строки порождает отсечку ТОЙ ЖЕ
-		// транзакцией: триггер `sa_oauth_client_removal_cuts_minted_tokens`
-		// кладёт запись отзыва, адресованную идентификатором нашей строки.
-		// Состав утверждений нашего токена несёт этот идентификатор
-		// (`kaname_sa_key_id`), он же входит в закрытый перечень ключей
-		// отсечки правила отзыва, и обе принимающие поверхности спрашивают
-		// правило НА ПУТИ ЗАПРОСА — авторитет отзыва на внутреннем слушателе и
-		// читатель предъявленного на публичном. Поэтому остаточное окно здесь
-		// задаёт срок кеша положительного вердикта у читателя — величина,
-		// которую ОБЪЯВЛЯЕТ ОПЕРАТОР и видит у себя, — а не срок самого
-		// удостоверения. Число поверхностей выше сверяет с деревом гейт
-		// `revoke_window_doc_test.go` разбором: он считает узлы вызова сам.
-		//
-		// ПОЛОСА ПРЕЖНЕГО ИЗДАТЕЛЯ. Там токен выпускает он, наша отсечка на
-		// его пути проверки не стоит, и выданное действует до собственного
-		// истечения: отзыв ограничивает удостоверение, а не то, что уже в
-		// пути. Какая из двух полос действует на посадке — свойство посадки, а
-		// не этого вызова; разбор — `nameClient` выше и
-		// `docs/engineering/architecture/sa-key-issuance-leaves-the-provider.md`.
-		//
-		// Прежняя редакция этого абзаца называла второй ответ единственным и
-		// предписывала называть ИМЕННО его, когда спрашивают о скорости
-		// отзыва. Для нашей чеканки это было неверно, и цена ошибки
-		// несимметрична: следующий читатель вправе счесть отсечку избыточной и
-		// снять либо триггер, либо её чтение (#2484).
-		//
-		// A compensating outbox or sweeper was considered and rejected: both
-		// are EVENTUAL, so neither would have closed the window the hook closes
-		// outright, and what they would buy — deleting a registration that can
-		// no longer obtain a token — is inventory hygiene, not security. That
-		// leftover is what this WARN is for; an operator can delete it by hand.
-		if u.logger != nil {
-			u.logger.WarnContext(ctx, "sa-key hydra oauth-client delete failed after DB commit — the registration outlives its row (it can no longer mint; delete it by hand)",
-				slog.String("oauth_client_id", string(cur.OAuthClientID)),
-				slog.String("key_id", string(in.KeyID)),
-				slog.String("err", err.Error()),
-			)
-		}
-	}
 	return revokeSAKeyResponse(in.KeyID)
 }
 
@@ -1513,7 +1120,6 @@ func saClientToProto(c domain.ServiceAccountOAuthClient) *iamv1.ServiceAccountOA
 	pb := &iamv1.ServiceAccountOAuthClient{
 		Id:              string(c.ID),
 		SvaId:           string(c.SvaID),
-		HydraClientId:   string(c.OAuthClientID),
 		Description:     string(c.Description),
 		CreatedByUserId: string(c.CreatedByUserID),
 		CreatedAt:       shared.TimestampProto(c.CreatedAt),
@@ -1541,26 +1147,31 @@ func credentialKindToProto(k domain.CredentialKind) iamv1.CredentialKind {
 		return iamv1.CredentialKind_CREDENTIAL_KIND_SECRET
 	case domain.CredentialKindFederated:
 		return iamv1.CredentialKind_CREDENTIAL_KIND_FEDERATED
-	case domain.CredentialKindLegacy:
-		return iamv1.CredentialKind_CREDENTIAL_KIND_LEGACY
 	default:
 		return iamv1.CredentialKind_CREDENTIAL_KIND_UNSPECIFIED
 	}
 }
 
 // CredentialKindFromProto — обратное отображение, для входа выдачи.
-func CredentialKindFromProto(k iamv1.CredentialKind) domain.CredentialKind {
+//
+// Номер вне словаря — ОТКАЗ с именем поля, а не «вид не назван». Вид назван, и
+// назван тем, чего нет: отобразить его в UNSPECIFIED значило бы выпустить
+// ключевую пару на запрос, просивший другого, — принять параметр и молча его
+// проигнорировать. Номер снятого вида (4, LEGACY, kaname#362) стал ровно таким
+// номером и отвергается этой же ветвью.
+func CredentialKindFromProto(k iamv1.CredentialKind) (domain.CredentialKind, error) {
 	switch k {
+	case iamv1.CredentialKind_CREDENTIAL_KIND_UNSPECIFIED:
+		return domain.CredentialKindUnspecified, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_KEYPAIR:
-		return domain.CredentialKindKeypair
+		return domain.CredentialKindKeypair, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_SECRET:
-		return domain.CredentialKindSecret
+		return domain.CredentialKindSecret, nil
 	case iamv1.CredentialKind_CREDENTIAL_KIND_FEDERATED:
-		return domain.CredentialKindFederated
-	case iamv1.CredentialKind_CREDENTIAL_KIND_LEGACY:
-		return domain.CredentialKindLegacy
+		return domain.CredentialKindFederated, nil
 	default:
-		return domain.CredentialKindUnspecified
+		return "", status.Errorf(codes.InvalidArgument,
+			"%s: unknown credential kind %d", domain.ErrCredentialKindField, int32(k))
 	}
 }
 

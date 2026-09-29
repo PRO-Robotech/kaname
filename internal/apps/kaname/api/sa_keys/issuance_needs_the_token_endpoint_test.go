@@ -42,7 +42,7 @@ const clientTokenKnob = "authn.client-token.enabled"
 // ниже одни и те же до правки и после: правка меняет форму сборки (порт
 // поставщика снят), а не то, что проверяется.
 func newEndpointlessIssueUC(repo *stubSAClientRepo, ops *stubOpsRepo) *IssueSAKeyUseCase {
-	return NewIssueSAKeyUseCase(repo, &stubTx{}, &stubOAuthClientAdmin{}, ops).
+	return NewIssueSAKeyUseCase(repo, &stubTx{}, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
 }
 

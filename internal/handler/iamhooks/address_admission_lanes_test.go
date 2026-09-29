@@ -35,17 +35,17 @@ func TestEV65_UnverifiedOwnerGetsNoTokenOnAnyIssuanceLane(t *testing.T) {
 	users := cutoffUser()
 	uoc := domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair, ID: laneOurUserKey, UserID: cutoffUserID,
-		OAuthClientID: laneUserMirror, CreatedAt: keyIssued,
+		CreatedAt: keyIssued,
 	}
 	soc := domain.ServiceAccountOAuthClient{
-		CredentialKind: domain.CredentialKindKeypair, ID: laneOurSAKey, SvaID: laneSAID, OAuthClientID: laneSAMirror,
+		CredentialKind: domain.CredentialKindKeypair, ID: laneOurSAKey, SvaID: laneSAID,
 	}
 	sa := domain.ServiceAccount{ID: laneSAID, AccountID: cutoffAccountID, Enabled: true}
 	enricher := service.NewTokenEnrichmentService(
 		service.TokenEnrichmentConfig{Domain: "api.test.cloud"}, users,
 	).
-		WithUserTokenPort(&fakeUserTokenPort{client: uoc, user: users.users[0]}).
-		WithSAPort(&fakeIssuanceSAPort{clientID: laneSAMirror, mapping: soc, sa: sa}).
+		WithUserTokenPort(&fakeUserTokenPort{user: users.users[0]}).
+		WithSAPort(&fakeIssuanceSAPort{clientID: laneOurSAKey, mapping: soc, sa: sa}).
 		WithOwnClientPort(laneOwnClients{uoc: uoc, soc: soc})
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 

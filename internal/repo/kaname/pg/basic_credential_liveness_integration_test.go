@@ -73,11 +73,6 @@ type basicCredLane struct {
 	ownerCol   string
 	ownerDead  string // литерал SQL: владелец перестаёт быть живым
 	ownerAlive string
-	// Добавка к SET при смене вида: без неё состояние «вид не SECRET»
-	// неисполнимо у носителя служебной учётки, а неисполнимое Given — это
-	// проба, которая не проверяет ничего.
-	kindAwayExtra string
-	kindBackExtra string
 	// Чья отсечка отзыва-всех ставится на состояниях отсечки и запрещает ли она
 	// ЭТУ полосу. Отсечка — о человеке: у полосы личности это её владелец, у
 	// полосы служебной учётки — человек того же аккаунта, и её он не касается.
@@ -120,8 +115,6 @@ func basicCredLanesUnderTest() []basicCredLane {
 			ownerCol:      "enabled",
 			ownerDead:     "false",
 			ownerAlive:    "true",
-			kindAwayExtra: ", hydra_client_id = 'hyd-cx-1450'",
-			kindBackExtra: ", hydra_client_id = NULL",
 			cutoffUser:    "usr0000000000000bat1",
 			cutoffForbids: false,
 		},
@@ -169,11 +162,11 @@ func basicCredStates(l basicCredLane, hashHex string) []basicCredState {
 		{"владелец снова живой", fmt.Sprintf(
 			`UPDATE %s SET %s = %s WHERE id = '%s'`, l.ownerTable, l.ownerCol, l.ownerAlive, l.ownerID), true},
 		{"вид не SECRET", fmt.Sprintf(
-			`UPDATE %s SET credential_kind = 'KEYPAIR', secret_hash = ''::bytea%s WHERE id = '%s'`,
-			l.table, l.kindAwayExtra, l.credID), false},
+			`UPDATE %s SET credential_kind = 'KEYPAIR', secret_hash = ''::bytea WHERE id = '%s'`,
+			l.table, l.credID), false},
 		{"вид снова SECRET", fmt.Sprintf(
-			`UPDATE %s SET credential_kind = 'SECRET', secret_hash = decode('%s', 'hex')%s WHERE id = '%s'`,
-			l.table, hashHex, l.kindBackExtra, l.credID), true},
+			`UPDATE %s SET credential_kind = 'SECRET', secret_hash = decode('%s', 'hex') WHERE id = '%s'`,
+			l.table, hashHex, l.credID), true},
 		// Отсечка отзыва-всех человека — состояние владельца, которое строку не
 		// снимает. Сличение ставит её и назад, поэтому пишет строку прямо:
 		// оператор записи продукта монотонен.

@@ -75,8 +75,8 @@ func (f assertionFixture) mintUserSecret(t *testing.T, id string) string {
 	require.NoError(t, err)
 	_, err = f.pool.Exec(context.Background(), `
 INSERT INTO kaname.user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, $2, 'SECRET', $3, now() + interval '30 days')`, id, f.user, hash)
+    (id, user_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, $2, 'SECRET', $3, now() + interval '30 days')`, id, f.user, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -88,8 +88,8 @@ func (f assertionFixture) mintSASecret(t *testing.T, id string) string {
 	require.NoError(t, err)
 	_, err = f.pool.Exec(context.Background(), `
 INSERT INTO kaname.service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, $3, 'SECRET', $4, now() + interval '30 days')`, id, f.sva, f.user, hash)
+    (id, sva_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, $3, 'SECRET', $4, now() + interval '30 days')`, id, f.sva, f.user, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -435,10 +435,10 @@ func TestRevokeAllCutoff_BasicSecretLaneAgreesWithTheKeyLane(t *testing.T) {
 		saSecretID   = "soc_rvkc0000000000004"
 	)
 	userKey := ctNewKey(t)
-	f.seedUserClient(t, userKeyID, "mirror-lanes-user", userKey.publicPEM, tokenpolicy.AlgES256, nil)
+	f.seedUserClient(t, userKeyID, userKey.publicPEM, tokenpolicy.AlgES256, nil)
 	userSecret := f.mintUserSecret(t, userSecretID)
 	saKey := ctNewKey(t)
-	f.seedSAClient(t, saKeyID, "mirror-lanes-sa", saKey.publicPEM, tokenpolicy.AlgES256)
+	f.seedSAClient(t, saKeyID, saKey.publicPEM, tokenpolicy.AlgES256)
 	saSecret := f.mintSASecret(t, saSecretID)
 
 	// Один момент выдачи на все удостоверения: отсечка взвешивается против него,

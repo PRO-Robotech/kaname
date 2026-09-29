@@ -6,19 +6,21 @@
 //
 // A service-account key IS the machine's long-lived credential. Exempting the
 // machine from interactive re-authentication stays defensible only while the
-// credential itself is bounded in time. Three gaps locked here:
+// credential itself is bounded in time. Two gaps locked here:
 //
 //  1. `ttl_seconds` had a floor (>= 0) but NO ceiling.
 //  2. `ttl_seconds == 0` persisted a NULL `expires_at` — a key that never
 //     expires — so the most convenient call shape produced the least safe
 //     credential.
-//  3. The Hydra OAuth2 client registered for the key carried no
-//     `access_token_lifespan`, so every token minted from it inherited the
-//     provider-global default.
+//
+// A third one — the lifetime of the tokens minted from the key — used to be a
+// per-client registration value at the previous external issuer. That
+// registration is gone (kaname#362); the lifetime of our tokens is the
+// platform token endpoint's (`authn.client-token.token-ttl`), bounded to the
+// remainder of the client lifetime, and is held by that lane's probes.
 //
 // Assertions are on the OBSERVABLE contract: the gRPC code for an over-long
-// TTL, the persisted `expires_at`, and the lifespan actually handed to the
-// client registration.
+// TTL and the persisted `expires_at`.
 package sa_keys
 
 import (
@@ -35,24 +37,22 @@ import (
 // ttlHarness — the shared stub set with a pinned clock, so an expiry assertion
 // compares against a known instant rather than racing wall-clock.
 type ttlHarness struct {
-	uc       *IssueSAKeyUseCase
-	repo     *stubSAClientRepo
-	provider *stubOAuthClientAdmin
-	ops      *stubOpsRepo
-	trust    *fakeTrustedIssuers
-	now      time.Time
+	uc    *IssueSAKeyUseCase
+	repo  *stubSAClientRepo
+	ops   *stubOpsRepo
+	trust *fakeTrustedIssuers
+	now   time.Time
 }
 
 func newTTLHarness(t *testing.T) *ttlHarness {
 	t.Helper()
 	h := &ttlHarness{
-		repo:     &stubSAClientRepo{},
-		provider: &stubOAuthClientAdmin{},
-		ops:      &stubOpsRepo{},
-		trust:    &fakeTrustedIssuers{},
-		now:      time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
+		repo:  &stubSAClientRepo{},
+		ops:   &stubOpsRepo{},
+		trust: &fakeTrustedIssuers{},
+		now:   time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC),
 	}
-	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.provider, h.ops).WithTrustedIssuerWriter(h.trust)
+	h.uc = NewIssueSAKeyUseCase(h.repo, &stubTx{}, h.ops).WithTrustedIssuerWriter(h.trust).WithOwnIssuance()
 	h.uc.now = func() time.Time { return h.now }
 	return h
 }
@@ -83,8 +83,8 @@ func TestIssue_TTLAboveMax_Rejected(t *testing.T) {
 	if msg := status.Convert(err).Message(); msg == "" || !contains(msg, "ttl_seconds") {
 		t.Errorf("message = %q; must name the offending field", msg)
 	}
-	if h.provider.created {
-		t.Error("a rejected TTL must not reach the provider — no client is registered for a refused key")
+	if h.ops.created {
+		t.Error("a rejected TTL must not start an operation")
 	}
 	if h.repo.insertOK {
 		t.Error("a rejected TTL must not persist a key row")
@@ -189,71 +189,6 @@ func TestIssue_ExplicitTTL_Honoured(t *testing.T) {
 	}
 	if got, want := *h.repo.inserted.ExpiresAt, h.now.Add(time.Hour); !got.Equal(want) {
 		t.Errorf("expires_at = %v; want %v", got, want)
-	}
-}
-
-// ── issued-token lifetime ────────────────────────────────────────────────────
-
-// TestIssue_RegistersClientWithAccessTokenLifespan — the OAuth2 client created
-// for the key must carry its OWN access-token lifetime, rather than inheriting
-// whatever the identity provider happens to default to.
-func TestIssue_RegistersClientWithAccessTokenLifespan(t *testing.T) {
-	h := newTTLHarness(t)
-	h.uc.AccessTokenLifespan = 15 * time.Minute
-
-	if err := h.issue(t, IssueInput{TTLSeconds: 3600}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	waitForOp(t, h.ops)
-
-	if !h.provider.created {
-		t.Fatal("the OAuth2 client must be registered")
-	}
-	if got, want := h.provider.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
-		t.Errorf("access_token_lifespan = %q; want %q — the registered client must pin its own lifespan", got, want)
-	}
-}
-
-// TestIssue_Federated_RegistersClientWithAccessTokenLifespan — the federated
-// (external-IdP) path mints tokens from its own client too; it must pin the
-// same lifespan. Omitting it there would leave the federation path unbounded
-// while the private_key_jwt path is bounded.
-func TestIssue_Federated_RegistersClientWithAccessTokenLifespan(t *testing.T) {
-	h := newTTLHarness(t)
-	h.uc.AccessTokenLifespan = 15 * time.Minute
-
-	err := h.issue(t, IssueInput{
-		TrustedSubjects: []domain.TrustedSubject{{
-			Issuer:         "https://kube.cluster.local",
-			SubjectPattern: "^system:serviceaccount:ci:deployer$",
-			PublicKeyPEM:   testIssuerPublicKeyPEM,
-			KeyAlgorithm:   "ES256",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	waitForOp(t, h.ops)
-
-	if got, want := h.provider.gotReq.AccessTokenLifespan, (15 * time.Minute).String(); got != want {
-		t.Errorf("federated access_token_lifespan = %q; want %q", got, want)
-	}
-}
-
-// TestIssue_AccessTokenLifespanUnset_LeavesFieldEmpty — an unconfigured
-// lifespan must not fabricate a value; the field stays empty and the provider
-// default applies (explicit degradation, not a silent guess).
-func TestIssue_AccessTokenLifespanUnset_LeavesFieldEmpty(t *testing.T) {
-	h := newTTLHarness(t)
-	h.uc.AccessTokenLifespan = 0
-
-	if err := h.issue(t, IssueInput{TTLSeconds: 3600}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	waitForOp(t, h.ops)
-
-	if got := h.provider.gotReq.AccessTokenLifespan; got != "" {
-		t.Errorf("access_token_lifespan = %q; want empty when unconfigured", got)
 	}
 }
 

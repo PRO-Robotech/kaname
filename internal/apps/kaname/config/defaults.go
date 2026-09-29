@@ -322,17 +322,16 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("jobs.expired-credential-reclaim.dry-run", false)
 
 	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
-	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
-	// omit the field and inherit the provider-global TTL, so an existing
-	// deployment is unchanged until its profile pins a value (values.prod.yaml
-	// does). Override: KANAME_SAKEY_ACCESS_TOKEN_TTL.
+	// Per-client access_token_lifespan of the SA-key client REGISTRATION at the
+	// previous external issuer. No reader since kaname#362 — the registration is
+	// gone; the lifetime of our tokens is authn.client-token.token-ttl. Kept while
+	// the platform chart emits it (see the field comment in config.go).
+	// Override: KANAME_SAKEY_ACCESS_TOKEN_TTL.
 	v.SetDefault("authn.sakey-access-token-ttl", time.Duration(0))
-	// Sender-constrained (RFC 9449) tokens for SA keys. Binding is per-client
-	// REGISTRATION metadata, so it takes effect only for keys issued after it is
-	// enabled — pre-existing keys keep minting plain bearers until rotated.
-	// Default false; the edge enforcement knob must be turned on only AFTER this
-	// one, otherwise every existing service-account token is rejected.
-	// Override: KANAME_SAKEY_BIND_DPOP.
+	// Sender-constrained (RFC 9449) requirement on the SA-key client REGISTRATION
+	// at the previous external issuer. No reader since kaname#362; the start guard
+	// (validateMachineTokenBinding) refuses it where it would be believed.
+	// Default false. Override: KANAME_SAKEY_BIND_DPOP.
 	v.SetDefault("authn.sakey-bind-dpop", false)
 	// bootstrap-mint — the cluster-admin token mint (#58). The signing key lives
 	// in a k8s Secret, referenced BY ENV NAME here (never inlined in YAML). The

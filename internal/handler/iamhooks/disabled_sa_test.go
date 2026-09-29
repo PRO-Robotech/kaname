@@ -49,7 +49,7 @@ type fakeStateSAPort struct {
 	sa       domain.ServiceAccount
 }
 
-func (f *fakeStateSAPort) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (f *fakeStateSAPort) LookupByClientID(_ context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	if string(id) != f.clientID {
 		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such sa-key client")
 	}
@@ -59,7 +59,6 @@ func (f *fakeStateSAPort) LookupByOAuthClientID(_ context.Context, id domain.OAu
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             "soc_01disabledhook01",
 		SvaID:          f.sa.ID,
-		OAuthClientID:  id,
 	}, nil
 }
 

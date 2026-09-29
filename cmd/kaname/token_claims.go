@@ -34,9 +34,8 @@ func newAssertionClaimsComposer(pool *pgxpool.Pool, cfg config.Config) *service.
 		users,
 	).
 		WithSAPort(&tokenEnrichSAAdapter{saClients: saClients}).
-		WithUserTokenPort(&tokenEnrichUserTokenAdapter{userClients: userClients, users: users}).
-		// Резолв по НАШЕМУ идентификатору. Зеркальное значение на пути
-		// разрешения клиента не участвует вовсе — оно остаётся значением
-		// утверждения и истекает вместе с внешним сервером.
+		WithUserTokenPort(&tokenEnrichUserTokenAdapter{users: users}).
+		// Резолв по НАШЕМУ идентификатору строки — единственному имени клиента
+		// (kaname#362).
 		WithOwnClientPort(&ownClientAdapter{userClients: userClients, saClients: saClients})
 }

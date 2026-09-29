@@ -234,7 +234,6 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "cc-client-uuid",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

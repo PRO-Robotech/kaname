@@ -39,7 +39,7 @@ type expirySAPort struct {
 	sa  domain.ServiceAccount
 }
 
-func (p expirySAPort) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (p expirySAPort) LookupByClientID(_ context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return p.soc, nil
 }
 
@@ -64,7 +64,6 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "kaname-sak-expiry",
 			ExpiresAt:      expiresAt,
 		},
 		sa: domain.ServiceAccount{
