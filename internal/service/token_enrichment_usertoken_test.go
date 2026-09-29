@@ -181,3 +181,18 @@ func TestClaimsForAssertionClient_UserToken_BlockedOwner_Refused(t *testing.T) {
 	assert.True(t, stderrors.Is(err, ErrSubjectNotActive), "got %v", err)
 	assert.Nil(t, claims, "заблокированному владельцу состав не выдаётся")
 }
+
+// TestClaimsForAssertionClient_UserToken_OwnerPortUnwired_Refused — без порта
+// владельца персональный токен не получает состава: отказ, а не паника и не
+// состав без суждения о владельце. Близнец — HappyPath выше, где порт подан.
+func TestClaimsForAssertionClient_UserToken_OwnerPortUnwired_Refused(t *testing.T) {
+	uoc := domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-np"), UserID: domain.UserID("usr-np"),
+		CredentialKind: domain.CredentialKindKeypair}
+	svc := NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "kacho.cloud"}, stubUserPort{t: t}).
+		WithOwnClientPort(stubOwnUserToken{uoc: uoc})
+
+	claims, _, err := svc.ClaimsForAssertionClient(context.Background(), userTokenClient("uoc-np", "usr-np"), TokenHookContext{})
+	require.Error(t, err)
+	assert.Nil(t, claims)
+	assert.Contains(t, err.Error(), "owner port is not wired")
+}

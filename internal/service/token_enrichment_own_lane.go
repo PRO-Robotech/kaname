@@ -72,6 +72,11 @@ func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 
 	switch client.Kind {
 	case domain.AssertionClientUser:
+		if s.userTokens == nil {
+			// Владельца нечем прочитать — ОТКАЗ, а не состав без владельца и не
+			// паника: чьё состояние не прочитано, того и не судили.
+			return nil, ResolvedPrincipal{}, fmt.Errorf("token enrichment: user-token owner port is not wired")
+		}
 		row, err := s.ownClients.GetUserToken(ctx, domain.UserOAuthClientID(client.ID))
 		if err != nil {
 			return nil, ResolvedPrincipal{}, fmt.Errorf("token enrichment: user-token client: %w", err)

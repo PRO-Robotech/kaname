@@ -168,8 +168,6 @@ type IssueSAKeyUseCase struct {
 	DefaultTTL time.Duration
 }
 
-// WithResponseRedactor wires the post-Issue secret redactor.}
-
 // WithResponseRedactor wires the post-Issue secret redactor.
 func (u *IssueSAKeyUseCase) WithResponseRedactor(r OpsResponseRedactor) *IssueSAKeyUseCase {
 	u.redactor = r
@@ -581,9 +579,8 @@ func (u *IssueSAKeyUseCase) doIssue(ctx context.Context, keyID domain.SAOAuthCli
 // личности: строка коммитится, тело для строки операции секрета НЕ НЕСЁТ, тело
 // для вызывающего его несёт.
 //
-// Регистрации у внешнего поставщика этот вид не заводит и заводить не может —
-// в этом и состоит предмет фазы, — поэтому колонка зеркала остаётся пустой, а
-// не получает синтетического значения.
+// Обмена этот вид не требует — его предъявляют как есть, — поэтому выдаётся он
+// и на посадке без токен-эндпоинта платформы.
 func (u *IssueSAKeyUseCase) issueSecretSync(
 	ctx context.Context,
 	op *operations.Operation,
