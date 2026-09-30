@@ -42,10 +42,10 @@ import (
 
 // stubOwnClientPort — чтение строки реестра по НАШЕМУ идентификатору.
 //
-// Дублёр отдаёт ТУ ЖЕ строку, что и порт прежнего пути отдаёт по зеркальному
-// значению: предмет сверки — состав, а не разрешение. Дублёр, подсовывающий
-// разным путям разные строки, сверял бы два разных принципала и был бы зелен
-// при любом расхождении составов.
+// Дублёр отдаёт ТУ ЖЕ строку, что и порт прежнего пути: предмет сверки —
+// состав, а не разрешение. Дублёр, подсовывающий разным путям разные строки,
+// сверял бы два разных принципала и был бы зелен при любом расхождении
+// составов.
 type stubOwnClientPort struct {
 	uoc    domain.UserOAuthClient
 	uocErr error
@@ -64,19 +64,17 @@ func (s stubOwnClientPort) GetSAKey(_ context.Context, _ domain.SAOAuthClientID)
 // stubSAPortForClaimSets — порт служебных учёток для прежнего пути.
 //
 // Разрешение КЛЮЧУЕТСЯ идентификатором, как у настоящего репозитория. Дублёр,
-// отдающий свою строку на любой вход, снисходительнее продукта ровно там, где
-// это ломает предмет пробы: прежний путь пробует служебную учётку ПЕРВОЙ, и
-// всеядный дублёр разрешил бы клиента пользовательского токена как машинного —
-// после чего проба сверяла бы составы ДВУХ РАЗНЫХ принципалов. Это и произошло
-// на первом прогоне.
+// отдающий свою строку на любой вход, снисходительнее продукта: он разрешил бы
+// субъекта, которого настоящий поиск не находит, и сверка составов прошла бы
+// на принципале, которого нет.
 type stubSAPortForClaimSets struct {
-	mirror string
-	soc    domain.ServiceAccountOAuthClient
-	sa     domain.ServiceAccount
+	clientID string
+	soc      domain.ServiceAccountOAuthClient
+	sa       domain.ServiceAccount
 }
 
-func (s stubSAPortForClaimSets) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	if string(id) != s.mirror {
+func (s stubSAPortForClaimSets) LookupByClientID(_ context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+	if string(id) != s.clientID {
 		return domain.ServiceAccountOAuthClient{}, iamerr.ErrNotFound
 	}
 	return s.soc, nil
@@ -92,64 +90,29 @@ func (s stubSAPortForClaimSets) FindByExternalSubject(_ context.Context, _, _ st
 	return domain.ServiceAccountOAuthClient{}, iamerr.ErrNotFound
 }
 
-// stubUserTokenPortForClaimSets — порт клиентов пользовательского токена для
-// прежнего пути, ключуемый идентификатором по той же причине.
-type stubUserTokenPortForClaimSets struct {
-	mirror string
-	uoc    domain.UserOAuthClient
-	user   domain.User
-}
-
-func (s stubUserTokenPortForClaimSets) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	if string(id) != s.mirror {
-		return domain.UserOAuthClient{}, iamerr.ErrNotFound
-	}
-	return s.uoc, nil
-}
-
-func (s stubUserTokenPortForClaimSets) GetUser(_ context.Context, _ domain.UserID) (domain.User, error) {
-	return s.user, nil
-}
-
 // TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal — §2.11.
+//
+// Путей, выпускающих токен одному принципалу, два у ключа служебной учётки:
+// обратный вызов прежнего провайдера и наш токен-эндпоинт. Оба называют
+// клиента ОДНИМ именем — идентификатором строки ключа (kaname#362). У
+// персонального токена путь один — наш: прежний провайдер персональных токенов
+// не регистрирует, и сверять его состав не с чем (его состав держит
+// token_enrichment_usertoken_test.go).
 func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T) {
 	fixed := time.Unix(1_700_000_000, 0).UTC()
 
 	const (
-		ourUserClientID = "uoc_0123456789abcdefg"
-		ourSAClientID   = "soc_0123456789abcdefg"
-		mirrorUser      = "kaname-usr-mirror-0001"
-		mirrorSA        = "kaname-sak-mirror-0001"
-		ownerUser       = "usr_0123456789abcdefg"
-		ownerSA         = "sva_0123456789abcdefg"
-		accountID       = "acc_0123456789abcdefg"
+		ourSAClientID = "soc_0123456789abcdefg"
+		ownerSA       = "sva_0123456789abcdefg"
+		accountID     = "acc_0123456789abcdefg"
 	)
 
-	uoc := domain.UserOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
-		// словарь таблицы отвергает строку, вида не назвавшую.
-		CredentialKind: domain.CredentialKindKeypair,
-		ID:             domain.UserOAuthClientID(ourUserClientID),
-		UserID:         domain.UserID(ownerUser),
-		OAuthClientID:  domain.OAuthClientID(mirrorUser),
-		// Момент выдачи ключа — НЕНУЛЕВОЙ и отличный от часов службы: это якорь,
-		// по которому отсечка отзыва-всех судит ключ. На нулевом значении
-		// «якорь потерян» и «якорь равен нулю» неотличимы, и сверка принципалов
-		// ниже была бы зелена на полосе, якоря не несущей.
-		CreatedAt: fixed.Add(-72 * time.Hour),
-	}
-	user := domain.User{
-		ID:           domain.UserID(ownerUser),
-		AccountID:    domain.AccountID(accountID),
-		InviteStatus: domain.InviteStatusActive,
-	}
 	soc := domain.ServiceAccountOAuthClient{
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             domain.SAOAuthClientID(ourSAClientID),
 		SvaID:          domain.ServiceAccountID(ownerSA),
-		OAuthClientID:  domain.OAuthClientID(mirrorSA),
 	}
 	sa := domain.ServiceAccount{
 		ID:        domain.ServiceAccountID(ownerSA),
@@ -160,98 +123,50 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 	// Одна служба, одни часы, оба входа. Порт прежнего пути и порт нашего
 	// отдают ОДНУ И ТУ ЖЕ строку — иначе сверялись бы два разных принципала.
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		TokenEnrichmentConfig{Domain: "kacho.cloud"},
 		stubUserPort{t: t},
 	).
-		WithUserTokenPort(stubUserTokenPortForClaimSets{mirror: mirrorUser, uoc: uoc, user: user}).
-		WithSAPort(stubSAPortForClaimSets{mirror: mirrorSA, soc: soc, sa: sa}).
-		WithOwnClientPort(stubOwnClientPort{uoc: uoc, soc: soc})
+		WithSAPort(stubSAPortForClaimSets{clientID: ourSAClientID, soc: soc, sa: sa}).
+		WithOwnClientPort(stubOwnClientPort{soc: soc})
 	svc.now = func() time.Time { return fixed }
 
 	// Привязка подаётся НЕПУСТОЙ на обоих путях: её поля есть в составе, и на
 	// пустых значениях расхождение по ним было бы неотличимо от совпадения.
-	hookCtx := TokenHookContext{
+	hc := TokenHookContext{
 		GrantType:     tokenpolicy.GrantTypeClientCredentials,
 		CnfJkt:        "jkt-thumb",
 		CnfX5tS256:    "x5t-thumb",
-		OAuthClientID: mirrorUser,
+		OAuthClientID: ourSAClientID,
+	}
+	client := domain.AssertionClient{
+		ID: ourSAClientID, Kind: domain.AssertionClientServiceAccount,
+		OwnerID: ownerSA, OwnerActive: true,
 	}
 
-	for _, tc := range []struct {
-		kind domain.AssertionClientKind
-		// mirror — чем принципала называет ПРЕЖНИЙ путь: зеркальным значением.
-		mirror string
-		// client — строка реестра для НАШЕГО пути.
-		client domain.AssertionClient
-	}{
-		{
-			kind:   domain.AssertionClientUser,
-			mirror: mirrorUser,
-			client: domain.AssertionClient{
-				ID: ourUserClientID, Kind: domain.AssertionClientUser,
-				OwnerID: ownerUser, OwnerActive: true,
-			},
-		},
-		{
-			kind:   domain.AssertionClientServiceAccount,
-			mirror: mirrorSA,
-			client: domain.AssertionClient{
-				ID: ourSAClientID, Kind: domain.AssertionClientServiceAccount,
-				OwnerID: ownerSA, OwnerActive: true,
-			},
-		},
-	} {
-		t.Run(string(tc.kind), func(t *testing.T) {
-			hc := hookCtx
-			hc.OAuthClientID = tc.mirror
+	// Прежний путь: обратный вызов провайдера, субъект — имя клиента.
+	legacy, legacyPrincipal, err := svc.EnrichClaims(context.Background(), ourSAClientID, hc)
+	require.NoError(t, err, "прежний путь обязан выдать состав")
 
-			// Прежний путь: обратный вызов провайдера, принципал назван
-			// зеркальным значением.
-			legacy, legacyPrincipal, err := svc.EnrichClaims(context.Background(), tc.mirror, hc)
-			require.NoError(t, err, "прежний путь обязан выдать состав")
+	// Наш путь: тем же прогоном, тот же принципал.
+	ours, oursPrincipal, err := svc.ClaimsForAssertionClient(context.Background(), client, hc)
+	require.NoError(t, err, "наш путь обязан выдать состав")
 
-			// Наш путь: тем же прогоном, тот же принципал, назван НАШИМ
-			// идентификатором.
-			ours, oursPrincipal, err := svc.ClaimsForAssertionClient(context.Background(), tc.client, hc)
-			require.NoError(t, err, "наш путь обязан выдать состав")
+	// Положительный контроль: состав НЕПУСТ. Равенство двух пустых карт зелено
+	// и не утверждает ничего.
+	require.NotEmpty(t, ours, "состав пуст — сверять нечего")
+	require.NotEmpty(t, legacy, "состав пуст — сверять нечего")
 
-			// Положительный контроль: состав НЕПУСТ. Равенство двух пустых
-			// карт зелено и не утверждает ничего.
-			require.NotEmpty(t, ours, "состав пуст — сверять нечего")
-			require.NotEmpty(t, legacy, "состав пуст — сверять нечего")
+	// Множество ИМЁН — отдельным утверждением, чтобы отказ называл именно
+	// потерянное поле, а не печатал две карты целиком.
+	require.Equal(t, claimNames(legacy), claimNames(ours), "множества имён утверждений разошлись")
 
-			// Множество ИМЁН — отдельным утверждением, чтобы отказ называл
-			// именно потерянное поле, а не печатал две карты целиком.
-			require.Equal(t, claimNames(legacy), claimNames(ours),
-				"путь %s: множества имён утверждений разошлись", tc.kind)
+	// Множество ЗНАЧЕНИЙ — равенство карт целиком: имена могут совпасть при
+	// разошедшихся значениях.
+	require.Equal(t, legacy, ours, "значения утверждений разошлись")
 
-			// Множество ЗНАЧЕНИЙ — равенство карт целиком: имена могут
-			// совпасть при разошедшихся значениях.
-			require.Equal(t, legacy, ours,
-				"путь %s: значения утверждений разошлись", tc.kind)
-
-			// Принципал, разрешённый двумя путями, — тот же: состав может
-			// совпасть у путей, разрешивших РАЗНЫХ принципалов, если оба
-			// собраны из одной строки.
-			//
-			// Сверяется ЦЕЛИКОМ, а не выборкой полей. Принципал — вход правил,
-			// которые вызывающий применяет ПОСЛЕ сборки состава (отсечка
-			// отзыва-всех судит по нему момент выдачи ключа), и поле, сверенное
-			// выборкой, — это поле, которое одна полоса может потерять молча:
-			// составы совпадут, вид и владелец совпадут, а правило на одной из
-			// полос не будет иметь входа.
-			require.Equal(t, legacyPrincipal, oursPrincipal, "путь %s: разрешённый принципал разошёлся", tc.kind)
-			if tc.kind == domain.AssertionClientUser {
-				// Положительный контроль сверки: у ключа пользователя якорь
-				// ЕСТЬ. Равенство двух пустых якорей зелено и не утверждает
-				// ничего.
-				require.NotNil(t, oursPrincipal.StandingCredentialIssuedAt,
-					"путь %s: принципал ключа пользователя обязан нести момент выдачи ключа", tc.kind)
-				require.True(t, oursPrincipal.StandingCredentialIssuedAt.Equal(uoc.CreatedAt),
-					"путь %s: момент выдачи ключа — это момент строки ключа", tc.kind)
-			}
-		})
-	}
+	// Принципал, разрешённый двумя путями, — тот же, и сверяется ЦЕЛИКОМ.
+	require.Equal(t, legacyPrincipal, oursPrincipal, "разрешённый принципал разошёлся")
+	require.Equal(t, PrincipalServiceAccount, oursPrincipal.Kind)
 }
 
 // claimNames — множество имён состава, отсортированное для читаемого отказа.

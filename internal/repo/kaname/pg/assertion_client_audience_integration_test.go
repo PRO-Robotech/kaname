@@ -43,14 +43,13 @@ func insertSAKey(t *testing.T, f assertionFixture, c domain.ServiceAccountOAuthC
 }
 
 // saKeyRow — минимальная строка ключа с ключевым материалом.
-func saKeyRow(f assertionFixture, id, mirror string, audiences []string) domain.ServiceAccountOAuthClient {
+func saKeyRow(f assertionFixture, id string, audiences []string) domain.ServiceAccountOAuthClient {
 	return domain.ServiceAccountOAuthClient{
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:    domain.CredentialKindKeypair,
 		ID:                domain.SAOAuthClientID(id),
 		SvaID:             domain.ServiceAccountID(f.sva),
-		OAuthClientID:     domain.OAuthClientID(mirror),
 		CreatedByUserID:   domain.UserID(f.user),
 		PublicKeyPEM:      testPublicKeyPEM,
 		KeyAlgorithm:      "ES256",
@@ -72,7 +71,7 @@ func TestSAKeyDeclaredAudiencesReachTheAssertionLane(t *testing.T) {
 	const wide = "soc_eeeeeeeeeeeeeeeee"
 	want := []string{"registry.kacho.local", "https://sts.example.com"}
 
-	persisted := insertSAKey(t, f, saKeyRow(f, narrowed, "mirror-narrowed", want))
+	persisted := insertSAKey(t, f, saKeyRow(f, narrowed, want))
 	require.Equal(t, want, persisted.DeclaredAudiences,
 		"писатель обязан вернуть записанное — иначе вызывающий строит ответ на том, что послал, а не на том, что легло")
 
@@ -89,7 +88,7 @@ func TestSAKeyDeclaredAudiencesReachTheAssertionLane(t *testing.T) {
 	require.Equal(t, want, client.DeclaredAudiences)
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: ключ без сужения приезжает пустым, а не с чужим.
-	insertSAKey(t, f, saKeyRow(f, wide, "mirror-wide", nil))
+	insertSAKey(t, f, saKeyRow(f, wide, nil))
 	client, err = f.repo.ResolveAssertionClient(ctx, wide)
 	require.NoError(t, err)
 	require.Empty(t, client.DeclaredAudiences,
@@ -99,7 +98,7 @@ func TestSAKeyDeclaredAudiencesReachTheAssertionLane(t *testing.T) {
 	// перечня у него нет by construction, и ветка объединения обязана отдавать
 	// пусто, а не срываться на несуществующей колонке.
 	const userClient = "uoc_ddddddddddddddddd"
-	f.seedUserClient(t, userClient, "mirror-user", testPublicKeyPEM, "ES256", nil)
+	f.seedUserClient(t, userClient, testPublicKeyPEM, "ES256", nil)
 	client, err = f.repo.ResolveAssertionClient(ctx, userClient)
 	require.NoError(t, err)
 	require.Equal(t, domain.AssertionClientUser, client.Kind)
@@ -124,10 +123,10 @@ func TestSAKeyDeclaredAudiencesSchemaRefusesUnusableElements(t *testing.T) {
 	seed := func(id string, audiences []string) error {
 		_, err := f.pool.Exec(ctx,
 			`INSERT INTO kaname.service_account_oauth_clients
-			   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, declared_audiences,
+			   (id, sva_id, created_by_user_id, public_key_pem, key_algorithm, declared_audiences,
 			    credential_kind)
-			 VALUES ($1,$2,$3,$4,$5,'ES256',$6::text[],'KEYPAIR')`,
-			id, f.sva, "mirror-"+id, f.user, testPublicKeyPEM, audiences)
+			 VALUES ($1,$2,$3,$4,'ES256',$5::text[],'KEYPAIR')`,
+			id, f.sva, f.user, testPublicKeyPEM, audiences)
 		return err
 	}
 

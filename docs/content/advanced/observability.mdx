@@ -167,8 +167,6 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 |---|---|
 | `kaname_identities_total` | сколько личностей платформа видела **за всё время**. Ряд не убывает: человек уходит, запись остаётся |
 | `kaname_identity_ledger_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Пока `outcome="ok"` растёт, ноль в нём означает ноль, а не неснятый замер |
-| `kaname_provider_mirror_rows` (`table`) | сколько удостоверений ещё несут зеркало клиента у **прежнего** внешнего OAuth-сервера, по таблице. Ноль в обоих рядах — измеренная половина условия, при котором прежний издатель снимается; пока он не ноль, снятие лишило бы эти удостоверения имени |
-| `kaname_provider_mirror_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Ноль там открывает необратимое снятие, поэтому читайте его только вместе с этим рядом: пока `outcome="ok"` растёт, ноль означает ноль |
 | `kaname_retention_passes_total` | проходы фоновой уборки |
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
@@ -254,7 +252,7 @@ sum by (reason) (rate(kaname_human_session_no_session_total[5m]))
 | `kaname_login_timing_envelope_seconds` | — | **потолок огибающей по времени**: ни один исход входа после ворот частоты — успех, неверный пароль, «адреса нет», «материала нет» — не уходит раньше него. Калибруется при старте как стоимость самого дорогого класса хранимого значения (формат и параметры) среди лежащих в хранилище и класса, которым служба пишет, с запасом в четверть. Вход стал длиннее — читайте этот ряд и стоимости классов ниже: задержка платится по тому, что реально лежит |
 | `kaname_login_timing_class_cost_seconds` | `format`, `params` | калиброванная стоимость проверки по каждому классу: `2a` (bcrypt, `cost=N`) и `argon2id` (`memory=…,iterations=…,parallelism=…`). Ряд появляется вместе с классом — при старте по переписи хранилища либо на первом входе по классу, которого перепись не видела; наибольший из них — то, из чего выведен потолок. Строки, чей класс проверяющий не читает, здесь не появляются: они названы в самоотчёте старта числом |
 | `kaname_login_timing_calibrations_total` | `trigger` | калибровки классов по поводу: `startup` (перепись хранилища и ручка), `read` (полоса встретила класс, которого огибающая не знала, — значение положено мимо этого процесса). Рост `read` — находка: кто-то пишет материал в обход службы, а сама служба класс дороже потолка не пишет |
-| `kaname_second_factor_presentations_total` | `method`, `outcome` | предъявления кода второго фактора по способу (`totp`, `lookup_secret`) и исходу: `matched`, `mismatched`, `replayed` (только `totp`: код той же ступени, что уже принят строкой), `material-unreadable` (**наш** хранимый секрет не открывается ни одним ключом кольца — находка о ключнице, человеку отвечают 503), `capacity-exhausted` (только `lookup_secret`: ёмкость проверяющего пароля исчерпана). Клетка заводится только для пар, которые полоса производит; предъявление при несошедшемся пароле сюда не идёт — пароль его не открыл |
+| `kaname_second_factor_presentations_total` | `method`, `outcome` | предъявления кода второго фактора по способу (`totp`, `lookup_secret`) и исходу: `matched`, `mismatched`, `replayed` (только `totp`: код той же ступени, что уже принят строкой), `material-unreadable` (**наш** хранимый секрет не открывается ни одним ключом кольца — находка о ключнице, человеку отвечают 503; рост сразу после смены ключа — прежний ключ снят из перечня раньше переобёртки: [Смена ключа обёртки второго фактора](/advanced/second-factor-wrapping-key)), `capacity-exhausted` (только `lookup_secret`: ёмкость проверяющего пароля исчерпана). Клетка заводится только для пар, которые полоса производит; предъявление при несошедшемся пароле сюда не идёт — пароль его не открыл |
 | `kaname_second_factor_refusals_total` | `reason` | отказы второго фактора, которые **не попытки** и в счёт подбора не идут: `not-enrolled`, `already-enrolled`, `enrollment-not-pending`, `session-not-fresh`, `unavailable`. Рост `session-not-fresh` при живой консоли — признак вызова глагола без предварительного предъявления |
 | `kaname_second_factor_events_total` | `event` | события второго фактора: `enrollment-started`, `enrollment-confirmed`, `removed`, `backup-codes-regenerated`, `backup-code-consumed`. Ноль заведений за всю жизнь посадки виден только потому, что клетка есть |
 | `kaname_access_key_refusals_total` | `lane`, `reason` | отказы по ключам доступа (WebAuthn) по полосе (`registration`, `assertion`, `revoke`) и причине: `session-not-fresh`, `challenge-not-issued`, `challenge-consumed`, `challenge-expired`, `malformed`, `origin-not-allowed`, `rp-id-mismatch`, `user-not-present`, `algorithm-not-allowed`, `not-discoverable`, `signature`, `unknown-credential`, `foreign-key`, `user-handle-mismatch`, `counter`, `counter-race`, `last-sign-in-method`, `not-found`, `form`. На полосе `assertion` человек получает **единый** отказ без причины (оракул существования и признанности ключа закрыт); причина видна только здесь и в журнале. Рост `origin-not-allowed` или `rp-id-mismatch` при живой консоли — признак смены доменного имени или происхождения консоли без правки привязки (`authn.access-keys.*`) |
@@ -393,14 +391,12 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 | `kaname_own_keyset_outcomes_total` | `outcome` | обслуживание НАШЕГО набора ключей проверки: `served`, `unavailable`, `empty`. Пустой набор — отдельная клетка: в отличие от недоступности, ожидание его не лечит |
 | `kaname_token_introspection_outcomes_total` | `outcome` | ответы на вопрос «жив ли предъявленный токен»: `active`, `inactive`, `unavailable`. Третий исход отдельно от `inactive` — иначе отказ базы неотличим от отзыва |
 | `kaname_signing_key_events_total` | `event` | события жизненного цикла подписного ключа: `generated`, `activated`, `retired`, `removed`, `compromised`, `failure`, `swept`. **`swept` — завершённый проход сметателя**, включая проходы без единого снятия: ноль снятий один не различает «снимать нечего» и «сметатель не ходит», ноль проходов — различает, и на него звонит `KanameSigningKeySweeperSilent` |
-| `kaname_jwks_mirror_outcomes_total` | `outcome` | обслуживание внутреннего зеркала ключей: `served`, `unavailable`, `misconfigured`. **`served` считается наравне с отказами** — иначе «ни разу не отказал» неотличимо от «ни разу не спросили»; неверный адрес — своя клетка, потому что сам не заживёт |
 | `kaname_presented_credential_outcomes_total` | `outcome` | чтение удостоверения, ПРЕДЪЯВЛЕННОГО на публичном слушателе: `accepted`, `refused`, `unavailable`. Отказ никогда не называет, какая именно проверка не прошла, — это сказало бы предъявителю, какую половину подбирать. `unavailable` — ТРЕТИЙ исход, а не оттенок отказа: негодное удостоверение чинит предъявитель, недоступный авторитет — оператор |
 | `kaname_registry_token_credential_kind_total` | `outcome` | исходы докерной полосы выдачи токена по виду предъявленного удостоверения |
 | `kaname_basic_credential_outcomes_total` | `verb`, `outcome` | исходы полосы базового секрета внутреннего слушателя: `verb` — `resolve` (предъявленный секрет) либо `liveness` (открытое соединение спрашивает по идентификатору); `outcome` — `accepted`, по одному значению на каждую причину отказа (`malformed`, `not-found`, `secret-mismatch`, `owner-revoked`), `reason-unnamed` и `unavailable`. Наружу любая причина отказа — один и тот же ответ; `owner-revoked` — удостоверение выдано не позже отсечки отзыва-всех его владельца. `reason-unnamed` у исправной службы всегда ноль |
 
-Три ряда этой таблицы — `kaname_jwks_mirror_outcomes_total`,
-`kaname_presented_credential_outcomes_total` и `kaname_basic_credential_outcomes_total` —
-заведены ради требования «ноль отказов за всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
+Два ряда этой таблицы — `kaname_presented_credential_outcomes_total` и
+`kaname_basic_credential_outcomes_total` — заведены ради требования «ноль отказов за всю жизнь контроля обязано быть заметно». Заметным оно становится только отсюда: в коде
 дежурный их не увидит.
 
 ## Приглашения и посев администратора
@@ -416,7 +412,7 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 
 | Ряд | Метки | Что значит |
 |---|---|---|
-| `kaname_provider_road_outcomes_total` | `road`, `outcome` | исходы обращений по каждому из трёх контуров к поставщику (`ADMIN`, `JWKS`, `TOKEN`). До этого ряда считался ОДИН контур из трёх, и молчание двух других было неотличимо от их исправности |
+| `kaname_provider_road_outcomes_total` | `road`, `outcome` | исходы обращений по каждой из двух дорог к поставщику: `road` — `admin` (административная: ключ служебной учётки, интерактивный клиент, принудительный выход) либо `token_exchange` (обмен подписанного утверждения на токен); `outcome` — `ok`, `absent`, `rejected`, `unavailable`, `misconfigured`. `absent` — ответ «не найдено», и по одному обращению он неразличим: растущий `absent` при нулевом `ok` на той же дороге — неверный адрес, а не идемпотентное снятие. До этого ряда считалась одна дорога — набора ключей, снятая с тех пор вместе с зеркалом этого набора, — и молчание остальных было неотличимо от их исправности |
 | `kaname_provider_compensations_emitted_total` | `origin`, `outcome` | компенсирующие намерения, ЗАПИСАННЫЕ в очередь, по саге-инициатору |
 | `kaname_provider_compensations_applied_total` | `origin` | компенсации, ИСПОЛНЕННЫЕ дренажом. Разрыв между записанными и исполненными и есть незакрытая компенсация |
 
@@ -588,14 +584,6 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
-
-- alert: KanameProviderMirrorUnsampled
-  # Ноль зеркал — цель, ради которой ряд заведён. Незаконно НЕ ЗНАТЬ, ноль
-  # это или неснятый замер: этот ноль открывает необратимое снятие компонента.
-  expr: increase(kaname_provider_mirror_samples_total{outcome="ok"}[10m]) == 0
-  for: 10m
-  annotations:
-    summary: "замер окна прежнего издателя не идёт — kaname_provider_mirror_rows перестал что-либо утверждать"
 
 - alert: KanameReadinessDependencyUnready
   expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0

@@ -178,14 +178,11 @@ type APIServerConfig struct {
 	// Умолчания нет по той же причине, что у публичного.
 	InternalRESTEndpoint string `mapstructure:"internal-rest-endpoint"`
 	// JWKSProxy — the cluster-INTERNAL key-set publisher HTTP listener (default
-	// `tcp://0.0.0.0:9097`). Записей у него ДВЕ, каждая по своему объявленному
-	// пути: зеркало ПУБЛИЧНОГО набора провайдера на каноническом
-	// `GET /.well-known/jwks.json` и НАША — проекция ключницы iam по
-	// `authn.token-signing.key-set-path`. Плоскость данных берёт ключи проверки у
-	// iam и никогда не звонит провайдеру напрямую.
+	// `tcp://0.0.0.0:9097`). Запись у него ОДНА — НАША, проекция ключницы iam по
+	// `authn.token-signing.key-set-path`; запись зеркала набора прежнего
+	// провайдера снята вместе с ним (kaname#361). Плоскость данных берёт ключи
+	// проверки у iam.
 	//
-	// Здесь стояло «while Hydra stays the issuer/signer» — утверждение верно про
-	// ЗАПИСЬ ЗЕРКАЛА и неверно про платформу: свои токены она подписывает сама.
 	// Разбор — в шапке jwks_proxy.go, второго места об этом предмете здесь нет.
 	//
 	// Served ONLY on the cluster-internal `kaname-internal` Service (never
@@ -305,17 +302,26 @@ type PostgresConfig struct {
 //	                        поэтому умолчание конечно, а не «никогда».
 //	                        Default 2160h (90d); override KANAME_SAKEY_DEFAULT_TTL.
 //	SAKeyMaxTTL           — включительный потолок ttl_seconds. Запрос сверх него
-//	                        отвергается InvalidArgument ДО регистрации клиента.
+//	                        отвергается InvalidArgument ДО всякой записи.
 //	                        Default 8760h (365d); override KANAME_SAKEY_MAX_TTL.
-//	SAKeyBindDPoP         — регистрировать OAuth2-клиент SA-ключа так, чтобы
-//	                        провайдер выпускал ТОЛЬКО sender-constrained токены
-//	                        (RFC 9449 `cnf.jkt`). Половина «выпуска» контроля
-//	                        привязки; половина «проверки» живёт на api-gateway.
-//	                        Default false; override KANAME_SAKEY_BIND_DPOP.
-//	SAKeyAccessTokenTTL   — per-client access_token_lifespan, проставляемый на
-//	                        OAuth2-клиенте SA-ключа. 0 → поле не отправляется и
-//	                        действует глобальный дефолт провайдера. Задаётся
-//	                        профилем деплоя; override KANAME_SAKEY_ACCESS_TOKEN_TTL.
+//	SAKeyBindDPoP         — требование sender-constrained токенов (RFC 9449
+//	                        `cnf.jkt`) на РЕГИСТРАЦИИ клиента SA-ключа у внешнего
+//	                        поставщика. ЧИТАТЕЛЯ НЕТ: регистрации выдача больше не
+//	                        заводит ни на одной посадке (kaname#362). Страж старта
+//	                        отвергает ручку на посадке с токен-эндпоинтом
+//	                        (validateMachineTokenBinding); без эндпоинта ключевая
+//	                        пара не выдаётся вовсе, и связанного-по-убеждению ключа
+//	                        не возникает. Default false; override KANAME_SAKEY_BIND_DPOP.
+//	SAKeyAccessTokenTTL   — per-client access_token_lifespan на РЕГИСТРАЦИИ
+//	                        клиента SA-ключа у внешнего поставщика. ЧИТАТЕЛЯ НЕТ с
+//	                        kaname#362 — регистрации нет; срок наших токенов
+//	                        задаёт authn.client-token.token-ttl. Ручка остаётся,
+//	                        пока её эмитирует чарт платформы (kacho:
+//	                        deploy/helm/umbrella/charts/kaname/templates/deployment.yaml,
+//	                        KANAME_SAKEY_ACCESS_TOKEN_TTL): снятая здесь раньше,
+//	                        она перестала бы читаться без единого слова. Снимается
+//	                        тем изменением, которым её перестанет эмитировать чарт.
+//	                        Override KANAME_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
 	Mode Mode `mapstructure:"mode"`
 	// IdentityProvider — ПОСАДКА ЛИЧНОСТИ: чем стенд проверяет человека,
@@ -370,18 +376,15 @@ type AuthNConfig struct {
 	// спросить (задача #2471).
 	ProviderAdminAuth string `mapstructure:"provider-admin-auth"`
 	HydraTokenURL     string `mapstructure:"hydra-token-url"`
-	// HydraTokenCAFile / HydraJWKSCAFile — the same anchor discipline for the two
-	// hops to the provider's PUBLIC listener: the token exchange (a signed client
-	// assertion out, the minted bearer back) and the JWKS upstream (the keyset the
-	// data-plane verifies every token against). Empty ⇒ the default transport,
+	// HydraTokenCAFile — the same anchor discipline for the hop to the provider's
+	// PUBLIC listener: the token exchange (a signed client assertion out, the
+	// minted bearer back). Empty ⇒ the default transport,
 	// which is what a plaintext in-cluster address needs and all it needs. Set ⇒
 	// the bundle becomes the ONLY anchor, and one that cannot be read refuses the
 	// start rather than falling back to the system roots — that fallback is the
 	// state nobody can see, because the operator configured verification against
 	// the internal CA and the process is not doing it.
 	HydraTokenCAFile        string `mapstructure:"hydra-token-ca-file"`
-	HydraJWKSURL            string `mapstructure:"hydra-jwks-url"`
-	HydraJWKSCAFile         string `mapstructure:"hydra-jwks-ca-file"`
 	HookSharedSecret        string `mapstructure:"hook-shared-secret"`
 	HookSharedSecretEnv     string `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`

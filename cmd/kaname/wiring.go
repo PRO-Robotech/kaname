@@ -778,7 +778,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// поставщик, и снимается она у него; под `own` поставщика нет вовсе, а
 		// сессия входа — НАША строка, и снимается она нашим же адаптером.
 		// Провязаны они ВЗАИМНО ИСКЛЮЧАЮЩЕ: провязать обе значило бы на каждой
-		// посадке звать одну впустую, а под `own` — звать отставленную дорогу и
+		// посадке звать одну впустую, а под `own` — звать дорогу, которой нет, и
 		// отказывать всему глаголу за её отсутствием.
 		WithProviderSessions(forceLogoutProviderSessions(cfg, pool, metricsReg.ProviderRoadRecorder())).
 		WithOwnSessions(forceLogoutOwnSessions(cfg, pool)).
@@ -821,9 +821,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// означает «выведен по одной полосе и работает по другой».
 		WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(pool))
 
-	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
-	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg,
-		metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
+	// ── SAKey wiring (Class A static SA keys of service accounts) ─────────
+	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
@@ -1034,20 +1033,54 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	}
 }
 
-// mustProviderAdminClient строит клиента административной дороги к поставщику,
-// резолвя якорь доверия хопа.
+// providerAdminHopIsBuilt — СТРОИТ ЛИ этот корень административную дорогу к
+// внешнему поставщику (задача kaname#21).
 //
-// КЛИЕНТ НЕ ОДИН, и прежняя редакция утверждала обратное: «строит единственный
-// клиент, который делят все потребители». Помощник зовётся каждым потребителем
-// и каждый раз отдаёт НОВЫЙ экземпляр — предикат рядом, а не число в прозе:
+// Живёт ВПЛОТНУЮ к развилке и читается ею же: наблюдатель провязки берёт ответ
+// отсюда, а не повторяет условие у себя. Второе место об одном предмете
+// разошлось бы с первым молча — и разошлось бы именно там, где расхождение не
+// видно: на посадке, которая сегодня не поднимается по другим строкам таблицы.
+func providerAdminHopIsBuilt(cfg config.Config) bool {
+	return cfg.AuthN.HasExternalIdentityProvider()
+}
+
+// providerAdminRoad — клиент административной дороги к внешнему поставщику,
+// названный РОЛЬЮ, а не поставщиком: ветви развилки говорят о дороге, и имя
+// поставщика в каждой из них было бы привязкой к тому, что снимается (kacho#2564).
+type providerAdminRoad = clients.HydraAdminClient
+
+// onProviderAdminRoad — РАЗВИЛКА ПОСАДКИ административной дороги (задача
+// kaname#338; решение о форме —
+// `docs/engineering/architecture/provider-admin-road-posture-is-a-fork.md`).
 //
-//	git grep -c 'mustProviderAdminClient(' -- cmd/kaname ':!*_test.go'
+// Вызывающий подаёт ДВЕ ветви. `built` исполняется на посадке с внешним
+// поставщиком и получает дорогу параметром; `absent` исполняется на посадке без
+// него и дороги не получает вовсе. Потребитель дороги — ровно ветвь, которой её
+// передали доводом, и в паре с ней всегда стоит его же ветвь другой посадки.
 //
-// Следствие у утверждения было: якорь резолвится не «однажды», а на каждом
-// вызове, и «разделяемое состояние», которого нет, читалось как основание
-// ничего не провязывать по месту. Сводить экземпляры в один — отдельное
-// решение с иной ценой (общий клиент делит транспорт и его пул соединений);
-// здесь текст приведён к тому, что код делает.
+// ПОЧЕМУ РАЗВИЛКА, А НЕ ОТВЕТ. Прежде строитель отдавал пару «клиент, построена
+// ли дорога», и на посадке без поставщика клиент существовал всё равно — без
+// адреса, отказывающий на всяком вызове. Что потребитель его не тронет, держала
+// ветвь по ответу, которую компилятор не судит, а тому, кто принимал клиента
+// доводом, решение о посадке не принадлежало вовсе. Здесь компилятор держит
+// обе половины: вызов без ветви другой посадки не собирается, а в ветви
+// `absent` дороги нет в области видимости. Остаток — ветвь `nil`, ветвь не
+// литералом, одна ветвь на нескольких потребителей — судит гейт
+// `TestProviderRoadConsumersEachDecideTheirPosture`.
+//
+// Две величины результата — не произвол: столько возвращает каждый потребитель
+// дороги в корне (исполнитель и ошибка; порт и разрешение имени; задача и
+// ошибка).
+//
+// Отсутствие поставщика отказом старта здесь НЕ ведётся: такой отказ пришёл бы
+// РАНЬШЕ стража посадки, и вместо перечня причин полосы читатель получил бы
+// одну, не ту и без имени полосы. Поэтому решение о старте остаётся у стража, а
+// здесь решается только то, кто из потребителей что получает. Отказ старта
+// ниже — другой предмет: якорь доверия назван, но не читается.
+//
+// Наблюдатель дороги приходит ДОВОДОМ: счётчик принадлежит реестру величин, а
+// развилка о нём не знает. nil законен — счёта нет, решения дороги это не
+// меняет (kacho#2491).
 //
 // Fatal on an unusable anchor, deliberately and at the composition root: the
 // alternative — carrying on against the system root store — is the state nobody
@@ -1056,48 +1089,21 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 // rotates. Config.Validate has already refused a production configuration that
 // omits the anchor while addressing the hop over TLS; this catches the anchor
 // that is named but unreadable, which only opening the file can tell.
-// providerAdminHopIsBuilt — СТРОИТ ЛИ этот корень административную дорогу к
-// внешнему поставщику (задача kaname#21).
 //
-// Живёт ВПЛОТНУЮ к строителю и читается им же: наблюдатель провязки берёт ответ
-// отсюда, а не повторяет условие у себя. Второе место об одном предмете
-// разошлось бы с первым молча — и разошлось бы именно там, где расхождение не
-// видно: на посадке, которая сегодня не поднимается по другим строкам таблицы.
-func providerAdminHopIsBuilt(cfg config.Config) bool {
-	return cfg.AuthN.HasExternalIdentityProvider()
-}
-
-// Наблюдатель дороги приходит ДОВОДОМ, а не берётся здесь: счётчик принадлежит
-// реестру величин, а этот помощник о нём не знает и знать ему нечем. nil
-// законен — счёта нет, решения дороги это не меняет (kacho#2491).
-//
-// ВТОРЫМ ЗНАЧЕНИЕМ ВОЗВРАЩАЕТСЯ ОТВЕТ О ПОСАДКЕ: построена ли дорога вообще
-// (задача kaname#313). Прежде возвращалось одно значение, и «дорога есть» с
-// «дороги нет» приходили потребителю НЕОТЛИЧИМО — потребитель, не спросивший
-// посадку, уносил отставленную дорогу молча, а отказывала она потом, на пути
-// запроса и у чужого глагола. Ответ значением делает это невыразимым: связать
-// его обязан каждый, а связанное и непрочитанное имя есть ошибка сборки —
-// значит решение о посадке принимает КАЖДЫЙ потребитель, и принимает его в
-// месте, где он его и объясняет. Держится гейтом
-// `TestProviderRoadConsumersTakeThePostureAnswer`.
-func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObserver) (
-	*clients.HydraAdminClient, bool,
-) {
-	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДОРОГИ НЕ ПОЛУЧАЕТ — И ЭТО ПРО АДРЕС, А НЕ
-	// ПРО ОТВЕТ (задача kaname#21, преемник kacho#2489).
-	//
-	// Резолв адреса пустого не возвращает НИКОГДА: при незаданной ручке он
-	// выводит адрес из доменного имени. Поэтому «поставщика нет» отсюда было
-	// невыразимо, дорога читалась как настроенная на стенде, который её не
-	// настраивал, и уходила звонить в публичный ингресс с административным
-	// предъявителем в заголовке.
-	//
-	// Отказ в СТАРТЕ здесь был бы хуже: он пришёл бы РАНЬШЕ стража посадки и
-	// вместо перечня причин полосы читатель получил бы одну, не ту и без имени
-	// полосы. Поэтому потребители получают клиента без дороги, а решение о
-	// старте остаётся у стража, который называет все причины разом.
+// КЛИЕНТ НЕ ОДИН: каждый вызов строит НОВЫЙ экземпляр и резолвит якорь заново.
+// Сводить экземпляры в один — отдельное решение с иной ценой (общий клиент
+// делит транспорт и его пул соединений).
+func onProviderAdminRoad[A, B any](cfg config.Config, roadObs clients.ProviderRoadObserver,
+	built func(road *providerAdminRoad) (A, B),
+	absent func() (A, B),
+) (A, B) {
+	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДОРОГИ НЕ ПОЛУЧАЕТ — И ЭТО ПРО АДРЕС
+	// (задача kaname#21, преемник kacho#2489). Резолв адреса пустого не
+	// возвращает НИКОГДА: при незаданной ручке он выводит адрес из доменного
+	// имени, и дорога уходила бы звонить в публичный ингресс с административным
+	// предъявителем в заголовке. Поэтому полоса спрашивается ДО резолва.
 	if !providerAdminHopIsBuilt(cfg) {
-		return clients.NewAbsentProviderAdminClient().WithRoadObserver(roadObs), false
+		return absent()
 	}
 	c, err := clients.NewHydraAdminClientWithCA(
 		cfg.AuthN.ResolveHydraAdminURL(),
@@ -1110,25 +1116,20 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 	if err != nil {
 		log.Fatalf("provider-admin client: %v", err)
 	}
-	return c.WithRoadObserver(roadObs), true
+	return built(c.WithRoadObserver(roadObs))
 }
 
 // interactiveClientProvider — ЧЕМ исполняются заведение и снятие клиента
 // интерактивного входа на ЭТОЙ посадке (задача kaname#313).
 //
-// Развилка НЕ новая: ответ берётся у САМОГО строителя дороги, который его и
-// возвращает. Второе условие об одной посадке разошлось бы с первым молча, и
-// разошлось бы там, где расхождение означает «клиент заведён у одного реестра,
-// а снимается у другого».
+// Развилка НЕ новая: она та же, что строит дорогу. Второе условие об одной
+// посадке разошлось бы с первым молча, и разошлось бы там, где расхождение
+// означает «клиент заведён у одного реестра, а снимается у другого».
 //
 // ПОЧЕМУ ВЫБОР ЗДЕСЬ, А НЕ ВЕТВЬЮ В USE-CASE. Глагол ресурса про посадку не
 // знает и знать ему нечем: он просит порт завести клиента и снять его. Ветвь
 // внутри него была бы решением о развёртывании, принятым в бизнес-слое, — и
 // принималось бы оно на каждом запросе заново.
-//
-// ОТСТАВЛЕННОЙ ДОРОГИ ЭТА ПОЛОСА БОЛЬШЕ НЕ ПОЛУЧАЕТ: под `own` строитель
-// административной дороги отсюда не зовётся вовсе, поэтому терминальный отказ
-// «внешнего поставщика нет» на путь заведения и снятия не попадает.
 //
 // ПОД `own` ИСПОЛНИТЕЛЬ СОБИРАЕТСЯ НАД РЕЕСТРОМ И ХЕШЕРОМ (задача kaname#405):
 // клиент конфиденциален, и проверочное значение его секрета нечем положить без
@@ -1137,11 +1138,13 @@ func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObse
 func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSecretStore,
 	ownHasher kanamepg.ClientSecretHasher, roadObs clients.ProviderRoadObserver,
 ) (interactiveclientapp.ProviderClients, error) {
-	road, built := mustProviderAdminClient(cfg, roadObs)
-	if built {
-		return clients.NewInteractiveClientProvider(road), nil
-	}
-	return kanamepg.NewOwnInteractiveClientProvider(ownRegistry, ownHasher)
+	return onProviderAdminRoad(cfg, roadObs,
+		func(road *providerAdminRoad) (interactiveclientapp.ProviderClients, error) {
+			return clients.NewInteractiveClientProvider(road), nil
+		},
+		func() (interactiveclientapp.ProviderClients, error) {
+			return kanamepg.NewOwnInteractiveClientProvider(ownRegistry, ownHasher)
+		})
 }
 
 // ownClientSecretHasher — хешер проверочного значения секрета интерактивного
@@ -1154,10 +1157,10 @@ func interactiveClientProvider(cfg config.Config, ownRegistry kanamepg.ClientSec
 // исполнителя, которому он нужен, нет, и возвращается ЧИСТЫЙ nil — не
 // типизированный: сборка исполнителя судит интерфейс.
 //
-// Предикат посадки берётся у строителя дороги (`providerAdminHopIsBuilt`), а
-// не повторяется: исполнитель `own` строится ровно там, где дороги нет
-// (`interactiveClientProvider`), и второе условие об одной посадке разошлось бы
-// с первым молча.
+// Предикат посадки берётся у развилки (`providerAdminHopIsBuilt`), а не
+// повторяется: исполнитель `own` строится ровно в её ветви без дороги
+// (`interactiveClientProvider`), и второе условие об одной посадке разошлось
+// бы с первым молча.
 func ownClientSecretHasher(cfg config.Config) (kanamepg.ClientSecretHasher, error) {
 	if providerAdminHopIsBuilt(cfg) {
 		return nil, nil
@@ -1174,22 +1177,19 @@ func ownClientSecretHasher(cfg config.Config) (kanamepg.ClientSecretHasher, erro
 //
 // Под `own` возвращает пару nil, и `WithProviderSessions` её не принимает:
 // провязка требует обоих — поставщика и разрешение имени субъекта, — а под `own`
-// внешнего субъекта не существует вовсе, и разрешать нечего.
-//
-// До этой правки пара провязывалась БЕЗУСЛОВНО, и под `own` принудительный
-// выход получал отставленную дорогу: снятие отказывало терминально, а отказ
-// снятия делает недоступным весь глагол. То есть распорядитель не мог вывести
-// никого.
+// внешнего субъекта не существует вовсе, и разрешать нечего. Nil ЧИСТЫЙ, а не
+// типизированный: страж провязки судит интерфейс, и типизированный nil прошёл
+// бы его насквозь.
 func forceLogoutProviderSessions(cfg config.Config, pool *pgxpool.Pool,
 	roadObs clients.ProviderRoadObserver,
 ) (internaliamapp.ProviderSessions, internaliamapp.ExternalIDResolver) {
-	road, built := mustProviderAdminClient(cfg, roadObs)
-	if !built {
-		// ЧИСТЫЙ nil, а не типизированный: страж провязки судит интерфейс, и
-		// типизированный nil прошёл бы его насквозь.
-		return nil, nil
-	}
-	return road, &forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)}
+	return onProviderAdminRoad(cfg, roadObs,
+		func(road *providerAdminRoad) (internaliamapp.ProviderSessions, internaliamapp.ExternalIDResolver) {
+			return road, &forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)}
+		},
+		func() (internaliamapp.ProviderSessions, internaliamapp.ExternalIDResolver) {
+			return nil, nil
+		})
 }
 
 // forceLogoutOwnSessions — снятие НАШИХ записей сессии входа, если посадка их
@@ -1227,62 +1227,42 @@ func saKeyIssuanceIsOurs(cfg config.Config) bool {
 	return cfg.SAKeyIssuanceIsOurs()
 }
 
-// buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
-// via Hydra OAuth2 client_credentials.
+// buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys of
+// service accounts.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
-	compObs clients.CompensationEmitObserver, roadObs clients.ProviderRoadObserver,
 	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
 
 	// ОТВЕТ О ПОСАДКЕ ПРИНИМАЕТСЯ ЗДЕСЬ.
 	//
-	// Контур выдачи ключей служебных учёток зависит от дороги НЕ ЦЕЛИКОМ, и
-	// измерено это по коду, а не выведено:
+	// Ключевая пара и федеративный ключ обмениваются ТОКЕН-ЭНДПОИНТОМ платформы
+	// (`authn.client-token.enabled`), и другого исполнителя обмена у ключа нет:
+	// регистрация клиента у внешнего поставщика снята вместе со столбцом, где
+	// лежало назначенное им имя (kaname#362). Без эндпоинта эти два вида
+	// отвергаются на выдаче синхронно, с именем ручки; секрет эндпоинта не
+	// требует и выдаётся. Дороги к поставщику эта сборка не строит вовсе.
 	//
-	//   · выдача. `IssueSAKeyUseCase.nameClient` зовёт поставщика ТОЛЬКО на
-	//     непереведённом контуре; на переведённом (`saKeyIssuanceIsOurs`) имя
-	//     клиента чеканим мы, и дорога на этом пути не участвует вовсе;
-	//   · компенсация. Намерение снять созданное адресуется КООРДИНАТОЙ У
-	//     ПОСТАВЩИКА, а на переведённом контуре она пуста — значит намерение не
-	//     записывается, и очередь компенсаций под `own` производителя не имеет;
-	//   · снятие. `RevokeSAKeyUseCase` зовёт поставщика ПОСЛЕ коммита, и его
-	//     отказ глотается намеренно: снятие уже состоялось тем, что строка
-	//     отображения ушла. Отставленная дорога даёт здесь строку в журнале, а
-	//     не отказ вызывающему.
+	// В БОЕВЫХ РЕЖИМАХ ПОСАДКА БЕЗ ЭНДПОИНТА НЕ ПОДНИМАЕТСЯ. Её отвергает
+	// страж старта — строка контура выдачи в таблице требований полос
+	// (`config.LaneRequirements`, задача #337); вердикт стража по режимам держит
+	// `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`, а то, что
+	// отказ стража завершает процесс в `main` до этой сборки, —
+	// `TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring`. Чарт её
+	// не собирает ни в каком режиме (`kaname-svc.requireClientTokenEndpoint`).
 	//
-	// НЕ ИСПОЛНЯЕТСЯ ОДНА КОМБИНАЦИЯ: посадка `own` при НЕпереведённом контуре
-	// (`authn.client-token.enabled` не включён). Там выдача уходит к
-	// поставщику, которого нет, и отказывает на всяком входе.
-	//
-	// В БОЕВЫХ РЕЖИМАХ ВЕТВЬ НИЖЕ НЕДОСТИЖИМА, и держится это двумя половинами.
-	// Комбинацию отвергает страж старта — строка контура выдачи в таблице
-	// требований полос (`config.LaneRequirements`, задача #337); вердикт стража
-	// по режимам держит `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
-	// Отказ стража завершает процесс в `main` до этой сборки; порядок держит
-	// `TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring`, исполняя
-	// настоящий `main` в дочернем процессе. Чарт её не собирает ни в каком режиме
-	// (`kaname-svc.requireClientTokenEndpoint`, та же задача): на стенде,
-	// поставленном чартом, ветвь не исполняется.
-	//
-	// ДОСТИЖИМА ОНА В РЕЖИМЕ РАЗРАБОТЧИКА. Требования полосы вне боевых режимов
-	// не предъявляются (внутрипроцессная фикстура стендом не является), и
-	// процесс с этой комбинацией поднимается. Второго отказа старта здесь не
-	// заводится: у комбинации он один и живёт в таблице полос, а второй, в
-	// сборке, был бы вторым местом об одном предмете и разошёлся бы с первым
-	// по режиму. Поэтому ответ о посадке ЧИТАЕТСЯ: неработающая комбинация
-	// называется при старте, один раз и с обеими ручками, — молчание здесь
-	// оставило бы дефект до пути запроса. Что в этом режиме предупреждение
-	// печатается ровно один раз и называет, чем снимается, держит та же
-	// `TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes`.
-	hydraAdmin, providerRoadBuilt := mustProviderAdminClient(cfg, roadObs)
-	if !providerRoadBuilt && !saKeyIssuanceIsOurs(cfg) {
-		logger.Warn("выдача ключей служебных учёток на этой посадке не исполняется: "+
-			"внешнего поставщика нет, а контур выдачи на свою чеканку не переведён — "+
-			"всякая выдача отказывает обращением к дороге, которой не существует",
+	// В РЕЖИМЕ РАЗРАБОТЧИКА ОНА ПОДНИМАЕТСЯ, и потому неработающая выдача
+	// называется при старте один раз, с ручкой, которой снимается: молчание
+	// оставило бы дефект до пути запроса. Второго отказа старта здесь не
+	// заводится — у комбинации он один и живёт в таблице полос.
+	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	if !ownIssuance {
+		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток на этой посадке "+
+			"отказывает: ключ обменивается токен-эндпоинтом платформы, а он не включён — "+
+			"выдаётся только секрет",
 			"authn.identity-provider", cfg.AuthN.IdentityProvider.String(),
 			"authn.client-token.enabled", cfg.AuthN.ClientToken.Enabled,
 			"снимается", "включением authn.client-token.enabled — контур выдачи на свою чеканку "+
-				"(задача kacho#1120) — либо объявлением внешнего поставщика")
+				"(задача kacho#1120)")
 	}
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
@@ -1290,20 +1270,12 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// key-mapping mutation (запрет #10). Payload carries no key material.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
-	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
-	// Переведён ли контур выдачи ключей на свою чеканку (задача kacho#1120). Решается
-	// ЗДЕСЬ, в единственном месте сборки: «переведён» — свойство посадки, и
-	// use-case его не выводит.
-	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
+	// Есть ли у посадки токен-эндпоинт — решается ЗДЕСЬ, в единственном месте
+	// сборки: это свойство посадки, и use-case его не выводит.
 	if ownIssuance {
 		issueUC.WithOwnIssuance()
 	}
-	// Always whitelist the configured registry service audience on every issued
-	// SA-key's Hydra client (#320) — the SAME value the `/iam/token` Docker-
-	// Registry shim requests during the client_credentials exchange
-	// (serve.go passes it as registrytokenwire.BuildConfig.Service). Without it
-	// Hydra rejects a docker-login exchange as an un-whitelisted audience.
-	issueUC.RegistryAudience = cfg.APIServer.RegistryToken.TokenService()
 	// Перечень доверенных издателей федеративного ключа — НАША таблица (#1124):
 	// писатель провязан здесь, читает её проверка утверждения на пути запроса.
 	issueUC.WithTrustedIssuerWriter(kanamepg.NewTrustedIssuerRepo(pool))
@@ -1321,52 +1293,20 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// what a machine authenticates with, and machine principals are exempt from
 	// step-up (a machine has no second factor) — that exemption holds only while
 	// the credential itself is time-bounded. DefaultTTL replaces the old
-	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling;
-	// AccessTokenLifespan pins the per-client token TTL so minted tokens do not
-	// inherit whatever the identity provider defaults to.
+	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling.
 	issueUC.DefaultTTL = cfg.AuthN.SAKeyDefaultTTL
 	issueUC.MaxTTL = cfg.AuthN.SAKeyMaxTTL
-	issueUC.AccessTokenLifespan = cfg.AuthN.SAKeyAccessTokenTTL
-	// Sender-constrained tokens for the machine credential. Issuance half of the
-	// binding control; the gateway enforces the other half. Must be enabled
-	// FIRST — enforcement without issuance can only reject.
-	issueUC.BindDPoP = cfg.AuthN.SAKeyBindDPoP
 	// Surface redaction failures (error / give-up / recovered panic) of the
 	// detached redaction goroutine — the only place a key can stay un-redacted.
 	issueUC.WithLogger(logger)
-	// Durable-приёмник компенсирующих намерений. Клиент у провайдера создаётся ДО
-	// коммита нашей строки (строка обязана нести назначенный провайдером
-	// client_id), поэтому провал коммита обязан снять созданное. Прямой вызов
-	// снятия остаётся ЗАПАСНЫМ путём: он сам может отказать, а процесс — умереть
-	// между провалом и уборкой; durable намерение доставит дренаж.
-	issueUC.WithCompensationEmitter(clients.NewProviderCompensationOutbox(pool).WithEmitObserver(compObs))
-	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), hydraAdmin, opsRepo)
+	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
-	// Surface the post-commit Hydra orphan-cleanup warning (eventual-consistency).
 	revokeUC.WithLogger(logger)
 	listKeysUC := sakeysapp.NewListSAKeysUseCase(saClientRepo)
 
-	// Посадка контура печатается ВСЕГДА, включая непереведённую: «зеркала больше
-	// не заводим» иначе невидимо ниоткуда, а оператору, разбирающему выдачу, это
-	// первое, что нужно знать — у ключа, выданного переведённым контуром, записи у
-	// прежнего издателя нет и искать её негде.
-	//
-	// АДРЕС БЕРЁТСЯ У ПОСТРОЕННОГО КЛИЕНТА, А НЕ РЕЗОЛВИТСЯ ВТОРОЙ РАЗ
-	// (задачи kacho#2573, kaname#21). Здесь стояло отдельное чтение
-	// `cfg.AuthN.ResolveHydraAdminURL()`, и оно не спрашивало полосу: резолвер
-	// пустого не возвращает НИКОГДА — при незаданной ручке он выводит адрес из
-	// доменного имени. На посадке `own`, где внешнего поставщика нет вовсе и
-	// строитель отдаёт отставленного клиента, перепись всё равно печатала
-	// административный адрес — то есть называла настроенной дорогу, по которой
-	// процесс не пойдёт ни разу.
-	//
-	// Клиент несёт адрес ровно тогда, когда дорога построена, поэтому пустое
-	// значение здесь означает «дороги нет», а не «поле не заполнено»; булев
-	// факт о ней печатает перепись полосы (`provider_admin_hop_built`) и здесь
-	// не повторяется — два места об одном предмете разошлись бы молча.
-	logger.Info("sa_keys wired",
-		"hydra_admin", hydraAdmin.BaseURL,
-		"own_issuance", ownIssuance)
+	// Посадка контура печатается ВСЕГДА: оператору, разбирающему выдачу, это
+	// первое, что нужно знать.
+	logger.Info("sa_keys wired", "own_issuance", ownIssuance)
 
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
 }

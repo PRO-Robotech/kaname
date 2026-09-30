@@ -26,10 +26,9 @@ import (
 // Deterministic bootstrap identity (byte-identical to migration 0058 /
 // bootstrap_token.DeriveIdentity()).
 const (
-	bootstrapClientID = "kacho-bootstrap-admin"
-	bootstrapSvaID    = "svab91854890de887e6d"
-	bootstrapSocID    = "soc_db27d17291ff453b6"
-	systemAccountID   = "acc1a18042d81fb438d6"
+	bootstrapSvaID  = "svab91854890de887e6d"
+	bootstrapSocID  = "soc_db27d17291ff453b6"
+	systemAccountID = "acc1a18042d81fb438d6"
 )
 
 // stubSAPort — programmable ServiceAccount + OAuth-client-mapping lookup.
@@ -40,7 +39,7 @@ type stubSAPort struct {
 	saErr  error
 }
 
-func (s stubSAPort) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (s stubSAPort) LookupByClientID(_ context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return s.soc, s.socErr
 }
 
@@ -70,7 +69,6 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             domain.SAOAuthClientID(bootstrapSocID),
 			SvaID:          domain.ServiceAccountID(bootstrapSvaID),
-			OAuthClientID:  domain.OAuthClientID(bootstrapClientID),
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(bootstrapSvaID),
@@ -80,13 +78,14 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		bootstrapUserPort{t: t},
 	).WithSAPort(sa)
 	svc.now = func() time.Time { return fixed }
 
-	// For client_credentials, Hydra's `subject` == the client_id.
-	claims, _, err := svc.EnrichClaims(context.Background(), bootstrapClientID, TokenHookContext{ACR: "0"})
+	// For client_credentials the `subject` is the client id — the id of the key
+	// row (kaname#362: the bootstrap row has no second name).
+	claims, _, err := svc.EnrichClaims(context.Background(), bootstrapSocID, TokenHookContext{ACR: "0"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "service_account", claims["kaname_principal_type"],
@@ -106,7 +105,7 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 func TestEnrichClaims_UnknownClient_NotBootstrapSA(t *testing.T) {
 	sa := stubSAPort{socErr: iamerr.ErrNotFound}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		fallthroughUserPort{},
 	).WithSAPort(sa)
 	_, _, err := svc.EnrichClaims(context.Background(), "some-other-client", TokenHookContext{})

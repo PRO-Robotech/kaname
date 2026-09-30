@@ -29,7 +29,7 @@ func edgeBare() httpEdgeTLS {
 
 func TestRequireHTTPEdgeTLS_CanFailAndStaysSilent(t *testing.T) {
 	second := httpEdgeTLS{
-		name: "зеркало ключей", knob: "KNOB_B", addr: "0.0.0.0:9097",
+		name: "публикатор ключей", knob: "KNOB_B", addr: "0.0.0.0:9097",
 		enabled: false, why: "предпосылка снятой аутентификации — односторонняя TLS",
 	}
 

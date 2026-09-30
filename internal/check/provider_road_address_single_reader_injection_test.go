@@ -53,7 +53,7 @@ func TestProviderAddressRead_SilentInsideTheBuilder(t *testing.T) {
 	t.Parallel()
 	src := `package main
 
-func mustProviderAdminClient(cfg config.Config) string {
+func ` + providerAddressOwner + `(cfg config.Config) string {
 	return cfg.AuthN.ResolveHydraAdminURL()
 }
 `

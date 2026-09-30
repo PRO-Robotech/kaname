@@ -168,7 +168,6 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 		c = domain.ServiceAccountOAuthClient{
 			ID:              domain.SAOAuthClientID(id.SocID),
 			SvaID:           domain.ServiceAccountID(id.SvaID),
-			OAuthClientID:   domain.OAuthClientID(id.ClientID),
 			Description:     domain.Description("bootstrap-admin token-mint client (#58)"),
 			CreatedByUserID: domain.UserID(id.CreatedByUserID),
 			PublicKeyPEM:    pubPEM,
@@ -195,7 +194,6 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	// winner-provisioned values).
 	id.SvaID = string(c.SvaID)
 	id.SocID = string(c.ID)
-	id.ClientID = string(c.OAuthClientID)
 	return id, nil
 }
 

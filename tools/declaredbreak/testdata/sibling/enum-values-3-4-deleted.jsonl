@@ -1,0 +1,2 @@
+{"path":"kaname/cloud/iam/v1/credential_kind.proto","start_line":43,"start_column":1,"end_line":67,"end_column":2,"type":"ENUM_VALUE_NO_DELETE","message":"Previously present enum value \"3\" on enum \"CredentialKind\" was deleted."}
+{"path":"kaname/cloud/iam/v1/credential_kind.proto","start_line":43,"start_column":1,"end_line":67,"end_column":2,"type":"ENUM_VALUE_NO_DELETE","message":"Previously present enum value \"4\" on enum \"CredentialKind\" was deleted."}

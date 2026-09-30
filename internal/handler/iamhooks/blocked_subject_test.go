@@ -186,7 +186,7 @@ func TestSubjectState_OneVerdictForBothHooks(t *testing.T) {
 // is exactly how the issuing hook ended up minting for a blocked user.
 func TestEnrichClaims_BlockedUser_IsNotNotFound(t *testing.T) {
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blockedUserRow()}})
 
 	_, _, err := svc.EnrichClaims(context.Background(), blockedSubject, service.TokenHookContext{})
@@ -200,7 +200,7 @@ func TestEnrichClaims_ActiveUser_Unaffected(t *testing.T) {
 	const sub = "kratos-active-sub"
 	active := activeUserRow(sub)
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{active}})
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
@@ -218,7 +218,7 @@ func TestEnrichClaims_MixedMembership_PicksTheActiveRow(t *testing.T) {
 	active := activeUserRow(sub)
 
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{blocked, active}})
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
@@ -228,24 +228,27 @@ func TestEnrichClaims_MixedMembership_PicksTheActiveRow(t *testing.T) {
 
 // ── Personal access token ───────────────────────────────────────────────────
 
-// A blocked user holding a personal access token was worse off than the
-// interactive one: that path resolves the owner BY ID, with no status filter at
-// all, and stamped the FULL claim set — principal id and account included.
-func TestTokenHook_BlockedUserPersonalToken_Refused(t *testing.T) {
-	const clientID = "pat-client-of-blocked-user"
+// TestTokenHook_PersonalTokenClientIsNotResolvedByTheProviderHook — обратный
+// вызов прежнего поставщика, получивший идентификатор персонального токена
+// клиентом `client_credentials`, принципала за ним не находит и отказывает:
+// ветви, резолвившей персональный токен по имени клиента у поставщика, больше
+// нет (kaname#362), и поставщик таких клиентов не регистрирует. Состояние
+// владельца персонального токена судит наш путь выдачи — его держит
+// `internal/service/token_enrichment_usertoken_test.go`.
+func TestTokenHook_PersonalTokenClientIsNotResolvedByTheProviderHook(t *testing.T) {
+	const clientID = "uoc_01blockedblocked"
 	owner := blockedUserRow()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.test.cloud", HydraIssuer: "https://hydra.test.cloud"},
+		service.TokenEnrichmentConfig{Domain: "api.test.cloud"},
 		&fakeUserLookup{users: []domain.User{owner}},
-	).WithUserTokenPort(&fakeBlockedOwnerTokens{clientID: clientID, owner: owner})
+	).WithUserTokenPort(&fakeOwnerOnly{owner: owner})
 	audit := &fakeAudit{}
 	h := iamhooks.NewTokenHookHandler(
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		}, enricher, newFakeRevocations(), audit, logger)
 
 	w := postHook(t, h, "/iam/v1/hooks/token", "secret-hook-token",
@@ -253,31 +256,23 @@ func TestTokenHook_BlockedUserPersonalToken_Refused(t *testing.T) {
 		  "request":{"client_id":"`+clientID+`","grant_types":["client_credentials"]}}`)
 
 	require.Equal(t, http.StatusForbidden, w.Code,
-		"a personal token whose owner may not authenticate must not mint. body: %s", w.Body.String())
+		"a client the provider lane cannot resolve must not mint. body: %s", w.Body.String())
 	assert.NotContains(t, w.Body.String(), string(owner.AccountID),
-		"least of all the full claim set naming the owner's account")
+		"least of all a claim set naming the owner's account")
 
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	assert.Nil(t, body["session"], "no session claims are returned on a refusal")
 }
 
-// fakeBlockedOwnerTokens — a personal-access-token mapping whose owning user is
-// blocked. Deliberately reports the owner as PRESENT: the defect is not a
-// missing row, it is a present row nobody looked at.
-type fakeBlockedOwnerTokens struct {
-	clientID string
-	owner    domain.User
+// fakeOwnerOnly — владелец персонального токена, которого порт знает. Порт
+// читается только нашим путём; обратный вызов его спросить не может, и проба
+// выше это держит.
+type fakeOwnerOnly struct {
+	owner domain.User
 }
 
-func (f *fakeBlockedOwnerTokens) LookupByOAuthClientID(_ context.Context, id domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	if string(id) != f.clientID {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such user-token client")
-	}
-	return domain.UserOAuthClient{ID: "uoc_01blockedblocked", UserID: f.owner.ID, OAuthClientID: id}, nil
-}
-
-func (f *fakeBlockedOwnerTokens) GetUser(_ context.Context, id domain.UserID) (domain.User, error) {
+func (f *fakeOwnerOnly) GetUser(_ context.Context, id domain.UserID) (domain.User, error) {
 	if id != f.owner.ID {
 		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such user")
 	}

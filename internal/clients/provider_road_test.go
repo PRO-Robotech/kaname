@@ -39,7 +39,9 @@ func adminAgainst(t *testing.T, status int, body string) (*HydraAdminClient, *ro
 	}))
 	t.Cleanup(srv.Close)
 	spy := &roadSpy{}
-	return NewHydraAdminClient(srv.URL, "").WithRoadObserver(spy), spy
+	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
+	require.NoError(t, err)
+	return c.WithRoadObserver(spy), spy
 }
 
 func TestProviderRoad_AdminDeleteClassifiesEveryAnswerIntoItsOwnCell(t *testing.T) {
@@ -76,7 +78,8 @@ func TestProviderRoad_AdminDeleteClassifiesEveryAnswerIntoItsOwnCell(t *testing.
 func TestProviderRoad_AdminTransportFailureIsUnavailableNotMisconfigured(t *testing.T) {
 	// Отказ транспорта лечится временем и обязан лежать отдельно от настройки:
 	// смешав их, оператор получил бы «поставщик лежит» на неверном адресе.
-	c := NewHydraAdminClient("http://127.0.0.1:1", "")
+	c, err := NewHydraAdminClientWithCA("http://127.0.0.1:1", "", "")
+	require.NoError(t, err)
 	c.HTTPClient = &http.Client{Timeout: 200 * time.Millisecond}
 	spy := &roadSpy{}
 	c = c.WithRoadObserver(spy)
@@ -86,10 +89,10 @@ func TestProviderRoad_AdminTransportFailureIsUnavailableNotMisconfigured(t *test
 }
 
 func TestProviderRoad_AbsentRoadIsNotCountedAsAnAnswer(t *testing.T) {
-	// Посадка без внешнего поставщика дороги не строит вовсе. Считать такой
+	// Клиент без адреса — нулевое значение типа — не звонит вовсе. Считать его
 	// отказ исходом ОБРАЩЕНИЯ значило бы утверждать, что по дороге ходили.
 	spy := &roadSpy{}
-	c := NewAbsentProviderAdminClient().WithRoadObserver(spy)
+	c := new(HydraAdminClient).WithRoadObserver(spy)
 	require.Error(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
 	require.Empty(t, spy.seen, "несобранная дорога обращением не является")
 }
@@ -115,7 +118,7 @@ func TestProviderRoad_TokenExchangeSplitsUnavailableFromMisconfigured(t *testing
 			}))
 			defer srv.Close()
 			spy := &roadSpy{}
-			c := (&HydraTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}).WithRoadObserver(spy)
+			c := (&ProviderTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}).WithRoadObserver(spy)
 			_, _ = c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
 			require.Equal(t, []string{ProviderRoadTokenExchange + "/" + tc.outcome}, spy.seen)
 		})
@@ -131,16 +134,16 @@ func TestProviderRoad_TokenExchangeSentinelIsUnchangedByTheSplit(t *testing.T) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}))
 	defer srv.Close()
-	c := &HydraTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}
+	c := &ProviderTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}
 	_, err := c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
-	// ИМЕННО `ErrHydraRejected`, и это не описка. 405 — четырёхсотый, и прежняя
+	// ИМЕННО `ErrProviderTokenRejected`, и это не описка. 405 — четырёхсотый, и прежняя
 	// ветка отдавала на нём сентинел отказа удостоверения. Клетка счётчика
 	// теперь называет его настройкой, а сентинел ОСТАЛСЯ прежним: расщепление
 	// клеток не имеет права сменить код, который получит докерный клиент.
 	//
 	// Первая редакция этой пробы ждала здесь сентинел недоступности — я взял его
 	// из прозы шапки файла, не перемерив ветку. Проба опровергла постановку.
-	require.ErrorIs(t, err, ErrHydraRejected,
+	require.ErrorIs(t, err, ErrProviderTokenRejected,
 		"сентинел обмена сменился бы вместе с клеткой — это уже не правка наблюдаемости")
 }
 
@@ -150,6 +153,7 @@ func TestProviderRoad_NilObserverChangesNothing(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	c := NewHydraAdminClient(srv.URL, "")
+	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
+	require.NoError(t, err)
 	require.NoError(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
 }

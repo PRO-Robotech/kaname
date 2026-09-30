@@ -36,21 +36,19 @@ import (
 // запроса, поэтому кардинальность не растёт с трафиком. Перечень саг стоит
 // ОДИН РАЗ — в [CompensationOrigins]; прежняя редакция этой строки называла
 // три саги, из которых производителя имели две (задача #2500 нашла это, сверяя
-// объявленный набор с засеваемым).
+// объявленный набор с засеваемым), а с kaname#362 производитель остался один.
 // Клетки ЗАКРЫТЫХ наборов компенсации.
 //
-// Значения дословно повторяют константы производителей
-// (`internal/apps/kaname/api/sa_keys` — `compensationOriginSAKey`,
-// `internal/apps/kaname/api/interactive_client` —
-// `compensationOriginInteractiveClient`): они неэкспортируемы, и адаптеру
-// величин незачем импортировать use-case ради двух строк.
+// Значение дословно повторяет константу производителя
+// (`internal/apps/kaname/api/interactive_client` —
+// `compensationOriginInteractiveClient`): она неэкспортируема, и адаптеру
+// величин незачем импортировать use-case ради одной строки.
 //
-// САГ ДВЕ, А НЕ ТРИ. Третья (`user_token`) была названа прозой и производителя
-// не имела ни одного: её клетка была бы вечным нулём, то есть утверждением о
-// саге, которой нет.
+// САГА ОДНА. Клетка без производителя была бы вечным нулём, то есть
+// утверждением о саге, которой нет: так сняты `user_token` (производителя не
+// было никогда) и `sa_key` — выдача ключа служебной учётки регистрации у
+// поставщика больше не заводит и компенсировать ей нечего (kaname#362).
 const (
-	// CompensationOriginSAKey — сага выдачи ключа служебной учётки.
-	CompensationOriginSAKey = "sa_key"
 	// CompensationOriginInteractiveClient — сага заведения интерактивного клиента.
 	CompensationOriginInteractiveClient = "interactive_client"
 
@@ -64,7 +62,6 @@ const (
 var (
 	// CompensationOrigins — ЗАКРЫТЫЙ набор саг-инициаторов.
 	CompensationOrigins = []string{
-		CompensationOriginSAKey,
 		CompensationOriginInteractiveClient,
 	}
 	// CompensationEmitOutcomes — ЗАКРЫТЫЙ набор исходов ЗАПИСИ намерения.

@@ -98,18 +98,18 @@ func TestIssuanceAndRefreshLanesMintTheSameClaimSet(t *testing.T) {
 
 	// Одна служба, одни часы, обе полосы.
 	svc := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		service.TokenEnrichmentConfig{Domain: "kacho.cloud"},
 		port,
 	).WithClock(func() time.Time { return fixed })
 
 	logger := slog.New(slog.DiscardHandler)
 
 	tokenHook := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: secret, Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		iamhooks.TokenHookConfig{HookSharedSecret: secret, Domain: "kacho.cloud"},
 		svc, nil, nil, logger,
 	)
 	refreshHook := iamhooks.NewRefreshHookHandler(
-		iamhooks.RefreshHookConfig{HookSharedSecret: secret, Domain: "kacho.cloud", HydraIssuer: "https://hydra.kacho.local"},
+		iamhooks.RefreshHookConfig{HookSharedSecret: secret, Domain: "kacho.cloud"},
 		port, svc, nil, nil, logger,
 	)
 

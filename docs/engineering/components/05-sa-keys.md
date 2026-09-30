@@ -2,56 +2,52 @@
 
 ## Назначение
 
-**SA Keys** — асимметричные ключи (ECDSA P-256), через которые ServiceAccount
-получает access_token по виду выдачи `client_credentials` с
-`token_endpoint_auth_method = private_key_jwt` (RFC 7521/7523).
+**SA Keys** — удостоверения ServiceAccount: асимметричный ключ (ECDSA P-256), которым
+служебная учётка получает access_token по виду выдачи `client_credentials` с
+`token_endpoint_auth_method = private_key_jwt` (RFC 7521/7523), федеративный ключ
+(утверждение внешнего издателя по перечню доверенных субъектов) и базовый секрет
+(`SECRET`, предъявляется как есть).
 
-> [!important] ЧИТАТЬ ПЕРВЫМ: у выдачи ДВА контура, и эта страница описывает оба
+> [!important] Контур выдачи ОДИН (kaname#362)
 >
-> Ниже подробно расписан контур, где ключ **зеркалится** OAuth-клиентом внешнего
-> поставщика и обмен идёт у него. Это **не единственный** контур и не действующий
-> по умолчанию в производственных профилях.
->
-> На **переведённом** контуре зеркала у поставщика нет вовсе, обмен идёт на
-> токен-эндпоинте платформы (`POST /iam/v1/token`), а токен выпускает **наш**
-> подписант. Признак перевода — объявленный токен-эндпоинт платформы
-> (`authn.client-token.enabled`); он же влечёт включённую свою чеканку.
->
-> **Владелец этого предмета — один документ**, и здесь он не пересказывается:
-> [`architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md).
-> Там таблица «полоса выдачи → кто чеканит → заводится ли зеркало», предикат
-> перечня живых строк с зеркалом и разбор того, что́ потеряло читателя вместе с
-> зеркалом. Всякое утверждение НИЖЕ, сказанное без оговорки о посадке, относится
-> к **непереведённому** контуру.
+> Ключевую пару и федеративный ключ обменивает **токен-эндпоинт платформы**
+> (`POST /iam/v1/token`), а токен выпускает **наш** подписант. Регистрации клиента
+> у внешнего поставщика выдача не заводит, и имени, назначенного им, не хранит:
+> столбец зеркала снят миграцией
+> `20260928231124_provider_mirror_leaves_the_credential_tables.sql`, поле — из
+> контракта (номер 3 зарезервирован). Посадка без объявленного эндпоинта
+> (`authn.client-token.enabled`) ключевую пару и федеративный ключ **не выдаёт**:
+> `Issue` отвечает `FAILED_PRECONDITION` с именем настройки. Секрет обмена не
+> требует и выдаётся и там. Разбор ухода выдачи от прежнего издателя —
+> [`architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md),
+> порядок снятия столбца —
+> [`architecture/provider-mirror-column-retirement.md`](../architecture/provider-mirror-column-retirement.md).
 
-Каждый ключ — это пара (`private_key`, `public_jwk`), **выпущенная kaname**:
+Каждый ключ-пара **выпущен kaname**:
 
 - **`private_key_pem`** — отдается клиенту ОДИН РАЗ в ответе `IssueSAKey`,
   никогда не хранится в kaname.
 - **`public_key`** — kaname держит SPKI-PEM в
-  `service_account_oauth_clients.public_key_pem`; на переведённом контуре именно
-  эта половина и сверяет подпись при обмене. На непереведённом она вдобавок
-  регистрируется у внешнего поставщика как JWK при создании зеркала клиента
-  (`jwks={keys:[...]}`).
+  `service_account_oauth_clients.public_key_pem`; именно эта половина сверяет
+  подпись `client_assertion` при обмене.
 
-`client_secret` в системе больше нет ни на одном контуре. Запрос access_token:
-клиент сам подписывает JWT-assertion приватным ключом, кладёт его в
-`client_assertion` и POST'ит на токен-эндпоинт — платформы (`/iam/v1/token`) либо
-внешнего поставщика (`/oauth2/token`), по посадке. Принимающая сторона сверяет
-подпись против зарегистрированной открытой половины.
+`client_secret` в системе нет. Запрос access_token: клиент сам подписывает
+JWT-assertion приватным ключом, кладёт его в `client_assertion` и POST'ит на
+токен-эндпоинт платформы. Клиентом он называет себя идентификатором строки ключа
+(`iss`/`sub` = `keyId`); второго имени у ключа нет.
 
 **Защита приватного ключа:** `private_key_pem` показывается **один раз** в
 ответе `IssueSAKey`. После этого `OpsResponseRedactor`
 (`internal/repo/kaname/pg/ops_response_redactor.go`) выполняет single-statement
-UPDATE на `operations.response_data`, замещая поле `private_key_pem` на
-`"<redacted>"` (а также legacy `client_secret`, который теперь всегда пустой).
+UPDATE на `operations.response_data`, очищая поле `private_key_pem`
+(а также legacy `client_secret`, который всегда пустой).
 Повторный `GET /operations/{id}` после redaction даст response без ключа.
 Это защищает от replay через operation-id.
 
 **Преимущества над client_secret_basic (legacy):**
 
 - ✅ private_key никогда не покидает client после issuance.
-- ✅ Секрета не хранит никто: у платформы и у зеркала только открытая половина.
+- ✅ Секрета не хранит никто: у платформы только открытая половина.
 - ✅ Strong crypto (asymmetric ES256 vs shared secret).
 - ✅ Стандартный паттерн асимметричной аутентификации service-аккаунтов.
 
@@ -63,10 +59,9 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 **Ограничения:**
 
-- Обмен ключа идёт **у одного издателя**, и какого — решает посадка: на
-  переведённом контуре наш `POST /iam/v1/token`, иначе прежний (и тогда без
-  него `Issue` падает `Unavailable`). Федеративный ключ остаётся у прежнего —
-  см. врезку ниже.
+- Обмен ключевой пары и федеративного ключа идёт только на `POST /iam/v1/token`;
+  без объявленного эндпоинта `Issue` этих видов отвечает `FAILED_PRECONDITION`
+  с именем `authn.client-token.enabled`.
 - `private_key_pem` не восстановим после первого ответа (no "show key again").
 - `enabled=false` SA → Issue блокируется (снять состояние — действием
   `ServiceAccountService.Disable`/`Enable`, см. [`04-service-account.md`](04-service-account.md)).
@@ -76,9 +71,8 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 | Поле                  | Тип                  | Обязательное | Immutable | Описание                                  |
 |-----------------------|----------------------|--------------|-----------|-------------------------------------------|
-| `id`                  | TEXT (`soc_...`)     | да           | да        | id записи (не Hydra-client-id).           |
+| `id`                  | TEXT (`soc_...`)     | да           | да        | id записи; им же клиент себя называет.    |
 | `sva_id`              | `ServiceAccountID`   | да           | да        | FK → `service_accounts(id)`.              |
-| `hydra_client_id`     | TEXT                 | да           | да        | имя, которым клиент себя называет. UNIQUE. См. врезку ниже. |
 | `description`         | TEXT                 | нет          | —         | Free-form, ≤256 chars.                    |
 | `created_by_user_id`  | TEXT                 | да           | да        | Ответственный за выпуск (audit). В запросе поле необязательно: край подставляет человеку — вызывающего, служебной учётке — владельца аккаунта целевой учётки. |
 | `created_at`          | TIMESTAMPTZ          | да (server)  | да        | UTC.                                      |
@@ -89,26 +83,22 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 **ID prefix:** `soc` (запись в БД, формат `soc_[crockford-17]`).
 
-> **Кто назначает `hydra_client_id` — зависит от посадки (задача #1120).**
-> Пока контур не переведён на свою чеканку, имя назначает прежний издатель, и
-> колонка несёт его зеркало. На переведённом контуре (объявлен токен-эндпоинт
-> платформы, `authn.client-token.enabled`) зеркала у него **не заводится вовсе**,
-> имя назначаем мы, и оно совпадает с `id` записи — то есть в ответе выдачи
-> `clientId` равен `keyId`. Разбор, граница федеративной полосы и окно двух
-> издателей числом —
-> [`../architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md).
+> **Имя клиента — идентификатор записи (задачи #1120, kaname#362).** В ответе
+> выдачи `clientId` равен `keyId`. Столбца с именем клиента у прежнего издателя
+> больше нет; ограничения вида и формы (`*_credential_kind_ck`,
+> `*_credential_shape_ck`) держат инварианты трёх видов без него.
 
 **DB table:** `kaname.service_account_oauth_clients` (squashed baseline
 `internal/migrations/0001_initial.sql`).
 
-**FK contract:** CASCADE delete при удалении SA (в БД); но Hydra clients
-надо явно удалять через `RevokeSAKey` (см. Gotchas).
+**FK contract:** CASCADE delete при удалении SA (в БД); снаружи службы снимать
+нечего — регистрации у внешнего поставщика у ключа нет.
 
 ### Срок жизни ключа (`expires_at`)
 
 Выставляется на Issue: явный `ttl_seconds` → иначе `KANAME_SAKEY_DEFAULT_TTL`
 (90d) → иначе NULL. Потолок — `KANAME_SAKEY_MAX_TTL` (365d), запрос сверх него
-отвергается `InvalidArgument` до регистрации клиента в Hydra.
+отвергается `InvalidArgument` до всякой записи.
 
 Энфорсится на пути обмена ключа на токен одним предикатом
 (`expires_at != NULL && expires_at <= now`). Путей было два; докер-полоса выбыла из них вместе
@@ -117,7 +107,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 | Путь | Точка проверки | Что видит клиент |
 |---|---|---|
-| Провайдер: `client_assertion` → Hydra `/oauth2/token` | token-hook (`TokenEnrichmentService`) → 403 | Hydra отказывает в выдаче |
+| Токен-эндпоинт платформы: `client_assertion` → `POST /iam/v1/token` | реестр утверждений (`AssertionClientRepo`) | отказ обмена |
 | Docker-token `/iam/token` | — | ключ здесь **не предъявляется**: полоса принимает только базовый токен доступа |
 
 Граница включительная: в момент `expires_at` ключ уже мёртв. Сравнение — по
@@ -128,10 +118,10 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 выдающей стороны (конфигурационный ключ `sakey-default-ttl`, поле `AuthN.SAKeyDefaultTTL`),
 а не проверяющей.
 
-Уже выданный access-token переживает истечение ключа: он живёт свой
-`access_token_lifespan` (per-client, `KANAME_SAKEY_ACCESS_TOKEN_TTL`). Гейт
-закрывает выдачу НОВЫХ токенов, не отзывает старые. Жнеца просроченных строк нет —
-строка остаётся, ключ просто перестаёт работать.
+Уже выданный access-token переживает истечение ключа только до своего срока
+(`authn.client-token.token-ttl`, урезанный до остатка жизни клиента). Гейт
+закрывает выдачу НОВЫХ токенов; истёкшие строки снимает уборщик
+(`jobs.expired-credential-reclaim`).
 
 ## Sequence diagram — Issue
 
@@ -142,39 +132,30 @@ sequenceDiagram
     participant GW as api-gateway
     participant IAM as kaname :9090
     participant DB as Postgres
-    participant Hydra as Ory Hydra
     participant Redactor as OpsResponseRedactor
 
     Admin->>GW: POST /iam/v1/serviceAccounts/{saId}/keys
     GW->>IAM: SAKeyService.Issue
+    alt токен-эндпоинт платформы не объявлен и вид не SECRET
+        IAM-->>GW: FailedPrecondition "credential_kind KEYPAIR: authn.client-token.enabled is false …"
+    end
     IAM->>DB: SELECT sa WHERE id=$saId
     alt sa.enabled=false
         IAM-->>GW: FailedPrecondition "ServiceAccount <id> is disabled and cannot be issued a key"
     end
-    IAM->>IAM: ecdsa.GenerateKey(P-256) → {priv_pem, pub_pem, jwk(kid=soc_…)}
-    alt контур переведён на свою чеканку (#1120)
-        IAM->>IAM: имя клиента := id записи; к прежнему издателю обращения нет
-    else контур не переведён
-        IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"],<br/> token_endpoint_auth_method:"private_key_jwt",<br/> jwks:{keys:[pub_jwk]}, scope, audience}
-        Hydra-->>IAM: 201 {client_id}  (NO client_secret)
-    end
+    IAM->>IAM: ecdsa.GenerateKey(P-256) → {priv_pem, pub_pem}; имя клиента := id записи
     IAM->>DB: BEGIN
-    IAM->>DB: INSERT service_account_oauth_clients<br/>(soc_id, sva_id, hydra_client_id, public_key_pem, key_algorithm, declared_audiences)
+    IAM->>DB: INSERT service_account_oauth_clients<br/>(soc_id, sva_id, public_key_pem, key_algorithm, declared_audiences, credential_kind)
     IAM->>DB: COMMIT
-    IAM->>DB: UPDATE operations<br/>SET done=true, response=IssueSAKeyResponse{client_id, private_key_pem, public_key_pem, algorithm:"ES256", key_id:soc_…}
+    IAM->>DB: UPDATE operations<br/>SET done=true, response=IssueSAKeyResponse{client_id=soc_…, private_key_pem, public_key_pem, algorithm:"ES256", key_id:soc_…}
     IAM-->>GW: Operation (done=true, response с private_key_pem)
     GW-->>Admin: 200 {client_id, private_key_pem, public_key_pem, algorithm, key_id}
 
     Note over Redactor,DB: Sync after MarkDone (idempotent)
     Redactor->>DB: SELECT response_type, response_data FROM operations WHERE id=$opId
     Redactor->>Redactor: Unmarshal Any → IssueSAKeyResponse
-    Redactor->>Redactor: private_key_pem := "<redacted>"<br/>client_secret := "<redacted>" (legacy field)
+    Redactor->>Redactor: private_key_pem := ""<br/>client_secret := "" (legacy field)
     Redactor->>DB: UPDATE operations SET response_data=$new WHERE id=$opId
-
-    Note over Admin,DB: Повторный GET /operations/$opId — secret отсутствует
-    Admin->>GW: GET /operations/iop_..
-    GW->>IAM: OperationService.Get
-    IAM-->>GW: Operation (response с client_secret="<redacted>")
 ```
 
 ## Sequence diagram — Revoke
@@ -185,15 +166,11 @@ sequenceDiagram
     participant Admin
     participant IAM
     participant DB
-    participant Hydra
 
     Admin->>IAM: SAKeyService.Revoke {sak_id}
-    IAM->>DB: SELECT hydra_client_id FROM service_account_oauth_clients WHERE id=$sak
-    IAM->>DB: DELETE FROM service_account_oauth_clients WHERE id=$sak (+ audit-row в той же TX)
-    IAM->>Hydra: DELETE /admin/clients/{client_id}
-    Hydra-->>IAM: 204 No Content
+    IAM->>DB: DELETE FROM service_account_oauth_clients WHERE id=$sak AND sva_id=$sa<br/>(+ audit-row в той же TX; триггер пишет отсечку отчеканенного)
     IAM-->>Admin: Operation done=true
-    Note over Admin,Hydra: Существующие access_tokens TTL'у живы — Hydra только<br/>refuses NEW token issuance
+    Note over Admin,DB: Новых токенов по ключу не выпустить: реестр его не разрешает.<br/>Выданные отсекаются на предъявлении (kaname_sa_key_id).
 ```
 
 ## API surface
@@ -203,7 +180,7 @@ sequenceDiagram
 | RPC       | Sync/Async | Описание                                              |
 |-----------|------------|-------------------------------------------------------|
 | `Issue`   | async      | Выпускает OAuth-ключ. Secret в response (один раз).   |
-| `Revoke`  | async      | Удаляет строку маппинга + Hydra client.               |
+| `Revoke`  | async      | Удаляет строку ключа; отчеканенное отсекается.        |
 | `List`    | sync       | Список ключей для SA (без секретов).                  |
 
 ### REST mapping
@@ -250,12 +227,9 @@ echo "CLIENT_ID=$CLIENT_ID  KEY_ID=$KEY_ID  ALG=ES256"
 
 ### Получить SA access_token (private_key_jwt, RFC 7521/7523)
 
-> **Адрес обмена зависит от посадки.** Ниже — рецепт для НЕПЕРЕВЕДЁННОГО контура
-> (`$HYDRA_PUBLIC_URL/oauth2/token`). На переведённом контуре тот же
-> `client_assertion` отправляется на `POST /iam/v1/token`, а `aud` утверждения
-> равен объявленному издателю платформы, а не адресу поставщика. Форма запроса и
-> требования к членам утверждения — на странице токен-эндпоинта в
-> опубликованной документации сервиса.
+Утверждение отправляется на токен-эндпоинт платформы, `aud` утверждения равен
+объявленному издателю платформы. Полная форма запроса и требования к членам
+утверждения — на странице токен-эндпоинта в опубликованной документации сервиса.
 
 ```bash
 # 1. Подписываем JWT-assertion sa.key'ом. Пример на python-jose:
@@ -265,15 +239,15 @@ from jose import jwt
 priv = open('sa.key').read()
 claims = {
   "iss": "$CLIENT_ID", "sub": "$CLIENT_ID",
-  "aud": "$HYDRA_PUBLIC_URL/oauth2/token",
+  "aud": "$PLATFORM_ISSUER",
   "exp": int(time.time()) + 60, "jti": uuid.uuid4().hex,
 }
 print(jwt.encode(claims, priv, algorithm="ES256",
                  headers={"kid": "$KEY_ID"}))
 PY
 
-# 2. POST к Hydra с client_assertion (НЕТ basic-auth, нет client_secret).
-curl -X POST "$HYDRA_PUBLIC_URL/oauth2/token" \
+# 2. POST на токен-эндпоинт платформы с client_assertion (нет basic-auth, нет client_secret).
+curl -X POST "http://localhost:18080/iam/v1/token" \
   -d "grant_type=client_credentials" \
   -d "client_id=$CLIENT_ID" \
   -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
@@ -292,13 +266,12 @@ curl -X DELETE http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys/$KEY_ID
 
 ```bash
 curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization: Bearer $TOKEN" | jq
-# → [{id, hydraClientId, createdAt, expiresAt, lastUsedAt, name, labels}]
+# → [{id, svaId, createdAt, expiresAt, lastUsedAt, name, labels, credentialKind}]
 ```
 
 ### Идемпотентность
 
-`IssueSAKey` НЕ идемпотентен — каждый вызов создаёт новую строку ключа (а на
-непереведённом контуре ещё и новое зеркало клиента у поставщика).
+`IssueSAKey` НЕ идемпотентен — каждый вызов создаёт новую строку ключа.
 
 `RevokeSAKey` идемпотентен **успехом**: повторный отзыв, отзыв идентификатора,
 которого не было никогда, и отзыв ключа ЧУЖОЙ учётки дают один и тот же исход —
@@ -319,8 +292,9 @@ curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization
 | Сценарий                             | gRPC code             | HTTP | Текст                                          |
 |--------------------------------------|------------------------|------|------------------------------------------------|
 | SA disabled                          | `FAILED_PRECONDITION`  | 400  | `ServiceAccount <id> is disabled and cannot be issued a key` |
+| Токен-эндпоинт платформы не объявлен (KEYPAIR / FEDERATED) | `FAILED_PRECONDITION` | 400 | `credential_kind <вид>: authn.client-token.enabled is false — …` |
+| Номер вида вне словаря (в том числе снятый 4) | `INVALID_ARGUMENT` | 400 | `credential_kind: unknown credential kind <номер>` |
 | SA не найден                         | `NOT_FOUND`            | 404  | `ServiceAccount sva_xxx not found`             |
-| Hydra недоступен                     | `UNAVAILABLE`          | 503  | `hydra admin api unreachable`                  |
 | Anonymous IssueSAKey                 | `UNAUTHENTICATED`      | 401  | `anonymous principal rejected`                 |
 | Anonymous Get operation с redacted   | `NOT_FOUND`            | 404  | (anti-replay guard — operation/anon)           |
 
@@ -329,7 +303,7 @@ curl http://localhost:18080/iam/v1/serviceAccounts/$SA_ID/keys -H "Authorization
 Команды запускаются **от корня репозитория**.
 
 ```bash
-make -C deploy dev-up        # включает Hydra
+make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # Newman: отдельного набора «ключи SA» нет — они покрыты набором служебной
@@ -337,7 +311,7 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 ./services/iam/tests/newman/scripts/run.sh --service iam-service-account
 ./services/iam/tests/newman/scripts/run.sh --service authz-sa-apitoken
 
-# Integration (testcontainers + Hydra stub):
+# Integration (testcontainers):
 go test -short -count=1 -timeout 120s \
   -run "TestSAKey|TestOpsResponseRedactor|TestIssueSAKey" \
   ./services/iam/internal/clients/ ./services/iam/internal/apps/kaname/api/sa_keys/
@@ -355,7 +329,6 @@ go test -short -count=1 -timeout 120s \
 - **Handler и use-case живут в одном пакете** `internal/apps/kaname/api/sa_keys/`: точки входа
   `Handler.Issue` / `Handler.List` / `Handler.Revoke` в `handler.go`, выпуск ключа — `keys.go`,
   журналирование — `audit.go`. Отдельного файла со сводкой use-case'ов у пакета нет.
-- **Hydra клиент:** `internal/clients/hydra_admin_client.go` + `hydra_oauth_clients.go`.
 - **Repo:** SA-OAuth-clients-репо в `internal/repo/kaname/pg/` (через `NewSAOAuthClientRepo`).
 - **Redactor:** `internal/repo/kaname/pg/ops_response_redactor.go`. SELECT
   `(response_type, response_data)` из `operations`, unmarshal `Any` →
@@ -369,10 +342,6 @@ go test -short -count=1 -timeout 120s \
 
 ## Gotchas / известные ограничения
 
-- **Hydra DELETE не cascade'ит из БД** — если оператор сделал DELETE
-  service_account напрямую SQL'ем, в БД через CASCADE удалятся записи
-  `service_account_oauth_clients`, но в Hydra clients останутся! ВСЕГДА
-  использовать API Revoke перед Delete SA.
 - **Private-key видимость окно** — между MarkDone и UPDATE redaction есть
   окно миллисекунд, когда первый GET вернет `private_key_pem`. Это
   by-design — это и есть единственная допустимая видимость ключа.
@@ -380,18 +349,12 @@ go test -short -count=1 -timeout 120s \
   `operation_id`, но `response.private_key_pem` уже `<redacted>`. Legacy
   `response.client_secret` всегда пуст и тоже редактируется
   для wire-compat.
-- **Hydra restart loses clients?** — нет, Hydra хранит в собственной БД;
-  kaname держит `hydra_client_id` для ссылки + `public_key_pem` для
-  диагностики ротаций.
 - **Алгоритм фиксирован `ES256`** — domain.Validate допускает RS256/EdDSA
   для будущих расширений, но текущая ECDSA P-256-only генерация
   (`internal/apps/kaname/api/sa_keys/keys.go`) выставляет только `ES256`.
-- **Legacy `client_secret` rows** — миграция в `0001_initial.sql` ставит
-  DEFAULT '' для `public_key_pem` / `key_algorithm`, поэтому rows,
-  выпущенные до перехода на private_key_jwt (если такие существуют в
-  продуктивных стендах), не валятся при выборке; но через эти
-  `hydra_client_id` все еще работает legacy `client_secret_basic`-flow на
-  стороне Hydra. План миграции — отдельный rotation-эпик.
+- **Строк прежнего потока нет.** Миграция снятия столбца зеркала отказывала,
+  пока лежала хоть одна строка вида LEGACY либо строка с именем клиента у
+  прежнего издателя (строка чеканки бутстрапа — названное исключение).
 
 ## Связанные компоненты
 
@@ -403,17 +366,17 @@ go test -short -count=1 -timeout 120s \
 - `internal/apps/kaname/api/sa_keys/usecases.go` — `IssueSAKeyUseCase` /
   `RevokeSAKeyUseCase` / `ListSAKeysUseCase`.
 - `internal/apps/kaname/api/sa_keys/keys.go` — `generateES256Key` (ECDSA P-256
-  keypair → PKCS#8 / SPKI PEM + JWK).
+  keypair → PKCS#8 / SPKI PEM).
 - `internal/apps/kaname/api/sa_keys/handler.go`.
-- `internal/clients/hydra_admin_client.go`,
-  `hydra_oauth_clients.go` — `CreateOAuthClient` с `jwks` /
-  `token_endpoint_auth_method=private_key_jwt`.
 - `internal/repo/kaname/pg/ops_response_redactor.go` (тот же файл, что назван выше — прежде
   здесь стоял другой каталог, и две ссылки об одном предмете расходились).
 - `internal/migrations/0001_initial.sql` — таблица
-  `service_account_oauth_clients` (`public_key_pem`, `key_algorithm`).
+  `service_account_oauth_clients` (`public_key_pem`, `key_algorithm`);
+  `internal/migrations/20260928231124_provider_mirror_leaves_the_credential_tables.sql`
+  — снятие столбца зеркала и вида LEGACY.
 - `pkg/operations/operationspb/handler_test.go` (полоса сведена в общий слой).
 - `internal/service/token_enrichment_service.go` — SA-claims path
   (`kaname_principal_type=service_account`, `kaname_principal_id`,
   `kaname_account_id`).
-- `cmd/kaname/hooks_mux.go` — `tokenEnrichSAAdapter` wiring.
+- `cmd/kaname/hooks_mux.go` — `tokenEnrichSAAdapter` wiring (поиск ключа по
+  имени клиента — `SAOAuthClientRepo.GetByClientID`, только KEYPAIR и FEDERATED).

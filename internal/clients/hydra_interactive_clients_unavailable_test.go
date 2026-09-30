@@ -35,8 +35,13 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
-func interactiveProvider(baseURL string) *InteractiveClientProvider {
-	return NewInteractiveClientProvider(NewHydraAdminClient(baseURL, "tok"))
+func interactiveProvider(t *testing.T, baseURL string) *InteractiveClientProvider {
+	t.Helper()
+	admin, err := NewHydraAdminClientWithCA(baseURL, "tok", "")
+	if err != nil {
+		t.Fatalf("клиент административной дороги не собран: %v", err)
+	}
+	return NewInteractiveClientProvider(admin)
 }
 
 // srvWithStatus — поставщик, отвечающий назначенным кодом.
@@ -70,7 +75,7 @@ func spec() interactiveclient.ProviderClientSpec {
 }
 
 func TestInteractiveProvider_TransportFailure_CarriesUnavailable(t *testing.T) {
-	p := interactiveProvider(unreachableURL(t))
+	p := interactiveProvider(t, unreachableURL(t))
 
 	_, err := p.Register(context.Background(), spec())
 	if err == nil {
@@ -91,7 +96,7 @@ func TestInteractiveProvider_TransportFailure_CarriesUnavailable(t *testing.T) {
 
 func TestInteractiveProvider_ProviderFault_CarriesUnavailable(t *testing.T) {
 	srv := srvWithStatus(t, http.StatusBadGateway)
-	p := interactiveProvider(srv.URL)
+	p := interactiveProvider(t, srv.URL)
 
 	_, err := p.Register(context.Background(), spec())
 	if err == nil {
@@ -108,7 +113,7 @@ func TestInteractiveProvider_ProviderFault_CarriesUnavailable(t *testing.T) {
 func TestInteractiveProvider_RejectedInput_StaysTerminal(t *testing.T) {
 	for _, code := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusConflict} {
 		srv := srvWithStatus(t, code)
-		p := interactiveProvider(srv.URL)
+		p := interactiveProvider(t, srv.URL)
 
 		_, err := p.Register(context.Background(), spec())
 		if err == nil {
@@ -118,18 +123,20 @@ func TestInteractiveProvider_RejectedInput_StaysTerminal(t *testing.T) {
 			t.Fatalf("%d: отвергнутый вход объявлен повторяемым (%v) — одинаковый повтор "+
 				"не изменит ни одного из входов, и вызывающий будет повторять вечно", code, err)
 		}
-		var apiErr *HydraAPIError
+		var apiErr *ProviderAPIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != code {
 			t.Fatalf("%d: отказ поставщика перестал быть распознаваемым по коду (%v) — "+
-				"на этом признаке стоит идемпотентность создания (409 у *HydraAPIError)", code, err)
+				"на этом признаке стоит идемпотентность создания (409 у *ProviderAPIError)", code, err)
 		}
 	}
 }
 
 // Контроль предпосылки: дорога, которой НЕТ, остаётся своим отказом и
-// недоступностью не притворяется — её повтор не лечит вовсе.
+// недоступностью не притворяется — её повтор не лечит вовсе. Клиент без адреса —
+// нулевое значение типа: производителя его нарочно в корне больше нет (развилка
+// посадки, kaname#338), и классификация судит запасной отказ по умолчанию.
 func TestInteractiveProvider_AbsentRoad_IsNotUnavailable(t *testing.T) {
-	p := NewInteractiveClientProvider(NewAbsentProviderAdminClient())
+	p := NewInteractiveClientProvider(new(HydraAdminClient))
 
 	_, err := p.Register(context.Background(), spec())
 	if err == nil {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // iam_extension_repos.go — repository for the non-core IAM extension
-// service_account_oauth_clients (SAKey — Class A static keys via Hydra).
+// service_account_oauth_clients (SAKey — Class A static keys of service accounts).
 //
 // Holds only SAOAuthClientRepo; the former federation / JIT-eligibility /
 // access-binding-condition repos no longer exist.
@@ -38,7 +38,7 @@ func NewSAOAuthClientRepo(pool *pgxpool.Pool) *SAOAuthClientRepo {
 	return &SAOAuthClientRepo{pool: pool}
 }
 
-const socCols = `id, sva_id, hydra_client_id, description, created_by_user_id,
+const socCols = `id, sva_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
                  public_key_pem, key_algorithm, trusted_subjects, name, labels,
                  declared_audiences, credential_kind, secret_hash`
@@ -57,21 +57,36 @@ func (r *SAOAuthClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) 
 	return out, nil
 }
 
-// GetByOAuthClientID — reverse lookup for token-hook claim enrichment:
-// Hydra hands kaname the `client_id` (== hydra_client_id) of the OAuth
-// client doing client_credentials; we need the owning ServiceAccount.
-func (r *SAOAuthClientRepo) GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+// GetByClientID — клиент обмена по имени, которым он себя называет: хук выпуска
+// токена и докерная полоса получают имя клиента и спрашивают, какой ключ
+// служебной учётки за ним стоит.
+//
+// Имя клиента ключа — идентификатор его строки (kaname#362): второго имени у
+// ключа нет. Отвечают на него ТОЛЬКО виды, которые обмениваются как клиент, —
+// ключевая пара и федеративный ключ. Секрет клиентом обмена не является: его
+// предъявляют как есть, и этот поиск его не находит — ровно как не находил его
+// поиск по снятому столбцу, где у секрета было пусто. Расширить множество
+// ответа молча значило бы дать секрету дорогу, которой у него не было.
+func (r *SAOAuthClientRepo) GetByClientID(ctx context.Context, clientID domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	row := r.pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM service_account_oauth_clients WHERE hydra_client_id = $1`, socCols),
-		string(hydraClientID))
+		fmt.Sprintf(`SELECT %s FROM service_account_oauth_clients
+		              WHERE id = $1 AND credential_kind = ANY ($2::text[])`, socCols),
+		string(clientID), exchangedClientKinds())
 	out, err := scanSAOAuthClient(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount credential %s not found", hydraClientID)
+		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount credential %s not found", clientID)
 	}
 	if err != nil {
-		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(hydraClientID))
+		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(clientID))
 	}
 	return out, nil
+}
+
+// exchangedClientKinds — виды ключа служебной учётки, которые обмениваются как
+// клиент. Перечень выводится из словаря домена, а не выписывается строками:
+// выписанный, он разошёлся бы со словарём молча.
+func exchangedClientKinds() []string {
+	return []string{string(domain.CredentialKindKeypair), string(domain.CredentialKindFederated)}
 }
 
 // Insert persists a new SA-OAuth-client row in the caller's writer-tx. Accepts
@@ -81,12 +96,12 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 	tx := txAsPgx(txh)
 	const q = `
 		INSERT INTO service_account_oauth_clients (
-		    id, sva_id, hydra_client_id, description, created_by_user_id,
+		    id, sva_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
 		    public_key_pem, key_algorithm, trusted_subjects, name, labels,
 		    declared_audiences, credential_kind, secret_hash
-		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb,
-		          $14::text[], $15, COALESCE($16, ''::bytea))
+		) VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb,
+		          $13::text[], $14, COALESCE($15, ''::bytea))
 		RETURNING ` + socCols
 	tsJSON, err := marshalTrustedSubjects(c.TrustedSubjects)
 	if err != nil {
@@ -97,7 +112,7 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	row := tx.QueryRow(ctx, q,
-		string(c.ID), string(c.SvaID), nullableProviderMirror(c.OAuthClientID),
+		string(c.ID), string(c.SvaID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, tsJSON, string(c.Name), labelsJSON,
@@ -363,23 +378,15 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		tsBody     []byte
 		labelsBody []byte
 		audiences  []string
-		// Колонка зеркала стала NULL-абельной вместе с введением вида SECRET:
-		// регистрации у внешнего поставщика у него нет by construction.
-		// Скан в обычную строку упал бы на КАЖДОЙ такой строке — то есть вид
-		// был бы выпускаем и нечитаем.
-		mirror sql.NullString
 	)
 	if err := row.Scan(
-		(*string)(&c.ID), (*string)(&c.SvaID), &mirror,
+		(*string)(&c.ID), (*string)(&c.SvaID),
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
 		&c.PublicKeyPEM, &c.KeyAlgorithm, &tsBody, (*string)(&c.Name), &labelsBody,
 		&audiences, (*string)(&c.CredentialKind), &c.SecretHash,
 	); err != nil {
 		return domain.ServiceAccountOAuthClient{}, err
-	}
-	if mirror.Valid {
-		c.OAuthClientID = domain.OAuthClientID(mirror.String)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time

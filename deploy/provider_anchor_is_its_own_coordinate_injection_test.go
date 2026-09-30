@@ -39,7 +39,6 @@ env:
   KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   KANAME_INTERNAL_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/provider/ca.crt
-  KANAME_HYDRA_JWKS_CA_FILE: /etc/kaname/tls/provider/ca.crt
   KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/provider/ca.crt
 `
 

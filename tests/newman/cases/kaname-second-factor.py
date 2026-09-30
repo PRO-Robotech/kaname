@@ -40,8 +40,8 @@
 в церемонии и повтор → перечеканка → исчерпание → окно ±1 → отказы снятия →
 снятие → формы. Последний кейс возвращает посев в исходное: следующий прогон
 снова заводит фактор с нуля. Кейсы со СВОИМ человеком (Ф12-19, Ф12-31, Ф12-32,
-Ф12-46) стоят после хребта и человека посева не трогают: у каждого свой адрес,
-свой источник и свой принятый шаг строки.
+Ф12-46 и кейс окна профиля) стоят после хребта и человека посева не трогают: у
+каждого свой адрес, свой источник и свой принятый шаг строки.
 
 СЧЁТ НЕВЕРНЫХ ПРЕДЪЯВЛЕНИЙ ОБЩИЙ У ВСЕХ КЕЙСОВ, и набор его ведёт. По адресу
 человека счёт обнуляет только предъявление, доводящее вход до уровня всех
@@ -54,6 +54,9 @@
 ГДЕ НАБОР ГОНЯЕТСЯ. Задание `chart-own` процесса `e2e-newman.yml` — тем же
 вызовом прогонщика, что вход и восстановление, после них: стенд чарта посадки
 `own`, лист края и посев человека те же (`stand-chart.sh`, `seed_login_lane.py`).
+Последний кейс ждёт окна профиля (`addressWindow`, `selfServiceFreshness` — по
+15 мин): набор идёт на эти минуты дольше, и предел шага задания назван этим
+числом, а не взят с запасом.
 
 УТВЕРЖДЕНИЯ НАБОРА НЕ ПОЛУЧАЮТ ЗНАЧЕНИЙ УДОСТОВЕРЕНИЙ (kaname#417). Отчёт прогона
 выкладывается артефактом публичного репозитория, а текст упавшего утверждения —
@@ -163,6 +166,19 @@ Coverage (техники: классы эквивалентности состо
                                             и отказ признака счёта не растят; у
                                             личности без фактора — отказы «не
                                             заведён» и «нет ожидающего заведения»
+  IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED      — окно профиля прошло, ожидание одно на
+                                            четыре ветви: Ф12-31 (г) — по истечении
+                                            Retry-After верный код 200, «2»; Ф12-09 —
+                                            заведение из несвежей сессии 403
+                                            SESSION_NOT_FRESH, строки нет, носитель
+                                            годен; Ф12-10 — пароль в той же сессии
+                                            освежает окно, «1», заведение 200;
+                                            Ф12-32 — отказ по свежести после N−1
+                                            неверных счёта не растит; Ф12-04 (а) —
+                                            истёкшее заведение в освежённой сессии
+                                            400 ENROLLMENT_NOT_PENDING побайтово как
+                                            не начатое, при истёкших обоих — 403
+                                            свежести, новое заведение — 200
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — и почему; идентификаторы здесь стоят КОММЕНТАРИЕМ,
@@ -170,18 +186,21 @@ Coverage (техники: классы эквивалентности состо
 # позицию несомой по строковому литералу модуля, и упоминание «не утверждаем»
 # строкой зачло бы её набору.
 #   · гонки Ф12-07 и Ф12-24 — уровень I, интеграция;
-#   · Ф12-31 (г) — верный код после окна: окно профиля 15 мин, часов службы у
-#     чёрного ящика нет, а ожидание окна в предел шага прогона не помещается;
-#     прочие четыре ветви несёт кейс IAM-2FA-NEG-CODE-GUESSING-RATE;
-#   · Ф12-32 — отказ по свежести (Ф12-09), недоступность материала (Ф12-35) и
-#     исчерпание ёмкости проверяющего на запасном коде (PWV-15): «Дано» стенд не
-#     строит (окно свежести профиля, перекатка с другим ключом обёртки,
-#     подставной проверяющий), позиция — «E + I», эти три держит уровень I;
-#     прочие четыре исхода несёт кейс IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS;
+#   · Ф12-32 — недоступность материала (Ф12-35) и исчерпание ёмкости
+#     проверяющего на запасном коде (PWV-15): «Дано» стенд не строит (перекатка
+#     процесса с другим ключом обёртки, подставной проверяющий), позиция —
+#     «E + I», эти два исхода держит уровень I — пробы
+#     TestF12_32_UnreadableMaterialIsNotAnAttempt и
+#     TestF12_32_ExhaustedCapacityOnABackupCodeIsNotAnAttempt
+#     (internal/apps/kaname/api/humansession/second_factor_not_an_attempt_test.go);
+#     отказ по свежести — кейс IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED и проба
+#     TestF12_32_FreshnessRefusalIsNotAnAttempt того же файла; прочие четыре исхода —
+#     кейс IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS;
 #   · неразличимость по времени Ф12-33 — измерительная, приборы этой формы в
 #     дереве — ручка уровня I;
-#   · свежесть Ф12-09/10 и истёкшее заведение Ф12-04 (а, б) — окно профиля
-#     стенда 15 мин, часов пробы у чёрного ящика нет;
+#   · заведение, снятое уборкой, Ф12-04 (б): момент прохода уборки чёрному ящику
+#     не виден и профилем не задаётся, а проход уборки держит уровень I (Ф12-44);
+#     ветви (а) и (в) несут кейсы окна профиля и формы;
 #   · глагол с полом «2» по новому носителю (Ф12-02, Ф12-15) — пол судит край, а
 #     края у стенда службы нет; наблюдаемое на полосе — носитель и уровень.
 
@@ -1751,9 +1770,8 @@ CASES.append(Case(
 
 # ───────────────────────────────────────────────────────────────────────────
 # Ф12-31: N неверных кодов → отказ по частоте; счёт общий с паролем; по
-# источнику; обнуление. Ветвь (г) — «после окна» — не строится: окно профиля
-# 15 мин, часов службы у чёрного ящика нет, и ожидание окна прогоном набора не
-# помещается в предел шага (запись — в шапке набора).
+# источнику; обнуление. Ветвь (г) — «после окна» — несёт последний кейс набора:
+# её «Дано» — время, и ожидание у того кейса одно на четыре ветви.
 #
 # (в) — ЛИЧНОСТЕЙ СТОЛЬКО, СКОЛЬКО НУЖНО, ЧТОБЫ АДРЕСНЫЙ СЧЁТ НЕ ЗАДЕТЬ. Приёмка
 # кладёт по одному коду на личность, чтобы отказ пришёл по источнику, а не по
@@ -1842,9 +1860,9 @@ CASES.append(Case(
 # ───────────────────────────────────────────────────────────────────────────
 # Ф12-32: что попыткой НЕ считается. N − 1 неверных плюс любой сосчитанный
 # промежуточный дали бы N, и верное предъявление получило бы 429.
-# Отказ по свежести (Ф12-09), недоступность материала (Ф12-35) и исчерпание
-# ёмкости проверяющего (PWV-15) стенд не строит — их держит уровень I позиции
-# («E + I»), запись — в шапке набора.
+# Отказ по свежести несёт последний кейс набора — его «Дано» время. Недоступность
+# материала (Ф12-35) и исчерпание ёмкости проверяющего (PWV-15) стенд не строит —
+# их держит уровень I позиции («E + I»), запись — в шапке набора.
 # ───────────────────────────────────────────────────────────────────────────
 _P32A, _P32B = "sfNa", "sfNb"
 CASES.append(Case(
@@ -1882,4 +1900,276 @@ CASES.append(Case(
                                    reason="ENROLLMENT_NOT_PENDING")),
         *_fp_login(_P32B, "f32b-right-password"),
     ],
+))
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ОКНО ПРОФИЛЯ ИСТЕКЛО — ОДНО ОЖИДАНИЕ НА ЧЕТЫРЕ ВЕТВИ (kaname#480).
+#
+# «Дано» каждой ветви ниже — «прошло окно профиля плюс ε», и производит его
+# время, а не посев: часов службы у чёрного ящика нет, а поставляемый профиль
+# стенд `chart-own` ставит как есть (шапка `.github/scripts/stand-chart.sh`),
+# поэтому окно — величина профиля (`authn.login.addressWindow`,
+# `authn.selfServiceFreshness`), и читается она отсюда же, из
+# `deploy/values.prod.yaml`.
+#
+# ВЕТВИ ЖДУТ ОДНОГО И ТОГО ЖЕ, И ОЖИДАНИЕ У КЕЙСА ОДНО. Сначала каждая ветвь
+# взводит свой срок — момент, после которого её «Дано» наступило; затем шаг
+# ожидания опрашивает признак формы с настоящей паузой, пока часы не пройдут
+# самый поздний из взведённых сроков; и только после него ветви утверждают исход.
+# Порознь четыре ожидания стоили бы четыре окна.
+#
+# Срок ветви Ф12-31 (г) — не окно, а `Retry-After` отказа по частоте: столько
+# секунд до конца окна называет сам продукт (Р10), и ветвь утверждает, что по их
+# истечении верный код проходит. Сроки остальных — окно свежести от ОТВЕТА,
+# выдавшего сессию либо строку `pending`: сервер отмечает момент раньше ответа,
+# поэтому отсчёт от ответа запаздывает, а не опережает. ε — пять секунд: часы
+# прогонщика и службы на стенде одни (kind на том же узле), и ε покрывает лишь
+# задержку ответа и округление до секунды.
+#
+# ЧТО ВЕТВИ УТВЕРЖДАЮТ, И ЧТО ИХ РОНЯЕТ:
+#   · Ф12-31 (г) — после окна верный код `200`, «2»; до окна тот же код — `429`
+#     (ветвь взводится им же — отказ по частоте ДО ожидания и есть её близнец);
+#   · Ф12-09 — заведение из сессии входа паролем, в которой после окна не было
+#     предъявления, — `403 SESSION_NOT_FRESH`; строки `pending` нет, носитель годен;
+#   · Ф12-10 — единственное отличие от Ф12-09 — пароль, предъявленный внутри той же
+#     сессии: окно освежено, уровень «1», заведение по новому носителю — `200`;
+#   · Ф12-32, исход «отказ по свежести» — после окна `N − 1` неверных кодов, затем
+#     отказ по свежести, затем верный код проходит без отказа по частоте: засчитай
+#     продукт отказ попыткой, верный код получил бы `429` (Ф12-31 а);
+#   · Ф12-04 (а) — заведение истекло, а сессия освежена паролем: `confirm` верным
+#     кодом — `400 ENROLLMENT_NOT_PENDING`, тело побайтово равно отказу не
+#     начатому (в) той же личности; при истёкших обоих первым отвечает свежесть
+#     — `403 SESSION_NOT_FRESH`; положительный контроль — новое заведение и код от
+#     него — `200`.
+# Инъекция одного факта «окно не прошло» (шаг ожидания снят) роняет каждую ветвь:
+# (г) получает `429`, Ф12-09 и отказ Ф12-32 — `200`/`409` вместо `403`, Ф12-04 (а) —
+# `200` на истёкшем заведении.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _fp_authn(key):
+    found = _fp_re.findall(rf"^  {key}: (\S+)\s*$", _FP_PROFILE.read_text(encoding="utf-8"), _fp_re.M)
+    if len(found) != 1:
+        raise SystemExit(f"kaname-second-factor: ключ профиля authn.{key} найден "
+                         f"{len(found)} раз в {_FP_PROFILE} — ждали ровно один")
+    return found[0]
+
+
+_T_FRESH = _fp_seconds(_fp_authn("selfServiceFreshness"))
+_NOT_FRESH_TEXT = "re-authentication required: present a credential again"
+_NOT_PENDING_TEXT = "no pending enrollment: begin with enroll"
+
+_WIN_DEADLINE = "sfWinDeadline"
+_WIN_EPS_MS = 5000
+_WIN_POLL_MS = 10000
+# Предел опросов — от самого длинного окна плюс время заведения четырёх людей до
+# ожидания (регистрация, письмо, фактор): их шаги идут раньше, и их срок —
+# позже начала кейса. Исчерпан предел раньше срока — утверждение шага ожидания
+# краснеет с названием причины, а не прогон повисает.
+_WIN_SETUP_S = 300
+_WIN_CAP = -(-((max(_T_ADDR, _T_FRESH) + _WIN_SETUP_S) * 1000) // _WIN_POLL_MS)
+
+
+def _win_arm_window(seconds):
+    """Test-script: срок ветви — ответ + окно + ε; взводится наибольший из сроков."""
+    return [
+        "{",
+        f"  const __cur = parseInt(pm.environment.get({js_str(_WIN_DEADLINE)}) || '0', 10);",
+        "  if (pm.response.code === 200) {",
+        f"    pm.environment.set({js_str(_WIN_DEADLINE)}, String(Math.max(__cur, Date.now() + {seconds * 1000 + _WIN_EPS_MS})));",
+        "  }",
+        "}",
+    ]
+
+
+# Срок ветви (г) — `Retry-After` отказа по частоте, названный продуктом.
+_WIN_ARM_RETRY_AFTER = [
+    "{",
+    "  const __ra = String(pm.response.headers.get('Retry-After') || '');",
+    f"  const __cur = parseInt(pm.environment.get({js_str(_WIN_DEADLINE)}) || '0', 10);",
+    "  if (pm.response.code === 429 && /^[0-9]+$/.test(__ra)) {",
+    f"    pm.environment.set({js_str(_WIN_DEADLINE)}, String(Math.max(__cur, Date.now() + Number(__ra) * 1000 + {_WIN_EPS_MS})));",
+    "  }",
+    "}",
+]
+
+
+def _win_wait(name, src_person):
+    """Ожидание самого позднего взведённого срока: опрос признака формы входа с
+    настоящей паузой (не дольше `_WIN_POLL_MS` и не дольше остатка) и конечным
+    пределом. Утверждения исполняются на КАЖДОМ опросе."""
+    path = f"{_CSRF}?form=login"
+    polls = "_sfWinPolls"
+    label = "WIN-WAIT"
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*require_env_url("loginLaneBaseUrl", path, _LANE_WHY), *_fp_src(src_person)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_fp_status(200, label),
+            f"const __deadline = parseInt(pm.environment.get({js_str(_WIN_DEADLINE)}) || '0', 10);",
+            f"const __polls = parseInt(pm.environment.get({js_str(polls)}) || '0', 10);",
+            "const __ready = Date.now() >= __deadline;",
+            f"pm.test({js_str(label + ': срок взведён ветвями кейса')}, () => pm.expect(__deadline > 0, 'срок взведён').to.eql(true));",
+            f"pm.test({js_str(label + f': окно профиля прошло либо ожидание в пределе {_WIN_CAP} опросов')}, () => "
+            f"pm.expect(__ready || __polls < {_WIN_CAP}, 'окно прошло').to.eql(true));",
+            f"if (__deadline > 0 && !__ready && __polls < {_WIN_CAP}) {{",
+            f"  pm.environment.set({js_str(polls)}, String(__polls + 1));",
+            f"  const __pause = Math.min({_WIN_POLL_MS}, Math.max(0, __deadline - Date.now()));",
+            "  const _ww = Date.now(); while (Date.now() - _ww < __pause) void 0;",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "} else {",
+            f"  pm.environment.unset({js_str(polls)});",
+            "}",
+        ],
+    )
+
+
+def _win_login(p, name):
+    """Вход паролем; срок ветви — окно свежести от ответа, выдавшего сессию."""
+    steps = _fp_login(p, name)
+    steps[-1].test_script = [*steps[-1].test_script, *_win_arm_window(_T_FRESH)]
+    return steps
+
+
+def _fp_enroll(p, name, session_var, tests=()):
+    up = name.upper()
+    return _fp_post(p, name, _ENROLL, {"csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"}, with_session=session_var,
+                    tests=[*_fp_status(200, up),
+                           "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                           f"pm.test({js_str(up + ': секрет base32 выдан')}, () => "
+                           "pm.expect(/^[A-Z2-7]{32}$/.test(String(__j.secret)), 'форма секрета').to.eql(true));",
+                           f"pm.environment.set({js_str(_fp(p, 'Secret'))}, __j.secret || '');",
+                           f"pm.environment.unset({js_str(_fp(p, 'LastStep'))});",
+                           *tests])
+
+
+def _fp_state(p, name, session_var, tests):
+    """Состояние фактора под носителем `session_var`: `200` — носитель годен."""
+    return Step(
+        name=name, method="GET", path=_STATUS,
+        pre_script=[*require_env_url("loginLaneBaseUrl", _STATUS, _LANE_WHY), *_fp_src(p),
+                    *_fp_cookies(p, session_var)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[*_fp_status(200, name.upper()),
+                     "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }", *tests],
+    )
+
+
+def _fp_step_up_password(p, name, session_var, tests):
+    return _fp_post(p, name, _STEP_UP,
+                    {"method": "password", "password": f"{{{{{_fp(p, 'Password')}}}}}",
+                     "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                    with_session=session_var, tests=tests)
+
+
+_PWG, _PWF, _PWP, _PWE = "sfWg", "sfWf", "sfWp", "sfWe"
+
+_WIN_STEPS = [
+    # ── взведение ────────────────────────────────────────────────────────────
+    # Ф12-31 (г): N неверных кодов, верный — 429; срок — Retry-After ответа.
+    *_fp_person(_PWG, "win-g"),
+    *_fp_login(_PWG, "win-g-login"),
+    *_fp_wrong_codes(_PWG, "win-g-wrong", _N_ADDR, "LoginSessionCookie"),
+    _fp_step_up_right(_PWG, "win-g-right-code-in-window", "LoginSessionCookie",
+                      [*_fp_too_many("WIN-G-IN-WINDOW", _T_ADDR), *_WIN_ARM_RETRY_AFTER]),
+    # Ф12-09/10: у личности только пароль; сессия — входом паролем.
+    *_fp_person(_PWF, "win-f", factor=False),
+    *_win_login(_PWF, "win-f-login"),
+    # Ф12-32: личность с фактором; сессия — входом паролем.
+    *_fp_person(_PWP, "win-p"),
+    *_win_login(_PWP, "win-p-login"),
+    # Ф12-04: (в) до заведения — «не начато», его тело — эталон; затем заведение.
+    *_fp_person(_PWE, "win-e", factor=False),
+    _fp_csrf(_PWE, "win-e-csrf-not-started", "second-factor"),
+    _fp_post(_PWE, "win-e-confirm-not-started", _CONFIRM,
+             {"code": "000000", "csrfToken": f"{{{{{_fp(_PWE, 'Csrf')}}}}}"}, with_session="SessionCookie",
+             tests=[*_fp_refused(400, 9, _NOT_PENDING_TEXT, "WIN-E-NOT-STARTED", reason="ENROLLMENT_NOT_PENDING"),
+                    *_keep_body("sfWeNotPendingRefusalBody")]),
+    _fp_csrf(_PWE, "win-e-csrf-enroll", "second-factor"),
+    _fp_enroll(_PWE, "win-e-enroll", "SessionCookie", tests=_win_arm_window(_T_FRESH)),
+    # ── ожидание ─────────────────────────────────────────────────────────────
+    _win_wait("win-wait", _PWG),
+    # ── исходы ───────────────────────────────────────────────────────────────
+    # Ф12-31 (г): после окна верный код — 200, «2».
+    _fp_csrf(_PWG, "win-g-csrf-after-window", "step-up", with_session="LoginSessionCookie"),
+    _fp_step_up_right(_PWG, "win-g-right-code-after-window", "LoginSessionCookie",
+                      [*_fp_status(200, "WIN-G-AFTER-WINDOW"), *_fp_level("WIN-G-AFTER-WINDOW", "2", True, [])]),
+    # Ф12-09: заведение из несвежей сессии — 403 SESSION_NOT_FRESH; строки нет,
+    # носитель годен.
+    _fp_csrf(_PWF, "win-f-csrf-enroll-not-fresh", "second-factor", with_session="LoginSessionCookie"),
+    _fp_post(_PWF, "win-f-enroll-not-fresh", _ENROLL, {"csrfToken": f"{{{{{_fp(_PWF, 'Csrf')}}}}}"},
+             with_session="LoginSessionCookie",
+             tests=_fp_refused(403, 7, _NOT_FRESH_TEXT, "WIN-F-NOT-FRESH", reason="SESSION_NOT_FRESH")),
+    _fp_state(_PWF, "win-f-state-after-refusal", "LoginSessionCookie", [
+        "pm.test('WIN-F-STATE-AFTER-REFUSAL: строки pending нет — отказ по свежести заведения не начал', () => "
+        "pm.expect(!!__j.totp && __j.totp.enrolled === false "
+        "&& !Object.prototype.hasOwnProperty.call(__j.totp, 'pendingUntil'), 'строка pending').to.eql(true));",
+    ]),
+    # Ф12-10: пароль внутри той же сессии освежает окно; уровень «1»; заведение
+    # по новому носителю — 200.
+    _fp_csrf(_PWF, "win-f-csrf-step-up-password", "step-up", with_session="LoginSessionCookie"),
+    _fp_step_up_password(_PWF, "win-f-step-up-password", "LoginSessionCookie", [
+        *_fp_status(200, "WIN-F-PASSWORD"),
+        *_fp_level("WIN-F-PASSWORD", "1", False, []),
+        f"pm.environment.set({js_str(_fp(_PWF, 'OldLoginSessionCookie'))}, pm.environment.get({js_str(_fp(_PWF, 'LoginSessionCookie'))}) || '');",
+        *_fp_capture(_PWF, "kaname_session", "LoginSessionCookie", "WIN-F-PASSWORD"),
+        "pm.test('WIN-F-PASSWORD: носитель перевыпущен — новое значение', () => "
+        f"pm.expect(pm.environment.get({js_str(_fp(_PWF, 'LoginSessionCookie'))}) !== "
+        f"pm.environment.get({js_str(_fp(_PWF, 'OldLoginSessionCookie'))}), 'носитель сменился').to.eql(true));",
+    ]),
+    _fp_csrf(_PWF, "win-f-csrf-enroll-fresh", "second-factor", with_session="LoginSessionCookie"),
+    _fp_enroll(_PWF, "win-f-enroll-fresh", "LoginSessionCookie"),
+    # Ф12-32, исход «отказ по свежести»: N − 1 неверных кодов после окна, отказ по
+    # свежести, верный код — 200 без отказа по частоте.
+    *_fp_wrong_codes(_PWP, "win-p-wrong", _N_ADDR - 1, "LoginSessionCookie"),
+    _fp_csrf(_PWP, "win-p-csrf-enroll-not-fresh", "second-factor", with_session="LoginSessionCookie"),
+    _fp_post(_PWP, "win-p-enroll-not-fresh", _ENROLL, {"csrfToken": f"{{{{{_fp(_PWP, 'Csrf')}}}}}"},
+             with_session="LoginSessionCookie",
+             tests=_fp_refused(403, 7, _NOT_FRESH_TEXT, "WIN-P-NOT-FRESH", reason="SESSION_NOT_FRESH")),
+    _fp_csrf(_PWP, "win-p-csrf-right-code", "step-up", with_session="LoginSessionCookie"),
+    _fp_step_up_right(_PWP, "win-p-right-code", "LoginSessionCookie",
+                      [*_fp_status(200, "WIN-P-RIGHT"), *_fp_level("WIN-P-RIGHT", "2", True, [])]),
+    # Ф12-04 (а): при истёкших обоих первым отвечает свежесть.
+    _fp_csrf(_PWE, "win-e-csrf-both-expired", "second-factor"),
+    _fp_post(_PWE, "win-e-confirm-both-expired", _CONFIRM,
+             {"code": f"{{{{{_fp(_PWE, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PWE, 'Csrf')}}}}}"},
+             with_session="SessionCookie", pre=_fp_present(_PWE, "WIN-E-BOTH-EXPIRED"),
+             tests=_fp_refused(403, 7, _NOT_FRESH_TEXT, "WIN-E-BOTH-EXPIRED", reason="SESSION_NOT_FRESH")),
+    # Сессия освежена паролем — истекло только заведение: верный код — тот же
+    # отказ, что не начатому, побайтово.
+    _fp_csrf(_PWE, "win-e-csrf-step-up-password", "step-up"),
+    _fp_step_up_password(_PWE, "win-e-step-up-password", "SessionCookie", [
+        *_fp_status(200, "WIN-E-PASSWORD"),
+        *_fp_capture(_PWE, "kaname_session", "SessionCookie", "WIN-E-PASSWORD"),
+    ]),
+    _fp_csrf(_PWE, "win-e-csrf-confirm-expired", "second-factor"),
+    _fp_post(_PWE, "win-e-confirm-expired", _CONFIRM,
+             {"code": f"{{{{{_fp(_PWE, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PWE, 'Csrf')}}}}}"},
+             with_session="SessionCookie", pre=_fp_present(_PWE, "WIN-E-EXPIRED"),
+             tests=[*_fp_refused(400, 9, _NOT_PENDING_TEXT, "WIN-E-EXPIRED", reason="ENROLLMENT_NOT_PENDING"),
+                    *_body_equals("sfWeNotPendingRefusalBody",
+                                  "WIN-E-EXPIRED: тело побайтово равно отказу не начатому заведению")]),
+    # Положительный контроль: новое заведение, код от НЕГО — 200, «2».
+    _fp_csrf(_PWE, "win-e-csrf-re-enroll", "second-factor"),
+    _fp_enroll(_PWE, "win-e-re-enroll", "SessionCookie"),
+    _fp_post(_PWE, "win-e-confirm-new", _CONFIRM,
+             {"code": f"{{{{{_fp(_PWE, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PWE, 'Csrf')}}}}}"},
+             with_session="SessionCookie", pre=_fp_present(_PWE, "WIN-E-NEW"),
+             tests=[*_fp_status(200, "WIN-E-NEW"), *_fp_accepted(_PWE),
+                    "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                    "pm.test('WIN-E-NEW: фактор заведён новым секретом — сессия «2»', () => "
+                    "pm.expect(!!__j.session && __j.session.assuranceLevel === '2', 'фактор заведён').to.eql(true));"]),
+]
+_WIN_STEPS[0].pre_script = [f"pm.environment.unset({js_str(_WIN_DEADLINE)});", *_WIN_STEPS[0].pre_script]
+
+CASES.append(Case(
+    id="IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED",
+    title=(f"Окно профиля прошло (N={_N_ADDR}, окно {_T_ADDR} с, свежесть {_T_FRESH} с): после Retry-After "
+           "верный код — 200 (Ф12-31 г); заведение из несвежей сессии — 403 SESSION_NOT_FRESH, пароль внутри "
+           "сессии окно освежает (Ф12-09, Ф12-10); отказ по свежести попыткой не считается (Ф12-32); "
+           "истёкшее заведение — тот же отказ, что не начатое, свежесть отвечает первой (Ф12-04 а)"),
+    classes=["SEC", "BVA", "NEG"],
+    priority="P0",
+    steps=_WIN_STEPS,
 ))

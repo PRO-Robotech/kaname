@@ -326,7 +326,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		requireRevocationAuthorityCallerAuth(ownMinting, jwksProxyAddr, mtlsCfg),
 		"боевой профиль не проходит стража авторитета отзыва: объявленная посадка "+
 			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-	t.Logf("своя чеканка: %v · слушатель зеркала ключей %q, режим проверки клиента %q, устанавливает вызывающего: %v",
+	t.Logf("своя чеканка: %v · слушатель публикатора ключей %q, режим проверки клиента %q, устанавливает вызывающего: %v",
 		ownMinting, jwksProxyAddr, mtlsCfg.JWKSProxyClientAuthModeValue(),
 		mtlsCfg.JWKSProxyVerifiesCaller())
 

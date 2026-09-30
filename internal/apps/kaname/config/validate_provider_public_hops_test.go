@@ -1,23 +1,18 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// validate_provider_public_hops_test.go — the two hops iam makes to the identity
-// provider's PUBLIC listener must be named by an operator, and when they are
-// addressed over TLS they must carry something to verify the peer against.
+// validate_provider_public_hops_test.go — the hop iam makes to the identity
+// provider's PUBLIC listener must be named by an operator, and when it is
+// addressed over TLS it must carry something to verify the peer against.
 //
-// WHY THESE TWO, AND WHY THEY ARE NOT THE ADMIN HOP. iam is the platform's only
-// facade to the provider, and three separate addresses ride that facade. The
-// administrative one already refuses to start unless it is declared and
-// encrypted. These two were left behind:
+// WHY THIS ONE, AND WHY IT IS NOT THE ADMIN HOP. The administrative address
+// already refuses to start unless it is declared and encrypted. The token
+// endpoint was left behind: the exchange posts a signed client assertion and
+// reads the minted bearer back out of the response body. The second public hop —
+// the upstream of the key-set mirror — left together with the mirror
+// (kaname#361), and nothing here names it any more.
 //
-//   - the JWKS upstream: the keyset iam mirrors on its cluster-internal listener
-//     IS the data-plane's only anchor for deciding whether a token was signed by
-//     the provider. Whatever answers that address decides which signatures the
-//     platform accepts.
-//   - the token endpoint: the exchange posts a signed client assertion and reads
-//     the minted bearer back out of the response body.
-//
-// Both fell back to a DERIVATION from the issuer when a profile named neither.
+// It fell back to a DERIVATION from the issuer when a profile named nothing.
 // A derivation is never empty, so the facade read as configured while addressing
 // the public ingress hostname — which does not resolve inside the cluster, and if
 // it ever does, it is not the process the operator meant. Requiring the
@@ -58,26 +53,11 @@ func publicHopCfg(mode config.Mode) config.Config {
 	return cfg
 }
 
-// The JWKS upstream left to derivation must be refused. Nothing else catches it:
-// ResolveHydraJWKSURL always returns a non-empty string.
-func TestValidate_Production_RefusesDerivedProviderJWKSURL(t *testing.T) {
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
-	cfg := publicHopCfg(config.ModeProduction)
-	cfg.AuthN.HydraJWKSURL = ""
-	err := externalLaneRefusal(cfg)
-	if err == nil {
-		t.Fatal("external-lane rows = nil, want refusal when the JWKS upstream address is derived")
-	}
-	if !strings.Contains(err.Error(), "hydra-jwks-url") {
-		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
-	}
-}
-
-// The token endpoint left to derivation must be refused, for the same reason.
+// The token endpoint left to derivation must be refused. Nothing else catches it:
+// ResolveHydraTokenURL always returns a non-empty string.
 func TestValidate_Production_RefusesDerivedProviderTokenURL(t *testing.T) {
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
 	cfg := publicHopCfg(config.ModeProduction)
-	cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 	cfg.AuthN.HydraTokenURL = ""
 	err := externalLaneRefusal(cfg)
 	if err == nil {
@@ -88,24 +68,16 @@ func TestValidate_Production_RefusesDerivedProviderTokenURL(t *testing.T) {
 	}
 }
 
-// https with nothing to verify against is refused on BOTH hops: the provider's
-// in-cluster certificate is internal-CA issued and this process trusts the system
-// roots, so every fetch would fail on an unknown authority after the address
-// already reads as hardened.
+// https with nothing to verify against is refused: the provider's in-cluster
+// certificate is internal-CA issued and this process trusts the system roots, so
+// every call would fail on an unknown authority after the address already reads
+// as hardened.
 func TestValidate_Production_RefusesTLSPublicHopWithoutAnchor(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		set     func(*config.Config)
 		wantHas string
 	}{
-		{
-			name: "jwks",
-			set: func(c *config.Config) {
-				c.AuthN.HydraJWKSURL = "https://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
-				c.AuthN.HydraJWKSCAFile = ""
-			},
-			wantHas: "hydra-jwks-ca-file",
-		},
 		{
 			name: "token",
 			set: func(c *config.Config) {
@@ -117,7 +89,6 @@ func TestValidate_Production_RefusesTLSPublicHopWithoutAnchor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := publicHopCfg(config.ModeProduction)
-			cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 			cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
 			tc.set(&cfg)
 			err := externalLaneRefusal(cfg)
@@ -135,61 +106,55 @@ func TestValidate_Production_RefusesTLSPublicHopWithoutAnchor(t *testing.T) {
 // the http client and fail at the first fetch, long after boot.
 func TestValidate_Production_RefusesNonAbsolutePublicHop(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
-	cfg.AuthN.HydraJWKSURL = "kacho-umbrella-hydra-public:4444/.well-known/jwks.json"
-	cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
+	cfg.AuthN.HydraTokenURL = "kacho-umbrella-hydra-public:4444/oauth2/token"
 	err := externalLaneRefusal(cfg)
 	if err == nil {
 		t.Fatal("external-lane rows = nil, want refusal for an address that is not an absolute http(s) URL")
 	}
-	if !strings.Contains(err.Error(), "hydra-jwks-url") {
+	if !strings.Contains(err.Error(), "hydra-token-url") {
 		t.Fatalf("the refusal must name the setting, got: %q", err.Error())
 	}
 }
 
-// The shape the deployed profiles actually carry — both hops declared, in plain
+// The shape the deployed profiles actually carry — the hop declared, in plain
 // http, no anchor — must still boot. The transport of the provider's public
 // listener is a separate change; this guard is about the address being named and
 // about TLS never being claimed without an anchor.
 func TestValidate_Production_AcceptsDeclaredPlaintextPublicHops(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
-	cfg.AuthN.HydraJWKSURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
 	cfg.AuthN.HydraTokenURL = "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
 	if err := externalLaneRefusal(cfg); err != nil {
-		t.Fatalf("external-lane rows = %v, want nil for declared plaintext public hops", err)
+		t.Fatalf("external-lane rows = %v, want nil for a declared plaintext public hop", err)
 	}
 }
 
-// https WITH an anchor on both hops must boot — this is the shape a stand takes
-// once the provider's public listener is served over TLS.
+// https WITH an anchor must boot — this is the shape a stand takes once the
+// provider's public listener is served over TLS.
 func TestValidate_Production_AcceptsTLSPublicHopsWithAnchor(t *testing.T) {
 	cfg := publicHopCfg(config.ModeProduction)
-	cfg.AuthN.HydraJWKSURL = "https://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json"
-	cfg.AuthN.HydraJWKSCAFile = "/etc/kaname/tls/server/ca.crt"
 	cfg.AuthN.HydraTokenURL = "https://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token"
 	cfg.AuthN.HydraTokenCAFile = "/etc/kaname/tls/server/ca.crt"
 	if err := externalLaneRefusal(cfg); err != nil {
-		t.Fatalf("external-lane rows = %v, want nil for https public hops with pinned anchors", err)
+		t.Fatalf("external-lane rows = %v, want nil for an https public hop with a pinned anchor", err)
 	}
 }
 
 // The ENV override counts as declared — it is one of the two sources an operator
 // actually writes, and the chart ships the address that way.
 func TestValidate_Production_AcceptsEnvDeclaredPublicHops(t *testing.T) {
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json")
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token")
 	cfg := publicHopCfg(config.ModeProduction)
 	if err := externalLaneRefusal(cfg); err != nil {
-		t.Fatalf("external-lane rows = %v, want nil when the addresses come from the ENV override", err)
+		t.Fatalf("external-lane rows = %v, want nil when the address comes from the ENV override", err)
 	}
 }
 
 // dev keeps the derivation: an in-process fixture has no provider at all, and a
 // developer stand may run one without a certificate.
 func TestValidate_Dev_LeavesPublicHopsAlone(t *testing.T) {
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
 	cfg := publicHopCfg(config.ModeDev)
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil in dev with both public hops derived", err)
+		t.Fatalf("Validate() = %v, want nil in dev with the public hop derived", err)
 	}
 }

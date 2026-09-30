@@ -115,11 +115,6 @@ type LaneWiring struct {
 	// резолвится всегда (при незаданной ручке — деривацией из доменного имени),
 	// поэтому «дороги нет» настройкой невыразимо и читается только отсюда.
 	ProviderAdminHopBuilt bool
-	// ProviderKeySetMirrorPublished — запись зеркала ЧУЖОГО набора проверочных
-	// ключей опубликована. Тот же довод, что у дороги выше: путь записи
-	// объявлен, издатель резолвится всегда, и пустым это поле настройка сделать
-	// не может.
-	ProviderKeySetMirrorPublished bool
 	// PresentableACRs — уровни доверия, которые полоса УМЕЕТ предъявить
 	// человеку. Пустой перечень означает «полоса не предъявляет ни одного»; это
 	// законное наблюдаемое состояние, а не «не заполнено».
@@ -169,7 +164,7 @@ var (
 // оператора); полосность добавляет к ним одну строку о том, каким значением
 // поля требование снимается.
 var LaneRequirements = []LaneRequirement{
-	// ТРИ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` (PRO-Robotech/corelib#30).
+	// ДВЕ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` (PRO-Robotech/corelib#30).
 	// Проверка старта до них НЕ доходит: посадку вне словаря она отвергает
 	// первой и в одиночку (validateIdentityProviderLane, #424), поэтому ни один
 	// старт этих отказов не произносит. Строки снимаются вместе с полосой
@@ -181,14 +176,6 @@ var LaneRequirements = []LaneRequirement{
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
 			return laneScoped(c.validateProductionProviderAdminHop())
-		},
-	},
-	{
-		Lanes:   laneExternal,
-		Element: "набор проверочных ключей внешнего поставщика",
-		Stage:   LaneStageConfig,
-		Check: func(c Config, _ LaneWiring) error {
-			return laneScoped(c.validateProviderPublicHop(providerHopJWKS))
 		},
 	},
 	{
@@ -427,19 +414,21 @@ var LaneRequirements = []LaneRequirement{
 			return unreachableFloorsComplaint(w)
 		},
 	},
-	// ДВЕ СТРОКИ НИЖЕ ТРЕБУЮТ ОТСУТСТВИЯ, а не наличия, и это единственные
-	// такие в таблице (задача #2489). Требование отрицательное потому, что
-	// предмет у него — зависимость наружу: на посадке, где внешнего поставщика
-	// нет вовсе, дорога к нему и запись зеркала его ключей суть провязка к
-	// тому, чего не существует.
+	// СТРОКА НИЖЕ ТРЕБУЕТ ОТСУТСТВИЯ, а не наличия, и это единственная такая в
+	// таблице (задача #2489). Требование отрицательное потому, что предмет у
+	// него — зависимость наружу: на посадке, где внешнего поставщика нет вовсе,
+	// дорога к нему есть провязка к тому, чего не существует. Соседняя строка о
+	// записи зеркала его ключей снята вместе с самой записью (kaname#361): её
+	// корень больше не строит ни на какой посадке, и требовать отсутствия
+	// невыразимого нечем.
 	//
-	// ПОЧЕМУ СТАДИЯ ПРОВЯЗКИ. Настройкой это невыразимо by construction: оба
-	// резолва деривируют значение из доменного имени и пустого не возвращают
-	// никогда, поэтому «под own адрес пуст» не выполнимо ни при каком профиле,
-	// а требование, которого нельзя выполнить, требованием не является.
+	// ПОЧЕМУ СТАДИЯ ПРОВЯЗКИ. Настройкой это невыразимо by construction: резолв
+	// деривирует адрес из доменного имени и пустого не возвращает никогда,
+	// поэтому «под own адрес пуст» не выполнимо ни при каком профиле, а
+	// требование, которого нельзя выполнить, требованием не является.
 	//
-	// ЧЕМ ДЕРЖИТСЯ НАБЛЮДЕНИЕ — ВНИМАНИЕМ, и это сказано прямо. Значение полей
-	// проставляет композиционный корень тем же способом, что и у двух соседних
+	// ЧЕМ ДЕРЖИТСЯ НАБЛЮДЕНИЕ — ВНИМАНИЕМ, и это сказано прямо. Значение поля
+	// проставляет композиционный корень тем же способом, что и у соседних
 	// строк выше: наблюдением, записанным литералом, с названным предикатом
 	// смены. Механизма, отличающего честное наблюдение от подставленного, здесь
 	// нет — как нет его и у соседей; заводить его этой строке в одиночку значило
@@ -457,22 +446,6 @@ var LaneRequirements = []LaneRequirement{
 					"identity provider — on this posture there is no such provider, and the "+
 					"address it dials is not even declared: it is derived from the domain name, "+
 					"so the road looks configured on a stand that never configured one",
-				IdentityProviderSetting, IdentityProviderOwn)
-		},
-	},
-	{
-		Lanes:   laneOwn,
-		Element: "запись зеркала чужого набора ключей не публикуется",
-		Stage:   LaneStageWiring,
-		Check: func(_ Config, w LaneWiring) error {
-			if !w.ProviderKeySetMirrorPublished {
-				return nil
-			}
-			return fmt.Errorf(
-				"%s=%s, but the publisher still carries the mirror record of an EXTERNAL "+
-					"provider key set — a record whose issuer is derived, whose upstream does "+
-					"not exist on this posture, and which would answer every caller that asks "+
-					"for it with an unavailable upstream instead of an honest refusal",
 				IdentityProviderSetting, IdentityProviderOwn)
 		},
 	},

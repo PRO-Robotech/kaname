@@ -5,7 +5,7 @@
 //
 // # Предмет, и он появился ВМЕСТЕ С ВЫНОСОМ
 //
-// Ручки транспорта у трёх HTTP-рёбер — вебхуки провайдера, скрейп и зеркало
+// Ручки транспорта у трёх HTTP-рёбер — вебхуки провайдера, скрейп и публикатор
 // ключей проверки — объявлены кодом давно, но задавал их ЗОНТИЧНЫЙ чарт
 // монорепо. Профиль ЭТОЙ службы их не объявляет, а адреса всех трёх приходят
 // умолчанием процесса и потому непусты всегда: отдельно поставленная служба
@@ -18,7 +18,7 @@
 //     обработчик отличает провайдера от постороннего. Снятый с провода, он
 //     позволяет звать заведение пользователя и обогащение токена от чужого
 //     имени;
-//   - ЗЕРКАЛО КЛЮЧЕЙ. Снятие аутентификации с этой поверхности —
+//   - ПУБЛИКАТОР КЛЮЧЕЙ. Снятие аутентификации с этой поверхности —
 //     задокументированное исключение, и обосновано оно ТРЕМЯ вещами разом:
 //     внутренний Service, односторонняя TLS, только публичный материал. Без
 //     TLS предпосылка собственного исключения ложна: остаётся
@@ -172,7 +172,13 @@ func iamHTTPEdges(hooksAddr, metricsAddr, jwksProxyAddr, restAddr, internalRESTA
 			plaintextDeclared: mtlsCfg.HooksPlaintextAcknowledged(),
 		},
 		{
-			name: "verification-key mirror (/.well-known/jwks.json)", knob: "KANAME_JWKSPROXY_SERVER_MTLS_ENABLE",
+			// Имя называет запись, которую отдаёт публикатор: она одна — наша, по
+			// пути `authn.token-signing.key-set-path`.
+			// Зеркало набора прежнего издателя по каноническому well-known снято
+			// вместе с ним (kaname#361), и отказ, называющий его, посылал бы
+			// оператора по адресу, которого слушатель не отдаёт.
+			name: "публикатор набора ключей проверки (authn.token-signing.key-set-path)",
+			knob: "KANAME_JWKSPROXY_SERVER_MTLS_ENABLE",
 			addr: jwksProxyAddr, enabled: mtlsCfg.JWKSProxyTLSEnabled(),
 			why: "this surface carries NO authentication by documented exception, and that " +
 				"exception rests on one-way TLS: without it an unauthenticated plaintext " +

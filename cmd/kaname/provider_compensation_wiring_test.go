@@ -89,7 +89,8 @@ func Test_ProviderCompensationDrainerConfig_PatienceIsDerivedNotAssigned(t *test
 func Test_ProviderCompensationDrainerConfig_AttemptCeilingComesFromTheProducer(t *testing.T) {
 	t.Parallel()
 
-	client := clients.NewHydraAdminClient("http://provider.invalid", "")
+	client, err := clients.NewHydraAdminClientWithCA("http://provider.invalid", "", "")
+	require.NoError(t, err, "клиент без якоря собирается без отказа")
 	require.NotNil(t, client.HTTPClient, "клиент без предела времени висел бы вечно")
 
 	assert.Equal(t, clients.ProviderAdminHopTimeout, client.HTTPClient.Timeout,

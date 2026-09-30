@@ -176,13 +176,11 @@ func TestF4d01_EitherLegalValuePassesTheStart(t *testing.T) {
 // тексте нет НИ ОДНОГО полосного требования.
 func TestF4d01_UnsetLaneDemandsNothingLaneScoped(t *testing.T) {
 	t.Setenv("KANAME_HYDRA_ADMIN_URL", "")
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
 
 	cfg := laneCfg(config.IdentityProviderUnset)
 	cfg.AuthN.HydraAdminURL = ""
 	cfg.AuthN.HydraAdminCAFile = ""
-	cfg.AuthN.HydraJWKSURL = ""
 	cfg.AuthN.HydraTokenURL = ""
 
 	err := cfg.Validate()
@@ -190,7 +188,7 @@ func TestF4d01_UnsetLaneDemandsNothingLaneScoped(t *testing.T) {
 		t.Fatal("Validate() = nil, ожидался отказ по незаданной посадке")
 	}
 	msg := err.Error()
-	for _, lanescoped := range []string{"hydra-admin-url", "hydra-jwks-url", "hydra-token-url"} {
+	for _, lanescoped := range []string{"hydra-admin-url", "hydra-token-url"} {
 		if strings.Contains(msg, lanescoped) {
 			t.Fatalf("при незаданной посадке полосное требование %q предъявляться не должно: %q",
 				lanescoped, msg)

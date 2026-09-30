@@ -66,7 +66,7 @@
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-grant-visibility.py` | 1 |
-| `cases/iam-token-facade-conformance.py` | 7 |
+| `cases/iam-token-facade-conformance.py` | 6 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
@@ -74,7 +74,7 @@
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
-| `cases/kaname-second-factor.py` | 17 |
+| `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -895,12 +895,11 @@
 
 - `IAM-ACB-SYSGRANT-VISIBLE-OK`
 
-## `cases/iam-token-facade-conformance.py` — 7 кейсов
+## `cases/iam-token-facade-conformance.py` — 6 кейсов
 
 > Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
 
 - `IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS`
-- `IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER`
 - `IBT-05-CREDENTIAL-LIFECYCLE-THROUGH-FACADE-RPCS`
 - `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
 - `IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR`
@@ -1136,7 +1135,7 @@
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 
-## `cases/kaname-second-factor.py` — 17 кейсов
+## `cases/kaname-second-factor.py` — 18 кейсов
 
 > Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
@@ -1148,10 +1147,13 @@
 > `active` → снят. Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем
 > же вызовом прогонщика, что вход и восстановление, последним (kaname#417);
 > утверждения набора значений удостоверений не печатают — держит
-> `scripts/second_factor_assertion_values_test.py`. Четыре последних кейса
-> (Ф12-19, Ф12-31, Ф12-32, Ф12-46) заводят своих людей — регистрацией,
-> подтверждением адреса кодом из письма (`standMailboxUrl`) и заведением фактора, —
-> и человека посева не трогают.
+> `scripts/second_factor_assertion_values_test.py`. Пять последних кейсов
+> (Ф12-19, Ф12-31, Ф12-32, Ф12-46 и кейс окна профиля) заводят своих людей —
+> регистрацией, подтверждением адреса кодом из письма (`standMailboxUrl`) и
+> заведением фактора, — и человека посева не трогают. Последний ждёт окна
+> профиля (`addressWindow`, `selfServiceFreshness`) одним ожиданием на четыре
+> ветви (kaname#480): Ф12-31 (г), Ф12-09, Ф12-10, отказ по свежести Ф12-32 и
+> Ф12-04 (а).
 
 - `IAM-2FA-NEG-NOT-ENROLLED-STATE`
 - `IAM-2FA-OK-ENROLL-PENDING-IS-NOT-A-METHOD`
@@ -1170,6 +1172,7 @@
 - `IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET`
 - `IAM-2FA-NEG-CODE-GUESSING-RATE`
 - `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
+- `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

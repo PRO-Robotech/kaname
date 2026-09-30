@@ -49,7 +49,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Дополнительно',
       collapsed: true,
-      items: ['advanced/design-decisions', 'advanced/observability'],
+      items: ['advanced/design-decisions', 'advanced/observability', 'advanced/second-factor-wrapping-key'],
     },
     {
       type: 'category',

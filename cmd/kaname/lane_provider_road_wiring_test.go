@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // lane_provider_road_wiring_test.go — КОМПОЗИЦИОННЫЙ КОРЕНЬ на посадке без
-// внешнего поставщика дорогу к нему НЕ СТРОИТ и запись зеркала его ключей НЕ
-// ПУБЛИКУЕТ (задача kaname#21).
+// внешнего поставщика дорогу к нему НЕ СТРОИТ (задача kaname#21). Записи
+// зеркала его ключей корень не публикует ни на какой посадке: она снята вместе
+// с внешним издателем (kaname#361), и привязку «издатель → путь», которая
+// отвергает вторую запись, судит пакет публикатора.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ СУДИТСЯ, А ЧТО УЖЕ СУДИТСЯ В ДРУГОМ МЕСТЕ
@@ -13,7 +15,7 @@
 // провязки говорит «построена». Эти пробы о другом конце: что композиционный
 // корень СТАВИТ В ЭТО ПОЛЕ ПРАВДУ и что он действительно не строит.
 //
-// До этой правки оба поля были ЛИТЕРАЛАМИ `true`. Литерал не мог покраснеть ни
+// До правки kaname#21 поле было ЛИТЕРАЛОМ `true`. Литерал не мог покраснеть ни
 // при какой посадке, то есть наблюдатель отчитывался о намерении вместо исхода —
 // ровно тот класс, ради которого самоотчёт о посадке и заведён.
 //
@@ -46,31 +48,52 @@ func roadCfg(p config.IdentityProvider, jwksEndpoint string) config.Config {
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// ДОРОГА: под `own` не строится, под `external` строится.
+// ДОРОГА: под `own` не строится, под `external` строится — и достаётся ТОЛЬКО
+// ветви построенной посадки (задача kaname#338).
+//
+// Развилка судится исходом, а не ответом: какая ветвь исполнилась и что она
+// получила. Под `own` ветвь с дорогой не исполняется НИ РАЗУ — значит клиента
+// без адреса, который прежде уходил потребителям значением, не получает никто.
 func TestCompositionRoot_AdminRoadIsBuiltOnlyWhereAProviderExists(t *testing.T) {
-	own, ownBuilt := mustProviderAdminClient(roadCfg(config.IdentityProviderOwn, "9097"), nil)
-	if ownBuilt {
-		t.Error("под own строитель ОБЪЯВИЛ дорогу построенной — ответ о посадке, " +
-			"который читают все потребители, назвал бы им несуществующее")
+	type taken struct {
+		built, absent int
+		road          *providerAdminRoad
 	}
-	if own == nil {
-		t.Fatal("mustProviderAdminClient() = nil под own; потребителям нужен объект, " +
-			"отказывающий по имени, а не пустой указатель")
-	}
-	if own.BaseURL != "" {
-		t.Errorf("под own дорога построена на адрес %q — а внешнего поставщика "+
-			"на этой посадке нет вовсе", own.BaseURL)
+	fork := func(cfg config.Config) taken {
+		var got taken
+		_, _ = onProviderAdminRoad(cfg, nil,
+			func(road *providerAdminRoad) (struct{}, error) {
+				got.built++
+				got.road = road
+				return struct{}{}, nil
+			},
+			func() (struct{}, error) {
+				got.absent++
+				return struct{}{}, nil
+			})
+		return got
 	}
 
-	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external дорога обязана быть.
-	ext, extBuilt := mustProviderAdminClient(roadCfg(config.IdentityProviderExternal, "9097"), nil)
-	if !extBuilt {
-		t.Error("под external строитель НЕ объявил дорогу построенной — потребители " +
-			"ушли бы на собственную полосу там, где исполняет чужой поставщик")
+	own := fork(roadCfg(config.IdentityProviderOwn, "9097"))
+	if own.built != 0 || own.road != nil {
+		t.Errorf("под own исполнена ветвь С ДОРОГОЙ (%d раз, клиент %v) — потребитель "+
+			"получил дорогу к поставщику, которого на этой посадке нет", own.built, own.road)
 	}
-	if ext == nil || ext.BaseURL == "" {
-		t.Fatal("под external дорога НЕ построена — отрицание выше зеленело бы на " +
-			"корне, который не строит никогда")
+	if own.absent != 1 {
+		t.Fatalf("под own ветвь без дороги исполнена %d раз, а не один — потребитель "+
+			"остался без своего решения", own.absent)
+	}
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external дорога обязана быть и прийти ветви.
+	ext := fork(roadCfg(config.IdentityProviderExternal, "9097"))
+	if ext.absent != 0 {
+		t.Errorf("под external исполнена ветвь без дороги (%d раз) — потребители ушли бы "+
+			"на собственную полосу там, где исполняет чужой поставщик", ext.absent)
+	}
+	if ext.built != 1 || ext.road == nil || ext.road.BaseURL == "" {
+		t.Fatalf("под external дорога НЕ пришла ветви построенной посадки (исполнена %d раз, "+
+			"клиент %v) — отрицание выше зеленело бы на развилке, которая не строит никогда",
+			ext.built, ext.road)
 	}
 }
 
@@ -83,33 +106,11 @@ func TestObserveLaneWiring_ReportsTheRoadItActuallyBuilt(t *testing.T) {
 	if own.ProviderAdminHopBuilt {
 		t.Error("под own наблюдатель докладывает построенную дорогу, которой корень не строит")
 	}
-	if own.ProviderKeySetMirrorPublished {
-		t.Error("под own наблюдатель докладывает опубликованное зеркало чужих ключей, " +
-			"которого публикатор не несёт")
-	}
 
-	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external оба факта истинны.
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external факт истинен.
 	ext := observeLaneWiring(ctx, roadCfg(config.IdentityProviderExternal, "9097"), nil, nil, nil, lg)
 	if !ext.ProviderAdminHopBuilt {
 		t.Error("под external дорога не доложена — отрицание выше зеленело бы на " +
 			"наблюдателе, отвечающем false всегда")
-	}
-	if !ext.ProviderKeySetMirrorPublished {
-		t.Error("под external зеркало не доложено — то же самое")
-	}
-}
-
-// СЛУШАТЕЛЬ ПУБЛИКАТОРА ВЫКЛЮЧЕН ⇒ ЗЕРКАЛА НЕТ, И ЭТО ТРЕТЬЯ ОСЬ.
-//
-// Литерал `true` лгал и здесь, а не только под own: при незаданном слушателе
-// публикатора запись зеркала не добавляется НИ НА КАКОЙ посадке — блок публикации
-// не исполняется вовсе. То есть наблюдатель докладывал опубликованным то, чего
-// не существует, на стенде, который публикатора не поднимал.
-func TestObserveLaneWiring_NoPublisherListenerMeansNoMirror(t *testing.T) {
-	w := observeLaneWiring(context.Background(),
-		roadCfg(config.IdentityProviderExternal, ""), nil, nil, nil, quietLogger())
-	if w.ProviderKeySetMirrorPublished {
-		t.Error("слушателя публикатора нет, а зеркало доложено опубликованным: " +
-			"наблюдатель отчитывается о намерении вместо исхода")
 	}
 }

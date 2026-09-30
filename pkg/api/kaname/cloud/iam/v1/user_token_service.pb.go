@@ -67,8 +67,9 @@ type IssueUserTokenRequest struct {
 	// доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
 	// АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
 	//
-	// LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
-	// глагол.
+	// Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
+	// потока — отвергается синхронно с именем поля, а не выпускается ключевой
+	// парой.
 	CredentialKind CredentialKind `protobuf:"varint,7,opt,name=credential_kind,json=credentialKind,proto3,enum=kaname.cloud.iam.v1.CredentialKind" json:"credential_kind,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

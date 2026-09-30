@@ -30,16 +30,12 @@ func newAssertionClaimsComposer(pool *pgxpool.Pool, cfg config.Config) *service.
 	userClients := kanamepg.NewUserOAuthClientRepo(pool)
 
 	return service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{
-			Domain:      cfg.AuthN.ResolveDomain(),
-			HydraIssuer: cfg.AuthN.ResolveHydraIssuer(),
-		},
+		service.TokenEnrichmentConfig{Domain: cfg.AuthN.ResolveDomain()},
 		users,
 	).
 		WithSAPort(&tokenEnrichSAAdapter{saClients: saClients}).
-		WithUserTokenPort(&tokenEnrichUserTokenAdapter{userClients: userClients, users: users}).
-		// Резолв по НАШЕМУ идентификатору. Зеркальное значение на пути
-		// разрешения клиента не участвует вовсе — оно остаётся значением
-		// утверждения и истекает вместе с внешним сервером.
+		WithUserTokenPort(&tokenEnrichUserTokenAdapter{users: users}).
+		// Резолв по НАШЕМУ идентификатору строки — единственному имени клиента
+		// (kaname#362).
 		WithOwnClientPort(&ownClientAdapter{userClients: userClients, saClients: saClients})
 }

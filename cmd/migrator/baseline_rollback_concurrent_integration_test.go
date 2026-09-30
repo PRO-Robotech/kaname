@@ -101,9 +101,9 @@ func insertSecretInFlight(t *testing.T, db *sql.DB) *sql.Tx {
 	tx, err := db.Begin()
 	require.NoError(t, err)
 	_, err = tx.Exec(`INSERT INTO kaname.service_account_oauth_clients
-	    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
+	    (id, sva_id, created_by_user_id, credential_kind, secret_hash,
 	     public_key_pem, key_algorithm, trusted_subjects, expires_at)
-	  VALUES ('soc_00000000000000mgr', 'sva00000000000000mgr', NULL, 'usr00000000000000mgr',
+	  VALUES ('soc_00000000000000mgr', 'sva00000000000000mgr', 'usr00000000000000mgr',
 	          'SECRET', $1, '', '', '[]'::jsonb, now() + interval '30 days')`, hash)
 	require.NoError(t, err, "Given неисполним, если законная строка вида SECRET не пишется")
 	return tx

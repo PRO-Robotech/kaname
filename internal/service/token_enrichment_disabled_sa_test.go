@@ -56,7 +56,6 @@ func saPortWithState(enabled bool) stubSAPort {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             domain.SAOAuthClientID(disabledSocID),
 			SvaID:          domain.ServiceAccountID(disabledSAID),
-			OAuthClientID:  domain.OAuthClientID(disabledSAClientID),
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(disabledSAID),
@@ -70,7 +69,7 @@ func saPortWithState(enabled bool) stubSAPort {
 // the jwt-bearer branch is the one exercised (the direct lookup misses).
 type fedSAPortWithState struct{ inner stubSAPort }
 
-func (p fedSAPortWithState) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (p fedSAPortWithState) LookupByClientID(_ context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return domain.ServiceAccountOAuthClient{}, iamerr.ErrNotFound
 }
 
@@ -84,7 +83,7 @@ func (p fedSAPortWithState) FindByExternalSubject(_ context.Context, _, _ string
 
 func newSAEnricher(port TokenEnrichmentSAPort) *TokenEnrichmentService {
 	return NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{},
 	).WithSAPort(port)
 }

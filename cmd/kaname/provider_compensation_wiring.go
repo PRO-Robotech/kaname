@@ -58,13 +58,9 @@ func buildProviderCompensationDrainer(
 	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver,
 	roadObs clients.ProviderRoadObserver, logger *slog.Logger,
 ) (func(context.Context) error, error) {
-	// Дорога СНЯТИЯ у поставщика — та самая, где ответ «не найдено» читался как
-	// успех и помечал строку доставленной. Счётчик здесь и есть то, что делает
-	// её неразличимость видимой (kacho#2492).
-	releaser, roadBuilt := mustProviderAdminClient(cfg, roadObs)
-
 	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДРЕНАЖА НЕ ПОЛУЧАЕТ, И ЭТО НЕ ОТКЛЮЧЕНИЕ
-	// РАБОТАЮЩЕГО (задача kaname#313).
+	// РАБОТАЮЩЕГО (задача kaname#313). Решение принимает ЭТОТ потребитель, своей
+	// ветвью развилки, а не тот, кто его собирает (задача kaname#338).
 	//
 	// Очередь эта держит ОДНО намерение — «снять клиента У ПОСТАВЩИКА», — и под
 	// `own` у неё нет ни одного производителя. Измерено по обоим саго, а не
@@ -73,13 +69,12 @@ func buildProviderCompensationDrainer(
 	//   · интерактивный клиент. Приёмник намерений провязывается только там, где
 	//     есть что компенсировать: под `own` заведение ничего у поставщика не
 	//     создаёт (`wiring.go`);
-	//   · ключ служебной учётки. Намерение адресуется КООРДИНАТОЙ У ПОСТАВЩИКА, а
-	//     на переведённом контуре она пуста, и производитель намерения выходит
-	//     первым же оператором. На непереведённом контуре под `own` регистрация
-	//     не удаётся вовсе — создавать оказывается нечего, и снимать тоже.
+	//   · ключ служебной учётки. Производителя намерения у выдачи ключа нет ни
+	//     на одной посадке: регистрации у поставщика она не заводит
+	//     (kaname#362), и компенсировать ей нечего.
 	//
-	// Собери мы дренаж с отставленной дорогой, он бил бы в неё на каждой строке
-	// и добивал бы её до порога отравления — то есть превращал бы «звонить
+	// Собери мы дренаж без дороги, он бил бы в её отсутствие на каждой строке и
+	// добивал бы строку до порога отравления — то есть превращал бы «звонить
 	// некуда» в «строка отравлена», две разные вещи в одну.
 	//
 	// ЧТО ОСТАЁТСЯ НЕСДРЕНИРОВАННЫМ, названо: строки, записанные посадкой
@@ -87,28 +82,32 @@ func buildProviderCompensationDrainer(
 	// не существует, — и невидимыми они не становятся: перепись очереди
 	// (`runProviderCompensationMetrics`) поднимается отдельной задачей и
 	// продолжает показывать глубину, возраст и отравленные.
-	if !roadBuilt {
-		return nil, nil
-	}
-
-	drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
-	d, err := drainer.New[clients.ProviderCompensationEvent](
-		pool,
-		providerCompensationDrainerConfig(clients.ProviderAdminHopTimeout),
-		clients.DecodeProviderCompensation,
-		clients.NewProviderCompensationApplier(releaser, obs),
-		drainerLogger,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("init provider compensation drainer: %w", err)
-	}
-
-	return func(ctx context.Context) error {
-		logger.Info("kaname provider compensation drainer starting",
-			"table", clients.ProviderCompensationTable,
-			"channel", clients.ProviderCompensationChannel)
-		return d.Run(ctx)
-	}, nil
+	return onProviderAdminRoad(cfg, roadObs,
+		// Дорога СНЯТИЯ у поставщика — та самая, где ответ «не найдено» читался
+		// как успех и помечал строку доставленной. Счётчик дороги и есть то, что
+		// делает её неразличимость видимой (kacho#2492).
+		func(releaser *providerAdminRoad) (func(context.Context) error, error) {
+			drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
+			d, err := drainer.New[clients.ProviderCompensationEvent](
+				pool,
+				providerCompensationDrainerConfig(clients.ProviderAdminHopTimeout),
+				clients.DecodeProviderCompensation,
+				clients.NewProviderCompensationApplier(releaser, obs),
+				drainerLogger,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("init provider compensation drainer: %w", err)
+			}
+			return func(ctx context.Context) error {
+				logger.Info("kaname provider compensation drainer starting",
+					"table", clients.ProviderCompensationTable,
+					"channel", clients.ProviderCompensationChannel)
+				return d.Run(ctx)
+			}, nil
+		},
+		func() (func(context.Context) error, error) {
+			return nil, nil
+		})
 }
 
 // providerCompensationDrainerConfig собирает проводку дренажа из объявленных

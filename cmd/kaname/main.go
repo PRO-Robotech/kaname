@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package main — binary `kaname`.
-// Подкоманд две: `serve` (gRPC API + internal endpoint; она же — умолчание) и
+// Подкоманд три: `serve` (gRPC API + internal endpoint; она же — умолчание),
 // `signing-key` — жизненный цикл ключа подписи, достижимый оператором
-// (signing_key_command.go, #314). Миграции — отдельный binary `cmd/migrator`.
+// (signing_key_command.go, #314), и `second-factor-key` — переобёртка секретов
+// второго фактора под первый ключ перечня (second_factor_key_command.go,
+// #259). Миграции — отдельный binary `cmd/migrator`.
 //
 // Thin entry-point. Responsibilities кратко: загрузить config, выбрать
-// subcommand, передать управление в runServe (см. serve.go) либо в
-// runSigningKeyCommand. Все реальное wiring живет в:
+// subcommand, передать управление в runServe (см. serve.go), в
+// runSigningKeyCommand либо в runSecondFactorKeyCommand. Все реальное wiring живет в:
 //   - serve.go — lifecycle (pools, listeners, parallel.ExecAbstract, shutdown)
 //   - wiring.go — composition (services struct + builders)
 //   - grpc_register.go — public/internal RPC registration
@@ -75,11 +77,18 @@ func main() {
 			code := runSigningKeyCommand(ctx, cfg, os.Args[2:], os.Stdout, bootLog)
 			stop()
 			os.Exit(code)
+		case secondFactorKeyCommandName:
+			// Та же загрузка и тот же страж настройки, что у службы: секреты
+			// переобёртывает процесс, настроенный как она, тем же перечнем.
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+			code := runSecondFactorKeyCommand(ctx, cfg, os.Args[2:], os.Stdout, bootLog)
+			stop()
+			os.Exit(code)
 		case "migrate":
 			bootLog.Error("`kaname migrate ...` is not supported — use the separate binary `kaname-migrator {up|down|status}`")
 			os.Exit(1)
 		default:
-			bootLog.Error("unknown command (commands: `serve`, `signing-key`; migrations live in `kaname-migrator`)",
+			bootLog.Error("unknown command (commands: `serve`, `signing-key`, `second-factor-key`; migrations live in `kaname-migrator`)",
 				slog.String("command", os.Args[1]))
 			os.Exit(1)
 		}

@@ -52,7 +52,7 @@ type expiryFedSAPort struct {
 	sa  domain.ServiceAccount
 }
 
-func (p expiryFedSAPort) LookupByOAuthClientID(_ context.Context, _ domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
+func (p expiryFedSAPort) LookupByClientID(_ context.Context, _ domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	return domain.ServiceAccountOAuthClient{}, iamerr.ErrNotFound
 }
 
@@ -75,7 +75,6 @@ func newExpirySAEnricher(t *testing.T, expiresAt *time.Time, now time.Time) *Tok
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             domain.SAOAuthClientID(expirySocID),
 			SvaID:          domain.ServiceAccountID(expirySvaID),
-			OAuthClientID:  domain.OAuthClientID(expiryClientID),
 			ExpiresAt:      expiresAt,
 		},
 		sa: domain.ServiceAccount{
@@ -86,7 +85,7 @@ func newExpirySAEnricher(t *testing.T, expiresAt *time.Time, now time.Time) *Tok
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{t: t},
 	).WithSAPort(sa)
 	svc.now = func() time.Time { return now }
@@ -183,7 +182,6 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             domain.SAOAuthClientID(expirySocID),
 			SvaID:          domain.ServiceAccountID(expirySvaID),
-			OAuthClientID:  domain.OAuthClientID(expiryClientID),
 			ExpiresAt:      &expired,
 		},
 		sa: domain.ServiceAccount{
@@ -194,7 +192,7 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 		},
 	}
 	svc := NewTokenEnrichmentService(
-		TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: "https://hydra.kacho.cloud"},
+		TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 		stubUserPort{t: t},
 	).WithSAPort(port)
 	svc.now = func() time.Time { return now }
@@ -208,54 +206,6 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 	require.Error(t, err, "an expired federated SA key must not mint a token")
 	assert.True(t, stderrors.Is(err, ErrCredentialExpired), "got %v", err)
 	assert.Nil(t, claims)
-}
-
-// TestEnrichClaims_UserToken_Expired_Denied — the personal-access-token twin
-// carries the same column and reaches the same hook; leaving it ungated would
-// keep an expired user token minting while the SA key next to it is refused.
-func TestEnrichClaims_UserToken_Expired_Denied(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0).UTC()
-	expired := now.Add(-time.Minute)
-	ut := stubUserTokenPort{
-		uoc: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
-			// словарь таблицы отвергает строку, вида не назвавшую.
-			CredentialKind: domain.CredentialKindKeypair,
-			ID:             domain.UserOAuthClientID("uoc-123"),
-			UserID:         domain.UserID("usr-abc"),
-			ExpiresAt:      &expired,
-		},
-		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
-			// A personal token is its owner's authority: the owner's state is
-			// load-bearing, so the fixture states it rather than leaving it unset.
-			InviteStatus: domain.InviteStatusActive},
-	}
-	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
-
-	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
-
-	require.Error(t, err, "an expired user token must not mint a token")
-	assert.True(t, stderrors.Is(err, ErrCredentialExpired), "got %v", err)
-	assert.Nil(t, claims)
-}
-
-// TestEnrichClaims_UserToken_NoExpiry_Mints — user tokens are issued without a
-// default TTL, so NULL is the common shape; it stays non-expiring.
-func TestEnrichClaims_UserToken_NoExpiry_Mints(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0).UTC()
-	ut := stubUserTokenPort{
-		uoc: domain.UserOAuthClient{ID: domain.UserOAuthClientID("uoc-123"), UserID: domain.UserID("usr-abc")},
-		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
-			// A personal token is its owner's authority: the owner's state is
-			// load-bearing, so the fixture states it rather than leaving it unset.
-			InviteStatus: domain.InviteStatusActive},
-	}
-	svc := newUserTokenEnricher(stubUserPort{t: t}, ut, now)
-
-	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
-
-	require.NoError(t, err)
-	assert.Equal(t, "user", claims["kaname_principal_type"])
 }
 
 // TestEnrichClaims_ExpiredSAKey_DoesNotFallThroughToUserPath — the denial must

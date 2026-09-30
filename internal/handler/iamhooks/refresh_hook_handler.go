@@ -47,7 +47,6 @@ import (
 type RefreshHookConfig struct {
 	HookSharedSecret string
 	Domain           string
-	HydraIssuer      string
 }
 
 // UserClaimsAssembler — the service-layer producer of the claim set for a User

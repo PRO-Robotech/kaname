@@ -80,8 +80,7 @@ func newTokenHookHandler(t *testing.T, users *fakeUserLookup, audit *fakeAudit) 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
 		service.TokenEnrichmentConfig{
-			Domain:      "api.test.cloud",
-			HydraIssuer: "https://hydra.test.cloud",
+			Domain: "api.test.cloud",
 		},
 		users,
 	)
@@ -89,7 +88,6 @@ func newTokenHookHandler(t *testing.T, users *fakeUserLookup, audit *fakeAudit) 
 		iamhooks.TokenHookConfig{
 			HookSharedSecret: "secret-hook-token",
 			Domain:           "api.test.cloud",
-			HydraIssuer:      "https://hydra.test.cloud",
 		},
 		enricher,
 		newFakeRevocations(),
@@ -149,7 +147,9 @@ func TestTokenHook_HappyPath_EnrichesClaims(t *testing.T) {
 	assert.Equal(t, "unknown", claims["kaname_device_compliance"]) // область webauthn не выводит «attested» (Ф7-39)
 	assert.Equal(t, "abc-thumbprint", claims["kaname_jkt"])
 	assert.Equal(t, "api.test.cloud", claims["kaname_audience"])
-	assert.Equal(t, "https://hydra.test.cloud", claims["kaname_issuer"])
+	// Утверждения издателя нет: читателей у него не было, а значением был адрес
+	// прежнего поставщика (kaname#364).
+	assert.NotContains(t, claims, "kaname_issuer")
 
 	// Audit emitted.
 	require.Len(t, audit.Events(), 1)
@@ -234,7 +234,6 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "cc-client-uuid",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",
@@ -330,11 +329,11 @@ func TestTokenHook_BodyDecodeError(t *testing.T) {
 func TestTokenHook_EmptyHookSecret_FailsClosed(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	enricher := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "x", HydraIssuer: "y"},
+		service.TokenEnrichmentConfig{Domain: "x"},
 		&fakeUserLookup{},
 	)
 	h := iamhooks.NewTokenHookHandler(
-		iamhooks.TokenHookConfig{HookSharedSecret: "", Domain: "x", HydraIssuer: "y"},
+		iamhooks.TokenHookConfig{HookSharedSecret: "", Domain: "x"},
 		enricher,
 		newFakeRevocations(),
 		&fakeAudit{},

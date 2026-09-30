@@ -104,7 +104,7 @@ func TestMintBootstrapToken_FirstCall_ProvisionsAndMints(t *testing.T) {
 	// Runtime mapping now exists (enrichment resolves our client id → bootstrap SA).
 	require.Equal(t, 1, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID))
 	require.Equal(t, 1, countRows(t, dsn,
-		`SELECT count(*) FROM service_account_oauth_clients WHERE hydra_client_id=$1 AND key_algorithm='ES256'`, id.ClientID))
+		`SELECT count(*) FROM service_account_oauth_clients WHERE id=$1 AND key_algorithm='ES256'`, id.SocID))
 }
 
 // ── IBT-02: idempotent reuse ────────────────────────────────────────────────────

@@ -83,12 +83,12 @@ func (f *reclaimFixture) putUserCred(t *testing.T, id string, lifetime, expiredF
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(), `
 INSERT INTO kaname.user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind,
+    (id, user_id, created_by_user_id, credential_kind,
      secret_hash, public_key_pem, key_algorithm, created_at, expires_at)
-VALUES ($1, 'usr00000000000000rcl', $2, 'usr00000000000000rcl', 'KEYPAIR',
+VALUES ($1, 'usr00000000000000rcl', 'usr00000000000000rcl', 'KEYPAIR',
         ''::bytea, '-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----', 'ES256',
-        now() - $3::interval - $4::interval, now() - $3::interval)`,
-		id, "mirror-"+id, expiredFor, lifetime)
+        now() - $2::interval - $3::interval, now() - $2::interval)`,
+		id, expiredFor, lifetime)
 	require.NoError(t, err, "посев удостоверения человека %s", id)
 }
 
@@ -97,11 +97,11 @@ func (f *reclaimFixture) putUserCredForever(t *testing.T, id string) {
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(), `
 INSERT INTO kaname.user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind,
+    (id, user_id, created_by_user_id, credential_kind,
      secret_hash, public_key_pem, key_algorithm, expires_at)
-VALUES ($1, 'usr00000000000000rcl', $2, 'usr00000000000000rcl', 'KEYPAIR',
+VALUES ($1, 'usr00000000000000rcl', 'usr00000000000000rcl', 'KEYPAIR',
         ''::bytea, '-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----', 'ES256', NULL)`,
-		id, "mirror-"+id)
+		id)
 	require.NoError(t, err, "посев бессрочного удостоверения %s", id)
 }
 
@@ -109,12 +109,12 @@ func (f *reclaimFixture) putSACred(t *testing.T, id string, lifetime, expiredFor
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(), `
 INSERT INTO kaname.service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind,
+    (id, sva_id, created_by_user_id, credential_kind,
      secret_hash, public_key_pem, key_algorithm, trusted_subjects, created_at, expires_at)
-VALUES ($1, 'sva00000000000000rcl', $2, 'usr00000000000000rcl', 'KEYPAIR',
+VALUES ($1, 'sva00000000000000rcl', 'usr00000000000000rcl', 'KEYPAIR',
         ''::bytea, '-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----', 'ES256', '[]'::jsonb,
-        now() - $3::interval - $4::interval, now() - $3::interval)`,
-		id, "mirror-"+id, expiredFor, lifetime)
+        now() - $2::interval - $3::interval, now() - $2::interval)`,
+		id, expiredFor, lifetime)
 	require.NoError(t, err, "посев удостоверения машины %s", id)
 }
 
