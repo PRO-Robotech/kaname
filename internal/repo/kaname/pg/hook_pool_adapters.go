@@ -32,7 +32,11 @@ const (
 	sessionAuditEventRevoked = "iam.session.revoked"
 	// SessionAuditEventAllRevoked — Revoke(revoke_all_user_tokens=true).
 	SessionAuditEventAllRevoked = "iam.session.all_revoked"
-	// SessionAuditEventForceLogout — InternalIAMService.ForceLogout.
+	// SessionAuditEventForceLogout — InternalIAMService.ForceLogout. Дверями
+	// этого файла НЕ пишется: запись принудительного выхода несёт исход снятия
+	// записей сессии, и кладёт её транзакция снятия (`humanSessionWriter`,
+	// kaname#340). Значение здесь — вид в таксономии очереди аудита, по
+	// которому её читают.
 	SessionAuditEventForceLogout = "iam.session.force_logout"
 )
 
@@ -94,9 +98,8 @@ func (s *SessionRevocationsAdapter) RevokeTx(ctx context.Context, rev domain.Ses
 	return tx.Commit(ctx)
 }
 
-// RevokeAllUserTokens — записать per-user revoke-all cutoff (monotonic upsert).
-// Это шлюз, который refresh-hook реально энфорсит против session auth_time;
-// используется admin ForceLogout и Revoke(revoke_all_user_tokens=true).
+// RevokeAllUserTokens — записать per-user revoke-all cutoff (monotonic upsert)
+// на пуле, без записи события.
 func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error {
 	return s.userRepo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
 		UserID:       userID,
@@ -107,19 +110,24 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, use
 }
 
 // RevokeAllUserTokensTx — atomic per-user revoke-all cutoff + durable
-// audit_outbox emit in ONE tx (запрет #10). Shared by the
-// Revoke(revoke_all_user_tokens=true) path (eventType iam.session.all_revoked)
-// and admin ForceLogout (eventType iam.session.force_logout) on the postures
-// that hold none of our login-session records. Под `own` принудительный выход
-// кладёт отсечку НЕ здесь, а транзакцией снятия наших записей — запись события
-// обязана лечь после снятия и нести его исход (kaname#340). The cutoff upsert
-// is identical to RevokeAllUserTokens (monotonic GREATEST); only the tx
-// ownership + audit row differ. eventType MUST be one of the session taxonomy
-// values that satisfy the audit_outbox_event_type CHECK.
+// iam.session.all_revoked audit_outbox row in ONE tx (запрет #10), for the
+// Revoke(revoke_all_user_tokens=true) path. The cutoff upsert is identical to
+// RevokeAllUserTokens (monotonic GREATEST); only the tx ownership + audit row
+// differ.
+//
+// ВИД ЗАПИСИ — СВОЙ, А НЕ ИЗ РУК ВЫЗЫВАЮЩЕГО (kaname#380). Прежде вид приходил
+// параметром: дверь делили отзыв всех токенов и принудительный выход на
+// посадке `external`, и запись принудительного выхода ложилась здесь четырьмя
+// величинами — без исхода снятия. Посадка снята (kaname#363), вызов вместе с
+// ней. Запись принудительного выхода обязана нести исход снятия записей
+// сессии, которого эта дверь не видит, и кладёт её транзакция снятия
+// (`humanSessionWriter`, kaname#340). Вид параметром держал бы такую запись в
+// одном аргументе от любого вызова двери; без параметра она здесь
+// непредставима — как у двери отзыва одного носителя (`RevokeTx`). Держит
+// `revoke_all_door_record_kind_test.go`.
 func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 	ctx context.Context,
 	userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID,
-	eventType string,
 ) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -147,7 +155,7 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 		"subject_id":   string(userID),
 		"reason":       reason,
 	}
-	if err := s.emitAuditTx(ctx, tx, eventType, payload); err != nil {
+	if err := s.emitAuditTx(ctx, tx, SessionAuditEventAllRevoked, payload); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -158,8 +166,8 @@ func (s *SessionRevocationsAdapter) IsRevoked(ctx context.Context, jti string) (
 	return s.repo.IsRevoked(ctx, jti)
 }
 
-// UserRevokedBefore делегирует — per-user revoke-all cutoff lookup для
-// refresh-hook user-level gate.
+// UserRevokedBefore делегирует — отсечка человека для правила выдачи нашего
+// токен-эндпоинта (`clienttokenwire`).
 func (s *SessionRevocationsAdapter) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
 	return s.userRepo.RevokedBefore(ctx, userID)
 }

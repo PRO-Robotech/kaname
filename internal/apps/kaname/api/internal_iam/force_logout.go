@@ -127,7 +127,7 @@ type OwnSessions interface {
 	ForceLogoutWriter(ctx context.Context, subject domain.UserID, lockWait time.Duration) (OwnSessionsWriter, error)
 }
 
-// OwnSessionsWriter — ОДНА транзакция принудительного выхода на посадке `own`:
+// OwnSessionsWriter — ОДНА транзакция принудительного выхода:
 // снятие наших записей, отсечка, запись события. Вызывающий обязан Commit либо
 // Rollback.
 type OwnSessionsWriter interface {
@@ -349,7 +349,7 @@ func (h *Handler) failForceLogout(ctx context.Context, opID string, gerr error) 
 	return gerr
 }
 
-// Сроки принудительного выхода на посадке `own` (kaname#340). Их два, и
+// Сроки принудительного выхода (kaname#340). Их два, и
 // отношение между ними несущее.
 const (
 	// forceLogoutLockWait — предел ОДНОГО ожидания замка в транзакции выхода
@@ -386,7 +386,7 @@ func forceLogoutRecordContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), forceLogoutRecordBudget)
 }
 
-// Шаг транзакции принудительного выхода на посадке `own`, на котором она
+// Шаг транзакции принудительного выхода, на котором она
 // отказала (kaname#340). Словарь ЗАКРЫТ: шагов ровно пять, и у каждого СВОЙ
 // контекст исполнения — от него и судится, кончился ли срок к моменту отказа.
 type ownForceLogoutStep int
@@ -504,13 +504,17 @@ const (
 	forceLogoutTeardownFailed = "failed"
 )
 
-// forceLogoutAuditEvent — запись события принудительного выхода на посадке `own`.
+// forceLogoutAuditEvent — запись события принудительного выхода.
 //
-// Состав — те же четыре величины, что кладёт транзакция отсечки на прочих
-// посадках (актор · вид субъекта · субъект · причина), и сверх них ИСХОД
+// Состав — четыре величины записи отсечки (актор · вид субъекта · субъект ·
+// причина), те же, что кладёт дверь отзыва всех токенов, и сверх них ИСХОД
 // снятия. Число снятых кладётся ТОЛЬКО при исходе «снято»: его отсутствие и есть
 // утверждение «не дошло», а ноль остаётся отличимым от него значением. Материала
 // удостоверений здесь нет — ни носителей, ни их свёрток.
+//
+// Прежде запись этого вида клала и та дверь — на посадке `external`, четырьмя
+// величинами, без исхода. Посадка снята (kaname#363), и вида записи дверь
+// больше не берёт (kaname#380): без исхода эта запись через неё непредставима.
 func forceLogoutAuditEvent(marker domain.UserTokenRevocation, revokedBy domain.UserID,
 	teardown string, ended int,
 ) outboxtypes.AuditEvent {
@@ -596,7 +600,7 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 	return ended, nil
 }
 
-// forceLogoutOwnSessions — принудительный выход на посадке `own`: снятие наших
+// forceLogoutOwnSessions — принудительный выход: снятие наших
 // записей сессии входа, отсечка и запись события с ИСХОДОМ снятия (kaname#340).
 // nil — выход состоялся; иначе — ошибка для ответа, уже отмеченная на операции.
 //
@@ -651,7 +655,7 @@ func (h *Handler) commitOwnForceLogout(ctx context.Context, marker domain.UserTo
 //
 // Отказ открытия, отсечки или записи события КОДОМ ХРАНИЛИЩА при живом сроке
 // запроса — не частичный исход: откатывается всё, не ложится ничего, и ответ —
-// перевод отказа хранилища, как на прочих посадках; вторая транзакция упёрлась
+// общий перевод отказа хранилища; вторая транзакция упёрлась
 // бы в тот же отказ. Так и с замком строки личности при открытии: не выдан он
 // потому, что строку держит удаление личности, а отсечка без того же замка не
 // ложится (её внешний ключ берёт его сам), и вторая транзакция упёрлась бы в

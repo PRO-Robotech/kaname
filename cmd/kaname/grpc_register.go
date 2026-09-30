@@ -215,10 +215,11 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	// оборвало бы каждую их мутацию, потому что недоступность авторитета на пути
 	// запроса fail-closed.
 	// InternalSessionRevocationsService — token revocation
-	// (logout / force-logout write + IsRevoked hot-path + admin ListByUser).
-	// Internal-only (запрет #6); the api-gateway logout handler + refresh-hook
-	// drive it. Registering it here closes the P0 gap where Revoke returned
-	// codes.Unimplemented and token revocation was inert.
+	// (logout write + IsRevoked hot-path + admin ListByUser).
+	// Internal-only (запрет #6); the api-gateway logout handler and the edge's
+	// per-request IsRevoked reader drive it. Registering it here closes the P0
+	// gap where Revoke returned codes.Unimplemented and token revocation was
+	// inert.
 	if svcs != nil && svcs.sessionRevocationsHandler != nil {
 		iamv1.RegisterInternalSessionRevocationsServiceServer(srv, svcs.sessionRevocationsHandler)
 	}
