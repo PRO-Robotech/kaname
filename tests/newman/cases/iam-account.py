@@ -23,7 +23,8 @@ CRUD fixture dependency:
   и это правильное поведение продукта, а не дефект (см. account/create.go).
   Все предъявители матричного посева машинные, значит ими аккаунт не создать.
   Условие «предъявитель принадлежит человеку» создаёт ВОЛНА ЦЕРЕМОНИИ
-  (`scripts/run-ceremony.sh` + `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`):
+  (посев `tests/authz-fixtures/seed_ceremony.py --wave` на автономном стенде,
+  задание `stand-ceremony`; локально — `scripts/run-ceremony.sh`):
     jwtHumanCeremony  — предъявитель ЧЕЛОВЕКА, добытый настоящим входом паролем
     ceremonyUserId    — идентификатор этого человека в iam (ожидаемый владелец)
 
@@ -177,7 +178,9 @@ def list_accounts_walk(name, auth, assertions, cap=25):
             f"  pm.environment.set('{acc}', '[]');",
             f"  pm.environment.set('{started}', pm.info.requestName);",
             "}",
-            "const _b = pm.environment.get('baseUrl') || pm.variables.get('baseUrl') || '';",
+            # Адрес — собственного фронта (kaname#398): модуль переадресован
+            # целиком (`address_own_front` в конце), и обход не возвращает шаг на край.
+            "const _b = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
             f"const _t = pm.environment.get('{tok}') || '';",
             "pm.request.url = _b + '/iam/v1/accounts?pageSize=1000'"
             "  + (_t ? '&pageToken=' + encodeURIComponent(_t) : '');",
@@ -1569,3 +1572,11 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

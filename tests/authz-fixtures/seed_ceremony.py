@@ -12,11 +12,22 @@
 входа. Пока файла не было, прогонщик набора печатал «УСЛОВИЕ НЕ СОЗДАНО: …
 посева церемонии нет» на каждом запуске.
 
-ГДЕ ОН ИСПОЛНЯЕТСЯ. На стенде чарта посадки `own`
-(`KANAME_STAND_IDENTITY_PROVIDER=own .github/scripts/stand-chart.sh`): зовёт его
-подкоманда `seed-ceremony` того же скрипта ПОСЛЕ `seed-login-lane`. Подкоманда
-выносит из Secret стенда листы, человека и поднимает переадресации поверхностей;
-адреса, по которым посев доказал способность, уезжают в окружение.
+ГДЕ ОН ИСПОЛНЯЕТСЯ — ДВА РЕЖИМА.
+
+  * Стенд чарта посадки `own` (`KANAME_STAND_IDENTITY_PROVIDER=own
+    .github/scripts/stand-chart.sh`, задание `chart-own`): зовёт его подкоманда
+    `seed-ceremony` того же скрипта ПОСЛЕ `seed-login-lane`. Подкоманда выносит из
+    Secret стенда листы, человека и поднимает переадресации поверхностей; адреса,
+    по которым посев доказал способность, уезжают в окружение.
+  * ВОЛНА (`--wave`) на автономном стенде (`.github/scripts/stand-own.sh`, задание
+    `stand-ceremony`, после машинного посева): людей посев заводит сам —
+    регистрацией полосой, подтверждением адреса кодом письма из приёмника писем
+    стенда и входом, — куёт каждому предъявителя уровня «1» той же церемонией, а
+    повышенный уровень — вторым фактором (заведение, подтверждение кодом по
+    времени, Ф12): подтверждение перевыпускает сессию уровнем «2», и церемония
+    под ней выдаёт токен уровня «2». Уровень и субъект каждого токена
+    утверждаются по его составу. Собственные фронты этого стенда держат взаимный
+    TLS, поэтому посев предъявляет им лист службы.
 
 ВСЁ ДЕЛАЕТСЯ ГЛАГОЛАМИ ПРОДУКТА — СЕМЬ ШАГОВ, И КАЖДЫЙ УТВЕРЖДАЕТ СВОЙ ИСХОД:
 
@@ -43,28 +54,37 @@
      выданным токеном: субъект — ТОТ человек, что вошёл. Иначе «токен выдан» не
      значило бы «предъявитель человека есть».
 
-ЧТО ПИШЕТСЯ — объявлено ниже и выдаётся флагом `--minted-keys`: адреса двух
-поверхностей, по которым шаги доказаны; два конфиденциальных клиента с адресами
-возврата (их читает набор `kaname-authorization-code`); предъявитель человека
-уровня 1 и его идентификатор и почта (ключи волны церемонии). Чего НЕ пишется и
-почему: предъявителей повышенного уровня (`*StepUp`) — второй фактор посевом не
-проходится; второго человека без выдач — у стенда один человек полосы.
+ЧТО ПИШЕТСЯ — объявлено ниже и выдаётся флагом `--minted-keys` (всё, что посев
+умеет писать): адреса двух поверхностей, по которым шаги доказаны; два
+конфиденциальных клиента с адресами возврата (их читает набор
+`kaname-authorization-code`); предъявитель человека уровня «1», его идентификатор
+и почта. Режим стенда чарта на этом останавливается: человек стенда там один, и
+второй фактор ему заводит и снимает набор `kaname-second-factor`. Волна пишет
+сверх того `MINTED_WAVE`: тот же человек уровня «2» и его личный аккаунт, второй
+человек без выдач, приглашаемый человек и слоты заведения аккаунта. Чего не
+пишет ни один режим: слот повышенного уровня машинного распорядителя
+(`jwtAccountAdminAStepUp`) — его пишет машинный посев.
 
 ИСХОДЫ — ТРИ, И ОНИ РАЗЛИЧАЮТСЯ КОДОМ:
 
-    0  — предъявитель человека выкован и принят фронтом, окружение записано;
+    0  — предъявители людей выкованы и приняты фронтом, окружение записано;
     1  — НАХОДКА: продукт ответил не по контракту там, где посев предъявил всё,
          чего контракт требует. Вердикт о дереве;
    75  — УСЛОВИЕ НЕ СОЗДАНО: поверхность недостижима, листа нет, нет `grpcurl`,
-         стенд не передал человека. Вердикта о дереве нет НИ ОДНОГО.
+         стенд не передал человека либо (волна) не назван приёмник писем.
+         Вердикта о дереве нет НИ ОДНОГО.
 
 СЕКРЕТЫ НЕ ПЕЧАТАЮТСЯ НИКОГДА — ни пароль, ни секрет клиента, ни токен: журнал
 прогона публичного репозитория читает кто угодно. Пароль и почта приходят
-переменными окружения процесса, а не аргументами.
+переменными окружения процесса, а не аргументами; пароли людей волны случайны,
+у каждого свой, и из процесса посева не выходят.
 
 САМОПРОВЕРКА — `--self-test`: подставной стенд по каждой оси, где каждая
-инъекция меняет ОДИН факт против законного мира; сходимость объявленных ключей
-с записью в обе стороны; поверхность — та, что выводит перепись долга.
+инъекция меняет ОДИН факт против законного мира — в обоих режимах; код по
+времени — по вектору RFC 6238; сходимость объявленных ключей с записью в обе
+стороны; поверхность и природа ключей — те, что выводит перепись долга. Мир
+волны не снисходительнее стенда: письмо приходит позже ответа глагола, второе
+раньше интервала Р9 отвергается `429`, а ожидание идёт по часам мира.
 """
 
 from __future__ import annotations
@@ -72,6 +92,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -82,6 +103,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -95,6 +117,8 @@ ROOT = HERE.parents[1]
 # Запись окружения и исход «условие не создано» — ОДНИ на все посевы: копия
 # разошлась бы с первой молча.
 sys.path.insert(0, str(HERE))
+import seed_login_lane as lane_seed  # noqa: E402
+import seed_own_stand as own_seed  # noqa: E402
 from seed_own_stand import Unmet, write_env  # noqa: E402
 from seed_login_lane import LaneHttp, cookie_value, form_token, message_of  # noqa: E402
 
@@ -109,7 +133,55 @@ MINTED_CLIENTS = ("oauthClientId", "oauthClientSecret", "oauthRedirectUri",
 # Предъявитель человека и его идентичность — ключи ЦЕРЕМОНИИ
 # (`newman-suite-debt.py`, `is_ceremony_key`): их производит только вход человека.
 MINTED_CEREMONY = ("jwtHumanCeremony", "ceremonyUserId", "ceremonyEmail")
-MINTED_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY
+
+# ─── ВОЛНА ЦЕРЕМОНИИ (`--wave`): люди, которых ждут коллекции волны ─────────
+#
+# Объявление волны (`ceremony_credentials.py --stems`) выводит из дерева
+# коллекции, которым нужен человеческий предъявитель, и ключи, которых каждая
+# ждёт. Здесь — ПРОИЗВОДИТЕЛЬ этих ключей: каждый человек заводится глаголами
+# продукта (регистрация полосой, подтверждение адреса кодом письма, вход), его
+# предъявитель куётся своей церемонией службы, а повышенный уровень — вторым
+# фактором (заведение и подтверждение кодом по времени, Ф12): подтверждение
+# перевыпускает сессию уровнем «2», и церемония под ней выдаёт токен того же
+# уровня. Уровень токена УТВЕРЖДАЕТСЯ по его составу (`acr`), а не
+# предполагается: токен «повышенного» уровня, выданный уровнем «1», дал бы
+# кейс, проверивший не порог, а подстановку.
+#
+# СЛОТЫ ЗАВЕДЕНИЯ АККАУНТА: одна личность — один аккаунт волны. Заведение
+# списывается с темпа личности (`authn.registration.admissions-per-window`), а
+# регистрация уже занимает у человека одно место — личный аккаунт. Поэтому
+# кейс, заводящий аккаунт, приводит СВОЮ личность; складывать заведения разных
+# кейсов в одного человека значит воспроизводить сценарий, который продукт
+# отвергает. Имена слотов — те, что читают кейсы (`cases/iam-account.py`,
+# `cases/iam-account-redesign.py`, `cases/rbac-visibility-set.py`).
+ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop",
+                   "AccRdDerive", "AccRdSaga", "AccRdRestrict", "RbacVisSet")
+
+
+def slot_keys(slot: str) -> tuple[str, str, str]:
+    """Ключи слота: предъявитель уровня «1», уровня «2» и идентификатор человека."""
+    return f"jwtHuman{slot}", f"jwtHuman{slot}StepUp", f"human{slot}UserId"
+
+
+MINTED_WAVE = (
+    # Тот же человек церемонии — повышенным уровнем, и аккаунт, которым он владеет
+    # (личный аккаунт регистрации: известный id, не зависящий от порядка коллекций).
+    "jwtHumanCeremonyStepUp", "ceremonyAccountId",
+    # ВТОРОЙ человек, которому на арендаторах посева не выдано ничего.
+    "jwtHumanCeremonyNoBindings", "ceremonyNoBindingsUserId",
+    # Человек, которого кейс ПРИГЛАШАЕТ (`iam-user.py`,
+    # IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS): с kaname#456 выдачи действуют только
+    # на человека с подтверждённым адресом, и приглашённый, ни разу не входивший,
+    # права не держит by construction. Предъявитель ему не нужен — доступ судит
+    # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
+    "ceremonyInviteeEmail", "ceremonyInviteeUserId",
+) + tuple(k for s in ADMISSION_SLOTS for k in slot_keys(s))
+# Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
+# ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
+# опрашивают под другим), а машине уровень не поднимается и не нужен — его пишет
+# машинный посев (`seed_own_stand.py`, `MINTED_CREDENTIALS`).
+
+MINTED_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY + MINTED_WAVE
 
 # Поверхность, которой зачитываются эти ключи: у собственных HTTP-дверей службы
 # ярлык переписи один. Самопроверка сверяет строку с выводом переписи.
@@ -138,6 +210,12 @@ class Finding(Exception):
     """Продукт ответил не по контракту там, где посев предъявил требуемое."""
 
 
+# Находка любого из трёх посевов, чьи глаголы здесь зовутся, — одна категория
+# исхода: отказ продукта там, где посев предъявил требуемое. Непойманная находка
+# соседа вышла бы трассировкой, и код 1 совпал бы с находкой лишь случайно.
+FINDINGS = (Finding, lane_seed.Finding, own_seed.Finding)
+
+
 def say(msg: str) -> None:
     print(msg, flush=True)
 
@@ -158,7 +236,7 @@ class Surfaces:
     """
 
     def __init__(self, pki: pathlib.Path, grpc_addr: str, issuance: str, own: str,
-                 proto_root: pathlib.Path):
+                 proto_root: pathlib.Path, present_service_leaf: bool = False):
         for f in ("ca.crt", "srv.crt", "srv.key", "edge.crt", "edge.key"):
             if not (pki / f).is_file():
                 raise Unmet(f"нет {pki / f} — стенд не выносил листы")
@@ -170,6 +248,14 @@ class Surfaces:
         self.pki, self.grpc, self.proto = pki, grpc_addr, proto_root
         self.issuance, self.own = issuance.rstrip("/"), own.rstrip("/")
         self.ctx = ssl.create_default_context(cafile=str(pki / "ca.crt"))
+        # ЛИСТ СЛУЖБЫ НА HTTP-ДВЕРЯХ — ПО ПОСАДКЕ, А НЕ ВСЕГДА. Автономный стенд
+        # (`stand-own.sh`) держит собственные фронты во взаимном TLS (`mutual`), и
+        # без клиентского листа рукопожатие обрывается раньше всякого ответа; его
+        # прогонщик набора предъявляет тот же лист службы. Стенд чарта листа от
+        # этих дверей не требует, и его лист службы выписан для роли сервера:
+        # предъявлять его там значило бы менять условие, при котором посев доказан.
+        if present_service_leaf:
+            self.ctx.load_cert_chain(str(pki / "srv.crt"), str(pki / "srv.key"))
 
     def _grpcurl(self, leaf: str, proto: str, method: str, body: dict,
                  headers: tuple[str, ...] = ()) -> tuple[int, str]:
@@ -377,9 +463,188 @@ def seed(stand, lane, email: str, password: str, suffix: str) -> dict:
             "ceremonyEmail": shown or email}
 
 
-def env_patch(values: dict) -> dict:
+# ─────────────────────────── волна церемонии ─────────────────────────────────
+
+
+TOTP_STEP_S = 30
+TOTP_DIGITS = 6
+SECOND_FACTOR_FORM = "second-factor"
+ENROLL = "/iam/v1/auth/second-factor/enroll"
+CONFIRM = "/iam/v1/auth/second-factor/confirm"
+
+
+def totp(secret_b32: str, step: int) -> str:
+    """Код по времени RFC 6238: HMAC-SHA1, шесть цифр, шаг 30 с (Ф12-08)."""
+    key = base64.b32decode(secret_b32 + "=" * (-len(secret_b32) % 8), casefold=True)
+    mac = hmac.new(key, step.to_bytes(8, "big"), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    value = (int.from_bytes(mac[off:off + 4], "big") & 0x7FFFFFFF) % 10 ** TOTP_DIGITS
+    return str(value).zfill(TOTP_DIGITS)
+
+
+def token_claims(token: str) -> dict:
+    """Состав выданного токена — без проверки подписи: подпись проверяет фронт,
+    которому токен предъявляется (`assert_human`), а здесь читается только то,
+    что выдача назначила."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise Finding("выданный токен — не JWT из трёх частей: уровень и субъект "
+                      "прочесть не из чего")
+    try:
+        raw = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        claims = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        raise Finding("состав выданного токена не разбирается") from None
+    if not isinstance(claims, dict):
+        raise Finding("состав выданного токена — не объект")
+    return claims
+
+
+def new_human(lane, mailbox, email: str, password: str,
+              sleep=time.sleep) -> tuple[str, str]:
+    """Человек заводится глаголами полосы: регистрация → подтверждение адреса
+    кодом письма → вход. Возвращает (носитель сессии уровня «1», id человека).
+
+    Письмо регистрации ставится тем же исходом глагола, а в приёмник приходит
+    позже ответа: его ЖДУТ здесь, а не просят второе. Второе письмо раньше
+    интервала Р9 служба отвергает (`429`), и посев, прочитавший приёмник один
+    раз, падал бы по жребию доставки. Форма — та же, что у полосы входа
+    (`seed_login_lane.seed`)."""
+    lane_seed.register(lane, email, password)
+    own_seed.await_code(mailbox, email, 0, sleep)
+    first = lane_seed.login(lane, email, password)
+    if first is None:
+        raise Finding("вход сразу после регистрации отвергнут (401) — человек, "
+                      "которого продукт только что завёл, не входит своим паролем")
+    if not first["verified"]:
+        lane_seed.verify_address(lane, mailbox, email, first["bearer"], sleep)
+    return human_session(lane, email, password)
+
+
+def level2_session(lane, session: str) -> str:
+    """Второй фактор: заведение → подтверждение кодом по времени. Подтверждение
+    перевыпускает сессию уровнем «2» (Ф12-02) — её носитель и возвращается."""
+    token, ctx = form_token(lane, SECOND_FACTOR_FORM, {"kaname_session": session})
+    cookies = {"kaname_form": ctx, "kaname_session": session}
+    code, _, text = lane.ask("POST", ENROLL, body={"csrfToken": token}, cookies=cookies)
+    if code != 200:
+        raise Finding(f"заведение второго фактора: ждали 200, получили {code} "
+                      f"({message_of(text)!r})")
+    try:
+        secret = json.loads(text or "{}").get("secret") or ""
+    except json.JSONDecodeError:
+        secret = ""
+    if not isinstance(secret, str) or not secret:
+        raise Finding("заведение второго фактора ответило 200 без секрета — "
+                      "кода по времени вычислить не из чего")
+    code, sc, text = lane.ask("POST", CONFIRM,
+                              body={"code": totp(secret, int(time.time()) // TOTP_STEP_S),
+                                    "csrfToken": token},
+                              cookies=cookies)
+    if code != 200:
+        raise Finding(f"подтверждение второго фактора кодом по времени: ждали 200, "
+                      f"получили {code} ({message_of(text)!r})")
+    try:
+        level = (json.loads(text or "{}").get("session") or {}).get("assuranceLevel")
+    except (json.JSONDecodeError, AttributeError):
+        level = None
+    raised = cookie_value(sc, "kaname_session")
+    if level != "2" or not raised:
+        raise Finding(f"подтверждение второго фактора: уровень сессии {level!r} и "
+                      f"носитель {'перевыпущен' if raised else 'НЕ перевыпущен'} — "
+                      f"уровня «2» подтверждение не дало (Ф12-02)")
+    return raised
+
+
+def ceremony_bearer(stand, client: tuple[str, str], session: str, user: str,
+                    level: str) -> tuple[str, str]:
+    """Церемония под сессией: код → обмен → приём фронтом. Уровень и субъект
+    токена утверждаются по его составу. → (токен, почта по фронту)."""
+    cid, csec = client
+    code, verifier = authorize(stand, cid, REDIRECT, session)
+    token = exchange(stand, cid, csec, code, verifier, REDIRECT)
+    claims = token_claims(token)
+    if str(claims.get("acr")) != level:
+        raise Finding(f"церемония под сессией уровня «{level}» выдала токен уровня "
+                      f"{claims.get('acr')!r} — уровень токена обязан быть уровнем сессии")
+    if claims.get("sub") != user or claims.get("kaname_principal_type") != "user":
+        raise Finding("церемония выдала токен не того субъекта либо не человеку")
+    return token, assert_human(stand, token, user)
+
+
+def slot_slug(slot: str) -> str:
+    """Слот → часть адреса почты: `AccRdDerive` → `acc-rd-derive`."""
+    out = []
+    for ch in slot:
+        if ch.isupper() and out:
+            out.append("-")
+        out.append(ch.lower())
+    return "".join(out)
+
+
+def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
+              sleep=time.sleep) -> dict:
+    """Волна церемонии: клиенты, люди и их предъявители обоих уровней. `sleep` —
+    паузы ожидания письма; самопроверка подаёт часы подставного мира."""
+    boot, principal = bootstrap(stand)
+    say("  ok   машинный system_admin выкован чеканкой и принят фронтом")
+    cid, csec = create_confidential(stand, principal, f"ceremony-a-{suffix}",
+                                    [REDIRECT, REDIRECT_ALT])
+    oid, osec = create_confidential(stand, principal, f"ceremony-b-{suffix}", [REDIRECT])
+    say("  ok   два конфиденциальных клиента заведены глаголом Create (способ секретом)")
+    client = (cid, csec)
+    values = {"iamRegistryTokenBaseUrl": stand.issuance, "ownRestBaseUrl": stand.own,
+              "oauthClientId": cid, "oauthClientSecret": csec,
+              "oauthRedirectUri": REDIRECT, "oauthRedirectUriAlt": REDIRECT_ALT,
+              "oauthOtherClientId": oid, "oauthOtherClientSecret": osec}
+    people: dict[str, str] = {}
+
+    def person(tag: str) -> tuple[str, str, str]:
+        email = f"ceremony-{tag}-{suffix}@{domain}"
+        session, user = new_human(lane, mailbox, email, secrets.token_urlsafe(24), sleep)
+        if user in people.values():
+            raise Finding(f"человек «{tag}» получил идентификатор уже заведённого — "
+                          f"слоты волны перестали быть разными людьми")
+        people[tag] = user
+        return email, session, user
+
+    email, s1, user = person("main")
+    l1, shown = ceremony_bearer(stand, client, s1, user, "1")
+    l2, _ = ceremony_bearer(stand, client, level2_session(lane, s1), user, "2")
+    tenant = own_seed.resolve_tenant(http, stand.own, boot, email)
+    if tenant["userId"] != user:
+        raise Finding("личный аккаунт найден у другого человека, чем вошедший")
+    values.update({"jwtHumanCeremony": l1, "jwtHumanCeremonyStepUp": l2,
+                   "ceremonyUserId": user, "ceremonyEmail": shown or email,
+                   "ceremonyAccountId": tenant["accountId"]})
+    say("  ok   человек церемонии: предъявители уровней «1» и «2», личный аккаунт")
+
+    _, sn, nob = person("nobind")
+    values["jwtHumanCeremonyNoBindings"], _ = ceremony_bearer(stand, client, sn, nob, "1")
+    values["ceremonyNoBindingsUserId"] = nob
+    say("  ok   второй человек — без выдач на арендаторах посева")
+
+    values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
+    say("  ok   человек для приглашения — адрес подтверждён, выдач нет")
+
+    for slot in ADMISSION_SLOTS:
+        _, ss, su = person(slot_slug(slot))
+        k1, k2, kid = slot_keys(slot)
+        values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
+        values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
+        values[kid] = su
+    say(f"  ok   слоты заведения аккаунта: {len(ADMISSION_SLOTS)} людей, у каждого "
+        f"предъявители уровней «1» и «2»")
+    say(f"  ok   людей заведено {len(people)}, все разные")
+    return values
+
+
+BASE_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY
+
+
+def env_patch(values: dict, keys: tuple[str, ...] = BASE_KEYS) -> dict:
     """ЧИСТАЯ функция — что уезжает в окружение; её судит самопроверка."""
-    return {k: values[k] for k in MINTED_KEYS}
+    return {k: values[k] for k in keys}
 
 
 def credentials() -> tuple[str, str]:
@@ -394,17 +659,28 @@ def run(args: argparse.Namespace) -> int:
     for name in ("lane_url", "issuance_url", "own_url", "grpc_addr", "pki"):
         if not getattr(args, name):
             raise Unmet(f"не назван --{name.replace('_', '-')} — поверхности, которую сеять, нет")
-    email, password = credentials()
     pki = pathlib.Path(args.pki)
-    stand = Surfaces(pki, args.grpc_addr, args.issuance_url, args.own_url, ROOT / "proto")
+    env_file = pathlib.Path(args.env_file)
+    stand = Surfaces(pki, args.grpc_addr, args.issuance_url, args.own_url, ROOT / "proto",
+                     present_service_leaf=args.wave)
     # Полоса — тем же клиентом, что у посева полосы входа, и с ТЕМ ЖЕ адресом
     # источника: оба — посевы, а не наборы, и окно частоты наборов они не трогают.
     lane = LaneHttp(args.lane_url, pki)
 
-    values = seed(stand, lane, email, password, secrets.token_hex(4))
-    patch = env_patch(values)
-    replaced = write_env(patch, pathlib.Path(args.env_file), pathlib.Path(args.env_template))
-    say(f"посев церемонии: ключей записано {len(patch)} (заменено {replaced}) в {args.env_file}")
+    if args.wave:
+        if not args.mailbox_url:
+            raise Unmet("не назван --mailbox-url — код подтверждения адреса заводимых "
+                        "людей читать неоткуда")
+        values = seed_wave(stand, lane, own_seed.Http(pki), own_seed.Mailbox(args.mailbox_url),
+                           secrets.token_hex(4), args.email_domain)
+        keys = MINTED_KEYS
+    else:
+        email, password = credentials()
+        values = seed(stand, lane, email, password, secrets.token_hex(4))
+        keys = BASE_KEYS
+    patch = env_patch(values, keys)
+    replaced = write_env(patch, env_file, pathlib.Path(args.env_template))
+    say(f"посев церемонии: ключей записано {len(patch)} (заменено {replaced}) в {env_file}")
     return 0
 
 
@@ -493,10 +769,163 @@ class _FakeLane:
 def _outcome(fn) -> tuple[str, str]:
     try:
         return "ok", json.dumps(fn())
-    except Finding as e:
+    except FINDINGS as e:
         return "finding", str(e)
     except Unmet as e:
         return "unmet", str(e)
+
+
+# ─── подставной мир волны: полоса, приёмник писем, стенд и фронт одной памятью ─
+
+
+def _fake_jwt(claims: dict) -> str:
+    body = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return "e30." + body + ".sig"
+
+
+class _WaveWorld:
+    """Законный мир волны: люди заводятся регистрацией, адрес подтверждается кодом
+    письма, второй фактор — кодом по времени; уровень сессии уезжает в токен.
+    Каждая инъекция меняет ОДИН факт.
+
+    ПИСЬМО — НЕ СИНХРОННО, И ВТОРОЕ РАНЬШЕ ИНТЕРВАЛА НЕ ВЫДАЁТСЯ, как на стенде.
+    Служба сдаёт письмо узлу после ответа глагола, и в приёмнике оно появляется
+    позже (`letter_lag` секунд часов мира; по умолчанию — меньше одного шага
+    опроса письма, законно — любое в пределах бюджета ожидания). Запрос письма раньше `RESEND_S` после предыдущего отвечает
+    `429 too many attempts; try again later` (Р9, kaname#456; величина — та, что
+    ставит стенд: `stand-own.sh`, VERIFICATION_RESEND_INTERVAL). Мир, кладущий
+    письмо в тот же миг, снисходительнее продукта: посев, просящий второе письмо
+    раньше срока, проходил бы здесь и падал бы на стенде по жребию доставки.
+    Часы — свои (`sleep` двигает `now`): ожидание по ним не стоит настоящего
+    времени и не зависит от него."""
+
+    SECRET = "JBSWY3DPEHPK3PXP"
+    RESEND_S = 60
+
+    def __init__(self, **inject):
+        self.inj = inject
+        self.now = 0.0
+        self.lag = float(inject.get("letter_lag", 1))
+        self.people: dict[str, dict] = {}
+        self.letters: dict[str, list[tuple[float, str]]] = {}
+        self.sent_at: dict[str, float] = {}
+        self.requests = 0
+        self.codes: dict[str, tuple[str, str]] = {}
+        self.base = _FakeStand()
+        self.issuance, self.own = self.base.issuance, self.base.own
+
+    # часы мира
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def _send(self, email: str) -> None:
+        self.sent_at[email] = self.now
+        if not self.inj.get("no_letter"):
+            self.letters.setdefault(email, []).append(
+                (self.now + self.lag, "Код подтверждения:\n4242\n"))
+
+    # полоса
+    def _uid(self, n: int) -> str:
+        return "usr" + ("same" if self.inj.get("same_id") and n > 1 else f"{n:04d}")
+
+    def ask(self, method, path, body=None, cookies=None):
+        cookies = cookies or {}
+        sess = cookies.get("kaname_session", "")
+        if path.startswith("/iam/v1/auth/csrf"):
+            return 200, ["kaname_form=ctx; Path=/"], '{"csrfToken":"t"}'
+        if path == "/iam/v1/auth/register":
+            uid = self._uid(len(self.people) + 1)
+            self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False}
+            self._send(body["email"])
+            return 200, [f"kaname_session=s1-{uid}; Path=/"], "{}"
+        if path == "/iam/v1/auth/login":
+            who = self.people.get(body["email"])
+            if not who or who["pw"] != body["password"]:
+                return 401, [], '{"message":"credentials are not accepted"}'
+            return 200, [f"kaname_session=s1-{who['id']}; Path=/"], json.dumps(
+                {"user": {"id": who["id"]}, "session": {"emailVerified": who["verified"]}})
+        if path == "/iam/v1/auth/verify-email":
+            self.requests += 1
+            email = next(e for e, w in self.people.items() if sess.endswith("-" + w["id"]))
+            if self.now - self.sent_at[email] < self.RESEND_S:
+                return 429, [], '{"message":"too many attempts; try again later"}'
+            self._send(email)
+            return 200, [], "{}"
+        if path == "/iam/v1/auth/verify-email/confirm":
+            for who in self.people.values():
+                if sess.endswith("-" + who["id"]) and body.get("code") == "4242":
+                    who["verified"] = True
+                    return 200, [], '{"session":{"emailVerified":true}}'
+            return 401, [], '{"message":"authentication failed"}'
+        if path == ENROLL:
+            if self.inj.get("no_secret"):
+                return 200, [], '{"otpauthUri":"otpauth://totp/x"}'
+            return 200, [], json.dumps({"secret": self.SECRET, "expiresAt": "2099-01-01T00:00:00Z"})
+        if path == CONFIRM:
+            step = int(time.time()) // TOTP_STEP_S
+            if body.get("code") not in {totp(self.SECRET, step + d) for d in (-1, 0, 1)}:
+                return 401, [], '{"message":"authentication failed"}'
+            level = "1" if self.inj.get("confirm_level_1") else "2"
+            return 200, [f"kaname_session=s{level}-{sess.split('-', 1)[1]}; Path=/"], json.dumps(
+                {"session": {"assuranceLevel": level}, "backupCodes": ["A"] * 10})
+        return 404, [], "{}"
+
+    # приёмник писем
+    def mailbox_letters(self, to):
+        return [text for at, text in self.letters.get(to, []) if at <= self.now]
+
+    # стенд: чеканка и клиенты — законные, у подставного стенда базового режима
+    def mint(self):
+        return self.base.mint()
+
+    def create_client(self, principal, name, redirects):
+        return self.base.create_client(principal, name, redirects)
+
+    def http(self, url, *, method="GET", headers=None, form=None):
+        headers = headers or {}
+        if url.startswith(self.issuance + "/iam/v1/authorize"):
+            q = urllib.parse.parse_qs(url.split("?", 1)[1])
+            sess = headers.get("Cookie", "").split("kaname_session=", 1)[-1]
+            level, uid = sess.split("-", 1)[0][1:], sess.split("-", 1)[1]
+            code = f"code{len(self.codes) + 1}"
+            self.codes[code] = (uid, level)
+            return 302, {"Location": f"{q['redirect_uri'][0]}?code={code}&state={q['state'][0]}"}, ""
+        if url == self.issuance + "/iam/v1/token":
+            uid, level = self.codes.pop(form["code"])
+            if self.inj.get("acr_stuck"):
+                level = "1"
+            return 200, {}, json.dumps({"access_token": _fake_jwt(
+                {"acr": level, "sub": uid, "kaname_principal_type": "user"})})
+        if url == self.own + "/iam/v1/me":
+            claims = token_claims(headers["Authorization"].split()[1])
+            email = next(e for e, w in self.people.items() if w["id"] == claims["sub"])
+            return 200, {}, json.dumps({"subject": "user:" + claims["sub"],
+                                        "userId": claims["sub"], "email": email})
+        return self.base.http(url, method=method, headers=headers, form=form)
+
+    # фронт под бутстрапом (перечни для разрешения арендатора)
+    def json_ask(self, url, **kw):
+        # Инъекция `foreign_owner`: строка человека по адресу и её личный аккаунт —
+        # у ДРУГОГО идентификатора, чем назвал вход.
+        row = (lambda w: "usrforeign" if self.inj.get("foreign_owner") else w["id"])
+        if "/iam/v1/users?" in url:
+            users = [{"id": row(w), "email": e, "inviteStatus": "ACTIVE"}
+                     for e, w in self.people.items()]
+            return 200, {"users": users}
+        if "/iam/v1/accounts?" in url:
+            return 200, {"accounts": [{"id": "acc" + w["id"][3:], "ownerUserId": row(w)}
+                                      for w in self.people.values()]}
+        if "/iam/v1/projects?" in url:
+            return 200, {"projects": [{"id": "prj1"}]}
+        return 404, {}
+
+
+class _Mail:
+    def __init__(self, world):
+        self.world = world
+
+    def letters(self, to):
+        return self.world.mailbox_letters(to)
 
 
 def _census_surface() -> str | None:
@@ -558,8 +987,8 @@ def self_test() -> int:
 
         ok = go()
         patch = env_patch(json.loads(ok[1])) if ok[0] == "ok" else {}
-        _c("объявленные ключи = записываемые (в обе стороны)", set(patch) == set(MINTED_KEYS),
-           f"{sorted(patch)} против {sorted(MINTED_KEYS)}")
+        _c("режим стенда чарта: объявленные ключи = записываемые (в обе стороны)",
+           set(patch) == set(BASE_KEYS), f"{sorted(patch)} против {sorted(BASE_KEYS)}")
         env, tmpl = pathlib.Path(tmp) / "env.json", pathlib.Path(tmp) / "tmpl.json"
         tmpl.write_text(json.dumps({"values": [
             {"key": "oauthClientSecret", "value": "", "type": "secret"},
@@ -567,9 +996,79 @@ def self_test() -> int:
         write_env(patch, env, tmpl)
         doc = {v["key"]: v for v in json.loads(env.read_text(encoding="utf-8"))["values"]}
         _c("запись доезжает всеми ключами, тип secret у секретов сохранён",
-           all(doc.get(k, {}).get("value") for k in MINTED_KEYS)
+           all(doc.get(k, {}).get("value") for k in BASE_KEYS)
            and doc["oauthClientSecret"].get("type") == "secret"
            and doc["jwtHumanCeremony"].get("type") == "secret", f"{sorted(doc)}")
+
+    print("=== волна церемонии (--wave): различение исходов ===")
+    _c("код по времени — вектор RFC 6238 (шаг 1, SHA-1): 287082",
+       totp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 1) == "287082",
+       totp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 1))
+
+    def wave(**inj):
+        w = _WaveWorld(**inj)
+        return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
+                                          sleep=w.sleep)), w
+
+    # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
+    # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
+    # не отвергает никто, — то есть на том, где дефект ненаблюдаем.
+    pw = _WaveWorld()
+    pw.ask("POST", "/iam/v1/auth/register", body={"email": "p@stand.invalid", "password": "x"})
+    early = pw.ask("POST", "/iam/v1/auth/verify-email", body={},
+                   cookies={"kaname_session": "s1-usr0001"})
+    pw.sleep(_WaveWorld.RESEND_S)
+    late = pw.ask("POST", "/iam/v1/auth/verify-email", body={},
+                  cookies={"kaname_session": "s1-usr0001"})
+    _c("предпосылка мира: письмо раньше интервала Р9 — 429, после интервала — 200",
+       early[0] == 429 and "too many attempts" in early[2] and late[0] == 200,
+       f"раньше {early[0]}, после {late[0]}")
+    lw = _WaveWorld()
+    lw.ask("POST", "/iam/v1/auth/register", body={"email": "p@stand.invalid", "password": "x"})
+    in_flight = lw.mailbox_letters("p@stand.invalid")
+    lw.sleep(own_seed.LETTER_POLL_S)
+    arrived = lw.mailbox_letters("p@stand.invalid")
+    _c("предпосылка мира: письмо регистрации к первому чтению в пути, через шаг опроса — в приёмнике",
+       in_flight == [] and len(arrived) == 1,
+       f"к первому чтению {len(in_flight)}, через шаг {len(arrived)}")
+
+    got, world = wave()
+    vals = json.loads(got[1]) if got[0] == "ok" else {}
+    levels = {k: token_claims(v).get("acr") for k, v in vals.items() if k.startswith("jwt")}
+    _c("(−) законный мир волны — записываемые ключи = объявленные (в обе стороны)",
+       got[0] == "ok" and set(env_patch(vals, MINTED_KEYS)) == set(MINTED_KEYS)
+       and set(vals) == set(MINTED_KEYS), f"{got[0]}: {sorted(set(vals) ^ set(MINTED_KEYS))}")
+    _c("(−) уровень каждого предъявителя — по имени слота: `…StepUp` — «2», прочие — «1»",
+       bool(levels) and all(lv == ("2" if k.endswith("StepUp") else "1")
+                            for k, lv in levels.items()), f"{levels}")
+    _c("(−) люди волны разные, и каждый подтвердил адрес",
+       len({w["id"] for w in world.people.values()}) == len(world.people) >= 11
+       and all(w["verified"] for w in world.people.values()), f"{world.people}")
+    _c("(−) письмо регистрации дождано, второго не запрошено ни разу",
+       got[0] == "ok" and world.requests == 0, f"запросов письма {world.requests}: {got}")
+    # Ось запаздывания письма: обе законные стороны — письмо уже лежит к первому
+    # чтению и письмо идёт дольше десятка шагов опроса (в пределах бюджета).
+    for label, lag in (("письмо регистрации уже в приёмнике к первому чтению", 0),
+                       ("письмо регистрации идёт 30 с", 30)):
+        got, world = wave(letter_lag=lag)
+        _c(f"(−) {label} — посев молчит, второго письма не просит",
+           got[0] == "ok" and world.requests == 0, f"запросов письма {world.requests}: {got}")
+    for label, inj, needle in (
+        ("подтверждение второго фактора не подняло уровень", {"confirm_level_1": True},
+         "уровня «2» подтверждение не дало"),
+        ("сессия «2», а токен выдан уровнем «1»", {"acr_stuck": True},
+         "уровень токена обязан быть уровнем сессии"),
+        ("два человека получили один идентификатор", {"same_id": True},
+         "перестали быть разными людьми"),
+        ("заведение фактора без секрета", {"no_secret": True}, "без секрета"),
+        # Причина — «не дошло», а не отказ Р9: запрос второго письма раньше срока
+        # тоже упоминает письмо подтверждения, и по одному слову их не различить.
+        ("письмо подтверждения не дошло", {"no_letter": True}, "не дошло до приёмника"),
+        ("личный аккаунт у другого человека", {"foreign_owner": True}, "у другого человека"),
+    ):
+        got, _ = wave(**inj)
+        _c(f"(+) {label} — находка, причина названа",
+           got[0] == "finding" and needle in got[1], f"{got}")
 
     try:
         surface, census = _census_surface()
@@ -579,7 +1078,7 @@ def self_test() -> int:
        surface == MINTED_SURFACE, f"перепись {surface!r}, посев {MINTED_SURFACE!r}")
     if census is not None:
         _c("ключи церемонии распознаны переписью как ключи ЦЕРЕМОНИИ, прочие — нет",
-           all(census.is_ceremony_key(k) for k in MINTED_CEREMONY)
+           all(census.is_ceremony_key(k) for k in MINTED_CEREMONY + MINTED_WAVE)
            and not any(census.is_ceremony_key(k) for k in MINTED_ADDRESSES + MINTED_CLIENTS),
            f"{[(k, census.is_ceremony_key(k)) for k in MINTED_KEYS]}")
 
@@ -588,8 +1087,11 @@ def self_test() -> int:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_SELF)} — {', '.join(_SELF)}", file=sys.stderr)
         return 1
     print("ДОКАЗАНО: предъявитель человека утверждается исходом каждого из семи шагов, "
-          "«поверхность молчит» и «листов нет» отличимы от находки кодом, объявленные ключи "
-          "сходятся с записью, а поверхность и природа ключей — с переписью долга.")
+          "«поверхность молчит» и «листов нет» отличимы от находки кодом; волна различает "
+          "уровень сессии и уровень токена, разных людей и подтверждённый адрес, а письмо "
+          "регистрации дожидается, не прося второго раньше интервала Р9; объявленные "
+          "ключи сходятся с записью в обоих режимах, а поверхность и природа ключей — с "
+          "переписью долга.")
     return 0
 
 
@@ -612,6 +1114,14 @@ def main() -> int:
     ap.add_argument("--env-template",
                     default=str(ROOT / "tests" / "newman" / "environments"
                                 / "local.postman_environment.template.json"))
+    ap.add_argument("--wave", action="store_true",
+                    help="волна церемонии автономного стенда: посев сам заводит людей "
+                         "(регистрация, подтверждение адреса, второй фактор) и пишет все "
+                         "ключи волны; без флага — человек стенда чарта из окружения")
+    ap.add_argument("--mailbox-url", default=env("KANAME_CEREMONY_MAILBOX_URL", ""),
+                    help="адрес чтения приёмника писем стенда (для --wave)")
+    ap.add_argument("--email-domain", default="kaname.local",
+                    help="домен адресов заводимых людей (для --wave)")
     ap.add_argument("--minted-keys", action="store_true",
                     help="напечатать ключи окружения, которые пишет посев, и выйти")
     ap.add_argument("--minted-surface", action="store_true",
@@ -634,7 +1144,7 @@ def main() -> int:
         print("Посев не состоялся по причине, не относящейся к дереву: вердикта о продукте "
               "нет НИ ОДНОГО.", file=sys.stderr)
         return RC_UNMET
-    except Finding as e:
+    except FINDINGS as e:
         print(f"НАХОДКА: {e}", file=sys.stderr)
         return RC_FINDING
 

@@ -597,12 +597,13 @@ jobs:
       # Артефакт скачивается кем угодно по ссылке и живёт до истечения срока
       # хранения, а машинный отчёт newman несёт ОКРУЖЕНИЕ ПРОГОНА ЦЕЛИКОМ — то
       # есть КАЖДОГО предъявителя, которого посев в него записал. ЕДИНИЦА СЧЁТА
-      # НАЗВАНА, потому что их две и они дают разные числа: предъявителей —
-      # десять (девять годных плюс один законно-отозванный, перепись посева
-      # печатает их строкой «предъявителей N»), ключей окружения — тридцать
-      # (`python3 tests/authz-fixtures/seed_own_stand.py --minted-keys |
-      # wc -l`). Обе меняются вместе с посевом; в артефакт уезжают ВСЕ ключи, а
-      # опасны из них предъявители. Это уже
+      # НАЗВАНА, потому что их две и они дают разные числа: предъявители
+      # (годные плюс один законно-отозванный; перепись посева печатает их строкой
+      # «предъявителей N») и ключи окружения (`python3
+      # tests/authz-fixtures/seed_own_stand.py --minted-keys | wc -l`). Числом здесь
+      # не выписана ни одна: обе меняются вместе с посевом, и выписанное уже
+      # отставало от него. В артефакт уезжают ВСЕ ключи, а опасны из них
+      # предъявители. Это уже
       # случилось: `own-front-newman-report` (53 104 байта) нёс 51 вхождение строк
       # вида JWT и был удалён руками, но производил его КОД.
       #
@@ -722,6 +723,229 @@ jobs:
 
       # Снос под `always()`: обрыв по пределу времени иначе оставил бы контейнер
       # базы поднятым.
+      - name: снос стенда
+        if: always()
+        run: .github/scripts/stand-own.sh down
+
+  # ── ВТОРОЙ ШАРД АВТОНОМНОГО СТЕНДА: ВОЛНА ЦЕРЕМОНИИ (kaname#398) ────────────
+  #
+  # Коллекции, которым нужен ЧЕЛОВЕЧЕСКИЙ предъявитель, — перечень выводит
+  # объявление волны (`tests/authz-fixtures/ceremony_credentials.py --stems`) — и
+  # коллекции машинного распорядителя, переехавшие вместе с ними на собственный
+  # фронт. Стенд тот же, что у задания `stand` (своя база, свой УЦ, посадка `own`),
+  # и посев машинный тот же; сверх него посев церемонии (`seed_ceremony.py
+  # --wave`) заводит людей глаголами продукта — регистрация полосой, подтверждение
+  # адреса кодом письма, вход — и куёт их предъявителей СВОЕЙ церемонией службы
+  # (код авторизации → обмен), а повышенный уровень — вторым фактором. Уровень
+  # каждого токена утверждается по его составу.
+  #
+  # ПОЧЕМУ ОТДЕЛЬНОЕ ЗАДАНИЕ, А НЕ ШАГ В `stand`. Прогонщик начинает с чистого
+  # `out/`, и второй вызов в том же задании стёр бы отчёт первого до выкладывания;
+  # а сложенные в один вызов, два перечня не уложились бы в срок предъявителей
+  # посева. Срок токена стенда — 25 минут (`stand-own.sh`,
+  # `KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL`), и он обязан пережить остаток обоих
+  # посевов и прогон: 5 + 5 + 15 = 25 (`timeout-minutes` трёх шагов ниже). Замер на
+  # автономном стенде 2026-09-30: машинный посев 64 с, посев церемонии 14 с, прогон
+  # четырнадцати коллекций — 8 мин 50 с.
+  stand-ceremony:
+    name: автономный стенд — волна церемонии и распорядители аккаунта (второй шард)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+
+      - name: различение исходов подъёма способно упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: .github/scripts/stand-own.sh --self-test
+
+      - name: подъём стенда (своя база + свой УЦ, без платформы)
+        timeout-minutes: 15
+        run: |
+          rc=0
+          .github/scripts/stand-own.sh up || rc=$?
+          case "$rc" in
+            0) echo "стенд поднят" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::стенд не поднялся по причине, не относящейся к дереву (нет docker, образ не скачался, порт занят, база не отвечает). Прогон недействителен, это НЕ дефект кода."
+              exit 1 ;;
+            *)
+              echo "::error title=Служба не поднялась::страж посадки отказал — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      - name: инструменты прогона (их отсутствие — НЕ находка о дереве)
+        timeout-minutes: 10
+        run: |
+          rc=0
+          npm install -g newman@6.2.2 >/dev/null 2>&1 || rc=$?
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@v1.9.3 || rc=$?
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          python3 -m pip install --quiet pyyaml || rc=$?
+          missing=""
+          for tool in newman grpcurl jq; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          python3 -c "import yaml" 2>/dev/null || missing="$missing pyyaml"
+          if [ -n "$missing" ] || [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::инструментов нет:$missing (установка rc=$rc) — коллекции НЕ гонялись, вердикта о дереве нет"
+            exit 1
+          fi
+          echo "инструменты на месте: newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | head -1), jq $(jq --version), pyyaml $(python3 -c 'import yaml; print(yaml.__version__)')"
+
+      # Каждый посев выносит вердикт (его отказ обвиняет продукт), значит его
+      # способность упасть доказывается ДО того, как вердикту поверят, — и каждый
+      # своим шагом: код возврата каждой самопроверки читается отдельно.
+      - name: машинный посев способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/seed_own_stand.py --self-test
+
+      - name: посев церемонии способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/seed_ceremony.py --self-test
+
+      - name: чистка отчёта способна упасть (самопроба по каждой форме)
+        timeout-minutes: 5
+        run: python3 .github/scripts/redact-newman-report.py --self-test
+
+      - name: предполёт посева способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/newman/scripts/seed_preflight.py --self-test
+
+      - name: машинный посев удостоверений на автономном стенде
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_own_stand.py || rc=$?
+          case "$rc" in
+            0) echo "посеяно" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::посев не состоялся по причине, не относящейся к дереву (нет слушателя, нет инструмента). Вердикта о продукте нет."
+              exit 1 ;;
+            *)
+              echo "::error title=Посев отвергнут продуктом::посев предъявил всё, чего требует контракт, и получил отказ — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      # УСЛОВИЕ ВОЛНЫ — ОТДЕЛЬНЫМ ШАГОМ: отказ церемонии не должен читаться отказом
+      # машинного посева и не должен читаться вердиктом о наборе.
+      - name: условие создано — люди и их предъявители своей церемонией службы
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_ceremony.py --wave \
+            --lane-url https://localhost:9100 --issuance-url https://localhost:9096 \
+            --own-url https://localhost:9098 --grpc-addr localhost:9091 \
+            --pki .stand/pki --mailbox-url http://127.0.0.1:18025 || rc=$?
+          case "$rc" in
+            0) echo "условие создано: люди заведены, предъявители уровней «1» и «2» выкованы церемонией и приняты фронтом" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::поверхность стенда недостижима, лист не выписан либо приёмник писем молчит — вердикта о продукте нет"
+              exit 1 ;;
+            *)
+              echo "::error title=Посев церемонии отвергнут продуктом::посев предъявил всё, чего требует контракт церемонии, и получил отказ — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      # ЧИСЛОВОЙ ВЕРДИКТ даёт прогонщик набора — строка на коллекцию и итог
+      # «N/M коллекций отчиталось». Коллекции ОДНИМ вызовом, по той же причине,
+      # что у задания `stand`. Коллекции волны прогонщик делегирует своей волне и
+      # в общем прогоне не гоняет; здесь они названы явно, и условие их волны
+      # создано шагом выше. Перечень здесь рукописный, и он обязан быть не уже
+      # перечня волны: коллекцию, которую не гоняет ни один шаг, перепись долга
+      # назовёт по имени и потребует у неё держателя.
+      - name: коллекции волны церемонии гоняются (числовой вердикт)
+        timeout-minutes: 15
+        run: |
+          cd tests/newman
+          ./scripts/run.sh --service authz-deny \
+            --service iam-account \
+            --service iam-account-redesign \
+            --service iam-membership-mine \
+            --service iam-membership-read \
+            --service iam-read-authz-vget \
+            --service iam-user \
+            --service iam-whoami \
+            --service rbac-subject-channel-equivalence \
+            --service rbac-visibility-set \
+            --service iam-access-binding-account-scope \
+            --service iam-access-binding-include-revoked \
+            --service iam-authz-grant-check-propagation \
+            --service iam-service-account \
+            --ssl-client-cert ../../.stand/pki/srv.crt \
+            --ssl-client-key ../../.stand/pki/srv.key \
+            --ssl-extra-ca-certs ../../.stand/pki/ca.crt
+
+      # Артефакт публичного репозитория — только после чистки: окружение прогона
+      # несёт предъявителей людей и машин. Три исхода, как у задания `stand`.
+      - name: отчёт прогона вычищен от удостоверений
+        if: always()
+        timeout-minutes: 5
+        run: |
+          mkdir -p tests/newman/out-public
+          if [ ! -d tests/newman/out ]; then
+            echo "::notice title=Отчёта нет::каталог tests/newman/out не создан — прогон коллекций не состоялся, выкладывать нечего"
+            echo 'ОТЧЁТА ПРОГОНА НЕТ: прогон коллекций не состоялся — смотрите шаги подъёма и посева выше. Это НЕ «вычищено до пустоты».' \
+              > tests/newman/out-public/no-report.txt
+            exit 0
+          fi
+          rc=0
+          python3 .github/scripts/redact-newman-report.py --in tests/newman/out --out tests/newman/out-public || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Артефакт НЕ выложен::чистка отчёта не сошлась (код $rc) — выкладывать отчёт с удостоверениями в ПУБЛИЧНЫЙ репозиторий нельзя"
+            rm -rf tests/newman/out-public
+            mkdir -p tests/newman/out-public
+            echo 'ЧИСТКА НЕ СОШЛАСЬ: отчёт НЕ выложен. Шаг чистки выше печатает ПУТИ, где удостоверение осталось, но не сами значения.' \
+              > tests/newman/out-public/redaction-failed.txt
+            exit 1
+          fi
+
+      - name: отчёт прогона волны церемонии (вычищенный)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ceremony-wave-newman-report
+          path: tests/newman/out-public
+          if-no-files-found: error
+
+      # Журнал — той же чисткой и одним файлом: рядом с ним в `.stand/run/` лежит
+      # ключевой материал стенда (разбор — у задания `stand`).
+      - name: журнал стенда вычищен от удостоверений
+        if: always()
+        timeout-minutes: 5
+        run: |
+          mkdir -p .stand/log-src .stand/log-public
+          if [ ! -f .stand/run/kaname.log ]; then
+            echo "::notice title=Журнала нет::.stand/run/kaname.log не создан — служба не запускалась"
+            echo 'ЖУРНАЛА НЕТ: .stand/run/kaname.log не создан — служба не запускалась.' \
+              > .stand/log-public/no-log.txt
+            exit 0
+          fi
+          cp .stand/run/kaname.log .stand/log-src/kaname.log
+          rc=0
+          python3 .github/scripts/redact-newman-report.py --in .stand/log-src --out .stand/log-public || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Журнал НЕ выложен::чистка журнала не сошлась (код $rc) — выкладывать его в ПУБЛИЧНЫЙ репозиторий нельзя"
+            rm -rf .stand/log-public
+            mkdir -p .stand/log-public
+            echo 'ЧИСТКА НЕ СОШЛАСЬ: журнал НЕ выложен. Шаг чистки выше печатает ПУТИ, где удостоверение осталось, но не сами значения.' \
+              > .stand/log-public/redaction-failed.txt
+            exit 1
+          fi
+
+      - name: журнал стенда
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: stand-ceremony-logs
+          path: .stand/log-public
+          if-no-files-found: error
+
       - name: снос стенда
         if: always()
         run: .github/scripts/stand-own.sh down
@@ -1072,7 +1296,8 @@ jobs:
       # Посев заводит двух конфиденциальных клиентов глаголом `Create` (kaname#405)
       # и проводит человека стенда через вход → код → обмен → приём фронтом;
       # утверждается приём токена, а не его выдача. Ключи набора церемонии
-      # `authorization_code` и волны церемонии он пишет сам.
+      # `authorization_code` и предъявителя человека уровня «1» он пишет сам;
+      # людей всей волны церемонии куёт режим `--wave` задания `stand-ceremony`.
       - name: условие создано — предъявитель человека своей церемонией
         timeout-minutes: 5
         run: |
@@ -1220,6 +1445,7 @@ jobs:
     needs:
       - suite
       - stand
+      - stand-ceremony
       - edgeselftests
       - chart
       - chart-own
@@ -1250,6 +1476,7 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.suite.result }}" \
             "${{ needs.stand.result }}" \
+            "${{ needs.stand-ceremony.result }}" \
             "${{ needs.edgeselftests.result }}" \
             "${{ needs.chart.result }}" \
             "${{ needs.chart-own.result }}" || rc=$?

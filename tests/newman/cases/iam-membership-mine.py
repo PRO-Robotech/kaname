@@ -40,7 +40,7 @@ CRUD fixture dependency:
       — человек и аккаунт, которым он владеет; поднятый вход нужен приглашению
         (`MembershipService/Create` несёт `required_acr_min: "2"`).
   jwtHumanCeremonyNoBindings / ceremonyNoBindingsUserId — второй человек, без
-      выдач (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`, стадия 8в).
+      выдач (`tests/authz-fixtures/seed_ceremony.py --wave`, человек `nobind`).
   jwtAccountAdminA / jwtAccountAdminAStepUp / accountAId / ceremonyEmail —
       служебная учётка-распорядитель A приглашает главного человека в A, чтобы у
       того стало ДВА членства и обход страницами имел предмет.
@@ -452,3 +452,11 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

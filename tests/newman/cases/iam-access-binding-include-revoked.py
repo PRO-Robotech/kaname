@@ -255,3 +255,11 @@ CASES.append(Case(
         poll_operation_until_done(required=False),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

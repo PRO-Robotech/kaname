@@ -42,6 +42,21 @@
 проходом и БЕЗ сравнения с прежней формой — 403 ровно то единственное, что прежняя
 форма и ловила, поэтому сравнение здесь ничего не сообщало бы.
 
+# Поверхность шага берётся из самой коллекции (kaname#398)
+
+Матрица authz-deny переадресована на собственный публичный фронт службы
+(`address_own_front`), набор authz-sa-apitoken остался на крае. Какую поверхность
+изображает подставной сервер, проба спрашивает у сгенерированной коллекции: страж
+адреса в пред-скрипте шага (`gen._ENV_URL_MARK`) называет переменную фронта, шаг без
+стража идёт по переменной своего адреса. Прежде проба подавала одну переменную края,
+и после переадресации ЗДОРОВЫЙ ответ краснел отказом «ownRestBaseUrl is not set» —
+доказательство того, что полосы способны упасть, пропало молча для её смысла.
+
+Вторая переменная пары указывает на ДРУГОЙ подставной сервер. Он отвечает только
+«не та поверхность» и считает обращения, поэтому чужая поверхность не может сойти за
+здоровый ответ, а её счёт утверждается нулём. Что эта ось способна упасть, проба
+показывает сама — контролем «поверхность перепутана» на полосе `read`.
+
 # Чем это слабее прогона против стенда — названо прямо
 
 Исполняется НАСТОЯЩИЙ newman по НАСТОЯЩЕЙ сгенерированной коллекции, но ответы даёт
@@ -56,6 +71,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -63,7 +79,24 @@ import tempfile
 import threading
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+import gen  # noqa: E402  — признак стража адреса и имя собственного фронта: один источник
+
 ROOT = Path(__file__).resolve().parents[1]
+
+# Две поверхности, между которыми набор выбирает адрес шага: край платформы и
+# собственный публичный фронт службы. Имя второй — у генератора, копии здесь нет.
+EDGE_VAR = "baseUrl"
+SURFACE_VARS = (EDGE_VAR, gen.OWN_FRONT_VAR)
+_URL_HOST_VAR = re.compile(r"^\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
+# Текст латиницей намеренно: тело уходит через json.dumps с экранированием, и
+# кириллица доехала бы до текста падения экранированными кодами символов.
+WRONG_SURFACE_TOKEN = "WRONG surface"
+_WRONG_SURFACE = (421, {"code": 13,
+                        "message": "selftest: request reached the " + WRONG_SURFACE_TOKEN +
+                                   " - the collection addresses this step to another front",
+                        "details": []})
 COLLECTION = ROOT / "collections" / "authz-deny.postman_collection.json"
 # Второй набор с теми же полосами. Он НЕ «такой же по аналогии» — его помощник живёт
 # своей копией в cases/authz-sa-apitoken.py, поэтому и проверяется отдельно: паритет,
@@ -152,12 +185,17 @@ SA_LANES = {
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     reply = (200, {})
+    hits = 0
 
     def log_message(self, *_args):
         return
 
+    def _reply(self):
+        return _Handler.reply
+
     def _send(self):
-        code, payload = _Handler.reply
+        type(self).hits += 1
+        code, payload = self._reply()
         raw = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -176,6 +214,42 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_PATCH(self):  # noqa: N802
         return self.do_POST()
+
+
+class _WrongSurfaceHandler(_Handler):
+    """Вторая поверхность пары: любое обращение сюда — находка пробы, а не ответ кейсу."""
+
+    hits = 0
+
+    def _reply(self):
+        return _WRONG_SURFACE
+
+
+def _surface(folder: str, collection: Path) -> str:
+    """Переменная поверхности, на которую уходят шаги кейса, — по коллекции, а не по памяти.
+
+    Страж адреса (`gen.require_env_url`) ставит признак первой строкой своего блока и
+    переписывает адрес шага на названную переменную; шаг без стража уходит по
+    переменной, с которой начинается его адрес.
+    """
+    coll = json.loads(collection.read_text())
+    found: set[str] = set()
+    for item in coll["item"]:
+        if item["name"] != folder:
+            continue
+        for step in item.get("item", []):
+            guarded = {line[len(gen._ENV_URL_MARK):].split()[0]
+                       for event in step.get("event", []) if event.get("listen") == "prerequest"
+                       for line in event["script"]["exec"] if line.startswith(gen._ENV_URL_MARK)}
+            if not guarded:
+                m = _URL_HOST_VAR.match(step["request"]["url"]["raw"])
+                guarded = {m.group(1) if m else step["request"]["url"]["raw"]}
+            found |= guarded
+    if len(found) != 1 or not found <= set(SURFACE_VARS):
+        sys.exit(f"selftest: шаги кейса {folder!r} адресуются к {sorted(found)}, а проба "
+                 f"изображает ровно одну поверхность из {list(SURFACE_VARS)} — предпосылка "
+                 f"сломана, вердикта нет")
+    return found.pop()
 
 
 def _folder(prefix: str, collection: Path = COLLECTION) -> str:
@@ -207,10 +281,13 @@ def _legacy_collection(dst: Path, folder: str, collection: Path = COLLECTION) ->
     return dst
 
 
-def _run(collection: Path, folder: str, base_url: str, report: Path) -> dict:
+def _run(collection: Path, folder: str, surface: str, urls: dict, report: Path) -> dict:
+    """Прогнать кейс: подставной сервер стоит на `surface`, вторая поверхность — на чужом."""
+    surfaces = [arg for var in SURFACE_VARS
+                for arg in ("--env-var", f"{var}={urls['right' if var == surface else 'wrong']}")]
     subprocess.run(
         ["newman", "run", str(collection), "--folder", folder,
-         "--env-var", f"baseUrl={base_url}",
+         *surfaces,
          "--env-var", f"projectA1Id={PROJECT_A1}",
          "--env-var", "projectA2Id=prj00000000000000003",
          "--env-var", "projectB1Id=prj00000000000000002",
@@ -244,8 +321,11 @@ def main() -> int:
         return 2
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    base_url = f"http://127.0.0.1:{server.server_address[1]}"
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    wrong = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _WrongSurfaceHandler)
+    urls = {"right": f"http://127.0.0.1:{server.server_address[1]}",
+            "wrong": f"http://127.0.0.1:{wrong.server_address[1]}"}
+    for srv in (server, wrong):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     problems: list[str] = []
     print(f"selftest ALLOW-полос матрицы iam — полос {len(LANES) + len(SA_LANES)} "
@@ -256,16 +336,19 @@ def main() -> int:
         lanes += [(SA_COLLECTION, lane, spec) for lane, spec in SA_LANES.items()]
         for collection, lane, (prefix, healthy, broken, token) in lanes:
             folder = _folder(prefix, collection)
+            surface = _surface(folder, collection)
+            strays = _WrongSurfaceHandler.hits
 
             _Handler.reply = healthy
-            ok = _run(collection, folder, base_url, tmpd / f"{lane}-ok.json")
+            ok = _run(collection, folder, surface, urls, tmpd / f"{lane}-ok.json")
             _Handler.reply = broken
-            bad = _run(collection, folder, base_url, tmpd / f"{lane}-bad.json")
+            bad = _run(collection, folder, surface, urls, tmpd / f"{lane}-bad.json")
             legacy = _legacy_collection(tmpd / f"{lane}-legacy.json", folder, collection)
             _Handler.reply = broken
-            leg = _run(legacy, folder, base_url, tmpd / f"{lane}-legacy-report.json")
+            leg = _run(legacy, folder, surface, urls, tmpd / f"{lane}-legacy-report.json")
+            strays = _WrongSurfaceHandler.hits - strays
 
-            print(f"  [{lane}] {prefix}")
+            print(f"  [{lane}] {prefix}  (поверхность {surface})")
             print(f"      здоровый ответ  : утверждений {ok['assertions']['total']}, "
                   f"упало {ok['assertions']['failed']}")
             print(f"      дефект          : утверждений {bad['assertions']['total']}, "
@@ -295,15 +378,21 @@ def main() -> int:
                 problems.append(f"[{lane}] прежняя форма на дефекте ПОКРАСНЕЛА "
                                 f"({leg['failures']}) — значит предмет issue #668 воспроизведён "
                                 f"неверно и вывод об усилении не обоснован")
+            if strays != 0:
+                problems.append(f"[{lane}] обращений к чужой поверхности {strays} — кейс ушёл "
+                                f"не на {surface}, и его ответы давал не тот фронт")
 
         # «Право снято» — инъекция, которую требует #710. Здоровый ответ уже проверен
         # выше (полосы op-*-710), поэтому здесь спрашивается ровно одно: краснеет ли
         # строка, когда край отвечает отказом в правах, и называет ли она отказ.
         for lane, prefix in RIGHT_REMOVED.items():
             folder = _folder(prefix)
+            surface = _surface(folder, COLLECTION)
+            strays = _WrongSurfaceHandler.hits
             _Handler.reply = (403, _DENIED)
-            denied = _run(COLLECTION, folder, base_url, tmpd / f"{lane}-denied.json")
-            print(f"  [право снято] {prefix}")
+            denied = _run(COLLECTION, folder, surface, urls, tmpd / f"{lane}-denied.json")
+            strays = _WrongSurfaceHandler.hits - strays
+            print(f"  [право снято] {prefix}  (поверхность {surface})")
             print(f"      403 отказ       : утверждений {denied['assertions']['total']}, "
                   f"упало {denied['assertions']['failed']}")
             for f in denied["failures"]:
@@ -317,8 +406,37 @@ def main() -> int:
             elif not any("permission denied" in f for f in denied["failures"]):
                 problems.append(f"[право снято/{lane}] кейс упал, но текст падения не называет "
                                 f"отказ в правах: {denied['failures']}")
+            if strays != 0:
+                problems.append(f"[право снято/{lane}] обращений к чужой поверхности {strays} — "
+                                f"отказ в правах давал не тот фронт")
+
+        # Контроль оси поверхности: здоровый ответ, поданный на ЧУЖУЮ переменную пары,
+        # обязан покраснеть и назвать поверхность. Без него нулевой счёт чужой
+        # поверхности выше неотличим от сервера, до которого не доходит ничего.
+        prefix, healthy = LANES["read"][0], LANES["read"][1]
+        folder = _folder(prefix)
+        swapped = next(v for v in SURFACE_VARS if v != _surface(folder, COLLECTION))
+        strays = _WrongSurfaceHandler.hits
+        _Handler.reply = healthy
+        mixed = _run(COLLECTION, folder, swapped, urls, tmpd / "surface-swapped.json")
+        strays = _WrongSurfaceHandler.hits - strays
+        print(f"  [поверхность перепутана] {prefix}  (подставной сервер на {swapped})")
+        print(f"      здоровый ответ  : утверждений {mixed['assertions']['total']}, "
+              f"упало {mixed['assertions']['failed']}, обращений к чужой поверхности {strays}")
+        for f in mixed["failures"]:
+            print(f"          падение: {f}")
+        if strays == 0:
+            problems.append("[поверхность перепутана] до чужой поверхности не дошло ни одного "
+                            "запроса — контроль не построен, нулевой счёт выше ничего не значит")
+        if mixed["assertions"]["failed"] == 0:
+            problems.append("[поверхность перепутана] кейс ЗЕЛЁНЫЙ на чужой поверхности — "
+                            "проба неспособна заметить, что ответ дал не тот фронт")
+        elif not any(WRONG_SURFACE_TOKEN in f for f in mixed["failures"]):
+            problems.append(f"[поверхность перепутана] кейс упал, но текст падения не называет "
+                            f"поверхность: {mixed['failures']}")
 
     server.shutdown()
+    wrong.shutdown()
 
     if problems:
         print("\nselftest: FAIL")
@@ -327,7 +445,8 @@ def main() -> int:
         return 1
     print("\nselftest: OK — все полосы обоих наборов различают здоровый ответ и дефект, "
           "называют дефект в тексте падения, прежняя форма не видела ни одного из них, "
-          "а строки #710 краснеют при снятом праве")
+          "строки #710 краснеют при снятом праве, каждый кейс получил ответы своей "
+          "поверхности, а перепутанная поверхность краснеет")
     return 0
 
 
