@@ -37,10 +37,12 @@ var notifyTypeShape = map[string]map[string]string{
 // notifyTypeShapeFindings возвращает расхождения разобранной модели с формой
 // notifyTypeShape и число осмотренных типов модели.
 //
-// Кроме формы самих трёх типов проверяется их ИЗОЛЯЦИЯ: субъект `service` не
-// назначается ни одному отношению чужого типа, а ни одно отношение не ходит
-// указателем через три типа. Иначе узкая форма здесь сочеталась бы с широкой
-// дверью рядом — и право уведомлений достигалось бы каскадом.
+// Кроме формы самих трёх типов проверяется их ИЗОЛЯЦИЯ: ни один из трёх типов
+// не стоит в прямом списке отношения чужого типа. Это же закрывает каскад
+// `x from p` через тип уведомлений: указатель `p` — отношение того же чужого
+// типа, и цель каскада резолвится только из его прямого списка
+// (authzplan.Model.PointerTargets). Иначе узкая форма здесь сочеталась бы с
+// широкой дверью рядом — и право уведомлений достигалось бы каскадом.
 func notifyTypeShapeFindings(m *authzplan.Model) (findings []string, typesSeen int) {
 	names := make([]string, 0, len(notifyTypeShape))
 	for n := range notifyTypeShape {
@@ -86,11 +88,6 @@ func notifyTypeShapeFindings(m *authzplan.Model) (findings []string, typesSeen i
 		}
 		for _, r := range typ.Relations {
 			for _, term := range r.Terms {
-				if term.Kind == authzplan.TermTTU {
-					if _, hit := notifyTypeShape[term.TTUPointer]; hit {
-						findings = append(findings, fmt.Sprintf("%s#%s: каскад через %s (строка %d)", typ.Name, r.Name, term.TTUPointer, r.Line))
-					}
-				}
 				for _, d := range term.Direct {
 					if _, hit := notifyTypeShape[d.Type]; hit {
 						findings = append(findings, fmt.Sprintf("%s#%s: субъект %s вне типов уведомлений (строка %d)", typ.Name, r.Name, d.Type, r.Line))
@@ -188,6 +185,23 @@ func TestNotifyTypeShapeProbeRedsOnEachWideningAndStaysSilentOnTheLawfulForm(t *
 			}
 		})
 	}
+
+	// Каскад чужого типа через тип уведомлений (`x from p`, `p: [notification_feed]`)
+	// ловится проверкой прямого типа у отношения-указателя: указатель — отношение
+	// ТОГО ЖЕ типа, и цель каскада резолвится только из его прямого списка
+	// (authzplan.compile, ветка TermTTU). Близнец отличается одним фактом —
+	// указатель ведёт в `project`.
+	t.Run("чужой тип каскадирует через ленту", func(t *testing.T) {
+		const smuggled = "\ntype smuggled\n  relations\n    define feed: [%s]\n    define viewer: %s from feed\n"
+		twin, _ := notifyTypeShapeFindings(parse(t, notifyTypesLawfulBlock+fmt.Sprintf(smuggled, "project", "viewer")))
+		if len(twin) != 0 {
+			t.Fatalf("законный близнец (указатель в project) дал находки: %v", twin)
+		}
+		got, _ := notifyTypeShapeFindings(parse(t, notifyTypesLawfulBlock+fmt.Sprintf(smuggled, "notification_feed", "reader")))
+		if !strings.Contains(strings.Join(got, "\n"), "smuggled#feed: субъект notification_feed") {
+			t.Fatalf("каскад через notification_feed не найден: %v", got)
+		}
+	})
 
 	t.Run("чужой тип назначает service", func(t *testing.T) {
 		m := parse(t, notifyTypesLawfulBlock+"\ntype smuggled\n  relations\n    define viewer: [service]\n")
