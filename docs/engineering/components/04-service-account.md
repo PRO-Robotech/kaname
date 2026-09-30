@@ -7,11 +7,11 @@
 client_credentials** по выпущенным SA-ключам (private_key_jwt,
 см. [`05-sa-keys.md`](05-sa-keys.md)).
 
-У каждого SA-ключа есть своя строка реестра в kaname. Зеркало OAuth-клиента у
-внешнего поставщика заводится **только на непереведённом контуре** — см.
-[`architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md);
-на переведённом обмен идёт на токен-эндпоинте платформы, и зеркала нет вовсе.
-kaname держит только запись с id, именем и account_id.
+У каждого SA-ключа есть своя строка реестра в kaname, и кроме неё у ключа нет
+ничего: обменивает его токен-эндпоинт платформы, а регистрации у внешнего
+поставщика выдача не заводит (kaname#362) — см. [`05-sa-keys.md`](05-sa-keys.md)
+и [`architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md).
+Сама учётка — запись в базе службы; её поля — §Доменная модель.
 
 **Use-cases:**
 - Сервисная учетка для CI/CD pipeline (терраформ применяет ресурсы как SA).
@@ -23,9 +23,11 @@ kaname держит только запись с id, именем и account_id.
 - Имя уникально per-Account.
 - SA-ключи (`sa_keys`) — отдельный sub-resource (см. [`05-sa-keys.md`](05-sa-keys.md)).
 - `enabled=false` закрывает КАЖДЫЙ путь выдачи нового токена или ключа
-  (token-hook `client_credentials`, федеративная ассерция, `SAKeyService.Issue`,
-  docker-token). Уже выданные access-токены НЕ инвалидируются — они доживают
-  свой срок; останавливается чеканка новых.
+  (обмен на токен-эндпоинте платформы, `SAKeyService.Issue`, docker-token) и
+  снимает уже выданные: переход в `false` пишет отсечку по учётке (триггер
+  `service_account_deactivation_cuts_minted_tokens`), и правило отзыва наших
+  токенов (`internal/tokenrevocation`) отвергает на предъявлении токен, выпущенный
+  учётке раньше отсечки.
 
 ## Доменная модель
 
@@ -45,11 +47,11 @@ kaname держит только запись с id, именем и account_id.
 
 ```
 accounts(id) ──RESTRICT── service_accounts.account_id
-service_accounts(id) ──CASCADE── service_account_oauth_clients.service_account_id
+service_accounts(id) ──RESTRICT── service_account_oauth_clients.sva_id
 service_accounts(id) ──RESTRICT── access_bindings.subject_id (когда subject_type='service_account')
 ```
 
-## Sequence diagram — Create + первый Issue ключа
+## Sequence diagram — Create
 
 ```mermaid
 sequenceDiagram
@@ -58,7 +60,6 @@ sequenceDiagram
     participant GW as api-gateway
     participant IAM as kaname :9090
     participant DB as Postgres
-    participant Hydra as Ory Hydra
     participant Out as fga_outbox
 
     Admin->>GW: POST /iam/v1/serviceAccounts<br/>{"account_id":"acc","name":"ci-pipeline"}
@@ -69,24 +70,10 @@ sequenceDiagram
     IAM->>DB: COMMIT
     IAM-->>GW: Operation
     GW-->>Admin: 200 {operationId} → poll → {sva_id}
-
-    Note over Admin,Hydra: ─── Создаем первый OAuth-ключ ───
-    Admin->>GW: POST /iam/v1/serviceAccounts/{sva_id}/keys
-    GW->>IAM: SAKeyService.Issue
-    IAM->>DB: BEGIN
-    IAM->>DB: INSERT operations (done=false)
-    IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"], token_endpoint_auth_method:"private_key_jwt", audience:[...]}
-    Hydra-->>IAM: 201 {client_id, client_secret}
-    IAM->>DB: INSERT service_account_oauth_clients (sva_id, public_key_pem, declared_audiences)
-    IAM->>DB: UPDATE operations done=true,<br/>response={client_id, client_secret}
-    IAM->>DB: COMMIT
-    IAM-->>GW: Operation (done=true, response=IssueSAKeyResponse)
-    GW-->>Admin: 200 {client_id, client_secret}<br/>!! Это первый и последний раз secret показан !!
-
-    Note over Admin: ─── OpsResponseRedactor ───
-    IAM->>DB: UPDATE operations<br/>SET response_data=redact(response, "client_secret")<br/>WHERE id=$opId
-    Note over DB: При повторном GET /operations — client_secret уже "<redacted>"
 ```
+
+Выпуск первого ключа — диаграмма «Issue» в [`05-sa-keys.md`](05-sa-keys.md).
+Второй её копии здесь нет: две диаграммы одного выпуска расходятся молча.
 
 ## API surface
 
@@ -135,21 +122,15 @@ SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys
 
 ## Конфигурация
 
-Опись настроек службы одна — справочник посадки
-`docs/content/install/configuration.mdx`; второй копии здесь не заводится.
+Своих ключей настройки у служебной учётки нет: сборка её use-case'ов
+(`cmd/kaname/wiring.go`, блок `ServiceAccountService`) не передаёт им ни одной
+величины настройки, и ни создание, ни правка, ни отключение, ни снятие учётки
+ключом настройки не выбираются.
 
-Ручки поставщика личности, у которого выпуск SA-ключа регистрирует OAuth-клиент
-учётки (см. `05-sa-keys.md`), живут в секции `authn`
-(`internal/apps/kaname/config/config.go`, тип `AuthNConfig`). У
-административного предъявителя YAML-ключа нет: значение приходит только
-переменной окружения, чьё ИМЯ объявляет ключ `authn.hydra-admin-token-env`, и в
-файл посадки секрет не пишется.
-
-Ключи, названные описью в каталоге `docs/`, сверяет гейт
-`TestDocumentedSettingKeysExistInTheSettingsTree`
-(`internal/check/documented_setting_key_exists.go`): всякий ключ из колонки
-ключа настройки существует в дереве настроек, а множество ключей берётся у
-структуры `config.Config`, а не перечнем.
+Выдачу её ключей настраивают ключи, перечисленные в
+[`05-sa-keys.md`](05-sa-keys.md) §Конфигурация. Справочник посадки —
+`docs/content/install/configuration.mdx`, перечень обязательных величин —
+`INSTALL.md` §3; описи настроек здесь не заводится.
 
 ## Как пользоваться
 
@@ -195,8 +176,8 @@ grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
 | Сценарий                                          | gRPC code             | HTTP | Текст                                                    |
 |---------------------------------------------------|------------------------|------|----------------------------------------------------------|
 | Имя занято в Account                              | `ALREADY_EXISTS`       | 409  | `ServiceAccount with name ci-pipeline already exists`    |
-| Delete при active key                             | `FAILED_PRECONDITION`  | 400  | `service_account has active oauth clients`               |
-| Delete при active AccessBinding                   | `FAILED_PRECONDITION`  | 400  | `service_account is referenced by access_bindings`       |
+| Delete при оставшейся строке ключа                | `FAILED_PRECONDITION`  | 400  | `resource is still referenced by other resources; release those references before deleting it` |
+| Delete при active AccessBinding                   | `FAILED_PRECONDITION`  | 400  | `ServiceAccount <id> has active access bindings and cannot be deleted` |
 
 ## Как воспроизвести локально
 
@@ -223,26 +204,31 @@ go test -short -count=1 -timeout 120s -run TestServiceAccount \
 - **Use-cases:** `internal/apps/kaname/api/service_account/{create,get,list,update,delete,set_enabled}.go`.
 - **Handler:** `internal/apps/kaname/api/service_account/handler.go`.
 - **Repo:** `internal/repo/kaname/pg/service_account_repo.go`.
-- **Интеграция с поставщиком:** SA сам по себе к поставщику не ходит — только
-  IssueSAKey (см. [`05-sa-keys.md`](05-sa-keys.md)). Сам SA — просто запись в БД.
+- **Внешнего поставщика нет ни у учётки, ни у её ключей:** выпуск пишет строку
+  реестра, отзыв её снимает, и вызова за пределы службы нет ни в одном из них
+  (шапка `internal/apps/kaname/api/sa_keys/usecases.go`; подробно —
+  [`05-sa-keys.md`](05-sa-keys.md)). Сама учётка — запись в БД.
 - **DB:** `service_accounts(id, account_id, name, description, labels, enabled, created_at)`.
 - **Indexes:** PK, UNIQUE `service_accounts_account_name_unique`, INDEX по account/project.
 - **CHECK:** имя через `labels_valid`-style helper.
 
 ## Gotchas / известные ограничения
 
-- **`enabled=false` НЕ revokes уже выданные access_tokens** — они валидны до
-  expires_at (обычно 1h). Только новые requests блокируются. Для немедленного
-  отзыва — Delete сервис-аккаунта или revoke его OAuth-clients в Hydra.
+- **Две отсечки, у каждой свой предмет.** `Disable` снимает токены учётки, по
+  какому бы её ключу они ни были выпущены (см. §Ограничения). `SAKeyService.Revoke`
+  снимает то, что отчеканено по одному ключу, и учётку не трогает (см.
+  [`05-sa-keys.md`](05-sa-keys.md), диаграмма «Revoke»).
 - **Проектной области у SA нет.** Поле `project_id` снято с контракта и из схемы
   (миграция 0071): его не принимал ни один запрос, не писала ни одна запись и не
   выбирало чтение агрегата — значение было пустым всегда и у всех, а claim,
   который из него выводился, не читал никто. Понадобятся проектные служебные
   учётки — их заводит отдельная подсистема со своей приёмкой.
-- **Delete cascade на oauth_clients** — при Delete SA удаляются и записи в
-  `service_account_oauth_clients` (через CASCADE FK), но **в Hydra** OAuth
-  clients остаются — sa_keys.RevokeUseCase должен очистить их явно (см.
-  [`05-sa-keys.md`](05-sa-keys.md)).
+- **Учётку с ключами не снять.** Внешний ключ
+  `service_account_oauth_clients_sva_fk` объявлен `ON DELETE RESTRICT`
+  (`internal/migrations/0001_initial.sql`): `Delete` учётки, у которой осталась
+  хоть одна строка ключа, завершается `FAILED_PRECONDITION`, поэтому ключи
+  отзываются до него (`SAKeyService.Revoke`, [`05-sa-keys.md`](05-sa-keys.md)).
+  Снаружи службы снимать нечего — регистрации у внешнего поставщика у ключа нет.
 
 ## Связанные компоненты
 
