@@ -38,6 +38,9 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // providerCompensationChannel — канал, который снимается. Выписан литералом в
@@ -45,10 +48,19 @@ import (
 // это отсутствие и сделало канал беспотребительским.
 const providerCompensationChannel = "kaname_provider_compensation_outbox"
 
-// providerCompensationNotifyLeavesVersion — версия миграции снятия. Откат ниже
-// неё обязан вернуть триггер: иначе «после наката канала нет» зеленело бы и на
-// схеме, которая его не производила никогда.
+// providerCompensationNotifyLeavesVersion — версия миграции снятия.
 const providerCompensationNotifyLeavesVersion int64 = 20260930090111
+
+// providerCompensationNotifyBelowVersion — граница «до снятия»: подъём до неё и
+// откат к ней берут каждую миграцию цепи, чья версия не выше, и ни одной выше.
+//
+// Граница выписана ЧИСЛОМ, а не взята из имени файла снятия, и это несущее.
+// Вычисление из файла падало бы на дереве, где файла ещё нет, строкой «файла в
+// цепи нет» — отказом предпосылки, а не утверждения: «проверять нечего» вместо
+// «строение стоит». Число же законно на любом дереве: там, где снятия нет, подъём
+// до границы и подъём до конца дают одну схему, и проба краснеет на том, что
+// утверждает, — строение уведомления после наката стоит.
+const providerCompensationNotifyBelowVersion = providerCompensationNotifyLeavesVersion - 1
 
 // providerCompensationNotifyFunctionPresent — жива ли функция триггера. Функция
 // без триггера ничего не шлёт, но остаётся в схеме объявлением механизма,
@@ -111,42 +123,106 @@ func TestIntegration_ProviderCompensationChannelHasNoProducerLeft(t *testing.T) 
 			"не таблица, чей остаток держат видимым перепись и уборщик")
 }
 
-// TestIntegration_ProviderCompensationNotifyRollsBackAndReapplies — откат
-// миграции снятия возвращает триггер и его функцию, повторный накат снимает их
-// снова.
+// providerCompensationNotifyStructure — строение уведомления очереди, как его
+// печатает каталог: определение каждого пользовательского триггера очереди
+// (`pg_get_triggerdef`) и определение функции уведомления (`pg_get_functiondef`)
+// — имя, подпись, язык и тело дословно. Пустой перечень — строения нет.
 //
-// Без отката «после наката канала нет» было бы неотличимо от «канала не было
-// никогда»: утверждение держит только пара, в которой одна сторона ПРОИЗВОДИТ
-// канал.
+// Спрашиваются ВСЕ пользовательские триггеры очереди, а не триггер под прежним
+// именем: откат, вернувший триггер под другим именем или на другое событие,
+// иначе совпал бы с прежним строением молча.
+func providerCompensationNotifyStructure(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rows, err := db.Query(`
+		SELECT 'trigger ' || pg_get_triggerdef(tg.oid)
+		  FROM pg_trigger tg
+		 WHERE tg.tgrelid = to_regclass('kaname.provider_compensation_outbox')
+		   AND NOT tg.tgisinternal
+		UNION ALL
+		SELECT 'function ' || pg_get_functiondef(p.oid)
+		  FROM pg_proc p
+		  JOIN pg_namespace n ON n.oid = p.pronamespace
+		 WHERE n.nspname = 'kaname' AND p.proname = 'provider_compensation_outbox_notify'
+		 ORDER BY 1`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	var facts []string
+	for rows.Next() {
+		var fact string
+		require.NoError(t, rows.Scan(&fact))
+		facts = append(facts, fact)
+	}
+	require.NoError(t, rows.Err())
+	return facts
+}
+
+// providerCompensationNotifyAt — пустая БД, поднятая по цепи iam до названной
+// версии включительно.
+func providerCompensationNotifyAt(t *testing.T, version int64) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", pgtest.NewEmptyDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	goose.SetLogger(goose.NopLogger())
+	require.NoError(t, goose.UpTo(db, ".", version), "цепь обязана подняться до версии %d", version)
+	return db
+}
+
+// TestIntegration_ProviderCompensationNotifyRollsBackAndReapplies — после наката
+// строения уведомления нет; откат ниже снятия возвращает его ДОСЛОВНО таким,
+// каким его оставил свод; повторный накат снимает его снова, не тронув очередь.
+//
+// Утверждения держатся ПАРОЙ, и ни одно не стоит без другого: «после наката
+// строения нет» зеленело бы и на схеме, которая его не производила никогда, а
+// «после отката строение прежнее» — на откате, которому нечего было откатывать.
+// Вместе они говорят то, что нужно: строение сняла миграция выше границы, и её
+// откат вернул его без расхождения.
+//
+// Эталон берётся у той же цепи, остановленной на границе, а не выписывается
+// литералом: сравнение идёт с тем, что оставил свод, в любой редакции свода.
+//
+// Предпосылок у пробы две, и обе исполнимы на любом дереве, где есть свод:
+// эталон непуст и называет канал. Отсутствие миграции снятия предпосылкой НЕ
+// является — на таком дереве проба исполняется целиком и краснеет на
+// утверждениях о строении после наката.
 func TestIntegration_ProviderCompensationNotifyRollsBackAndReapplies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("пропуск интеграционной пробы (нужен Docker)")
 	}
+
+	// Эталон — строение на границе «до снятия».
+	below := providerCompensationNotifyAt(t, providerCompensationNotifyBelowVersion)
+	want := providerCompensationNotifyStructure(t, below)
+	t.Logf("эталон на границе %d: фактов строения %d", providerCompensationNotifyBelowVersion, len(want))
+	require.NotEmpty(t, want,
+		"эталон пуст: на границе нет ни триггера, ни функции уведомления — сравнивать откат не с чем")
+	require.Contains(t, notifyChannelsProducedBy(t, below), providerCompensationChannel,
+		"эталон не производит канал: сравнение отката с ним ничего не утверждало бы о канале")
+
 	db := freshIamSchema(t)
 
-	steps := 0
-	for {
-		v, err := goose.GetDBVersion(db)
-		require.NoError(t, err)
-		if v < providerCompensationNotifyLeavesVersion {
-			break
-		}
-		require.NoError(t, goose.Down(db, "."), "откат обязан проходить")
-		steps++
-	}
-	require.Positive(t, steps,
-		"откат не сделал ни шага: миграции снятия в цепи нет — утверждения ниже беспредметны")
+	// Утверждение 1 — после наката строения нет.
+	assert.Empty(t, providerCompensationNotifyStructure(t, db),
+		"после наката строение уведомления стоит: триггер либо функция очереди компенсаций "+
+			"пережили снятие (kaname#363)")
+	assert.NotContains(t, notifyChannelsProducedBy(t, db), providerCompensationChannel,
+		"после наката канал производится")
 
-	assert.Contains(t, notifyChannelsProducedBy(t, db), providerCompensationChannel,
-		"после отката канал не производится: откат не вернул триггер")
-	assert.True(t, providerCompensationNotifyFunctionPresent(t, db),
-		"после отката функции уведомления нет: откат вернул не то строение")
+	// Утверждение 2 — откат к границе возвращает строение дословно.
+	require.NoError(t, goose.DownTo(db, ".", providerCompensationNotifyBelowVersion), "откат обязан проходить")
+	assert.Equal(t, want, providerCompensationNotifyStructure(t, db),
+		"откат обязан вернуть строение уведомления дословно таким, каким его оставил свод")
 
+	// Утверждение 3 — повторный накат снимает строение снова и не трогает очередь.
 	require.NoError(t, goose.Up(db, "."), "повторный накат обязан проходить")
+	assert.Empty(t, providerCompensationNotifyStructure(t, db),
+		"после повторного наката строение уведомления стоит снова")
 	assert.NotContains(t, notifyChannelsProducedBy(t, db), providerCompensationChannel,
 		"после повторного наката канал производится снова")
-	assert.False(t, providerCompensationNotifyFunctionPresent(t, db),
-		"после повторного наката функция уведомления осталась")
 	assert.True(t, providerCompensationQueuePresent(t, db),
 		"повторный накат снял очередь")
 }
