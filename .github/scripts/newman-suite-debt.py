@@ -149,8 +149,8 @@ CFG_RE = re.compile(r"pm\.environment\.get\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*BaseU
 EDGE_VARS = frozenset({"baseUrl", "internalBaseUrl", "externalBaseUrl"})
 # Переменные адреса СОБСТВЕННЫХ HTTP-поверхностей службы — те, что автономный
 # стенд производит сам: два REST-фронта и слушатель полосы входа паролем (Ф3,
-# kacho#1269; поднимается посадкой `own` — стенд чарта с ручкой
-# `KANAME_STAND_IDENTITY_PROVIDER=own`, посев `seed_login_lane.py`). Ярлык поверхности у трёх
+# kacho#1269; поднимается посадкой `own` — стенд чарта, задание `chart-own`,
+# посев `seed_login_lane.py`). Ярлык поверхности у трёх
 # один — он контракт с посевом стенда (`--minted-surface`), а не описание порта.
 OWN_VARS = frozenset({"ownRestBaseUrl", "ownInternalRestBaseUrl", "loginLaneBaseUrl"})
 # Поверхности, которые служба поднимает, но чей ОТВЕТ зависит от недостижимого
@@ -1128,12 +1128,12 @@ SCENARIO_DEBT: ScenarioDebt = {
     "IC-SECRET-10": ("снятие не оставляет годного секрета; " + _IC_SECRET_OWN_DOOR,
                      _HOLDER_SERVICE_ON_EDGE),
     # Условие позиции — стенд посадки `external` — не создаёт ни один стенд службы:
-    # боевой профиль объявляет `identityProvider: own` (`deploy/values.prod.yaml`),
-    # задание `chart` набора не гоняет, а коллекция `iam-interactive-client`, где
-    # позиции место по DoD, не гоняется ни одним шагом.
+    # посадка у службы одна, `own` (ключ посадки снят), стенд чарта один
+    # (`chart-own`), а коллекция `iam-interactive-client`, где позиции место по
+    # DoD, не гоняется ни одним шагом.
     "IC-SECRET-11": ("посадка `external`: секрета нет, способ `none`. Стенда этой посадки с "
-                     "прогоном набора у службы нет: боевой профиль объявляет "
-                     "`identityProvider: own`, задание `chart` набора не гоняет, коллекция "
+                     "прогоном набора у службы нет: посадка у службы одна, `own` (ключ "
+                     "посадки снят), стенд чарта один (`chart-own`), коллекция "
                      "`iam-interactive-client` не гоняется ни одним шагом",
                      _HOLDER_EXTERNAL_LANDING_REMOVAL),
 }
