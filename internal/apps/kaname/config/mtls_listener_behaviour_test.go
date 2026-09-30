@@ -17,15 +17,16 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-// TestMTLS_Hooks_DefaultOffServesPlaintext — behavioural proof that the
-// DEFAULT-OFF hooks edge yields a PLAINTEXT listener byte-identical to today: a
+// TestMTLS_Metrics_DefaultOffServesPlaintext — behavioural proof that the
+// DEFAULT-OFF metrics edge yields a PLAINTEXT listener byte-identical to today: a
 // plain HTTP client (no TLS) reaches it. Mirrors how serve.go wires the listener
-// (build *tls.Config; nil → no tls.NewListener wrap).
-func TestMTLS_Hooks_DefaultOffServesPlaintext(t *testing.T) {
+// (build *tls.Config; nil → no tls.NewListener wrap). The probe was written for
+// the hooks edge of the external identity provider, gone with it (kaname#363).
+func TestMTLS_Metrics_DefaultOffServesPlaintext(t *testing.T) {
 	m, err := config.LoadMTLS()
 	require.NoError(t, err)
 
-	tlsCfg, err := m.HooksServerTLSConfig()
+	tlsCfg, err := m.MetricsServerTLSConfig()
 	require.NoError(t, err)
 	require.Nil(t, tlsCfg, "default-off → nil (no TLS wrap)")
 
@@ -47,7 +48,7 @@ func TestMTLS_Hooks_DefaultOffServesPlaintext(t *testing.T) {
 	// Plain HTTP (no TLS) succeeds → confirms plaintext transport unchanged.
 	cl := &http.Client{Timeout: 2 * time.Second}
 	resp, err := cl.Get("http://" + ln.Addr().String() + "/")
-	require.NoError(t, err, "default-off hooks listener must accept plaintext HTTP")
+	require.NoError(t, err, "default-off metrics listener must accept plaintext HTTP")
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

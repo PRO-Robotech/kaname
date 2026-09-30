@@ -76,15 +76,14 @@ func (r *LoginMethodRepo) MarkEmailVerified(ctx context.Context) error { return 
 // ─── Полосы выдачи спрашивают правило (§9 п. 15) ────────────────────────────
 
 // issuanceLanes — полосы выдачи удостоверения человеку. Знаменатель — виды
-// выдачи токен-эндпоинта (машинные и словарь церемонии фундамента), хуки
-// выпуска и обновления, полоса базового секрета.
+// выдачи токен-эндпоинта (машинные и словарь церемонии фундамента) и полоса
+// базового секрета. Хуков выпуска и обновления внешнего поставщика, прежде
+// стоявших здесь, больше нет (kaname#363).
 var issuanceLanes = []check.IssuanceLane{
 	{Name: tokenpolicy.GrantTypeClientCredentials, File: "internal/apps/kaname/api/client_token/issue.go", Func: "weighCutoff"},
 	{Name: tokenpolicy.GrantTypeJWTBearer, File: "internal/apps/kaname/api/client_token/issue.go", Func: "weighCutoff"},
 	{Name: string(oauthceremony.GrantAuthorizationCode), File: "internal/ceremonyport/access_tokens.go", Func: "IssueAccessToken"},
 	{Name: string(oauthceremony.GrantRefreshToken), File: "internal/ceremonyport/access_tokens.go", Func: "IssueAccessToken"},
-	{Name: "хук выпуска", File: "internal/handler/iamhooks/token_hook_handler.go", Func: "revokedAtIssuance"},
-	{Name: "хук обновления", File: "internal/handler/iamhooks/refresh_hook_handler.go", Func: "userLevelRevoked"},
 	{Name: "базовый секрет", File: "internal/repo/kaname/pg/basic_credential_repo.go", Func: "ownerAdmission"},
 }
 

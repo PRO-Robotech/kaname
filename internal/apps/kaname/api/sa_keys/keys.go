@@ -3,10 +3,12 @@
 
 // keys.go — Phase 3a (private_key_jwt) keypair helpers for SA Keys.
 //
-// Generates ECDSA P-256 keypairs, encodes them as PKCS#8 / SPKI PEM, and
-// projects the public key to a JWK suitable for Hydra client registration.
-// The private key never persists in kaname DB; we only keep the public
-// PEM for rotation diagnostics and the algorithm string.
+// Generates ECDSA P-256 keypairs and encodes them as PKCS#8 / SPKI PEM. The
+// private key never persists in kaname DB; we keep only the public PEM (the
+// signature of `client_assertion` is checked against it) and the algorithm
+// string. A JWK projection used to be built here for the registration of the
+// client at the previous external issuer; that registration is gone
+// (kaname#362), and the projection with it.
 package sa_keys
 
 import (
@@ -14,28 +16,20 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-
-	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // generatedKey holds all artifacts produced by generateES256Key.
 type generatedKey struct {
 	PrivatePEM string
 	PublicPEM  string
-	JWK        clients.JWK
 	Algorithm  string
 }
 
-// generateES256Key mints a fresh ECDSA P-256 keypair, returning PKCS#8
-// PEM (private), SPKI PEM (public), and a JWK projection of the public
-// key with `alg=ES256`, `use=sig`, and the supplied `kid`.
-func generateES256Key(kid string) (generatedKey, error) {
-	if kid == "" {
-		return generatedKey{}, fmt.Errorf("kid required")
-	}
+// generateES256Key mints a fresh ECDSA P-256 keypair, returning PKCS#8 PEM
+// (private) and SPKI PEM (public) with `alg=ES256`.
+func generateES256Key() (generatedKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return generatedKey{}, fmt.Errorf("generate ecdsa p256: %w", err)
@@ -51,36 +45,9 @@ func generateES256Key(kid string) (generatedKey, error) {
 	privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER})
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
 
-	// P-256 coordinate size is 32 bytes; left-pad if the big.Int Bytes
-	// representation came back short.
-	xBytes := padLeft(priv.X.Bytes(), 32)
-	yBytes := padLeft(priv.Y.Bytes(), 32)
-
-	jwk := clients.JWK{
-		Kty: "EC",
-		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(xBytes),
-		Y:   base64.RawURLEncoding.EncodeToString(yBytes),
-		Kid: kid,
-		Alg: "ES256",
-		Use: "sig",
-	}
-
 	return generatedKey{
 		PrivatePEM: string(privPEM),
 		PublicPEM:  string(pubPEM),
-		JWK:        jwk,
 		Algorithm:  "ES256",
 	}, nil
-}
-
-// padLeft returns a `size`-byte slice with the input zero-padded on the
-// left. If `b` is already >= size it is returned unchanged.
-func padLeft(b []byte, size int) []byte {
-	if len(b) >= size {
-		return b
-	}
-	out := make([]byte, size)
-	copy(out[size-len(b):], b)
-	return out
 }

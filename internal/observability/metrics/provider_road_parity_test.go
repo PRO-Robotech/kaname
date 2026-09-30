@@ -62,22 +62,14 @@ type providerRoadCounter struct {
 // Запись, чьей дороги профиль больше не объявляет, — находка: утверждение о
 // наблюдаемости обязано истекать вместе со своим предметом.
 var roadsWithACounter = map[string]providerRoadCounter{
-	"ADMIN": {
-		Family: ProviderRoadOutcomesMetric,
-		Cell:   clients.ProviderRoadAdmin,
-		Why:    "выдача и отзыв ключа служебной учётки, интерактивный клиент, принудительный выход",
-	},
 	"TOKEN": {
 		Family: ProviderRoadOutcomesMetric,
 		Cell:   clients.ProviderRoadTokenExchange,
 		Why:    "обмен подписанного утверждения на токен у прежнего издателя",
 	},
-	"JWKS": {
-		Family: JWKSMirrorOutcomesMetric,
-		Why: "у зеркала набора ключей СВОЁ семейство и свой производитель: оно ведёт " +
-			"собственные счётчики и отдаётся коллектором. Метки дороги в нём нет — " +
-			"дорога у него одна by construction",
-	},
+	// Дороги набора ключей здесь нет: она снята вместе с зеркалом этого набора
+	// (kaname#361), и её ручек профиль больше не объявляет. Административной —
+	// тоже: она снята вместе с посадкой внешнего поставщика (kaname#363).
 }
 
 func TestIAM2491_EveryRoadTheProfileDeclaresHasACounter(t *testing.T) {
@@ -150,14 +142,12 @@ func adjudicateRoadParity(
 	return uncounted, silent, stale, counted
 }
 
-// providerRoadRowsOnTheWire строит ОБА семейства на свежем реестре и отдаёт
-// множество рядов вида `<семейство>/<значение метки road>`; для семейства без
-// метки дороги значение пусто.
+// providerRoadRowsOnTheWire строит семейство дорог на свежем реестре и отдаёт
+// множество рядов вида `<семейство>/<значение метки road>`.
 func providerRoadRowsOnTheWire(t *testing.T) map[string]bool {
 	t.Helper()
 	reg := NewRegistry()
 	reg.NewProviderRoadRecorder()
-	reg.NewJWKSMirrorCollector(func() JWKSMirrorCounts { return JWKSMirrorCounts{} })
 
 	// Собирается ПРОВОД, а не объявление: семейство обязано отдать ряд.
 	var gathered []*dto.MetricFamily

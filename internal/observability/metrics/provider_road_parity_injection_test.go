@@ -9,7 +9,10 @@ package metrics
 //
 // Пара «красное до · зелёное после» снята и на ЖИВОМ дереве: до починки гейт
 // назвал бы ADMIN и TOKEN («дорог объявлено 3 · со счётом 1»), после —
-// «3 · 3». Здесь то же свойство закреплено воспроизводимо, на синтетике.
+// «3 · 3». Дорога набора ключей с тех пор снята вместе с зеркалом (kaname#361),
+// административная — вместе с посадкой внешнего поставщика (kaname#363), и
+// живое дерево даёт «1 · 1». Здесь свойство закреплено воспроизводимо, на
+// синтетике.
 //
 // У КАЖДОГО нарушителя стоит ЗАКОННЫЙ БЛИЗНЕЦ — та же форма, отличающаяся
 // РОВНО ОДНИМ фактом.
@@ -18,28 +21,24 @@ import (
 	"testing"
 )
 
-// injProfileThreeRoads — ЗАКОННЫЙ БЛИЗНЕЦ: профиль, объявляющий дороги парами
+// injProfileOneRoad — ЗАКОННЫЙ БЛИЗНЕЦ: профиль, объявляющий дорогу парой
 // «адрес + якорь», ровно как боевой.
-const injProfileThreeRoads = `
+const injProfileOneRoad = `
 env:
-  KANAME_HYDRA_ADMIN_URL: "https://a.invalid"
-  KANAME_HYDRA_ADMIN_CA_FILE: /ca.crt
-  KANAME_HYDRA_JWKS_URL: "https://j.invalid"
-  KANAME_HYDRA_JWKS_CA_FILE: /ca.crt
   KANAME_HYDRA_TOKEN_URL: "https://t.invalid"
   KANAME_HYDRA_TOKEN_CA_FILE: /ca.crt
 `
 
-// injProfileFourthRoad — ДЕФЕКТ: заведена четвёртая дорога, счёта у неё нет.
+// injProfileSecondRoad — ДЕФЕКТ: заведена вторая дорога, счёта у неё нет.
 // Ровно один факт против близнеца.
-const injProfileFourthRoad = injProfileThreeRoads + `  KANAME_HYDRA_CONSENT_URL: "https://c.invalid"
+const injProfileSecondRoad = injProfileOneRoad + `  KANAME_HYDRA_CONSENT_URL: "https://c.invalid"
   KANAME_HYDRA_CONSENT_CA_FILE: /ca.crt
 `
 
 // injProfileAddressWithoutAnchor — ЗАКОННЫЙ БЛИЗНЕЦ границы: адрес БЕЗ якоря
 // дорогой не является, и гейт обязан о нём молчать. Единица счёта названа в
 // шапке гейта именно затем, чтобы эта строка не стала находкой.
-const injProfileAddressWithoutAnchor = injProfileThreeRoads + `  KANAME_HYDRA_CONSENT_URL: "https://c.invalid"
+const injProfileAddressWithoutAnchor = injProfileOneRoad + `  KANAME_HYDRA_CONSENT_URL: "https://c.invalid"
 `
 
 // injProfileNoRoads — пустой обход: профиль без дорог. Отказ, а не чистое дерево.
@@ -50,22 +49,20 @@ env:
 
 func TestIAM2491_InjectionRedsTheRoadWithoutACounterAndKeepsQuietOnTheCountedOnes(t *testing.T) {
 	rows := map[string]bool{
-		ProviderRoadOutcomesMetric + "/" + "admin":          true,
 		ProviderRoadOutcomesMetric + "/" + "token_exchange": true,
-		JWKSMirrorOutcomesMetric + "/":                      true,
 	}
 
-	twin, err := providerRoadsDeclaredIn([]byte(injProfileThreeRoads))
+	twin, err := providerRoadsDeclaredIn([]byte(injProfileOneRoad))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	uncounted, silent, stale, counted := adjudicateRoadParity(twin, roadsWithACounter, rows)
-	if len(uncounted)+len(silent)+len(stale) != 0 || counted != 3 {
+	if len(uncounted)+len(silent)+len(stale) != 0 || counted != 1 {
 		t.Fatalf("законный близнец дал находки: без счёта %v · молчащих %v · просроченных %v · сошлось %d",
 			uncounted, silent, stale, counted)
 	}
 
-	defect, err := providerRoadsDeclaredIn([]byte(injProfileFourthRoad))
+	defect, err := providerRoadsDeclaredIn([]byte(injProfileSecondRoad))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -73,13 +70,13 @@ func TestIAM2491_InjectionRedsTheRoadWithoutACounterAndKeepsQuietOnTheCountedOne
 	if len(uncounted) != 1 || uncounted[0] != "CONSENT" {
 		t.Fatalf("дорога без счёта не названа: %v", uncounted)
 	}
-	if counted != 3 {
-		t.Errorf("сошлось %d вместо 3 — инъекция уронила заодно соседа", counted)
+	if counted != 1 {
+		t.Errorf("сошлось %d вместо 1 — инъекция уронила заодно соседа", counted)
 	}
-	// ВТОРОЕ ЧИСЛО ПЕРЕПИСИ И ЕСТЬ ПРЕДМЕТ ГЕЙТА: одно «со счётом 3» читалось бы
-	// как исправная наблюдаемость, пока рядом не стоит «объявлено 4».
-	if len(defect) != 4 {
-		t.Errorf("объявленных дорог насчитано %d вместо 4", len(defect))
+	// ВТОРОЕ ЧИСЛО ПЕРЕПИСИ И ЕСТЬ ПРЕДМЕТ ГЕЙТА: одно «со счётом 1» читалось бы
+	// как исправная наблюдаемость, пока рядом не стоит «объявлено 2».
+	if len(defect) != 2 {
+		t.Errorf("объявленных дорог насчитано %d вместо 2", len(defect))
 	}
 }
 
@@ -88,7 +85,7 @@ func TestIAM2491_InjectionKeepsQuietOnAnAddressWithoutAnAnchor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	if len(roads) != 3 {
+	if len(roads) != 1 {
 		t.Fatalf("адрес без якоря засчитан дорогой (насчитано %d: %v) — единица счёта "+
 			"разошлась бы с объявленной в шапке", len(roads), roads)
 	}
@@ -97,11 +94,8 @@ func TestIAM2491_InjectionKeepsQuietOnAnAddressWithoutAnAnchor(t *testing.T) {
 func TestIAM2491_InjectionRedsTheSilentFamily(t *testing.T) {
 	// ДЕФЕКТ: запись счёта есть, а ряда на проводе нет — счётчик объявлен и не
 	// провязан. Ровно один факт против близнеца выше.
-	rows := map[string]bool{
-		ProviderRoadOutcomesMetric + "/" + "admin": true,
-		JWKSMirrorOutcomesMetric + "/":             true,
-	}
-	roads, err := providerRoadsDeclaredIn([]byte(injProfileThreeRoads))
+	rows := map[string]bool{}
+	roads, err := providerRoadsDeclaredIn([]byte(injProfileOneRoad))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -109,18 +103,17 @@ func TestIAM2491_InjectionRedsTheSilentFamily(t *testing.T) {
 	if len(silent) != 1 || silent[0] != "TOKEN" {
 		t.Fatalf("молчащее семейство не названо: %v", silent)
 	}
-	if counted != 2 {
-		t.Errorf("сошлось %d вместо 2", counted)
+	if counted != 0 {
+		t.Errorf("сошлось %d вместо 0", counted)
 	}
 }
 
 func TestIAM2491_InjectionRedsAnEntryWhoseRoadTheProfileDropped(t *testing.T) {
 	// ДЕФЕКТ: профиль снял дорогу, запись о её счёте осталась. Послабление и
 	// утверждение обязаны истекать вместе со своим предметом.
-	_, _, stale, _ := adjudicateRoadParity([]string{"ADMIN", "JWKS"}, roadsWithACounter,
+	_, _, stale, _ := adjudicateRoadParity([]string{}, roadsWithACounter,
 		map[string]bool{
-			ProviderRoadOutcomesMetric + "/" + "admin": true,
-			JWKSMirrorOutcomesMetric + "/":             true,
+			ProviderRoadOutcomesMetric + "/" + "token_exchange": true,
 		})
 	if len(stale) != 1 || stale[0] != "TOKEN" {
 		t.Fatalf("просроченная запись не названа: %v", stale)
@@ -154,7 +147,7 @@ func TestIAM2491_InjectionProvesTheCountedRoadsAreCountedOnTheWire(t *testing.T)
 		}
 	}
 	wired := providerRoadRowsOnTheWire(t)
-	for _, road := range []string{"admin", "token_exchange"} {
+	for _, road := range []string{"token_exchange"} {
 		if !wired[ProviderRoadOutcomesMetric+"/"+road] {
 			t.Errorf("провязанный реестр не отдаёт ряда дороги %q", road)
 		}

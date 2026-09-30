@@ -22,7 +22,6 @@ import (
 // подставленного.
 func ceremonyPaceConfig() config.Config {
 	var cfg config.Config
-	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:                  true,
 		AllowedAudiences:         "registry.kacho.local",
@@ -100,7 +99,7 @@ func TestKNPACE05_CeremonyRefusesAListenerThatDoesNotAskForACertificate(t *testi
 	})
 	t.Run("близнец: церемонии нет", func(t *testing.T) {
 		cfg := ceremonyPaceConfig()
-		cfg.AuthN.IdentityProvider = config.IdentityProviderExternal
+		cfg.AuthN.ClientToken.Enabled = false
 		if err := requireIssuingListenerAsksForACertificate(cfg, listener("server-tls-only")); err != nil {
 			t.Errorf("без церемонии режим слушателя не судится: %v", err)
 		}

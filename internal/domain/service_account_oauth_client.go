@@ -18,34 +18,34 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
-// ServiceAccountOAuthClient — Class A workload identity (Hydra static client).
+// ServiceAccountOAuthClient — ключ служебной учётки (Class A workload identity).
 //
-// private_key_jwt mode: kaname mints an ECDSA P-256 keypair per SA
-// key, registers the public JWK with Hydra (`token_endpoint_auth_method =
-// private_key_jwt`), and returns the private PEM to the caller exactly once.
-// Hydra stores only the JWK; kaname keeps the SPKI public PEM (for
-// rotation diagnostics) plus the algorithm. The legacy
-// `client_secret_basic` flow is dropped: no secret ever exists.
+// Клиентом ключ называется по идентификатору ЭТОЙ строки: им подписывается
+// `client_assertion`, по нему наш реестр утверждений разрешает клиента, и им же
+// ключ называют докерная полоса и отзыв. Второго имени у ключа нет (kaname#362):
+// имя клиента у прежнего внешнего издателя снято вместе со столбцом, где оно
+// лежало.
 //
-// 1:1 SA→client.
+// private_key_jwt: служба чеканит пару ключей ECDSA P-256 на каждый ключ,
+// хранит открытую половину (SPKI PEM) и алгоритм и отдаёт закрытую половину
+// вызывающему ровно один раз. Общего секрета у этого вида нет.
 type ServiceAccountOAuthClient struct {
 	ID              SAOAuthClientID
 	SvaID           ServiceAccountID
-	OAuthClientID   OAuthClientID
 	Description     Description
 	CreatedByUserID UserID
 	CreatedAt       time.Time
 	ExpiresAt       *time.Time
 	LastUsedAt      *time.Time
 
-	// PublicKeyPEM — SPKI-encoded ECDSA P-256 public key registered with
-	// Hydra as a JWK. Empty for legacy rows that pre-date the private_key_jwt
-	// mode (migrated with DEFAULT '') AND for FEDERATED rows where the
-	// key material lives in the external IdP rather than kaname.
+	// PublicKeyPEM — SPKI-encoded ECDSA P-256 public key of the key pair; the
+	// signature of `client_assertion` is checked against it. Empty for FEDERATED
+	// and SECRET rows: the first presents the external issuer's key, the second
+	// carries no key material at all.
 	PublicKeyPEM string
-	// KeyAlgorithm — JOSE alg of the registered key. One of {"ES256",
-	// "RS256", "EdDSA"}. Empty for legacy rows; new private_key_jwt keys
-	// always set "ES256"; federated rows leave it empty.
+	// KeyAlgorithm — JOSE alg of the key pair. One of {"ES256", "RS256",
+	// "EdDSA"}; new private_key_jwt keys always set "ES256"; federated and
+	// secret rows leave it empty.
 	KeyAlgorithm string
 
 	// TrustedSubjects — федеративный вид ключа. Непустой перечень означает, что
@@ -227,7 +227,6 @@ func isPublicHTTPSIssuer(raw string) bool {
 func (c ServiceAccountOAuthClient) Validate() error {
 	var errs error
 	errs = multierr.Append(errs, c.ID.Validate())
-	errs = multierr.Append(errs, c.OAuthClientID.Validate())
 	errs = multierr.Append(errs, c.Description.Validate())
 	if c.SvaID == "" {
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument sva_id: required"))
@@ -276,8 +275,8 @@ func (c ServiceAccountOAuthClient) Validate() error {
 }
 
 // SAOAuthClientID — новый формат `soc<17-crockford>` (corelib `ids.NewID`, без
-// подчёркивания). id существующих строк immutable (id = Hydra client id + JWK
-// kid), поэтому валидатор принимает и legacy `soc_<17-crockford>`.
+// подчёркивания). id существующих строк immutable (id = имя клиента + JWK kid),
+// поэтому валидатор принимает и прежнюю форму `soc_<17-crockford>`.
 type SAOAuthClientID string
 
 var socIDRe = regexp.MustCompile(`^soc_?[0-9a-hjkmnp-tv-z]{17}$`)
@@ -285,22 +284,6 @@ var socIDRe = regexp.MustCompile(`^soc_?[0-9a-hjkmnp-tv-z]{17}$`)
 func (id SAOAuthClientID) Validate() error {
 	if !socIDRe.MatchString(string(id)) {
 		return fmt.Errorf("Illegal argument id: must match ^soc_?[0-9a-hjkmnp-tv-z]{17}$")
-	}
-	return nil
-}
-
-// OAuthClientID — opaque hydra client id (length 1..128, [A-Za-z0-9._:-]).
-type OAuthClientID string
-
-var oauthClientIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-
-func (h OAuthClientID) Validate() error {
-	s := string(h)
-	if len(s) < 1 || len(s) > 128 {
-		return fmt.Errorf("Illegal argument hydra_client_id: length must be 1..128")
-	}
-	if !oauthClientIDRe.MatchString(s) {
-		return fmt.Errorf("Illegal argument hydra_client_id: must match [A-Za-z0-9._:-]+")
 	}
 	return nil
 }

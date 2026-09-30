@@ -87,11 +87,11 @@ func GatewayServiceName() string { return gatewayServiceName }
 //     под эту возможность выведено заново, а не унаследовано, — разбор у
 //     `session_revocations.Handler.IsRevoked`.
 //   - InternalUserService/Get — service→service lookup.
-//   - Hydra hook callbacks are not in this set and cannot be: they are served
-//     over HTTP by internal/handler/iamhooks, not as gRPC methods. The gRPC
-//     declaration that once mirrored them (InternalIamHooksService) had no
-//     implementation and was retired — see retiredRPCSurface in
-//     internal/repohygiene.
+//   - identity-provider hook callbacks are not in this set: they were served over
+//     HTTP, never as gRPC methods, and left together with the external provider
+//     (kaname#363). The gRPC declaration that once mirrored them
+//     (InternalIamHooksService) had no implementation and was retired — see
+//     retiredRPCSurface in internal/repohygiene.
 //   - the fga-proxy writes InternalIAMService/{RegisterResource,
 //     UnregisterResource} — gated in-handler by RelationWriteGate (module SAs).
 //     The third one, WriteCreatorTuple, was retired with zero callers (#788).

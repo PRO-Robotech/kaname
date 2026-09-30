@@ -519,11 +519,11 @@ else
   run_one "iam-membership-create"
   # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to the
   # token-signing provider (security.md §«Production-mode обязателен ВЕЗДЕ» п.4).
-  # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-12/13/14/15
-  # (the mirror / hook / docker-handle / provider-surface lanes the acceptance has no
-  # scenario for). Needs FOUR extra base URLs beyond the gateway ones —
-  # iamJwksBaseUrl / providerPublicBaseUrl / iamRegistryTokenBaseUrl /
-  # registryDataPlaneBaseUrl — injected as --env-var by
+  # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-13/14/15
+  # (the hook / docker-handle / provider-surface lanes the acceptance has no
+  # scenario for; the mirror lane IBT-12 left with the mirror, kaname#361). Needs
+  # THREE extra base URLs beyond the gateway ones — iamJwksBaseUrl /
+  # iamRegistryTokenBaseUrl / registryDataPlaneBaseUrl — injected as --env-var by
   # deploy/scripts/newman-{e2e,parallel}.sh; a missing one turns the case RED naming
   # the variable (require_env_url), never a silent skip. The CI `assert all suites
   # green` step parses EVERY collections/*.json, so this MUST run here — otherwise the

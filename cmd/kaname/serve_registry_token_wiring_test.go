@@ -32,7 +32,6 @@ func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	for name, other := range map[string]string{
 		"public gRPC":   cfg.APIServer.ListenAddress(),
 		"internal gRPC": cfg.APIServer.InternalListenAddress(),
-		"hooks HTTP":    cfg.AuthN.HooksHTTPListenAddress(),
 		"metrics HTTP":  cfg.APIServer.MetricsListenAddress(),
 	} {
 		if addr == other {

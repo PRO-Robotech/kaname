@@ -270,8 +270,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	}},
 	// Код восстановления — идентификатор, дайджест и сроки чеканит служба.
 	"recovery_codes": nil,
-	// Завершение восстановления: внешний субъект и идентификатор токена прислал
-	// вебхук поставщика личности; человека и счёт сессий определяет служба.
+	// Завершение восстановления: внешний субъект и идентификатор токена приходят
+	// вызывающим внутреннего глагола (прежде — вебхук поставщика личности, снят
+	// с ним, kaname#363); человека и счёт сессий определяет служба.
 	"recovery_completions": {
 		caller:  []string{"recovery_completions_external_id_check", "recovery_completions_jti_check"},
 		service: []string{"recovery_completions_count_check", "recovery_completions_user_id_check"},
@@ -385,7 +386,6 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{
 			"service_account_oauth_clients_credential_kind_ck",
 			"service_account_oauth_clients_credential_shape_ck",
-			"service_account_oauth_clients_hydra_client_id_check",
 			"service_account_oauth_clients_id_check",
 			"service_account_oauth_clients_key_algorithm_check",
 			"service_account_oauth_clients_trusted_subjects_array_ck",
@@ -445,7 +445,6 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{
 			"user_oauth_clients_credential_kind_ck",
 			"user_oauth_clients_credential_shape_ck",
-			"user_oauth_clients_hydra_client_id_check",
 			"user_oauth_clients_id_check",
 			"user_oauth_clients_key_algorithm_check",
 		},
@@ -457,7 +456,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{"user_token_revocations_revoked_by_check"},
 	},
 	// Человек: адрес, отображаемое имя, метки и внешний субъект прислал
-	// вызывающий (арендатор или вебхук поставщика личности). Состояние
+	// вызывающий (арендатор либо внутренний глагол заведения личности). Состояние
 	// приглашения ставит служба, но его согласие с внешним субъектом нарушает
 	// присланный пустой субъект — и эта проверка остаётся полосой ввода.
 	"users": {

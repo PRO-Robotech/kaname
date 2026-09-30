@@ -20,7 +20,9 @@ package pg
 // что каждый называет таблицу секрета: заведение одним оператором под ключом
 // «человек, вид», CAS подтверждения, условная запись принятого шага, набор
 // запасных кодов под замком строки, снятие обеих строк, уборка истёкших
-// заведений. Материал ни один из них НЕ читает строкой мимо типа: набор
+// заведений; для переобёртки секретов под первый ключ перечня (kaname#259
+// п.3) — страница строк `totp` и замена материала по прочитанному значению.
+// Материал ни один из них НЕ читает строкой мимо типа: набор
 // потребляется по ЗНАЧЕНИЮ ЭЛЕМЕНТА, которое приносит проверяющий (он вычислил
 // его из предъявленного кода и соли — это не материал строки), а форма набора
 // (элементы между запятыми, запятая по краям) объявлена проверяющим и
@@ -158,25 +160,35 @@ func getLoginMethod(ctx context.Context, q loginMethodQuerier, userID domain.Use
 // created_at`. Отказ базы (в том числе `pgx.ErrNoRows`) уходит вызывающему как
 // есть; строка, не проходящая тип, — НАШ дефект.
 func scanLoginMethod(row pgx.Row, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
-	var (
-		material string
-		state    string
-		step     *int64
-		created  time.Time
-	)
-	if err := row.Scan(&material, &state, &step, &created); err != nil {
+	var f loginMethodFields
+	if err := row.Scan(&f.material, &f.state, &f.step, &f.created); err != nil {
 		return domain.LoginMethod{}, err
 	}
-	verifier, verr := domain.NewLoginVerifier(material)
+	return f.build(userID, kind)
+}
+
+// loginMethodFields — колонки строки способа, как их отдаёт ряд. Разбор один
+// на все операторы чтения: и по паре (человек, вид), и страницей, где человек
+// приходит колонкой ряда.
+type loginMethodFields struct {
+	material string
+	state    string
+	step     *int64
+	created  time.Time
+}
+
+// build — строка способа в своём типе. Строка, не проходящая тип, — НАШ дефект.
+func (f loginMethodFields) build(userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	verifier, verr := domain.NewLoginVerifier(f.material)
 	if verr != nil {
 		// Пустого материала ограничение таблицы не пропускает; прочитать его
 		// значит найти строку, записанную мимо схемы, — НАШ дефект, а не «нет
 		// способа».
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInternal, "stored login method is malformed")
 	}
-	m := domain.LoginMethod{UserID: userID, Kind: kind, Verifier: verifier, State: domain.LoginMethodState(state), CreatedAt: created}
-	if step != nil {
-		m.AcceptedStep, m.StepAccepted = *step, true
+	m := domain.LoginMethod{UserID: userID, Kind: kind, Verifier: verifier, State: domain.LoginMethodState(f.state), CreatedAt: f.created}
+	if f.step != nil {
+		m.AcceptedStep, m.StepAccepted = *f.step, true
 	}
 	if err := m.Validate(); err != nil {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInternal, "stored login method is malformed")
@@ -469,4 +481,76 @@ func (r *LoginMethodRepo) SweepExpiredEnrollments(ctx context.Context, window ti
 		return 0, false, mapErr(err, "LoginMethod.SweepExpiredEnrollments", "")
 	}
 	return tag.RowsAffected(), tag.RowsAffected() >= int64(batch), nil
+}
+
+// --- переобёртка секретов второго фактора (kaname#259 п.3) ---
+
+// TOTPSecretsAfter — страница строк `totp` ОБОИХ состояний (порт
+// `secondfactorwrap.Store`): человек строго после курсора, по возрастанию, не
+// больше limit. Заведение (`pending`) несёт секрет под тем же ключом обёртки,
+// что подтверждённый фактор, и проходу переобёртки нужно не меньше, чем ему.
+//
+// Курсор — человек, первая колонка первичного ключа: страница читается
+// диапазоном ключа, а не смещением, и цена страницы — её размер, а не номер.
+// Материал выходит из ряда только в свой тип (общий разбор ряда).
+func (r *LoginMethodRepo) TOTPSecretsAfter(ctx context.Context, after domain.UserID, limit int) ([]domain.LoginMethod, error) {
+	if limit <= 0 {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page size: must be positive")
+	}
+	q := `SELECT user_id, verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + `
+	       WHERE kind = $1 AND user_id > $2
+	       ORDER BY user_id
+	       LIMIT $3`
+	rows, err := r.pool.Query(ctx, q, string(domain.LoginMethodTOTP), string(after), limit)
+	if err != nil {
+		return nil, mapErr(err, "LoginMethod.TOTPSecretsAfter", "")
+	}
+	defer rows.Close()
+	out := make([]domain.LoginMethod, 0, limit)
+	for rows.Next() {
+		var (
+			user string
+			f    loginMethodFields
+		)
+		if err := rows.Scan(&user, &f.material, &f.state, &f.step, &f.created); err != nil {
+			return nil, mapErr(err, "LoginMethod.TOTPSecretsAfter", "")
+		}
+		m, err := f.build(domain.UserID(user), domain.LoginMethodTOTP)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "LoginMethod.TOTPSecretsAfter", "")
+	}
+	return out, nil
+}
+
+// SwapTOTPSecret — замена материала строки `totp` человека по ПРОЧИТАННОМУ
+// значению (порт `secondfactorwrap.Store`; ban #10): одним оператором,
+// условием «материал побайтово равен prev». Меняется ТОЛЬКО материал —
+// состояние, момент и принятый шаг остаются, поэтому переобёртка не открывает
+// повтор кода и не продлевает заведение.
+//
+// Условие — арбитр конкуренции со службой: писатель, зафиксировавший новое
+// значение (заведение заново, снятие, уборка), держит замок строки, и замена
+// ждёт его; под READ COMMITTED условие судится по зафиксированному значению,
+// и замена не ложится. Писатель откатился — материал остался прочитанным, и
+// замена ложится. false — материал уже другой либо строки нет; различает их
+// вызывающий перечитыванием.
+//
+// Индекса по материалу нет и не нужно (шапка миграции запрещает его
+// намеренно): строка находится первичным ключом, материал — условие над ней.
+func (r *LoginMethodRepo) SwapTOTPSecret(ctx context.Context, user domain.UserID, prev, next domain.LoginVerifier) (bool, error) {
+	if user == "" || prev.IsZero() || next.IsZero() {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: user, shown and replacing material required")
+	}
+	q := `UPDATE ` + loginMethodsTable + ` SET verifier = $4
+	       WHERE user_id = $1 AND kind = $2 AND verifier = $3`
+	tag, err := r.pool.Exec(ctx, q, string(user), string(domain.LoginMethodTOTP), prev.Reveal(), next.Reveal())
+	if err != nil {
+		return false, mapErr(err, "LoginMethod.SwapTOTPSecret", loginMethodHint(user, domain.LoginMethodTOTP))
+	}
+	return tag.RowsAffected() == 1, nil
 }

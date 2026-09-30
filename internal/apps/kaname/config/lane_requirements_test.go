@@ -5,170 +5,119 @@
 // F4d-12 приёмки Ф4д, плюс ТАБЛИЧНАЯ проба отказа старта (F4d-10).
 //
 // Проба отказа старта ходит по config.LaneRequirements и порождает по случаю на
-// строку. Непокрытой клетки произведения «значение поля × обязательный элемент»
-// не бывает by construction: чтобы завести требование, его придётся вписать в ту
-// же таблицу, по которой ходит эта проба. Второй рукописный перечень клеток
-// здесь НЕ заводится — он и был бы тем самым вторым местом об одном предмете.
+// строку. Непокрытой строки не бывает by construction: чтобы завести требование,
+// его придётся вписать в ту же таблицу, по которой ходит эта проба. Второй
+// рукописный перечень строк здесь НЕ заводится — он и был бы тем самым вторым
+// местом об одном предмете.
+//
+// Прежде случаи порождались произведением «строка × полоса посадки», и на
+// «чужой» полосе требование проверялось непредъявленным. Посадка у службы одна
+// (kaname#363): случай на строку один, и каждая строка предъявляется всякому
+// боевому старту.
 package config_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
-
-	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ПРИЗНАК задачи #1125, закрытый: боевая посадка, своя чеканка, НИ ОДНОГО адреса
+// ПРИЗНАК задачи #1125, закрытый: боевой старт, своя чеканка, НИ ОДНОГО адреса
 // внешнего поставщика — старт проходит.
 //
-// До полосности этот же вход давал ТРИ отказа сразу (authn.hydra-admin-url,
-// authn.hydra-jwks-url, authn.hydra-token-url), и отдельный клон в боевой
-// посадке не поднимался, сколько бы кода ни переехало.
-func TestF4d_OwnPostureBootsWithoutASingleProviderAddress(t *testing.T) {
-	cfg := postureWithoutProviderAddresses(t, config.IdentityProviderOwn)
+// До полосности этот же вход давал ТРИ отказа сразу (административный адрес,
+// адрес набора ключей и адрес обмена). Адрес набора ключей снят вместе с
+// зеркалом (kaname#361), административный — вместе с посадкой поставщика
+// (kaname#363); адрес обмена старт больше не судит.
+func TestF4d_ProductionBootsWithoutASingleProviderAddress(t *testing.T) {
+	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
+	cfg := laneCfg()
+	cfg.AuthN.HydraTokenURL = ""
 
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() = %v; посадка own обязана подниматься без адресов поставщика", err)
+		t.Fatalf("Validate() = %v; боевой старт обязан подниматься без адресов поставщика", err)
 	}
 }
 
-// Положительный контроль того же входа: строки полосы `external` те же пустые
-// адреса НЕ пропускают, и отказов ровно три — по одному на адрес. Без него
-// зелёное выше означало бы «стражи сняты», а не «стражи полосные».
-//
-// Строки судятся напрямую, а не проверкой старта: посадка снята фундаментом
-// (PRO-Robotech/corelib#30), и старт отвергает её раньше требований полосы
-// (#424). Строки живут до снятия полосы целиком (#363).
-func TestF4d_ExternalLaneRowsStillRefuseTheSameEmptyAddresses(t *testing.T) {
-	cfg := postureWithoutProviderAddresses(t, config.IdentityProviderExternal)
-
-	err := externalLaneRefusal(cfg)
-	if err == nil {
-		t.Fatal("строки полосы external = nil; адреса поставщика обязаны требоваться")
-	}
-	msg := err.Error()
-	for _, setting := range []string{
-		"authn.hydra-admin-url", "authn.hydra-jwks-url", "authn.hydra-token-url",
-	} {
-		if !strings.Contains(msg, setting) {
-			t.Fatalf("отказ обязан называть %s, получено: %q", setting, msg)
-		}
-	}
-	// F4d-04/F4d-05: тексты отказов сохранены ДОСЛОВНО и несут ОДНУ добавленную
-	// строку о том, каким значением поля требование снимается.
-	if !strings.Contains(msg, "is not declared (env override KANAME_HYDRA_ADMIN_URL)") {
-		t.Fatalf("текст провайдерского отказа обязан быть сохранён дословно, получено: %q", msg)
-	}
-	if n := strings.Count(msg, "declare authn.identity-provider=own and this requirement is lifted"); n != 3 {
-		t.Fatalf("каждый полосный отказ обязан назвать снимающее значение; таких строк %d, ожидалось 3", n)
-	}
-}
-
-// externalLaneRefusal — отказ строк стадии «настройка» полосы снятой посадки
-// `external`, взятых из той же таблицы, по которой ходит проверка старта.
-//
-// Проверка старта до этих строк не доходит (#424): посадку вне словаря она
-// отвергает первой и в одиночку. Строки живут в таблице до снятия полосы
-// целиком (#363), и пробы их содержимого зовут их здесь — иначе положительные
-// случаи зеленели бы на полосе `own`, где эти стражи не предъявляются вовсе.
-func externalLaneRefusal(c config.Config) error {
-	var errs error
-	rows := 0
-	for _, r := range config.LaneRequirements {
-		if r.Stage != config.LaneStageConfig || !r.AppliesTo(config.IdentityProviderExternal) {
-			continue
-		}
-		rows++
-		errs = multierr.Append(errs, r.Check(c, config.LaneWiring{}))
-	}
-	if rows == 0 {
-		// Строк не осталось — судить нечего, и молчание не должно читаться как
-		// «стражи пропустили вход».
-		return errors.New("в таблице полос нет ни одной строки полосы external — пробам, которые их судят, судить нечего")
-	}
-	return errs
-}
-
-// postureWithoutProviderAddresses — боевая настройка со СВОЕЙ чеканкой и без
-// единого адреса внешнего поставщика (ни в настройке, ни в окружении).
-func postureWithoutProviderAddresses(t *testing.T, p config.IdentityProvider) config.Config {
-	t.Helper()
-	t.Setenv("KANAME_HYDRA_ADMIN_URL", "")
-	t.Setenv("KANAME_HYDRA_JWKS_URL", "")
+// Законный близнец: тот же вход без своей чеканки старт НЕ проходит — то есть
+// зелёное выше означает «адреса поставщика не требуются», а не «проверка
+// старта не отказывает ни на чём». Прежде близнецом были строки полосы
+// `external`, требовавшие тех же адресов; они сняты вместе с посадкой, и
+// близнец меняет другой факт — чеканку.
+func TestF4d_ProductionWithoutOwnMintingRefusesTheSameInput(t *testing.T) {
 	t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
-
-	cfg := laneCfg(p)
-	cfg.AuthN.HydraAdminURL = ""
-	cfg.AuthN.HydraAdminCAFile = ""
-	cfg.AuthN.HydraJWKSURL = ""
+	cfg := laneCfg()
 	cfg.AuthN.HydraTokenURL = ""
-	return cfg
+	cfg.AuthN.TokenSigning.Enabled = false
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil; без своей чеканки боевой старт обязан отказывать")
+	}
+	if !strings.Contains(err.Error(), "authn.token-signing.enabled is false") {
+		t.Fatalf("отказ обязан называть выключенную чеканку, получено: %q", err.Error())
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // F4d-10 — ТАБЛИЧНАЯ проба отказа старта: по случаю на строку таблицы.
 //
-// Для каждой строки: на своей полосе невыполненное требование ОТВЕРГАЕТ старт и
-// текст называет элемент; на ЧУЖОЙ полосе то же самое требование не
-// предъявляется вовсе (полосность), и выполненное требование старт проходит
-// (положительный контроль).
-func TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane(t *testing.T) {
+// Для каждой строки: невыполненное требование ОТВЕРГАЕТ боевой старт, и текст
+// называет элемент своим отказом; выполненное требование старт проходит
+// (положительный контроль). Ни один отказ не называет снятого ключа посадки:
+// совет объявить ключ, которого нет, послал бы оператора за вторым отказом.
+func TestF4d10_EveryLaneRequirementRefusesTheProductionStart(t *testing.T) {
 	if len(config.LaneRequirements) == 0 {
-		t.Fatal("таблица требований полос пуста — обходить нечего")
+		t.Fatal("таблица требований пуста — обходить нечего")
 	}
+	cases := 0
 	for _, r := range config.LaneRequirements {
-		for _, lane := range config.IdentityProviderValues() {
-			name := lane.String() + "/" + strings.ReplaceAll(r.Element, " ", "_")
-			t.Run(name, func(t *testing.T) {
-				cfg := laneCfg(lane)
-				broken, wiring := breakRequirement(t, cfg, r)
+		name := strings.ReplaceAll(r.Element, " ", "_")
+		cases++
+		t.Run(name, func(t *testing.T) {
+			cfg := laneCfg()
+			broken, wiring := breakRequirement(t, cfg, r)
 
-				var err error
-				switch r.Stage {
-				case config.LaneStageConfig:
-					err = broken.Validate()
-				case config.LaneStageWiring:
-					err = config.ValidateLaneWiring(broken, wiring)
-				default:
-					t.Fatalf("неизвестная стадия %v", r.Stage)
-				}
+			var err error
+			switch r.Stage {
+			case config.LaneStageConfig:
+				err = broken.Validate()
+			case config.LaneStageWiring:
+				err = config.ValidateLaneWiring(broken, wiring)
+			default:
+				t.Fatalf("неизвестная стадия %v", r.Stage)
+			}
+			if err == nil {
+				t.Fatalf("требование %q не отвергло боевой старт", r.Element)
+			}
+			own := r.Check(broken, wiring)
+			if own == nil {
+				t.Fatalf("строка %q на сломанном входе сама отказа не производит — случай ломает не её предмет", r.Element)
+			}
+			if !strings.Contains(err.Error(), own.Error()) {
+				t.Fatalf("отказ старта не несёт отказа строки %q:\n  строка: %v\n  старт: %v", r.Element, own, err)
+			}
+			if strings.Contains(err.Error(), "identity-provider") {
+				t.Fatalf("отказ называет снятый ключ посадки: %q", err.Error())
+			}
 
-				if !r.AppliesTo(lane) {
-					// Полосность: на чужой полосе требование не предъявляется.
-					// Признак производителя — имя поля посадки: оно стоит в
-					// КАЖДОМ полосном отказе и ни в одном чужом.
-					if err != nil && strings.Contains(err.Error(), config.IdentityProviderSetting) {
-						t.Fatalf("требование %q предъявлено на чужой полосе %s: %v", r.Element, lane, err)
-					}
-					return
-				}
-				if err == nil {
-					t.Fatalf("требование %q на полосе %s не отвергло старт", r.Element, lane)
-				}
-				if !strings.Contains(err.Error(), config.IdentityProviderSetting) {
-					t.Fatalf("отказ обязан называть поле посадки, получено: %q", err.Error())
-				}
-
-				// Положительный контроль: выполненное требование проходит.
-				okWiring := wiredLane()
-				var okErr error
-				switch r.Stage {
-				case config.LaneStageConfig:
-					okErr = cfg.Validate()
-				case config.LaneStageWiring:
-					okErr = config.ValidateLaneWiring(cfg, okWiring)
-				}
-				if okErr != nil {
-					t.Fatalf("положительный контроль: выполненное требование %q обязано проходить, получено %v",
-						r.Element, okErr)
-				}
-			})
-		}
+			// Положительный контроль: выполненное требование проходит.
+			var okErr error
+			switch r.Stage {
+			case config.LaneStageConfig:
+				okErr = cfg.Validate()
+			case config.LaneStageWiring:
+				okErr = config.ValidateLaneWiring(cfg, wiredLane())
+			}
+			if okErr != nil {
+				t.Fatalf("положительный контроль: выполненное требование %q обязано проходить, получено %v",
+					r.Element, okErr)
+			}
+		})
 	}
+	t.Logf("перепись: строк таблицы %d · порождено случаев %d", len(config.LaneRequirements), cases)
 }
 
 // breakRequirement возвращает вход, на котором названное требование НЕ
@@ -180,22 +129,10 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 	w := wiredLane()
 
 	switch r.Element {
-	case "административная дорога к внешнему поставщику":
-		t.Setenv("KANAME_HYDRA_ADMIN_URL", "")
-		broken.AuthN.HydraAdminURL = ""
-		broken.AuthN.HydraAdminCAFile = ""
-	case "набор проверочных ключей внешнего поставщика":
-		t.Setenv("KANAME_HYDRA_JWKS_URL", "")
-		broken.AuthN.HydraJWKSURL = ""
-	case "адрес обмена утверждения у внешнего поставщика":
-		t.Setenv("KANAME_HYDRA_TOKEN_URL", "")
-		broken.AuthN.HydraTokenURL = ""
 	case "своя чеканка токенов включена":
 		broken.AuthN.TokenSigning.Enabled = false
 	case "контур выдачи ключей служебных учёток переведён на свою чеканку":
 		broken.AuthN.ClientToken.Enabled = false
-	case "приём предъявленного удостоверения включён":
-		broken.AuthN.PresentedCredential.Enabled = false
 	case "подписант своей чеканки провязан":
 		w.OwnMintSignerWired = false
 	case "свои способы входа человека провязаны":
@@ -229,11 +166,6 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.AccessKeys.Origins = nil
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
-	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.
-	case "дорога к внешнему поставщику не строится":
-		w.ProviderAdminHopBuilt = true
-	case "запись зеркала чужого набора ключей не публикуется":
-		w.ProviderKeySetMirrorPublished = true
 	default:
 		// Новая строка таблицы без способа её сломать — НАХОДКА, а не пропуск:
 		// иначе клетка была бы «покрыта» случаем, который ничего не проверяет.
@@ -250,12 +182,7 @@ func wiredLane() config.LaneWiring {
 		OwnMintSignerWired:    true,
 		HumanCredentialsWired: true,
 		HumanSessionsWired:    true,
-		// Полностью провязанная полоса `own` — это в том числе полоса, у
-		// которой дороги к внешнему поставщику НЕТ: два поля ниже требуются
-		// отсутствующими, поэтому «всё выполнено» для них означает false.
-		ProviderAdminHopBuilt:         false,
-		ProviderKeySetMirrorPublished: false,
-		PresentableACRs:               []string{"1", "2"},
+		PresentableACRs:       []string{"1", "2"},
 		CatalogFloors: config.CatalogFloors{
 			Readable: true,
 			ByLevel:  map[string]int{"1": 285, "2": 32},
@@ -268,7 +195,7 @@ func wiredLane() config.LaneWiring {
 
 // Отказ называет ЧИСЛО записей, которые остались бы недостижимыми.
 func TestF4d09_UnreachableFloorRefusalNamesTheCatalogCount(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	w := wiredLane()
 	w.PresentableACRs = []string{"1"} // второй фактор не провязан
 
@@ -284,7 +211,7 @@ func TestF4d09_UnreachableFloorRefusalNamesTheCatalogCount(t *testing.T) {
 // Подмена каталога на набор БЕЗ записей уровня «2» отказ снимает — то есть
 // величина действительно берётся из каталога.
 func TestF4d09_CatalogWithoutRaisedFloorsLiftsTheRefusal(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	w := wiredLane()
 	w.PresentableACRs = []string{"1"}
 	w.CatalogFloors.ByLevel = map[string]int{"1": 285}
@@ -296,7 +223,7 @@ func TestF4d09_CatalogWithoutRaisedFloorsLiftsTheRefusal(t *testing.T) {
 
 // Нечитаемый каталог — ОТДЕЛЬНЫЙ исход, а не ноль.
 func TestF4d09_UnreadableCatalogIsNotAnEmptyOne(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	w := wiredLane()
 	w.CatalogFloors = config.CatalogFloors{Readable: false}
 
@@ -313,7 +240,7 @@ func TestF4d09_UnreadableCatalogIsNotAnEmptyOne(t *testing.T) {
 // точке решения. Иначе страж отказал бы в старте из-за записи, которая ни
 // одного запроса не отвергла бы.
 func TestF4d09_UnknownAssuranceLevelIsNotADemand(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	w := wiredLane()
 	w.PresentableACRs = []string{"1"}
 	w.CatalogFloors.ByLevel = map[string]int{"1": 285, "totally-unknown": 7}
@@ -327,7 +254,7 @@ func TestF4d09_UnknownAssuranceLevelIsNotADemand(t *testing.T) {
 // F4d-08 — половина ПОЛНОТЫ ПРОВЯЗКИ не заменяется посадочной и наоборот.
 
 func TestF4d08_WiringHalfIsNotReplacedByTheConfigHalf(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn) // настройка полная и валидная
+	cfg := laneCfg() // настройка полная и валидная
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("посадочная половина обязана проходить на полной настройке: %v", err)
 	}
@@ -346,7 +273,7 @@ func TestF4d08_WiringHalfIsNotReplacedByTheConfigHalf(t *testing.T) {
 // Обе точки читают ОДИН аксессор включённости своей чеканки — разойтись во
 // мнении о ней они не могут.
 func TestF4d08_BothHalvesReadOneEnabledAccessor(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	cfg.AuthN.TokenSigning.Enabled = false
 
 	if err := cfg.Validate(); err == nil {
@@ -360,9 +287,9 @@ func TestF4d08_BothHalvesReadOneEnabledAccessor(t *testing.T) {
 }
 
 // В непроизводственном режиме требований полосы нет — та же граница, что у
-// соседних провайдерских стражей (in-process фикстура стендом не является).
+// соседних стражей старта (in-process фикстура стендом не является).
 func TestF4d_DevModeCarriesNoLaneRequirements(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	cfg.AuthN.Mode = config.ModeDev
 	if err := config.ValidateLaneWiring(cfg, config.LaneWiring{}); err != nil {
 		t.Fatalf("ValidateLaneWiring() = %v; в dev требований полосы нет", err)

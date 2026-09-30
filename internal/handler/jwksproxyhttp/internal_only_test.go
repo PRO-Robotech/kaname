@@ -12,9 +12,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 )
 
-// RJU-06 — internal-only lock: the /.well-known/jwks.json route is served ONLY by
-// the jwks-proxy mux (mounted on the cluster-INTERNAL :9097 listener), and is NOT
-// reachable on the EXTERNAL registry-token mux (:9096). Publishing JWKS on an
+// ownKeySetPath — путь нашей записи по умолчанию (`authn.token-signing.key-set-path`).
+const ownKeySetPath = "/.well-known/kaname/jwks.json"
+
+// RJU-06 — internal-only lock: the key-set route is served ONLY by the publisher
+// mux (mounted on the cluster-INTERNAL :9097 listener), and is NOT reachable on
+// the EXTERNAL registry-token mux (:9096). Publishing the key set on an
 // external-reachable surface would regress ban #6.
 func TestJWKSProxy_RJU06_NotOnExternalRegistryTokenMux(t *testing.T) {
 	// External registry-token mux (docker clients hit /iam/token through the edge).
@@ -23,22 +26,20 @@ func TestJWKSProxy_RJU06_NotOnExternalRegistryTokenMux(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, jwksproxyhttp.WellKnownJWKSPath, nil)
+	req := httptest.NewRequest(http.MethodGet, ownKeySetPath, nil)
 	externalMux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("external registry-token mux served %s → %d; want 404 (route must be internal-only, ban #6)",
-			jwksproxyhttp.WellKnownJWKSPath, rec.Code)
+			ownKeySetPath, rec.Code)
 	}
 
-	// The dedicated jwks-proxy mux DOES route the well-known path to the handler.
+	// The dedicated publisher mux DOES route the key-set path to its handler.
 	//
-	// Маршрут монтируется теперь ОБЪЯВЛЕННОЙ привязкой «издатель → путь»
-	// (записей больше одной, см. binding.go). Утверждение то же самое; изменился
-	// способ, каким путь попадает в mux, и это ровно то, что требовалось: перечень
-	// путей выводится из привязки, а не выписывается по месту.
+	// Маршрут монтируется ОБЪЯВЛЕННОЙ привязкой «издатель → путь»: путь
+	// выводится из привязки, а не выписывается по месту.
 	binding, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{{
-		Issuer:  "https://provider.kacho.local",
-		Path:    jwksproxyhttp.WellKnownJWKSPath,
+		Issuer:  "https://kaname.kacho.local",
+		Path:    ownKeySetPath,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }),
 	}})
 	if err != nil {
@@ -49,10 +50,9 @@ func TestJWKSProxy_RJU06_NotOnExternalRegistryTokenMux(t *testing.T) {
 		t.Fatalf("mux по законной привязке обязан строиться: %v", err)
 	}
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, jwksproxyhttp.WellKnownJWKSPath, nil)
+	req = httptest.NewRequest(http.MethodGet, ownKeySetPath, nil)
 	jwksMux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusTeapot {
-		t.Fatalf("jwks-proxy mux did not route %s to its handler (got %d)",
-			jwksproxyhttp.WellKnownJWKSPath, rec.Code)
+		t.Fatalf("publisher mux did not route %s to its handler (got %d)", ownKeySetPath, rec.Code)
 	}
 }

@@ -97,7 +97,8 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	}
 	// AccessKeyService (Ф7, kacho#1273): шесть глаголов ключа доступа — четыре
 	// под правом человека и два освобождённых глагола утверждения (Р11).
-	// Регистрируется ТОЛЬКО при поднятой полосе входа (`own`).
+	// Регистрируется вместе с полосой входа: она строится на каждом старте,
+	// а не построенная останавливает старт раньше (`buildLoginLane`).
 	if svcs != nil && svcs.accessKeyHandler != nil {
 		iamv1.RegisterAccessKeyServiceServer(srv, svcs.accessKeyHandler)
 	}
@@ -214,10 +215,11 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	// оборвало бы каждую их мутацию, потому что недоступность авторитета на пути
 	// запроса fail-closed.
 	// InternalSessionRevocationsService — token revocation
-	// (logout / force-logout write + IsRevoked hot-path + admin ListByUser).
-	// Internal-only (запрет #6); the api-gateway logout handler + refresh-hook
-	// drive it. Registering it here closes the P0 gap where Revoke returned
-	// codes.Unimplemented and token revocation was inert.
+	// (logout write + IsRevoked hot-path + admin ListByUser).
+	// Internal-only (запрет #6); the api-gateway logout handler and the edge's
+	// per-request IsRevoked reader drive it. Registering it here closes the P0
+	// gap where Revoke returned codes.Unimplemented and token revocation was
+	// inert.
 	if svcs != nil && svcs.sessionRevocationsHandler != nil {
 		iamv1.RegisterInternalSessionRevocationsServiceServer(srv, svcs.sessionRevocationsHandler)
 	}
@@ -243,10 +245,10 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	}
 	// InternalHumanSessionService — `Resolve` нашей сессии человека по носителю
 	// (Ф3, kacho#1269). Internal-only (запрет #6): вызывающий — край, на каждом
-	// запросе с печеньем; наружу метод не выставляется никогда. Регистрация
-	// УСЛОВНА: полоса входа строится только под `own`, и без неё глагола нет —
-	// `Unimplemented` честнее ответа «сессии нет» от службы, которая сессий не
-	// выдаёт.
+	// запросе с печеньем; наружу метод не выставляется никогда. Исполнителя
+	// глагола несёт полоса входа, а она строится на каждом старте (kaname#363):
+	// непостроенная останавливает старт раньше, и пустого исполнителя здесь не
+	// бывает.
 	if svcs != nil && svcs.humanSessionHandler != nil {
 		iamv1.RegisterInternalHumanSessionServiceServer(srv, svcs.humanSessionHandler)
 	}

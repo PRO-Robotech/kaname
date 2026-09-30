@@ -598,8 +598,8 @@ func (w *ceremonyWorld) buildSurface() {
 		w.fixture("сборка поверхности выдачи: %v", err)
 	}
 	var cfg config.Config
-	// Церемония существует ровно под посадкой `own` (приёмка §1: свой вход).
-	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
+	// Церемония собрана включённым токен-эндпоинтом (приёмка §1: свой вход);
+	// посадка у службы одна (kaname#363).
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:          true,
 		AllowedAudiences: "https://api.kacho.local,registry.kacho.local",

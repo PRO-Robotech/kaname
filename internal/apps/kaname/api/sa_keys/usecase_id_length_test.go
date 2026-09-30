@@ -59,7 +59,7 @@ func TestIssueSAKey_ServiceAccountIDLengthIsJudged(t *testing.T) {
 	require.Len(t, truncatedSAID, domain.ShortIDLen-1,
 		"отрицание обязано отличаться от контроля РОВНО длиной")
 
-	uc := NewIssueSAKeyUseCase(nil, nil, nil, nil)
+	uc := NewIssueSAKeyUseCase(nil, nil, nil).WithOwnIssuance()
 
 	t.Run("truncated is rejected by format", func(t *testing.T) {
 		// created_by намеренно не назван: без починки исполнение проходит

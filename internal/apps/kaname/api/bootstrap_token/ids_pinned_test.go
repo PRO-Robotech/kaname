@@ -101,3 +101,37 @@ func TestDeriveIdentity_FormulaStaysWhereNameAndIDMoveTogether(t *testing.T) {
 			"которое делает обе пробы вакуумными")
 	}
 }
+
+// mirrorLeavingFile — миграция, снявшая столбец имени клиента у внешнего
+// поставщика (kaname#362). Её предохранитель пропускает ровно одну строку
+// зеркала — строку этой чеканки, — названную тройкой посевных значений.
+const mirrorLeavingFile = "20260928231124_provider_mirror_leaves_the_credential_tables.sql"
+
+// TestDeriveIdentity_MirrorLeavingExclusionNamesThisRow — исключение
+// предохранителя названо теми же значениями, что отдаёт `DeriveIdentity`.
+//
+// Сдвиг любого из них оставил бы исключение адресующим чужую строку: собственная
+// строка чеканки на живой базе стала бы «зеркалом», и накат отказывал бы
+// навсегда. Значения читаются из ПРЯМОГО хода миграции, а не выписываются здесь
+// второй раз.
+func TestDeriveIdentity_MirrorLeavingExclusionNamesThisRow(t *testing.T) {
+	body, err := migrations.FS.ReadFile(mirrorLeavingFile)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: миграция %s не прочитана: %v", mirrorLeavingFile, err)
+	}
+	up := migrations.MigrationUpSection(string(body))
+	if len(up) == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: прямой ход %s пуст", mirrorLeavingFile)
+	}
+	id := DeriveIdentity()
+	for field, want := range map[string]string{
+		"SocID": "id = '" + id.SocID + "'",
+		"SvaID": "sva_id = '" + id.SvaID + "'",
+	} {
+		if !strings.Contains(up, want) {
+			t.Errorf("исключение предохранителя не называет %s строки чеканки (%s): накат "+
+				"отказал бы на её собственной строке", field, want)
+		}
+	}
+	t.Logf("перепись: прямого хода прочитано %d байт · значений исключения сверено 2", len(up))
+}

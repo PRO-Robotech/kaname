@@ -126,16 +126,6 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.NewCatalogSnapshotRecorder() },
 		Why:   "мёртвое обновление снимка снаружи неотличимо от исправного: снимок продолжает отвечать прежним множеством",
 	},
-	Namespace + "_provider_compensations_emitted_total": {
-		Cells: len(CompensationOrigins) * len(CompensationEmitOutcomes),
-		Build: func(r *Registry) { r.NewCompensationRecorder() },
-		Why:   "«ноль компенсаций» — и здоровое облако, и непровязанный механизм",
-	},
-	Namespace + "_provider_compensations_applied_total": {
-		Cells: len(CompensationOrigins),
-		Build: func(r *Registry) { r.NewCompensationRecorder() },
-		Why:   "расхождение записанных и исполненных читается только когда обе серии существуют",
-	},
 	// ── ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) ────────────────────────────────
 	// Один конструктор, семь семейств: запись на каждое, иначе незасеянный сосед
 	// прятался бы под засеянным. Словари — у производителей событий.
@@ -288,20 +278,6 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(RegisterPostCommitSteps) * len(RegisterPostCommitOutcomes),
 		Build: func(r *Registry) { r.NewRegisterPostCommitRecorder() },
 		Why:   "шаг после коммита, который не исполняется, выглядел бы как шаг без отказов",
-	},
-	AuthnHookRequestsMetric: {
-		Cells: 2 * 2, // маршрутов × исходов, набор приходит доводом от корня
-		Build: func(r *Registry) {
-			r.AuthnHooksRecorder([]string{"login", "registration"}, []string{"ok", "error"})
-		},
-		Why: "полоса хуков поставщика личности: непровязанный маршрут обязан быть виден нулём",
-	},
-	AuthnHookAuditDropsMetric: {
-		Cells: 2, // виды записи, набор приходит доводом от корня
-		Build: func(r *Registry) {
-			r.AuthnHookAuditDropsRecorder([]string{"authn.token.issued", "authn.refresh.issued"})
-		},
-		Why: "полоса обслуживает дальше на отказе записи журнала: «потерь не было» обязано быть отличимо от непровязанного приёмника",
 	},
 	ReadinessChecksMetric: {
 		Cells: 1 * len(ReadinessOutcomes), // одна названная зависимость × исходы

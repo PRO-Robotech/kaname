@@ -17,7 +17,7 @@ import (
 // требование невыполнимым by construction.
 //
 // Здесь проверяется, что страж видит ВСЕ поверхности корня, а не четыре из
-// восьми (#2639): совпадение скрейпа с зеркалом ключей — такая же неисполнимая
+// восьми (#2639): совпадение скрейпа с публикатором ключей — такая же неисполнимая
 // посадка, как совпадение двух фронтов, и до расширения сверки страж о нём
 // молчал.
 //
@@ -29,7 +29,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 	const (
 		publicGRPC    = ":9090"
 		internalGRPC  = ":9091"
-		hooks         = ":9094"
+		loginLane     = ":9100"
 		metrics       = ":9095"
 		registryToken = ":9096"
 		jwksProxy     = ":9097"
@@ -42,7 +42,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		return []surfaceAddr{
 			{knobPublicGRPC, publicGRPC},
 			{knobInternalGRPC, internalGRPC},
-			{knobHooks, hooks},
+			{knobLoginLane, loginLane},
 			{knobMetrics, metrics},
 			{knobRegistryToken, registryToken},
 			{knobJWKSProxy, jwksProxy},
@@ -100,14 +100,14 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		}
 	})
 
-	t.Run("инъекция: скрейп занял адрес зеркала ключей", func(t *testing.T) {
+	t.Run("инъекция: скрейп занял адрес публикатора ключей", func(t *testing.T) {
 		// РАДИ ЭТОГО СЛУЧАЯ сверка и расширена: обе поверхности прежним стражем
 		// не судились вовсе, и совпадение их адресов он принимал молча.
 		surfaces := allEight()
 		surfaces[3].addr = jwksProxy
 		_, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
-			t.Fatal("страж принял посадку, где скрейп и зеркало ключей слушают один " +
+			t.Fatal("страж принял посадку, где скрейп и публикатор ключей слушают один " +
 				"адрес: поверхности, которых сверка не знает, и есть её слепая зона")
 		}
 		for _, want := range []string{knobMetrics, knobJWKSProxy, jwksProxy} {
@@ -117,14 +117,14 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		}
 	})
 
-	t.Run("инъекция: вебхуки заняли адрес публичного gRPC", func(t *testing.T) {
+	t.Run("инъекция: полоса входа заняла адрес публичного gRPC", func(t *testing.T) {
 		surfaces := allEight()
 		surfaces[2].addr = publicGRPC
 		_, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
-			t.Fatal("страж принял посадку, где вебхуки слушают адрес gRPC-слушателя")
+			t.Fatal("страж принял посадку, где полоса входа слушает адрес gRPC-слушателя")
 		}
-		for _, want := range []string{knobHooks, knobPublicGRPC} {
+		for _, want := range []string{knobLoginLane, knobPublicGRPC} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("отказ не называет %q: %v", want, err)
 			}
@@ -144,7 +144,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		// Оператор чинит профиль один раз, а не по одному совпадению за
 		// перезапуск: страж, останавливающийся на первом, продаёт круг подъёма.
 		surfaces := allEight()
-		surfaces[3].addr = jwksProxy  // скрейп ↔ зеркало ключей
+		surfaces[3].addr = jwksProxy  // скрейп ↔ публикатор ключей
 		surfaces[7].addr = publicREST // внутренний фронт ↔ публичный
 		census, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {

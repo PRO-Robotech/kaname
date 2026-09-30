@@ -73,8 +73,6 @@ const (
 	knobPublicREST = "KANAME_API_SERVER__REST_ENDPOINT"
 	// knobInternalREST — собственный внутренний REST-фронт.
 	knobInternalREST = "KANAME_API_SERVER__INTERNAL_REST_ENDPOINT"
-	// knobHooks — вебхуки провайдера личности.
-	knobHooks = "KANAME_AUTHN__HOOKS_HTTP_ENDPOINT"
 	// knobMetrics — скрейп величин.
 	knobMetrics = "KANAME_API_SERVER__METRICS_ENDPOINT"
 	// knobRegistryToken — выдача докерного токена.
@@ -83,7 +81,7 @@ const (
 	// значение приходит из окружения, здесь стоит только его адрес. Сканер
 	// опознаёт подстроку TOKEN в имени постоянной и иначе решить не может.
 	knobRegistryToken = "KANAME_API_SERVER__REGISTRY_TOKEN__ENDPOINT"
-	// knobJWKSProxy — зеркало набора ключей проверки подписи.
+	// knobJWKSProxy — публикатор набора ключей проверки подписи.
 	knobJWKSProxy = "KANAME_API_SERVER__JWKS_PROXY__ENDPOINT"
 )
 
@@ -229,7 +227,7 @@ func internalRESTFrontAuthAxis(requiresClientCert bool) servicecontract.Axis[ser
 // объявленным выключением с причиной, и причина попадает в журнал при старте.
 // Причина требуется АРГУМЕНТОМ, а не берётся из общего шаблона — у четырёх
 // поверхностей iam цена выключения РАЗНАЯ: у скрейпа это отсутствие
-// наблюдаемости, у зеркала ключей — закрытая верификация всей плоскости данных
+// наблюдаемости, у публикатора ключей — закрытая верификация всей плоскости данных
 // реестра.
 func addrAxis(addr, becauseEmpty string) servicecontract.Axis[string] {
 	if addr == "" {

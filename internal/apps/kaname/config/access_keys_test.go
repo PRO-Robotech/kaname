@@ -335,14 +335,13 @@ func TestAccessKeys_F7_13_LaneRequirementOnOwn(t *testing.T) {
 		}
 		seen = true
 		require.Equal(t, config.LaneStageConfig, r.Stage)
-		require.True(t, r.AppliesTo(config.IdentityProviderOwn))
-		require.False(t, r.AppliesTo(config.IdentityProviderExternal))
 	}
 	require.True(t, seen, "в таблице требований нет строки %q", el)
 }
 
 // TestAccessKeys_F7_13_RequiredSettingsRowsExist — три строки таблицы
-// обязательных величин порождены из перечня ручек, полоса `own`.
+// обязательных величин порождены из перечня ручек и безусловны (прежде —
+// «полоса own»; посадка у службы одна, kaname#363).
 func TestAccessKeys_F7_13_RequiredSettingsRowsExist(t *testing.T) {
 	want := map[string]bool{akKeyRPID: false, akKeyOrig: false, akKeyAlgs: false}
 	for _, s := range config.RequiredSettings {
@@ -350,7 +349,7 @@ func TestAccessKeys_F7_13_RequiredSettingsRowsExist(t *testing.T) {
 			continue
 		}
 		want[s.Key] = true
-		require.Equal(t, []config.IdentityProvider{config.IdentityProviderOwn}, s.Lanes, "строка %s — полоса own", s.Key)
+		require.False(t, s.Conditional, "строка %s — безусловная", s.Key)
 		require.Equal(t, config.SupplyEnv, s.Supply)
 		require.NotEmpty(t, s.Env)
 		require.Contains(t, s.Refusal, s.Key)
@@ -436,7 +435,7 @@ func TestAccessKeys_F7_38_RequiredSettingsRowExists(t *testing.T) {
 	for _, s := range config.RequiredSettings {
 		if s.Key == akCeilKey {
 			require.Equal(t, akCeilEnv, s.Env)
-			require.Empty(t, s.Lanes, "потолок — величина любой посадки, той же формы, что три соседних")
+			require.False(t, s.Conditional, "потолок — величина всякого старта, той же формы, что три соседних")
 			return
 		}
 	}

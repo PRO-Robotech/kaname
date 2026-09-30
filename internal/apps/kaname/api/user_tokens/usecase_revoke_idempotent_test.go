@@ -100,7 +100,6 @@ func TestRevoke_RepeatAbsentAndForeignShareOneOutcome(t *testing.T) {
 		CredentialKind: domain.CredentialKindSecret,
 		ID:             tokenID,
 		UserID:         caller,
-		OAuthClientID:  "hydra-usr-9",
 	}}
 	ownOutcome, ownDeleted := revokeOutcome(t, own, caller, tokenID)
 	if !ownDeleted {
@@ -127,7 +126,6 @@ func TestRevoke_RepeatAbsentAndForeignShareOneOutcome(t *testing.T) {
 		CredentialKind: domain.CredentialKindSecret,
 		ID:             tokenID,
 		UserID:         other,
-		OAuthClientID:  "hydra-usr-2",
 	}}
 	foreignOutcome, foreignDeleted := revokeOutcome(t, foreign, caller, tokenID)
 

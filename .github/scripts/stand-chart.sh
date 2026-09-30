@@ -64,11 +64,12 @@
 # ПОСАДКА `own`: ЧЕМ СТЕНД ОТЛИЧАЕТСЯ И ПОЧЕМУ ИМЕННО ЭТИМ
 #
 # Посадка — НАКЛАДКА ОПЕРАТОРА поверх боевого профиля, а не второй профиль:
-# `authn.identityProvider: own` и токен-эндпоинт платформы (`authn.clientToken`,
-# `enabled: true` и четыре величины) — ровно то, что называет INSTALL.md §1;
-# без эндпоинта `own` не собирает сам чарт (kaname#337). Прочее — адрес полосы,
-# её взаимный TLS, предел памяти, третий ключ Secret — боевой профиль уже несёт,
-# и стенд его не повторяет: повтор проверял бы накладку, а не поставку.
+# токен-эндпоинт платформы (`authn.clientToken`, `enabled: true` и его
+# величины) своими числами — ровно то, что называет INSTALL.md §1; без
+# эндпоинта боевую установку не собирает сам чарт (kaname#337). Ключа посадки в
+# накладке нет: он снят (kaname#363), и чарт отвергает его вслух. Прочее — адрес
+# полосы, её взаимный TLS, предел памяти, ключи Secret — боевой профиль уже
+# несёт, и стенд его не повторяет: повтор проверял бы накладку, а не поставку.
 #
 # Сверх накладки стенд создаёт ДВА условия, без которых набор полосы входа
 # исполняется и не утверждает ничего:
@@ -553,10 +554,9 @@ make_secrets() {
 	# объект обязан нести ключ на любой посадке: `secretKeyRef` судится
 	# кластером при создании контейнера, а не процессом при чтении.
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-authn" \
-		--from-literal=hook-shared-secret="$(openssl rand -hex 16)" \
 		--from-literal=jwks-encryption-key-hex="$(openssl rand -hex 32)" \
 		--from-literal=second-factor-encryption-key-hex="$(openssl rand -hex 32)" >/dev/null
-	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: три ключа)"
+	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: два ключа)"
 	# Лист края — Secret'ом стенда, а не только файлом рабочего каталога: посев
 	# и прогон берут его ОТСЮДА (`seed-login-lane`), то есть предъявляется ровно
 	# тот лист, что выписан под этот УЦ, в каком бы каталоге ни шёл следующий шаг.
@@ -647,15 +647,10 @@ tls:
   clientSecretName: $RELEASE-client-tls
   providerSecretName: $RELEASE-provider-ca
 secrets:
-  KANAME_HOOK_TOKEN:
-    secretName: $RELEASE-authn
-    secretKey: hook-shared-secret
   KANAME_JWKS_ENC_KEY:
     secretName: $RELEASE-authn
     secretKey: jwks-encryption-key-hex
 env:
-  KANAME_HYDRA_ADMIN_URL: "https://127.0.0.1:14445"
-  KANAME_HYDRA_JWKS_URL: "https://127.0.0.1:14444/.well-known/jwks.json"
   KANAME_HYDRA_TOKEN_URL: "https://127.0.0.1:14444/oauth2/token"
 EOF
 	rm -f "$WORK/values.stand-own.yaml"
@@ -674,7 +669,6 @@ EOF
 	# равного потолкам фундамента; коллекции церемонии судят прежнее поведение.
 	cat > "$WORK/values.stand-own.yaml" <<EOF
 authn:
-  identityProvider: own
   trustedForwarderSANs:
     - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
     - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"

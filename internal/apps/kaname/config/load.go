@@ -13,8 +13,6 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
-
-	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
 // Load reads configuration from a YAML file (if path != "") + applies
@@ -44,25 +42,13 @@ func Load(path string) (Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "__", "-", "_"))
 	v.AutomaticEnv()
 
-	// ПОСАДКА ЛИЧНОСТИ привязывается к окружению ЯВНО, и это не украшение.
-	//
-	// AutomaticEnv резолвит переменную только для ключа, который viper уже
-	// ЗНАЕТ, — то есть объявленного умолчанием либо привязкой. У этого ключа
-	// умолчания нет намеренно (см. defaults.go), поэтому без явной привязки
-	// документированная переменная не доезжала бы до поля ВООБЩЕ: оператор
-	// задаёт её, процесс принимает старт как «посадка не объявлена», и ручка
-	// выглядит настроенной, ничего не делая.
-	//
-	// Привязка регистрирует ключ, НЕ давая ему значения: незаданная переменная
-	// оставляет поле нулевым, то есть «не объявлено», и отказ старта наступает
-	// ровно так же. Свойство закреплено пробой documented-env-имени.
-	if err := v.BindEnv("authn."+identityposture.FieldName,
-		"KANAME_AUTHN__IDENTITY_PROVIDER"); err != nil {
-		return Config{}, fmt.Errorf("bind %s env: %w", IdentityProviderSetting, err)
+	// СНЯТЫЕ КЛЮЧИ ИЗ ОКРУЖЕНИЯ отвергаются ДО всякого чтения: переменная, которую
+	// загрузчик больше не привязывает, иначе прошла бы молча (retired_settings.go).
+	if err := refuseRetiredSettingsInEnv(os.LookupEnv); err != nil {
+		return Config{}, err
 	}
 
-	// ДОСТАВКА МАНИФЕСТОВ привязывается к окружению ЯВНО — по той же причине,
-	// что посадка личности выше (задача #1875).
+	// ДОСТАВКА МАНИФЕСТОВ привязывается к окружению ЯВНО (задача #1875).
 	//
 	// Умолчания у обеих ручек нет намеренно: пустой каталог означает «доставка
 	// не заведена», и подставленное значение было бы непустым всегда. Но
@@ -163,6 +149,12 @@ func Load(path string) (Config, error) {
 		if err := v.ReadInConfig(); err != nil {
 			return Config{}, fmt.Errorf("read config %q: %w", path, err)
 		}
+		// Снятый ключ в файле — отказ, а не молчание: у разбора нет запрета на
+		// незнакомые ключи, и без этой проверки строка профиля, написанная под
+		// прежнюю посадку, была бы принята и проигнорирована.
+		if err := refuseRetiredSettingsInFile(v, path); err != nil {
+			return Config{}, err
+		}
 	}
 
 	// Legacy ENV → new keys (backward-compat).
@@ -190,7 +182,6 @@ func Load(path string) (Config, error) {
 			mapstructure.StringToSliceHookFunc(","),
 			stringToInt64SliceHook(","),
 			modeDecodeHook(),
-			identityProviderDecodeHook(),
 		)
 	}
 	if err := v.Unmarshal(&cfg, decoderOpts); err != nil {
@@ -420,34 +411,6 @@ func modeDecodeHook() mapstructure.DecodeHookFunc {
 		default:
 			return data, nil
 		}
-	}
-}
-
-// identityProviderDecodeHook — DecodeHook для viper.Unmarshal: строка →
-// IdentityProvider (задача #1125).
-//
-// Разбор ТОТ ЖЕ, что у всех прочих читателей (ParseIdentityProvider): второй
-// разборщик разошёлся бы с первым на вырожденном значении, и разошёлся бы
-// молча. Числовая форма НЕ принимается намеренно: у поля есть ровно два
-// законных значения и оба именованы, а номер значения — деталь представления,
-// которую профиль писать не должен и по которой невозможно отличить «не
-// задано» от осознанного выбора.
-func identityProviderDecodeHook() mapstructure.DecodeHookFunc {
-	return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
-		if to != reflect.TypeOf(IdentityProvider(0)) {
-			return data, nil
-		}
-		v, ok := data.(string)
-		if !ok {
-			return data, nil
-		}
-		if strings.TrimSpace(v) == "" {
-			// Пустое значение — «профиль поля не объявил», а не негодный ввод.
-			// Отказ производит проверка настройки, называя поле и оба законных
-			// значения; отказ здесь назвал бы то же самое вторым текстом.
-			return IdentityProviderUnset, nil
-		}
-		return ParseIdentityProvider(v)
 	}
 }
 

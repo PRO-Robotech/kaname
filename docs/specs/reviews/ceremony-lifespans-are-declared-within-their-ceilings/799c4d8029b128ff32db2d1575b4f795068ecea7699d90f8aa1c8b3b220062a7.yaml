@@ -48,9 +48,9 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-09-27'
 
 effective_approval:
-  issued: false
-  issued_at: null
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-29T16:31:20Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 2 — APPROVED, блокирующих ноль. Блокирующее круга 1 (COVERAGE: стражу не
     подавалась величина строго внутри диапазона, нижний край не судил никто) закрыто по
@@ -71,24 +71,53 @@ effective_approval:
       правятся.
 
   sanction:
-    outcome: САНКЦИИ НЕТ — ждёт события
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ — с момента события, не раньше
     decided_by: acceptance-reviewer
     decided_at: '2026-09-27'
-    issued_by_event: null
-    event_url: null
+    issued_by_event: 5894386917
+    event_url: https://github.com/PRO-Robotech/kaname/issues/318#issuecomment-5894386917
     basis: >-
       change-graph.md §3: вердикт действителен, когда его подтверждает внешнее событие —
       принадлежащее названной задаче, с допущенным к роли автором, с телом, связывающим точный
-      отпечаток предмета, роль и вердикт. На момент записи события нет ни одного, поэтому
-      issued, issued_at и ban1_lifted стоят формой «не выдано», а не пропущены.
-    conditions_pending: >-
-      (1) Отпечаток — git show 94ef7a123:<путь> | sha256sum равен имени этой записи и строке
-      subject_sha256 события; ревизия на origin раньше события (gh api
-      repos/PRO-Robotech/kaname/activity?ref=refs/heads/318). (2) Принадлежность — issue_url
-      события указывает на PRO-Robotech/kaname#318. (3) Полномочие — автор события значится в
-      review_authority.acceptance-reviewer политики docs/changes/policy.yaml воркспейса
-      (сейчас строка 41, [pointpu]). (4) Тело — пять строк заголовка дословно, каждая ровно одна,
-      контроль в другую сторону verdict CHANGES_REQUESTED → 0; created_at == updated_at.
+      отпечаток предмета, роль и вердикт. Все четыре условия ниже выполнены и перемерены на
+      ревизии kaname 366 @ 4d1514b8a (= origin/366) и воркспейса origin/main 6eddaa5e тем, кто
+      приводит запись к факту (tooling-maintainer по маршруту диспетчера, возврат B2 посадки
+      kaname-357-366); ни одно не взято со слов задания или курьера. Вердикт роли этим не
+      перевынесен: он остаётся вердиктом круга 2.
+    remeasured: >-
+      (1) Отпечаток — `git show
+      94ef7a123c89de7148efee844a13a7a91dcad9a7:docs/engineering/acceptance/ceremony-lifespans-are-declared-within-their-ceilings.md
+      | sha256sum` → 799c4d8029b128ff32db2d1575b4f795068ecea7699d90f8aa1c8b3b220062a7; то же число
+      на origin/366 @ 4d1514b8a, `git log 94ef7a123..origin/366 -- <путь>` → 0 коммитов, то есть
+      документ после вердикта не правился; совпал с именем файла этой записи и со строкой
+      `subject_sha256` тела события. Ревизия опубликована раньше события: ветки `318` на origin не
+      было никогда, ревизия ушла на origin в составе ветки сборки `455` — `gh api
+      'repos/PRO-Robotech/kaname/activity?ref=refs/heads/455'` → создание на 6929c86f8 в
+      2026-09-27T15:36:54Z, `git merge-base --is-ancestor 94ef7a123 6929c86f8` → 0; в `366` —
+      push c083ad5bb → 90a25be64 в 2026-09-27T17:46:41Z; событие — 2026-09-29T16:31:20Z. Условие
+      `publication_pending.expected_form` этим исполнено. (2) Принадлежность задаче — `gh api
+      repos/PRO-Robotech/kaname/issues/comments/5894386917` → `issue_url` указывает на
+      PRO-Robotech/kaname#318, то есть на `subject.task`. (3) Полномочие — `pointpu` значится в
+      `review_authority.acceptance-reviewer` политики `docs/changes/policy.yaml` воркспейса
+      (origin/main 6eddaa5e, строка 41), `gh api
+      repos/PRO-Robotech/kaname/collaborators/pointpu/permission` → admin, `author_association`
+      → MEMBER; эпоха post-cutover — `git merge-base --is-ancestor
+      1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main` → 0. (4) Тело — пять строк заголовка
+      до первой `---`, каждая из пяти обязательных дословно ровно одна (`grep -cxF` → 1 по
+      каждой), контроль в другую сторону `grep -cxF 'verdict: CHANGES_REQUESTED'` → 0; отпечаток
+      тела `gh api … | jq -j .body | sha256sum` →
+      2c4f8f71200f07e1bc326e04473f0de4c9d24e51ddf59c7f4069e62a123c3f84 (на том же теле `jq -r` →
+      6773a5f0… — другое число о другом входе); `created_at == updated_at`
+      (2026-09-29T16:31:20Z) ⇒ после публикации тело не правилось. Единственность: `gh api
+      --paginate repos/PRO-Robotech/kaname/issues/318/comments` → комментариев 5, заголовок
+      события (строки `role:` и `subject_sha256:`) несёт ровно один — 5894386917.
+    code_before_event: >-
+      Код задачи — коммит 31d008548 (2026-09-27T11:57:35Z) — влит в ветку волны сборкой 3:
+      слияние 70d64cbea в `455` и 90a25be64 в `366` (push 2026-09-27T17:46:41Z), то есть почти за
+      двое суток ДО события. Запрет #1 в это время действовал, и санкция этим событием задним
+      числом не выдаётся: `issued_at` — момент события, а не момент кода. Факт назван и в теле
+      самого события (абзац «Код предшествовал событию»). Санкционировано событием содержимое
+      приёмки редакции 94ef7a123; о соответствии кода этой редакции запись не судит.
     mechanism: >-
       После события запись приводится к факту НА МЕСТЕ — форма 585749b74 (#295) и 2e45268cb
       (#406): тронуты ровно три выводимых поля (issued, issued_at, ban1_lifted), outcome этого
@@ -110,7 +139,17 @@ effective_approval:
       PY
     divergence_predicate_result: >-
       На 94ef7a123 до этой записи — «осмотрено 65 · расхождений 0». С этой записью — «осмотрено
-      66 · расхождений 0»: события у неё нет, и предикат её по построению не судит.
+      66 · расхождений 0»: события у неё нет, и предикат её по построению не судит. На 366 @
+      4d1514b8a до приведения — «осмотрено 78 · расхождений 2» (записи #339 96d6d526… и #405
+      6390a37f…, приводятся тем же коммитом), эта запись в счёт не входила: `event.status:
+      not_performed`. После приведения трёх записей — «осмотрено 78 · расхождений 0»; APPROVED с
+      исполненным событием 36 → 37, `issued: true` 34 → 37. Контроль в другую сторону: `issued:
+      true` без исполненного события — 0 до и 0 после.
+    silence_gate: >-
+      `.github/scripts/review-event-silence.py` на 366 @ 4d1514b8a до приведения называл
+      расхождение ровно на этой записи — событие 5894386917 опубликовано, а запись
+      `event.status: not_performed`, `issued: False`, код 1. Результат на коммите приведения —
+      в сообщении того коммита.
     gate: >-
       Инвариант performed ⇒ issued true держится вниманием, держатель заказан kaname#302.
       Запись без исполненного события судит .github/scripts/review-event-silence.py: он ищет в
@@ -133,19 +172,36 @@ authority:
 
 event:
   type: issue_comment
-  status: not_performed
-  why_not_performed: >-
-    Внешнее событие публикует курьер, а не рецензент: политика называет единственного
-    допущенного — pointpu. «Не выполнилось» — третья категория, в успех не зачитывается.
+  status: performed
+  database_id: 5894386917
+  node_id: IC_kwDOUO26pM8AAAABX1U05Q
+  url: https://github.com/PRO-Robotech/kaname/issues/318#issuecomment-5894386917
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5894386917
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/318
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-29T16:31:20Z'
+  body_sha256: 2c4f8f71200f07e1bc326e04473f0de4c9d24e51ddf59c7f4069e62a123c3f84
   subject_sha256: 799c4d8029b128ff32db2d1575b4f795068ecea7699d90f8aa1c8b3b220062a7
   subject_revision: 94ef7a123c89de7148efee844a13a7a91dcad9a7
   verdict: APPROVED
   event_body: 'acceptance-reviewer · APPROVED · 799c4d8029b128ff32db2d1575b4f795068ecea7699d90f8aa1c8b3b220062a7'
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента, тем же коммитом, что
+    `effective_approval.sanction`, по форме 5fa3d525d (#315). Прежний блок (`status:
+    not_performed`, причина — событие публикует курьер, а не рецензент) заменён этим: он описывал
+    момент вердикта, когда события ещё не было. Поле `event_body` оставлено как отдано
+    рецензентом — одной строкой через « · »; опубликовано оно пятью строками заголовка до первой
+    `---`, и именно эту форму судит `.github/scripts/review-event-silence.py`. Перемер всех полей
+    — `effective_approval.sanction.remeasured`.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: none
-  publication_mode: agent_verdict_awaiting_courier
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 scope:

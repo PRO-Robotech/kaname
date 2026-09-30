@@ -160,6 +160,13 @@ type sqlTok struct {
 	// at — смещение начала лексемы в тексте: по нему вызывающий называет строку
 	// исходника, на которой лексема стоит.
 	at int
+	// verbatim и bodyOff — у строки: первое прочтение стоит в тексте ДОСЛОВНО,
+	// со смещения at+bodyOff. Так место внутри строки (оператор в теле
+	// подпрограммы) называется своей строкой исходника, а не строкой начала
+	// константы; прочтение, раскрывшее экранирование либо продолжение, дословным
+	// не является, и место в нём называется началом константы.
+	verbatim bool
+	bodyOff  int
 }
 
 // sqlStrKind — вид строковой константы: от него зависит раскрытие содержимого.
@@ -219,10 +226,10 @@ func sqlTokens(src string) []sqlTok {
 			body := src[i+len(tag):]
 			end := strings.Index(body, tag)
 			if end < 0 {
-				toks, i = append(toks, sqlTok{kind: sqlTokString, readings: []string{body}}), len(src)
+				toks, i = append(toks, sqlTok{kind: sqlTokString, readings: []string{body}, verbatim: true, bodyOff: len(tag)}), len(src)
 				continue
 			}
-			toks = append(toks, sqlTok{kind: sqlTokString, readings: []string{body[:end]}})
+			toks = append(toks, sqlTok{kind: sqlTokString, readings: []string{body[:end]}, verbatim: true, bodyOff: len(tag)})
 			i += len(tag) + end + len(tag)
 		case isSQLIdentStart(c):
 			j := i + 1
@@ -238,14 +245,17 @@ func sqlTokens(src string) []sqlTok {
 					continue
 				case (c == 'U' || c == 'u') && strings.HasPrefix(src[j:], `&'`):
 					tok, next := sqlString(src, j+1, sqlStrUnicode)
+					tok.bodyOff += j + 1 - i
 					toks, i = append(toks, tok), next
 					continue
 				case src[j] == '\'' && (c == 'E' || c == 'e'):
 					tok, next := sqlString(src, j, sqlStrEscape)
+					tok.bodyOff += j - i
 					toks, i = append(toks, tok), next
 					continue
 				case src[j] == '\'' && (c == 'N' || c == 'n'):
 					tok, next := sqlString(src, j, sqlStrPlain)
+					tok.bodyOff += j - i
 					toks, i = append(toks, tok), next
 					continue
 				case src[j] == '\'' && (c == 'B' || c == 'b' || c == 'X' || c == 'x'):
@@ -377,8 +387,11 @@ func sqlContinuation(src string, i int) int {
 }
 
 // sqlString — строковая константа вида kind, чья открывающая кавычка в at.
+// Смещение дословного прочтения (bodyOff) считается от кавычки: приставку
+// константы (E, N, U&) вызывающий прибавляет сам.
 func sqlString(src string, at int, kind sqlStrKind) (sqlTok, int) {
-	raw, next, _ := sqlScanSingleQuoted(src, at, kind == sqlStrEscape)
+	raw, next, closed := sqlScanSingleQuoted(src, at, kind == sqlStrEscape)
+	quoteEnd := next
 	var readings []string
 	switch kind {
 	case sqlStrEscape:
@@ -392,7 +405,8 @@ func sqlString(src string, at int, kind sqlStrKind) (sqlTok, int) {
 			readings = append(readings, alt)
 		}
 	}
-	return sqlTok{kind: sqlTokString, readings: readings}, next
+	verbatim := closed && readings[0] == src[at+1:quoteEnd-1]
+	return sqlTok{kind: sqlTokString, readings: readings, verbatim: verbatim, bodyOff: 1}, next
 }
 
 // sqlQuotedName — имя в кавычках, открытое в at; unicode — имя U&"…". Незакрытое

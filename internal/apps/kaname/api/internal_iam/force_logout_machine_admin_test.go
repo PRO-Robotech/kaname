@@ -66,7 +66,6 @@ func TestForceLogout_ServiceAccountAdminIsAskedAsServiceAccount(t *testing.T) {
 	chk := &subjectKeyedChecker{grantedTo: "service_account:" + saID}
 	rec := &fakeForceLogoutRecorder{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
@@ -96,7 +95,6 @@ func TestForceLogout_UserAdminIsAskedAsUser(t *testing.T) {
 	chk := &subjectKeyedChecker{grantedTo: "user:" + usrID}
 	rec := &fakeForceLogoutRecorder{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
@@ -120,7 +118,6 @@ func TestForceLogout_UnnameablePrincipalIsRefusedWithoutAsking(t *testing.T) {
 	chk := &subjectKeyedChecker{grantedTo: "user:whatever"}
 	rec := &fakeForceLogoutRecorder{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
 		WithOperations(&recordingForceLogoutOps{}).
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает

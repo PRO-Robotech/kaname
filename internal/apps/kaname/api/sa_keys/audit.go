@@ -23,8 +23,7 @@ import (
 )
 
 const (
-	// auditEventSAKeyIssued — SAKeyService.IssueSAKey (Class A static SA-key
-	// minted via Hydra OAuth2 client).
+	// auditEventSAKeyIssued — SAKeyService.IssueSAKey (Class A static SA-key).
 	auditEventSAKeyIssued = "iam.sa_key.issued"
 	// auditEventSAKeyRevoked — SAKeyService.RevokeSAKey.
 	auditEventSAKeyRevoked = "iam.sa_key.revoked"

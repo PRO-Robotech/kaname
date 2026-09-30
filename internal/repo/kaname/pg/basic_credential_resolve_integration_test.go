@@ -79,8 +79,8 @@ func mintUserCredential(t *testing.T, pool *pgxpool.Pool, credID, userID string)
 	require.NoError(t, err)
 	_, err = pool.Exec(context.Background(), `
 INSERT INTO user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, $2, 'SECRET', $3, now() + interval '30 days')`, credID, userID, hash)
+    (id, user_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, $2, 'SECRET', $3, now() + interval '30 days')`, credID, userID, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -91,8 +91,8 @@ func mintSACredential(t *testing.T, pool *pgxpool.Pool, credID, svaID string) st
 	require.NoError(t, err)
 	_, err = pool.Exec(context.Background(), `
 INSERT INTO service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30 days')`, credID, svaID, hash)
+    (id, sva_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30 days')`, credID, svaID, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -246,8 +246,8 @@ func TestBAT1_48_ExpiryIsRefusedByTheSameRefusalAndTheBoundaryIsCheckedBothWays(
 	alive, hash, err := credsecret.Mint("uoc_0000000000000bat6")
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO user_oauth_clients (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ('uoc_0000000000000bat6', 'usr0000000000000bat1', NULL, 'usr0000000000000bat1', 'SECRET', $1,
+INSERT INTO user_oauth_clients (id, user_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ('uoc_0000000000000bat6', 'usr0000000000000bat1', 'usr0000000000000bat1', 'SECRET', $1,
         now() + interval '5 seconds')`, hash)
 	require.NoError(t, err)
 	// Дату создания сдвигаем в прошлое, чтобы истёкший срок оставался ЗАКОННЫМ

@@ -3,7 +3,7 @@
 
 // pod_env_execution_test.go — ИМЕНА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ПОДА СУДЯТСЯ ПО
 // ИСПОЛНЕНИЮ ЧАРТА, а не по тексту шаблонов (задача #433, держатель правила
-// #392 «у ручек стража посадки один адрес — ключ значений чарта»).
+// #392 «у ручек стража токен-эндпоинта один адрес — ключ значений чарта»).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ НЕ ТЕКСТ
@@ -30,8 +30,8 @@
 // Популяция берётся у продукта, а не у текста:
 //
 //   - ручки — таблица стража старта (`config.RequiredSettings`, `postureGuardRows`);
-//   - посадки — объявленные чартом (`podEnvConditions`): накладка own и боевой
-//     профиль без посадки;
+//   - посадки — объявленные чартом (`podEnvConditions`): накладка оператора и
+//     боевой профиль как есть;
 //   - места, где ключ может стать именем, — КАЖДАЯ карта дерева значений
 //     посадки. Дерево берёт сам helm: рендер копии чарта с шаблоном,
 //     выводящим `.Values` целиком (`podEnvValuesDump`), — со слиянием профилей
@@ -134,13 +134,14 @@ func (c podEnvCondition) with(sets ...string) []string {
 	return append(append([]string{}, c.overlay...), sets...)
 }
 
-// podEnvConditions — посадки, объявленные чартом. Первая — own: при ней тень
-// ручки стража и есть дефект (#392). Вторая — боевой профиль БЕЗ посадки:
-// профиль стоит на own (#424), и «как есть» совпал бы с первой; посадка,
-// отличная от own, которую чарт рендерит, одна — незаявленная.
+// podEnvConditions — входы, на которых судится чарт. Первый — накладка
+// оператора: при ней тень ручки стража и есть дефект (#392). Второй — боевой
+// профиль как есть, с заглушками величин. Прежде вторым был профиль без ключа
+// посадки; ключа больше нет (kaname#363), и объявленный профилем снят бы
+// отказом рендера, а не судился.
 var podEnvConditions = []podEnvCondition{
-	{name: "накладка own", overlay: ownPostureOverlay},
-	{name: "боевой профиль без посадки", overlay: []string{identityProviderKnob + "="}},
+	{name: "накладка оператора", overlay: operatorOverlay},
+	{name: "боевой профиль как есть", overlay: nil},
 }
 
 // ── Исполнения ───────────────────────────────────────────────────────────────
@@ -1052,7 +1053,7 @@ func judgePodEnvByExecution(t *testing.T, dir string, conds []podEnvCondition) (
 		if strings.HasPrefix(probe, "проход ") {
 			for _, s := range ss {
 				findings = append(findings, fmt.Sprintf("%s: ключ перечня, которого нет в дереве значений ни одной посадки, стал именем "+
-					"переменной пода формой %s — %s; ни проба, ни страж посадки такой перечень не судят: объявите его в values.yaml",
+					"переменной пода формой %s — %s; ни проба, ни страж токен-эндпоинта такой перечень не судят: объявите его в values.yaml",
 					probe, s.form(), s.where()))
 			}
 			continue
@@ -1077,7 +1078,7 @@ func judgePodEnvByExecution(t *testing.T, dir string, conds []podEnvCondition) (
 				}
 				switch {
 				case !guarded:
-					findings = append(findings, fmt.Sprintf("%s: ключ карты стал именем переменной пода формой %s — %s, а страж посадки "+
+					findings = append(findings, fmt.Sprintf("%s: ключ карты стал именем переменной пода формой %s — %s, а страж токен-эндпоинта "+
 						"эту карту не судит: ручка стража дойдёт до пода той же дорогой", mapLabel(probe), o.form(), o.where()))
 				case o.entry.name != o.key:
 					findings = append(findings, fmt.Sprintf("%s: страж судит ключ карты дословно, а именем переменной пода он стал "+
@@ -1126,7 +1127,7 @@ func judgeGuardOf(t *testing.T, w *podEnvWork, cond podEnvCondition, path string
 			}
 			for _, e := range entries {
 				if e.name == r.env {
-					findings = append(findings, fmt.Sprintf("%s.%s: рендер прошёл — ручка стража посадки уехала в окружение пода — "+
+					findings = append(findings, fmt.Sprintf("%s.%s: рендер прошёл — ручка стража токен-эндпоинта уехала в окружение пода — "+
 						"посадка «%s», %s, %s", path, r.env, cond.name, e.doc, e.container))
 				}
 			}

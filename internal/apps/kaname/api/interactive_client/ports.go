@@ -48,12 +48,12 @@ type clientRepo interface {
 // testable without a live provider and keeps the provider's HTTP shape out of
 // the business layer.
 //
-// ИМЕНОВАН НАРУЖУ, и это не косметика: исполнителей у порта ДВА, и выбирает их
-// посадка — под `external` зеркало чужого реестра
-// (`*clients.InteractiveClientProvider`), под `own` наш собственный реестр
-// (`*pg.OwnInteractiveClientProvider`). Выбор делает композиционный корень, а
-// выбор, который нельзя назвать типом, пришлось бы выражать ветвью внутри
-// use-case — то есть переносить решение о посадке в бизнес-слой (kaname#313).
+// ИМЕНОВАН НАРУЖУ, и это не косметика: исполнитель собирается композиционным
+// корнем, а не use-case, — наш собственный реестр
+// (`*pg.OwnInteractiveClientProvider`). Прежде исполнителей было два и
+// выбирала их посадка (kaname#313); зеркало чужого реестра снято вместе с
+// посадкой внешнего поставщика (kaname#363), а порт остался границей: бизнес-слой
+// не знает, чем исполняется заведение клиента.
 type ProviderClients interface {
 	Register(ctx context.Context, in ProviderClientSpec) (ProviderClient, error)
 	Deregister(ctx context.Context, providerClientID string) error

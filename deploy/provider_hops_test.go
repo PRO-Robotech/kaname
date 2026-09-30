@@ -4,11 +4,13 @@
 // provider_hops_test.go — a census of every address iam is given for the identity
 // provider, and of the transport each one is given it over.
 //
-// WHY A CENSUS AND NOT THREE ASSERTIONS. The defect this is written against is not
-// "one address was wrong". It is that the facade has THREE hops to the provider,
-// one of them was moved to a declared, encrypted, anchored form with a boot guard
-// and a gate, and the other two were measured by nobody — so the class read as
-// closed while half of it was live. A per-hop assertion reproduces exactly that:
+// WHY A CENSUS AND NOT PER-HOP ASSERTIONS. The defect this is written against is
+// not "one address was wrong". It is that the facade had THREE hops to the
+// provider, one of them was moved to a declared, encrypted, anchored form with a
+// boot guard and a gate, and the other two were measured by nobody — so the class
+// read as closed while half of it was live. One hop remains: the key-set mirror's
+// upstream left together with the mirror (kaname#361), the admin API hop together
+// with the external-provider posture (kaname#363). A per-hop assertion reproduces exactly that:
 // the next hop added inherits the blind spot. This reads the whole set, states how
 // many it examined, and refuses to be silent about a member it has nothing to say
 // about.
@@ -39,10 +41,10 @@
 // WHAT IT ASSERTS, per production-class stack:
 //
 //	(1) every hop's address is DECLARED, never left to iam's derivation from the
-//	    issuer. Production refuses to start otherwise
-//	    (config.validateProductionProviderAdminHop /
-//	    validateProductionProviderPublicHops); this gate is what keeps that refusal
-//	    from being discovered on a stand.
+//	    issuer. The start guards that refused an undeclared address belonged to
+//	    the external-provider posture and left with it (kaname#363); the exchange
+//	    hop of the untranslated docker contour stays, and this census is what
+//	    keeps its address from being derived on a shipped profile.
 //	(2) an address declared https carries its trust anchor. Without one the process
 //	    verifies against the system roots, which an internal-CA certificate never
 //	    chains to: the address reads as hardened and every call fails.
@@ -73,8 +75,8 @@ import (
 // WHY TWO SOURCES AND NOT ONE TABLE. The same chart is installed two ways, and the
 // knob paths differ by exactly one segment:
 //
-//	as a subchart of our umbrella   kaname.platform.iam.hydraAdminUrl
-//	standalone, as shipped          platform.iam.hydraAdminUrl
+//	as a subchart of our umbrella   kaname.platform.iam.hydraTokenURL
+//	standalone, as shipped          platform.iam.hydraTokenURL
 //
 // The census used to read only the first, addressed as `../../../deploy/helm/
 // umbrella/...` — a path that exists in the monorepo and nowhere else. In the
@@ -178,8 +180,8 @@ func profileSources(t *testing.T) []profileSource {
 //
 // Each address has TWO spellings an operator may use, and both count as declared
 // because iam reads both: the chart knob and the raw environment entry the knob
-// renders to. dev-prod declares its JWKS upstream the second way; a gate that only
-// knew the first would have called that stack underconfigured and been ignored.
+// renders to. A stack may declare a hop the second way; a gate that only knew the
+// first would have called that stack underconfigured and been ignored.
 type hop struct {
 	name string
 	// knob / anchor — paths under the SERVICE's own values tree. A source that
@@ -191,21 +193,11 @@ type hop struct {
 	anchorEnv string
 }
 
+// providerHops — the hops still addressed to the provider. The admin API hop left
+// together with the external-provider posture (kaname#363): iam no longer holds
+// a client for it, and a census that still counted it would demand an address
+// nothing reads.
 var providerHops = []hop{
-	{
-		name:      "admin API",
-		knob:      []string{"platform", "iam", "hydraAdminUrl"},
-		env:       "KANAME_HYDRA_ADMIN_URL",
-		anchor:    []string{"platform", "iam", "hydraAdminCaFile"},
-		anchorEnv: "KANAME_HYDRA_ADMIN_CA_FILE",
-	},
-	{
-		name:      "JWKS upstream",
-		knob:      []string{"platform", "iam", "hydraJwksUrl"},
-		env:       "KANAME_HYDRA_JWKS_URL",
-		anchor:    []string{"platform", "iam", "hydraJwksCaFile"},
-		anchorEnv: "KANAME_HYDRA_JWKS_CA_FILE",
-	},
 	{
 		name:      "token endpoint",
 		knob:      []string{"platform", "iam", "hydraTokenURL"},
@@ -222,12 +214,9 @@ var providerHops = []hop{
 // not a knob left unticked: the per-listener override was MEASURED absent on
 // 2026-07-30 (deploy/helm/umbrella/templates/hydra-admin-certificate.yaml records
 // the measurement), so the shared serve.tls has to move — and it moves the
-// ingress, this mirror and the token endpoint together, ≥6 coupled addresses. That
+// ingress and the token endpoint together, ≥6 coupled addresses. That
 // is its own change with its own acceptance, not something to smuggle in beside a
 // boot guard.
-//
-// The admin API is deliberately NOT a member: it is required to be https, and it
-// is, on every production-class profile.
 //
 // This register is written to expire. It is asserted in both directions below, so
 // the day the public listener gets a certificate the entry stops having a subject
@@ -235,14 +224,13 @@ var providerHops = []hop{
 //
 // ITS SUBJECT IS OUR UMBRELLA, AND ONLY THAT. The shipped chart carries no
 // provider at all — whoever installs brings their own — so its own values.prod.yaml
-// addresses all three hops over https with a pinned anchor and takes no exemption
+// addresses the hop over https with a pinned anchor and takes no exemption
 // (values.prod.yaml says so in as many words). The expiry check therefore runs
 // over the umbrella source, and whether that source is present is READ FROM THE
 // TREE and printed in the census, never assumed: in a clone that has no umbrella
 // the register has nothing to expire, and asserting it there would turn a probe
 // red on the absence of our stand rather than on any defect of the product.
 var plaintextPendingProviderTLS = map[string]string{
-	"JWKS upstream":  "the provider's public listener has no TLS; moving it is the shared-serve.tls change",
 	"token endpoint": "the provider's public listener has no TLS; moving it is the shared-serve.tls change",
 }
 

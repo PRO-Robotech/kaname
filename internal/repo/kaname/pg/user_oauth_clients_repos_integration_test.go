@@ -12,7 +12,7 @@ package pg_test
 //   - USR-09(a): CHECK (expires_at > created_at) → 23514 → ErrInvalidArg.
 //   - USR-09(b): две ПАРАЛЛЕЛЬНЫЕ Issue на одного user → две независимые строки
 //     uoc_ (N:1), без коллизии, ни одна не «теряется».
-//   - UNIQUE hydra_client_id: коллизия → 23505 → ErrAlreadyExists.
+//   - повтор идентификатора строки: коллизия ключа → 23505 → ErrAlreadyExists.
 //   - USR-09(c): FK user_id → users ON DELETE CASCADE (удаление user снимает токены).
 //   - USR-13: DeleteOwnedByID идемпотентен и СУЖЕН ВЛАДЕЛЬЦЕМ — повторное
 //     снятие и снятие чужой строки дают found=false БЕЗ ошибки (#1216).
@@ -39,8 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// newUOC — доменная строка токена под данного user, с уникальными id и
-// hydra_client_id (по suffix).
+// newUOC — доменная строка токена под данного user, с уникальным id.
 func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 	return domain.UserOAuthClient{
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
@@ -48,7 +47,6 @@ func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
 		UserID:          userID,
-		OAuthClientID:   domain.OAuthClientID("hydra-uoc-" + suffix),
 		Description:     domain.Description("laptop CLI " + suffix),
 		CreatedByUserID: userID,
 		PublicKeyPEM:    "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
@@ -92,13 +90,8 @@ func TestUserOAuthClient_01_InsertGetList_RoundTrip(t *testing.T) {
 
 	got, err := repo.Get(ctx, row.ID)
 	require.NoError(t, err)
-	assert.Equal(t, row.OAuthClientID, got.OAuthClientID)
+	assert.Equal(t, row.Description, got.Description)
 	assert.Equal(t, "ES256", got.KeyAlgorithm)
-
-	// Reverse lookup для token-hook principal-mapping.
-	byClient, err := repo.GetByOAuthClientID(ctx, row.OAuthClientID)
-	require.NoError(t, err)
-	assert.Equal(t, row.ID, byClient.ID)
 
 	list, next, err := repo.List(ctx, uid, "", 100)
 	require.NoError(t, err)
@@ -188,7 +181,11 @@ func TestUserOAuthClient_09b_ConcurrentIssue_NToOne(t *testing.T) {
 	assert.Len(t, seen, n, "уникальные id, ни одна строка не потеряна")
 }
 
-func TestUserOAuthClient_UniqueHydraClientID_Collision(t *testing.T) {
+// TestUserOAuthClient_DuplicateID_Collision — повтор идентификатора строки —
+// отказ ErrAlreadyExists. Прежде предметом был уникальный индекс имени клиента
+// у внешнего поставщика; столбец и индекс сняты (kaname#362), и отображение
+// отказа уникальности держится на ключе строки.
+func TestUserOAuthClient_DuplicateID_Collision(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -206,7 +203,7 @@ func TestUserOAuthClient_UniqueHydraClientID_Collision(t *testing.T) {
 	insertUOC(t, ctx, txb, repo, first)
 
 	second := newUOC(uid, "dup2")
-	second.OAuthClientID = first.OAuthClientID // тот же hydra_client_id
+	second.ID = first.ID // тот же идентификатор строки
 
 	tx, err := txb.Begin(ctx)
 	require.NoError(t, err)
@@ -214,7 +211,7 @@ func TestUserOAuthClient_UniqueHydraClientID_Collision(t *testing.T) {
 	_, err = repo.Insert(ctx, tx, second)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrAlreadyExists),
-		"UNIQUE hydra_client_id SQLSTATE 23505 → ErrAlreadyExists, got %v", err)
+		"повтор ключа строки SQLSTATE 23505 → ErrAlreadyExists, got %v", err)
 }
 
 func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
