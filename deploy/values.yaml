@@ -244,11 +244,16 @@ apiServer:
   # `global.kacho.registry.serviceAud` — ОДИН раз на обе стороны полосы; здесь
   # (одиночная установка чарта) его объявляют этим ключом.
   #
-  #   `service` — это НЕ только fallback для `?service=`: адресат докерной полосы
-  #   обязан входить в перечень адресатов токен-эндпоинта
-  #   (`authn.clientToken.allowedAudiences`), иначе обмен отвергается и docker
-  #   получает `unauthorized`. Регистрации адресата у внешнего поставщика на
-  #   каждом ключе больше нет (kaname#362).
+  #   `service` — это НЕ только умолчание для `?service=`, а ЕДИНСТВЕННЫЙ адресат
+  #   (`aud`), которому полоса выпускает токен. `?service=`, названный докерным
+  #   клиентом и отличный от него, отвергается: shim отдаёт 401 →
+  #   `docker login: unauthorized`, а причину называет журнал службы. На ключи
+  #   служебных учёток значение не записывается, и регистрации адресата у
+  #   внешнего поставщика на каждом ключе больше нет (kaname#362). При поднятой
+  #   полосе служба не стартует, если значение не объявлено, а при включённом
+  #   `authn.clientToken` — и если оно вне его `allowedAudiences`. Держат это
+  #   проба internal/apps/kaname/api/registry_token/audience_narrowing_test.go и
+  #   страж старта `RegistryTokenConfig.Validate`.
   #
   #   `issuer` — `iss` + realm в WWW-Authenticate; должен совпадать с realm'ом,
   #   который анонсирует data-plane реестра (KACHO_REGISTRY_TOKEN_REALM).
