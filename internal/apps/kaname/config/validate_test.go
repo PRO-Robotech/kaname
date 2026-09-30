@@ -101,12 +101,6 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			Ceremony:                     ceremonyLifespanSettings(),
 			TrustedForwarderSANs:         []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
 			TrustDomainName:              "kacho.cloud",
-			// The hop to the provider's PUBLIC listener declared, in the plain
-			// http the provider actually serves there — the shape the deployed
-			// profiles carry. It is part of the fixture, not of any test's
-			// subject; production no longer judges it (its guard stood on the
-			// external posture's row, gone with the posture, kaname#363).
-			ProviderTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
 		},
 	}
 }

@@ -4,10 +4,8 @@
 // Package registrytokenwire — composition-root adapters binding the registry
 // `/iam/token` shim use-case to iam infrastructure:
 //
-//   - HydraExchangeAdapter — brokers the client_credentials + private_key_jwt
-//     exchange with Hydra's public token endpoint, mapping issuer-unavailability
-//     to the use-case's fail-closed sentinel. Пользуется им АНОНИМНЫЙ поток на
-//     контуре, ещё не переведённом на нашу чеканку.
+//   - LocalMintAdapter (local_minter.go) — НАШ подписант, единственный издатель
+//     полосы.
 //
 //   - SAClientLookupAdapter — обратный резолв ключа служебной учётки по
 //     client_id. Живёт ТОЛЬКО ради окна перехода #1143: полоса предъявленного
@@ -20,60 +18,11 @@ package registrytokenwire
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
-
-// ── Hydra token exchange ────────────────────────────────────────────────────
-
-// hydraClientCredentials — the Hydra public token endpoint (satisfied by
-// clients.ProviderTokenClient).
-type hydraClientCredentials interface {
-	ClientCredentials(ctx context.Context, req clients.ClientCredentialsRequest) (clients.TokenResponse, error)
-}
-
-// HydraExchangeAdapter — the TokenExchanger backed by Hydra's public token
-// endpoint. Issuer unavailability is surfaced as the use-case's fail-closed
-// sentinel; a Hydra rejection is returned as-is (the use-case collapses it to a
-// 401 challenge).
-type HydraExchangeAdapter struct {
-	client hydraClientCredentials
-}
-
-// NewHydraExchange — builder.
-func NewHydraExchange(c hydraClientCredentials) *HydraExchangeAdapter {
-	return &HydraExchangeAdapter{client: c}
-}
-
-var _ registrytokenuc.TokenExchanger = (*HydraExchangeAdapter)(nil)
-
-// Exchange brokers the client_credentials + private_key_jwt exchange.
-func (a *HydraExchangeAdapter) Exchange(ctx context.Context, in registrytokenuc.ExchangeInput) (registrytokenuc.ExchangeOutput, error) {
-	out, err := a.client.ClientCredentials(ctx, clients.ClientCredentialsRequest{
-		ClientAssertion: in.ClientAssertion,
-		Audience:        in.Audience,
-		Scope:           in.Scope,
-	})
-	if err != nil {
-		if errors.Is(err, clients.ErrProviderTokenUnavailable) {
-			// Причина ОБОРАЧИВАЕТСЯ, а не подменяется: наружу отказ всё равно
-			// уйдёт фиксированным текстом (собирает use-case), а в журнал
-			// попадёт то, что ответила сеть. Голый sentinel здесь означал бы
-			// пересказ собственного решения об отказе — ровно то, что стоило
-			// двадцати минут разбора на живом стенде у соседней выдачи.
-			return registrytokenuc.ExchangeOutput{}, fmt.Errorf("%w: %w",
-				registrytokenuc.ErrIssuerUnavailable, err)
-		}
-		// Hydra rejection (invalid_client / invalid_grant) — collapsed to 401
-		// upstream; no raw Hydra detail is propagated.
-		return registrytokenuc.ExchangeOutput{}, registrytokenuc.ErrInvalidCredentials
-	}
-	return registrytokenuc.ExchangeOutput{AccessToken: out.AccessToken, ExpiresIn: out.ExpiresIn}, nil
-}
 
 // saClientByIDReader — lookup of an SA key by its client id (the id of its row;
 // kaname#362), plus the ServiceAccount it belongs to (satisfied by the SA repo).

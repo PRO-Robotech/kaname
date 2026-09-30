@@ -77,8 +77,15 @@ func (r rootClaimsRows) GetSAKey(_ context.Context, id domain.SAOAuthClientID) (
 // TestOwnLaneClaimsCarryNoProviderAddressWithTheSettingUnset — сборка корня
 // при незаданной настройке поставщика не несёт ни утверждения издателя, ни
 // значения с именем поставщика.
+//
+// Переменная издателя поставщика снята вместе с дорогой обмена (kaname#494), и
+// процесс её не читает. Проба задаёт её МАРКЕРОМ и утверждает, что маркер не
+// доезжает ни до одного утверждения: снятая переменная, оставленная в
+// окружении пода, не меняет состава. Имя собирается из словаря класса —
+// выписанное литералом, оно было бы новой привязкой к поставщику.
 func TestOwnLaneClaimsCarryNoProviderAddressWithTheSettingUnset(t *testing.T) {
-	t.Setenv(config.ProviderIssuerEnv, "")
+	const marker = "https://retired-provider-issuer.marker.invalid"
+	t.Setenv("KANAME_"+strings.ToUpper(check.RetiredIssuerName)+"_ISSUER", marker)
 	cfg := config.Config{}
 	cfg.AuthN.Domain = "api.own.test"
 	if strings.Contains(strings.ToLower(cfg.AuthN.Domain), check.RetiredIssuerName) {
@@ -133,6 +140,10 @@ func TestOwnLaneClaimsCarryNoProviderAddressWithTheSettingUnset(t *testing.T) {
 				continue
 			}
 			values++
+			if strings.Contains(s, marker) {
+				findings++
+				t.Errorf("%s: значение утверждения %s = %q несёт значение снятой переменной издателя", l.name, k, s)
+			}
 			if strings.Contains(strings.ToLower(s), check.RetiredIssuerName) {
 				findings++
 				t.Errorf("%s: значение утверждения %s = %q называет прежнего поставщика", l.name, k, s)

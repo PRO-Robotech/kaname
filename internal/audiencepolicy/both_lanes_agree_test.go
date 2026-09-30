@@ -256,14 +256,15 @@ func issueViaRegistryToken(t *testing.T, declared []string, requested string) er
 	secret, _, err := credsecret.Mint(clientID)
 	require.NoError(t, err)
 
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(
+	uc, err := registrytokenuc.NewIssueRegistryTokenUseCase(
 		registrytokenuc.Config{
-			AssertionAudience: "https://hydra.kacho.local/oauth2/token",
-			AllowedAudiences:  []string{audRegistry},
-			DefaultService:    audRegistry,
+			AllowedAudiences: []string{audRegistry},
+			DefaultService:   audRegistry,
 		},
-		dockerSigner{}, dockerExchanger{},
-	).WithLocalMinter(dockerMinter{}).WithBasicCredentialResolver(dockerAuthority{secret: secret})
+		dockerMinter{},
+	)
+	require.NoError(t, err)
+	uc = uc.WithBasicCredentialResolver(dockerAuthority{secret: secret})
 
 	_, err = uc.Execute(context.Background(), registrytokenuc.IssueInput{
 		Username: clientID, Password: secret, Service: requested,
@@ -285,16 +286,6 @@ func (a dockerAuthority) ResolveBasic(_ context.Context, presented string) (doma
 		PrincipalID:   "sva_0123456789abcdefg",
 		CredentialID:  p.CredentialID,
 	}, nil
-}
-
-type dockerSigner struct{}
-
-func (dockerSigner) Sign(registrytokenuc.AssertionInput) (string, error) { return "assertion", nil }
-
-type dockerExchanger struct{}
-
-func (dockerExchanger) Exchange(context.Context, registrytokenuc.ExchangeInput) (registrytokenuc.ExchangeOutput, error) {
-	return registrytokenuc.ExchangeOutput{AccessToken: "token", ExpiresIn: 300}, nil
 }
 
 type dockerMinter struct{}

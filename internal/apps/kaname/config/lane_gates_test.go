@@ -204,11 +204,23 @@ func TestF4d11_EveryProviderKnobIsVisibleToConfigValidation(t *testing.T) {
 	}
 	sort.Strings(invisible)
 
-	t.Logf("перепись: файлов пакета настройки осмотрено %d; ручек разговора с поставщиком в дереве службы %d; видимых проверке %d",
-		len(files), len(env.names), len(env.names)-len(invisible))
+	t.Logf("перепись: файлов пакета настройки осмотрено %d; файлов Go дерева службы прочитано %d; "+
+		"ручек разговора с поставщиком в дереве службы %d; видимых проверке %d",
+		len(files), env.filesRead, len(env.names), len(env.names)-len(invisible))
 
+	// ПРЕДПОСЫЛКА — ПРОЧИТАННОЕ, А НЕ НАЙДЕННОЕ. Ручек разговора с поставщиком в
+	// дереве НОЛЬ с тех пор, как снята последняя дорога к нему — обмен у прежнего
+	// издателя (kaname#494). Это ЦЕЛЬ снятия, и падать на ней гейт не вправе:
+	// прежний отказ «ни одной ручки не найдено» краснел ровно на достигнутом.
+	// Отличить «ноль найдено» от «ноль прочитано» обязана перепись файлов, а
+	// способность найти ручку, если она вернётся, доказывают инъекции оси 3
+	// (lane_gates_injection_test.go) на синтетике.
+	if env.filesRead == 0 {
+		t.Fatal("обход пуст: ни одного файла Go дерева службы не прочитано — гейт судил бы о непрочитанном")
+	}
 	if len(env.names) == 0 {
-		t.Fatal("обход пуст: ни одной ручки разговора с поставщиком не найдено — гейт судил бы о непрочитанном")
+		t.Logf("ручек разговора с поставщиком 0 — предмет гейта снят вместе с последней дорогой к " +
+			"поставщику; вернувшаяся ручка будет судиться здесь же")
 	}
 	if len(invisible) > 0 {
 		t.Errorf("ручки разговора с поставщиком, невидимые проверке настройки при старте (%d): %s — "+
@@ -297,6 +309,9 @@ func TestF4d11_AKnobUnrelatedToTheProviderIsNotAFinding(t *testing.T) {
 type envKnobs struct {
 	names []string
 	where map[string]string
+	// filesRead — сколько непроверочных файлов Go прочитано обходом дерева.
+	// Объём осмотренного: «ручек 0» без него неотличимо от «файлов 0».
+	filesRead int
 }
 
 // providerEnvKnobs собирает имена переменных окружения, читаемых непроверочным
@@ -325,6 +340,7 @@ func providerEnvKnobs(t *testing.T, serviceRoot string) envKnobs {
 		if perr != nil {
 			return nil
 		}
+		out.filesRead++
 		for _, name := range getenvNamesMentioningProvider(f) {
 			if !seen[name] {
 				seen[name] = true
