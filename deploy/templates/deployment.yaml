@@ -152,14 +152,6 @@ spec:
           secret:
             secretName: {{ $tls.clientSecretName | quote }}
         {{- end }}
-        {{/* ЯКОРЬ ПОСТАВЩИКА — ТРЕТИЙ ТОМ, а не ключ в чужом секрете: «чьим
-        сертификатам сервера я верю у соседа» и «кто вправе прийти ко мне
-        клиентом» суть разные вопросы, и координата у каждого своя (#2487). */}}
-        {{- if $tls.providerSecretName }}
-        - name: tls-provider
-          secret:
-            secretName: {{ $tls.providerSecretName | quote }}
-        {{- end }}
       initContainers:
         # Миграции БД исполняет отдельный binary `kaname-migrator`
         # (cobra-based CLI), не subcommand основного.
@@ -273,11 +265,6 @@ spec:
             {{- if $tls.clientSecretName }}
             - name: tls-client
               mountPath: {{ printf "%s/client" (required "tls.mountPath не задан при объявленном tls.clientSecretName: путь монтирования обязан быть назван явно — иначе удостоверение исходящего вызова называет файл, которого в поде нет" $tls.mountPath) | quote }}
-              readOnly: true
-            {{- end }}
-            {{- if $tls.providerSecretName }}
-            - name: tls-provider
-              mountPath: {{ printf "%s/provider" (required "tls.mountPath не задан при объявленном tls.providerSecretName: путь монтирования обязан быть назван явно — иначе якорь поставщика личности называет файл, которого в поде нет" $tls.mountPath) | quote }}
               readOnly: true
             {{- end }}
           env:

@@ -25,6 +25,9 @@ func TestBuild_RefusesAnUndeclaredBasicCredentialLimit(t *testing.T) {
 	cfg := registrytokenwire.BuildConfig{
 		Realm:   "https://api.kacho.local/iam/token",
 		Service: "registry.probe.local",
+		// Наш подписант подан: без него сборка отказывает раньше предела, и
+		// отказ ниже был бы не о пределе (kaname#494).
+		Signer: ourSigner(t),
 	}
 	_, err := registrytokenwire.Build(nil, cfg)
 	if err == nil {

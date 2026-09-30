@@ -204,7 +204,6 @@ repository:
 authn:
   mode: dev                        # dev | production | production-strict
   domain: api.kacho.cloud
-  hydra-issuer: ""                 # пусто → выводится из domain
   hook-shared-secret-env: KANAME_HOOK_TOKEN
   # Ключ ОБЁРТКИ приватной половины подписного ключа (см. ниже).
   jwks-encryption-key-hex-env: KANAME_JWKS_ENC_KEY

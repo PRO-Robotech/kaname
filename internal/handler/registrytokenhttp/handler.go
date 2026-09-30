@@ -10,28 +10,22 @@
 // registry token), format the Docker-compatible JSON. No business logic.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// КТО ЧЕКАНИТ ТОКЕН ЭТОЙ ПОЛОСЫ — ЗАВИСИТ ОТ ПОСАДКИ, И ЭТО НАДО ЗНАТЬ ПЕРВЫМ
+// КТО ЧЕКАНИТ ТОКЕН ЭТОЙ ПОЛОСЫ — НАШ ПОДПИСАНТ, И ТОЛЬКО ОН
 //
-// Здесь стояло «Hydra remains the token issuer/signer; kaname mints NOTHING».
-// Утверждение ПЕРЕЖИЛО СВОЙ ПРЕДМЕТ:
-//
-//	своя чеканка объявлена   → чеканит НАШ подписант
-//	                           (internal/registrytokenwire.LocalMintAdapter
-//	                           поверх internal/tokensigner)
-//	не объявлена             → полоса брокерит токен у провайдера, как прежде
-//
-// Различать обязательно: при разборе «почему плоскость данных отвергла токен»
-// первый вопрос — ЧЕЙ это токен, и по ответу выбирается сторона, на которой
-// чинить.
+// Здесь стояло утверждение, что токен выпускает внешний провайдер, а служба не
+// чеканит ничего; позже — что это зависит от посадки. Оба пережили свой
+// предмет: издатель у полосы один — НАШ подписант
+// (internal/registrytokenwire.LocalMintAdapter поверх internal/tokensigner), и
+// полоса без него не собирается вовсе (kaname#494). При разборе «почему
+// плоскость данных отвергла токен» ответ на «чей это токен» поэтому один.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // КЛЮЧИ ПРОВЕРКИ ЖИВУТ НЕ ЗДЕСЬ
 //
 // Своего эндпоинта набора ключей у этого mux нет: плоскость данных берёт ключи
 // у внутреннего публикатора (:9097, package internal/handler/jwksproxyhttp), и
-// записей у него ДВЕ — зеркало провайдера на каноническом well-known и НАША по
-// пути `authn.token-signing.key-set-path`. Потребитель выбирает запись по
-// объявленному издателю токена, а не перебором.
+// запись у него ОДНА — НАША, по пути `authn.token-signing.key-set-path`
+// (зеркало набора провайдера снято, kaname#361).
 //
 // Endpoint:
 //
@@ -208,8 +202,9 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeError maps a use-case failure to the fail-closed HTTP response: an
-// unreachable issuer (Hydra) → 503 (no token); any auth failure → 401 challenge;
-// anything else → 500. No raw Hydra/network error ever leaks (fixed text).
+// unavailable issuer (our signer or the basic-credential authority) → 503 (no
+// token); any auth failure → 401 challenge; anything else → 500. No raw
+// signer/network error ever leaks (fixed text).
 func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err error) {
 	switch {
 	case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):

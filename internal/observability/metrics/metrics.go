@@ -109,13 +109,6 @@ type Registry struct {
 	expiredCredSweepOnce sync.Once
 	expiredCredSweep     *ExpiredCredentialSweepRecorder
 
-	// providerRoadOnce/providerRoad — единственный экземпляр счётчика исходов
-	// дорог к внешнему поставщику (#2491). Потребители собираются в разных
-	// местах корня, а второй конструктор уронил бы старт на повторной
-	// регистрации семейства с тем же именем.
-	providerRoadOnce sync.Once
-	providerRoad     *ProviderRoadRecorder
-
 	// loginLaneOnce/loginLane — единственный экземпляр приёмника полосы входа
 	// (Ф3): его делят слушатель формы, варианты использования и проверяющий
 	// пароля; второй конструктор уронил бы старт повторной регистрацией.

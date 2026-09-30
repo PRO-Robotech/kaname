@@ -1219,15 +1219,12 @@ func runServe(cfg config.Config) error {
 	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
-			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
-			Service:           cfg.APIServer.RegistryToken.TokenService(),
-			HydraTokenURL:     cfg.AuthN.ResolveProviderTokenURL(),
-			HydraTokenCAFile:  cfg.AuthN.ResolveProviderTokenCAFile(),
-			AssertionAudience: cfg.AuthN.ResolveProviderTokenEndpoint(),
-			Logger:            logger,
-			// Приземление подписанта на НАСТОЯЩИЙ путь выдачи. Подписант без
-			// производственного вызывающего — тот же класс, что хранилище без
-			// читателя: он выглядит исправным, потому что его пробы зелены.
+			Realm:   cfg.APIServer.RegistryToken.TokenIssuer(),
+			Service: cfg.APIServer.RegistryToken.TokenService(),
+			Logger:  logger,
+			// НАШ подписант — единственный издатель полосы. Выключенная своя
+			// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
+			// выхода (kaname#494): другого издателя у полосы нет.
 			Signer:   tokenSigner,
 			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
 			// ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ #1143 — уже РАЗОБРАННОЕ выше:
@@ -1241,10 +1238,6 @@ func runServe(cfg config.Config) error {
 			// на посадке БЕЗ окна — иначе оператор, у которого обновление
 			// сломало вход арендаторам, узнаёт об этом из жалобы.
 			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
-			// Счёт исходов ДОРОГИ ОБМЕНА к прежнему издателю (kacho#2491).
-			// Провязывается безусловно: дорога строится лишь на непереведённом
-			// контуре, и на переведённом счётчик обязан молчать сам.
-			ProviderRoadObserver: metricsReg.ProviderRoadRecorder(),
 			// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
 			// же, что у полос выдачи токена: оператор этой полосы для строки
 			// человека читает и отсечку отзыва-всех (kaname#379).

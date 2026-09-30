@@ -63,8 +63,11 @@ SA-keys → private_key_jwt — NOTE FOR SETUP HARNESS:
     1. Принять `private_key_pem` из IssueSAKey response.
     2. Подписать JWT-assertion (RFC 7521/7523) — header `{alg:"ES256",
        kid:<key_id>}`, claims `{iss:<client_id>, sub:<client_id>,
-       aud:<hydra-issuer>/oauth2/token, exp:now+60s, jti:<rand>}`.
-    3. POST к Hydra `/oauth2/token` с
+       aud:<идентификатор издателя платформы>, exp:now+60s, jti:<rand>}` —
+       адресат утверждения — идентификатор НАШЕГО издателя; адрес чужого
+       токен-эндпоинта им больше не бывает (последняя дорога к прежнему
+       издателю снята, kaname#494).
+    3. POST к токен-эндпоинту платформы `/iam/v1/token` с
        `grant_type=client_credentials`,
        `client_id=<client_id>`,
        `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`,
