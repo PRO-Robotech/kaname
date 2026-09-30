@@ -73,26 +73,17 @@ type revokeAllWriter struct {
 func revokeAllWritersUnderTest() []revokeAllWriter {
 	return []revokeAllWriter{
 		{
-			// Принудительный выход пишет отсечку транзакцией адаптера вместе с
-			// записью аудита своего вида.
-			name: "принудительный выход",
-			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
-			write: func(t *testing.T, f assertionFixture, before time.Time) {
-				t.Helper()
-				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
-					context.Background(), domain.UserID(f.user), before,
-					"admin-force-logout", "", "iam.session.force_logout"))
-			},
-		},
-		{
-			// Отзыв всех токенов субъекта — тем же адаптером, своим видом аудита.
+			// Отзыв всех токенов субъекта пишет отсечку транзакцией адаптера
+			// вместе с записью аудита своего вида. Принудительный выход этой
+			// дверью больше не пишет (kaname#380): его отсечку кладёт
+			// транзакция сессии человека, поданная ниже.
 			name: "отзыв всех токенов",
 			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
 				t.Helper()
 				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
 					context.Background(), domain.UserID(f.user), before,
-					"admin-revoke", "", "iam.session.all_revoked"))
+					"admin-revoke", ""))
 			},
 		},
 		{
@@ -115,8 +106,8 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 		},
 		{
 			// Транзакция сессии человека — путь, которым пишут отсечку выход из
-			// сессии, смена пароля, завершение восстановления нашей полосой и
-			// сброс второго фактора.
+			// сессии, принудительный выход, смена пароля, завершение
+			// восстановления нашей полосой и сброс второго фактора.
 			name: "транзакция сессии человека",
 			path: "humanSessionWriter.UpsertCutoff",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {

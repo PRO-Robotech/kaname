@@ -141,7 +141,7 @@ type services struct {
 	identityQuotaHandler *identityquotaapp.Handler
 
 	// sessionRevocationsHandler — InternalSessionRevocationsService:
-	// token revocation on logout / force-logout + the api-gateway
+	// token revocation on logout + the api-gateway
 	// IsRevoked hot-path. Internal-only (запрет #6), registered on port 9091.
 	sessionRevocationsHandler *sessionrevapp.Handler
 
@@ -724,9 +724,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	regGate := authzguard.NewRelationWriteGate(relationStore).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction())
 	// Session-revocation writer. Pool-scoped adapter over
-	// session_revocations — SHARED by ForceLogout (here), the
-	// InternalSessionRevocationsService Revoke path, and the refresh-hook reader
-	// (one table, one fan-out).
+	// session_revocations — the InternalSessionRevocationsService Revoke path
+	// and its IsRevoked / ListByUser readers (one table). ForceLogout does not
+	// write through it: its cutoff and its outcome-carrying record are laid by
+	// the teardown transaction below (kaname#340, kaname#380).
 	sessionRevAdapter := kanamepg.NewSessionRevocationsAdapter(pool)
 	// Instrument the authz Check hot path at the adapter boundary (Clean
 	// Architecture): the metrics decorator wraps the CheckRelation port the
@@ -790,9 +791,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		basicCredentialCells(), basicCredentialOutcomeReader(internalIAMHandler))
 
 	// ── InternalSessionRevocationsService ─────────────────────────────────
-	// Revoke (logout / force-logout) + IsRevoked (api-gateway hot-path) +
-	// ListByUser (admin audit). Shares the session_revocations table with the
-	// refresh-hook reader. Internal-only (запрет #6).
+	// Revoke (logout) + IsRevoked (api-gateway hot-path) +
+	// ListByUser (admin audit). Internal-only (запрет #6).
 	//
 	// ListByUser answers about the user NAMED IN THE REQUEST, so it is authorized
 	// against that user through the same relation store UserService.Get uses. The
@@ -972,7 +972,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// квоты личности — единственная поверхность, читаемая о себе самом.
 		identityQuotaHandler: identityQuotaHandler,
 
-		// token revocation (logout / force-logout).
+		// token revocation (logout).
 		sessionRevocationsHandler: sessionRevocationsHandler,
 
 		// cluster-wide admin operations feed.

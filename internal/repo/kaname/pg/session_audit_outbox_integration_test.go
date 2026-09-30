@@ -4,10 +4,10 @@
 package pg_test
 
 // session_audit_outbox_integration_test.go — session slice. Durable
-// audit_outbox emit on session revoke / revoke-all /
-// force-logout, atomically with the revocation write.
+// audit_outbox emit on session revoke / revoke-all, atomically with the
+// revocation write.
 //
-// The session/force-logout revoke path is a SINGLE-STATEMENT pool-scoped
+// The session revoke path is a SINGLE-STATEMENT pool-scoped
 // adapter today (no caller-tx). Per the acceptance doc, atomic audit requires
 // wrapping revocation + audit-INSERT in ONE tx (commit-together-or-rollback-
 // together, запрет #10). The SessionRevocationsAdapter is extended with
@@ -18,8 +18,6 @@ package pg_test
 //   - RevokeTx (single jti) → one iam.session.revoked, payload carries
 //     subjectId/reason/tokenJti/actor, NO token secret.
 //   - RevokeAllUserTokensTx → one iam.session.all_revoked.
-//   - ForceLogout path (RevokeAllUserTokensTx, force-logout event_type) →
-//     one iam.session.force_logout.
 //   - commit-together: a committed revocation always has its audit row.
 //   - rollback-no-orphan: a rolled-back tx leaves neither revocation nor
 //     audit row.
@@ -27,6 +25,13 @@ package pg_test
 //   - 22-char id guard: id matches ^evt_…{20,30}$ and reads back.
 //   - concurrent idempotent upsert of the same jti → audit count equals
 //     the number of committed upsert tx (emit-per-committed-change), no orphan.
+//
+// Записи принудительного выхода здесь нет: её кладёт транзакция снятия записей
+// сессии вместе с исходом снятия (kaname#340), и судит её
+// `internal_iam/force_logout_outcome_record_integration_test.go`. Прежний кейс
+// 5.2-05 клал её этой дверью, без исхода, — формой ветви посадки `external`,
+// снятой вместе с посадкой (kaname#363); дверь больше не берёт вид записи
+// параметром (kaname#380).
 
 import (
 	"context"
@@ -130,7 +135,7 @@ func TestSessionAudit_5_2_04_RevokeAllEmits(t *testing.T) {
 	target := mustSeedUser(t, ctx, pool, "ssn04tgt")
 
 	require.NoError(t, adapter.RevokeAllUserTokensTx(ctx,
-		target, time.Now().UTC(), "admin-revoke", admin, "iam.session.all_revoked"))
+		target, time.Now().UTC(), "admin-revoke", admin))
 
 	require.Equal(t, 1, countAuditByEventAndSubject(ctx, t, pool, "iam.session.all_revoked", string(target)),
 		"revoke-all must emit exactly one iam.session.all_revoked row")
@@ -146,35 +151,6 @@ func TestSessionAudit_5_2_04_RevokeAllEmits(t *testing.T) {
 	_, found, err := adapter.UserRevokedBefore(ctx, string(target))
 	require.NoError(t, err)
 	require.True(t, found, "the user_token_revocations cutoff must be committed with the audit row")
-}
-
-// ── 5.2-05 ForceLogout path emits iam.session.force_logout ─────────────────────
-
-func TestSessionAudit_5_2_05_ForceLogoutEmits(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-
-	adapter := kanamepg.NewSessionRevocationsAdapter(pool)
-	admin := mustSeedUser(t, ctx, pool, "ssn05adm")
-	target := mustSeedUser(t, ctx, pool, "ssn05tgt")
-
-	require.NoError(t, adapter.RevokeAllUserTokensTx(ctx,
-		target, time.Now().UTC(), "admin-force-logout", admin, "iam.session.force_logout"))
-
-	require.Equal(t, 1, countAuditByEventAndSubject(ctx, t, pool, "iam.session.force_logout", string(target)),
-		"force-logout must emit exactly one iam.session.force_logout row")
-	id, _, payloadRaw := readOneAudit(ctx, t, pool, "iam.session.force_logout", string(target))
-	require.Regexp(t, sessionEvtIDRe, id)
-	var payload map[string]string
-	require.NoError(t, json.Unmarshal([]byte(payloadRaw), &payload))
-	require.Equal(t, string(admin), payload["actor"])
-	require.Equal(t, string(target), payload["subject_id"])
 }
 
 // ── 5.2-35 rollback-no-orphan (session) ───────────────────────────────────────
