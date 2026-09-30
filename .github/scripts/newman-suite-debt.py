@@ -211,13 +211,27 @@ CEREMONY_PREFIXES = ("jwtHuman", "ceremony")
 # приглашённого человека, а кейсы читают его при `subjectType=service_account` —
 # это МАШИННЫЙ ключ, и он обязан остаться в машинном препятствии.
 CEREMONY_ID_RE = re.compile(r"^human[A-Z][A-Za-z0-9]*UserId$")
-# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — тоже церемония, под каким бы именем слот ни
-# стоял. Сходится из двух независимых мест: набор объявляет
-# `jwtAccountAdminAStepUp` НЕПОДДЕЛЫВАЕМЫМ посевом (шапка
-# `cases/iam-interactive-client.py`), а продукт берёт `kaname_acr` только из сессии
-# поставщика (`token_enrichment_service.go` кладёт пробросом,
-# `authzguard/acr_floor.go` читает) — служебная учётка от порога освобождена, то
-# есть поднять уровень машине нечем.
+# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОГО ЖЕ ПРИНЦИПАЛА, ЧТО И БЕЗ ПОВЫШЕНИЯ, И
+# ПРИРОДУ ОН НАСЛЕДУЕТ ОТ НЕГО (kaname#398). Уровень — свойство сессии входа:
+# продукт берёт `acr` только из неё (`token_enrichment_service.go` кладёт
+# пробросом, `authzguard/acr_floor.go` читает), и у ЧЕЛОВЕКА повышенный уровень
+# куёт только церемония — вход вторым фактором. У МАШИНЫ уровня нет вовсе:
+# общее правило повышения (`grpcsrv.EvaluateStepUp`) освобождает машинного
+# принципала ПЕРВОЙ ветвью, до всякого сравнения `acr`, и порог его не касается.
+#
+# ЗДЕСЬ СТОЯЛО «`*StepUp` — церемония, под каким бы именем слот ни стоял», и
+# довод опирался на шапку `cases/iam-interactive-client.py`: «`jwtAccountAdminAStepUp`
+# is declared unforgeable by the seed itself». Довод ложен: шапка пересказывала
+# запись платформы, которую там же сняли как опровергнутую — машинный посев этот
+# слот ВЫДАЁТ, и законно, по той же ветви освобождения. Кейсы подтверждают это
+# своим устройством: выпуск под `jwtAccountAdminAStepUp` опрашивается под
+# `jwtAccountAdminA` (`iam-service-account.py`, `iam-user.py`,
+# `iam-authz-grant-check-propagation.py`), то есть оба слота — ОДИН принципал.
+# Человек под этим именем был бы другим принципалом, и его операция соседнему
+# шагу не читалась бы (замер на автономном стенде: `404 operation … not found`).
+#
+# Поэтому признак — не суффикс сам по себе, а суффикс ПОВЕРХ ключа церемонии:
+# `jwtHumanCeremonyStepUp` — человек, `jwtAccountAdminAStepUp` — машина.
 CEREMONY_STEPUP_SUFFIX = "StepUp"
 # АДРЕС ПОВЕРХНОСТИ — не удостоверение и не предмет посева: его НАЗЫВАЕТ посадка.
 # Объединение всех трёх наборов адресов выше; своя поверхность здесь тоже нужна —
@@ -226,10 +240,14 @@ ADDRESS_VARS = EDGE_VARS | OWN_VARS | NEIGHBOUR_VARS
 
 
 def is_ceremony_key(key: str) -> bool:
-    """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор."""
-    return (key.startswith(CEREMONY_PREFIXES)
-            or key.endswith(CEREMONY_STEPUP_SUFFIX)
-            or bool(CEREMONY_ID_RE.match(key)))
+    """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор.
+
+    Повышенный уровень наследует природу предъявителя, которого повышает: суффикс
+    снимается, и судится то, что осталось (см. `CEREMONY_STEPUP_SUFFIX`).
+    """
+    if key.endswith(CEREMONY_STEPUP_SUFFIX) and len(key) > len(CEREMONY_STEPUP_SUFFIX):
+        return is_ceremony_key(key[: -len(CEREMONY_STEPUP_SUFFIX)])
+    return key.startswith(CEREMONY_PREFIXES) or bool(CEREMONY_ID_RE.match(key))
 
 
 def collections(newman: pathlib.Path) -> list[pathlib.Path]:
@@ -339,6 +357,8 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
     природы «человек» (`humanAccCrudUserId`, `humanAccRdDeriveUserId`,
     `humanAccRdSagaUserId`, `jwtAccountAdminAStepUp`) и 2 природы «адрес»
     (`iamJwksBaseUrl`, `providerPublicBaseUrl`) — то есть каждый третий.
+    Четвёртый «человек» того замера отнесён ошибочно: `jwtAccountAdminAStepUp` —
+    слот машинного распорядителя (см. `CEREMONY_STEPUP_SUFFIX`, kaname#398).
 
       · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — предъявитель человека либо его идентификатор;
       · АДРЕС поверхности — его называет посадка, не подписант;
@@ -383,8 +403,13 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
         shown = ", ".join(f"{k} ({states[k]})" for k in ks[:3])
         return shown + ("…" if len(ks) > 3 else "")
 
-    ceremony = [k for k in need if is_ceremony_key(k)]
-    rest = [k for k in need if k not in ceremony and k not in minted]
+    # КЛЮЧ ЦЕРЕМОНИИ, КОТОРЫЙ ПОСЕВ ЭТОЙ ПОВЕРХНОСТИ КУЁТ, ПРЕПЯТСТВИЕМ НЕ
+    # ЯВЛЯЕТСЯ (kaname#398) — по тому же правилу, что машинный: зачитывается
+    # только своей поверхности. Кто вправе ковать такой ключ, судит не перепись, а
+    # основание объявления волны (`ceremony_credentials.py --verify`): машинный
+    # посев с ключом церемонии — находка, и зачесть его здесь было бы нечем.
+    ceremony = [k for k in need if is_ceremony_key(k) and k not in minted]
+    rest = [k for k in need if not is_ceremony_key(k) and k not in minted]
     address = [k for k in rest if k in ADDRESS_VARS]
     machine = [k for k in rest if k not in ADDRESS_VARS]
     if ceremony:
@@ -929,9 +954,6 @@ HOLDER_REF_RE = re.compile(r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]*)")
 
 # Держатели, общие нескольким позициям, — ИМЕНОВАННЫЕ ВЕЛИЧИНЫ, а не текст в
 # одиннадцати местах: разойдись копии, свод по держателю посчитал бы две задачи.
-_HOLDER_CEREMONY = (
-    "PRO-Robotech/kaname#398 — объявление и посев волны церемонии в дереве службы: "
-    "человеческий предъявитель на стенде, прогон волны `run-ceremony.sh`")
 _HOLDER_EDGE_HALF = (
     "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
     "расщепить коллекцию либо переутвердить по фактическому производителю")
@@ -986,17 +1008,18 @@ _HOLDER_SERVICE_ON_EDGE = (
     "коллекции у края платформы")
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
-    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек", _HOLDER_CEREMONY),
+    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек без выдач, его куёт волна церемонии автономного стенда (`seed_ceremony.py --wave`); цели привязки `userPA1Id`/`userPureNoBindingsId` — строки людей машинного посева; гоняет задание `stand-ceremony` (kaname#398)", ""),
     "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит", _HOLDER_FAILCLOSED_OWN),
     "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)", _holder_platform_move("services/vpc/tests/newman")),
     "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
     "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
-    "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
-    "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит", _HOLDER_CEREMONY),
+    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, машине порог уровня не подлежит, и его пишет машинный посев; отказ формы идентификатора аккаунта-цели авторизации, который производит край, вынесен в `iam-account-id-edge-format`; гоняет задание `stand-ceremony`", ""),
+    "iam-access-binding-include-revoked": ("A", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, и его пишет машинный посев; гоняет задание `stand-ceremony`", ""),
     "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
-    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction", _HOLDER_CEREMONY),
-    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10", _HOLDER_CEREMONY),
-    "iam-authz-grant-check-propagation": ("B", "выдача → внутренний `iam:check` — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ; вне посева ещё `userINVId`. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
+    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction — у каждого заводящего кейса своя личность уровней «1» и «2», их куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-account-id-edge-format": ("C", "два кейса, вынесенные при переезде `iam-access-binding-account-scope` и `iam-membership-read` на собственный фронт (kaname#398): пара 400/3 на негодной форме идентификатора аккаунта, стоящего целью авторизации в пути, — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-30); порядок на собственном фронте — предмет kaname#168", _holder_platform_move("gateway/tests/newman")),
+    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10 — личности уровней «1» и «2» куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-authz-grant-check-propagation": ("A", "выдача → внутренний `iam:check` собственного внутреннего фронта — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA` (выпуск под одним опрашивается под другим), и его пишет машинный посев. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415), затем с B (kaname#398); гоняет задание `stand-ceremony`", ""),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
     "iam-group": ("A", "CRUD группы и её членов — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` края не читается; все ключи, включая цель привязки `userINVId`, пишет посев автономного стенда (#415)", ""),
     "iam-interactive-client": ("B", "глаголы клиента фронтируются краем; на `external` Create/Delete регистрируют клиента во внешнем поставщике, на `own` — в своём реестре (kaname#405)", _HOLDER_SERVICE_ON_EDGE),
@@ -1005,29 +1028,29 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
     "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", ""),
-    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается", _HOLDER_CEREMONY),
-    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем", _HOLDER_CEREMONY),
+    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается; людей куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем, его куёт волна церемонии автономного стенда вторым фактором; отказ формы идентификатора аккаунта, который производит край, вынесен в `iam-account-id-edge-format`; гоняет задание `stand-ceremony` (kaname#398)", ""),
     "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
     "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
     "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)", _holder_platform_move("gateway/tests/newman")),
     "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
     "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт", ""),
     "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC", ""),
-    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»", _HOLDER_CEREMONY),
+    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»; человека куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
     "iam-role": ("A", "CRUD роли и её операций — глаголы службы; пин отказа — `md.scope` СВОЕЙ двери (`assert_unscoped_rejected('iam.roles.create','account')`, #50), `md.resource` края не читается; все ключи пишет посев автономного стенда", ""),
     "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция", ""),
-    "iam-service-account": ("B", "служебная учётка и её ключи — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` не читается; 9 шагов из 74 (снятие выпущенных ключей) предъявляют `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
+    "iam-service-account": ("A", "служебная учётка и её ключи — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` не читается; 9 шагов из 74 (снятие выпущенных ключей) предъявляют `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA` (выпуск под одним опрашивается под другим), и его пишет машинный посев. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415), затем с B (kaname#398); гоняет задание `stand-ceremony`", ""),
     "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`", ""),
     "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи", ""),
     "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…", _HOLDER_FACADE_SPLIT),
-    "iam-user": ("B", "пользователь и его удостоверения — глаголы службы; 5 пинов отказа — `md.scope` СВОЕЙ двери (#50); 16 шагов из 152 — человек церемонии (`jwtHumanCeremony`, `…StepUp`), ещё 23 — `jwtAccountAdminAStepUp`. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415)", _HOLDER_CEREMONY),
-    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`", _HOLDER_CEREMONY),
+    "iam-user": ("B", "пользователь и его удостоверения — глаголы службы; 5 пинов отказа — `md.scope` СВОЕЙ двери (#50); 16 шагов из 152 — человек церемонии (`jwtHumanCeremony`, `…StepUp`), его куёт волна церемонии автономного стенда; ещё 23 — `jwtAccountAdminAStepUp`, машинный распорядитель машинного посева; приглашается человек волны с подтверждённым адресом (kaname#456). КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415); гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`; людей куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
     "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль", ""),
     "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена", _holder_platform_move("services/nlb/tests/newman")),
     "label-revoke-storage": ("D", "`geo` + `storage` + `iam`", _holder_platform_move("services/storage/tests/newman")),
     "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc", _holder_platform_move("services/vpc/tests/newman")),
-    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов", _HOLDER_CEREMONY),
-    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`", _HOLDER_CEREMONY),
+    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов; человека куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp` — личность уровней «1» и «2» куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
     # разрезом #24 не судилась — судить было нечего.
     "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность", ""),
@@ -1218,14 +1241,22 @@ _HOLDER_F13 = (
 # Ф5-17 и Ф5-25 (в): блокировка — глагол `UserService.Block` (и `Unblock`, без
 # которого сменённые учётные данные заблокированной не наблюдаются) с отношением
 # `identity_suspender` и полом уровня «2» (`proto/kaname/cloud/iam/v1/user_service.proto`).
-# Распорядителя повышенного уровня стенд `chart-own` не куёт: посев церемонии
-# пишет предъявителя уровня «1» и прямо называет, что `*StepUp` не пишет
-# (`tests/authz-fixtures/seed_ceremony.py`).
+# Круг отношения — надзор облака. Сценарии — полосы восстановления, и гоняет их
+# набор `kaname-recovery-lane` на стенде `chart-own`; посев церемонии там пишет
+# человека уровня «1» и предъявителя надзора облака в окружение не кладёт.
+# Держатель — задача позиций E приёмки Ф5 без кейса набора (kaname#468): волна
+# церемонии kaname#398 этих позиций не несёт — её коллекции судят свои сущности
+# на автономном стенде, а не восстановление.
 _F5_NO_SUSPENDER = (
     "заблокировать личность может только распорядитель с отношением `identity_suspender` "
-    "на уровне «2» (`UserService.Block`/`Unblock`, `user_service.proto`); стенд `chart-own` "
-    "такого предъявителя не куёт — посев церемонии пишет предъявителя уровня «1», `*StepUp` "
-    "не пишет (`seed_ceremony.py`)")
+    "(надзор облака) на уровне «2» (`UserService.Block`/`Unblock`, `user_service.proto`); "
+    "набор восстановления гоняется на стенде `chart-own`, и посев церемонии там кладёт в "
+    "окружение человека уровня «1», а предъявителя надзора облака не кладёт — блокировать "
+    "личность кейсу набора нечем (`seed_ceremony.py`, режим без `--wave`)")
+_HOLDER_F5_SUSPENDER = (
+    "PRO-Robotech/kaname#468 — позиции E приёмки Ф5 без кейса набора: посев стенда "
+    "`chart-own` кладёт предъявителя надзора облака, и набор восстановления заводит кейс "
+    "блокированной личности той же правкой")
 # Ф5-12, Ф5-20…22, Ф5-24: условия и форма пробы, которых не создаёт ни стенд, ни
 # набор; у каждой держатель — существующая задача, чей предмет это условие строит
 # (kaname#460 передал записи, kaname#468 назвал условия).
@@ -1267,10 +1298,10 @@ SCENARIO_DEBT.update({
                "отвечает 503 — производитель шага (2) `kacho#2698` не посажен", _HOLDER_F13),
     "Ф13-28": (_F13_LANE_ABSENT + "; половина через край — связка службы с платформой, "
                "её проба живёт в доме платформы (`e2e-flow.md` §7а)", _HOLDER_F13),
-    "Ф5-17": (_F5_NO_SUSPENDER, _HOLDER_CEREMONY),
+    "Ф5-17": (_F5_NO_SUSPENDER, _HOLDER_F5_SUSPENDER),
     "Ф5-25": ("ветвь (в) — личность, заблокированная распорядителем: " + _F5_NO_SUSPENDER
               + "; ветви (а) и (б) без (в) сценарий не исполняют — (в) замок, (б) его близнец",
-              _HOLDER_CEREMONY),
+              _HOLDER_F5_SUSPENDER),
     "Ф5-24": ("состав ответа службы краю о сессии — `InternalHumanSessionService/Resolve`, "
               "глагол внутреннего слушателя без HTTP-привязки (`human_session_service.proto`), "
               "а набор ходит только HTTP; «кто я» и глагол платформы под сессией восстановления "
@@ -2297,22 +2328,22 @@ def self_test() -> int:
                and ("нужен машинный посев поверхности" in out) != want_ceremony,
                out[:900])
 
-        # ── Ось 7б: ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОЖЕ ЦЕРЕМОНИЯ ─────────
+        # ── Ось 7б: ПОВЫШЕННЫЙ УРОВЕНЬ НАСЛЕДУЕТ ПРИРОДУ ПРЕДЪЯВИТЕЛЯ ───────
         #
-        # ЗАМЕР, И ОН СХОДИТСЯ ИЗ ДВУХ НЕЗАВИСИМЫХ МЕСТ. Шапка
-        # `cases/iam-interactive-client.py` говорит дословно:
-        # «`jwtAccountAdminAStepUp` is declared unforgeable by the seed itself …
-        # and every other `jwt*` fixture is a ServiceAccount token, i.e.
-        # acr-exempt». И это подтверждается устройством продукта: `kaname_acr`
-        # приходит ТОЛЬКО из сессии поставщика (`token_enrichment_service.go`
-        # кладёт его пробросом, `authzguard/acr_floor.go` читает), а служебная
-        # учётка от порога ОСВОБОЖДЕНА — то есть поднять уровень машине нечем.
+        # Уровень — свойство сессии входа, и у человека его поднимает только
+        # церемония (вход вторым фактором). У машины уровня нет: общее правило
+        # повышения освобождает машинного принципала первой ветвью, и слот
+        # повышенного уровня машинного распорядителя — ТОТ ЖЕ принципал (кейсы
+        # выпускают под `jwtAccountAdminAStepUp` и опрашивают под
+        # `jwtAccountAdminA`). Прежняя редакция объявляла церемонией ЛЮБОЙ
+        # `*StepUp` и опиралась на шапку, пересказывавшую опровергнутую запись
+        # платформы (kaname#398).
         #
-        # Значит приставки `jwtHuman` недостаточно: `*StepUp` — предъявитель, чей
-        # производитель церемония, под каким бы именем слот ни стоял.
-        # Законный близнец отличается ОДНИМ фактом: `jwtAccountAdminA` без
-        # повышения — служебная учётка, и он обязан остаться машинным.
-        for lane, key, want_ceremony in (("stepup", "jwtAccountAdminAStepUp", True),
+        # ТРИ ПОЛОСЫ, КАЖДАЯ МЕНЯЕТ ОДИН ФАКТ: человек повышенного уровня —
+        # церемония; машина повышенного уровня — машинный посев; та же машина без
+        # суффикса — машинный посев (законный близнец второй полосы).
+        for lane, key, want_ceremony in (("human-stepup", "jwtHumanCeremonyStepUp", True),
+                                         ("machine-stepup", "jwtAccountAdminAStepUp", False),
                                          ("plain", "jwtAccountAdminA", False)):
             base = tmp / f"stepup-{lane}"
             body = ('{"item":[{"name":"s","request":{"url":{"raw":'
@@ -2330,6 +2361,42 @@ def self_test() -> int:
                ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
                and ("нужен машинный посев поверхности" in out) != want_ceremony,
                out[:900])
+
+        # ── Ось 7в: КЛЮЧ ЦЕРЕМОНИИ СНИМАЕТ ПОСЕВ СВОЕЙ ПОВЕРХНОСТИ, И ТОЛЬКО ОН ─
+        #
+        # Посев церемонии (`seed_ceremony.py`) куёт предъявителя человека на
+        # собственном фронте службы; коллекция того же фронта, его читающая,
+        # препятствия «нужна церемония» больше не несёт (kaname#398). Та же
+        # коллекция при посеве, объявившем ДРУГУЮ поверхность, препятствие
+        # сохраняет: предъявитель через стенды не переносится.
+        for lane, surface_decl, lifted in (
+                ("own", "служба (собственный REST-фронт)", True),
+                ("foreign", SURFACE_EDGE, False)):
+            base = tmp / f"ceremony-credit-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"prerequest","script":{"exec":['
+                    '"pm.environment.get(\'ownRestBaseUrl\')",'
+                    '"pm.environment.get(\'jwtHumanCeremony\')"]}}]}]}')
+            t7c = _mk(base, {"cer": body},
+                      {"baseUrl": "http://edge", "ownRestBaseUrl": "https://own",
+                       "jwtHumanCeremony": "", "runId": ""})
+            fx = t7c.parent / "authz-fixtures"
+            fx.mkdir(parents=True, exist_ok=True)
+            (fx / "seed_ceremony.py").write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                "    print('jwtHumanCeremony')\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                f"    print({surface_decl!r})\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t7c, workflows=_wf(base, runs=["cer"]))
+            out = buf.getvalue()
+            _c(f"ключ церемонии, посев поверхности «{surface_decl}»: препятствие "
+               f"{'снято' if lifted else 'ОСТАЛОСЬ'}",
+               ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) != lifted, out[:900])
 
         # ── Ось 8: АДРЕС — НЕ ПОСЕВ, И ЕГО ПРОИЗВОДИТ СТЕНД ──────────────────
         #
@@ -2524,18 +2591,19 @@ def self_test() -> int:
         # ── Ось 15: КАТЕГОРИЯ A ПРИ ТРЕБОВАНИИ ЦЕРЕМОНИИ — НАХОДКА ──────────
         #
         # Ведомость сама определяет B как «нужен ЧЕЛОВЕЧЕСКИЙ предъявитель».
-        # Запись A у коллекции, читающей `*StepUp`, объявляет её переводимой
-        # машинным посевом — возможность, неисполнимую by construction.
+        # Запись A у коллекции, читающей предъявителя человека повышенного
+        # уровня, объявляет её переводимой машинным посевом — возможность,
+        # неисполнимую by construction.
         # Ведомость подаётся ЯВНО, мимо `_st_ledger`: иначе ось судила бы то же
         # правило, которым синтетическая ведомость и строится, то есть себя.
         base = tmp / "misfiled"
         stepup_body = ('{"item":[{"name":"s","request":{"url":{"raw":'
                        '"{{ownRestBaseUrl}}/x"}},'
                        '"event":[{"listen":"test","script":{"exec":['
-                       '"pm.environment.get(\'jwtAccountAdminAStepUp\')"]}}]}]}')
+                       '"pm.environment.get(\'jwtHumanCeremonyStepUp\')"]}}]}]}')
         t15 = _mk(base, {"misfiled": stepup_body},
                   {"ownRestBaseUrl": "https://localhost:9098",
-                   "jwtAccountAdminAStepUp": "", "runId": ""})
+                   "jwtHumanCeremonyStepUp": "", "runId": ""})
         wf15 = _wf(base, runs=["misfiled"])
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
@@ -2543,7 +2611,7 @@ def self_test() -> int:
         _c("A при требовании церемонии — код 1", rc == 1, f"код {rc}")
         _c("и находка называет коллекцию и ключ",
            "misfiled" in err.getvalue()
-           and "jwtAccountAdminAStepUp" in err.getvalue(), err.getvalue()[:400])
+           and "jwtHumanCeremonyStepUp" in err.getvalue(), err.getvalue()[:400])
 
         # ЗАКОННЫЙ БЛИЗНЕЦ ПЕРВЫЙ: та же коллекция, категория B — молчание.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
