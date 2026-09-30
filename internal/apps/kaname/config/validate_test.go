@@ -106,7 +106,7 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			// profiles carry. It is part of the fixture, not of any test's
 			// subject; production no longer judges it (its guard stood on the
 			// external posture's row, gone with the posture, kaname#363).
-			HydraTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
+			ProviderTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
 		},
 	}
 }

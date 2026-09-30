@@ -273,7 +273,7 @@ type PostgresConfig struct {
 //	                        (см. ResolveDomain; свойство держит проба
 //	                        TestDomainHasNoCompiledInDefault). Из него
 //	                        сборка состава утверждений выводит адресата.
-//	HydraIssuer           — Ory Hydra issuer (default `https://hydra.<Domain>`).
+//	ProviderIssuer        — издатель внешнего поставщика (default `https://hydra.<Domain>`).
 //	JWKSEncryptionKeyHex  — 32-байтовый ключ ОБЁРТКИ приватной половины
 //	                        подписного ключа, в hex (64 символа). Ею
 //	                        оборачивается приватная половина в ключнице
@@ -315,11 +315,11 @@ type PostgresConfig struct {
 //	                        тем изменением, которым её перестанет эмитировать чарт.
 //	                        Override KANAME_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode          Mode   `mapstructure:"mode"`
-	Domain        string `mapstructure:"domain"`
-	HydraIssuer   string `mapstructure:"hydra-issuer"`
-	HydraTokenURL string `mapstructure:"hydra-token-url"`
-	// HydraTokenCAFile — the same anchor discipline for the hop to the provider's
+	Mode             Mode   `mapstructure:"mode"`
+	Domain           string `mapstructure:"domain"`
+	ProviderIssuer   string `mapstructure:"hydra-issuer"`
+	ProviderTokenURL string `mapstructure:"hydra-token-url"`
+	// ProviderTokenCAFile — the same anchor discipline for the hop to the provider's
 	// PUBLIC listener: the token exchange (a signed client assertion out, the
 	// minted bearer back). Empty ⇒ the default transport,
 	// which is what a plaintext in-cluster address needs and all it needs. Set ⇒
@@ -327,7 +327,7 @@ type AuthNConfig struct {
 	// start rather than falling back to the system roots — that fallback is the
 	// state nobody can see, because the operator configured verification against
 	// the internal CA and the process is not doing it.
-	HydraTokenCAFile        string `mapstructure:"hydra-token-ca-file"`
+	ProviderTokenCAFile     string `mapstructure:"hydra-token-ca-file"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`
 	JWKSEncryptionKeyHexEnv string `mapstructure:"jwks-encryption-key-hex-env"`
 	// SecondFactorEncryptionKeyHex — перечень ключей ОБЁРТКИ секретов второго
