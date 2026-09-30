@@ -102,24 +102,27 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 не работает. Антецедент самоистекает: перестал профиль называть файлы под
 каталогом — обязательность снялась сама.
 
-ТРИ ЗАПИСИ, А НЕ ОБХОД ПО СПИСКУ, и это решение. Обход даёт условие с
+ЗАПИСИ, А НЕ ОБХОД ПО СПИСКУ, и это решение. Обход даёт условие с
 вычисляемым ключом (`get $tls $lane.knob`) и текст, собранный `printf`-ом из
 переменной, — то есть форму, в которой ни одна проверка не увидит НИ ИМЕНИ
-координаты, ни того, что она вообще стережётся. Три записи той же формы, что и
+координаты, ни того, что она вообще стережётся. Записи той же формы, что и
 четыре выше, читаются и человеком, и гейтом
-(`operator_supplied_roster_test.go`). */}}
+(`operator_supplied_roster_test.go`).
+
+Записей ДВЕ — лист слушателя и клиентский лист. Третья стерегла якорь
+поставщика личности и снята вместе с его единственной дорогой — обменом у
+прежнего издателя (kaname#494): тома нет, и путь под его каталогом называет
+файл, которого в поде не бывает. */}}
 {{- $tls := .Values.tls | default dict -}}
 {{- $mount := $tls.mountPath | default "" -}}
 {{- $envs := .Values.env | default dict -}}
 {{- $namesServer := "" -}}
 {{- $namesClient := "" -}}
-{{- $namesProvider := "" -}}
 {{- if $mount -}}
 {{- range $k, $v := $envs -}}
 {{- $val := printf "%v" $v -}}
 {{- if contains (printf "%s/server/" $mount) $val -}}{{- $namesServer = $k -}}{{- end -}}
 {{- if contains (printf "%s/client/" $mount) $val -}}{{- $namesClient = $k -}}{{- end -}}
-{{- if contains (printf "%s/provider/" $mount) $val -}}{{- $namesProvider = $k -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if and $namesServer (not $tls.secretName) -}}
@@ -127,9 +130,6 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 {{- end -}}
 {{- if and $namesClient (not $tls.clientSecretName) -}}
 {{- $missing = append $missing (printf "  tls.clientSecretName   — имя объекта Secret с КЛИЕНТСКИМ листом: им служба представляется,\n                           когда звонит сама (назначение `client auth`, отдельный лист от серверного).\n                           Обязательна ЗДЕСЬ потому, что профиль называет файл под %s/client/ (например %s)." $mount $namesClient) -}}
-{{- end -}}
-{{- if and $namesProvider (not $tls.providerSecretName) -}}
-{{- $missing = append $missing (printf "  tls.providerSecretName — имя объекта Secret с ЯКОРЕМ доверия к серверным сертификатам ВАШЕГО\n                           поставщика личности. Это ДРУГАЯ величина, чем круг клиентских листов выше:\n                           «чьим сертификатам сервера я верю у соседа» против «кто вправе прийти ко мне».\n                           Обязательна ЗДЕСЬ потому, что профиль называет файл под %s/provider/ (например %s)." $mount $namesProvider) -}}
 {{- end -}}
 {{- if $missing -}}
 {{- fail (printf "чарт службы прав не ставится: НЕ НАЗВАНО координат — %d.\n\nЭтот чарт создаёт свои объекты (Deployment, Service, ConfigMap %s-config и, при включённой ручке alertRules, PrometheusRule) и НЕ заводит ни образа, ни базы, ни секретов. Всё, на что он ссылается за своими объектами, заводит тот, кто ставит, — и называет здесь. Умолчания у этих ключей нет намеренно: непустое умолчание называло бы объект нашей установки, которого у вас нет, выглядело бы настройкой и отказало бы уже в кластере.\n\n%s\n\nЧТО СДЕЛАТЬ: заведите эти координаты у себя (объекты — в своём пространстве имён, образ — в своём реестре) и назовите их профилю, например\n  helm install <релиз> <чарт> -f values.yaml \\\n    --set image=<реестр>/pro-robotech/kaname:<тег> \\\n    --set db.host=postgres.<ваше-пространство>.svc \\\n    --set db.passwordSecretName=kaname-db \\\n    --set db.passwordSecretKey=password\nГотовый образец всех величин боевой посадки — values.prod.yaml рядом с чартом."

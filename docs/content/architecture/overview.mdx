@@ -22,7 +22,7 @@ database-per-service, интеграцию с провайдерами иден�
 flowchart TD
   handler["handler<br/>(тонкий transport: parse → use-case → format)"] --> uc["use-case<br/>(apps/kaname/api/{account,project,user,…})"]
   repo["repo (pgx adapter)"] --> uc
-  clients["clients (почта, дорога обмена)"] --> uc
+  clients["clients (почта)"] --> uc
   uc --> domain["domain<br/>(сущности + Validate, чистый Go)"]
   repo --> domain
 ```
@@ -33,7 +33,7 @@ flowchart TD
     <tr><td><strong>domain</strong></td><td><code>internal/domain/</code></td><td>Сущности + <code>Validate()</code>; закрытые наборы (verbs, subject-types). Только stdlib + proto</td></tr>
     <tr><td><strong>use-case</strong></td><td><code>internal/apps/kaname/api/&lt;resource&gt;/</code></td><td>Бизнес-логика; определяет port-интерфейсы (Repo, Client). Не импортирует transport</td></tr>
     <tr><td><strong>repo (adapter)</strong></td><td><code>internal/repo/</code></td><td>Реализация портов на handwritten pgx; SQLSTATE → sentinel; outbox-emit в TX</td></tr>
-    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Почтовый отправитель, дорога обмена непереведённого докерного контура к прежнему издателю</td></tr>
+    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Почтовый отправитель. Дороги к прежнему издателю здесь больше нет: последняя — обмен докерного контура — снята (kaname#494)</td></tr>
     <tr><td><strong>handler</strong></td><td><code>internal/handler/</code></td><td>Тонкий transport: parse → use-case → format. Без бизнес-логики</td></tr>
     <tr><td><strong>authz</strong></td><td><code>internal/authzguard</code>, <code>authzmap</code>, <code>authztypes</code></td><td>Интерсепторы, permission-map, verb→relation, объектные типы</td></tr>
     <tr><td><strong>composition root</strong></td><td><code>cmd/kaname/</code></td><td>Единственное место wiring (serve.go); <code>cmd/migrator/</code> — миграции</td></tr>
@@ -134,6 +134,6 @@ RPC, а vpc/compute дополнительно регистрируют влад
 
 :::info Циклов нет
 Рёбра `* → iam` однонаправлены — IAM не зовёт своих консументов обратно. Единственные исходящие
-рёбра IAM — к инфраструктуре (Postgres, почтовый узел; дорога обмена непереведённого
-докерного контура — к прежнему издателю), не к доменным сервисам.
+рёбра IAM — к инфраструктуре (Postgres, почтовый узел), не к доменным сервисам. Ребра к
+прежнему издателю нет: последняя дорога к нему снята (kaname#494).
 :::

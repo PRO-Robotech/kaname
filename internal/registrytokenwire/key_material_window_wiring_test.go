@@ -58,6 +58,7 @@ func buildLane(t *testing.T, until time.Time, obs *countingObserver) http.Handle
 		BasicCredentialTimeout: time.Second,
 		KeyMaterialWindowUntil: until,
 		CredentialKindObserver: obs,
+		Signer:                 ourSigner(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка полосы: %v", err)

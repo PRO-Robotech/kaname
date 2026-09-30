@@ -19,7 +19,7 @@ import (
 //	logger:        { level }
 //	api-server:    { endpoint, internal-endpoint, graceful-shutdown }
 //	repository:    { postgres }
-//	authn:         { mode, domain, hydra-issuer, hooks, jwks, dpop }
+//	authn:         { mode, domain, hooks, jwks, dpop }
 //
 // The gateway-internal drainer is configured from KANAME_* env vars in the
 // composition root (cmd/kaname), not from this YAML.
@@ -273,7 +273,6 @@ type PostgresConfig struct {
 //	                        (см. ResolveDomain; свойство держит проба
 //	                        TestDomainHasNoCompiledInDefault). Из него
 //	                        сборка состава утверждений выводит адресата.
-//	ProviderIssuer        — издатель внешнего поставщика (default `https://hydra.<Domain>`).
 //	JWKSEncryptionKeyHex  — 32-байтовый ключ ОБЁРТКИ приватной половины
 //	                        подписного ключа, в hex (64 символа). Ею
 //	                        оборачивается приватная половина в ключнице
@@ -315,19 +314,8 @@ type PostgresConfig struct {
 //	                        тем изменением, которым её перестанет эмитировать чарт.
 //	                        Override KANAME_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode             Mode   `mapstructure:"mode"`
-	Domain           string `mapstructure:"domain"`
-	ProviderIssuer   string `mapstructure:"hydra-issuer"`
-	ProviderTokenURL string `mapstructure:"hydra-token-url"`
-	// ProviderTokenCAFile — the same anchor discipline for the hop to the provider's
-	// PUBLIC listener: the token exchange (a signed client assertion out, the
-	// minted bearer back). Empty ⇒ the default transport,
-	// which is what a plaintext in-cluster address needs and all it needs. Set ⇒
-	// the bundle becomes the ONLY anchor, and one that cannot be read refuses the
-	// start rather than falling back to the system roots — that fallback is the
-	// state nobody can see, because the operator configured verification against
-	// the internal CA and the process is not doing it.
-	ProviderTokenCAFile     string `mapstructure:"hydra-token-ca-file"`
+	Mode                    Mode   `mapstructure:"mode"`
+	Domain                  string `mapstructure:"domain"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`
 	JWKSEncryptionKeyHexEnv string `mapstructure:"jwks-encryption-key-hex-env"`
 	// SecondFactorEncryptionKeyHex — перечень ключей ОБЁРТКИ секретов второго

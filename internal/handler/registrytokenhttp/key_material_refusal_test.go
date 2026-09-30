@@ -64,13 +64,14 @@ func realDockerLane(t *testing.T) (http.Handler, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
-		AllowedAudiences:  []string{"registry.kacho.local"},
-		DefaultService:    "registry.kacho.local",
-		AssertionAudience: "https://issuer.invalid/oauth2/token",
-	}, nil, nil).
-		WithLocalMinter(constMinter{}).
-		WithBasicCredentialResolver(liveCredential{secret: secret, sva: svaID})
+	uc, err := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
+		AllowedAudiences: []string{"registry.kacho.local"},
+		DefaultService:   "registry.kacho.local",
+	}, constMinter{})
+	if err != nil {
+		t.Fatalf("полоса не построена: %v", err)
+	}
+	uc = uc.WithBasicCredentialResolver(liveCredential{secret: secret, sva: svaID})
 	return NewTokenHandler(Config{
 		Realm:          "https://api.kacho.local/iam/token",
 		DefaultService: "registry.kacho.local",

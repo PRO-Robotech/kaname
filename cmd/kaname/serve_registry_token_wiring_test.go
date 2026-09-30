@@ -68,11 +68,9 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 		"cfg.APIServer.RegistryToken.ListenAddress()",
 		"cfg.APIServer.RegistryToken.TokenIssuer()",
 		"cfg.APIServer.RegistryToken.TokenService()",
-		"cfg.AuthN.ResolveProviderTokenURL()",
-		// The anchor of the hop travels with its address: a root that passes one
-		// without the other is how https ends up verified against the system roots.
-		"cfg.AuthN.ResolveProviderTokenCAFile()",
-		"cfg.AuthN.ResolveProviderTokenEndpoint()",
+		// НАШ подписант — единственный издатель полосы (kaname#494): корень,
+		// не подающий его, получил бы отказ сборки на каждом старте.
+		"Signer:   tokenSigner,",
 		// Подъём, гашение и строка самоотчёта переехали в профиль не-gRPC
 		// поверхности: докладывает о себе она сама, и доклад несёт то, чего прежняя
 		// строка не несла никогда, — досягаемость и решение об аутентификации.
@@ -106,8 +104,7 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 		Realm:                  tok.TokenIssuer(),
 		Service:                laneService,
 		BasicCredentialTimeout: credentialLanePeerTimeout,
-		HydraTokenURL:          cfg.AuthN.ResolveProviderTokenURL(),
-		AssertionAudience:      cfg.AuthN.ResolveProviderTokenEndpoint(),
+		Signer:                 registryLaneSigner(t),
 	})
 	if err != nil {
 		t.Fatalf("registrytokenwire.Build: %v", err)

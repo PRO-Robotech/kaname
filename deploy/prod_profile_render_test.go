@@ -361,6 +361,41 @@ func TestProdProfile_RenderedByHelmSatisfiesTheBootGuard(t *testing.T) {
 		len(chartProfiles), in.Docs, len(in.ConfigBody), len(in.Envs), len(in.FromSecret), len(in.Mounts))
 }
 
+// TestProdProfile_RenderedPodCarriesNoProviderAnchor — отрендеренный боевой под
+// не монтирует якоря поставщика личности и не называет пути под ним (kaname#494).
+//
+// Якорь служил единственной дороге — обмену утверждения у прежнего издателя — и
+// снят вместе с ней. Оставленный, он требовал бы от установки объект Secret, у
+// которого нет читателя: под не поднимается без него (том без `optional`), а
+// процессу он не нужен ни одним путём.
+//
+// Положительный контроль на том же рендере: лист слушателя смонтирован. Без него
+// «якоря нет» зеленело бы и на рендере, где не смонтировано ничего.
+func TestProdProfile_RenderedPodCarriesNoProviderAnchor(t *testing.T) {
+	in := readRenderedInput(t, renderStandaloneChart(t, chartProfiles))
+
+	var server bool
+	var anchored []string
+	for _, m := range in.Mounts {
+		switch {
+		case strings.HasSuffix(strings.TrimSuffix(m, "/"), "/server"):
+			server = true
+		case strings.HasSuffix(strings.TrimSuffix(m, "/"), "/provider"):
+			anchored = append(anchored, "монтирование "+m)
+		}
+	}
+	for k, v := range in.Envs {
+		if strings.Contains(v, "/provider/") {
+			anchored = append(anchored, "переменная "+k+"="+v)
+		}
+	}
+	sort.Strings(anchored)
+	t.Logf("перепись: монтирований %d · переменных %d · о якоре поставщика %d", len(in.Mounts), len(in.Envs), len(anchored))
+	require.True(t, server, "лист слушателя не смонтирован — рендер не тот, судить нечего: %v", in.Mounts)
+	require.Empty(t, anchored, "боевой под несёт якорь поставщика, у которого нет читателя:\n%s",
+		strings.Join(anchored, "\n"))
+}
+
 // ── Р2: отрицательный контроль ───────────────────────────────────────────────
 
 // TestProdProfile_RenderedGuardIsLiveWithoutTheProfile — без боевого профиля

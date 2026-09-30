@@ -37,9 +37,11 @@ func TestOutboundLaneInjection_LaneRenderedByTheChartIsSilent(t *testing.T) {
 
 func TestOutboundLaneInjection_LaneNamedByAProfileIsSilent(t *testing.T) {
 	// ВТОРАЯ ЗАКОННАЯ ФОРМА РУЧКИ: ключ рендером не отдаётся, но профиль
-	// НАЗЫВАЕТ его переменную. Так объявлена дорога обмена к прежнему издателю.
-	f := judgeOutboundLanes([]string{"authn.hydra-token-url"},
-		boolSet(), boolSet("KANAME_HYDRA_TOKEN_URL"), declaredEnvNames)
+	// НАЗЫВАЕТ его переменную. Единственное отличие от находки ниже — имя в
+	// профиле. (Прежде этой формой была объявлена дорога обмена к прежнему
+	// издателю; снята вместе с дорогой, kaname#494.)
+	f := judgeOutboundLanes([]string{"invite-mail.relay"},
+		boolSet(), boolSet("KANAME_INVITE_MAIL__RELAY"), declaredEnvNames)
 	if len(f) != 0 {
 		t.Fatalf("вердикт покраснел на полосе, названной профилем: %v", f)
 	}
@@ -64,17 +66,18 @@ func TestOutboundLaneInjection_LaneWithNoKnobIsAFinding(t *testing.T) {
 // знает ОБЕ формы имени переменной.
 //
 // У части ключей есть СВОЯ привязка, и профиль называет именно её. Знай
-// распознаватель одну каноническую форму — он объявил бы находкой дорогу обмена,
-// объявленную верно; знай он только объявленную — молчал бы о ключах, у которых
-// своей привязки нет вовсе.
+// распознаватель одну каноническую форму — он объявил бы находкой ключ со своей
+// привязкой, объявленный верно; знай он только объявленную — молчал бы о ключах,
+// у которых своей привязки нет вовсе. Живой носитель второй формы — ключ обёртки
+// подписного ключа из таблицы обязательных величин.
 func TestOutboundLaneInjection_KnowsBothEnvWritings(t *testing.T) {
 	if got := canonicalEnvName("invite-mail.relay"); got != "KANAME_INVITE_MAIL__RELAY" {
 		t.Fatalf("каноническая форма имени выведена неверно: %s", got)
 	}
-	names := declaredEnvNames("authn.hydra-token-url")
+	names := declaredEnvNames("authn.jwks-encryption-key-hex")
 	var sawDeclared bool
 	for _, n := range names {
-		if n == "KANAME_HYDRA_TOKEN_URL" {
+		if n == "KANAME_JWKS_ENC_KEY" {
 			sawDeclared = true
 		}
 	}
@@ -93,7 +96,7 @@ func TestOutboundLaneInjection_KnowsBothEnvWritings(t *testing.T) {
 func TestOutboundLaneInjection_VocabularyKnowsItsFormsAndOnlyThem(t *testing.T) {
 	for _, yes := range []string{
 		"repository.postgres.url", "repository.postgres.slave-url",
-		"authn.hydra-admin-url", "invite-mail.relay", "invite-mail.login-url",
+		"authn.upstream-admin-url", "invite-mail.relay", "invite-mail.login-url",
 	} {
 		if !dialCoordinateLeaf(yes) {
 			t.Fatalf("координата чужого узла %q не опознана", yes)
@@ -102,7 +105,7 @@ func TestOutboundLaneInjection_VocabularyKnowsItsFormsAndOnlyThem(t *testing.T) 
 	// ЗАКОННЫЙ БЛИЗНЕЦ: соседние ключи той же секции координатами не являются, и
 	// словарь, который их захватит, сделает гейт красным на верном дереве.
 	for _, no := range []string{
-		"authn.hydra-issuer", "invite-mail.from", "invite-mail.tls-mode",
+		"authn.domain", "invite-mail.from", "invite-mail.tls-mode",
 		"api-server.graceful-shutdown", "logger.level",
 	} {
 		if dialCoordinateLeaf(no) {
@@ -125,7 +128,7 @@ func TestOutboundLaneInjection_PopulationComesFromTheDeclaration(t *testing.T) {
 	want := map[string]bool{
 		"invite-mail.relay":             false,
 		"repository.postgres.slave-url": false,
-		"authn.hydra-token-url":         false,
+		"authn.domain":                  false,
 	}
 	for _, l := range leaves {
 		if _, ok := want[l]; ok {
