@@ -20,13 +20,13 @@ const derivedTokenEndpoint = "https://hydra.access.example.invalid/oauth2/token"
 
 // TestResolveProviderTokenURL_DefaultAndOverride — the shim's POST target
 // defaults to the external issuer's token endpoint, and honors
-// ProviderTokenURLEnv for the provider's cluster-internal public Service.
+// ProviderExchangeURLEnv for the provider's cluster-internal public Service.
 func TestResolveProviderTokenURL_DefaultAndOverride(t *testing.T) {
 	c := config.AuthNConfig{Domain: "access.example.invalid"}
 	if got := c.ResolveProviderTokenURL(); got != derivedTokenEndpoint {
 		t.Fatalf("default ResolveProviderTokenURL() = %q", got)
 	}
-	t.Setenv(config.ProviderTokenURLEnv, "http://kacho-umbrella-provider-public.kacho.svc:4444/oauth2/token")
+	t.Setenv(config.ProviderExchangeURLEnv, "http://kacho-umbrella-provider-public.kacho.svc:4444/oauth2/token")
 	if got := c.ResolveProviderTokenURL(); got != "http://kacho-umbrella-provider-public.kacho.svc:4444/oauth2/token" {
 		t.Fatalf("override ResolveProviderTokenURL() = %q", got)
 	}

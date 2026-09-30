@@ -218,17 +218,17 @@ func (c AuthNConfig) ResolveProviderTokenEndpoint() string {
 	return strings.TrimRight(c.ResolveProviderIssuer(), "/") + "/oauth2/token"
 }
 
-// ProviderTokenURLEnv — переменная окружения адреса обмена у внешнего
+// ProviderExchangeURLEnv — переменная окружения адреса обмена у внешнего
 // поставщика: второе звено порядка в DeclaredProviderTokenURL. Объявлена одним
 // местом по той же причине, что ProviderIssuerEnv: перечень ручек ниже и пробы,
 // задающие или гасящие переменную, берут имя отсюда, а не выписывают заново.
 //
-// #nosec G101 -- это ИМЯ переменной окружения, которую правит оператор, а не
-// удостоверение: значение приходит из окружения, здесь стоит только его адрес.
-// Сканер опознаёт подстроку Token в имени постоянной и иначе решить не может:
-// ProviderIssuerEnv выше — та же форма без этой подстроки, и находкой он не
-// становится.
-const ProviderTokenURLEnv = "KANAME_HYDRA_TOKEN_URL"
+// Постоянная названа ролью порта — адрес обмена, — а не словом удостоверения.
+// Её значение — ИМЯ переменной, а постоянную со словом удостоверения в имени
+// сканер кода читает как удостоверение в коде (G101). Отметка подавления на ней
+// ослепила бы сканер на этой координате целиком: удостоверение, вписанное сюда
+// вместо имени, прошло бы молча.
+const ProviderExchangeURLEnv = "KANAME_HYDRA_TOKEN_URL"
 
 // tokenRoadKnob — пара «ключ настройки ↔ переменная среды» одной ручки дороги
 // обмена к прежнему издателю.
@@ -247,7 +247,7 @@ type tokenRoadKnob struct {
 // дорога обмена осталась: объявление имени переехало сюда, к читателю, и гейт
 // исходящих полос поставки берёт вторую форму имени отсюда.
 var TokenRoadKnobs = []tokenRoadKnob{
-	{Key: "authn.hydra-token-url", Env: ProviderTokenURLEnv},
+	{Key: "authn.hydra-token-url", Env: ProviderExchangeURLEnv},
 	{Key: "authn.hydra-token-ca-file", Env: "KANAME_HYDRA_TOKEN_CA_FILE"},
 }
 
@@ -264,7 +264,7 @@ func tokenRoadEnv(key string) string {
 
 // ResolveProviderTokenURL — the provider's public token endpoint the
 // `/iam/token` shim POSTs the exchange to. Precedence: the explicit
-// `authn.hydra-token-url` / ENV ProviderTokenURLEnv (`KANAME_HYDRA_TOKEN_URL`)
+// `authn.hydra-token-url` / ENV ProviderExchangeURLEnv (`KANAME_HYDRA_TOKEN_URL`)
 // override (a cluster-internal Service, e.g.
 // http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token), then the
 // external token endpoint (back-compat). The `iss` of the resulting token

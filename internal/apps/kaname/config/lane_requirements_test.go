@@ -32,7 +32,7 @@ import (
 // зеркалом (kaname#361), административный — вместе с посадкой поставщика
 // (kaname#363); адрес обмена старт больше не судит.
 func TestF4d_ProductionBootsWithoutASingleProviderAddress(t *testing.T) {
-	t.Setenv(config.ProviderTokenURLEnv, "")
+	t.Setenv(config.ProviderExchangeURLEnv, "")
 	cfg := laneCfg()
 	cfg.AuthN.ProviderTokenURL = ""
 
@@ -47,7 +47,7 @@ func TestF4d_ProductionBootsWithoutASingleProviderAddress(t *testing.T) {
 // `external`, требовавшие тех же адресов; они сняты вместе с посадкой, и
 // близнец меняет другой факт — чеканку.
 func TestF4d_ProductionWithoutOwnMintingRefusesTheSameInput(t *testing.T) {
-	t.Setenv(config.ProviderTokenURLEnv, "")
+	t.Setenv(config.ProviderExchangeURLEnv, "")
 	cfg := laneCfg()
 	cfg.AuthN.ProviderTokenURL = ""
 	cfg.AuthN.TokenSigning.Enabled = false
