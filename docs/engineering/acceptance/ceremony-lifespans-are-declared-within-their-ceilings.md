@@ -214,8 +214,9 @@ git grep -n -E '(^|[^a-z-])(code-ttl|refresh-ttl)' -- '*.go' '*.yaml' '*.tpl' '*
   уронить старт, и отказ, у которого нет строки таблицы, — находка. Профиль строит
   `supplyProfile` (`internal/apps/kaname/config/required_settings_test.go:173`), посадки
   перечислены в `landingsUnderTest` (`:82`);
-- `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane`. На своей полосе
-  невыполненное требование отвергает старт, на чужой не предъявляется;
+- `TestF4d10_EveryLaneRequirementRefusesTheProductionStart`. Невыполненное требование
+  отвергает боевой старт, выполненное — проходит (прежде проба судила «свою полосу» и
+  «чужую»; ось посадки снята, kaname#363);
 - `TestRefusalNamedEnvVarReachesItsField`. Переменная, названная текстом отказа, обязана
   менять исход;
 - гейт порождённой таблицы документа установки (`tools/operatordocs`).
@@ -225,8 +226,8 @@ git grep -n -E '(^|[^a-z-])(code-ttl|refresh-ttl)' -- '*.go' '*.yaml' '*.tpl' '*
 - Ключи полосы `own` чарт объявляет, а население берёт у таблицы стража:
   `TestChartDeclaresEveryKnobTheOwnLaneGuardRequires` (`deploy/own_lane_knobs_declared_test.go:283`).
 - Профиль поставки вместе с накладкой `own` рендерится и подаётся стражу старта:
-  `TestChartRendersOwnPostureWithTheClientTokenEndpoint`
-  (`deploy/own_posture_needs_client_token_test.go:121`). Профили —
+  `TestChartRendersTheOperatorOverlayWithTheClientTokenEndpoint` (прежде — с накладкой
+  `own`; ключ посадки снят, kaname#363, и накладка несёт только токен-эндпоинт). Профили —
   `values.yaml` и `values.prod.yaml` (`deploy/prod_profile_test.go:62`).
 - Профиль поставки стоит на `external` и всё равно несёт величины полосы `own`: блок
   `login` в `deploy/values.prod.yaml:270-300`, «страж их здесь не судит». Шаблон рендерит
@@ -660,7 +661,7 @@ git grep -n -E '(^|[^a-z-])(code-ttl|refresh-ttl)' -- '*.go' '*.yaml' '*.tpl' '*
 
 **Производители:** требование полосы `own` (`LaneRequirements`) и полосы строки таблицы
 (заводит это изменение). Табличная сторона того же свойства — «на чужой полосе требование не
-предъявляется» — ложится в `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane`
+предъявляется» — ложится в `TestF4d10_EveryLaneRequirementRefusesTheProductionStart`
 новой строкой, без правки пробы.
 
 **Красный до правки:** на Д1 зелены 08/1 и 08/2, красны 08/3 и 08/4. Зелёные половины
@@ -788,7 +789,7 @@ LINE-A-1-24 сборки.
 
 **Производители:** блок шаблона `deploy/templates/configmap.yaml`, рендерится, если профиль
 его несёт; блок профиля `deploy/values.prod.yaml` (оба заводит это изменение). Держатель
-13/1 — `TestChartRendersOwnPostureWithTheClientTokenEndpoint`: она судит стражем именно этот
+13/1 — `TestChartRendersTheOperatorOverlayWithTheClientTokenEndpoint`: она судит стражем именно этот
 рендер, и после изменения без блока в профиле краснеет. Объявленность ключей держит
 `TestChartDeclaresEveryKnobTheOwnLaneGuardRequires` (население — строки таблицы), переложение
 ключей — `TestConfigBridge_CoversEveryKeyTheChartRenders`.
@@ -813,12 +814,12 @@ LINE-A-1-24 сборки.
 | KN-CTTL-06/2 | как 03/2, `1ns`; срок семейства короче сроков доступа и кода не отвергается | как 03/2 | как 03/2 |
 | KN-CTTL-06/3 | как 03/3, `2h` — то же число, что у мира 09/1, 11 и 12 | как 03/3 | как 03/3 |
 | KN-CTTL-07 | один отказ называет обе | страж, собирающий отказы (заводится) | форма `client_token.go:103-179` |
-| KN-CTTL-08 | под `external` не требуются и не судятся; под `own` — да | требование полосы `own` (заводится), `ownScoped` `lane_requirements.go:532` | `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane`; §0.5 |
+| KN-CTTL-08 | под `external` не требуются и не судятся; под `own` — да | требование полосы `own` (заводится), `ownScoped` `lane_requirements.go:532` | `TestF4d10_EveryLaneRequirementRefusesTheProductionStart`; §0.5 |
 | KN-CTTL-09 | журнал старта и сроки записей равны ручкам | `cmd/kaname/ceremony.go:131`, `:132`, `:201-206` и `CeremonyFamilyBound` на `40902d877` — провязка ручек (заводится); вставки §0.4 | §0.2, §0.3 чтение сборки |
 | KN-CTTL-10 | `invalid_grant` на коде старше ручки; `200` моложе | срок кода из ручки (заводится); `oauth_ceremony_vaults.go:412`, `oauth_ceremony_repo.go:393-397` | §0.4; проба LINE-A-1-24 сборки |
 | KN-CTTL-11 | `invalid_grant` на неизвестном токене (эталон); на семействе старше ручки — тот же ответ байт в байт; `200` моложе | срок семейства в обоих читателях (заводится); годность `oauth_ceremony_vaults.go:608`, `:661`; один знак отказа на отсутствие и истечение — `oauth_ceremony_vaults.go:635-648` | §0.3, §0.4; посев рецензента круга 1 на Д0: байт в байт |
 | KN-CTTL-12 | преемник старого семейства отвергнут; моложе — оборачивается | граница семейства с ручкой (заводится) | §0.1 `PRO-Robotech/corelib@c8b7650112:TestGrantBoundHoldsTheWholeFamily`; §0.3 |
-| KN-CTTL-13 | ключи в карте; страж принимает; без блока — отказывает с обеими | блок `configmap.yaml` и блок `values.prod.yaml` (заводятся) | `TestChartRendersOwnPostureWithTheClientTokenEndpoint`, `TestChartDeclaresEveryKnobTheOwnLaneGuardRequires`, `TestConfigBridge_CoversEveryKeyTheChartRenders` |
+| KN-CTTL-13 | ключи в карте; страж принимает; без блока — отказывает с обеими | блок `configmap.yaml` и блок `values.prod.yaml` (заводятся) | `TestChartRendersTheOperatorOverlayWithTheClientTokenEndpoint`, `TestChartDeclaresEveryKnobTheOwnLaneGuardRequires`, `TestConfigBridge_CoversEveryKeyTheChartRenders` |
 
 Сценариев без производителя — **ноль**. У каждого «заводится» названа координата, куда
 производитель ляжет, и сценарий, который красен, пока его нет. Держателей вне дерева службы
@@ -850,7 +851,7 @@ LINE-A-1-24 сборки.
 3. **Таблица и полосы.** В `RequiredSettings` две новые строки: полоса `own`, путь подачи
    `SupplyEnv`, переменные §1.1, образцы `60s` и `168h`. В `LaneRequirements` — требование
    под `own`. Зелёные без правки своих тел: `TestRequiredSettings_TableCannotLie`,
-   `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane`,
+   `TestF4d10_EveryLaneRequirementRefusesTheProductionStart`,
    `TestRefusalNamedEnvVarReachesItsField`.
 4. **Падающие пробы — до правки** (ban #12). Красное дерево одно — **Д1**: поля ручек
    заведены и зарегистрированы нулём, стража и читателей нет, церемония живёт по константам.
@@ -891,7 +892,7 @@ LINE-A-1-24 сборки.
      `TestProdProfile_EveryKnobIsLoadBearing` не правится; без записей она красна на обеих
      ручках, и это перевод соседа по построению;
    - зелёные: `TestChartDeclaresEveryKnobTheOwnLaneGuardRequires`,
-     `TestChartRendersOwnPostureWithTheClientTokenEndpoint`,
+     `TestChartRendersTheOperatorOverlayWithTheClientTokenEndpoint`,
      `TestConfigBridge_CoversEveryKeyTheChartRenders`,
      `TestProdProfile_EveryKnobIsLoadBearing`.
 8. **Своих потолков чарт не несёт и величин не судит:**

@@ -53,10 +53,9 @@ func (h *Handler) WithResendInvite(uc *ResendInviteUseCase) *Handler {
 }
 
 // WithResetSecondFactor — сброс второго фактора распорядителем (Ф12 Р10).
-// Отдельной провязкой, а не параметром построения: глагол существует только
-// на посадке `own` — под `external` второго фактора у службы нет, и там он не
-// провязывается вовсе (Ф12-37); вызов без провязки отвечает `Unimplemented`
-// — ровно как контракт, у которого нет исполнителя.
+// Отдельной провязкой, а не параметром построения: исполнитель несёт полоса
+// входа, которую корень собирает после служб (Ф12-37); вызов без провязки
+// отвечает `Unimplemented` — ровно как контракт, у которого нет исполнителя.
 func (h *Handler) WithResetSecondFactor(uc *ResetSecondFactorUseCase) *Handler {
 	h.reset = uc
 	return h
@@ -181,11 +180,14 @@ func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*
 	return shared.OperationToProto(op), nil
 }
 
-// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30): под
-// `external` не провязан и отвечает как контракт без исполнителя.
+// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30). Исполнителя
+// провязывает корень вместе с полосой входа на каждом старте; непровязанный
+// обработчик (только сборка мимо корня) отвечает как контракт без исполнителя,
+// а не паникой. Прежде так отвечала посадка внешнего поставщика; её больше нет
+// (kaname#363).
 func (h *Handler) ResetSecondFactor(ctx context.Context, req *iamv1.ResetSecondFactorRequest) (*operationpb.Operation, error) {
 	if h.reset == nil {
-		return nil, status.Error(codes.Unimplemented, "second factor is not served on this posture")
+		return nil, status.Error(codes.Unimplemented, "second factor reset is not wired")
 	}
 	op, err := h.reset.Execute(ctx, domain.UserID(req.GetUserId()))
 	if err != nil {

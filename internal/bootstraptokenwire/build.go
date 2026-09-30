@@ -80,10 +80,7 @@ func (m localMint) MintToken(ctx context.Context, in bootstraptoken.MintInput) (
 		ID:      in.SAKeyID,
 		Kind:    domain.AssertionClientServiceAccount,
 		OwnerID: in.PrincipalID,
-	}, service.TokenHookContext{
-		GrantType:     tokenpolicy.GrantTypeClientCredentials,
-		OAuthClientID: in.SAKeyID,
-	})
+	}, service.TokenHookContext{})
 	if cerr != nil {
 		// Состав не собрался — токена нет. Пустой состав выглядел бы выданным
 		// токеном и не нёс бы принципала: край принял бы его и не нашёл, за кого

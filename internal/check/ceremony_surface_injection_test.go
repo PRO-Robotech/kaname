@@ -750,12 +750,13 @@ func ceremonyInjections() []ceremonyInjection {
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "az.AuthorizePath"}},
 
 		{"I11_local_const_concat_in_package_constructor", func(f *ceremonyFixture) {
-			// Якорь — первый оператор конструктора: маршрутов живости и
-			// готовности, на которых здесь стоял якорь, на слушателе вебхуков
-			// больше нет (kaname#360).
-			f.insertAfter("internal/handler/iamhooks", "http_server.go", "NewMux", `mux := http.NewServeMux()`,
-				"const ceremonyProbePath = \"/iam/v1\" + \"/authorize\"\nmux.Handle(ceremonyProbePath, h.TokenHook)")
-		}, []string{"эндпоинт авторизации", "2 поверхностях", "вебхуки провайдера личности"}},
+			// Конструктор чужого пакета — мультиплексор публикатора ключей. Прежде
+			// здесь стоял конструктор слушателя вебхуков поставщика; он снят вместе
+			// с поставщиком (kaname#363), и форма судится на соседнем конструкторе
+			// той же формы: локальный мультиплексор, якорь — его построение.
+			f.insertAfter("internal/handler/jwksproxyhttp", "binding.go", "NewMux", `mux := http.NewServeMux()`,
+				"const ceremonyProbePath = \"/iam/v1\" + \"/authorize\"\nmux.Handle(ceremonyProbePath, b.record.Handler)")
+		}, []string{"эндпоинт авторизации", "2 поверхностях", "публикатор набора ключей"}},
 
 		{"I12_registration_inside_login_lane_constructor", func(f *ceremonyFixture) {
 			f.insertAfter("internal/handler/loginlanehttp", "handler.go", "New",
@@ -1252,11 +1253,21 @@ func TestCeremonySurfaceInjections(t *testing.T) {
 // TestCeremonySurfaceInjectionEighthSurfaceIsCensused — перепись I3: восьмая
 // поверхность насчитана и объявлением, и элементом среза подъёма.
 func TestCeremonySurfaceInjectionEighthSurfaceIsCensused(t *testing.T) {
+	// Число поверхностей берётся у контроля того же дерева, а не выписывается:
+	// здесь стояло «8», и снятие двери вебхуков поставщика (kaname#363) сделало
+	// бы инъекцию красной на верном дереве. Предмет — «добавленная поверхность
+	// сосчитана», то есть ровно на одну больше контроля.
+	control := newCeremonyFixture(t).mustJudge(fixtureCeremonyCoordinates()).Census
 	f := newCeremonyFixture(t)
 	ceremonyEighthSurface(f)
 	c := f.mustJudge(fixtureCeremonyCoordinates()).Census
-	if c.SurfaceDecls != 8 || c.RaisedSurfaces != 8 {
-		t.Errorf("перепись I3: объявлений %d, поднимается %d — ожидалось 8 и 8", c.SurfaceDecls, c.RaisedSurfaces)
+	if control.SurfaceDecls == 0 {
+		t.Fatalf("контроль не насчитал ни одной поверхности — перепись беспредметна: %s", control.Summary())
+	}
+	if c.SurfaceDecls != control.SurfaceDecls+1 || c.RaisedSurfaces != control.RaisedSurfaces+1 {
+		t.Errorf("перепись I3: объявлений %d, поднимается %d — ожидалось %d и %d (контроль %d и %d плюс одна)",
+			c.SurfaceDecls, c.RaisedSurfaces, control.SurfaceDecls+1, control.RaisedSurfaces+1,
+			control.SurfaceDecls, control.RaisedSurfaces)
 	}
 }
 

@@ -378,5 +378,6 @@ go test -short -count=1 -timeout 120s \
 - `internal/service/token_enrichment_service.go` — SA-claims path
   (`kaname_principal_type=service_account`, `kaname_principal_id`,
   `kaname_account_id`).
-- `cmd/kaname/hooks_mux.go` — `tokenEnrichSAAdapter` wiring (поиск ключа по
-  имени клиента — `SAOAuthClientRepo.GetByClientID`, только KEYPAIR и FEDERATED).
+- `cmd/kaname/token_claims.go` — `tokenEnrichSAAdapter` wiring: чтение
+  служебной учётки по строке реестра. Поиск ключа по имени клиента у прежнего
+  поставщика ушёл вместе с его хуками (kaname#363).

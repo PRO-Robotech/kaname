@@ -62,18 +62,14 @@ type providerRoadCounter struct {
 // Запись, чьей дороги профиль больше не объявляет, — находка: утверждение о
 // наблюдаемости обязано истекать вместе со своим предметом.
 var roadsWithACounter = map[string]providerRoadCounter{
-	"ADMIN": {
-		Family: ProviderRoadOutcomesMetric,
-		Cell:   clients.ProviderRoadAdmin,
-		Why:    "выдача и отзыв ключа служебной учётки, интерактивный клиент, принудительный выход",
-	},
 	"TOKEN": {
 		Family: ProviderRoadOutcomesMetric,
 		Cell:   clients.ProviderRoadTokenExchange,
 		Why:    "обмен подписанного утверждения на токен у прежнего издателя",
 	},
 	// Дороги набора ключей здесь нет: она снята вместе с зеркалом этого набора
-	// (kaname#361), и её ручек профиль больше не объявляет.
+	// (kaname#361), и её ручек профиль больше не объявляет. Административной —
+	// тоже: она снята вместе с посадкой внешнего поставщика (kaname#363).
 }
 
 func TestIAM2491_EveryRoadTheProfileDeclaresHasACounter(t *testing.T) {

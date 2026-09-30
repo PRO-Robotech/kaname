@@ -30,7 +30,7 @@ func TestKeySetPublisherEdgeRefusalNamesWhatTheListenerServes(t *testing.T) {
 	// Поднят ровно один слушатель — публикатор; прочие адреса пусты, и страж
 	// их пропускает by construction. Транспорт не объявлен, посадка боевая:
 	// отказ обязан прозвучать, и прозвучать о нём одном.
-	_, err := requireHTTPEdgeTLS(true, iamHTTPEdges("", "", "0.0.0.0:9097", "", "", config.MTLSConfig{}))
+	err := requireHTTPEdgeTLS(true, iamHTTPEdges("", "0.0.0.0:9097", "", "", config.MTLSConfig{}))
 	if err == nil {
 		t.Fatal("публикатор открытым текстом в боевой посадке обязан получить отказ — страж смолчал, судить нечего")
 	}

@@ -68,7 +68,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
@@ -83,84 +82,13 @@ const alertRulesToggle = "alertRules.enabled"
 
 // pageAlertBlockRe — блок кода страницы с правилами. Берётся блок, а не строки:
 // имя `alert:` встречается и в прозе вокруг. Первая группа — ПОМЕТКА ПОСАДКИ
-// на строке перед блоком (`<!-- posture: own -->`), вторая — тело блока.
+// на строке перед блоком (`<!-- posture: … -->`), вторая — тело блока.
 //
-// Пометка машинно читаемая намеренно: заголовок прозой распознаватель судил бы
-// словом, а слово «own» стоит на странице и там, где посадка не при чём.
+// Пометок больше не бывает: посадка у службы одна (kaname#363), и набор правил
+// один на каждую установку. Пометка всё равно читается — затем, чтобы блок,
+// ею помеченный, был отказом, а не молчаливым выпадением из сверки: прежде
+// пометка выбирала, какой установке правила обещаны.
 var pageAlertBlockRe = regexp.MustCompile("(?s)(?:<!-- posture: ([a-z]+) -->\n)?```yaml\n(.*?)```")
-
-// posturedRules — правила страницы, разложенные по пометке полосы: пустой
-// ключ — правила, действующие на ЛЮБОЙ посадке.
-type posturedRules map[string][]alertRule
-
-// forPosture — что страница обещает установке названной посадки: правила
-// каждой полосы, которую процесс при этой посадке поднимает
-// ([laneDeliveredTo]). Правила полосы, которой процесс не поднимает, в
-// обещание НЕ входят. Пусто — посадка не объявлена.
-func (p posturedRules) forPosture(posture string) ([]alertRule, error) {
-	target := config.IdentityProviderUnset
-	if posture != "" {
-		parsed, err := config.ParseIdentityProvider(posture)
-		if err != nil {
-			return nil, fmt.Errorf("посадка рендера: %w", err)
-		}
-		target = parsed
-	}
-	lanes := make([]string, 0, len(p))
-	for lane := range p {
-		lanes = append(lanes, lane)
-	}
-	sort.Strings(lanes)
-	var out []alertRule
-	for _, lane := range lanes {
-		delivered, err := laneDeliveredTo(lane, target)
-		if err != nil {
-			return nil, err
-		}
-		if delivered {
-			out = append(out, p[lane]...)
-		}
-	}
-	return out, nil
-}
-
-// laneDeliveredTo — везёт ли чарт установке посадки posture правила полосы,
-// помеченной на странице как lane.
-//
-// Пометка называет полосу по посадке, которая её ОБЪЯВЛЯЕТ, а не перечень
-// посадок, которым её везут. Где полоса есть, отвечает предикат процесса,
-// поднимающего её ряд, а не совпадение имени: полосу хуков внешнего
-// поставщика процесс поднимает при любой посадке, кроме `own`, то есть и при
-// незаявленной (#427). Сверка по совпадению имени обещала бы незаявленной
-// посадке меньше, чем работает, и молча согласилась бы с чартом, который
-// там правила о хуках не везёт.
-//
-// Пометка вне словаря — отказ, а не молчаливое «никому»: иначе правила
-// опечатанной полосы выпали бы из сверки обеих сторон разом.
-//
-// ПОМЕТКА ПОЛОСЫ ХУКОВ — СЛОВО, А НЕ ИМЯ ИЗ СЛОВАРЯ (#424). Полоса хуков
-// помечена на странице словом снятой посадки `external`
-// (PRO-Robotech/corelib#30); словарь посадки этого имени больше не печатает —
-// снятое значение печатается числом, — поэтому пометка сверяется со словом
-// страницы. Полоса при этом жива: процесс поднимает её при незаявленной
-// посадке (#427), и пометка уходит вместе с полосой (#363).
-func laneDeliveredTo(lane string, posture config.IdentityProvider) (bool, error) {
-	switch lane {
-	case "":
-		return true, nil
-	case hooksLanePageMarker:
-		return hooksRaisedByProcess(posture), nil
-	case config.IdentityProviderOwn.String():
-		return posture == config.IdentityProviderOwn, nil
-	}
-	return false, fmt.Errorf("пометка полосы %q на странице не называет ни одной полосы, известной сверке "+
-		"(%s, %s либо без пометки): её правила не обещаны ни одной посадке",
-		lane, hooksLanePageMarker, config.IdentityProviderOwn)
-}
-
-// hooksLanePageMarker — пометка полосы хуков внешнего поставщика на
-// опубликованной странице (см. laneDeliveredTo).
-const hooksLanePageMarker = "external"
 
 // alertRule — правило в том виде, в каком его сверяют две стороны.
 type alertRule struct {
@@ -190,59 +118,51 @@ func parseAlertRules(text string) ([]alertRule, error) {
 	return out, nil
 }
 
-// pageAlertRules — правила, обещанные опубликованной страницей, по посадке.
-func pageAlertRules(t *testing.T, root string) posturedRules {
-	t.Helper()
-	path := filepath.Join(root, publishedObservabilityPage)
-	raw, err := os.ReadFile(path) // #nosec G304 -- путь из корня службы
-	require.NoErrorf(t, err, "опубликованная страница не читается: %s", path)
-
-	rules := posturedRules{}
-	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(string(raw), -1) {
+// splitPageAlertRules — правила из блоков текста страницы и пометки посадки,
+// которые стоят перед блоками. СУЖДЕНИЕ отделено от чтения файла: инъекция
+// зовёт его же, а не свою копию.
+func splitPageAlertRules(text string) (rules []alertRule, markers []string, err error) {
+	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(text, -1) {
 		if !strings.Contains(m[2], "- alert:") {
 			continue
 		}
 		parsed, perr := parseAlertRules(m[2])
-		require.NoErrorf(t, perr, "блок правил страницы не разбирается как YAML: %s", path)
-		rules[m[1]] = append(rules[m[1]], parsed...)
+		if perr != nil {
+			return nil, nil, perr
+		}
+		if m[1] != "" {
+			markers = append(markers, m[1])
+		}
+		rules = append(rules, parsed...)
 	}
-	return rules
+	return rules, markers, nil
 }
 
-// identityPostureSet — ручка чарта, выбирающая посадку личности.
-const identityPostureSet = "authn.identityProvider"
-
-// postureOfProfiles — посадка, которую объявляет цепочка профилей; пусто —
-// профиль посадки не объявляет.
-func postureOfProfiles(t *testing.T, chain []string) string {
+// pageAlertRules — правила, обещанные опубликованной страницей, и пометки
+// посадки, которые на ней нашлись (каждая — находка).
+func pageAlertRules(t *testing.T, root string) (rules []alertRule, markers []string) {
 	t.Helper()
-	v, _ := at(mergeChartProfiles(t, chain), "authn", "identityProvider").(string)
-	return v
+	path := filepath.Join(root, publishedObservabilityPage)
+	raw, err := os.ReadFile(path) // #nosec G304 -- путь из корня службы
+	require.NoErrorf(t, err, "опубликованная страница не читается: %s", path)
+	rules, markers, err = splitPageAlertRules(string(raw))
+	require.NoErrorf(t, err, "блок правил страницы не разбирается как YAML: %s", path)
+	return rules, markers
 }
 
-// alertRenders — что рендерится и под какой посадкой. ОБЕ полосы личности
-// рендерятся явно, а не только та, что стоит в поставляемом профиле: правило
-// чужой полосы, уехавшее не под свой выключатель, видно только на второй.
+// alertRenders — что рендерится: каждый поставляемый профиль как есть. Набор
+// правил один на каждую установку, поэтому раскладок по посадкам больше нет.
 type alertRender struct {
-	name    string
-	chain   []string
-	sets    []string
-	posture string
+	name  string
+	chain []string
+	sets  []string
 }
 
 func alertRenders(t *testing.T) []alertRender {
 	t.Helper()
-	prod := []string{"values.yaml", "values.prod.yaml"}
-	dev := []string{"values.yaml", "values.dev.yaml"}
 	return []alertRender{
-		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
-		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
-		{name: "values.prod.yaml+own", chain: prod, sets: ownPostureOverlay, posture: "own"},
-		// Раскладки «боевой профиль, переведённый на external» здесь больше нет
-		// (#424): посадка снята фундаментом (PRO-Robotech/corelib#30), и
-		// обещание страницы для неё не строится — разбор её не принимает.
-		// Правила полосы хуков обещаны и сверяются на профиле без посадки
-		// (values.dev.yaml): там процесс их слушатель поднимает (#427).
+		{name: "values.prod.yaml", chain: []string{"values.yaml", "values.prod.yaml"}},
+		{name: "values.dev.yaml", chain: []string{"values.yaml", "values.dev.yaml"}},
 	}
 }
 
@@ -305,45 +225,42 @@ func diffRuleSets(page, chart []alertRule) (onlyPage, onlyChart []string) {
 	return onlyPage, onlyChart
 }
 
-// TestDeliveredAlertRulesMatchThePublishedPage — Р2 ПО ПОСАДКАМ (задача #210).
+// TestDeliveredAlertRulesMatchThePublishedPage — Р2 на каждом поставляемом
+// профиле (задачи #210, #363).
 //
-// Правило о хуках поставщика личности под посадкой `own` звонило бы вечно:
-// хуков поставщика там нет by construction, тишина на них штатна, а порог,
-// срабатывающий на штатном состоянии, перестают читать — и вместе с ним
-// теряют настоящую тревогу под `external`. Поэтому набор правил ЗАВИСИТ от
-// посадки: общие правила плюс правила каждой полосы, которую процесс при ней
-// поднимает, и страница обещает ровно то, что объект везёт установке этой
-// посадки. Незаявленная посадка — стендовый профиль — получает и правила о
-// хуках: слушатель их процесс при ней поднимает (#427).
-//
-// Сверяется в обе стороны на каждой из четырёх раскладок: два поставляемых
-// профиля как есть и боевой профиль, явно переведённый на каждую из полос.
-// Правило чужой полосы, уехавшее не под свой выключатель, видно только на
-// второй полосе — поэтому обе рендерятся явно.
+// Прежде набор правил зависел от посадки: правило о хуках поставщика под своей
+// посадкой звонило бы вечно, и страница обещала каждой посадке своё. Посадка
+// у службы одна, хуков поставщика нет ни на каком старте, и страница обещает
+// один набор — общие правила и правила собственной полосы входа, — а объект
+// обязан везти его на каждом профиле. Пометка посадки на странице — находка:
+// она обещала бы правила установке, которой больше не бывает.
 func TestDeliveredAlertRulesMatchThePublishedPage(t *testing.T) {
 	root, err := surfaceroster.IAMRoot(".")
 	require.NoError(t, err, "корень дерева службы")
 
-	paged := pageAlertRules(t, root)
-	require.NotEmpty(t, paged["own"], "страница не несёт ни одного правила полосы `own` — "+
-		"тревога под этой посадкой не объявлена вовсе")
-	require.NotEmpty(t, paged[hooksLanePageMarker], "страница не несёт ни одного правила полосы хуков")
+	page, markers := pageAlertRules(t, root)
+	require.Emptyf(t, markers, "страница помечает блоки правил посадкой %v — посадка у службы одна, "+
+		"и пометка обещала бы правила установке, которой не бывает", markers)
+	ownLane := 0
+	for _, r := range page {
+		if r.Alert == "KanameLoginLaneFailing" || r.Alert == "KanameLoginVerifierCapacityExhausted" {
+			ownLane++
+		}
+	}
+	require.Equal(t, 2, ownLane, "страница не несёт обоих правил собственной полосы входа — "+
+		"тревога о входе человека не объявлена")
 
 	for _, r := range alertRenders(t) {
 		t.Run(r.name, func(t *testing.T) {
 			rendered := renderStandaloneChart(t, r.chain, r.sets...)
 			chart, objects := chartAlertRules(t, rendered)
-			page, perr := paged.forPosture(r.posture)
-			require.NoError(t, perr, "обещание страницы для посадки рендера")
-			lane := len(page) - len(paged[""])
 
 			onlyPage, onlyChart := diffRuleSets(page, chart)
 
-			t.Logf("ПЕРЕПИСЬ правил тревоги (%s, посадка %q):\n"+
-				"  объектов правил %d · правил у объекта %d · правил на странице для посадки %d "+
-				"(общих %d · полосы %d) · только на странице %d · только у объекта %d",
-				r.name, r.posture, objects, len(chart), len(page), len(paged[""]), lane,
-				len(onlyPage), len(onlyChart))
+			t.Logf("ПЕРЕПИСЬ правил тревоги (%s):\n"+
+				"  объектов правил %d · правил у объекта %d · правил на странице %d "+
+				"(собственной полосы входа %d) · только на странице %d · только у объекта %d",
+				r.name, objects, len(chart), len(page), ownLane, len(onlyPage), len(onlyChart))
 
 			// Предпосылка: обе стороны непусты. Пустая страница дала бы
 			// совпадение с пустым объектом, и «расхождений ноль» означало бы

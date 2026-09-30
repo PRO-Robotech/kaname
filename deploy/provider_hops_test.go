@@ -8,8 +8,9 @@
 // not "one address was wrong". It is that the facade had THREE hops to the
 // provider, one of them was moved to a declared, encrypted, anchored form with a
 // boot guard and a gate, and the other two were measured by nobody — so the class
-// read as closed while half of it was live. Two hops remain: the key-set mirror's
-// upstream left together with the mirror (kaname#361). A per-hop assertion reproduces exactly that:
+// read as closed while half of it was live. One hop remains: the key-set mirror's
+// upstream left together with the mirror (kaname#361), the admin API hop together
+// with the external-provider posture (kaname#363). A per-hop assertion reproduces exactly that:
 // the next hop added inherits the blind spot. This reads the whole set, states how
 // many it examined, and refuses to be silent about a member it has nothing to say
 // about.
@@ -40,10 +41,10 @@
 // WHAT IT ASSERTS, per production-class stack:
 //
 //	(1) every hop's address is DECLARED, never left to iam's derivation from the
-//	    issuer. Production refuses to start otherwise
-//	    (config.validateProductionProviderAdminHop /
-//	    validateProductionProviderPublicHops); this gate is what keeps that refusal
-//	    from being discovered on a stand.
+//	    issuer. The start guards that refused an undeclared address belonged to
+//	    the external-provider posture and left with it (kaname#363); the exchange
+//	    hop of the untranslated docker contour stays, and this census is what
+//	    keeps its address from being derived on a shipped profile.
 //	(2) an address declared https carries its trust anchor. Without one the process
 //	    verifies against the system roots, which an internal-CA certificate never
 //	    chains to: the address reads as hardened and every call fails.
@@ -74,8 +75,8 @@ import (
 // WHY TWO SOURCES AND NOT ONE TABLE. The same chart is installed two ways, and the
 // knob paths differ by exactly one segment:
 //
-//	as a subchart of our umbrella   kaname.platform.iam.hydraAdminUrl
-//	standalone, as shipped          platform.iam.hydraAdminUrl
+//	as a subchart of our umbrella   kaname.platform.iam.hydraTokenURL
+//	standalone, as shipped          platform.iam.hydraTokenURL
 //
 // The census used to read only the first, addressed as `../../../deploy/helm/
 // umbrella/...` — a path that exists in the monorepo and nowhere else. In the
@@ -192,14 +193,11 @@ type hop struct {
 	anchorEnv string
 }
 
+// providerHops — the hops still addressed to the provider. The admin API hop left
+// together with the external-provider posture (kaname#363): iam no longer holds
+// a client for it, and a census that still counted it would demand an address
+// nothing reads.
 var providerHops = []hop{
-	{
-		name:      "admin API",
-		knob:      []string{"platform", "iam", "hydraAdminUrl"},
-		env:       "KANAME_HYDRA_ADMIN_URL",
-		anchor:    []string{"platform", "iam", "hydraAdminCaFile"},
-		anchorEnv: "KANAME_HYDRA_ADMIN_CA_FILE",
-	},
 	{
 		name:      "token endpoint",
 		knob:      []string{"platform", "iam", "hydraTokenURL"},
@@ -220,16 +218,13 @@ var providerHops = []hop{
 // is its own change with its own acceptance, not something to smuggle in beside a
 // boot guard.
 //
-// The admin API is deliberately NOT a member: it is required to be https, and it
-// is, on every production-class profile.
-//
 // This register is written to expire. It is asserted in both directions below, so
 // the day the public listener gets a certificate the entry stops having a subject
 // and the gate turns red until it is deleted.
 //
 // ITS SUBJECT IS OUR UMBRELLA, AND ONLY THAT. The shipped chart carries no
 // provider at all — whoever installs brings their own — so its own values.prod.yaml
-// addresses both hops over https with a pinned anchor and takes no exemption
+// addresses the hop over https with a pinned anchor and takes no exemption
 // (values.prod.yaml says so in as many words). The expiry check therefore runs
 // over the umbrella source, and whether that source is present is READ FROM THE
 // TREE and printed in the census, never assumed: in a clone that has no umbrella

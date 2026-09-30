@@ -54,8 +54,9 @@ func startRetentionSweeper(
 		cfg.Retention.Sweep(),
 		// За базовым перечнем — предметы полосы входа: сессии человека, журнал
 		// неверных предъявлений и прочие (Ф3, kacho#1269, `WithHumanSessions`).
-		// Их уборщики приходят от полосы входа и под `external` отсутствуют —
-		// тогда перечень остаётся базовым.
+		// Их уборщики приходят от полосы входа; полоса, не построенная (только
+		// в пробах — на живом старте это отказ сборки), оставляет перечень
+		// базовым.
 		retention.WithHumanSessions(retention.Subjects(
 			kanamepg.NewClientAssertionReplayRepo(pool),
 			kanamepg.NewSessionRevocationRepo(pool),

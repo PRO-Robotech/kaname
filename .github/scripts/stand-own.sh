@@ -230,7 +230,6 @@ stand_env() {
   export KANAME_DB_USER=kaname KANAME_DB_NAME=kaname KANAME_DB_PASSWORD=stand
   export KANAME_DB_SSLMODE=require
   export KANAME_JWKS_ENC_KEY="$(cat "$WRAPKEY_FILE")"
-  export KANAME_HOOK_TOKEN=stand-hook-secret-0123456789
   export KANAME_AUTHN__DOMAIN=kaname.local
   export KANAME_AUTHN__TRUST_DOMAIN=kaname.local
   export KANAME_AUTHN__TRUSTED_FORWARDER_SANS='spiffe://kaname.local/ns/kaname/sa/kaname'
@@ -239,14 +238,14 @@ stand_env() {
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5
   export KANAME_OWN_CEILINGS__ACCESS_KEYS_PER_USER=5
-  # ПОЛОСА ЛИЧНОСТИ — `own`, И ДРУГОЙ У СЛУЖБЫ НЕТ.
+  # ПОЛОСА ЛИЧНОСТИ ОДНА — СВОЙ ВХОД, И КЛЮЧА, КОТОРЫЙ ЕЁ ВЫБИРАЛ, НЕТ.
   #
-  # Здесь стояло `external` с объявленными и недостижимыми адресами поставщика.
-  # Посадку `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424):
-  # разбор ключа принимает ровно `own`, и накатчик отвергал настройку раньше,
-  # чем стенд доходил до службы, — задание краснело на загрузке настройки.
+  # Здесь стояло сперва `external`, затем `own` ключом посадки. Посадку
+  # `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424), а ключ
+  # снят вместе с осью (kaname#363): загрузчик отвергает его переменную вслух,
+  # при любом значении.
   #
-  # Под `own` вход человека держит сама служба, и старт требует величин полосы
+  # Вход человека держит сама служба, и старт требует величин полосы
   # входа, обёртки секретов второго фактора, окна свежести и привязки ключей
   # доступа. Числа ниже — те же, что объявляет боевой профиль
   # (`deploy/values.prod.yaml`, блок `authn.login`): стенд судит ту посадку,
@@ -254,8 +253,7 @@ stand_env() {
   # адрес консоли установки под её доменом, как у профиля: консоли на стенде
   # нет, и ключ, привязанный к этому адресу, не предъявит никто.
   #
-  # Адресов поставщика здесь больше нет: под `own` их не читает никто.
-  export KANAME_AUTHN__IDENTITY_PROVIDER=own
+  # Адресов поставщика здесь больше нет: их не читает никто.
   export KANAME_AUTHN__LOGIN__SESSION_TTL=24h
   export KANAME_AUTHN__LOGIN__COOKIE_DOMAIN=none
   export KANAME_AUTHN__LOGIN__ADDRESS_ATTEMPTS=5
@@ -375,7 +373,7 @@ stand_env() {
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC=10
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING=32
   local l u
-  for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
+  for l in INTERNAL INTERNALREST METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \
       KANAME_${l}_SERVER_MTLS_CERTFILE=$PKI/srv.crt \
       KANAME_${l}_SERVER_MTLS_KEYFILE=$PKI/srv.key \
@@ -539,8 +537,8 @@ start_service() {
 # ниже подставляет свою пару: судить готовность на восьми боевых номерах значило бы
 # мерить, свободны ли они на этой машине, а не различает ли скрипт исходы.
 #
-# Слушателя хуков поставщика (`:9092`) в перечне нет: под `own` поставщика нет, и
-# слушатель не поднимается (kaname#360). Есть слушатель полосы входа (`:9100`).
+# Слушателя хуков поставщика (`:9092`) в перечне нет: поставщика у службы нет, и
+# слушателя тоже (kaname#360, kaname#363). Есть слушатель полосы входа (`:9100`).
 PORTS="${KANAME_STAND_PORTS:-9090 9091 9095 9096 9097 9098 9099 9100}"
 
 # Счёт слушателей ВЫВОДИТСЯ из перечня: выписанное число разошлось бы с ним молча,

@@ -51,9 +51,10 @@
 //
 // ФОРМ ИМЕНИ ПЕРЕМЕННОЙ ТОЖЕ ДВЕ. Каноническая выводится из ключа
 // (`invite-mail.relay` → `KANAME_INVITE_MAIL__RELAY`), но у части ключей есть
-// СВОЯ привязка, и профиль называет именно её (`authn.hydra-admin-url` →
-// `KANAME_HYDRA_ADMIN_URL`). Вторая форма берётся у владельца объявления
-// (`config.RequiredSettings`), а не угадывается: распознаватель, знающий одну
+// СВОЯ привязка, и профиль называет именно её (`authn.hydra-token-url` →
+// `KANAME_HYDRA_TOKEN_URL`). Вторая форма берётся у владельца объявления
+// (`config.RequiredSettings` либо перечень ручек дороги обмена
+// `config.TokenRoadKnobs`), а не угадывается: распознаватель, знающий одну
 // форму, о другой МОЛЧИТ — не краснеет и не зеленеет.
 package deploy_test
 
@@ -127,12 +128,18 @@ func canonicalEnvName(key string) string {
 }
 
 // declaredEnvNames — все имена переменных, которыми ключ подаётся: каноническое
-// плюс объявленное владельцем таблицы обязательных величин.
+// плюс объявленное владельцем — таблицей обязательных величин либо перечнем
+// ручек дороги обмена.
 func declaredEnvNames(key string) []string {
 	names := []string{canonicalEnvName(key)}
 	for _, rs := range config.RequiredSettings {
 		if rs.Key == key && rs.Env != "" && rs.Env != names[0] {
 			names = append(names, rs.Env)
+		}
+	}
+	for _, k := range config.TokenRoadKnobs {
+		if k.Key == key && k.Env != names[0] {
+			names = append(names, k.Env)
 		}
 	}
 	return names

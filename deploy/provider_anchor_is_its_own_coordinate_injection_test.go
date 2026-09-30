@@ -38,7 +38,6 @@ authMode: production-strict
 env:
   KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   KANAME_INTERNAL_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
-  KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/provider/ca.crt
   KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/provider/ca.crt
 `
 
@@ -59,8 +58,8 @@ func TestProviderAnchorInjection_SharedCoordinateIsAFinding(t *testing.T) {
 	// ИНЪЕКЦИЯ, ОДИН ФАКТ против контроля: якорь поставщика переведён на
 	// координату круга клиентских листов. Это и есть состояние до фикса #2487.
 	injected := strings.Replace(separateCoordinates,
-		"KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/provider/ca.crt",
-		"KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/server/ca.crt", 1)
+		"KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/provider/ca.crt",
+		"KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/server/ca.crt", 1)
 	findings, _, _ := judgeProviderAnchorCoordinates("synthetic", anchorStack(t, injected), nil)
 	if len(findings) != 1 {
 		t.Fatalf("склейка координат не найдена (находок %d): %v", len(findings), findings)
@@ -69,7 +68,7 @@ func TestProviderAnchorInjection_SharedCoordinateIsAFinding(t *testing.T) {
 	// симптом, посылает читателя искать не там.
 	if !strings.Contains(findings[0], "/etc/kaname/tls/server/ca.crt") ||
 		!strings.Contains(findings[0], "PUBLIC_SERVER") ||
-		!strings.Contains(findings[0], "admin API") {
+		!strings.Contains(findings[0], "token endpoint") {
 		t.Fatalf("находка не называет ни координаты, ни слушателей, ни хопа: %s", findings[0])
 	}
 }
@@ -88,7 +87,7 @@ env:
   KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   KANAME_INTERNAL_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
   KANAME_REST_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
-  KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/provider/ca.crt
+  KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/provider/ca.crt
 `
 	findings, circles, _ := judgeProviderAnchorCoordinates("synthetic", anchorStack(t, shared), nil)
 	if len(findings) != 0 {
@@ -110,7 +109,7 @@ func TestProviderAnchorInjection_ClashHiddenInAListIsFound(t *testing.T) {
 authMode: production-strict
 env:
   KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
-  KANAME_HYDRA_ADMIN_CA_FILE: /etc/kaname/tls/provider/ca.crt,/etc/kaname/tls/server/ca.crt
+  KANAME_HYDRA_TOKEN_CA_FILE: /etc/kaname/tls/provider/ca.crt,/etc/kaname/tls/server/ca.crt
 `
 	findings, _, _ := judgeProviderAnchorCoordinates("synthetic", anchorStack(t, inList), nil)
 	if len(findings) != 1 {

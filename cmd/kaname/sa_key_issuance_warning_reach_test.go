@@ -11,10 +11,10 @@
 // Ветвь в `buildSAKeysHandler` срабатывает, когда контур выдачи не переведён
 // (`authn.client-token.enabled` не включён): ключевую пару и федеративный ключ
 // обменивает только токен-эндпоинт платформы, и без него их выдача отказывает
-// на любой посадке — регистрации у внешнего поставщика выдача больше не заводит
-// (kaname#362). Страж старта из задачи #337 посадку `own` без эндпоинта в
-// боевых режимах отвергает, а требования полосы вне боевых режимов не
-// предъявляются вовсе. Значит на посадке `own` ветвь исполняется ТОЛЬКО в режиме
+// — регистрации у внешнего поставщика выдача больше не заводит (kaname#362), и
+// самого поставщика у службы нет (kaname#363). Страж старта из задачи #337
+// старт без эндпоинта в боевых режимах отвергает, а вне боевых режимов это
+// требование не предъявляется вовсе. Значит ветвь исполняется ТОЛЬКО в режиме
 // разработчика.
 //
 // «Недостижима в боевых режимах» — утверждение из ДВУХ половин, и держатель
@@ -37,9 +37,7 @@
 // ЗАКОННЫЕ БЛИЗНЕЦЫ
 //
 // Без него «предупреждение напечатано» зеленело бы на ветви, печатающей всегда:
-// тот же вход с включённым токен-эндпоинтом не печатает ничего. Посадка
-// `external` близнецом больше не служит: дорога к поставщику выдачу ключа не
-// исполняет, и без эндпоинта ветвь печатает там так же.
+// тот же вход с включённым токен-эндпоинтом не печатает ничего.
 //
 // Близнец ОБЯЗАН подниматься: молчание, измеренное на входе, который страж
 // старта отвергает, есть молчание процесса, до сборки не дошедшего, и о ветви
@@ -66,8 +64,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-// devOwnWithoutOwnSAKeyIssuance — вход случая: режим разработчика, посадка
-// `own`, токен-эндпоинт платформы не включён. Прочие величины — те, без которых
+// devOwnWithoutOwnSAKeyIssuance — вход случая: режим разработчика,
+// токен-эндпоинт платформы не включён. Прочие величины — те, без которых
 // страж старта отказал бы в любом режиме по причине, к предмету не относящейся.
 //
 // Величины самого контура выдачи ОБЪЯВЛЕНЫ, а контур выключен одной ручкой
@@ -80,7 +78,6 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 	ceiling := func(v int64) *int64 { return &v }
 	var cfg config.Config
 	cfg.AuthN.Mode = config.ModeDev
-	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.Domain = "access.example.invalid"
 	cfg.AuthN.TrustedForwarderSANs = []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"}
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
@@ -195,7 +192,7 @@ func differingFacts(a, b reflect.Value, path string) []string {
 }
 
 // requireOneFactTwin — близнец отличается от входа случая ровно фактом fact
-// (путь поля настройки, например `AuthN.IdentityProvider`) и ничем больше.
+// (путь поля настройки, например `AuthN.Mode`) и ничем больше.
 func requireOneFactTwin(t *testing.T, caseIn, twin config.Config, fact string) {
 	t.Helper()
 	facts := differingFacts(reflect.ValueOf(caseIn), reflect.ValueOf(twin), "")
@@ -229,7 +226,7 @@ func TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes(t *testing.T) {
 			"иначе проба судит не достижимость ветви, а неподнявшуюся фикстуру", err)
 	}
 
-	requireOneLiftingWarning(t, saKeysWarnings(t, cfg), "dev-посадка own без своего контура выдачи "+
+	requireOneLiftingWarning(t, saKeysWarnings(t, cfg), "dev-старт без своего контура выдачи "+
 		"поднимается, и выдача ключевой пары и федеративного ключа на ней отказывает")
 
 	for _, mode := range []config.Mode{config.ModeProduction, config.ModeProductionStrict} {
@@ -239,7 +236,7 @@ func TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes(t *testing.T) {
 			requireOneFactTwin(t, cfg, prod, "AuthN.Mode")
 			err := prod.Validate()
 			if err == nil {
-				t.Fatal("Validate() = nil: боевая посадка own без своего контура выдачи " +
+				t.Fatal("Validate() = nil: боевой старт без своего контура выдачи " +
 					"поднимается — ветвь предупреждения была бы достижима на развёрнутом стенде")
 			}
 			if !strings.Contains(err.Error(), "authn.client-token.enabled is false") {
@@ -283,7 +280,7 @@ const mainChildCommand = "sa-key-reach-probe-no-such-command"
 const mainReturnedCode = 86
 
 // TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring — половина
-// «порядок в main»: на боевой посадке own без своего контура выдачи `main`
+// «порядок в main»: на боевом старте без своего контура выдачи `main`
 // печатает отказ стража строкой контура выдачи и ЗАВЕРШАЕТ процесс — за
 // записью отказа не исполняется ничего, до сборки ключей он не доходит.
 //
@@ -299,8 +296,7 @@ func TestSAKeyIssuanceWarning_ProductionRefusalStopsMainBeforeWiring(t *testing.
 	for _, mode := range []config.Mode{config.ModeProduction, config.ModeProductionStrict} {
 		t.Run(mode.String(), func(t *testing.T) {
 			records, code, raw := runMainChild(t, map[string]string{
-				"KANAME_AUTHN__MODE":              mode.String(),
-				"KANAME_AUTHN__IDENTITY_PROVIDER": config.IdentityProviderOwn.String(),
+				"KANAME_AUTHN__MODE": mode.String(),
 			})
 			if code == mainReturnedCode {
 				t.Fatalf("main вернулся, а не завершил процесс, — отказ стража старта не остановил "+
@@ -394,7 +390,7 @@ func runMainChild(t *testing.T, overrides map[string]string) ([]map[string]any, 
 // близнец: у выдачи есть исполнитель, и предупреждения нет. Близнец поднимается
 // и меняет против входа случая ровно один факт.
 func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
-	t.Run("own со своим контуром выдачи", func(t *testing.T) {
+	t.Run("свой контур выдачи", func(t *testing.T) {
 		cfg := devOwnWithoutOwnSAKeyIssuance()
 		cfg.AuthN.ClientToken.Enabled = true
 		requireOneFactTwin(t, devOwnWithoutOwnSAKeyIssuance(), cfg, "AuthN.ClientToken.Enabled")
@@ -406,17 +402,4 @@ func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
 			t.Fatalf("предупреждений %d при переведённом контуре: %v", len(warns), warns)
 		}
 	})
-}
-
-// TestSAKeyIssuanceWarning_ReachedWhereverTheEndpointIsOff — без токен-эндпоинта
-// у выдачи ключевой пары нет исполнителя ни на одной посадке: дорога к внешнему
-// поставщику её больше не исполняет (kaname#362), и ветвь печатает и там.
-// Вход меняет против случая ровно один факт — посадку.
-func TestSAKeyIssuanceWarning_ReachedWhereverTheEndpointIsOff(t *testing.T) {
-	cfg := devOwnWithoutOwnSAKeyIssuance()
-	cfg.AuthN.IdentityProvider = config.IdentityProviderExternal
-	requireOneFactTwin(t, devOwnWithoutOwnSAKeyIssuance(), cfg, "AuthN.IdentityProvider")
-	requireStartableTwin(t, cfg)
-	requireOneLiftingWarning(t, saKeysWarnings(t, cfg), "посадка с дорогой к поставщику без своего "+
-		"контура выдачи: ключевую пару обменять негде и здесь")
 }

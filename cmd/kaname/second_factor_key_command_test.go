@@ -28,11 +28,10 @@ func sfKeyHex(b byte) string {
 	return strings.Repeat(string([]byte{digits[b>>4], digits[b&0x0f]}), 32)
 }
 
-// sfCommandCfgAt — посадка own с перечнем ключей обёртки над базой по адресу.
+// sfCommandCfgAt — настройка с перечнем ключей обёртки над базой по адресу.
 func sfCommandCfgAt(dsn string, ring ...byte) config.Config {
 	cfg := postureCfg(config.ModeDev, "disable")
 	cfg.Repository.Postgres.URL = dsn
-	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	keys := make([]string, 0, len(ring))
 	for _, k := range ring {
 		keys = append(keys, sfKeyHex(k))
@@ -77,8 +76,8 @@ func TestSecondFactorKeyCommand_ACallThatDoesNotParseNeverReachesTheStore(t *tes
 // TestSecondFactorKeyCommand_AnUndeclaredRingIsRefusedByItsKnobBeforeTheStore —
 // перечень ключей обёртки не задан — «не исполнялось» с именем ручки и
 // переменной; до базы команда не доходит: проход без ключей не открыл бы
-// ничего. Посадка без полосы входа — тоже «не исполнялось»: второго фактора
-// там нет, и секретов под этим перечнем служба не держит.
+// ничего. Посадки без полосы входа больше нет (kaname#363): второй фактор
+// держит каждый старт, и отказа «второго фактора здесь нет» у команды нет.
 func TestSecondFactorKeyCommand_AnUndeclaredRingIsRefusedByItsKnobBeforeTheStore(t *testing.T) {
 	dsn := "postgres://u:p@" + closedStoreAddress(t) + "/kaname"
 
@@ -91,15 +90,7 @@ func TestSecondFactorKeyCommand_AnUndeclaredRingIsRefusedByItsKnobBeforeTheStore
 		require.Contains(t, out, "KANAME_PROBE_SF_KEY_UNSET")
 		require.NotContains(t, out, "база:")
 	})
-	t.Run("посадка без полосы входа", func(t *testing.T) {
-		cfg := sfCommandCfgAt(dsn, 2, 1)
-		cfg.AuthN.IdentityProvider = config.IdentityProviderUnset
-		code, out := runSFKey(t, cfg, "rewrap")
-		require.Equal(t, secondFactorKeyExitNotRun, code, "вывод: %s", out)
-		require.Contains(t, out, config.IdentityProviderSetting)
-		require.NotContains(t, out, "база:")
-	})
-	t.Run("близнец: перечень задан на own", func(t *testing.T) {
+	t.Run("близнец: перечень задан", func(t *testing.T) {
 		code, out := runSFKey(t, sfCommandCfgAt(dsn, 2, 1), "rewrap")
 		require.Equal(t, secondFactorKeyExitNotRun, code, "вывод: %s", out)
 		require.Contains(t, out, "база:")

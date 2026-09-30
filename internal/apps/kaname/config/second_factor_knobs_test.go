@@ -103,8 +103,10 @@ func TestF12_36_SelfServiceFreshnessIsAKnobWithoutADefault(t *testing.T) {
 }
 
 // TestF12_LaneRequirementsCarryBothKnobsOnOwn — обе ручки стоят строками
-// таблицы требований полосы `own` стадии «настройка»; клетки порождает
-// табличная проба, здесь — что строки есть.
+// таблицы требований стадии «настройка»; случаи порождает табличная проба,
+// здесь — что строки есть. Прежде здесь же утверждалось «только полосы own»;
+// посадка у службы одна (kaname#363), и строки предъявляются всякому боевому
+// старту.
 func TestF12_LaneRequirementsCarryBothKnobsOnOwn(t *testing.T) {
 	want := map[string]bool{
 		"перечень ключей обёртки секретов второго фактора объявлен": false,
@@ -112,8 +114,8 @@ func TestF12_LaneRequirementsCarryBothKnobsOnOwn(t *testing.T) {
 	}
 	for _, r := range config.LaneRequirements {
 		if _, ok := want[r.Element]; ok {
-			if r.Stage != config.LaneStageConfig || !r.AppliesTo(config.IdentityProviderOwn) || r.AppliesTo(config.IdentityProviderExternal) {
-				t.Fatalf("строка %q обязана быть стадии «настройка» и только полосы own", r.Element)
+			if r.Stage != config.LaneStageConfig {
+				t.Fatalf("строка %q обязана быть стадии «настройка»", r.Element)
 			}
 			want[r.Element] = true
 		}

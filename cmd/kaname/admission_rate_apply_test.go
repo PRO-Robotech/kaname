@@ -30,12 +30,13 @@ func (f *fakeRateProjector) ApplyAdmissionRate(_ context.Context, maxEvents int6
 	return kanamepg.AdmissionRateProjection{Written: 1, MaxEvents: maxEvents, WindowSeconds: int64(window / time.Second)}, f.err
 }
 
-// TestAdmissionRate_F4_19_PostureValueIsProjectedUnderOwnOnly — под `own`
-// объявленная величина уезжает в проекцию; под `external` проекция не зовётся;
-// отказ проекции — отказ пуска.
-func TestAdmissionRate_F4_19_PostureValueIsProjectedUnderOwnOnly(t *testing.T) {
+// TestAdmissionRate_F4_19_PostureValueIsProjectedOnEveryStart — объявленная
+// величина уезжает в проекцию на каждом старте, боевом и нет: посадки, под
+// которой строку правил администратор, больше нет (kaname#363); отказ
+// проекции — отказ пуска.
+func TestAdmissionRate_F4_19_PostureValueIsProjectedOnEveryStart(t *testing.T) {
 	three := int64(3)
-	own := loginLaneCfg(config.IdentityProviderOwn)
+	own := loginLaneCfg()
 	own.AuthN.Registration = config.RegistrationConfig{AdmissionsPerWindow: &three, AdmissionWindow: 90 * time.Minute}
 	p := &fakeRateProjector{}
 	require.NoError(t, projectAdmissionRate(context.Background(), slog.New(slog.DiscardHandler), p, own))
@@ -43,10 +44,12 @@ func TestAdmissionRate_F4_19_PostureValueIsProjectedUnderOwnOnly(t *testing.T) {
 	require.EqualValues(t, 3, p.max)
 	require.Equal(t, 90*time.Minute, p.window)
 
-	external := loginLaneCfg(config.IdentityProviderExternal)
+	dev := own
+	dev.AuthN.Mode = config.ModeDev
 	p2 := &fakeRateProjector{}
-	require.NoError(t, projectAdmissionRate(context.Background(), slog.New(slog.DiscardHandler), p2, external))
-	require.Zero(t, p2.calls, "под external строку авторитета правит администратор — проекция не зовётся")
+	require.NoError(t, projectAdmissionRate(context.Background(), slog.New(slog.DiscardHandler), p2, dev))
+	require.Equal(t, 1, p2.calls, "проекция не выбирается режимом: строку авторитета больше не правит никто, кроме профиля")
+	require.EqualValues(t, 3, p2.max)
 
 	p3 := &fakeRateProjector{err: errors.New("db down")}
 	err := projectAdmissionRate(context.Background(), slog.New(slog.DiscardHandler), p3, own)

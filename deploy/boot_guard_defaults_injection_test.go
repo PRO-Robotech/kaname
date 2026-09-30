@@ -130,10 +130,10 @@ func TestBootGuardDefaultsInjection(t *testing.T) {
 			name: "подстановка_у_соседнего_судимого_ключа_—_находка",
 			mutate: func(t *testing.T, chartDir string) {
 				replaceInChartFile(t, configMapPath(chartDir),
-					"identity-provider: {{ . | quote }}",
-					`identity-provider: {{ default "external" . | quote }}`)
+					"\n      domain: {{ . | quote }}",
+					"\n      domain: {{ default "+substitutedProbeDomain+" . | quote }}")
 			},
-			wantSubstring: "authn.identity-provider",
+			wantSubstring: "authn.domain",
 		},
 		{
 			name: "подстановка_у_ключа_которого_страж_НЕ_судит_—_молчание",
