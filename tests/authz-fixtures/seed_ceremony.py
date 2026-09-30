@@ -82,7 +82,9 @@
 САМОПРОВЕРКА — `--self-test`: подставной стенд по каждой оси, где каждая
 инъекция меняет ОДИН факт против законного мира — в обоих режимах; код по
 времени — по вектору RFC 6238; сходимость объявленных ключей с записью в обе
-стороны; поверхность и природа ключей — те, что выводит перепись долга.
+стороны; поверхность и природа ключей — те, что выводит перепись долга. Мир
+волны не снисходительнее стенда: письмо приходит позже ответа глагола, второе
+раньше интервала Р9 отвергается `429`, а ожидание идёт по часам мира.
 """
 
 from __future__ import annotations
@@ -498,16 +500,24 @@ def token_claims(token: str) -> dict:
     return claims
 
 
-def new_human(lane, mailbox, email: str, password: str) -> tuple[str, str]:
+def new_human(lane, mailbox, email: str, password: str,
+              sleep=time.sleep) -> tuple[str, str]:
     """Человек заводится глаголами полосы: регистрация → подтверждение адреса
-    кодом письма → вход. Возвращает (носитель сессии уровня «1», id человека)."""
+    кодом письма → вход. Возвращает (носитель сессии уровня «1», id человека).
+
+    Письмо регистрации ставится тем же исходом глагола, а в приёмник приходит
+    позже ответа: его ЖДУТ здесь, а не просят второе. Второе письмо раньше
+    интервала Р9 служба отвергает (`429`), и посев, прочитавший приёмник один
+    раз, падал бы по жребию доставки. Форма — та же, что у полосы входа
+    (`seed_login_lane.seed`)."""
     lane_seed.register(lane, email, password)
+    own_seed.await_code(mailbox, email, 0, sleep)
     first = lane_seed.login(lane, email, password)
     if first is None:
         raise Finding("вход сразу после регистрации отвергнут (401) — человек, "
                       "которого продукт только что завёл, не входит своим паролем")
     if not first["verified"]:
-        lane_seed.verify_address(lane, mailbox, email, first["bearer"], time.sleep)
+        lane_seed.verify_address(lane, mailbox, email, first["bearer"], sleep)
     return human_session(lane, email, password)
 
 
@@ -572,8 +582,10 @@ def slot_slug(slot: str) -> str:
     return "".join(out)
 
 
-def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str) -> dict:
-    """Волна церемонии: клиенты, люди и их предъявители обоих уровней."""
+def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
+              sleep=time.sleep) -> dict:
+    """Волна церемонии: клиенты, люди и их предъявители обоих уровней. `sleep` —
+    паузы ожидания письма; самопроверка подаёт часы подставного мира."""
     boot, principal = bootstrap(stand)
     say("  ok   машинный system_admin выкован чеканкой и принят фронтом")
     cid, csec = create_confidential(stand, principal, f"ceremony-a-{suffix}",
@@ -589,7 +601,7 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str) -> dict:
 
     def person(tag: str) -> tuple[str, str, str]:
         email = f"ceremony-{tag}-{suffix}@{domain}"
-        session, user = new_human(lane, mailbox, email, secrets.token_urlsafe(24))
+        session, user = new_human(lane, mailbox, email, secrets.token_urlsafe(24), sleep)
         if user in people.values():
             raise Finding(f"человек «{tag}» получил идентификатор уже заведённого — "
                           f"слоты волны перестали быть разными людьми")
@@ -774,17 +786,43 @@ def _fake_jwt(claims: dict) -> str:
 class _WaveWorld:
     """Законный мир волны: люди заводятся регистрацией, адрес подтверждается кодом
     письма, второй фактор — кодом по времени; уровень сессии уезжает в токен.
-    Каждая инъекция меняет ОДИН факт."""
+    Каждая инъекция меняет ОДИН факт.
+
+    ПИСЬМО — НЕ СИНХРОННО, И ВТОРОЕ РАНЬШЕ ИНТЕРВАЛА НЕ ВЫДАЁТСЯ, как на стенде.
+    Служба сдаёт письмо узлу после ответа глагола, и в приёмнике оно появляется
+    позже (`letter_lag` секунд часов мира; по умолчанию — меньше одного шага
+    опроса письма, законно — любое в пределах бюджета ожидания). Запрос письма раньше `RESEND_S` после предыдущего отвечает
+    `429 too many attempts; try again later` (Р9, kaname#456; величина — та, что
+    ставит стенд: `stand-own.sh`, VERIFICATION_RESEND_INTERVAL). Мир, кладущий
+    письмо в тот же миг, снисходительнее продукта: посев, просящий второе письмо
+    раньше срока, проходил бы здесь и падал бы на стенде по жребию доставки.
+    Часы — свои (`sleep` двигает `now`): ожидание по ним не стоит настоящего
+    времени и не зависит от него."""
 
     SECRET = "JBSWY3DPEHPK3PXP"
+    RESEND_S = 60
 
     def __init__(self, **inject):
         self.inj = inject
+        self.now = 0.0
+        self.lag = float(inject.get("letter_lag", 1))
         self.people: dict[str, dict] = {}
-        self.letters: dict[str, list[str]] = {}
+        self.letters: dict[str, list[tuple[float, str]]] = {}
+        self.sent_at: dict[str, float] = {}
+        self.requests = 0
         self.codes: dict[str, tuple[str, str]] = {}
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
+
+    # часы мира
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def _send(self, email: str) -> None:
+        self.sent_at[email] = self.now
+        if not self.inj.get("no_letter"):
+            self.letters.setdefault(email, []).append(
+                (self.now + self.lag, "Код подтверждения:\n4242\n"))
 
     # полоса
     def _uid(self, n: int) -> str:
@@ -798,8 +836,7 @@ class _WaveWorld:
         if path == "/iam/v1/auth/register":
             uid = self._uid(len(self.people) + 1)
             self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False}
-            if not self.inj.get("no_letter"):
-                self.letters.setdefault(body["email"], []).append("Код подтверждения:\n4242\n")
+            self._send(body["email"])
             return 200, [f"kaname_session=s1-{uid}; Path=/"], "{}"
         if path == "/iam/v1/auth/login":
             who = self.people.get(body["email"])
@@ -808,6 +845,11 @@ class _WaveWorld:
             return 200, [f"kaname_session=s1-{who['id']}; Path=/"], json.dumps(
                 {"user": {"id": who["id"]}, "session": {"emailVerified": who["verified"]}})
         if path == "/iam/v1/auth/verify-email":
+            self.requests += 1
+            email = next(e for e, w in self.people.items() if sess.endswith("-" + w["id"]))
+            if self.now - self.sent_at[email] < self.RESEND_S:
+                return 429, [], '{"message":"too many attempts; try again later"}'
+            self._send(email)
             return 200, [], "{}"
         if path == "/iam/v1/auth/verify-email/confirm":
             for who in self.people.values():
@@ -830,7 +872,7 @@ class _WaveWorld:
 
     # приёмник писем
     def mailbox_letters(self, to):
-        return list(self.letters.get(to, []))
+        return [text for at, text in self.letters.get(to, []) if at <= self.now]
 
     # стенд: чеканка и клиенты — законные, у подставного стенда базового режима
     def mint(self):
@@ -965,7 +1007,30 @@ def self_test() -> int:
 
     def wave(**inj):
         w = _WaveWorld(**inj)
-        return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid")), w
+        return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
+                                          sleep=w.sleep)), w
+
+    # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
+    # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
+    # не отвергает никто, — то есть на том, где дефект ненаблюдаем.
+    pw = _WaveWorld()
+    pw.ask("POST", "/iam/v1/auth/register", body={"email": "p@stand.invalid", "password": "x"})
+    early = pw.ask("POST", "/iam/v1/auth/verify-email", body={},
+                   cookies={"kaname_session": "s1-usr0001"})
+    pw.sleep(_WaveWorld.RESEND_S)
+    late = pw.ask("POST", "/iam/v1/auth/verify-email", body={},
+                  cookies={"kaname_session": "s1-usr0001"})
+    _c("предпосылка мира: письмо раньше интервала Р9 — 429, после интервала — 200",
+       early[0] == 429 and "too many attempts" in early[2] and late[0] == 200,
+       f"раньше {early[0]}, после {late[0]}")
+    lw = _WaveWorld()
+    lw.ask("POST", "/iam/v1/auth/register", body={"email": "p@stand.invalid", "password": "x"})
+    in_flight = lw.mailbox_letters("p@stand.invalid")
+    lw.sleep(own_seed.LETTER_POLL_S)
+    arrived = lw.mailbox_letters("p@stand.invalid")
+    _c("предпосылка мира: письмо регистрации к первому чтению в пути, через шаг опроса — в приёмнике",
+       in_flight == [] and len(arrived) == 1,
+       f"к первому чтению {len(in_flight)}, через шаг {len(arrived)}")
 
     got, world = wave()
     vals = json.loads(got[1]) if got[0] == "ok" else {}
@@ -979,6 +1044,15 @@ def self_test() -> int:
     _c("(−) люди волны разные, и каждый подтвердил адрес",
        len({w["id"] for w in world.people.values()}) == len(world.people) >= 11
        and all(w["verified"] for w in world.people.values()), f"{world.people}")
+    _c("(−) письмо регистрации дождано, второго не запрошено ни разу",
+       got[0] == "ok" and world.requests == 0, f"запросов письма {world.requests}: {got}")
+    # Ось запаздывания письма: обе законные стороны — письмо уже лежит к первому
+    # чтению и письмо идёт дольше десятка шагов опроса (в пределах бюджета).
+    for label, lag in (("письмо регистрации уже в приёмнике к первому чтению", 0),
+                       ("письмо регистрации идёт 30 с", 30)):
+        got, world = wave(letter_lag=lag)
+        _c(f"(−) {label} — посев молчит, второго письма не просит",
+           got[0] == "ok" and world.requests == 0, f"запросов письма {world.requests}: {got}")
     for label, inj, needle in (
         ("подтверждение второго фактора не подняло уровень", {"confirm_level_1": True},
          "уровня «2» подтверждение не дало"),
@@ -987,18 +1061,12 @@ def self_test() -> int:
         ("два человека получили один идентификатор", {"same_id": True},
          "перестали быть разными людьми"),
         ("заведение фактора без секрета", {"no_secret": True}, "без секрета"),
-        ("письмо подтверждения не дошло", {"no_letter": True}, "письмо подтверждения"),
+        # Причина — «не дошло», а не отказ Р9: запрос второго письма раньше срока
+        # тоже упоминает письмо подтверждения, и по одному слову их не различить.
+        ("письмо подтверждения не дошло", {"no_letter": True}, "не дошло до приёмника"),
         ("личный аккаунт у другого человека", {"foreign_owner": True}, "у другого человека"),
     ):
-        # Ожидание письма — настоящими паузами (`LETTER_BUDGET_S`); мир без письма
-        # ждал бы их все. Часы подменяются на время ОДНОЙ инъекции и возвращаются.
-        real_sleep = time.sleep
-        if inj.get("no_letter"):
-            time.sleep = lambda _s: None
-        try:
-            got, _ = wave(**inj)
-        finally:
-            time.sleep = real_sleep
+        got, _ = wave(**inj)
         _c(f"(+) {label} — находка, причина названа",
            got[0] == "finding" and needle in got[1], f"{got}")
 
@@ -1020,7 +1088,8 @@ def self_test() -> int:
         return 1
     print("ДОКАЗАНО: предъявитель человека утверждается исходом каждого из семи шагов, "
           "«поверхность молчит» и «листов нет» отличимы от находки кодом; волна различает "
-          "уровень сессии и уровень токена, разных людей и подтверждённый адрес; объявленные "
+          "уровень сессии и уровень токена, разных людей и подтверждённый адрес, а письмо "
+          "регистрации дожидается, не прося второго раньше интервала Р9; объявленные "
           "ключи сходятся с записью в обоих режимах, а поверхность и природа ключей — с "
           "переписью долга.")
     return 0
