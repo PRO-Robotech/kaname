@@ -33,8 +33,6 @@ package check
 
 // RetiredVendorLedger — точное число привязок по файлу, по возрастанию пути.
 var RetiredVendorLedger = []RetiredVendorLedgerEntry{
-	{File: ".github/scripts/stand-chart.sh",
-		Bindings: 1},
 	{File: "deploy/foreign_operator_declared_injection_test.go",
 		Bindings: 1},
 	{File: "docs/specs/reviews/access-keys-are-ours/79a82b12e95fe969b29b960ad98c02685dc97363cddd1f565ed778f5baaa531c.yaml",
