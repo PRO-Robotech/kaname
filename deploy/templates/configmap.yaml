@@ -120,9 +120,10 @@ data:
       {{- end }}
       {{- $rt := .Values.apiServer.registryToken | default dict }}
       {{- if or $rt.issuer $rt.service (hasKey $rt "endpoint") }}
-      # Docker Registry v2 token shim. `service` также whitelist'ится как audience в
-      # Hydra-клиенте каждого выпускаемого SA-ключа (#321) — расхождение с тем, что
-      # docker шлёт в `?service=`, ломает login (Hydra: audience not whitelisted).
+      # Docker Registry v2 token shim. `service` — единственный адресат (`aud`)
+      # токена этой полосы: `?service=`, который docker назвал отличным от него,
+      # отвергается 401 и ломает login. На ключи служебных учёток значение не
+      # записывается. Подробно — у ключа `apiServer.registryToken` в values.yaml.
       registry-token:
         {{- if hasKey $rt "endpoint" }}
         # ВНЕШНЕ ДОСЯГАЕМАЯ поверхность выдачи. Пустой адрес выключает её вовсе.

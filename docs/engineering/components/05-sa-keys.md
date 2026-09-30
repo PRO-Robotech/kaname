@@ -91,8 +91,10 @@ UPDATE на `operations.response_data`, очищая поле `private_key_pem`
 **DB table:** `kaname.service_account_oauth_clients` (squashed baseline
 `internal/migrations/0001_initial.sql`).
 
-**FK contract:** CASCADE delete при удалении SA (в БД); снаружи службы снимать
-нечего — регистрации у внешнего поставщика у ключа нет.
+**FK contract:** `service_account_oauth_clients_sva_fk` объявлен `ON DELETE
+RESTRICT`: учётку, у которой осталась строка ключа, не снять, и ключи отзываются
+до её `Delete` (см. [`04-service-account.md`](04-service-account.md)). Снаружи
+службы снимать нечего — регистрации у внешнего поставщика у ключа нет.
 
 ### Срок жизни ключа (`expires_at`)
 
@@ -151,7 +153,7 @@ sequenceDiagram
     IAM-->>GW: Operation (done=true, response с private_key_pem)
     GW-->>Admin: 200 {client_id, private_key_pem, public_key_pem, algorithm, key_id}
 
-    Note over Redactor,DB: Sync after MarkDone (idempotent)
+    Note over Redactor,DB: после Done, по истечении authn.sakey-redact-grace (idempotent)
     Redactor->>DB: SELECT response_type, response_data FROM operations WHERE id=$opId
     Redactor->>Redactor: Unmarshal Any → IssueSAKeyResponse
     Redactor->>Redactor: private_key_pem := ""<br/>client_secret := "" (legacy field)
@@ -202,9 +204,32 @@ sequenceDiagram
 
 ## Конфигурация
 
-Опись стояла здесь и ОТСТАЛА ОТ ДЕРЕВА — теми же двумя строками группы
-`extapi.*`, которой в настройке нет (см. `04-service-account.md`). Дом описи
-один: справочник посадки `docs/content/install/configuration.mdx`.
+Справочник посадки — `docs/content/install/configuration.mdx`, перечень
+обязательных величин — `INSTALL.md` §3; описи настроек здесь не заводится. Ниже
+названо только, какие ключи настройки меняют описанное на этой странице.
+
+- `authn.client-token.enabled` — токен-эндпоинт платформы, единственный
+  исполнитель обмена ключа на токен. Выключен — `Issue` ключевой пары и
+  федеративного ключа отвечает `FAILED_PRECONDITION` с именем этого ключа;
+  секрет выдаётся и так. В боевом режиме выключенный эндпоинт — отказ старта
+  (`internal/apps/kaname/config/lane_requirements.go`) и отказ установки чарта
+  (ключ значений `authn.clientToken.enabled`).
+- `authn.client-token.token-ttl` — срок токена, выпускаемого по ключу.
+- `authn.sakey-default-ttl`, `authn.sakey-max-ttl` — срок ключа, когда запрос
+  его не назвал, и его потолок (§Срок жизни ключа).
+- `authn.sakey-redact-grace` — окно между завершением операции `Issue` и
+  затиранием `private_key_pem` в её ответе.
+- `own-ceilings.credentials-per-service-account` — потолок числа ключей одной
+  учётки. Умолчания нет: незаданный — отказ старта.
+- `jobs.expired-credential-reclaim` — уборщик, снимающий истёкшие строки ключей.
+- `authn.sakey-access-token-ttl`, `authn.sakey-bind-dpop` — в выдаче читателя
+  нет: обе применялись к регистрации клиента у внешнего поставщика, а её выдача
+  не заводит (kaname#362). Включённый `authn.sakey-bind-dpop` при включённом
+  `authn.client-token.enabled` — отказ старта
+  (`internal/apps/kaname/config/sakey_binding.go`).
+
+Административной дороги к внешнему поставщику у выдачи нет: ключей его адреса и
+предъявителя в настройке службы не осталось (kaname#363).
 
 ## Как пользоваться
 
@@ -342,9 +367,9 @@ go test -short -count=1 -timeout 120s \
 
 ## Gotchas / известные ограничения
 
-- **Private-key видимость окно** — между MarkDone и UPDATE redaction есть
-  окно миллисекунд, когда первый GET вернет `private_key_pem`. Это
-  by-design — это и есть единственная допустимая видимость ключа.
+- **Private-key видимость окно** — между MarkDone и UPDATE redaction ответ
+  операции несёт `private_key_pem`; длину окна задаёт `authn.sakey-redact-grace`.
+  Это by-design — это и есть единственная допустимая видимость ключа.
 - **Replay через operation-id** — даже после redaction оператор знает
   `operation_id`, но `response.private_key_pem` уже `<redacted>`. Legacy
   `response.client_secret` всегда пуст и тоже редактируется

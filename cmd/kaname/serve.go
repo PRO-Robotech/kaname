@@ -1221,9 +1221,9 @@ func runServe(cfg config.Config) error {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
 			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
 			Service:           cfg.APIServer.RegistryToken.TokenService(),
-			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
-			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
-			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
+			HydraTokenURL:     cfg.AuthN.ResolveProviderTokenURL(),
+			HydraTokenCAFile:  cfg.AuthN.ResolveProviderTokenCAFile(),
+			AssertionAudience: cfg.AuthN.ResolveProviderTokenEndpoint(),
 			Logger:            logger,
 			// Приземление подписанта на НАСТОЯЩИЙ путь выдачи. Подписант без
 			// производственного вызывающего — тот же класс, что хранилище без
