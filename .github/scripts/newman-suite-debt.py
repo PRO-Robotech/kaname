@@ -87,6 +87,13 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 свой предмет и истекает вместе с препятствием, а не остаётся ведомостью прощения.
 Форма держателя закрыта (`HOLDER_RE`): адрес задачи и то, что она сделает.
 
+ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, СВЕРЯЕТСЯ С МОДУЛЕМ КЕЙСОВ (kaname#361). Держатель
+вправе назвать полосы своей коллекции, и такое имя — утверждение о модуле:
+полоса `<СЕМЕЙСТВО>-<номер>` стоит там приставкой значения `id=` кейса. Держатель
+продолжал называть полосу IBT-12 после того, как её сняли вместе с зеркалом набора
+ключей, и перепись этого не видела. Судится только семейство, которое модуль ведёт
+сам; прочитанное, названное и судимое печатается числом (`reconcile_holder_lanes`).
+
 ПОЗИЦИЯ ПРИЁМКИ — ВТОРАЯ ЕДИНИЦА ДОЛГА, И ОНА МЕЛЬЧЕ КОЛЛЕКЦИИ (kaname#449).
 Ведомость производителя судит коллекцию, а приёмка объявляет сквозным отдельный
 СЦЕНАРИЙ заголовком с перечнем уровней, где `E` — прогон на стенде. Законных форм
@@ -951,10 +958,14 @@ _HOLDER_FAILCLOSED_OWN = (
     "PRO-Robotech/kaname#415 — переутвердить по фактическому производителю: "
     "служба на собственном фронте автономного стенда, волна свёртки базы ЭТОГО "
     "стенда; различитель производителя отказа снимается пробой стенда")
+# Полосы IBT-12 здесь нет намеренно: её предмет — запись зеркала набора ключей
+# поставщика — снят вместе с ним (kaname#361), и модуль кейсов её не несёт.
+# Сверку «названная держателем полоса есть у модуля» держит
+# `reconcile_holder_lanes`.
 _HOLDER_FACADE_SPLIT = (
     "PRO-Robotech/kaname#415 — расщепить: полосы края (IBT-04 и IBT-10 уже держит "
     "`gateway/tests/newman/cases/authn_edge.py` платформы, IBT-06 и IBT-15 — туда "
-    "же) уходят в набор края, полосы фасада службы (IBT-05, IBT-12, IBT-13) "
+    "же) уходят в набор края, полосы фасада службы (IBT-05, IBT-13) "
     "переутверждаются на собственном фронте")
 # Две коллекции производителя-службы, которые адресуются краю: у каждой своё
 # условие стенда, а задача одна.
@@ -1427,6 +1438,79 @@ def reconcile_holders(stems: set[str], runs: dict[str, list[str]],
     return out
 
 
+# ─────────────── ПОЛОСЫ, НАЗВАННЫЕ ДЕРЖАТЕЛЕМ ───────────────────────────────
+#
+# Держатель вправе назвать полосы своей коллекции (`IBT-05`, `IBT-13`), и
+# названная полоса — утверждение о МОДУЛЕ КЕЙСОВ: задача переутвердит то, что
+# модуль несёт. Утверждение стареет вместе с модулем молча. Так и было: полосу
+# IBT-12 сняли вместе с зеркалом набора ключей (kaname#361), модуль сказал это
+# своей докстрокой, а держатель продолжал называть её полосой, которую задача
+# переутвердит.
+#
+# Полоса модуля — приставка `<СЕМЕЙСТВО>-<номер>` у значения `id=` в вызове,
+# которым модуль заводит кейс. Докстрока и комментарий полосы НЕ несут: снятая
+# полоса в докстроке названа именно затем, чтобы сказать, что её нет.
+# Судится только семейство, которое модуль сам ведёт: ссылка на полосу чужого
+# семейства — не утверждение о модуле, и она печатается несудимой, а не
+# прощается молча.
+LANE_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*)-([0-9]+)(?:-|$)")
+LANE_REF_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Z][A-Z0-9]*)-([0-9]+)(?![0-9A-Za-z])")
+
+
+def module_case_ids(cases: pathlib.Path, stem: str) -> list[str] | None:
+    """Значения `id=` вызовов модуля кейсов коллекции. None — модуля нет."""
+    import ast as _ast
+    mod = cases / f"{stem}.py"
+    if not mod.is_file():
+        return None
+    tree = _ast.parse(mod.read_text(encoding="utf-8"), filename=str(mod))
+    return [k.value.value for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+            for k in n.keywords
+            if k.arg == "id" and isinstance(k.value, _ast.Constant)
+            and isinstance(k.value.value, str)]
+
+
+def reconcile_holder_lanes(cases: pathlib.Path, ledger: Ledger | None = None
+                           ) -> tuple[list[str], dict[str, int]]:
+    """Полоса, названная держателем, есть у модуля кейсов его коллекции.
+
+    Возвращает находки и перепись: держателей прочитано, полос ими названо, из
+    них судимо (семейство модуля). Модуль, не давший ни одного `id=`, при
+    названной держателем полосе — находка: «полосы нет» тогда значило бы «кейсов
+    не прочитано».
+    """
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out: list[str] = []
+    census = {"holders": 0, "named": 0, "judged": 0}
+    for stem, (_cat, _why, holder) in sorted(ledger.items()):
+        if not holder:
+            continue
+        census["holders"] += 1
+        refs = [f"{fam}-{num}" for fam, num in LANE_REF_RE.findall(holder)]
+        if not refs:
+            continue
+        census["named"] += len(refs)
+        ids = module_case_ids(cases, stem)
+        if ids is None:
+            continue
+        if not ids:
+            out.append(f"держатель коллекции {stem} называет полосы ({', '.join(refs)}), а "
+                       f"модуль кейсов {stem}.py не дал ни одного `id=` — судить их не по чему, "
+                       f"и «полосы нет» значило бы «кейсов не прочитано»")
+            continue
+        lanes = {f"{m.group(1)}-{m.group(2)}" for m in map(LANE_ID_RE.match, ids) if m}
+        families = {lane.split("-")[0] for lane in lanes}
+        for ref in refs:
+            if ref.split("-")[0] not in families:
+                continue
+            census["judged"] += 1
+            if ref not in lanes:
+                out.append(f"держатель коллекции {stem} называет полосу {ref}, а модуль кейсов "
+                           f"{stem}.py её не несёт ни одним кейсом — полоса снята либо не "
+                           f"заведена, и переутверждать задаче нечего")
+    return out, census
+
+
 def reconcile_producer_ledger(stems: set[str],
                               ledger: Ledger | None = None) -> list[str]:
     """Сверка ведомости с деревом В ОБЕ СТОРОНЫ."""
@@ -1640,6 +1724,10 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     # расхождение со шагом держит `pipeline_claims_test.py`.
     all_stems = {stem for stem, *_ in [*runnable, *blocked]}
     drift += reconcile_holders(all_stems, runs, ledger)
+    # ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, — утверждение о модуле кейсов, и оно
+    # сверяется с модулем, а не с памятью о нём (`reconcile_holder_lanes`).
+    lane_drift, lane_census = reconcile_holder_lanes(newman / "cases", ledger)
+    drift += lane_drift
     # ПОЗИЦИЯ ПРИЁМКИ — мельче коллекции, и её долг судится отдельно (kaname#449).
     pos_drift, positions, carried, acc_docs, acc_forms = reconcile_scenario_debt(
         newman, scenario_debt)
@@ -1681,6 +1769,11 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print("по ДЕРЖАТЕЛЮ (задача, которая прогонит; состояние в трекере здесь НЕ сверяется):")
     for ref, stems in sorted(by_holder.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         print(f"  · {ref}: {len(stems)} ({', '.join(stems)})")
+    # Объём осмотренного сверкой полос — рядом со сводом держателей: «ноль
+    # находок» без него не отличает «названа живая полоса» от «не судилось ничего».
+    print(f"полосы, названные держателями: держателей прочитано {lane_census['holders']} · "
+          f"полос названо {lane_census['named']} · из них судимо модулем кейсов "
+          f"{lane_census['judged']}")
     print()
     print("по АДРЕСАЦИИ (к чьему базовому адресу стучатся шаги):")
     for s, n in sorted(by_surface.items(), key=lambda kv: -kv[1]):
@@ -2736,6 +2829,49 @@ def self_test() -> int:
         _c("формы заголовка: прочитанное и уровня E названы числом по каждой форме",
            "«**ID: <ID>** · <уровни> — …» 1 · 1; «**<ID> — <заголовок>** · <уровни>» 5 · 3; "
            "«**<ID> (<уровни>).**» 3 · 1" in fout, fout[-900:])
+
+        # Ось 19: ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, ЕСТЬ У МОДУЛЯ КЕЙСОВ (kaname#361).
+        # Держатель переутверждал полосу IBT-12, снятую вместе с зеркалом набора
+        # ключей: модуль сказал это докстрокой, ведомость — нет. Пара по каждому
+        # исходу, различие в одном факте против близнеца: названа живая полоса —
+        # молчание; снятая (она стоит только докстрокой) либо стоящая только
+        # комментарием — находка; полоса чужого семейства не судится; модуль без
+        # единого `id=` — находка о слепоте, а не молчание.
+        ldir = tmp / "lanes"
+        ln = _mk(ldir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        lwf = _wf(ldir / "none", runs=[])
+        (ln / "cases").mkdir(parents=True, exist_ok=True)
+        live_mod = ('"""Модуль кейсов. SYN-02 — СНЯТА вместе с предметом."""\n'
+                    '# SYN-04 здесь только комментарием\n'
+                    'CASES = [Case(id="SYN-01-LIVE"), Case(id="SYN-03-LIVE")]\n')
+        blind_mod = 'CASES = [Case(name="SYN-01-LIVE")]\n'
+        lhold = "PRO-Robotech/kaname#1 — синтетика: переутвердит полосы "
+        for label, mod, holder, want_rc, want_texts in (
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: названы живые полосы модуля — молчание",
+                 live_mod, lhold + "SYN-01 и SYN-03", 0, ()),
+                ("названа полоса, которую модуль называет только докстрокой, — находка",
+                 live_mod, lhold + "SYN-01 и SYN-02", 1, ("полосу SYN-02", "carrier")),
+                ("названа полоса, стоящая только комментарием, — находка",
+                 live_mod, lhold + "SYN-01 и SYN-04", 1, ("полосу SYN-04",)),
+                ("полоса чужого семейства не судится — молчание",
+                 live_mod, lhold + "SYN-01 и OTHER-07", 0, ()),
+                ("модуль без единого id= при названной полосе — находка, а не молчание",
+                 blind_mod, lhold + "SYN-01", 1, ("не дал ни одного `id=`",))):
+            (ln / "cases" / "carrier.py").write_text(mod, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(ln, workflows=lwf, ledger={"carrier": ("A", "довод", holder)})
+            _c(f"полосы держателя: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:400]}")
+        (ln / "cases" / "carrier.py").write_text(live_mod, encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(ln, workflows=lwf,
+                     ledger={"carrier": ("A", "довод", lhold + "SYN-01 и OTHER-07")})
+        _c("полосы держателя: перепись называет прочитанное, названное и судимое",
+           rc == 0 and ("держателей прочитано 1 · полос названо 2 · из них судимо модулем "
+                        "кейсов 1") in buf.getvalue(), f"код {rc}; {buf.getvalue()[-900:]}")
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
