@@ -29,7 +29,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 	const (
 		publicGRPC    = ":9090"
 		internalGRPC  = ":9091"
-		hooks         = ":9094"
+		loginLane     = ":9100"
 		metrics       = ":9095"
 		registryToken = ":9096"
 		jwksProxy     = ":9097"
@@ -42,7 +42,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		return []surfaceAddr{
 			{knobPublicGRPC, publicGRPC},
 			{knobInternalGRPC, internalGRPC},
-			{knobHooks, hooks},
+			{knobLoginLane, loginLane},
 			{knobMetrics, metrics},
 			{knobRegistryToken, registryToken},
 			{knobJWKSProxy, jwksProxy},
@@ -117,14 +117,14 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 		}
 	})
 
-	t.Run("инъекция: вебхуки заняли адрес публичного gRPC", func(t *testing.T) {
+	t.Run("инъекция: полоса входа заняла адрес публичного gRPC", func(t *testing.T) {
 		surfaces := allEight()
 		surfaces[2].addr = publicGRPC
 		_, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
-			t.Fatal("страж принял посадку, где вебхуки слушают адрес gRPC-слушателя")
+			t.Fatal("страж принял посадку, где полоса входа слушает адрес gRPC-слушателя")
 		}
-		for _, want := range []string{knobHooks, knobPublicGRPC} {
+		for _, want := range []string{knobLoginLane, knobPublicGRPC} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("отказ не называет %q: %v", want, err)
 			}

@@ -194,8 +194,9 @@ type AccessKeyChallengeReaper interface {
 }
 
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
-// функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
-// под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
+// функцией, а не параметрами `Subjects`: уборщики приходят от собранной полосы,
+// и неполный их набор — отказ, а не уборщик без предмета, который выглядел бы
+// исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 ||
 		r.VerificationCodes == nil || r.SourceWindows == nil || r.BearerLetters == nil || r.LetterWindow <= 0 || r.SourceWindow <= 0 {

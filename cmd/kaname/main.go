@@ -14,7 +14,6 @@
 //   - serve.go — lifecycle (pools, listeners, parallel.ExecAbstract, shutdown)
 //   - wiring.go — composition (services struct + builders)
 //   - grpc_register.go — public/internal RPC registration
-//   - hooks_mux.go — HTTP hooks mux (Hydra token/refresh)
 //   - env.go — env-helpers (DSN mask, FGA timeouts)
 //   - listeners.go / governance_wiring.go /
 //     wiring.go — phase-specific wiring

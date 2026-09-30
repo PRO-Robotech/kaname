@@ -55,7 +55,6 @@ import (
 // придуманный.
 func TestValidate_RefusesDSNWithoutAHost(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.Repository.Postgres.URL = "postgres://iam@:5432/kaname"
 
@@ -77,7 +76,6 @@ func TestValidate_RefusesDSNWithoutAHost(t *testing.T) {
 // — то есть на сломанной поставке.
 func TestValidate_AcceptsDSNWithAHost(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.Repository.Postgres.URL = "postgres://iam@pg:5432/kaname"
 
@@ -92,7 +90,6 @@ func TestValidate_AcceptsDSNWithAHost(t *testing.T) {
 // остаётся отказом, и отказ по-прежнему называет ручку.
 func TestValidate_StillRefusesAWhollyEmptyDSN(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.Repository.Postgres.URL = "   "
 
@@ -116,7 +113,6 @@ func TestValidate_StillRefusesAWhollyEmptyDSN(t *testing.T) {
 func TestValidate_RefusalDoesNotEchoTheDBPassword(t *testing.T) {
 	const password = "s3cret-never-in-a-log"
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.Repository.Postgres.URL = "postgres://iam:" + password + "@:5432/kaname"
 

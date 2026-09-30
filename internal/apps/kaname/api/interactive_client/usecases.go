@@ -141,49 +141,30 @@ func (uc *ListUseCase) Execute(ctx context.Context, pageSize int64, pageToken, f
 
 // ── Create ───────────────────────────────────────────────────────────────────
 
-// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
-// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
-// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
-// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
-type providerCompensationEmitter interface {
-	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
-}
-
-// CreateUseCase — registers the client at the registry the deployment chose
-// (the external identity provider or the service's own), then records it. On
-// the own registry the client is confidential and its secret is shown once, in
-// the answer of this call (kaname#405).
+// CreateUseCase — registers the client at the service's own registry, then
+// records it. The client is confidential and its secret is shown once, in the
+// answer of this call (kaname#405).
 type CreateUseCase struct {
 	repo      clientRepo
 	provider  ProviderClients
 	opsRepo   operations.Repo
 	audiences []string
 	logger    *slog.Logger
-	// compensation — durable sink for the compensating intent when the row is
-	// not committed after the provider registration. nil → direct best-effort
-	// deregistration only (see clients.ProviderCompensationOutbox).
-	compensation providerCompensationEmitter
 }
 
-// WithCompensationEmitter wires the durable sink for compensating intents.
-// Composition-root only.
-func (uc *CreateUseCase) WithCompensationEmitter(c providerCompensationEmitter) *CreateUseCase {
-	uc.compensation = c
-	return uc
-}
-
-// compensationOriginInteractiveClient — saga attribution in the intent.
-const compensationOriginInteractiveClient = "interactive_client"
-
-// providerReleaseTimeout — upper bound on the release (recording the intent OR
-// the direct call). Detached from the caller's cancellation: the release must
-// run even when the request is already gone.
+// providerReleaseTimeout — upper bound on the release call. Detached from the
+// caller's cancellation: the release must run even when the request is already
+// gone.
 const providerReleaseTimeout = 5 * time.Second
 
 // releaseProviderClient removes a registration made before the row was
-// committed. The DURABLE intent is the primary path — it survives both a dead
-// process and a failing release call; the direct deregistration stays as the
-// FALLBACK for when the intent cannot be recorded. Both are idempotent.
+// committed, by a direct idempotent deregistration.
+//
+// A DURABLE intent used to be the primary path here, for the registration made
+// at an external identity provider: the intent survived a dead process and a
+// failing release call. The external provider is gone (kaname#363) — the
+// registry is our own, the release is a call to it — and the intent writer went
+// with the provider.
 func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
 	if clientID == "" {
 		return
@@ -191,17 +172,6 @@ func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, re
 	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
 	defer cancel()
 
-	if uc.compensation != nil {
-		if err := uc.compensation.EmitHydraClientDelete(
-			relCtx, clientID, compensationOriginInteractiveClient, reason,
-		); err == nil {
-			return
-		} else if uc.logger != nil {
-			uc.logger.ErrorContext(relCtx,
-				"interactive client: durable compensation intent could not be recorded, falling back to a direct release",
-				"provider_client_id", clientID, "reason", reason, "err", err.Error())
-		}
-	}
 	if err := uc.provider.Deregister(relCtx, clientID); err != nil && uc.logger != nil {
 		// Neither an intent nor a release: the registration stays at the
 		// provider, and this line is the only handle left to remove it by hand.

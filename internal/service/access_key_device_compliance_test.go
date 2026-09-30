@@ -27,23 +27,25 @@ import (
 )
 
 func TestAccessKey_F7_39_DeviceComplianceIsNotDerivedFromTheKey(t *testing.T) {
-	svc := NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "kacho.cloud"}, nil)
+	svc := NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "kacho.cloud"})
 	svc.now = func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC) }
 	user := domain.User{ID: "usr-abc", AccountID: "acc-xyz"}
+	uoc := domain.UserOAuthClient{ID: "uoc-1", UserID: user.ID}
+	sa := domain.ServiceAccount{ID: "sva-1", AccountID: "acc-xyz"}
+	soc := domain.ServiceAccountOAuthClient{ID: "soc-1", SvaID: sa.ID}
 
-	withKey := svc.userClaims(user, "ext-1", TokenHookContext{GrantedScopes: []string{"openid", "webauthn"}})
-	without := svc.userClaims(user, "ext-1", TokenHookContext{GrantedScopes: []string{"openid"}})
-
-	// Положительный контроль: значение по-прежнему ВЫСТАВЛЯЕТСЯ — «не
-	// выводится» отличимо от «поля больше нет».
-	require.Contains(t, withKey, "kaname_device_compliance")
-	require.Contains(t, without, "kaname_device_compliance")
-	require.Equal(t, "unknown", without["kaname_device_compliance"])
-	require.Equal(t, without["kaname_device_compliance"], withKey["kaname_device_compliance"],
-		"наличие ключа среди выданных областей не есть доказательство аттестации устройства (Р4)")
-	for _, sc := range []string{"passkey", "webauthn"} {
-		got := svc.userClaims(user, "ext-1", TokenHookContext{GrantedScopes: []string{sc}})
-		require.Equal(t, "unknown", got["kaname_device_compliance"], "область %s", sc)
+	// Вход полос собственной выдачи областей не несёт вовсе: деривации «область
+	// ключа ⇒ устройство аттестовано» неоткуда взять предмет. Прежде вход нёс
+	// выданные области (обратный вызов поставщика), и проба сравнивала состав с
+	// областью ключа и без неё; вход снят вместе с хуками (kaname#363).
+	for name, claims := range map[string]map[string]any{
+		"персональный токен":    svc.userTokenClaims(uoc, user, string(uoc.ID), TokenHookContext{}),
+		"ключ служебной учётки": svc.saClaims(soc, sa, string(soc.ID), TokenHookContext{}),
+	} {
+		// Положительный контроль: значение по-прежнему ВЫСТАВЛЯЕТСЯ — «не
+		// выводится» отличимо от «поля больше нет».
+		require.Contains(t, claims, "kaname_device_compliance", name)
+		require.Equal(t, "unknown", claims["kaname_device_compliance"], name)
 	}
 }
 
@@ -54,15 +56,17 @@ var (
 
 // TestAccessKey_F7_39_IssuanceLanesCensus — перепись по исходнику производителя:
 // «полос выдачи, ставящих значение, N · из них выводящих аттестованность из
-// наличия ключа M» — обязано быть `5 · 0`. Знаменатель — пять полос — не
-// двигается снятием деривации; исчезновение полосы и исчезновение поля дали бы
-// другой знаменатель, и различить их одной величиной было бы нельзя.
+// наличия ключа M» — обязано быть `2 · 0`. Прежде знаменатель был пять
+// (userClaims · saClaims · federatedClaims · userTokenClaims · MinimalClaims);
+// три полосы обратного вызова поставщика сняты вместе с хуками (kaname#363), и
+// знаменатель сдвинулся исчезновением полос, а не поля — ровно то различение,
+// ради которого величин две.
 func TestAccessKey_F7_39_IssuanceLanesCensus(t *testing.T) {
 	raw, err := os.ReadFile("token_enrichment_service.go")
 	require.NoError(t, err)
 	lanes := len(reComplianceSet.FindAll(raw, -1))
 	derived := len(reComplianceDerived.FindAll(raw, -1))
 	t.Logf("перепись: полос выдачи, ставящих kaname_device_compliance, %d · из них выводящих аттестованность из наличия ключа %d", lanes, derived)
-	require.Equal(t, 5, lanes, "полос выдачи ровно пять (userClaims · saClaims · federatedClaims · userTokenClaims · MinimalClaims)")
+	require.Equal(t, 2, lanes, "полос выдачи ровно две (saClaims · userTokenClaims)")
 	require.Equal(t, 0, derived, "деривация «attested» из наличия области ключа снята (Ф7-39, Р4)")
 }

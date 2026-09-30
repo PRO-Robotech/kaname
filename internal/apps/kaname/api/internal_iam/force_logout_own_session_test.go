@@ -181,10 +181,9 @@ func ownSessionsScripted(writers ...*recordingOwnWriter) *recordingOwnSessions {
 	return &recordingOwnSessions{script: writers}
 }
 
-func ownSessionHandler(rec sessionRevoker, own *recordingOwnSessions) (*Handler, *recordingForceLogoutOps) {
+func ownSessionHandler(own *recordingOwnSessions) (*Handler, *recordingForceLogoutOps) {
 	ops := &recordingForceLogoutOps{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
 		WithOperations(ops).
 		WithOwnSessions(own)
@@ -195,7 +194,7 @@ func ownSessionHandler(rec sessionRevoker, own *recordingOwnSessions) (*Handler,
 // снимает ВСЕ записи и берёт причину из закрытого словаря строки.
 func TestForceLogout_EndsOurOwnLoginSession(t *testing.T) {
 	tx := &recordingOwnWriter{ended: 2}
-	h, _ := ownSessionHandler(&fakeForceLogoutRecorder{}, ownSessionsScripted(tx))
+	h, _ := ownSessionHandler(ownSessionsScripted(tx))
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
@@ -219,9 +218,8 @@ func TestForceLogout_EndsOurOwnLoginSession(t *testing.T) {
 // посадке `own` снятие, отсечка и запись события — ОДНА транзакция, в порядке
 // «снятие → отсечка → событие», и запись несёт исход и число снятых.
 func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *testing.T) {
-	rec := &fakeForceLogoutRecorder{}
 	own := ownSessionsScripted(&recordingOwnWriter{ended: 2})
-	h, _ := ownSessionHandler(rec, own)
+	h, _ := ownSessionHandler(own)
 
 	before := time.Now().UTC()
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{
@@ -244,9 +242,6 @@ func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *t
 	require.Equal(t, []string{"end", "cutoff", "event", "commit"}, tx.calls,
 		"запись события обязана лечь ПОСЛЕ снятия — иначе исхода ей не знать; "+
 			"строку сессии снятие берёт до строки отсечки")
-	assert.Zero(t, rec.allCnt,
-		"под `own` отсечку кладёт транзакция снятия: второй писатель положил бы "+
-			"вторую запись события — намерение отдельно от исхода")
 
 	require.Len(t, tx.cutoffs, 1)
 	assert.Equal(t, domain.UserID("usr_victim"), tx.cutoffs[0].UserID)
@@ -277,7 +272,7 @@ func TestForceLogout_OwnPosture_EventIsLaidAfterTheTeardownInOneTransaction(t *t
 // систему безопаснее, падало бы на повторе.
 func TestForceLogout_NoLiveOwnSession_IsStillALogout(t *testing.T) {
 	own := ownSessionsScripted(&recordingOwnWriter{ended: 0})
-	h, _ := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, _ := ownSessionHandler(own)
 
 	op, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.NoError(t, err)
@@ -304,7 +299,7 @@ func TestForceLogout_OwnSessionTeardownFails_KeepsTheCutoffAndRecordsTheFailure(
 	first := &recordingOwnWriter{endErr: errors.New("human_sessions: backend down")}
 	partial := &recordingOwnWriter{}
 	own := ownSessionsScripted(first, partial)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err, "неснятая сессия не имеет права читаться как состоявшийся выход")
@@ -335,7 +330,7 @@ func TestForceLogout_OwnPartialOutcomeNotRecorded_NothingLands(t *testing.T) {
 	first := &recordingOwnWriter{endErr: errors.New("human_sessions: backend down")}
 	partial := &recordingOwnWriter{commitErr: errors.New("commit: connection lost")}
 	own := ownSessionsScripted(first, partial)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err)
@@ -357,7 +352,7 @@ func TestForceLogout_OwnPartialOutcomeNotRecorded_NothingLands(t *testing.T) {
 func TestForceLogout_OwnCutoffFails_NothingLandsAndNoPartialRecord(t *testing.T) {
 	first := &recordingOwnWriter{ended: 1, cutoffErr: errors.New("user_token_revocations: backend down")}
 	own := ownSessionsScripted(first)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err, "отказ отсечки не имеет права отвечать успехом")
@@ -370,33 +365,24 @@ func TestForceLogout_OwnCutoffFails_NothingLandsAndNoPartialRecord(t *testing.T)
 	assert.False(t, first.committed)
 }
 
-// TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff — ни одного
-// исполнителя снятия не провязано: глагол ОТКАЗЫВАЕТ, отсечка остаётся.
+// TestForceLogout_NoTeardownWired_RefusesBeforeAnyWrite — исполнитель снятия
+// не провязан: глагол ОТКАЗЫВАЕТ, и отказывает ДО всякой записи.
 //
-// Здесь стояла проба, утверждавшая обратное: непровязанное снятие отвечало
-// успехом, и это объявлялось сохранением прежнего поведения. Оно и было
-// дефектом формы — регрессия провязки давала тот же код ответа, то же тело
-// операции и ту же запись журнала, что исправная работа, и увидеть разницу
-// можно было только запросом в базу.
-//
-// Отсечка при этом НЕ теряется: она защитна сама по себе и идемпотентна, а
-// повтор глагола после починки провязки доснимет сессию. Теряется только
-// ложное «выведен».
-func TestForceLogout_NoTeardownWired_RefusesAndKeepsTheCutoff(t *testing.T) {
-	rec := &fakeForceLogoutRecorder{}
+// Прежде здесь отсечку клал второй писатель (`sessionRevoker`), а отказ
+// приходил после неё — «отсечка остаётся, теряется только ложное «выведен»».
+// Второй писатель снят вместе с посадкой без наших записей сессии
+// (kaname#363): писатель отсечки теперь сама транзакция снятия, и без неё
+// писать отсечку нечем. Поэтому отказ стоит первым: ни операции, ни отсечки.
+func TestForceLogout_NoTeardownWired_RefusesBeforeAnyWrite(t *testing.T) {
 	ops := &recordingForceLogoutOps{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
 		WithOperations(ops)
 
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err, "непровязанное снятие не имеет права отвечать успехом")
 	assert.Equal(t, codes.Unavailable, status.Code(err))
-
-	assert.Equal(t, 1, rec.allCnt, "отсечка остаётся — она защитна и идемпотентна")
-	assert.Contains(t, ops.calls, "markerror",
-		"опрос операции обязан увидеть отказ, а не успех")
+	assert.Empty(t, ops.calls, "отказ обязан прийти до записи операции: писать отсечку нечем")
 }
 
 // TestForceLogout_OwnTeardownEndedByTheRequest_PartialOutcomeRunsOnItsOwnBoundedContext
@@ -414,7 +400,7 @@ func TestForceLogout_OwnTeardownEndedByTheRequest_PartialOutcomeRunsOnItsOwnBoun
 	}}
 	partial := &recordingOwnWriter{}
 	own := ownSessionsScripted(first, partial)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	before := time.Now()
 	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
@@ -485,7 +471,7 @@ func TestForceLogout_OwnStoreRefusalBecauseTheContextEnded_IsUnavailable(t *test
 				}
 				defer cancel()
 				own := ownSessionsScripted(tc.writers(cancel)...)
-				h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+				h, ops := ownSessionHandler(own)
 				_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 				require.Error(t, err)
 				assert.Equal(t, codes.Unavailable, status.Code(err),
@@ -509,7 +495,7 @@ func TestForceLogout_OwnStatementCancelledBecauseTheRequestEnded_IsUnavailable(t
 		return errors.New("internal: database error: sqlstate 57014")
 	}}
 	own := ownSessionsScripted(first)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err)
@@ -552,7 +538,7 @@ func TestForceLogout_OwnRequestEndsAfterTheTeardown_PartialOutcomeStillLands(t *
 			tc.arm(first, cancel)
 			partial := &recordingOwnWriter{}
 			own := ownSessionsScripted(first, partial)
-			h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+			h, ops := ownSessionHandler(own)
 
 			_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 			require.Error(t, err, "откаченное снятие не имеет права читаться как состоявшийся выход")
@@ -592,7 +578,7 @@ func TestForceLogout_OwnRequestEndsBeforeTheCommit_TheCommitIsNotTheRequests(t *
 	defer cancel()
 	first := &recordingOwnWriter{ended: 2, onCommit: func(context.Context) { cancel() }}
 	own := ownSessionsScripted(first)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.ErrorIs(t, reqCtx.Err(), context.Canceled, "фикстура: запрос обязан быть отменён")

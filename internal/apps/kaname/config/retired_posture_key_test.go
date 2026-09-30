@@ -75,17 +75,25 @@ func TestRetiredPostureKeyIsRefusedFromTheSettingsFile(t *testing.T) {
 	if err := os.Unsetenv(retiredPostureEnv); err != nil {
 		t.Fatalf("переменная не снята: %v", err)
 	}
-	refused := 0
+	bodies := map[string]string{}
 	for _, v := range retiredPostureValues {
-		if t.Run("value="+v, func(t *testing.T) {
-			path := writeSettingsFile(t, "authn:\n  identity-provider: \""+v+"\"\n")
+		bodies["value="+v] = "authn:\n  identity-provider: \"" + v + "\"\n"
+	}
+	// Ключ без значения — YAML читает его пустым (null), и разбор настройки
+	// такую строку не видит значением вовсе. Строка в файле при этом стоит, и
+	// оператор её написал: это та же форма «принято и проигнорировано».
+	bodies["value=null"] = "authn:\n  identity-provider:\n"
+	refused := 0
+	for name, body := range bodies {
+		if t.Run(name, func(t *testing.T) {
+			path := writeSettingsFile(t, body)
 			_, err := config.Load(path)
 			requireRetiredKeyRefusal(t, err, "settings file")
 		}) {
 			refused++
 		}
 	}
-	t.Logf("перепись: путь «файл настройки» · значений %d · отвергнуто с верным текстом %d", len(retiredPostureValues), refused)
+	t.Logf("перепись: путь «файл настройки» · форм %d · отвергнуто с верным текстом %d", len(bodies), refused)
 }
 
 // Законный близнец пути 1: тот же файл без ключа — загрузка проходит. Без него

@@ -35,9 +35,7 @@ import (
 // domainCfg — годная production-настройка с объявленным доменом.
 func domainCfg(domain string) config.Config {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
-	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.TokenSigning = ownMintingSettings()
 	cfg.APIServer.RegistryToken = registryTokenLaneSettings()
 	cfg.AuthN.ClientToken = clientTokenLaneSettings()

@@ -174,19 +174,7 @@ func RegisterDefaults(v *viper.Viper) {
 	// access). Local fixtures / the newman stand opt INTO dev explicitly via
 	// KANAME_AUTH_MODE=dev (values.dev.yaml carries mode: dev).
 	v.SetDefault("authn.mode", "production")
-	// authn.identity-provider — УМОЛЧАНИЯ НЕТ НАМЕРЕННО (задача #1125).
-	//
-	// Обе альтернативы разобраны и обе отвергнуты: умолчание `external`
-	// заставило бы каждый профиль, поля не объявивший, требовать адресов, у
-	// которых нет носителя; умолчание `own` МОЛЧА сняло бы провайдерские
-	// требования у профиля, который просто забыли обновить. Умолчание живёт в
-	// ПРОФИЛЕ — базовый профиль зонтичного чарта объявляет значение явно.
-	//
-	// Строки `SetDefault` для этого ключа быть не должно: она и есть то самое
-	// умолчание в коде. Свойство держит проба
-	// TestF4d01_UnsetIdentityProviderRefusesTheStart — при умолчании она
-	// перестала бы наблюдать незаданное значение вовсе.
-	// AuthN core — configurable domain + Hydra issuer + hooks. Secrets are
+	// AuthN core — configurable domain + the provider token hop. Secrets are
 	// resolved from env so they don't sit in YAML/ConfigMap.
 	//
 	// authn.domain — УМОЛЧАНИЯ НЕТ НАМЕРЕННО (задача #2127).
@@ -206,14 +194,7 @@ func RegisterDefaults(v *viper.Viper) {
 	// умолчание в коде. Свойство держит проба TestDomainHasNoCompiledInDefault.
 	// Ключ привязан к окружению явно (load.go) — без этого `AutomaticEnv` не
 	// разрешил бы переменную вовсе.
-	v.SetDefault("authn.hydra-issuer", "")       // resolved via ResolveHydraIssuer() when empty
-	v.SetDefault("authn.hook-shared-secret", "") // no default — security-sensitive
-	v.SetDefault("authn.hook-shared-secret-env", "KANAME_HOOK_TOKEN")
-	// Административный предъявитель внешнего поставщика: в YAML пишется ИМЯ
-	// переменной, значение — никогда (секрет). Прежде эта ручка читалась прямо
-	// из окружения в корне сборки и потому была невидима проверке настройки при
-	// старте (задача #1125).
-	v.SetDefault("authn.hydra-admin-token-env", "KANAME_HYDRA_ADMIN_TOKEN")
+	v.SetDefault("authn.hydra-issuer", "") // resolved via ResolveHydraIssuer() when empty
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
 	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
@@ -222,7 +203,6 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.second-factor-encryption-key-hex", "")
 	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
 	v.SetDefault("authn.self-service-freshness", time.Duration(0))
-	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// Своя чеканка токенов (задача #897). Умолчание задано ТОЛЬКО у величины,
 	// у которой оно осмысленно: путь нашей записи набора. У издателя и
 	// алгоритма умолчаний НЕТ — подпись умолчанием была бы решением, принятым

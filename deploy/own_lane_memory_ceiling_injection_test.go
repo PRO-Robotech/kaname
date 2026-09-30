@@ -41,7 +41,7 @@ const resourcesBlockInTemplate = "          {{- with .Values.resources }}\n" +
 // TestInjection_ChartAsDeliveredCarriesTheOwnLaneMemoryLimit — КОНТРОЛЬ.
 func TestInjection_ChartAsDeliveredCarriesTheOwnLaneMemoryLimit(t *testing.T) {
 	dir := chartCopy(t)
-	sets := withOwnPosture(minimalOperatorCoordinates...)
+	sets := withOperatorOverlay(minimalOperatorCoordinates...)
 	rendered := renderChartAt2(t, dir, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	census, err := judgeOwnLaneMemoryCeiling(loginLaneOfRender(t, rendered), limit, declared, raw)
@@ -55,7 +55,7 @@ func TestInjection_DroppingTheResourcesBlockIsFound(t *testing.T) {
 	dir := chartCopy(t)
 	patchInCopy(t, dir, "templates/deployment.yaml", resourcesBlockInTemplate, "")
 
-	sets := withOwnPosture(minimalOperatorCoordinates...)
+	sets := withOperatorOverlay(minimalOperatorCoordinates...)
 	rendered := renderChartAt2(t, dir, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	require.Falsef(t, declared, "мера видит предел %q при снятом блоке — она смотрит НЕ ТУДА, "+
@@ -70,7 +70,7 @@ func TestInjection_DroppingTheResourcesBlockIsFound(t *testing.T) {
 // объявлен, но меньше бюджета полосы.
 func TestInjection_LimitBelowTheBudgetIsFound(t *testing.T) {
 	dir := chartCopy(t)
-	sets := withOwnPosture(append([]string{"resources.limits.memory=512Mi"}, minimalOperatorCoordinates...)...)
+	sets := withOperatorOverlay(append([]string{"resources.limits.memory=512Mi"}, minimalOperatorCoordinates...)...)
 	rendered := renderChartAt2(t, dir, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	require.True(t, declared, "инъекция не объявила предел — она проверяла бы не ту ось")
@@ -89,13 +89,13 @@ func TestInjection_LimitEqualToTheBudgetIsLegal(t *testing.T) {
 	// прогона, и второе чтение в той же пробе застало бы его занятым.
 	var need uint64
 	t.Run("бюджет", func(t *testing.T) {
-		probe := renderChartAt2(t, dir, chartProfiles, withOwnPosture(minimalOperatorCoordinates...)...)
+		probe := renderChartAt2(t, dir, chartProfiles, withOperatorOverlay(minimalOperatorCoordinates...)...)
 		census, _ := judgeOwnLaneMemoryCeiling(loginLaneOfRender(t, probe), 0, false, "")
 		need = census.Need
 	})
 	require.NotZero(t, need, "бюджет полосы не прочитан — близнеца не из чего построить")
 
-	sets := withOwnPosture(append([]string{fmt.Sprintf("resources.limits.memory=%d", need)}, minimalOperatorCoordinates...)...)
+	sets := withOperatorOverlay(append([]string{fmt.Sprintf("resources.limits.memory=%d", need)}, minimalOperatorCoordinates...)...)
 	rendered := renderChartAt2(t, dir, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	require.True(t, declared)

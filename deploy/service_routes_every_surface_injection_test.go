@@ -214,9 +214,11 @@ spec:
     - name: grpc-internal
       port: {{ .Values.ports.internalGrpc }}
       targetPort: grpc-internal
-    - name: http-hooks
-      port: {{ include "kaname-svc.processDefaultPort" "hooks" }}
-      targetPort: http-hooks
+    {{- if .Values.apiServer.loginLaneEndpoint }}
+    - name: http-login-lane
+      port: {{ include "kaname-svc.surfacePort" .Values.apiServer.loginLaneEndpoint }}
+      targetPort: http-login-lane
+    {{- end }}
     {{- if .Values.apiServer.internalRestEndpoint }}
     - name: http-rest-int
       port: {{ include "kaname-svc.surfacePort" .Values.apiServer.internalRestEndpoint }}
@@ -229,15 +231,13 @@ spec:
 func TestSurfaceRouteCensusCanFail(t *testing.T) {
 	roster := readSurfaceRoster(t)
 	dir := chartCopyWithService(t, serviceBeforeTheFix)
-	// Посадка снята со входа: слушатель вебхуков процесс поднимает при любой
-	// посадке, кроме `own` (kaname#360), а боевой профиль стоит на `own` (#424).
-	// Инъекция судит все поверхности перечня разом, поэтому вход — тот, при
-	// котором поднята каждая.
-	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"}, identityProviderKnob+"=")
+	// Вход — боевой профиль: при нём поднята каждая поверхность перечня, и
+	// инъекция судит их все разом.
+	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"})
 
 	raised, routed, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.NotEmpty(t, findings,
-		"гейт молчит на чарте, ведущем к двум поверхностям из восьми, — он не измеряет своего предмета")
+		"гейт молчит на чарте, ведущем к двум поверхностям из всех, — он не измеряет своего предмета")
 	// Число поверхностей БЕРЁТСЯ у перечня: здесь стояло «8», и девятая —
 	// полоса входа под посадкой `own` — сделала бы инъекцию красной на верном
 	// дереве (kaname#204).
@@ -246,7 +246,7 @@ func TestSurfaceRouteCensusCanFail(t *testing.T) {
 
 	joined := strings.Join(findings, "\n")
 	for _, name := range []string{
-		"выдача токенов", "публикатор набора ключей", "вебхуки провайдера личности",
+		"выдача токенов", "публикатор набора ключей", "полоса входа паролем",
 		"собственный публичный REST-фронт", "собственный внутренний REST-фронт",
 	} {
 		require.Containsf(t, joined, name, "находка обязана НАЗЫВАТЬ поверхность %q, а не только считать их", name)
@@ -262,8 +262,10 @@ func TestSurfaceRouteStaysSilentOnSurfacesThatAreNotRaised(t *testing.T) {
 	raised, routed, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.Empty(t, findings,
 		"стендовый профиль не поднимает REST-фронтов, и молчание о них — верный вердикт, а не пропуск")
-	require.Equal(t, 6, raised, "стендовый профиль поднимает шесть поверхностей")
-	require.Equal(t, routed, raised, "и ведёт ко всем шести")
+	// Шестой прежде была дверь вебхуков поставщика: процесс поднимал её при
+	// незаявленной посадке, а ключа посадки больше нет (kaname#363).
+	require.Equal(t, 5, raised, "стендовый профиль поднимает пять поверхностей")
+	require.Equal(t, routed, raised, "и ведёт ко всем пяти")
 }
 
 // ── ось 2: периметр ──────────────────────────────────────────────────────────
@@ -271,10 +273,9 @@ func TestSurfaceRouteStaysSilentOnSurfacesThatAreNotRaised(t *testing.T) {
 func TestSurfaceRouteCatchesAnInternalDoorOnThePublicObject(t *testing.T) {
 	roster := readSurfaceRoster(t)
 	dir := chartCopyWithService(t, serviceWithInternalOnPublic)
-	// Посадка снята со входа по той же причине, что в переписи выше: иначе
-	// законный близнец — вебхуки на своём объекте — молчал бы оттого, что
-	// слушателя нет, а не оттого, что маршрут верен.
-	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"}, identityProviderKnob+"=")
+	// Вход — боевой профиль: законный близнец — полоса входа на своём объекте —
+	// поднят им, и молчит оттого, что маршрут верен, а не оттого, что слушателя нет.
+	rendered := renderChartAt2(t, dir, []string{"values.yaml", "values.prod.yaml"})
 
 	_, _, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.NotEmpty(t, findings,
@@ -283,8 +284,8 @@ func TestSurfaceRouteCatchesAnInternalDoorOnThePublicObject(t *testing.T) {
 	joined := strings.Join(findings, "\n")
 	require.Contains(t, joined, "публикатор набора ключей", "находка обязана назвать перенесённую поверхность")
 	require.Contains(t, joined, "периметр", "находка обязана назвать, ЧЕМ это плохо, а не только что не сошлось")
-	require.NotContains(t, joined, "вебхуки провайдера личности",
-		"вебхуки остались на своём объекте — законный близнец обязан молчать")
+	require.NotContains(t, joined, "полоса входа паролем",
+		"полоса входа осталась на своём объекте — законный близнец обязан молчать")
 }
 
 // ── ось 3: пустота ───────────────────────────────────────────────────────────

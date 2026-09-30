@@ -125,39 +125,26 @@ func (c PresentedCredentialConfig) Validate(signing TokenSigningConfig, tokenTTL
 	return errs
 }
 
-// ValidateBinding — СВЯЗЫВАНИЕ: поверхность, на которой предъявляются
-// удостоверения, обязана иметь того, кто их читает (задача продукта #2191).
+// ValidateBinding — СВЯЗЫВАНИЕ: боевой старт обязан иметь того, кто читает
+// удостоверение, предъявленное самим вызывающим (задача продукта #2191).
 //
 // # Почему это отдельный страж, а не строка проверки величин выше
 //
-// Тот судит СОГЛАСОВАННОСТЬ величин включённого читателя. Этот — ПРОТИВОРЕЧИЕ
-// между двумя объявлениями: поверхность поднята, читателя нет. Половина пары
-// хуже отсутствия обеих, потому что выглядит настроенной: арендатор дотягивается
-// до фронта, предъявляет годное удостоверение и получает тот же отказ, что и
-// предъявивший мусор, — назвать его нечем.
+// Тот судит СОГЛАСОВАННОСТЬ величин включённого читателя. Этот — отсутствие
+// читателя там, где иного способа назваться у арендатора нет: нашего края,
+// чтобы передать личность, в его установке не существует, а модульного
+// сертификата у человека не бывает. Без читателя служба поднимается и отвечает
+// на годное удостоверение тем же отказом, что на мусор, — и это выглядит
+// настроенным.
 //
-// # Антецедент — ДИЗЪЮНКЦИЯ, и каждая её половина названа
+// # Антецедент — боевой режим, и только он
 //
-//   - ПОДНЯТЫЙ СОБСТВЕННЫЙ ПУБЛИЧНЫЙ ФРОНТ. Он поднимается на ЛЮБОЙ посадке —
-//     его поднимает объявленный адрес, а не выбор посадки, — и всякий, кто до
-//     него дотянулся, приходит обычным клиентом: модульного сертификата у
-//     арендатора нет и быть не может, а нашего края перед этим фронтом нет by
-//     construction. Значит предъявленное удостоверение — единственное, чем он
-//     может назваться;
-//   - ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ЛИЧНОСТИ. Здесь требование то же и по той
-//     же причине, и стояло оно прежде отдельной строкой таблицы полос. Строка
-//     переехала СЮДА, а не продублирована: два стража об одном предмете
-//     разошлись бы молча — и разошлись бы там, где расхождение не видно.
-//
-// Прежний антецедент («посадка объявлена своей») не наступал НИКОГДА: этого
-// значения не выбирает ни один профиль развёртывания. Связывание существовало,
-// требование не предъявлялось ни разу, и всё выглядело настроенным.
-//
-// # Почему отказ называет ОБЕ ручки
-//
-// Требование снимается любой из них — поднять читателя либо не поднимать фронт,
-// — и оператор вправе выбрать сам. Отказ, называющий одну, предписывает выбор,
-// которого страж не делал.
+// Прежде антецедент был ДИЗЪЮНКЦИЕЙ: «поднят собственный публичный фронт»
+// либо «посадка без внешнего поставщика». Внешнего поставщика у службы больше
+// нет (kaname#363), вторая половина наступает на всяком боевом старте, и первая
+// её больше ничем не расширяет. Совета «не поднимайте фронт», прежде
+// снимавшего требование, в тексте больше нет: он послал бы оператора за вторым
+// отказом.
 //
 // # Почему только в БОЕВОЙ посадке, и чего это НЕ означает
 //
@@ -169,40 +156,15 @@ func (c PresentedCredentialConfig) Validate(signing TokenSigningConfig, tokenTTL
 // промежуточный шаг подъёма — то есть требовало бы того, чего на нём не бывает
 // by construction.
 //
-// Это НЕ значит «в дев можно фронт без читателя»: ban #16 объявляет, что всякий
-// РАЗВЁРНУТЫЙ стенд работает в боевой посадке, и там пара обязательна. Дев
+// Это НЕ значит «в дев можно без читателя»: ban #16 объявляет, что всякий
+// РАЗВЁРНУТЫЙ стенд работает в боевой посадке, и там читатель обязателен. Дев
 // остаётся только промежуточным шагом установки и внутрипроцессной фикстурой.
-func (c PresentedCredentialConfig) ValidateBinding(
-	productionMode bool, publicRESTEndpoint string, provider IdentityProvider,
-) error {
+func (c PresentedCredentialConfig) ValidateBinding(productionMode bool) error {
 	if c.Enabled || !productionMode {
 		return nil
 	}
-	frontIsUp := strings.TrimSpace(publicRESTEndpoint) != ""
-	postureHasNoEdge := provider == IdentityProviderOwn
-	if !frontIsUp && !postureHasNoEdge {
-		return nil
-	}
-
-	var errs error
-	if frontIsUp {
-		errs = multierr.Append(errs, fmt.Errorf(
-			"api-server.rest-endpoint raises the service's OWN public REST front (%s) while "+
-				"authn.presented-credential.enabled is false — whoever reaches that front comes as "+
-				"an ordinary client: a tenant has no module certificate and there is no edge of "+
-				"ours in front of it, so a PRESENTED credential is the only thing it can name "+
-				"itself with. With no reader the front answers a good credential exactly as it "+
-				"answers a malformed one, and that looks configured. Enable the reader, or do not "+
-				"declare api-server.rest-endpoint",
-			strings.TrimSpace(publicRESTEndpoint)))
-	}
-	if postureHasNoEdge {
-		errs = multierr.Append(errs, fmt.Errorf(
-			"%s=%s but authn.presented-credential.enabled is false — on this posture there is no "+
-				"edge of ours to forward an identity and no module certificate for a person, so a "+
-				"tenant has NOTHING to name itself with: every public RPC would answer an honest "+
-				"and useless refusal. Enable it",
-			IdentityProviderSetting, IdentityProviderOwn))
-	}
-	return errs
+	return fmt.Errorf(
+		"production mode: authn.presented-credential.enabled is false — there is no edge of ours " +
+			"to forward an identity and no module certificate for a person, so a tenant has NOTHING " +
+			"to name itself with: every public RPC would answer an honest and useless refusal. Enable it")
 }

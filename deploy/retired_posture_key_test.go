@@ -141,7 +141,9 @@ func requireRetiredPostureRefusal(t *testing.T, out string, err error, names str
 
 // Ч2, путь «профиль значений».
 func TestChartRefusesTheRetiredPostureKeyInValues(t *testing.T) {
-	for _, v := range []string{"own", "external", ""} {
+	// `null` — ключ, объявленный без значения: helm оставляет его в слитых
+	// значениях, и шаблон, судящий значение, увидел бы «ничего».
+	for _, v := range []string{"own", "external", "", "null"} {
 		t.Run("value="+v, func(t *testing.T) {
 			out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, retiredPostureValuesKey+"="+v)
 			requireRetiredPostureRefusal(t, out, err, retiredPostureValuesKey)
@@ -168,15 +170,26 @@ func TestShippedProfileRendersWithoutARetiredKey(t *testing.T) {
 	require.NoErrorf(t, err, "поставляемый профиль не рендерится:\n%s", headOf(out))
 }
 
-// withoutPostureKey — `--set`, снимающий ключ посадки из слитых значений:
-// поставляемый профиль, который его ещё несёт, проверяется так, будто ключа нет.
-const withoutPostureKey = retiredPostureValuesKey + "=null"
+// shippedChainCarriesNoPostureKey — слитая цепочка поставляемых профилей не
+// несёт ключа посадки ни в какой форме, включая пустую. Предпосылка Ч3:
+// поставляемый профиль судится КАК ЕСТЬ. На родителе правки проба снимала
+// ключ `--set …=null`, потому что профили его ещё несли; теперь их правило
+// снятых ручек отвергает и `null` — объявленный ключ объявлен при любом
+// значении, — и снимать больше нечего.
+func shippedChainCarriesNoPostureKey(t *testing.T, chain []string) {
+	t.Helper()
+	authn, _ := at(mergeChartProfiles(t, chain), "authn").(map[string]any)
+	_, declared := authn["identityProvider"]
+	require.Falsef(t, declared, "поставляемая цепочка %v несёт снятый ключ посадки — её рендер судился бы "+
+		"отказом правила снятых ручек, а не полосой входа", chain)
+}
 
 // Ч3.
 func TestEveryShippedProfileRendersTheOwnLaneWithoutThePostureKey(t *testing.T) {
 	for _, chain := range shippedProfileChains {
 		t.Run(chain[len(chain)-1], func(t *testing.T) {
-			out, err := renderChartAtAllowingFailure(t, ".", chain, withoutPostureKey)
+			shippedChainCarriesNoPostureKey(t, chain)
+			out, err := renderChartAtAllowingFailure(t, ".", chain)
 			require.NoErrorf(t, err, "профиль без ключа посадки не рендерится — это «не выполнилось»:\n%s", headOf(out))
 
 			rules, objects := chartAlertRules(t, out)
@@ -211,16 +224,17 @@ func TestEveryShippedProfileRendersTheOwnLaneWithoutThePostureKey(t *testing.T) 
 
 // Ч3, страж токен-эндпоинта: без ключа посадки выключенный эндпоинт — отказ.
 func TestChartRefusesADisabledClientTokenEndpointWithoutThePostureKey(t *testing.T) {
-	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, withoutPostureKey, clientTokenEnabledKnob+"=false")
+	shippedChainCarriesNoPostureKey(t, chartProfiles)
+	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, clientTokenEnabledKnob+"=false")
 	require.Errorf(t, err, "рендер без ключа посадки собрал выключенный токен-эндпоинт — ключу служебной "+
 		"учётки некуда пойти, и отказ пришёл бы уже в кластере:\n%s", headOf(out))
 	require.Contains(t, out, clientTokenEnabledKnob)
-	require.NotContains(t, out, retiredPostureValuesKey+"=own", "отказ называет снятый ключ посадки условием")
+	require.NotContains(t, out, retiredPostureValuesKey, "отказ называет снятый ключ посадки условием")
 }
 
 // Законный близнец: тот же рендер со включённым эндпоинтом проходит.
 func TestChartRendersAnEnabledClientTokenEndpointWithoutThePostureKey(t *testing.T) {
-	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, withoutPostureKey, clientTokenEnabledKnob+"=true")
+	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, clientTokenEnabledKnob+"=true")
 	require.NoErrorf(t, err, "рендер без ключа посадки со включённым эндпоинтом отказал:\n%s", headOf(out))
 }
 

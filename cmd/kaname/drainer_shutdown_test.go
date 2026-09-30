@@ -103,8 +103,8 @@ func assertTaskStopsOnCancel(t *testing.T, name string, task func(context.Contex
 	}
 }
 
-// TestIAM2465_DrainerTasksReturnWhenTheShutdownContextIsCancelled — обе полосы
-// дренажа корня обязаны нести свойство, которое несут остальные его задачи.
+// TestIAM2465_DrainerTasksReturnWhenTheShutdownContextIsCancelled — полоса
+// дренажа и скан очереди корня обязаны нести свойство, которое несут остальные его задачи.
 func TestIAM2465_DrainerTasksReturnWhenTheShutdownContextIsCancelled(t *testing.T) {
 	pool := deadPool(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -118,12 +118,13 @@ func TestIAM2465_DrainerTasksReturnWhenTheShutdownContextIsCancelled(t *testing.
 		assertTaskStopsOnCancel(t, "дренаж писем приглашения", task)
 	})
 
-	t.Run("компенсации провайдера", func(t *testing.T) {
-		task, err := buildProviderCompensationDrainer(pool, config.Config{},
-			reg.CompensationRecorder(), reg.ProviderRoadRecorder(), logger)
-		if err != nil {
-			t.Fatalf("сборка дренажа компенсаций: %v", err)
-		}
-		assertTaskStopsOnCancel(t, "дренаж компенсаций провайдера", task)
+	// Дренажа компенсаций провайдера больше нет (kaname#363): у очереди не
+	// осталось ни производителя, ни исполнителя. Задача корня над её таблицей —
+	// скан переписи — несёт то же свойство, и судится тем же образом.
+	t.Run("перепись очереди компенсаций", func(t *testing.T) {
+		assertTaskStopsOnCancel(t, "скан очереди компенсаций провайдера", func(ctx context.Context) error {
+			runProviderCompensationMetrics(ctx, pool, reg.OutboxRecorder(), logger)
+			return nil
+		})
 	})
 }

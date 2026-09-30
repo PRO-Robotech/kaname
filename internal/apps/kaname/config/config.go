@@ -272,22 +272,14 @@ type PostgresConfig struct {
 //	                        до стража, а не замещается построением
 //	                        (см. ResolveDomain; свойство держит проба
 //	                        TestDomainHasNoCompiledInDefault). Из него
-//	                        token_hook выводит издателя и адресата.
+//	                        сборка состава утверждений выводит адресата.
 //	HydraIssuer           — Ory Hydra issuer (default `https://hydra.<Domain>`).
-//	HookSharedSecret      — Bearer-token Hydra uses to authenticate calls to
-//	                        token_hook/refresh_hook. Пустое значение обхода НЕ
-//	                        даёт: обработчик отвечает 500 и запрос не
-//	                        обслуживает; в production-посадке страж старта
-//	                        отказывает в пуске.
 //	JWKSEncryptionKeyHex  — 32-байтовый ключ ОБЁРТКИ приватной половины
 //	                        подписного ключа, в hex (64 символа). Ею
 //	                        оборачивается приватная половина в ключнице
 //	                        (задача #897); ручка об этом предмете в дереве
 //	                        ОДНА, и её значение меняет исход старта — см.
 //	                        validateProductionAuthNSecrets.
-//	HooksHTTPEndpoint     — HTTP listener for webhooks from Hydra/Kratos.
-//	                        Default `tcp://0.0.0.0:9092` (separate port from
-//	                        gRPC public 9090 / internal 9091).
 //	SAKeyRedactGrace      — задержка между Done-ом Issue-Operation и затиранием
 //	                        одноразового private_key_pem в её response. Даёт
 //	                        поллящему клиенту окно, чтобы забрать ключ до вычистки.
@@ -323,59 +315,10 @@ type PostgresConfig struct {
 //	                        тем изменением, которым её перестанет эмитировать чарт.
 //	                        Override KANAME_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode Mode `mapstructure:"mode"`
-	// IdentityProvider — ПОСАДКА ЛИЧНОСТИ: чем стенд проверяет человека,
-	// внешним поставщиком удостоверений или своей чеканкой (задача #1125).
-	//
-	// Разводит требования старта: под `external` обязательны три адреса
-	// поставщика, под `own` — не требуется ни одного, зато обязательна своя
-	// чеканка и свой вход человека. Умолчания в коде НЕТ намеренно (см.
-	// identity_provider.go): незаданное значение — отказ старта, а не молча
-	// выбранная полоса. Перечень требований каждой полосы — LaneRequirements.
-	IdentityProvider IdentityProvider `mapstructure:"identity-provider"`
-	Domain           string           `mapstructure:"domain"`
-	HydraIssuer      string           `mapstructure:"hydra-issuer"`
-	HydraAdminURL    string           `mapstructure:"hydra-admin-url"`
-	// HydraAdminCAFile — PEM bundle the provider-admin hop is verified against
-	// when it is served over TLS. Empty ⇒ the default transport (system roots),
-	// which an internal-CA certificate never chains to. Set ⇒ the bundle becomes
-	// the ONLY anchor, and one that cannot be read refuses the start.
-	HydraAdminCAFile string `mapstructure:"hydra-admin-ca-file"`
-	// HydraAdminTokenEnv — ИМЯ переменной окружения, из которой берётся
-	// административный предъявитель внешнего поставщика.
-	//
-	// Само значение в YAML не пишется никогда (секрет), поэтому полем настройки
-	// объявлено имя переменной — та же косвенность, что у общего секрета хуков
-	// и у ключа обёртки.
-	//
-	// ПОЧЕМУ ЭТО ПОЛЕ ВООБЩЕ ПОЯВИЛОСЬ. Ручка существовала и прежде, но
-	// читалась прямым обращением к окружению В КОРНЕ СБОРКИ — то есть была
-	// невидима проверке настройки при старте by construction. Проверка читает
-	// ПОЛЯ, и только их; значит ручка мимо полей не участвует в полосности
-	// посадки и не может быть снята значением поля посадки. Полосность,
-	// неполная ровно на ту ручку, которую проверка не видит, — это тот же
-	// класс, что чинила подфаза Ф4б-0.
-	HydraAdminTokenEnv string `mapstructure:"hydra-admin-token-env"`
-	// ProviderAdminAuth — ЧЕМ административный контур поставщика личности
-	// аутентифицирует нас: `bearer` (возит административный предъявитель) либо
-	// `none` (административный порт не аутентифицирует никого).
-	//
-	// ПОЧЕМУ ЭТО РЕШЕНИЕ ОПЕРАТОРА, А НЕ НАШЕ УМОЛЧАНИЕ. Прежде вопрос решался
-	// молча: пустой предъявитель считался законным значением с обоснованием
-	// «административный порт поставщика в этой посадке не аутентифицирует
-	// никого». Это утверждение о НАШЕМ стенде, перенесённое в продукт, который
-	// ставят у себя другие. Оператор в чужом облаке, чей поставщик свой
-	// административный доступ аутентифицирует, получал отказ на КАЖДОЙ
-	// административной операции фасада и НИ ОДНОЙ строки при старте о причине.
-	//
-	// Умолчания у поля нет намеренно: величина, которую построение подставляет
-	// молча, предметом стража быть не может. Незаданное поле оставляет прежнее
-	// поведение (предъявитель не требуется) — это НЕ выбор за оператора, а
-	// область: страж судит ПОЛОВИНУ ПАРЫ, то есть объявленный `bearer` без
-	// пришедшего предъявителя. Выбор требует ЧАРТ, у которого есть, с кого
-	// спросить (задача #2471).
-	ProviderAdminAuth string `mapstructure:"provider-admin-auth"`
-	HydraTokenURL     string `mapstructure:"hydra-token-url"`
+	Mode          Mode   `mapstructure:"mode"`
+	Domain        string `mapstructure:"domain"`
+	HydraIssuer   string `mapstructure:"hydra-issuer"`
+	HydraTokenURL string `mapstructure:"hydra-token-url"`
 	// HydraTokenCAFile — the same anchor discipline for the hop to the provider's
 	// PUBLIC listener: the token exchange (a signed client assertion out, the
 	// minted bearer back). Empty ⇒ the default transport,
@@ -385,8 +328,6 @@ type AuthNConfig struct {
 	// state nobody can see, because the operator configured verification against
 	// the internal CA and the process is not doing it.
 	HydraTokenCAFile        string `mapstructure:"hydra-token-ca-file"`
-	HookSharedSecret        string `mapstructure:"hook-shared-secret"`
-	HookSharedSecretEnv     string `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`
 	JWKSEncryptionKeyHexEnv string `mapstructure:"jwks-encryption-key-hex-env"`
 	// SecondFactorEncryptionKeyHex — перечень ключей ОБЁРТКИ секретов второго
@@ -423,7 +364,6 @@ type AuthNConfig struct {
 	// отправителем. В чужом облаке нет ни того, ни другого — арендатору нечем
 	// назваться.
 	PresentedCredential  PresentedCredentialConfig `mapstructure:"presented-credential"`
-	HooksHTTPEndpoint    string                    `mapstructure:"hooks-http-endpoint"`
 	SAKeyRedactGrace     time.Duration             `mapstructure:"sakey-redact-grace"`
 	UserTokenRedactGrace time.Duration             `mapstructure:"usertoken-redact-grace"`
 	SAKeyDefaultTTL      time.Duration             `mapstructure:"sakey-default-ttl"`

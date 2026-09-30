@@ -1,13 +1,14 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// hook_pool_adapters.go — pool-scoped adapters для handler/internal port-iface.
+// hook_pool_adapters.go — pool-scoped session-revocation adapter.
 //
-// Hook handlers (token / refresh) are stateless HTTP endpoints that need
-// lightweight pool-scoped writes without the CQRS Writer-TX overhead.
-// These adapters wrap the existing AuditOutboxRepo / SessionRevocationRepo
-// in single-statement TX (autocommit-style), serving the
-// kaname.audit_outbox and kaname.session_revocations tables.
+// The file is named after its first readers, the external identity provider's
+// token and refresh hooks (gone, kaname#363), which needed lightweight
+// pool-scoped writes without the CQRS Writer-TX overhead. What remains is the
+// SessionRevocationsAdapter: it wraps SessionRevocationRepo /
+// UserTokenRevocationRepo for the revocation service, the own sign-in lane and
+// the edge's revoke-all reader.
 package pg
 
 import (
@@ -35,67 +36,11 @@ const (
 	SessionAuditEventForceLogout = "iam.session.force_logout"
 )
 
-// AuditEmitterAdapter — pool-scoped wrapper. Каждый Emit открывает мини-TX,
-// INSERT audit row, commit. Это не идеально для atomic-coupling с domain
-// mutation, но hook handlers — асинхронный side-channel, atomicity не критична
-// (loss tolerable; drainer-side dedupe handles duplicates).
-type AuditEmitterAdapter struct {
-	pool *pgxpool.Pool
-	repo *AuditOutboxRepo
-	now  func() time.Time
-}
-
-// NewAuditEmitterAdapter — constructor.
-func NewAuditEmitterAdapter(pool *pgxpool.Pool) *AuditEmitterAdapter {
-	return &AuditEmitterAdapter{
-		pool: pool,
-		repo: NewAuditOutboxRepo(pool),
-		now:  time.Now,
-	}
-}
-
-// Emit append-only пишет audit event.
-func (a *AuditEmitterAdapter) Emit(ctx context.Context, eventType string, tenantAccountID string, payload map[string]any) error {
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	entry := domain.AuditOutboxEntry{
-		// newAuditEventID yields an `evt_<22-char>` id; the previous
-		// NewKac127ID("evt") produced a 17-char body that FAILS the
-		// audit_outbox_id_check ({20,30}) → every hook audit Emit was silently
-		// rejected (23514) at INSERT. Same generator the grant/revoke + bootstrap
-		// audit paths use.
-		ID:           domain.AuditEventID(newAuditEventID()),
-		EventType:    domain.EventTypeName(eventType),
-		EventPayload: payloadJSON,
-		Status:       domain.AuditOutboxStatusPending,
-		CreatedAt:    a.now(),
-	}
-	if tenantAccountID != "" {
-		aid := domain.AccountID(tenantAccountID)
-		entry.TenantAccountID = &aid
-	}
-
-	tx, err := a.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := a.repo.InsertTx(ctx, tx, entry); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // SessionRevocationsAdapter — pool-scoped wrapper над SessionRevocationRepo +
 // UserTokenRevocationRepo. Backs the per-jti revocation path (Revoke / IsRevoked)
 // AND the user-level "revoke-all-before" path (RevokeAllUserTokens /
-// UserRevokedBefore) — one adapter shared by ForceLogout, the
-// InternalSessionRevocationsService Revoke path, and the refresh-hook reader.
+// UserRevokedBefore) — one adapter shared by the InternalSessionRevocationsService
+// Revoke path and its readers.
 type SessionRevocationsAdapter struct {
 	pool      *pgxpool.Pool
 	repo      *SessionRevocationRepo

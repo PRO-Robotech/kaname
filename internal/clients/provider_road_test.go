@@ -29,72 +29,24 @@ func (s *roadSpy) ObserveProviderRoad(road, outcome string) {
 	s.seen = append(s.seen, road+"/"+outcome)
 }
 
-// adminAgainst поднимает поставщика, отвечающего названным кодом, и отдаёт
-// клиента административной дороги с перехватчиком.
-func adminAgainst(t *testing.T, status int, body string) (*HydraAdminClient, *roadSpy) {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(srv.Close)
-	spy := &roadSpy{}
-	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
-	require.NoError(t, err)
-	return c.WithRoadObserver(spy), spy
-}
+// Пробы АДМИНИСТРАТИВНОЙ дороги здесь больше нет: дорога снята вместе с
+// посадкой внешнего поставщика (kaname#363). Её единственная клетка, которой
+// нет у обмена, — «несобранная дорога обращением не является», — снята вместе
+// с ней; разложение ответов по клеткам и различение транспорта от настройки
+// судятся на дороге обмена ниже.
 
-func TestProviderRoad_AdminDeleteClassifiesEveryAnswerIntoItsOwnCell(t *testing.T) {
-	// Ось, ради которой заведена клетка `absent`: 404 остаётся УСПЕХОМ вызова
-	// (иначе строка очереди компенсаций перестаёт помечаться доставленной и
-	// заклинивает партицию), но перестаёт быть НЕВИДИМЫМ.
-	for _, tc := range []struct {
-		name    string
-		status  int
-		outcome string
-		wantErr bool
-	}{
-		{"снято", http.StatusNoContent, ProviderRoadOutcomeOK, false},
-		{"не найдено — неразличимо, но видно", http.StatusNotFound, ProviderRoadOutcomeAbsent, false},
-		{"метод не поддержан — адрес, а не сбой", http.StatusMethodNotAllowed, ProviderRoadOutcomeMisconfigured, true},
-		{"не реализован — адрес, а не сбой", http.StatusNotImplemented, ProviderRoadOutcomeMisconfigured, true},
-		{"отвергнуто по существу", http.StatusForbidden, ProviderRoadOutcomeRejected, true},
-		{"поставщик лёг", http.StatusBadGateway, ProviderRoadOutcomeUnavailable, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, spy := adminAgainst(t, tc.status, "{}")
-			err := c.DeleteOAuthClient(context.Background(), "cli-1")
-			if tc.wantErr {
-				require.Error(t, err, "ответ %d обязан остаться отказом вызова", tc.status)
-			} else {
-				require.NoError(t, err, "ответ %d обязан остаться успехом вызова", tc.status)
-			}
-			require.Equal(t, []string{ProviderRoadAdmin + "/" + tc.outcome}, spy.seen,
-				"ответ %d попал не в свою клетку", tc.status)
-		})
-	}
-}
-
-func TestProviderRoad_AdminTransportFailureIsUnavailableNotMisconfigured(t *testing.T) {
+func TestProviderRoad_TokenExchangeTransportFailureIsUnavailableNotMisconfigured(t *testing.T) {
 	// Отказ транспорта лечится временем и обязан лежать отдельно от настройки:
 	// смешав их, оператор получил бы «поставщик лежит» на неверном адресе.
-	c, err := NewHydraAdminClientWithCA("http://127.0.0.1:1", "", "")
-	require.NoError(t, err)
-	c.HTTPClient = &http.Client{Timeout: 200 * time.Millisecond}
 	spy := &roadSpy{}
-	c = c.WithRoadObserver(spy)
+	c := (&ProviderTokenClient{
+		TokenURL:   "http://127.0.0.1:1",
+		HTTPClient: &http.Client{Timeout: 200 * time.Millisecond},
+	}).WithRoadObserver(spy)
 
-	require.Error(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
-	require.Equal(t, []string{ProviderRoadAdmin + "/" + ProviderRoadOutcomeUnavailable}, spy.seen)
-}
-
-func TestProviderRoad_AbsentRoadIsNotCountedAsAnAnswer(t *testing.T) {
-	// Клиент без адреса — нулевое значение типа — не звонит вовсе. Считать его
-	// отказ исходом ОБРАЩЕНИЯ значило бы утверждать, что по дороге ходили.
-	spy := &roadSpy{}
-	c := new(HydraAdminClient).WithRoadObserver(spy)
-	require.Error(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
-	require.Empty(t, spy.seen, "несобранная дорога обращением не является")
+	_, err := c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
+	require.Error(t, err)
+	require.Equal(t, []string{ProviderRoadTokenExchange + "/" + ProviderRoadOutcomeUnavailable}, spy.seen)
 }
 
 func TestProviderRoad_TokenExchangeSplitsUnavailableFromMisconfigured(t *testing.T) {
@@ -150,10 +102,11 @@ func TestProviderRoad_TokenExchangeSentinelIsUnchangedByTheSplit(t *testing.T) {
 // nil-наблюдатель законен: счёта нет, решения дороги это не меняет.
 func TestProviderRoad_NilObserverChangesNothing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"access_token":"t","expires_in":60}`))
 	}))
 	defer srv.Close()
-	c, err := NewHydraAdminClientWithCA(srv.URL, "", "")
+	c := &ProviderTokenClient{TokenURL: srv.URL, HTTPClient: srv.Client()}
+	_, err := c.ClientCredentials(context.Background(), ClientCredentialsRequest{ClientAssertion: "a"})
 	require.NoError(t, err)
-	require.NoError(t, c.DeleteOAuthClient(context.Background(), "cli-1"))
 }
