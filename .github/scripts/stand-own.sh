@@ -230,23 +230,32 @@ stand_env() {
   export KANAME_DB_USER=kaname KANAME_DB_NAME=kaname KANAME_DB_PASSWORD=stand
   export KANAME_DB_SSLMODE=require
   export KANAME_JWKS_ENC_KEY="$(cat "$WRAPKEY_FILE")"
-  export KANAME_HOOK_TOKEN=stand-hook-secret-0123456789
   export KANAME_AUTHN__DOMAIN=kaname.local
   export KANAME_AUTHN__TRUST_DOMAIN=kaname.local
-  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS='spiffe://kaname.local/ns/kaname/sa/kaname'
+  # КРУГ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ — имя службы И имя края (kaname#398), как у
+  # стенда чарта посадки `own` (`stand-chart.sh`, накладка `own`). Глагол `Create`
+  # интерактивного клиента фронтируется краем (`GatewayFrontedInternalRPCs`):
+  # хоп собственного фронта его не проходит by construction, а пересланный
+  # принципал принимается только от доверенного пересылающего. Посев церемонии
+  # (`seed_ceremony.py`) заводит клиентов этим глаголом, стоя на месте края
+  # листом края стенда (`edge.crt`). В боевом профиле этот круг и есть край;
+  # стенд дописывает его к имени службы, а не заменяет. Без него пол
+  # подтверждения глагола читает принципал как непроверенный и отвечает
+  # `authz.step_up` (замер на стенде: 403, PreconditionFailure).
+  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS="spiffe://kaname.local/ns/kaname/sa/kaname,spiffe://kaname.local/ns/kaname/sa/$EDGE_SA"
   export KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE=registry.kaname.local
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5
   export KANAME_OWN_CEILINGS__ACCESS_KEYS_PER_USER=5
-  # ПОЛОСА ЛИЧНОСТИ — `own`, И ДРУГОЙ У СЛУЖБЫ НЕТ.
+  # ПОЛОСА ЛИЧНОСТИ ОДНА — СВОЙ ВХОД, И КЛЮЧА, КОТОРЫЙ ЕЁ ВЫБИРАЛ, НЕТ.
   #
-  # Здесь стояло `external` с объявленными и недостижимыми адресами поставщика.
-  # Посадку `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424):
-  # разбор ключа принимает ровно `own`, и накатчик отвергал настройку раньше,
-  # чем стенд доходил до службы, — задание краснело на загрузке настройки.
+  # Здесь стояло сперва `external`, затем `own` ключом посадки. Посадку
+  # `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424), а ключ
+  # снят вместе с осью (kaname#363): загрузчик отвергает его переменную вслух,
+  # при любом значении.
   #
-  # Под `own` вход человека держит сама служба, и старт требует величин полосы
+  # Вход человека держит сама служба, и старт требует величин полосы
   # входа, обёртки секретов второго фактора, окна свежести и привязки ключей
   # доступа. Числа ниже — те же, что объявляет боевой профиль
   # (`deploy/values.prod.yaml`, блок `authn.login`): стенд судит ту посадку,
@@ -254,8 +263,7 @@ stand_env() {
   # адрес консоли установки под её доменом, как у профиля: консоли на стенде
   # нет, и ключ, привязанный к этому адресу, не предъявит никто.
   #
-  # Адресов поставщика здесь больше нет: под `own` их не читает никто.
-  export KANAME_AUTHN__IDENTITY_PROVIDER=own
+  # Адресов поставщика здесь больше нет: их не читает никто.
   export KANAME_AUTHN__LOGIN__SESSION_TTL=24h
   export KANAME_AUTHN__LOGIN__COOKIE_DOMAIN=none
   export KANAME_AUTHN__LOGIN__ADDRESS_ATTEMPTS=5
@@ -342,12 +350,14 @@ stand_env() {
   #
   # Срок выводится из БЮДЖЕТА ШАГОВ, которые живут выданным токеном: посев
   # чеканит его и передаёт прогону, и токен обязан пережить остаток посева
-  # (`timeout-minutes: 10`) плюс прогон коллекций (`timeout-minutes: 15`) —
-  # иначе истечение посреди прогона пришло бы отказом доступа, неотличимым от
-  # дефекта дерева. Сумма 25 минут не выходит за платформенный потолок
-  # `tokenpolicy.MaxTokenTTL` (30 минут), сверх которого страж отказывает.
-  # Предикат: `grep -n 'timeout-minutes' .github/workflows/e2e-newman.yml` у
-  # шагов посева и прогона.
+  # плюс прогон коллекций — иначе истечение посреди прогона пришло бы отказом
+  # доступа, неотличимым от дефекта дерева. Заданий на этом стенде два, и у
+  # каждого сумма пределов его шагов — 25 минут: `stand` — посев 10 и прогон 15,
+  # `stand-ceremony` — машинный посев 5, посев церемонии 5 и прогон 15 (его
+  # предъявители людей выданы той же поверхностью и живут тот же срок). Сумма не
+  # выходит за платформенный потолок `tokenpolicy.MaxTokenTTL` (30 минут), сверх
+  # которого страж отказывает. Предикат: `grep -n 'timeout-minutes'
+  # .github/workflows/e2e-newman.yml` у шагов посева и прогона обоих заданий.
   export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
   # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
   # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело
@@ -375,7 +385,7 @@ stand_env() {
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC=10
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING=32
   local l u
-  for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
+  for l in INTERNAL INTERNALREST METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \
       KANAME_${l}_SERVER_MTLS_CERTFILE=$PKI/srv.crt \
       KANAME_${l}_SERVER_MTLS_KEYFILE=$PKI/srv.key \
@@ -539,8 +549,8 @@ start_service() {
 # ниже подставляет свою пару: судить готовность на восьми боевых номерах значило бы
 # мерить, свободны ли они на этой машине, а не различает ли скрипт исходы.
 #
-# Слушателя хуков поставщика (`:9092`) в перечне нет: под `own` поставщика нет, и
-# слушатель не поднимается (kaname#360). Есть слушатель полосы входа (`:9100`).
+# Слушателя хуков поставщика (`:9092`) в перечне нет: поставщика у службы нет, и
+# слушателя тоже (kaname#360, kaname#363). Есть слушатель полосы входа (`:9100`).
 PORTS="${KANAME_STAND_PORTS:-9090 9091 9095 9096 9097 9098 9099 9100}"
 
 # Счёт слушателей ВЫВОДИТСЯ из перечня: выписанное число разошлось бы с ним молча,

@@ -34,13 +34,15 @@ Two independent reasons, and BOTH are needed:
   in IAM-IC-CR-CRUD-OK: creating the client a human signs in through does NOT
   itself require an interactive sign-in, so the capability has no ring in it.
   Scenario 12's NEGATIVE half — a human at level 1 refused with `401
-  insufficient_user_authentication` — is NOT written here, and the reason is a
-  measurement rather than a preference: no human principal exists on any stand
-  today. `jwtAccountAdminAStepUp` is declared unforgeable by the seed itself
-  (PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py), and every other `jwt*` fixture is a
-  ServiceAccount token, i.e. acr-exempt — so a probe written now could not tell
-  "the floor held" from "the subject was never presented". It belongs to the
-  ceremony wave (S2), where a human bearer is produced by the ceremony itself.
+  insufficient_user_authentication` — is NOT written here. Every machine `jwt*`
+  fixture is a ServiceAccount token, i.e. acr-exempt — `jwtAccountAdminAStepUp`
+  included: it is the SAME machine account admin as `jwtAccountAdminA` (the
+  autonomous stand seed writes one token into both slots, kaname#398), so a probe
+  under it could not tell "the floor held" from "the subject was never presented".
+  Human bearers of both levels now exist — the ceremony wave of the autonomous
+  stand (`tests/authz-fixtures/seed_ceremony.py --wave`) forges them through the
+  service's own ceremony — and the negative half belongs with them; this module
+  is held by kaname#416 and does not run there yet.
 
 Coverage (acceptance sub-phase-IAM-INT-1, §3 / §8). The scenario ID is carried in
 the text so the trace runs both ways — §3 states it must appear in the names of

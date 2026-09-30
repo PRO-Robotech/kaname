@@ -112,8 +112,8 @@ def assert_grpc_code_in(*codes_named):
 # flakes with an intermittent 403 in the pre-convergence window.
 #
 # The probe targets `InternalIAMService.Check` (POST /iam/v1/internal/iam:check),
-# a raw single-tuple FGA check exposed ONLY on the api-gateway cluster-internal REST
-# listener ({{internalBaseUrl}}, :18081) — the public :18080 404s /iam/v1/internal/*
+# a raw single-tuple FGA check exposed ONLY on the service's own internal REST
+# front ({{ownInternalRestBaseUrl}}) — the public front 404s /iam/v1/internal/*
 # by design (ban #6). Each probe step's pre_script redirects there via
 # _internal_url_override (without it the probe hits the public port → 404 → JSONError).
 # It is `<exempt>` from the
@@ -141,17 +141,19 @@ def assert_grpc_code_in(*codes_named):
 # account-scoped probe.
 
 def _internal_url_override(path):
-    """Redirect this request to the api-gateway cluster-internal REST listener
-    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
-    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
-    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
-    probe hits the public port → 404 page-not-found → JSONError. Mirrors
-    iam-internal-only-check.py::_internal_url_override. internalBaseUrl is injected
-    at runtime by deploy/scripts/newman-e2e.sh."""
+    """Redirect this request to the service's own internal REST front
+    ({{ownInternalRestBaseUrl}}, written by the autonomous stand seed).
+    Internal* paths (/iam/v1/internal/*) are served ONLY there — the public front
+    404s them by design (ban #6). gen.py emits {{baseUrl}}<path>; without this
+    override the FGA-Check probe hits the public front → 404 → JSONError."""
+    # ВНУТРЕННИЙ ФРОНТ — СВОЙ (kaname#398). `internalBaseUrl` — внутренний
+    # слушатель КРАЯ платформы; на автономном стенде его нет, и шаг ушёл бы в отказ
+    # соединения. Путь `/iam/v1/internal/*` подаёт собственный внутренний
+    # REST-фронт службы (ban #6), и переменную называет автор — свою.
     return require_env_url(
-        "internalBaseUrl", path,
+        "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 def poll_check_allowed_step(name, subject_expr, object_expr, relation,
@@ -382,7 +384,9 @@ def resolve_binding_id_step(name, resource_id_tmpl, subject_env_key, out_env_key
             f"  pm.environment.set('{started_var}', pm.info.requestName);",
             f"  pm.environment.unset('{out_env_key}');",
             "}",
-            "const _base = pm.environment.get('baseUrl') || pm.variables.get('baseUrl') || '';",
+            # Адрес — собственного фронта (kaname#398): модуль переадресован
+            # целиком (`address_own_front` в конце), и обход не возвращает шаг на край.
+            "const _base = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
             f"const _rid = pm.variables.replaceIn('{resource_id_tmpl}');",
             f"const _tok = pm.environment.get('{tok_var}') || '';",
             f"pm.request.url = _base + '/iam/v1/accessBindings:listByScope?resourceType={resource_type}'",
@@ -1244,3 +1248,11 @@ CASES.append(Case(
 # `bootstrap-approveB` is removed from the known-RED whitelist in
 # scripts/assert-suites-green.sh by the same change (the list shrinks, never grows).
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

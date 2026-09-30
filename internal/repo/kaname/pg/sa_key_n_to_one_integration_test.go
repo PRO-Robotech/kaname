@@ -55,7 +55,6 @@ func TestSAKeyNToOne_ConcurrentIssue_NoSvaUnique(t *testing.T) {
 			CredentialKind:  domain.CredentialKindKeypair,
 			ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 			SvaID:           svaID,
-			OAuthClientID:   domain.OAuthClientID("hydra-soc-" + suffix),
 			Description:     domain.Description("ci key " + suffix),
 			CreatedByUserID: uid,
 			PublicKeyPEM:    "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",

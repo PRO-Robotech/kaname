@@ -39,8 +39,10 @@
 # гейт (tests/newman/scripts/assert-suites-green.sh) докладывает `<stem>(no-report)` и роняет
 # прогон. «Не смогли создать условие» — открытый долг, а не зелёная суита.
 #
-# Запуск: cwd = tests/newman
-#   [SETUP_NS=kacho] [DELAY=…] ./scripts/run-ceremony.sh
+# Запуск: cwd = tests/newman; адреса стенда — переменными `KANAME_CEREMONY_*`
+# (см. шаг посева ниже), взаимный TLS фронтов — `EXTRA_NEWMAN_ARGS`:
+#   [SETUP_NS=kacho] [DELAY=…] [EXTRA_NEWMAN_ARGS='--ssl-client-cert … --ssl-client-key …
+#     --ssl-extra-ca-certs …'] ./scripts/run-ceremony.sh
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -101,8 +103,16 @@ if [ ! -f "$SEED" ]; then
   exit 3
 fi
 
-echo "[ceremony] посев церемонии: $SEED"
-if ! SETUP_NS="${SETUP_NS:-kacho}" python3 "$SEED"; then
+echo "[ceremony] посев церемонии: $SEED --wave"
+# Режим `--wave` — тот, что создаёт условие ВСЕХ коллекций волны: люди,
+# предъявители обоих уровней, идентификаторы (без флага посев пишет одного
+# человека стенда чарта уровня «1», и половина волны упала бы на пустых ключах).
+# Адреса поверхностей посев берёт из окружения — `KANAME_CEREMONY_LANE_URL`,
+# `…_ISSUANCE_URL`, `…_OWN_URL`, `…_GRPC_ADDR`, `…_PKI`, `…_MAILBOX_URL` (шапка
+# `seed_ceremony.py`). Конвейер зовёт посев и прогонщик отдельными шагами
+# задания `stand-ceremony` — у каждого свой исход, а прогон засчитывается
+# переписью долга по команде прогонщика.
+if ! SETUP_NS="${SETUP_NS:-kacho}" python3 "$SEED" --wave; then
   echo "===== ВОЛНА ЦЕРЕМОНИИ: ПОСЕВ УПАЛ =====" >&2
   echo "Церемония не довела предъявителя. Коллекции НЕ запускались: прогон против" >&2
   echo "непосеянного условия — это не красный результат и не зелёный, результата нет." >&2

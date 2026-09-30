@@ -1,0 +1,2 @@
+{"path":"kaname/cloud/iam/v1/credential_kind.proto","start_line":63,"start_column":30,"end_line":63,"end_column":31,"type":"ENUM_VALUE_SAME_NAME","message":"Enum value \"3\" on enum \"CredentialKind\" changed name from \"CREDENTIAL_KIND_FEDERATED\" to \"CREDENTIAL_KIND_EXTERNAL\"."}
+{"path":"kaname/cloud/iam/v1/credential_kind.proto","start_line":68,"start_column":29,"end_line":68,"end_column":30,"type":"ENUM_VALUE_SAME_NAME","message":"Enum value \"4\" on enum \"CredentialKind\" changed name from \"CREDENTIAL_KIND_LEGACY\" to \"CREDENTIAL_KIND_RETIRED\"."}

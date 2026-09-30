@@ -113,9 +113,9 @@ func insertSecretCred(t *testing.T, db *sql.DB) {
 		hash[i] = byte(i + 3)
 	}
 	_, err := db.Exec(`INSERT INTO kaname.service_account_oauth_clients
-	    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
+	    (id, sva_id, created_by_user_id, credential_kind, secret_hash,
 	     public_key_pem, key_algorithm, trusted_subjects, expires_at)
-	  VALUES ('soc_00000000000000dwn', 'sva00000000000000dwn', NULL, 'usr00000000000000dwn',
+	  VALUES ('soc_00000000000000dwn', 'sva00000000000000dwn', 'usr00000000000000dwn',
 	          'SECRET', $1, '', '', '[]'::jsonb, now() + interval '30 days')`, hash)
 	require.NoError(t, err,
 		"Given неисполним, если законная строка вида SECRET не записывается")

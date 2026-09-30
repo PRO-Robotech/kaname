@@ -27,14 +27,14 @@ Covered RPCs:
 Неразличимость утверждается СРАВНЕНИЕМ ТЕЛ, а не только совпадением кодов: проба,
 сверяющая один код, зеленеет на любом расхождении текста.
 
-Что нормализуется и почему это НЕ ослабление. Отказ края несёт область запроса
-дословно — `account:<id>` в `violations[].subject` и в `metadata.resource`. Это эхо
+Что нормализуется и почему это НЕ ослабление. Отказ двери прав (с kaname#398 — своей
+двери службы на собственном фронте) несёт область запроса дословно — `account:<id>` в `violations[].subject` и в `metadata.resource`. Это эхо
 того, что вызывающий прислал САМ, и оракулом быть не может: два вызова несут два
 разных адреса, потому что он их и назвал. Побайтовое равенство таких тел невыполнимо
 by construction, поэтому сверяется равенство ПОСЛЕ подстановки `<ACCT>` вместо эха —
 и отдельным утверждением проверяется, что иных вхождений идентификатора в теле НЕТ.
 Замер, из которого это выведено: два тела отказа, отрендеренных одним и тем же кодом
-края на двух разных адресах, различаются РОВНО двумя вхождениями идентификатора;
+двери на двух разных адресах, различаются РОВНО двумя вхождениями идентификатора;
 сообщение, тип нарушения, описание, субъект, действие и `reason` совпадают дословно.
 
 CRUD fixture dependency:
@@ -51,9 +51,9 @@ CRUD fixture dependency:
   jwtNoBindings                 — аутентифицирован, прав нигде нет
   jwtHumanCeremonyStepUp / ceremonyUserId / ceremonyAccountId — ЧЕЛОВЕК и аккаунт,
       которым он владеет. Единственный человеческий вызывающий набора; условие
-      создаётся волной церемонии (`scripts/run-ceremony.sh`, WAVE 4), а сама
-      коллекция попадает в неё ВЫВОДОМ ИЗ ДЕРЕВА — по тому, что шаг называет
-      предъявителя из `CEREMONY_ONLY_ENV` (`PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py`).
+      создаётся волной церемонии (`tests/authz-fixtures/seed_ceremony.py --wave`,
+      задание `stand-ceremony`), а сама коллекция попадает в неё ВЫВОДОМ ИЗ ДЕРЕВА —
+      по ключу предъявителя человека (`tests/authz-fixtures/ceremony_credentials.py --stems`).
 
 verifies: IAM-ID-2-01, -02, -03, -04, -05, -12, -13.
 """
@@ -93,8 +93,8 @@ def _same_body_as(var, label):
 def _same_body_modulo_scope(var, saved_scope_js, this_scope_js, label):
     """Сверка тел ПО СУЩЕСТВУ: нормализуется ЭХО СОБСТВЕННОГО ВВОДА вызывающего.
 
-    Отказ края несёт область запроса дословно — `account:<id>` в `violations[].subject`
-    и в `metadata.resource`. Это ЭХО ТОГО, ЧТО ВЫЗЫВАЮЩИЙ ПРИСЛАЛ САМ, и оракулом оно
+    Отказ двери прав несёт область запроса дословно — `account:<id>` в
+    `violations[].subject` и в метаданных `ErrorInfo`. Это ЭХО ТОГО, ЧТО ВЫЗЫВАЮЩИЙ ПРИСЛАЛ САМ, и оракулом оно
     быть не может: два вызова несут два разных адреса, потому что их назвал он.
     Требовать от таких тел побайтового совпадения значит требовать невыполнимого от
     любого ответа, который область запроса называет.
@@ -126,7 +126,7 @@ def _grpc_code(code, label):
     ]
 
 
-# gRPC-коды в теле ответа края.
+# gRPC-коды в теле ответа двери.
 CODE_INVALID_ARGUMENT = 3
 CODE_NOT_FOUND = 5
 CODE_PERMISSION_DENIED = 7
@@ -278,7 +278,7 @@ CASES.append(Case(
             # шагам выше — `UserService/Invite` несёт `required_acr_min: "2"`.
             # Личность та же: `jwtHumanCeremony` и `jwtHumanCeremonyStepUp` —
             # один человек `ceremonyUserId`, различающийся только уровнем входа
-            # (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`, `lvl1`/`lvl2`),
+            # (`tests/authz-fixtures/seed_ceremony.py --wave`: `l1`/`l2` одного человека),
             # поэтому допуск `viewer` @ `account` у шага не меняется.
             auth="jwtHumanCeremony",
             test_script=[
@@ -334,7 +334,7 @@ CASES.append(Case(
                 *assert_status(403),
                 *_grpc_code(CODE_PERMISSION_DENIED, "код — PERMISSION_DENIED, а не скрывающий NOT_FOUND"),
                 "pm.test('отказ НЕ называет ни отношения, ни причины отказа модели — "
-                "край подменяет её неразглашающим описанием', () => {",
+                "дверь прав подменяет её неразглашающим описанием', () => {",
                 "  const raw = pm.response.text();",
                 "  const t = raw.toLowerCase();",
                 "  pm.expect(t, raw).to.not.include('viewer');",
@@ -399,7 +399,7 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 CASES.append(Case(
     id="IAM-ID2-NEG-FORM",
-    title="Негодная форма отвергается синхронно: идентификатор членства и терм фильтра — сервисом, идентификатор аккаунта — краем",
+    title="Негодная форма отвергается синхронно сервисом: идентификатор членства и терм фильтра",
     classes=["NEG", "VAL"],
     priority="P0",
     steps=[
@@ -456,43 +456,13 @@ CASES.append(Case(
                             "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: форма и существование — РАЗНЫЕ полосы"),
             ],
         ),
-        Step(
-            name="malformed-account-id-rights-holder",
-            method="GET",
-            path="/iam/v1/accounts/not-an-account/memberships",
-            auth="jwtAccountAdminA",
-            test_script=[
-                *assert_status(400),
-                *_grpc_code(CODE_INVALID_ARGUMENT, "негодный accountId — отказ КРАЯ, до модели прав"),
-                *_save_body("mbrMalformedAcctBody"),
-            ],
-        ),
-        Step(
-            name="malformed-account-id-no-rights",
-            method="GET",
-            path="/iam/v1/accounts/not-an-account/memberships",
-            auth="jwtNoBindings",
-            test_script=[
-                *assert_status(400),
-                *_same_body_as(
-                    "mbrMalformedAcctBody",
-                    "исход НЕ является функцией прав: у вызывающего без единой выдачи ответ тот же, "
-                    "потому что права не спрашиваются вовсе",
-                ),
-            ],
-        ),
-        Step(
-            name="control-wellformed-absent-account-reaches-the-model",
-            method="GET",
-            path=f"/iam/v1/accounts/{ABSENT_ACCOUNT}/memberships",
-            auth="jwtAccountAdminA",
-            test_script=[
-                *assert_status(403),
-                *_grpc_code(CODE_PERMISSION_DENIED,
-                            "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: well-formed accountId рубеж формы ПРОХОДИТ — "
-                            "иначе отрицание зеленело бы на крае, отвергающем ВСЯКИЙ accountId"),
-            ],
-        ),
+        # ПОЛОВИНА «ИДЕНТИФИКАТОР АККАУНТА — КРАЕМ» ВЫНЕСЕНА (kaname#398). Негодный
+        # `accountId` в пути — цель авторизации, и пару 400/3 до модели прав
+        # производит край платформы; собственный фронт службы на том же входе
+        # отвечает 403/7 от проверки прав (замер на автономном стенде). Шаги
+        # перенесены дословно в `iam-account-id-edge-format.py`
+        # (`IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID`, дом — платформа); порядок «форма →
+        # права» на собственном фронте — предмет PRO-Robotech/kaname#168.
     ],
 ))
 
@@ -548,7 +518,7 @@ CASES.append(Case(
             auth="jwtNoBindings",
             test_script=[
                 *assert_status(403),
-                *_grpc_code(CODE_PERMISSION_DENIED, "край отвечает РАНЬШЕ сервиса"),
+                *_grpc_code(CODE_PERMISSION_DENIED, "дверь прав отвечает РАНЬШЕ разбора страницы"),
                 *_save_body("mbrNoRightsBody"),
             ],
         ),
@@ -715,3 +685,11 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

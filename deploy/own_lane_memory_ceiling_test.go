@@ -36,10 +36,10 @@
 //	    арифметики здесь не заводится намеренно — она разошлась бы со стражем
 //	    молча, на первой же смене потолка формата записи пароля.
 //
-// Р2 рендерится с накладкой `own` (`ownPostureOverlay`: посадка, включённый
-// токен-эндпоинт и его величины — без эндпоинта чарт `own` не собирает, задача
-// #337): судится тот вход, который получит установка, переведённая на `own`
-// поверх боевого профиля.
+// Р2 рендерится с накладкой оператора (`operatorOverlay`: включённый
+// токен-эндпоинт и его величины — без эндпоинта чарт боевую установку не
+// собирает, задача #337): судится тот вход, который получит установка поверх
+// боевого профиля.
 // Оба вердикта берутся с РЕНДЕРА, а не с текста профиля: ключ, стоящий под
 // условием, в тексте есть, а в рендере его может не быть.
 //
@@ -214,7 +214,7 @@ func TestDeliveredChartDeclaresTheServiceContainerMemoryLimit(t *testing.T) {
 
 // TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard — Р2.
 func TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard(t *testing.T) {
-	sets := withOwnPosture(minimalOperatorCoordinates...)
+	sets := withOperatorOverlay(minimalOperatorCoordinates...)
 	rendered := renderStandaloneChart(t, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	login := loginLaneOfRender(t, rendered)

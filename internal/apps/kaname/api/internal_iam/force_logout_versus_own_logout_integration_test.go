@@ -499,7 +499,6 @@ func TestLogoutVersusForceLogout_KN_SER_05_3_ContestedRoundsAgreeWithTheRecord(t
 		barrier := newSERStartBarrier()
 		steps := &serStepLog{}
 		h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-			WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(sc.pool)).
 			WithAdminChecker(allowAdmin{}).
 			WithOperations(ops).
 			WithOwnSessions(serForceSide{inner: kanamepg.NewHumanSessionRepo(sc.pool), barrier: barrier, steps: steps})

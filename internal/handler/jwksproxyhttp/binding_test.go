@@ -1,14 +1,12 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// binding_test.go — F1-44 (замок «только внутри» на КАЖДОМ пути публикации) и
+// binding_test.go — F1-44 (замок «только внутри» на пути публикации) и
 // F1-46 (привязка «издатель → путь» на стороне публикатора, включая стража
 // старта).
 package jwksproxyhttp_test
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,20 +17,19 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 )
 
-// twoRecordBinding — привязка публикатора с ДВУМЯ записями: наша (проекция
-// ключницы) и зеркало прежнего издателя, сохраняемое до F4.
-func twoRecordBinding(t *testing.T) jwksproxyhttp.Binding {
+// ownRecordBinding — привязка публикатора с его ЕДИНСТВЕННОЙ записью: наша
+// проекция ключницы. Вторая запись (зеркало прежнего издателя) снята вместе с
+// ним (kaname#361), и привязка её отвергает — binding_single_issuer_test.go.
+func ownRecordBinding(t *testing.T) jwksproxyhttp.Binding {
 	t.Helper()
 	ours := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
 		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}},
 	})
-	mirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{UpstreamURL: "https://provider.invalid/jwks"})
 	b, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
 		{Issuer: "https://kaname.kacho.local", Path: "/.well-known/kaname/jwks.json", Handler: ours},
-		{Issuer: "https://provider.kacho.local", Path: jwksproxyhttp.WellKnownJWKSPath, Handler: mirror},
 	})
 	if err != nil {
-		t.Fatalf("привязка из двух законных записей обязана строиться: %v", err)
+		t.Fatalf("привязка из нашей законной записи обязана строиться: %v", err)
 	}
 	return b
 }
@@ -43,7 +40,7 @@ func twoRecordBinding(t *testing.T) jwksproxyhttp.Binding {
 // где нет вообще ничего, а «резолвится внутри» ничего не говорит о внешней
 // поверхности.
 func TestBinding_F1_44_EveryPublicationPathIsInternalOnly(t *testing.T) {
-	b := twoRecordBinding(t)
+	b := ownRecordBinding(t)
 
 	internal, err := jwksproxyhttp.NewMux(b)
 	if err != nil {
@@ -54,9 +51,9 @@ func TestBinding_F1_44_EveryPublicationPathIsInternalOnly(t *testing.T) {
 	}))
 
 	// Перечень проверяемых путей ВЫВОДИТСЯ из привязки, а не выписан в пробе:
-	// выписанный разошёлся бы с ней молча при появлении третьей записи.
+	// выписанный разошёлся бы с ней молча.
 	paths := b.Paths()
-	if len(paths) != 2 {
+	if len(paths) != 1 {
 		t.Fatalf("привязка обязана давать перечень путей, получено %v", paths)
 	}
 
@@ -105,7 +102,7 @@ func TestBinding_F1_44_EveryPublicationPathIsInternalOnly(t *testing.T) {
 
 // TestBinding_F1_46_RecordsAreDeclaredNotDerived — F1-46, сторона публикатора.
 func TestBinding_F1_46_RecordsAreDeclaredNotDerived(t *testing.T) {
-	b := twoRecordBinding(t)
+	b := ownRecordBinding(t)
 
 	// Then — НАША запись содержит только наши ключи, чужих в ней нет.
 	internal, err := jwksproxyhttp.NewMux(b)
@@ -161,11 +158,11 @@ func TestBinding_F1_46_BootGuardRefusesIncompleteBinding(t *testing.T) {
 		"издатель пуст": {
 			{Issuer: "", Path: "/a.json", Handler: ours},
 		},
-		"два издателя на один путь": {
+		"два издателя на один путь — вторая запись": {
 			{Issuer: "https://a", Path: "/a.json", Handler: ours},
 			{Issuer: "https://b", Path: "/a.json", Handler: ours},
 		},
-		"один издатель дважды": {
+		"один издатель дважды — вторая запись": {
 			{Issuer: "https://a", Path: "/a.json", Handler: ours},
 			{Issuer: "https://a", Path: "/b.json", Handler: ours},
 		},
@@ -180,53 +177,12 @@ func TestBinding_F1_46_BootGuardRefusesIncompleteBinding(t *testing.T) {
 		}
 	}
 
-	// Положительный контроль на ОБЕИХ мощностях: с полной привязкой из одной и
-	// из двух записей построение проходит.
+	// Положительный контроль: полная привязка из одной записи строится. Две
+	// записи отвергаются всегда — по мощности, а не по форме
+	// (binding_single_issuer_test.go).
 	if _, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
 		{Issuer: "https://a", Path: "/a.json", Handler: ours},
 	}); err != nil {
 		t.Fatalf("привязка из одной законной записи обязана строиться: %v", err)
 	}
-	if _, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
-		{Issuer: "https://a", Path: "/a.json", Handler: ours},
-		{Issuer: "https://b", Path: "/b.json", Handler: ours},
-	}); err != nil {
-		t.Fatalf("привязка из двух законных записей обязана строиться: %v", err)
-	}
-}
-
-// TestBinding_F1_46_OneRecordFailingDoesNotCloseTheOther — §6.5: «целиком»
-// относится к ЗАПИСИ. Недоступность одной записи не делает недоступной другую,
-// иначе доступность прежнего провайдера стала бы условием проверки НАШИХ
-// токенов — то есть усилила бы зависимость, ради снятия которой фаза делается.
-func TestBinding_F1_46_OneRecordFailingDoesNotCloseTheOther(t *testing.T) {
-	ours := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
-		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}},
-	})
-	brokenMirror := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
-		Source: stubKeySet{err: errors.New("provider is unavailable")},
-	})
-	b, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
-		{Issuer: "https://kaname.kacho.local", Path: "/ours.json", Handler: ours},
-		{Issuer: "https://provider", Path: "/mirror.json", Handler: brokenMirror},
-	})
-	if err != nil {
-		t.Fatalf("привязка: %v", err)
-	}
-	mux, err := jwksproxyhttp.NewMux(b)
-	if err != nil {
-		t.Fatalf("mux: %v", err)
-	}
-
-	res := httptest.NewRecorder()
-	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/mirror.json", nil))
-	if res.Code == http.StatusOK {
-		t.Fatalf("недоступная запись обязана отказывать")
-	}
-	res = httptest.NewRecorder()
-	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/ours.json", nil))
-	if res.Code != http.StatusOK {
-		t.Fatalf("наша запись закрылась вместе с чужой (код %d) — это усилило бы зависимость от прежнего провайдера", res.Code)
-	}
-	_ = context.Background()
 }

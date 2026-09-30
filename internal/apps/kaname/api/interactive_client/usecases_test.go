@@ -311,9 +311,11 @@ func createReq() *iamv1.CreateInteractiveClientRequest {
 // «признак, если он есть, доезжает кодом», и НЕ утверждает, что его кто-нибудь
 // ставит. Ровно это и было предметом задачи #2481: производитель признака не
 // ставил, отказ уходил внутренней ошибкой, а проба оставалась зелёной — по
-// подделке, а не по продукту. Что признак ставит настоящий производитель,
-// доказывает `internal/clients/hydra_interactive_clients_unavailable_test.go`;
-// две половины вместе и составляют цепь.
+// подделке, а не по продукту. Производителем признака был клиент внешнего
+// поставщика; он снят вместе с посадкой этого поставщика (kaname#363), и
+// собственный исполнитель — реестр — признака недоступности не ставит. Проба
+// держит оставшуюся половину: признак, если придёт от любого исполнителя порта,
+// доезжает кодом и не оставляет строки.
 func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 	repo := &insertFailsRepo{}
 	prov := &failingProvider{registerErr: iamerr.Wrapf(iamerr.ErrUnavailable, "identity provider unavailable")}
@@ -342,7 +344,7 @@ func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 // не меняет ни одного из входов, и вызывающий повторял бы вечно (задача #2481).
 func TestCreate_ProviderRejectedTheInput_IsNotAnnouncedRetryable(t *testing.T) {
 	repo := &insertFailsRepo{}
-	prov := &failingProvider{registerErr: errors.New("hydra admin api: status 400: bad redirect_uri")}
+	prov := &failingProvider{registerErr: errors.New("provider admin api: status 400: bad redirect_uri")}
 	ops := &fakeOps{}
 
 	_, err := NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil).

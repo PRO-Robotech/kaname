@@ -77,7 +77,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | # | что в дереве | координата | что оно делает сегодня | чем измерено |
 |---|---|---|---|---|
 | 1 | способ, который объявляет собственный исполнитель заведения | `internal/repo/kaname/pg/own_interactive_client_provider.go` (константа — строка 94, ответ `Register` — строка 145) | объявляет `none`; шапка файла называет публичность решением, принятым вопреки Р3 | `git grep -n ownPublicClientAuthMethod origin/366 -- internal/` → 3 строки |
-| 2 | способ адаптера внешнего поставщика | `internal/clients/hydra_interactive_clients.go` (строка 126) | объявляет `none` | `git grep -n 'TokenEndpointAuthMethod: "none"' origin/366 -- internal/clients/hydra_interactive_clients.go` → 1 |
+| 2 | способ адаптера внешнего поставщика | `PRO-Robotech/kaname@fc9f5aff1:internal/clients/hydra_interactive_clients.go` (строка 126); адаптер снят вместе с посадкой внешнего поставщика (kaname#363) | объявлял `none` | `git show fc9f5aff1:internal/clients/hydra_interactive_clients.go \| grep -c 'TokenEndpointAuthMethod: "none"'` → 1 |
 | 3 | словарь способов и связь с материалом | `internal/migrations/20260923230023_interactive_client_declares_how_it_authenticates.sql` | принимает `none`, `client_secret_basic`, `client_secret_post`; материал секрета лежит только у способа секретом; обратной связи «способ секретом ⟹ материал в строке» нет намеренно (клиент внешнего поставщика) | чтение миграции: ограничения `interactive_clients_auth_method_ck`, `interactive_clients_secret_verifier_method_ck` |
 | 4 | колонка проверочного значения | `internal/migrations/20260920175118_interactive_client_carries_its_secret_verifier.sql` | argon2id разметкой PHC, момент установки стоит ровно при непустом значении; секрета в открытом виде не хранит | ограничения `interactive_clients_secret_verifier_form_ck`, `interactive_clients_secret_verifier_stamp_ck` |
 | 5 | писатель проверочного значения | `internal/repo/kaname/pg/oauth_ceremony_repo.go` (`SetClientSecretVerifier`) | объявлен, прод-вызывающих **ноль**; единственный писатель строки `InteractiveClientRepo.Insert` (`internal/repo/kaname/pg/interactive_client_repo.go`) колонку не называет | `git grep -n SetClientSecretVerifier origin/366 -- '*.go' ':!*_test.go'` → 3 строки: объявление и два комментария |
@@ -226,7 +226,7 @@ integration (testcontainers, применённые миграции, компо
 
 **Общие Given — все конструируются посевом, ни одно не берётся со стенда на веру:**
 - *посадка `own`* — I: композиционный корень выбирает собственный реестр (как
-  `TestCompositionRoot_InteractiveClientCreateHasAnExecutorUnderOwnPosture`); E: стенд задания
+  `TestCompositionRoot_InteractiveClientCreateHasAnExecutor`); E: стенд задания
   `chart-own`;
 - *вызывающий* — машинный принципал `system_admin` на внутреннем листенере (посев учётки бутстрапа;
   пол `"2"` у `Create`/`Update`/`Delete` снимает только машинный принципал — довод IAM-INT-1, здесь

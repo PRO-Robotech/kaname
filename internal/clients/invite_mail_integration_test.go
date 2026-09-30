@@ -40,9 +40,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/observability"
 	"github.com/PRO-Robotech/corelib/outbox/drainer"
 	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
+	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/invite_mail_outbox"
@@ -313,7 +315,20 @@ func (r *sentRecorder) first() clients.MailEvent {
 	return r.sent[0]
 }
 
-func setupInviteMailDB(t *testing.T) *pgxpool.Pool { return setupCompensationDB(t) }
+// setupInviteMailDB — своя база на общем Postgres пакета; путь поиска — тот же,
+// что у прод-бинаря, и объявлен `pgtest.Config.SearchPath` этого пакета. Прежде
+// тело жило у набора очереди компенсаций, снятого вместе с ней (kaname#363).
+func setupInviteMailDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test in -short mode (postgres)")
+	}
+	dsn := pgtest.NewDB(t)
+	pool, err := coredb.NewPool(context.Background(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	return pool
+}
 
 func countInviteMail(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID string) int {
 	t.Helper()

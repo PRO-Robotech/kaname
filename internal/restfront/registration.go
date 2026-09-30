@@ -78,8 +78,8 @@ func registerInternalRESTServices(
 		// Наша сессия человека (Ф3, kacho#1269). Привязок ноль — внешнего пути у
 		// `Resolve` контракт не объявляет: край спрашивает его gRPC на каждом
 		// запросе с носителем, и HTTP-двери у этого вопроса нет. В перечне стоит
-		// по той же причине, что соседи с нулём привязок. Под посадкой `external`
-		// служба на слушателе не поднята, и привязка ведёт к `Unimplemented`.
+		// по той же причине, что соседи с нулём привязок. Служба поднимается на
+		// слушателе вместе с полосой входа на каждом старте.
 		{"InternalHumanSessionService", iamv1.RegisterInternalHumanSessionServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
@@ -122,8 +122,7 @@ func registerPublicRESTServices(
 		{"SAKeyService", iamv1.RegisterSAKeyServiceHandlerFromEndpoint},
 		{"UserTokenService", iamv1.RegisterUserTokenServiceHandlerFromEndpoint},
 		// Ключи доступа (Ф7, kacho#1273): шесть глаголов на публичном
-		// слушателе. Под посадкой `external` служба на слушателе не поднята, и
-		// привязка ведёт к `Unimplemented`.
+		// слушателе. Служба поднимается вместе с полосой входа на каждом старте.
 		{"AccessKeyService", iamv1.RegisterAccessKeyServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {

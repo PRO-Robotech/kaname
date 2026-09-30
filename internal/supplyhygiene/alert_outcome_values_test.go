@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ
 //
-// Четыре ряда исходов несут ЗАКРЫТЫЕ словари значений, объявленные в коде.
+// Три ряда исходов несут ЗАКРЫТЫЕ словари значений, объявленные в коде.
 // Запрос дежурного и правило тревоги повторяют значение строкой PromQL — то есть
 // словарь оказывается в двух местах. Переименование в коде тогда не двигает
 // правило, и правило перестаёт совпадать с чем-либо: отбор даёт пустой ряд,
@@ -32,8 +32,9 @@
 //
 // Она судит СУЩЕСТВОВАНИЕ значения в словаре, а не верность его толкования:
 // страница вправе объяснить существующий исход неправильно. Она также не судит
-// ряды, чьего словаря в таблице ниже нет, — а таблица перечисляет ровно четыре
-// ряда, у которых закрытый словарь объявлен кодом.
+// ряды, чьего словаря в таблице ниже нет, — а таблица перечисляет ровно три
+// ряда, у которых закрытый словарь объявлен кодом. Четвёртым был ряд обращений
+// к хукам внешнего поставщика; он снят вместе с хуками (kaname#363).
 package supplyhygiene
 
 import (
@@ -49,7 +50,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/expiredcredsweep"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
-	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
@@ -62,7 +62,6 @@ import (
 func outcomeDictionaries() map[string][]string {
 	return map[string][]string{
 		metrics.ReadinessChecksMetric:                metrics.ReadinessOutcomes,
-		metrics.AuthnHookRequestsMetric:              iamhooks.LaneOutcomes(),
 		metrics.ExpiredCredentialReclaimPassesMetric: expiredcredsweep.Outcomes(),
 		metrics.ClientTokenOutcomesMetric:            clienttokenhttp.DeclaredOutcomes(),
 	}

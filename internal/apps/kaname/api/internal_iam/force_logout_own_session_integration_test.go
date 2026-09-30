@@ -62,7 +62,6 @@ import (
 func ownPostureForceLogoutHandler(t *testing.T, pool *pgxpool.Pool) *internaliam.Handler {
 	t.Helper()
 	return internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
 		WithAdminChecker(allowAdmin{}).
 		WithOperations(operations.NewRepo(pool, "kaname")).
 		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))

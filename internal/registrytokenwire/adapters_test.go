@@ -50,7 +50,7 @@ func TestHydraExchange_Happy(t *testing.T) {
 // TestHydraExchange_UnavailableMapsToIssuerUnavailable — a Hydra-unavailable
 // client error maps to the use-case's fail-closed 503 sentinel.
 func TestHydraExchange_UnavailableMapsToIssuerUnavailable(t *testing.T) {
-	fc := &fakeProviderTokenClient{err: clients.ErrHydraUnavailable}
+	fc := &fakeProviderTokenClient{err: clients.ErrProviderTokenUnavailable}
 	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
 	if !errors.Is(err, registrytokenuc.ErrIssuerUnavailable) {
 		t.Fatalf("err = %v; want ErrIssuerUnavailable", err)
@@ -60,7 +60,7 @@ func TestHydraExchange_UnavailableMapsToIssuerUnavailable(t *testing.T) {
 // TestHydraExchange_RejectedMapsToInvalidCredentials — a Hydra rejection maps to
 // the credential-invalid sentinel (→ 401 challenge upstream), not a 503.
 func TestHydraExchange_RejectedMapsToInvalidCredentials(t *testing.T) {
-	fc := &fakeProviderTokenClient{err: clients.ErrHydraRejected}
+	fc := &fakeProviderTokenClient{err: clients.ErrProviderTokenRejected}
 	_, err := NewHydraExchange(fc).Exchange(context.Background(), registrytokenuc.ExchangeInput{ClientAssertion: "a"})
 	if !errors.Is(err, registrytokenuc.ErrInvalidCredentials) {
 		t.Fatalf("err = %v; want ErrInvalidCredentials", err)

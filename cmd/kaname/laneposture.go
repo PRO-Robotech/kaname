@@ -43,7 +43,7 @@ import (
 // (wiredSignInMethods). Подаются параметром по той же причине, что и каталог:
 // перечень предъявимых уровней ВЫВОДИТСЯ из них правилом (приёмка Ф11, Р9), и
 // сценарий «провязан только пароль» обязан быть вызываемым, а не описываемым.
-func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensigner.Signer,
+func observeLaneWiring(ctx context.Context, signer *tokensigner.Signer,
 	signIn []assurance.Method, lane *loginLane, logger *slog.Logger,
 ) config.LaneWiring {
 	human := laneWiringOf(lane)
@@ -52,34 +52,18 @@ func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensign
 
 		// СВОИ способы входа человека и СВОЯ сессия — НАБЛЮДЕНИЕ за полосой
 		// входа паролем (Ф3, kacho#1269; хранилище способов входа — Ф2,
-		// kacho#1268). Полоса строится корнем только под `own`
-		// (`buildLoginLane`), и оба поля читают её провязку: хранилище сессии и
-		// хранилище способов входа собраны — `true`; полосы нет — `false`.
-		// Литерала здесь нет ни в одну сторону: под `external` полоса не
-		// строится, и наблюдатель честно сообщает, что человека своей полосой
-		// служба не впустит.
+		// kacho#1268). Оба поля читают провязку полосы (`buildLoginLane`):
+		// хранилище сессии и хранилище способов входа собраны — `true`; полосы
+		// нет — `false`. Литерала здесь нет ни в одну сторону: полоса, которую
+		// корень не собрал, доложена несобранной, и страж сборки откажет.
 		HumanCredentialsWired: human.HumanCredentialsWired,
 		HumanSessionsWired:    human.HumanSessionsWired,
 
-		// ДОРОГА К ВНЕШНЕМУ ПОСТАВЩИКУ И ЗАПИСЬ ЗЕРКАЛА ЕГО КЛЮЧЕЙ — ТЕПЕРЬ
-		// НАБЛЮДЕНИЕ, А НЕ ЛИТЕРАЛ (задача kaname#21; kacho#2489 была закрыта
-		// при живом предмете, преемник — та задача).
-		//
-		// ЗДЕСЬ СТОЯЛИ ДВА `true`, И ОНИ БЫЛИ НЕВЕРНЫ ДВАЖДЫ. Литерал не мог
-		// покраснеть ни при какой посадке — то есть наблюдатель отчитывался о
-		// намерении вместо исхода, ровно тем классом, ради которого самоотчёт о
-		// посадке и заведён. Сверх того второй литерал лгал и на полосе
-		// `external`: при незаданном слушателе публикатора блок публикации не
-		// исполняется ВОВСЕ, и запись зеркала не добавляется никуда, а поле
-		// докладывало её опубликованной.
-		//
-		// Оба значения берутся у ТЕХ ЖЕ предикатов, которыми корень решает,
-		// строить и публиковать ли. Один предикат, два читателя — доложенное и
-		// сделанное разойтись не могут by construction.
-		ProviderAdminHopBuilt:         providerAdminHopIsBuilt(cfg),
-		ProviderKeySetMirrorPublished: providerKeySetMirrorIsPublished(cfg),
+		// ДОРОГИ К ВНЕШНЕМУ ПОСТАВЩИКУ здесь больше нет — ни в наблюдении, ни в
+		// самоотчёте: корень её не строит ни на каком старте, и клиента, которым
+		// её строили, в дереве нет (kaname#363). Докладывать о ней нечего.
 
-		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ, — ВЫВЕДЕНЫ
+		// Уровни, которые полоса своего входа умеет предъявить ЧЕЛОВЕКУ, — ВЫВЕДЕНЫ
 		// ПРАВИЛОМ из провязанных способов, взятых в лучшем исходе их флагов
 		// (приёмка Ф11, Р9). Здесь стоял литерал «ни одного»; литерал не мог
 		// покраснеть ни при какой провязке — наблюдатель отчитывался о
@@ -133,7 +117,5 @@ func laneWiringCensus(w config.LaneWiring) []any {
 		"own_mint_signer_wired", w.OwnMintSignerWired,
 		"human_credentials_wired", w.HumanCredentialsWired,
 		"human_sessions_wired", w.HumanSessionsWired,
-		"provider_admin_hop_built", w.ProviderAdminHopBuilt,
-		"provider_keyset_mirror_published", w.ProviderKeySetMirrorPublished,
 	}
 }

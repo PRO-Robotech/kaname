@@ -6,10 +6,11 @@
 // the identity provider.
 //
 // It exists because there were three hops and one of them had the property. The
-// admin hop was moved to TLS with a pinned anchor and a boot guard; the two hops to
-// the provider's PUBLIC listener — the token exchange and the JWKS upstream — were
-// still built as `&http.Client{Timeout: …}`, i.e. with no way to be given an anchor
-// at all. That is not merely a missing knob: it made the obvious fix impossible,
+// admin hop (since removed with the external-provider posture, kaname#363) was
+// moved to TLS with a pinned anchor and a boot guard; the two hops to the
+// provider's PUBLIC listener — the token exchange and the key-set mirror's
+// upstream (since removed with the mirror, kaname#361) — were still built as
+// `&http.Client{Timeout: …}`, i.e. with no way to be given an anchor at all. That is not merely a missing knob: it made the obvious fix impossible,
 // because flipping such an address to https lands on the SYSTEM roots, which an
 // internal-CA certificate never chains to. So "cannot be done" was true of the
 // code and read as true of the platform.
@@ -31,16 +32,11 @@ import (
 // Settings naming each hop's trust anchor. Held as constants so a refusal names
 // the thing an operator edits, in both the YAML and the ENV spelling.
 const (
-	adminHopCASetting = "authn.hydra-admin-ca-file (env KANAME_HYDRA_ADMIN_CA_FILE)"
 	// #nosec G101 -- the name of a setting an operator edits, not a credential.
 	// The value is a CA *file path* setting for the token-exchange hop; the rule
 	// matches on the identifier containing "token". Same class, and same treatment,
 	// as the header/metadata key names in gateway/internal/principalmeta/keys.go.
 	tokenHopCASetting = "authn.hydra-token-ca-file (env KANAME_HYDRA_TOKEN_CA_FILE)"
-	// JWKSHopCASetting is exported because the JWKS upstream client is assembled
-	// at the composition root (the mirror handler takes an injected client), so
-	// the refusal has to be able to name the setting from there.
-	JWKSHopCASetting = "authn.hydra-jwks-ca-file (env KANAME_HYDRA_JWKS_CA_FILE)"
 )
 
 // ProviderHopHTTPClient builds the HTTP client for one hop to the identity
@@ -49,8 +45,10 @@ const (
 //
 // caFile empty ⇒ the default transport, unchanged. That is not an oversight: an
 // in-cluster listener served over plaintext http needs no anchor, and inventing
-// one would refuse a stand deliberately configured that way. The production boot
-// guard (config.Validate) is what forbids claiming https without one.
+// one would refuse a stand deliberately configured that way. The boot guard that
+// forbade claiming https without one belonged to the external-provider posture's
+// requirements and left with it (kaname#363); the shipped profile is kept honest
+// by the chart's census of provider hops (deploy/provider_hops_test.go).
 //
 // caFile set ⇒ the returned client trusts that bundle ALONE. Not "in addition to
 // the system roots": an internal-CA hop has no business accepting a publicly

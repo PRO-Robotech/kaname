@@ -84,7 +84,7 @@ const TokenPath = "/iam/token"
 
 // NewMux mounts the token handler on its canonical path. The caller exposes the
 // returned mux on an EXTERNAL-reachable HTTP listener (docker clients hit
-// /iam/token through the edge) — unlike the cluster-internal hooks mux.
+// /iam/token through the edge).
 func NewMux(token http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if token != nil {

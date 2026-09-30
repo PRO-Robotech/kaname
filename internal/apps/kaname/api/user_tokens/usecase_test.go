@@ -192,7 +192,7 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 //
 // Форма регистрации у внешнего поставщика здесь больше не утверждается: её нет
 // (#1121). Что удостоверение годно к предъявлению НАШЕМУ издателю, утверждают
-// пробы `usecase_provider_mirror_test.go` и интеграционная проба реестра.
+// пробы `usecase_one_client_name_test.go` и интеграционная проба реестра.
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
@@ -322,7 +322,6 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000001",
 			UserID:         "usr00000000000000002", // принадлежит другому user
-			OAuthClientID:  "hydra-x",
 		},
 	}
 	ops := &stubOpsRepo{}
@@ -353,7 +352,6 @@ func TestRevoke_HappyPath(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000009",
 			UserID:         "usr00000000000000001",
-			OAuthClientID:  "hydra-usr-9",
 		},
 	}
 	ops := &stubOpsRepo{}

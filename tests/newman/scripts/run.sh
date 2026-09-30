@@ -217,7 +217,7 @@ run_one() {
     return 0
   fi
   if [[ "${2:-}" == "explicit" ]] && _is_delegated "$res"; then
-    echo "[delegated] ${res} запрошен ЯВНО — гоню, хотя условие его волны здесь не создано; часть шагов ответит не тем принципалом" >&2
+    echo "[delegated] ${res} запрошен ЯВНО — гоню; условие его волны прогонщик не создаёт и не проверяет: его создаёт посев волны ДО прогона (задание \`stand-ceremony\`: \`seed_ceremony.py --wave\`), а без него часть шагов ответит не тем принципалом" >&2
   fi
   local col="collections/${res}.postman_collection.json"
   if [[ ! -f "$col" ]]; then
@@ -519,11 +519,11 @@ else
   run_one "iam-membership-create"
   # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to the
   # token-signing provider (security.md §«Production-mode обязателен ВЕЗДЕ» п.4).
-  # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-12/13/14/15
-  # (the mirror / hook / docker-handle / provider-surface lanes the acceptance has no
-  # scenario for). Needs FOUR extra base URLs beyond the gateway ones —
-  # iamJwksBaseUrl / providerPublicBaseUrl / iamRegistryTokenBaseUrl /
-  # registryDataPlaneBaseUrl — injected as --env-var by
+  # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-13/14/15
+  # (the hook / docker-handle / provider-surface lanes the acceptance has no
+  # scenario for; the mirror lane IBT-12 left with the mirror, kaname#361). Needs
+  # THREE extra base URLs beyond the gateway ones — iamJwksBaseUrl /
+  # iamRegistryTokenBaseUrl / registryDataPlaneBaseUrl — injected as --env-var by
   # deploy/scripts/newman-{e2e,parallel}.sh; a missing one turns the case RED naming
   # the variable (require_env_url), never a silent skip. The CI `assert all suites
   # green` step parses EVERY collections/*.json, so this MUST run here — otherwise the
@@ -727,12 +727,14 @@ fi
 #   волна ЦЕРЕМОНИИ — коллекции, часть шагов которых требует ЧЕЛОВЕЧЕСКОГО
 #     вызывающего (аккаунт принадлежит пользователю by construction; уровень
 #     аутентификации поднимается только церемонией входа). Машинный посев такого
-#     предъявителя не производит, поэтому сейчас эти шаги идут под ЧУЖИМ
-#     принципалом: часть падает, часть зеленеет по неверной причине. Их гоняет
-#     scripts/run-ceremony.sh — волна, которая условие СОЗДАЁТ посевом церемонии.
-#     Посев есть (tests/authz-fixtures/seed_ceremony.py, задание `chart-own`), а
-#     шага самой волны в конвейере службы нет: коллекции её перечня адресуются
-#     краю платформы, и это открытый долг kaname#398 (п.3 предиката).
+#     предъявителя не производит, и в общей волне эти шаги пошли бы под ЧУЖИМ
+#     принципалом: часть падает, часть зеленеет по неверной причине. Условие
+#     создаёт посев церемонии (tests/authz-fixtures/seed_ceremony.py --wave):
+#     людей и их предъявителей обоих уровней он куёт своей церемонией службы на
+#     автономном стенде. В конвейере волну гоняет задание `stand-ceremony`
+#     процесса e2e-newman.yml — посев отдельным шагом, затем этот прогонщик с
+#     коллекциями перечня, названными явно (kaname#398); локально то же делает
+#     scripts/run-ceremony.sh.
 #
 #     Перечень НЕ выписан здесь и не будет: он ВЫВОДИТСЯ из дерева объявлением
 #     tests/authz-fixtures/ceremony_credentials.py на каждом запуске — по ключу

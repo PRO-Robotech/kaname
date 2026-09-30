@@ -6,7 +6,6 @@ package jwksproxyhttp
 import (
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 )
@@ -28,14 +27,14 @@ const (
 	reasonKeySetEmpty       = "jwks_keyset_empty"
 )
 
-// Record — одна запись привязки «издатель → источник набора».
+// Record — запись привязки «издатель → источник набора».
 //
-// Записей больше одной, и это следствие решения принимать двух издателей: у
-// КАЖДОГО принимаемого издателя своя запись. Объединение наборов рассмотрено и
-// отвергнуто — оно уничтожает ровно ту защиту, ради которой развязка и
-// заводится: ключ одного издателя проверял бы токен, объявляющий другого.
+// Запись у публикатора ОДНА — наша. Вторая существовала ради прежнего
+// издателя и ушла вместе с ним (kaname#361); объединять наборы разных
+// издателей в один документ запрещено по той же причине, по которой их прежде
+// разводили: ключ одного издателя проверял бы токен, объявляющий другого.
 type Record struct {
-	// Issuer — принимаемый издатель. Ключ поиска, и ТОЛЬКО ключ поиска.
+	// Issuer — издатель записи. Ключ поиска, и ТОЛЬКО ключ поиска.
 	Issuer string
 	// Path — путь записи. ОБЪЯВЛЯЕТСЯ здесь, а не выводится из издателя.
 	//
@@ -48,62 +47,58 @@ type Record struct {
 	// становится тождественно истинным — проверка остаётся в тексте, не имея
 	// возможности упасть.
 	Path string
-	// Handler — обработчик записи: проекция ключницы для нашей, зеркало для
-	// прежнего издателя.
+	// Handler — обработчик записи: проекция ключницы.
 	Handler http.Handler
 }
 
 // Binding — объявленная привязка «издатель → путь → обработчик».
 type Binding struct {
-	records  []Record
-	byIssuer map[string]Record
+	record Record
 }
 
 // NewBinding строит привязку, ОТКАЗЫВАЯ в вырожденной.
 //
 // Это и есть страж старта записи источника: издатель, объявленный
-// принимаемым, но не имеющий записи, — отказ в старте, а не молчаливый перебор
-// записей подряд. Отказ здесь — третий экземпляр класса «пустое значение
-// означает „не сужаем“», который дерево уже закрывает на двух других перечнях.
+// публикуемым, но не имеющий записи, — отказ в старте, а не молчаливый
+// перебор записей подряд. Отказ на пустом перечне — третий экземпляр класса
+// «пустое значение означает „не сужаем“», который дерево уже закрывает на двух
+// других перечнях.
+//
+// ВТОРАЯ ЗАПИСЬ — ТОЖЕ ОТКАЗ, и отказывает мощность, а не форма: каждая запись
+// по отдельности законна, и потому вернувшееся зеркало чужого набора прошло бы
+// все остальные проверки молча.
 func NewBinding(records []Record) (Binding, error) {
-	if len(records) == 0 {
-		return Binding{}, fmt.Errorf("jwks binding: no key-set records declared — " +
-			"a publisher with no records answers nobody, and every token of every issuer would be refused")
+	switch {
+	case len(records) == 0:
+		return Binding{}, fmt.Errorf("jwks binding: no key-set record declared — " +
+			"a publisher with no record answers nobody, and every token would be refused")
+	case len(records) > 1:
+		extra := make([]string, 0, len(records)-1)
+		for _, rec := range records[1:] {
+			extra = append(extra, strings.TrimSpace(rec.Issuer))
+		}
+		return Binding{}, fmt.Errorf(
+			"jwks binding: %d key-set records declared, and the publisher carries exactly one — "+
+				"its own key set (issuer %s); a record of another issuer (%s) would put that issuer's "+
+				"keys next to ours on the same listener",
+			len(records), strings.TrimSpace(records[0].Issuer), strings.Join(extra, ", "))
 	}
-	byIssuer := make(map[string]Record, len(records))
-	byPath := make(map[string]string, len(records))
-	for _, rec := range records {
-		issuer := strings.TrimSpace(rec.Issuer)
-		if issuer == "" {
-			return Binding{}, fmt.Errorf("jwks binding: a record declares no issuer")
-		}
-		// Путь считается ПО СОДЕРЖАНИЮ, а не по длине строки: разделители без
-		// сегментов дают непустую строку и пустой путь.
-		if !usablePath(rec.Path) {
-			return Binding{}, fmt.Errorf(
-				"jwks binding: issuer %s is accepted but declares no usable key-set path (got %q) — "+
-					"refusing to start rather than resolving it to a derived address", issuer, rec.Path)
-		}
-		if rec.Handler == nil {
-			return Binding{}, fmt.Errorf("jwks binding: issuer %s declares a path with no handler behind it", issuer)
-		}
-		if _, dup := byIssuer[issuer]; dup {
-			return Binding{}, fmt.Errorf("jwks binding: issuer %s is declared twice", issuer)
-		}
-		if other, dup := byPath[rec.Path]; dup {
-			return Binding{}, fmt.Errorf(
-				"jwks binding: path %s is claimed by both %s and %s — one path, one record",
-				rec.Path, other, issuer)
-		}
-		byIssuer[issuer] = Record{Issuer: issuer, Path: rec.Path, Handler: rec.Handler}
-		byPath[rec.Path] = issuer
+	rec := records[0]
+	issuer := strings.TrimSpace(rec.Issuer)
+	if issuer == "" {
+		return Binding{}, fmt.Errorf("jwks binding: the record declares no issuer")
 	}
-	out := Binding{byIssuer: byIssuer}
-	for _, rec := range byIssuer {
-		out.records = append(out.records, rec)
+	// Путь считается ПО СОДЕРЖАНИЮ, а не по длине строки: разделители без
+	// сегментов дают непустую строку и пустой путь.
+	if !usablePath(rec.Path) {
+		return Binding{}, fmt.Errorf(
+			"jwks binding: issuer %s is published but declares no usable key-set path (got %q) — "+
+				"refusing to start rather than resolving it to a derived address", issuer, rec.Path)
 	}
-	sort.Slice(out.records, func(i, j int) bool { return out.records[i].Path < out.records[j].Path })
-	return out, nil
+	if rec.Handler == nil {
+		return Binding{}, fmt.Errorf("jwks binding: issuer %s declares a path with no handler behind it", issuer)
+	}
+	return Binding{record: Record{Issuer: issuer, Path: rec.Path, Handler: rec.Handler}}, nil
 }
 
 // usablePath отвечает, несёт ли объявленный путь хотя бы один сегмент.
@@ -122,42 +117,36 @@ func usablePath(path string) bool {
 // Paths возвращает пути привязки.
 //
 // Всякий, кому нужен перечень путей публикации — проба замка «только внутри»,
-// композиционный корень, страница развёртывания, — ВЫВОДИТ его отсюда.
-// Выписанный перечень разошёлся бы с привязкой молча при появлении третьей
-// записи, и утверждение о единственном маршруте осталось бы зелёным, уедь
-// второй на внешнюю поверхность.
+// композиционный корень, страница развёртывания, — ВЫВОДИТ его отсюда, а не
+// выписывает: выписанный перечень разошёлся бы с привязкой молча.
 func (b Binding) Paths() []string {
-	out := make([]string, 0, len(b.records))
-	for _, rec := range b.records {
-		out = append(out, rec.Path)
+	if b.record.Handler == nil {
+		return nil
 	}
-	return out
+	return []string{b.record.Path}
 }
 
 // PathOf резолвит объявленного издателя в путь его записи.
 //
-// Издатель употребляется ТОЛЬКО как ключ поиска в объявленной таблице: не
-// резолвится — отказ. Ни одна часть пути, имени файла, ключа кэша или
-// исходящего адреса из него не строится.
+// Издатель употребляется ТОЛЬКО как ключ поиска: не совпал с объявленным —
+// отказ. Ни одна часть пути, имени файла, ключа кэша или исходящего адреса из
+// него не строится.
 func (b Binding) PathOf(issuer string) (string, bool) {
-	rec, ok := b.byIssuer[issuer]
-	if !ok {
+	if b.record.Handler == nil || issuer != b.record.Issuer {
 		return "", false
 	}
-	return rec.Path, true
+	return b.record.Path, true
 }
 
-// NewMux монтирует КАЖДУЮ запись привязки на свой путь.
+// NewMux монтирует запись привязки на её путь.
 //
 // Возвращённый mux выставляется вызывающим на cluster-ВНУТРЕННЕМ слушателе —
-// никогда на внешнем, и это относится к каждому пути, а не к первому из них.
+// никогда на внешнем.
 func NewMux(b Binding) (*http.ServeMux, error) {
-	if len(b.records) == 0 {
-		return nil, fmt.Errorf("jwks mux: binding carries no records")
+	if b.record.Handler == nil {
+		return nil, fmt.Errorf("jwks mux: binding carries no record")
 	}
 	mux := http.NewServeMux()
-	for _, rec := range b.records {
-		mux.Handle(rec.Path, rec.Handler)
-	}
+	mux.Handle(b.record.Path, b.record.Handler)
 	return mux, nil
 }

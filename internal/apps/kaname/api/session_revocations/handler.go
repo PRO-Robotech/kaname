@@ -9,7 +9,11 @@
 //
 // Revocation sources that drive Revoke:
 //   - User-initiated logout (api-gateway OAuth2 logout handler — fronts Revoke).
-//   - Admin force-logout (InternalIAMService.ForceLogout — uses the same writer).
+//
+// Принудительный выход распорядителя (`InternalIAMService.ForceLogout`) этим
+// писателем не пользуется: отсечку и запись события с исходом снятия кладёт
+// транзакция снятия записей сессии (kaname#340). Писатель был общим, пока
+// существовала посадка `external` (снята, kaname#363; kaname#380).
 //
 // Здесь стояла третья строка — выход по обратному каналу провайдера. Его в
 // дереве нет ни одним производителем, и контракт, на который шапка ссылалась,

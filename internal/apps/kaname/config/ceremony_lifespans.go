@@ -125,7 +125,6 @@ func ceremonyLifespanRequirement(short, sample, why string) RequiredSetting {
 	row := RequiredSetting{
 		Key:     key,
 		Supply:  SupplyEnv,
-		Lanes:   []IdentityProvider{IdentityProviderOwn},
 		Sample:  sample,
 		Why:     why,
 		Refusal: key,

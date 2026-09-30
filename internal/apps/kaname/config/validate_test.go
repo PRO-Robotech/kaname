@@ -20,9 +20,9 @@ import (
 // that are ABOUT the allow-list overwrite the field explicitly
 // (trusted_forwarders_test.go).
 //
-// The provider-admin address is seeded on the same terms and for the same reason
-// — production demands it be DECLARED (never derived) and over TLS. Tests that
-// are ABOUT that hop overwrite it (validate_provider_admin_hop_test.go).
+// The identity posture and the provider-admin address used to be seeded here on
+// the same terms; both are gone with the external identity provider
+// (kaname#363).
 func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 	return config.Config{
 		// Величины фоновой уборки посеяны здесь на тех же основаниях, что
@@ -87,15 +87,9 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			// профиль. Значение нарочно НЕ платформенное: подставленное имя
 			// чужого продукта — ровно тот дефект, ради которого умолчание снято.
 			Domain: "access.example.invalid",
-			// Посадка личности объявлена ЯВНО и равна единственному законному
-			// значению словаря: посадка `external` снята фундаментом
-			// (PRO-Robotech/corelib#30), и проверка старта отвергает её (#424).
-			// Умолчания у поля нет by construction (задача #1125), поэтому
-			// фикстура обязана его назвать — как обязан профиль. Величины полосы
-			// `own` посеяны ниже на тех же основаниях, что величины уборки
-			// выше: без них каждая боевая проба, которая не про полосу, падала
-			// бы на требованиях полосы.
-			IdentityProvider:             config.IdentityProviderOwn,
+			// Величины своего входа и своей чеканки посеяны ниже на тех же
+			// основаниях, что величины уборки выше: без них каждая боевая проба,
+			// которая не про полосу, падала бы на требованиях полосы.
 			SecondFactorEncryptionKeyHex: strings.Repeat("cd", 32),
 			SelfServiceFreshness:         15 * time.Minute,
 			TokenSigning:                 ownMintingSettings(),
@@ -107,37 +101,13 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			Ceremony:                     ceremonyLifespanSettings(),
 			TrustedForwarderSANs:         []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
 			TrustDomainName:              "kacho.cloud",
-			HydraAdminURL:                "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
-			HydraAdminCAFile:             "/etc/kaname/tls/server/ca.crt",
-			// Both hops to the provider's PUBLIC listener declared, in the plain
+			// The hop to the provider's PUBLIC listener declared, in the plain
 			// http the provider actually serves there — the shape the deployed
-			// profiles carry. They are part of the fixture, not of any test's
-			// subject: production refuses a DERIVED address on either
-			// (validateProductionProviderPublicHops), so leaving them empty would
-			// make every unrelated production case fail for a reason it is not about.
-			HydraJWKSURL:  "http://kacho-umbrella-hydra-public.kacho.svc:4444/.well-known/jwks.json",
-			HydraTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
+			// profiles carry. It is part of the fixture, not of any test's
+			// subject; production no longer judges it (its guard stood on the
+			// external posture's row, gone with the posture, kaname#363).
+			ProviderTokenURL: "http://kacho-umbrella-hydra-public.kacho.svc:4444/oauth2/token",
 		},
-	}
-}
-
-// TestValidate_Production_RequiresHookSecret — production mode must reject an
-// empty hook-shared-secret (the Bearer Hydra uses to authenticate token/refresh
-// hooks). A prod boot without it would accept hook calls without auth.
-func TestValidate_Production_RequiresHookSecret(t *testing.T) {
-	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32) // JWKS key present
-	// hook-shared-secret left empty (and no env source configured)
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate() = nil, want error for empty hook-shared-secret in production")
-	}
-	if !strings.Contains(err.Error(), "hook-shared-secret") {
-		t.Fatalf("Validate() error = %q, want it to name hook-shared-secret", err.Error())
-	}
-	// Never leak the secret value (there is none here, but guard the contract).
-	if strings.Contains(strings.ToLower(err.Error()), "value") {
-		t.Fatalf("Validate() error must not reference a secret value: %q", err.Error())
 	}
 }
 
@@ -145,7 +115,6 @@ func TestValidate_Production_RequiresHookSecret(t *testing.T) {
 // JWKS encryption key (used to encrypt private_key_pem in the DB).
 func TestValidate_Production_RequiresJWKSKey(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	// jwks-encryption-key-hex left empty
 	err := cfg.Validate()
 	if err == nil {
@@ -157,42 +126,37 @@ func TestValidate_Production_RequiresJWKSKey(t *testing.T) {
 }
 
 // TestValidate_ProductionStrict_RequiresSecrets — production-strict inherits the
-// production AuthN-secret requirements (both missing → an error naming both).
+// production AuthN-secret requirement (the wrapping key missing → an error naming
+// it). The hooks' shared secret used to be the second requirement; it went with
+// the hooks (kaname#363).
 func TestValidate_ProductionStrict_RequiresSecrets(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProductionStrict, "require")
-	// both secrets empty
+	// the wrapping key is empty
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for empty AuthN secrets in production-strict")
-	}
-	if !strings.Contains(err.Error(), "hook-shared-secret") {
-		t.Fatalf("Validate() error = %q, want it to name hook-shared-secret", err.Error())
 	}
 	if !strings.Contains(err.Error(), "jwks-encryption-key-hex") {
 		t.Fatalf("Validate() error = %q, want it to name jwks-encryption-key-hex", err.Error())
 	}
 }
 
-// TestValidate_Production_FullyPopulated_OK — a production config with both
-// AuthN secrets populated validates cleanly.
+// TestValidate_Production_FullyPopulated_OK — a production config with the AuthN
+// secret populated validates cleanly.
 func TestValidate_Production_FullyPopulated_OK(t *testing.T) {
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil for a fully-populated production config", err)
 	}
 }
 
-// TestValidate_Production_SecretFromEnv_OK — secrets resolved from the ENV
-// indirection (hook-shared-secret-env / jwks-encryption-key-hex-env) satisfy the
-// production requirement (workspace policy: secrets via secretKeyRef/env, never
-// YAML).
+// TestValidate_Production_SecretFromEnv_OK — the secret resolved from the ENV
+// indirection (jwks-encryption-key-hex-env) satisfies the production requirement
+// (workspace policy: secrets via secretKeyRef/env, never YAML).
 func TestValidate_Production_SecretFromEnv_OK(t *testing.T) {
-	t.Setenv("KANAME_TEST_HOOK_TOKEN", "env-hook-secret")
 	t.Setenv("KANAME_TEST_JWKS_KEY", strings.Repeat("cd", 32))
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecretEnv = "KANAME_TEST_HOOK_TOKEN"
 	cfg.AuthN.JWKSEncryptionKeyHexEnv = "KANAME_TEST_JWKS_KEY"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil when secrets resolve from ENV", err)
@@ -217,9 +181,8 @@ func TestValidate_Production_SecretFromEnv_OK(t *testing.T) {
 // отвергала при исправной посадке; дескриптор читает ТУ строку, что уходит в
 // пул, и такой стенд принимает.
 
-// TestValidate_Dev_EmptySecrets_OK — dev mode legitimately omits AuthN secrets
-// (the hook handlers accept calls without a Bearer in dev). Validate must NOT
-// require them — dev behavior is unchanged.
+// TestValidate_Dev_EmptySecrets_OK — dev mode legitimately omits AuthN secrets.
+// Validate must NOT require them — dev behavior is unchanged.
 func TestValidate_Dev_EmptySecrets_OK(t *testing.T) {
 	cfg := goodEndpoints(config.ModeDev, "disable")
 	if err := cfg.Validate(); err != nil {

@@ -46,7 +46,7 @@ func loginFieldByKey(v reflect.Value, key string) (reflect.Value, bool) {
 func TestEV90_FiveKnobsWithoutDefaults(t *testing.T) {
 	for _, k := range verificationKnobs {
 		t.Run(k.short, func(t *testing.T) {
-			cfg := laneCfg(config.IdentityProviderOwn)
+			cfg := laneCfg()
 			f, ok := loginFieldByKey(reflect.ValueOf(&cfg.AuthN.Login).Elem(), k.short)
 			if !ok {
 				t.Fatalf("ЧЕСТНЫЙ-КРАСНЫЙ EV-90 (а): ручки authn.login.%s в настройке нет — старт проходит без неё", k.short)
@@ -102,10 +102,10 @@ func TestEV90_KnobsBeyondTheirBoundsRefuseTheStart(t *testing.T) {
 			func(l *config.LoginLaneConfig) { l.VerificationResendLimit = config.VerificationResendLimitCeiling + 1 }},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			at := laneCfg(config.IdentityProviderOwn)
+			at := laneCfg()
 			tc.atBound(&at.AuthN.Login)
 			require.NoError(t, at.Validate(), "ровно на границе — старт")
-			over := laneCfg(config.IdentityProviderOwn)
+			over := laneCfg()
 			tc.over(&over.AuthN.Login)
 			err := over.Validate()
 			require.Error(t, err, "за границей — отказ старта")

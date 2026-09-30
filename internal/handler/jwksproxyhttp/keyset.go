@@ -232,6 +232,18 @@ func toJWK(k domain.PublishedKey) (jwk, error) {
 	return out, nil
 }
 
+// failClosedStatus — код отказа записи: источник не отдал набор, и публикатор
+// не подставляет вместо него ни пустого, ни чужого.
+const failClosedStatus = http.StatusBadGateway
+
+// writeFailClosed отдаёт фиксированное непрозрачное тело отказа: ни текста
+// источника, ни ключей — только опознавательное слово исхода.
+func writeFailClosed(w http.ResponseWriter, status int, reason string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `{"error":%q}`, reason)
+}
+
 func b64(raw []byte) string { return base64.RawURLEncoding.EncodeToString(raw) }
 
 func bigEndianExponent(e int) []byte {
