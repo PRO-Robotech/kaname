@@ -144,6 +144,11 @@ var nonGrantableModelTypes = map[string]string{
 	"group":           "subject-set type for group#member usersets (the grantable resource is iam_group)",
 	"cluster":         "platform singleton cluster:cluster_root — super-admin ladder anchor, not a grantable resource",
 	"iam_fgaproxy":    "исторический якорь права писать кортежи: живых фактов нет (#914), но его выдают уже применённые миграции",
+	// Право на уведомления (NTF-1 З17, kaname#484): кортежи этих типов пишет только
+	// применитель манифеста при посеве, тенантские поверхности и прокси их отвергают.
+	"service":                "subject type of the service principal service:<name> (corelib authz.ServiceSubject), never an authz object",
+	"notification_feed":      "notification right: reader is granted only by the manifest seed applier, never through the permission catalog",
+	"notification_namespace": "notification right: sender is granted only by the manifest seed applier, never through the permission catalog",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the

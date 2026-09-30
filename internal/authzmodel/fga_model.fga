@@ -1397,6 +1397,35 @@ type storage_image
     define v_delete: [user, service_account, group#member] or super_admin
 
 # ---------------------------------------------------------------------------
+# Notification rights (NTF-1, kacho#2915 design З17; kaname#484).
+#
+#   - service                — the service principal `service:<name>`, produced
+#                              only by corelib `authz.ServiceSubject`; a subject
+#                              type with no relations of its own.
+#   - notification_feed      — `reader`: which service may read a module's feed.
+#   - notification_namespace — `sender`: which service may send from a namespace.
+#
+# NARROW BY DESIGN: each relation is assigned to `service` directly and to
+# nothing else — no cascade (`from`, `or`), no wildcard, no `group#member`, and
+# no other type names these three. A group or wildcard subject would grant the
+# right to send on behalf of a namespace to whoever happens to be in the group.
+# Tuples are written only by the kaname manifest seed applier; tenant surfaces
+# refuse all three types, and the proxy admission rule (corelib
+# `proxytuple.forbiddenObjectTypes`) forbids them. The shape is held by
+# internal/authzmodel TestNotifyTypesAreDeclaredInTheirNarrowForm.
+# ---------------------------------------------------------------------------
+
+type service
+
+type notification_feed
+  relations
+    define reader: [service]
+
+type notification_namespace
+  relations
+    define sender: [service]
+
+# ---------------------------------------------------------------------------
 # Conditions catalog — 7 frozen built-ins (acceptance §4.5).
 # ---------------------------------------------------------------------------
 
