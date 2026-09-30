@@ -125,7 +125,6 @@ func TestValidate_AuthZWindow_RefusalNamesTheRuleNotTheValue(t *testing.T) {
 // иначе отказ приходил бы не по предмету пробы.
 func validAuthZWindowConfig(mode config.Mode) config.Config {
 	cfg := goodEndpoints(mode, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	return cfg
 }

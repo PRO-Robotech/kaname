@@ -18,23 +18,23 @@ import (
 
 func TestOutcomeSelectorScanFindsAValueOutsideTheDictionary(t *testing.T) {
 	dictionaries := map[string][]string{
-		"kaname_authn_hook_requests_total": {"ok", "refused", "failed"},
+		"kaname_sample_requests_total": {"ok", "refused", "failed"},
 	}
 
 	// Отрицательная подача: значение вне словаря.
-	broken := "expr: increase(kaname_authn_hook_requests_total{outcome=\"rejected\"}[15m]) > 0"
+	broken := "expr: increase(kaname_sample_requests_total{outcome=\"rejected\"}[15m]) > 0"
 	census, findings := scanOutcomeSelectors(broken, dictionaries)
 	require.NotZero(t, census.matchers, "разбор не нашёл отбора на входе, который его несёт")
 	require.Len(t, findings, 1, "значение вне словаря не найдено — проверка вакуумна")
-	require.Equal(t, "kaname_authn_hook_requests_total{outcome=\"rejected\"}", findings[0].String())
+	require.Equal(t, "kaname_sample_requests_total{outcome=\"rejected\"}", findings[0].String())
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ отличается ОДНИМ фактом: значение из словаря.
-	legal := "expr: increase(kaname_authn_hook_requests_total{outcome=\"refused\"}[15m]) > 0"
+	legal := "expr: increase(kaname_sample_requests_total{outcome=\"refused\"}[15m]) > 0"
 	_, none := scanOutcomeSelectors(legal, dictionaries)
 	require.Empty(t, none, "проверка краснеет на законной записи")
 
 	// Регулярный отбор судится по альтернативам врозь: одна верна, вторая нет.
-	mixed := "sum(increase(kaname_authn_hook_requests_total{outcome=~\"failed|exploded\"}[10m])) > 0"
+	mixed := "sum(increase(kaname_sample_requests_total{outcome=~\"failed|exploded\"}[10m])) > 0"
 	_, mixedFindings := scanOutcomeSelectors(mixed, dictionaries)
 	require.Len(t, mixedFindings, 1, "альтернатива регулярного отбора не судится врозь")
 	require.Equal(t, "exploded", mixedFindings[0].value)

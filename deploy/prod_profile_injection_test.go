@@ -329,7 +329,7 @@ func TestMaterialPathRecogniser_LawfulTwinsStaySilent(t *testing.T) {
 	// адреса и режимы наравне с путями, и первый же ложный срабат снял бы
 	// проверку.
 	for _, knob := range []string{
-		"KANAME_HYDRA_ADMIN_URL",
+		"KANAME_HYDRA_TOKEN_URL",
 		"KANAME_AUTHN__TRUST_DOMAIN",
 		"KANAME_INVITE_MAIL__RELAY",
 		// Окончание `FILE` внутри слова, а не суффиксом имени.
@@ -347,7 +347,7 @@ func TestMaterialPathRecogniser_LawfulTwinsStaySilent(t *testing.T) {
 		"KANAME_PUBLIC_SERVER_MTLS_KEYFILE",
 		"KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES",
 		"KANAME_REST_UPSTREAM_MTLS_CAFILES",
-		"KANAME_HYDRA_ADMIN_CA_FILE",
+		"KANAME_HYDRA_TOKEN_CA_FILE",
 	} {
 		require.True(t, namesAMaterialPath(knob),
 			"форма %s, которую знал прежний перечень, выведенным не узнаётся — сужение", knob)

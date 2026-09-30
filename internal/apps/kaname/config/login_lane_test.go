@@ -50,18 +50,20 @@ func TestLoginLane_F3_28_33_41_EveryKnobRefusesByNameUnderOwn(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("own/"+c.name, func(t *testing.T) {
-			cfg := laneCfg(config.IdentityProviderOwn)
+			cfg := laneCfg()
 			c.mut(&cfg.AuthN.Login)
 			err := cfg.Validate()
 			require.Error(t, err, "под own незаданная величина — отказ")
 			for _, k := range c.knobs {
 				require.Contains(t, err.Error(), k)
 			}
-			require.Contains(t, err.Error(), "[required because authn.identity-provider=own]")
+			// Прежде отказ нёс пометку «[required because authn.identity-provider=own]»;
+			// ключ посадки снят (kaname#363), и отказ его не называет.
+			require.NotContains(t, err.Error(), "identity-provider")
 		})
 	}
 	t.Run("положительный контроль: годный профиль стартует, домен none — пустой ключ", func(t *testing.T) {
-		cfg := laneCfg(config.IdentityProviderOwn)
+		cfg := laneCfg()
 		require.NoError(t, cfg.Validate())
 		require.Empty(t, cfg.AuthN.Login.ResolvedCookieDomain())
 		cfg.AuthN.Login.CookieDomain = "console.example.invalid"

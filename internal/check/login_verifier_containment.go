@@ -645,7 +645,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		for _, decl := range f.file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv != nil && fn.Name.Name == spec.Accessor {
 				c.AccessorDecls++
-				// Разбор получателя — общий с соседним гейтом (`provider_road_wire_guard.go`):
+				// Разбор получателя — общий для гейтов пакета (`ast_receiver.go`):
 				// вторая копия одного разбора разошлась бы с первой молча.
 				recvType, _ := receiverTypeName(fn)
 				declWhere = append(declWhere, fmt.Sprintf("%s (получатель %s)", f.rel, recvType))

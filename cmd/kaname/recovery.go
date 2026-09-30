@@ -27,9 +27,8 @@ import (
 func startLROReconciler(ctx context.Context, pool *pgxpool.Pool, repo kanamerepo.Repository, catalogSource catalog.Source, rec operations.Recorder, logger *slog.Logger) {
 	// Читатель ключей доступа (Ф7) — свой адаптер поверх того же пула, не
 	// CQRS-корень: осиротевшие регистрация и снятие ключа разрешаются его
-	// строкой. Провязан на любой посадке — операций этого типа под `external`
-	// не заводится, но строка, оставшаяся от прежней посадки, обязана стать
-	// терминальной и там.
+	// строкой. Провязан на каждом старте: операции этого типа заводит полоса
+	// входа, и строка, осиротевшая на любом из них, обязана стать терминальной.
 	resolver := operationresolver.New(repo, catalogSource, kanamepg.NewAccessKeyRepo(pool),
 		operationresolver.WithLogger(logger))
 	reconciler := operations.NewReconciler(pool, resolver, operations.ReconcilerConfig{

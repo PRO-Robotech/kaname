@@ -32,19 +32,23 @@ const (
 	// claimKeyPrefix — префикс имени утверждения продукта.
 	claimKeyPrefix = "kaname_"
 	claimMinKeys   = 3
-	// claimLanesFloor — сколько РАЗНЫХ функций обязаны звать сборщики.
+	// claimLanesFloor — сколько РАЗНЫХ сторон выдачи обязаны пользоваться
+	// сборщиками. Сторона — вид клиента, чей состав собирается (сборщик, которого
+	// зовут), а не функция, которая зовёт: прежде сторонами были две полосы —
+	// хуки внешнего поставщика и своя чеканка; хуки сняты (kaname#363), и обе
+	// оставшиеся стороны — клиент человека и клиент служебной учётки — зовёт одна
+	// функция своей чеканки.
 	claimLanesFloor  = 2
 	claimCensusFloor = 300
 )
 
 // claimBuilders — сборщики состава: то, чем состав ПОТРЕБЛЯЕТСЯ. Перечень
-// закрыт и живёт рядом с владельцем.
+// закрыт и живёт рядом с владельцем. Сборщики состава хуков внешнего
+// поставщика (человек, федеративный вход, уменьшенный состав) сняты вместе с
+// хуками (kaname#363).
 var claimBuilders = map[string]bool{
-	"userClaims":      true,
 	"saClaims":        true,
-	"federatedClaims": true,
 	"userTokenClaims": true,
-	"MinimalClaims":   true,
 }
 
 type claimTreeScan struct {
@@ -105,8 +109,10 @@ func TestTokenClaimsAreAssembledInOnePlace(t *testing.T) {
 	scan, _ := scanClaimTree(t)
 
 	lanes := map[string]bool{}
+	callers := map[string]bool{}
 	for _, c := range scan.Calls {
-		lanes[c.Func] = true
+		lanes[c.Callee] = true
+		callers[c.Func] = true
 	}
 	var ownerAssemblies, outside []check.ClaimAssembly
 	for _, a := range scan.Assemblies {
@@ -119,10 +125,10 @@ func TestTokenClaimsAreAssembledInOnePlace(t *testing.T) {
 
 	t.Logf("перепись: файлов Go разобрано %d, литералов отображения %d (пустых %d, с "+
 		"ключами состава %d), вызовов осмотрено %d; сборок состава найдено %d — у "+
-		"владельца %d, вне его %d; полос, зовущих сборщики, %d",
+		"владельца %d, вне его %d; сторон выдачи (зовомых сборщиков) %d · зовущих функций %d",
 		scan.Parsed, scan.Census.MapLiterals, scan.Census.EmptyMapLiterals,
 		scan.Census.KeyedLiterals, scan.Census.Calls, len(scan.Assemblies),
-		len(ownerAssemblies), len(outside), len(lanes))
+		len(ownerAssemblies), len(outside), len(lanes), len(callers))
 
 	if scan.Parsed < claimCensusFloor {
 		t.Fatalf("перепись обвалилась: разобрано %d файлов при пороге %d", scan.Parsed, claimCensusFloor)
@@ -143,7 +149,7 @@ func TestTokenClaimsAreAssembledInOnePlace(t *testing.T) {
 			where = append(where, l)
 		}
 		sort.Strings(where)
-		t.Fatalf("сборщики состава зовутся из %d полосы (%s) при пороге %d: «одним местом "+
+		t.Fatalf("сборщиками состава пользуется %d сторона выдачи (%s) при пороге %d: «одним местом "+
 			"пользуются ОБЕ стороны» проверяемо только тогда, когда сторон две",
 			len(lanes), strings.Join(where, ", "), claimLanesFloor)
 	}

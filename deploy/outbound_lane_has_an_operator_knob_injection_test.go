@@ -37,9 +37,9 @@ func TestOutboundLaneInjection_LaneRenderedByTheChartIsSilent(t *testing.T) {
 
 func TestOutboundLaneInjection_LaneNamedByAProfileIsSilent(t *testing.T) {
 	// ВТОРАЯ ЗАКОННАЯ ФОРМА РУЧКИ: ключ рендером не отдаётся, но профиль
-	// НАЗЫВАЕТ его переменную. Так объявлены три дороги к поставщику личности.
-	f := judgeOutboundLanes([]string{"authn.hydra-admin-url"},
-		boolSet(), boolSet("KANAME_HYDRA_ADMIN_URL"), declaredEnvNames)
+	// НАЗЫВАЕТ его переменную. Так объявлена дорога обмена к прежнему издателю.
+	f := judgeOutboundLanes([]string{"authn.hydra-token-url"},
+		boolSet(), boolSet("KANAME_HYDRA_TOKEN_URL"), declaredEnvNames)
 	if len(f) != 0 {
 		t.Fatalf("вердикт покраснел на полосе, названной профилем: %v", f)
 	}
@@ -64,17 +64,17 @@ func TestOutboundLaneInjection_LaneWithNoKnobIsAFinding(t *testing.T) {
 // знает ОБЕ формы имени переменной.
 //
 // У части ключей есть СВОЯ привязка, и профиль называет именно её. Знай
-// распознаватель одну каноническую форму — он объявил бы находкой три дороги к
-// поставщику, которые объявлены верно; знай он только объявленную — молчал бы о
-// ключах, которых в таблице обязательных величин нет вовсе.
+// распознаватель одну каноническую форму — он объявил бы находкой дорогу обмена,
+// объявленную верно; знай он только объявленную — молчал бы о ключах, у которых
+// своей привязки нет вовсе.
 func TestOutboundLaneInjection_KnowsBothEnvWritings(t *testing.T) {
 	if got := canonicalEnvName("invite-mail.relay"); got != "KANAME_INVITE_MAIL__RELAY" {
 		t.Fatalf("каноническая форма имени выведена неверно: %s", got)
 	}
-	names := declaredEnvNames("authn.hydra-admin-url")
+	names := declaredEnvNames("authn.hydra-token-url")
 	var sawDeclared bool
 	for _, n := range names {
-		if n == "KANAME_HYDRA_ADMIN_URL" {
+		if n == "KANAME_HYDRA_TOKEN_URL" {
 			sawDeclared = true
 		}
 	}

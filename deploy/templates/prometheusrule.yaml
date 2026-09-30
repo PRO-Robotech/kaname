@@ -128,40 +128,14 @@ spec:
           annotations:
             summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
 
-{{- $authn := .Values.authn | default dict }}
-{{- if include "kaname-svc.hooksLaneRaised" . }}
-        # ПРАВИЛА ПОЛОСЫ ХУКОВ ПОСТАВЩИКА — РОВНО ТАМ, ГДЕ ПРОЦЕСС ПОДНИМАЕТ ИХ
-        # СЛУШАТЕЛЬ (задачи #210, #427). Условие то же, что у порта хуков пода и
-        # внутреннего Service (`kaname-svc.hooksLaneRaised`): «не own», а не
-        # «== external». Под `own` хуков поставщика нет by construction: тишина
-        # на них штатна, и правило о тишине звонило бы ВЕЧНО. Под незаявленной
-        # посадкой (служба с ней стартует только вне боевого режима) слушатель
-        # работает, и его тишину иначе не видел бы никто. Согласие с процессом держит
-        # `deploy/hooks_port_follows_posture_test.go`.
-        - alert: KanameAuthnHooksSilent
-          # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
-          expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
-          for: 30m
-          annotations:
-            summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
-
-        - alert: KanameAuthnHookRefused
-          expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
-          for: 15m
-          annotations:
-            summary: "хук {{ "{{ $labels.route }}" }} отвергает обращения поставщика — провязка на его стороне неверна"
-
-        - alert: KanameAuthnHookFailing
-          expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
-          annotations:
-            summary: "хук {{ "{{ $labels.route }}" }} не смог ответить — вход человека отказывает"
-{{- end }}
-{{- if eq $authn.identityProvider "own" }}
-        # ПРАВИЛА СОБСТВЕННОЙ ПОЛОСЫ ВХОДА — ТОЛЬКО ПОД `own` (задача #210).
+        # ПРАВИЛА СОБСТВЕННОЙ ПОЛОСЫ ВХОДА (задача #210). Прежде они стояли под
+        # ключом посадки (`own`), а рядом — правила хуков внешнего поставщика под
+        # «не own»; посадка у службы одна, ключ снят (kaname#363), и правила
+        # полосы входа везёт каждый профиль, а правил хуков нет ни у одного.
         # Правила о ТИШИНЕ здесь нет намеренно: час без единого входа у небольшой
         # установки ночью — штатное состояние, и порог на нём перестали бы читать.
-        # Звонят отказы НАШЕЙ стороны, у которых производитель есть только на этой
-        # посадке: человек получает один и тот же отказ, причина видна лишь здесь.
+        # Звонят отказы НАШЕЙ стороны: человек получает один и тот же отказ,
+        # причина видна лишь здесь.
         - alert: KanameLoginLaneFailing
           expr: |
             sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
@@ -177,7 +151,6 @@ spec:
           for: 5m
           annotations:
             summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
-{{- end }}
 
         - alert: KanameExpiredCredentialReclaimStalled
           # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.

@@ -57,9 +57,10 @@ func (r *SAOAuthClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) 
 	return out, nil
 }
 
-// GetByClientID — клиент обмена по имени, которым он себя называет: хук выпуска
-// токена и докерная полоса получают имя клиента и спрашивают, какой ключ
-// служебной учётки за ним стоит.
+// GetByClientID — клиент обмена по имени, которым он себя называет: докерная
+// полоса получает имя клиента и спрашивает, какой ключ служебной учётки за ним
+// стоит. Прежде тот же вопрос задавал хук выпуска внешнего поставщика; он снят
+// с поставщиком (kaname#363).
 //
 // Имя клиента ключа — идентификатор его строки (kaname#362): второго имени у
 // ключа нет. Отвечают на него ТОЛЬКО виды, которые обмениваются как клиент, —
@@ -212,39 +213,6 @@ func (r *SAOAuthClientRepo) OwnerUserForServiceAccount(ctx context.Context, id d
 		return "", mapErr(err, "SAOAuthClient.OwnerUserForServiceAccount", string(id))
 	}
 	return domain.UserID(ownerUserID), nil
-}
-
-// FindByExternalSubject — reverse lookup for federation IN: given an
-// external OIDC (issuer, sub) tuple, return the SA-OAuth-client mapping whose
-// `trusted_subjects` contains an entry with matching issuer AND a
-// subject_pattern regex that matches `sub`. Returns ErrNotFound when nothing
-// matches.
-//
-// Uses jsonb containment (`@>`) to narrow on issuer, then the Postgres `~`
-// regex operator to validate the subject_pattern against the supplied sub.
-// Indexes: jsonb is small per row (a handful of entries); a future GIN index
-// on `trusted_subjects` is straightforward if cardinality grows.
-func (r *SAOAuthClientRepo) FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {
-	q := fmt.Sprintf(`
-		SELECT %s
-		  FROM service_account_oauth_clients
-		 WHERE EXISTS (
-		           SELECT 1
-		             FROM jsonb_array_elements(trusted_subjects) AS ts
-		            WHERE ts->>'issuer' = $1
-		              AND $2 ~ (ts->>'subject_pattern')
-		       )
-		 LIMIT 1`, socCols)
-	row := r.pool.QueryRow(ctx, q, issuer, sub)
-	out, err := scanSAOAuthClient(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound,
-			"SAOAuthClient with trusted_subject (issuer=%s, sub=%s) not found", issuer, sub)
-	}
-	if err != nil {
-		return domain.ServiceAccountOAuthClient{}, mapErr(err, "SAOAuthClient.FindByExternalSubject", "")
-	}
-	return out, nil
 }
 
 func marshalTrustedSubjects(ts []domain.TrustedSubject) ([]byte, error) {

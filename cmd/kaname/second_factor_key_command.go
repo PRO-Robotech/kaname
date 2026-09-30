@@ -117,14 +117,6 @@ func runSecondFactorKeyCommand(ctx context.Context, cfg config.Config, args []st
 		_, _ = fmt.Fprintf(out, "лишние аргументы: %v\n%s\n", fs.Args(), secondFactorKeyUsage)
 		return secondFactorKeyExitNotRun
 	}
-	// Второй фактор живёт в полосе входа, а она поднимается ровно там, где её
-	// поднимает служба (loginLaneWanted): на иной посадке секретов под этим
-	// перечнем служба не держит, и проход судил бы чужое.
-	if !loginLaneWanted(cfg) {
-		_, _ = fmt.Fprintf(out, "второго фактора на этой посадке нет (%s=%s): полоса входа поднимается только под %s — действовать не над чем\n",
-			config.IdentityProviderSetting, cfg.AuthN.IdentityProvider, config.IdentityProviderOwn)
-		return secondFactorKeyExitNotRun
-	}
 	// Перечень — тем же разбором той же ручки, что у службы (loginlane.go):
 	// другой перечень оборачивал бы то, чего реплики не откроют.
 	ring, err := cfg.AuthN.ResolveSecondFactorEncryptionKeys()

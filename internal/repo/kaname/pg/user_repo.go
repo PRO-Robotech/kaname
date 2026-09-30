@@ -668,8 +668,8 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 //
 // ОТМЕТКА ПОДТВЕРЖДЕНИЯ — третье условие того же оператора (kaname#456, Р11):
 // приглашение активирует только подтверждение адреса, а оно ставит отметку той
-// же транзакцией раньше активации. Путь хука поставщика отметки нашей полосы
-// не несёт и приглашения не активирует.
+// же транзакцией раньше активации. Внутренний глагол заведения личности
+// отметки нашей полосы не несёт и приглашения не активирует.
 func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, externalID domain.ExternalSubject, displayName domain.DisplayName) (domain.User, error) {
 	q := fmt.Sprintf(`
 		UPDATE users

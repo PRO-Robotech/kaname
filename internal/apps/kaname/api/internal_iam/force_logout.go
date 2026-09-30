@@ -3,22 +3,17 @@
 
 // force_logout.go — InternalIAMService.ForceLogout.
 //
-// ForceLogout — admin force-logout: records a USER-LEVEL revoke-all cutoff
-// (user_token_revocations.revoke_before = now) for the target subject so the
-// refresh-hook denies ALL of the user's currently-live tokens (it compares the
-// token's session auth_time against the cutoff). Reuses the SAME adapter as the
-// user-logout / Revoke(revoke_all) paths. Async per the proto envelope (returns
-// Operation, done=true). The earlier per-jti synthetic-jti write was inert — a
-// synthetic jti can never match the target's real live-token jti.
+// ForceLogout — admin force-logout: ends the target's OWN login sessions
+// (`human_sessions`), records a USER-LEVEL revoke-all cutoff
+// (user_token_revocations.revoke_before = now) and the audit event carrying the
+// teardown's outcome — in ONE transaction of `OwnSessions` (kaname#340). Async
+// per the proto envelope (returns Operation, done=true).
 //
-// СНЯТИЕ САМОЙ СЕССИИ ВХОДА — второе действие, и ЧЬЮ сессию снимать, решает
-// посадка (kaname#313): под `external` — сессию у внешнего поставщика
-// (`ProviderSessions`), после транзакции отсечки; под `own` — НАШУ строку
-// `human_sessions` (`OwnSessions`), в ОДНОЙ транзакции с отсечкой и записью
-// события, которая несёт исход снятия (kaname#340). Провязан ровно один из
-// двух: провязать оба значило бы на каждой посадке звать одного впустую, а под
-// `own` — звать дорогу, которой нет, и отказывать всему глаголу за её
-// отсутствием.
+// ЧЬЮ СЕССИЮ СНИМАТЬ, БОЛЬШЕ НЕ РЕШАЕТ ПОСАДКА (kaname#363). Прежде под
+// `external` снималась сессия у внешнего поставщика, отдельным действием после
+// транзакции отсечки, и долговременная запись несла лишь намерение (#380).
+// Поставщика у службы больше нет: сессия входа человека — всегда наша строка, и
+// снимает её одна транзакция, запись которой несёт исход.
 //
 // ForceLogout was advertised (caller_policy + permission_catalog) but
 // Unimplemented before this fix — an advertised-but-Unimplemented RPC is a
@@ -47,30 +42,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
-// sessionRevoker — narrow write port for ForceLogout.
-// Implemented by *repo/kaname/pg.SessionRevocationsAdapter — the SAME adapter
-// the user-logout Revoke path and the refresh-hook share.
-//
-// ForceLogout writes a USER-LEVEL revoke-all cutoff (the gate the refresh-hook
-// actually enforces against the token's real session auth_time), NOT a per-jti
-// row. The previous per-jti synthetic-jti approach was inert: the synthetic
-// "force-logout:<user>:<unixnano>" never equals the target's real live-token
-// jti, so the refresh-hook jti gate (WHERE token_jti=$1) never matched.
-//
-// The tx-scoped RevokeAllUserTokensTx commits the cutoff AND the durable
-// iam.session.force_logout audit_outbox row in ONE transaction
-// (commit-together-or-rollback-together, запрет #10). eventType selects the
-// audit taxonomy value (force_logout for this RPC).
-//
-// ForceLogout зовёт его там, где НАШИХ записей сессии нет, — на посадке
-// `external` и там, где исполнитель снятия не провязан вовсе. Под `own` отсечку
-// кладёт транзакция снятия (`OwnSessionsWriter`, kaname#340): запись события
-// обязана лечь ПОСЛЕ снятия и нести его исход, а транзакция этого порта снятия
-// не видит.
-type sessionRevoker interface {
-	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID, eventType string) error
-}
-
 // forceLogoutOperationRepo — Operation-порт ForceLogout. Шире operations.Repo
 // ровно на MetadataFinalizer: op-строку обязано создавать ДО мутации (иначе
 // сбой Create оставляет закоммиченный cutoff без pollable операции), а
@@ -86,68 +57,17 @@ type forceLogoutOperationRepo interface {
 // pg-side session taxonomy + audit_outbox_event_type CHECK.
 const eventSessionForceLogout = "iam.session.force_logout"
 
-// ProviderSessions — the identity provider's login-session surface.
-//
-// Force-logout writes a cutoff that stops tokens from being ISSUED. That is the
-// authoritative half, and on its own it leaves the person's browser holding a
-// live session: when that session asks again it presents its ORIGINAL
-// authentication instant, which the cutoff refuses — correctly, and forever,
-// with nothing prompting the re-authentication that would clear it. Ending the
-// session is what turns a standing refusal into a logout.
-//
-// Реализуется `*clients.HydraAdminClient`. Пусто на посадке, которая внешнего
-// поставщика не объявляет вовсе: там сессия входа — НАША строка, и снимает её
-// `OwnSessions` ниже. Пусто и тогда, когда административная поверхность
-// поставщика просто не настроена; там отсечка по-прежнему пишется и
-// по-прежнему действует.
-//
-// ИМЕНОВАН НАРУЖУ: провязывается он теперь ПО ПОСАДКЕ, и композиционный корень
-// обязан уметь вернуть «никого» ЧИСТЫМ nil. Возврат типизированного nil мимо
-// интерфейса прошёл бы страж провязки насквозь — и снятие сессии падало бы на
-// разыменовании вместо честного «на этой посадке снимать нечего» (kaname#313).
-type ProviderSessions interface {
-	DeleteLoginSessions(ctx context.Context, subject string) error
-}
-
-// ExternalIDResolver maps a kacho user id to the identity the provider knows.
-//
-// The two are different namespaces and neither substitutes for the other:
-// force-logout names a `users.id`, the provider keys its sessions on the
-// subject it issued. Passing one where the other belongs would delete nothing
-// and report success.
-//
-// Именован наружу по той же причине, что и порт выше.
-type ExternalIDResolver interface {
-	ExternalIDOf(ctx context.Context, id domain.UserID) (string, error)
-}
-
-// WithProviderSessions — attaches the provider's login-session surface and the
-// resolver that names a user to it. Both or neither: a teardown that cannot
-// resolve its subject is not a teardown.
-func (h *Handler) WithProviderSessions(p ProviderSessions, r ExternalIDResolver) *Handler {
-	if p == nil || r == nil {
-		return h
-	}
-	h.providerSessions = p
-	h.externalIDs = r
-	return h
-}
-
 // OwnSessions — НАШИ записи сессии входа (`human_sessions`), снимаемые целиком
 // по личности (kaname#313).
 //
-// # ПОЧЕМУ ЭТО ВТОРОЙ ПОРТ, А НЕ ВТОРАЯ РЕАЛИЗАЦИЯ ПЕРВОГО
-//
-// `ProviderSessions` адресует субъекта ЧУЖИМИ именами: снятие идёт по внешнему
-// субъекту, которого на посадке `own` не существует вовсе, и резолвер этого
-// имени там отказывает by construction. Здесь предмет адресуется `users.id` —
-// тем самым, который назвал распорядитель. Подставить один порт под другой
-// значило бы подставить и разрешение имени, которого нет.
+// Предмет адресуется `users.id` — тем самым, который назвал распорядитель.
+// Прежний второй порт — снятие сессии у внешнего поставщика по ЧУЖОМУ имени
+// субъекта — снят вместе с поставщиком (kaname#363).
 //
 // # ПОЧЕМУ ОТСЕЧКИ НЕ ХВАТАЕТ, И ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО
 //
 // Отсечка субъекта (`user_token_revocations.revoke_before`) действует на
-// ВЫДАЧЕ: её читают хуки выдачи и край. Резолв нашей сессии её НЕ ПРИМЕНЯЕТ и
+// ВЫДАЧЕ: её читает край. Резолв нашей сессии её НЕ ПРИМЕНЯЕТ и
 // объявляет это о себе прямо (`humansession/resolve.go`, §8 инв. 8) — строка
 // судится по трём признакам: снята · истекла · личность неактивна. Значит
 // носитель, выданный ДО принудительного выхода, резолвится и ПОСЛЕ него.
@@ -223,23 +143,12 @@ type OwnSessionsWriter interface {
 }
 
 // WithOwnSessions — привязывает снятие НАШИХ записей сессии входа.
-// Composition-root only, посадка `own`.
+// Composition-root only.
 //
-// nil оставляет прежнее поведение: отсечка пишется, наши записи не трогаются.
-// Это законно ровно там, где наших записей и нет, — под `external` полоса входа
-// не поднимается вовсе, и снимать нечего.
+// Непровязанный порт — закрытый отказ глагола (Unavailable), а не отсечка без
+// снятия: «выведен» при стоящей сессии хуже, чем «повторите».
 func (h *Handler) WithOwnSessions(s OwnSessions) *Handler {
-	if s == nil {
-		return h
-	}
 	h.ownSessions = s
-	return h
-}
-
-// WithSessionRevoker — attaches the session-revocation writer used by
-// ForceLogout. Composition-root only (cmd/kaname/wiring.go).
-func (h *Handler) WithSessionRevoker(r sessionRevoker) *Handler {
-	h.sessionRevoker = r
 	return h
 }
 
@@ -305,15 +214,13 @@ func (h *Handler) requireSystemAdmin(ctx context.Context) error {
 	return nil
 }
 
-// ForceLogout — record a user-level revoke-all cutoff for the target subject so
-// the refresh-hook denies ALL of the user's currently-live tokens.
+// ForceLogout — end the target's own login sessions and record a user-level
+// revoke-all cutoff, with the audit event carrying the teardown's outcome.
 //
-// We set revoke_before = now(): the refresh-hook denies any token whose session
-// authenticated at or before this cutoff (compared against the Hydra session
-// auth_time). Once the user re-authenticates, auth_time advances past the cutoff
-// and new sessions are allowed again (no permanent lockout). This actually
-// denies live tokens — unlike the old per-jti synthetic-jti row, which was inert
-// (a synthetic jti never matches the target's real token jti).
+// We set revoke_before = now(): a reader of the cutoff refuses any token whose
+// session authenticated at or before it. Once the user re-authenticates, the
+// authentication instant advances past the cutoff and new sessions are allowed
+// again (no permanent lockout).
 func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest) (*operationpb.Operation, error) {
 	// Defense-in-depth authZ FIRST: require an authenticated principal holding
 	// system_admin@cluster (fail-closed). This RPC was previously ungated
@@ -325,11 +232,10 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if userID == "" {
 		return nil, shared.InvalidArg("user_id", "required")
 	}
-	// Писатель отсечки выбирается посадкой: под `own` её кладёт транзакция
-	// снятия наших записей (kaname#340), на прочих — `sessionRevoker`. Отказ
-	// здесь — ровно тогда, когда нет НИ ОДНОГО из двух.
-	if h.ownSessions == nil && h.sessionRevoker == nil {
-		return nil, status.Error(codes.Unavailable, "session revocation writer not configured")
+	// Отсечку, снятие наших записей и запись события кладёт ОДНА транзакция
+	// (kaname#340). Непровязанный исполнитель — отказ до всякой записи.
+	if h.ownSessions == nil {
+		return nil, status.Error(codes.Unavailable, "login-session teardown not configured")
 	}
 	if h.operations == nil {
 		return nil, status.Error(codes.Unavailable, "operation repository not configured")
@@ -384,76 +290,11 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 		return nil, fmt.Errorf("persist operation: %w", err)
 	}
 
-	// ЧЕЙ ПИСАТЕЛЬ КЛАДЁТ ОТСЕЧКУ, РЕШАЕТ ПОСАДКА (kaname#340).
-	//
-	// Под `own` отсечку, снятие наших записей и запись события кладёт ОДНА
-	// транзакция (`forceLogoutOwnSessions`): запись события обязана лечь ПОСЛЕ
-	// снятия и нести его исход. На прочих посадках наших записей нет, и отсечку
-	// вместе с записью события кладёт `sessionRevoker` — как и прежде, до снятия
-	// у поставщика: исход снятия у поставщика числом не выражается.
-	if h.ownSessions != nil {
-		if err := h.forceLogoutOwnSessions(ctx, op.ID, marker, revokedBy); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := h.sessionRevoker.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionForceLogout); err != nil {
-			// Record the terminal failure on the already-persisted op so a poll sees
-			// a real error, not NotFound; still surface the gRPC error to the caller.
-			return nil, h.failForceLogout(ctx, op.ID, shared.MapRepoErr(err))
-		}
-
-		// НИ ОДНОГО ИСПОЛНИТЕЛЯ СНЯТИЯ — ЗАКРЫТЫЙ ОТКАЗ, А НЕ МОЛЧАЛИВОЕ
-		// НИЧЕГОНЕДЕЛАНИЕ (задача kaname#313).
-		//
-		// Исполнителей снятия два, и посадка выбирает РОВНО ОДНОГО: под `own` —
-		// наши записи, под `external` — сессию у поставщика. Ни одного не провязано
-		// — значит глагол пишет отсечку и НЕ СНИМАЕТ НИЧЕГО, отвечая успехом.
-		// Регрессия провязки в этом состоянии неотличима от исправной работы: тот
-		// же код ответа, то же тело операции, та же запись журнала, — и увидеть
-		// разницу можно только запросом в базу.
-		//
-		// Довод тот же, которым закрыт читатель отсечки у соседа: непровязка,
-		// отвечающая успехом, молча снимает контроль.
-		//
-		// СТОИТ ЗДЕСЬ, А НЕ ВЫШЕ, НАМЕРЕННО: отсечка уже закоммичена и остаётся —
-		// она защитна сама по себе и идемпотентна. Теряется только ложное
-		// «выведен», а повтор глагола после починки провязки доснимет сессию.
-		//
-		// ОДНА НОГА ЭТОГО ДОВОДА НЕ ПЕРЕМЕРЕНА ЗДЕСЬ, и сказано это затем, чтобы
-		// через месяц довод не прочли как доказанный целиком. «Отсечка защитна сама
-		// по себе» опирается на то, ЧТО С НЕЙ ДЕЛАЮТ ЧИТАТЕЛИ: хуки выдачи и край.
-		// Край живёт в другом доме, и настоящий дифф его поведения не измеряет —
-		// измерено здесь только то, что записи кладутся и что по ним судит
-		// авторитет отзыва на пути запроса. Если читатель отсечку не применит,
-		// защитной она не будет, и этот довод рухнет вместе с ним.
-		//
-		// ПРЕДИКАТ ПРОВЕРКИ: сквозная проба, предъявляющая носитель КРАЮ до и после
-		// глагола. Её здесь нет и быть не может — дом другой.
-		if h.providerSessions == nil {
-			gerr := status.Error(codes.Unavailable,
-				"no login-session teardown is wired: the cutoff alone does not end a session")
-			slog.ErrorContext(ctx, "ForceLogout: no login-session teardown is wired",
-				"operation_id", op.ID, "user_id", userID)
-			return nil, h.failForceLogout(ctx, op.ID, gerr)
-		}
-	}
-
-	// End the session at the provider, now that the cutoff is durable.
-	//
-	// Order is deliberate. The cutoff goes first because it is the half that
-	// holds without anyone's cooperation; the teardown follows because it is the
-	// half that makes the refusal recoverable. If the provider cannot be reached
-	// the cutoff STAYS — it is protective and idempotent — but the call reports
-	// failure: an administrator told "logged out" while the session is still
-	// standing is worse off than one told to retry. Retrying re-applies the same
-	// cutoff and re-attempts the same teardown, both idempotent.
-	if h.providerSessions != nil {
-		if err := h.endProviderSession(ctx, marker.UserID); err != nil {
-			gerr := status.Error(codes.Unavailable, "could not end the session at the identity provider")
-			slog.ErrorContext(ctx, "ForceLogout: provider session teardown failed",
-				"operation_id", op.ID, "user_id", userID, "err", err.Error())
-			return nil, h.failForceLogout(ctx, op.ID, gerr)
-		}
+	// Отсечку, снятие наших записей и запись события кладёт ОДНА транзакция
+	// (`forceLogoutOwnSessions`): запись события обязана лечь ПОСЛЕ снятия и
+	// нести его исход (kaname#340).
+	if err := h.forceLogoutOwnSessions(ctx, op.ID, marker, revokedBy); err != nil {
+		return nil, err
 	}
 
 	// Complete the Operation: done=true, metadata + the declared response.
@@ -870,20 +711,4 @@ func forceLogoutOperationPayload(userID string) (meta, resp *anypb.Any, err erro
 		return nil, nil, fmt.Errorf("marshal force-logout response: %w", err)
 	}
 	return meta, resp, nil
-}
-
-// endProviderSession resolves the target to the identity the provider knows and
-// ends every login session it holds for them.
-//
-// A subject that cannot be resolved is an error, not a skip: silently doing
-// nothing here is exactly the shape of the defect this closes.
-func (h *Handler) endProviderSession(ctx context.Context, userID domain.UserID) error {
-	subject, err := h.externalIDs.ExternalIDOf(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("resolve external subject of %s: %w", userID, err)
-	}
-	if subject == "" {
-		return fmt.Errorf("user %s has no external subject to end sessions for", userID)
-	}
-	return h.providerSessions.DeleteLoginSessions(ctx, subject)
 }

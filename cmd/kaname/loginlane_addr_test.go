@@ -40,12 +40,13 @@ import (
 
 // TestLoginLane_SurfaceAddressIsNormalisedLikeEveryOtherSurface — объявленная
 // профилем форма даёт адрес, который принимает `net.Listen`; форма без схемы —
-// законный близнец, адрес тот же; пустая полоса — поверхность выключена с
-// причиной, адреса нет.
+// законный близнец, адрес тот же; необъявленный адрес — поверхность выключена
+// с причиной, адреса нет (прежде этот исход давала посадка без полосы; её
+// больше нет, kaname#363).
 func TestLoginLane_SurfaceAddressIsNormalisedLikeEveryOtherSurface(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for _, declared := range []string{"tcp://0.0.0.0:9100", "0.0.0.0:9100", "9100"} {
-		cfg := loginLaneCfg(config.IdentityProviderOwn)
+		cfg := loginLaneCfg()
 		cfg.APIServer.LoginLaneEndpoint = declared
 		desc, err := loginLaneSurface(cfg, servicecontract.ModeProduction, logger, &loginLane{}, config.MTLSConfig{})
 		require.NoError(t, err, declared)
@@ -58,13 +59,13 @@ func TestLoginLane_SurfaceAddressIsNormalisedLikeEveryOtherSurface(t *testing.T)
 		require.True(t, strings.HasSuffix(addr, ":9100"), "%s → %s", declared, addr)
 	}
 
-	cfg := loginLaneCfg(config.IdentityProviderExternal)
-	cfg.APIServer.LoginLaneEndpoint = "tcp://0.0.0.0:9100"
-	desc, err := loginLaneSurface(cfg, servicecontract.ModeProduction, logger, nil, config.MTLSConfig{})
+	cfg := loginLaneCfg()
+	cfg.APIServer.LoginLaneEndpoint = ""
+	desc, err := loginLaneSurface(cfg, servicecontract.ModeDev, logger, &loginLane{}, config.MTLSConfig{})
 	require.NoError(t, err)
 	_, given := desc.Spec().Addr.Get()
-	require.False(t, given, "под external полосы нет — адрес не объявляется значением")
-	require.False(t, desc.Enabled())
+	require.False(t, given, "адрес не объявлен — он не приходит значением")
+	require.False(t, desc.Enabled(), "поверхность без адреса обязана быть выключенной с причиной, а не поднятой")
 }
 
 // TestLoginLane_ListenAddressAccessorMatchesTheCommonRule — нормализатор полосы

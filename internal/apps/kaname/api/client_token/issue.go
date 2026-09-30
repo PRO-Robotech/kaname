@@ -210,13 +210,11 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		return Output{}, clientassertion.OutcomeAudienceNotAllowed, err
 	}
 
-	// (4) Состав утверждений — из ОДНОГО объявления, тем же кодом, что и на
-	// пути обратного вызова.
+	// (4) Состав утверждений — из ОДНОГО объявления, тем же кодом, что у
+	// прочих полос собственной выдачи.
 	claims, principal, err := u.claims.ClaimsForAssertionClient(ctx, in.Client, service.TokenHookContext{
-		GrantType:     tokenpolicy.GrantTypeClientCredentials,
-		OAuthClientID: in.Client.ID,
-		CnfJkt:        confirmationJKT(in.Confirmation),
-		CnfX5tS256:    confirmationX5T(in.Confirmation),
+		CnfJkt:     confirmationJKT(in.Confirmation),
+		CnfX5tS256: confirmationX5T(in.Confirmation),
 	})
 	if err != nil {
 		return Output{}, clientassertion.OutcomeIssuanceFailed, fmt.Errorf("client_token: claims: %w", err)

@@ -73,8 +73,6 @@ const (
 	knobPublicREST = "KANAME_API_SERVER__REST_ENDPOINT"
 	// knobInternalREST — собственный внутренний REST-фронт.
 	knobInternalREST = "KANAME_API_SERVER__INTERNAL_REST_ENDPOINT"
-	// knobHooks — вебхуки провайдера личности.
-	knobHooks = "KANAME_AUTHN__HOOKS_HTTP_ENDPOINT"
 	// knobMetrics — скрейп величин.
 	knobMetrics = "KANAME_API_SERVER__METRICS_ENDPOINT"
 	// knobRegistryToken — выдача докерного токена.

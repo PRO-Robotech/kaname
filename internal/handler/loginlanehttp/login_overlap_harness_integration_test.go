@@ -602,7 +602,6 @@ func newOverlapLane(t *testing.T) *overlapLane {
 	})
 	require.NotNil(t, h.store, "НЕ ВЫПОЛНИЛОСЬ: стенд не отдал глаголу входа обёртку хранилища")
 	h.force = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(h.pool)).
 		WithAdminChecker(overlapAllowAdmin{}).
 		WithOperations(operations.NewRepo(h.pool, "kaname")).
 		WithOwnSessions(overlapForceSide{inner: kanamepg.NewHumanSessionRepo(h.pool), exit: h.exit})

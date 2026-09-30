@@ -71,7 +71,7 @@ func TestForceLogout_OwnCommitOutlivesItsOwnBudget_IsNotAPartialOutcome(t *testi
 	synctest.Test(t, func(t *testing.T) {
 		first := &recordingOwnWriter{ended: 2, onCommit: func(ctx context.Context) { <-ctx.Done() }}
 		own := ownSessionsScripted(first)
-		h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+		h, ops := ownSessionHandler(own)
 		reqCtx := adminCtx()
 
 		_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
@@ -97,7 +97,7 @@ func TestForceLogout_OwnCommitRefusedAfterTheRequestEnded_IsNotAPartialOutcome(t
 	first := &recordingOwnWriter{ended: 2, onCommit: func(context.Context) { cancel() },
 		commitErr: storeCodeRefusal()}
 	own := ownSessionsScripted(first)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err)
@@ -118,7 +118,7 @@ func TestForceLogout_OwnCommitRefusedWhileTheRequestLives_IsNotAPartialOutcome(t
 	reqCtx := adminCtx()
 	first := &recordingOwnWriter{ended: 2, commitErr: storeCodeRefusal()}
 	own := ownSessionsScripted(first)
-	h, ops := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+	h, ops := ownSessionHandler(own)
 
 	_, err := h.ForceLogout(reqCtx, &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestForceLogout_OwnRefusalWithoutPartialOutcome_LogsItsCause(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			logBuf := captureForceLogoutErrorLog(t)
 			own := ownSessionsScripted(tc.first)
-			h, _ := ownSessionHandler(&fakeForceLogoutRecorder{}, own)
+			h, _ := ownSessionHandler(own)
 
 			_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})
 			require.Error(t, err)

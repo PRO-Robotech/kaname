@@ -65,12 +65,13 @@ Why no black-box POSITIVE revoke→IsRevoked case:
   internal RPCs must never appear on the advertised external TLS endpoint.
 
   Same applies to the USER-LEVEL revoke-all gate (ForceLogout /
-  Revoke(revoke_all_user_tokens)): the refresh-hook compares the token's session
-  auth_time against a per-user `user_token_revocations.revoke_before` cutoff —
-  a server-side Hydra webhook with no public HTTP surface. It is covered
-  white-box by unit tests (internal/handler/iamhooks/refresh_hook_handler_test.go
-  user-level cases; internal/apps/.../{internal_iam,session_revocations}) and the
-  integration test internal/repo/kaname/pg/user_token_revocations_repo_integration_test.go.
+  Revoke(revoke_all_user_tokens)): the issuance lanes compare the credential's
+  moment against a per-user `user_token_revocations.revoke_before` cutoff, with no
+  public HTTP surface of their own. The refresh hook of the external identity
+  provider, which used to be one of them, left together with that provider
+  (kaname#363). The gate is covered white-box by unit tests
+  (internal/apps/.../{internal_iam,session_revocations}) and the integration test
+  internal/repo/kaname/pg/user_token_revocations_repo_integration_test.go.
   The black-box contract that remains is the external-isolation NEGATIVE below
   (IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS — with the caveat recorded there that it
   witnesses fail-closed refusal, not route isolation).

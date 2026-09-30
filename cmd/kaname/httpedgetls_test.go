@@ -5,7 +5,10 @@
 // СПОСОБЕН упасть и способен смолчать.
 //
 // Каждый случай меняет РОВНО ОДИН факт против законного близнеца: иначе
-// неизвестно, который из двух дал вердикт.
+// неизвестно, который из двух дал вердикт. Случаев об объявленном исключении
+// открытого текста здесь больше нет: механизм снят вместе с единственным
+// ребром, у которого исключение было, — слушателем вебхуков внешнего
+// поставщика (kaname#363).
 package main
 
 import (
@@ -16,8 +19,8 @@ import (
 // edgeOK / edgeBare — законный близнец и его единственное отличие.
 func edgeOK() httpEdgeTLS {
 	return httpEdgeTLS{
-		name: "вебхуки", knob: "KNOB_A", addr: "0.0.0.0:9092",
-		enabled: true, why: "по проводу идёт общий секрет провайдера",
+		name: "внутренний REST-фронт", knob: "KNOB_A", addr: "0.0.0.0:9099",
+		enabled: true, why: "по проводу идёт удостоверение модуля",
 	}
 }
 
@@ -33,24 +36,13 @@ func TestRequireHTTPEdgeTLS_CanFailAndStaysSilent(t *testing.T) {
 		enabled: false, why: "предпосылка снятой аутентификации — односторонняя TLS",
 	}
 
-	// edgeExcepted — ребро, у которого исключение ЕСТЬ и ОБЪЯВЛЕНО. Отличается
-	// от законного близнеца ровно двумя фактами, и оба — про одно решение:
-	// транспорт снят, исключение объявлено.
-	edgeExcepted := func() httpEdgeTLS {
-		e := edgeBare()
-		e.plaintextKnob = "KNOB_A_PLAINTEXT_ACKNOWLEDGED"
-		e.plaintextDeclared = true
-		return e
-	}
-
 	cases := []struct {
-		name         string
-		production   bool
-		edges        []httpEdgeTLS
-		want         []string
-		wantDeclared int
-		silent       bool
-		why          string
+		name       string
+		production bool
+		edges      []httpEdgeTLS
+		want       []string
+		silent     bool
+		why        string
 	}{
 		{
 			name: "законный близнец: транспорт объявлен", production: true,
@@ -60,7 +52,7 @@ func TestRequireHTTPEdgeTLS_CanFailAndStaysSilent(t *testing.T) {
 		{
 			name: "боевая посадка, ребро открытым текстом", production: true,
 			edges: []httpEdgeTLS{edgeBare()},
-			want:  []string{"KNOB_A", "0.0.0.0:9092", "общий секрет провайдера", "in the clear"},
+			want:  []string{"KNOB_A", "0.0.0.0:9099", "удостоверение модуля", "in the clear"},
 			why:   "отказ обязан назвать ручку, адрес и ЧТО едет — иначе оператор снимет ручку, а не заведёт материал",
 		},
 		{
@@ -81,37 +73,6 @@ func TestRequireHTTPEdgeTLS_CanFailAndStaysSilent(t *testing.T) {
 			why:   "страж, останавливающийся на первом, продаёт три круга подъёма вместо одного",
 		},
 		{
-			name: "исключение ОБЪЯВЛЕНО — страж пропускает и НАЗЫВАЕТ ребро", production: true,
-			edges: []httpEdgeTLS{edgeExcepted()}, silent: true, wantDeclared: 1,
-			why: "открытый текст по решению обязан быть отличим от открытого текста по недосмотру, " +
-				"и различить их можно только по журналу старта",
-		},
-		{
-			name: "транспорт объявлен И объявлено исключение — ОТКАЗ", production: true,
-			edges: []httpEdgeTLS{func() httpEdgeTLS {
-				e := edgeExcepted()
-				e.enabled = true
-				return e
-			}()},
-			want: []string{"KNOB_A", "KNOB_A_PLAINTEXT_ACKNOWLEDGED", "противоположное"},
-			why:  "два правила об одном предмете; выбрать между ними молча процесс не вправе",
-		},
-		{
-			name: "исключение объявлено ребру, у которого его НЕ БЫВАЕТ — ОТКАЗ", production: true,
-			edges: []httpEdgeTLS{func() httpEdgeTLS {
-				e := edgeBare()
-				e.plaintextDeclared = true // ручки нет: plaintextKnob пуст
-				return e
-			}()},
-			want: []string{"которого у этого ребра", "0.0.0.0:9092"},
-			why:  "область исключения обязана быть свойством СТРАЖА, а не доверием к вызывающему",
-		},
-		{
-			name: "исключение объявлено, но посадка НЕ боевая — no-op", production: false,
-			edges: []httpEdgeTLS{edgeExcepted()}, silent: true, wantDeclared: 0,
-			why: "вне боевой посадки страж не судит ничего, и называть ему нечего",
-		},
-		{
 			name: "перечень пуст — ОТКАЗ, а не тишина", production: true,
 			edges: nil,
 			want:  []string{"вердикт беспредметен"},
@@ -127,14 +88,10 @@ func TestRequireHTTPEdgeTLS_CanFailAndStaysSilent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			declared, err := requireHTTPEdgeTLS(tc.production, tc.edges)
+			err := requireHTTPEdgeTLS(tc.production, tc.edges)
 			if tc.silent {
 				if err != nil {
 					t.Fatalf("законный близнец обязан молчать (%s), а страж сказал: %v", tc.why, err)
-				}
-				if len(declared) != tc.wantDeclared {
-					t.Fatalf("объявленных исключений названо %d, ожидалось %d (%s): %v",
-						len(declared), tc.wantDeclared, tc.why, declared)
 				}
 				return
 			}

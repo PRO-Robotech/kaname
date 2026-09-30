@@ -1,30 +1,40 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// lane_requirements.go — ТРЕБОВАНИЯ ПОЛОС посадки личности, объявленные
-// таблицей (задача #1125, подфаза Ф4д эпика #896).
+// lane_requirements.go — ТРЕБОВАНИЯ ПОЛОСЫ своего входа и своей чеканки,
+// объявленные таблицей (задача #1125, подфаза Ф4д эпика #896; ось посадки снята
+// в kaname#363).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ ТАБЛИЦА, А НЕ ЦЕПОЧКА `if`
 //
-// Полосность — это ПРОИЗВЕДЕНИЕ: значение поля × обязательный элемент. Такое
-// произведение обязано быть покрыто пробой отказа старта ЦЕЛИКОМ, и держаться
-// это должно ПОСТРОЕНИЕМ, а не переписью: проба ходит по ЭТОЙ ЖЕ таблице и
-// порождает по случаю на строку, поэтому непокрытой клетки не бывает by
-// construction. Чтобы завести требование, его придётся вписать сюда — то есть
-// туда, где его увидит проба.
+// Каждое требование обязано быть покрыто пробой отказа старта, и держаться это
+// должно ПОСТРОЕНИЕМ, а не переписью: проба ходит по ЭТОЙ ЖЕ таблице и порождает
+// по случаю на строку, поэтому непокрытой строки не бывает by construction.
+// Чтобы завести требование, его придётся вписать сюда — то есть туда, где его
+// увидит проба.
 //
-// Второй рукописный перечень клеток рядом — находка гейта: два места об одном
+// Второй рукописный перечень строк рядом — находка гейта: два места об одном
 // предмете разошлись бы молча, и разошлись бы именно там, где расхождение не
-// видно (на клетке, которую забыли дописать во второй перечень).
+// видно (на строке, которую забыли дописать во второй перечень).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЛОСА ОДНА, И ВЫБИРАТЬ ЕЁ НЕЧЕМ (kaname#363)
+//
+// Прежде строки называли полосу посадки — `external` либо `own`, — и старт
+// предъявлял только строки той, что объявил ключ посадки. Внешнего поставщика
+// удостоверений у службы больше нет, ключ снят, и строки предъявляются ВСЯКОМУ
+// боевому старту. Снятие оси не должно было выродить стражей в вакуумные:
+// раннего возврата «посадка не объявлена — судить нечего» здесь больше нет, и
+// обе стадии исполняют все свои строки (lane_axis_withdrawn_test.go).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ИНВАРИАНТ, РАДИ КОТОРОГО ВСЁ ОСТАЛЬНОЕ
 //
-// НЕ СУЩЕСТВУЕТ значения поля, при котором множество обязательных элементов
-// пусто. Полоса без требований означала бы посадку, поднимающуюся без всякой
-// проверки личности, — то есть ровно то, что запрещает ban #16. Свойство
-// проверяется по этой таблице (lane_requirements_gate_test.go).
+// НИ ОДНА стадия не пуста. Стадия без требований означала бы старт, поднимающийся
+// без проверки того, чем служба удостоверяет человека и чем она чеканит, — то
+// есть ровно то, что запрещает ban #16. Свойство проверяется по этой таблице
+// (lane_gates_test.go), и гейт печатает, сколько строк на какой стадии.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ДВЕ СТАДИИ, И ОНИ НЕ ВЗАИМОЗАМЕНЯЕМЫ
@@ -34,7 +44,7 @@
 //     выразить их отсутствие не может, поэтому эти строки исполняет
 //     композиционный корень через ValidateLaneWiring.
 //
-// Половины не смягчают друг друга: посадочная проверка НЕ заменяет проверку
+// Половины не смягчают друг друга: проверка настройки НЕ заменяет проверку
 // полноты провязки, и наоборот. Включённость своей чеканки обе читают ОДНИМ
 // аксессором (TokenSigningConfig.Enabled) — разойтись во мнении о ней они не
 // могут.
@@ -42,7 +52,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ВЕЛИЧИНА ПОДАЁТСЯ ПАРАМЕТРОМ, А НЕ ЧИТАЕТСЯ СТРАЖЕМ ИЗ ВСТРОЕННОГО ФАЙЛА
 //
-// Требование «посадка умеет предъявить каждый уровень доверия, которого требует
+// Требование «полоса умеет предъявить каждый уровень доверия, которого требует
 // каталог прав» берёт величину ИЗ КАТАЛОГА, а не из константы. Каталог подаётся
 // в стража композиционным корнем (LaneWiring.CatalogFloors) ровно так, как его
 // подаёт композиционный корень края. Иначе «подмена каталога на набор без
@@ -110,11 +120,6 @@ type LaneWiring struct {
 	HumanCredentialsWired bool
 	// HumanSessionsWired — хранилище СВОЕЙ сессии человека доступно.
 	HumanSessionsWired bool
-	// ProviderAdminHopBuilt — административная дорога к ВНЕШНЕМУ поставщику
-	// собрана этим корнем. Наблюдение, а не намерение профиля: адрес хопа
-	// резолвится всегда (при незаданной ручке — деривацией из доменного имени),
-	// поэтому «дороги нет» настройкой невыразимо и читается только отсюда.
-	ProviderAdminHopBuilt bool
 	// PresentableACRs — уровни доверия, которые полоса УМЕЕТ предъявить
 	// человеку. Пустой перечень означает «полоса не предъявляет ни одного»; это
 	// законное наблюдаемое состояние, а не «не заполнено».
@@ -124,14 +129,10 @@ type LaneWiring struct {
 	CatalogFloors CatalogFloors
 }
 
-// LaneRequirement — ОДНА клетка произведения «значение поля × обязательный
-// элемент».
+// LaneRequirement — ОДНО требование, без которого боевой старт не проходит.
 type LaneRequirement struct {
-	// Lanes — полосы, на которых требование действует. Строка, названная
-	// обеими полосами, клеткой произведения не является — это общее требование.
-	Lanes []IdentityProvider
-	// Element — обязательный элемент полосы, человеческим именем. Попадает в
-	// перепись гейта и в имя порождённого пробой случая.
+	// Element — обязательный элемент, человеческим именем. Попадает в перепись
+	// гейта и в имя порождённого пробой случая.
 	Element string
 	// Stage — стадия, на которой требование проверяется.
 	Stage LaneStage
@@ -140,54 +141,13 @@ type LaneRequirement struct {
 	Check func(Config, LaneWiring) error
 }
 
-// AppliesTo сообщает, действует ли требование на названной полосе.
-func (r LaneRequirement) AppliesTo(p IdentityProvider) bool {
-	for _, l := range r.Lanes {
-		if l == p {
-			return true
-		}
-	}
-	return false
-}
-
-// laneExternal / laneOwn — короткие перечни полос для объявления строк.
-// Объявлены переменными, чтобы строка таблицы читалась одной строкой; словарём
-// значений это не является (он один — identityProviderNames).
-var (
-	laneExternal = []IdentityProvider{IdentityProviderExternal}
-	laneOwn      = []IdentityProvider{IdentityProviderOwn}
-)
-
-// LaneRequirements — ТАБЛИЦА требований полос. Единственное объявление.
+// LaneRequirements — ТАБЛИЦА требований. Единственное объявление.
 //
-// Тексты отказов провайдерской полосы сохранены ДОСЛОВНО (они часть контракта
-// оператора); полосность добавляет к ним одну строку о том, каким значением
-// поля требование снимается.
+// Ни один текст отказа не называет снятого ключа посадки: совет объявить ключ,
+// которого нет, послал бы оператора за вторым отказом — от загрузчика
+// (retired_settings.go).
 var LaneRequirements = []LaneRequirement{
-	// ДВЕ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` (PRO-Robotech/corelib#30).
-	// Проверка старта до них НЕ доходит: посадку вне словаря она отвергает
-	// первой и в одиночку (validateIdentityProviderLane, #424), поэтому ни один
-	// старт этих отказов не произносит. Строки снимаются вместе с полосой
-	// целиком (#363); до того пробы их содержимого зовут строку напрямую, а не
-	// проверку старта.
 	{
-		Lanes:   laneExternal,
-		Element: "административная дорога к внешнему поставщику",
-		Stage:   LaneStageConfig,
-		Check: func(c Config, _ LaneWiring) error {
-			return laneScoped(c.validateProductionProviderAdminHop())
-		},
-	},
-	{
-		Lanes:   laneExternal,
-		Element: "адрес обмена утверждения у внешнего поставщика",
-		Stage:   LaneStageConfig,
-		Check: func(c Config, _ LaneWiring) error {
-			return laneScoped(c.validateProviderPublicHop(providerHopToken))
-		},
-	},
-	{
-		Lanes:   laneOwn,
 		Element: "своя чеканка токенов включена",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
@@ -195,20 +155,17 @@ var LaneRequirements = []LaneRequirement{
 				return nil
 			}
 			return fmt.Errorf(
-				"production mode: %s=%s but authn.token-signing.enabled is false — this posture "+
-					"has no identity provider to fall back to, so with our own minting off the "+
-					"process would start and be unable to issue a single token. Enable it",
-				IdentityProviderSetting, IdentityProviderOwn)
+				"production mode: authn.token-signing.enabled is false — the service has no " +
+					"identity provider to fall back to, so with our own minting off the process " +
+					"would start and be unable to issue a single token. Enable it")
 		},
 	},
-	// СТРОКА КОНТУРА ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337). Непереведённый
-	// контур заводит зеркало клиента у внешнего поставщика, а под `own` его нет:
-	// процесс поднимался бы и отказывал на всякой выдаче ключа. Исполнить такую
-	// комбинацию нечем — ключу без токен-эндпоинта платформы некуда пойти, — и
-	// потому она невозможна. Предикат «переведён» один на всех читателей
+	// СТРОКА КОНТУРА ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337). Ключ
+	// служебной учётки обменивается на токен токен-эндпоинтом платформы, и
+	// другого исполнителя выдачи у службы нет: процесс поднимался бы и отказывал
+	// на всякой выдаче ключа. Предикат «переведён» один на всех читателей
 	// (Config.SAKeyIssuanceIsOurs): копия условия здесь разошлась бы со сборкой.
 	{
-		Lanes:   laneOwn,
 		Element: "контур выдачи ключей служебных учёток переведён на свою чеканку",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
@@ -216,153 +173,121 @@ var LaneRequirements = []LaneRequirement{
 				return nil
 			}
 			return fmt.Errorf(
-				"production mode: %s=%s but authn.client-token.enabled is false — a service-account "+
-					"key is exchanged on the platform token endpoint, and with the endpoint off the "+
-					"key issuance registers the client at an external identity provider, which this "+
-					"posture does not have: the process would start and refuse every key issuance. "+
-					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED)",
-				IdentityProviderSetting, IdentityProviderOwn)
+				"production mode: authn.client-token.enabled is false — a service-account key is " +
+					"exchanged on the platform token endpoint, and the service has no other executor " +
+					"of key issuance: the process would start and refuse every key issuance. " +
+					"Enable authn.client-token (env KANAME_AUTHN__CLIENT_TOKEN__ENABLED)")
 		},
 	},
 	// ЗДЕСЬ СТОЯЛА СТРОКА «приём предъявленного удостоверения включён», и она
-	// ПЕРЕЕХАЛА, а не исчезла: PresentedCredentialConfig.ValidateBinding.
+	// ПЕРЕЕХАЛА, а не исчезла: PresentedCredentialConfig.ValidateBinding. У
+	// требования один предмет, и два стража о нём разошлись бы молча.
 	//
-	// Причина переезда — АНТЕЦЕДЕНТ. Здесь требование предъявлялось посадке
-	// `own`, которую не выбирает ни один профиль развёртывания, тогда как
-	// собственный публичный фронт поднимается на ЛЮБОЙ посадке — его поднимает
-	// объявленный адрес, а не выбор посадки. Связывание существовало, его
-	// антецедент не наступал никогда, следствие не требовалось ни разу, и всё
-	// выглядело настроенным.
-	//
-	// Второй строкой рядом это не чинится: у требования один предмет, и два
-	// стража о нём разошлись бы молча. Поэтому антецедент стал дизъюнкцией
-	// («фронт поднят ИЛИ посадка без края»), а требование живёт в ОДНОМ месте —
-	// и это место не таблица полос, потому что строка, названная обеими
-	// полосами, клеткой произведения не является (см. шапку файла).
 	// ШЕСТЬ СТРОК ПОЛОСЫ ВХОДА (Ф3, kacho#1269; шестая — Ф5, kacho#1271):
 	// величины, без которых полоса входа паролем и восстановления не
 	// собирается, объявляет профиль; незаданная — отказ старта с именем ручки
-	// (Ф1 §7 инв. 4; Ф3-28, Ф3-33, Ф3-41, Ф3-42, Ф5-06). Под `external` полосы
-	// нет, и её величины не требуются.
+	// (Ф1 §7 инв. 4; Ф3-28, Ф3-33, Ф3-41, Ф3-42, Ф5-06).
 	{
-		Lanes:   laneOwn,
 		Element: "срок сессии и домен печенья объявлены",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateSessionAndCookie())
+			return c.AuthN.Login.ValidateSessionAndCookie()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "предел частоты неверных предъявлений объявлен по обеим осям",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateRateLimits())
+			return c.AuthN.Login.ValidateRateLimits()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "правило пароля объявлено: длина, состояние и адрес проверки утечек",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidatePasswordPolicy())
+			return c.AuthN.Login.ValidatePasswordPolicy()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "ручка «что писать» объявлена и в перечне записываемых",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateHasher())
+			return c.AuthN.Login.ValidateHasher()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "ёмкость проверяющего и резерв памяти объявлены",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateCapacity())
+			return c.AuthN.Login.ValidateCapacity()
 		},
 	},
 	// СТРОКА РЕГИСТРАЦИИ (Ф4, kacho#1270; Р5, Ф4-18/19): величина темпа
 	// заведения объявляется профилем и незаданная — отказ старта с именем ручки.
-	// Под `external` носитель ключа — идентификатор поставщика, а величину
-	// правит администратор облака; требование не предъявляется.
 	{
-		Lanes:   laneOwn,
 		Element: "величина темпа заведения объявлена: предел и окно",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Registration.ValidateAdmissionRate())
+			return c.AuthN.Registration.ValidateAdmissionRate()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "срок кода восстановления доступа объявлен",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateRecovery())
+			return c.AuthN.Login.ValidateRecovery()
 		},
 	},
 	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ручек без умолчания; письмо
 	// подтверждения — условие входа дальше экрана подтверждения, и полоса без
 	// величин не поднимается.
 	{
-		Lanes:   laneOwn,
 		Element: "пять величин подтверждения адреса объявлены: срок и предел попыток кода, промежуток, число и окно писем",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateVerification())
+			return c.AuthN.Login.ValidateVerification()
 		},
 	},
 	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318, Р5): срок кода и срок семейства
-	// объявляет профиль, не выше потолков фундамента. Церемония собирается только
-	// под `own`, и под `external` ручки не судятся.
+	// объявляет профиль, не выше потолков фундамента.
 	{
-		Lanes:   laneOwn,
 		Element: "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Ceremony.Validate())
+			return c.AuthN.Ceremony.Validate()
 		},
 	},
 	// ДВЕ СТРОКИ ВТОРОГО ФАКТОРА (Ф12, kacho#1281; Р2, Р8; Ф12-35, Ф12-36):
 	// перечень ключей обёртки секретов и окно свежести правки своих данных
-	// объявляет профиль; незаданное — отказ старта с именем ручки. Под
-	// `external` второй фактор ведёт поставщик, и величины не требуются.
+	// объявляет профиль; незаданное — отказ старта с именем ручки.
 	{
-		Lanes:   laneOwn,
 		Element: "перечень ключей обёртки секретов второго фактора объявлен",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
 			if _, err := c.AuthN.ResolveSecondFactorEncryptionKeys(); err != nil {
-				return ownScoped(fmt.Errorf("production mode: %w", err))
+				return fmt.Errorf("production mode: %w", err)
 			}
 			return nil
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "окно свежести правки своих данных объявлено",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.ValidateSelfServiceFreshness())
+			return c.AuthN.ValidateSelfServiceFreshness()
 		},
 	},
 	// СТРОКА ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13): три величины
 	// контракта объявляет профиль; незаданная — отказ старта, называющий СВОЮ
-	// ручку. Под `external` сессии нет, а регистрация и снятие ключа — действия в
-	// окне свежести (Р5), поэтому ключей там нет и величины не требуются.
+	// ручку.
 	{
-		Lanes:   laneOwn,
 		Element: "привязка ключей доступа объявлена: имя доверяющей стороны, перечень происхождений, перечень алгоритмов",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.AccessKeys.Validate())
+			return c.AuthN.AccessKeys.Validate()
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "подписант своей чеканки провязан",
 		Stage:   LaneStageWiring,
 		Check: func(c Config, w LaneWiring) error {
@@ -370,14 +295,12 @@ var LaneRequirements = []LaneRequirement{
 				return nil
 			}
 			return fmt.Errorf(
-				"%s=%s and authn.token-signing.enabled is true, but the signer is not wired in "+
-					"the composition root — the setting says we mint and the process has nothing "+
-					"to mint with; this refusal is NOT the config-stage one and does not replace it",
-				IdentityProviderSetting, IdentityProviderOwn)
+				"authn.token-signing.enabled is true, but the signer is not wired in the composition " +
+					"root — the setting says we mint and the process has nothing to mint with; this " +
+					"refusal is NOT the config-stage one and does not replace it")
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "свои способы входа человека провязаны",
 		Stage:   LaneStageWiring,
 		Check: func(c Config, w LaneWiring) error {
@@ -385,14 +308,12 @@ var LaneRequirements = []LaneRequirement{
 				return nil
 			}
 			return fmt.Errorf(
-				"%s=%s but no store of our own human sign-in methods is wired — on this posture "+
-					"there is no identity provider to check a person against, so the stand would "+
-					"come up with no way for any human to prove who they are",
-				IdentityProviderSetting, IdentityProviderOwn)
+				"production mode: no store of our own human sign-in methods is wired — the service " +
+					"has no identity provider to check a person against, so the stand would come up " +
+					"with no way for any human to prove who they are")
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "своя сессия человека провязана",
 		Stage:   LaneStageWiring,
 		Check: func(c Config, w LaneWiring) error {
@@ -400,55 +321,22 @@ var LaneRequirements = []LaneRequirement{
 				return nil
 			}
 			return fmt.Errorf(
-				"%s=%s but no store of our own human session is wired — a person could then "+
-					"authenticate and carry nothing that says so, and a sign-out would have "+
-					"nothing to end",
-				IdentityProviderSetting, IdentityProviderOwn)
+				"production mode: no store of our own human session is wired — a person could then " +
+					"authenticate and carry nothing that says so, and a sign-out would have nothing to end")
 		},
 	},
 	{
-		Lanes:   laneOwn,
 		Element: "каждый уровень доверия каталога предъявим",
 		Stage:   LaneStageWiring,
 		Check: func(c Config, w LaneWiring) error {
 			return unreachableFloorsComplaint(w)
 		},
 	},
-	// СТРОКА НИЖЕ ТРЕБУЕТ ОТСУТСТВИЯ, а не наличия, и это единственная такая в
-	// таблице (задача #2489). Требование отрицательное потому, что предмет у
-	// него — зависимость наружу: на посадке, где внешнего поставщика нет вовсе,
-	// дорога к нему есть провязка к тому, чего не существует. Соседняя строка о
-	// записи зеркала его ключей снята вместе с самой записью (kaname#361): её
-	// корень больше не строит ни на какой посадке, и требовать отсутствия
-	// невыразимого нечем.
-	//
-	// ПОЧЕМУ СТАДИЯ ПРОВЯЗКИ. Настройкой это невыразимо by construction: резолв
-	// деривирует адрес из доменного имени и пустого не возвращает никогда,
-	// поэтому «под own адрес пуст» не выполнимо ни при каком профиле, а
-	// требование, которого нельзя выполнить, требованием не является.
-	//
-	// ЧЕМ ДЕРЖИТСЯ НАБЛЮДЕНИЕ — ВНИМАНИЕМ, и это сказано прямо. Значение поля
-	// проставляет композиционный корень тем же способом, что и у соседних
-	// строк выше: наблюдением, записанным литералом, с названным предикатом
-	// смены. Механизма, отличающего честное наблюдение от подставленного, здесь
-	// нет — как нет его и у соседей; заводить его этой строке в одиночку значило
-	// бы требовать от неё большего, чем от остальной таблицы.
-	{
-		Lanes:   laneOwn,
-		Element: "дорога к внешнему поставщику не строится",
-		Stage:   LaneStageWiring,
-		Check: func(_ Config, w LaneWiring) error {
-			if !w.ProviderAdminHopBuilt {
-				return nil
-			}
-			return fmt.Errorf(
-				"%s=%s, but the composition root still builds the admin road to an EXTERNAL "+
-					"identity provider — on this posture there is no such provider, and the "+
-					"address it dials is not even declared: it is derived from the domain name, "+
-					"so the road looks configured on a stand that never configured one",
-				IdentityProviderSetting, IdentityProviderOwn)
-		},
-	},
+	// ЗДЕСЬ СТОЯЛА СТРОКА «дорога к внешнему поставщику не строится» —
+	// единственная в таблице, требовавшая ОТСУТСТВИЯ. Снята вместе с дорогой
+	// (kaname#363): корень не строит её ни на каком старте, административного
+	// клиента поставщика в дереве больше нет, и требовать отсутствия того, что
+	// не может быть построено, нечем.
 }
 
 // unreachableFloorsComplaint — страж «объявленный пол, который полосе нечем
@@ -468,9 +356,8 @@ var LaneRequirements = []LaneRequirement{
 func unreachableFloorsComplaint(w LaneWiring) error {
 	if !w.CatalogFloors.Readable {
 		return fmt.Errorf(
-			"%s=%s and the permission catalog could not be read, so which assurance levels any "+
-				"RPC demands is unknown — an unread catalog is not an empty one (refuse to start)",
-			IdentityProviderSetting, IdentityProviderOwn)
+			"production mode: the permission catalog could not be read, so which assurance levels any " +
+				"RPC demands is unknown — an unread catalog is not an empty one (refuse to start)")
 	}
 
 	unreachable := 0
@@ -492,10 +379,9 @@ func unreachableFloorsComplaint(w LaneWiring) error {
 	}
 	sort.Strings(levels)
 	return fmt.Errorf(
-		"%s=%s and %d catalog entr(ies) demand assurance level(s) %s that this posture cannot "+
-			"present — the lane offers %s, so those verbs would be unreachable to every human "+
+		"production mode: %d catalog entr(ies) demand assurance level(s) %s that the sign-in lane "+
+			"cannot present — the lane offers %s, so those verbs would be unreachable to every human "+
 			"while the catalog says they are merely guarded (refuse to start)",
-		IdentityProviderSetting, IdentityProviderOwn,
 		unreachable, strings.Join(levels, ", "), presentedList(w.PresentableACRs))
 }
 
@@ -521,72 +407,17 @@ func presentedList(presentable []string) string {
 	return strings.Join(out, ", ")
 }
 
-// ownScoped — пометка требований, предъявляемых посадке `own`: каждая строка
-// отказа называет поле посадки и значение, из-за которого требование
-// предъявлено. Значения, которым требование снималось бы, пометка не называет:
-// `own` — единственное законное значение словаря, а снятую посадку `external`
-// (PRO-Robotech/corelib#30) проверка старта отвергает (#424) — совет объявить
-// её послал бы оператора за вторым отказом.
-func ownScoped(err error) error {
-	if err == nil {
-		return nil
-	}
-	var out error
-	for _, e := range multierr.Errors(err) {
-		out = multierr.Append(out, fmt.Errorf(
-			"%w [required because %s=%s]",
-			e, IdentityProviderSetting, IdentityProviderOwn))
-	}
-	return out
-}
-
-// laneScoped добавляет к отказу полосы снятой посадки ОДНУ строку о том, каким
-// значением поля требование снимается. Текст самого отказа не меняется — он
-// часть контракта оператора.
+// validateLaneRequirements — половина НАСТРОЙКИ: требования, выразимые
+// значениями настройки, выполнены.
 //
-// До этих строк проверка старта не доходит (#424): посадку вне словаря она
-// отвергает раньше требований полосы. Строки живут до снятия полосы целиком
-// (#363).
-func laneScoped(err error) error {
-	if err == nil {
-		return nil
-	}
-	var out error
-	for _, e := range multierr.Errors(err) {
-		out = multierr.Append(out, fmt.Errorf(
-			"%w [required because %s=%s; declare %s=%s and this requirement is lifted]",
-			e, IdentityProviderSetting, IdentityProviderExternal,
-			IdentityProviderSetting, IdentityProviderOwn))
-	}
-	return out
-}
-
-// validateIdentityProviderLane — посадочная половина: посадка ЗАКОННА, и
-// требования ЕЁ полосы, выразимые настройкой, выполнены.
-//
-// Законность судит проверка старта фундамента (Provider.Validate, задача #424):
-// у неё три исхода — не объявлено · объявлено числом вне словаря · законно. Она
-// замещает прежнюю ветку «объявлено ли поле», а не стоит рядом с ней: на
-// незаданном поле Validate сама отвечает identityposture.NotDeclared. Одного
-// IsSet мало — тип посадки целое, и число мимо разбора (преобразование типа,
-// декодер, кладущий число прямо в поле) IsSet называет объявленным: снятую
-// посадку `external` прежняя ветка пропускала к требованиям её полосы, а число,
-// которого словарь не знал никогда, — в старт без единого требования.
-//
-// Незаконная посадка отвергается ПЕРВОЙ и в одиночку: полоса неизвестна, и
-// требовать по ней нечего. Предъявлять сверх этого требования какой-нибудь
-// полосы значило бы выбрать полосу за оператора. Текст отказа один на оба
-// процесса — служба прав и край зовут одну проверку фундамента: расхождение
-// диагностики заставило бы оператора учить два объяснения одного предмета.
-func (c Config) validateIdentityProviderLane() error {
-	p := c.AuthN.IdentityProvider
-	if err := p.Validate(IdentityProviderSetting); err != nil {
-		return fmt.Errorf("production mode: %w", err)
-	}
-
+// Прежде ей предшествовала законность посадки (Provider.Validate фундамента),
+// и незаконная посадка отвергалась первой и в одиночку. Посадки больше нет —
+// ключ снят и отвергается загрузчиком (retired_settings.go), — и строки
+// предъявляются всякому боевому старту безусловно.
+func (c Config) validateLaneRequirements() error {
 	var errs error
 	for _, r := range LaneRequirements {
-		if r.Stage != LaneStageConfig || !r.AppliesTo(p) {
+		if r.Stage != LaneStageConfig {
 			continue
 		}
 		errs = multierr.Append(errs, r.Check(c, LaneWiring{}))
@@ -598,26 +429,23 @@ func (c Config) validateIdentityProviderLane() error {
 // видит, собраны.
 //
 // Зовётся композиционным корнем после сборки и до старта листенеров. Отказ
-// здесь — отдельный текст, и он НЕ заменяется посадочной проверкой: проба,
+// здесь — отдельный текст, и он НЕ заменяется проверкой настройки: проба,
 // доказавшая одну точку, о второй не утверждает ничего.
 //
-// В непроизводственном режиме требований полосы нет: in-process фикстура
-// поставщика не имеет и стендом не является (та же граница, что у соседних
-// провайдерских стражей).
+// В боевом режиме исполняются ВСЕ строки стадии сборки, без раннего возврата:
+// прежний возврат «посадка не объявлена — об этом уже отказала настройка»
+// после снятия оси остался бы возвратом без предмета, и стадия не исполнялась
+// бы вовсе (kaname#363).
+//
+// В непроизводственном режиме требований нет: in-process фикстура стендом не
+// является (та же граница, что у соседних стражей старта).
 func ValidateLaneWiring(c Config, w LaneWiring) error {
 	if !c.AuthN.Mode.IsProduction() {
 		return nil
 	}
-	p := c.AuthN.IdentityProvider
-	if !p.IsLegal() {
-		// Посадка не объявлена либо вне словаря — об этом уже отказала проверка
-		// настройки (validateIdentityProviderLane); второй отказ о том же
-		// предмете сделал бы два места об одном.
-		return nil
-	}
 	var errs error
 	for _, r := range LaneRequirements {
-		if r.Stage != LaneStageWiring || !r.AppliesTo(p) {
+		if r.Stage != LaneStageWiring {
 			continue
 		}
 		errs = multierr.Append(errs, r.Check(c, w))

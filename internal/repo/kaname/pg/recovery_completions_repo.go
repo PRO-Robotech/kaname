@@ -5,8 +5,9 @@ package pg
 
 // recovery_completions_repo.go — kaname.recovery_completions: idempotency
 // ledger of recovery completions. Two event sources, one row shape (Ф5 Р4):
-// the identity-provider webhook (InternalUserService.OnRecoveryCompleted, names
-// an external subject) and our own recovery flow (`humansession`, Ф5 —
+// the internal verb InternalUserService.OnRecoveryCompleted (names an external
+// subject; its caller was the identity-provider webhook, which left with that
+// provider, kaname#363) and our own recovery flow (`humansession`, Ф5 —
 // external subject absent, written as NULL; recovery_jti is the recovery_codes
 // row id).
 //

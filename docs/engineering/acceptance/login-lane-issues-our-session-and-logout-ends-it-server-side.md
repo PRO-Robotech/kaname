@@ -398,7 +398,7 @@ git grep -c 'rpc SessionCutoffOf' -- 'proto/kaname/cloud/iam/v1/session_revocati
 # единица — вызов усечения до секунды в обработчике этого RPC (разрешение отсечки на проводе)
 git grep -c 'shared.TimestampProto' -- 'internal/apps/kaname/api/session_revocations/session_cutoff.go'   # → 1: усекает (`internal/apps/kaname/shared/proto.go`, Truncate до секунды)
 # ГРАНИЦА отсечки у ЧИТАТЕЛЕЙ — единица — прод-строка сравнения момента с отсечкой
-git grep -n 'authTime.After(cutoff)' -- 'internal/handler/iamhooks/refresh_hook_handler.go' | wc -l   # → 1: !After ⇒ ≤ включающая
+git show d5e515e04:internal/handler/iamhooks/refresh_hook_handler.go | grep -c 'authTime.After(cutoff)'   # → 1 на d5e515e04: !After ⇒ ≤ включающая; хук обновления снят с поставщиком (kaname#363)
 git grep -n 'issued.Time.Before(cutoff)' -- 'internal/tokenrevocation/rule.go' | wc -l              # → 1: Before ⇒ < СТРОГАЯ
 ```
 
@@ -1826,7 +1826,7 @@ comm -13 \
 | **Ф-а** | HTTP-слушатель службы со своей ручкой адреса, неаутентифицированный на уровне запроса | `internal/handler/registrytokenhttp/` (выдача docker-токена) и его ручка `KANAME_API_SERVER__REGISTRY_TOKEN__ENDPOINT` (`cmd/kaname/httpsurfaces.go`) | `TestUnavailabilityCauseReachesTheLogButNotTheBody` — причина в журнал, не в тело | Ф3-01, 02, 15, 17, 19 — полоса как HTTP-поверхность со своей ручкой; режим TLS у полосы иной — Ф-с, допуск — §4.1 п.18 |
 | **Ф-б** | ОДИН отказ на все причины, различимость — внутрь, в счётчик и журнал | `internal/apps/kaname/api/internal_iam/resolve_basic_credential.go` (приёмка BAT-1 §10) | пробы отказа этого глагола | Ф3-02, Ф3-10, Ф3-27 |
 | **Ф-в** | монотонная отсечка субъекта одним оператором в транзакции, вместе с событием аудита | `internal/repo/kaname/pg/user_token_revocations_repo.go` (`upsertRevokeAllSQL`), `RevokeAllUserTokensTx` | `internal/domain/user_token_revocation_test.go`; `TestUserTokenRevocations_Upsert_MonotonicGreatest` — момент | Ф3-16, Ф3-21 — **момент**. Причину и актора при отброшенном моменте эта операция переписывает **безусловно** (`= EXCLUDED.` у обоих, §1.2) — это отрицательный контроль замка Ф1 §8, а не форма; свойство «причина и актор принадлежат записи, чей момент стоит» производит §4.1 п.17 |
-| **Ф-г** | отказ старта на незаданной величине, текст называет ручку; строка требований посадки | `internal/apps/kaname/config/validate.go`, `lane_requirements.go` (строка «своя сессия человека провязана») | `TestUnsetDomainRefusesTheStart` · `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane` | Ф3-28, 33, 41, 42, 44 |
+| **Ф-г** | отказ старта на незаданной величине, текст называет ручку; строка требований посадки | `internal/apps/kaname/config/validate.go`, `lane_requirements.go` (строка «своя сессия человека провязана») | `TestUnsetDomainRefusesTheStart` · `TestF4d10_EveryLaneRequirementRefusesTheProductionStart` | Ф3-28, 33, 41, 42, 44 |
 | **Ф-д** | управляемые часы на пути решения | `internal/presentedcred/reader.go` (поле `now`) | `TestKAN_VER_02_ExpiredIsRefused` | Ф3-11, 16, 49, 50 |
 | **Ф-е** | счётчик, чьи клетки заведены нулём до первого события | `internal/observability/metrics/expired_credential_sweep_recorder.go` | `TestExpiredCredentialSweep_CellsExistBeforeTheFirstPass` | Ф3-27, 34, 48 |
 | **Ф-ж** | реестр уборщиков одной фоновой петли — одна запись на предмет | `cmd/kaname/retention.go` | приёмка `retention-sweep-has-a-caller.md`; держатель, названный в шапке файла, живёт в дереве платформы и это дерево не судит — `kaname#111` | Ф3-49 |

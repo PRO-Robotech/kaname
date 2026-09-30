@@ -1,14 +1,15 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// authn_phase2.go — helpers for the AuthN core config fields.
+// authn.go — helpers for the AuthN core config fields.
 //
-// Reading order:
+// Reading order of a secret:
 //
-//  1. value from YAML/ENV directly (e.g. authn.hook-shared-secret),
-//  2. ENV variable referenced by authn.hook-shared-secret-env (default
-//     KANAME_HOOK_TOKEN). Required because secrets are never written to
-//     YAML (workspace policy — secretKeyRef-only).
+//  1. value from YAML/ENV directly (e.g. authn.jwks-encryption-key-hex),
+//  2. ENV variable referenced by the matching `-env` key (e.g.
+//     authn.jwks-encryption-key-hex-env, default KANAME_JWKS_ENC_KEY).
+//     Required because secrets are never written to YAML (workspace policy —
+//     secretKeyRef-only).
 //
 // ResolveHydraIssuer() / ResolveAudience() — derived from Domain. Умолчания у
 // Domain нет: см. ResolveDomain.
@@ -19,34 +20,11 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 )
-
-// ResolveHookSharedSecret returns the current shared-secret for Hydra hooks.
-// If authn.hook-shared-secret is set directly (dev) we use it; otherwise we
-// read the ENV variable named by authn.hook-shared-secret-env.
-//
-// Пустой возврат ОБХОДА НЕ ДАЁТ. Обработчик отвечает на него `500`
-// `hook_secret_not_configured` и не обслуживает запрос: ненастроенный секрет —
-// операторская ошибка нашей стороны, а не «аутентификация не требуется»
-// (`internal/handler/iamhooks/hook_auth.go`, проба
-// `TestHookAuthUnconfiguredSecretIsObservable`). В production-посадке пустое
-// значение до обработчика вообще не доезжает — страж старта отказывает в пуске
-// (`validateProductionAuthNSecrets`).
-func (c AuthNConfig) ResolveHookSharedSecret() string {
-	if c.HookSharedSecret != "" {
-		return c.HookSharedSecret
-	}
-	envName := c.HookSharedSecretEnv
-	if envName == "" {
-		envName = "KANAME_HOOK_TOKEN"
-	}
-	return os.Getenv(envName)
-}
 
 // JWKSEncryptionKeyEnvName — имя переменной окружения, из которой берётся ключ
 // ОБЁРТКИ приватной половины, когда ручка не задана значением напрямую.
@@ -226,64 +204,9 @@ func (c AuthNConfig) ResolveHydraIssuer() string {
 }
 
 // ResolveAudience returns the caller-aud for tokens (`<domain>` without
-// scheme). Used by token_hook to embed the audience claim.
+// scheme). The claim composer of our own mint stamps it as the audience.
 func (c AuthNConfig) ResolveAudience() string {
 	return c.ResolveDomain()
-}
-
-// DeclaredHydraAdminURL returns the admin-API address an operator actually
-// WROTE — the YAML setting or its ENV override — and the empty string when
-// neither is set.
-//
-// It exists because ResolveHydraAdminURL below never returns empty: it falls back
-// to a derivation from the issuer. That makes "declared" and "guessed"
-// indistinguishable at the call sites, which is precisely what let a production
-// profile ship with no declaration at all. The production boot guard
-// (config.validateProductionProviderAdminHop) reads THIS, not the resolved value.
-func (c AuthNConfig) DeclaredHydraAdminURL() string {
-	if v := strings.TrimSpace(c.HydraAdminURL); v != "" {
-		return v
-	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_ADMIN_URL"))
-}
-
-// ResolveHydraAdminCAFile — path to the PEM bundle the provider-admin hop is
-// verified against. Explicit setting, then ENV; empty when neither is set.
-//
-// Deliberately NOT derived from any other path: an anchor that is always
-// non-empty would make the hop read as verified on a profile that never
-// configured one, which is the same defect as a derived address.
-func (c AuthNConfig) ResolveHydraAdminCAFile() string {
-	if v := strings.TrimSpace(c.HydraAdminCAFile); v != "" {
-		return v
-	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_ADMIN_CA_FILE"))
-}
-
-// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
-// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
-// ENV KANAME_HYDRA_ADMIN_URL override, then the derivation from the issuer
-// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
-// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
-// even when the external issuer host does not resolve in-cluster.
-func (c AuthNConfig) ResolveHydraAdminURL() string {
-	if v := c.DeclaredHydraAdminURL(); v != "" {
-		return v
-	}
-	if iss := c.ResolveHydraIssuer(); iss != "" {
-		u, err := url.Parse(iss)
-		if err == nil {
-			// hydra.X.Y → hydra-admin.X.Y (Hydra split public/admin convention).
-			if h := u.Hostname(); strings.HasPrefix(h, "hydra.") {
-				u.Host = "hydra-admin." + strings.TrimPrefix(h, "hydra.")
-				if p := u.Port(); p != "" {
-					u.Host += ":" + p
-				}
-				return u.String()
-			}
-		}
-	}
-	return "https://hydra-admin." + c.ResolveDomain()
 }
 
 // ResolveHydraTokenEndpoint — the EXTERNAL issuer's token endpoint
@@ -292,6 +215,38 @@ func (c AuthNConfig) ResolveHydraAdminURL() string {
 // POST target.
 func (c AuthNConfig) ResolveHydraTokenEndpoint() string {
 	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/oauth2/token"
+}
+
+// tokenRoadKnob — пара «ключ настройки ↔ переменная среды» одной ручки дороги
+// обмена к прежнему издателю.
+type tokenRoadKnob struct {
+	Key string
+	Env string
+}
+
+// TokenRoadKnobs — ручки дороги обмена непереведённого докерного контура одним
+// объявлением. Их переменные названы СВОИМ именем, а не выведены из пути ключа,
+// и читает их процесс именно этим именем (`DeclaredHydraTokenURL`,
+// `ResolveHydraTokenCAFile`); профиль поставки называет ту же форму.
+//
+// Прежде владельцем этих имён были строки таблицы обязательных величин
+// посадки внешнего поставщика. Посадка снята (kaname#363), строки ушли с ней, а
+// дорога обмена осталась: объявление имени переехало сюда, к читателю, и гейт
+// исходящих полос поставки берёт вторую форму имени отсюда.
+var TokenRoadKnobs = []tokenRoadKnob{
+	{Key: "authn.hydra-token-url", Env: "KANAME_HYDRA_TOKEN_URL"},
+	{Key: "authn.hydra-token-ca-file", Env: "KANAME_HYDRA_TOKEN_CA_FILE"},
+}
+
+// tokenRoadEnv — значение переменной ручки дороги обмена по ключу; пусто, когда
+// ключа в перечне нет либо переменная не задана.
+func tokenRoadEnv(key string) string {
+	for _, k := range TokenRoadKnobs {
+		if k.Key == key {
+			return strings.TrimSpace(os.Getenv(k.Env))
+		}
+	}
+	return ""
 }
 
 // ResolveHydraTokenURL — the Hydra public token endpoint the `/iam/token` shim
@@ -310,88 +265,26 @@ func (c AuthNConfig) ResolveHydraTokenURL() string {
 // DeclaredHydraTokenURL returns the address an operator actually WROTE — the
 // YAML setting or its ENV override — and the empty string when neither is set.
 //
-// It exists for the same reason DeclaredHydraAdminURL does: the Resolve* form
-// never returns empty, so "declared" and "guessed" are indistinguishable at the
-// call sites, and the guessed value is the PUBLIC ingress hostname. The
-// production boot guard (validateProductionProviderPublicHops) reads THIS, not
-// the resolved value.
+// It exists because the Resolve* form never returns empty, so "declared" and
+// "guessed" are indistinguishable at the call sites, and the guessed value is
+// the PUBLIC ingress hostname.
 func (c AuthNConfig) DeclaredHydraTokenURL() string {
 	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
 		return v
 	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_TOKEN_URL"))
+	return tokenRoadEnv("authn.hydra-token-url")
 }
 
 // ResolveHydraTokenCAFile — path to the PEM bundle the hop to the provider's
 // PUBLIC listener is verified against. Explicit setting, then ENV; empty when
 // neither is set.
 //
-// Deliberately NOT derived from any other path (not even from the admin hop's
-// anchor, which happens to be the same bundle today): an anchor that is always
+// Deliberately NOT derived from any other path: an anchor that is always
 // non-empty would make the hop read as verified on a profile that never
 // configured one — the same defect as a derived address.
 func (c AuthNConfig) ResolveHydraTokenCAFile() string {
 	if v := strings.TrimSpace(c.HydraTokenCAFile); v != "" {
 		return v
 	}
-	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_TOKEN_CA_FILE"))
-}
-
-// HooksHTTPListenAddress — normalised listen-addr for the webhook HTTP
-// server. Default `tcp://0.0.0.0:9092` (separate port from gRPC
-// public/internal).
-func (c AuthNConfig) HooksHTTPListenAddress() string {
-	return listenAddress(c.HooksHTTPEndpoint)
-}
-
-// HydraAdminTokenEnvName — имя переменной окружения, из которой берётся
-// административный предъявитель внешнего поставщика.
-//
-// Объявлено ОДНИМ местом: его называют резолв, текст документации профиля и
-// перепись ручек разговора с поставщиком. Три копии разошлись бы молча — на
-// той, которую забыли поправить.
-func (c AuthNConfig) HydraAdminTokenEnvName() string {
-	if n := strings.TrimSpace(c.HydraAdminTokenEnv); n != "" {
-		return n
-	}
-	return "KANAME_HYDRA_ADMIN_TOKEN"
-}
-
-// ResolveHydraAdminToken возвращает административный предъявитель внешнего
-// поставщика.
-//
-// Пустая строка — законное значение: административный порт поставщика в этой
-// посадке не аутентифицирует никого, и требовать предъявителя значило бы не
-// пустить в старт каждый существующий стенд. Ценность резолва не в требовании,
-// а в ВИДИМОСТИ: ручка, читаемая здесь, видна проверке настройки; ручка,
-// читаемая в корне сборки, — нет.
-func (c AuthNConfig) ResolveHydraAdminToken() string {
-	return strings.TrimSpace(os.Getenv(c.HydraAdminTokenEnvName()))
-}
-
-// Значения ручки «чем административный контур аутентифицирует нас». Объявлены
-// ОДНИМ местом: их называют резолв, страж старта и текст его отказа. Три копии
-// разошлись бы молча — на той, которую забыли поправить.
-const (
-	// ProviderAdminAuthBearer — контур возит административный предъявитель.
-	ProviderAdminAuthBearer = "bearer"
-	// ProviderAdminAuthNone — административный порт поставщика не
-	// аутентифицирует никого. Значение ОБЪЯВЛЯЕТСЯ оператором, а не
-	// подразумевается нами: это утверждение о ЕГО поставщике.
-	ProviderAdminAuthNone = "none"
-)
-
-// ProviderAdminAuthValue — объявленный способ аутентификации административного
-// контура, как его прочитал процесс.
-//
-// Пустая строка означает «оператор не объявлял», и это ОТДЕЛЬНОЕ состояние, не
-// сводимое ни к `none`, ни к `bearer`: страж обязан различать «сказано, что не
-// нужен» и «не сказано ничего».
-func (c AuthNConfig) ProviderAdminAuthValue() string {
-	return strings.ToLower(strings.TrimSpace(c.ProviderAdminAuth))
-}
-
-// ProviderAdminAuthValues — закрытый словарь значений ручки, для текста отказа.
-func ProviderAdminAuthValues() []string {
-	return []string{ProviderAdminAuthBearer, ProviderAdminAuthNone}
+	return tokenRoadEnv("authn.hydra-token-ca-file")
 }

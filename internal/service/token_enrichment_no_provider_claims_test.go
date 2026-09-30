@@ -8,14 +8,13 @@ package service_test
 //
 // # Что здесь утверждается
 //
-// Полос, получающих состав от этой службы, семь: три ветви обратного вызова
-// поставщика (интерактивная сессия, ключ служебной учётки, федеративное
-// утверждение), уменьшенный состав первого входа, состав полосы обновления и
-// два вида клиента НАШЕГО токен-эндпоинта. Ветви персонального токена у
-// обратного вызова нет: поставщик персональных токенов не регистрирует, и она
-// снята вместе со столбцом имени клиента у него (kaname#362). Каждая
-// спрашивается здесь своим входом, и каждая обязана отдать непустой состав —
-// иначе «утверждения нет» неотличимо от «состава нет».
+// Полос, получающих состав от этой службы, две: два вида клиента НАШЕГО
+// токен-эндпоинта. Прежде их было семь — три ветви обратного вызова поставщика
+// (интерактивная сессия, ключ служебной учётки, федеративное утверждение),
+// уменьшенный состав первого входа и состав полосы обновления; все пять сняты
+// вместе с хуками поставщика (kaname#363). Каждая полоса спрашивается здесь
+// своим входом и обязана отдать непустой состав — иначе «утверждения нет»
+// неотличимо от «состава нет».
 //
 // Утверждения издателя (`kaname_issuer`) нет ни у одной полосы: читателей у
 // него не было ни в службе, ни в платформе, ни в фундаменте, а значением его
@@ -38,8 +37,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/corelib/tokenpolicy"
-
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -51,35 +48,15 @@ import (
 const (
 	npDomain       = "api.test.cloud"
 	npHumanSubject = "np-human-external-sub"
-	npFedIssuer    = "https://ci.example.org"
-	npFedSubject   = "repo:acme/infra:ref:refs/heads/main"
 	npUserID       = "usr_np0000000000000001"
 	npAccountID    = "acc_np0000000000000001"
 	npSAID         = "sva_np0000000000000001"
 	npSAKeyID      = "soc_np0000000000000001"
-	npFedKeyID     = "soc_np0000000000000002"
 	npUserTokenID  = "uoc_np0000000000000001"
 )
 
-type npUsers struct{ user domain.User }
-
-func (p npUsers) FindByExternalID(_ context.Context, ext domain.ExternalSubject) ([]domain.User, error) {
-	if ext != p.user.ExternalID {
-		return nil, nil
-	}
-	return []domain.User{p.user}, nil
-}
-
 type npSAs struct {
-	byClient, byFed domain.ServiceAccountOAuthClient
-	sa              domain.ServiceAccount
-}
-
-func (p npSAs) LookupByClientID(_ context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	if id != p.byClient.ID {
-		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no sa client %s", id)
-	}
-	return p.byClient, nil
+	sa domain.ServiceAccount
 }
 
 func (p npSAs) GetServiceAccount(_ context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
@@ -87,13 +64,6 @@ func (p npSAs) GetServiceAccount(_ context.Context, id domain.ServiceAccountID) 
 		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrNotFound, "no sa %s", id)
 	}
 	return p.sa, nil
-}
-
-func (p npSAs) FindByExternalSubject(_ context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {
-	if issuer != npFedIssuer || sub != npFedSubject {
-		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no trusted subject")
-	}
-	return p.byFed, nil
 }
 
 type npUserTokens struct {
@@ -147,18 +117,14 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             npSAKeyID, SvaID: npSAID,
 	}
-	socFed := domain.ServiceAccountOAuthClient{
-		CredentialKind: domain.CredentialKindFederated,
-		ID:             npFedKeyID, SvaID: npSAID,
-	}
 	uoc := domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             npUserTokenID, UserID: npUserID,
 		CreatedAt: fixed.Add(-time.Hour),
 	}
 
-	svc := service.NewTokenEnrichmentService(service.TokenEnrichmentConfig{Domain: npDomain}, npUsers{user: user}).
-		WithSAPort(npSAs{byClient: socKey, byFed: socFed, sa: sa}).
+	svc := service.NewTokenEnrichmentService(service.TokenEnrichmentConfig{Domain: npDomain}).
+		WithSAPort(npSAs{sa: sa}).
 		WithUserTokenPort(npUserTokens{user: user}).
 		WithOwnClientPort(npOwnClients{uoc: uoc, soc: socKey}).
 		WithClock(func() time.Time { return fixed })
@@ -167,18 +133,9 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 	// судить.
 	bound := service.TokenHookContext{
 		ACR: "1", CnfJkt: "np-jkt-thumb", CnfX5tS256: "np-x5t-thumb",
-		AuthTime: fixed.Add(-time.Minute).Unix(),
 	}
 	ctx := context.Background()
 
-	enrich := func(name, subject string, hc service.TokenHookContext) npLane {
-		t.Helper()
-		claims, _, err := svc.EnrichClaims(ctx, subject, hc)
-		if err != nil {
-			t.Fatalf("полоса %q: состав не выдан (%v) — сценарий прошёл не той дорогой, ради которой заведён", name, err)
-		}
-		return npLane{name: name, claims: claims}
-	}
 	assertion := func(name string, client domain.AssertionClient) npLane {
 		t.Helper()
 		claims, _, err := svc.ClaimsForAssertionClient(ctx, client, bound)
@@ -188,19 +145,7 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 		return npLane{name: name, claims: claims}
 	}
 
-	cc := bound
-	cc.GrantType = tokenpolicy.GrantTypeClientCredentials
-	fed := bound
-	fed.GrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer"
-	fed.ExternalIssuer = npFedIssuer
-	fed.OAuthClientID = npFedKeyID
-
 	lanes := []npLane{
-		enrich("обратный вызов: интерактивная сессия", npHumanSubject, bound),
-		enrich("обратный вызов: ключ служебной учётки", npSAKeyID, cc),
-		enrich("обратный вызов: федеративное утверждение", npFedSubject, fed),
-		{name: "уменьшенный состав первого входа", claims: svc.MinimalClaims(npHumanSubject)},
-		{name: "полоса обновления", claims: svc.UserClaims(user, npHumanSubject, bound)},
 		assertion("наш эндпоинт: клиент персонального токена", domain.AssertionClient{
 			ID: npUserTokenID, Kind: domain.AssertionClientUser, OwnerID: npUserID, OwnerActive: true,
 		}),
@@ -210,8 +155,8 @@ func npIssuanceLanes(t *testing.T) ([]npLane, []string) {
 	}
 
 	fixture := []string{
-		npDomain, npHumanSubject, npFedIssuer, npFedSubject,
-		npUserID, npAccountID, npSAID, npSAKeyID, npFedKeyID, npUserTokenID,
+		npDomain, npHumanSubject,
+		npUserID, npAccountID, npSAID, npSAKeyID, npUserTokenID,
 		bound.ACR, bound.CnfJkt, bound.CnfX5tS256,
 	}
 	return lanes, fixture

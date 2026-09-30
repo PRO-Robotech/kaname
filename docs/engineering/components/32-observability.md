@@ -300,10 +300,10 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
   приватный registry); HTTP-listener и интерсепторы — в composition root
   `cmd/kaname/serve.go`.
 - **Health:** живость и готовность строит ОБЩИЙ носитель `pkg/observability/health`
-  (#1752) — тот же, что у шести остальных сервисов; `internal/handler/iamhooks/http_server.go`
-  только монтирует его обработчики на `/healthz` и `/readyz`. Набор именованных
-  проверок (`health.Checker`: база, версия схемы, LRO-worker) собирается в
-  композиционном корне `cmd/kaname/hooks_mux.go`, а `SetShuttingDown` дёргается
+  (#1752) — тот же, что у шести остальных сервисов; `internal/handler/diagnostics/mux.go`
+  только монтирует его обработчики на `/healthz` и `/readyz` поверхности диагностики.
+  Набор именованных проверок (`health.Checker`: база, версия схемы, LRO-worker)
+  собирается в композиционном корне `cmd/kaname/readiness.go`, а `SetShuttingDown` дёргается
   из `cmd/kaname/serve.go` — готовность уходит в 503 ДО остановки серверов.
 
   Прежде здесь стоял свой тип `ReadinessChecker` той же формы, объявленный в
@@ -334,4 +334,4 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 - общий фундамент: `pkg/observability/` (slog + OTel), `pkg/operations/` (Recorder).
 - `internal/observability/metrics/{metrics,lro_recorder,authz_decorator}.go`
 - `cmd/kaname/serve.go` — wiring logger / metrics-listener / интерсепторов.
-- `internal/handler/iamhooks/http_server.go` — `/healthz` / `/readyz`.
+- `internal/handler/diagnostics/mux.go` — `/healthz` / `/readyz`.

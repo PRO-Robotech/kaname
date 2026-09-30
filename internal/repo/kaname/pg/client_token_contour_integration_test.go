@@ -140,7 +140,6 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	userClients := kanamepg.NewUserOAuthClientRepo(f.pool)
 	claims := service.NewTokenEnrichmentService(
 		service.TokenEnrichmentConfig{Domain: "kacho.local"},
-		users,
 	).
 		WithSAPort(&ctSAAdapter{saClients: saClients}).
 		WithUserTokenPort(&ctUserAdapter{users: users}).
@@ -172,12 +171,6 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 
 type ctSAAdapter struct{ saClients *kanamepg.SAOAuthClientRepo }
 
-func (a *ctSAAdapter) LookupByClientID(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	return a.saClients.GetByClientID(ctx, id)
-}
-func (a *ctSAAdapter) FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {
-	return a.saClients.FindByExternalSubject(ctx, issuer, sub)
-}
 func (a *ctSAAdapter) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
 	return a.saClients.GetServiceAccount(ctx, id)
 }
