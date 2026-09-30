@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 806
+Всего кейсов: 808
 
 ## Перепись по модулям
 
@@ -41,6 +41,7 @@
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
+| `cases/iam-account-id-edge-format.py` | 2 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 38 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
@@ -481,6 +482,13 @@
 - `IAM-ACB-RD-LS-PAGESIZE-NEGATIVE-VALUE-NEG`
 - `IAM-ACB-RD-LS-FILTER-UNKNOWN-KEY-NEG`
 - `IAM-ACB-RD-LS-FILTER-WHITELIST-OK`
+
+## `cases/iam-account-id-edge-format.py` — 2 кейсов
+
+> Case-set iam-account-id-edge-format — ФОРМА ИДЕНТИФИКАТОРА АККАУНТА, КОТОРУЮ СУДИТ КРАЙ.
+
+- `IAM-AB-SIA-12-EDGE-LIST-BY-ACCOUNT`
+- `IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID`
 
 ## `cases/iam-account-redesign.py` — 9 кейсов
 

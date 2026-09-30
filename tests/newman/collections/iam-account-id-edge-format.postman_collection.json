@@ -1,7 +1,7 @@
 {
   "info": {
-    "_postman_id": "d909456f-85ae-5dd3-bb04-4448e4ba2f10",
-    "name": "kaname / newman / iam-whoami",
+    "_postman_id": "c9296789-bb6c-5003-ae79-d57f1bc56004",
+    "name": "kaname / newman / iam-account-id-edge-format",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -45,11 +45,11 @@
   ],
   "item": [
     {
-      "name": "IAM-WAI-GT-CRUD-OK — GET /iam/v1/me as jwtHumanCeremony → 200, subject/userId/email/accounts populated",
-      "description": "class:CRUD | priority:P0",
+      "name": "IAM-AB-SIA-12-EDGE-LIST-BY-ACCOUNT — IAM-AB-SIA-12: /accounts/not-an-id/accessBindings → 400 INVALID_ARGUMENT, \"invalid resource id 'not-an-id'\" — у цели авторизации производитель отказа формы КРАЙ",
+      "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
-          "name": "IAM-WAI-GT-CRUD-OK :: whoami-aaa",
+          "name": "IAM-AB-SIA-12-EDGE-LIST-BY-ACCOUNT :: sia-malformed-parity-with-list-by-account",
           "request": {
             "method": "GET",
             "header": [
@@ -59,14 +59,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/me",
+              "raw": "{{baseUrl}}/iam/v1/accounts/not-an-id/accessBindings?pageSize=100",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "me"
+                "accounts",
+                "not-an-id",
+                "accessBindings?pageSize=100"
               ]
             }
           },
@@ -76,24 +78,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/me');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
-                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -124,58 +115,181 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('WhoAmI: subject = user:<ceremonyUserId>', () => {",
-                  "  const j = pm.response.json();",
-                  "  const want = 'user:' + pm.environment.get('ceremonyUserId');",
-                  "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
-                  "pm.test('WhoAmI: userId matches ceremonyUserId', () => {",
+                  "pm.test('у цели авторизации отказ формы производит край, и текст его', () =>",
+                  "  pm.expect(pm.response.json().message, pm.response.text())",
+                  "    .to.eql(\"invalid resource id 'not-an-id'\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID — Негодная форма идентификатора аккаунта отвергается КРАЕМ до модели прав: 400 у держателя права и у вызывающего без права, тела равны",
+      "description": "class:NEG | class:VAL | priority:P0",
+      "item": [
+        {
+          "name": "IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID :: malformed-account-id-rights-holder",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/not-an-account/memberships",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "not-an-account",
+                "memberships"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('негодный accountId — отказ КРАЯ, до модели прав', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.userId, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId'));",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
-                  "pm.test('WhoAmI: email non-empty', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.email, 'email field').to.be.a('string').with.length.greaterThan(0);",
-                  "});",
-                  "pm.test('WhoAmI: clusterViewer is a boolean', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.clusterViewer, 'clusterViewer field').to.be.a('boolean');",
-                  "});",
-                  "pm.test('WhoAmI: systemAdmin is a boolean', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.systemAdmin, 'systemAdmin field').to.be.a('boolean');",
-                  "});",
-                  "pm.test('WhoAmI: accounts is an array', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.accounts, 'accounts field').to.be.an('array');",
-                  "});",
-                  "pm.test('WhoAmI: accounts contains ceremonyAccountId (owner)', () => {",
-                  "  const j = pm.response.json();",
-                  "  const aid = pm.environment.get('ceremonyAccountId');",
-                  "  const found = (j.accounts || []).find(m => m.accountId === aid);",
-                  "  pm.expect(found, 'ceremonyAccountId membership entry').to.be.an('object');",
-                  "});",
-                  "pm.test('createdAt truncated to seconds', () => {",
-                  "  const ts = (pm.response.json().checkedAt);",
-                  "  pm.expect(ts, 'createdAt present').to.be.a('string');",
-                  "  // RFC3339; если есть дробная часть — это .000... либо отсутствует",
-                  "  const m = ts.match(/\\.(\\d+)/);",
-                  "  if (m) pm.expect(parseInt(m[1].padEnd(9,'0'), 10), 'sub-second part is zero').to.eql(0);",
+                  "pm.environment.set('mbrMalformedAcctBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID :: malformed-account-id-no-rights",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/not-an-account/memberships",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "not-an-account",
+                "memberships"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtNoBindings'",
+                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('исход НЕ является функцией прав: у вызывающего без единой выдачи ответ тот же, потому что права не спрашиваются вовсе', () => {",
+                  "  pm.expect(pm.response.text()).to.eql(pm.environment.get('mbrMalformedAcctBody'));",
                   "});"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-WAI-GT-AUTHZ-ANON-DENY — GET /iam/v1/me as anonymous (no Bearer) → 401 Unauthenticated",
-      "description": "class:AUTHZ | class:NEG | priority:P0",
-      "item": [
+        },
         {
-          "name": "IAM-WAI-GT-AUTHZ-ANON-DENY :: whoami-anon",
+          "name": "IAM-ID2-NEG-FORM-EDGE-ACCOUNT-ID :: control-wellformed-absent-account-reaches-the-model",
           "request": {
             "method": "GET",
             "header": [
@@ -185,14 +299,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/me",
+              "raw": "{{baseUrl}}/iam/v1/accounts/acc00000000000000000/memberships",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "me"
+                "accounts",
+                "acc00000000000000000",
+                "memberships"
               ]
             }
           },
@@ -202,106 +318,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: anonymous step",
-                  "pm.request.headers.remove('Authorization');",
-                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/me');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
-                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('ANON: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-WAI-GT-CRUD-NOB — GET /iam/v1/me as jwtHumanCeremonyNoBindings → 200, accounts empty (exempt for any authenticated)",
-      "description": "class:CRUD | priority:P1",
-      "item": [
-        {
-          "name": "IAM-WAI-GT-CRUD-NOB :: whoami-nob",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "me"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyNoBindings'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyNoBindings') || pm.variables.get('jwtHumanCeremonyNoBindings') || '';",
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremonyNoBindings is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/me');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
-                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -332,19 +355,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('WhoAmI-NOB: subject = user:<ceremonyNoBindingsUserId>', () => {",
+                  "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
+                  "pm.test('ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: well-formed accountId рубеж формы ПРОХОДИТ — иначе отрицание зеленело бы на крае, отвергающем ВСЯКИЙ accountId', () => {",
                   "  const j = pm.response.json();",
-                  "  const want = 'user:' + pm.environment.get('ceremonyNoBindingsUserId');",
-                  "  pm.expect(j.subject, JSON.stringify(j)).to.eql(want);",
-                  "});",
-                  "pm.test('WhoAmI-NOB: accounts is array (possibly empty)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.accounts, 'accounts field').to.be.an('array');",
-                  "});",
-                  "pm.test('WhoAmI-NOB: systemAdmin = false (regular user)', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.systemAdmin, 'NOB must not be system_admin').to.eql(false);",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
                   "});"
                 ]
               }

@@ -232,7 +232,17 @@ stand_env() {
   export KANAME_JWKS_ENC_KEY="$(cat "$WRAPKEY_FILE")"
   export KANAME_AUTHN__DOMAIN=kaname.local
   export KANAME_AUTHN__TRUST_DOMAIN=kaname.local
-  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS='spiffe://kaname.local/ns/kaname/sa/kaname'
+  # КРУГ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ — имя службы И имя края (kaname#398), как у
+  # стенда чарта посадки `own` (`stand-chart.sh`, накладка `own`). Глагол `Create`
+  # интерактивного клиента фронтируется краем (`GatewayFrontedInternalRPCs`):
+  # хоп собственного фронта его не проходит by construction, а пересланный
+  # принципал принимается только от доверенного пересылающего. Посев церемонии
+  # (`seed_ceremony.py`) заводит клиентов этим глаголом, стоя на месте края
+  # листом края стенда (`edge.crt`). В боевом профиле этот круг и есть край;
+  # стенд дописывает его к имени службы, а не заменяет. Без него пол
+  # подтверждения глагола читает принципал как непроверенный и отвечает
+  # `authz.step_up` (замер на стенде: 403, PreconditionFailure).
+  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS="spiffe://kaname.local/ns/kaname/sa/kaname,spiffe://kaname.local/ns/kaname/sa/$EDGE_SA"
   export KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE=registry.kaname.local
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
@@ -340,12 +350,14 @@ stand_env() {
   #
   # Срок выводится из БЮДЖЕТА ШАГОВ, которые живут выданным токеном: посев
   # чеканит его и передаёт прогону, и токен обязан пережить остаток посева
-  # (`timeout-minutes: 10`) плюс прогон коллекций (`timeout-minutes: 15`) —
-  # иначе истечение посреди прогона пришло бы отказом доступа, неотличимым от
-  # дефекта дерева. Сумма 25 минут не выходит за платформенный потолок
-  # `tokenpolicy.MaxTokenTTL` (30 минут), сверх которого страж отказывает.
-  # Предикат: `grep -n 'timeout-minutes' .github/workflows/e2e-newman.yml` у
-  # шагов посева и прогона.
+  # плюс прогон коллекций — иначе истечение посреди прогона пришло бы отказом
+  # доступа, неотличимым от дефекта дерева. Заданий на этом стенде два, и у
+  # каждого сумма пределов его шагов — 25 минут: `stand` — посев 10 и прогон 15,
+  # `stand-ceremony` — машинный посев 5, посев церемонии 5 и прогон 15 (его
+  # предъявители людей выданы той же поверхностью и живут тот же срок). Сумма не
+  # выходит за платформенный потолок `tokenpolicy.MaxTokenTTL` (30 минут), сверх
+  # которого страж отказывает. Предикат: `grep -n 'timeout-minutes'
+  # .github/workflows/e2e-newman.yml` у шагов посева и прогона обоих заданий.
   export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
   # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
   # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело

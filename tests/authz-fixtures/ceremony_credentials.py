@@ -222,7 +222,7 @@ def _seed(base: pathlib.Path, name: str, keys: list[str]) -> None:
 
 def self_test() -> int:
     census = load_census(DEFAULT_ROOT)
-    tmpl = {"jwtHumanX": "", "jwtAdmin": "", "jwtAdminStepUp": "",
+    tmpl = {"jwtHumanX": "", "jwtHumanXStepUp": "", "jwtAdmin": "", "jwtAdminStepUp": "",
             "humanSlotUserId": "", "svaInviteeId": "", "jwtAccountAdminA": "",
             "runId": ""}
     with tempfile.TemporaryDirectory() as tmp:
@@ -230,7 +230,8 @@ def self_test() -> int:
         suite = _suite(base, {
             "brace-human": "{{jwtHumanX}}/x",
             "brace-machine": "{{jwtAccountAdminA}}/x",
-            "get-stepup": "pm.environment.get('jwtAdminStepUp')",
+            "get-stepup": "pm.environment.get('jwtHumanXStepUp')",
+            "get-machine-stepup": "pm.environment.get('jwtAdminStepUp')",
             "get-plain": "pm.environment.get('jwtAdmin')",
             "human-id": "{{humanSlotUserId}}",
             "sva-invitee": "{{svaInviteeId}}",
@@ -241,8 +242,12 @@ def self_test() -> int:
         _check("предъявитель человека — в волне", "brace-human" in got, str(got))
         _check("машинный близнец — вне волны", "brace-machine" not in got, str(got))
         print("ось 2 — форма `environment.get(…)` и повышенный уровень")
-        _check("`…StepUp` — в волне", "get-stepup" in got, str(got))
-        _check("тот же ключ без `StepUp` — вне волны", "get-plain" not in got, str(got))
+        # Повышенный уровень наследует природу предъявителя (kaname#398): человек
+        # повышенного уровня — церемония, машина — нет (у машины уровня нет, её
+        # порог повышения не касается).
+        _check("`jwtHuman…StepUp` — в волне", "get-stepup" in got, str(got))
+        _check("машинный `…StepUp` — вне волны", "get-machine-stepup" not in got, str(got))
+        _check("машинный ключ без `StepUp` — вне волны", "get-plain" not in got, str(got))
         print("ось 3 — идентификатор человека против похожего машинного имени")
         _check("`human…UserId` — в волне", "human-id" in got, str(got))
         _check("`svaInviteeId` — вне волны", "sva-invitee" not in got, str(got))
@@ -262,7 +267,7 @@ def self_test() -> int:
         f, _, named = basis_findings(census, base / FIXTURES)
         _check("законный близнец — только машинные ключи: молчание", not f, str(f))
         _check("названные ключи посчитаны", named == 1, str(named))
-        _seed(base, SEED_NAME, ["jwtHumanX", "jwtAdminStepUp"])
+        _seed(base, SEED_NAME, ["jwtHumanX", "jwtHumanXStepUp"])
         f, asked, _ = basis_findings(census, base / FIXTURES)
         _check("посев церемонии пишет ключи церемонии — это его предмет: молчание",
                not f, str(f))

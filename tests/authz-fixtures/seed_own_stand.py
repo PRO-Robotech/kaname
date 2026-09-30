@@ -22,11 +22,14 @@
 ключей, которая его читала, kaname#361):
 
   · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — `jwtHuman*`, `ceremony*` и идентификаторы человека
-    церемонии (`humanAcc*UserId`). Полоса личности `own` не поднимается вовсе
-    (врезка в `.github/scripts/stand-own.sh`), а машинно выпущенный токен человека
-    приезжает с ПУСТЫМ уровнем подтверждения при пороге `required_acr_min>=1` —
-    и поднять его нечем: `acr` приходит только из сессии поставщика, службой он
-    лишь читается. То же и про `*StepUp`: набор сам объявляет их неподделываемыми;
+    церемонии (`humanAcc*UserId`). Машинно выпущенный токен человека приезжает с
+    ПУСТЫМ уровнем подтверждения при пороге `required_acr_min>=1`, а уровень
+    приходит только из сессии входа. Их куёт посев церемонии
+    (`seed_ceremony.py --wave`) входом человека через свою церемонию службы на
+    этом же стенде; повышенный уровень человека (`jwtHuman*StepUp`) — вторым
+    фактором. Слот повышенного уровня МАШИННОГО распорядителя
+    (`jwtAccountAdminAStepUp`) — иное дело: у машины уровня нет, и слот несёт
+    того же распорядителя (см. `MINTED_CREDENTIALS`);
   · ИСТЁКШЕЕ и ПОВРЕЖДЁННОЕ удостоверения — причины у самого шага отзыва ниже.
 
 ВСЁ, ЧТО ЗДЕСЬ ДЕЛАЕТСЯ, ДЕЛАЕТСЯ ЕДИНСТВЕННЫМ ГЛАГОЛОМ ПРОДУКТА. Ни одной
@@ -189,6 +192,15 @@ DEFAULT_MAILBOX_URL = "http://127.0.0.1:18025"
 # отказывают меткой «условие не создано».
 MINTED_CREDENTIALS = (
     "jwtAccountAdminA",
+    # ТОТ ЖЕ предъявитель распорядителя аккаунта A — слот «повышенного уровня»
+    # (kaname#398). Кейсы читают его как вариант ТОГО ЖЕ принципала: выпускают
+    # под ним и опрашивают операцию под `jwtAccountAdminA`. Распорядитель здесь —
+    # служебная учётка, а у машинного принципала уровня нет: общее правило
+    # повышения (`grpcsrv.EvaluateStepUp`) освобождает его ПЕРВОЙ ветвью, до
+    # всякого сравнения `acr`. Значит поднимать нечего, и слот несёт то же
+    # удостоверение; человек под этим именем был бы ДРУГИМ принципалом, и его
+    # операция не читалась бы соседним шагом.
+    "jwtAccountAdminAStepUp",
     "jwtAccountAdminB",
     "jwtBootstrap",
     "jwtInvitee",
@@ -234,6 +246,13 @@ MINTED_IDENTIFIERS = (
     "userAABId",
     "userNOBId",
     "userINVId",
+    # Цели привязки матрицы отказов (`cases/authz-deny.py`): строки людей, на
+    # которые субъекты матрицы пробуют выдать себе права и чью запись читают.
+    # Предъявителя у них нет (`principal_pairings.BINDING_TARGET_ONLY_IDS`), и
+    # литерал чужого стенда на их месте называл бы несуществующую строку —
+    # отказ по нему пришёл бы и при исправном рубеже.
+    "userPA1Id",
+    "userPureNoBindingsId",
     "svaAId",
     "svaInviteeId",
     "svaNoGrantId",
@@ -1166,6 +1185,12 @@ def run(args: argparse.Namespace) -> int:
         assert_serves(http, public, creds[var], f"/iam/v1/accounts/{account_id}",
                       f"{var} (чтение СВОЕГО аккаунта)")
         step(f"{var} получен обменом и ПРИНЯТ фронтом на своём аккаунте")
+    # Слот повышенного уровня — ТОТ ЖЕ принципал (см. `MINTED_CREDENTIALS`):
+    # машинный распорядитель освобождён от порога уровня, и второе удостоверение
+    # ничего не подняло бы.
+    creds["jwtAccountAdminAStepUp"] = creds["jwtAccountAdminA"]
+    step("jwtAccountAdminAStepUp — тот же распорядитель аккаунта A (машинный "
+         "принципал порогу уровня не подлежит)")
 
     say("── служебная учётка A: субъект, который называет себя на /iam/v1/me ──")
     sva_a = make_service_account(http, public, boot, tenants["a"]["accountId"],
@@ -1257,6 +1282,27 @@ def run(args: argparse.Namespace) -> int:
             "цель привязки членства совпала с уже заведённым человеком — слоты "
             "набора перестали быть независимы")
     step(f"и стала строкой человека: {user_inv}")
+
+    say("── ЦЕЛИ ПРИВЯЗКИ МАТРИЦЫ ОТКАЗОВ: строки людей без предъявителя ───────")
+    #
+    # `userPureNoBindingsId` — цель, которой в дереве не выдаётся НИЧЕГО и никем;
+    # `userPA1Id` — строка человека, на которую распорядитель проекта A1 пробует
+    # выдать себе права. Свой слот у каждой: общий слот сделал бы «никому не
+    # выдано» функцией порядка коллекций.
+    targets: dict[str, str] = {}
+    for slot in ("pa1", "pure"):
+        t_email = f"seed-{run_id}-{slot}@kaname.local"
+        bearer = register_person(lane_http, t_email, person_password())
+        confirm_person(lane_http, mailbox, t_email, bearer)
+        targets[slot] = resolve_tenant(http, public, boot, t_email)["userId"]
+        if targets[slot] in (user_nob, user_inv, tenants["a"]["userId"],
+                             tenants["b"]["userId"], *[v for k, v in targets.items()
+                                                       if k != slot]):
+            raise Finding(
+                f"цель привязки «{slot}» совпала с уже заведённым человеком — слоты "
+                f"матрицы перестали быть независимы")
+        step(f"цель привязки «{slot}» заведена полосой входа, адрес подтверждён: "
+             f"{targets[slot]}")
 
     say("── бутстрап-предъявитель: тот, кем посев и работал всё это время ─────")
     #
@@ -1407,6 +1453,9 @@ def run(args: argparse.Namespace) -> int:
         "userNOBId": user_nob,
         # Цель привязки членства группы — человек, и только цель.
         "userINVId": user_inv,
+        # Цели привязки матрицы отказов — люди, и только цели.
+        "userPA1Id": targets["pa1"],
+        "userPureNoBindingsId": targets["pure"],
         "svaAId": sva_a,
         "svaInviteeId": sva_inv,
         "svaNoGrantId": sva_nogrant,
