@@ -11,7 +11,7 @@
 //     Required because secrets are never written to YAML (workspace policy —
 //     secretKeyRef-only).
 //
-// ResolveHydraIssuer() / ResolveAudience() — derived from Domain. Умолчания у
+// ResolveProviderIssuer() / ResolveAudience() — derived from Domain. Умолчания у
 // Domain нет: см. ResolveDomain.
 //
 // All methods are pure (no side-effects; only os.Getenv reads).
@@ -181,20 +181,21 @@ func (c AuthNConfig) ResolveDomain() string {
 }
 
 // ProviderIssuerEnv — переменная окружения, переопределяющая издателя внешнего
-// поставщика: второе звено порядка в ResolveHydraIssuer. Имя записано здесь
+// поставщика: второе звено порядка в ResolveProviderIssuer. Имя записано здесь
 // один раз — читатель ниже и пробы, задающие или гасящие переменную, берут его
 // отсюда. Выписанное пробой заново, оно разошлось бы с читателем молча: проба
 // гасила бы переменную, которой процесс не читает.
 const ProviderIssuerEnv = "KANAME_HYDRA_ISSUER"
 
-// ResolveHydraIssuer returns the Hydra issuer. Precedence: explicit HydraIssuer
-// field → ProviderIssuerEnv (`KANAME_HYDRA_ISSUER`) env → derived
-// `https://hydra.<Domain>`. The env fallback lets a deployment whose Hydra
-// advertises a non-derivable issuer (e.g. a dev-stand behind a path-prefixed
-// public URL) align the shim's client_assertion audience with Hydra's real
-// issuer — otherwise the exchange fails invalid_client.
-func (c AuthNConfig) ResolveHydraIssuer() string {
-	if iss := strings.TrimSpace(c.HydraIssuer); iss != "" {
+// ResolveProviderIssuer returns the external provider's issuer. Precedence:
+// explicit ProviderIssuer field (key `authn.hydra-issuer`) → ProviderIssuerEnv
+// (`KANAME_HYDRA_ISSUER`) env → derived `https://hydra.<Domain>`. The env
+// fallback lets a deployment whose provider advertises a non-derivable issuer
+// (e.g. a dev-stand behind a path-prefixed public URL) align the shim's
+// client_assertion audience with the provider's real issuer — otherwise the
+// exchange fails invalid_client.
+func (c AuthNConfig) ResolveProviderIssuer() string {
+	if iss := strings.TrimSpace(c.ProviderIssuer); iss != "" {
 		return iss
 	}
 	if v := strings.TrimSpace(os.Getenv(ProviderIssuerEnv)); v != "" {
@@ -209,13 +210,19 @@ func (c AuthNConfig) ResolveAudience() string {
 	return c.ResolveDomain()
 }
 
-// ResolveHydraTokenEndpoint — the EXTERNAL issuer's token endpoint
-// (`<issuer>/oauth2/token`). This is the value Hydra recognises as the audience
-// of a client_assertion, and stays external regardless of the cluster-internal
+// ResolveProviderTokenEndpoint — the EXTERNAL issuer's token endpoint
+// (`<issuer>/oauth2/token`). This is the value the provider recognises as the
+// audience of a client_assertion, and stays external regardless of the cluster-internal
 // POST target.
-func (c AuthNConfig) ResolveHydraTokenEndpoint() string {
-	return strings.TrimRight(c.ResolveHydraIssuer(), "/") + "/oauth2/token"
+func (c AuthNConfig) ResolveProviderTokenEndpoint() string {
+	return strings.TrimRight(c.ResolveProviderIssuer(), "/") + "/oauth2/token"
 }
+
+// ProviderTokenURLEnv — переменная окружения адреса обмена у внешнего
+// поставщика: второе звено порядка в DeclaredProviderTokenURL. Объявлена одним
+// местом по той же причине, что ProviderIssuerEnv: перечень ручек ниже и пробы,
+// задающие или гасящие переменную, берут имя отсюда, а не выписывают заново.
+const ProviderTokenURLEnv = "KANAME_HYDRA_TOKEN_URL"
 
 // tokenRoadKnob — пара «ключ настройки ↔ переменная среды» одной ручки дороги
 // обмена к прежнему издателю.
@@ -226,15 +233,15 @@ type tokenRoadKnob struct {
 
 // TokenRoadKnobs — ручки дороги обмена непереведённого докерного контура одним
 // объявлением. Их переменные названы СВОИМ именем, а не выведены из пути ключа,
-// и читает их процесс именно этим именем (`DeclaredHydraTokenURL`,
-// `ResolveHydraTokenCAFile`); профиль поставки называет ту же форму.
+// и читает их процесс именно этим именем (`DeclaredProviderTokenURL`,
+// `ResolveProviderTokenCAFile`); профиль поставки называет ту же форму.
 //
 // Прежде владельцем этих имён были строки таблицы обязательных величин
 // посадки внешнего поставщика. Посадка снята (kaname#363), строки ушли с ней, а
 // дорога обмена осталась: объявление имени переехало сюда, к читателю, и гейт
 // исходящих полос поставки берёт вторую форму имени отсюда.
 var TokenRoadKnobs = []tokenRoadKnob{
-	{Key: "authn.hydra-token-url", Env: "KANAME_HYDRA_TOKEN_URL"},
+	{Key: "authn.hydra-token-url", Env: ProviderTokenURLEnv},
 	{Key: "authn.hydra-token-ca-file", Env: "KANAME_HYDRA_TOKEN_CA_FILE"},
 }
 
@@ -249,41 +256,42 @@ func tokenRoadEnv(key string) string {
 	return ""
 }
 
-// ResolveHydraTokenURL — the Hydra public token endpoint the `/iam/token` shim
-// POSTs the exchange to. Precedence: the explicit `authn.hydra-token-url` / ENV
-// KANAME_HYDRA_TOKEN_URL override (a cluster-internal Service, e.g.
+// ResolveProviderTokenURL — the provider's public token endpoint the
+// `/iam/token` shim POSTs the exchange to. Precedence: the explicit
+// `authn.hydra-token-url` / ENV ProviderTokenURLEnv (`KANAME_HYDRA_TOKEN_URL`)
+// override (a cluster-internal Service, e.g.
 // http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token), then the
-// external token endpoint (back-compat). The `iss` of the resulting token remains
-// the external Hydra issuer; only the network target differs.
-func (c AuthNConfig) ResolveHydraTokenURL() string {
-	if v := c.DeclaredHydraTokenURL(); v != "" {
+// external token endpoint (back-compat). The `iss` of the resulting token
+// remains the provider's external issuer; only the network target differs.
+func (c AuthNConfig) ResolveProviderTokenURL() string {
+	if v := c.DeclaredProviderTokenURL(); v != "" {
 		return v
 	}
-	return c.ResolveHydraTokenEndpoint()
+	return c.ResolveProviderTokenEndpoint()
 }
 
-// DeclaredHydraTokenURL returns the address an operator actually WROTE — the
+// DeclaredProviderTokenURL returns the address an operator actually WROTE — the
 // YAML setting or its ENV override — and the empty string when neither is set.
 //
 // It exists because the Resolve* form never returns empty, so "declared" and
 // "guessed" are indistinguishable at the call sites, and the guessed value is
 // the PUBLIC ingress hostname.
-func (c AuthNConfig) DeclaredHydraTokenURL() string {
-	if v := strings.TrimSpace(c.HydraTokenURL); v != "" {
+func (c AuthNConfig) DeclaredProviderTokenURL() string {
+	if v := strings.TrimSpace(c.ProviderTokenURL); v != "" {
 		return v
 	}
 	return tokenRoadEnv("authn.hydra-token-url")
 }
 
-// ResolveHydraTokenCAFile — path to the PEM bundle the hop to the provider's
+// ResolveProviderTokenCAFile — path to the PEM bundle the hop to the provider's
 // PUBLIC listener is verified against. Explicit setting, then ENV; empty when
 // neither is set.
 //
 // Deliberately NOT derived from any other path: an anchor that is always
 // non-empty would make the hop read as verified on a profile that never
 // configured one — the same defect as a derived address.
-func (c AuthNConfig) ResolveHydraTokenCAFile() string {
-	if v := strings.TrimSpace(c.HydraTokenCAFile); v != "" {
+func (c AuthNConfig) ResolveProviderTokenCAFile() string {
+	if v := strings.TrimSpace(c.ProviderTokenCAFile); v != "" {
 		return v
 	}
 	return tokenRoadEnv("authn.hydra-token-ca-file")

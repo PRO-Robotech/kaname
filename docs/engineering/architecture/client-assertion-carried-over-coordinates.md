@@ -188,7 +188,7 @@ done
 идентификатор нашего издателя; адрес токен-эндпоинта отвергается.
 
 ```sh
-git grep -n 'ResolveHydraTokenEndpoint' -- '*.go' ':!*_test.go'
+git grep -n 'ResolveProviderTokenEndpoint' -- '*.go' ':!*_test.go'
 ```
 
 Все попадания принадлежат контуру, который предъявляет утверждение **внешнему** серверу, а не

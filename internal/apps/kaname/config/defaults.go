@@ -194,7 +194,7 @@ func RegisterDefaults(v *viper.Viper) {
 	// умолчание в коде. Свойство держит проба TestDomainHasNoCompiledInDefault.
 	// Ключ привязан к окружению явно (load.go) — без этого `AutomaticEnv` не
 	// разрешил бы переменную вовсе.
-	v.SetDefault("authn.hydra-issuer", "") // resolved via ResolveHydraIssuer() when empty
+	v.SetDefault("authn.hydra-issuer", "") // resolved via ResolveProviderIssuer() when empty
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
 	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
