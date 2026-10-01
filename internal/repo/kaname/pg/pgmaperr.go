@@ -24,7 +24,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/PRO-Robotech/corelib/db/pgfault"
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/quota/quotadetail"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
@@ -32,6 +34,9 @@ import (
 // constraint-name aware text mapping yields the canonical Kachō messages:
 //
 //	accounts_name_unique        → ErrAlreadyExists "Account with name %s already exists"
+//	                              (имя формы идентификатора — "Account %s already exists")
+//	accounts_pkey,
+//	issued_account_ids_pkey     → ErrAlreadyExists "Account %s already exists"
 //	accounts_owner_fk           → ErrFailedPrecondition "User %s not found"
 //	<таблица>_name_check        → ErrInternal (защита последнего рубежа: форму
 //	                              имени проверяет сам сервис, значит срабатывание
@@ -330,8 +335,26 @@ func isConnectionFailure(err error) bool {
 
 func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	switch pgErr.ConstraintName {
+	// Идентификатор аккаунта может прислать вызывающий (kaname#549, Р4), поэтому
+	// конфликт идентификатора называет его, и текст один для живого, удалённого
+	// и посеянного: первичный ключ — живой, ключ реестра выданных (его вставляет
+	// триггер на вставку аккаунта) — выданный когда-либо.
+	case "accounts_pkey", "issued_account_ids_pkey":
+		if id, _ := splitAccountInsertHint(idHint); id != "" {
+			return fmt.Sprintf("Account %s already exists", id)
+		}
+		return "resource with these attributes already exists"
 	case "accounts_name_unique":
-		return fmt.Sprintf("Account with name %s already exists", idHint)
+		// Имя формы идентификатора носит только аккаунт с этим самым
+		// идентификатором (Р6, CHECK `accounts_name_is_not_a_foreign_id`), значит
+		// конфликт такого имени — это конфликт идентификатора, и текст тот же.
+		// Без этой ветви ответ на запрос с пустым именем зависел бы от порядка,
+		// в котором база проверяет два ключа одной вставки.
+		_, name := splitAccountInsertHint(idHint)
+		if ids.IsValid(name, domain.PrefixAccount) {
+			return fmt.Sprintf("Account %s already exists", name)
+		}
+		return fmt.Sprintf("Account with name %s already exists", name)
 	// Имени `users_external_id_unique` в этом перечне НЕТ и заводить его не
 	// надо: ни одна миграция такого ключа не создаёт. Оно стояло здесь и
 	// молчало — ветвь, которую сервер не выберет никогда, выглядит покрытием и
@@ -705,6 +728,10 @@ func checkText(pgErr *pgconn.PgError) string {
 	// строками ниже. Два места об одном предмете, из которых верно одно;
 	// теперь верно оба — роль отводится в ветке 23514 вместе с остальными.
 	switch pgErr.ConstraintName {
+	case "accounts_name_is_not_a_foreign_id":
+		// Рубеж базы под правилом Account.Validate (kaname#549, Р6) — тот же
+		// текст, что у типа: вызывающий прислал имя, и исправлять ему есть что.
+		return domain.ErrAccountNameOfTheIDForm.Error()
 	case "accounts_description_check", "projects_description_check", "groups_description_check",
 		"service_accounts_description_check", "roles_description_check":
 		return "Illegal argument description: length must be <=256"

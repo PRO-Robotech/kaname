@@ -9,14 +9,19 @@ package account
 // doCreate (Insert + outbox-emit + commit) → marshal anypb response.
 //
 // Sync validations (до Operation):
-//   1. owner_user_id required + format proxy через domain.Account.Validate.
-//   2. domain.Account.Validate() — multierr (name regex / description length /
-//      labels cardinality+key+val).
+//   1. owner_user_id output-only, род принципала — пользователь.
+//   2. Указанный `id` — форма генератора (INVALID_ARGUMENT, поле `id`), затем
+//      право администратора облака (PERMISSION_DENIED / UNAVAILABLE).
+//   3. domain.Account.Validate() — multierr (name regex, имя формы
+//      идентификатора только своё / description length / labels).
 // Async validations (внутри worker doCreate):
 //   - FK accounts_owner_fk: user не существует → SQLSTATE 23503 →
 //     ErrFailedPrecondition "User <id> not found".
 //   - UNIQUE accounts_name_unique: дубль имени → SQLSTATE 23505 →
 //     ErrAlreadyExists "Account with name <name> already exists".
+//   - PK accounts_pkey либо реестр выданных issued_account_ids_pkey: занятый
+//     или когда-либо выданный идентификатор → SQLSTATE 23505 →
+//     ErrAlreadyExists "Account <id> already exists".
 // Запрет #10: software-precheck `repo.ExistsByName` НЕ
 // делаем — UNIQUE на DB-уровне атомарно ловит race.
 
@@ -118,6 +123,13 @@ func ownerBindingLedgerTuples(a domain.Account, bindingID domain.AccessBindingID
 	}
 }
 
+// Источник идентификатора аккаунта в событии создания (приёмка, Р7): закрытая
+// пара, третьего значения нет.
+const (
+	idSourceSupplied  = "supplied"
+	idSourceGenerated = "generated"
+)
+
 // CreateAccountUseCase инициирует создание Account.
 //
 // Скоупный гэп с kacho-vpc-pattern: kaname НЕ имеет folder/parent peer-check
@@ -125,11 +137,12 @@ func ownerBindingLedgerTuples(a domain.Account, bindingID domain.AccessBindingID
 type CreateAccountUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// relations/logger — kept for backwards-compatible WithRelationStore wiring
-	// (composition root still passes them). The owner-tuple is no longer written
-	// sync from the Create path: it is co-committed into kaname.fga_outbox in
-	// the writer-tx (SEC-D) and applied by the drainer. The
-	// fields remain so future read-side helpers can reuse the client.
+	// relations — порт модели прав. Создание спрашивает его ровно об одном:
+	// вправе ли вызывающий задать идентификатор аккаунта (администратор облака),
+	// и только когда идентификатор указан. Неподключённый порт — отказ права,
+	// а не пропуск. Кортеж владельца через него не пишется: он co-commit'ится в
+	// kaname.fga_outbox в writer-tx (SEC-D) и применяется дренажом.
+	// logger — запись о несработавшей пост-фиксационной материализации.
 	relations clients.RelationStore
 	logger    *slog.Logger
 	// reconciler — P6 owner-binding materialization (C-01/C-01b). nil-safe.
@@ -147,7 +160,8 @@ func (u *CreateAccountUseCase) WithReconciler(r OwnerBindingReconciler) *CreateA
 	return u
 }
 
-// WithRelationStore wires the account owner-tuple writer.
+// WithRelationStore wires the rights-model port (asked only when the caller
+// supplies an account id) and the logger.
 func (u *CreateAccountUseCase) WithRelationStore(relations clients.RelationStore, logger *slog.Logger) *CreateAccountUseCase {
 	u.relations = relations
 	u.logger = logger
@@ -158,8 +172,18 @@ func (u *CreateAccountUseCase) WithRelationStore(relations clients.RelationStore
 // созданный Operation указателем (caller'у нужен он для `OperationService.Get`).
 //
 // Принимает `domain.Account` напрямую — никаких
-// тривиальных `CreateInput`-оберток. Поле `a.ID` на входе пустое — назначим
-// внутри через `ids.NewID(ids.PrefixAccount)`.
+// тривиальных `CreateInput`-оберток. Поле `a.ID` на входе — идентификатор,
+// присланный вызывающим (`CreateAccountRequest.id`), либо пусто. Пусто —
+// идентификатор чеканит генератор, побайтово как до появления поля; указан —
+// принимается только форма генератора и только от администратора облака
+// (приёмка «идентификатор аккаунта можно указать при создании», Р1–Р3).
+//
+// Порядок синхронных проверок (там же, §7 п. 3): аутентификация → поле
+// `ownerUserId` и род принципала → форма `id` → право задавать `id` → имя и
+// прочее → операция. Форма раньше права: негодная форма получает один ответ от
+// любого вызывающего и в базу не ходит. Право раньше операции: до ответа модели
+// нет ни чтения, ни строки операции с `account_id = id`, поэтому отказ права
+// одинаков для занятого и свободного идентификатора.
 func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*operations.Operation, error) {
 	// Anti-anonymous: anonymous create Account с произвольным owner → account hijack.
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
@@ -214,14 +238,31 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	}
 	a.OwnerUserID = domain.UserID(principalID)
 
-	// ID generation: используем literal-prefix через domain.PrefixAccount.
-	// Future: переключиться на `ids.PrefixAccount` после его добавления
-	// в pkg/ids.
-	//
-	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
+	// Идентификатор: присланный либо чеканный. Источник фиксируется ДО
+	// подстановки — он идёт в событие аудита и выводится из того, был ли
+	// идентификатор в запросе, а не сравнением результата.
+	idSource := idSourceGenerated
+	if a.ID != "" {
+		idSource = idSourceSupplied
+		// ФОРМА — ровно форма генератора, без нормализации: регистр не
+		// сворачивается, пробелы не срезаются. Второго написания формы нет.
+		if !ids.IsValid(string(a.ID), domain.PrefixAccount) {
+			return nil, shared.InvalidArg("id", fmt.Sprintf("invalid account id '%s'", string(a.ID)))
+		}
+		// ПРАВО задавать идентификатор — вопрос модели, и задаётся он только при
+		// непустом поле: без него поведение генератора от хранилища прав не
+		// зависит. Модель решает, код выбирает вопрос.
+		if err := authzguard.RequireClusterAdmin(ctx, u.relations); err != nil {
+			return nil, err
+		}
+	} else {
+		a.ID = domain.AccountID(ids.NewID(domain.PrefixAccount))
+	}
+	// Идентификатор назначен ДО проверки имени намеренно: пустое имя — законный
 	// вход создания и означает «назови сам», а умолчание производится ОТ
-	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
-	accID := ids.NewID(domain.PrefixAccount)
+	// ИДЕНТИФИКАТОРА (#1279); и правило имени формы идентификатора (Р6) судит
+	// имя против СОБСТВЕННОГО идентификатора, которого без назначения нет.
+	accID := string(a.ID)
 	// F2: pre-allocate the default Project id so CreateAccountMetadata carries
 	// BOTH accountId AND defaultProjectId before the Operation is done — the
 	// client never has to List the default project.
@@ -258,9 +299,8 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	// the principal, so it is resolved here and passed into doCreate.
 	actor := authzguard.PrincipalUserID(ctx)
 
-	a.ID = domain.AccountID(accID)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return u.doCreate(ctx, a, domain.ProjectID(defaultProjID), actor)
+		return u.doCreate(ctx, a, domain.ProjectID(defaultProjID), actor, idSource)
 	})
 	return &op, nil
 }
@@ -272,7 +312,7 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 // binding'а (scope-self verb-bearing tuples на account:<A> + ARM_ANCHOR forward
 // над содержимым — C-01/C-01b; единый materialization-путь). Возвращает anypb с
 // финальным state Account'а.
-func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, defaultProjID domain.ProjectID, actor string) (*anypb.Any, error) {
+func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, defaultProjID domain.ProjectID, actor, idSource string) (*anypb.Any, error) {
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
@@ -329,6 +369,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 			"resource_type": "account",
 			"resource_id":   string(inserted.ID),
 			"name":          string(inserted.Name),
+			"id_source":     idSource,
 		},
 	}); aerr != nil {
 		return nil, shared.MapRepoErr(aerr)

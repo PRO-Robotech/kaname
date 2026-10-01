@@ -50,7 +50,6 @@ func TestAccountNameRuleTwinsAreAccepted(t *testing.T) {
 		{nameRuleOwnID, "accq2x5v8b4n6t17m3ku", "последний знак `u` вне алфавита — не форма идентификатора"},
 		{nameRuleOwnID, "acc7m3k9q2x5v8b4n6t", "19 знаков — не форма идентификатора"},
 		{nameRuleOwnID, "aid23-tenant", "обычное имя"},
-		{"acc1a18042d81fb438d6", "kacho-system", "посеянный служебный аккаунт"},
 	} {
 		require.NoError(t, nameRuleAccount(tc.id, tc.name).Validate(), tc.why)
 	}

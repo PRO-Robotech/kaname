@@ -213,8 +213,11 @@ func TestAccountID17_BackfillClosesIDsIssuedBeforeTheMigration(t *testing.T) {
 			"%s отвергнут не ключом реестра: %s", name, pgErr.ConstraintName)
 	}
 
-	// Близнец: идентификатор, не упомянутый нигде, проходит.
-	require.NoError(t, insertAccountRow(db, i5, "aid17-fresh-"+i5[len(i5)-6:], owner))
+	// Близнец: идентификатор, не упомянутый нигде, проходит. Владелец — второй
+	// человек: у первого темп заведения фикстуры (3 за окно) уже исчерпан личным
+	// аккаунтом, I1 и I4, а предмет близнеца — реестр, а не темп.
+	twinOwner := seedOwner(t, db, "aid17twin")
+	require.NoError(t, insertAccountRow(db, i5, "aid17-fresh-"+i5[len(i5)-6:], twinOwner))
 }
 
 // TestAccountID24_NameRuleMigrationRefusesLoudlyOnAViolator — AID-24.

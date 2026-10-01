@@ -20,6 +20,7 @@ package audit_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"regexp"
@@ -238,7 +239,13 @@ func TestAccountID14_ConcurrentCreatesWithOneIDLetExactlyOneThrough(t *testing.T
 	const n = 8
 	race := func(t *testing.T, idOf func(int) string) (env *testEnv, ops []*operations.Operation) {
 		env = newProbeEnv(t)
-		owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid14")
+		// Свой человек на каждую горутину: темп заведения считается на личность
+		// (3 за окно у фикстуры), а предмет пробы — единственность по ключу, а не
+		// темп. С одним владельцем близнец упирался бы в темп, а не проходил.
+		owners := make([]domain.UserID, n)
+		for i := range owners {
+			owners[i], _ = seedUserAccount(t, context.Background(), env.pool, fmt.Sprintf("aid14-%d", i))
+		}
 		uc := createUseCase(env, &relationDouble{admin: true})
 		ops = make([]*operations.Operation, n)
 		errs := make([]error, n)
@@ -249,7 +256,7 @@ func TestAccountID14_ConcurrentCreatesWithOneIDLetExactlyOneThrough(t *testing.T
 			go func(i int) {
 				defer wg.Done()
 				<-start
-				ops[i], errs[i] = uc.Execute(withPrincipal(owner), domain.Account{
+				ops[i], errs[i] = uc.Execute(withPrincipal(owners[i]), domain.Account{
 					ID: domain.AccountID(idOf(i)), Name: domain.AccountName("aid14-" + string(rune('a'+i))), Labels: domain.Labels{},
 				})
 			}(i)
