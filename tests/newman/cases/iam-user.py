@@ -6,7 +6,8 @@
 Covered RPCs:  Get, List, Invite, Delete + глаголы-действия :block / :unblock /
   :removeFromAccount (public UserService).
 Not covered here: InternalUserService.UpsertFromIdentity, InternalUserService.Get —
-  those are internal-port-only RPCs covered in iam-internal-only-check.py.
+  those are internal-port-only RPCs; their route census on the platform's listeners is
+  held by PRO-Robotech/kacho:gateway/tests/newman/cases/iam-internal-only-check.py.
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):

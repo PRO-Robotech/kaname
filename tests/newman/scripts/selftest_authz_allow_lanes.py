@@ -45,7 +45,9 @@
 # Поверхность шага берётся из самой коллекции (kaname#398)
 
 Матрица authz-deny переадресована на собственный публичный фронт службы
-(`address_own_front`), набор authz-sa-apitoken остался на крае. Какую поверхность
+(`address_own_front`). Второй набор с теми же полосами, authz-sa-apitoken, снят из
+этого дерева: его дом — набор vpc платформы (PRO-Robotech/kacho#2912, сторона
+службы — kaname#415), и его полосы судит набор там. Какую поверхность
 изображает подставной сервер, проба спрашивает у сгенерированной коллекции: страж
 адреса в пред-скрипте шага (`gen._ENV_URL_MARK`) называет переменную фронта, шаг без
 стража идёт по переменной своего адреса. Прежде проба подавала одну переменную края,
@@ -98,11 +100,6 @@ _WRONG_SURFACE = (421, {"code": 13,
                                    " - the collection addresses this step to another front",
                         "details": []})
 COLLECTION = ROOT / "collections" / "authz-deny.postman_collection.json"
-# Второй набор с теми же полосами. Он НЕ «такой же по аналогии» — его помощник живёт
-# своей копией в cases/authz-sa-apitoken.py, поэтому и проверяется отдельно: паритет,
-# принятый на веру, ровно тем и опасен (см. data-integrity.md §«Межсервисное намерение»).
-SA_COLLECTION = ROOT / "collections" / "authz-sa-apitoken.postman_collection.json"
-SEED_NETWORK_A1 = "net00000000000000001"
 
 PROJECT_A1 = "prj00000000000000001"
 ACCOUNT_A = "acc00000000000000001"
@@ -119,15 +116,6 @@ _OK_NAME_REJECT = {"code": 3,
 _MISS = {"code": 5, "message": "Project " + PROJECT_A1 + " not found", "details": []}
 _UNAVAILABLE = {"code": 14, "message": "authorization service unavailable", "details": []}
 _SYNC_RESOURCE = {"id": PROJECT_A1, "accountId": ACCOUNT_A, "name": "selftest"}
-
-# Полосы второго набора: тот же вид ответов, но ресурс — сеть vpc, а идентификатор
-# операции несёт префикс `enp` (ids.PrefixOperationVPC), не iam-шный `iop`.
-_OK_NETWORK = {"id": SEED_NETWORK_A1, "projectId": PROJECT_A1, "name": "selftest"}
-_OK_NETWORKS = {"networks": [_OK_NETWORK], "nextPageToken": ""}
-_OK_VPC_OPERATION = {"id": "enp00000000000000001", "description": "selftest", "done": False,
-                     "metadata": {"networkId": SEED_NETWORK_A1}}
-_NETWORK_MISS = {"code": 5, "message": "Network " + SEED_NETWORK_A1 + " not found", "details": []}
-_SYNC_NETWORK = dict(_OK_NETWORK)
 
 # Прежняя форма утверждения — воспроизведена ДОСЛОВНО. Снята из cases/authz-deny.py
 # коммитом issue #668.
@@ -174,12 +162,6 @@ LANES = {
 RIGHT_REMOVED = {
     "acct-up": "AUTHZ-ACCT-UP-OWN-AAA",
     "invite":  "AUTHZ-INV-A-AAA",
-}
-
-SA_LANES = {
-    "sa-read": ("AUTHZ-SA-NET-GT-A1", (200, _OK_NETWORK),       (404, _NETWORK_MISS), "not found"),
-    "sa-list": ("AUTHZ-SA-NET-LS-A1", (200, _OK_NETWORKS),      (503, _UNAVAILABLE),  "authorization service unavailable"),
-    "sa-op":   ("AUTHZ-SA-NET-CR-A1", (200, _OK_VPC_OPERATION), (200, _SYNC_NETWORK), SEED_NETWORK_A1),
 }
 
 
@@ -289,7 +271,6 @@ def _run(collection: Path, folder: str, surface: str, urls: dict, report: Path) 
         ["newman", "run", str(collection), "--folder", folder,
          *surfaces,
          "--env-var", f"projectA1Id={PROJECT_A1}",
-         "--env-var", "projectA2Id=prj00000000000000003",
          "--env-var", "projectB1Id=prj00000000000000002",
          "--env-var", f"accountAId={ACCOUNT_A}",
          "--env-var", "accountBId=acc00000000000000002",
@@ -304,7 +285,6 @@ def _run(collection: Path, folder: str, surface: str, urls: dict, report: Path) 
          "--env-var", "jwtSAA=selftest-token",
          "--env-var", "jwtSAB=selftest-token",
          "--env-var", "apiTokenA=selftest-token",
-         "--env-var", f"seedNetworkA1Id={SEED_NETWORK_A1}",
          "--reporters", "json", "--reporter-json-export", str(report),
          "--timeout-request", "5000"],
         capture_output=True, check=False, text=True, timeout=300)
@@ -328,12 +308,11 @@ def main() -> int:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     problems: list[str] = []
-    print(f"selftest ALLOW-полос матрицы iam — полос {len(LANES) + len(SA_LANES)} "
-          f"в двух наборах, плюс {len(RIGHT_REMOVED)} проверки «право снято»")
+    print(f"selftest ALLOW-полос матрицы iam — полос {len(LANES)} "
+          f"в наборе authz-deny, плюс {len(RIGHT_REMOVED)} проверки «право снято»")
     with tempfile.TemporaryDirectory() as tmp:
         tmpd = Path(tmp)
         lanes = [(COLLECTION, lane, spec) for lane, spec in LANES.items()]
-        lanes += [(SA_COLLECTION, lane, spec) for lane, spec in SA_LANES.items()]
         for collection, lane, (prefix, healthy, broken, token) in lanes:
             folder = _folder(prefix, collection)
             surface = _surface(folder, collection)
@@ -443,7 +422,7 @@ def main() -> int:
         for p in problems:
             print(f"  - {p}")
         return 1
-    print("\nselftest: OK — все полосы обоих наборов различают здоровый ответ и дефект, "
+    print("\nselftest: OK — все полосы набора различают здоровый ответ и дефект, "
           "называют дефект в тексте падения, прежняя форма не видела ни одного из них, "
           "строки #710 краснеют при снятом праве, каждый кейс получил ответы своей "
           "поверхности, а перепутанная поверхность краснеет")

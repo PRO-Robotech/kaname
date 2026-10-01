@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 808
+Всего кейсов: 742
 
 ## Перепись по модулям
 
@@ -35,7 +35,6 @@
 |---|---:|
 | `cases/authz-deny.py` | 293 |
 | `cases/authz-failclosed.py` | 3 |
-| `cases/authz-sa-apitoken.py` | 30 |
 | `cases/basic-access-token.py` | 2 |
 | `cases/docker-lane-credential-kind.py` | 1 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
@@ -47,8 +46,6 @@
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
-| `cases/iam-interactive-client.py` | 8 |
-| `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
 | `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
@@ -56,7 +53,6 @@
 | `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
-| `cases/iam-project-edge-format.py` | 1 |
 | `cases/iam-project.py` | 35 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
@@ -67,7 +63,7 @@
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-grant-visibility.py` | 1 |
-| `cases/iam-token-facade-conformance.py` | 6 |
+| `cases/iam-token-facade-conformance.py` | 4 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
@@ -78,9 +74,6 @@
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
-| `cases/label-revoke-nlb.py` | 1 |
-| `cases/label-revoke-storage.py` | 3 |
-| `cases/label-revoke-vpc.py` | 8 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
 
@@ -386,46 +379,11 @@
 
 ## `cases/authz-failclosed.py` — 3 кейсов
 
-> Case-set authz-failclosed — отказ, когда вердикта о правах взять неоткуда.
+> Case-set authz-failclosed — отказ, когда вердикта взять неоткуда.
 
 - `AUTHZ-FAILCLOSED-OPENFGA-DOWN`
 - `AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200`
-- `AUTHZ-FAILCLOSED-EDGE-KEY-SOURCE-LANE`
-
-## `cases/authz-sa-apitoken.py` — 30 кейсов
-
-> Case-set authz-sa-apitoken для kaname.
-
-- `AUTHZ-SA-NET-GT-A1`
-- `AUTHZ-SA-NET-LS-A1`
-- `AUTHZ-SA-NET-CR-A1`
-- `AUTHZ-SA-NET-LS-A2-DENY`
-- `AUTHZ-SA-NET-GT-B1`
-- `AUTHZ-SA-NET-CR-B1`
-- `AUTHZ-SA-NET-LS-B1-DENY`
-- `AUTHZ-SA-ACCT-GT-A`
-- `AUTHZ-SA-ACCT-UP-A`
-- `AUTHZ-SA-ESC-SELF-ADMIN`
-- `AUTHZ-SA-ESC-SELF-VPC-B1`
-- `AUTHZ-SA-ESC-SELF-MODIFY`
-- `AUTHZ-SA-ESC-ISSUE-KEY`
-- `AUTHZ-SA-ESC-CUSTOM-ROLE`
-- `AUTHZ-SANG-NET-GT-A1`
-- `AUTHZ-SANG-NET-LS-A1-DENY`
-- `AUTHZ-SANG-NET-CR-A1`
-- `AUTHZ-SANG-SA-LS-A-EMPTY`
-- `AUTHZ-APITOK-NET-GT-A1`
-- `AUTHZ-APITOK-NET-LS-A1`
-- `AUTHZ-APITOK-NET-GT-B1`
-- `AUTHZ-APITOK-ACCT-GT-A`
-- `AUTHZ-APITOK-NET-LS-B1-DENY`
-- `AUTHZ-APITOK-REVOKED-GT-A1`
-- `AUTHZ-APITOK-REVOKED-LS-A1`
-- `AUTHZ-APITOK-MALFORMED-GT-A1`
-- `AUTHZ-APITOK-EXPIRED-GT-A1`
-- `AUTHZ-APITOK-REVOKED-CR`
-- `AUTHZ-APITOK-MALFORMED-CR`
-- `AUTHZ-APITOK-ESC-SELF-ADMIN`
+- `AUTHZ-FAILCLOSED-UNKNOWN-KEY-TWIN`
 
 ## `cases/basic-access-token.py` — 2 кейсов
 
@@ -607,37 +565,6 @@
 - `IAM-GRP-DL-AUTHZ-ANON-DENY`
 - `IAM-GRP-LSOP-CRUD-OK`
 
-## `cases/iam-interactive-client.py` — 8 кейсов
-
-> Case-set: InternalInteractiveClientService — the interactive-login client (IAM-INT-1, S1).
-
-- `IAM-IC-CR-CRUD-OK`
-- `IAM-IC-CR-CONF-DUP-NAME`
-- `IAM-IC-CR-VAL-REDIRECT-URIS`
-- `IAM-IC-GT-NEG-ABSENT`
-- `IAM-IC-GT-VAL-MALFORMED-ID`
-- `IAM-IC-UP-VAL-IMMUTABLE-MASK`
-- `IAM-IC-UP-VAL-UNKNOWN-MASK`
-- `IAM-IC-DL-IDM-REPEAT`
-
-## `cases/iam-internal-only-check.py` — 13 кейсов
-
-> Case-set для iam-internal-only-check.
-
-- `IAM-INT-NEG-EXT-REST-ALIVE`
-- `IAM-INT-NEG-EXT-USER-UPSERT`
-- `IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT`
-- `IAM-INT-NEG-EXT-IAM-CHECK`
-- `IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS`
-- `IAM-INT-OK-INT-USER-UPSERT`
-- `IAM-INT-OK-INT-USER-UPSERT-IDEM`
-- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT`
-- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN`
-- `IAM-INT-OK-INT-IAM-CHECK`
-- `IAM-INT-NEG-EXT-IC-LIST`
-- `IAM-INT-NEG-EXT-IC-CREATE`
-- `IAM-INT-OK-INT-IC-LIST`
-
 ## `cases/iam-invite-grant-fga.py` — 4 кейсов
 
 > RC-1 — anchor-grant FGA materialization (e2e, black-box) — GREEN BY THE RIGHT REASON.
@@ -701,12 +628,6 @@
 - `CONF-G-01-catalog-happy`
 - `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
-
-## `cases/iam-project-edge-format.py` — 1 кейсов
-
-> Case-set iam-project-edge-format — ФОРМА ИДЕНТИФИКАТОРА ПРОЕКТА, КОТОРУЮ СУДИТ КРАЙ.
-
-- `IAM-PRJ-DL-NEG-MALFORMED-PREFIX`
 
 ## `cases/iam-project.py` — 35 кейсов
 
@@ -903,15 +824,13 @@
 
 - `IAM-ACB-SYSGRANT-VISIBLE-OK`
 
-## `cases/iam-token-facade-conformance.py` — 6 кейсов
+## `cases/iam-token-facade-conformance.py` — 4 кейса
 
-> Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
+> Case-set: iam is the SINGLE FACADE to the token signer (#59, Phase C).
 
 - `IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS`
 - `IBT-05-CREDENTIAL-LIFECYCLE-THROUGH-FACADE-RPCS`
 - `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
-- `IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR`
-- `IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE`
 - `IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED`
 
 ## `cases/iam-user.py` — 43 кейсов
@@ -976,33 +895,6 @@
 
 - `IAM-LBLCLEAR-PROJECT-EMPTY-01`
 - `IAM-LBLREVOKE-PROJECT-01`
-
-## `cases/label-revoke-nlb.py` — 1 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, nlb.listener (e2e).
-
-- `T31-LBLREVOKE-NLB-LISTENER-04`
-
-## `cases/label-revoke-storage.py` — 3 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, storage resources (e2e).
-
-- `T31-LBLREVOKE-STORAGE-VOLUME-03`
-- `T31-LBLREVOKE-STORAGE-SNAPSHOT-03`
-- `T31-LBLREVOKE-STORAGE-IMAGE-03`
-
-## `cases/label-revoke-vpc.py` — 8 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, vpc resources (e2e, black-box).
-
-- `T31-LBLREVOKE-VPC-NETWORK-01`
-- `T31-LBLREVOKE-VPC-SECGROUP-02`
-- `T31-LBLREVOKE-VPC-NETWORK-ADD-01`
-- `T31-LBLREVOKE-VPC-NETWORK-CHANGE-01`
-- `T31-LBLREVOKE-VPC-NETWORK-IDM-01`
-- `T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01`
-- `T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01`
-- `T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE`
 
 ## `cases/rbac-subject-channel-equivalence.py` — 8 кейсов
 

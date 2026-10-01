@@ -525,6 +525,7 @@ jobs:
       # и обмен подписанного утверждения у НАШЕГО издателя (:9096). Ни записи в
       # базу, ни подписи чужим ключом, ни обхода рубежа.
       - name: посев удостоверений на автономном стенде
+        id: seed-own
         timeout-minutes: 10
         run: |
           rc=0
@@ -588,9 +589,72 @@ jobs:
             --service iam-flat-authz-vbc \
             --service docker-lane-credential-kind \
             --service iam-membership-create \
+            --service iam-token-facade-conformance \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
+
+      # ── ВОЛНА СВЁРТКИ БАЗЫ: отказ без вердикта, а не пустая страница ──────
+      #
+      # Коллекции `authz-failclosed` нужно условие, несовместимое с остальным
+      # прогоном: база стенда недостижима, служба жива (kaname#415). Поэтому волна
+      # идёт ПОСЛЕ коллекций собственного фронта и в перечень шага выше не входит,
+      # а базу возвращает следующий шаг при любом исходе этого.
+      #
+      # ПЕРЕД СВЁРТКОЙ оба удостоверения, которыми идут прогонщик и коллекция,
+      # предъявляются фронту. Это контроль — при живой базе 200, то есть стенд
+      # исправен, и отказ под свёрткой произведёт она, — и прогрев: положительный
+      # вердикт об отзыве фронт помнит срок кеша (у стенда 30 с), и без прогрева
+      # исход коллекции был бы функцией расписания — 401 рубежа предъявителя после
+      # остывания кеша, 503 рубежа, читающего базу, до него. Разбор и замер — шапка
+      # tests/newman/cases/authz-failclosed.py. Предъявитель уходит клиенту через
+      # стандартный ввод, а не доводом командной строки.
+      - name: волна свёртки базы — отказ без вердикта, а не пустая страница (числовой вердикт)
+        id: failclosed-wave
+        if: ${{ !cancelled() && steps.seed-own.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          env_file=tests/newman/environments/local.postman_environment.json
+          own="$(jq -r '.values[] | select(.key == "ownRestBaseUrl") | .value' "$env_file")"
+          for key in jwtBootstrap jwtAccountAdminA; do
+            code="$(jq -r --arg k "$key" '.values[] | select(.key == $k) | "Authorization: Bearer " + .value' "$env_file" \
+              | curl -sS -o /dev/null -w '%{http_code}' -H @- \
+                  --cacert .stand/pki/ca.crt --cert .stand/pki/srv.crt --key .stand/pki/srv.key \
+                  "$own/iam/v1/accounts?pageSize=1")" || code="нет ответа"
+            if [ "$code" != "200" ]; then
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предъявитель $key не принят фронтом при ЖИВОЙ базе (код $code) — свёртка не начиналась, коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+              exit 1
+            fi
+            echo "контроль до свёртки: $key принят фронтом (200), вердикт об отзыве прогрет"
+          done
+          rc=0
+          .github/scripts/stand-own.sh db-fold || rc=$?
+          case "$rc" in
+            0) : ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::базу стенда свернуть не удалось — коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+              exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+          cd tests/newman
+          ./scripts/run.sh --service authz-failclosed \
+            --ssl-client-cert ../../.stand/pki/srv.crt \
+            --ssl-client-key ../../.stand/pki/srv.key \
+            --ssl-extra-ca-certs ../../.stand/pki/ca.crt
+
+      - name: база стенда возвращена после волны свёртки
+        if: ${{ always() && steps.failclosed-wave.outcome != 'skipped' }}
+        timeout-minutes: 5
+        run: |
+          rc=0
+          .github/scripts/stand-own.sh db-unfold || rc=$?
+          case "$rc" in
+            0) : ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::базу стенда вернуть после волны не удалось — вердикт волны выше от этого не меняется, а журнал стенда ниже пишет служба без базы"
+              exit 1 ;;
+            *) exit "$rc" ;;
+          esac
 
       # ── АРТЕФАКТ ПУБЛИЧНОГО РЕПОЗИТОРИЯ ВЫКЛАДЫВАЕТСЯ ТОЛЬКО ПОСЛЕ ЧИСТКИ ──
       #

@@ -1,185 +1,132 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
+"""Case-set: iam is the SINGLE FACADE to the token signer (#59, Phase C).
 
 WHAT PROPERTY THIS FILE PINS
 ============================
 `.claude/rules/security.md` §«Production-mode обязателен ВЕЗДЕ» п.4 states the rule
 this suite exists to keep true:
 
-    iam is the ONLY facade to the signing provider. Clients, services and e2e go to
-    iam — signature verification through its JWKS-proxy, token issuance/lifecycle
-    through its RPCs, the docker token through its handle, claim enrichment through
-    its hook. Dialling the provider directly, around iam, breaks the unification.
-    Exactly one direct path stays legitimate: the final standard client-assertion →
-    token exchange.
+    iam is the ONLY facade to token signing. Clients, services and e2e go to iam —
+    signature verification through the key material it publishes, token issuance
+    and lifecycle through its RPCs, claim composition by iam itself. Going around
+    iam breaks the unification.
 
-Four lanes and one exception. THREE of them are probed here; the fourth — the
-docker lane, IBT-14 — lives in the registry suite
-(`services/registry/tests/newman/cases/registry-docker-facade-lane.py`) and is
-named here so the rule is not read as three-quarters covered:
+WHERE THIS RUNS, AND WHY HERE (e2e-flow.md §7а; kaname#415)
+=========================================================
+Every lane below is PRODUCED BY THE SERVICE: its own public REST front verifies the
+presented Bearer, its own key publisher serves the verifying half, its own RPCs
+issue and revoke credentials, its own signer places the composed claims. So the
+module runs where those producers live — on the autonomous stand of this
+repository, job `stand` of `.github/workflows/e2e-newman.yml`, every step on
+`{{ownRestBaseUrl}}` (`address_own_front` at the end of the module) except the
+key-set reads, which go to the publisher listener `{{iamJwksBaseUrl}}`. Both
+addresses and the bootstrap Bearer are minted by the machine seed of that stand
+(`tests/authz-fixtures/seed_own_stand.py`).
 
-    Every lane below dials CORE only — api-gateway, iam, the signing provider —
-    and every stand carries those. The docker lane dials the registry DATA PLANE,
-    a shard-gated component that `deploy/e2e-shards.json` deploys on the `edge`
-    shard alone; the iam suite runs on the shard that deliberately removes it.
-    Written here, that lane asked for a service its own runner does not deploy —
-    and the shape it took was worse than a red case: the runner opened the
-    port-forward unconditionally, a forward to a service that is not there exits,
-    and the run was declared INVALID before the first suite started (four shards
-    of five, `0/16 collections`, run 31344367968). It now lives with its subject.
-    The pairing is asserted, not remembered: `deploy/scripts/assert-shard-coverage.py`
-    check 9 requires that a suite dialling a component transport runs only on
-    shards declaring that component.
+The module was written for the api-gateway of the platform. Splitting it by
+producer (kaname#415) left here what the service produces and named, for every
+lane that left, who holds it now:
 
-Three lanes and the negatives that make each of them mean something:
-
-  verification  IBT-04 — the Bearer the edge accepts is verified by key material the
+  verification  IBT-04 — the Bearer the front accepts is verified by key material the
                          FACADE serves (its `kid` is published by the facade's own
-                         key-set record), and the edge answers 200 — neither 401 nor
-                         403.
-                IBT-12 — RETIRED with its subject. It held the MIRROR record of the
-                         provider's public keyset faithful to the provider; the mirror
-                         left together with the provider (kaname#361), the publisher
-                         carries ONE record — ours — and there is nothing left to
-                         compare.
+                         key-set record), and the front answers 200 — neither 401 nor
+                         403. That the EDGE accepts the same Bearer is the edge's
+                         subject: PRO-Robotech/kacho:gateway/tests/newman/cases/authn_edge.py.
   issuance      IBT-05 — a credential is issued AND revoked through iam's own RPCs
                          (SAKeyService.Issue/Revoke, UserTokenService.Issue/Revoke),
                          and the acr-exempt service principal is not step-up-challenged.
-  enrichment    IBT-13 — the platform principal the edge reports for a machine token
-                         is the one the FACADE's claim composition named. Without the
-                         composition the credential carries no `kaname_*` claim at all
-                         and names nobody on this platform.
-  negatives     IBT-06 — the bootstrap mint has no REST door on any api-gateway listener.
-                IBT-15 — the provider's own surfaces (admin client registration, token
-                         endpoint, JWKS) are not reachable through the platform edge,
-                         so a bypass client cannot be provisioned from outside.
-                IBT-10 — only a facade-issued RS256 Bearer is accepted: anonymous is
-                         401, and an alg-confusion HS256 forgery over the SAME payload,
-                         keyed with the public modulus, is 401.
+  enrichment    IBT-13 — the platform principal the front reports for a machine token
+                         is the one the FACADE's claim composition named.
+  negatives     IBT-10 — only a facade-issued asymmetric Bearer is accepted by the
+                         front: anonymous is 401, an unsigned token over the accepted
+                         payload is 401, and an alg-confusion HS256 forgery over the
+                         SAME payload, keyed with the published public material, is
+                         401. The edge's own rubezh is held by the same platform
+                         module as IBT-04.
 
-WHERE THE IDS COME FROM, AND WHERE THE ACCEPTANCE TEXT DIVERGES FROM THE TREE
-=============================================================================
-IBT-04/05/06/10 are the four e2e-conformance scenarios named in the acceptance
+Lanes that LEFT this module, each with its holder:
+
+  IBT-06 — "the bootstrap mint has no REST door on any api-gateway listener". Its
+           subject is the route table of a listener, and it is held by
+           REGISTRATION, which is stronger than an e2e 404 (a 404 also answers a
+           typo): on the service side by `cmd/kaname/bootstrap_token_internal_only_test.go`,
+           on the edge side by
+           PRO-Robotech/kacho:gateway/internal/restmux/bootstrap_token_no_rest_route_test.go.
+  IBT-15 — "the provider's own surfaces are not reachable through the edge". Two of
+           its three addresses were surfaces of the external provider, and the
+           provider is gone from the product together with its mirror record
+           (kaname#424, kaname#361): there is nothing left to route around. The third
+           — where the facade key set is published — is a statement about the route
+           table of the edge, the platform's subject; on the service side the record
+           is served by the publisher listener, which IBT-04 below reads.
+  IBT-12 — RETIRED with its subject earlier (kaname#361); its number is not reused.
+  IBT-14 — the docker lane; it lives with its subject in the platform's registry suite.
+
+WHERE THE IDS COME FROM
+=======================
+IBT-04/05/06/10 are the e2e-conformance scenarios named in the acceptance
 (`docs/specs/sub-phase-IAM-BOOTSTRAP-TOKEN-acceptance.md`, Traceability rows
-"e2e-conformance (Phase C)") and in issue #59's Scope. IBT-12/13/14/15 are new
-numbers in the same family (IBT-01..IBT-11 + IBT-A1..A3 + IBT-T5 are taken): the
-acceptance was written about the BOOTSTRAP MINT, so it has no scenario for the
-mirror, the hook, the docker handle or the provider surfaces — the four lanes the
-facade rule named. The mirror lane (IBT-12) is retired with the mirror
-(kaname#361); its number is not reused. Following the tree over the text, three divergences are recorded
-here rather than papered over:
+"e2e-conformance (Phase C)"); IBT-12/13/14/15 are new numbers in the same family.
+The case IDS ARE KEPT, because they are the acceptance's scenario numbers and
+renaming them would silently break the traceability rows that cite them — even
+where an id still says EDGE or RS256: what the case asserts is said by its title
+and its comment.
 
-  1. IBT-06 predicts `404 Not Found` for the mint on both listeners, "additionally
-     blocked by the dispatcher on external". MEASURED on the production-posture stand
-     (2026-08-09, all probes authenticated with a facade-issued Bearer): every probe
-     of the mint — the grpc-gateway unbound form AND the custom path the acceptance
-     spells — answers `403 {"code":7}` with a `PreconditionFailure` violation of type
-     `authz.catalog` and an EMPTY `ErrorInfo.metadata.action`, on the public listener
-     AND on the internal one, in the same shape as a nonsense path fired at the same
-     listener. The reason is structural: the mint carries no `google.api.http` binding
-     at all, so there is no route to miss, and the fail-closed authz gate answers
-     before the mux is consulted. 404 can never arrive, so a case asserting it could
-     never pass — it would be a check that cannot run, reported as one that did.
-     What this case asserts instead is what can actually be witnessed: NEVER 2xx, in
-     the same REFUSAL SHAPE as a typo, with a positive control proving the same
-     listeners DO serve routes (`iam:lookupSubject` answers 200 on internal and a 404
-     mux-miss on public). This is the "family B" shape and the honesty note of
-     `cases/iam-internal-only-check.py`, applied here for the same reason.
-     Not BYTE-identity: the refusal body echoes the requested path back in
-     `ErrorInfo.metadata.fqn`, so two different addresses always differ in that one
-     field and a byte comparison would be red on a correct platform. The comparison
-     is over the normalised shape (http · code · reason · violation type · action);
-     see `_REFUSAL_SHAPE_JS` below for why the empty `action` is the load-bearing part.
-  2. The advertised external TLS listener (:8443) is NOT probed. Measured on the same
-     stand: it requests a client certificate, completes the handshake, opens the HTTP/2
-     stream and then answers nothing — with no client cert AND with the gateway's own
-     client cert; no request of that kind reaches the gateway's access log. A probe
-     that cannot be answered must not be written as a passing check, so the isolation
-     statements here are made on the two listeners that do answer. `externalBaseUrl`
-     is deliberately NOT referenced by this file.
-  3. IBT-05's acceptance text drives `UserTokenService.Issue` for the SEED. This case
+Two divergences from the acceptance text, recorded rather than papered over:
+
+  1. IBT-05's acceptance text drives `UserTokenService.Issue` for the SEED. This case
      drives it for the CONTRACT: issue → poll → the credential material is returned →
      revoke. It deliberately does NOT exchange the user credential for a Bearer: a
-     user client-credentials token carries no `acr` and the user-token client is
-     provisioned without the api audience, so that exchange cannot authenticate the
-     edge (issue #59, comment of 2026-07-22). That limit is #59's remaining open item
-     (the interactive principal), not something this file can assert around.
-  4. THE ACCEPTANCE HAS ONE ISSUING LANE; THE PLATFORM NOW HAS TWO. The acceptance
-     was written when every Bearer on this platform came from the external provider,
-     and its scenario names carry that world: IBT-10 says "RS256", IBT-13 says "the
-     FACADE hook". The platform since grew its own signer, and the bootstrap
-     credential these cases present is minted by it — asymmetric still, but ES256,
-     issued by iam, with the composed claims placed FLAT rather than nested, and with
-     the principal itself as `sub`.
-     The case IDS ARE KEPT, because they are the acceptance's scenario numbers and
-     renaming them would silently break the traceability rows that cite them. What
-     changed is what the cases assert: every lane-specific literal (one algorithm,
-     one key-set record, one claim placement, `sub` is not the principal) is replaced
-     by the property that holds across BOTH lanes, and each case comment says which
-     literal it replaced and why the replacement is not a relaxation. The key-set
-     axis has since narrowed back: the provider's mirror record left with the
-     provider (kaname#361), and the kid is looked up in the facade's one record —
-     ours — which is what the platform now publishes, not a lane literal.
-     This is not hypothetical tidiness. Written for one lane, this file went red
-     against a correct platform in FIVE of its seven cases at once — two on the key
-     material (the algorithm, and the record the kid is looked up in), one on the
-     claim form, and two more purely as a cascade, where the step that failed was
-     doing exactly the right thing with a value the suite had failed to capture.
+     user client-credentials token carries no `acr`, so that exchange cannot stand
+     in for an interactive principal (issue #59).
+  2. THE ACCEPTANCE HAS ONE ISSUING LANE, AND SO DOES THE PRODUCT NOW. The
+     acceptance was written when every Bearer came from the external provider; the
+     platform then grew its own signer, and the provider has since left the product
+     (kaname#424). Every lane-specific literal (one algorithm, one key-set record,
+     one claim placement, `sub` is not the principal) was replaced by the property
+     that holds for any asymmetric signer, and each case comment says which literal
+     it replaced and why the replacement is not a relaxation. The claim reader still
+     NAMES the nested forms the provider used, so that a failure says which form it
+     searched — the stand produces the flat one.
 
 WHAT IS DELIBERATELY *NOT* ASSERTED, SO NOBODY LOOKS FOR IT HERE
 ================================================================
-The legitimate direct path — the final OAuth2 `client_assertion` → token exchange at
-the provider — is not exercised as a black-box case: signing an ES256 assertion needs
-the private key handed out once by Issue, and a Postman script signing JOSE would be a
-second implementation of `PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py` that could drift from it
-silently.
-
-It used to be exercised on every run anyway, one level down — the Bearer these cases
-carry was produced by exactly that exchange. That is no longer true on a stand where
-the bootstrap credential is minted by the platform's own signer, and saying otherwise
-would be claiming a lane is covered when nothing here reaches it. What IBT-04 witnesses
-is what it says: the credential this suite presents is accepted, and the key that
-verifies it is published by the facade in its own key-set record.
+The final OAuth2 `client_assertion` → token exchange is not exercised as a
+black-box case: signing an ES256 assertion needs the private key handed out once by
+Issue, and a Postman script signing JOSE would be a second implementation of the
+seed's own exchange that could drift from it silently. The Bearer this suite carries
+is produced by that very exchange in the seed of the stand.
 
 HOW THE PROBES REACH WHAT THEY PROBE
 ====================================
-Two endpoints of this stand are not the api-gateway and are addressed through their
-own base-URL variables, injected by the newman runner (`--env-var`) exactly like
-`internalBaseUrl`. A missing variable is a BROKEN HARNESS, never a legal mode:
-`require_env_url` fails naming the variable and only then skips, so losing one turns
-the suite RED instead of silently deleting a lane.
+  {{ownRestBaseUrl}}          the service's own public REST front (`address_own_front`);
+  {{iamJwksBaseUrl}}          the service's key-publisher listener. ONE path is read
+                              on it — the platform's own key-set record, declared as a
+                              module constant next to `_jwks_step` — and each fetch
+                              asserts 200: a record that moved makes this suite name
+                              the address it asked for, never pass having read nothing.
 
-Both belong to CORE, which is why they are addressable on every shard. The two
-addresses of the docker lane (iam's :9096 handle and the registry data plane)
-moved out with IBT-14 and are declared by the registry suite instead — the second
-of them reaches a shard-gated component, and that is precisely why the lane could
-not stay here.
-
-  {{iamJwksBaseUrl}}          iam key-publisher listener (:9097). Cluster-internal,
-                              server-TLS with an internal-CA leaf → the steps carry
-                              `insecure_tls` (the tunnel's trust chain is not the
-                              subject; WHAT IS SERVED is). ONE path is read on it —
-                              the platform's own key-set record, declared as a module
-                              constant next to `_jwks_step` — and each fetch asserts
-                              200: a record that moved makes this suite name the
-                              address it asked for, never pass having read nothing.
-                              The provider's PUBLIC endpoint is no longer read by any
-                              case: it was the oracle of the mirror comparison, and
-                              the mirror is gone (kaname#361).
+A missing variable is a BROKEN HARNESS, never a legal mode: `require_env_url` fails
+naming the variable, so losing one turns the suite RED instead of silently deleting
+a lane.
 
 Idempotence: every fixture this file creates carries `{{runId}}` in its name and is
 torn down by the case that made it (SA created → key issued → key revoked → SA
 deleted). The one credential issued against a pre-seeded subject (the user token) is
-revoked in the same case. Nothing is left behind for the next run to collide with.
+revoked in the same case.
 
 Test-first note (strict TDD): these cases are written to FAIL when the facade property
-is violated, and that was demonstrated by injection rather than asserted — see
-`docs/RESULTS.md` (IBT conformance) for the pair of runs: with a forged HS256 Bearer
-substituted for the facade-issued one, IBT-04/IBT-13 go RED naming the lane; with the
-real Bearer they are GREEN. Do not weaken an assertion here; a red case means the
-property moved.
+is violated, and that is demonstrated by injection rather than asserted —
+`scripts/selftest_token_facade_forms.py` feeds the real generated collection a
+defective world per axis and requires each to go red naming itself. Do not weaken an
+assertion here; a red case means the property moved.
+
+Техники: классы эквивалентности предъявителя (подлинный · без удостоверения · без
+подписи · подделка смешением алгоритма), переходы состояний удостоверения (выдан →
+отозван), угадывание ошибок (симметричный ключ в записи публикатора, приватный член
+ключа, запись переехала).
 """
 
 # ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
@@ -196,7 +143,7 @@ CASES = []
 # Shared JS: base64url ↔ text, and reading the credential the STEP ACTUALLY SENT.
 #
 # The header is read from `pm.request.headers`, not from the environment variable
-# it came from: what this suite is about is the credential presented to the edge.
+# it came from: what this suite is about is the credential presented to the front.
 # Reading the variable instead would still pass if some later change stopped the
 # header from being attached at all.
 # ---------------------------------------------------------------------------
@@ -393,14 +340,14 @@ _PUBLIC_MATERIAL_JS = [
 
 
 # ===========================================================================
-# IBT-04 — the edge accepts the facade-issued Bearer, and the key that verifies
+# IBT-04 — the front accepts the facade-issued Bearer, and the key that verifies
 #          it is served BY THE FACADE.
 #
-# Two halves, and neither alone is the property. "The edge answered 200" says the
+# Two halves, and neither alone is the property. "The front answered 200" says the
 # token was good; it does not say WHOSE key material proved it. "The publisher
 # serves keys" says material exists; it does not say anything verifies with it.
 # Together they close the verification lane: this exact credential's `kid` is one
-# the facade publishes, and the edge admits it.
+# the facade publishes, and the front admits it.
 #
 # THE RECORD READ IS OURS, AND IT IS THE ONLY ONE.
 # The publisher used to carry a record per accepted issuer, and this case read
@@ -408,7 +355,7 @@ _PUBLIC_MATERIAL_JS = [
 # record left together with the provider (kaname#361): the publisher now carries
 # one record and refuses a second at start, so the kid of an accepted Bearer is
 # required to be served by OUR record — a kid the facade does not publish means
-# the edge verifies against key material that is not the platform's.
+# the front verifies against key material that is not the platform's.
 #
 # The algorithm assertion moved from "RS256" to "asymmetric, and the same
 # algorithm the publishing record declares for that kid". It is not weaker: the
@@ -420,7 +367,7 @@ _PUBLIC_MATERIAL_JS = [
 
 CASES.append(Case(
     id="IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS",
-    title="The facade publishes — in its own key-set record — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
+    title="The facade publishes — in its own key-set record — the kid that signs the accepted Bearer, under the algorithm its header names; the service's own front answers 200 (not 401, not 403)",
     classes=["SEC", "CONF"],
     priority="P0",
     steps=[
@@ -430,12 +377,12 @@ CASES.append(Case(
             "keyring and publishes the verifying half here",
         ),
         Step(
-            name="bearer-accepted-at-edge",
+            name="bearer-accepted-at-the-front",
             method="GET",
             path="/iam/v1/me",
             auth="jwtBootstrap",
             test_script=[
-                *assert_answered("edge acceptance"),
+                *assert_answered("front acceptance"),
                 *_JOSE_HELPERS,
                 # ОДНО утверждение, а не три. Прежде рядом со `status 200` стояли «не
                 # 401» и «не 403», объяснённые тем, что голое равенство не называет
@@ -444,9 +391,9 @@ CASES.append(Case(
                 # ОТДЕЛЬНО упасть не могут, а сами по себе проходят на 500 и 503.
                 # Полосы теперь названы В СООБЩЕНИИ утверждения — диагностика та же,
                 # а мёртвых строк нет. verifies #668.
-                "pm.test('edge accepted the presented Bearer: HTTP 200', () => pm.expect(pm.response.code,",
+                "pm.test('the front accepted the presented Bearer: HTTP 200', () => pm.expect(pm.response.code,",
                 "  '401 here means the facade-signed token failed verification; 403 on an <exempt> RPC'",
-                "  + ' means the principal did not resolve; any other code means the edge never reached'",
+                "  + ' means the principal did not resolve; any other code means the front never reached'",
                 "  + ' this lane. Body: ' + pm.response.text()).to.eql(200));",
                 "const _sent = _sentBearer();",
                 "pm.test('a Bearer was actually presented (an unauthenticated 200 would prove nothing)',",
@@ -455,7 +402,7 @@ CASES.append(Case(
                 "pm.test('presented Bearer is signed with an ASYMMETRIC algorithm (never HS*, never none)',",
                 "  () => pm.expect(['RS256', 'ES256', 'EdDSA'], JSON.stringify(_hdr) +",
                 "    ' — a symmetric or unsigned header means the presenter could have made this'",
-                "    + ' credential itself, and \"the edge answered 200\" would say nothing about the facade')",
+                "    + ' credential itself, and \"the front answered 200\" would say nothing about the facade')",
                 "    .to.include(_hdr.alg));",
                 "pm.test('presented Bearer names a kid', () => {",
                 "  pm.expect(_hdr.kid, JSON.stringify(_hdr)).to.be.a('string').with.length.greaterThan(0);",
@@ -469,7 +416,7 @@ CASES.append(Case(
                 "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by its OWN "
                 "key-set record', () => {",
                 "  pm.expect(_ownByKid[_hdr.kid], 'kid ' + _hdr.kid + ' — not in the facade record'",
-                "    + ' (keys read: ' + Object.keys(_ownByKid).length + '): the edge verifies against'",
+                "    + ' (keys read: ' + Object.keys(_ownByKid).length + '): the front verifies against'",
                 "    + ' key material this facade does not publish').to.be.an('object');",
                 "});",
                 "pm.test('the publishing record declares the SAME algorithm the Bearer header names', () => {",
@@ -483,7 +430,7 @@ CASES.append(Case(
                 "pm.test('presented Bearer carries an issuer and an audience', () => {",
                 "  pm.expect(_pl.iss, JSON.stringify(_pl)).to.be.a('string').with.length.greaterThan(0);",
                 "  const aud = [].concat(_pl.aud || []);",
-                "  pm.expect(aud.length, 'aud claim: an audience-less token is not edge-addressed')",
+                "  pm.expect(aud.length, 'aud claim: an audience-less token is not addressed to the API')",
                 "    .to.be.greaterThan(0);",
                 "});",
             ],
@@ -554,10 +501,12 @@ CASES.append(Case(
             test_script=[
                 *assert_answered("create SA fixture"),
                 # THE PRODUCER ASSERTS EVERYTHING IT PUBLISHES. Two of these three
-                # values are read by IBT-06, and when only the account was asserted
-                # the other two went missing silently — the failure then surfaced in
-                # a different case, on a step that was behaving correctly for an
-                # input nobody had captured.
+                # values were read by IBT-06 when it lived here, and when only the
+                # account was asserted the other two went missing silently — the
+                # failure then surfaced in a different case, on a step that was
+                # behaving correctly for an input nobody had captured. The three
+                # claims ARE the composition this case presents, so they stay
+                # asserted after IBT-06 left (see the module docstring).
                 "pm.test('the caller Bearer carried the composed claims this suite reads', () => {",
                 "  const _form = pm.environment.get('ibtCallerClaimForm') || 'none';",
                 "  pm.expect(_form, 'no kaname_* claims in ANY of the three declared forms"
@@ -565,7 +514,7 @@ CASES.append(Case(
                 "  pm.expect(pm.environment.get('ibtAccountId'), 'kaname_account_id claim (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(pm.environment.get('ibtCallerPrincipalId'),",
-                "    'kaname_principal_id claim (form: ' + _form + ') — read by IBT-06')",
+                "    'kaname_principal_id claim (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(pm.environment.get('ibtCallerPrincipalType'),",
                 "    'kaname_principal_type claim (form: ' + _form + ')')",
@@ -860,325 +809,6 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# IBT-06 — the bootstrap mint has no REST door on any api-gateway listener.
-#
-# READ THE DIVERGENCE NOTE IN THE MODULE DOCSTRING BEFORE CHANGING THIS CASE.
-# The acceptance predicts 404; the stand answers 403 `authz.catalog`, identically
-# on both listeners and identically to a nonsense path, because the RPC carries no
-# HTTP binding at all — there is no route to miss, and the fail-closed authz gate
-# answers before the mux is consulted. A "404 on external" assertion here could
-# never pass; asserting it would be a check that cannot run, reported as one that did.
-#
-# So the case asserts what is witnessable, and carries the controls that give it
-# meaning:
-#   * the internal listener DOES serve Internal* RPCs           (positive control)
-#   * the public listener DOES answer 404 for an Internal* route it lacks
-#     (so a 404 is a shape this suite could observe if it ever arrived)
-#   * the mint answers NEVER 2xx on both, indistinguishably from nonsense
-# The credential used is a valid system-admin Bearer — the strong form of the
-# claim: not "a stranger gets nothing" but "the most privileged caller on the
-# platform still has no REST door to the mint".
-# ===========================================================================
-
-_MINT_UNBOUND = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
-_MINT_ACCEPTANCE_PATH = "/iam/v1/internal/bootstrapToken:mint"
-
-
-# NORMALISED REFUSAL SHAPE — why not a byte comparison against the control.
-#
-# The first draft of this helper compared `code + response body` against the
-# nonsense control and required them equal. Measured on the stand, that can never
-# hold: the refusal body echoes the requested path back in `ErrorInfo.metadata.fqn`,
-# so two different addresses always differ in exactly that field and an assertion
-# of byte-identity would be red on a correct platform. What IS comparable — and what
-# actually carries the meaning — is the SHAPE of the refusal:
-#
-#   code 7 · reason AUTHZ_DENIED · violation type authz.catalog · EMPTY action
-#
-# The empty `action` is the discriminator the rest of this suite already relies on
-# (`gen.py::assert_scoped_authz_deny`): the gateway fills `action` from the
-# permission-catalog entry of the resolved method, so an empty one means there was
-# no entry — the address is not a gated RPC, it is nothing. A real, routed,
-# catalogued endpoint refusing this caller would carry a NON-empty action and this
-# assertion would go red, which is precisely the regression worth locking.
-_REFUSAL_SHAPE_JS = [
-    "function _refusalShape(resp) {",
-    "  var j = null; try { j = resp.json(); } catch (e) { return String(resp.code) + ' non-json'; }",
-    "  var info = ((j && j.details) || []).find(d => (d['@type'] || '').includes('ErrorInfo')) || {};",
-    "  var pf = ((j && j.details) || []).find(d => (d['@type'] || '').includes('PreconditionFailure')) || {};",
-    "  var v = ((pf.violations || [])[0] || {});",
-    "  return JSON.stringify({",
-    "    http: resp.code, code: j && j.code, reason: info.reason,",
-    "    violation: v.type, action: (info.metadata || {}).action",
-    "  });",
-    "}",
-]
-
-
-def _never_2xx(label, control_var=None):
-    out = [
-        *assert_answered(label),
-        *_REFUSAL_SHAPE_JS,
-        f"pm.test({json.dumps(label + ': NEVER 2xx — there is no door here')}, () => {{",
-        "  pm.expect(pm.response.code, pm.response.text()).to.not.be.within(200, 299);",
-        "});",
-    ]
-    if control_var:
-        out += [
-            f"pm.test({json.dumps(label + ': refused with the SAME SHAPE as a nonsense path on the same listener — i.e. the address is not a routed endpoint at all')}, () => {{",
-            f"  const ctl = pm.environment.get('{control_var}');",
-            "  pm.expect(ctl, 'control shape not captured — the control step did not run')"
-            ".to.be.a('string');",
-            "  pm.expect(_refusalShape(pm.response),",
-            "    'this address answers DIFFERENTLY from a typo on the same listener: something '",
-            "    + 'is routed here. Body: ' + pm.response.text()).to.eql(ctl);",
-            "});",
-            f"pm.test({json.dumps(label + ': the refusal carries an EMPTY action — no permission-catalog entry, so no such RPC is exposed')}, () => {{",
-            "  const j = pm.response.json();",
-            "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
-            "  pm.expect(info, JSON.stringify(j)).to.be.an('object');",
-            "  pm.expect((info.metadata || {}).action, 'a NON-empty action means this path resolved "
-            "to a catalogued RPC — it is exposed. ' + JSON.stringify(j)).to.eql('');",
-            "});",
-        ]
-    return out
-
-
-CASES.append(Case(
-    id="IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR",
-    title="MintBootstrapToken is unreachable over REST on both api-gateway listeners, for a system-admin caller, indistinguishably from a nonsense path",
-    classes=["SEC", "NEG", "CONF"],
-    priority="P0",
-    steps=[
-        # ---- controls first: the listeners answer, and they DO route Internal* ----
-        Step(
-            name="control-internal-listener-serves-internal-rpcs",
-            method="POST",
-            path="/iam/v1/internal/iam:lookupSubject",
-            auth="jwtBootstrap",
-            pre_script=require_env_url(
-                "internalBaseUrl", "/iam/v1/internal/iam:lookupSubject",
-                "IBT-06 positive control — the internal listener must be shown to serve "
-                "Internal* routes, else the absence of the mint says nothing") + _ACCOUNT_FROM_CALLER,
-            body={"id": "{{ibtCallerPrincipalId}}"},
-            test_script=[
-                *assert_answered("internal listener control"),
-                "pm.test('the internal listener SERVES Internal* RPCs (200 for a subject that exists)',",
-                "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
-                "pm.test('and it answered about the caller principal, not something else', () => {",
-                "  const j = pm.response.json();",
-                "  const who = (j.serviceAccount && j.serviceAccount.id) || (j.user && j.user.id) || '';",
-                "  pm.expect(who, JSON.stringify(j)).to.eql(pm.environment.get('ibtCallerPrincipalId'));",
-                "});",
-            ],
-        ),
-        Step(
-            name="control-public-listener-404s-an-internal-route-it-lacks",
-            method="POST",
-            path="/iam/v1/internal/iam:lookupSubject",
-            auth="jwtBootstrap",
-            body={"id": "{{ibtCallerPrincipalId}}"},
-            test_script=[
-                *assert_answered("public listener isolation control"),
-                # This control does double duty: it is the ban #6 statement for a route
-                # that exists (Internal* is not on the public mux) AND the proof that a
-                # 404 is a shape this suite could observe — so the mint's 403 below is a
-                # measured fact about the mint, not a property of the harness.
-                "pm.test('an Internal* route bound on the internal mux is a 404 mux-miss on the "
-                "public one', () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
-                "pm.test('and the 404 is the ROUTING miss, not a service-level not-found', () => {",
-                "  const j = pm.response.json();",
-                "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
-                "  pm.expect(j.message, JSON.stringify(j)).to.eql('Not Found');",
-                "});",
-            ],
-        ),
-        Step(
-            name="control-nonsense-path-public",
-            method="POST",
-            path="/ibt-nonsense-{{runId}}",
-            auth="jwtBootstrap",
-            body={},
-            test_script=[
-                *assert_answered("public nonsense control"),
-                *_REFUSAL_SHAPE_JS,
-                "pm.test('nonsense control answered (its refusal shape is the yardstick for the mint probes)',",
-                "  () => pm.expect(pm.response.code).to.be.a('number'));",
-                "pm.environment.set('_ibtCtlPublic', _refusalShape(pm.response));",
-            ],
-        ),
-        Step(
-            name="control-nonsense-path-internal",
-            method="POST",
-            path="/ibt-nonsense-{{runId}}",
-            auth="jwtBootstrap",
-            body={},
-            pre_script=require_env_url(
-                "internalBaseUrl", "/ibt-nonsense-{{runId}}",
-                "IBT-06 control — how the internal listener answers a typo"),
-            test_script=[
-                *assert_answered("internal nonsense control"),
-                *_REFUSAL_SHAPE_JS,
-                "pm.test('nonsense control answered on the internal listener',",
-                "  () => pm.expect(pm.response.code).to.be.a('number'));",
-                "pm.environment.set('_ibtCtlInternal', _refusalShape(pm.response));",
-            ],
-        ),
-        # ---- the probes ----
-        Step(
-            name="mint-unbound-form-on-public",
-            method="POST",
-            path=_MINT_UNBOUND,
-            auth="jwtBootstrap",
-            body={},
-            test_script=_never_2xx("mint (grpc-gateway unbound form) on the public listener",
-                                   "_ibtCtlPublic"),
-        ),
-        Step(
-            name="mint-unbound-form-on-internal",
-            method="POST",
-            path=_MINT_UNBOUND,
-            auth="jwtBootstrap",
-            body={},
-            pre_script=require_env_url(
-                "internalBaseUrl", _MINT_UNBOUND,
-                "IBT-06 — the mint must have no door on the internal listener either"),
-            test_script=_never_2xx("mint (grpc-gateway unbound form) on the internal listener",
-                                   "_ibtCtlInternal"),
-        ),
-        Step(
-            name="mint-acceptance-named-path-on-public",
-            method="POST",
-            path=_MINT_ACCEPTANCE_PATH,
-            auth="jwtBootstrap",
-            body={},
-            test_script=_never_2xx("mint (the path the acceptance spells) on the public listener",
-                                   "_ibtCtlPublic"),
-        ),
-        Step(
-            name="mint-acceptance-named-path-on-internal",
-            method="POST",
-            path=_MINT_ACCEPTANCE_PATH,
-            auth="jwtBootstrap",
-            body={},
-            pre_script=require_env_url(
-                "internalBaseUrl", _MINT_ACCEPTANCE_PATH,
-                "IBT-06 — the acceptance-named path on the internal listener"),
-            test_script=_never_2xx("mint (the path the acceptance spells) on the internal listener",
-                                   "_ibtCtlInternal"),
-        ),
-    ],
-))
-
-
-# ===========================================================================
-# IBT-15 — the provider's own surfaces are not reachable through the platform edge.
-#
-# The facade rule is only enforceable if going around it is not offered. Three
-# addresses matter, and each is a different way around:
-#   /admin/clients            registering an OAuth client without iam — the one move
-#                             that would manufacture a principal the platform never
-#                             provisioned;
-#   /oauth2/token             the exchange, reachable through the edge would make the
-#                             "direct only for the final exchange" exception a
-#                             platform-published endpoint rather than a provider one;
-#   the facade key set       the verification material, at the path of the facade's
-#                             own record (`_OWN_JWKS_PATH`). The facade serves it on
-#                             a CLUSTER-INTERNAL listener by documented decision
-#                             (security.md, iam JWKS-route exception). Publishing it
-#                             at the edge would not be a vulnerability — it is public
-#                             material — but it would move the surface, and the
-#                             decision is that it does not live there. Here stood the
-#                             provider's `/.well-known/jwks.json`; the facade stopped
-#                             serving it when the mirror left (kaname#361), so that
-#                             path had no positive control any more and a negative
-#                             on it would have been satisfied by nothing.
-#
-# The positive control is what makes the third statement real rather than empty:
-# the first step fetches that exact path successfully at the facade listener, so
-# "not 2xx here" is isolation, not a typo. Fired against a nonsense control on
-# each listener for the same reason as IBT-06.
-# ===========================================================================
-
-_PROVIDER_SURFACES = [
-    ("admin-client-registration", "/admin/clients", "POST"),
-    ("provider-token-endpoint", "/oauth2/token", "POST"),
-    ("key-set-at-the-edge", _OWN_JWKS_PATH, "GET"),
-]
-
-
-def _provider_surface_steps():
-    steps = []
-    for label, path, method in _PROVIDER_SURFACES:
-        steps.append(Step(
-            name=f"{label}-on-public",
-            method=method,
-            path=path,
-            auth="jwtBootstrap",
-            body={} if method == "POST" else None,
-            test_script=_never_2xx(f"{path} on the public listener", "_ibtCtlPublic2"),
-        ))
-        steps.append(Step(
-            name=f"{label}-on-internal",
-            method=method,
-            path=path,
-            auth="jwtBootstrap",
-            body={} if method == "POST" else None,
-            pre_script=require_env_url(
-                "internalBaseUrl", path,
-                "IBT-15 — a provider surface or the facade key set must not be reachable "
-                "on the internal listener either"),
-            test_script=_never_2xx(f"{path} on the internal listener", "_ibtCtlInternal2"),
-        ))
-    return steps
-
-
-CASES.append(Case(
-    id="IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE",
-    title="Provider admin-client registration and token endpoint, and the facade key set, are not served by any api-gateway listener (the facade cannot be routed around)",
-    classes=["SEC", "NEG", "CONF"],
-    priority="P0",
-    steps=[
-        _jwks_step(
-            "control-facade-serves-the-key-set-path",
-            "IBT-15 positive control — the key-set path IS served, at the facade listener, "
-            "so NOT-at-the-edge is isolation and not a misspelling",
-        ),
-        Step(
-            name="control-nonsense-path-public",
-            method="POST",
-            path="/ibt-nonsense2-{{runId}}",
-            auth="jwtBootstrap",
-            body={},
-            test_script=[
-                *assert_answered("public nonsense control"),
-                *_REFUSAL_SHAPE_JS,
-                "pm.test('nonsense control answered', () => pm.expect(pm.response.code).to.be.a('number'));",
-                "pm.environment.set('_ibtCtlPublic2', _refusalShape(pm.response));",
-            ],
-        ),
-        Step(
-            name="control-nonsense-path-internal",
-            method="POST",
-            path="/ibt-nonsense2-{{runId}}",
-            auth="jwtBootstrap",
-            body={},
-            pre_script=require_env_url(
-                "internalBaseUrl", "/ibt-nonsense2-{{runId}}",
-                "IBT-15 control — how the internal listener answers a typo"),
-            test_script=[
-                *assert_answered("internal nonsense control"),
-                *_REFUSAL_SHAPE_JS,
-                "pm.test('nonsense control answered', () => pm.expect(pm.response.code).to.be.a('number'));",
-                "pm.environment.set('_ibtCtlInternal2', _refusalShape(pm.response));",
-            ],
-        ),
-        *_provider_surface_steps(),
-    ],
-))
-
-
-# ===========================================================================
 # IBT-10 — ONLY a facade-published asymmetric Bearer is accepted (regression lock).
 #
 # The negatives here are built FROM the accepted credential rather than invented:
@@ -1186,10 +816,10 @@ CASES.append(Case(
 # invented HS256 token could be refused for a dozen uninteresting reasons — wrong
 # issuer, wrong audience, expired — and the case would pass without ever exercising
 # algorithm confusion. Re-signing the ACCEPTED payload leaves exactly one difference
-# between the 200 and the 401: which algorithm the edge was willing to verify with.
+# between the 200 and the 401: which algorithm the front was willing to verify with.
 #
 # The HMAC key is the PUBLIC material the facade itself publishes for that kid —
-# the textbook alg-confusion attack (CWE-347). If the edge ever took `alg` from the
+# the textbook alg-confusion attack (CWE-347). If the front ever took `alg` from the
 # token header instead of pinning it to the key, this forgery would be
 # indistinguishable from the real Bearer and would authenticate as a cluster
 # system-admin.
@@ -1210,7 +840,7 @@ CASES.append(Case(
 # names one lane of two; see divergence 4 in the module docstring.
 #
 # The positive control in the first step is not ceremony: without it, all three
-# refusals below are satisfied by an edge that refuses everything.
+# refusals below are satisfied by a front that refuses everything.
 # ===========================================================================
 
 CASES.append(Case(
@@ -1232,7 +862,7 @@ CASES.append(Case(
             test_script=[
                 *assert_answered("positive control"),
                 "pm.test('the untouched facade Bearer is ACCEPTED (without this, every refusal "
-                "below is satisfied by an edge that refuses everything)',",
+                "below is satisfied by a front that refuses everything)',",
                 "  () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
                 *_JOSE_HELPERS,
                 "const _sent = _sentBearer();",
@@ -1323,3 +953,12 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ДОМ И ПОВЕРХНОСТЬ (e2e-flow.md §7а; kaname#415): производитель каждого
+# утверждения модуля — сама служба, поэтому каждый шаг идёт на её собственный
+# публичный фронт. Шаги, уже адресованные публикатору ключей (`iamJwksBaseUrl`,
+# `require_env_url` в их пред-скрипте), помощник не трогает.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "полос фасада нет производителя — рубеж, выдачу и состав "
+                                 "утверждений производит служба на этом фронте")
