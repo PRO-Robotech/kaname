@@ -168,7 +168,7 @@ if attr="$(branch_rule_attribution "$PR_TITLE")"; then
 fi
 if ! n="$(branch_rule_subject_task "$PR_TITLE")"; then
     BR_FINDINGS+=("заголовок не начинается с «#<N> »: «$PR_TITLE»")
-elif branch_rule_is_number "$head" && [ "$n" != "$head" ]; then
+elif branch_rule_is_number "$head" && [ "$n" != "$(branch_rule_task "$head")" ]; then
     BR_FINDINGS+=("заголовок «#$n» у головы «$head»: заголовок несёт номер задачи ветки")
 fi
 if attr="$(branch_rule_attribution "$PR_BODY")"; then
@@ -176,7 +176,7 @@ if attr="$(branch_rule_attribution "$PR_BODY")"; then
 fi
 if [ "$head" != main ] && ! branch_rule_is_number "$head"; then
     branch_rule_has_pre_t0 "${range[@]}" ||
-        BR_FINDINGS+=("голова «$head»: ветка называется номером задачи (^[0-9]+\$), исключение — main и ветки, открытые до правила")
+        BR_FINDINGS+=("голова «$head»: ветка называется номером задачи (^[0-9]+\$ либо ^[0-9]+-<суть>\$), исключение — main и ветки, открытые до правила")
 fi
 
 owned="$(git rev-list --first-parent "${range[@]}")"

@@ -58,14 +58,14 @@ func TestReviewTriggerGateKnowsTheImagePublisher(t *testing.T) {
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ: ровно та запись, которую задача вносит в дерево.
 	t.Run("близнец: образ публикует ствол и линию — не находка", func(t *testing.T) {
-		got, census := imageAudit(t, "[main, '[0-9]+']")
+		got, census := imageAudit(t, "[main, '[0-9]+', '[0-9]+-*']")
 		require.Emptyf(t, got, "публикация головы линии объявлена нарушением: %v", got)
 		require.Contains(t, census.String(), "публикующих посаженное объявлено 1 · прочитано 1 · "+
-			"из них по push в {main, [0-9]+} 1")
+			"из них по push в {main, [0-9]+, [0-9]+-*} 1")
 	})
 
 	t.Run("близнец: то же множество в другом порядке — не находка", func(t *testing.T) {
-		got, _ := imageAudit(t, "['[0-9]+', main]")
+		got, _ := imageAudit(t, "['[0-9]+-*', '[0-9]+', main]")
 		require.Empty(t, got, "законная запись того же множества объявлена нарушением")
 	})
 
@@ -74,26 +74,34 @@ func TestReviewTriggerGateKnowsTheImagePublisher(t *testing.T) {
 		got, census := imageAudit(t, "[main]")
 		require.Len(t, got, 1)
 		require.Contains(t, got[0], imageInjectRel)
-		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
+		require.Contains(t, got[0], "недостаёт {`[0-9]+`, `[0-9]+-*`}")
 		require.Contains(t, got[0], "голова линии остаётся без образа")
-		require.Contains(t, census.String(), "из них по push в {main, [0-9]+} 0")
+		require.Contains(t, census.String(), "из них по push в {main, [0-9]+, [0-9]+-*} 0")
 	})
 
 	t.Run("[0-9]* вместо [0-9]+ — захват хвоста", func(t *testing.T) {
-		got, _ := imageAudit(t, "[main, '[0-9]*']")
+		got, _ := imageAudit(t, "[main, '[0-9]*', '[0-9]+-*']")
 		require.Len(t, got, 1)
 		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
 		require.Contains(t, got[0], "лишние {`[0-9]*`}")
 	})
 
+	// Д59 эпика kacho#2914: голова ветки эпика `484-notify` — тоже линия.
+	t.Run("образ без второй формы линии — голова `<N>-<суть>` без образа", func(t *testing.T) {
+		got, _ := imageAudit(t, "[main, '[0-9]+']")
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], "недостаёт {`[0-9]+-*`}")
+		require.NotContains(t, got[0], "лишние")
+	})
+
 	t.Run("образ расширен до всех веток", func(t *testing.T) {
-		got, _ := imageAudit(t, "[main, '[0-9]+', '**']")
+		got, _ := imageAudit(t, "[main, '[0-9]+', '[0-9]+-*', '**']")
 		require.Len(t, got, 1)
 		require.Contains(t, got[0], "лишние {`**`}")
 	})
 
 	t.Run("образ без ствола", func(t *testing.T) {
-		got, _ := imageAudit(t, "['[0-9]+']")
+		got, _ := imageAudit(t, "['[0-9]+', '[0-9]+-*']")
 		require.Len(t, got, 1)
 		require.Contains(t, got[0], "недостаёт {`main`}")
 	})

@@ -13,8 +13,8 @@
 # настоящим `git push` в голый репозиторий, запрос — синтетическим диапазоном.
 #
 # Проба доказывает и свою способность упасть: тот же набор гоняется против
-# восьми воссозданных дефектов — слепой атрибуции, старой формы ветки
-# `issue-<N>`, потерянного T0, хука отправки без стража, обхода проверок,
+# девяти воссозданных дефектов — слепой атрибуции, старой формы ветки
+# `issue-<N>`, забытой второй формы `<N>-<суть>` (Д59), потерянного T0, хука отправки без стража, обхода проверок,
 # поставленного раньше стража, и трёх дефектов ведомости известных нарушений
 # (#482): прощение не применено, прощение шире записи, причина не судится, —
 # и от каждого требует хотя бы одного провала.
@@ -175,6 +175,7 @@ commit_msg_cases() { # $1 — набор
     rule_commit "$r" "$1"
     k="$("${G[@]}" rev-parse HEAD)"
     "${G[@]}" checkout -q -b 7
+    "${G[@]}" checkout -q -b 7-lane
     "${G[@]}" checkout -q -b 2840
     "${G[@]}" checkout -q -b 8 main
     "${G[@]}" commit -q --allow-empty -m "#8 восьмая"
@@ -193,7 +194,7 @@ commit_msg_cases() { # $1 — набор
     at() { # $1 — ветка; сбрасывает её к исходной вершине
         "${G[@]}" checkout -q -f "$1" 2> /dev/null
         case "$1" in
-            7 | 2840) "${G[@]}" reset -q --hard "$k" ;;
+            7 | 7-lane | 2840) "${G[@]}" reset -q --hard "$k" ;;
             old) "${G[@]}" reset -q --hard "$c1" ;;
             feature-old) "${G[@]}" reset -q --hard "$c1" ;;
         esac
@@ -206,6 +207,11 @@ commit_msg_cases() { # $1 — набор
     expect "коммит: первая строка без «#N »" refuse "первая строка не начинается" "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#8 правка"
     expect "коммит: «#8» на ветке 7" refuse "«#8» на ветке «7»" "$rc" "$out"
+    # Вторая форма имени (Д59): `<N>-<суть>`, N — номер до первого дефиса.
+    at 7-lane; run git commit -q --allow-empty -m "#7 правка"
+    expect "коммит: «#7 …» на ветке 7-lane" pass - "$rc" "$out"
+    at 7-lane; run git commit -q --allow-empty -m "#8 правка"
+    expect "коммит: «#8» на ветке 7-lane" refuse "«#8» на ветке «7-lane»" "$rc" "$out"
 
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Co-authored-by: Ivan <ivan@example.invalid>"
     expect "коммит: соавтор-человек — запрещён ключ, а не значение (#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
@@ -302,6 +308,12 @@ push_fixture() { # $1 — набор
     "${G[@]}" checkout -q -b 31 30; "${G[@]}" commit -q --allow-empty -m "#31 задача"
     "${G[@]}" checkout -q -b 22 20; "${G[@]}" commit -q --allow-empty -m "задача без номера"
     "${G[@]}" checkout -q -b 23 20; "${G[@]}" commit -q --allow-empty -m "#24 чужой номер"
+    # Вторая форма имени (Д59) и её близнец вне формы — один факт: регистр и знак.
+    "${G[@]}" checkout -q -b 21-lane 20; "${G[@]}" commit -q --allow-empty -m "#21 полоса"
+    # Сообщения различны: одинаковое сообщение на той же вершине в ту же секунду
+    # дало бы тот же sha, и коммит стал бы общим для двух веток.
+    "${G[@]}" checkout -q -b 21_Lane 20; "${G[@]}" commit -q --allow-empty -m "#21 полоса вне формы"
+    "${G[@]}" checkout -q -b 23-lane 20; "${G[@]}" commit -q --allow-empty -m "#24 чужой номер на полосе"
     "${G[@]}" checkout -q -b 25 20; "${G[@]}" commit -q --allow-empty --author="Other <other@example.invalid>" -m "#25 чужой автор"
     "${G[@]}" checkout -q -b 26 20; GIT_COMMITTER_EMAIL=other@example.invalid "${G[@]}" commit -q --allow-empty -m "#26 чужой коммиттер"
     # #861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
@@ -401,6 +413,12 @@ push_rule_cases() {
     expect "отправка: первая строка без «#N »" refuse "первая строка не начинается" "$rc" "$out"
     rule_run "$(line 23)"
     expect "отправка: «#24» на ветке 23" refuse "«#24» на ветке «23»" "$rc" "$out"
+    rule_run "$(line 21-lane)"
+    expect "отправка: новая ветка 21-lane — вторая форма имени" pass - "$rc" "$out"
+    rule_run "$(line 21_Lane)"
+    expect "отправка: новая ветка 21_Lane — вне обеих форм" refuse "новая ветка называется номером" "$rc" "$out"
+    rule_run "$(line 23-lane)"
+    expect "отправка: «#24» на ветке 23-lane" refuse "«#24» на ветке «23-lane»" "$rc" "$out"
     rule_run "$(line 25)"
     expect "отправка: автор не корневой" refuse "автор «Other" "$rc" "$out"
     rule_run "$(line 26)"
@@ -478,6 +496,12 @@ pr_cases() {
     expect "запрос: тело со строкой Claude-Session" refuse "тело: атрибуция" "$rc" "$out"
     pr_run issue-21 origin/20 21 "#21 задача" "обычное тело"
     expect "запрос: голова issue-21" refuse "голова «issue-21»: ветка называется номером" "$rc" "$out"
+    pr_run 21-lane origin/20 21-lane "#21 полоса" "обычное тело"
+    expect "запрос: голова 21-lane — вторая форма имени" pass - "$rc" "$out"
+    pr_run 21-lane origin/20 21-lane "#22 полоса" "обычное тело"
+    expect "запрос: заголовок «#22» у головы 21-lane" refuse "заголовок «#22» у головы «21-lane»" "$rc" "$out"
+    pr_run 21_Lane origin/20 21_Lane "#21 полоса вне формы" "обычное тело"
+    expect "запрос: голова 21_Lane — вне обеих форм" refuse "голова «21_Lane»: ветка называется номером" "$rc" "$out"
     pr_run 20 origin/main 20m "#20 волна" "обычное тело"
     expect "запрос: волна 20 со слиянием по форме" pass - "$rc" "$out"
     pr_run 20 origin/main 20d "#20 волна" "обычное тело"
@@ -613,6 +637,8 @@ defect() { # $1 — метка, $2 — описание; правит копию
     case "$1" in
         blind)  printf '\nbranch_rule_attribution() { return 1; }\n' >> "$k/scripts/hooks/branch-rule.sh" ;;
         issue)  printf '\nbranch_rule_is_number() { [[ "$1" =~ ^[0-9]+$ || "$1" =~ ^issue-[0-9]+$ ]]; }\n' >> "$k/scripts/hooks/branch-rule.sh" ;;
+        # Вторая форма `<N>-<суть>` забыта: предикат знает только цифры (до Д59).
+        suffix) printf '\nbranch_rule_is_number() { [[ "$1" =~ ^[0-9]+$ ]]; }\n' >> "$k/scripts/hooks/branch-rule.sh" ;;
         t0)     printf '\nbranch_rule_t0() { printf 0; }\n' >> "$k/scripts/hooks/branch-rule.sh" ;;
         noguard) sed -i 's|^rule_out="$(bash "$rule_guard".*$|rule_out=""; true|' "$k/scripts/hooks/pre-push"
                 grep -q '^rule_out=""; true$' "$k/scripts/hooks/pre-push" || return 1 ;;
@@ -636,7 +662,7 @@ suite "$tmp/kit-real" настоящий
 read -r real_fails real_cases < "$tmp/result.настоящий"
 
 declare -A dfails
-for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
+for d in blind issue suffix t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
     if defect "$d"; then
         echo
         echo "── проба против дефекта «$d» (ждём хотя бы один провал)"
@@ -656,7 +682,7 @@ printf '  утверждений у настоящего: %s, провалов %
 rc=0
 [ "$real_fails" = 0 ] || { echo "ОТКАЗ: настоящая оснастка нарушает свои утверждения" >&2; rc=1; }
 [ "${real_cases:-0}" -gt 0 ] || { echo "ОТКАЗ: ни одного утверждения не исполнено" >&2; rc=1; }
-for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
+for d in blind issue suffix t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
     printf '  дефект %-11s провалов %s (норма ≥1)\n' "$d" "${dfails[$d]}"
     if [ "${dfails[$d]}" = "н/д" ]; then
         echo "ОТКАЗ: дефект «$d» не воссоздан — форма оснастки изменилась" >&2; rc=1

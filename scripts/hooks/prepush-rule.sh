@@ -59,7 +59,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             pre=("$tip" --not --remotes)
         fi
         branch_rule_has_pre_t0 "${pre[@]}" ||
-            BR_FINDINGS+=("ветка «$name»: новая ветка называется номером задачи (^[0-9]+\$), исключение одно — main")
+            BR_FINDINGS+=("ветка «$name»: новая ветка называется номером задачи (^[0-9]+\$ либо ^[0-9]+-<суть>\$), исключение одно — main")
     fi
 
     # Свои первые родители: другие локальные ветки из отрицания исключаются по

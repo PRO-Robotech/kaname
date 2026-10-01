@@ -24,8 +24,11 @@
 # пином), а не `own`; запись ложится тем же заходом, что и посадка в ствол.
 #
 # Правило:
-#   · ветка — номер задачи ЭТОГО репозитория, `^[0-9]+$`; исключение одно — `main`;
-#   · первая строка коммита — `#<N> `, N — задача ветки; коммит слияния —
+#   · ветка — номер задачи ЭТОГО репозитория, `^[0-9]+$`, либо номер с сутью
+#     через дефис, `^[0-9]+-[a-z0-9][a-z0-9-]*$` (`484-notify`; решение Д59
+#     эпика PRO-Robotech/kacho#2914); исключение одно — `main`;
+#   · первая строка коммита — `#<N> `, N — задача ветки (у второй формы —
+#     номер до первого дефиса); коммит слияния —
 #     `#<N> merge #<M>: …` либо `#<N> merge main: …`;
 #   · подпись — только корневая учётная запись (`git config --global user.*`);
 #     -c user.*, --local/--worktree user.*, GIT_AUTHOR_*/GIT_COMMITTER_* её не
@@ -83,7 +86,15 @@ branch_rule_t0_text() {
     date -u -d "@$BRANCH_RULE_T0" '+%Y-%m-%dT%H:%M:%SZ' 2> /dev/null || printf '@%s' "$BRANCH_RULE_T0"
 }
 
-branch_rule_is_number() { [[ "$1" =~ ^[0-9]+$ ]]; }
+# branch_rule_is_number <имя> — ветка названа задачей: `<N>` либо `<N>-<суть>`
+# (Д59). Суть — строчная латиница, цифры и дефис, первым не дефис.
+branch_rule_is_number() { [[ "$1" =~ ^[0-9]+$ || "$1" =~ ^[0-9]+-[a-z0-9][a-z0-9-]*$ ]]; }
+
+# branch_rule_task <имя> — печатает N задачи ветки; 1 — имя не задачи.
+branch_rule_task() {
+    branch_rule_is_number "$1" || return 1
+    printf '%s' "${1%%-*}"
+}
 
 # branch_rule_subject_task <первая строка> — печатает N из `#<N> `; 1 — формы нет.
 branch_rule_subject_task() {
@@ -214,7 +225,7 @@ branch_rule_judge_commits() {
             if [ "$np" -ge 2 ] && ! branch_rule_merge_form "$subj"; then
                 branch_rule_form_finding "$exempt" "$h" "${h:0:10} слияние не по форме «#<N> merge #<M>: …» / «#<N> merge main: …»: «$subj»"
             fi
-            if branch_rule_is_number "$name" && [[ $'\n'"$owned"$'\n' == *$'\n'"$h"$'\n'* ]] && [ "$n" != "$name" ]; then
+            if branch_rule_is_number "$name" && [[ $'\n'"$owned"$'\n' == *$'\n'"$h"$'\n'* ]] && [ "$n" != "$(branch_rule_task "$name")" ]; then
                 branch_rule_form_finding "$exempt" "$h" "${h:0:10} «#$n» на ветке «$name»: первая строка ветки-номера несёт её номер"
             fi
         fi
