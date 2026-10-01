@@ -136,9 +136,11 @@ func TestFlatAndClusterNamesAreNotJudgedByTheNestedSpace(t *testing.T) {
 		"KANAME_INTERNAL_PORT_9091_TCP_ADDR": "10.0.0.7",
 		// значения ключей `*-env` и прямые чтения окружения
 		"KANAME_DB_PASSWORD":                 "pw",
-		"KANAME_HYDRA_ISSUER":                "https://issuer.example",
 		"KANAME_BOOTSTRAP_ROOT_EMAIL":        "root@example.org",
 		"KANAME_RECONCILE_SWEEP_INTERVAL_MS": "30000",
+		// плоское имя, которого конфиг не читает вовсе: молчание о нём —
+		// тоже свойство сужения, а не знание имени
+		"KANAME_UNREAD_FLAT_NAME": "x",
 		// чужая приставка с двойным подчёркиванием — не наше пространство
 		"KANAMECTL__ENDPOINT": "x",
 		"OTHER__THING":        "x",
