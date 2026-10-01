@@ -138,7 +138,10 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 том был бы не нужен, у службы нет. Объект Secret чарт не создаёт, как и
 секрет пароля базы, — форма записи та же. */}}
 {{- $mailKeys := .Values.authn.secrets | default dict -}}
-{{- if not $mailKeys.secretName -}}
+{{/* ИМЯ ИЗ ОДНИХ ПРОБЕЛОВ — ТО ЖЕ «НЕ НАЗВАНО»: непустая строка истинна, и
+`if not` пропустил бы её, а кластер отверг бы объект с таким именем уже при
+установке — без имени ключа. Судится обрезанное значение. */}}
+{{- if not (trim (toString ($mailKeys.secretName | default ""))) -}}
 {{- $missing = append $missing "  authn.secrets.secretName — имя объекта Secret с ключами почтовой полосы: `mail-window.key` (k_window)\n                           и `device-label.key` (k_device), не короче 32 байт каждый. Том монтируется в\n                           authn.secrets.mountPath; без файлов служба не стартует ни на какой посадке." -}}
 {{- end -}}
 {{- if $missing -}}
