@@ -64,18 +64,21 @@ func NestedEnvNames() []string {
 // имя — из тега `mapstructure` (до запятой), поле без тега — по имени поля в
 // нижнем регистре, `squash` — поля встраиваются без сегмента, `-` и
 // неэкспортируемые поля декодер не видит. Указатель разыменовывается;
-// вложенная структура даёт сегмент пути; открытая форма (openKeyForms) листом
-// не является; всё прочее — лист.
+// вложенная структура даёт сегмент пути; открытая форма (openKeyForms) — в том
+// числе список с открытым элементом — листом не является; список структур —
+// лист, и обход заходит в его элемент; всё прочее — лист.
 func decoderKeysOf(tp reflect.Type) []string { return walkDecoder(tp).keys }
 
-// openKeyForms — пути полей ОТКРЫТОЙ формы: отображение и интерфейс. Их
-// подключи задаёт оператор, а не тип, поэтому множество ключей и имён
-// пространства `__` из типа для них не выводится — а строгость (файл,
-// окружение, перечень величин документа установки) держится ровно на этом
-// выводе. Поддержки таких полей нет намеренно: проба
-// TestConfigCarriesNoOpenKeyForm запрещает их в Config, и поле, которому
-// нужен оператором заданный набор подключей, объявляется иначе (структурой
-// с перечисленными полями либо списком).
+// openKeyForms — пути полей ОТКРЫТОЙ формы: отображение и интерфейс, а также
+// список либо массив с таким элементом; внутри элемента-структуры списка путь
+// несёт сегмент `[]` (`lim[].m`). Их подключи задаёт оператор, а не тип,
+// поэтому множество ключей и имён пространства `__` из типа для них не
+// выводится — а строгость (файл, окружение, перечень величин документа
+// установки) держится ровно на этом выводе. Поддержки таких полей нет
+// намеренно: проба TestConfigCarriesNoOpenKeyForm запрещает их в Config, и
+// поле, которому нужен оператором заданный набор подключей, объявляется
+// иначе (структурой с перечисленными полями либо списком скаляров или таких
+// структур).
 func openKeyForms(tp reflect.Type) []string { return walkDecoder(tp).open }
 
 // decoderWalk — исход одного обхода: листья, открытые формы и перепись
@@ -94,7 +97,15 @@ func walkDecoder(tp reflect.Type) decoderWalk {
 	return w
 }
 
+// walkDecoderKeys обходит поля структуры. inList — структура является
+// ЭЛЕМЕНТОМ списка: её поля не ключи файла (список для viper — одно значение,
+// его элементы в пути ключа не участвуют), но открытые формы в них судятся так
+// же — декодер принимает под ними любой подключ.
 func walkDecoderKeys(tp reflect.Type, prefix string, w *decoderWalk) {
+	walkDecoderFields(tp, prefix, false, w)
+}
+
+func walkDecoderFields(tp reflect.Type, prefix string, inList bool, w *decoderWalk) {
 	for tp.Kind() == reflect.Pointer {
 		tp = tp.Elem()
 	}
@@ -113,7 +124,7 @@ func walkDecoderKeys(tp reflect.Type, prefix string, w *decoderWalk) {
 			ft = ft.Elem()
 		}
 		if name == "" && hasTagOption(opts, "squash") && ft.Kind() == reflect.Struct {
-			walkDecoderKeys(ft, prefix, w)
+			walkDecoderFields(ft, prefix, inList, w)
 			continue
 		}
 		if name == "" {
@@ -125,13 +136,42 @@ func walkDecoderKeys(tp reflect.Type, prefix string, w *decoderWalk) {
 		}
 		switch ft.Kind() {
 		case reflect.Struct:
-			walkDecoderKeys(ft, path, w)
+			walkDecoderFields(ft, path, inList, w)
 		case reflect.Map, reflect.Interface:
 			w.open = append(w.open, path)
+		case reflect.Slice, reflect.Array:
+			// Элемент списка — после снятия указателей и вложенных списков.
+			// Открытый элемент делает открытым весь список; элемент-структура
+			// обходится как элемент: список при этом остаётся ключом.
+			et := listElem(ft)
+			switch et.Kind() {
+			case reflect.Map, reflect.Interface:
+				w.open = append(w.open, path)
+			case reflect.Struct:
+				if !inList {
+					w.keys = append(w.keys, path)
+				}
+				walkDecoderFields(et, path+"[]", true, w)
+			default:
+				if !inList {
+					w.keys = append(w.keys, path)
+				}
+			}
 		default:
-			w.keys = append(w.keys, path)
+			if !inList {
+				w.keys = append(w.keys, path)
+			}
 		}
 	}
+}
+
+// listElem — тип элемента списка или массива без указателей и вложенных
+// списков: `[][]*map[string]string` судится как отображение.
+func listElem(tp reflect.Type) reflect.Type {
+	for tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array || tp.Kind() == reflect.Pointer {
+		tp = tp.Elem()
+	}
+	return tp
 }
 
 func hasTagOption(opts, want string) bool {

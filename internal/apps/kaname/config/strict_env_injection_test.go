@@ -87,29 +87,68 @@ func TestDecoderKeyWalkDoesNotTakeAnOpenFormForALeaf(t *testing.T) {
 	type inner struct {
 		Leaf string `mapstructure:"leaf"`
 	}
+	type withMap struct {
+		M map[string]string `mapstructure:"m"`
+	}
+	type withString struct {
+		Name string `mapstructure:"name"`
+	}
+	kept := []string{"kept"}
 	for _, tc := range []struct {
 		name string
 		tp   reflect.Type
-		open string
+		keys []string
+		open []string
 	}{
 		{"отображение", reflect.TypeOf(struct {
 			Kept string         `mapstructure:"kept"`
 			Lim  map[string]int `mapstructure:"lim"`
-		}{}), "lim"},
+		}{}), kept, []string{"lim"}},
 		{"отображение структур под указателем", reflect.TypeOf(struct {
 			Kept string            `mapstructure:"kept"`
 			Lim  *map[string]inner `mapstructure:"lim"`
-		}{}), "lim"},
+		}{}), kept, []string{"lim"}},
 		{"интерфейс", reflect.TypeOf(struct {
 			Kept string `mapstructure:"kept"`
 			Lim  any    `mapstructure:"lim"`
-		}{}), "lim"},
+		}{}), kept, []string{"lim"}},
+		// Список, чей элемент — открытая форма: декодер принимает под каждым
+		// элементом любой подключ (UnmarshalExact на `[]map` молчит), и
+		// листом такой список не является.
+		{"список отображений", reflect.TypeOf(struct {
+			Kept string              `mapstructure:"kept"`
+			Lim  []map[string]string `mapstructure:"lim"`
+		}{}), kept, []string{"lim"}},
+		{"список интерфейсов", reflect.TypeOf(struct {
+			Kept string `mapstructure:"kept"`
+			Lim  []any  `mapstructure:"lim"`
+		}{}), kept, []string{"lim"}},
+		{"массив отображений", reflect.TypeOf(struct {
+			Kept string               `mapstructure:"kept"`
+			Lim  [2]map[string]string `mapstructure:"lim"`
+		}{}), kept, []string{"lim"}},
+		{"список указателей на отображения", reflect.TypeOf(struct {
+			Kept string               `mapstructure:"kept"`
+			Lim  []*map[string]string `mapstructure:"lim"`
+		}{}), kept, []string{"lim"}},
+		// Список структур — законный ключ файла (список для viper — значение),
+		// но обход обязан зайти в элемент: отображение в его поле открыто так же.
+		{"список структур с отображением", reflect.TypeOf(struct {
+			Kept string    `mapstructure:"kept"`
+			Lim  []withMap `mapstructure:"lim"`
+		}{}), []string{"kept", "lim"}, []string{"lim[].m"}},
+		{"близнец: список структур со строкой", reflect.TypeOf(struct {
+			Kept string       `mapstructure:"kept"`
+			Lim  []withString `mapstructure:"lim"`
+		}{}), []string{"kept", "lim"}, nil},
+		{"близнец: список строк", reflect.TypeOf(struct {
+			Kept string   `mapstructure:"kept"`
+			Lim  []string `mapstructure:"lim"`
+		}{}), []string{"kept", "lim"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := decoderKeysOf(tc.tp)
-			require.NotContains(t, got, tc.open, "открытая форма принята за лист")
-			require.Equal(t, []string{"kept"}, got, "законный лист рядом обязан остаться")
-			require.Equal(t, []string{tc.open}, openKeyForms(tc.tp), "открытая форма не названа путём")
+			require.Equal(t, tc.keys, decoderKeysOf(tc.tp), "листья: открытая форма принята за лист либо законный лист потерян")
+			require.Equal(t, tc.open, openKeyForms(tc.tp), "открытая форма не названа путём")
 		})
 	}
 
@@ -149,10 +188,12 @@ func TestConfigCarriesNoOpenKeyForm(t *testing.T) {
 	w := walkDecoder(reflect.TypeOf(Config{}))
 	t.Logf("перепись: полей Config осмотрено %d · ключей %d · открытых форм %d",
 		w.fields, len(w.keys), len(w.open))
+	require.Positive(t, w.fields, "не осмотрено ни одного поля — проба не выполнилась")
 	require.Greater(t, w.fields, len(w.keys), "обход не осмотрел секций — предпосылка не выполнена")
 	require.NotEmpty(t, w.keys, "обход не нашёл ни одного ключа — проба не выполнилась")
 	require.Empty(t, w.open, "поле открытой формы в Config: его подключи не выводятся из типа, "+
-		"и строгий файл отверг бы каждый из них — объявите поле структурой с перечисленными полями либо списком")
+		"и строгий файл отверг бы каждый из них — объявите поле структурой с перечисленными полями "+
+		"либо списком скаляров или таких структур")
 }
 
 // Предпосылка живого объявления: декодер Config знает ключи, и множество
