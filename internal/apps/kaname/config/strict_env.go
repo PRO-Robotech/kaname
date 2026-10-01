@@ -64,15 +64,37 @@ func NestedEnvNames() []string {
 // имя — из тега `mapstructure` (до запятой), поле без тега — по имени поля в
 // нижнем регистре, `squash` — поля встраиваются без сегмента, `-` и
 // неэкспортируемые поля декодер не видит. Указатель разыменовывается;
-// вложенная структура даёт сегмент пути; всё прочее — лист.
-func decoderKeysOf(tp reflect.Type) []string {
-	var out []string
-	walkDecoderKeys(tp, "", &out)
-	sort.Strings(out)
-	return out
+// вложенная структура даёт сегмент пути; открытая форма (openKeyForms) листом
+// не является; всё прочее — лист.
+func decoderKeysOf(tp reflect.Type) []string { return walkDecoder(tp).keys }
+
+// openKeyForms — пути полей ОТКРЫТОЙ формы: отображение и интерфейс. Их
+// подключи задаёт оператор, а не тип, поэтому множество ключей и имён
+// пространства `__` из типа для них не выводится — а строгость (файл,
+// окружение, перечень величин документа установки) держится ровно на этом
+// выводе. Поддержки таких полей нет намеренно: проба
+// TestConfigCarriesNoOpenKeyForm запрещает их в Config, и поле, которому
+// нужен оператором заданный набор подключей, объявляется иначе (структурой
+// с перечисленными полями либо списком).
+func openKeyForms(tp reflect.Type) []string { return walkDecoder(tp).open }
+
+// decoderWalk — исход одного обхода: листья, открытые формы и перепись
+// осмотренных полей (объём — отдельно от находок).
+type decoderWalk struct {
+	keys   []string
+	open   []string
+	fields int
 }
 
-func walkDecoderKeys(tp reflect.Type, prefix string, out *[]string) {
+func walkDecoder(tp reflect.Type) decoderWalk {
+	var w decoderWalk
+	walkDecoderKeys(tp, "", &w)
+	sort.Strings(w.keys)
+	sort.Strings(w.open)
+	return w
+}
+
+func walkDecoderKeys(tp reflect.Type, prefix string, w *decoderWalk) {
 	for tp.Kind() == reflect.Pointer {
 		tp = tp.Elem()
 	}
@@ -85,12 +107,13 @@ func walkDecoderKeys(tp reflect.Type, prefix string, out *[]string) {
 		if name == "-" {
 			continue
 		}
+		w.fields++
 		ft := f.Type
 		for ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 		if name == "" && hasTagOption(opts, "squash") && ft.Kind() == reflect.Struct {
-			walkDecoderKeys(ft, prefix, out)
+			walkDecoderKeys(ft, prefix, w)
 			continue
 		}
 		if name == "" {
@@ -100,11 +123,14 @@ func walkDecoderKeys(tp reflect.Type, prefix string, out *[]string) {
 		if prefix != "" {
 			path = prefix + "." + name
 		}
-		if ft.Kind() == reflect.Struct {
-			walkDecoderKeys(ft, path, out)
-			continue
+		switch ft.Kind() {
+		case reflect.Struct:
+			walkDecoderKeys(ft, path, w)
+		case reflect.Map, reflect.Interface:
+			w.open = append(w.open, path)
+		default:
+			w.keys = append(w.keys, path)
 		}
-		*out = append(*out, path)
 	}
 }
 

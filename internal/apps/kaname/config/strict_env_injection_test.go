@@ -60,24 +60,99 @@ func TestDecoderKeyWalkKnowsEveryFieldForm(t *testing.T) {
 		Flat int `mapstructure:"flat"`
 	}
 	type root struct {
-		Tagged   string         `mapstructure:"tagged"`
-		Untagged string         // mapstructure сопоставляет по имени поля
-		Skipped  string         `mapstructure:"-"`
-		Ptr      *int64         `mapstructure:"ptr"`
-		Nested   inner          `mapstructure:"nested"`
-		NestedP  *inner         `mapstructure:"nested-p"`
-		Squashed squashed       `mapstructure:",squash"`
-		Opts     string         `mapstructure:"opts,omitempty"`
-		private  string         //nolint:unused // форма поля, которую декодер не видит
-		List     []string       `mapstructure:"list"`
-		Map      map[string]int `mapstructure:"map"`
+		Tagged   string   `mapstructure:"tagged"`
+		Untagged string   // mapstructure сопоставляет по имени поля
+		Skipped  string   `mapstructure:"-"`
+		Ptr      *int64   `mapstructure:"ptr"`
+		Nested   inner    `mapstructure:"nested"`
+		NestedP  *inner   `mapstructure:"nested-p"`
+		Squashed squashed `mapstructure:",squash"`
+		Opts     string   `mapstructure:"opts,omitempty"`
+		private  string   //nolint:unused // форма поля, которую декодер не видит
+		List     []string `mapstructure:"list"`
 	}
 	_ = root{}.private
 
 	got := decoderKeysOf(reflect.TypeOf(root{}))
 	require.Equal(t, []string{
-		"flat", "list", "map", "nested-p.leaf-key", "nested.leaf-key", "opts", "ptr", "tagged", "untagged",
+		"flat", "list", "nested-p.leaf-key", "nested.leaf-key", "opts", "ptr", "tagged", "untagged",
 	}, got)
+}
+
+// Открытая форма — поле, чьи подключи задаёт оператор, а не тип: отображение
+// и интерфейс. Декодер принимает под ней ЛЮБОЙ подключ, и обход, принявший её
+// за лист, отверг бы каждый такой подключ файла как неизвестный, а пространству
+// `__` выдал бы имя, которого не читает никто. Листом она не является.
+func TestDecoderKeyWalkDoesNotTakeAnOpenFormForALeaf(t *testing.T) {
+	type inner struct {
+		Leaf string `mapstructure:"leaf"`
+	}
+	for _, tc := range []struct {
+		name string
+		tp   reflect.Type
+		open string
+	}{
+		{"отображение", reflect.TypeOf(struct {
+			Kept string         `mapstructure:"kept"`
+			Lim  map[string]int `mapstructure:"lim"`
+		}{}), "lim"},
+		{"отображение структур под указателем", reflect.TypeOf(struct {
+			Kept string            `mapstructure:"kept"`
+			Lim  *map[string]inner `mapstructure:"lim"`
+		}{}), "lim"},
+		{"интерфейс", reflect.TypeOf(struct {
+			Kept string `mapstructure:"kept"`
+			Lim  any    `mapstructure:"lim"`
+		}{}), "lim"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decoderKeysOf(tc.tp)
+			require.NotContains(t, got, tc.open, "открытая форма принята за лист")
+			require.Equal(t, []string{"kept"}, got, "законный лист рядом обязан остаться")
+			require.Equal(t, []string{tc.open}, openKeyForms(tc.tp), "открытая форма не названа путём")
+		})
+	}
+
+	t.Run("открытая форма под squash и во вложенной секции — полный путь", func(t *testing.T) {
+		type sec struct {
+			Lim map[string]string `mapstructure:"lim"`
+		}
+		type flat struct {
+			Any any `mapstructure:"any"`
+		}
+		type root struct {
+			Sec  sec  `mapstructure:"sec"`
+			Flat flat `mapstructure:",squash"`
+		}
+		require.Equal(t, []string{"any", "sec.lim"}, openKeyForms(reflect.TypeOf(root{})))
+	})
+
+	t.Run("близнец: список, список структур, вложенная структура — открытых форм 0", func(t *testing.T) {
+		type item struct {
+			Name string `mapstructure:"name"`
+		}
+		type root struct {
+			List  []string `mapstructure:"list"`
+			Items []item   `mapstructure:"items"`
+			Sec   item     `mapstructure:"sec"`
+		}
+		require.Empty(t, openKeyForms(reflect.TypeOf(root{})))
+		require.Equal(t, []string{"items", "list", "sec.name"}, decoderKeysOf(reflect.TypeOf(root{})))
+	})
+}
+
+// Config не несёт ни одного поля открытой формы: множество ключей файла и
+// имён пространства `__` выводится из типа целиком (strict_env.go,
+// openKeyForms). Перепись осмотренных полей печатается отдельно от находок, и
+// пустой обход — отказ, а не «находок 0».
+func TestConfigCarriesNoOpenKeyForm(t *testing.T) {
+	w := walkDecoder(reflect.TypeOf(Config{}))
+	t.Logf("перепись: полей Config осмотрено %d · ключей %d · открытых форм %d",
+		w.fields, len(w.keys), len(w.open))
+	require.Greater(t, w.fields, len(w.keys), "обход не осмотрел секций — предпосылка не выполнена")
+	require.NotEmpty(t, w.keys, "обход не нашёл ни одного ключа — проба не выполнилась")
+	require.Empty(t, w.open, "поле открытой формы в Config: его подключи не выводятся из типа, "+
+		"и строгий файл отверг бы каждый из них — объявите поле структурой с перечисленными полями либо списком")
 }
 
 // Предпосылка живого объявления: декодер Config знает ключи, и множество
