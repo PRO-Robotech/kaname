@@ -13,7 +13,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   - 2026-10-02 · круг 1 · CHANGES_REQUESTED (B1 CONSTRUCTIBILITY: «Дано» AID-18; N1, N2) ·
     `878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede` ·
     `docs/specs/reviews/account-id-may-be-supplied-at-create/878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede.yaml`.
-    Редакция 2 отвечает: B1 — AID-18 и §6.2; N1 — §1.8 и §6.2; N2 — §8, S1 п. 2
+    Редакция 2 правлена ПОСЛЕ объявления состояния DRAFT и отвечает на этот круг: B1 — AID-18
+    и §6.2; N1 — §1.8 и §6.2; N2 — §8, S1 п. 2. Вердикт круга 1 к ней не переносится
 - **Дата:** 2026-10-02
 - **Задача:** `PRO-Robotech/kaname#549`; волна-8 `#548` эпика `#357`; релиз
   `release:identity-own`. Сторона платформы — `PRO-Robotech/kacho#2984` (под `kacho#2564`),
