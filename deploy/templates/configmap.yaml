@@ -139,7 +139,6 @@ data:
       {{- end }}
 
     repository:
-      type: POSTGRES
       postgres:
         url: {{ printf "postgres://%s@%s:%v/%s" .Values.db.user .Values.db.host .Values.db.port .Values.db.name | quote }}
         max-conns: {{ default 0 .Values.repository.postgres.maxConns }}
