@@ -39,7 +39,10 @@ func appendSecretToProdProfile(t *testing.T, chartDir, env string) {
 	if err != nil {
 		t.Fatalf("фикстура не собрана, боевой профиль не читается: %v", err)
 	}
-	const anchor = "secrets:\n"
+	// Якорь — КОРНЕВОЙ ключ с начала строки: `secrets:` есть и вложенным
+	// (`authn.secrets` — файлы ключей почтовой полосы), и подстрока попала бы в
+	// него — запись легла бы не в ту карту, а профиль перестал бы разбираться.
+	const anchor = "\nsecrets:\n"
 	text := string(raw)
 	if !strings.Contains(text, anchor) {
 		t.Fatalf("фикстура не собрана: боевой профиль не несёт карты `secrets`")

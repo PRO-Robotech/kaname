@@ -76,6 +76,37 @@ ownCeilings:
   # компонент по умолчанию; перенос ключей расходует те же слоты (Ф7-43).
   accessKeysPerUser: 3
 
+# ── ФЛАГ ПОЧТЫ СЛУЖБЫ (приёмка NTF-2 Р4, NTF2-33) ───────────────────────────
+#
+# Объявлен явно: незаданный — отказ рендера с именем ключа. `true` — служба
+# ставит письма класса security в свою ленту, и их забирает служба уведомлений
+# установки. Установка без почты объявляет здесь `false`: восстановление
+# доступа, регистрация, приглашение по почте и подтверждение адреса тогда
+# получают явный отказ «email delivery is not configured in this
+# installation», прочие действия исполняются (Р4).
+notifications:
+  enabled: true
+
+# ── ПРИГЛАШЕНИЯ: СРОК И ПОТОЛКИ (приёмка NTF-2 Р7, Р8; решение Д11) ─────────
+#
+# Числа — ориентиры базового профиля таблицы Р8 приёмки
+# sub-phase-NTF-2-identity-provider-mail-removal-acceptance.md (строка
+# «kaname · приглашения»: 200 · 50 · 30 сут · 200 · 3 · 5 · 10 · 7 сут).
+# Умолчаний нет ни в базовых значениях чарта, ни у процесса: незаданная — отказ
+# старта с именем ключа (`KANAME_INVITE__*`). Порядки судит страж старта:
+# youngAccountPerDay ≤ accountPerDay; recipientPerHour ≤ recipientPerDay ≤
+# recipientPerDayAll ≤ 50 (последнее — лимит шаблона `invite`).
+invite:
+  # срок строки приглашения: после него активация отвергается (1–30 сут)
+  ttl: 168h
+  accountPerDay: 200
+  youngAccountPerDay: 50
+  youngAccountAge: 720h
+  pendingMax: 200
+  recipientPerHour: 3
+  recipientPerDay: 5
+  recipientPerDayAll: 10
+
 # ── ОБРАЗ: КООРДИНАТА В ВАШЕМ РЕЕСТРЕ ───────────────────────────────────────
 #
 # Умолчания у этого ключа нет намеренно: в базовых значениях чарта стоял тег
@@ -311,6 +342,62 @@ authn:
     verificationResendInterval: 60s
     verificationResendLimit: 5
     verificationResendWindow: 24h
+    # ── ПОЧТОВЫЕ РУЧКИ ТАБЛИЦЫ Р8 (приёмка NTF-2, решение Д11) ──
+    # Числа — ориентиры базового профиля таблицы Р8 приёмки
+    # sub-phase-NTF-2-identity-provider-mail-removal-acceptance.md (строки
+    # «kaname · адресат», «срок кода», «перебор», «письмо о торможении»,
+    # «доверенное устройство»). Условие старта на ЛЮБОЙ посадке: незаданная —
+    # отказ с именем ключа и переменной (`KANAME_AUTHN__LOGIN__*`); границы и
+    # порядки судит страж таблицы границ (`config.MailBounds`).
+    #
+    # срок кода регистрации (ориентир 60 мин; 5 мин ≤ ttl ≤ 24 ч, ≥ firstPause)
+    registrationCodeTtl: 60m
+    # окно адресата по назначению письма: 60 с · 5 мин · 3 в час · 5 в сутки ·
+    # пол — одно письмо раз в 6 ч сверх потолков
+    mailWindow:
+      recovery:
+        firstPause: 60s
+        secondPause: 5m
+        perHour: 3
+        perDay: 5
+        floorInterval: 6h
+      verification:
+        firstPause: 60s
+        secondPause: 5m
+        perHour: 3
+        perDay: 5
+        floorInterval: 6h
+      registration:
+        firstPause: 60s
+        secondPause: 5m
+        perHour: 3
+        perDay: 5
+        floorInterval: 6h
+    # перебор кода: 5 неверных с пары (адрес, источник) за 15 мин; потолок 100
+    # неверных на адрес за то же окно
+    attempts:
+      addressSourcePerWindow: 5
+      window: 15m
+      addressFailureCeiling: 100
+    # не чаще одного письма о торможении адресату за 7 сут
+    mailThrottledInterval: 168h
+    # метка доверенного устройства: срок 90 сут; 2 письма восстановления в сутки
+    # по паре (окно адресата, метка)
+    trustedDevice:
+      ttl: 2160h
+      recoveryPerDay: 2
+
+  # ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18, CX2-13). Имя — ПРЕДПИСАНИЕ
+  # той же формы, что у `tls.secretName` ниже: объект с таким именем оператор
+  # заводит сам ДО первого прогона helm, с ключами `mail-window.key` и
+  # `device-label.key` (случайные байты, не короче 32 каждый), например
+  #   kubectl create secret generic kaname-mail-keys \
+  #     --from-file=mail-window.key=<(openssl rand 32) \
+  #     --from-file=device-label.key=<(openssl rand 32)
+  # Каталог монтирования здесь НЕ ПОВТОРЯЕТСЯ: его объявляют базовые значения
+  # чарта (`authn.secrets.mountPath`), и пути настроек выводятся из него.
+  secrets:
+    secretName: kaname-mail-keys
 
   # РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; Р5, Ф4-18/19): потолок ТЕМПА
   # заведения аккаунтов одной личностью — сколько за окно, СЧИТАЯ первое (при 3
