@@ -459,6 +459,16 @@ func shippedProfiles(t *testing.T, dir string) []string {
 
 // declaredBlockSwitches — выключатели из умолчаний чарта: только там объявлен
 // каждый (правило отвергает снятый ключ, поэтому умолчание обязано быть).
+// switchesRequiredWithoutDefault — выключатели, у которых умолчания в чарте НЕТ
+// РЕШЕНИЕМ: незаданный — отказ рендера правила с координатой, и этот отказ на
+// базовых значениях и есть предмет. Причина названа у каждой записи; запись
+// истекает сама — выключатель, получивший умолчание либо переставший читаться
+// правилом, делает её находкой.
+var switchesRequiredWithoutDefault = map[string]string{
+	"notifications": "флаг почты службы объявляется явно каждым профилем: незаданный — отказ рендера " +
+		"с именем ключа (приёмка NTF-2 Р4, NTF2-33 (б)); умолчание в чарте было бы решением за оператора",
+}
+
 func declaredBlockSwitches(t *testing.T) []string {
 	t.Helper()
 	coords, findings := switchesInValues(chartDefaultsFile, readChartProfile(t, chartDefaultsFile))
@@ -503,7 +513,20 @@ func TestBlockSwitchIsReadOnlyThroughTheBooleanRule(t *testing.T) {
 	for _, d := range declared {
 		isDeclared[d] = true
 	}
+	for coord := range switchesRequiredWithoutDefault {
+		switch {
+		case isDeclared[coord]:
+			drift = append(drift, fmt.Sprintf("%s.%s числится обязательным без умолчания, а умолчания чарта его "+
+				"объявляют — запись пережила свой предмет", coord, blockSwitchLeaf))
+		case len(called[coord]) == 0:
+			drift = append(drift, fmt.Sprintf("%s.%s числится обязательным без умолчания, а правилом не читается "+
+				"ни разу — запись пережила свой предмет", coord, blockSwitchLeaf))
+		}
+	}
 	for coord, pos := range called {
+		if _, required := switchesRequiredWithoutDefault[coord]; required {
+			continue
+		}
 		if !isDeclared[coord] {
 			drift = append(drift, fmt.Sprintf("%s (%s): правило читает %s.%s, которого нет в умолчаниях чарта — "+
 				"рендер отказал бы на базовых значениях", strings.Join(pos, ", "), coord, coord, blockSwitchLeaf))

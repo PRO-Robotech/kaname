@@ -524,7 +524,7 @@ EOF
 
 make_secrets() {
 	local s
-	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-provider-ca" "$RELEASE-authn"; do
+	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-provider-ca" "$RELEASE-authn" "$RELEASE-mail-keys"; do
 		"${KCTL[@]}" -n "$NS" delete secret "$s" >/dev/null 2>&1 || true
 	done
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-db" \
@@ -556,7 +556,19 @@ make_secrets() {
 		--from-literal=hook-shared-secret="$(openssl rand -hex 16)" \
 		--from-literal=jwks-encryption-key-hex="$(openssl rand -hex 32)" \
 		--from-literal=second-factor-encryption-key-hex="$(openssl rand -hex 32)" >/dev/null
-	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: три ключа)"
+	# ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18): k_window и k_device —
+	# случайные 32 байта каждый. Том чарт проецирует поимённо (`items`), поэтому
+	# объект без любого из ключей останавливает под до старта; служба без файлов
+	# не стартует ни на какой посадке. Ключи живут столько, сколько стенд:
+	# пересоздание начинает окна адресатов заново и снимает метки устройств.
+	( umask 077; openssl rand 32 > "$PKI/mail-window.key" && openssl rand 32 > "$PKI/device-label.key" ) || {
+		unmet "ключи почтовой полосы не выпустились (openssl)"
+		exit "$RC_UNMET"
+	}
+	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-mail-keys" \
+		--from-file=mail-window.key="$PKI/mail-window.key" \
+		--from-file=device-label.key="$PKI/device-label.key" >/dev/null
+	say "стенд: шесть секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: три ключа · ключи почтовой полосы: два файла)"
 	# Лист края — Secret'ом стенда, а не только файлом рабочего каталога: посев
 	# и прогон берут его ОТСЮДА (`seed-login-lane`), то есть предъявляется ровно
 	# тот лист, что выписан под этот УЦ, в каком бы каталоге ни шёл следующий шаг.
@@ -565,8 +577,8 @@ make_secrets() {
 		"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-edge-client-tls" \
 			--from-file=tls.crt="$PKI/edge.crt" --from-file=tls.key="$PKI/edge.key" \
 			--from-file=ca.crt="$PKI/ca.crt" >/dev/null
-		say "стенд: шестой секрет — клиентский лист с именем края"
-		# КЛЮЧ БУТСТРАП-КОНТУРА — седьмой секрет, и только под `own`. Посев
+		say "стенд: седьмой секрет — клиентский лист с именем края"
+		# КЛЮЧ БУТСТРАП-КОНТУРА — восьмой секрет, и только под `own`. Посев
 		# церемонии (`seed-ceremony`) заводит интерактивных клиентов ГЛАГОЛОМ
 		# `Create`, а у глагола пол — машинный `system_admin`; первое такое
 		# удостоверение на дереве без личностей выдаёт ровно чеканка бутстрапа
@@ -581,7 +593,7 @@ make_secrets() {
 		"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-bootstrap" >/dev/null 2>&1 || true
 		"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-bootstrap" \
 			--from-file=private-key-pem="$PKI/bootstrap-sa.key" >/dev/null
-		say "стенд: седьмой секрет — ключ бутстрап-контура для посева церемонии"
+		say "стенд: восьмой секрет — ключ бутстрап-контура для посева церемонии"
 	fi
 }
 
@@ -631,6 +643,8 @@ authn:
   trustDomain: $DOMAIN
   trustedForwarderSANs:
     - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
+  secrets:
+    secretName: $RELEASE-mail-keys
   tokenSigning:
     issuer: "https://$DOMAIN"
   presentedCredential:

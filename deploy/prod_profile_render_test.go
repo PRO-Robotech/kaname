@@ -141,13 +141,20 @@ var renderedSecretStandIns = func() map[string]string {
 // умолчаний которым не даёт намеренно: без них рендер отказывает целиком.
 //
 // Нужны отрицательному контролю: он ставит службу БЕЗ боевого профиля, а без
-// этих четырёх шаблон не рендерится вовсе — и «не выполнилось» подменило бы
+// этих шести шаблон не рендерится вовсе — и «не выполнилось» подменило бы
 // вердикт стража, которого контроль как раз и добивается.
+//
+// Флаг почты координатой чужого кластера НЕ является — это решение установки,
+// — но и его рендер требует названным (приёмка NTF-2 Р4, NTF2-33 (б)): без
+// него базовые значения не рендерятся, и отрицательный контроль стал бы
+// «не выполнилось». Величина — та же, что объявляет боевой профиль.
 var minimalOperatorCoordinates = []string{
 	"image=registry.example.invalid/pro-robotech/kaname:0.1.0",
 	"db.host=postgres.example.invalid",
 	"db.passwordSecretName=kaname-db",
 	"db.passwordSecretKey=password",
+	"authn.secrets.secretName=kaname-mail-keys",
+	"notifications.enabled=true",
 }
 
 // renderStandaloneChart зовёт `helm template` на ЭТОМ чарте с названной

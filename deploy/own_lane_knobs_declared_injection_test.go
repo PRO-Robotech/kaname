@@ -39,7 +39,10 @@ func appendSecretToProdProfile(t *testing.T, chartDir, env string) {
 	if err != nil {
 		t.Fatalf("фикстура не собрана, боевой профиль не читается: %v", err)
 	}
-	const anchor = "secrets:\n"
+	// Якорь — КОРНЕВОЙ ключ с начала строки: `secrets:` есть и вложенным
+	// (`authn.secrets` — файлы ключей почтовой полосы), и подстрока попала бы в
+	// него — запись легла бы не в ту карту, а профиль перестал бы разбираться.
+	const anchor = "\nsecrets:\n"
 	text := string(raw)
 	if !strings.Contains(text, anchor) {
 		t.Fatalf("фикстура не собрана: боевой профиль не несёт карты `secrets`")
@@ -60,14 +63,18 @@ func TestOwnLaneKnobsDeclaredInjection(t *testing.T) {
 			mutate: func(*testing.T, string) {},
 		},
 		{
-			name: "срок кода восстановления снят с шаблона — находка с ключом и переменной",
+			// Срок сессии — строка таблицы стража с полосой `own`. Прежде здесь
+			// стоял срок кода восстановления; с приёмкой NTF-2 он строка таблицы
+			// границ Р8 и применим на любой посадке, а безусловные строки эта
+			// проба не судит (у них своя — проба боевого профиля стражем).
+			name: "срок сессии снят с шаблона — находка с ключом и переменной",
 			mutate: func(t *testing.T, chartDir string) {
 				dropRenderedLines(t, chartDir,
-					"        {{- with .recoveryCodeTtl }}",
-					"        recovery-code-ttl: {{ . | quote }}",
+					"        {{- with .sessionTtl }}",
+					"        session-ttl: {{ . | quote }}",
 					"        {{- end }}")
 			},
-			wantSubstring: "authn.login.recovery-code-ttl (KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL)",
+			wantSubstring: "authn.login.session-ttl (KANAME_AUTHN__LOGIN__SESSION_TTL)",
 		},
 		{
 			name: "предел темпа регистрации снят с шаблона — находка",

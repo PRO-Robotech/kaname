@@ -530,11 +530,17 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
-	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
+	// Ручки без умолчания, которые читает сборка (срок приглашения), судит сама
+	// сборка и отказывает с именем ключа — второго места этого суждения здесь
+	// нет: проверка, чей исход выбрасывается, не защищает того, кто читает поле.
+	svcs, err := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+	if err != nil {
+		return err
+	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что

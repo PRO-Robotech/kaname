@@ -83,6 +83,9 @@ type Config struct {
 	// единственный способ, которым служба может иметь потолок, не имея
 	// авторитета величин: спросить её больше не у кого. См. own_ceilings.go.
 	OwnCeilings OwnCeilingsConfig `mapstructure:"own-ceilings"`
+	// Notifications — флаг почты службы (замысел NTF-2 З2): объявляется
+	// всегда, `false` законно, отсутствие — отказ старта. См. notifications.go.
+	Notifications NotificationsConfig `mapstructure:"notifications"`
 }
 
 // AuthZConfig — окно вердикта собственной двери.
@@ -430,6 +433,9 @@ type AuthNConfig struct {
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`
+	// Secrets — файлы ключей почтовой полосы (замысел NTF-2 З18): k_window и
+	// k_device. Без умолчаний; см. secrets.go.
+	Secrets SecretsConfig `mapstructure:"secrets"`
 	// Login — полоса входа паролем и наша сессия (Ф3, kacho#1269): срок и домен
 	// печенья, частота, политика пароля, ручка «что писать», ёмкость. Ни одна
 	// величина не подставляется молча; требуются под посадкой `own`.

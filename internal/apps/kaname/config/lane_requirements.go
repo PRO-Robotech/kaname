@@ -309,20 +309,13 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.Registration.ValidateAdmissionRate())
 		},
 	},
-	{
-		Lanes:   laneOwn,
-		Element: "срок кода восстановления доступа объявлен",
-		Stage:   LaneStageConfig,
-		Check: func(c Config, _ LaneWiring) error {
-			return ownScoped(c.AuthN.Login.ValidateRecovery())
-		},
-	},
-	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ручек без умолчания; письмо
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): четыре ручки без умолчания; письмо
 	// подтверждения — условие входа дальше экрана подтверждения, и полоса без
-	// величин не поднимается.
+	// величин не поднимается. Сроки кодов восстановления и подтверждения ушли в
+	// таблицу границ Р8 (`mail_bounds.go`) и судятся её стражем на любой посадке.
 	{
 		Lanes:   laneOwn,
-		Element: "пять величин подтверждения адреса объявлены: срок и предел попыток кода, промежуток, число и окно писем",
+		Element: "четыре величины подтверждения адреса объявлены: предел попыток кода, промежуток, число и окно писем",
 		Stage:   LaneStageConfig,
 		Check: func(c Config, _ LaneWiring) error {
 			return ownScoped(c.AuthN.Login.ValidateVerification())

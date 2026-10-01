@@ -194,7 +194,6 @@ var configBridge = []bridged{
 	{configKey: "api-server.graceful-shutdown", valuePath: []string{"apiServer", "gracefulShutdown"}},
 	{configKey: "api-server.registry-token.issuer", valuePath: []string{"apiServer", "registryToken", "issuer"}, omitEmpty: true},
 	{configKey: "api-server.registry-token.service", valuePath: []string{"apiServer", "registryToken", "service"}, omitEmpty: true},
-	{configKey: "repository.type", derive: func(*valueReader) any { return "POSTGRES" }},
 	{configKey: "repository.postgres.url", derive: func(r *valueReader) any {
 		return fmt.Sprintf("postgres://%s@%s:%s/%s",
 			r.text("db", "user"), r.text("db", "host"), r.text("db", "port"), r.text("db", "name"))
@@ -261,6 +260,33 @@ var configBridge = []bridged{
 	{configKey: "authn.login.verification-resend-interval", valuePath: []string{"authn", "login", "verificationResendInterval"}, omitEmpty: true},
 	{configKey: "authn.login.verification-resend-limit", valuePath: []string{"authn", "login", "verificationResendLimit"}, omitEmpty: true},
 	{configKey: "authn.login.verification-resend-window", valuePath: []string{"authn", "login", "verificationResendWindow"}, omitEmpty: true},
+	// ПОЧТОВЫЕ РУЧКИ ТАБЛИЦЫ Р8 (приёмка NTF-2, решение Д11): ключи того же блока
+	// `login`, но судит их страж таблицы границ на ЛЮБОЙ посадке. Сроки — ветвь
+	// `with` (`omitEmpty`); счёты — ветвь `hasKey`, и `omitEmpty` у них НЕ
+	// ставится по доводу собственных потолков: переложение повторяет ветвь
+	// шаблона, а не угадывает, законен ли ноль.
+	{configKey: "authn.login.registration-code-ttl", valuePath: []string{"authn", "login", "registrationCodeTtl"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.recovery.first-pause", valuePath: []string{"authn", "login", "mailWindow", "recovery", "firstPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.recovery.second-pause", valuePath: []string{"authn", "login", "mailWindow", "recovery", "secondPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.recovery.per-hour", valuePath: []string{"authn", "login", "mailWindow", "recovery", "perHour"}},
+	{configKey: "authn.login.mail-window.recovery.per-day", valuePath: []string{"authn", "login", "mailWindow", "recovery", "perDay"}},
+	{configKey: "authn.login.mail-window.recovery.floor-interval", valuePath: []string{"authn", "login", "mailWindow", "recovery", "floorInterval"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.verification.first-pause", valuePath: []string{"authn", "login", "mailWindow", "verification", "firstPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.verification.second-pause", valuePath: []string{"authn", "login", "mailWindow", "verification", "secondPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.verification.per-hour", valuePath: []string{"authn", "login", "mailWindow", "verification", "perHour"}},
+	{configKey: "authn.login.mail-window.verification.per-day", valuePath: []string{"authn", "login", "mailWindow", "verification", "perDay"}},
+	{configKey: "authn.login.mail-window.verification.floor-interval", valuePath: []string{"authn", "login", "mailWindow", "verification", "floorInterval"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.registration.first-pause", valuePath: []string{"authn", "login", "mailWindow", "registration", "firstPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.registration.second-pause", valuePath: []string{"authn", "login", "mailWindow", "registration", "secondPause"}, omitEmpty: true},
+	{configKey: "authn.login.mail-window.registration.per-hour", valuePath: []string{"authn", "login", "mailWindow", "registration", "perHour"}},
+	{configKey: "authn.login.mail-window.registration.per-day", valuePath: []string{"authn", "login", "mailWindow", "registration", "perDay"}},
+	{configKey: "authn.login.mail-window.registration.floor-interval", valuePath: []string{"authn", "login", "mailWindow", "registration", "floorInterval"}, omitEmpty: true},
+	{configKey: "authn.login.attempts.address-source-per-window", valuePath: []string{"authn", "login", "attempts", "addressSourcePerWindow"}},
+	{configKey: "authn.login.attempts.window", valuePath: []string{"authn", "login", "attempts", "window"}, omitEmpty: true},
+	{configKey: "authn.login.attempts.address-failure-ceiling", valuePath: []string{"authn", "login", "attempts", "addressFailureCeiling"}},
+	{configKey: "authn.login.mail-throttled-interval", valuePath: []string{"authn", "login", "mailThrottledInterval"}, omitEmpty: true},
+	{configKey: "authn.login.trusted-device.ttl", valuePath: []string{"authn", "login", "trustedDevice", "ttl"}, omitEmpty: true},
+	{configKey: "authn.login.trusted-device.recovery-per-day", valuePath: []string{"authn", "login", "trustedDevice", "recoveryPerDay"}},
 	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; задача #205): предел ветвится по
 	// `hasKey` (ноль законен), окно — по `with`. `omitEmpty` у предела НЕ
 	// ставится по тому же доводу, что у собственных потолков: ноль — величина,
@@ -277,6 +303,29 @@ var configBridge = []bridged{
 	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
 	// файлом настроек не рендерится.
 	{configKey: "authn.self-service-freshness", valuePath: []string{"authn", "selfServiceFreshness"}, omitEmpty: true},
+	// ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18): пути ВЫВОДЯТСЯ шаблоном из
+	// каталога монтирования тома, а не берутся ручкой — склейка, как у адресов
+	// слушателей. Имя объекта Secret до процесса не доезжает: его судит страж
+	// рендера (`kaname-svc.requireOperatorSuppliedNames`).
+	{configKey: "authn.secrets.mail-window-key-file", derive: func(r *valueReader) any {
+		return r.text("authn", "secrets", "mountPath") + "/mail-window.key"
+	}},
+	{configKey: "authn.secrets.device-label-key-file", derive: func(r *valueReader) any {
+		return r.text("authn", "secrets", "mountPath") + "/device-label.key"
+	}},
+	// ФЛАГ ПОЧТЫ (приёмка NTF-2 Р4): рендерится всегда — незаданный роняет рендер,
+	// а `false` законен, поэтому `omitEmpty` не ставится.
+	{configKey: "notifications.enabled", valuePath: []string{"notifications", "enabled"}},
+	// ПРИГЛАШЕНИЯ (приёмка NTF-2 Р7, Р8): срок и возраст — ветвь `with`; счёты —
+	// ветвь `hasKey`, ноль у части из них законен.
+	{configKey: "invite.ttl", valuePath: []string{"invite", "ttl"}, omitEmpty: true},
+	{configKey: "invite.account-per-day", valuePath: []string{"invite", "accountPerDay"}},
+	{configKey: "invite.young-account-per-day", valuePath: []string{"invite", "youngAccountPerDay"}},
+	{configKey: "invite.young-account-age", valuePath: []string{"invite", "youngAccountAge"}, omitEmpty: true},
+	{configKey: "invite.pending-max", valuePath: []string{"invite", "pendingMax"}},
+	{configKey: "invite.recipient-per-hour", valuePath: []string{"invite", "recipientPerHour"}},
+	{configKey: "invite.recipient-per-day", valuePath: []string{"invite", "recipientPerDay"}},
+	{configKey: "invite.recipient-per-day-all", valuePath: []string{"invite", "recipientPerDayAll"}},
 	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273): имя и алгоритмы — ветвь `with`
 	// (`omitEmpty`); перечень происхождений — ветвь `hasKey`, и `omitEmpty` у него
 	// НЕ ставится по тому же доводу, что у потолков: пустой список — величина

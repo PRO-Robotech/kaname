@@ -133,7 +133,15 @@ type flatEnvKnob struct {
 	Key string
 	// Shape — форма значения.
 	Shape envValueShape
+	// Compose — значение ключа из значения переменной, когда они разной формы
+	// (голый порт → конечная точка слушателя). Пусто — значение кладётся как
+	// есть. Ключ при этом — настоящий ключ декодера: промежуточного ключа,
+	// которого декодер не знает, строгая загрузка не пропускает (strict_env.go).
+	Compose func(string) string
 }
+
+// anyAddressEndpoint — конечная точка слушателя на всех адресах из голого порта.
+func anyAddressEndpoint(port string) string { return "tcp://0.0.0.0:" + port }
 
 // flatEnvKnobs — ВСЕ плоские имена переменных, которые читает загрузка
 // настроек, в одном объявлении.
@@ -146,8 +154,8 @@ type flatEnvKnob struct {
 var flatEnvKnobs = []flatEnvKnob{
 	{Env: "KANAME_DB_SSLMODE", Key: "repository.postgres.ssl-mode"},
 	{Env: "KANAME_DB_MAX_CONNS", Key: "repository.postgres.max-conns"},
-	{Env: "KANAME_GRPC_PORT", Key: "_legacy.grpc-port", Shape: shapePort},
-	{Env: "KANAME_INTERNAL_PORT", Key: "_legacy.internal-port", Shape: shapePort},
+	{Env: "KANAME_GRPC_PORT", Key: "api-server.endpoint", Shape: shapePort, Compose: anyAddressEndpoint},
+	{Env: "KANAME_INTERNAL_PORT", Key: "api-server.internal-endpoint", Shape: shapePort, Compose: anyAddressEndpoint},
 	{Env: "KANAME_AUTH_MODE", Key: "authn.mode"},
 	// Окно затирания ключа служебной учётки: чарт задаёт короткое плоское имя,
 	// а не namespaced. Величина — длительность Go ("120s").
