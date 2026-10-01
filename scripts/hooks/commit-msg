@@ -72,7 +72,7 @@ if [ "$history" = 0 ]; then
         if [ -f "$git_dir/MERGE_HEAD" ] && ! branch_rule_merge_form "$subj"; then
             fail+=("слияние — «#<N> merge #<M>: …» либо «#<N> merge main: …», а не «$subj»")
         fi
-        if branch_rule_is_number "$branch" && [ "$n" != "$branch" ]; then
+        if branch_rule_is_number "$branch" && [ "$n" != "$(branch_rule_task "$branch")" ]; then
             fail+=("«#$n» на ветке «$branch»: первая строка несёт номер ветки")
         fi
     fi

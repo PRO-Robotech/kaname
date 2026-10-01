@@ -274,7 +274,18 @@ var (
 		pulls: "357:closed 366:open"}
 	taskPush = gateWorld{event: "push", refType: "branch", refName: "429", creds: true,
 		pulls: "366:closed 366:open 357:closed"}
+	// Вторая форма имени линии (Д36/Д59 эпика kacho#2914): номер, дефис, суть.
+	// Ветка эпика `484-notify` — база запроса волны; ветка полосы той же формы
+	// `484-ci-branch-name-suffix` — голова запроса, а не его база.
+	suffixLinePush = gateWorld{event: "push", refType: "branch", refName: "484-notify", creds: true,
+		pulls: "484-notify:open 484-notify:closed main:open"}
+	suffixTaskPush = gateWorld{event: "push", refType: "branch", refName: "484-ci-branch-name-suffix", creds: true,
+		pulls: "484-notify:open main:open"}
 )
+
+// gateLineCond — запись условия «ветка названа как линия» в шаге `gate`: две
+// формы имени, из цифр и `<номер>-<суть>` (Д59). Инъекции ниже меняют именно её.
+const gateLineCond = `elif [[ "$REF_NAME" =~ ^[0-9]+$ || "$REF_NAME" =~ ^[0-9]+-[a-z0-9][a-z0-9-]*$ ]]; then`
 
 // gateFinding — что не так с решением о публикации; пусто — решение то, что ждали.
 func gateFinding(outputs map[string]string, push, ns string) string {
@@ -302,6 +313,7 @@ func TestImageProducerTagsALineHeadLikeTheTrunk(t *testing.T) {
 	for _, tc := range []struct{ what, branch, sha string }{
 		{"голова ветки эпика", "357", lineHeadSHA},
 		{"голова ветки волны", "366", lineHeadSHA},
+		{"голова ветки эпика второй формы", "484-notify", lineHeadSHA},
 		{"ствол — близнец того же правила", "main", trunkHeadSHA},
 	} {
 		t.Run("имя: "+tc.what, func(t *testing.T) {
@@ -327,6 +339,12 @@ func TestImageProducerTagsALineHeadLikeTheTrunk(t *testing.T) {
 		// ЗАКОННЫЙ БЛИЗНЕЦ ЛИНИИ той же формы имени: фильтр `push` его пропускает,
 		// а посаженного состояния у него нет.
 		{"push в ветку задачи НЕ публикует — имя той же формы, состояние не посажено", taskPush, "false", "owner", "429"},
+		{"push в ветку эпика второй формы публикует — она база запроса", suffixLinePush, "true", "owner", "484-notify"},
+		{"push в ветку полосы второй формы НЕ публикует — база ни одного запроса", suffixTaskPush, "false", "owner", "484-ci-branch-name-suffix"},
+		// ЗАКОННЫЙ БЛИЗНЕЦ ФОРМЫ: имя с прописной и подчёркиванием вне обеих
+		// форм — трекер не спрашивается, публикации нет.
+		{"ветка вне обеих форм имени не публикует и трекер не спрашивает",
+			gateWorld{event: "push", refType: "branch", refName: "484_Notify", creds: true, pulls: "484_Notify:open"}, "false", "owner", ""},
 		{"ссылка на версию публикует", gateWorld{event: "push", refType: "tag", refName: "v1.2.3", creds: true}, "true", "owner", ""},
 		{"ручной запуск на ветке полосы не публикует",
 			gateWorld{event: "workflow_dispatch", refType: "branch", refName: "lane/kn-api", creds: true}, "false", "owner", ""},
@@ -399,11 +417,22 @@ func TestImageProducerTagProbeCanFail(t *testing.T) {
 	// без переписи, и ветка задачи идёт в реестр под именем линии.
 	t.Run("линию распознаёт форма имени, а не перепись — задача публикуется", func(t *testing.T) {
 		t.Parallel()
-		script := injectOnce(t, steps["gate"].Run, `elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then`,
-			`elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then landed=true; why="ветка из цифр"; elif false; then`)
+		script := injectOnce(t, steps["gate"].Run, gateLineCond,
+			gateLineCond+` landed=true; why="ветка из цифр"; elif false; then`)
 		out, _, err := runGate(t, script, "local", taskPush)
 		require.NoError(t, err)
 		require.Contains(t, gateFinding(out, "false", "owner"), `публикация "true", а ждали "false"`)
+	})
+
+	// Д59: шаг, знающий только форму из цифр, оставляет голову ветки эпика
+	// `484-notify` без образа — тот же дефект #429 для второй формы имени.
+	t.Run("вторая форма имени не распознана — голова `484-notify` без образа", func(t *testing.T) {
+		t.Parallel()
+		script := injectOnce(t, steps["gate"].Run, gateLineCond, `elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then`)
+		out, calls, err := runGate(t, script, "local", suffixLinePush)
+		require.NoError(t, err)
+		require.Contains(t, gateFinding(out, "true", "owner"), `публикация "false", а ждали "true"`)
+		require.Empty(t, calls, "форма не распознана — трекер не спрошен")
 	})
 
 	t.Run("перепись только открытых запросов — влитая линия без образа", func(t *testing.T) {

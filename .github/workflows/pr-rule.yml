@@ -24,7 +24,7 @@ on:
     # `edited` — заголовок и тело правятся без отправки, и вердикт обязан
     # пересчитаться. `[0-9]+` — запрос волны в ветку эпика (ветка-номер).
     types: [opened, edited, synchronize, reopened, ready_for_review]
-    branches: [main, '[0-9]+']
+    branches: [main, '[0-9]+', '[0-9]+-*']
 
 permissions:
   contents: read

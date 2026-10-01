@@ -25,7 +25,7 @@ const reviewInjectRel = "ci.yml"
 // Записи из дерева, которые инъекция меняет. Если форма в дереве сменится,
 // инъекция откажет ГРОМКО (см. injectOnce), а не станет холостой.
 const (
-	reviewBlock = "  pull_request:\n    branches:\n      - main\n      - '[0-9]+'\n"
+	reviewBlock = "  pull_request:\n    branches:\n      - main\n      - '[0-9]+'\n      - '[0-9]+-*'\n"
 	pushBlock   = "  push:\n    branches: [main]\n"
 )
 
@@ -83,6 +83,20 @@ func TestReviewTriggerGateCanFail(t *testing.T) {
 			"перепись обязана НАЗВАТЬ разрыв числом, а не только находкой")
 	})
 
+	// Решение Д59 эпика kacho#2914: ветки эпиков notify названы номером с
+	// сутью (`484-notify`), и база этой формы — часть множества. Снятая, она
+	// возвращает тот же дефект, что закрывала задача, — для второй формы.
+	t.Run("вторая форма линии снята — запрос в ветку `<N>-<суть>` без контекстов", func(t *testing.T) {
+		got, census := reviewAudit(t, func(raw string) string {
+			return injectOnce(t, raw, "      - '[0-9]+-*'\n", "")
+		})
+		require.Len(t, got, 1)
+		require.Contains(t, got[0], reviewInjectRel)
+		require.Contains(t, got[0], "недостаёт {`[0-9]+-*`}")
+		require.NotContains(t, got[0], "лишние")
+		require.Equal(t, census.OnReview-1, census.ReviewAtLine)
+	})
+
 	t.Run("фильтр расширен до всех веток", func(t *testing.T) {
 		got, _ := reviewAudit(t, func(raw string) string {
 			return injectOnce(t, raw, "      - '[0-9]+'\n", "      - '[0-9]+'\n      - '**'\n")
@@ -122,7 +136,7 @@ func TestReviewTriggerGateCanFail(t *testing.T) {
 	// порядке. Гейт, сверяющий текст, а не множество, краснел бы здесь.
 	t.Run("то же множество строкой и в другом порядке — не находка", func(t *testing.T) {
 		got, census := reviewAudit(t, func(raw string) string {
-			return injectOnce(t, raw, reviewBlock, "  pull_request:\n    branches: ['[0-9]+', main]\n")
+			return injectOnce(t, raw, reviewBlock, "  pull_request:\n    branches: ['[0-9]+-*', '[0-9]+', main]\n")
 		})
 		require.Empty(t, got, "законная запись того же множества объявлена нарушением")
 		require.Equal(t, census.OnReview, census.ReviewAtLine)
@@ -543,13 +557,13 @@ func TestReviewTriggerGateResolvesYAMLAliases(t *testing.T) {
 		t.Parallel()
 		got, census := aliasedBases(t, "  pull_request:\n    branches:\n      - *trunk\n")
 		require.Len(t, got, 1)
-		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
+		require.Contains(t, got[0], "недостаёт {`[0-9]+`, `[0-9]+-*`}")
 		require.NotContains(t, got[0], "лишние", "псевдоним прочитан по имени якоря, а не по значению")
 		require.Equal(t, control.Aliases+1, census.Aliases)
 	})
 	t.Run("близнец: база запроса псевдонимом, линия на месте", func(t *testing.T) {
 		t.Parallel()
-		got, census := aliasedBases(t, "  pull_request:\n    branches:\n      - *trunk\n      - '[0-9]+'\n")
+		got, census := aliasedBases(t, "  pull_request:\n    branches:\n      - *trunk\n      - '[0-9]+'\n      - '[0-9]+-*'\n")
 		require.Empty(t, got)
 		require.Equal(t, census.OnReview, census.ReviewAtLine)
 	})
@@ -636,7 +650,7 @@ func TestReviewTriggerGateKnowsEveryLawfulEventForm(t *testing.T) {
 	t.Run("branches одиночным скаляром — множество из одного", func(t *testing.T) {
 		got, _, _ := withProcess(t, "name: новый\non:\n  pull_request:\n    branches: main\n"+jobs)
 		require.Len(t, got, 1)
-		require.Contains(t, got[0], "недостаёт {`[0-9]+`}")
+		require.Contains(t, got[0], "недостаёт {`[0-9]+`, `[0-9]+-*`}")
 	})
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ: процесс, не идущий ни на запросе, ни по push в ветки,
@@ -667,7 +681,7 @@ func TestReviewTriggerGateJudgesTheRequestEvent(t *testing.T) {
 	for _, tc := range []struct{ name, block string }{
 		{"pull_request_target с базой ствола", "  pull_request_target:\n    branches: [main]\n"},
 		{"pull_request_target с базами ствола и линии",
-			"  pull_request_target:\n    branches:\n      - main\n      - '[0-9]+'\n"},
+			"  pull_request_target:\n    branches:\n      - main\n      - '[0-9]+'\n      - '[0-9]+-*'\n"},
 		{"pull_request_target без тела", "  pull_request_target:\n"},
 	} {
 		t.Run(tc.name+" вместо pull_request", func(t *testing.T) {
@@ -753,7 +767,7 @@ func TestReviewTriggerGateJudgesTheRequestEvent(t *testing.T) {
 
 	t.Run("близнец: процесс ствола на pull_request", func(t *testing.T) {
 		got, census := withProcess(t, "name: новый\non:\n  push:\n    branches: [main]\n"+
-			"  pull_request:\n    branches: [main, '[0-9]+']\n"+jobs)
+			"  pull_request:\n    branches: [main, '[0-9]+', '[0-9]+-*']\n"+jobs)
 		require.Empty(t, got)
 		require.Equal(t, control.OnReview+1, census.OnReview)
 		require.Equal(t, control.ReviewAtLine+1, census.ReviewAtLine)
