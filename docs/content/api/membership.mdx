@@ -65,7 +65,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>accountName</code></td><td>string</td><td>output-only</td><td><strong>Зеркало</strong> человекочитаемого имени аккаунта; источник истины — <a href="/api/account">Account</a>. Пустое значение означает «имя не задано», а <strong>не</strong> «аккаунта нет»</td></tr>
     <tr><td><code>userId</code></td><td>string</td><td>output-only</td><td>Человек (<a href="/api/user">User</a>)</td></tr>
     <tr><td><code>state</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> — см. ниже</td></tr>
-    <tr><td><code>invitedBy</code></td><td>string</td><td>output-only</td><td>Идентификатор пригласившего. След приглашения, <strong>переживающий вход</strong>: активация трогает <code>state</code> и <code>updatedAt</code> и не трогает его. Пусто у членства, заведённого не приглашением</td></tr>
+    <tr><td><code>invitedBy</code></td><td>string</td><td>output-only</td><td>Идентификатор пригласившего. След приглашения, <strong>переживающий активацию</strong>: активация трогает <code>state</code> и <code>updatedAt</code> и не трогает его. Пусто у членства, заведённого не приглашением</td></tr>
     <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Когда членство заведено; для приглашения — когда оно выписано. Усечено до секунд</td></tr>
     <tr><td><code>updatedAt</code></td><td>timestamp</td><td>output-only</td><td>Когда состояние менялось в последний раз. Усечено до секунд</td></tr>
   </tbody>

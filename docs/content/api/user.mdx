@@ -41,7 +41,7 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Внутренний идентификатор (префикс <code>usr</code>)</td></tr>
-    <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Субъект входа человека, отчеканенный полосой входа при регистрации. Пусто для <code>PENDING</code> (ещё не входил)</td></tr>
+    <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Субъект входа человека. Чеканит его полоса входа: регистрация без приглашения либо подтверждение адреса живого приглашения; внутренний <code>InternalUserService.UpsertFromIdentity</code> пишет значение своего вызывающего. Пусто для <code>PENDING</code> (адрес приглашённого не подтверждён)</td></tr>
     <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup)</td></tr>
     <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Отображаемое имя</td></tr>
     <tr><td><code>inviteStatus</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>BLOCKED</code></td></tr>
@@ -72,8 +72,8 @@ import dedent from 'ts-dedent'
 <table>
   <thead><tr><th>Значение</th><th>Смысл</th></tr></thead>
   <tbody>
-    <tr><td><code>PENDING</code></td><td>Приглашён, ещё ни разу не входил (<code>externalId</code> пуст)</td></tr>
-    <tr><td><code>ACTIVE</code></td><td>Зарегистрировался на полосе входа, <code>externalId</code> заполнен</td></tr>
+    <tr><td><code>PENDING</code></td><td>Приглашение не активировано: адрес приглашённого не подтверждён (<code>externalId</code> пуст). Зарегистрировавшийся адресом приглашения входит, но только в <a href="/api/auth-lane#verification-position">положение подтверждения</a></td></tr>
+    <tr><td><code>ACTIVE</code></td><td>Личность заведена, <code>externalId</code> заполнен: регистрацией без приглашения, подтверждением адреса живого приглашения либо внутренним <code>InternalUserService.UpsertFromIdentity</code>. Подтверждённого адреса <code>ACTIVE</code> не означает: зарегистрировавшийся без приглашения активен сразу и до подтверждения остаётся в положении подтверждения</td></tr>
     <tr><td><code>BLOCKED</code></td><td>Вход на платформу запрещён администратором облака — во всех аккаунтах человека сразу</td></tr>
   </tbody>
 </table>
@@ -395,14 +395,18 @@ account/project). Identity-поля (`externalId` и прочие, заводи�
     <tr><td><code>Delete</code> чужой личности распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td>Строка личности глобальна; используйте <code>RemoveFromAccount</code></td></tr>
     <tr><td><code>RemoveFromAccount</code>, пока у человека есть права в этом аккаунте</td><td><code>FAILED_PRECONDITION</code></td><td><code>"User &lt;id&gt; still has active access bindings in Account &lt;id&gt; and cannot be removed from it"</code></td></tr>
     <tr><td><code>RemoveFromAccount</code> в чужой аккаунт</td><td><code>PERMISSION_DENIED</code></td><td>Область решения — названный аккаунт</td></tr>
-    <tr><td><code>Block</code> приглашённого (<code>PENDING</code>)</td><td><code>FAILED_PRECONDITION</code></td><td>Внешней личности ещё нет — запрещать нечего; снимите членство</td></tr>
+    <tr><td><code>Block</code> приглашённого (<code>PENDING</code>)</td><td><code>FAILED_PRECONDITION</code></td><td>Личность не активирована — запрещать нечего; снимите членство</td></tr>
     <tr><td><code>Block</code> / <code>Unblock</code> распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td><code>identity_suspender</code> — отношение надзора облака; аккаунту служит <code>RemoveFromAccount</code></td></tr>
     <tr><td><code>Update</code> меток распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td>Метки человека пишет только надзор облака (<code>record_writer</code>)</td></tr>
   </tbody>
 </table>
 
-:::tip Активация при первом входе
-Приглашённый пользователь становится `ACTIVE` автоматически при первом входе тем же адресом —
-регистрацией на [полосе входа](/api/auth-lane). Механика — на
-странице [Идентичность и токены](/architecture/identity).
+:::tip Активация — подтверждением адреса
+Приглашённый становится `ACTIVE`, когда подтвердит адрес приглашения на
+[полосе входа](/api/auth-lane#verification-position). Регистрация тем же адресом приглашение
+не активирует: способ входа и сессия ложатся на строку приглашения, строка остаётся `PENDING`, а
+сессия — в положении подтверждения. Активирует его код из письма, предъявленный
+`POST /iam/v1/auth/verify-email/confirm`, пока приглашение живо; истёкшее либо снятое не
+активируется (`INVITE_NOT_VALID`), выход — повторное приглашение. Механика — на странице
+[Идентичность и токены](/architecture/identity).
 :::

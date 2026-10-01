@@ -217,8 +217,8 @@ type InviteUserRequest struct {
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// Email of the invitee. Required, case-insensitive lookup.
 	Email string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	// Display name to seed the User-row (optional; will be overwritten on first
-	// login from Kratos identity traits).
+	// Display name to seed the User-row (optional; empty — the local part of the
+	// address). Activation by address confirmation keeps it.
 	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Optional: project_id + role_id pair to create AccessBinding atomically.
 	// Если оба не заполнены — только invite-row создается (admin позже выдает роли
