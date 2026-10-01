@@ -1003,7 +1003,7 @@ class _WaveWorld:
             # Чужой посеянный аккаунт читает только администратор облака.
             sub = token_claims(kw.get("token", "")).get("sub")
             if sub in self.admins:
-                return 200, {"id": SEEDED_SYSTEM_ACCOUNT, "name": "kacho-system"}
+                return 200, {"id": SEEDED_SYSTEM_ACCOUNT}
             return 404, {"code": 5, "message": f"Account {SEEDED_SYSTEM_ACCOUNT} not found"}
         return 404, {}
 

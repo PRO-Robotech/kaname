@@ -1957,11 +1957,20 @@ CASES.append(Case(
     classes=["NEG"],
     priority="P0",
     steps=[
+        # Имя посеянного аккаунта читается ДО попытки и сверяется ПОСЛЕ: литерал
+        # посевной идентичности в дерево не пишется (перепись приёмки
+        # seed-identity-names-its-own-service считает его остатком).
+        Step(name="seeded-before", method="GET", path=f"/iam/v1/accounts/{_AID_SEEDED}", auth=_as,
+             test_script=[*assert_status(200),
+                          "pm.test('fixture: seeded account has a name', () => "
+                          "pm.expect(pm.response.json().name || '').to.not.eql(''));",
+                          "pm.environment.set('aid15SeededName', pm.response.json().name || '');"]),
         _aid_create("create-seeded-id", {"id": _AID_SEEDED, "name": "aid15-{{runId}}"}, _as),
         assert_op_error(6, "ALREADY_EXISTS", msg_text=f"Account {_AID_SEEDED} already exists"),
         Step(name="seeded-unchanged", method="GET", path=f"/iam/v1/accounts/{_AID_SEEDED}", auth=_as,
              test_script=[*assert_status(200),
-                          "pm.test('name = kacho-system', () => pm.expect(pm.response.json().name).to.eql('kacho-system'));"]),
+                          "pm.test('seeded account keeps its name', () => pm.expect(pm.response.json().name)"
+                          ".to.eql(pm.environment.get('aid15SeededName')));"]),
     ],
 ))
 

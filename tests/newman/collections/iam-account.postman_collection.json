@@ -15672,6 +15672,91 @@
       "description": "class:NEG | priority:P0",
       "item": [
         {
+          "name": "IAM-ACC-ID-15 :: seeded-before",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/acc1a18042d81fb438d6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "acc1a18042d81fb438d6"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAidAdmShared'",
+                  "const __t = pm.environment.get('jwtHumanAidAdmShared') || pm.variables.get('jwtHumanAidAdmShared') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAidAdmShared is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAidAdmShared is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/acc1a18042d81fb438d6');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('fixture: seeded account has a name', () => pm.expect(pm.response.json().name || '').to.not.eql(''));",
+                  "pm.environment.set('aid15SeededName', pm.response.json().name || '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-ACC-ID-15 :: create-seeded-id",
           "request": {
             "method": "POST",
@@ -15958,7 +16043,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('name = kacho-system', () => pm.expect(pm.response.json().name).to.eql('kacho-system'));"
+                  "pm.test('seeded account keeps its name', () => pm.expect(pm.response.json().name).to.eql(pm.environment.get('aid15SeededName')));"
                 ]
               }
             }
