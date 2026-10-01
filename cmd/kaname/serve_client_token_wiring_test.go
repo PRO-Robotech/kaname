@@ -95,6 +95,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		Realm:                  "https://api.kacho.local/iam/token",
 		Service:                "registry.kacho.local",
 		BasicCredentialTimeout: credentialLanePeerTimeout,
+		Signer:                 registryLaneSigner(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка поверхности выдачи: %v", err)

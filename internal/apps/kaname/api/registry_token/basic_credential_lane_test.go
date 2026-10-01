@@ -57,17 +57,14 @@ func (f *fakeMinter) MintToken(_ context.Context, in MintInput) (MintOutput, err
 func basicDockerLane(t *testing.T, res *fakeBasicResolver) (*IssueRegistryTokenUseCase, *fakeMinter) {
 	t.Helper()
 	m := &fakeMinter{out: MintOutput{AccessToken: "minted", ExpiresIn: 300}}
-	uc := NewIssueRegistryTokenUseCase(Config{
+	uc := mustUseCase(t, Config{
 		Scope:            "registry",
 		AllowedAudiences: []string{"registry"},
 		// Умолчание объявлено НЕПУСТЫМ намеренно: с пустым запрос, адресата не
 		// назвавший, получал бы пустой адресат — то есть «любой», — и проба
 		// умолчания зеленела бы, ничего не утверждая.
-		DefaultService:    "registry",
-		AssertionAudience: "https://issuer.invalid/oauth2/token",
-	}, &fakeSigner{}, &fakeExchanger{}).
-		WithLocalMinter(m).
-		WithBasicCredentialResolver(res)
+		DefaultService: "registry",
+	}, m).WithBasicCredentialResolver(res)
 	return uc, m
 }
 

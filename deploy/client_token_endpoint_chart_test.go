@@ -112,7 +112,9 @@ func headOf(s string) string {
 func TestChartRefusesAProductionInstallWithoutTheClientTokenEndpoint(t *testing.T) {
 	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, clientTokenEnabledKnob+"=false")
 	requireRenderRefusal(t, out, err, clientTokenEnabledKnob)
-	require.NotContains(t, out, "authn.identityProvider", "отказ называет снятый ключ посадки условием")
+	// Что отказ не называет условием снятый ключ посадки, судит проба снятого
+	// ключа на том же входе (`retired_posture_key_test.go`, Ч3): одно место об
+	// одном предмете.
 }
 
 // Законный близнец О1: тот же вход в режиме разработчика рендерится — страж

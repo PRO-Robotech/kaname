@@ -263,8 +263,26 @@ func TestMountGuardDistinguishesTheLeaves(t *testing.T) {
 		})
 		require.Error(t, err, "переименует шаблон подкаталог — путь под неизвестным именем "+
 			"обязан стать находкой, а не пройти молча")
-		// Листов три с задачи #2487: якорь поставщика — своя координата.
-		require.Contains(t, err.Error(), "client, provider, server")
+		// Листов два: якорь поставщика (#2487) снят вместе с дорогой обмена
+		// (kaname#494).
+		require.Contains(t, err.Error(), "известны client, server")
+	})
+
+	// ЯКОРЯ ПОСТАВЩИКА БОЛЬШЕ НЕТ (kaname#494): третий лист монтирования служил
+	// единственной дороге к прежнему издателю, и снят вместе с ней. Путь под его
+	// подкаталогом — находка при ЛЮБОЙ объявленной координате: том не
+	// заводится, файла в поде нет. Близнец — тот же вход под листом слушателя
+	// (первый случай выше), он молчит.
+	t.Run("ПУТЬ ПОД СНЯТЫМ ЛИСТОМ ЯКОРЯ ПОСТАВЩИКА — находка", func(t *testing.T) {
+		merged := legal()
+		merged["tls"].(map[string]any)["providerSecretName"] = "kaname-provider-ca"
+		err := filesAreMountable(merged, map[string]string{
+			"KANAME_INVITE_MAIL__CA_BUNDLE_FILE": "/etc/kaname/tls/provider/ca.crt",
+		})
+		require.Error(t, err, "путь под <mount>/provider/ прошёл: лист якоря поставщика снят вместе с "+
+			"дорогой обмена, и каталога в поде нет")
+		require.Contains(t, err.Error(), "KANAME_INVITE_MAIL__CA_BUNDLE_FILE")
+		require.Contains(t, err.Error(), `"provider"`)
 	})
 
 	t.Run("ПУТЬ ВНЕ МОНТИРОВАНИЯ — прежняя ось не потеряна", func(t *testing.T) {
@@ -329,7 +347,7 @@ func TestMaterialPathRecogniser_LawfulTwinsStaySilent(t *testing.T) {
 	// адреса и режимы наравне с путями, и первый же ложный срабат снял бы
 	// проверку.
 	for _, knob := range []string{
-		"KANAME_HYDRA_TOKEN_URL",
+		"KANAME_REPOSITORY__POSTGRES__URL",
 		"KANAME_AUTHN__TRUST_DOMAIN",
 		"KANAME_INVITE_MAIL__RELAY",
 		// Окончание `FILE` внутри слова, а не суффиксом имени.
@@ -347,7 +365,11 @@ func TestMaterialPathRecogniser_LawfulTwinsStaySilent(t *testing.T) {
 		"KANAME_PUBLIC_SERVER_MTLS_KEYFILE",
 		"KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES",
 		"KANAME_REST_UPSTREAM_MTLS_CAFILES",
-		"KANAME_HYDRA_TOKEN_CA_FILE",
+		// Форма `_CA_FILE` ушла вместе со своим ЕДИНСТВЕННЫМ носителем — якорем
+		// хопа к прежнему издателю (kaname#494): поля с таким окончанием в
+		// настройке больше нет, и выводить эту форму не из чего. Это законное
+		// сужение вывода — вслед за предметом, а не потеря предмета; вернётся
+		// поле — вернётся и форма.
 	} {
 		require.True(t, namesAMaterialPath(knob),
 			"форма %s, которую знал прежний перечень, выведенным не узнаётся — сужение", knob)
