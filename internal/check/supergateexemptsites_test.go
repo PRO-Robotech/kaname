@@ -10,7 +10,8 @@ package check_test
 // обход и ведомость без мест — отказ, а не зелёное. Инъекции идут в обе
 // стороны: каждый дефект меняет ровно один факт против дерева как есть и
 // обязан дать ровно одну находку с координатой; законный близнец той же формы
-// (одноимённая локальная функция, литерал со строкой вне перечня) — молчание.
+// (одноимённая локальная функция, литерал со строкой вне перечня, строка
+// перечня в значении поля структуры или словаря) — молчание.
 
 import (
 	"context"
@@ -152,17 +153,47 @@ func TestSuperGateExemptSitesInjection_LedgerRowWithoutPlaceIsFound(t *testing.T
 }
 
 // TestSuperGateExemptSitesInjection_LawfulTwinsAreSilent — та же форма без
-// предмета: одноимённая функция пакета (не член семейства по идентичности) и
-// составной литерал со строкой вне перечня.
+// предмета: одноимённая функция пакета (не член семейства по идентичности),
+// литерал множества со строкой вне перечня, и строка из перечня там, где она
+// значение, а не член множества: поле литерала структуры (именованное и
+// позиционное — форма кортежа посева `moduleseed.ServiceTuple`) и значение
+// словаря. Запрет З19 — на вторую декларацию МНОЖЕСТВА, а не на употребление
+// слова модели.
 func TestSuperGateExemptSitesInjection_LawfulTwinsAreSilent(t *testing.T) {
 	rep := scanSuperGate(t, loadSuperGateLedger(t), check.SuperGateOverlay{
 		userPkg: {injectedFile: injectedHeader + "package user\n\n" +
 			"// IsClusterAdminE — одноимённая функция пакета user: не член семейства.\n" +
 			"func IsClusterAdminE() bool { return false }\n\n" +
-			"var injectedTwin = map[string]bool{\"notification_feed_x\": IsClusterAdminE()}\n"},
+			"var injectedTwin = map[string]bool{\"notification_feed_x\": IsClusterAdminE()}\n\n" +
+			"type injectedTuple struct{ objectType string }\n\n" +
+			"var injectedNamedField = injectedTuple{objectType: \"notification_feed\"}\n\n" +
+			"var injectedPositionalField = &injectedTuple{\"notification_namespace\"}\n\n" +
+			"var injectedMapValue = map[string]string{\"feed\": \"notification_feed\"}\n"},
 	})
 	for _, f := range rep.Findings {
 		t.Errorf("законный близнец дал находку: %s", f)
+	}
+}
+
+// TestSuperGateExemptSitesInjection_EverySetFormIsFound — каждая законная в Go
+// форма записи множества со строкой из перечня — ровно одна находка: ключ
+// словаря (в том числе именованного типа и вложенного литерала с опущенным
+// типом), элемент среза и массива, ветка switch.
+func TestSuperGateExemptSitesInjection_EverySetFormIsFound(t *testing.T) {
+	for name, body := range map[string]string{
+		"ключ словаря":                   "var injectedSet = map[string]struct{}{\"notification_feed\": {}}\n",
+		"ключ словаря именованного типа": "type injectedSetT map[string]bool\n\nvar injectedSet = injectedSetT{\"notification_namespace\": true}\n",
+		"элемент среза":                  "var injectedSet = []string{\"notification_feed\"}\n",
+		"элемент массива":                "var injectedSet = [...]string{\"notification_namespace\"}\n",
+		"элемент вложенного литерала":    "var injectedSet = map[string][]string{\"exempt\": {\"notification_feed\"}}\n",
+		"ветка switch":                   "func injectedSet(t string) bool {\n\tswitch t {\n\tcase \"notification_feed\":\n\t\treturn true\n\t}\n\treturn false\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rep := scanSuperGate(t, loadSuperGateLedger(t), check.SuperGateOverlay{
+				userPkg: {injectedFile: injectedHeader + "package user\n\n" + body},
+			})
+			requireOneFinding(t, rep, "internal/apps/kaname/api/user/"+injectedFile, "вторая декларация")
+		})
 	}
 }
 

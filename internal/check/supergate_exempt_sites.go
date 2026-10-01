@@ -50,9 +50,14 @@ package check
 // # Вторая декларация перечня
 //
 // Перечень читается из его объявления (ключи составного литерала пакетной
-// переменной, названной ведомостью), а не выписывается здесь. Составной литерал
-// или ветка `switch` где угодно ещё, называющие константой строку из перечня, —
-// вторая декларация, и это находка.
+// переменной, названной ведомостью), а не выписывается здесь. Запись множества
+// где угодно ещё, членом которого константой названа строка из перечня, — вторая
+// декларация, и это находка. Формы множества: ключ литерала словаря, элемент
+// литерала среза или массива (тип литерала — по подлежащему типу, так что
+// именованный тип и вложенный литерал с опущенным типом судятся так же), ветка
+// `switch`. Значение поля структуры и значение словаря — употребление слова
+// модели, а не член множества (кортеж посева `moduleseed.ServiceTuple`), и
+// находкой не являются.
 //
 // # Ограничение, названное честно
 //
@@ -859,8 +864,14 @@ func stringConst(info *types.Info, e ast.Expr) (string, bool) {
 	return constant.StringVal(tv.Value), true
 }
 
-// reportSecondDecl — составной литерал или ветка switch, называющие тип перечня
-// вне его объявления.
+// reportSecondDecl — запись МНОЖЕСТВА, членом которого назван тип перечня вне
+// его объявления: ключ литерала словаря, элемент литерала среза или массива,
+// ветка switch. Значение поля структуры и значение словаря членом множества не
+// являются — это употребление слова модели (кортеж посева
+// `moduleseed.ServiceTuple{objectType: …}`), а запрет З19 — на вторую
+// декларацию набора. Тип литерала берётся у проверки типов, поэтому
+// именованный тип и вложенный литерал с опущенным типом судятся по
+// подлежащему типу.
 func reportSecondDecl(rep *SuperGateReport, fset *token.FileSet, sp *superGatePkg, n ast.Node,
 	setLit *ast.CompositeLit, set map[string]struct{}) {
 	var exprs []ast.Expr
@@ -869,12 +880,27 @@ func reportSecondDecl(rep *SuperGateReport, fset *token.FileSet, sp *superGatePk
 		if x == setLit {
 			return
 		}
-		for _, el := range x.Elts {
-			if kv, ok := el.(*ast.KeyValueExpr); ok {
-				exprs = append(exprs, kv.Key, kv.Value)
-				continue
+		tv, ok := sp.info.Types[x]
+		if !ok || tv.Type == nil {
+			return
+		}
+		switch tv.Type.Underlying().(type) {
+		case *types.Map:
+			for _, el := range x.Elts {
+				if kv, ok := el.(*ast.KeyValueExpr); ok {
+					exprs = append(exprs, kv.Key)
+				}
 			}
-			exprs = append(exprs, el)
+		case *types.Slice, *types.Array:
+			for _, el := range x.Elts {
+				if kv, ok := el.(*ast.KeyValueExpr); ok {
+					exprs = append(exprs, kv.Value)
+					continue
+				}
+				exprs = append(exprs, el)
+			}
+		default:
+			return
 		}
 	case *ast.CaseClause:
 		exprs = x.List
