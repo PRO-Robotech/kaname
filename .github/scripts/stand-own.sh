@@ -202,7 +202,7 @@ start_pg() {
 # стенда», а измеренная цена боевой посадки, и он обязан меняться вместе с
 # требованиями, а не жить своей жизнью.
 stand_env() {
-  mkdir -p "$RUNDIR"
+  mkdir -p "$RUNDIR" "$PKI"
   [ -f "$WRAPKEY_FILE" ] || openssl rand -hex 32 > "$WRAPKEY_FILE"
   # КОНТУР БУТСТРАПА ВКЛЮЧЁН НА СТЕНДЕ, И БЕЗ НЕГО СТЕНД НЕ ПРОВЕРЯЕТ НИЧЕГО
   # СВЕРХ РУБЕЖА.
@@ -298,6 +298,51 @@ stand_env() {
   # обёртки подписных ключей: записанное им другой ключ не откроет.
   [ -f "$SECOND_FACTOR_KEY_FILE" ] || openssl rand -hex 32 > "$SECOND_FACTOR_KEY_FILE"
   export KANAME_SECOND_FACTOR_ENC_KEY="$(cat "$SECOND_FACTOR_KEY_FILE")"
+  # ─── ПОЧТОВЫЕ РУЧКИ ТАБЛИЦЫ Р8 И ФЛАГ ПОЧТЫ (приёмка NTF-2 Р4, Р8; Д11) ──
+  #
+  # Страж таблицы границ (`config.ValidateMailBounds`) требует их на ЛЮБОЙ
+  # посадке и в любом режиме, умолчаний нет ни у одной: без них старт
+  # отказывает, называя каждый ключ. Числа — те же, что объявляет боевой
+  # профиль (`deploy/values.prod.yaml`: блоки `authn.login`, `invite`,
+  # `notifications`), — стенд судит посадку, которую поставка уносит клиенту.
+  export KANAME_NOTIFICATIONS__ENABLED=true
+  export KANAME_AUTHN__LOGIN__REGISTRATION_CODE_TTL=60m
+  local purpose
+  for purpose in RECOVERY VERIFICATION REGISTRATION; do
+    export "KANAME_AUTHN__LOGIN__MAIL_WINDOW__${purpose}__FIRST_PAUSE=60s"
+    export "KANAME_AUTHN__LOGIN__MAIL_WINDOW__${purpose}__SECOND_PAUSE=5m"
+    export "KANAME_AUTHN__LOGIN__MAIL_WINDOW__${purpose}__PER_HOUR=3"
+    export "KANAME_AUTHN__LOGIN__MAIL_WINDOW__${purpose}__PER_DAY=5"
+    export "KANAME_AUTHN__LOGIN__MAIL_WINDOW__${purpose}__FLOOR_INTERVAL=6h"
+  done
+  export KANAME_AUTHN__LOGIN__ATTEMPTS__ADDRESS_SOURCE_PER_WINDOW=5
+  export KANAME_AUTHN__LOGIN__ATTEMPTS__WINDOW=15m
+  export KANAME_AUTHN__LOGIN__ATTEMPTS__ADDRESS_FAILURE_CEILING=100
+  export KANAME_AUTHN__LOGIN__MAIL_THROTTLED_INTERVAL=168h
+  export KANAME_AUTHN__LOGIN__TRUSTED_DEVICE__TTL=2160h
+  export KANAME_AUTHN__LOGIN__TRUSTED_DEVICE__RECOVERY_PER_DAY=2
+  export KANAME_INVITE__TTL=168h
+  export KANAME_INVITE__ACCOUNT_PER_DAY=200
+  export KANAME_INVITE__YOUNG_ACCOUNT_PER_DAY=50
+  export KANAME_INVITE__YOUNG_ACCOUNT_AGE=720h
+  export KANAME_INVITE__PENDING_MAX=200
+  export KANAME_INVITE__RECIPIENT_PER_HOUR=3
+  export KANAME_INVITE__RECIPIENT_PER_DAY=5
+  export KANAME_INVITE__RECIPIENT_PER_DAY_ALL=10
+  # ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18): k_window и k_device —
+  # по 32 случайных байта, ФАЙЛАМИ под каталогом УЦ стенда: его контейнер
+  # службы монтирует тем же путём (только чтение), а процесс читает путь, а не
+  # значение. В окружение и в печать посадки (`env`) уходят ПУТИ — сами ключи
+  # не попадают ни в лог, ни в окружение. Ключи ПОСТОЯННЫ, как ключи обёртки
+  # выше: смена k_window начинает окна адресатов заново, смена k_device снимает
+  # все метки устройств.
+  if [ ! -f "$PKI/mail-window.key" ] || [ ! -f "$PKI/device-label.key" ]; then
+    ( umask 077
+      openssl rand 32 > "$PKI/mail-window.key" && openssl rand 32 > "$PKI/device-label.key" ) || {
+        unmet "ключи почтовой полосы не выпустились (openssl)"; exit "$RC_UNMET"; }
+  fi
+  export KANAME_AUTHN__SECRETS__MAIL_WINDOW_KEY_FILE="$PKI/mail-window.key"
+  export KANAME_AUTHN__SECRETS__DEVICE_LABEL_KEY_FILE="$PKI/device-label.key"
   # СЛУШАТЕЛЬ ПОЛОСЫ ВХОДА — дверь, которой посев заводит людей. Он допускает
   # РОВНО край по SAN проверенного клиентского листа, поэтому режим — `mutual`,
   # а лист края стенд выписывает сам (`make_pki`, `edge.crt`).
@@ -473,7 +518,7 @@ migrate() {
 # не создано: вердикта о дереве нет.
 start_mailbox() {
   need_tool python3
-  mkdir -p "$RUNDIR"
+  mkdir -p "$RUNDIR" "$PKI"
   if [ -f "$RUNDIR/mailbox.pid" ]; then
     kill "$(cat "$RUNDIR/mailbox.pid")" 2>/dev/null
     rm -f "$RUNDIR/mailbox.pid"
@@ -500,7 +545,7 @@ SERVICE_IMAGE="${KANAME_STAND_SERVICE_IMAGE:-$PG_IMAGE}"
 SERVICE_MEMORY="${KANAME_STAND_SERVICE_MEMORY:-1280m}"
 
 start_service() {
-  mkdir -p "$RUNDIR"
+  mkdir -p "$RUNDIR" "$PKI"
   local envs=() v
   # Посадка уезжает в контейнер ИМЕНАМИ, а не значениями: `-e ИМЯ` берёт
   # величину из окружения, и ключи с переводом строки доезжают целыми. Ручки
