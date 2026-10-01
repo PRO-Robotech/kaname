@@ -515,6 +515,13 @@ func (a checkAdapter) Check(ctx context.Context, subject, relation, object strin
 	if allowed {
 		return true, nil
 	}
+	// Тип объекта из перечня без надзора (Р5, место Д-6): исход — исход модели.
+	// Сегодня каталог публичных методов kaname этих типов не называет, но тип
+	// здесь — параметр, и довод «сюда не доходит» истёк бы с первым же методом.
+	objectType, _, _ := SplitModelObject(object)
+	if SuperGateExempt(objectType) {
+		return false, nil
+	}
 	if a.isSuperGateQuestion(relation, object) {
 		// Вопрос двери СОВПАЛ с вопросом надзора — переспрашивать то же самое
 		// незачем: ответ «нет» уже получен выше.

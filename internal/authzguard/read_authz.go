@@ -58,6 +58,8 @@ func AllowsVGet(ctx context.Context, checker RelationChecker, fgaType, id string
 // super-gate OR the ctx principal holds `relation` on `<fgaType>:<id>`. AllowsVGet
 // is the get-specialization (relation == "v_get"). Kept generic so a future read
 // path (e.g. a v_list object-existence probe) reuses the same fail-closed posture.
+// On an object type from the no-super-gate list (`SuperGateExempt`, decision Р5)
+// the super-gate is not asked at all: the verdict is the object question alone.
 //
 // An allow is returned as soon as ONE question answers yes, even if the other
 // failed — an allow needs no second opinion. A non-allow is only reported as a
@@ -71,13 +73,23 @@ func AllowsVerb(ctx context.Context, checker RelationChecker, relation, fgaType,
 	if !ok {
 		return false, nil
 	}
-	// Cluster-admin short-circuit (D-9): a cluster-admin reads ANY object even
-	// without a per-object tuple.
-	admin, adminErr := SubjectIsClusterAdminPlainE(ctx, checker, subject)
-	if admin {
-		return true, nil
+	object := fgaType + ":" + id
+	// Тип судится тем разбором, что у модели (место Д-7, Р5): на типе из перечня
+	// без надзора надзор не спрашивается вовсе — исход даёт один вопрос об объекте.
+	objectType, _, _ := SplitModelObject(object)
+	var (
+		admin    bool
+		adminErr error
+	)
+	if !SuperGateExempt(objectType) {
+		// Cluster-admin short-circuit (D-9): a cluster-admin reads ANY object even
+		// without a per-object tuple.
+		admin, adminErr = SubjectIsClusterAdminPlainE(ctx, checker, subject)
+		if admin {
+			return true, nil
+		}
 	}
-	allowed, err := checker.Check(ctx, subject, relation, fgaType+":"+id)
+	allowed, err := checker.Check(ctx, subject, relation, object)
 	if err != nil {
 		return false, err
 	}
