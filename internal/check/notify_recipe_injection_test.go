@@ -14,6 +14,7 @@ package check_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,8 +22,18 @@ import (
 // recipeOverride пишет файл-подмену тела цели target строками lines.
 func recipeOverride(t *testing.T, target string, lines ...string) string {
 	t.Helper()
+	return recipeOverrideWithHead(t, "", target, lines...)
+}
+
+// recipeOverrideWithHead — подмена тела, перед которой в файле стоит head
+// (объявление специальной цели вроде `.IGNORE`); пустой head — без него.
+func recipeOverrideWithHead(t *testing.T, head, target string, lines ...string) string {
+	t.Helper()
 	p := filepath.Join(t.TempDir(), "override.mk")
 	body := target + ":\n\t" + strings.Join(lines, "\n\t") + "\n"
+	if head != "" {
+		body = head + "\n" + body
+	}
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
@@ -32,17 +43,12 @@ func recipeOverride(t *testing.T, target string, lines ...string) string {
 // recipeFindings — находки пробы по цели target при подмене override.
 func recipeFindings(t *testing.T, override, target string) recipeReport {
 	t.Helper()
-	for _, r := range auditNotifyRecipes(t, notifyTreeRoot(t), []string{override}) {
-		if r.Target == target {
-			t.Log(r.String())
-			for _, f := range r.Findings {
-				t.Log("находка: " + f)
-			}
-			return r
-		}
+	r := auditNotifyRecipe(t, notifyTreeRoot(t), []string{override}, target)
+	t.Log(r.String())
+	for _, f := range r.Findings {
+		t.Log("находка: " + f)
 	}
-	t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: исхода по цели %s нет", target)
-	return recipeReport{}
+	return r
 }
 
 func TestNTF1Recipe_InjectionsInKanameAreFound(t *testing.T) {
@@ -144,5 +150,133 @@ func TestNTF1Recipe_InjectionNearMissIsNamed(t *testing.T) {
 	}
 	if strings.Contains(joined, "образец -run не покрывает пробы перечня: TestNTF1B27Gate_OnKaname") {
 		t.Errorf("покрытая проба названа выпавшей:\n%s", joined)
+	}
+}
+
+// Находки пробы распространения кода — подстроки, по которым инъекции ниже
+// узнают свою причину.
+const (
+	findPrefixDash  = "префикс make «-» у строки обязательного вызова"
+	findIgnore      = "цель названа в .IGNORE"
+	findQuench      = "гаситель кода"
+	findSetPlusE    = "`set +e` в строке обязательного вызова"
+	findCodeLost    = "код вызова не доходит до кода цели"
+	findNotDriven   = "исполнение не проверено"
+	notifyCheckLine = `$(NOTIFYGEN) -check -base "$(BASE)"`
+	treeGatesLine   = `go test ./internal/check/ -count=1 -v -run '$(NOTIFY_TREE_GATES_RUN)'`
+)
+
+// TestNTF1Recipe_ExitCodeInjectionsInKanameAreFound — вызов, НАПЕЧАТАННЫЙ
+// make -n, ещё не значит, что его код доходит до кода цели. Каждая инъекция
+// меняет против законной строки ровно один факт — гаситель кода; близнецы
+// той же формы, но с кодом, доходящим до цели, молчат И исполняются.
+//
+// want — подстрока ПЕРВОЙ находки (чтение текста рецепта идёт раньше
+// исполнения), alsoWant — подстроки, обязанные быть среди остальных находок
+// (исполнение с заведомо неверным входом).
+func TestNTF1Recipe_ExitCodeInjectionsInKanameAreFound(t *testing.T) {
+	cases := []struct {
+		name     string
+		target   string
+		head     string
+		lines    []string
+		want     string
+		alsoWant []string
+	}{
+		// --- законные близнецы: молчат и исполняются, код цели ненулевой ---
+		// Префикс «+» в близнец не берётся: строку с ним make исполняет и под -n.
+		{name: "близнец: notifications-check — префикс @, отказ с exit 3",
+			target: "notifications-check",
+			lines:  []string{"@" + notifyCheckLine + " || { echo 'сверка красная'; exit 3; }"}},
+		{name: "близнец: префикс «-» у строки версии, не у обязательного вызова",
+			target: "notifications-check",
+			lines:  []string{"-$(NOTIFYGEN) -version", notifyCheckLine}},
+		{name: "близнец: `|| true` внутри подстановки, не после вызова",
+			target: "notifications-check",
+			lines:  []string{"v=$$(git rev-parse HEAD || true); " + notifyCheckLine}},
+		{name: "близнец: `&& true` после вызова не гасит его код",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + " && true"}},
+		{name: "близнец: .IGNORE называет чужую цель",
+			target: "notifications-check", head: ".IGNORE: docker",
+			lines: []string{notifyCheckLine}},
+		{name: "близнец: notify-tree-gates — `|| exit 1`",
+			target: "notify-tree-gates",
+			lines:  []string{treeGatesLine + " || exit 1"}},
+
+		// --- M1/M2 из вердикта check-verifier и остальные формы гасителя ---
+		{name: "M1: `|| true` в конце строки вызова notifygen",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + " || true"},
+			want:   findQuench + " `|| true`", alsoWant: []string{findCodeLost}},
+		{name: "M2: префикс make «-» перед строкой вызова",
+			target: "notifications-check",
+			lines:  []string{"-" + notifyCheckLine},
+			want:   findPrefixDash, alsoWant: []string{findCodeLost}},
+		{name: "префикс «-» после «@»",
+			target: "notifications-check",
+			lines:  []string{"@-" + notifyCheckLine},
+			want:   findPrefixDash, alsoWant: []string{findCodeLost}},
+		{name: "`|| :` после вызова",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + " || :"},
+			want:   findQuench + " `|| :`", alsoWant: []string{findCodeLost}},
+		{name: "`|| exit 0` после вызова",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + " || exit 0"},
+			want:   findQuench + " `|| exit 0`", alsoWant: []string{findCodeLost}},
+		{name: "`; true` в конце строки вызова",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + "; true"},
+			want:   findQuench + " `; true`", alsoWant: []string{findCodeLost}},
+		{name: "`set +e` в строке вызова",
+			target: "notifications-check",
+			lines:  []string{"set +e; " + notifyCheckLine},
+			want:   findSetPlusE},
+		{name: ".IGNORE называет цель",
+			target: "notifications-check", head: ".IGNORE: notifications-check",
+			lines: []string{notifyCheckLine},
+			want:  findIgnore, alsoWant: []string{findCodeLost}},
+		{name: "труба после вызова — формы чтением нет, ловит исполнение",
+			target: "notifications-check",
+			lines:  []string{notifyCheckLine + " 2>&1 | cat"},
+			want:   findCodeLost},
+		{name: "notify-tree-gates: `|| true` после go test",
+			target: "notify-tree-gates",
+			lines:  []string{treeGatesLine + " || true"},
+			want:   findQuench + " `|| true`", alsoWant: []string{findCodeLost}},
+		{name: "notify-tree-gates: префикс «-» перед go test",
+			target: "notify-tree-gates",
+			lines:  []string{"-" + treeGatesLine},
+			want:   findPrefixDash, alsoWant: []string{findCodeLost}},
+		{name: "notify-tree-gates: образец -run зашит, поданный не доходит",
+			target: "notify-tree-gates",
+			lines:  []string{"go test ./internal/check/ -count=1 -v -run '.*'"},
+			want:   findNotDriven},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := recipeFindings(t, recipeOverrideWithHead(t, c.head, c.target, c.lines...), c.target)
+			if r.Commands == 0 || r.RecipeLines == 0 {
+				t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: подмена не прочитана ни make -n, ни базой make: %s", r)
+			}
+			if c.want == "" {
+				for _, f := range r.Findings {
+					t.Errorf("близнец обязан молчать: %s", f)
+				}
+				if r.Calls != 1 || !r.Executed || r.ExitCode == 0 {
+					t.Errorf("близнец обязан исполниться с ненулевым кодом цели: %s", r)
+				}
+				return
+			}
+			if len(r.Findings) == 0 || !strings.Contains(r.Findings[0], c.want) {
+				t.Fatalf("ожидается первая находка %q, получено: %v", c.want, r.Findings)
+			}
+			for _, w := range c.alsoWant {
+				if !slices.ContainsFunc(r.Findings[1:], func(f string) bool { return strings.Contains(f, w) }) {
+					t.Errorf("ожидается находка %q, получено: %v", w, r.Findings)
+				}
+			}
+		})
 	}
 }

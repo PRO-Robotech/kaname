@@ -61,11 +61,20 @@ type recipeReport struct {
 	Commands int      // простых команд после разбора
 	Calls    int      // команд, признанных обязательным вызовом
 	Findings []string // находки словами
+
+	RecipeLines int  // логических строк рецепта, прочитанных базой make (make -p)
+	Executed    bool // цель исполнена с заведомо неверным входом
+	ExitCode    int  // код make при этом исполнении
 }
 
 func (r recipeReport) String() string {
-	return fmt.Sprintf("тело цели %s: строк make -n %d · простых команд %d · обязательных вызовов %d · находок %d",
-		r.Target, r.Lines, r.Commands, r.Calls, len(r.Findings))
+	exec := "не исполнялась"
+	if r.Executed {
+		exec = fmt.Sprintf("исполнена, код make %d", r.ExitCode)
+	}
+	return fmt.Sprintf("тело цели %s: строк make -n %d · простых команд %d · обязательных вызовов %d · "+
+		"строк рецепта в базе make %d · цель %s · находок %d",
+		r.Target, r.Lines, r.Commands, r.Calls, r.RecipeLines, exec, len(r.Findings))
 }
 
 // makeRun исполняет make в корне дерева с Makefile дерева и дополнительными
@@ -119,20 +128,33 @@ func notifyTreeGatesList(t *testing.T, root string, extra []string) []string {
 	return names
 }
 
+// notifyRecipeTargets — цели NTF-1, тела которых судит проба.
+var notifyRecipeTargets = []string{"notifications-check", "notify-tree-gates"}
+
 // auditNotifyRecipes — исход пробы по обеим целям для Makefile дерева root и
 // файлов-переопределений extra.
 func auditNotifyRecipes(t *testing.T, root string, extra []string) []recipeReport {
 	t.Helper()
-	check := judgeRecipe("notifications-check",
-		makeRun(t, root, extra, "-n", "notifications-check", "BASE="+notifyRecipeBase),
-		func(cmd []string) (bool, string) { return isNotifygenCheck(cmd, notifyRecipeBase) },
-		"вызова `notifygen -check -base "+notifyRecipeBase+"` нет — сверка D07 не исполняется")
-	gates := notifyTreeGatesList(t, root, extra)
-	tree := judgeRecipe("notify-tree-gates",
-		makeRun(t, root, extra, "-n", "notify-tree-gates"),
-		func(cmd []string) (bool, string) { return isTreeGatesRun(cmd, gates) },
-		"вызова `go test ./internal/check/ -run <перечень>` нет — гейты дерева не исполняются")
-	return []recipeReport{check, tree}
+	var out []recipeReport
+	for _, target := range notifyRecipeTargets {
+		out = append(out, auditNotifyRecipe(t, root, extra, target))
+	}
+	return out
+}
+
+// auditNotifyRecipe — исход пробы по одной цели: (1) make -n печатает ровно
+// один обязательный вызов; (2) текст рецепта не гасит его код (префикс «-»,
+// .IGNORE, `|| true` и родня — notify_recipe_exit_test.go); (3) цель,
+// исполненная с заведомо неверным входом, выходит НЕНУЛЕВЫМ кодом, и отказ
+// принадлежит обязательному вызову.
+func auditNotifyRecipe(t *testing.T, root string, extra []string, target string) recipeReport {
+	t.Helper()
+	spec := notifyRecipeSpecFor(t, root, extra, target)
+	out := makeRun(t, root, extra, append([]string{"-n", target}, spec.vars...)...)
+	r := judgeRecipe(target, out, spec.match, spec.absent)
+	judgeRecipeQuench(t, root, extra, spec, out, &r)
+	judgeRecipeExit(t, root, extra, spec, &r)
+	return r
 }
 
 // judgeRecipe режет вывод make -n на простые команды и считает обязательные
@@ -258,31 +280,80 @@ var shellReserved = map[string]bool{"{": true, "}": true, "!": true, "if": true,
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
-// shellCommands режет текст оболочки на простые команды (слова без кавычек).
-func shellCommands(s string) ([][]string, error) {
+// shellCmd — простая команда строки оболочки: Words — слова без ведущих
+// служебных слов и присваиваний (то, что исполняется), Raw — все слова,
+// Op — оператор ПОСЛЕ команды (`||`, `&&`, `;`, `&`, `|`, `)`; "" — конец строки).
+type shellCmd struct {
+	Words []string
+	Raw   []string
+	Op    string
+}
+
+// shellLines режет текст оболочки на строки (перевод строки вне кавычек и
+// не перенесённый `\`) и строки — на простые команды с оператором после
+// каждой. Команда из одних присваиваний или служебных слов остаётся в строке
+// (Words пуст): она держит место оператора, иначе `|| rc=$?` читался бы как
+// `;` после вызова.
+func shellLines(s string) ([][]shellCmd, error) {
 	toks, err := shellLex(s)
 	if err != nil {
 		return nil, err
 	}
-	var cmds [][]string
+	var lines [][]shellCmd
+	var line []shellCmd
 	var cur []string
-	flush := func() {
-		for len(cur) > 0 && (shellReserved[cur[0]] || shellAssignment.MatchString(cur[0])) {
-			cur = cur[1:]
+	flush := func(op string) {
+		if len(cur) == 0 {
+			// `( … ) || true`: оператор после закрытой скобки — оператор
+			// последней команды скобки.
+			if n := len(line); n > 0 && op != "(" && op != ")" && op != "\n" && line[n-1].Op == ")" {
+				line[n-1].Op = op
+			}
+			return
 		}
-		if len(cur) > 0 {
-			cmds = append(cmds, cur)
+		words := cur
+		for len(words) > 0 && (shellReserved[words[0]] || shellAssignment.MatchString(words[0])) {
+			words = words[1:]
 		}
+		line = append(line, shellCmd{Words: words, Raw: cur, Op: op})
 		cur = nil
 	}
 	for _, tk := range toks {
-		if tk.op {
-			flush()
-			continue
+		switch {
+		case tk.op && tk.text == "\n":
+			flush("")
+			if len(line) > 0 {
+				lines = append(lines, line)
+			}
+			line = nil
+		case tk.op:
+			flush(tk.text)
+		default:
+			cur = append(cur, tk.text)
 		}
-		cur = append(cur, tk.text)
 	}
-	flush()
+	flush("")
+	if len(line) > 0 {
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+// shellCommands режет текст оболочки на простые команды (слова без кавычек):
+// исполняемые слова каждой команды shellLines, у которой они есть.
+func shellCommands(s string) ([][]string, error) {
+	lines, err := shellLines(s)
+	if err != nil {
+		return nil, err
+	}
+	var cmds [][]string
+	for _, line := range lines {
+		for _, c := range line {
+			if len(c.Words) > 0 {
+				cmds = append(cmds, c.Words)
+			}
+		}
+	}
 	return cmds, nil
 }
 
@@ -325,10 +396,12 @@ func shellLex(s string) ([]shellToken, error) {
 			w.WriteRune(c)
 		case c == '&' || c == '|':
 			end()
+			op := string(c)
 			if i+1 < len(r) && r[i+1] == c {
 				i++
+				op += string(c)
 			}
-			toks = append(toks, shellToken{op: true, text: string(c)})
+			toks = append(toks, shellToken{op: true, text: op})
 		case c == '#' && !inWord:
 			for i+1 < len(r) && r[i+1] != '\n' {
 				i++
@@ -391,8 +464,11 @@ func TestNTF1Recipe_KanameMakeRunsTheNotifyCommands(t *testing.T) {
 	root := notifyTreeRoot(t)
 	for _, r := range auditNotifyRecipes(t, root, nil) {
 		t.Log(r.String())
-		if r.Lines == 0 || r.Commands == 0 {
+		if r.Lines == 0 || r.Commands == 0 || r.RecipeLines == 0 {
 			t.Fatalf("пустой обход — не вердикт: %s", r)
+		}
+		if !r.Executed {
+			t.Errorf("тело цели %s НЕ ИСПОЛНЯЛОСЬ с неверным входом — распространение кода не судилось: %s", r.Target, r)
 		}
 		for _, f := range r.Findings {
 			t.Errorf("тело цели %s · %s", r.Target, f)
