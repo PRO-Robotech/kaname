@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/PRO-Robotech/corelib v1.10.0-rc.5.0.20260930202300-fe30208b617f
+	github.com/PRO-Robotech/corelib v1.10.0-rc.5.0.20261001082548-8a9eb14cd008
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -110,4 +110,5 @@ require (
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 )
