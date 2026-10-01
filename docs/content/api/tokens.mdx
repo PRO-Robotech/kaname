@@ -532,9 +532,9 @@ flowchart LR
 
 ### Виды выдачи {#token-endpoint-grants}
 
-Видов четыре, и перечень **закрыт**: иной `grant_type` отвергается `400
-{"error":"unsupported_grant_type"}`. Тот же перечень эндпоинт публикует в метаданных обнаружения
-(`grant_types_supported`, [OAuth-церемония](/api/oauth-ceremony)).
+Видов четыре, и перечень **закрыт**: иной `grant_type` отвергается ответом
+`400 {"error":"unsupported_grant_type"}`. Тот же перечень эндпоинт публикует в метаданных
+обнаружения (`grant_types_supported`, [OAuth-церемония](/api/oauth-ceremony)).
 
 | `grant_type` | кто предъявляет | что предъявляется | форма запроса |
 |---|---|---|---|
