@@ -50,8 +50,10 @@ var mailKeyFileKeys = []string{
 // podVolumeSource — откуда том пода берёт содержимое: имя объекта Secret и
 // отображение «ключ объекта → путь файла внутри тома».
 type podVolumeSource struct {
-	secretName string
-	items      map[string]string // путь файла → ключ объекта
+	secretName  string
+	items       map[string]string // путь файла → ключ объекта
+	defaultMode any               // как разобран рендер; nil — не объявлен
+	itemModes   map[string]any    // путь файла → режим записи, если объявлен
 }
 
 // renderedPod — монтирования контейнера службы и тома пода из рендера.
@@ -89,15 +91,19 @@ func readRenderedPod(t *testing.T, rendered string) renderedPod {
 		for _, raw := range vols {
 			v, _ := raw.(map[string]any)
 			n, _ := v["name"].(string)
-			src := podVolumeSource{items: map[string]string{}}
+			src := podVolumeSource{items: map[string]string{}, itemModes: map[string]any{}}
 			if s, ok := v["secret"].(map[string]any); ok {
 				src.secretName, _ = s["secretName"].(string)
+				src.defaultMode = s["defaultMode"]
 				items, _ := s["items"].([]any)
 				for _, it := range items {
 					item, _ := it.(map[string]any)
 					k, _ := item["key"].(string)
 					p, _ := item["path"].(string)
 					src.items[p] = k
+					if m, ok := item["mode"]; ok {
+						src.itemModes[p] = m
+					}
 				}
 			}
 			pod.volumes[n] = src
@@ -171,4 +177,44 @@ func TestNotificationsFlag_IsDeclaredByTheProfile(t *testing.T) {
 		out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, "notifications.enabled=yes")
 		requireRenderRefusal(t, out, err, "notifications.enabled")
 	})
+}
+
+// mailKeyFileMode — права файлов ключей: читает владелец и группа пода
+// (`fsGroup`), прочим файл закрыт. Ключи k_window и k_device — материал
+// подписи; файл, открытый на чтение всем, отдал бы его любому процессу в поде,
+// чей пользователь не входит в группу.
+const mailKeyFileMode = 0o440
+
+// modeBits — режим из разобранного рендера. yaml.v3 читает `0440` как
+// восьмеричное 288 (YAML 1.1), `0o440` — тоже как 288; иное — не режим.
+func modeBits(t *testing.T, where string, v any) int {
+	t.Helper()
+	n, ok := v.(int)
+	require.Truef(t, ok, "%s: режим не целое число: %#v", where, v)
+	return n
+}
+
+func TestMailKeyFiles_VolumeModeIsOwnerAndGroupReadOnly(t *testing.T) {
+	pod := readRenderedPod(t, renderStandaloneChart(t, chartProfiles))
+	src, ok := pod.volumes["mail-keys"]
+	require.True(t, ok, "в рендере нет тома mail-keys — судить права не по чему")
+	require.NotNil(t, src.defaultMode,
+		"у тома mail-keys не объявлен defaultMode — kubernetes положит файлы ключей с 0644, читаемыми всем")
+	got := modeBits(t, "defaultMode тома mail-keys", src.defaultMode)
+	require.Equalf(t, mailKeyFileMode, got,
+		"defaultMode тома mail-keys = %#o, ожидалось %#o: ключи почтовой полосы читаются шире группы пода",
+		got, mailKeyFileMode)
+	require.NotEmpty(t, src.items, "том mail-keys не проецирует ни одного ключа — обход пуст")
+	for path, raw := range src.itemModes {
+		m := modeBits(t, "mode записи "+path, raw)
+		require.Zerof(t, m&^mailKeyFileMode,
+			"запись %s тома mail-keys несёт режим %#o — шире %#o", path, m, mailKeyFileMode)
+	}
+	t.Logf("перепись: defaultMode %#o · записей %d · из них со своим режимом %d",
+		got, len(src.items), len(src.itemModes))
+}
+
+func TestMailKeyFiles_BlankSecretNameRefusesTheRender(t *testing.T) {
+	out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, "authn.secrets.secretName=  ")
+	requireRenderRefusal(t, out, err, "authn.secrets.secretName")
 }
