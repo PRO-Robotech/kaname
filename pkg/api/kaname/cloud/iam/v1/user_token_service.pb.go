@@ -176,8 +176,7 @@ type IssueUserTokenResponse struct {
 	PublicKeyPem string `protobuf:"bytes,4,opt,name=public_key_pem,json=publicKeyPem,proto3" json:"public_key_pem,omitempty"`
 	// JOSE signing algorithm приватного ключа. Всегда "ES256".
 	Algorithm string `protobuf:"bytes,5,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
-	// JWK `kid` публичного ключа. Вызывающий ОБЯЗАН выставить `kid`-header
-	// подписанных assertion'ов в это значение. Совпадает с `client_id`.
+	// JWK `kid` публичного ключа. Совпадает с `client_id`.
 	KeyId string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	// Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
 	// вида SECRET; у KEYPAIR и FEDERATED пуст.

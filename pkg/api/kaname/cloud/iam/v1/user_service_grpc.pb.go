@@ -40,14 +40,18 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// A set of methods for managing User resources per-Account scope.
+// A set of methods for managing User resources.
 //
-// Модель User (per-Account):
-//   - User per-Account: каждый User-row принадлежит ровно одному Account.
-//   - Invite RPC — admin Account'а приглашает email; backend создает PENDING-row.
-//   - Activate-on-first-login — при первом login через Kratos с матчингом email
-//     PENDING → ACTIVE через InternalUserService.UpsertFromIdentity.
-//   - Create RPC — DEPRECATED; возвращает FailedPrecondition «Use Invite».
+// Модель User — глобальная личность платформы: одна строка на человека, а
+// принадлежность аккаунтам выражают строки членства (`membership.proto`).
+//   - Invite — распорядитель аккаунта приглашает адрес: заводится строка личности
+//     в состоянии PENDING (если её ещё нет) и членство в аккаунте.
+//   - Активация — подтверждение адреса приглашённым на полосе входа службы, пока
+//     приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
+//     пишет на строку приглашения способ входа и сессию, но приглашение не
+//     активирует.
+//   - Create нет: личность заводят приглашение, регистрация без приглашения и
+//     внутренний `InternalUserService.UpsertFromIdentity`.
 type UserServiceClient interface {
 	// Returns the specified User resource.
 	Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error)
@@ -58,8 +62,9 @@ type UserServiceClient interface {
 	// Permission: requires `admin` OR `editor` relation на account_id.
 	//
 	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
-	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
-	// приглашении той же пары, в пределах ограничения частоты на адрес.
+	// поток): уходит, пока приглашение не активировано (`invite_status =
+	// PENDING`), на первом и на повторном приглашении той же пары, в пределах
+	// ограничения частоты на адрес.
 	Invite(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
@@ -266,8 +271,8 @@ type UserServiceClient interface {
 	// membership his invitation created. That IS the revocation of an unaccepted
 	// invitation, and the path to it is RemoveFromAccount above — the counterpart
 	// of Invite and the Account's own right (`member_remover`). Invite writes the
-	// `memberships` row in PENDING state, removal drops it, and a later first
-	// login does not bring it back: the mirror trigger updates an existing
+	// `memberships` row in PENDING state, removal drops it, and a later address
+	// confirmation does not bring it back: the mirror trigger updates an existing
 	// membership and never inserts one on an edit of the identity row (migration
 	// 20260824010000).
 	//
@@ -294,7 +299,8 @@ type UserServiceClient interface {
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused
 	// here too — turning an unconfirmed invitee into an active member is
-	// activation-on-first-login, a different path with a different subject.
+	// activation by address confirmation on the service's sign-in lane, a
+	// different path with a different subject.
 	Unblock(ctx context.Context, in *UnblockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Resets the second factor of the specified User: the administrator's path
 	// for a person who lost the authenticator device AND the backup codes.
@@ -448,14 +454,18 @@ func (c *userServiceClient) ListOperations(ctx context.Context, in *ListUserOper
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
 //
-// A set of methods for managing User resources per-Account scope.
+// A set of methods for managing User resources.
 //
-// Модель User (per-Account):
-//   - User per-Account: каждый User-row принадлежит ровно одному Account.
-//   - Invite RPC — admin Account'а приглашает email; backend создает PENDING-row.
-//   - Activate-on-first-login — при первом login через Kratos с матчингом email
-//     PENDING → ACTIVE через InternalUserService.UpsertFromIdentity.
-//   - Create RPC — DEPRECATED; возвращает FailedPrecondition «Use Invite».
+// Модель User — глобальная личность платформы: одна строка на человека, а
+// принадлежность аккаунтам выражают строки членства (`membership.proto`).
+//   - Invite — распорядитель аккаунта приглашает адрес: заводится строка личности
+//     в состоянии PENDING (если её ещё нет) и членство в аккаунте.
+//   - Активация — подтверждение адреса приглашённым на полосе входа службы, пока
+//     приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
+//     пишет на строку приглашения способ входа и сессию, но приглашение не
+//     активирует.
+//   - Create нет: личность заводят приглашение, регистрация без приглашения и
+//     внутренний `InternalUserService.UpsertFromIdentity`.
 type UserServiceServer interface {
 	// Returns the specified User resource.
 	Get(context.Context, *GetUserRequest) (*User, error)
@@ -466,8 +476,9 @@ type UserServiceServer interface {
 	// Permission: requires `admin` OR `editor` relation на account_id.
 	//
 	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
-	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
-	// приглашении той же пары, в пределах ограничения частоты на адрес.
+	// поток): уходит, пока приглашение не активировано (`invite_status =
+	// PENDING`), на первом и на повторном приглашении той же пары, в пределах
+	// ограничения частоты на адрес.
 	Invite(context.Context, *InviteUserRequest) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
@@ -674,8 +685,8 @@ type UserServiceServer interface {
 	// membership his invitation created. That IS the revocation of an unaccepted
 	// invitation, and the path to it is RemoveFromAccount above — the counterpart
 	// of Invite and the Account's own right (`member_remover`). Invite writes the
-	// `memberships` row in PENDING state, removal drops it, and a later first
-	// login does not bring it back: the mirror trigger updates an existing
+	// `memberships` row in PENDING state, removal drops it, and a later address
+	// confirmation does not bring it back: the mirror trigger updates an existing
 	// membership and never inserts one on an edit of the identity row (migration
 	// 20260824010000).
 	//
@@ -702,7 +713,8 @@ type UserServiceServer interface {
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused
 	// here too — turning an unconfirmed invitee into an active member is
-	// activation-on-first-login, a different path with a different subject.
+	// activation by address confirmation on the service's sign-in lane, a
+	// different path with a different subject.
 	Unblock(context.Context, *UnblockUserRequest) (*operation.Operation, error)
 	// Resets the second factor of the specified User: the administrator's path
 	// for a person who lost the authenticator device AND the backup codes.

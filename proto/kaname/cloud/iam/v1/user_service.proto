@@ -14,14 +14,18 @@ import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// A set of methods for managing User resources per-Account scope.
+// A set of methods for managing User resources.
 //
-// Модель User (per-Account):
-// - User per-Account: каждый User-row принадлежит ровно одному Account.
-// - Invite RPC — admin Account'а приглашает email; backend создает PENDING-row.
-// - Activate-on-first-login — при первом login через Kratos с матчингом email
-//   PENDING → ACTIVE через InternalUserService.UpsertFromIdentity.
-// - Create RPC — DEPRECATED; возвращает FailedPrecondition «Use Invite».
+// Модель User — глобальная личность платформы: одна строка на человека, а
+// принадлежность аккаунтам выражают строки членства (`membership.proto`).
+// - Invite — распорядитель аккаунта приглашает адрес: заводится строка личности
+//   в состоянии PENDING (если её ещё нет) и членство в аккаунте.
+// - Активация — подтверждение адреса приглашённым на полосе входа службы, пока
+//   приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
+//   пишет на строку приглашения способ входа и сессию, но приглашение не
+//   активирует.
+// - Create нет: личность заводят приглашение, регистрация без приглашения и
+//   внутренний `InternalUserService.UpsertFromIdentity`.
 service UserService {
   // Returns the specified User resource.
   rpc Get (GetUserRequest) returns (User) {
@@ -64,8 +68,9 @@ service UserService {
   // Permission: requires `admin` OR `editor` relation на account_id.
   //
   // Письмо приглашения — то же правило, что у `MembershipService.Create` (один
-  // поток): уходит, пока личность ни разу не входила, на первом и на повторном
-  // приглашении той же пары, в пределах ограничения частоты на адрес.
+  // поток): уходит, пока приглашение не активировано (`invite_status =
+  // PENDING`), на первом и на повторном приглашении той же пары, в пределах
+  // ограничения частоты на адрес.
   rpc Invite (InviteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users:invite"
@@ -359,8 +364,8 @@ service UserService {
   // membership his invitation created. That IS the revocation of an unaccepted
   // invitation, and the path to it is RemoveFromAccount above — the counterpart
   // of Invite and the Account's own right (`member_remover`). Invite writes the
-  // `memberships` row in PENDING state, removal drops it, and a later first
-  // login does not bring it back: the mirror trigger updates an existing
+  // `memberships` row in PENDING state, removal drops it, and a later address
+  // confirmation does not bring it back: the mirror trigger updates an existing
   // membership and never inserts one on an edit of the identity row (migration
   // 20260824010000).
   //
@@ -401,7 +406,8 @@ service UserService {
   // Same shape throughout: action not field, Operation, step-up, idempotent
   // (unblocking an active membership succeeds). A PENDING invitation is refused
   // here too — turning an unconfirmed invitee into an active member is
-  // activation-on-first-login, a different path with a different subject.
+  // activation by address confirmation on the service's sign-in lane, a
+  // different path with a different subject.
   rpc Unblock (UnblockUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/users/{user_id}:unblock" body: "*" };
     option (corelib.api.v1.operation) = {
@@ -515,8 +521,8 @@ message InviteUserRequest {
   // Email of the invitee. Required, case-insensitive lookup.
   string email = 2;
 
-  // Display name to seed the User-row (optional; will be overwritten on first
-  // login from Kratos identity traits).
+  // Display name to seed the User-row (optional; empty — the local part of the
+  // address). Activation by address confirmation keeps it.
   string display_name = 3;
 
   // Optional: project_id + role_id pair to create AccessBinding atomically.
