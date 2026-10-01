@@ -153,6 +153,11 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// projection; a conflicting pair is rejected sync (INVALID_ARGUMENT). The
 	// binding row + the legacy projection + the active-grant UNIQUE anchor use
 	// subjects[0].
+	// Служебный субъект тенантской выдачей не производится (NTF1-M10 (а)) —
+	// отказ с именем поля, до разрешения набора; см. service_subject.go.
+	if err := refuseServiceSubjects(b.Subjects, b.SubjectType); err != nil {
+		return nil, err
+	}
 	subjects, err := domain.NormalizeSubjects(b.Subjects, b.SubjectType, b.SubjectID)
 	if err != nil {
 		return nil, shared.MapValidationErr(err)

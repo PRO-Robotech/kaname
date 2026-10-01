@@ -140,8 +140,6 @@ func (p relPair) String() string { return p.Type + "#" + p.Relation }
 // Способность гейта упасть на пустом перечне доказана отдельно
 // (nonverb_relation_has_reader_injection_test.go).
 var nonVerbWithoutReader = map[relPair]string{
-	{Type: "notification_feed", Relation: "reader"}: "модель заведена полосой K1 (kaname#484) раньше читателя; " +
-		"читают ResolveSend (K3) и применитель манифеста (K2) — запись истекает, когда литерал приходит в прод-код",
 	{Type: "notification_namespace", Relation: "sender"}: "модель заведена полосой K1 (kaname#484) раньше писателя; " +
 		"пишут применитель манифеста (K2) и Revoke/Restore (K3) — запись истекает, когда литерал приходит в прод-код",
 }

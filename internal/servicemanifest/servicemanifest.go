@@ -73,8 +73,18 @@ func Raw() []byte { return raw }
 // ответа. Отношение и вид получателя своего манифеста судит оснастка дерева
 // (`make module-manifest-check`, `iamctl validate`), а копия побайтово равна
 // тому, что она судила.
+//
+// Документ судится как СОБСТВЕННЫЙ манифест службы доступа
+// ([manifest.AsAccessService]): строка `notifications` у него несёт только
+// читателя, без пространства (приёмка NTF-1, Р3).
 func Load(opts ...manifest.LoadOption) (*manifest.Manifest, error) {
-	m, err := manifest.Load(raw, opts...)
+	return loadDocument(raw, opts...)
+}
+
+// loadDocument — тот же разбор над произвольным документом: пробы формы судят
+// встроенный манифест с одной правкой, а не второй файл в дереве.
+func loadDocument(data []byte, opts ...manifest.LoadOption) (*manifest.Manifest, error) {
+	m, err := manifest.Load(data, append([]manifest.LoadOption{manifest.AsAccessService()}, opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("встроенный манифест службы: %w", err)
 	}

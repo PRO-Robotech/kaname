@@ -96,6 +96,9 @@ type loadOptions struct {
 	oracle RelationOracle
 	// modules — набор модулей, внесённый вызывающим; см. [WithModuleSet].
 	modules domain.ModuleSet
+	// notificationsHolder — разряд, которым судится строка `notifications`;
+	// см. [AsAccessService].
+	notificationsHolder NotificationsHolder
 }
 
 // WithRelationOracle вносит модель, против которой судится связность выдачи
