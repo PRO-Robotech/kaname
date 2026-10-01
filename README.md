@@ -15,10 +15,11 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
   потребитель.
 - **Permission catalog** — `PermissionCatalogService`: грантуемая таксономия `<module>.<resource>.<verb>`.
 - **Service-account keys** — `SAKeyService` (статические ключи служебных учёток; токен по ключу
-  выпускает наш подписант там, где объявлена своя чеканка, иначе внешний поставщик).
+  выпускает наш подписант на токен-эндпоинте `/iam/v1/token`).
 - **Cluster-admin grants** — internal `InternalClusterService` (time-bombed/permanent).
-- **AuthN-интеграция** — webhooks Ory Kratos (provision) + Hydra (token/refresh);
-  User mirror через `InternalUserService.UpsertFromIdentity`.
+- **Вход человека** — собственная полоса входа (регистрация, вход, подтверждение адреса,
+  второй фактор, восстановление) на своём слушателе и сессия `kaname_session`; край разрешает
+  её через `InternalHumanSessionService.Resolve`. Внешнего поставщика удостоверений нет.
 
 ## Что можно запустить
 
@@ -103,9 +104,10 @@ composition root, `cmd/migrator/main.go` — отдельный CLI миграц
 - `repo/kaname/`        — CQRS Repository / Reader / Writer + pg-impl.
 - `dto/`               — generic table-driven DTO трансферы.
 - `handler/`           — тонкий gRPC transport-слой.
-- `clients/`           — peer-клиенты (TTL+LRU) к Ory Hydra (admin/OAuth/сессии/
-                         обмен токенов) + порты вопроса о доступе (`relations.go`);
-                         реализация портов — своя база, не сетевой сосед.
+- `clients/`           — исходящие порты службы: письмо приглашения (`invite_mail.go`),
+                         проверка пароля по утечкам (`breachcheck/`) и порты вопроса
+                         о доступе (`relations.go`); реализация портов доступа — своя
+                         база, не сетевой сосед.
 - `migrations/`        — Postgres goose-миграции (sequential, `0001_initial.sql` — baseline).
 - `errors/`            — sentinel errors + `WrapPgErr` (SQLSTATE → service.Err\*).
 
