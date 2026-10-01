@@ -63,6 +63,9 @@ RC_UNMET=75
 # самопроверке ниже: она доказывает исход «слушатель не появился», а шестьдесят
 # секунд ожидания там были бы платой за уже известный ответ. Умолчание прежнее.
 SERVICE_TRIES="${KANAME_STAND_SERVICE_TRIES:-60}"
+# Бюджет ожидания готовности базы после возврата из свёртки (`db-unfold`) — тем же
+# счётом попыток по секунде и по той же причине: самопроверке нужен короткий.
+DB_READY_TRIES="${KANAME_STAND_DB_READY_TRIES:-60}"
 
 PG_NAME="${KANAME_STAND_PG_NAME:-kaname-stand-pg}"
 PG_PORT="${KANAME_STAND_PG_PORT:-15432}"
@@ -607,6 +610,52 @@ down() {
   say "стенд снесён"
 }
 
+# ─── СВЁРТКА БАЗЫ: условие волны отказа без вердикта (kaname#415) ────────────
+#
+# Коллекции `authz-failclosed` нужно условие, несовместимое с остальным прогоном:
+# база стенда НЕДОСТИЖИМА, а служба ЖИВА. Свёртка останавливает контейнер базы и
+# службу не трогает; возврат запускает его обратно и ждёт, пока база снова
+# принимает соединения (служба переподключается сама — замер 2026-10-01: первый
+# же запрос после возврата отвечает 200).
+#
+# Исходы — те же два класса, что у подъёма. Не вышло остановить или запустить —
+# УСЛОВИЕ НЕ СОЗДАНО (75): волна без свёртки проверяла бы живую базу, и это не
+# вердикт о дереве. Код клиента контейнера при этом не единственный свидетель:
+# остановка сверяется с СОСТОЯНИЕМ контейнера, потому что «команда прошла» и
+# «база недостижима» — разные факты.
+fold_db() {
+  need_tool docker
+  local out running
+  if ! out="$(docker stop "$PG_NAME" 2>&1)"; then
+    unmet "базу стенда не свернуть: контейнер $PG_NAME не остановлен ($out)"
+    exit "$RC_UNMET"
+  fi
+  running="$(docker inspect -f '{{.State.Running}}' "$PG_NAME" 2>/dev/null)"
+  if [ "$running" != "false" ]; then
+    unmet "базу стенда не свернуть: контейнер $PG_NAME по-прежнему исполняется (состояние «${running:-не прочитано}»)"
+    exit "$RC_UNMET"
+  fi
+  say "база стенда свёрнута: контейнер $PG_NAME остановлен, служба оставлена жить"
+}
+
+unfold_db() {
+  need_tool docker
+  local out i
+  if ! out="$(docker start "$PG_NAME" 2>&1)"; then
+    unmet "базу стенда не вернуть: контейнер $PG_NAME не запущен ($out)"
+    exit "$RC_UNMET"
+  fi
+  for i in $(seq 1 "$DB_READY_TRIES"); do
+    if docker exec "$PG_NAME" pg_isready -U kaname >/dev/null 2>&1; then
+      say "база стенда возвращена и принимает соединения, попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  unmet "база стенда не ответила pg_isready за $DB_READY_TRIES с после возврата"
+  exit "$RC_UNMET"
+}
+
 # --- самопроверка: доказательство инъекцией в обе стороны ---------------------
 #
 # Живёт ФЛАГОМ этого же файла, а не соседним: отдельный файл в перечень шагов
@@ -803,6 +852,49 @@ PYEOF
              "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname" \
              "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
 
+    # ─── ПОДЛОЖНЫЕ КЛИЕНТЫ КОНТЕЙНЕРА ДЛЯ СВЁРТКИ БАЗЫ ──────────────────────
+    #
+    # Свёртка и возврат базы зовут `docker stop|start|inspect|exec`. Подложный
+    # клиент держит СОСТОЯНИЕ контейнера в файле (`SELFTEST_PG_STATE`): `stop`
+    # пишет `false`, `start` — `true`, `inspect` печатает записанное, а
+    # `pg_isready` отвечает успехом ровно у исполняющегося. Четыре мира отличаются
+    # от него ОДНИМ фактом каждый: остановить не вышло · остановка не подействовала
+    # · база не поднимается · клиента нет вовсе.
+    mkdir -p "$TMP/pg-ok" "$TMP/pg-stop-fails" "$TMP/pg-stays" "$TMP/pg-never-ready"
+    cat > "$TMP/pg-ok/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    echo false > "$SELFTEST_PG_STATE" ;;
+  start)   echo true > "$SELFTEST_PG_STATE" ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+  exec)    [ "$(cat "$SELFTEST_PG_STATE")" = true ] ;;
+esac
+EOF
+    cat > "$TMP/pg-stop-fails/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    echo 'Error response from daemon: No such container' >&2; exit 1 ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+esac
+EOF
+    cat > "$TMP/pg-stays/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    exit 0 ;;
+  inspect) echo true ;;
+esac
+EOF
+    cat > "$TMP/pg-never-ready/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  start)   echo true > "$SELFTEST_PG_STATE" ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+  exec)    exit 1 ;;
+esac
+EOF
+    chmod +x "$TMP/pg-ok/docker" "$TMP/pg-stop-fails/docker" "$TMP/pg-stays/docker" \
+             "$TMP/pg-never-ready/docker"
+
     # Порты берутся СВОБОДНЫМИ у ядра, а не выписываются: судить готовность на
     # восьми боевых номерах значило бы мерить, заняты ли они на этой машине.
     SELFTEST_FREE_PORTS="$("$PY" -c '
@@ -863,6 +955,28 @@ EOF
           PORTS="$PAIR_CHAIN"; SERVICE_TRIES=5
           export SELFTEST_BIND_PORTS=""
           need_tool docker; need_tool go; migrate; start_service )
+    }
+
+    world_fold_ok() {
+        ( PATH="$TMP/pg-ok:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_stop_fails() {
+        ( PATH="$TMP/pg-stop-fails:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_stays() {
+        ( PATH="$TMP/pg-stays:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_no_docker() { ( PATH="$TMP/empty"; fold_db ); }
+    world_unfold_ok() {
+        ( PATH="$TMP/pg-ok:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo false > "$SELFTEST_PG_STATE"; DB_READY_TRIES=3; unfold_db )
+    }
+    world_unfold_never_ready() {
+        ( PATH="$TMP/pg-never-ready:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo false > "$SELFTEST_PG_STATE"; DB_READY_TRIES=2; unfold_db )
     }
 
     probes=0; failed=0; checks=0
@@ -951,6 +1065,21 @@ EOF
     # значит 75 здесь был бы маской настоящего отказа.
     assert 1  "(+) тот же мир, служба отвергнута — 1, а не 75"      world_chain_guard    "служба не поднялась" "KANAME_AUTHN__TRUSTED_FORWARDER_SANS" "УСЛОВИЕ НЕ СОЗДАНО"
 
+    echo "--- ось 6: свёртка базы для волны отказа — несозданное условие не выдаётся за вердикт"
+    # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым: контейнер остановлен и остановку видно.
+    assert 0  "(−) свёртка: контейнер остановлен — 0"                world_fold_ok        "база стенда свёрнута" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца: остановить не вышло. Волна без свёртки
+    # проверяла бы живую базу — это несозданное условие, а не находка.
+    assert 75 "(+) свёртка: остановить не вышло — 75"                world_fold_stop_fails "базу стенда не свернуть" "No such container" "НАХОДКА"
+    # (+) другой факт: остановка «прошла», а контейнер исполняется. Код клиента
+    # здесь успешен, поэтому без сверки состояния свёртка была бы объявлена.
+    assert 75 "(+) свёртка: контейнер продолжает исполняться — 75"   world_fold_stays     "по-прежнему исполняется" "-" "НАХОДКА"
+    assert 75 "(+) свёртка без клиента контейнера — 75"              world_fold_no_docker "инструмента нет: docker" "-" "НАХОДКА"
+    # (−) возврат: база снова принимает соединения.
+    assert 0  "(−) возврат: база снова принимает соединения — 0"     world_unfold_ok      "база стенда возвращена" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца: контейнер стартовал, база не отвечает.
+    assert 75 "(+) возврат: база не ответила — 75"                   world_unfold_never_ready "не ответила pg_isready" "-" "НАХОДКА"
+
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
@@ -974,8 +1103,10 @@ case "${1:-}" in
     exit 0
     ;;
   down) down; exit 0 ;;
+  db-fold) fold_db; exit 0 ;;
+  db-unfold) unfold_db; exit 0 ;;
   *)
-    printf 'использование: %s {up|env|down|--self-test}\n' "$0" >&2
+    printf 'использование: %s {up|env|down|db-fold|db-unfold|--self-test}\n' "$0" >&2
     exit 2
     ;;
 esac
