@@ -387,11 +387,17 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		result.DenyReasons = []string{DenyReasonEmailNotVerified}
 		return result, nil
 	}
-	if p.superGateDecides {
+	if p.noQuestion() {
 		// Вопроса об объекте нет — спросить форму «наугад» значило бы получить
 		// честное «нет» о том, чего не спрашивали. Но решение принято, и оно
 		// обязано попасть в знаменатель: надзор администратора облака —
 		// авторитет на всём, и платит за него только отказ.
+		//
+		// Кроме типов перечня без надзора (Р5, место Д-1): там исход — отказ.
+		if authzguard.SuperGateExempt(p.objectType) {
+			result.DenyReasons = []string{p.denyReason}
+			return result, nil
+		}
 		admin, aerr := s.isClusterAdmin(ctx, caMemo, p.subject)
 		if aerr != nil {
 			// Вопрос остался без ответа. Отказом это не является: вернуть здесь
@@ -440,9 +446,18 @@ type checkPlan struct {
 	// superGateDecides — вопроса к форме нет (отношение не разрешается либо объект
 	// не адресуем), и решение принимает надзор администратора облака.
 	superGateDecides bool
+	// exemptRefusal — вопроса к форме нет, а тип объекта — из перечня без надзора
+	// (Р5, `authzguard.SuperGateExempt`): пункт решён в плане отказом. Метки
+	// superGateDecides он НЕ несёт намеренно: прогон надзора партии сводится по
+	// ключу без типа объекта (runKeyOf), и пункт типа перечня, попав туда, получил
+	// бы ответ надзора, вынесенный о соседнем пункте другого типа.
+	exemptRefusal bool
 	// denyReason — текст отказа, когда надзор права не даёт.
 	denyReason string
 }
+
+// noQuestion — вопроса к форме нет: решает надзор либо отказ типа перечня.
+func (p checkPlan) noQuestion() bool { return p.superGateDecides || p.exemptRefusal }
 
 // planCheck разбирает пункт, не обращаясь к хранилищу.
 //
@@ -465,6 +480,12 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		p.invalid = fmt.Errorf("Illegal argument action: required")
 		return p
 	}
+	// Тип объекта — тем разбором, что у модели (тип до ПЕРВОГО двоеточия строки
+	// «тип:идентификатор»), а не полем ресурса: ресурс с типом
+	// `notification_feed:x` модель спросит об объекте `notification_feed`, и
+	// перечень без надзора обязан судить ровно его (Р5, CX1-05 (б)).
+	p.objectType, p.objectID = splitModelObject(req.Resource.Type, req.Resource.ID)
+	exempt := authzguard.SuperGateExempt(p.objectType)
 	// Explicit relation override. When the api-gateway
 	// passes `required_relation` from the catalog, we honor it verbatim
 	// instead of deriving from action verb — the catalog is the single
@@ -479,7 +500,9 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		// Cluster-admin fallback: even an unresolvable relation is allowed for a
 		// cluster-admin (the flat super-gate is authority on everything). Checked on
 		// the deny path only — the common allow case never pays this round-trip.
-		p.superGateDecides = true
+		// Not on a type from the no-super-gate list (Р5): there it is a refusal.
+		p.superGateDecides = !exempt
+		p.exemptRefusal = exempt
 		p.denyReason = fmt.Sprintf("action %q does not resolve to a known relation", req.Action)
 		return p
 	}
@@ -507,15 +530,16 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		// Объекта нет — вопроса форме E нет; решение всё равно названо (знаменатель).
 		// Cluster-admin fallback: an unscopable resource has no per-object path,
 		// but a cluster-admin is authority on everything. Deny path only.
-		p.superGateDecides = true
+		// Not on a type from the no-super-gate list (Р5): there it is a refusal.
+		p.superGateDecides = !exempt
+		p.exemptRefusal = exempt
 		p.denyReason = "no path: unscoped resource"
 		return p
 	}
 
 	p.relation = relation
-	p.objectType = req.Resource.Type
-	p.objectID = req.Resource.ID
 	p.object = fmt.Sprintf("%s:%s", req.Resource.Type, req.Resource.ID)
+	p.objectType, p.objectID = splitModelObject(req.Resource.Type, req.Resource.ID)
 	// Build the CEL condition-context: principal/connection attributes are
 	// server-derived (forged client values stripped); see buildCondContext.
 	p.condCtx = buildCondContext(ctx, req.Context, now)
@@ -548,6 +572,11 @@ func (s *AuthorizeService) verdict(
 	}
 	if allowed {
 		return true, nil
+	}
+	// Тип перечня без надзора (Р5, место Д-2): исход — исход модели.
+	objectType, _, _ := splitFGAObject(object)
+	if authzguard.SuperGateExempt(objectType) {
+		return false, nil
 	}
 	admin, aerr := s.isClusterAdmin(ctx, caMemo, subject)
 	if aerr != nil {
@@ -591,7 +620,7 @@ func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequ
 	if p.invalid != nil {
 		return []string{p.invalid.Error()}
 	}
-	if p.superGateDecides {
+	if p.noQuestion() {
 		return []string{p.denyReason}
 	}
 	return []string{denyReasonText(p.subject, p.relation, p.object, p.action, nil)}
@@ -689,15 +718,22 @@ type CheckRelationRequest struct {
 	HigherConsistency bool
 }
 
+// splitModelObject — тип и идентификатор объекта так, как их увидит модель,
+// получив строку «<Type>:<ID>»: разделитель — ПЕРВОЕ двоеточие. Тип и
+// идентификатор пункта к этому моменту проверены на непустоту, поэтому строка
+// всегда разбирается.
+func splitModelObject(resourceType, resourceID string) (objectType, objectID string) {
+	objectType, objectID, _ = splitFGAObject(resourceType + ":" + resourceID)
+	return objectType, objectID
+}
+
 // splitFGAObject splits "<type>:<id>" on the FIRST colon. Object ids may
 // themselves contain colons (registry_repository:<reg>/<repo>:<tag>), so the
-// remainder is the id verbatim.
+// remainder is the id verbatim. The parse is the one the no-super-gate list is
+// judged by (`authzguard.SplitModelObject`) — one parse for the deny-text tail
+// and for the Р5 predicate, so they cannot disagree about the object type.
 func splitFGAObject(object string) (objectType, objectID string, ok bool) {
-	i := strings.Index(object, ":")
-	if i <= 0 || i == len(object)-1 {
-		return "", "", false
-	}
-	return object[:i], object[i+1:], true
+	return authzguard.SplitModelObject(object)
 }
 
 // CheckRelation — relation-native authorization check (FGA Check + OPA
@@ -766,6 +802,12 @@ func (s *AuthorizeService) verdictForRelation(
 	}
 	if allowed {
 		return true, nil
+	}
+	// Тип перечня без надзора (Р5, место Д-3) — тем разбором, что у модели: через
+	// эту дверь идут перехватчик прав каждой службы и сервер ленты источника.
+	objectType, _, _ := splitFGAObject(req.Object)
+	if authzguard.SuperGateExempt(objectType) {
+		return false, nil
 	}
 	admin, aerr := authzguard.SubjectIsClusterAdminPlainE(ctx, s.clusterAdmin, req.Subject)
 	if aerr != nil {
@@ -877,6 +919,11 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 		}
 		if d {
 			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{DenyReasonEmailNotVerified}, CheckedAt: now}
+			continue
+		}
+		if p.exemptRefusal {
+			// Решён в плане (Р5): в прогон надзора не идёт — его ключ типа не несёт.
+			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{p.denyReason}, CheckedAt: now}
 			continue
 		}
 		key := runKeyOf(p)
@@ -1078,13 +1125,23 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 	if run.superGate {
 		// Вопроса к форме нет; решение принимает надзор — один вопрос на прогон,
 		// потому что субъект в прогоне один (и он же мемоизирован на весь проход).
-		admin, aerr := s.isClusterAdmin(ctx, caMemo, run.subject)
-		if aerr != nil {
-			// Партия роняется ЦЕЛИКОМ: молча суженный набор разрешений — это
-			// страница видимого, отданная соседу как истина.
-			return superGateUnavailable(aerr)
-		}
+		//
+		// Пообъектно, а не на прогон: ключ прогона надзора типа объекта не несёт,
+		// и пункт типа перечня без надзора (Р5, место Д-4) обязан получить отказ,
+		// даже окажись он здесь рядом с пунктом другого типа. План таких пунктов
+		// сюда не кладёт (exemptRefusal); предикат стоит и здесь, потому что место
+		// держит его само, а не довод о том, кто сюда доходит.
 		for _, i := range run.items {
+			if authzguard.SuperGateExempt(plans[i].objectType) {
+				out[i] = &CheckResult{Allowed: false, DenyReasons: []string{plans[i].denyReason}, CheckedAt: now}
+				continue
+			}
+			admin, aerr := s.isClusterAdmin(ctx, caMemo, run.subject)
+			if aerr != nil {
+				// Партия роняется ЦЕЛИКОМ: молча суженный набор разрешений — это
+				// страница видимого, отданная соседу как истина.
+				return superGateUnavailable(aerr)
+			}
 			if admin {
 				out[i] = &CheckResult{Allowed: true, CheckedAt: now}
 				continue
@@ -1116,6 +1173,12 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 	for k, i := range run.items {
 		if verdicts[k] {
 			out[i] = &CheckResult{Allowed: true, CheckedAt: now}
+			continue
+		}
+		// Тип перечня без надзора (Р5, место Д-5): отказ модели и есть исход.
+		if authzguard.SuperGateExempt(run.objectType) {
+			denied = append(denied, i)
+			deniedIDs = append(deniedIDs, plans[i].objectID)
 			continue
 		}
 		// Надзор администратора облака — авторитет на всём, и спрашивается ТОЛЬКО
