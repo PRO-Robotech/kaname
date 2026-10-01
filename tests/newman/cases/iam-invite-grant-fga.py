@@ -151,7 +151,8 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     (pre-request URL rewrite to {{ownInternalRestBaseUrl}}): /iam/v1/internal/iam:check is
     served ONLY on :18081, so without the redirect gen.py's {{baseUrl}} (:18080)
     404s — the edge's routing error {"code":5,"message":"Not Found"}, byte-identical to a
-    nonsense path. Matches label-revoke-vpc.py."""
+    nonsense path. Same override as the label-revoke suites, now in the platform's
+    vpc suite (PRO-Robotech/kacho:services/vpc/tests/newman/cases/label-revoke-vpc.py)."""
     retry = []
     if poll:
         retry = [

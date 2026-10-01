@@ -52,9 +52,9 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// icSecretR — адрес возврата R приёмки (тот же, что GOOD_REDIRECT набора
-// `tests/newman/cases/iam-interactive-client.py`); K заводится с
-// `redirectUris = [R]`.
+// icSecretR — адрес возврата R приёмки (тот же, что REDIRECT набора края
+// платформы `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`,
+// куда набор переехал из этого дерева); K заводится с `redirectUris = [R]`.
 const icSecretR = "https://api.kacho.local/auth/callback"
 
 // createClient заводит конфиденциального клиента ГЛАГОЛОМ `Create` своей

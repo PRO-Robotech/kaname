@@ -15,7 +15,8 @@ body non-nil" instead of "mask contains labels", so clearing was a 200-but-no-op
 a label-scoped grant could NOT be revoked by clearing the matching label (the admin
 got 200, access silently persisted).
 
-This is the IAM-native analogue of the cross-service label-revoke-vpc.py suite. The
+This is the IAM-native analogue of the cross-service label-revoke-vpc suite, whose home
+is the platform (PRO-Robotech/kacho:services/vpc/tests/newman/cases/label-revoke-vpc.py). The
 selectable resource is iam.project (label-selectable iam-direct, same-DB from the
 own-table labels — no resource_mirror feed needed), so the WHOLE mechanic is
 black-box reachable through the gateway against the IAM-only stack:

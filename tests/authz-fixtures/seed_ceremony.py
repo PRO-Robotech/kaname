@@ -190,9 +190,11 @@ MINTED_SURFACE = "служба (собственный REST-фронт)"
 ENV_EMAIL = "KANAME_STAND_LANE_EMAIL"
 ENV_PASSWORD = "KANAME_STAND_LANE_PASSWORD"
 
-# Адреса возврата — те же значения, что у набора интерактивного клиента
-# (`cases/iam-interactive-client.py`, GOOD_REDIRECT и GOOD_REDIRECT_2). Слушать по
-# ним не нужно: предмет — куда служба СОГЛАСНА доставить код.
+# Адреса возврата — значения, которыми клиентов заводил прежний набор
+# интерактивного клиента этого дерева; набор переехал к краю платформы
+# (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`, первый
+# адрес там тот же). Слушать по ним не нужно: предмет — куда служба СОГЛАСНА
+# доставить код.
 REDIRECT = "https://api.kacho.local/auth/callback"
 REDIRECT_ALT = "https://api.kacho.local/auth/callback2"
 

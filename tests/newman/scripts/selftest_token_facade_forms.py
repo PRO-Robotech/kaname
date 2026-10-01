@@ -72,6 +72,10 @@ import tempfile
 import threading
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import gen  # noqa: E402  — имя собственного фронта службы: один источник, копии здесь нет
+
 ROOT = Path(__file__).resolve().parents[1]
 COLLECTION = ROOT / "collections" / "iam-token-facade-conformance.postman_collection.json"
 
@@ -147,7 +151,13 @@ def provider_lane_bearer(**over) -> str:
 
 
 class Stand:
-    """Подставной стенд: край (`/iam/v1/me`) и публикатор ключей фасада."""
+    """Подставной стенд: собственный фронт службы (`/iam/v1/me`) и публикатор ключей.
+
+    Суита адресована собственному фронту службы (kaname#415, `address_own_front`):
+    производитель её утверждений — сама служба. Поэтому подставной сервер стоит на
+    переменной фронта, а переменная края не задаётся вовсе — шаг, ушедший бы на
+    край, остался бы без адреса и покраснел бы, а не прошёл.
+    """
 
     def __init__(self, bearer: str, subject: str = SUBJECT,
                  own=None, own_status: int = 200):
@@ -216,8 +226,7 @@ def run_folder(stand: Stand, folder: str) -> tuple[int, int, list[str]]:
         base = f"http://127.0.0.1:{stand.port}"
         cmd = [
             "newman", "run", str(COLLECTION), "--folder", folder,
-            "--env-var", f"baseUrl={base}",
-            "--env-var", f"internalBaseUrl={base}",
+            "--env-var", f"{gen.OWN_FRONT_VAR}={base}",
             "--env-var", f"iamJwksBaseUrl={base}",
             "--env-var", f"jwtBootstrap={stand.bearer}",
             "--reporters", "json", "--reporter-json-export", str(out),
