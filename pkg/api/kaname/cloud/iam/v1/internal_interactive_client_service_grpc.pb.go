@@ -74,19 +74,12 @@ type InternalInteractiveClientServiceClient interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	List(ctx context.Context, in *ListInteractiveClientsRequest, opts ...grpc.CallOption) (*ListInteractiveClientsResponse, error)
-	// Registers a new interactive-login client and records it. The registry that
-	// holds the client is chosen by the deployment, not by the caller:
-	//
-	//   - with an external identity provider, the client is registered there on
-	//     the request path, fail-closed: if the provider is unreachable the
-	//     mutation ends `UNAVAILABLE` and leaves NO row behind — the name does not
-	//     stay taken. Such a client is public (`token_endpoint_auth_method =
-	//     none`) and gets no secret;
-	//   - with the service's own registry, the client is CONFIDENTIAL
-	//     (`client_secret_basic`): the service mints its secret and returns it
-	//     ONCE, in `CreateInteractiveClientResponse.client_secret` of THIS call.
-	//     The secret is stored nowhere in readable form — only its verification
-	//     value — and no other call returns it.
+	// Registers a new interactive-login client in the service's own registry and
+	// records it. The client is CONFIDENTIAL (`token_endpoint_auth_method =
+	// client_secret_basic`): the service mints its secret and returns it ONCE, in
+	// `CreateInteractiveClientResponse.client_secret` of THIS call. The secret is
+	// stored nowhere in readable form — only its verification value — and no
+	// other call returns it.
 	//
 	// The operation completes on the request path (`done = true` in the answer
 	// of this call). A refused Create (name taken, registry failure) answers
@@ -111,9 +104,9 @@ type InternalInteractiveClientServiceClient interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Update(ctx context.Context, in *UpdateInteractiveClientRequest, opts ...grpc.CallOption) (*operation.Operation, error)
-	// Removes the client at the identity provider and its row. Idempotent —
-	// deleting an already-absent client does not differ in code from the first
-	// delete.
+	// Removes the client's row; its token families, authorization codes and
+	// refresh tokens go with it by the schema's cascade. Idempotent — deleting an
+	// already-absent client does not differ in code from the first delete.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Delete(ctx context.Context, in *DeleteInteractiveClientRequest, opts ...grpc.CallOption) (*operation.Operation, error)
@@ -196,19 +189,12 @@ type InternalInteractiveClientServiceServer interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	List(context.Context, *ListInteractiveClientsRequest) (*ListInteractiveClientsResponse, error)
-	// Registers a new interactive-login client and records it. The registry that
-	// holds the client is chosen by the deployment, not by the caller:
-	//
-	//   - with an external identity provider, the client is registered there on
-	//     the request path, fail-closed: if the provider is unreachable the
-	//     mutation ends `UNAVAILABLE` and leaves NO row behind — the name does not
-	//     stay taken. Such a client is public (`token_endpoint_auth_method =
-	//     none`) and gets no secret;
-	//   - with the service's own registry, the client is CONFIDENTIAL
-	//     (`client_secret_basic`): the service mints its secret and returns it
-	//     ONCE, in `CreateInteractiveClientResponse.client_secret` of THIS call.
-	//     The secret is stored nowhere in readable form — only its verification
-	//     value — and no other call returns it.
+	// Registers a new interactive-login client in the service's own registry and
+	// records it. The client is CONFIDENTIAL (`token_endpoint_auth_method =
+	// client_secret_basic`): the service mints its secret and returns it ONCE, in
+	// `CreateInteractiveClientResponse.client_secret` of THIS call. The secret is
+	// stored nowhere in readable form — only its verification value — and no
+	// other call returns it.
 	//
 	// The operation completes on the request path (`done = true` in the answer
 	// of this call). A refused Create (name taken, registry failure) answers
@@ -233,9 +219,9 @@ type InternalInteractiveClientServiceServer interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Update(context.Context, *UpdateInteractiveClientRequest) (*operation.Operation, error)
-	// Removes the client at the identity provider and its row. Idempotent —
-	// deleting an already-absent client does not differ in code from the first
-	// delete.
+	// Removes the client's row; its token families, authorization codes and
+	// refresh tokens go with it by the schema's cascade. Idempotent — deleting an
+	// already-absent client does not differ in code from the first delete.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Delete(context.Context, *DeleteInteractiveClientRequest) (*operation.Operation, error)
