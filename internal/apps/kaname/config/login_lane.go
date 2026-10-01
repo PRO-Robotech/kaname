@@ -59,16 +59,32 @@ type LoginLaneConfig struct {
 	VerifierCapacity   int    `mapstructure:"verifier-capacity"`
 	MemoryReserveBytes uint64 `mapstructure:"memory-reserve-bytes"`
 
-	// RecoveryCodeTTL — срок кода восстановления доступа (Ф5 Р1; перенос Ф1
-	// §4.1 — 5 минут — объявляется профилем).
-	RecoveryCodeTTL time.Duration `mapstructure:"recovery-code-ttl"`
-
-	// Подтверждение адреса (kaname#456, Р7, Р9; Ф6 Р16) — пять ручек, у каждой
-	// нет умолчания. Величины профиля продукта — 30m · 5 · 60s · 5 · 24h.
+	// СРОКИ КОДОВ по назначению — строки таблицы границ Р8 (`mail_bounds.go`):
+	// 5 мин ≤ срок ≤ 24 ч и срок не короче первой паузы окна того же
+	// назначения. nil — ключ не объявлен; судит страж таблицы, а не полосы.
 	//
-	// VerificationCodeTTL — срок кода подтверждения; своя величина, не равная
-	// сроку кода восстановления (Ф6 Р16).
-	VerificationCodeTTL time.Duration `mapstructure:"verification-code-ttl"`
+	// RecoveryCodeTTL — срок кода восстановления доступа (Ф5 Р1).
+	RecoveryCodeTTL *time.Duration `mapstructure:"recovery-code-ttl"`
+	// VerificationCodeTTL — срок кода подтверждения адреса; своя величина, не
+	// равная сроку кода восстановления (Ф6 Р16).
+	VerificationCodeTTL *time.Duration `mapstructure:"verification-code-ttl"`
+	// RegistrationCodeTTL — срок кода регистрации «сначала письмо» (З14).
+	RegistrationCodeTTL *time.Duration `mapstructure:"registration-code-ttl"`
+
+	// MailWindow — окна адресата по назначению письма (Р8, З11).
+	MailWindow MailWindowsConfig `mapstructure:"mail-window"`
+	// Attempts — перебор кода на трёх путях предъявления (Р8, З15).
+	Attempts LoginAttemptsConfig `mapstructure:"attempts"`
+	// MailThrottledInterval — не чаще одного письма о торможении адресату за
+	// этот промежуток (Р8).
+	MailThrottledInterval *time.Duration `mapstructure:"mail-throttled-interval"`
+	// TrustedDevice — метка доверенного устройства (Р8, З18).
+	TrustedDevice TrustedDeviceConfig `mapstructure:"trusted-device"`
+
+	// Подтверждение адреса (kaname#456, Р7, Р9) — четыре ручки прежней
+	// собственной почты, без умолчания. Величины профиля продукта — 5 · 60s ·
+	// 5 · 24h.
+	//
 	// VerificationCodeAttempts — предел неподошедших предъявлений на код: столько
 	// тратит код, и дальше он не подходит и верным значением.
 	VerificationCodeAttempts int `mapstructure:"verification-code-attempts"`
@@ -80,6 +96,44 @@ type LoginLaneConfig struct {
 	VerificationResendLimit int `mapstructure:"verification-resend-limit"`
 	// VerificationResendWindow — скользящее окно числа писем.
 	VerificationResendWindow time.Duration `mapstructure:"verification-resend-window"`
+}
+
+// MailWindowConfig — окно адресата одного назначения письма
+// (`authn.login.mail-window.<назначение>.*`, Р8): две паузы прогрессии, потолки
+// «в час» и «в сутки» и пол. nil — ключ не объявлен.
+type MailWindowConfig struct {
+	FirstPause    *time.Duration `mapstructure:"first-pause"`
+	SecondPause   *time.Duration `mapstructure:"second-pause"`
+	PerHour       *int           `mapstructure:"per-hour"`
+	PerDay        *int           `mapstructure:"per-day"`
+	FloorInterval *time.Duration `mapstructure:"floor-interval"`
+}
+
+// MailWindowsConfig — окна адресата трёх назначений.
+type MailWindowsConfig struct {
+	Recovery     MailWindowConfig `mapstructure:"recovery"`
+	Verification MailWindowConfig `mapstructure:"verification"`
+	Registration MailWindowConfig `mapstructure:"registration"`
+}
+
+// LoginAttemptsConfig — перебор кода (`authn.login.attempts.*`, Р8, З15).
+type LoginAttemptsConfig struct {
+	// AddressSourcePerWindow — неверных предъявлений с пары (адрес, источник)
+	// за окно.
+	AddressSourcePerWindow *int `mapstructure:"address-source-per-window"`
+	// Window — окно счёта.
+	Window *time.Duration `mapstructure:"window"`
+	// AddressFailureCeiling — потолок неудач на адрес за то же окно.
+	AddressFailureCeiling *int `mapstructure:"address-failure-ceiling"`
+}
+
+// TrustedDeviceConfig — метка доверенного устройства
+// (`authn.login.trusted-device.*`, Р8, З18).
+type TrustedDeviceConfig struct {
+	// TTL — срок метки от её выдачи.
+	TTL *time.Duration `mapstructure:"ttl"`
+	// RecoveryPerDay — писем восстановления в сутки по паре (окно, метка).
+	RecoveryPerDay *int `mapstructure:"recovery-per-day"`
 }
 
 // loginLaneKnob — пара «ключ настройки ↔ переменная среды» одной ручки полосы.
@@ -108,8 +162,6 @@ var LoginLaneKnobs = []loginLaneKnob{
 	{loginLaneKeyPrefix + "hasher-parallelism", "KANAME_AUTHN__LOGIN__HASHER_PARALLELISM"},
 	{loginLaneKeyPrefix + "verifier-capacity", "KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY"},
 	{loginLaneKeyPrefix + "memory-reserve-bytes", "KANAME_AUTHN__LOGIN__MEMORY_RESERVE_BYTES"},
-	{loginLaneKeyPrefix + "recovery-code-ttl", "KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL"},
-	{loginLaneKeyPrefix + "verification-code-ttl", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL"},
 	{loginLaneKeyPrefix + "verification-code-attempts", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_ATTEMPTS"},
 	{loginLaneKeyPrefix + "verification-resend-interval", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_INTERVAL"},
 	{loginLaneKeyPrefix + "verification-resend-limit", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_LIMIT"},
@@ -333,17 +385,6 @@ func (l LoginLaneConfig) ValidateMemoryBudget(limitBytes uint64, limited bool) e
 	return nil
 }
 
-// ValidateRecovery — срок кода восстановления (Ф5-06): незаданный — отказ с
-// именем ручки; положительный близнец Ф5-07 — объявленный срок поднимает
-// процесс.
-func (l LoginLaneConfig) ValidateRecovery() error {
-	if l.RecoveryCodeTTL <= 0 {
-		return loginLaneMissing(loginLaneKeyPrefix+"recovery-code-ttl",
-			"срок кода восстановления — величина посадки без умолчания в коде; перенос Ф1 §4.1 (5m) объявляется профилем")
-	}
-	return nil
-}
-
 // Границы величин подтверждения адреса (kaname#456, условие аудита
 // поверхности): величина за границей — отказ старта с именем ключа. Без границ
 // профиль мог бы молча выключить защиту от подбора кода (миллион попыток,
@@ -353,16 +394,14 @@ func (l LoginLaneConfig) ValidateRecovery() error {
 const (
 	// VerificationCodeAttemptsCeiling — предел попыток на код не выше.
 	VerificationCodeAttemptsCeiling = 10
-	// VerificationCodeTTLCeiling — срок кода не дольше.
-	VerificationCodeTTLCeiling = 24 * time.Hour
 	// VerificationResendIntervalFloor — промежуток между письмами не короче.
 	VerificationResendIntervalFloor = 30 * time.Second
 	// VerificationResendLimitCeiling — писем за окно не больше.
 	VerificationResendLimitCeiling = 20
 )
 
-// ValidateVerification — пять ручек подтверждения адреса (kaname#456, Р9,
-// EV-90): незаданная — отказ старта с именем ключа и переменной. Промежуток
+// ValidateVerification — четыре ручки подтверждения адреса (kaname#456, Р9,
+// EV-90; срок кода судит таблица границ Р8, `mail_bounds.go`): незаданная — отказ старта с именем ключа и переменной. Промежуток
 // между письмами короче окна: иначе предел числа писем за окно не исполнялся
 // бы никогда, и ручка объявляла бы свойство, которого у полосы нет. Величина за
 // границей — тоже отказ старта (см. границы выше).
@@ -376,18 +415,11 @@ func (l LoginLaneConfig) ValidateVerification() error {
 	if l.VerificationCodeAttempts > VerificationCodeAttemptsCeiling {
 		beyond("verification-code-attempts", l.VerificationCodeAttempts, fmt.Sprintf("«не больше %d»", VerificationCodeAttemptsCeiling))
 	}
-	if l.VerificationCodeTTL > VerificationCodeTTLCeiling {
-		beyond("verification-code-ttl", l.VerificationCodeTTL, "«не дольше "+VerificationCodeTTLCeiling.String()+"»")
-	}
 	if l.VerificationResendInterval > 0 && l.VerificationResendInterval < VerificationResendIntervalFloor {
 		beyond("verification-resend-interval", l.VerificationResendInterval, "«не короче "+VerificationResendIntervalFloor.String()+"»")
 	}
 	if l.VerificationResendLimit > VerificationResendLimitCeiling {
 		beyond("verification-resend-limit", l.VerificationResendLimit, fmt.Sprintf("«не больше %d»", VerificationResendLimitCeiling))
-	}
-	if l.VerificationCodeTTL <= 0 {
-		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-code-ttl",
-			"срок кода подтверждения адреса — своя величина посадки без умолчания в коде (Ф6 Р16); величина профиля продукта — 30m"))
 	}
 	if l.VerificationCodeAttempts <= 0 {
 		errs = multierr.Append(errs, loginLaneMissing(loginLaneKeyPrefix+"verification-code-attempts",
@@ -422,7 +454,6 @@ func (l LoginLaneConfig) ValidateAll() error {
 		l.ValidatePasswordPolicy(),
 		l.ValidateHasher(),
 		l.ValidateCapacity(),
-		l.ValidateRecovery(),
 		l.ValidateVerification(),
 	)
 }

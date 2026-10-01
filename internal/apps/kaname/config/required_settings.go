@@ -311,7 +311,7 @@ func (s RequiredSetting) Applicability() string {
 //
 // Порядок строк — порядок, в котором величины встречает оператор: сперва
 // общие для любой посадки, затем полосные.
-var RequiredSettings = []RequiredSetting{
+var RequiredSettings = append([]RequiredSetting{
 	{
 		Key:    "authn.domain",
 		Env:    "KANAME_AUTHN__DOMAIN",
@@ -427,13 +427,9 @@ var RequiredSettings = []RequiredSetting{
 		"сколько проверок пароля идут одновременно; ёмкость × память на потолке + резерв обязаны помещаться в предел памяти контейнера — страж старта сверяет числа; сверка секрета клиента церемонии занимает не больше половины ёмкости, и под церемонией ёмкость меньше 2 — отказ старта"),
 	loginLaneRequirement("memory-reserve-bytes", "268435456",
 		"резерв памяти процесса сверх проверок пароля, байт"),
-	// ВОССТАНОВЛЕНИЕ ДОСТУПА на той же полосе (Ф5, kacho#1271).
-	loginLaneRequirement("recovery-code-ttl", "5m",
-		"срок кода восстановления доступа, от чеканки; код однократен и после срока не оживает. Умолчания нет: перенос прежней величины (5 мин) объявляется профилем, а не построением"),
-	// ПОДТВЕРЖДЕНИЕ АДРЕСА на той же полосе (kaname#456, Р7, Р9): пять ручек без
-	// умолчания, образцы — величины профиля продукта.
-	loginLaneRequirement("verification-code-ttl", "30m",
-		"срок кода подтверждения адреса, от выдачи письма; своя величина, не равная сроку кода восстановления: подтверждение человек часто откладывает"),
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА на той же полосе (kaname#456, Р7, Р9): четыре ручки
+	// без умолчания, образцы — величины профиля продукта. Сроки кодов
+	// восстановления и подтверждения — строки таблицы границ Р8 (ниже).
 	loginLaneRequirement("verification-code-attempts", "5",
 		"сколько неподошедших предъявлений тратит код подтверждения; дальше он не подходит и верным значением, нужен новый код"),
 	loginLaneRequirement("verification-resend-interval", "60s",
@@ -840,6 +836,29 @@ var RequiredSettings = []RequiredSetting{
 			"Ноль означал бы «без потолка»",
 		Refusal: "authn.client-token.authorize-in-flight-ceiling must be declared",
 	},
+}, mailBoundRequirements()...)
+
+// mailBoundRequirements — строки перечня, ПОРОЖДЁННЫЕ из таблицы границ
+// почтовых ручек (`mail_bounds.go`): ключ, переменная, образец и объяснение
+// берутся у неё. Применимы на любой посадке: страж таблицы судит безусловно.
+// Подстрока отказа — сам ключ: он стоит в тексте каждой ветви стража.
+func mailBoundRequirements() []RequiredSetting {
+	out := make([]RequiredSetting, 0, len(MailBounds))
+	for _, b := range MailBounds {
+		why := b.Why + ". Умолчания нет (приёмка NTF-2 Р8): величину объявляет посадка"
+		if b.Kind != MailBoundDeclared {
+			why += "; граница " + b.bound()
+		}
+		out = append(out, RequiredSetting{
+			Key:     b.Key,
+			Env:     EnvNameOfKey(b.Key),
+			Supply:  SupplyEnv,
+			Sample:  b.Sample,
+			Why:     why,
+			Refusal: b.Key,
+		})
+	}
+	return out
 }
 
 // ownCeilingRequirement — строка таблицы обязательных величин, ПОРОЖДЁННАЯ из

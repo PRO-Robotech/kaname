@@ -43,10 +43,9 @@ func TestLoginLane_F3_28_33_41_EveryKnobRefusesByNameUnderOwn(t *testing.T) {
 		{"параметр ниже пола", func(l *config.LoginLaneConfig) { l.HasherIterations = 1 }, []string{"floor"}},
 		{"ёмкость", func(l *config.LoginLaneConfig) { l.VerifierCapacity = 0 }, []string{"authn.login.verifier-capacity", "KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY"}},
 		{"резерв", func(l *config.LoginLaneConfig) { l.MemoryReserveBytes = 0 }, []string{"authn.login.memory-reserve-bytes"}},
-		// Ф5-06: срок кода восстановления — величина Ф1 §4.1 (5 минут), объявляемая
-		// профилем; незаданная — отказ старта с именем ручки. Положительный
-		// близнец Ф5-07 — годный профиль ниже.
-		{"срок кода восстановления", func(l *config.LoginLaneConfig) { l.RecoveryCodeTTL = 0 }, []string{"authn.login.recovery-code-ttl", "KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL"}},
+		// Ф5-06 (срок кода восстановления объявляется профилем, незаданный —
+		// отказ с именем ручки) держит теперь страж таблицы границ Р8 на ЛЮБОЙ
+		// посадке, а не полоса `own`: mail_bounds_test.go, вариант (т).
 	}
 	for _, c := range cases {
 		t.Run("own/"+c.name, func(t *testing.T) {
@@ -107,6 +106,7 @@ func TestLoginLane_KnobsAreBoundToEnv(t *testing.T) {
 	cfg, err := config.Load("")
 	require.NoError(t, err)
 	require.Equal(t, "36h0m0s", cfg.AuthN.Login.SessionTTL.String())
+	require.NotNil(t, cfg.AuthN.Login.RecoveryCodeTTL, "Ф5-06: ручка срока кода не привязана к окружению")
 	require.Equal(t, "7m0s", cfg.AuthN.Login.RecoveryCodeTTL.String(), "Ф5-06: ручка срока кода привязана к среде")
 	require.Equal(t, "console.example.invalid", cfg.AuthN.Login.CookieDomain)
 	require.Equal(t, 7, cfg.AuthN.Login.AddressAttempts)

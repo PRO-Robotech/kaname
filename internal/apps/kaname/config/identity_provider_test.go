@@ -102,13 +102,46 @@ func loginLaneSettings() config.LoginLaneConfig {
 		HasherParallelism:  4,
 		VerifierCapacity:   4,
 		MemoryReserveBytes: 256 << 20,
-		RecoveryCodeTTL:    5 * time.Minute,
+		// Сроки кодов и почтовые ручки Р8 — ориентиры базового профиля
+		// (приёмка NTF-2 Р8): их судит страж таблицы границ на любой посадке.
+		RecoveryCodeTTL:       ref(15 * time.Minute),
+		VerificationCodeTTL:   ref(60 * time.Minute),
+		RegistrationCodeTTL:   ref(60 * time.Minute),
+		MailWindow:            config.MailWindowsConfig{Recovery: mailWindow(), Verification: mailWindow(), Registration: mailWindow()},
+		Attempts:              config.LoginAttemptsConfig{AddressSourcePerWindow: ref(5), Window: ref(15 * time.Minute), AddressFailureCeiling: ref(100)},
+		MailThrottledInterval: ref(7 * 24 * time.Hour),
+		TrustedDevice:         config.TrustedDeviceConfig{TTL: ref(90 * 24 * time.Hour), RecoveryPerDay: ref(2)},
 		// Подтверждение адреса (kaname#456, Р9) — величины профиля продукта.
-		VerificationCodeTTL:        30 * time.Minute,
 		VerificationCodeAttempts:   5,
 		VerificationResendInterval: 60 * time.Second,
 		VerificationResendLimit:    5,
 		VerificationResendWindow:   24 * time.Hour,
+	}
+}
+
+// ref — указатель на значение: ручки таблицы границ объявлены указателями,
+// чтобы «не объявлено» отличалось от нуля.
+func ref[T any](v T) *T { return &v }
+
+// mailWindow — окно адресата базового профиля (Р8): 60s · 5m · 3/ч · 5/сут ·
+// пол 6h.
+func mailWindow() config.MailWindowConfig {
+	return config.MailWindowConfig{
+		FirstPause: ref(60 * time.Second), SecondPause: ref(5 * time.Minute),
+		PerHour: ref(3), PerDay: ref(5), FloorInterval: ref(6 * time.Hour),
+	}
+}
+
+// inviteSettings — величины приглашения базового профиля (Р8).
+func inviteSettings() config.InviteConfig {
+	return config.InviteConfig{
+		TTL: ref(7 * 24 * time.Hour), AccountPerDay: ref(200), YoungAccountPerDay: ref(50),
+		YoungAccountAge: ref(30 * 24 * time.Hour), PendingMax: ref(200),
+		RecipientPerHour: ref(3), RecipientPerDay: ref(5), RecipientPerDayAll: ref(10),
+		MailRateLimit: config.InviteMailRateLimitConfig{
+			MaxPerWindow: config.DefaultInviteMailPerWindow,
+			Window:       config.DefaultInviteMailWindow,
+		},
 	}
 }
 

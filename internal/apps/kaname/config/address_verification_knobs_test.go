@@ -7,6 +7,11 @@
 // ключа и переменной; опись обязательных настроек несёт все пять с величинами
 // профиля продукта.
 //
+// Срок кода подтверждения с приёмкой NTF-2 стал строкой таблицы границ Р8
+// (`mail_bounds.go`): его судит страж таблицы на любой посадке, а ориентир
+// базового профиля — 60 минут (Р8), а не прежние 30. Свойство EV-90 — «без
+// умолчания, отказ называет ключ и переменную» — держится и там.
+//
 // Ручки находятся по ключу настройки (`mapstructure`), а не по имени поля Go:
 // предмет пробы — объявленный ключ, и его отсутствие есть «ручки нет».
 package config_test
@@ -24,7 +29,7 @@ import (
 
 // verificationKnobs — ключи и переменные Р9, дословно, с величиной профиля.
 var verificationKnobs = []struct{ short, env, sample string }{
-	{"verification-code-ttl", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL", "30m"},
+	{"verification-code-ttl", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_TTL", "60m"},
 	{"verification-code-attempts", "KANAME_AUTHN__LOGIN__VERIFICATION_CODE_ATTEMPTS", "5"},
 	{"verification-resend-interval", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_INTERVAL", "60s"},
 	{"verification-resend-limit", "KANAME_AUTHN__LOGIN__VERIFICATION_RESEND_LIMIT", "5"},
@@ -88,10 +93,9 @@ func TestEV90_KnobsBeyondTheirBoundsRefuseTheStart(t *testing.T) {
 				l.VerificationCodeAttempts = config.VerificationCodeAttemptsCeiling + 1
 			}},
 		{"verification-code-ttl",
-			func(l *config.LoginLaneConfig) { l.VerificationCodeTTL = config.VerificationCodeTTLCeiling },
-			func(l *config.LoginLaneConfig) {
-				l.VerificationCodeTTL = config.VerificationCodeTTLCeiling + time.Second
-			}},
+			// Граница Р8 — 24 ч включительно (строка таблицы границ).
+			func(l *config.LoginLaneConfig) { l.VerificationCodeTTL = ref(24 * time.Hour) },
+			func(l *config.LoginLaneConfig) { l.VerificationCodeTTL = ref(24*time.Hour + time.Second) }},
 		{"verification-resend-interval",
 			func(l *config.LoginLaneConfig) { l.VerificationResendInterval = config.VerificationResendIntervalFloor },
 			func(l *config.LoginLaneConfig) {

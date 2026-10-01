@@ -92,7 +92,8 @@ authn:
 	t.Run("близнец: тот же файл без ключа стартует", func(t *testing.T) {
 		cfg, err := config.Load(writeConfig(t, strictTwinConfig))
 		require.NoError(t, err)
-		require.Equal(t, 72*time.Hour, cfg.Invite.TTL,
+		require.NotNil(t, cfg.Invite.TTL)
+		require.Equal(t, 72*time.Hour, *cfg.Invite.TTL,
 			"близнец обязан ДОЕЗЖАТЬ: иначе он зеленеет и на файле, которого не прочли")
 	})
 }
@@ -120,7 +121,8 @@ func TestUnknownNestedEnvRefusesStartNamingIt(t *testing.T) {
 		t.Setenv(name, "48h")
 		cfg, err := config.Load("")
 		require.NoError(t, err)
-		require.Equal(t, 48*time.Hour, cfg.Invite.TTL)
+		require.NotNil(t, cfg.Invite.TTL)
+		require.Equal(t, 48*time.Hour, *cfg.Invite.TTL)
 	})
 }
 
@@ -205,6 +207,11 @@ func TestNestedEnvNamesAreDerivedFromTheDecoderKeys(t *testing.T) {
 	}
 	for _, k := range config.CeremonyLifespanKnobs {
 		check(k.Env)
+	}
+	// Таблица границ почтовых ручек привязывает ключи именем, выведенным из
+	// ключа: имя в множестве ⇔ ключ таблицы есть ключ декодера.
+	for _, b := range config.MailBounds {
+		check(config.EnvNameOfKey(b.Key))
 	}
 	require.Positive(t, bound, "предпосылка: таблицы явных привязок не пусты")
 	t.Logf("перепись: ключей декодера %d · имён пространства `__` %d · явно привязанных проверено %d",

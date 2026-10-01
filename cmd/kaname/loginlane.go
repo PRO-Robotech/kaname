@@ -528,8 +528,18 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	}
 	// Подтверждение адреса (kaname#456, Р7, Р9): пять величин полосы; письмо
 	// регистрации ставится той же транзакцией, что заводит человека.
+	// Сроки кодов — ручки таблицы границ Р8 без умолчания (NTF-2): незаданная
+	// даёт отказ сборки полосы с именем ключа, а не нулевой срок.
+	verificationTTL, err := config.Declared(login.VerificationCodeTTL, "authn.login.verification-code-ttl")
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	recoveryTTL, err := config.Declared(login.RecoveryCodeTTL, "authn.login.recovery-code-ttl")
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	letterPace := humansession.VerificationPace{
-		CodeTTL: login.VerificationCodeTTL, Attempts: login.VerificationCodeAttempts,
+		CodeTTL: verificationTTL, Attempts: login.VerificationCodeAttempts,
 		Interval: login.VerificationResendInterval, Limit: login.VerificationResendLimit,
 		Window: login.VerificationResendWindow,
 	}
@@ -550,7 +560,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		rec.RecoveryRequestObserved(humansession.RecoveryRequestDispatchDropped)
 	})
 	requestUC, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher,
+		Store: sessions, CodeTTL: recoveryTTL, Dispatcher: dispatcher,
 		Sources: sessions, SourcePace: sourcePace, MailLimit: inviteMailRateLimit(cfg),
 		Observer: rec, Now: time.Now, Logger: logger,
 	})

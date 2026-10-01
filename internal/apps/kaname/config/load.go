@@ -166,6 +166,13 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	// ТАБЛИЦА ГРАНИЦ почтовых ручек (замысел NTF-2 З5, З23): 32 ручки Р8, флаг
+	// почты и два файла ключей привязываются ОДНИМ циклом по той же таблице,
+	// что читает страж старта, — второго перечня регистрации нет.
+	if err := bindMailBounds(v.BindEnv); err != nil {
+		return Config{}, err
+	}
+
 	// YAML file (optional).
 	if path != "" {
 		v.SetConfigFile(path)

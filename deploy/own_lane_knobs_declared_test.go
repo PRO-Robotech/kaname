@@ -49,7 +49,9 @@
 //	чарт  → процесс каждый ключ, который шаблон рендерит в блоках полосы
 //	               (`authn.login.*`, `authn.registration.*`, `authn.access-keys.*`),
 //	               процесс читает ручкой перечня (`config.LoginLaneKnobs`,
-//	               `config.RegistrationKnobs`, `config.AccessKeyKnobs`).
+//	               `config.RegistrationKnobs`, `config.AccessKeyKnobs`) либо
+//	               строкой таблицы границ почтовых ручек (`config.MailBounds`:
+//	               сроки кодов, окна адресата, перебор, метка устройства).
 //	               Ключ вне перечня — ручка без читателя: оператор её правит,
 //	               рендер зелёный, поведение прежнее.
 //
@@ -107,6 +109,11 @@ func laneKnobKeys() map[string]bool {
 	}
 	for _, k := range config.AccessKeyKnobs {
 		keys[k.Key] = true
+	}
+	// Таблица границ почтовых ручек (приёмка NTF-2 Р8) — тоже перечень, по
+	// которому Load привязывает окружение и страж называет ручку.
+	for _, b := range config.MailBounds {
+		keys[b.Key] = true
 	}
 	return keys
 }
@@ -263,7 +270,7 @@ func auditOwnLaneKnobsDeclared(chartDir string) (findings []string, census strin
 		unread++
 		findings = append(findings, fmt.Sprintf(
 			"  %s:%d: ключ %s рендерится в блоке полосы, а процесс не читает его ни одной ручкой перечня\n"+
-				"    (config.LoginLaneKnobs, config.RegistrationKnobs, config.AccessKeyKnobs). Это ручка без читателя: оператор её\n"+
+				"    (config.LoginLaneKnobs, config.RegistrationKnobs, config.AccessKeyKnobs, config.MailBounds). Это ручка без читателя: оператор её\n"+
 				"    правит, рендер зелёный, поведение прежнее. Снимите ключ с шаблона либо заведите ручку в перечне.",
 			configMapTemplate, k.line, path))
 	}

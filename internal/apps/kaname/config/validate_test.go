@@ -60,10 +60,14 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		// ручке, поэтому голая структура его не несёт и ноль здесь есть
 		// попытка снять ограничение. Пробы, которые ПРО него, значение
 		// перезаписывают (invite_mail_rate_limit_test.go).
-		Invite: config.InviteConfig{MailRateLimit: config.InviteMailRateLimitConfig{
-			MaxPerWindow: config.DefaultInviteMailPerWindow,
-			Window:       config.DefaultInviteMailWindow,
-		}},
+		//
+		// Срок и потолки приглашений — ручки таблицы границ Р8 без умолчания
+		// (приёмка NTF-2 Р8): посеяны ориентирами базового профиля.
+		Invite: inviteSettings(),
+		// Флаг почты объявлен всегда (NTF2-50): `false` законно, отсутствие —
+		// отказ старта. Пробы, которые ПРО него, значение перезаписывают
+		// (mail_bounds_test.go).
+		Notifications: config.NotificationsConfig{Enabled: ref(true)},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",
@@ -95,7 +99,12 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			// `own` посеяны ниже на тех же основаниях, что величины уборки
 			// выше: без них каждая боевая проба, которая не про полосу, падала
 			// бы на требованиях полосы.
-			IdentityProvider:             config.IdentityProviderOwn,
+			IdentityProvider: config.IdentityProviderOwn,
+			// Файлы ключей почтовой полосы (З18) объявлены: пути, а не материал.
+			Secrets: config.SecretsConfig{
+				MailWindowKeyFile:  "/etc/kaname/secrets/mail-window.key",
+				DeviceLabelKeyFile: "/etc/kaname/secrets/device-label.key",
+			},
 			SecondFactorEncryptionKeyHex: strings.Repeat("cd", 32),
 			SelfServiceFreshness:         15 * time.Minute,
 			TokenSigning:                 ownMintingSettings(),
