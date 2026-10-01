@@ -194,7 +194,6 @@ var configBridge = []bridged{
 	{configKey: "api-server.graceful-shutdown", valuePath: []string{"apiServer", "gracefulShutdown"}},
 	{configKey: "api-server.registry-token.issuer", valuePath: []string{"apiServer", "registryToken", "issuer"}, omitEmpty: true},
 	{configKey: "api-server.registry-token.service", valuePath: []string{"apiServer", "registryToken", "service"}, omitEmpty: true},
-	{configKey: "repository.type", derive: func(*valueReader) any { return "POSTGRES" }},
 	{configKey: "repository.postgres.url", derive: func(r *valueReader) any {
 		return fmt.Sprintf("postgres://%s@%s:%s/%s",
 			r.text("db", "user"), r.text("db", "host"), r.text("db", "port"), r.text("db", "name"))

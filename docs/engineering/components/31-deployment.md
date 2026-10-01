@@ -175,6 +175,13 @@ Pod hardened: `runAsNonRoot` (uid 65532), `readOnlyRootFilesystem`,
 `kaname` читает YAML-config из `/etc/kaname/config.yaml` (рендерится
 `templates/configmap.yaml`). Любой ключ переопределяется ENV по схеме
 `KANAME_<SECTION>__<KEY>` (двойное подчеркивание между секцией и ключом).
+
+Конфигурация строгая: ключ файла, которого служба не читает, — отказ старта
+`unknown configuration key` с полным путём ключа; переменная с приставкой
+`KANAME_` и двойным подчёркиванием, которую не производит ни один ключ, — отказ
+`unknown configuration variable` с её именем. Плоские имена (без `__`) этой
+проверкой не судятся: их читают другие механизмы загрузки.
+
 Отрендеренный config:
 
 ```yaml
@@ -187,13 +194,7 @@ api-server:
   metrics-endpoint: "tcp://0.0.0.0:9095"   # дефолт; через configmap не рендерится
   graceful-shutdown: "10s"
 
-metrics:
-  enable: true
-healthcheck:
-  enable: true
-
 repository:
-  type: POSTGRES
   postgres:
     url: "postgres://iam@kacho-umbrella-pg-iam:5432/kaname"
     slave-url: ""                  # опц. read-replica; пусто → Reader-TX на master

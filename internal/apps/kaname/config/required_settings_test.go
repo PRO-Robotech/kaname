@@ -259,6 +259,27 @@ func putPath(tree map[string]any, key string, value any) {
 	cur[parts[len(parts)-1]] = value
 }
 
+// rowsNamedByRefusal — строки таблицы, чью переменную или ключ называет отказ
+// сборки профиля, координатами ключей. Отказ строгой загрузки называет ИМЯ
+// переменной (strict_env.go), а читатель находки чинит СТРОКУ таблицы: без
+// перевода находка указала бы не туда.
+func rowsNamedByRefusal(err error, table []config.RequiredSetting) string {
+	var keys []string
+	for _, s := range table {
+		named := strings.Contains(err.Error(), "`"+s.Key+"`")
+		if s.Env != "" && strings.Contains(err.Error(), "`"+s.Env+"`") {
+			named = true
+		}
+		if named {
+			keys = append(keys, s.Key)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return " — строки таблицы: " + strings.Join(keys, ", ")
+}
+
 func refusals(cfg config.Config) []string {
 	var out []string
 	for _, e := range multierr.Errors(cfg.Validate()) {
@@ -328,7 +349,8 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 		// зеленели бы на профиле, сломанном чем угодно.
 		full, err := supplyProfile(dir, table, lane, "")
 		if err != nil {
-			findings = append(findings, fmt.Sprintf("полоса %s: профиль не собран: %v", lane, err))
+			findings = append(findings, fmt.Sprintf("полоса %s: профиль не собран: %v%s",
+				lane, err, rowsNamedByRefusal(err, table)))
 			continue
 		}
 		if got := refusals(full); len(got) != 0 {
@@ -348,7 +370,8 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 
 			cfg, err := supplyProfile(dir, table, lane, s.Key)
 			if err != nil {
-				findings = append(findings, fmt.Sprintf("полоса %s, снята %s: профиль не собран: %v", lane, s.Key, err))
+				findings = append(findings, fmt.Sprintf("полоса %s, снята %s: профиль не собран: %v%s",
+					lane, s.Key, err, rowsNamedByRefusal(err, table)))
 				continue
 			}
 			if !mentions(refusals(cfg), s.Refusal) {

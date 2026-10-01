@@ -33,9 +33,18 @@ import (
 //     already-deployed Helm chart and dev scripts.
 //  6. Unmarshal into Config with a custom DecodeHook (Mode-ENUM from string).
 //
+// Строгость (замысел NTF-2 З5, см. strict_env.go): переменная пространства `__`,
+// которой не производит ни один ключ декодера, — отказ ДО любого чтения; ключ
+// любого слоя, которого декодер не знает, — отказ с полным путём ключа, и
+// декодер сам настроен `ErrorUnused` (`UnmarshalExact`).
+//
 // Returns Config + error. Validate() is invoked separately by the caller
 // (in main).
 func Load(path string) (Config, error) {
+	if err := refuseUnknownNestedEnv(os.Environ()); err != nil {
+		return Config{}, err
+	}
+
 	v := viper.New()
 	RegisterDefaults(v)
 
@@ -193,7 +202,10 @@ func Load(path string) (Config, error) {
 			identityProviderDecodeHook(),
 		)
 	}
-	if err := v.Unmarshal(&cfg, decoderOpts); err != nil {
+	if err := refuseUnknownFileKeys(v.AllKeys()); err != nil {
+		return Config{}, err
+	}
+	if err := v.UnmarshalExact(&cfg, decoderOpts); err != nil {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
@@ -241,6 +253,12 @@ func applyLegacyEnv(v *viper.Viper) error {
 			continue // значение собирается вручную — поля адреса базы ниже
 		}
 		if val, ok := os.LookupEnv(k.Env); ok {
+			if k.Compose != nil {
+				if val == "" {
+					continue // пустой порт — «не задано», как и прежде
+				}
+				val = k.Compose(val)
+			}
 			v.Set(k.Key, val)
 		}
 	}
@@ -271,14 +289,6 @@ func applyLegacyEnv(v *viper.Viper) error {
 			db = "kaname"
 		}
 		v.Set("repository.postgres.url", fmt.Sprintf("postgres://%s@%s:%s/%s", user, host, port, db))
-	}
-
-	// Legacy port→endpoint composer.
-	if p := v.GetString("_legacy.grpc-port"); p != "" {
-		v.Set("api-server.endpoint", "tcp://0.0.0.0:"+p)
-	}
-	if p := v.GetString("_legacy.internal-port"); p != "" {
-		v.Set("api-server.internal-endpoint", "tcp://0.0.0.0:"+p)
 	}
 
 	return nil
