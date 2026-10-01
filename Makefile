@@ -535,6 +535,64 @@ model-canon-check:
 cla-check:
 	@go test ./tools/clagate/ -count=1 -v
 
+# notifications-check и notify-tree-gates — вызов проверок NTF-1 в CI дерева
+# (NTF1-D08, З31). Шаги конвейера `make notifications-check BASE=HEAD^1` и
+# `make notify-tree-gates` судит гейт internal/check/notify_wiring_test.go —
+# тонкий вызывающий `treehygiene.AuditNotifyWiring` corelib, где и живёт
+# ведомость: снятый шаг, условие на шаге, мелкий клон — красный.
+#
+# Генератор исполняется версией пина corelib из go.mod (`go run` пути пакета):
+# другой версии у него здесь нет, и `notifygen -version` печатает её первой
+# строкой — вердикт читается вместе с тем, чей он.
+NOTIFYGEN := go run github.com/PRO-Robotech/corelib/cmd/notifygen
+
+# БАЗА — ОБЯЗАТЕЛЬНЫЙ ВХОД, умолчания нет. Правило ревизии шаблона (NTF1-D07)
+# судит дерево против ревизии ствола; без неё сверять не с чем, а пустая база
+# дала бы вакуумный зелёный. Поэтому без BASE цель не исполняет сверку и
+# называет это третьим исходом — «УСЛОВИЕ НЕ СОЗДАНО», ненулевым кодом. В CI
+# база — первый родитель клона с полной историей (`fetch-depth: 0`); база, не
+# разрешающаяся в коммит, — красный генератора «база не найдена» (D07 (д)).
+# Строка «база <коммит>: …» вывода — отпечаток базы, которой судили (DoD S2 п.10).
+.PHONY: notifications-check notify-tree-gates
+## notifications-check — шаблоны извещений: ревизия, эталон, миграции ленты и правило базы против BASE=<ревизия>
+notifications-check:
+	@test -n "$(BASE)" || { \
+	  echo "УСЛОВИЕ НЕ СОЗДАНО: правило базы NTF1-D07 судит дерево против ревизии ствола, а BASE не задан."; \
+	  echo "  Вызов: make notifications-check BASE=<ревизия> (в CI — BASE=HEAD^1 на клоне с полной историей)."; \
+	  echo "  Пустая база дала бы зелёный без сверки, поэтому вердикта нет — ни зелёного, ни красного."; \
+	  exit 2; }
+	$(NOTIFYGEN) -version
+	$(NOTIFYGEN) -check -base "$(BASE)"
+
+# Гейты дерева NTF-1 по kaname (З16): NTF1-B27 (гейт и приёмник address.Domain),
+# NTF1-B28 (гейт), NTF1-B28 (гейт `Put`), узел «ошибка Value() отброшена»,
+# перепись писателей таблиц ленты — и их инъекции прогоном по kaname. Сами узлы
+# живут в corelib `treehygiene`; пробы internal/check — тонкие вызывающие.
+#
+# ПЕРЕЧЕНЬ ПРОБ ЗАКРЫТ И СЧИТАЕТСЯ. `go test -run` по образцу, не совпавшему ни
+# с одной пробой, выходит НУЛЁМ («no tests to run»): переименованная проба
+# выпала бы из прогона молча. Поэтому цель сверяет число исполненных
+# зелёными проб верхнего уровня с числом имён перечня — меньше значит, что
+# часть гейтов не исполнялась, и это красный, а не зелёный.
+NOTIFY_TREE_GATES := TestNTF1B27Gate_OnKaname TestNTF1B27Receiver_OnKaname \
+	TestNTF1B28Gate_OnKaname TestNTF1B28PutGate_OnKaname TestUK46ValueErrorDiscard_OnKaname \
+	TestNTF1B19FeedWriters_OnKaname TestNTF1Gates_InjectionsInKanameAreFound
+NOTIFY_TREE_GATES_RUN := ^($(subst $(eval) ,|,$(strip $(NOTIFY_TREE_GATES))))$$
+
+## notify-tree-gates — гейты дерева NTF-1 по kaname (B27, B28, B28 Put) с инъекциями и объёмом осмотренного
+notify-tree-gates:
+	@log=$$(mktemp) || { echo "НЕ ВЫПОЛНИЛОСЬ: файл вывода прогона не заведён"; exit 2; }; rc=0; \
+	go test ./internal/check/ -count=1 -v -run '$(NOTIFY_TREE_GATES_RUN)' > "$$log" 2>&1 || rc=$$?; \
+	cat "$$log"; \
+	want=$(words $(NOTIFY_TREE_GATES)); \
+	passed=$$(grep -cE '^--- PASS: Test[A-Za-z0-9_]+ ' "$$log" || true); \
+	rm -f "$$log"; \
+	echo "notify-tree-gates: проб в перечне $$want · исполнено зелёными $$passed · код go test $$rc"; \
+	if [ "$$rc" -ne 0 ]; then exit "$$rc"; fi; \
+	if [ "$$passed" -ne "$$want" ]; then \
+	  echo "НЕ ВЫПОЛНИЛОСЬ: зелёными исполнено $$passed проб из $$want — часть гейтов перечня не исполнялась (переименована, пропущена, снята)"; \
+	  exit 1; fi
+
 # Общая `operations`-таблица из kacho-corelib/migrations/common/0001_operations.sql
 # встроена inline в internal/migrations/0001_initial.sql под схемой kaname.
 # Re-копирование common-файла создало бы конфликтующий unqualified
