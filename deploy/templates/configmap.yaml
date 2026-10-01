@@ -311,6 +311,104 @@ data:
         {{- with .verificationResendWindow }}
         verification-resend-window: {{ . | quote }}
         {{- end }}
+        # ПОЧТОВЫЕ РУЧКИ ТАБЛИЦЫ Р8 (приёмка NTF-2, решение Д11; замысел З23) —
+        # срок кода регистрации, окно адресата по трём назначениям, перебор кода,
+        # письмо о торможении, метка доверенного устройства. В ОТЛИЧИЕ ОТ
+        # ВЕЛИЧИН ВЫШЕ это условие старта НА ЛЮБОЙ ПОСАДКЕ: их судит страж
+        # таблицы границ (`config.ValidateMailBounds`) в любом режиме. Умолчаний
+        # нет ни здесь, ни у процесса; ключ отдан ВЕТВЬЮ, и незаданный доезжает
+        # до стража незаданным — отказ называет ключ и переменную. Границы и
+        # порядки судит страж, а не рендер — второе место о тех же числах
+        # разошлось бы с таблицей молча.
+        #
+        # Счёт идёт через `kaname-svc.mailCount`, а не голым `int64` — тот
+        # превращает слово в НОЛЬ, и опечатка доехала бы до стража законным с
+        # виду числом. Ключи выписаны ПОСТРОЧНО, а не обходом по назначениям —
+        # обход прятал бы имена ключей от проб, читающих шаблон.
+        {{- with .registrationCodeTtl }}
+        registration-code-ttl: {{ . | quote }}
+        {{- end }}
+        {{- with .mailWindow }}
+        mail-window:
+          {{- with .recovery }}
+          recovery:
+            {{- with .firstPause }}
+            first-pause: {{ . | quote }}
+            {{- end }}
+            {{- with .secondPause }}
+            second-pause: {{ . | quote }}
+            {{- end }}
+            {{- if hasKey . "perHour" }}
+            per-hour: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.recovery.perHour" .perHour) }}
+            {{- end }}
+            {{- if hasKey . "perDay" }}
+            per-day: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.recovery.perDay" .perDay) }}
+            {{- end }}
+            {{- with .floorInterval }}
+            floor-interval: {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .verification }}
+          verification:
+            {{- with .firstPause }}
+            first-pause: {{ . | quote }}
+            {{- end }}
+            {{- with .secondPause }}
+            second-pause: {{ . | quote }}
+            {{- end }}
+            {{- if hasKey . "perHour" }}
+            per-hour: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.verification.perHour" .perHour) }}
+            {{- end }}
+            {{- if hasKey . "perDay" }}
+            per-day: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.verification.perDay" .perDay) }}
+            {{- end }}
+            {{- with .floorInterval }}
+            floor-interval: {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .registration }}
+          registration:
+            {{- with .firstPause }}
+            first-pause: {{ . | quote }}
+            {{- end }}
+            {{- with .secondPause }}
+            second-pause: {{ . | quote }}
+            {{- end }}
+            {{- if hasKey . "perHour" }}
+            per-hour: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.registration.perHour" .perHour) }}
+            {{- end }}
+            {{- if hasKey . "perDay" }}
+            per-day: {{ include "kaname-svc.mailCount" (list "authn.login.mailWindow.registration.perDay" .perDay) }}
+            {{- end }}
+            {{- with .floorInterval }}
+            floor-interval: {{ . | quote }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+        {{- with .attempts }}
+        attempts:
+          {{- if hasKey . "addressSourcePerWindow" }}
+          address-source-per-window: {{ include "kaname-svc.mailCount" (list "authn.login.attempts.addressSourcePerWindow" .addressSourcePerWindow) }}
+          {{- end }}
+          {{- with .window }}
+          window: {{ . | quote }}
+          {{- end }}
+          {{- if hasKey . "addressFailureCeiling" }}
+          address-failure-ceiling: {{ include "kaname-svc.mailCount" (list "authn.login.attempts.addressFailureCeiling" .addressFailureCeiling) }}
+          {{- end }}
+        {{- end }}
+        {{- with .mailThrottledInterval }}
+        mail-throttled-interval: {{ . | quote }}
+        {{- end }}
+        {{- with .trustedDevice }}
+        trusted-device:
+          {{- with .ttl }}
+          ttl: {{ . | quote }}
+          {{- end }}
+          {{- if hasKey . "recoveryPerDay" }}
+          recovery-per-day: {{ include "kaname-svc.mailCount" (list "authn.login.trustedDevice.recoveryPerDay" .recoveryPerDay) }}
+          {{- end }}
+        {{- end }}
       {{- end }}
 
       {{- with $authn.registration }}
@@ -414,6 +512,17 @@ data:
       # не хватает.
       trust-domain: {{ . | quote }}
       {{- end }}
+
+      # ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18, CX2-13): `k_window` и
+      # `k_device`. Пути ВЫВОДЯТСЯ из каталога монтирования тома, который
+      # шаблон развёртывания собирает из объявленного объекта Secret
+      # (`authn.secrets.secretName`; пустое имя — отказ рендера перечнем
+      # `kaname-svc.requireOperatorSuppliedNames`). Путь, заданный отдельной
+      # ручкой, разошёлся бы с томом молча: страж настройки судит только
+      # непустоту пути, и отказ пришёл бы в кластере, на чтении файла.
+      secrets:
+        mail-window-key-file: {{ printf "%s/mail-window.key" (required "authn.secrets.mountPath не задан: каталог монтирования файлов ключей почтовой полосы обязан быть назван — иначе пути настроек называют файлы, которых в поде нет" $.Values.authn.secrets.mountPath) | quote }}
+        device-label-key-file: {{ printf "%s/device-label.key" (required "authn.secrets.mountPath не задан: каталог монтирования файлов ключей почтовой полосы обязан быть назван — иначе пути настроек называют файлы, которых в поде нет" $.Values.authn.secrets.mountPath) | quote }}
 
       {{- $ts := $authn.tokenSigning | default dict }}
       {{- if include "kaname-svc.blockEnabled" (list $ "authn.tokenSigning") }}
@@ -555,13 +664,36 @@ data:
     объекта Secret (карта `secrets` профиля). Карта настроек читается шире
     секрета, и величина, положенная в неё, доступна каждому, кто вправе её
     прочитать. */}}
-    {{- /* ─── СРОК СТРОКИ ПРИГЛАШЕНИЯ (приёмка ID-MAIL-1, §10 п. 22) ──────────
+    {{- /* ─── ФЛАГ ПОЧТЫ СЛУЖБЫ (приёмка NTF-2 Р4, NTF2-33; замысел З2) ──────
 
-    УМОЛЧАНИЕ ЖИВЁТ У ПРОЦЕССА, А НЕ ЗДЕСЬ, и ключ отдан ВЕТВЬЮ: молчание
-    посадки означает согласие с умолчанием, а не «без срока». Дословная
-    подстановка нуля означала бы попытку снять ограничение — её отвергает страж
-    старта, и отвергает правильно: значения, означающего «без срока», в словаре
-    ручки не существует вовсе. */}}
+    Объявляется ЯВНО каждым профилем: незаданный ключ — отказ рендера с его
+    именем (NTF2-33 (б)), а не молчаливое «выключено» или «включено». `false`
+    законно и рендерится дословно.
+
+    Читается ПРАВИЛОМ ВЫКЛЮЧАТЕЛЯ (`kaname-svc.blockEnabled`), а не своим
+    условием: правило уже отличает снятый ключ и не-булево («false» строкой,
+    «yes») от булева и отказывает с координатой — ровно то, что нужно флагу.
+    Своё условие было бы вторым местом об одном предмете, и истинность строки
+    `"false"` включила бы почту, которую выключали. */}}
+    notifications:
+      enabled: {{ if include "kaname-svc.blockEnabled" (list $ "notifications") }}true{{ else }}false{{ end }}
+
+    {{- /* ─── СРОК СТРОКИ ПРИГЛАШЕНИЯ И ПОТОЛКИ ПРИГЛАШЕНИЙ (приёмка NTF-2 Р7,
+    Р8; решение Д11) ─────────────────────────────────────────────────────────
+
+    УМОЛЧАНИЯ НЕТ НИ ЗДЕСЬ, НИ У ПРОЦЕССА. Здесь стояло «умолчание живёт у
+    процесса, молчание посадки — согласие с умолчанием (неделя)»: умолчание
+    снято (Р8 — числа живут в поставляемых значениях, в бинаре их нет), и
+    молчание посадки теперь означает «не объявлено» — страж старта отказывает,
+    называя ключ (`invite.ttl`, KANAME_INVITE__TTL). Ключ отдан ВЕТВЬЮ, чтобы
+    незаданный доехал до стража незаданным: пустая строка, отданная дословно,
+    отвергалась бы разбором раньше стража и без его текста. Значения «без
+    срока» в словаре ручки нет вовсе.
+
+    Семь потолков — та же форма: ветвь по `hasKey` у счётов (ноль законен —
+    «приглашений не слать») и по `with` у возраста; целое — через
+    `kaname-svc.mailCount` (довод — у блока `authn.login`). Границы и порядки
+    судит страж таблицы границ, а не рендер. */}}
     {{- with $inv := .Values.invite | default dict }}
     {{- /* ─── ОГРАНИЧЕНИЕ ЧАСТОТЫ ПИСЕМ НА АДРЕС (приёмка ID-MAIL-1, Р14, MAIL-42/43)
 
@@ -588,10 +720,35 @@ data:
     {{- fail (printf "kaname: `invite.mailRateLimit.window` = %q — ожидается положительная длительность окна (`1h`, `30m`). Значения «без ограничения» не существует: профиль вправе изменить величину, но не снять её (решение Р14 приёмки ID-MAIL-1, MAIL-43)" $win) }}
     {{- end }}
     {{- end }}
-    {{- if or $inv.ttl $maxDeclared $winDeclared }}
+    {{- $invDeclared := or $inv.ttl $inv.youngAccountAge $maxDeclared $winDeclared }}
+    {{- range $k := list "accountPerDay" "youngAccountPerDay" "pendingMax" "recipientPerHour" "recipientPerDay" "recipientPerDayAll" }}
+    {{- if hasKey $inv $k }}{{- $invDeclared = true }}{{- end }}
+    {{- end }}
+    {{- if $invDeclared }}
     invite:
       {{- with $inv.ttl }}
       ttl: {{ . | quote }}
+      {{- end }}
+      {{- if hasKey $inv "accountPerDay" }}
+      account-per-day: {{ include "kaname-svc.mailCount" (list "invite.accountPerDay" $inv.accountPerDay) }}
+      {{- end }}
+      {{- if hasKey $inv "youngAccountPerDay" }}
+      young-account-per-day: {{ include "kaname-svc.mailCount" (list "invite.youngAccountPerDay" $inv.youngAccountPerDay) }}
+      {{- end }}
+      {{- with $inv.youngAccountAge }}
+      young-account-age: {{ . | quote }}
+      {{- end }}
+      {{- if hasKey $inv "pendingMax" }}
+      pending-max: {{ include "kaname-svc.mailCount" (list "invite.pendingMax" $inv.pendingMax) }}
+      {{- end }}
+      {{- if hasKey $inv "recipientPerHour" }}
+      recipient-per-hour: {{ include "kaname-svc.mailCount" (list "invite.recipientPerHour" $inv.recipientPerHour) }}
+      {{- end }}
+      {{- if hasKey $inv "recipientPerDay" }}
+      recipient-per-day: {{ include "kaname-svc.mailCount" (list "invite.recipientPerDay" $inv.recipientPerDay) }}
+      {{- end }}
+      {{- if hasKey $inv "recipientPerDayAll" }}
+      recipient-per-day-all: {{ include "kaname-svc.mailCount" (list "invite.recipientPerDayAll" $inv.recipientPerDayAll) }}
       {{- end }}
       {{- if or $maxDeclared $winDeclared }}
       mail-rate-limit:

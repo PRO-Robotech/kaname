@@ -530,6 +530,13 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
+	// Срок приглашения читается сборкой разыменованием: ручка без умолчания, и
+	// незаданная обязана дать отказ с именем ключа здесь, а не панику в сборке.
+	// Страж старта (`cfg.Validate()` в main) уже это требует; проверка здесь —
+	// для пути, на котором runServe получил настройку мимо него.
+	if _, err := config.Declared(cfg.Invite.TTL, "invite.ttl"); err != nil {
+		return fmt.Errorf("приглашения: %w", err)
+	}
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.

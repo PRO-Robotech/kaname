@@ -97,6 +97,7 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 		MaxPerWindow: config.DefaultInviteMailPerWindow,
 		Window:       config.DefaultInviteMailWindow,
 	}}
+	declareMailBounds(&cfg)
 	cfg.AuthN.TokenSigning = config.TokenSigningConfig{
 		Enabled:           true,
 		Issuer:            "https://iam.kacho.cloud",
@@ -407,4 +408,33 @@ func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
 				len(warns), warns)
 		}
 	})
+}
+
+// declareMailBounds — почтовые ручки таблицы границ Р8, флаг почты и файлы
+// ключей объявлены ориентирами базового профиля (приёмка NTF-2 Р8): страж
+// таблицы судит их на любой посадке, и фикстура, не про них, обязана их
+// назвать, как обязан профиль.
+func declareMailBounds(cfg *config.Config) {
+	d := func(v time.Duration) *time.Duration { return &v }
+	n := func(v int) *int { return &v }
+	on := true
+	cfg.Notifications.Enabled = &on
+	cfg.AuthN.Secrets = config.SecretsConfig{
+		MailWindowKeyFile:  "/etc/kaname/secrets/mail-window.key",
+		DeviceLabelKeyFile: "/etc/kaname/secrets/device-label.key",
+	}
+	w := func() config.MailWindowConfig {
+		return config.MailWindowConfig{FirstPause: d(time.Minute), SecondPause: d(5 * time.Minute),
+			PerHour: n(3), PerDay: n(5), FloorInterval: d(6 * time.Hour)}
+	}
+	l := &cfg.AuthN.Login
+	l.MailWindow = config.MailWindowsConfig{Recovery: w(), Verification: w(), Registration: w()}
+	l.RecoveryCodeTTL, l.VerificationCodeTTL, l.RegistrationCodeTTL = d(15*time.Minute), d(time.Hour), d(time.Hour)
+	l.Attempts = config.LoginAttemptsConfig{AddressSourcePerWindow: n(5), Window: d(15 * time.Minute), AddressFailureCeiling: n(100)}
+	l.MailThrottledInterval = d(7 * 24 * time.Hour)
+	l.TrustedDevice = config.TrustedDeviceConfig{TTL: d(90 * 24 * time.Hour), RecoveryPerDay: n(2)}
+	i := &cfg.Invite
+	i.TTL, i.YoungAccountAge = d(7*24*time.Hour), d(30*24*time.Hour)
+	i.AccountPerDay, i.YoungAccountPerDay, i.PendingMax = n(200), n(50), n(200)
+	i.RecipientPerHour, i.RecipientPerDay, i.RecipientPerDayAll = n(3), n(5), n(10)
 }

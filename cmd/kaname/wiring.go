@@ -390,11 +390,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
-		// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22). Величина
-		// читается ЗДЕСЬ и передаётся use-case'у: настройки читает
-		// композиционный корень, а не бизнес-логика. Умолчание живёт у ручки,
-		// поэтому молчащая посадка получает его, а не «без срока».
-		WithInviteTTL(cfg.Invite.TTLOrDefault()).
+		// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22; NTF-2 Р8).
+		// Величина читается ЗДЕСЬ и передаётся use-case'у: настройки читает
+		// композиционный корень, а не бизнес-логика. Умолчания у ручки нет:
+		// объявленность проверена в runServe до сборки (`config.Declared`),
+		// границы — стражем старта.
+		WithInviteTTL(*cfg.Invite.TTL).
 		// Ограничение частоты писем на адрес (приёмка ID-MAIL-1, Р14/Р22,
 		// MAIL-25) — одно на оба глагола, отправляющих письмо; счётчик исходов
 		// намерения — тоже один. Величину судит страж старта: непозитивную он

@@ -160,6 +160,26 @@ spec:
           secret:
             secretName: {{ $tls.providerSecretName | quote }}
         {{- end }}
+        {{- $mailKeys := .Values.authn.secrets | default dict }}
+        # ФАЙЛЫ КЛЮЧЕЙ ПОЧТОВОЙ ПОЛОСЫ (замысел NTF-2 З18, CX2-13) — том
+        # БЕЗУСЛОВНЫЙ: страж старта требует оба файла на любой посадке, и карта
+        # настроек называет их всегда. Пустое имя объекта отвергает перечень
+        # `kaname-svc.requireOperatorSuppliedNames` до этой строки.
+        #
+        # Ключи объекта ПРОЕЦИРУЮТСЯ поимённо (`items`), а не томом целиком:
+        # в под попадают ровно два файла, которые читает процесс, и объект без
+        # любого из ключей останавливает под до старта с именем ключа, а не
+        # пускает процесс отказывать на чтении. Права 0440 — читает группа пода
+        # (`fsGroup`), прочим файл закрыт.
+        - name: mail-keys
+          secret:
+            secretName: {{ $mailKeys.secretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: mail-window.key
+                path: mail-window.key
+              - key: device-label.key
+                path: device-label.key
       initContainers:
         # Миграции БД исполняет отдельный binary `kaname-migrator`
         # (cobra-based CLI), не subcommand основного.
@@ -291,6 +311,9 @@ spec:
               mountPath: {{ printf "%s/provider" (required "tls.mountPath не задан при объявленном tls.providerSecretName: путь монтирования обязан быть назван явно — иначе якорь поставщика личности называет файл, которого в поде нет" $tls.mountPath) | quote }}
               readOnly: true
             {{- end }}
+            - name: mail-keys
+              mountPath: {{ required "authn.secrets.mountPath не задан: каталог монтирования файлов ключей почтовой полосы обязан быть назван — иначе пути настроек называют файлы, которых в поде нет" $mailKeys.mountPath | quote }}
+              readOnly: true
           env:
             - name: KANAME_CONFIG_PATH
               value: /etc/kaname/config.yaml
