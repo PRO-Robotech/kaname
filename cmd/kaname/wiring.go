@@ -246,8 +246,19 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// есть чем завтра.
 	catalogRows moduleapp.CatalogStateSource,
 	metricsReg *metrics.Registry,
-	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) (*services, error) {
 	_ = slavePool // kanameRepo is built and passed in by main()
+
+	// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22; NTF-2 Р8) — ручка
+	// без умолчания. Объявленность судится ЗДЕСЬ, у единственного читателя, и
+	// величина берётся из того же суждения, а не разыменованием поля: сборка,
+	// вызванная мимо стража старта, отказывает с именем ключа, а не паникует.
+	// Суждение стоит ДО сборки чего-либо — отказ не оставляет за собой
+	// зарегистрированных сборщиков метрик.
+	inviteTTL, err := config.Declared(cfg.Invite.TTL, "invite.ttl")
+	if err != nil {
+		return nil, fmt.Errorf("приглашения: %w", err)
+	}
 
 	// relationStore — ТО значение, которое получают собственные стражи iam, и
 	// причина, по которой страж не может спросить «мимо»: другого значения для него
@@ -390,12 +401,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
-		// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22; NTF-2 Р8).
-		// Величина читается ЗДЕСЬ и передаётся use-case'у: настройки читает
-		// композиционный корень, а не бизнес-логика. Умолчания у ручки нет:
-		// объявленность проверена в runServe до сборки (`config.Declared`),
-		// границы — стражем старта.
-		WithInviteTTL(*cfg.Invite.TTL).
+		// Срок строки приглашения: величина из суждения об объявленности в
+		// начале сборки; настройки читает композиционный корень, а не
+		// бизнес-логика. Границы судит страж старта.
+		WithInviteTTL(inviteTTL).
 		// Ограничение частоты писем на адрес (приёмка ID-MAIL-1, Р14/Р22,
 		// MAIL-25) — одно на оба глагола, отправляющих письмо; счётчик исходов
 		// намерения — тоже один. Величину судит страж старта: непозитивную он
@@ -1032,7 +1041,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.
 		ownGates:          relationStore,
 		bindingReconciler: rsabReconciler,
-	}
+	}, nil
 }
 
 // mustProviderAdminClient строит клиента административной дороги к поставщику,

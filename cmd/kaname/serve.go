@@ -530,18 +530,17 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
-	// Срок приглашения читается сборкой разыменованием: ручка без умолчания, и
-	// незаданная обязана дать отказ с именем ключа здесь, а не панику в сборке.
-	// Страж старта (`cfg.Validate()` в main) уже это требует; проверка здесь —
-	// для пути, на котором runServe получил настройку мимо него.
-	if _, err := config.Declared(cfg.Invite.TTL, "invite.ttl"); err != nil {
-		return fmt.Errorf("приглашения: %w", err)
-	}
-	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
+	// Ручки без умолчания, которые читает сборка (срок приглашения), судит сама
+	// сборка и отказывает с именем ключа — второго места этого суждения здесь
+	// нет: проверка, чей исход выбрасывается, не защищает того, кто читает поле.
+	svcs, err := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+	if err != nil {
+		return err
+	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что
