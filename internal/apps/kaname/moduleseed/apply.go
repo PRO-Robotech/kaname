@@ -31,6 +31,15 @@
 // вступления идут в неё. Порядок между доставленными не решён — там популяция
 // ноль объявленных групп, и это состояние без предмета, а не отсрочка.
 //
+// # Строка `notifications` — тоже предмет посева
+//
+// Манифест модуля либо службы может нести строку уведомлений (приёмка NTF-1,
+// Р3 и Р5). Применитель судит её тем же предикатом, что загрузчик
+// (`manifest.JudgeNotifications`), — разряд называет ПОЗИЦИЯ манифеста в
+// [Applier.Apply], — и кладёт кортеж `service:notify reader
+// notification_feed:<лента>` в той же транзакции, что посев модуля. Кортеж
+// собирается конструктором `service_tuple.go`, субъект — фундаментом.
+//
 // # Что применитель НЕ делает
 //
 // Он не читает каталог доставки (это `loadDeliveredManifests`) и не судит форму
@@ -97,6 +106,9 @@ type Writer interface {
 	GrantRelation(ctx context.Context, subject Subject, relation, scopeKind, scopeID string) (changed bool, err error)
 	// GrantRole выдаёт субъекту РОЛЬ на якоре области.
 	GrantRole(ctx context.Context, subject Subject, roleID, scopeKind, scopeID string) (changed bool, err error)
+	// WriteServiceTuple кладёт кортеж со служебным субъектом (строка
+	// `notifications`). Кортеж приезжает собранным: см. [ServiceTuple].
+	WriteServiceTuple(ctx context.Context, t ServiceTuple) (changed bool, err error)
 }
 
 // Subject — получатель выдачи, адресованный ПАРОЙ (аккаунт, имя): так он
@@ -143,15 +155,20 @@ type Report struct {
 	DeclaredAccounts, DeclaredGroups, DeclaredJoins, DeclaredGrants int
 	// Written — строк заведено либо приведено.
 	WrittenAccounts, WrittenGroups, WrittenJoins, WrittenGrants int
+	// DeclaredServiceTuples, WrittenServiceTuples — служебные кортежи строки
+	// `notifications`: объявлено и записано.
+	DeclaredServiceTuples, WrittenServiceTuples int
 }
 
 func (r Report) String() string {
-	return fmt.Sprintf("%s: личностей %d/%d · групп %d/%d · вступлений %d/%d · выдач %d/%d (записано/объявлено)",
+	return fmt.Sprintf("%s: личностей %d/%d · групп %d/%d · вступлений %d/%d · выдач %d/%d · "+
+		"служебных кортежей %d/%d (записано/объявлено)",
 		r.Module,
 		r.WrittenAccounts, r.DeclaredAccounts,
 		r.WrittenGroups, r.DeclaredGroups,
 		r.WrittenJoins, r.DeclaredJoins,
-		r.WrittenGrants, r.DeclaredGrants)
+		r.WrittenGrants, r.DeclaredGrants,
+		r.WrittenServiceTuples, r.DeclaredServiceTuples)
 }
 
 // Census — перепись всего применения.
@@ -167,7 +184,8 @@ type Census struct {
 	Own *Report
 	// Manifests — ДОСТАВЛЕННЫХ манифестов прочитано. Свой сюда не входит.
 	Manifests int
-	// Seeding — из доставленных объявили раздел `seed`. Ноль здесь законен и
+	// Seeding — из доставленных объявили раздел `seed` либо строку
+	// `notifications`. Ноль здесь законен и
 	// означает «модули посева не объявили», а НЕ «применять не стали».
 	Seeding int
 	// Reports — по модулю на каждый объявивший ДОСТАВЛЕННЫЙ манифест.
@@ -177,8 +195,10 @@ type Census struct {
 // Totals — суммы по подразделам: объявлено и записано, оба разряда вместе.
 func (c Census) Totals() (declared, written int) {
 	for _, r := range c.allReports() {
-		declared += r.DeclaredAccounts + r.DeclaredGroups + r.DeclaredJoins + r.DeclaredGrants
-		written += r.WrittenAccounts + r.WrittenGroups + r.WrittenJoins + r.WrittenGrants
+		declared += r.DeclaredAccounts + r.DeclaredGroups + r.DeclaredJoins + r.DeclaredGrants +
+			r.DeclaredServiceTuples
+		written += r.WrittenAccounts + r.WrittenGroups + r.WrittenJoins + r.WrittenGrants +
+			r.WrittenServiceTuples
 	}
 	return declared, written
 }
@@ -228,7 +248,7 @@ func (a *Applier) Apply(ctx context.Context, own *manifest.Manifest, delivered [
 	census := Census{Manifests: len(delivered)}
 
 	if own != nil {
-		report, err := a.applyOne(ctx, own)
+		report, err := a.applyOne(ctx, own, manifest.HolderAccessService)
 		census.Own = &report
 		if err != nil {
 			return census, fmt.Errorf("посев своего манифеста %q (свой манифест службы): %w", own.Module, err)
@@ -236,14 +256,14 @@ func (a *Applier) Apply(ctx context.Context, own *manifest.Manifest, delivered [
 	}
 
 	for _, m := range delivered {
-		if m == nil || m.Seed == nil {
+		if m == nil || (m.Seed == nil && m.Notifications == nil) {
 			// «Посева нет» и «посев объявлен и пуст» — РАЗНЫЕ утверждения
 			// (`seed: null` против `seed: {}`), и различает их указатель.
 			// Первое здесь и остаётся первым: применять нечего.
 			continue
 		}
 		census.Seeding++
-		report, err := a.applyOne(ctx, m)
+		report, err := a.applyOne(ctx, m, manifest.HolderModule)
 		census.Reports = append(census.Reports, report)
 		if err != nil {
 			return census, fmt.Errorf("посев модуля %q: %w", m.Module, err)
@@ -264,23 +284,38 @@ func (a *Applier) ApplyAll(ctx context.Context, manifests []*manifest.Manifest) 
 
 // applyOne применяет посев одного манифеста под ОДНОЙ транзакцией.
 //
-// Манифест без раздела `seed` даёт отчёт с нулями и транзакции не открывает:
-// применять нечего, а «подан и пуст» обязано быть отличимо от «не подан» —
-// это различает вызывающий по указателю в переписи.
-func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest) (Report, error) {
-	if m.Seed == nil {
-		return Report{Module: m.Module}, nil
+// Манифест без раздела `seed` и без строки `notifications` даёт отчёт с нулями
+// и транзакции не открывает: применять нечего, а «подан и пуст» обязано быть
+// отличимо от «не подан» — это различает вызывающий по указателю в переписи.
+//
+// holder — разряд манифеста, названный ПОЗИЦИЕЙ в [Applier.Apply] (свой либо
+// доставленный), а не документом: форма, по которой документ опознавал бы себя
+// службой, была бы формой, которую может написать любой модуль.
+func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest, holder manifest.NotificationsHolder) (Report, error) {
+	report := Report{Module: m.Module}
+	if m.Seed == nil && m.Notifications == nil {
+		return report, nil
 	}
 	seed := m.Seed
-	report := Report{
-		Module:           m.Module,
-		DeclaredAccounts: len(seed.ServiceAccounts),
-		DeclaredGroups:   len(seed.Groups),
-		DeclaredJoins:    len(seed.Joins),
-		DeclaredGrants:   len(seed.AccessBindings),
+	if seed == nil {
+		seed = &manifest.Seed{}
 	}
+	report.DeclaredAccounts = len(seed.ServiceAccounts)
+	report.DeclaredGroups = len(seed.Groups)
+	report.DeclaredJoins = len(seed.Joins)
+	report.DeclaredGrants = len(seed.AccessBindings)
 
-	err := a.tx.RunInWriteTx(ctx, func(ctx context.Context, w Writer) error {
+	// Строка `notifications` судится ДО транзакции и тем же предикатом, что у
+	// загрузчика: применитель — последний рубеж для документа, дошедшего сюда в
+	// обход разбора. Отказ не открывает транзакции — половину строки (законный
+	// notify рядом с чужим читателем) применитель не применяет.
+	tuples, err := notificationTuples(m, holder)
+	if err != nil {
+		return report, err
+	}
+	report.DeclaredServiceTuples = len(tuples)
+
+	err = a.tx.RunInWriteTx(ctx, func(ctx context.Context, w Writer) error {
 		// ПОРЯДОК НЕСУЩИЙ, и держится он ключами, а не памятью.
 		//
 		// Личности и группы — первыми: и вступление, и выдача ссылаются на них
@@ -325,9 +360,39 @@ func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest) (Report, e
 			}
 			report.WrittenGrants += written
 		}
+		for _, t := range tuples {
+			changed, err := w.WriteServiceTuple(ctx, t)
+			if err != nil {
+				return fmt.Errorf("служебный кортеж %s: %w", t, err)
+			}
+			if changed {
+				report.WrittenServiceTuples++
+			}
+		}
 		return nil
 	})
 	return report, err
+}
+
+// notificationTuples — служебные кортежи строки `notifications` манифеста m.
+// Строки нет — кортежей нет; строка негодна — отказ.
+func notificationTuples(m *manifest.Manifest, holder manifest.NotificationsHolder) ([]ServiceTuple, error) {
+	if m.Notifications == nil {
+		return nil, nil
+	}
+	if err := manifest.JudgeNotifications(m, holder); err != nil {
+		return nil, fmt.Errorf("строка notifications: %w", err)
+	}
+	feed := manifest.NotificationFeed(m, holder)
+	tuples := make([]ServiceTuple, 0, len(m.Notifications.Readers))
+	for _, reader := range m.Notifications.Readers {
+		t, err := feedReaderTuple(reader, feed)
+		if err != nil {
+			return nil, fmt.Errorf("строка notifications: %w", err)
+		}
+		tuples = append(tuples, t)
+	}
+	return tuples, nil
 }
 
 // applyBinding кладёт одну выдачу — по одной строке на КАЖДОГО названного

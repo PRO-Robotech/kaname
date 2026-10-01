@@ -193,6 +193,9 @@ type Manifest struct {
 	// снятия; см. deprecated.go.
 	DeprecatedVerbs map[string]DeprecatedVerb `yaml:"deprecatedVerbs"`
 	Seed            *Seed                     `yaml:"seed"`
+	// Notifications — строка уведомлений модуля; nil — строки нет. См.
+	// notifications.go.
+	Notifications *Notifications `yaml:"notifications"`
 
 	// linkage — перепись валидатора связности, снятая при загрузке. Поле
 	// неэкспортируемое и без yaml-тега: это НЕ ключ документа, а результат
@@ -408,6 +411,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	if err := refuseNullSeed(doc); err != nil {
 		return nil, err
 	}
+	if err := refuseNullNotifications(doc); err != nil {
+		return nil, err
+	}
 	// ЗДЕСЬ СТОЯЛ пред-разборный отказ по ключу `verbs` в правиле роли. Он снят
 	// ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (kacho#1844): поимённая форма права вернулась —
 	// вместе с проверкой её полноты по классу, как и предписывал §10 п. 2
@@ -445,6 +451,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	faults := validateResources(&m, doc, referent)
 	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
+	if err := judgeNotifications(&m, loadOpts.notificationsHolder, notificationsLine(doc)); err != nil {
+		faults = append(faults, err)
+	}
 
 	// Связность — последняя ступень той же загрузки; почему не отдельным
 	// вызовом, сказано в шапке Load. Перечень ролей приезжает ИЗ РАЗОБРАННОГО

@@ -42,6 +42,12 @@ package pg
 // третья копия разошлась бы с ними молча ровно там, где это дороже всего:
 // субъект выдачи и субъект отзыва стали бы разными.
 //
+// Это про ТЕНАНТСКИЕ субъекты выдачи. Служебный субъект `service:<имя>` строки
+// `notifications` кодек не строит и строить не вправе: слова `service` он не
+// знает и записал бы `user:`. Его производит фундамент (`authz.ServiceSubject`)
+// в конструкторе применителя, и сюда кортеж приезжает собранным
+// (`WriteServiceTuple`, условие УК1).
+//
 // # Отказы приходят СЫРЫМИ, и это решение
 //
 // Приведение к статусу (`mapErr`) здесь НЕ делается: оно сворачивает
@@ -378,6 +384,44 @@ func (w moduleSeedWriter) grant(
 		}
 	}
 	return true, nil
+}
+
+// WriteServiceTuple кладёт кортеж со служебным субъектом строкой журнала —
+// прямой факт складывает из неё триггер, как у всякой выдачи посева.
+//
+// # Субъект приходит СОБРАННЫМ, и здесь он не строится (УК1)
+//
+// Строку `service:<имя>` производит фундамент (`authz.ServiceSubject`) в
+// конструкторе применителя; тенантский кодек `domain.FGASubjectRef` слова
+// `service` не знает, и собранный им субъект стал бы `user:`. Кортеж, названный
+// не целиком (нулевое значение), — отказ, а не пустая строка журнала.
+//
+// # Повтор не пишет журнал — и держит это тот же оператор
+//
+// Строка журнала кладётся только тогда, когда прямого факта этого кортежа ещё
+// нет; условие стоит в ТОМ ЖЕ операторе, что вставка. Иначе каждый старт клал бы
+// строку журнала заново: перепись росла бы, а состояние — нет. Два старта,
+// одновременно не увидевшие факта, положат две строки журнала об ОДНОМ
+// кортеже: проекция складывает их в один факт (`ON CONFLICT` триггера), то есть
+// гонка даёт лишнюю строку журнала, а не второе право.
+func (w moduleSeedWriter) WriteServiceTuple(ctx context.Context, t moduleseed.ServiceTuple) (bool, error) {
+	if !t.Valid() {
+		return false, fmt.Errorf("служебный кортеж назван не целиком (%q): писать нечего", t.String())
+	}
+	tag, err := w.tx.Exec(ctx, `
+		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		SELECT 'fga.tuple.write',
+		       jsonb_build_object('user', $1::text, 'object', $3::text || ':' || $4::text, 'relation', $2::text),
+		       now()
+		 WHERE NOT EXISTS (
+		       SELECT 1 FROM kaname.relation_fact f
+		        WHERE f.subject = $1::text AND f.relation = $2::text
+		          AND f.object_type = $3::text AND f.object_id = $4::text)`,
+		t.User(), t.Relation(), t.ObjectType(), t.ObjectID())
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // subjectRef переводит получателя выдачи в пару, которой его адресует хранилище.

@@ -16,12 +16,14 @@ package servicemanifest
 // факт дома, взятый у той же оснастки (`manifestoracle.Canon`).
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/manifestoracle"
 )
@@ -168,6 +170,129 @@ func TestMRW10_RecipientKindTheRelationDoesNotAdmitIsRefused(t *testing.T) {
 	t.Run("system_viewer, без оракула — отказ не производится (путь старта)", func(t *testing.T) {
 		if _, err := manifest.Load(viewer); err != nil {
 			t.Fatalf("без оракула судья утверждает о виде получателя: %v", err)
+		}
+	})
+}
+
+// serviceDocument — встроенный манифест как дерево YAML с ОДНОЙ правкой
+// верхнего уровня (раздел `notifications` лежит рядом с `seed`, а не внутри).
+func serviceDocument(t *testing.T, edit func(doc map[string]any)) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := yaml.Unmarshal(Raw(), &doc); err != nil {
+		t.Fatalf("встроенный манифест не разобран как YAML: %v", err)
+	}
+	edit(doc)
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatalf("документ пробы не собран: %v", err)
+	}
+	return out
+}
+
+// tupleCall — записанный вызов порта: служебный кортеж, который применитель
+// отдал хранилищу.
+type tupleCall struct{ user, relation, object string }
+
+// tupleRecorder — порт хранилища, записывающий служебные кортежи и молча
+// соглашающийся со всем остальным: предмет пробы — только строка
+// `notifications`, посев группы в ней не участвует.
+type tupleRecorder struct{ tuples []tupleCall }
+
+func (r *tupleRecorder) UpsertServiceAccount(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+func (r *tupleRecorder) UpsertGroup(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+func (r *tupleRecorder) JoinGroup(context.Context, string, string, string, string) (bool, error) {
+	return true, nil
+}
+func (r *tupleRecorder) GrantRelation(context.Context, moduleseed.Subject, string, string, string) (bool, error) {
+	return true, nil
+}
+func (r *tupleRecorder) GrantRole(context.Context, moduleseed.Subject, string, string, string) (bool, error) {
+	return true, nil
+}
+func (r *tupleRecorder) WriteServiceTuple(_ context.Context, tu moduleseed.ServiceTuple) (bool, error) {
+	r.tuples = append(r.tuples, tupleCall{user: tu.User(), relation: tu.Relation(), object: tu.Object()})
+	return true, nil
+}
+
+type recorderTx struct{ w *tupleRecorder }
+
+func (tx recorderTx) RunInWriteTx(ctx context.Context, fn func(context.Context, moduleseed.Writer) error) error {
+	return fn(ctx, tx.w)
+}
+
+// TestNTF1F21_AccessServiceNotificationsLine — исключение службы доступа (Р3):
+// её манифест несёт только `readers: [notify]` без `namespace`.
+//
+// (а) принят, и применитель заводит РОВНО `service:notify reader
+// notification_feed:kaname` — ни одного кортежа с субъектом `service:kaname` и
+// объектом `notification_namespace:kaname`; (б) с `namespace` — находка «у
+// службы доступа служебного принципала нет (MRW-1 Р1)», ни одного кортежа.
+// Близнец формы — тот же документ, судимый как манифест МОДУЛЯ: без `namespace`
+// он отвергается, то есть исключение даёт именно разряд службы, а не форма.
+func TestNTF1F21_AccessServiceNotificationsLine(t *testing.T) {
+	readersOnly := serviceDocument(t, func(doc map[string]any) {
+		doc["notifications"] = map[string]any{"readers": []any{"notify"}}
+	})
+	withNamespace := serviceDocument(t, func(doc map[string]any) {
+		doc["notifications"] = map[string]any{"namespace": "kaname", "readers": []any{"notify"}}
+	})
+
+	t.Run("(а) только readers — принят, один кортеж reader на ленту kaname", func(t *testing.T) {
+		m, err := loadDocument(readersOnly)
+		if err != nil {
+			t.Fatalf("строка службы доступа `notifications: {readers: [notify]}` отвергнута: %v", err)
+		}
+		rec := &tupleRecorder{}
+		census, err := moduleseed.NewApplier(recorderTx{w: rec}).Apply(context.Background(), m, nil)
+		if err != nil {
+			t.Fatalf("применитель отверг принятую строку: %v", err)
+		}
+		t.Logf("перепись: %s", census)
+		want := tupleCall{user: "service:notify", relation: "reader", object: "notification_feed:kaname"}
+		if len(rec.tuples) != 1 || rec.tuples[0] != want {
+			t.Fatalf("заведены кортежи %+v, ожидался ровно %+v", rec.tuples, want)
+		}
+		for _, tu := range rec.tuples {
+			if tu.user == "service:kaname" || strings.HasPrefix(tu.object, "notification_namespace:") {
+				t.Fatalf("служба доступа получила служебного принципала либо пространство: %+v", tu)
+			}
+		}
+	})
+
+	t.Run("(б) с namespace — находка, кортежей ноль", func(t *testing.T) {
+		_, err := loadDocument(withNamespace)
+		if !errors.Is(err, manifest.ErrAccessServiceHasNoServicePrincipal) {
+			t.Fatalf("строка службы доступа с namespace принята: %v", err)
+		}
+		if !strings.Contains(err.Error(), "у службы доступа служебного принципала нет (MRW-1 Р1)") {
+			t.Fatalf("находка не называет причину словами приёмки: %v", err)
+		}
+
+		// Последний рубеж — применитель: разобранная (а) с namespace, дописанным
+		// в обход разбора, свой манифест не применяется.
+		m, lerr := loadDocument(readersOnly)
+		if lerr != nil {
+			t.Fatalf("предпосылка не создана — (а) не разобрана: %v", lerr)
+		}
+		m.Notifications.Namespace = "kaname"
+		rec := &tupleRecorder{}
+		_, aerr := moduleseed.NewApplier(recorderTx{w: rec}).Apply(context.Background(), m, nil)
+		if !errors.Is(aerr, manifest.ErrAccessServiceHasNoServicePrincipal) {
+			t.Fatalf("применитель своего манифеста принял namespace: %v", aerr)
+		}
+		if len(rec.tuples) != 0 {
+			t.Fatalf("при отказе заведены кортежи: %+v", rec.tuples)
+		}
+	})
+
+	t.Run("близнец: та же форма без namespace в манифесте МОДУЛЯ — находка", func(t *testing.T) {
+		if _, err := manifest.Load(readersOnly); !errors.Is(err, manifest.ErrNotificationNamespaceForeign) {
+			t.Fatalf("манифест модуля без namespace принят — исключение дала форма, а не разряд: %v", err)
 		}
 	})
 }
