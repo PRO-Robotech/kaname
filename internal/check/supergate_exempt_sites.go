@@ -865,11 +865,12 @@ func stringConst(info *types.Info, e ast.Expr) (string, bool) {
 }
 
 // reportSecondDecl — запись МНОЖЕСТВА, членом которого назван тип перечня вне
-// его объявления: ключ литерала словаря, элемент литерала среза или массива,
-// ветка switch. Значение поля структуры и значение словаря членом множества не
-// являются — это употребление слова модели (кортеж посева
+// его объявления: ключ или значение литерала словаря, элемент литерала среза
+// или массива, ветка switch. Из суждения выведено ровно одно — значение поля
+// литерала структуры: это употребление слова модели (кортеж посева
 // `moduleseed.ServiceTuple{objectType: …}`), а запрет З19 — на вторую
-// декларацию набора. Тип литерала берётся у проверки типов, поэтому
+// декларацию набора. Словарь, решающий по значениям, — та же вторая
+// декларация, поэтому его значения судятся наравне с ключами. Тип литерала берётся у проверки типов, поэтому
 // именованный тип и вложенный литерал с опущенным типом судятся по
 // подлежащему типу.
 func reportSecondDecl(rep *SuperGateReport, fset *token.FileSet, sp *superGatePkg, n ast.Node,
@@ -888,7 +889,7 @@ func reportSecondDecl(rep *SuperGateReport, fset *token.FileSet, sp *superGatePk
 		case *types.Map:
 			for _, el := range x.Elts {
 				if kv, ok := el.(*ast.KeyValueExpr); ok {
-					exprs = append(exprs, kv.Key)
+					exprs = append(exprs, kv.Key, kv.Value)
 				}
 			}
 		case *types.Slice, *types.Array:

@@ -156,9 +156,10 @@ func TestSuperGateExemptSitesInjection_LedgerRowWithoutPlaceIsFound(t *testing.T
 // предмета: одноимённая функция пакета (не член семейства по идентичности),
 // литерал множества со строкой вне перечня, и строка из перечня там, где она
 // значение, а не член множества: поле литерала структуры (именованное и
-// позиционное — форма кортежа посева `moduleseed.ServiceTuple`) и значение
-// словаря. Запрет З19 — на вторую декларацию МНОЖЕСТВА, а не на употребление
-// слова модели.
+// позиционное — форма кортежа посева `moduleseed.ServiceTuple`). Запрет З19 —
+// на вторую декларацию МНОЖЕСТВА, а не на употребление слова модели. Значение
+// словаря близнецом не является: словарь, решающий по значениям, — та же
+// вторая декларация, и оно судится (EverySetFormIsFound).
 func TestSuperGateExemptSitesInjection_LawfulTwinsAreSilent(t *testing.T) {
 	rep := scanSuperGate(t, loadSuperGateLedger(t), check.SuperGateOverlay{
 		userPkg: {injectedFile: injectedHeader + "package user\n\n" +
@@ -167,8 +168,7 @@ func TestSuperGateExemptSitesInjection_LawfulTwinsAreSilent(t *testing.T) {
 			"var injectedTwin = map[string]bool{\"notification_feed_x\": IsClusterAdminE()}\n\n" +
 			"type injectedTuple struct{ objectType string }\n\n" +
 			"var injectedNamedField = injectedTuple{objectType: \"notification_feed\"}\n\n" +
-			"var injectedPositionalField = &injectedTuple{\"notification_namespace\"}\n\n" +
-			"var injectedMapValue = map[string]string{\"feed\": \"notification_feed\"}\n"},
+			"var injectedPositionalField = &injectedTuple{\"notification_namespace\"}\n"},
 	})
 	for _, f := range rep.Findings {
 		t.Errorf("законный близнец дал находку: %s", f)
@@ -178,11 +178,12 @@ func TestSuperGateExemptSitesInjection_LawfulTwinsAreSilent(t *testing.T) {
 // TestSuperGateExemptSitesInjection_EverySetFormIsFound — каждая законная в Go
 // форма записи множества со строкой из перечня — ровно одна находка: ключ
 // словаря (в том числе именованного типа и вложенного литерала с опущенным
-// типом), элемент среза и массива, ветка switch.
+// типом), значение словаря, элемент среза и массива, ветка switch.
 func TestSuperGateExemptSitesInjection_EverySetFormIsFound(t *testing.T) {
 	for name, body := range map[string]string{
 		"ключ словаря":                   "var injectedSet = map[string]struct{}{\"notification_feed\": {}}\n",
 		"ключ словаря именованного типа": "type injectedSetT map[string]bool\n\nvar injectedSet = injectedSetT{\"notification_namespace\": true}\n",
+		"значение словаря":               "var injectedSet = map[string]string{\"feed\": \"notification_feed\"}\n",
 		"элемент среза":                  "var injectedSet = []string{\"notification_feed\"}\n",
 		"элемент массива":                "var injectedSet = [...]string{\"notification_namespace\"}\n",
 		"элемент вложенного литерала":    "var injectedSet = map[string][]string{\"exempt\": {\"notification_feed\"}}\n",
