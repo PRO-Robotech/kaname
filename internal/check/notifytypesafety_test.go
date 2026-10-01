@@ -22,6 +22,7 @@ package check_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -74,9 +75,11 @@ func logCorelibPin(t *testing.T, root string) {
 	cmd := exec.Command("go", "list", "-m", "-f", "{{.Version}} {{with .Replace}}=> {{.Path}} {{.Version}}{{end}}", // #nosec G204 -- argv фиксирован
 		"github.com/PRO-Robotech/corelib")
 	cmd.Dir = root
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: версия corelib в графе модулей дерева не установлена: %v", err)
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: версия corelib в графе модулей дерева не установлена: %v\n%s", err, stderr.String())
 	}
 	v := strings.TrimSpace(string(out))
 	if !strings.HasPrefix(v, "v") || strings.Contains(v, "=>") {
@@ -284,7 +287,7 @@ func injectedKanameTree(t *testing.T) string {
 func buildInjectedKaname(src, dst string) (string, error) {
 	out, err := gitenv.Command(src, "ls-files", "-z").Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git ls-files %s: %w", src, err)
 	}
 	copied := 0
 	for _, rel := range strings.Split(string(out), "\x00") {
@@ -297,28 +300,28 @@ func buildInjectedKaname(src, dst string) (string, error) {
 			continue // удалён в рабочей копии: в судимом дереве его нет
 		}
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("lstat %s: %w", rel, err)
 		}
 		to := filepath.Join(dst, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
-			return "", err
+			return "", fmt.Errorf("mkdir %s: %w", rel, err)
 		}
 		switch {
 		case fi.Mode()&fs.ModeSymlink != 0:
 			target, err := os.Readlink(from)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("readlink %s: %w", rel, err)
 			}
 			if err := os.Symlink(target, to); err != nil {
-				return "", err
+				return "", fmt.Errorf("symlink %s: %w", rel, err)
 			}
 		case fi.Mode().IsRegular():
 			raw, err := os.ReadFile(from) // #nosec G304 -- отслеживаемый файл дерева пробы
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("read %s: %w", rel, err)
 			}
 			if err := os.WriteFile(to, raw, fi.Mode().Perm()); err != nil {
-				return "", err
+				return "", fmt.Errorf("write %s: %w", rel, err)
 			}
 		default:
 			continue
@@ -334,15 +337,15 @@ func buildInjectedKaname(src, dst string) (string, error) {
 	} {
 		to := filepath.Join(dst, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
-			return "", err
+			return "", fmt.Errorf("mkdir %s: %w", rel, err)
 		}
 		if err := os.WriteFile(to, []byte(body), 0o600); err != nil {
-			return "", err
+			return "", fmt.Errorf("write %s: %w", rel, err)
 		}
 	}
 	for _, args := range [][]string{{"init", "--quiet", "-b", "main"}, {"add", "-A"}} {
 		if out, err := gitenv.Command(dst, args...).CombinedOutput(); err != nil {
-			return "", errors.New("git " + strings.Join(args, " ") + ": " + err.Error() + ": " + string(out))
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
 		}
 	}
 	return dst, nil

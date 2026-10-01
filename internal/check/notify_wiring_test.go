@@ -103,7 +103,8 @@ func TestNTF1D08_InjectionInKanameIsFound(t *testing.T) {
 }
 
 // copyWorkflowsWithout копирует рабочие процессы src во временный каталог,
-// снимая шаги, чьё тело `run:` равно drop (пусто — не снимать). Шаг снимается
+// снимая шаги, чьё тело `run:` равно drop (пусто — не снимать; файл всё равно
+// проходит разбор и Marshal, как у инъекции). Шаг снимается
 // разбором YAML, а не правкой текста: правка текста попадала бы и в прозу
 // комментариев, где та же запись объяснена.
 func copyWorkflowsWithout(t *testing.T, src, drop string) (string, int) {
@@ -122,17 +123,19 @@ func copyWorkflowsWithout(t *testing.T, src, drop string) (string, int) {
 		if err != nil {
 			t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %v", err)
 		}
-		if drop != "" && (strings.HasSuffix(e.Name(), ".yml") || strings.HasSuffix(e.Name(), ".yaml")) {
+		// Каждый файл рабочего процесса идёт путём «разбор → Marshal» и у
+		// близнеца, и у инъекции: копии различаются ровно снятым шагом, а не
+		// ещё и формой записи (кавычки, отступы, комментарии после Marshal).
+		if strings.HasSuffix(e.Name(), ".yml") || strings.HasSuffix(e.Name(), ".yaml") {
 			var doc yaml.Node
 			if err := yaml.Unmarshal(raw, &doc); err != nil {
 				t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %s не разбирается YAML: %v", e.Name(), err)
 			}
-			n := dropRunSteps(&doc, drop)
-			if n > 0 {
-				removed += n
-				if raw, err = yaml.Marshal(&doc); err != nil {
-					t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %v", err)
-				}
+			if drop != "" {
+				removed += dropRunSteps(&doc, drop)
+			}
+			if raw, err = yaml.Marshal(&doc); err != nil {
+				t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %s не записывается YAML: %v", e.Name(), err)
 			}
 		}
 		if err := os.WriteFile(filepath.Join(dst, e.Name()), raw, 0o600); err != nil {
