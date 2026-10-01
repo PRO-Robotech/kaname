@@ -30,9 +30,10 @@ type InteractiveClient_Status int32
 
 const (
 	InteractiveClient_STATUS_UNSPECIFIED InteractiveClient_Status = 0
-	// The client is registered at the provider and may run ceremonies.
+	// The client is registered and may run ceremonies.
 	InteractiveClient_ACTIVE InteractiveClient_Status = 1
-	// Delete has been accepted; the client is being removed at the provider.
+	// The client is being removed. No path of the service writes this state:
+	// Delete removes the row on the request path.
 	InteractiveClient_DELETING InteractiveClient_Status = 2
 )
 
@@ -81,20 +82,17 @@ func (InteractiveClient_Status) EnumDescriptor() ([]byte, []int) {
 // completes an interactive sign-in ceremony and ends up holding a bearer the
 // edge accepts.
 //
-// WHY THIS RESOURCE EXISTS. The platform could issue a bearer to a MACHINE and
-// could not issue one to a HUMAN: every client the identity provider knows was
-// registered by one of three iam use-cases, and all three hard-code
-// `client_credentials` / `jwt-bearer`. There was no creator of an
-// `authorization_code` client at all, so the ceremony had nothing to run
-// against. This resource is that creator's subject.
+// WHY THIS RESOURCE EXISTS. The sign-in ceremony (`authorization_code`, then
+// `refresh_token`) runs only against a registered client, and this resource is
+// the one path that registers such a client: service-account keys and personal
+// tokens never produce the `authorization_code` shape.
 //
-// WHY IT IS ADMIN-ONLY AND INTERNAL. Registering a client at the identity
-// provider is a credential-lifecycle act: whoever holds it decides where
-// authorization codes may be redirected. The provider's administrative API
-// authenticates nobody by design, so the capability is expressed as an
-// `Internal*` service on the cluster-internal listener (:9091) and never on
-// the external endpoint (ban #6). iam remains the single facade to the
-// identity provider (core rule #16) — no other workload registers clients.
+// WHY IT IS ADMIN-ONLY AND INTERNAL. Registering a client is a
+// credential-lifecycle act: whoever holds it decides where authorization codes
+// may be redirected. The capability is therefore an `Internal*` service on the
+// cluster-internal listener (:9091), never on the external endpoint (ban #6),
+// and every RPC requires `system_admin`. The registry is the service's own
+// table `interactive_clients`; no other path registers a client.
 //
 // Resource id prefix: `ic-` (hyphen canon, `ids.PrefixInteractiveClientHyphen`).
 // The id is immutable for the life of the resource and is the ONLY externally
@@ -114,7 +112,7 @@ type InteractiveClient struct {
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Where the identity provider may redirect the authorization code. At least
+	// Where the sign-in ceremony may redirect the authorization code. At least
 	// one entry is required and every entry must be an absolute `https://` URL:
 	// a redirect target is where the code — a credential — is delivered, so a
 	// plaintext or relative target hands it to whoever is listening.
@@ -123,9 +121,8 @@ type InteractiveClient struct {
 	// `redirect_uris` when present.
 	PostLogoutRedirectUris []string `protobuf:"bytes,7,rep,name=post_logout_redirect_uris,json=postLogoutRedirectUris,proto3" json:"post_logout_redirect_uris,omitempty"`
 	// The name the sign-in ceremony knows the client by. Output-only — assigned
-	// by the registry that holds the client (the external identity provider, or
-	// the service's own registry), echoed here so the ceremony can be started
-	// against it.
+	// by the service's registry at Create and immutable, echoed here so the
+	// ceremony can be started against it.
 	ClientId string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	// Audiences stamped into bearers issued through this client. Output-only
 	// (decision Р2): the caller does not supply an audience, iam stamps the
@@ -133,19 +130,19 @@ type InteractiveClient struct {
 	// cannot be set correctly is a field without a reader; a field that CAN be
 	// set incorrectly breaks the edge silently.
 	Audiences []string `protobuf:"bytes,9,rep,name=audiences,proto3" json:"audiences,omitempty"`
-	// OAuth2 grant types the provider will honour for this client. Output-only —
+	// OAuth2 grant types the token endpoint honours for this client. Output-only —
 	// always exactly `["authorization_code", "refresh_token"]`; this resource
 	// exists to create that shape and offers no other.
 	GrantTypes []string `protobuf:"bytes,10,rep,name=grant_types,json=grantTypes,proto3" json:"grant_types,omitempty"`
 	// How the client authenticates at the token endpoint. Output-only and
-	// immutable after Create; the registry that holds the client decides it:
+	// immutable after Create:
 	//
-	//   - `none` — a public client: it holds no secret and proves possession by
-	//     PKCE alone (the external identity provider registers this form);
 	//   - `client_secret_basic` — a confidential client: it presents the secret
 	//     shown once in `CreateInteractiveClientResponse.client_secret` by HTTP
-	//     Basic, and PKCE on top (the service's own registry registers this
-	//     form).
+	//     Basic, and PKCE on top. Create registers every client in this form;
+	//   - `none` — a public client: it holds no secret and proves possession by
+	//     PKCE alone. Create does not produce this form; a client that carries it
+	//     keeps it, because the method cannot change after Create.
 	//
 	// This field, not the emptiness of any other, is the sign that the client
 	// has a secret. The resource itself carries no secret field at all.

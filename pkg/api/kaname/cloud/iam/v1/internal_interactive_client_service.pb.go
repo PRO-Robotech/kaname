@@ -225,8 +225,8 @@ type CreateInteractiveClientRequest struct {
 	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
 	Labels map[string]string `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Where the provider may redirect the authorization code. Required, and
-	// every entry must be an absolute `https://` URL.
+	// Where the sign-in ceremony may redirect the authorization code. Required,
+	// and every entry must be an absolute `https://` URL.
 	RedirectUris []string `protobuf:"bytes,4,rep,name=redirect_uris,json=redirectUris,proto3" json:"redirect_uris,omitempty"`
 	// Optional post-logout redirect targets; same `https://` rule when present.
 	PostLogoutRedirectUris []string `protobuf:"bytes,5,rep,name=post_logout_redirect_uris,json=postLogoutRedirectUris,proto3" json:"post_logout_redirect_uris,omitempty"`
@@ -312,13 +312,11 @@ type CreateInteractiveClientResponse struct {
 	// endpoint together with `interactive_client.client_id`, by HTTP Basic
 	// (RFC 6749 §2.3.1), as `token_endpoint_auth_method` says.
 	//
-	// WHAT EMPTINESS MEANS. Non-empty EXACTLY in the answer of the Create call
-	// for a client whose `token_endpoint_auth_method` presents a secret. Empty
-	// in the answer of the call for a client with `none` — that client has no
-	// secret. Empty ALWAYS in the operation read back later
-	// (`OperationService.Get`): the secret is shown once. Whether the client has
-	// a secret is told by `token_endpoint_auth_method`, not by this field being
-	// empty.
+	// WHAT EMPTINESS MEANS. Non-empty EXACTLY in the answer of the Create call:
+	// Create registers every client with `client_secret_basic`. Empty ALWAYS in
+	// the operation read back later (`OperationService.Get`): the secret is shown
+	// once. Whether a client has a secret is told by
+	// `token_endpoint_auth_method`, not by this field being empty.
 	ClientSecret  string `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
