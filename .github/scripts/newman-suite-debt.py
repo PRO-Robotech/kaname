@@ -108,9 +108,13 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 (`docs/engineering/acceptance/*.md`) разбором заголовков сценариев, и каждая либо
 НЕСЁТСЯ модулем кейсов (идентификатор стоит в строковом литерале модуля
 `tests/newman/cases/<коллекция>.py`; комментарий не в счёт), либо записана в
-`SCENARIO_DEBT` с доводом и держателем в закрытой форме `HOLDER_RE`. Сверка — в
-обе стороны: позиция без кейса и без записи роняет перепись; запись, чью позицию
-уже несёт модуль, либо запись без позиции уровня E роняет её же.
+`SCENARIO_DEBT` с доводом и держателем в закрытой форме `HOLDER_RE`, либо записана
+в `SCENARIO_HOME` — её кейс лежит в наборе другого репозитория, и гоняет его шаг
+конвейера там (координаты закрытой формы `HOME_CASE_RE`, `HOME_STEP_RE`; дерева
+дома рядом нет, и перепись говорит, что его не сверяла). Сверка — в обе стороны:
+позиция без кейса и без записи роняет перепись; запись, чью позицию уже несёт
+модуль, запись без позиции уровня E и позиция, записанная и долгом, и домом,
+роняют её же.
 
 ИСХОДЫ:
     0  — перепись напечатана (долг — не отказ: он именно объявляется);
@@ -957,32 +961,22 @@ HOLDER_REF_RE = re.compile(r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]*)")
 _HOLDER_EDGE_HALF = (
     "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
     "расщепить коллекцию либо переутвердить по фактическому производителю")
-# ЗАДАЧА #415 РЕШИЛА ИСХОД ПО КАЖДОЙ ИЗ ЧЕТЫРНАДЦАТИ, и держатель называет
-# РЕШЁННЫЙ исход, а не перечень возможных. Прежняя запись «переутвердить,
-# перенести либо снять» стояла у всех четырнадцати одинаково и не говорила, что
-# будет сделано: решённое было неотличимо от нерешённого.
+# ИСХОД ПО КОЛЛЕКЦИЯМ ПРЕДМЕТА ПЛАТФОРМЫ РЕШЁН ПО ДЕРЕВУ, А НЕ ПО ЯРЛЫКУ
+# (kaname#415). Пять были записаны C с доводом «читает `md.resource`», а коммит
+# #50 перевёл их пины на `md.scope` своей двери: против края они упали бы,
+# исполнимы только на собственном фронте, и производитель у них — служба.
+# `geo-read` снята: обе половины её предмета держит набор geo платформы
+# (`region.py`, `zone.py`, `authz-deny.py`).
 #
-# Решение по дереву, а не по ярлыку. Пять из четырнадцати были записаны C с
-# доводом «читает `md.resource`», а коммит #50 уже перевёл эти одиннадцать пинов
-# на `md.scope` своей двери: против края они упали бы, исполнимы только на
-# собственном фронте. Их исход — переутвердить по фактическому производителю
-# (служба); `iam-role` гоняется, `iam-group` ждёт ключа посева, три читают
-# предъявителя церемонии и потому держатся #398. `geo-read` снята: обе половины
-# её предмета держит набор geo платформы (`region.py`, `zone.py`, `authz-deny.py`).
-#
-# ШЕСТЬ ПЕРЕНОСОВ ИСПОЛНЕНЫ и сняты из этого дерева вместе со своими записями:
-# `authz-sa-apitoken` и `label-revoke-vpc` — в `services/vpc/tests/newman`,
-# `label-revoke-nlb` — в `services/nlb/tests/newman`, `label-revoke-storage` — в
+# СЕМЬ КОЛЛЕКЦИЙ ПЕРЕНЕСЕНЫ в наборы платформы, и в этом дереве их нет, как нет и
+# их записей: сверка ведомости с деревом идёт в обе стороны. `authz-sa-apitoken`
+# и `label-revoke-vpc` — в `services/vpc/tests/newman`, `label-revoke-nlb` — в
+# `services/nlb/tests/newman`, `label-revoke-storage` — в
 # `services/storage/tests/newman`, `iam-internal-only-check` и
-# `iam-project-edge-format` — в `gateway/tests/newman` платформы. Держатель
-# переноса — PRO-Robotech/kacho#2912: кейсы там гоняют шаги «гейт — newman
-# зелёный (vpc | nlb | storage | api-gateway)». Записи о снятом здесь нет и быть
-# не может — сверка ведомости с деревом идёт в обе стороны.
-def _holder_platform_move(suite: str) -> str:
-    """Исход «перенести в платформу»: дом по предмету — названный набор платформы."""
-    return (f"PRO-Robotech/kaname#415 — перенос в набор `{suite}` платформы "
-            "(PRO-Robotech/kacho) с названным шагом её конвейера; из дерева службы "
-            "снимается тем же изменением, что заводит шаг там")
+# `iam-project-edge-format` — в `gateway/tests/newman` (держатель переноса —
+# PRO-Robotech/kacho#2912); `iam-account-id-edge-format` — в
+# `gateway/tests/newman` (PRO-Robotech/kacho#2939). Там кейсы гоняют шаги «гейт —
+# newman зелёный (vpc | nlb | storage | api-gateway)».
 
 
 # ОТКАЗ БЕЗ ВЕРДИКТА ПЕРЕУТВЕРЖДЁН ПО ФАКТИЧЕСКОМУ ПРОИЗВОДИТЕЛЮ (kaname#415):
@@ -1010,22 +1004,16 @@ def _holder_platform_move(suite: str) -> str:
 # собственного внутреннего фронта кругом края не становится by construction:
 # `POST /iam/v1/internal/interactiveClients` через него — 403 `AUTHZ_DENIED`.
 # Чёрный ящик доходит до этих глаголов только через край.
-_HOLDER_IC_PLATFORM_EDGE = (
-    "PRO-Robotech/kacho#2913 — позицию утверждает кейс набора края платформы "
-    "(`gateway/tests/newman/cases/iam-interactive-client.py`, в паре с законным "
-    "близнецом), его гоняет шаг «гейт — newman зелёный (api-gateway)» на стенде "
-    "платформы под посадкой own")
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек без выдач, его куёт волна церемонии автономного стенда (`seed_ceremony.py --wave`); цели привязки `userPA1Id`/`userPureNoBindingsId` — строки людей машинного посева; гоняет задание `stand-ceremony` (kaname#398)", ""),
     "authz-failclosed": ("A", "отказ без вердикта на собственном фронте автономного стенда: при свёрнутой базе удостоверение со свежим вердиктом об отзыве получает 503/14 фиксированным текстом рубежа, которому нужна база, на чтении объекта и на семи списках — никогда 200 с пустой страницей; близнец с чужим `kid` — 401 рубежа предъявителя; производитель всех утверждений — служба; гоняет шаг волны свёртки базы задания `stand` (kaname#415)", ""),
     "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
     "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
-    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, машине порог уровня не подлежит, и его пишет машинный посев; отказ формы идентификатора аккаунта-цели авторизации, который производит край, вынесен в `iam-account-id-edge-format`; гоняет задание `stand-ceremony`", ""),
+    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, машине порог уровня не подлежит, и его пишет машинный посев; отказ формы идентификатора аккаунта-цели авторизации, который производит край, утверждает набор края платформы (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-edge-format.py`); гоняет задание `stand-ceremony`", ""),
     "iam-access-binding-include-revoked": ("A", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, и его пишет машинный посев; гоняет задание `stand-ceremony`", ""),
     "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
     "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction — у каждого заводящего кейса своя личность уровней «1» и «2», их куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
-    "iam-account-id-edge-format": ("C", "два кейса, вынесенные при переезде `iam-access-binding-account-scope` и `iam-membership-read` на собственный фронт (kaname#398): пара 400/3 на негодной форме идентификатора аккаунта, стоящего целью авторизации в пути, — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-30); порядок на собственном фронте — предмет kaname#168", _holder_platform_move("gateway/tests/newman")),
     "iam-account-redesign": ("B", "7 человеческих предъявителей из 10 — личности уровней «1» и «2» куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
     "iam-authz-grant-check-propagation": ("A", "выдача → внутренний `iam:check` собственного внутреннего фронта — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA` (выпуск под одним опрашивается под другим), и его пишет машинный посев. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415), затем с B (kaname#398); гоняет задание `stand-ceremony`", ""),
     "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
@@ -1035,7 +1023,7 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
     "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", ""),
     "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается; людей куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
-    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем, его куёт волна церемонии автономного стенда вторым фактором; отказ формы идентификатора аккаунта, который производит край, вынесен в `iam-account-id-edge-format`; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем, его куёт волна церемонии автономного стенда вторым фактором; отказ формы идентификатора аккаунта, который производит край, утверждает набор края платформы (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-edge-format.py`); гоняет задание `stand-ceremony` (kaname#398)", ""),
     "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
     "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
     "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
@@ -1099,6 +1087,21 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
 # заводит кейс (`reconcile_scenario_debt`).
 ScenarioDebt = dict[str, tuple[str, str]]
 
+# ПОЗИЦИЯ, ЧЕЙ СКВОЗНОЙ ДОМ — ДРУГОЙ РЕПОЗИТОРИЙ: ID сценария → (кейс в доме, шаг
+# конвейера дома). Это не долг: у позиции есть кейс и шаг, который его гоняет, и нет
+# задачи, которая её прогонит. Это и не позиция, которую несёт модуль: модуль лежит
+# в чужом дереве, и перепись его не читает. Координаты — в межрепозиторной форме
+# `<владелец>/<репозиторий>:<путь>` закрытого вида (`HOME_CASE_RE`, `HOME_STEP_RE`),
+# и свой репозиторий домом не бывает: свой модуль судится модулем. Запись сверяется в
+# обе стороны, как и долг (`reconcile_scenario_debt`). Сверку с деревом дома перепись
+# НЕ выполняет — его рядом нет, — и печатает это строкой вывода.
+ScenarioHome = dict[str, tuple[str, str]]
+HOME_CASE_RE = re.compile(
+    r"^(PRO-Robotech/(?!kaname:)[a-z0-9][a-z0-9-]*):"
+    r"(?:[A-Za-z0-9_.-]+/)*tests/newman/cases/[A-Za-z0-9_-]+\.py$")
+HOME_STEP_RE = re.compile(
+    r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*):\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml «[^«»]+»$")
+
 # Позиции DoD п.7 приёмки секрета клиента (kaname#405,
 # `docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md`).
 # Уровень I у них держат интеграционные пробы; здесь — только сквозной уровень.
@@ -1108,28 +1111,21 @@ ScenarioDebt = dict[str, tuple[str, str]]
 # край (`internal/authzguard/caller_policy.go`, `GatewayFrontedInternalRPCs`), а хоп
 # собственного внутреннего фронта кругом края не становится и получает 403
 # `AUTHZ_DENIED`. Посев церемонии зовёт `Create` gRPC-ом с листом края
-# (`tests/authz-fixtures/seed_ceremony.py`), поэтому 06 гоняется, а у кейсов набора
-# такой двери нет. Позиции 01, 04, 08, 09 и 10 утверждает набор края платформы —
-# туда переехала коллекция интерактивного клиента, и держатель назван там же.
-_IC_SECRET_OWN_DOOR = (
-    "стенд `chart-own`: REST набора до глаголов `InternalInteractiveClientService` не "
-    "доходит — их круг вызывающих край (`GatewayFrontedInternalRPCs`), хоп собственного "
-    "внутреннего фронта получает 403 AUTHZ_DENIED; посев церемонии проходит глагол "
-    "gRPC-ом с листом края, у кейсов newman такой двери нет")
+# (`tests/authz-fixtures/seed_ceremony.py`), поэтому 06 гоняется здесь. Позиции 01,
+# 04, 08, 09 и 10 утверждает кейс набора края платформы, и его гоняет шаг
+# конвейера края.
+_HOME_IC_SECRET = (
+    "PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py",
+    "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — newman зелёный (api-gateway)»")
+SCENARIO_HOME: ScenarioHome = {
+    sid: _HOME_IC_SECRET
+    for sid in ("IC-SECRET-01", "IC-SECRET-04", "IC-SECRET-08", "IC-SECRET-09", "IC-SECRET-10")}
+
 _HOLDER_EXTERNAL_LANDING_REMOVAL = (
     "PRO-Robotech/kaname#363 — посадка `external` снята вместе с ключом посадки; "
     "позиция уходит из приёмки её редакцией, правило поля держит пара с IC-SECRET-01")
 
 SCENARIO_DEBT: ScenarioDebt = {
-    "IC-SECRET-01": ("секрет выдаётся в ответе `Create` посадки own; " + _IC_SECRET_OWN_DOOR,
-                     _HOLDER_IC_PLATFORM_EDGE),
-    "IC-SECRET-04": ("несостоявшееся заведение секрета не выдаёт и материала не оставляет; "
-                     + _IC_SECRET_OWN_DOOR, _HOLDER_IC_PLATFORM_EDGE),
-    "IC-SECRET-08": ("`Get` секрета не несёт; " + _IC_SECRET_OWN_DOOR, _HOLDER_IC_PLATFORM_EDGE),
-    "IC-SECRET-09": ("`List` и `Update` секрета не несут, маской его не задать; "
-                     + _IC_SECRET_OWN_DOOR, _HOLDER_IC_PLATFORM_EDGE),
-    "IC-SECRET-10": ("снятие не оставляет годного секрета; " + _IC_SECRET_OWN_DOOR,
-                     _HOLDER_IC_PLATFORM_EDGE),
     # Условие позиции — стенд посадки `external` — не создаёт ни один стенд службы:
     # посадка у службы одна, `own` (ключ посадки снят), стенд чарта один
     # (`chart-own`), а коллекции интерактивного клиента, где позиции место по DoD,
@@ -1688,21 +1684,46 @@ def carried_positions(cases: pathlib.Path, ids: set[str]) -> dict[str, list[str]
     return out
 
 
-def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt
+def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt,
+                            home: ScenarioHome | None = None
                             ) -> tuple[list[str], dict[str, str], dict[str, list[str]], int,
                                        dict[str, list[int]]]:
-    """Позиции уровня E против модулей кейсов и записей долга — В ОБЕ СТОРОНЫ.
+    """Позиции уровня E против модулей кейсов, записей долга и записей о доме в
+    другом репозитории — В ОБЕ СТОРОНЫ.
 
     Возвращает находки, позиции (ID → приёмка), кто их несёт, сколько приёмок
     прочитано и перепись заголовков по формам.
     """
+    home = {} if home is None else home
     positions, docs, unknown, forms = acceptance_positions(newman.parents[1] / ACCEPTANCE_REL)
-    carried = carried_positions(newman / "cases", set(positions) | set(debt))
+    carried = carried_positions(newman / "cases", set(positions) | set(debt) | set(home))
     out = [f"заголовок сценария в незнакомой форме (уровни не разобраны): {u}" for u in unknown]
     for sid in sorted(positions):
-        if sid not in carried and sid not in debt:
+        if sid not in carried and sid not in debt and sid not in home:
             out.append(f"позиция {sid} ({positions[sid]}) объявлена сквозной (уровень E), а ни "
-                       f"кейса в модулях набора, ни записи долга о ней нет")
+                       f"кейса в модулях набора, ни записи долга, ни записи о доме в другом "
+                       f"репозитории о ней нет")
+    for sid, (case, step) in sorted(home.items()):
+        if sid not in positions:
+            out.append(f"запись дома позиции {sid} пережила предмет: сценария уровня E с таким "
+                       f"ID нет ни в одной приёмке")
+        elif sid in carried:
+            out.append(f"запись дома позиции {sid} пережила предмет: её несёт модуль "
+                       f"{', '.join(carried[sid])} этого дерева — запись снимается тем же "
+                       f"изменением, что завело кейс")
+        if sid in debt:
+            out.append(f"позиция {sid} записана и долгом, и домом в другом репозитории — исход "
+                       f"у позиции один")
+        cm, sm = HOME_CASE_RE.match(case), HOME_STEP_RE.match(step)
+        if cm is None:
+            out.append(f"кейс дома позиции {sid} вне закрытой формы «PRO-Robotech/<другой "
+                       f"репозиторий>:<путь>/tests/newman/cases/<модуль>.py»: {case!r}")
+        if sm is None:
+            out.append(f"шаг дома позиции {sid} вне закрытой формы «PRO-Robotech/<репозиторий>:"
+                       f".github/workflows/<файл>.yml «<имя шага>»»: {step!r}")
+        if cm and sm and cm.group(1) != sm.group(1):
+            out.append(f"шаг дома позиции {sid} назван в другом репозитории, чем её кейс: "
+                       f"{sm.group(1)} против {cm.group(1)}")
     for sid, (why, holder) in sorted(debt.items()):
         if sid not in positions:
             out.append(f"запись долга позиции {sid} пережила предмет: сценария уровня E с таким "
@@ -1720,13 +1741,16 @@ def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt
 
 
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-        ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None) -> int:
-    # Ведомость позиций, как и ведомость производителя, — ПАРАМЕТР. Объявленная
-    # берётся только для объявленного дерева: синтетическая ведомость коллекций
+        ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None,
+        scenario_home: ScenarioHome | None = None) -> int:
+    # Ведомости позиций, как и ведомость производителя, — ПАРАМЕТРЫ. Объявленные
+    # берутся только для объявленного дерева: синтетическая ведомость коллекций
     # значит синтетическое дерево, и объявленных позиций у него нет.
-    declared_tree = ledger is None and scenario_debt is None
+    declared_tree = ledger is None and scenario_debt is None and scenario_home is None
     if scenario_debt is None:
         scenario_debt = SCENARIO_DEBT if ledger is None else {}
+    if scenario_home is None:
+        scenario_home = SCENARIO_HOME if ledger is None else {}
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
@@ -1765,7 +1789,7 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     drift += lane_drift
     # ПОЗИЦИЯ ПРИЁМКИ — мельче коллекции, и её долг судится отдельно (kaname#449).
     pos_drift, positions, carried, acc_docs, acc_forms = reconcile_scenario_debt(
-        newman, scenario_debt)
+        newman, scenario_debt, scenario_home)
     if declared_tree and acc_docs == 0:
         pos_drift.append(f"приёмок в {ACCEPTANCE_REL} прочитано 0 — перепись позиций "
                          f"беспредметна: «долга позиций нет» значило бы «ничего не прочитано»")
@@ -1877,10 +1901,15 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     # её несёт, либо чем и кем записан её долг.
     ran = [sid for sid in positions if any(runs.get(st) for st in carried.get(sid, []))]
     built = [sid for sid in positions if sid in carried and sid not in ran]
-    owed = [sid for sid in positions if sid not in carried]
+    homed = [sid for sid in positions if sid not in carried and sid in scenario_home]
+    owed = [sid for sid in positions if sid not in carried and sid not in scenario_home]
     print(f"ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (сквозной прогон на стенде): приёмок прочитано {acc_docs}, "
           f"позиций {len(positions)} — гоняется {len(ran)} · собрана, коллекция не гоняется "
-          f"{len(built)} · долг {len(owed)}")
+          f"{len(built)} · долг {len(owed)} · в доме другого репозитория {len(homed)}")
+    # Дом другого репозитория — ЗАПИСЬ, а не измерение: его дерева рядом нет, и
+    # сказать это надо там же, где названо число.
+    print(f"  дом в другом репозитории: записей {len(homed)}; сверка с деревом дома здесь НЕ "
+          f"выполняется — кейс и шаг названы записью, их наличие в доме этот прогон не измерил")
     # Прочитанное ПО КАЖДОЙ ФОРМЕ: «позиций N» без него не отличает «форма не
     # встречается» от «форму не читают» — ровно тот случай, что был слеп (J4).
     print("  формы заголовка сценария (с перечнем уровней прочитано · из них уровня E): "
@@ -1893,6 +1922,10 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
                      f"собрана в {', '.join(carried[sid])}, коллекция не гоняется "
                      f"(её держатель — строкой выше)")
             print(f"  · {sid} [{positions[sid]}] — {state}")
+        elif sid in scenario_home:
+            case, step = scenario_home[sid]
+            print(f"  · {sid} [{positions[sid]}] — в доме {HOME_CASE_RE.match(case).group(1)}: "
+                  f"кейс {case}, шаг {step}")
         else:
             why, holder = scenario_debt[sid]
             print(f"  · {sid} [{positions[sid]}] — ДОЛГ: {why}")
@@ -2944,6 +2977,61 @@ def self_test() -> int:
         _c("полосы держателя: перепись называет прочитанное, названное и судимое",
            rc == 0 and ("держателей прочитано 1 · полос названо 2 · из них судимо модулем "
                         "кейсов 1") in buf.getvalue(), f"код {rc}; {buf.getvalue()[-900:]}")
+
+        # Ось 20: ПОЗИЦИЯ, ЧЕЙ СКВОЗНОЙ ДОМ — ДРУГОЙ РЕПОЗИТОРИЙ (kaname#416). Позицию
+        # несёт кейс набора платформы, и её прогоняет шаг конвейера там. Записью долга
+        # она не является — у неё нет задачи, которая её прогонит, — а модулем этого
+        # дерева не несётся. Запись о доме судится в обе стороны, как и долг: позиция
+        # без уровня E, позиция, которую несёт свой модуль, и позиция с двумя исходами
+        # сразу — находки; координата вне закрытой формы — тоже. Различие против
+        # законного близнеца — в одном факте.
+        (acc / "synthetic.md").write_text(base_heads, encoding="utf-8")
+        hcase = "PRO-Robotech/kacho:gateway/tests/newman/cases/synthetic.py"
+        hstep = "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — синтетика»"
+        for label, debt, home, want_rc, want_texts in (
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: позиция E записана домом другого репозитория по форме — "
+                 "молчание", {}, {"SYN-03": (hcase, hstep)}, 0, ()),
+                ("запись дома позиции, которую несёт свой модуль, — пережила предмет",
+                 {}, {"SYN-03": (hcase, hstep), "SYN-01": (hcase, hstep)}, 1,
+                 ("позиции SYN-01", "несёт модуль carrier")),
+                ("запись дома позиции без уровня E — без предмета",
+                 {}, {"SYN-03": (hcase, hstep), "SYN-02": (hcase, hstep)}, 1,
+                 ("позиции SYN-02", "нет ни в одной приёмке")),
+                ("позиция записана и долгом, и домом — исход у позиции один",
+                 {"SYN-03": ("довод", hold)}, {"SYN-03": (hcase, hstep)}, 1,
+                 ("позиция SYN-03", "исход у позиции один")),
+                ("кейс дома без приставки репозитория — находка",
+                 {}, {"SYN-03": ("gateway/tests/newman/cases/synthetic.py", hstep)}, 1,
+                 ("кейс дома позиции SYN-03", "вне закрытой формы")),
+                ("кейс дома в ЭТОМ репозитории — находка: свой модуль судится модулем",
+                 {}, {"SYN-03": ("PRO-Robotech/kaname:tests/newman/cases/synthetic.py", hstep)},
+                 1, ("кейс дома позиции SYN-03", "вне закрытой формы")),
+                ("шаг дома без файла конвейера — находка",
+                 {}, {"SYN-03": (hcase, "PRO-Robotech/kacho: «гейт — синтетика»")}, 1,
+                 ("шаг дома позиции SYN-03", "вне закрытой формы")),
+                ("шаг другого репозитория, чем кейс, — находка",
+                 {}, {"SYN-03": (hcase, "PRO-Robotech/kaname:.github/workflows/e2e-newman.yml "
+                                        "«гейт — синтетика»")}, 1,
+                 ("позиции SYN-03", "в другом репозитории, чем её кейс"))):
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt=debt,
+                         scenario_home=home)
+            _c(f"дом позиции: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:500]}")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt={},
+                     scenario_home={"SYN-03": (hcase, hstep)})
+        hout = buf.getvalue()
+        _c("дом позиции: перепись числом — позиция не в долге, а в доме другого репозитория",
+           rc == 0 and ("позиций 2 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 0 · "
+                        "в доме другого репозитория 1") in hout, f"код {rc}; {hout[-900:]}")
+        _c("дом позиции: строка позиции называет кейс и шаг дома и говорит, что дом здесь "
+           "не сверялся",
+           f"SYN-03 [synthetic.md] — в доме PRO-Robotech/kacho: кейс {hcase}, шаг {hstep}" in hout
+           and "сверка с деревом дома здесь НЕ выполняется" in hout, hout[-900:])
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
