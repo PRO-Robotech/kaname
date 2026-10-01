@@ -168,7 +168,12 @@ _ALL_SANITISERS = tuple(h for hs in SANITISER.values() for h in hs)
 # можно внести новые молча. Потолок, который не может покраснеть, храповиком не
 # является. Число взято из переписи самой пробы («подстановок в литерал строки
 # либо комментария 326»).
-STRING_LITERAL_CEILING = 326
+#
+# 326 -> 271 ПО ЗАМЕРУ ТОЙ ЖЕ ПЕРЕПИСИ: декларации, ушедшие в наборы платформы
+# (kaname#415, kaname#416 — семь модулей), унесли свои места, а модули фасада
+# токенов и отказа без вердикта сняли полосы края вместе с их скриптами. Ни одно
+# место не закрыто сериализатором — убыль целиком от снятого.
+STRING_LITERAL_CEILING = 271
 
 # ВЕДОМОСТЬ ИСХОДОВ. Ключ — (файл, что подставляется); номер строки не годится,
 # он двигается от чужой правки. Запись без места в дереве и место без записи —
@@ -182,7 +187,10 @@ RECORDED = {
     # Вместе с ними ушёл и единственный носитель исхода «текст»: в этом
     # репозитории таких подстановок ноль, и `TEXT_SEAMS` пуст НАМЕРЕННО —
     # перепись называет это числом, а не молчанием.
-    ("tests/newman/cases/authz-sa-apitoken.py", "op_id_pattern"): CODE,
+    #
+    # Запись помощника `allow_asserts` набора `authz-sa-apitoken` снята вместе с
+    # набором: он переехал в набор vpc платформы (PRO-Robotech/kacho#2912,
+    # сторона службы — kaname#415), и места в этом дереве у него нет.
     # Форма секрета удостоверения: образец приходит из общего объявления
     # (`credential-secret-form.json`), а не выписан в кейсе. Вторая сторона,
     # читающая то же объявление, чеканит значения кодом продукта и требует,
@@ -419,6 +427,44 @@ def _with_attr(module, name, value, produce):
         setattr(module, name, was)
 
 
+# Шов помощника формы секрета: подпись места и место подстановки в образце.
+# Подпись — та, что помощник обязан назвать в отказе; место подстановки берётся
+# у генератора, а не выписывается здесь второй копией.
+_SECRET_FORM_SEAM = "iam/credential_secret_pattern/kind-prefix"
+_SECRET_FORM_DECLARATION = REPO_ROOT / "tests" / "newman" / "credential-secret-form.json"
+
+
+def _secret_form_template() -> str:
+    """Образец объявления формы секрета — ИЗ САМОГО ОБЪЯВЛЕНИЯ, а не копией."""
+    return json.loads(_SECRET_FORM_DECLARATION.read_text(encoding="utf-8"))["jsPatternTemplate"]
+
+
+def _secret_form_cache(module) -> dict:
+    """Кэш объявления у ТОГО генератора, чей помощник впрыснут в декларацию."""
+    return module.credential_secret_pattern.__globals__["_credential_secret_form_cache"]
+
+
+def _with_secret_form_prefix(module, kind, prefix, produce):
+    """Подменить приставку ОДНОГО вида в прочитанном объявлении на один вызов.
+
+    Остальное объявление остаётся настоящим: помощник сперва читает его сам
+    (законным видом), затем подменяется ровно поле, которое судит шов. По выходе
+    кэш возвращается к прочитанному — соседние пробы видят настоящую форму.
+    """
+    module.credential_secret_pattern(kind, where=_SECRET_FORM_SEAM)
+    cache = _secret_form_cache(module)
+    saved = json.loads(json.dumps(cache))
+    patched = json.loads(json.dumps(cache))
+    patched["idPrefixByKind"][kind] = prefix
+    cache.clear()
+    cache.update(patched)
+    try:
+        return produce()
+    finally:
+        cache.clear()
+        cache.update(saved)
+
+
 # (сервис, декларация, подпись места, вызов, что литерал обязан собой представлять).
 #
 # Пятое поле — СОСТАВ литерала, и оно не украшение: два места из трёх подставляют
@@ -429,10 +475,21 @@ CODE_SEAMS = [
     # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
     # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
     # мелочь. В дереве платформы они остались при своих наборах.
-    ("iam", "authz-sa-apitoken", "iam/allow_asserts/operation-id",
-     lambda m, p: _with_attr(m, "_VPC_OPERATION_PREFIX", p,
-                             lambda: m.allow_asserts("PROBE", "POST", "/vpc/v1/networks")),
-     lambda p: f"/^{p}[a-z0-9]+$/"),
+    #
+    # Шов набора iam — ПОМОЩНИК ФОРМЫ СЕКРЕТА, единственный носитель исхода «код»
+    # в этом дереве (две записи ведомости выше, `basic-access-token` и
+    # `docker-lane-credential-kind`). Прежде шов стоял на помощнике
+    # `allow_asserts` набора `authz-sa-apitoken`; набор переехал в набор vpc
+    # платформы (PRO-Robotech/kacho#2912), и шов перенесён на живое место. Вход
+    # шва — ПРИСТАВКА ВИДА в объявлении `credential-secret-form.json`: это и есть
+    # значение извне, которое помощник сажает в литерал выражения.
+    ("iam", "basic-access-token", _SECRET_FORM_SEAM,
+     lambda m, p: _with_secret_form_prefix(
+         m, "userToken", p,
+         lambda: [f"pm.expect(String(s)).to.match("
+                  f"/{m.credential_secret_pattern('userToken', where=_SECRET_FORM_SEAM)}/);"]),
+     lambda p: _secret_form_template().replace(
+         _generator("iam")._CREDENTIAL_KIND_PLACEHOLDER, p)),
 ]
 
 TEXT_SEAMS = [

@@ -121,6 +121,10 @@ var deliveredPipelineFiles = []string{
 	".github/scripts/classify-integration-outcome.sh",
 	".github/scripts/go-test-verdict.py",
 	".github/scripts/gosec-gate.sh",
+	// Сверка опубликованного образа: её зовёт производитель образа после
+	// отправки (#429, п.1 предиката). Без неё шаг отказывает на отсутствующем
+	// файле, а не на образе.
+	".github/scripts/image-published-revision.sh",
 	".github/scripts/run-integration.sh",
 }
 

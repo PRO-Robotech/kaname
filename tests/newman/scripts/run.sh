@@ -213,11 +213,15 @@ run_one() {
   # список вызовов рукописный — и следующий добавленный вызов иначе снова обошёл бы
   # вычитание молча.
   if [[ "${2:-}" != "explicit" ]] && _is_delegated "$res"; then
-    echo "[delegated] ${res} — условие создаёт своя волна (run-failclosed.sh / run-ceremony.sh); здесь НЕ гоняется, вердикт по нему выносит assert-suites-green.sh"
+    echo "[delegated] ${res} — условие создаёт своя волна (свёртка базы стенда / run-ceremony.sh); здесь НЕ гоняется, вердикт по нему выносит assert-suites-green.sh"
     return 0
   fi
   if [[ "${2:-}" == "explicit" ]] && _is_delegated "$res"; then
-    echo "[delegated] ${res} запрошен ЯВНО — гоню; условие его волны прогонщик не создаёт и не проверяет: его создаёт посев волны ДО прогона (задание \`stand-ceremony\`: \`seed_ceremony.py --wave\`), а без него часть шагов ответит не тем принципалом" >&2
+    if [[ "$res" == "authz-failclosed" ]]; then
+      echo "[delegated] ${res} запрошен ЯВНО — гоню; условие его волны прогонщик не создаёт и не проверяет: его создаёт шаг волны ДО прогона (задание \`stand\`: прогрев предъявителей и \`stand-own.sh db-fold\`), а без него коллекция ответит живой базой" >&2
+    else
+      echo "[delegated] ${res} запрошен ЯВНО — гоню; условие его волны прогонщик не создаёт и не проверяет: его создаёт посев волны ДО прогона (задание \`stand-ceremony\`: \`seed_ceremony.py --wave\`), а без него часть шагов ответит не тем принципалом" >&2
+    fi
   fi
   local col="collections/${res}.postman_collection.json"
   if [[ ! -f "$col" ]]; then
@@ -458,7 +462,7 @@ else
   # contract). The legacy suite tested the tombstoned scope/scope_ref surface and
   # was only half-migrated; the redesign suite is the authoritative AccessBinding
   # coverage.
-  for res in authz-deny authz-sa-apitoken iam-account iam-project iam-user iam-role iam-group iam-service-account iam-rbac-scope-grant iam-rbac-rules-labels iam-rbac-subjects iam-whoami; do
+  for res in authz-deny iam-account iam-project iam-user iam-role iam-group iam-service-account iam-rbac-scope-grant iam-rbac-rules-labels iam-rbac-subjects iam-whoami; do
     run_one "$res"
   done
   # IAM-1 REDESIGN authz-core suites (Account/Project tenancy-tree, Role
@@ -491,7 +495,6 @@ else
   # вердикта выводится из дерева, а не из перечня вызовов), но подхват — сигнал
   # автору, а не норма: место в порядке у коллекции есть, и оно здесь.
   run_one "iam-access-binding-include-revoked"
-  run_one "iam-internal-only-check"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
   # (GET /iam/v1/permissionCatalog). Authenticated read + anonymous-deny. The CI
@@ -517,17 +520,16 @@ else
   # строки набор исполнялся бы нулём коллекций, а гейт назвал бы
   # `iam-membership-create(no-report)`.
   run_one "iam-membership-create"
-  # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to the
-  # token-signing provider (security.md §«Production-mode обязателен ВЕЗДЕ» п.4).
-  # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-13/14/15
-  # (the hook / docker-handle / provider-surface lanes the acceptance has no
-  # scenario for; the mirror lane IBT-12 left with the mirror, kaname#361). Needs
-  # THREE extra base URLs beyond the gateway ones — iamJwksBaseUrl /
-  # iamRegistryTokenBaseUrl / registryDataPlaneBaseUrl — injected as --env-var by
-  # deploy/scripts/newman-{e2e,parallel}.sh; a missing one turns the case RED naming
-  # the variable (require_env_url), never a silent skip. The CI `assert all suites
-  # green` step parses EVERY collections/*.json, so this MUST run here — otherwise the
-  # gate reports `iam-token-facade-conformance(no-report)` as a phantom failure.
+  # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to token
+  # signing (security.md §«Production-mode обязателен ВЕЗДЕ» п.4), asserted where
+  # the service produces it: its own public front and its key publisher (kaname#415;
+  # IBT-04/05/10/13 — the lanes about api-gateway listeners left with their holders,
+  # named in the module docstring). Needs ownRestBaseUrl and iamJwksBaseUrl, both
+  # written by the machine seed of the autonomous stand; a missing one turns the
+  # case RED naming the variable (require_env_url), never a silent skip. The CI
+  # `assert all suites green` step parses EVERY collections/*.json, so this MUST run
+  # here — otherwise the gate reports `iam-token-facade-conformance(no-report)` as a
+  # phantom failure.
   run_one "iam-token-facade-conformance"
   # The atomic grant→FGA-Check propagation suite (AccessBinding/JIT/BG
   # paths). The CI `assert all suites green` step parses every
@@ -543,36 +545,14 @@ else
   # EVERY collections/*.json — so without running it here the gate reports
   # `iam-invite-grant-fga(no-report)` as a phantom failure.
   run_one "iam-invite-grant-fga"
-  # T3.1 cross-service ARM_LABELS revoke-on-label-change (workspace#113). These
-  # suites grant an ARM_LABELS role on a vpc/compute/nlb resource (matchLabels)
-  # and assert visibility (InternalIAMService.Check v_list) appears on Create and
-  # is REVOKED when the matching label is removed/changed on the resource. They
-  # are CROSS-SERVICE: they require kacho-vpc / kacho-compute / kacho-nlb deployed
-  # alongside kaname behind the gateway (the `*→iam` RegisterResource edge that
-  # feeds resource_mirror with labels). The newman-e2e of EVERY repo (iam / vpc /
-  # compute / nlb / deploy) brings up the FULL kacho-deploy umbrella (all services)
-  # and runs this shared iam suite, so these run against a complete stack — GREEN
-  # since the T3.1 fixes are in vpc/compute/nlb@main (47d707d / 4a0b010 / 3cf783e).
-  # The CI `assert all suites green` step parses EVERY collections/*.json, so they
-  # MUST run here to produce the report the gate expects.
-  run_one "label-revoke-vpc"
-  run_one "label-revoke-nlb"
-  # label-revoke-storage — the OWNER-side carrier. label-revoke-compute is GONE: the
-  # block-storage duplicate in kacho-compute it drove (Disk/Image/Snapshot) is retired,
-  # and this suite was added ahead of that removal precisely so the evidence would not
-  # leave with it. Same shape, storage FGA types (storage_volume / storage_snapshot /
-  # storage_image). GREEN and deliberately NOT whitelisted — see docs/RESULTS.md
-  # "Resolved — label-remove on storage revokes". It was red on the revoke half when
-  # written and was fixed the same day; the note here claiming otherwise outlived the
-  # fix. With the compute duplicate gone this is the ONLY carrier of the property, so
-  # a red here is a product finding standing on its own, never a budget to widen.
-  run_one "label-revoke-storage"
   # label-revoke-iam — the IAM-NATIVE analogue: a label clear via
   # ProjectService.Update(update_mask=labels, empty body) must CLEAR the labels
   # (not a silent no-op) and REVOKE the ARM_LABELS grant on iam.project (v_list
-  # True->False). Unlike the cross-service suites above, the selectable resource is
-  # iam-native (label-selectable iam-direct, same-DB), so it runs fully against the
-  # IAM-only stack too. gen.py ALWAYS emits collections/label-revoke-iam.json, and
+  # True->False). Unlike the cross-service label-revoke suites — those live with
+  # their subject in the platform's vpc / nlb / storage suites
+  # (PRO-Robotech/kacho#2912) — the selectable resource is iam-native
+  # (label-selectable iam-direct, same-DB), so it runs fully against the IAM-only
+  # stack too. gen.py ALWAYS emits collections/label-revoke-iam.json, and
   # the CI `assert all suites green` step parses EVERY collections/*.json — so this
   # MUST run here, else the gate reports `label-revoke-iam(no-report)` as a phantom
   # failure. Env deps (jwtBootstrap / jwtAccountAdminA / accountAId) are seeded by
@@ -615,17 +595,6 @@ else
   # `rbac-visibility-set(no-report)`. Env deps (jwtAccountAdminA / accountAId / userINVId /
   # jwtInvitee) are seeded by the shared fixtures.
   run_one "rbac-visibility-set"
-  # iam-interactive-client — CRUD/валидация клиента интерактивного входа на
-  # cluster-internal листенере (ic-id, ровно один https-audience, grant
-  # authorization_code; повтор имени → ALREADY_EXISTS; redirect_uris; malformed-id
-  # → INVALID_ARGUMENT, а НЕ NOT_FOUND; immutable-vs-unknown в маске; повторное
-  # удаление идемпотентно). Условия ЧЕЛОВЕКА не требует и в DELEGATED-набор
-  # (authz-failclosed + волна церемонии) не входит — значит место ему здесь.
-  # gen.py ВСЕГДА эмитит collections/iam-interactive-client.json, а авторитетный
-  # гейт разбирает КАЖДУЮ collections/*.json, поэтому без этого вызова коллекция
-  # не отрабатывает вовсе и докладывается `iam-interactive-client(no-report)`:
-  # восемь кейсов, которые не могут упасть, потому что не исполняются.
-  run_one "iam-interactive-client"
   # iam-list-visibility — страница списка есть страница ВИДИМОГО (задача #645):
   # свой объект лежит на ПЕРВОЙ маленькой странице, хотя перед ним по времени
   # создания лежат чужие, и ни одной чужой строки с ним не приходит. Порог
@@ -717,12 +686,13 @@ fi
 # `<stem>(no-report)`, если волна не отработала. То есть вычитание здесь ничего
 # спрятать не может: оно снимает ложный MISSING у прогонщика, а не проверку.
 #
-#   authz-failclosed — нужен ВЫКЛЮЧЕННЫЙ store прав; scripts/run-failclosed.sh
-#     сворачивает его в ноль, гоняет коллекцию и поднимает обратно. В дереве
-#     платформы волну запускал PRO-Robotech/kacho:deploy/scripts/newman-parallel.sh
-#     (WAVE 3, после всех суит); в конвейере службы шага этой волны нет, и исход
-#     коллекции записан держателем в ведомости переписи долга (kaname#415) —
-#     соседям выключенный store прав сломал бы всё.
+#   authz-failclosed — нужна НЕДОСТИЖИМАЯ база при живой службе. Условие создаёт
+#     шаг волны задания `stand` процесса e2e-newman.yml (kaname#415): после всех
+#     коллекций собственного фронта он предъявляет фронту удостоверения коллекции
+#     (контроль и прогрев вердикта об отзыве), сворачивает базу стенда
+#     (`.github/scripts/stand-own.sh db-fold`) и гоняет коллекцию ЭТИМ прогонщиком
+#     с `--service authz-failclosed`; базу возвращает следующий шаг (`db-unfold`).
+#     Соседям свёрнутая база сломала бы всё.
 #
 #   волна ЦЕРЕМОНИИ — коллекции, часть шагов которых требует ЧЕЛОВЕЧЕСКОГО
 #     вызывающего (аккаунт принадлежит пользователю by construction; уровень

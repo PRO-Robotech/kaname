@@ -1234,7 +1234,8 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-PRJ-DL-NEG-MALFORMED-PREFIX (IAM-PNE-1-08) ЖИВЁТ В `iam-project-edge-format.py`.
+# IAM-PRJ-DL-NEG-MALFORMED-PREFIX (IAM-PNE-1-08) ЖИВЁТ В НАБОРЕ КРАЯ ПЛАТФОРМЫ:
+# `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-project-edge-format.py`.
 #
 # Его пара `400` / `3` — производитель КРАЙ (короткое замыкание по приставке ДО
 # проверки прав, приёмка `non-empty-project-is-not-deleted.md` Н4/Н14). Этот

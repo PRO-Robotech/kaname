@@ -332,9 +332,10 @@ make -C deploy dev-up
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # Newman: отдельного набора «ключи SA» нет — они покрыты набором служебной
-# учётки и набором токена по ключу.
+# учётки здесь и набором токена по ключу в доме платформы: его предмет —
+# связка с vpc, и гоняет его конвейер платформы
+# (PRO-Robotech/kacho:services/vpc/tests/newman/cases/authz-sa-apitoken.py).
 ./services/iam/tests/newman/scripts/run.sh --service iam-service-account
-./services/iam/tests/newman/scripts/run.sh --service authz-sa-apitoken
 
 # Integration (testcontainers):
 go test -short -count=1 -timeout 120s \
