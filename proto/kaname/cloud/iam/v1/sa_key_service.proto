@@ -17,9 +17,11 @@ import "corelib/authz/v1/authz_options.proto";
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
 // SAKeyService — public-facing CRUD for static ServiceAccount OAuth keys
-// (Class A workload identity). Each key maps to an OAuth 2.0 client registered
-// with `grant_types=[client_credentials]`; external workloads exchange it for a
-// Kachō-issued JWT at the provider's standard token endpoint.
+// (Class A workload identity). Each key is a client of the service's own
+// registry, named by the id of its row. A key pair and a federated key are
+// exchanged for an access JWT at the platform token endpoint
+// (`POST /iam/v1/token`), which the service signs itself; a basic secret is
+// presented as is.
 //
 // AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
 // the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
@@ -219,7 +221,9 @@ message TrustedSubject {
 
 message IssueSAKeyResponse {
   ServiceAccountOAuthClient key = 1;
-  // Plaintext OAuth client_id (Hydra-registered).
+  // OAuth client_id — the id of the key row, the same value as `key.id` and
+  // `key_id`. The signed assertion names itself by it (`iss` and `sub`) at the
+  // platform token endpoint.
   string client_id = 2;
   // DEPRECATED — with private_key_jwt client auth the secret no
   // longer exists; this field is always empty for new keys. Kept for wire
@@ -231,30 +235,26 @@ message IssueSAKeyResponse {
   string client_secret = 3 [deprecated = true, (kaname.cloud.iam.v1.secret_bearing) = true];
   // PEM-encoded PKCS#8 ECDSA P-256 private key — SHOWN ONCE; never
   // recoverable. Caller uses it to sign `client_assertion` (RFC 7521/7523)
-  // in OAuth2 client_credentials requests against Hydra.
+  // in OAuth2 `client_credentials` requests to the platform token endpoint.
   //
   // Помечен носителем секрета: приватная половина — предъявительский секрет
   // ровно в том же смысле, что и однострочный базовый, и оседать в строке
   // операции, журнале аудита, ленте подписки или строке ресурса не имеет права.
   string private_key_pem = 4 [(kaname.cloud.iam.v1.secret_bearing) = true];
-  // PEM-encoded SPKI public key (informational; Hydra holds the canonical
-  // copy as a JWK in the registered client metadata).
+  // PEM-encoded SPKI public key (informational; the canonical copy is the key
+  // row, and the platform token endpoint verifies the assertion against it).
   string public_key_pem = 5;
   // JOSE signing algorithm used by the private key. Always "ES256".
   string algorithm = 6;
-  // JWK `kid` of the registered public key. Caller MUST set the `kid`
-  // header of signed assertions to this value so Hydra picks the right key.
+  // JWK `kid` of the registered public key; the same value as `client_id`.
   string key_id = 7;
-  // Перечень адресатов, которые этот ключ вправе заказать.
+  // Перечень адресатов, которые этот ключ вправе заказать, — сужение,
+  // записанное на ключе при выдаче (`audience` запроса, задача #1136).
+  // Токен-эндпоинт платформы выдаёт адресата только из этого перечня и только
+  // внутри перечня посадки (`authn.client-token.allowed-audiences`).
   //
-  // Величина зависит от контура выдачи, и это не деталь реализации, а ответ на
-  // вопрос «что этот ключ сможет заказать». Пока клиент зеркалится у прежнего
-  // издателя, решает перечень зеркала — обмен идёт у него, и он сверяет с ним.
-  // На переведённом контуре зеркала нет вовсе, и решает записанное на ключе
-  // сужение (`audience` запроса, задача #1136).
-  //
-  // Пустой перечень на переведённом контуре — утверждение, а не умолчание:
-  // сужения ключ не объявлял, действует перечень посадки.
+  // Пустой перечень — утверждение, а не умолчание: сужения ключ не объявлял,
+  // действует перечень посадки.
   repeated string audiences = 8;
 
   // Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
