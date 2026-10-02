@@ -29,10 +29,10 @@ package user
 //     (+ optionally INSERT AccessBinding).
 //  4. response = User; metadata = {user_id, account_id}.
 //
-// The Kratos admin magic-link step was removed (Kratos client deleted). Invite
-// still creates a PENDING user row + optional AccessBinding; how the invitee
-// activates the row (magic-link / IdP login / admin assist) is left to the
-// broker layer.
+// The external identity provider's admin magic-link step was removed together
+// with its client. Invite creates a PENDING user row + optional AccessBinding;
+// the invitee activates the row by registering at the invited address, on the
+// address-verification outcome (kaname#456).
 
 import (
 	"context"

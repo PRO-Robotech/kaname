@@ -275,8 +275,8 @@ go build -ldflags "-X main.buildVersion=$OCI_IMAGE_VERSION -X main.buildRevision
 
 ## Healthcheck
 
-HTTP-пробы поднимаются на cluster-internal hooks-listener (`:9092`, тот же, что
-несет Ory-вебхуки):
+HTTP-пробы поднимаются на cluster-internal диагностической поверхности (`:9095`, та
+же, что отдаёт `/metrics`); на неё же нацелены `readinessProbe` и `livenessProbe` пода:
 
 | HTTP             | Что проверяет                                                     |
 |------------------|------------------------------------------------------------------|
@@ -284,13 +284,13 @@ HTTP-пробы поднимаются на cluster-internal hooks-listener (`:9
 | `GET /readyz`    | Readiness — ping БД и поднятый LRO-worker; при падении → 503.     |
 
 ```bash
-curl http://kaname:9092/healthz
+curl http://kaname:9095/healthz
 # → 200 OK
 ```
 
-В деплое liveness/readiness Kubernetes-пробы сконфигурированы как `tcpSocket` на
-gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для ручной проверки и
-внешнего мониторинга через hooks-listener.
+В деплое liveness/readiness Kubernetes-пробы — `httpGet` на `/healthz` и `/readyz`
+порта `metrics` (`deploy/templates/deployment.yaml`); схема пробы выводится из
+транспорта диагностической поверхности.
 
 ## Подробности реализации
 

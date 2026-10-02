@@ -223,7 +223,7 @@ func TestForeignOperatorInjection_OperatorMissingFromDependenciesIsAFinding(t *t
 		Kind: "PrometheusRule", Provider: "Prometheus Operator", Foreign: true,
 		Knob: "alertRules.enabled", RemedyValue: "false", Default: "true",
 	}
-	silentDeps := "<strong>PostgreSQL</strong> · <strong>Ory Kratos</strong>"
+	silentDeps := "<strong>PostgreSQL</strong> · <strong>SMTP-релей</strong>"
 	findings := judgeForeignRow(row, silentDeps, values)
 	require.NotEmpty(t, findings, "оператор, не названный в зависимостях, прошёл молча")
 	require.Contains(t, strings.Join(findings, "\n"), "зависимостей рантайма")

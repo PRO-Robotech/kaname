@@ -147,8 +147,8 @@ type Writer interface {
 	// письмом.
 	EmitInviteMail(ctx context.Context, intent outboxtypes.InviteMailIntent) (queued bool, err error)
 
-	// InsertRecoveryCompletion — idempotency-gate INSERT for the Kratos
-	// recovery-completed webhook (kaname.recovery_completions, migration 0015).
+	// InsertRecoveryCompletion — idempotency-gate INSERT for the
+	// recovery-completed callback (kaname.recovery_completions, migration 0015).
 	// Runs `INSERT … ON CONFLICT (recovery_jti) DO NOTHING` and
 	// then reads back the stored row, all on THIS writer-tx:
 	//   - inserted=true  → this recovery_jti is new → caller runs the side-effects

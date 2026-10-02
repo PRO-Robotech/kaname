@@ -5,7 +5,7 @@ discrepancy between an early design assumption and the actual uniqueness schema.
 
 ## The discrepancy
 
-An early design reasoned about which multi-account states a single Kratos identity
+An early design reasoned about which multi-account states a single identity
 (`external_id`) can occupy by citing only the **per-Account** uniqueness:
 
 ```

@@ -13,7 +13,7 @@ import (
 // InviteStatus — invite-flow state for a User row.
 //
 // PENDING — created via `UserService.Invite`, external_id="" until first
-// login; the invitee has not yet confirmed identity through Kratos.
+// login; the invitee has not yet registered and verified the address.
 // ACTIVE  — either self-signup via `UpsertFromIdentity` without a pending
 // invite, or a PENDING row activated on first-login (matched by email).
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается

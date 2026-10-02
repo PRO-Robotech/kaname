@@ -11,7 +11,7 @@ package pg
 // external_id <> ''` — с условием на непустоту. Принадлежность аккаунтам
 // выражают ЧЛЕНСТВА (`memberships`), и их у человека может быть несколько.
 //
-// Здесь стояло «User is scoped per-Account (один Kratos identity → N User-row)»
+// Здесь стояло «User is scoped per-Account (одна identity → N User-row)»
 // — верное до отрыва идентичности от аккаунта (стадия S4-expand) и ложное
 // после. Утверждение расходилось с перечнем инвариантов НИЖЕ В ЭТОЙ ЖЕ шапке:
 // там уже стояли глобальные ключи. Два места об одном предмете, и неверным было
@@ -195,7 +195,7 @@ func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email)
 	return out, nil
 }
 
-// FindActiveByExternalID — все ACTIVE-row'ы по identity (Kratos sub) через
+// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
 // все Account'ы. Использует partial index `users_active_external_id_idx`.
 func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
 	if externalID == "" {
@@ -222,7 +222,7 @@ func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID doma
 	return out, nil
 }
 
-// FindByExternalIDInStatuses — все row'ы по identity (Kratos sub) через все
+// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 // Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at ASC.
 // В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы —
 // recovery обязан их находить и re-enable'ить (OnRecoveryCompleted).

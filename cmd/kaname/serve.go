@@ -1571,7 +1571,8 @@ func runServe(cfg config.Config) error {
 	}
 
 	// Enterprise SSO HTTP listeners (SCIM + SAML) are not part of this service;
-	// identity federation flows exclusively through the Ory stack (Kratos/Hydra OIDC).
+	// sign-in, session and token minting are this service's own (no external
+	// identity provider).
 
 	// Параллельный запуск
 	// public-сервера + internal-сервера + shutdown-waiter через

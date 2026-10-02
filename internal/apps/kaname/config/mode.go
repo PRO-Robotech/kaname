@@ -10,7 +10,7 @@
 //
 // Mode: ENUM Mode{ModeDev, ModeProduction, ModeProductionStrict} — overall
 // service mode (anonymous-allowed / fail-closed / fail-closed+strict-TLS).
-// The same ENUM governs the mandatory JWT (Kratos/Hydra) on the
+// The same ENUM governs the mandatory JWT on the
 // public-listener once AuthN core is wired.
 package config
 

@@ -58,7 +58,7 @@ func TestToken_AnonymousDisabled_NoCreds_401(t *testing.T) {
 	assertNoBearerHandedOut(t, rec.Body.Bytes())
 }
 
-// TestToken_AnonymousEnabled_IssuerUnavailable_503 — Hydra unreachable on the
+// TestToken_AnonymousEnabled_IssuerUnavailable_503 — issuer unavailable on the
 // anon mint path is fail-closed 503 (no token), same as the SA-key path.
 func TestToken_AnonymousEnabled_IssuerUnavailable_503(t *testing.T) {
 	iss := &fakeIssuer{anonEnabled: true, anonErr: registrytokenuc.ErrIssuerUnavailable}
@@ -75,7 +75,7 @@ func TestToken_AnonymousEnabled_IssuerUnavailable_503(t *testing.T) {
 }
 
 // TestToken_AnonymousEnabled_Unauthenticated_401 — an anon path returning
-// ErrUnauthenticated (e.g. Hydra rejects the anon client) falls back to the 401
+// ErrUnauthenticated (e.g. the issuer rejects the anon client) falls back to the 401
 // challenge, never leaking a token.
 func TestToken_AnonymousEnabled_Unauthenticated_401(t *testing.T) {
 	iss := &fakeIssuer{anonEnabled: true, anonErr: registrytokenuc.ErrUnauthenticated}

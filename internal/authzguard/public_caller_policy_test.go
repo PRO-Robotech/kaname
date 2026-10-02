@@ -219,7 +219,7 @@ func TestPublicCallerPolicy_NoVerifiedCert_Prod(t *testing.T) {
 	for _, ctx := range []context.Context{
 		context.Background(),
 		grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, false), // предъявлен, но не проверен
-		grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/kacho/sa/hydra", true),
+		grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/kacho/sa/foreign-workload", true),
 	} {
 		if err := p.allow(ctx, projectGetMethod); err == nil {
 			t.Fatal("a caller without a verified kacho module certificate passed the public floor")

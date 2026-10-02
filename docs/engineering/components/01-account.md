@@ -11,8 +11,8 @@ Account замещает связку `Organization` + `Cloud` из устаре
 промежуточной сущности Organization.
 
 **Use-cases:**
-- Создание новой организации при signup-callback от Ory Kratos (через
-  `InternalUserService.UpsertFromIdentity`).
+- Создание новой организации при регистрации человека (`POST /iam/v1/auth/register`,
+  `internal/apps/kaname/api/registration`).
 - Перенос ресурсов между Account запрещен — каждый ресурс намертво привязан
   к Account через FK ON DELETE RESTRICT.
 - Tenant-isolation основан на Account (`owner_user_id` определяет, кто
@@ -310,10 +310,10 @@ make -C deploy logs-svc SVC=iam
 - **Delete cascade** — НЕТ. Все child-ресурсы (Project, SA, Group, ...) надо
   удалить вручную, иначе RESTRICT-блок. Каскадное удаление через границу
   сервиса не выполняется (только same-DB FK cascade).
-- **Bootstrap path** — при первом signup-е User'а от Ory Kratos,
-  `InternalUserService.UpsertFromIdentity` создает User + Account + Project +
+- **Bootstrap path** — регистрация человека (и административный
+  `InternalUserService.UpsertFromIdentity`) создает User + Account + Project +
   default-AccessBindings в одной транзакции; обходит per-resource Create
-  use-case (см. [`21-internal-iam.md`](21-internal-iam.md)).
+  use-case (см. [`03-user.md`](03-user.md), [`21-internal-iam.md`](21-internal-iam.md)).
 
 ## Связанные компоненты
 

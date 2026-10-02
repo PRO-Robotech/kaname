@@ -7,8 +7,8 @@ package pg_test
 //
 // P0 regression guard: the api-gateway logout handler writes a revocation via
 // InternalSessionRevocationsService.Revoke, which lands in session_revocations;
-// the Hydra refresh-hook then reads the SAME table via IsRevoked and denies the
-// refresh. Before the fix the Revoke RPC was unimplemented, so nothing was ever
+// the hot-path reader then reads the SAME table via IsRevoked and denies the
+// token. Before the fix the Revoke RPC was unimplemented, so nothing was ever
 // written and IsRevoked always returned false (revocation was inert).
 //
 // This integration test exercises the production write path

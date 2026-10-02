@@ -42,7 +42,7 @@ const (
 //
 // НЕ публикуется на external TLS listener. Регистрируется в api-gateway internal mux
 // (внутренний listener) — нужен auth-interceptor api-gateway (звать LookupSubject
-// из interceptor'а после валидации JWT (Ory Hydra)).
+// из interceptor'а после валидации JWT).
 //
 // Вызывается из admin-tooling (grpcurl) и authz-interceptor api-gateway.
 type InternalIAMServiceClient interface {
@@ -317,7 +317,7 @@ func (c *internalIAMServiceClient) CheckBasicCredentialLive(ctx context.Context,
 //
 // НЕ публикуется на external TLS listener. Регистрируется в api-gateway internal mux
 // (внутренний listener) — нужен auth-interceptor api-gateway (звать LookupSubject
-// из interceptor'а после валидации JWT (Ory Hydra)).
+// из interceptor'а после валидации JWT).
 //
 // Вызывается из admin-tooling (grpcurl) и authz-interceptor api-gateway.
 type InternalIAMServiceServer interface {

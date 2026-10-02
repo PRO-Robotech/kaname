@@ -52,7 +52,7 @@ const (
 	readFloorMethod = "/kaname.cloud.iam.v1.InternalIAMService/LookupSubject"
 	// checkMethod — the PDP, exempt from the floor (INV-FLOOR-5).
 	checkMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
-	// recoveryMethod — secret-authed Kratos hook, exempt (INV-FLOOR-6).
+	// recoveryMethod — secret-authed recovery callback, exempt (INV-FLOOR-6).
 	recoveryMethod = "/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted"
 	// isRevokedMethod — hot-path, exempt (INV-FLOOR-6).
 	isRevokedMethod = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
