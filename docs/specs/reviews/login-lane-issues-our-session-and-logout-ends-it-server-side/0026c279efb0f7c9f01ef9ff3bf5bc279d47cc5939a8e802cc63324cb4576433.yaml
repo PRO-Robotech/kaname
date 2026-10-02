@@ -72,3 +72,12 @@ constructibility: >-
   Посева не было: стенда в задании нет. Неконструируемость Ф3-46 и Ф3-44 показана двумя стражами
   ключа в дереве службы.
 event_body: acceptance-reviewer · CHANGES_REQUESTED · 0026c279efb0f7c9f01ef9ff3bf5bc279d47cc5939a8e802cc63324cb4576433
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

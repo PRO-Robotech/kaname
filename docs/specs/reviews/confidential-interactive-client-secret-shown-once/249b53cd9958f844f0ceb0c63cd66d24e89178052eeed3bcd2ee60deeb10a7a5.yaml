@@ -83,3 +83,12 @@ constructibility: >-
   (два стража ключа); живые Given 01–10, 12, 13 этой редакцией не менялись — «не выполнилось» 0
   по предмету круга.
 event_body: acceptance-reviewer · CHANGES_REQUESTED · 249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

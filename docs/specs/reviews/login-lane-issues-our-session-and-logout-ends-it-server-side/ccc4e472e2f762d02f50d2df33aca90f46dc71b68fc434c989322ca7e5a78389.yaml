@@ -65,3 +65,12 @@ constructibility: >-
   деревом: ключа нет в deploy/values.prod.yaml и deploy/values.yaml (предикат §21 → 0), самоотчёт
   называет own словом фундамента (bootposture.go:92).
 event_body: acceptance-reviewer · APPROVED · ccc4e472e2f762d02f50d2df33aca90f46dc71b68fc434c989322ca7e5a78389
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

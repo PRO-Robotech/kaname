@@ -69,3 +69,12 @@ constructibility: >-
   Посева не было: стенда в задании нет. Предмет круга — координаты дома и довод, а не Given; общий
   Given «R = REDIRECT набора края» сверен по дереву платформы. «Не выполнилось» 0 по предмету круга.
 event_body: acceptance-reviewer · APPROVED · 0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
