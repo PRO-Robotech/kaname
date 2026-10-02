@@ -17,6 +17,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > 2026-10-02 · круг 3 · CHANGES_REQUESTED · `249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5` ·
 > `docs/specs/reviews/confidential-interactive-client-secret-shown-once/249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5.yaml`
 > (строка вписана редакцией 4)
+> 2026-10-02 · круг 4 · APPROVED · `0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea` ·
+> `docs/specs/reviews/confidential-interactive-client-secret-shown-once/0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea.yaml`
+> (строка вписана редакцией 5: вердикт — о редакции 4 и на правки после неё не переносится)
 > **Дата:** 2026-09-26
 > **Редакция:** 2 (круг 2). Документ правлен ПОСЛЕ вердикта круга 1 (CHANGES_REQUESTED на редакцию 1,
 > отпечаток `f1786b6a…`); строка состояния не тронута; что и по какой находке изменено — §9.
@@ -434,8 +437,9 @@ InteractiveClient.Create` стоит и сообщением статуса, и 
 - запись долга `IC-SECRET-11` в `.github/scripts/newman-suite-debt.py` и её держатель
   `_HOLDER_EXTERNAL_LANDING_REMOVAL` снимаются вместе с позицией. Перепись позиций иначе
   красна: запись долга пережила предмет;
-- проба слоя use-case `TestCreate_IC11_PublicClientAnswersWithAnEmptySecret`
-  (`internal/apps/kaname/api/interactive_client/create_secret_test.go`) судит согласие тройки
+- проба слоя use-case `TestCreate_R4_PublicClientAnswersWithAnEmptySecret`
+  (`internal/apps/kaname/api/interactive_client/create_secret_test.go`; до редакции 5 — под именем
+  по снятому ID) судит согласие тройки
   «способ ⟺ материал ⟺ секрет» (Р4, ветка `none`) над подставным реестром. Её предмет — правило
   ответа, а не посадка, поэтому она **переводится**, а не снимается: держит Р4 на слое use-case,
   а имя и комментарий перестают называть снятый ID. Пока имя прежнее, это ссылка на снятый
@@ -563,7 +567,7 @@ InteractiveClient.Create` стоит и сообщением статуса, и 
    позиция 11 снята редакцией 3 вместе с посадкой `external` (`kaname#363`; §4, группа E).
    Позиция, у которой ни модуля службы, ни записи дома нет, остаётся записью долга с держателем,
    а не зелёным.
-   Проба слоя use-case `TestCreate_IC11_PublicClientAnswersWithAnEmptySecret` переводится тем же
+   Проба слоя use-case `TestCreate_R4_PublicClientAnswersWithAnEmptySecret` переводится тем же
    запросом волны `kaname#497`, что снимает запись долга `IC-SECRET-11` (§4, группа E): имя и
    комментарий перестают называть снятый ID. Пройдено, когда
    `git grep -n -e 'IC11' -e 'IC-SECRET-11' -- internal cmd tests .github | wc -l` → 0 на голове
@@ -645,8 +649,33 @@ git ls-tree -r --name-only origin/main | grep -c 'gateway/tests/newman/cases/iam
 | находка | род | что изменено |
 |---|---|---|
 | B1 (блокирующая) | PRODUCER | §1 строка 14 — читатель тела ответа `Create` на сквозном уровне — набор края платформы с координатой и ревизией; он уже разбирает новый тип ответа и видит контракт через пин (Р8). §4 общие Given — посадка E разведена по дому (06 — `chart-own`, прочие — стенд платформы); R равен `REDIRECT` набора края. IC-SECRET-08, третье And — снят довод о проверке снятой посадки в снятом файле; утверждение «сверка по значению S, а не образцом имени» и его причина — прежние. DoD п.7 — сквозной уровень по `SCENARIO_HOME` ведомости службы, держатели `kacho#2913` и `kaname#416` |
-| N1 | DoD | DoD п.7 — перевод пробы `TestCreate_IC11_PublicClientAnswersWithAnEmptySecret` назван изменением (запрос волны `kaname#497`) и предикатом пройденности |
+| N1 | DoD | DoD п.7 — перевод пробы TestCreate_IC11_PublicClientAnswersWithAnEmptySecret (с редакции 5 имя прозой: функция переименована, §12) назван изменением (запрос волны `kaname#497`) и предикатом пройденности |
 | N2 | — | правки документа не требует: запись долга `IC-SECRET-11` и держатель `_HOLDER_EXTERNAL_LANDING_REMOVAL` снимаются тем же запросом волны (§4, группа E) |
 
 **Не тронуты:** ID, «Дано», «Когда» и «Тогда» сценариев, кроме довода в третьем And IC-SECRET-08;
 решения Р1–Р8; §2, §3, §5, §6, §8, §9, §10. Сценариев 12 живых из 13 меток.
+
+---
+
+## §12 Редакция 5 — перевод пробы Р4 исполнен
+
+Основание — DoD п.7: проба слоя use-case ветки способа `none` переименована и её комментарий больше
+не называет снятый ID; утверждение пробы не тронуто. Координата документа переведена на новое имя,
+иначе гейт координат приёмок (`TestAcceptanceProbeCoordinateResolves`) красен: прежнего имени в
+дереве нет.
+
+```sh
+# ДОМ: PRO-Robotech/kaname, ветка 553
+git grep -n -e 'IC11' -e 'IC-SECRET-11' -- internal cmd tests .github | wc -l          # → 0
+go test -count=1 -run '^TestCreate_R4_' ./internal/apps/kaname/api/interactive_client/  # → PASS
+```
+
+| что | было | стало | довод |
+|---|---|---|---|
+| шапка, история review | строки круга 4 нет | строка круга 4 · APPROVED | вердикт — о редакции 4 |
+| §4, группа E, судьба пробы | координата по прежнему имени | `TestCreate_R4_PublicClientAnswersWithAnEmptySecret` | функция переименована тем же запросом волны `kaname#497` |
+| §7 (DoD) п.7 | координата по прежнему имени | новое имя | то же |
+| §11, строка N1 | координата по прежнему имени | прежнее имя прозой | свидетельство круга остаётся, мёртвого адреса нет |
+
+**Не тронуты:** ID, «Дано», «Когда» и «Тогда» сценариев; решения Р1–Р8; §1–§3, §5, §6, §8–§10;
+§7 кроме имени в п.7; §11 кроме имени в N1. Сценариев 12 живых из 13 меток.
