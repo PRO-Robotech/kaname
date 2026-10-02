@@ -1660,7 +1660,7 @@ def _aid_create(name, body, auth, acc_var=None, prj_var=None, pre=(), extra=()):
 
 
 def _aid_metadata_is(var) -> list:
-    return [f"pm.test('metadata.accountId is the supplied id ({var})', () => "
+    return [f"pm.test({js_str(f'metadata.accountId is the supplied id ({var})')}, () => "
             f"pm.expect((pm.response.json().metadata || {{}}).accountId, JSON.stringify(pm.response.json()))"
             f".to.eql(pm.environment.get({js_str(var)})));"]
 
