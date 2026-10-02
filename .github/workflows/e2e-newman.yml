@@ -601,46 +601,48 @@ jobs:
       # идёт ПОСЛЕ коллекций собственного фронта и в перечень шага выше не входит,
       # а базу возвращает следующий шаг при любом исходе этого.
       #
-      # ПЕРЕД СВЁРТКОЙ оба удостоверения, которыми идут прогонщик и коллекция,
-      # предъявляются фронту. Это контроль — при живой базе 200, то есть стенд
-      # исправен, и отказ под свёрткой произведёт она, — и прогрев: положительный
-      # вердикт об отзыве фронт помнит срок кеша (у стенда 30 с), и без прогрева
-      # исход коллекции был бы функцией расписания — 401 рубежа предъявителя после
-      # остывания кеша, 503 рубежа, читающего базу, до него. Разбор и замер — шапка
-      # tests/newman/cases/authz-failclosed.py. Предъявитель уходит клиенту через
-      # стандартный ввод, а не доводом командной строки.
+      # ПЕРЕД СВЁРТКОЙ волна СОЗДАЁТ условие коллекции, а не предполагает его
+      # (kaname#558): рубеж предъявителя под свёрткой отвечает единым 401, как
+      # только ему нужна база, то есть при устаревшем снимке набора ключей либо
+      # вердикте об отзыве, а окна обоих кешей НЕ скользящие — предъявление
+      # внутри окна его не продлевает. Поэтому `stand-own.sh failclosed-prepare`
+      # выдерживает тишину длиной в больший из сроков (значения — из посадки
+      # стенда, а не литералом), предъявляет оба удостоверения — промах обоих
+      # кешей и контроль 200 при живой базе, — и сворачивает базу; затем
+      # коллекция, затем `failclosed-judge` судит её код по окну. Окно истекло
+      # до вызовов либо красное получено за окном — УСЛОВИЕ НЕ СОЗДАНО (75), а не
+      # вердикт о дереве. Предъявитель уходит клиенту через стандартный ввод, а не
+      # доводом командной строки.
       - name: волна свёртки базы — отказ без вердикта, а не пустая страница (числовой вердикт)
         id: failclosed-wave
         if: ${{ !cancelled() && steps.seed-own.outcome == 'success' }}
         timeout-minutes: 10
         run: |
-          env_file=tests/newman/environments/local.postman_environment.json
-          own="$(jq -r '.values[] | select(.key == "ownRestBaseUrl") | .value' "$env_file")"
-          for key in jwtBootstrap jwtAccountAdminA; do
-            code="$(jq -r --arg k "$key" '.values[] | select(.key == $k) | "Authorization: Bearer " + .value' "$env_file" \
-              | curl -sS -o /dev/null -w '%{http_code}' -H @- \
-                  --cacert .stand/pki/ca.crt --cert .stand/pki/srv.crt --key .stand/pki/srv.key \
-                  "$own/iam/v1/accounts?pageSize=1")" || code="нет ответа"
-            if [ "$code" != "200" ]; then
-              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предъявитель $key не принят фронтом при ЖИВОЙ базе (код $code) — свёртка не начиналась, коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
-              exit 1
-            fi
-            echo "контроль до свёртки: $key принят фронтом (200), вердикт об отзыве прогрет"
-          done
           rc=0
-          .github/scripts/stand-own.sh db-fold || rc=$?
+          .github/scripts/stand-own.sh failclosed-prepare tests/newman/environments/local.postman_environment.json || rc=$?
           case "$rc" in
             0) : ;;
             75)
-              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::базу стенда свернуть не удалось — коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::волна свёртки базы не создала своего условия (причина выше) — коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
               exit 1 ;;
             *) exit "$rc" ;;
           esac
           cd tests/newman
+          crc=0
           ./scripts/run.sh --service authz-failclosed \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
-            --ssl-extra-ca-certs ../../.stand/pki/ca.crt
+            --ssl-extra-ca-certs ../../.stand/pki/ca.crt || crc=$?
+          cd ../..
+          rc=0
+          .github/scripts/stand-own.sh failclosed-judge "$crc" || rc=$?
+          case "$rc" in
+            0) : ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::условие волны свёртки базы не выдержано до конца коллекции (причина выше) — её исход (код $crc) не вердикт о дереве"
+              exit 1 ;;
+            *) exit "$rc" ;;
+          esac
 
       - name: база стенда возвращена после волны свёртки
         if: ${{ always() && steps.failclosed-wave.outcome != 'skipped' }}
