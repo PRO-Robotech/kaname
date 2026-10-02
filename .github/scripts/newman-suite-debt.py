@@ -1399,20 +1399,15 @@ SCENARIO_DEBT.update({
 # Позиции уровня K приёмки идентификатора аккаунта (kaname#549,
 # `docs/engineering/acceptance/account-id-may-be-supplied-at-create.md`, §5 полоса
 # «сторона платформы»). Уровень K — снаружи через край платформы, и стенд службы
-# края не несёт. Сегодня край пинит службу без поля `id` и отбрасывает его (§1.7
-# приёмки), поэтому кейса набора края ещё нет и запись дома была бы ложью: дом
-# заводит стадия S2 — пин службы с полем и кейсы края. Тем же изменением, что
-# заведёт кейсы, запись долга переходит в `SCENARIO_HOME`.
-_HOLDER_AID_EDGE = (
-    "PRO-Robotech/kacho#2984 — стадия S2: край пинит службу с полем `id` и заводит "
-    "кейсы AID-K1 и AID-K2 в набор края; запись уходит в дом позиции")
-_AID_NO_EDGE = ("уровень K — через край платформы, а края на стенде службы нет; сегодня "
-                "край пинит службу без поля `id` и отбрасывает его (§1.7 приёмки)")
-SCENARIO_DEBT.update({
-    "AID-K1": (_AID_NO_EDGE + "; «Тогда» — `metadata.accountId = X` через край", _HOLDER_AID_EDGE),
-    "AID-K2": (_AID_NO_EDGE + "; «Тогда» — отказ права, произведённый службой за краем, "
-               "и близнец без `id`", _HOLDER_AID_EDGE),
-})
+# края не несёт, поэтому позиции записаны домом, а не долгом: край пинит службу с
+# полем `id`, и кейсы IAM-ACC-ID-K1 и IAM-ACC-ID-K2 с их близнецами несёт модуль
+# набора края платформы (kacho#2984, стадия S2). Его гоняет шаг конвейера края на
+# шарде `edge`; запись долга с держателем kacho#2984 снята тем же изменением, что
+# назвало дом (kaname#560).
+_HOME_AID_EDGE = (
+    "PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-at-create.py",
+    "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — newman зелёный (api-gateway)»")
+SCENARIO_HOME.update({sid: _HOME_AID_EDGE for sid in ("AID-K1", "AID-K2")})
 
 
 def _surface_of_stem(stem, runnable, blocked) -> str:
