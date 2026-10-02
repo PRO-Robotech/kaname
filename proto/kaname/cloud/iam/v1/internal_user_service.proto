@@ -49,26 +49,10 @@ service InternalUserService {
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
 
-  // callback of the retired external identity provider (kaname#363) after a
-  // successful self-service recovery flow (magic-link e-mail recovery); the
-  // method stays mounted, and no caller of it remains in this tree. kaname
-  // re-enables the User (if `invite_status` was `DISABLED`), invalidates all
-  // active sessions for the user (writes `session_revocations` rows with
-  // reason=`password-change`), and emits `iam.user.recovery_completed` audit.
-  //
-  // Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
-  // does NOT spawn duplicate revocations.
-  rpc OnRecoveryCompleted (OnRecoveryCompletedRequest) returns (corelib.operation.Operation) {
-    option (corelib.api.v1.operation) = {
-      metadata: "OnRecoveryCompletedMetadata"
-      response: "User"
-    };
-    // Cluster-internal listener-protected; the only authorized caller was
-    // the retired external identity provider via secret-token (kaname#363).
-    // No per-RPC authz check.
-    option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
-  }
+  // Глагола приёма исхода восстановления от внешнего поставщика здесь больше
+  // нет (kaname#564): его вызывающий ушёл вместе с поставщиком (kaname#363),
+  // а на пути вызова не стояло ни одной проверки модели прав. Восстановление
+  // доступа ведёт собственная полоса входа (`/iam/v1/auth/recovery/complete`).
 }
 
 message UpsertFromIdentityRequest {
@@ -88,28 +72,4 @@ message UpsertFromIdentityMetadata {
 
   // True если был создан новый User; false если обновился existing.
   bool created = 2;
-}
-
-// payload of the recovery-completed callback.
-message OnRecoveryCompletedRequest {
-  // Identity id (= kaname User.external_id) whose recovery just
-  // completed.
-  string external_id = 1;
-
-  // Recovery-flow id (used as idempotency key — `INSERT ... ON
-  // CONFLICT (recovery_jti) DO NOTHING`).
-  string recovery_jti = 2;
-
-  // E-mail at which the recovery was completed (echo from the identity
-  // traits — kaname matches it against `users.email` to defend against
-  // mismatched payloads).
-  string email = 3;
-}
-
-message OnRecoveryCompletedMetadata {
-  // ID локального User row.
-  string user_id = 1;
-
-  // Number of active sessions revoked as part of the recovery flow.
-  int32 revoked_session_count = 2;
 }

@@ -150,7 +150,7 @@ func TestBlockedState_HasNoProductWriterWithoutALiftPath(t *testing.T) {
 	require.Empty(t, found,
 		"НЕОБЪЯВЛЕННЫЙ писатель состояния членства: %v\n\n"+
 			"Самостоятельное восстановление пароля запрет НЕ снимает (осознанное решение —\n"+
-			"см. internal/apps/kaname/api/user/internal_on_recovery.go). Значит у КАЖДОГО пути\n"+
+			"см. internal/apps/kaname/api/humansession/recovery_complete.go). Значит у КАЖДОГО пути\n"+
 			"записи обязан быть административный путь снятия, иначе заблокированный\n"+
 			"оказывается заперт навсегда.\n\n"+
 			"Форму бери с уже посаженной пары UserService.Block/Unblock\n"+

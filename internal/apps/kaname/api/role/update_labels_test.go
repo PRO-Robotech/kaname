@@ -242,12 +242,6 @@ func (w *rlUpdWriter) EmitReconcileEvent(_ context.Context, eventType, objectTyp
 	}
 	return nil
 }
-func (w *rlUpdWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *rlUpdWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *rlUpdWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 func (w *rlUpdWriter) Commit(context.Context) error                   { return nil }
 func (w *rlUpdWriter) Rollback(context.Context) error                 { return nil }

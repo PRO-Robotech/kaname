@@ -622,12 +622,6 @@ func (w *abFakeWriter) EmitFGARelationWrite(context.Context, []service.RelationT
 func (w *abFakeWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *abFakeWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *abFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *abFakeWriter) AdvisoryXactLock(_ context.Context, key string) error {
 	w.repo.recordTxOp("advisory_xact_lock:" + key)
 	return nil

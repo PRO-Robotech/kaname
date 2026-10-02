@@ -398,8 +398,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// намерения — тоже один. Величину судит страж старта: непозитивную он
 		// не пропускает, поэтому здесь читается уже проверенное.
 		WithInviteMailRateLimit(inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
-	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
-		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
 	// типа, поэтому перестановка их здесь — ошибка компиляции, а не контроль,
 	// тихо ставший своей противоположностью.
@@ -417,7 +415,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		userBlock, userUnblock, userRemoveFromAccount).
 		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
-	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
+	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet)
 
 	// ServiceAccountService.
 	saCreate := serviceaccountapp.NewCreateServiceAccountUseCase(kanameRepo, opsRepo).

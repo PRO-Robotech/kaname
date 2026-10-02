@@ -224,8 +224,9 @@ func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID doma
 
 // FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 // Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at ASC.
-// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы —
-// recovery обязан их находить и re-enable'ить (OnRecoveryCompleted).
+// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы:
+// читатели (поиск субъекта, административное заведение личности) обязаны
+// отличать заблокированную личность от отсутствующей.
 // Пустой externalID / пустой statuses → nil-срез.
 func (r *userReader) FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
 	if externalID == "" || len(statuses) == 0 {

@@ -296,9 +296,11 @@ go test -short -count=1 -timeout 120s \
 
 - **Use-cases:** `internal/apps/kaname/api/user/` (`get.go`, `list.go`, `delete.go`,
   `invite.go`, `internal_upsert.go`, `set_blocked.go`, `update.go`, `audit.go`).
-- **Handler:** `internal/apps/kaname/api/user/handler.go` (public); internal-полоса —
-  `internal_upsert.go` и `internal_on_recovery.go` в том же каталоге (отдельного файла
-  с обобщённым именем внутреннего обработчика здесь нет).
+- **Handler:** `internal/apps/kaname/api/user/handler.go` (public и internal —
+  `InternalHandler` в том же файле); вариант использования internal-полосы —
+  `internal_upsert.go`. Глагола приёма исхода восстановления от прежнего поставщика
+  у internal-полосы больше нет (kaname#564): восстановление доступа ведёт полоса
+  входа, `internal/apps/kaname/api/humansession/recovery_complete.go`.
 - **Repo:** `internal/repo/kaname/pg/user_repo.go` + `user_pool_repo.go`.
 - **Bootstrap path:** `UpsertFromIdentity` создает User + Account + Project +
   AccessBindings в одной transaction, минуя per-resource `CreateUseCase`.

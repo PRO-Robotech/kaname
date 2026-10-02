@@ -639,12 +639,15 @@ comm -13 \
   # КОНТРОЛЬ: приём ИСХОДА чужого потока объявлен и находится:
   git grep -hoE 'rpc OnRecoveryCompleted' -- proto | wc -l                  # → 1
   ```
+  Контроль снят с предметом: с kaname#564 глагола приёма исхода от прежнего поставщика в
+  контракте нет, и вторая строка даёт 0; утверждение ∅4 о глаголах начала восстановления
+  от этого не меняется.
 
 ### §5.2 Формы — механизм уже живёт в дереве, экземпляра для восстановления нет
 
 | # | форма | где живёт | чем держится | на что опирается |
 |---|---|---|---|---|
-| **Ф-а** | завершение одной транзакцией: журнал по ключу потока, сдвиг отсечки, аудит, **сохранение** блокировки | `internal/apps/kaname/api/user/internal_on_recovery.go` (305 строк) | **по свойству, а не по каталогу — §5.2а**; сводно: `internal/repo/kaname/pg/recovery_completions_integration_test.go` и `recovery_keeps_block_integration_test.go` | Ф5-03, Ф5-16…19 |
+| **Ф-а** | завершение одной транзакцией: журнал по ключу потока, сдвиг отсечки, аудит, **сохранение** блокировки | жила в `PRO-Robotech/kaname@97c721ba5:internal/apps/kaname/api/user/internal_on_recovery.go` (305 строк) — **снята** вместе с внутренним глаголом приёма исхода от прежнего поставщика (kaname#564): вызывающего у глагола не осталось, а проверки модели прав на его пути не было. Ту же форму несёт полоса входа — `internal/apps/kaname/api/humansession/recovery_complete.go` | держатели §5.2а сняты с предметом: файлы проб recovery_completions_integration_test.go и recovery_keeps_block_integration_test.go | Ф5-03, Ф5-16…19 |
 | **Ф-б** | приём исхода потока по HTTP с общим секретом — **снят** вместе с хуками внешнего поставщика (kaname#363): чужого потока восстановления больше нет, восстановление ведёт полоса входа | жил в `PRO-Robotech/kaname@d5e515e04:internal/handler/iamhooks/recovery_hook_handler.go` (140 строк) | пробы маршрута и секрета сняты с предметом: TestRecoveryHookHasARouteOnTheHooksListener, близнец TestUnwiredHookGetsNoRoute; секрет — TestHookAuthRefusalNamesItsCauseInTheLogOnly и TestHookAuthUnconfiguredSecretIsObservable | Ф5-16, Ф5-19 — приёмник снят вместе с источником события; утверждение за приёмкой |
 | **Ф-в** | очередь писем в нашей базе, переживающая смерть эмитента; намерение атомарно со своей строкой | `internal/repo/kaname/pg/invite_mail_outbox/outbox.go` | `Test_InviteMailQueue_SurvivesTheDeathOfTheProcessThatEmitted` · `Test_InviteMailIntent_IsAtomicWithTheInviteRow` | Ф5-09 |
 | **Ф-г** | отправитель со **своим** пределом времени на попытку и ограниченным повтором | `internal/clients/invite_mail.go` (678 строк) | `Test_InviteMailSender_SilentRelayIsBoundedByItsOwnAttemptDeadline` · `Test_InviteMailSender_PositiveControl_ResponsiveRelayIsNotBoundedAway` | Ф5-09, Ф5-12 |
@@ -655,6 +658,13 @@ comm -13 \
 | **Ф-и** | отказ старта на незаданной величине, текст называет ручку | `internal/apps/kaname/config/validate.go` | `TestUnsetDomainRefusesTheStart` · `TestDeclaredDomainPassesTheStart` | Ф5-06 |
 
 ### §5.2а Чем держится форма Ф-а — ПО СВОЙСТВУ, и каждое доказано инъекцией
+
+> **Правка после вердикта (kaname#564), полный состав.** Форма Ф-а, чьих держателей разбирает
+> этот раздел, снята вместе с внутренним глаголом приёма исхода от прежнего поставщика; пробы
+> раздела сняты с ней. Их имена ниже оставлены **прозой** — как свидетельство круга, а не как
+> живые координаты: адреса у них больше нет. Опыт раздела поставлен на ревизии до снятия
+> (`PRO-Robotech/kaname@97c721ba5` и раньше) и о нынешнем дереве не утверждает. Больше в
+> документе не тронуто ничего, кроме строки Ф-а в §5.2 и оговорки к ∅4.
 
 Раздел заведён потому, что прежняя редакция назвала держателями Ф-а три unit-пробы каталога
 `internal/apps/kaname/api/user`, а **шапка их файла прямо говорит обратное**: «The async
@@ -680,13 +690,13 @@ go test ./internal/apps/kaname/api/user/ -count=1 -short
 
 | объявленное свойство формы | держатель (координата) | внесённое различие (одно) | исход опыта |
 |---|---|---|---|
-| **журнал по ключу потока**: повтор — бездействие | `internal/repo/kaname/pg/recovery_completions_integration_test.go` · `TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop` | снят ранний возврат по неудавшейся вставке строки журнала | **FAIL**, координата `recovery_completions_integration_test.go:328` (второй сдвиг отсечки) и `:332` (второй аудит). Законные близнецы `_S01_…`, `_BlockedStaysBlocked`, `_ActiveStaysActive` — **PASS** |
-| **сдвиг отсечки на КАЖДОЙ затронутой строке** | тот же файл · `_S01_…`, `_S02_…` плюс `recovery_keeps_block_integration_test.go` · `_BlockedStaysBlocked`, `_ActiveStaysActive` | отсечка не пишется ни для одной строки | **FAIL** у всех пяти — свойство держат все, и это верно: отсечка есть предмет восстановления |
-| **аудит в той же транзакции** | `_S01_…`, `_S02_…`, `_BlockedStaysBlocked` | событие аудита не эмитируется | **FAIL** у трёх; `_ActiveStaysActive` (аудита не утверждает) — **PASS**, законный близнец |
-| **сохранение блокировки** | `recovery_keeps_block_integration_test.go` · `_BlockedStaysBlocked`; близнец — `_ActiveStaysActive` | завершение снимает блокировку с каждой затронутой строки | **FAIL** у `_BlockedStaysBlocked`; близнец `_ActiveStaysActive`, а также `_S02_…` и `_S05_…` — **PASS** |
-| **ОДНА транзакция**: откат не оставляет ни одной из половин | `recovery_completions_integration_test.go` · `_S07_MidTxFailure_FullRollback` | строка журнала пишется своей отдельной транзакцией **до** основной | **FAIL** у `_S07_…` (застрявший ключ идемпотентности); `_S01_…`, `_S02_…`, `_S05_…`, `_BlockedStaysBlocked` — **PASS** |
+| **журнал по ключу потока**: повтор — бездействие | recovery_completions_integration_test.go · TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop | снят ранний возврат по неудавшейся вставке строки журнала | **FAIL**, координата recovery_completions_integration_test.go:328 (второй сдвиг отсечки) и :332 (второй аудит). Законные близнецы _S01_…, _BlockedStaysBlocked, _ActiveStaysActive — **PASS** |
+| **сдвиг отсечки на КАЖДОЙ затронутой строке** | тот же файл · _S01_…, _S02_… плюс recovery_keeps_block_integration_test.go · _BlockedStaysBlocked, _ActiveStaysActive | отсечка не пишется ни для одной строки | **FAIL** у всех пяти — свойство держат все, и это верно: отсечка есть предмет восстановления |
+| **аудит в той же транзакции** | _S01_…, _S02_…, _BlockedStaysBlocked | событие аудита не эмитируется | **FAIL** у трёх; _ActiveStaysActive (аудита не утверждает) — **PASS**, законный близнец |
+| **сохранение блокировки** | recovery_keeps_block_integration_test.go · _BlockedStaysBlocked; близнец — _ActiveStaysActive | завершение снимает блокировку с каждой затронутой строки | **FAIL** у _BlockedStaysBlocked; близнец _ActiveStaysActive, а также _S02_… и _S05_… — **PASS** |
+| **ОДНА транзакция**: откат не оставляет ни одной из половин | recovery_completions_integration_test.go · `_S07_MidTxFailure_FullRollback` | строка журнала пишется своей отдельной транзакцией **до** основной | **FAIL** у _S07_… (застрявший ключ идемпотентности); _S01_…, _S02_…, _S05_…, _BlockedStaysBlocked — **PASS** |
 
-**Ловушка имени названа отдельно, потому что в неё уже попали.** Пробы `_S03_…` и `_S04_…`
+**Ловушка имени названа отдельно, потому что в неё уже попали.** Пробы _S03_… и _S04_…
 существуют **в обоих** каталогах: unit — синхронные ворота до порождения операции,
 интеграционные — те же имена с суффиксом `_NoSideEffects`. Совпадение имени здесь не
 свидетельство: сверять надо каталог и предмет, а не строку `-run`.

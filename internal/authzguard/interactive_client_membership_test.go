@@ -13,8 +13,8 @@ package authzguard
 // GatewayFrontedInternalRPCs would be wrong: measured on this tree, 11 of the 16
 // iam Internal* entries absent from that list are absent BY DESIGN — the PDP
 // (`Check`), the hot-path chicken-and-egg lookups (`IsRevoked`,
-// `InternalUserService/Get`), the secret-authed recovery callback, and the fga-proxy writes
-// gated in-handler by RelationWriteGate. Deriving the rule from the catalog
+// `InternalUserService/Get`), and the fga-proxy writes gated in-handler by
+// RelationWriteGate. Deriving the rule from the catalog
 // would turn each of those documented exemptions into a finding, and the first
 // false red would get the gate switched off. So membership is stated, exactly as
 // the package already states it for every other admin RPC, and the exemption set

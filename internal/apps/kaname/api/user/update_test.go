@@ -222,12 +222,6 @@ func (w *updUserWriter) EmitReconcileEvent(_ context.Context, _, _, objectID str
 	w.parent.reconcil = append(w.parent.reconcil, objectID)
 	return nil
 }
-func (w *updUserWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *updUserWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *updUserWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 func (w *updUserWriter) Commit(context.Context) error                   { return nil }
 func (w *updUserWriter) Rollback(context.Context) error                 { return nil }

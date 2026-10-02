@@ -174,12 +174,6 @@ func (w *fakeUsrWriter) EmitFGARelationDelete(_ context.Context, tuples []servic
 	}
 	return nil
 }
-func (w *fakeUsrWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *fakeUsrWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *fakeUsrWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeUsrRdr struct{ accID string }

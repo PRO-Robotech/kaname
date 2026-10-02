@@ -23,7 +23,6 @@ package kaname
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -146,28 +145,6 @@ type Writer interface {
 	// намерение не несёт — доступ даёт владение почтовым ящиком, а не обладание
 	// письмом.
 	EmitInviteMail(ctx context.Context, intent outboxtypes.InviteMailIntent) (queued bool, err error)
-
-	// InsertRecoveryCompletion — idempotency-gate INSERT for the
-	// recovery-completed callback (kaname.recovery_completions, migration 0015).
-	// Runs `INSERT … ON CONFLICT (recovery_jti) DO NOTHING` and
-	// then reads back the stored row, all on THIS writer-tx:
-	//   - inserted=true  → this recovery_jti is new → caller runs the side-effects
-	//     (revoke-all cutoff + audit) in the SAME tx, then commits.
-	//   - inserted=false → already processed → idempotent no-op; the returned
-	//     domain.RecoveryCompletion carries the stored user_id /
-	//     revoked_session_count for the replayed Operation.metadata.
-	// The PK row-lock serializes concurrent deliveries of one recovery_jti
-	// (exactly one writer wins the INSERT). On a mid-tx rollback the ledger row
-	// rolls back too (no "stuck" idempotency key — запрет #10).
-	InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (domain.RecoveryCompletion, bool /*inserted*/, error)
-
-	// UpsertUserTokenRevokeAll — per-user "revoke-all-before" cutoff written on
-	// THIS writer-tx (kaname.user_token_revocations, migration 0012). Same
-	// monotonic GREATEST upsert as the pool-scoped path, but tx-scoped so the
-	// cutoff commits atomically with the recovery audit event
-	// (запрет #10). The cutoff never moves backwards; the PK row-lock
-	// serializes concurrent writers.
-	UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 
 	// AdvisoryXactLock takes a transaction-scoped
 	// pg_advisory_xact_lock(hashtext(key)) on THIS writer-tx. It serializes

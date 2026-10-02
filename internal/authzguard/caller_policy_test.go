@@ -260,7 +260,6 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
 		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
-		"/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 	}
 	for _, m := range mustHave {
 		if _, ok := set[m]; !ok {
