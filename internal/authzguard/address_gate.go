@@ -89,9 +89,9 @@ const (
 	svcBootstrap   = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/"
 )
 
-// internalAddressGateTable — таблицы Р4в: 19 строк круга и 13 вне круга.
+// internalAddressGateTable — таблицы Р4в: 18 строк круга и 13 вне круга.
 var internalAddressGateTable = map[string]InternalAddressGateRow{
-	// ── круг края (19) ──
+	// ── круг края (18) ──
 	svcRevocations + "Revoke": {GateAllowsSelfRevoke,
 		"снятие собственного удостоверения есть выход (Р2) и доступа не прибавляет; о другом человеке — не выход"},
 	svcRevocations + "ListByUser": {GateRefuses,
@@ -113,8 +113,6 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 	svcOperations + "ListIamOperations": {GateRefuses, "операции службы — чтение распорядителя"},
 	svcUser + "UpsertFromIdentity": {GateRefuses,
 		"от лица человека — отказ; без принципала-человека (обратный вызов поставщика от имени системы) рубеж молчит, исход судит правило приглашения"},
-	svcUser + "OnRecoveryCompleted": {GateRefuses,
-		"от лица человека — отказ; без принципала-человека рубеж молчит"},
 
 	// ── вне круга (13) ──
 	svcIAM + "Check": {GateOutsideCircle,

@@ -453,13 +453,7 @@ func (w *fakeWriter) AccessBindingsW() access_binding.WriterIface {
 	return &fakeAccountABWriter{parent: w.repo}
 }
 func (w *fakeWriter) EmitAuditEvent(context.Context, service.AuditEvent) error { return nil }
-func (w *fakeWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *fakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
-func (w *fakeWriter) AdvisoryXactLock(context.Context, string) error { return nil }
+func (w *fakeWriter) AdvisoryXactLock(context.Context, string) error           { return nil }
 
 type fakeAcctReader struct{}
 

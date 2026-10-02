@@ -145,128 +145,6 @@ func (x *UpsertFromIdentityMetadata) GetCreated() bool {
 	return false
 }
 
-// payload of the recovery-completed callback.
-type OnRecoveryCompletedRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identity id (= kaname User.external_id) whose recovery just
-	// completed.
-	ExternalId string `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	// Recovery-flow id (used as idempotency key — `INSERT ... ON
-	// CONFLICT (recovery_jti) DO NOTHING`).
-	RecoveryJti string `protobuf:"bytes,2,opt,name=recovery_jti,json=recoveryJti,proto3" json:"recovery_jti,omitempty"`
-	// E-mail at which the recovery was completed (echo from the identity
-	// traits — kaname matches it against `users.email` to defend against
-	// mismatched payloads).
-	Email         string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *OnRecoveryCompletedRequest) Reset() {
-	*x = OnRecoveryCompletedRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *OnRecoveryCompletedRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*OnRecoveryCompletedRequest) ProtoMessage() {}
-
-func (x *OnRecoveryCompletedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use OnRecoveryCompletedRequest.ProtoReflect.Descriptor instead.
-func (*OnRecoveryCompletedRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_user_service_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *OnRecoveryCompletedRequest) GetExternalId() string {
-	if x != nil {
-		return x.ExternalId
-	}
-	return ""
-}
-
-func (x *OnRecoveryCompletedRequest) GetRecoveryJti() string {
-	if x != nil {
-		return x.RecoveryJti
-	}
-	return ""
-}
-
-func (x *OnRecoveryCompletedRequest) GetEmail() string {
-	if x != nil {
-		return x.Email
-	}
-	return ""
-}
-
-type OnRecoveryCompletedMetadata struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID локального User row.
-	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Number of active sessions revoked as part of the recovery flow.
-	RevokedSessionCount int32 `protobuf:"varint,2,opt,name=revoked_session_count,json=revokedSessionCount,proto3" json:"revoked_session_count,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *OnRecoveryCompletedMetadata) Reset() {
-	*x = OnRecoveryCompletedMetadata{}
-	mi := &file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *OnRecoveryCompletedMetadata) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*OnRecoveryCompletedMetadata) ProtoMessage() {}
-
-func (x *OnRecoveryCompletedMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use OnRecoveryCompletedMetadata.ProtoReflect.Descriptor instead.
-func (*OnRecoveryCompletedMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_user_service_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *OnRecoveryCompletedMetadata) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *OnRecoveryCompletedMetadata) GetRevokedSessionCount() int32 {
-	if x != nil {
-		return x.RevokedSessionCount
-	}
-	return 0
-}
-
 var File_kaname_cloud_iam_v1_internal_user_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc = "" +
@@ -279,21 +157,11 @@ const file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc = "" +
 	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\"O\n" +
 	"\x1aUpsertFromIdentityMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
-	"\acreated\x18\x02 \x01(\bR\acreated\"v\n" +
-	"\x1aOnRecoveryCompletedRequest\x12\x1f\n" +
-	"\vexternal_id\x18\x01 \x01(\tR\n" +
-	"externalId\x12!\n" +
-	"\frecovery_jti\x18\x02 \x01(\tR\vrecoveryJti\x12\x14\n" +
-	"\x05email\x18\x03 \x01(\tR\x05email\"j\n" +
-	"\x1bOnRecoveryCompletedMetadata\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\x122\n" +
-	"\x15revoked_session_count\x18\x02 \x01(\x05R\x13revokedSessionCount2\x92\x04\n" +
+	"\acreated\x18\x02 \x01(\bR\acreated2\xe1\x02\n" +
 	"\x13InternalUserService\x12\xdf\x01\n" +
 	"\x12UpsertFromIdentity\x12..kaname.cloud.iam.v1.UpsertFromIdentityRequest\x1a\x1c.corelib.operation.Operation\"{\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*\"\n" +
 	"\x1aUpsertFromIdentityMetadata\x12\x04User\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/internal/users:upsertFromIdentity\x12h\n" +
-	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xae\x01\n" +
-	"\x13OnRecoveryCompleted\x12/.kaname.cloud.iam.v1.OnRecoveryCompletedRequest\x1a\x1c.corelib.operation.Operation\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*#\n" +
-	"\x1bOnRecoveryCompletedMetadata\x12\x04UserBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENERBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_internal_user_service_proto_rawDescOnce sync.Once
@@ -307,25 +175,21 @@ func file_kaname_cloud_iam_v1_internal_user_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_internal_user_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_kaname_cloud_iam_v1_internal_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_kaname_cloud_iam_v1_internal_user_service_proto_goTypes = []any{
-	(*UpsertFromIdentityRequest)(nil),   // 0: kaname.cloud.iam.v1.UpsertFromIdentityRequest
-	(*UpsertFromIdentityMetadata)(nil),  // 1: kaname.cloud.iam.v1.UpsertFromIdentityMetadata
-	(*OnRecoveryCompletedRequest)(nil),  // 2: kaname.cloud.iam.v1.OnRecoveryCompletedRequest
-	(*OnRecoveryCompletedMetadata)(nil), // 3: kaname.cloud.iam.v1.OnRecoveryCompletedMetadata
-	(*GetUserRequest)(nil),              // 4: kaname.cloud.iam.v1.GetUserRequest
-	(*operation.Operation)(nil),         // 5: corelib.operation.Operation
-	(*User)(nil),                        // 6: kaname.cloud.iam.v1.User
+	(*UpsertFromIdentityRequest)(nil),  // 0: kaname.cloud.iam.v1.UpsertFromIdentityRequest
+	(*UpsertFromIdentityMetadata)(nil), // 1: kaname.cloud.iam.v1.UpsertFromIdentityMetadata
+	(*GetUserRequest)(nil),             // 2: kaname.cloud.iam.v1.GetUserRequest
+	(*operation.Operation)(nil),        // 3: corelib.operation.Operation
+	(*User)(nil),                       // 4: kaname.cloud.iam.v1.User
 }
 var file_kaname_cloud_iam_v1_internal_user_service_proto_depIdxs = []int32{
 	0, // 0: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:input_type -> kaname.cloud.iam.v1.UpsertFromIdentityRequest
-	4, // 1: kaname.cloud.iam.v1.InternalUserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
-	2, // 2: kaname.cloud.iam.v1.InternalUserService.OnRecoveryCompleted:input_type -> kaname.cloud.iam.v1.OnRecoveryCompletedRequest
-	5, // 3: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:output_type -> corelib.operation.Operation
-	6, // 4: kaname.cloud.iam.v1.InternalUserService.Get:output_type -> kaname.cloud.iam.v1.User
-	5, // 5: kaname.cloud.iam.v1.InternalUserService.OnRecoveryCompleted:output_type -> corelib.operation.Operation
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	2, // 1: kaname.cloud.iam.v1.InternalUserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
+	3, // 2: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:output_type -> corelib.operation.Operation
+	4, // 3: kaname.cloud.iam.v1.InternalUserService.Get:output_type -> kaname.cloud.iam.v1.User
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -344,7 +208,7 @@ func file_kaname_cloud_iam_v1_internal_user_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

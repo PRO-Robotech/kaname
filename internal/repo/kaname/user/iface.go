@@ -35,8 +35,9 @@ type ReaderIface interface {
 	// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 	// Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at
 	// ASC. В отличие от FindActiveByExternalID (ACTIVE-only), этот reader видит
-	// и BLOCKED-row'ы — recovery обязан их находить и re-enable'ить
-	// (InternalUserService.OnRecoveryCompleted). Пустой externalID либо пустой
+	// и BLOCKED-row'ы: читатели (поиск субъекта, административное заведение
+	// личности) обязаны отличать заблокированную личность от отсутствующей.
+	// Пустой externalID либо пустой
 	// statuses → nil-срез. Возвращает nil-срез если
 	// нет ни одной row.
 	FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error)

@@ -146,15 +146,9 @@ func (w *lcgWriter) EmitFGARelationDelete(context.Context, []service.RelationTup
 	return nil
 }
 func (w *lcgWriter) EmitReconcileEvent(context.Context, string, string, string) error { return nil }
-func (w *lcgWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *lcgWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
-func (w *lcgWriter) AdvisoryXactLock(context.Context, string) error { return nil }
-func (w *lcgWriter) Commit(context.Context) error                   { return nil }
-func (w *lcgWriter) Rollback(context.Context) error                 { return nil }
+func (w *lcgWriter) AdvisoryXactLock(context.Context, string) error                   { return nil }
+func (w *lcgWriter) Commit(context.Context) error                                     { return nil }
+func (w *lcgWriter) Rollback(context.Context) error                                   { return nil }
 
 type lcgGrpWtr struct{ parent *lcgRepo }
 

@@ -324,12 +324,6 @@ func (w *fakeUWtr) EmitFGARelationDelete(_ context.Context, tuples []service.Rel
 	return nil
 }
 
-func (w *fakeUWtr) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *fakeUWtr) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *fakeUWtr) AdvisoryXactLock(context.Context, string) error { return nil }
 
 // Stubs нужные для bootstrap-path (InsertActive + Account.Insert +

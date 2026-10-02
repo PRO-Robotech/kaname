@@ -17,7 +17,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -258,23 +257,6 @@ const (
 	mailWindowInvite   mailWindowKind = "invite"
 	mailWindowRecovery mailWindowKind = "recovery"
 )
-
-// InsertRecoveryCompletion — idempotency-gate INSERT on THIS writer-tx
-// (recovery_completions, migration 0015). ON CONFLICT DO NOTHING
-// + backstop SELECT → (stored row, inserted). PK row-lock serializes concurrent
-// deliveries of one recovery_jti.
-func (w *writeTx) InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return insertRecoveryCompletionTx(ctx, w.tx, rc)
-}
-
-// UpsertUserTokenRevokeAll — per-user monotonic revoke-all cutoff on THIS
-// writer-tx. Идёт ТОЙ ЖЕ дверью, что и прочие писатели отсечки
-// (`upsertSubjectCutoff`, kaname#313): записей отсечки две, судят по ним разные
-// читатели, и класть их порознь значит снимать доступ наполовину. Обе
-// коммитятся вместе с событием восстановления (запрет #10).
-func (w *writeTx) UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
-	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
-}
 
 // AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.
 // The key is passed as a bind parameter (hashtext maps it to the int4 lock key),

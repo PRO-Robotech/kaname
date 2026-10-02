@@ -758,8 +758,7 @@ func runServe(cfg config.Config) error {
 	// Default-OFF: dev/newman (prod=false) → NO-OP pass-through (newman stand
 	// byte-identical). Prod fail-closed: no verified SAN → PermissionDenied;
 	// FGA backend error → Unavailable. EXEMPT (NOT in ReadFloorRPCs): the PDP
-	// Check (INV-FLOOR-5), secret-authed OnRecoveryCompleted + hot-path IsRevoked
-	// (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
+	// Check (INV-FLOOR-5), the hot-path IsRevoked (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
 	// INV-FLOOR-8). Chained AFTER internalCallerPolicy, mirroring its prod-mode
 	// gating. The legitimate reader SAs — api-gateway, vpc and compute, and those
 	// three only — are seeded system_viewer@cluster by migration 0014. The network

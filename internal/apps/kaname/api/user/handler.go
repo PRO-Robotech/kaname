@@ -246,18 +246,16 @@ func (h *Handler) Invite(ctx context.Context, req *iamv1.InviteUserRequest) (*op
 // ожидает `Create` — добавь RPC в proto с `option deprecated = true` и
 // handler вернет FailedPrecondition с подсказкой использовать `Invite`.
 
-// InternalHandler — InternalUserService (UpsertFromIdentity / Get /
-// OnRecoveryCompleted).
+// InternalHandler — InternalUserService (UpsertFromIdentity / Get).
 type InternalHandler struct {
 	iamv1.UnimplementedInternalUserServiceServer
 
-	upsert     *UpsertFromIdentityUseCase
-	get        *GetUserUseCase
-	onRecovery *OnRecoveryCompletedUseCase
+	upsert *UpsertFromIdentityUseCase
+	get    *GetUserUseCase
 }
 
-func NewInternalHandler(u *UpsertFromIdentityUseCase, g *GetUserUseCase, r *OnRecoveryCompletedUseCase) *InternalHandler {
-	return &InternalHandler{upsert: u, get: g, onRecovery: r}
+func NewInternalHandler(u *UpsertFromIdentityUseCase, g *GetUserUseCase) *InternalHandler {
+	return &InternalHandler{upsert: u, get: g}
 }
 
 func (h *InternalHandler) UpsertFromIdentity(ctx context.Context, req *iamv1.UpsertFromIdentityRequest) (*operationpb.Operation, error) {
@@ -283,20 +281,6 @@ func (h *InternalHandler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
-}
-
-// OnRecoveryCompleted — recovery-completed callback of the retired external identity
-// provider (kaname#363); mounted, no caller in this tree. Mutation → async Operation.
-func (h *InternalHandler) OnRecoveryCompleted(ctx context.Context, req *iamv1.OnRecoveryCompletedRequest) (*operationpb.Operation, error) {
-	op, err := h.onRecovery.Execute(ctx, OnRecoveryCompletedInput{
-		ExternalID:  domain.ExternalSubject(req.GetExternalId()),
-		RecoveryJTI: req.GetRecoveryJti(),
-		Email:       domain.Email(req.GetEmail()),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return shared.OperationToProto(op), nil
 }
 
 // ---- shared ----

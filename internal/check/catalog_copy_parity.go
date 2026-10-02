@@ -50,9 +50,10 @@
 // ЧТО СВЕРКА УТВЕРЖДАЕТ ТЕПЕРЬ
 //
 // Норма прежняя и НЕ ослаблена: копии — ОДИН порождённый артефакт. Изменилось
-// то, что у равенства появились ДВА закрытых перечня объявленных окон —
-// переименования фундамента и записи службы, ждущие края (kaname#181), — и
-// каждая запись обязана держать себя САМА в обе стороны. Остаток после их
+// то, что у равенства появились ТРИ закрытых перечня объявленных окон —
+// переименования фундамента, записи службы, ждущие края (kaname#181), и
+// глаголы, снятые службой, которые край ещё называет (kaname#564), — и каждая
+// запись обязана держать себя САМА в обе стороны. Остаток после их
 // применения — находка с прежним текстом.
 //
 // Сравнение остаётся ПОБАЙТОВЫМ, а не «по смыслу»: файл режется на блоки
@@ -290,6 +291,62 @@ func CatalogPendingEntries() []CatalogPendingEntry {
 	return out
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ТРЕТИЙ ВИД ЗАПИСИ — ГЛАГОЛ, СНЯТЫЙ СЛУЖБОЙ, КОТОРЫЙ КРАЙ ЕЩЁ НАЗЫВАЕТ (kaname#564)
+//
+// Зеркало второго вида с обратным знаком: служба СНЯЛА свой глагол вместе с его
+// записью, а копия края порождается из контракта службы ПО ПИНУ — то есть
+// перестанет его называть только после посадки снятия в ствол службы и подъёма
+// пина платформой. Промежуточного состояния, в котором обе копии совпали бы, не
+// существует by construction — ровно как у записи, ждущей края.
+//
+// Запись объявляет: у края эта запись ЕСТЬ, у нас её УЖЕ НЕТ, и это не
+// расхождение. Держит себя в обе стороны: край перестал называть глагол —
+// предикат снятия наступил, запись обязана уйти; в нашей копии глагол всё ещё
+// есть — запись утверждает о дереве неправду.
+//
+// Что при этом НЕ ослаблено: из сравнения выносится ровно названная запись края
+// и только пока её нет у нас. Расхождение содержимым любой другой записи, лишняя
+// запись с любой стороны и форма файла судятся побайтово, как прежде.
+
+// CatalogRetiredEntry — запись копии края, чей глагол служба уже сняла, а край
+// ещё называет, потому что порождает её из нашего контракта по пину.
+type CatalogRetiredEntry struct {
+	// EdgeFQN — полное имя снятого метода в копии края.
+	EdgeFQN string
+	// Why — почему присутствие у края не дефект.
+	Why string
+	// Removal — ПРЕДИКАТ СНЯТИЯ, внешний по отношению к этому дереву.
+	Removal string
+	// Refs — где предмет ведётся.
+	Refs string
+}
+
+// catalogRetiredEntries — ЗАКРЫТЫЙ перечень снятых службой глаголов, которые
+// край ещё называет. Условия те же три, что у прочих окон. Самоистечение держит
+// `CompareCatalogCopies`: запись, чей глагол край больше не называет, — находка.
+var catalogRetiredEntries = []CatalogRetiredEntry{
+	{
+		EdgeFQN: "kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
+		Why: "глагол приёма исхода восстановления от прежнего поставщика снят с контракта службы вместе " +
+			"с записью каталога (kaname#564): вызывающего у него нет ни в дереве службы, ни в дереве " +
+			"платформы, а на пути вызова не стояло ни одной проверки модели прав; край порождает свою " +
+			"копию по пину службы и перестанет называть глагол после подъёма пина (перепись против " +
+			"ствола платформы bea4495e93: расходится ровно эта запись — «есть у края, нет у нас»)",
+		Removal: "копия края на стволе платформы НЕ несёт `kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted` " +
+			"— платформа подняла пин службы до ревизии со снятым глаголом и перегенерировала каталог; " +
+			"тогда запись снимается",
+		Refs: "PRO-Robotech/kaname#564",
+	},
+}
+
+// CatalogRetiredEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
+func CatalogRetiredEntries() []CatalogRetiredEntry {
+	out := make([]CatalogRetiredEntry, len(catalogRetiredEntries))
+	copy(out, catalogRetiredEntries)
+	return out
+}
+
 // Виды находок. Разделены потому, что у них РАЗНЫЙ адресат: ведомость правят
 // здесь, а расхождение копий ведёт либо к синхронизации, либо к платформе.
 // Общий заголовок «копии разошлись» на находке ведомости лгал бы: при
@@ -322,6 +379,11 @@ type CatalogParityCensus struct {
 	// PendingApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
 	// глагол есть у нас и его ещё нет у края.
 	PendingApplied int
+	// RetiredDeclared — записей о снятых службой глаголах в ведомости.
+	RetiredDeclared int
+	// RetiredApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
+	// глагол есть у края и его уже нет у нас.
+	RetiredApplied int
 	// BytesEqual — совпали ли копии побайтово ДО применения ведомости.
 	BytesEqual bool
 }
@@ -330,16 +392,18 @@ type CatalogParityCensus struct {
 func (c CatalogParityCensus) String() string {
 	return fmt.Sprintf(
 		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · "+
-			"ожидающих края объявлено %d · применено %d · побайтово до ведомости %v",
+			"ожидающих края объявлено %d · применено %d · снятых службой объявлено %d · применено %d · "+
+			"побайтово до ведомости %v",
 		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied,
-		c.PendingDeclared, c.PendingApplied, c.BytesEqual)
+		c.PendingDeclared, c.PendingApplied, c.RetiredDeclared, c.RetiredApplied, c.BytesEqual)
 }
 
 // CompareCatalogCopies — сверка против ДЕЙСТВУЮЩЕЙ ведомости дерева. Возвращает
 // перечень находок (пустой = зелёное) и перепись. Ошибка — это ТРЕТИЙ ИСХОД:
 // разобрать не удалось, вердикта о совпадении копий НЕТ (не путать с находкой).
 func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, CatalogParityCensus, error) {
-	return compareCatalogCopiesWith(catalogFoundationRenames, catalogPendingEntries, edgeRaw, ownRaw)
+	return compareCatalogCopiesWithLedgers(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
+		edgeRaw, ownRaw)
 }
 
 // compareCatalogCopiesWith — та же сверка с ЯВНЫМИ ведомостями.
@@ -350,9 +414,19 @@ func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, Catal
 func compareCatalogCopiesWith(
 	renames []CatalogFoundationRename, pending []CatalogPendingEntry, edgeRaw, ownRaw string,
 ) ([]CatalogParityFinding, CatalogParityCensus, error) {
+	return compareCatalogCopiesWithLedgers(renames, pending, nil, edgeRaw, ownRaw)
+}
+
+// compareCatalogCopiesWithLedgers — та же сверка со всеми тремя ЯВНЫМИ
+// ведомостями (форма для проб третьего вида записи).
+func compareCatalogCopiesWithLedgers(
+	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
+	edgeRaw, ownRaw string,
+) ([]CatalogParityFinding, CatalogParityCensus, error) {
 	census := CatalogParityCensus{
 		RenamesDeclared: len(renames),
 		PendingDeclared: len(pending),
+		RetiredDeclared: len(retired),
 		BytesEqual:      edgeRaw == ownRaw,
 	}
 
@@ -417,6 +491,30 @@ func compareCatalogCopiesWith(
 		awaited[e.OwnFQN] = true
 		census.PendingApplied++
 	}
+	// ── ЗАПИСИ О СНЯТЫХ СЛУЖБОЙ ГЛАГОЛАХ ДЕРЖАТ СЕБЯ В ОБЕ СТОРОНЫ ────────────
+	//
+	// Край больше не называет глагол → предикат снятия наступил: запись обязана
+	// уйти. У нас глагол всё ещё есть → ведомость утверждает о НАШЕМ дереве
+	// неправду. Только при предмете с обеих сторон запись края выносится из
+	// сравнения — и ровно она одна.
+	retiredAway := make(map[string]bool, len(retired))
+	for _, e := range retired {
+		if _, ok := edgeByFQN[e.EdgeFQN]; !ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"край больше не несёт снятый глагол %q — предикат снятия наступил: снимите запись. %s",
+				e.EdgeFQN, e.Refs)})
+			continue
+		}
+		if _, ok := ownByFQN[e.EdgeFQN]; ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись объявляет глагол %q снятым, а в НАШЕЙ копии он есть — она утверждает о дереве неправду. %s",
+				e.EdgeFQN, e.Refs)})
+			continue
+		}
+		retiredAway[e.EdgeFQN] = true
+		census.RetiredApplied++
+	}
+
 	ownCompared := ownBlocks
 	if len(awaited) > 0 {
 		ownCompared = make([]catalogBlock, 0, len(ownBlocks))
@@ -433,6 +531,9 @@ func compareCatalogCopiesWith(
 	// после подстановки блоки пересортировываются, и только тогда сравниваются.
 	projected := make([]catalogBlock, 0, len(edgeBlocks))
 	for _, b := range edgeBlocks {
+		if retiredAway[b.fqn] {
+			continue
+		}
 		if own, ok := renamed[b.fqn]; ok {
 			body := strings.Replace(b.body, catalogFQNField(b.fqn), catalogFQNField(own), 1)
 			if body == b.body {

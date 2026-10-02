@@ -148,12 +148,6 @@ func (w *fakeGrpWriter) EmitFGARelationWrite(context.Context, []service.Relation
 func (w *fakeGrpWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *fakeGrpWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *fakeGrpWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *fakeGrpWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeAccRdr struct{}

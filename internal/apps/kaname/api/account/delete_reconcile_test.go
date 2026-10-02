@@ -324,12 +324,6 @@ func (w *delFakeWriter) EmitFGARelationDelete(_ context.Context, tuples []servic
 func (w *delFakeWriter) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil
 }
-func (w *delFakeWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *delFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *delFakeWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type delAcctWriter struct{ repo *delFakeRepo }
