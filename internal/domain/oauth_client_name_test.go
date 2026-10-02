@@ -79,7 +79,6 @@ func TestSAOAuthClient_Validate_Name(t *testing.T) {
 	base := ServiceAccountOAuthClient{
 		ID:              "soc01abcdefghjkmnpqr",
 		SvaID:           "sva_01",
-		OAuthClientID:   "hydra-cli",
 		CreatedByUserID: "usr_01",
 	}
 
@@ -116,7 +115,6 @@ func TestUserOAuthClient_Validate_Name(t *testing.T) {
 	base := UserOAuthClient{
 		ID:              "uoc01abcdefghjkmnpqr",
 		UserID:          "usr_01",
-		OAuthClientID:   "hydra-cli",
 		CreatedByUserID: "usr_01",
 	}
 

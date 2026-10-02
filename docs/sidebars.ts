@@ -38,6 +38,7 @@ const sidebars: SidebarsConfig = {
         'api/access-binding',
         'api/tokens',
         'api/auth-lane',
+        'api/oauth-ceremony',
         'api/authorize',
         'api/operations',
         'api/quotas',
@@ -48,7 +49,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Дополнительно',
       collapsed: true,
-      items: ['advanced/design-decisions', 'advanced/observability'],
+      items: ['advanced/design-decisions', 'advanced/observability', 'advanced/second-factor-wrapping-key'],
     },
     {
       type: 'category',

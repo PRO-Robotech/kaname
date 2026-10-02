@@ -5,12 +5,12 @@
 // способны упасть и способны смолчать.
 //
 // Инъекция идёт в ОБЕ стороны по каждой оси: дефект обязан находиться, законный
-// близнец той же формы обязан молчать. Без второй половины гейт ловил бы форму,
+// близнец той же формы обязан молчать. Ось полос посадки заменена осью стадий:
+// посадка у службы одна (kaname#363). Без второй половины гейт ловил бы форму,
 // а не существо, и первый же ложный срабат его отключил бы.
 //
-// Пробы зовут ТЕ ЖЕ чистые тела, что исполняются на дереве (countCanonicalName-
-// Declarations, inspectLaneTable, rangesOverLaneRequirements,
-// getenvNamesMentioningProvider). Своя копия предиката разошлась бы с настоящим
+// Пробы зовут ТЕ ЖЕ чистые тела, что исполняются на дереве (inspectLaneTable,
+// rangesOverLaneRequirements, getenvNamesMentioningProvider). Своя копия предиката разошлась бы с настоящим
 // гейтом молча — и доказательство перестало бы относиться к нему.
 package config_test
 
@@ -37,24 +37,40 @@ func synthetic(t *testing.T, sources map[string]string) (*token.FileSet, map[str
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ось 2 — полнота произведения (F4d-10).
+// Ось 2 — полнота таблицы по стадиям (F4d-10).
 
-// Дефект: у полосы не осталось НИ ОДНОГО обязательного элемента. Обязано
-// находиться — это посадка, поднимающаяся без всякой проверки личности.
-func TestInjection_ALaneWithNoRequiredElementIsFound(t *testing.T) {
+// Дефект: у стадии сборки не осталось НИ ОДНОГО требования. Обязано находиться —
+// это старт, поднимающийся без проверки провязки.
+func TestInjection_AStageWithNoRequirementIsFound(t *testing.T) {
 	_, files := synthetic(t, map[string]string{
 		"lane_requirements.go": `package config
 var LaneRequirements = []LaneRequirement{
-	{Lanes: laneExternal, Element: "адрес поставщика"},
+	{Element: "своя чеканка", Stage: LaneStageConfig},
 }
 `,
 	})
 	c := inspectLaneTable(files)
-	if c.PerLane["laneOwn"] != 0 {
-		t.Fatalf("перепись не заметила полосу без требований: own=%d", c.PerLane["laneOwn"])
+	if c.PerStage["LaneStageWiring"] != 0 {
+		t.Fatalf("перепись не заметила стадию без требований: сборка=%d", c.PerStage["LaneStageWiring"])
 	}
-	if c.PerLane["laneExternal"] == 0 {
-		t.Fatal("перепись потеряла и вторую полосу — предикат считает не то")
+	if c.PerStage["LaneStageConfig"] != 1 {
+		t.Fatal("перепись потеряла и вторую стадию — предикат считает не то")
+	}
+}
+
+// Дефект: строка без стадии. Сумма по стадиям обязана разойтись с числом строк.
+func TestInjection_ARowWithoutAStageIsFound(t *testing.T) {
+	_, files := synthetic(t, map[string]string{
+		"lane_requirements.go": `package config
+var LaneRequirements = []LaneRequirement{
+	{Element: "своя чеканка", Stage: LaneStageConfig},
+	{Element: "без стадии"},
+}
+`,
+	})
+	c := inspectLaneTable(files)
+	if c.Rows != 2 || c.PerStage["LaneStageConfig"]+c.PerStage["LaneStageWiring"] != 1 {
+		t.Fatalf("строка без стадии не видна расхождением: строк %d, по стадиям %v", c.Rows, c.PerStage)
 	}
 }
 
@@ -62,10 +78,10 @@ var LaneRequirements = []LaneRequirement{
 func TestInjection_ASecondLaneTableIsFound(t *testing.T) {
 	_, files := synthetic(t, map[string]string{
 		"a.go": `package config
-var LaneRequirements = []LaneRequirement{{Lanes: laneExternal, Element: "а"}}
+var LaneRequirements = []LaneRequirement{{Element: "а", Stage: LaneStageConfig}}
 `,
 		"b.go": `package config
-var LaneRequirements = []LaneRequirement{{Lanes: laneOwn, Element: "б"}}
+var LaneRequirements = []LaneRequirement{{Element: "б", Stage: LaneStageWiring}}
 `,
 	})
 	if c := inspectLaneTable(files); c.Declarations != 2 {
@@ -73,26 +89,23 @@ var LaneRequirements = []LaneRequirement{{Lanes: laneOwn, Element: "б"}}
 	}
 }
 
-// ЗАКОННЫЙ БЛИЗНЕЦ: требование, объявленное для ОБЕИХ полос сразу, клеткой
-// произведения не является — гейт на нём молчит. Без этого случая гейт краснел
-// бы на всяком общем требовании.
-func TestInjection_ARequirementDeclaredForBothLanesIsNotAFinding(t *testing.T) {
+// ЗАКОННЫЙ БЛИЗНЕЦ: таблица с требованиями на обеих стадиях — гейт молчит, и
+// стадия, названная квалифицированным именем, считается той же стадией.
+func TestInjection_ATableWithBothStagesIsSilent(t *testing.T) {
 	_, files := synthetic(t, map[string]string{
 		"lane_requirements.go": `package config
 var LaneRequirements = []LaneRequirement{
-	{Lanes: []IdentityProvider{IdentityProviderExternal, IdentityProviderOwn}, Element: "общее"},
-	{Lanes: laneExternal, Element: "адрес поставщика"},
-	{Lanes: laneOwn, Element: "своя чеканка"},
+	{Element: "своя чеканка", Stage: LaneStageConfig},
+	{Element: "подписант провязан", Stage: config.LaneStageWiring},
 }
 `,
 	})
 	c := inspectLaneTable(files)
-	if c.PerLane["laneExternal"] == 0 || c.PerLane["laneOwn"] == 0 {
-		t.Fatalf("общее требование не должно лишать полосу её собственных клеток: external=%d own=%d",
-			c.PerLane["laneExternal"], c.PerLane["laneOwn"])
+	if c.PerStage["LaneStageConfig"] != 1 || c.PerStage["LaneStageWiring"] != 1 {
+		t.Fatalf("законная таблица прочитана неверно: %v", c.PerStage)
 	}
-	if c.Rows != 3 {
-		t.Fatalf("строк таблицы %d, ожидалось 3", c.Rows)
+	if c.Rows != 2 {
+		t.Fatalf("строк таблицы %d, ожидалось 2", c.Rows)
 	}
 }
 
@@ -163,7 +176,7 @@ func build() string { return os.Getenv(name()) }
 func TestInjection_AnUnrelatedKnobIsSilent(t *testing.T) {
 	_, files := synthetic(t, map[string]string{
 		"wiring.go": `package main
-func build() string { return os.Getenv("KANAME_HOOK_TOKEN") }
+func build() string { return os.Getenv("KANAME_JWKS_ENC_KEY") }
 `,
 	})
 	if got := getenvNamesMentioningProvider(files["wiring.go"]); len(got) != 0 {

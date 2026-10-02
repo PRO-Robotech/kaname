@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/oauthceremony"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
@@ -21,11 +22,20 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // resourceKind — the noun used in the malformed-id message. One constant, so the
 // sync format check and the not-found tone cannot drift apart.
 const resourceKind = "interactive client"
+
+// Способы аутентификации клиента на токен-эндпоинте — словарь схемы
+// (`interactive_clients_auth_method_ck`, kaname#317). Способ решает реестр,
+// который держит клиента; use-case судит согласие способа с материалом.
+//
+// Слова берутся у фундамента (`oauthceremony.ClientAuth*`), а не заводятся
+// здесь: колонку пишет реестр этой службы, а читает церемония фундамента
+// (`oauth_ceremony_vaults.go`), и два словаря одной колонки разошлись бы молча.
 
 // grantTypesInteractive — the ONLY shape this resource registers. A constant and
 // not a request field: the resource exists precisely to produce this shape, and
@@ -131,46 +141,30 @@ func (uc *ListUseCase) Execute(ctx context.Context, pageSize int64, pageToken, f
 
 // ── Create ───────────────────────────────────────────────────────────────────
 
-// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
-// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
-// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
-// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
-type providerCompensationEmitter interface {
-	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
-}
-
-// CreateUseCase — registers the client at the identity provider, then records it.
+// CreateUseCase — registers the client at the service's own registry, then
+// records it. The client is confidential and its secret is shown once, in the
+// answer of this call (kaname#405).
 type CreateUseCase struct {
 	repo      clientRepo
-	provider  providerClients
+	provider  ProviderClients
 	opsRepo   operations.Repo
 	audiences []string
 	logger    *slog.Logger
-	// compensation — durable sink for the compensating intent when the row is
-	// not committed after the provider registration. nil → direct best-effort
-	// deregistration only (see clients.ProviderCompensationOutbox).
-	compensation providerCompensationEmitter
 }
 
-// WithCompensationEmitter wires the durable sink for compensating intents.
-// Composition-root only.
-func (uc *CreateUseCase) WithCompensationEmitter(c providerCompensationEmitter) *CreateUseCase {
-	uc.compensation = c
-	return uc
-}
-
-// compensationOriginInteractiveClient — saga attribution in the intent.
-const compensationOriginInteractiveClient = "interactive_client"
-
-// providerReleaseTimeout — upper bound on the release (recording the intent OR
-// the direct call). Detached from the caller's cancellation: the release must
-// run even when the request is already gone.
+// providerReleaseTimeout — upper bound on the release call. Detached from the
+// caller's cancellation: the release must run even when the request is already
+// gone.
 const providerReleaseTimeout = 5 * time.Second
 
 // releaseProviderClient removes a registration made before the row was
-// committed. The DURABLE intent is the primary path — it survives both a dead
-// process and a failing release call; the direct deregistration stays as the
-// FALLBACK for when the intent cannot be recorded. Both are idempotent.
+// committed, by a direct idempotent deregistration.
+//
+// A DURABLE intent used to be the primary path here, for the registration made
+// at an external identity provider: the intent survived a dead process and a
+// failing release call. The external provider is gone (kaname#363) — the
+// registry is our own, the release is a call to it — and the intent writer went
+// with the provider.
 func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
 	if clientID == "" {
 		return
@@ -178,17 +172,6 @@ func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, re
 	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
 	defer cancel()
 
-	if uc.compensation != nil {
-		if err := uc.compensation.EmitHydraClientDelete(
-			relCtx, clientID, compensationOriginInteractiveClient, reason,
-		); err == nil {
-			return
-		} else if uc.logger != nil {
-			uc.logger.ErrorContext(relCtx,
-				"interactive client: durable compensation intent could not be recorded, falling back to a direct release",
-				"provider_client_id", clientID, "reason", reason, "err", err.Error())
-		}
-	}
 	if err := uc.provider.Deregister(relCtx, clientID); err != nil && uc.logger != nil {
 		// Neither an intent nor a release: the registration stays at the
 		// provider, and this line is the only handle left to remove it by hand.
@@ -200,11 +183,13 @@ func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, re
 
 // NewCreateUseCase — constructor. `audiences` comes from iam's own configuration
 // (Р2): the caller never supplies it and it is echoed output-only.
-func NewCreateUseCase(r clientRepo, p providerClients, ops operations.Repo, audiences []string, logger *slog.Logger) *CreateUseCase {
+func NewCreateUseCase(r clientRepo, p ProviderClients, ops operations.Repo, audiences []string, logger *slog.Logger) *CreateUseCase {
 	return &CreateUseCase{repo: r, provider: p, opsRepo: ops, audiences: audiences, logger: logger}
 }
 
-// Execute — validate → persist Operation → register at provider → insert row.
+// Execute — validate → persist Operation → register at the registry → check
+// the secret triple → insert the row with the verification value → split the
+// response bodies (stored without the secret, shown with it).
 //
 // WHY THE PROVIDER IS CONTACTED BEFORE THE ROW IS WRITTEN, AND WHAT PAYS FOR IT.
 // The row must carry the provider's client id, so registration comes first. If
@@ -256,6 +241,17 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
 		return nil, gerr
 	}
+	// failTraced — отказ пути, чья причина — НАШ текст: ответ реестра (в том
+	// числе срыв чеканки секрета), несогласие тройки, сборка тела ответа. Наружу
+	// у него фиксированный текст INTERNAL, поэтому причина уходит в журнал
+	// службы общим путём (`shared.LogMappedErr`) — иначе у дефекта реестра нет
+	// следа нигде. Отказ ВСТАВКИ сюда не идёт намеренно: его причина — текст
+	// хранилища, и IC-SECRET-13 (б) требует, чтобы отказ вне словаря не эхал
+	// его и в журнал (`TestIntegration_IC13b_InternalInsertRefusalEchoesNothing`).
+	failTraced := func(err error) (*operationpb.Operation, error) {
+		_ = shared.LogMappedErr(ctx, uc.logger, "InteractiveClient.Create", err, shared.MapRepoErr(err))
+		return fail(err)
+	}
 
 	pc, err := uc.provider.Register(ctx, ProviderClientSpec{
 		Name:                   string(c.Name),
@@ -265,14 +261,23 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		GrantTypes:             grantTypesInteractive,
 	})
 	if err != nil {
-		return fail(err)
+		return failTraced(err)
+	}
+	// Согласие тройки «способ ⟺ материал ⟺ секрет» — ДО вставки (задача #405).
+	// Схема держит только одно направление; без этой проверки возможен клиент
+	// со способом секретом, которому нечего предъявить никогда.
+	if err := secretMaterialAgrees(pc); err != nil {
+		uc.releaseProviderClient(ctx, pc.ClientID, "registry answered a secret material that disagrees with the method")
+		return failTraced(err)
 	}
 	c.ClientID = pc.ClientID
 	c.GrantTypes = pc.GrantTypes
 	c.TokenEndpointAuthMethod = pc.TokenEndpointAuthMethod
 	c.Audiences = pc.Audiences
 
-	created, err := uc.repo.Insert(ctx, c)
+	// Проверочное значение ложится ТЕМ ЖЕ оператором, что строка (Р5): второго
+	// писателя материала нет.
+	created, err := uc.repo.Insert(ctx, c, pc.SecretVerifier)
 	if err != nil {
 		// Compensate the half-done registration. The compensating intent cannot
 		// ride the insert's transaction — that transaction is precisely the one
@@ -283,16 +288,64 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		return fail(err)
 	}
 
-	resp, merr := operationResponse(created)
-	if merr != nil {
-		return nil, merr
+	// Тело для строки операции — без секрета, тело вызывающему — с ним (Р3).
+	// Оба собираются ДО терминальной записи и живут в этом вызове, а не в поле
+	// use-case: use-case один на все запросы, и поле стало бы общим
+	// состоянием — секрет одного вызывающего мог бы уйти другому.
+	stored, shown, err := createResponses(created, pc.Secret)
+	if err != nil {
+		// Тело вызывающему не собралось — секрет не будет показан никому, и
+		// клиент, которого никто не может доказать, не остаётся: строка
+		// снимается, заведение у реестра отзывается.
+		uc.abandonCreated(ctx, created)
+		// Причина — только ТЕКСТОМ (%v), в цепочку она не входит нарочно:
+		// чужой признак в цепочке переклассифицировал бы отказ в MapRepoErr.
+		return failTraced(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
 	}
-	if err := uc.opsRepo.MarkDone(ctx, op.ID, resp); err != nil && uc.logger != nil {
+	if err := uc.opsRepo.MarkDone(ctx, op.ID, stored); err != nil && uc.logger != nil {
 		uc.logger.ErrorContext(ctx, "interactive client Create: operation complete failed",
 			"operation_id", op.ID, "err", err.Error())
 	}
-	op.Done, op.Response = true, resp
+	// Подмена ПОСЛЕ записи: в строке лежит тело без секрета, вызывающий
+	// получает тело с ним.
+	op.Done, op.Response = true, shown
 	return shared.OperationToProto(&op), nil
+}
+
+// secretMaterialAgrees — согласие тройки «способ ⟺ материал ⟺ секрет» в ответе
+// реестра. Способ секретом приходит с секретом И проверочным значением, `none`
+// — без обоих; иное сочетание и способ вне словаря — дефект реестра, и отказ
+// у него фиксированного текста (`INTERNAL`), без строки и без секрета.
+func secretMaterialAgrees(pc ProviderClient) error {
+	hasSecret, hasMaterial := !pc.Secret.IsZero(), !pc.SecretVerifier.IsZero()
+	switch pc.TokenEndpointAuthMethod {
+	case string(oauthceremony.ClientAuthBasic), string(oauthceremony.ClientAuthPost):
+		if hasSecret && hasMaterial {
+			return nil
+		}
+	case string(oauthceremony.ClientAuthNone):
+		if !hasSecret && !hasMaterial {
+			return nil
+		}
+	}
+	return iamerr.Wrapf(iamerr.ErrInternal,
+		"interactive client registry answered method %q with secret present=%t and verification value present=%t",
+		pc.TokenEndpointAuthMethod, hasSecret, hasMaterial)
+}
+
+// abandonCreated снимает строку, записанную заведением, ответ которого не
+// собрался, и отзывает заведение у реестра. Отвязано от отмены вызывающего по
+// той же причине, что `releaseProviderClient`: снятие обязано состояться и
+// тогда, когда запроса уже нет.
+func (uc *CreateUseCase) abandonCreated(ctx context.Context, created domain.InteractiveClient) {
+	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
+	defer cancel()
+	if _, _, err := uc.repo.Delete(relCtx, created.ID); err != nil && uc.logger != nil {
+		uc.logger.ErrorContext(relCtx,
+			"interactive client: row of an abandoned Create left behind",
+			"interactive_client_id", string(created.ID), "err", err.Error())
+	}
+	uc.releaseProviderClient(ctx, created.ClientID, "operation response could not be built")
 }
 
 // ── Update ───────────────────────────────────────────────────────────────────
@@ -416,13 +469,13 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 // DeleteUseCase — removes the client at the provider and its row.
 type DeleteUseCase struct {
 	repo     clientRepo
-	provider providerClients
+	provider ProviderClients
 	opsRepo  operations.Repo
 	logger   *slog.Logger
 }
 
 // NewDeleteUseCase — constructor.
-func NewDeleteUseCase(r clientRepo, p providerClients, ops operations.Repo, logger *slog.Logger) *DeleteUseCase {
+func NewDeleteUseCase(r clientRepo, p ProviderClients, ops operations.Repo, logger *slog.Logger) *DeleteUseCase {
 	return &DeleteUseCase{repo: r, provider: p, opsRepo: ops, logger: logger}
 }
 

@@ -142,6 +142,7 @@ func newNotEnrolledHarness(t *testing.T) *notEnrolledHarness {
 	register, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: 24 * time.Hour, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
+		Letter: laneLetterPace, Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: laneSourcePace,
 	})
 	require.NoError(t, err)
 	email := "ne-" + ids.NewID("tst")[3:11] + "@example.invalid"

@@ -45,7 +45,7 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("api-server.subscription.idle-poll", 5*time.Second)
 	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
 	// external-reachable plaintext port (ingress-terminated TLS), distinct from
-	// the hooks (:9092) and metrics (:9095) listeners. Issuer/service/TTL shape
+	// the metrics (:9095) and key-set (:9097) listeners. Issuer/service/TTL shape
 	// the minted identity-JWT and must match the data-plane's advertised Bearer
 	// realm. Override via KANAME_API_SERVER__REGISTRY_TOKEN__{ENDPOINT,ISSUER,SERVICE,TTL}.
 	v.SetDefault("api-server.registry-token.endpoint", "tcp://0.0.0.0:9096")
@@ -63,15 +63,13 @@ func RegisterDefaults(v *viper.Viper) {
 	// TestDocumentedEnvName_KeyMaterialWindowUntil.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
 	v.SetDefault("api-server.registry-token.key-material-window-until", "")
-	// Cluster-INTERNAL listener of verification KEY SETS — a SEPARATE port
+	// Cluster-INTERNAL listener of the verification KEY SET — a SEPARATE port
 	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
-	// (never external, ban #6) over one-way server-TLS. It publishes records BY
-	// ISSUER (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
-	// `authn.token-signing.key-set-path` — the signer of every token we mint — and,
-	// at the canonical `/.well-known/jwks.json`, a short-TTL mirror of the previous
-	// issuer's PUBLIC JWKS, kept only while tokens of its issue are still
-	// presentable (kacho#2564). Consumers pick the record by the token's declared
-	// issuer; there is no fallback across records.
+	// (never external, ban #6) over one-way server-TLS. It publishes ONE record
+	// (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
+	// `authn.token-signing.key-set-path` — the signer of every token we mint. The
+	// previous issuer's mirror record left with that issuer (kaname#361), and the
+	// binding refuses a second record at start.
 	// Override via KANAME_API_SERVER__JWKS_PROXY__ENDPOINT.
 	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
 
@@ -176,19 +174,7 @@ func RegisterDefaults(v *viper.Viper) {
 	// access). Local fixtures / the newman stand opt INTO dev explicitly via
 	// KANAME_AUTH_MODE=dev (values.dev.yaml carries mode: dev).
 	v.SetDefault("authn.mode", "production")
-	// authn.identity-provider — УМОЛЧАНИЯ НЕТ НАМЕРЕННО (задача #1125).
-	//
-	// Обе альтернативы разобраны и обе отвергнуты: умолчание `external`
-	// заставило бы каждый профиль, поля не объявивший, требовать адресов, у
-	// которых нет носителя; умолчание `own` МОЛЧА сняло бы провайдерские
-	// требования у профиля, который просто забыли обновить. Умолчание живёт в
-	// ПРОФИЛЕ — базовый профиль зонтичного чарта объявляет значение явно.
-	//
-	// Строки `SetDefault` для этого ключа быть не должно: она и есть то самое
-	// умолчание в коде. Свойство держит проба
-	// TestF4d01_UnsetIdentityProviderRefusesTheStart — при умолчании она
-	// перестала бы наблюдать незаданное значение вовсе.
-	// AuthN core — configurable domain + Hydra issuer + hooks. Secrets are
+	// AuthN core — configurable domain + the provider token hop. Secrets are
 	// resolved from env so they don't sit in YAML/ConfigMap.
 	//
 	// authn.domain — УМОЛЧАНИЯ НЕТ НАМЕРЕННО (задача #2127).
@@ -208,15 +194,6 @@ func RegisterDefaults(v *viper.Viper) {
 	// умолчание в коде. Свойство держит проба TestDomainHasNoCompiledInDefault.
 	// Ключ привязан к окружению явно (load.go) — без этого `AutomaticEnv` не
 	// разрешил бы переменную вовсе.
-	v.SetDefault("authn.hydra-issuer", "")       // resolved via ResolveHydraIssuer() when empty
-	v.SetDefault("authn.hydra-jwks-url", "")     // resolved via ResolveHydraJWKSURL() (env KANAME_HYDRA_JWKS_URL)
-	v.SetDefault("authn.hook-shared-secret", "") // no default — security-sensitive
-	v.SetDefault("authn.hook-shared-secret-env", "KANAME_HOOK_TOKEN")
-	// Административный предъявитель внешнего поставщика: в YAML пишется ИМЯ
-	// переменной, значение — никогда (секрет). Прежде эта ручка читалась прямо
-	// из окружения в корне сборки и потому была невидима проверке настройки при
-	// старте (задача #1125).
-	v.SetDefault("authn.hydra-admin-token-env", "KANAME_HYDRA_ADMIN_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
 	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
@@ -225,17 +202,19 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.second-factor-encryption-key-hex", "")
 	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
 	v.SetDefault("authn.self-service-freshness", time.Duration(0))
-	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
-	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
-	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.
-	// У издателя и алгоритма умолчаний НЕТ — подпись умолчанием была бы
-	// решением, принятым за оператора.
+	// Своя чеканка токенов (задача #897). Умолчание задано ТОЛЬКО у величины,
+	// у которой оно осмысленно: путь нашей записи набора. У издателя и
+	// алгоритма умолчаний НЕТ — подпись умолчанием была бы решением, принятым
+	// за оператора. Срок ключа регистрируется ВЫРОЖДЕННЫМ (#321): это политика
+	// ротации, решение установки, и незаданная она обязана доехать до стража
+	// незаданной — подставленная здесь, она делала бы страж зелёным при любом
+	// входе. Регистрация нужна затем, чтобы переменная окружения разрешалась.
 	v.SetDefault("authn.token-signing.enabled", false)
 	v.SetDefault("authn.token-signing.issuer", "")
 	v.SetDefault("authn.token-signing.algorithm", "")
 	v.SetDefault("authn.token-signing.allowed-algorithms", "")
 	v.SetDefault("authn.token-signing.key-set-path", defaultKeySetPath)
-	v.SetDefault("authn.token-signing.key-lifetime", "2160h")
+	v.SetDefault("authn.token-signing.key-lifetime", time.Duration(0))
 
 	// Приём предъявленного удостоверения (#2077). Умолчания ПУСТЫЕ намеренно:
 	// «выключено» — единственное безопасное состояние, а адресат и окно отзыва
@@ -268,6 +247,15 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.client-token.default-audience", "")
 	v.SetDefault("authn.client-token.token-ttl", "0s")
 	v.SetDefault("authn.client-token.body-ceiling", 0)
+	// Темп эндпоинта (kaname#315) — та же дисциплина: нулевое умолчание держит
+	// ключ разрешимым из окружения, а незаданная величина доезжает до стража
+	// нулём и отвергает пуск.
+	v.SetDefault("authn.client-token.exchanges-per-client-per-sec", 0)
+	v.SetDefault("authn.client-token.in-flight-ceiling", 0)
+	v.SetDefault("authn.client-token.failed-proofs-per-source", 0)
+	v.SetDefault("authn.client-token.failed-proof-window", "0s")
+	v.SetDefault("authn.client-token.authorize-per-source-per-sec", 0)
+	v.SetDefault("authn.client-token.authorize-in-flight-ceiling", 0)
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
 	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает
@@ -310,17 +298,16 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("jobs.expired-credential-reclaim.dry-run", false)
 
 	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
-	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
-	// omit the field and inherit the provider-global TTL, so an existing
-	// deployment is unchanged until its profile pins a value (values.prod.yaml
-	// does). Override: KANAME_SAKEY_ACCESS_TOKEN_TTL.
+	// Per-client access_token_lifespan of the SA-key client REGISTRATION at the
+	// previous external issuer. No reader since kaname#362 — the registration is
+	// gone; the lifetime of our tokens is authn.client-token.token-ttl. Kept while
+	// the platform chart emits it (see the field comment in config.go).
+	// Override: KANAME_SAKEY_ACCESS_TOKEN_TTL.
 	v.SetDefault("authn.sakey-access-token-ttl", time.Duration(0))
-	// Sender-constrained (RFC 9449) tokens for SA keys. Binding is per-client
-	// REGISTRATION metadata, so it takes effect only for keys issued after it is
-	// enabled — pre-existing keys keep minting plain bearers until rotated.
-	// Default false; the edge enforcement knob must be turned on only AFTER this
-	// one, otherwise every existing service-account token is rejected.
-	// Override: KANAME_SAKEY_BIND_DPOP.
+	// Sender-constrained (RFC 9449) requirement on the SA-key client REGISTRATION
+	// at the previous external issuer. No reader since kaname#362; the start guard
+	// (validateMachineTokenBinding) refuses it where it would be believed.
+	// Default false. Override: KANAME_SAKEY_BIND_DPOP.
 	v.SetDefault("authn.sakey-bind-dpop", false)
 	// bootstrap-mint — the cluster-admin token mint (#58). The signing key lives
 	// in a k8s Secret, referenced BY ENV NAME here (never inlined in YAML). The

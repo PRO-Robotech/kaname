@@ -123,6 +123,8 @@ func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 	const ext = "ext_INV_ti3"
 	const email = "invitee-ti3@example.com"
 	_, accID, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti3", email)
+	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	markAddressVerified(t, ctx, pool, inviteeID)
 
 	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
 	op, err := uc.Execute(ctx, userapp.UpsertFromIdentityInput{
@@ -175,6 +177,7 @@ func TestUpsertInviteGrant_TI3_RC2_RollbackDiscardsBoth(t *testing.T) {
 	// member-tuple, all on one tx, abandoned.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, inviteeID)
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,
 		domain.ExternalSubject("ext_INV_ti3rb"), domain.DisplayName("Rolled Back"))
 	require.NoError(t, err)
@@ -211,6 +214,8 @@ func TestUpsertInviteGrant_TI5_RC5_BootstrapFiresOwnsZero_NoSecondInsertActive(t
 	const ext = "ext_INV_ti5"
 	const email = "invitee-ti5@example.com"
 	_, accA, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti5", email)
+	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	markAddressVerified(t, ctx, pool, inviteeID)
 
 	// Pre-condition: invitee owns ZERO accounts.
 	require.Equal(t, 0, ownedAccountCount(t, ctx, pool, string(inviteeID)),
@@ -295,6 +300,8 @@ func TestUpsertInviteGrant_TE4_RC5_ReActivateIdempotent_SingleOwnedAccount(t *te
 	const ext = "ext_INV_te4"
 	const email = "invitee-te4@example.com"
 	_, accA, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "te4", email)
+	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	markAddressVerified(t, ctx, pool, inviteeID)
 
 	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
 	in := userapp.UpsertFromIdentityInput{

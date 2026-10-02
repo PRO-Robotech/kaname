@@ -6,11 +6,11 @@
 //
 // # Почему это отдельный файл композиционного корня
 //
-// Эндпоинт собирает четыре части, и у каждой свой отказ: проверяющий
-// утверждение, реестр, способный к утверждению, хранилище однократности и
-// выдача нашим подписантом. Собранные в теле общего пуска, они растворяются
-// среди двух десятков соседних провязок, и первая же неполная из них проходит
-// обзор незамеченной.
+// Эндпоинт собирает пять частей, и у каждой свой отказ: проверяющий
+// утверждение, реестр, способный к утверждению, хранилище однократности,
+// читатель отсечки отзыва-всех и выдача нашим подписантом. Собранные в теле
+// общего пуска, они растворяются среди двух десятков соседних провязок, и
+// первая же неполная из них проходит обзор незамеченной.
 //
 // # Что здесь ГЛАВНОЕ
 //
@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,17 +33,27 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
-// clientTokenPeerTimeout — предел времени ОДНОГО внешнего вызова этого пути.
+// credentialLanePeerTimeout — предел времени ОДНОГО внешнего вызова на полосах
+// удостоверений: выдачи токена, предъявления базового секрета, заведения и
+// восстановления человека.
 //
-// Назван здесь потому, что путь собирается в этом корне: две величины в двух
-// местах — то, как они расходятся. Предмет предела — чтение реестра и допуск
-// однократности; оба идут в свою базу, и оба обязаны кончаться отказом, а не
-// ожиданием.
-const clientTokenPeerTimeout = 3 * time.Second
+// Назван здесь потому, что эти полосы собираются в этом корне: две величины в
+// двух местах — то, как они расходятся. Предмет предела — чтение реестра,
+// допуск однократности и чтение отсечки отзыва-всех на токен-эндпоинте;
+// обращение авторитета о базовом секрете к базе, в котором для строки человека
+// читается та же отсечка (`basic_credential_lane.go` — глаголы внутреннего
+// слушателя; `serve.go` — полоса докер-реестра); и правило выдачи церемонии
+// (`ceremony.go`). Полос хука внешнего поставщика, прежде названных здесь же,
+// больше нет (kaname#363). Все идут в свою базу, и все обязаны кончаться отказом, а не ожиданием; чтение
+// отсечки — одно и то же на всех полосах и потому несёт один предел —
+// обёрткой читателя там, где отсечка читается отдельным запросом, и пределом
+// оператора там, где она читается в одном операторе со строкой удостоверения.
+const credentialLanePeerTimeout = 3 * time.Second
 
 // buildClientTokenEndpoint собирает токен-эндпоинт платформы.
 //
@@ -54,6 +65,8 @@ func buildClientTokenEndpoint(
 	cfg config.Config,
 	signer *tokensigner.Signer,
 	logger *slog.Logger,
+	ceremony *ceremonySurface,
+	source *issuingsource.Rule,
 ) (*clienttokenhttp.Handler, error) {
 	if !cfg.AuthN.ClientToken.Enabled {
 		return nil, nil
@@ -63,6 +76,11 @@ func buildClientTokenEndpoint(
 		// половина того же требования: выпускать нечем.
 		return nil, fmt.Errorf("client token endpoint is enabled but our signer is not wired")
 	}
+	if source == nil {
+		// Правило адреса источника — ключ оси П3; без него окно отказов
+		// ключевалось бы ничем.
+		return nil, fmt.Errorf("client token endpoint is enabled but the source address rule is not wired")
+	}
 
 	// Состав утверждений собирают ТЕ ЖЕ функции, что и на пути обратного
 	// вызова, и ТА ЖЕ сборка, что у прочих полос нашей чеканки: перечень и
@@ -70,11 +88,33 @@ func buildClientTokenEndpoint(
 	// доезжает до всех сторон by construction.
 	claims := newAssertionClaimsComposer(pool, cfg)
 
-	return clienttokenwire.FromPool(pool, clienttokenwire.BuildConfig{
+	// Полосы церемонии (`authorization_code`, `refresh_token`) — на ЭТОМ же
+	// эндпоинте, когда церемония собрана (`ceremony.go`). nil-указатель в
+	// интерфейс не кладётся: пустой интерфейс и есть «церемонии нет».
+	var ceremonyLane clienttokenhttp.CeremonyLane
+	if ceremony != nil && ceremony.Token != nil {
+		ceremonyLane = ceremony.Token
+	}
+
+	// Отсечку отзыва-всех владельца сборка от пула читает адаптером ТОГО ЖЕ
+	// типа, что у авторитета о базовом секрете, — своим экземпляром над тем же
+	// пулом. Одинаковость ответа полос держат строка и запрос к ней (тип адаптера),
+	// предел на вызов (та же обёртка и тот же credentialLanePeerTimeout) и
+	// правило вердикта (`revocationpolicy`), а не общий экземпляр.
+	return clienttokenwire.FromPool(pool, clientTokenBuildConfig(cfg, signer.Issuer(), logger, ceremonyLane, source.TokenPoint), signer, claims)
+}
+
+// clientTokenBuildConfig — перевод настройки в вход сборки эндпоинта.
+//
+// Отделён от провязки пула затем, чтобы переход «настройка → сборка» судился
+// без базы: величина, которую страж требует и корень не передаёт, оставляет
+// обе стороны зелёными по своим пробам (kaname#315).
+func clientTokenBuildConfig(cfg config.Config, issuer string, logger *slog.Logger, ceremony clienttokenhttp.CeremonyLane, source func(*http.Request) string) clienttokenwire.BuildConfig {
+	return clienttokenwire.BuildConfig{
 		Logger: logger,
 		// Ожидаемый адресат утверждения — идентификатор НАШЕГО издателя, а не
 		// адрес эндпоинта: у адреса форм несколько, у издателя одна.
-		ExpectedAudience: signer.Issuer(),
+		ExpectedAudience: issuer,
 		// Величины объявлены числом ровно в одном месте и приезжают сюда
 		// параметром: сборка обязана отличать поданную величину от неподанной,
 		// а константа незаданной не бывает.
@@ -86,8 +126,18 @@ func buildClientTokenEndpoint(
 		DefaultAudience:          cfg.AuthN.ClientToken.DefaultAudience,
 		TokenTTL:                 cfg.AuthN.ClientToken.TokenTTL,
 		BodyCeiling:              cfg.AuthN.ClientToken.BodyCeiling,
-		PeerTimeout:              clientTokenPeerTimeout,
-	}, signer, claims)
+		PeerTimeout:              credentialLanePeerTimeout,
+		Ceremony:                 ceremony,
+		// Темп (kaname#315, П1–П3): величины объявляет профиль, страж старта их
+		// требует при включённом эндпоинте.
+		ExchangesPerClientPerSec: cfg.AuthN.ClientToken.ExchangesPerClientPerSec,
+		InFlightCeiling:          cfg.AuthN.ClientToken.InFlightCeiling,
+		FailedProofsPerSource:    cfg.AuthN.ClientToken.FailedProofsPerSource,
+		FailedProofWindow:        cfg.AuthN.ClientToken.FailedProofWindow,
+		// Ключ П3 — правило адреса источника поверхности выдачи (Р7), одно на
+		// обе точки.
+		Source: source,
+	}
 }
 
 // clientTokenOutcomeReader — переходник от переписи обработчика к читателю

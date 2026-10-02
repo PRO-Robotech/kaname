@@ -53,10 +53,9 @@ func (h *Handler) WithResendInvite(uc *ResendInviteUseCase) *Handler {
 }
 
 // WithResetSecondFactor — сброс второго фактора распорядителем (Ф12 Р10).
-// Отдельной провязкой, а не параметром построения: глагол существует только
-// на посадке `own` — под `external` второго фактора у службы нет, и там он не
-// провязывается вовсе (Ф12-37); вызов без провязки отвечает `Unimplemented`
-// — ровно как контракт, у которого нет исполнителя.
+// Отдельной провязкой, а не параметром построения: исполнитель несёт полоса
+// входа, которую корень собирает после служб (Ф12-37); вызов без провязки
+// отвечает `Unimplemented` — ровно как контракт, у которого нет исполнителя.
 func (h *Handler) WithResetSecondFactor(uc *ResetSecondFactorUseCase) *Handler {
 	h.reset = uc
 	return h
@@ -181,11 +180,14 @@ func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*
 	return shared.OperationToProto(op), nil
 }
 
-// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30): под
-// `external` не провязан и отвечает как контракт без исполнителя.
+// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30). Исполнителя
+// провязывает корень вместе с полосой входа на каждом старте; непровязанный
+// обработчик (только сборка мимо корня) отвечает как контракт без исполнителя,
+// а не паникой. Прежде так отвечала посадка внешнего поставщика; её больше нет
+// (kaname#363).
 func (h *Handler) ResetSecondFactor(ctx context.Context, req *iamv1.ResetSecondFactorRequest) (*operationpb.Operation, error) {
 	if h.reset == nil {
-		return nil, status.Error(codes.Unimplemented, "second factor is not served on this posture")
+		return nil, status.Error(codes.Unimplemented, "second factor reset is not wired")
 	}
 	op, err := h.reset.Execute(ctx, domain.UserID(req.GetUserId()))
 	if err != nil {
@@ -244,18 +246,16 @@ func (h *Handler) Invite(ctx context.Context, req *iamv1.InviteUserRequest) (*op
 // ожидает `Create` — добавь RPC в proto с `option deprecated = true` и
 // handler вернет FailedPrecondition с подсказкой использовать `Invite`.
 
-// InternalHandler — InternalUserService (UpsertFromIdentity / Get /
-// OnRecoveryCompleted).
+// InternalHandler — InternalUserService (UpsertFromIdentity / Get).
 type InternalHandler struct {
 	iamv1.UnimplementedInternalUserServiceServer
 
-	upsert     *UpsertFromIdentityUseCase
-	get        *GetUserUseCase
-	onRecovery *OnRecoveryCompletedUseCase
+	upsert *UpsertFromIdentityUseCase
+	get    *GetUserUseCase
 }
 
-func NewInternalHandler(u *UpsertFromIdentityUseCase, g *GetUserUseCase, r *OnRecoveryCompletedUseCase) *InternalHandler {
-	return &InternalHandler{upsert: u, get: g, onRecovery: r}
+func NewInternalHandler(u *UpsertFromIdentityUseCase, g *GetUserUseCase) *InternalHandler {
+	return &InternalHandler{upsert: u, get: g}
 }
 
 func (h *InternalHandler) UpsertFromIdentity(ctx context.Context, req *iamv1.UpsertFromIdentityRequest) (*operationpb.Operation, error) {
@@ -281,19 +281,6 @@ func (h *InternalHandler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
-}
-
-// OnRecoveryCompleted — Kratos password-recovery webhook. Mutation → async Operation.
-func (h *InternalHandler) OnRecoveryCompleted(ctx context.Context, req *iamv1.OnRecoveryCompletedRequest) (*operationpb.Operation, error) {
-	op, err := h.onRecovery.Execute(ctx, OnRecoveryCompletedInput{
-		ExternalID:  domain.ExternalSubject(req.GetExternalId()),
-		RecoveryJTI: req.GetRecoveryJti(),
-		Email:       domain.Email(req.GetEmail()),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return shared.OperationToProto(op), nil
 }
 
 // ---- shared ----

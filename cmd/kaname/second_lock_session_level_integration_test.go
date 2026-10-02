@@ -51,7 +51,7 @@ package main
 //
 // # Способность падать (инъекцией, откат, зелёное)
 //
-//   - `acr_floor.go`: пол не спрашивает каталог (`if true || ACRRank(required)
+//   - `acr_floor.go`: пол не спрашивает каталог (`if true || acrlevel.Rank(required)
 //     == 0`) → красное «второй замок пропустил пересланное «1»»;
 //   - `resolve.go`, `sessionProto`: ответ краю называет «1» вместо уровня
 //     записи → красное «пересылаемое значение не равно уровню нашей сессии».
@@ -230,6 +230,8 @@ func registerSecondLockPerson(t *testing.T, ctx context.Context, pool *pgxpool.P
 	register, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: 24 * time.Hour, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
+		Letter:  humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
+		Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
 	})
 	require.NoError(t, err)
 	out, err := register.Execute(ctx, registration.Input{
@@ -237,6 +239,10 @@ func registerSecondLockPerson(t *testing.T, ctx context.Context, pool *pgxpool.P
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, out.View.User.ID, "Дано: регистрация назвала личность")
+	// Посев бутстрапа выдаёт права только подтвердившему адрес (kaname#456,
+	// Р4а): Дано этой сцены — личность, подтвердившая адрес.
+	_, err = pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(out.View.User.ID))
+	require.NoError(t, err)
 	return out.View.User
 }
 

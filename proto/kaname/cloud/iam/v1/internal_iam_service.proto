@@ -20,7 +20,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 //
 // НЕ публикуется на external TLS listener. Регистрируется в api-gateway internal mux
 // (внутренний listener) — нужен auth-interceptor api-gateway (звать LookupSubject
-// из interceptor'а после валидации JWT (Ory Hydra)).
+// из interceptor'а после валидации JWT).
 //
 // Вызывается из admin-tooling (grpcurl) и authz-interceptor api-gateway.
 service InternalIAMService {
@@ -279,7 +279,7 @@ service InternalIAMService {
 message LookupSubjectRequest {
   // Один из ключей идентификации subject'а. Exactly one должен быть выставлен.
   oneof key {
-    // OIDC `sub` claim (Ory).
+    // Субъект личности (`sub` claim).
     string external_id = 1;
     // kaname internal id (`usr-...` или `sva-...`).
     string id = 2;

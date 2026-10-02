@@ -6,12 +6,13 @@
 //
 // # Зачем отдельный пакет сборки
 //
-// Эндпоинт состоит из четырёх частей, и три из них при полусобранной провязке
+// Эндпоинт состоит из пяти частей, и четыре из них при полусобранной провязке
 // выглядят исправными: проверяющий без потолка длительности принимает
 // утверждение с любым сроком; выдача без перечня адресатов выдаёт токен,
 // адресованный чему угодно; чтение реестра без предела времени висит на
-// неотвечающем соседе, пока не кончатся горутины. Ни одно из трёх не
-// проявляется отказом на положительном пути.
+// неотвечающем соседе, пока не кончатся горутины; выдача без читателя отсечки
+// отзыва-всех не отличает «отсечек нет» от «спросить некого». Ни одно из
+// четырёх не проявляется отказом на положительном пути.
 //
 // Поэтому сборка — ОДНО место и ОДИН отказ: неполная провязка не поднимает
 // сервис. Отказ в старте виден оператору сразу и называет величину; отказ на
@@ -29,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -37,8 +39,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // BuildConfig — вход сборки. Каждая величина обязательна.
@@ -68,13 +73,30 @@ type BuildConfig struct {
 	TokenTTL time.Duration
 	// BodyCeiling — потолок тела запроса.
 	BodyCeiling int64
+	// Ceremony — полосы церемонии OAuth на этом эндпоинте; nil — церемония на
+	// посадке не собрана (см. `clienttokenhttp.Config.Ceremony`).
+	Ceremony clienttokenhttp.CeremonyLane
 	// PeerTimeout — предел времени КАЖДОГО внешнего вызова этого пути: чтения
-	// реестра и допуска однократности.
+	// реестра, допуска однократности и чтения отсечки отзыва-всех.
 	//
 	// Обязателен, а не «разумное умолчание»: неотвечающий сосед без предела
 	// вешает горутину навсегда, и горутины копятся до исчерпания процесса —
 	// то есть отказ приходит не туда, где причина.
 	PeerTimeout time.Duration
+	// ExchangesPerClientPerSec — темп обменов в секунду на идентификатор
+	// клиента, на процесс (kaname#315). Судится проверяющим по заявленному
+	// идентификатору ДО реестра; тратят его только принятые предъявления.
+	ExchangesPerClientPerSec int
+	// InFlightCeiling — потолок одновременных обменов на процесс, все четыре
+	// вида выдачи (П1, kaname#315).
+	InFlightCeiling int
+	// FailedProofsPerSource и FailedProofWindow — ось П3: неудавшихся
+	// доказательств клиента за скользящее окно на источник, на процесс.
+	FailedProofsPerSource int
+	FailedProofWindow     time.Duration
+	// Source — адрес источника запроса по правилу Р7 (`issuingsource`): ключ
+	// П3. Обязателен — без него окну нечем ключеваться.
+	Source func(*http.Request) string
 }
 
 // New собирает эндпоинт из уже готовых портов.
@@ -89,6 +111,7 @@ func New(
 	replay clientassertion.ReplayGuard,
 	signer client_token.Signer,
 	claims client_token.ClaimSource,
+	revocations client_token.RevocationLookup,
 ) (*clienttokenhttp.Handler, error) {
 	if cfg.PeerTimeout <= 0 {
 		return nil, fmt.Errorf("clienttokenwire: per-call timeout must be declared as a positive number " +
@@ -110,6 +133,32 @@ func New(
 	if replay == nil {
 		return nil, fmt.Errorf("clienttokenwire: replay guard is required")
 	}
+	if revocations == nil {
+		// Отсечка отзыва-всех владельца — не «дополнительная проверка»: без
+		// читателя выдача не отличала бы «отсечек нет» от «спросить некого».
+		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader is required")
+	}
+	if cfg.InFlightCeiling <= 0 {
+		return nil, fmt.Errorf("clienttokenwire: in-flight exchange ceiling must be declared as a positive number "+
+			"(got %d) — zero means «no ceiling»", cfg.InFlightCeiling)
+	}
+
+	if cfg.Source == nil {
+		return nil, fmt.Errorf("clienttokenwire: source address rule is required — the failed-proof window " +
+			"per source would have nothing to key by")
+	}
+
+	// Темп строится ЗДЕСЬ, одним экземпляром на эндпоинт: обе полосы
+	// проверяющего списывают из него, и второй экземпляр удвоил бы темп.
+	pace, err := exchangepace.New(cfg.ExchangesPerClientPerSec, cfg.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: pace: %w", err)
+	}
+	// Окно П3 — тоже одно на эндпоинт: его делят все четыре вида выдачи.
+	failedProofs, err := failurewindow.New(cfg.FailedProofsPerSource, cfg.FailedProofWindow, cfg.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: failed-proof window per source: %w", err)
+	}
 
 	verifier, err := clientassertion.New(clientassertion.Policy{
 		ExpectedAudience:     cfg.ExpectedAudience,
@@ -120,24 +169,39 @@ func New(
 	},
 		WithDeadlineResolver(clients, cfg.PeerTimeout),
 		WithDeadlineIssuers(issuers, cfg.PeerTimeout),
-		WithDeadlineReplay(replay, cfg.PeerTimeout))
+		WithDeadlineReplay(replay, cfg.PeerTimeout),
+		pace)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
 	}
 
+	// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
+	// объявленным пределом на вызов: одно чтение одной строки несёт один
+	// предел на любой полосе (полоса базового секрета читает ту же строку
+	// в одном операторе со своей и несёт ту же величину пределом
+	// оператора).
+	cutoffs, err := revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader: %w", err)
+	}
 	issue, err := client_token.New(client_token.Config{
 		AllowedAudiences: cfg.AllowedAudiences,
 		DefaultAudience:  cfg.DefaultAudience,
 		TokenTTL:         cfg.TokenTTL,
 		Clock:            cfg.Clock,
-	}, signer, claims)
+	},
+		signer, claims, cutoffs)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
 	}
 
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
-		BodyCeiling: cfg.BodyCeiling,
-		Logger:      cfg.Logger,
+		BodyCeiling:     cfg.BodyCeiling,
+		InFlightCeiling: cfg.InFlightCeiling,
+		FailedProofs:    failedProofs,
+		Source:          cfg.Source,
+		Logger:          cfg.Logger,
+		Ceremony:        cfg.Ceremony,
 	}, verifier, issue)
 	if err != nil {
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)
@@ -145,8 +209,16 @@ func New(
 	return h, nil
 }
 
-// FromPool собирает эндпоинт от пула: реестр, способный к утверждению, и
-// хранилище однократности берутся из своей базы.
+// FromPool собирает эндпоинт от пула: реестр, способный к утверждению,
+// хранилище однократности и читатель отсечки отзыва-всех берутся из своей базы.
+//
+// Читатель отсечки — адаптер ТОГО ЖЕ типа, что у полос хука
+// (`kanamepg.NewSessionRevocationsAdapter`), но свой экземпляр над тем же пулом:
+// эндпоинт собирается и там, где хуков поставщика нет. Одинаковость ответа
+// полос держит не общий экземпляр, а три вещи, общие по построению: одна строка
+// и один запрос к ней (тип адаптера), один предел времени на вызов (обёртка
+// [revocationpolicy.WithDeadline] с объявленным пределом корня) и одно правило
+// вердикта (`revocationpolicy.AtIssuance`).
 func FromPool(
 	pool *pgxpool.Pool,
 	cfg BuildConfig,
@@ -160,7 +232,8 @@ func FromPool(
 		kanamepg.NewAssertionClientRepo(pool),
 		kanamepg.NewTrustedIssuerRepo(pool),
 		kanamepg.NewClientAssertionReplayRepo(pool),
-		signer, claims)
+		signer, claims,
+		kanamepg.NewSessionRevocationsAdapter(pool))
 }
 
 // ── предел времени на каждом внешнем вызове ─────────────────────────────────

@@ -14,14 +14,15 @@ package main
 // те же величины частоты, а своё у него — срок кода и диспетчер постановки
 // письма вне пути ответа (Ф5 Р2).
 //
-// # Поднимается ПОСАДКОЙ
+// # Поднимается НА КАЖДОМ СТАРТЕ
 //
-// Под `own` полоса — условие старта: хранилища провязаны, слушатель формы
-// поднят в режиме `mutual` на объявленном адресе, `Resolve` зарегистрирован на
-// внутреннем слушателе. Под `external` полосы нет вовсе: вход человека
-// проверяет поставщик, и наша полоса рядом с ним была бы вторым входом об одном
-// предмете. «Нет» здесь — nil-объект, и наблюдатель провязки сообщает о нём
-// честно (`HumanSessionsWired: false`), а не литералом.
+// Полоса — условие старта: хранилища провязаны, слушатель формы поднят в
+// режиме `mutual` на объявленном адресе, `Resolve` зарегистрирован на
+// внутреннем слушателе. Прежде её снимала посадка внешнего поставщика; той
+// посадки больше нет (kaname#363), и полосу не выключает ничто — неполная
+// настройка полосы есть отказ сборки с именем ручки. Методы полосы безопасны на
+// пустом значении: наблюдатель провязки называет непостроенную полосу
+// непровязанной (`HumanSessionsWired: false`), а не падает.
 //
 // # Порт стража памяти — чтение cgroup
 //
@@ -56,8 +57,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -77,6 +80,15 @@ const breachCheckTimeout = 5 * time.Second
 // recoveryDispatchTimeout — предел одной постановки письма восстановления вне
 // пути ответа: запись двух строк одной транзакцией, а не разговор с узлом.
 const recoveryDispatchTimeout = 30 * time.Second
+
+// recoveryDispatchInFlight — предел одновременных постановок письма
+// восстановления вне пути ответа (kaname#456): запрос приходит без
+// удостоверения, и горутина с транзакцией записи на каждый запрос без предела
+// была бы ценой, которую назначает вызывающий. Величина — число соединений
+// записи, которое постановки вправе занять разом, не отнимая пул у глаголов на
+// пути ответа; сверх предела работа не принимается и считается клеткой
+// `dispatch-dropped`, а ответ вызывающему тот же.
+const recoveryDispatchInFlight = 16
 
 // envelopeCensusTimeout — предел переписи классов стоимости при старте: один
 // последовательный проход по таблице способов (индекса по материалу нет
@@ -102,11 +114,26 @@ type loginLane struct {
 	freshness time.Duration
 	// keys — хранилище ключей доступа и их испытаний (Ф7, kacho#1273): служба
 	// ключей поднимается вместе с полосой — окно свежести (Р5) и предъявление
-	// судятся о сессии, которой под `external` нет.
+	// судятся о сессии полосы.
 	keys *kanamepg.AccessKeyRepo
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// verifier — проверяющий паролей полосы с приманкой объявленного класса.
+	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
+	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
+	verifier *passwordverify.Verifier
+	// letterWindow — окно писем подтверждения адреса (kaname#456, Р9): порог
+	// уборки строк кодов, по которым считается предел писем.
+	letterWindow time.Duration
+}
+
+// secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
+func (l *loginLane) secretChecker() ceremonyport.SecretChecker {
+	if l == nil || l.verifier == nil {
+		return nil
+	}
+	return l.verifier
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -116,11 +143,6 @@ func (l *loginLane) drain() {
 		return
 	}
 	l.dispatcher.Wait()
-}
-
-// loginLaneWanted — поднимается ли полоса на этой посадке: ровно под `own`.
-func loginLaneWanted(cfg config.Config) bool {
-	return cfg.AuthN.IdentityProvider == config.IdentityProviderOwn
 }
 
 // wired — хранилища полосы провязаны (наблюдение для посадки, `kaname#21`).
@@ -175,14 +197,16 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
-		Challenges: l.keys,
+		Challenges:        l.keys,
+		VerificationCodes: l.sessions, SourceWindows: l.sessions, BearerLetters: l.sessions,
+		LetterWindow: l.letterWindow, SourceWindow: l.limits.SourceWindow,
 	}
 }
 
 // accessKeyHandler — шесть глаголов ключа доступа (Ф7, kacho#1273) теми же
 // хранилищами, что полоса: свежесть — по сессиям, «последний способ» — по
-// строкам способов; nil — полосы нет (под `external` служба не регистрируется
-// и привязка фронта ведёт к `Unimplemented`).
+// строкам способов; nil — полоса не построена (методы безопасны на пустом
+// значении; на живом старте непостроенная полоса останавливает старт раньше).
 //
 // Привязка (имя доверяющей стороны, происхождения, алгоритмы) — из посадки,
 // прошедшей стража старта (`AccessKeysConfig.Validate` в требованиях полосы);
@@ -211,29 +235,29 @@ func (l *loginLane) accessKeyHandler(cfg config.Config, opsRepo operations.Repo,
 	return h, nil
 }
 
-// requireLoginLaneTLS — страж посадки `own` (Ф3-44 в): адрес объявлен, TLS
-// включён, режим `mutual`. Под `external` и вне production — no-op.
+// requireLoginLaneTLS — страж полосы входа (Ф3-44 в): адрес объявлен, TLS
+// включён, режим `mutual`. Судится на КАЖДОМ боевом старте: полосу больше не
+// выбирает ключ посадки (kaname#363), и вне production страж — no-op.
 func requireLoginLaneTLS(productionMode bool, cfg config.Config, mtlsCfg config.MTLSConfig) error {
-	if !productionMode || !loginLaneWanted(cfg) {
+	if !productionMode {
 		return nil
 	}
 	if strings.TrimSpace(cfg.APIServer.LoginLaneEndpoint) == "" {
-		return fmt.Errorf("%s=%s requires the password sign-in lane listener, and its address is not declared "+
-			"(set %s, e.g. tcp://0.0.0.0:9100 — a port of its own, distinct from the REST fronts): on this posture no other component lets a person sign in",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, knobLoginLane)
+		return fmt.Errorf("production mode requires the password sign-in lane listener, and its address is not declared "+
+			"(set %s, e.g. tcp://0.0.0.0:9100 — a port of its own, distinct from the REST fronts): no other component lets a person sign in",
+			knobLoginLane)
 	}
 	if !mtlsCfg.LoginLaneServerMTLS.Enable {
-		return fmt.Errorf("%s=%s requires TLS on the sign-in lane listener %s "+
+		return fmt.Errorf("production mode requires TLS on the sign-in lane listener %s "+
 			"(set KANAME_LOGINLANE_SERVER_MTLS_ENABLE=true with its cert/key and client CA): the lane admits "+
 			"exactly the edge by its verified client certificate, and without TLS there is no certificate to judge",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, cfg.APIServer.LoginLaneEndpoint)
+			cfg.APIServer.LoginLaneEndpoint)
 	}
 	if !mtlsCfg.LoginLaneRequiresClientCert() {
-		return fmt.Errorf("%s=%s requires the sign-in lane listener in mode %q, got %q "+
+		return fmt.Errorf("production mode requires the sign-in lane listener in mode %q, got %q "+
 			"(set KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE=%s): admission of exactly the edge is judged by the "+
 			"SAN of a verified client certificate, and any other mode leaves the lane open to every peer",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, config.InternalRESTMutualModeName(),
-			mtlsCfg.LoginLaneClientAuthModeValue(), config.InternalRESTMutualModeName())
+			config.InternalRESTMutualModeName(), mtlsCfg.LoginLaneClientAuthModeValue(), config.InternalRESTMutualModeName())
 	}
 	return nil
 }
@@ -349,15 +373,24 @@ func calibrateLoginEnvelope(ctx context.Context, envelope *passwordverify.Envelo
 	return report, nil
 }
 
-// buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
+// laneHasher — ХЕШЕР объявленного класса записи полосы входа
+// (`cfg.AuthN.Login.Declared()`). Производитель ОДИН на две потребы: им корень
+// пишет приманку проверяющего, и им же исполнитель заведения интерактивного
+// клиента пишет проверочное значение секрета (задача kaname#405). Два
+// построения из одного объявления разошлись бы в первой же правке одного из
+// них, и сверка секрета клиента стоила бы иначе, чем отказ по приманке.
+func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
+	return passwordverify.NewHasher(cfg.AuthN.Login.Declared())
+}
+
+// buildLoginLane — полоса своего входа. Собирается на КАЖДОМ старте: ключа
+// посадки, который её снимал, больше нет (kaname#363), и незаданные величины
+// полосы — отказ сборки с именем ручки, а не старт без полосы.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
 func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
-	if !loginLaneWanted(cfg) {
-		return nil, nil
-	}
 	login := cfg.AuthN.Login
 	if err := login.ValidateAll(); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -377,7 +410,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
-	hasher, err := passwordverify.NewHasher(login.Declared())
+	hasher, err := laneHasher(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -401,7 +434,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	// хранилища ∪ класс ручки, каждый — калибровкой прогоном проверяющего.
 	// Перепись не удалась — отказ старта: огибающая только по классу ручки
 	// оставила бы популяцию переноса отличимой по времени.
-	envelope, err := passwordverify.NewEnvelope(verifier, rec)
+	envelope, err := passwordverify.NewEnvelope(verifier, rec, passwordverify.WallClockCostMeter)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -488,17 +521,33 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if !ok {
 		return nil, fmt.Errorf("sign-in lane: registration lane %q is not declared in registration.Lanes", registration.LanePassword)
 	}
+	// Подтверждение адреса (kaname#456, Р7, Р9): пять величин полосы; письмо
+	// регистрации ставится той же транзакцией, что заводит человека.
+	letterPace := humansession.VerificationPace{
+		CodeTTL: login.VerificationCodeTTL, Attempts: login.VerificationCodeAttempts,
+		Interval: login.VerificationResendInterval, Limit: login.VerificationResendLimit,
+		Window: login.VerificationResendWindow,
+	}
+	// Окно обращений по источнику для регистрации и запроса восстановления —
+	// ось источника полосы входа, те же величины (kaname#456).
+	sourcePace := humansession.SourcePace{Limit: login.SourceAttempts, Window: login.SourceWindow}
+	registrationPG := kanamepg.NewRegistrationStore(pool)
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
-		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
+		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
+		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	// Восстановление доступа (Ф5): постановка письма — вне пути ответа (Р2).
-	dispatcher := humansession.NewGoDispatcher(recoveryDispatchTimeout)
+	dispatcher := humansession.NewGoDispatcher(recoveryDispatchTimeout).WithCap(recoveryDispatchInFlight, func() {
+		rec.RecoveryRequestObserved(humansession.RecoveryRequestDispatchDropped)
+	})
 	requestUC, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher, Observer: rec, Now: time.Now, Logger: logger,
+		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher,
+		Sources: sessions, SourcePace: sourcePace, MailLimit: inviteMailRateLimit(cfg),
+		Observer: rec, Now: time.Now, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -546,6 +595,24 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Подтверждение адреса (kaname#456, Р6–Р10): два глагола под сессией и
+	// положение сессии, читаемое из текущей отметки на каждом запросе.
+	verificationDeps := humansession.VerificationDeps{
+		Store: verificationStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
+		Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
+	}
+	requestVerificationUC, err := humansession.NewRequestVerificationUseCase(verificationDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmVerificationUC, err := humansession.NewConfirmVerificationUseCase(verificationDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	positionUC, err := humansession.NewPositionUseCase(sessions, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -553,9 +620,11 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
+		Verification:  rec,
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -565,6 +634,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		verifier: verifier, letterWindow: login.VerificationResendWindow,
 	}, nil
 }
 
@@ -587,6 +657,45 @@ type registrationWriter struct{ *kanamepg.RegistrationWriter }
 
 func (w registrationWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
 	return userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), in)
+}
+
+// verificationStore — адаптер хранилища глагола подтверждения к порту:
+// сессия — читатель записи сессии, транзакция исхода — писатель регистрации,
+// открытый замком писателя нескольких сессий на строке человека. Активацию
+// приглашения (Р11 п. 2) исполняет `user.ActivateInviteOnVerificationTx` над
+// писателем зеркала той же транзакции — здесь, в композиционном корне, как и
+// зеркало регистрации.
+type verificationStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+}
+
+func (s verificationStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s verificationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (humansession.VerificationWriter, error) {
+	w, err := s.inner.VerificationWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return verificationWriter{RegistrationWriter: w}, nil
+}
+
+type verificationWriter struct{ *kanamepg.RegistrationWriter }
+
+// ActivateInviteOnVerification — см. порт: срок и снятие приглашения — один
+// исход «не активируется» (Р11 п. 3); строка, уже не PENDING, — тот же исход:
+// активировать нечего.
+func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
+	res, err := userapp.ActivateInviteOnVerificationTx(ctx, w.MirrorWriter(), pending, string(pending.ID))
+	if err != nil {
+		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
+			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
+		}
+		return humansession.InviteActivation{}, err
+	}
+	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
 // ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:
@@ -614,6 +723,22 @@ type laneVerbs struct {
 	remove     *humansession.RemoveSecondFactorUseCase
 	regenerate *humansession.RegenerateBackupCodesUseCase
 	stepUp     *humansession.StepUpUseCase
+	// Подтверждение адреса (kaname#456).
+	requestVerification *humansession.RequestVerificationUseCase
+	confirmVerification *humansession.ConfirmVerificationUseCase
+	position            *humansession.PositionUseCase
+}
+
+func (v laneVerbs) RequestEmailVerification(ctx context.Context, bearer domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
+	return v.requestVerification.Execute(ctx, bearer)
+}
+
+func (v laneVerbs) ConfirmEmailVerification(ctx context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error) {
+	return v.confirmVerification.Execute(ctx, in)
+}
+
+func (v laneVerbs) AddressPosition(ctx context.Context, bearer domain.SessionBearer) (humansession.Position, error) {
+	return v.position.Execute(ctx, bearer)
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {
@@ -670,35 +795,30 @@ func (v laneVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (hum
 func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog.Logger,
 	lane *loginLane, mtlsCfg config.MTLSConfig,
 ) (servicecontract.SurfaceDescriptor, error) {
-	addr := ""
-	var handler http.Handler
-	if lane != nil {
-		// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных
-		// поверхностей. Здесь стояло сырое объявление профиля
-		// (`tcp://0.0.0.0:9100`): под `own` процесс проходил всех стражей и
-		// падал на привязке этой поверхности — «too many colons in address»
-		// (задача kaname#21, живой старт 2026-09-17). Держит
-		// `loginlane_addr_test.go`.
-		addr = cfg.APIServer.LoginLaneListenAddress()
-		handler = lane.handler
-	}
+	// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных поверхностей.
+	// Здесь стояло сырое объявление профиля (`tcp://0.0.0.0:9100`): процесс
+	// проходил всех стражей и падал на привязке этой поверхности — «too many
+	// colons in address» (задача kaname#21, живой старт 2026-09-17). Держит
+	// `loginlane_addr_test.go`. Ветви «полосы нет» больше нет: полоса строится
+	// на каждом старте (kaname#363), и необъявленный адрес — выключенная с
+	// причиной поверхность, а в боевом режиме отказ старта раньше
+	// (`requireLoginLaneTLS`).
+	addr := cfg.APIServer.LoginLaneListenAddress()
+	var handler http.Handler = lane.handler
 	tlsCfg, err := mtlsCfg.LoginLaneServerTLSConfig()
 	if err != nil {
 		return servicecontract.SurfaceDescriptor{}, fmt.Errorf("sign-in lane TLS: %w", err)
-	}
-	if lane == nil {
-		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
 		Name: "полоса входа паролем, регистрации, восстановления доступа и второго фактора " +
 			"(/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete,second-factor,second-factor/{enroll,confirm,remove,backup-codes},step-up})",
 		Mode:   mode,
 		Logger: logger,
-		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход, "+
-			"восстановление доступа и второй фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
-			"/recovery/complete, /second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) "+
-			"служба не обслуживает — их исполняет внешний поставщик"),
+		Addr: addrAxis(addr, "полоса входа паролем поднимается по адресу "+knobLoginLane+", и он не "+
+			"объявлен: вход человека, регистрацию, смену пароля, выход, восстановление доступа и второй "+
+			"фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, /recovery/complete, "+
+			"/second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) этот старт не "+
+			"обслуживает; в боевом режиме необъявленный адрес — отказ старта"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](

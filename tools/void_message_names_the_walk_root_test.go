@@ -64,22 +64,29 @@ func runSplit(t *testing.T, script string, args ...string) (int, string, string)
 	return code, out.String(), errb.String()
 }
 
-// emptyRepo — дерево, на котором проверка ФОРМЫ даёт ИМЕННО VOID: репозиторий
-// без единого манифеста.
+// repoWithoutManifest — дерево, на котором проверка ФОРМЫ даёт ИМЕННО VOID:
+// репозиторий, индекс которого знает файлы, но ни одного манифеста.
 //
 // Репозиторий, а не голый временный каталог: полоса дерева берёт перечень путей
 // у ИНДЕКСА (задача PRO-Robotech/kacho#2041), и каталог без индекса даёт НАХОДКУ
-// «перечень взять неоткуда», а не «проверять нечего». Предпосылка пробы требует
-// ровно VOID — значит индекс обязан быть, и обязан быть пустым.
-func emptyRepo(t *testing.T) string {
+// «перечень взять неоткуда», а не «проверять нечего». Индекс при этом обязан быть
+// НЕПУСТЫМ: индекс, не знающий под корнем ни одного файла, — тоже находка, корень
+// им не отслеживается (задача PRO-Robotech/kaname#384). VOID остаётся ровно
+// одному миру — файлы в индексе есть, манифеста среди них нет.
+func repoWithoutManifest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	// gitenv, а не exec напрямую: `cmd.Dir` НЕ выбирает репозиторий, когда в
-	// окружении стоит GIT_DIR — переменная сильнее рабочего каталога, и фикстура
-	// завела бы индекс ТОЙ копии, из которой запущен прогон.
-	cmd := gitenv.Command(root, "init", "-q")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init в %s: %v\n%s", root, err, out)
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("не манифест\n"), 0o600); err != nil {
+		t.Fatalf("запись README.md: %v", err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "--", "README.md"}} {
+		// gitenv, а не exec напрямую: `cmd.Dir` НЕ выбирает репозиторий, когда в
+		// окружении стоит GIT_DIR — переменная сильнее рабочего каталога, и
+		// фикстура завела бы индекс ТОЙ копии, из которой запущен прогон.
+		cmd := gitenv.Command(root, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v в %s: %v\n%s", args, root, err, out)
+		}
 	}
 	return root
 }
@@ -129,7 +136,7 @@ func TestManifestVoidMessagesNameTheWalkRootInThemselves(t *testing.T) {
 		script string
 		root   func(*testing.T) string
 	}{
-		{"форма манифеста", "module-manifest-check.sh", emptyRepo},
+		{"форма манифеста", "module-manifest-check.sh", repoWithoutManifest},
 		{"сверка канона", "model-canon-check.sh", voidCanonTree},
 	}
 	for _, c := range cases {

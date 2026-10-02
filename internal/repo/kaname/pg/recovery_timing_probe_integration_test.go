@@ -55,6 +55,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -93,6 +94,8 @@ func newRequestUC(t *testing.T, repo *pg.HumanSessionRepo, d humansession.Dispat
 	t.Helper()
 	uc, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: repo, CodeTTL: rcTTL, Dispatcher: d, Observer: obs, Now: time.Now, Logger: slog.New(slog.DiscardHandler),
+		Sources: repo, SourcePace: humansession.SourcePace{Limit: 100000, Window: time.Hour},
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 100000, Window: time.Hour},
 	})
 	require.NoError(t, err)
 	return uc

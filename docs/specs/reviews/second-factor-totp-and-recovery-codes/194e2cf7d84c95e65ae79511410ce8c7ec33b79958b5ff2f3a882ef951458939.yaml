@@ -1,0 +1,354 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939
+  static_status: DRAFT
+  static_status_note: >-
+    Токен `DRAFT` в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка НЕ правится этой записью: одобрение выводится из внешнего
+    события и этой записи, не из слова в заголовке. Прежние записи каталога не трогаются —
+    эта редакция (12) получает соседнюю запись по своему отпечатку.
+  base_commit: 0ffe0c7f3993991b8969e498d296bf5740cbca6e
+  content_commit: none
+  content_commit_note: >-
+    Редакция 12 на момент круга НЕ закоммичена: рабочая копия ветки `287` @ 0ffe0c7f, изменён один
+    файл (`git status --short` → ` M docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md`).
+    Вердикт привязан к отпечатку, а не к коммиту: после коммита
+    `git show <коммит>:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md | sha256sum`
+    обязан дать 194e2cf7… дословно — иначе эта запись о другом содержимом.
+  branch: '287'
+  wave_base: 20a5dcaa11b769cbd19eec033f158e5eac6a5b88
+  pull_request: pending
+  task: PRO-Robotech/kacho#1281
+  edition_task: PRO-Robotech/kaname#304
+  edition_task_note: >-
+    Правка исполняет исход 2 `kaname#304` (предикат снятия `kaname#287` переформулирован на
+    собственный замок полосы); сама находка — `kaname#287`.
+  lines: 2623
+  round: 9
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/02b30c2e50c34933650fcbc87d64a16cf75f52c7a7ccad25c4b58ec1f9f048cf.yaml
+  predecessor_note: >-
+    Непосредственный предшественник — редакция 11 (02b30c2e…, круг 8 APPROVED, внешнее событие
+    kacho#1281 comment 5737617038, 2026-09-18T23:58:56Z). Она же лежит в стволе и в HEAD ветки:
+    `git show origin/main:<путь> | sha256sum` (origin/main = cbbac984) и
+    `git show HEAD:<путь> | sha256sum` (HEAD = 0ffe0c7f) → 02b30c2e… оба. Одобрение редакции 11
+    на редакцию 12 НЕ переносится (change-graph.md §2).
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md в рабочей копии
+    tmp/kaname-287 (ветка 287 @ 0ffe0c7f) → 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939,
+    совпал с объявленным в задании дословно; wc -l → 2623.
+  measurement_revisions: >-
+    Дом службы: kaname, ветка 287 @ 0ffe0c7f (коммит фикса), база волны 20a5dcaa, ствол
+    origin/main cbbac984. Ссылок в клоне (refs/heads + refs/remotes) — 187 на момент круга.
+  task_premise_remeasured: >-
+    (1) Отпечаток 194e2cf7… — ПОДТВЕРДИЛОСЬ своим sha256sum. (2) «Отсылок было три, а не две» —
+    ПОДТВЕРДИЛОСЬ: `grep -c 'имя — в теле\|приведено в теле'` на HEAD → 3, в рабочей копии → 0;
+    прочие вхождения «в теле» (11) — про код в теле запроса и про решение в теле другой задачи, к
+    предмету не относятся. (3) «Тело kaname#287 имени пробы-опыта не несёт» — ПОДТВЕРДИЛОСЬ:
+    `gh issue view 287 -R PRO-Robotech/kaname --json body` — имени нет, комментариев нет.
+    (4) «Предикат kaname#304 даёт 0 в 187 ссылках, контроль — 3» — ПОДТВЕРДИЛОСЬ перемером:
+    имя пробы-опыта — 0 находок, имя пробы-замка — 3 (refs/heads/287,
+    refs/heads/issue-287-second-factor-window, refs/remotes/origin/issue-287-second-factor-window).
+    (5) «В `git diff 20a5dcaa...HEAD -- '*_test.go'` 4 файла, 10 функций» — ПОДТВЕРДИЛОСЬ.
+    Ни одна посылка не опровергнута.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-23'
+
+# ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
+effective_approval:
+  issued: true
+  issued_at: '2026-09-23T09:20:53Z'
+  ban1_lifted: true
+  why: >-
+    Вердикт круга 9 — APPROVED: блокирующих ноль. Дельта против одобренной редакции 11 —
+    переадресация трёх отсылок на пробу, существующую в дереве ветки, и строка редакции 12;
+    сценарии, их ID и счёт (46), решения Р1…Р12 и величины не тронуты. Названная проба
+    исполнена рецензентом в обе стороны (см. experiment). Санкция этим не выдана: роль без
+    внешнего события полномочия не даёт (change-graph.md §3); политика
+    (docs/changes/policy.yaml → review_authority.acceptance-reviewer) называет `pointpu`.
+  what_the_event_would_lift: >-
+    Перенос действующего одобрения с редакции 11 (02b30c2e…) на редакцию 12 (194e2cf7…). Нового
+    предмета для кода редакция 12 не вводит: санкция на код по дельте редакций 9…11 уже выдана
+    событием 5737617038 и остаётся; событие на 194e2cf7… нужно, чтобы документ, входящий в ствол
+    вместе с фиксом, нёс одобренный отпечаток.
+  what_the_owner_sees_in_the_event: >-
+    Приёмка Ф12, редакция 12: предикат снятия находки kaname#287 переадресован на замок полосы,
+    живущий в дереве (исход 2 kaname#304); контракт Ф12 Р7 / Ф3 Р10 не изменён.
+  publication_pending:
+    required_for_sanction: true
+    expected_from: диспетчер/курьер волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kacho#1281 с полями role, verdict, subject, subject_revision (коммит
+      редакции 12, после его создания), subject_sha256 (194e2cf7…) дословно; блок `event`
+      дописывается ОТДЕЛЬНЫМ коммитом поверх этой записи — вердикт и разбор задним числом не
+      правятся.
+
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    decided_by: acceptance-reviewer
+    decided_at: '2026-09-23'
+    issued_by_event: 5792262830
+    basis: >-
+      change-graph.md §3: вердикт действителен, когда его подтверждает внешнее событие —
+      принадлежащее названной задаче, с допущенным к роли автором, с телом, связывающим точный
+      отпечаток предмета, роль и вердикт. Все четыре условия выполнены и перемерены рецензентом
+      на своей ревизии; ни одно не взято со слов задания или сверки волны.
+    remeasured: >-
+      (1) Отпечаток предмета — `git show
+      11b6f723d3cb9dd84f37e694047823268e535a5d:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+      | sha256sum` → 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939; совпал с именем файла ЭТОЙ записи, с `subject.sha256` и со
+      строкой `subject_sha256` тела события. Ревизия тела — коммит, внёсший эту редакцию вместе с
+      этой записью: обязательство `subject.content_commit_note` исполнено. Ревизия опубликована раньше события: `gh api
+      'repos/PRO-Robotech/kaname/activity?ref=refs/heads/287'` → создание ветки на 11b6f723 в
+      01:17:10Z.
+      (2) Принадлежность задаче — `gh api repos/PRO-Robotech/kacho/issues/comments/5792262830` →
+      `issue_url` указывает на PRO-Robotech/kacho#1281, то есть на `subject.task`.
+      (3) Полномочие — `pointpu` значится в `review_authority.acceptance-reviewer` политики
+      `docs/changes/policy.yaml` воркспейса, `gh api
+      repos/PRO-Robotech/kacho/collaborators/pointpu/permission` → admin, `author_association`
+      ответа → MEMBER; эпоха post-cutover: `git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main` в воркспейсе
+      (origin/main 6eddaa5e) → 0. (4) Тело — пять обязательных строк
+      дословно, каждая ровно одна (`grep -cxF` → 1 по каждой), контроль в другую сторону `grep -cxF
+      'verdict: CHANGES_REQUESTED'` → 0 и строка чужого отпечатка (713ff0bd…) → 0; отпечаток тела
+      `gh api … | jq -j .body | sha256sum` → 201fa744aa211a153f83eea25e10c90fb9ea9241dd2a60b897281e1290774453, совпал с `event.body_sha256`;
+      `created_at == updated_at` ⇒ после публикации тело не правилось.
+    ban1_fact: >-
+      `ban1_lifted: true` — с момента события и для ЭТОЙ редакции. Нового предмета для кода
+      редакция 12 не вводит (`what_the_event_would_lift`): код полосы kaname#287, внесённый до
+      события (первый — 0ffe0c7f3, `git show -s --format=%cI 0ffe0c7f3` →
+      2026-09-23T03:51:17+03:00), стоит под санкцией редакции 11 — событие 5737617038 записи
+      `02b30c2e…`, — а не под этой. Задним числом эта санкция его не покрывает и покрывать не
+      должна.
+    mechanism: >-
+      Правка ЭТОЙ записи на месте, а не новая запись и не правка шапки документа. Отпечаток
+      предмета не менялся, а координата записи ПО ОПРЕДЕЛЕНИЮ есть этот отпечаток
+      (`<sha256>.yaml`), поэтому второй записи о той же редакции не бывает by construction.
+      Запрет change-graph.md §2 («история ревью добавляется, не переписывается») предметом имеет
+      РЕДАКЦИЮ: новая редакция получает СОСЕДНЮЮ запись. Здесь редакция та же; вердикт, разбор,
+      находки, числа, `why` и `publication_pending` не тронуты — они рассуждение на момент
+      вердикта, когда события ещё не было. Тронуты ровно три выводимых поля
+      (issued/issued_at/ban1_lifted), добавлены этот блок и блок `event`. `effective_approval`
+      выводится из СОБЫТИЯ, наступившего позже записи; не привести его к факту значит оставить
+      запись, утверждающую «санкции нет» там, где она выдана.
+    precedent: >-
+      Форма — записи кругов 8 и 6 (`second-factor-…/02b30c2e…`, `login-lane-…/713ff0bd…`; блок
+      `event` — 111a598a7, санкция — d060e6df6). Инвариант каталога на 4ed53c9b: записей 57; с
+      `verdict: APPROVED` и `event.status: performed` — 23, `issued: true` у всех 23; после правки —
+      27 и 27. Контроль в другую сторону, который приводил d060e6df6 (`registration-…/7c81fa29…`:
+      APPROVED при `event.status: not_performed` и `issued: false`), перемером ОПРОВЕРГНУТ: событие
+      на трекере есть (kaname#256, 5731034477), это пятая молчащая запись, а не контроль. Пары, где
+      вердикт и событие расходятся, в каталоге этой ревизии нет вовсе, поэтому «поле следует
+      событию» и «поле следует вердикту» каталог НЕ различает. Правка от различения не зависит: у
+      этой записи вердикт APPROVED и событие состоялось — оба правила дают `issued: true`.
+    divergence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужен PyYAML
+      import glob, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      bad = [p for p, d in rows
+             if (d.get('event') or {}).get('status') == 'performed'
+             and d.get('verdict') == 'APPROVED'
+             and (d.get('effective_approval') or {}).get('issued') is not True]
+      print('осмотрено', len(rows), '· расхождений', len(bad))
+      for p in bad:
+          print(' ', p)
+      PY
+    divergence_predicate_result: >-
+      На 4ed53c9b — «осмотрено 57 · расхождений 0», и это молчание СЛЕПОЕ: предикат судит только
+      запись с блоком `event`, а эта запись его не несла. Промежуточное состояние этой же правки
+      (блоки `event` дописаны, `effective_approval` ещё нет) — «осмотрено 57 · расхождений 4»:
+      краснеет ровно на четырёх записях правки. После — «осмотрено 57 · расхождений 0».
+    silence_predicate: |-
+      python3 - <<'PY'   # из корня рабочей копии kaname; нужны PyYAML и gh
+      import glob, json, subprocess, yaml
+      rows = [(p, yaml.safe_load(open(p))) for p in sorted(glob.glob('docs/specs/reviews/*/*.yaml'))]
+      tasks = sorted({t for _, d in rows for k in ('task', 'edition_task')
+                      if '#' in (t := str((d.get('subject') or {}).get(k) or ''))})
+      com = {t: [c for page in json.loads(subprocess.run(['gh', 'api', '--paginate', '--slurp',
+             'repos/%s/issues/%s/comments?per_page=100' % tuple(t.split('#'))], capture_output=True,
+             text=True, check=True).stdout) for c in page] for t in tasks}
+      silent = [(p, c['id']) for p, d in rows if (d.get('event') or {}).get('status') != 'performed'
+                for k in ('task', 'edition_task') for c in com.get((d.get('subject') or {}).get(k), [])
+                if {'role: acceptance-reviewer', 'subject_sha256: ' + p[-69:-5]} <= set(c['body'].splitlines())]
+      print('записей', len(rows), '· задач', len(tasks), '· комментариев', sum(map(len, com.values())),
+            '· событие есть, запись молчит', len(silent))
+      for p, i in silent:
+          print(' ', p, i)
+      PY
+    silence_predicate_result: >-
+      На 4ed53c9b — «записей 57 · задач 17 · комментариев 94 · событие есть, запись молчит 5»:
+      четыре записи этой правки и `registration-and-its-three-consequences/7c81fa29…` (kaname#256,
+      событие 5731034477) — тот же дефект вне объёма этой правки, назван в её возврате. После —
+      «… молчит 1». Граница названа: опрашиваются только задачи из `subject.task` и
+      `subject.edition_task`; контроль в другую сторону (то же сопоставление по записям С блоком
+      `event`) находит 18 событий из 23 записанных, пять остальных лежат в задачах, названных
+      записью иначе. Число молчащих — нижняя граница, а не перепись.
+    gate: >-
+      ГЕЙТА на это свойство в дереве НЕТ. Замер на 4ed53c9b: `grep -rln 'effective_approval\|publication_pending'
+      internal/ scripts/ Makefile .github` в kaname → 0 файлов; в `scripts/change-graph-gate/` и
+      `scripts/docs-gate/` воркспейса → 0. Каталог `docs/specs/reviews/` читают три пробы
+      `internal/check` (ведомость вершин вопроса об истории, перепись посева) — поля санкции ни одна
+      не судит. Оба предиката выше держатся ВНИМАНИЕМ; держатель класса «событие на трекере есть —
+      запись о нём молчит» — предмет tooling-maintainer, назван сверкой волны 377.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5792262830
+  node_id: IC_kwDOTZqgWM8AAAABWT7qrg
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5792262830
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5792262830
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-23T09:20:53Z'
+  body_sha256: 201fa744aa211a153f83eea25e10c90fb9ea9241dd2a60b897281e1290774453
+  subject_sha256: 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939
+  subject_revision: 11b6f723d3cb9dd84f37e694047823268e535a5d
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента (#378: сверка волны 377 назвала запись
+    молчащей при опубликованном событии), тем же коммитом, что `effective_approval.sanction`;
+    вердикт, разбор, находки и числа задним числом не правлены. Перемерено: поля события — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5792262830` (id, node_id, user pointpu, MEMBER,
+    created_at; created_at == updated_at, то есть после публикации тело не правилось); пять строк
+    тела дословно, каждая ровно одна (`grep -cxF` → 1 по каждой); отпечаток тела — `gh api … |
+    jq -j .body | sha256sum` → 201fa744…; форма команды проверена в обе стороны: на этом же
+    теле `jq -r` → 6eae4704… — другое число о другом входе; на событии круга 7 Ф12
+    (`second-factor-…/423f7233…`, 5730853026) `jq -j` → 8409dfc3… как в его записи. Отпечаток предмета снят самостоятельно: `git show
+    11b6f723d3cb9dd84f37e694047823268e535a5d:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md | sha256sum` → 194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939, совпал
+    с именем файла записи и со строкой `subject_sha256` тела события.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакций 11 → 12, каждый ломоть диффа положен на раздел: строка редакции 11 (шапка,
+    скобка о пробе-опыте); новая строка редакции 12 (шапка); §8, строка «Ф12-31…33, 46 подбор и
+    время»; §9 DoD, пункт замка kaname#287. Сверено с kaname#304 (исходы и предикат снятия) и с
+    деревом ветки 287 (проба, её файл и ветвь). Разделы, не тронутые диффом, заново не
+    перечитывались: их вердикт — записи кругов 1…8.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+# ─── ДЕЛЬТА ПРОТИВ ОБЪЯВЛЕННОГО СОСТАВА — НЕ ШИРЕ И НЕ УЖЕ ─────────────────
+delta_vs_declared:
+  predicate: >-
+    git diff --numstat -- <путь> → 30 6; git diff -U0 → четыре ломтя: @@ -179,3 +179,5 @@ (шапка,
+    строка редакции 11), @@ -209,0 +212,18 @@ (шапка, строка редакции 12), @@ -2323 +2343 @@
+    (§8, 2326…2366), @@ -2377,2 +2397,6 @@ (§9, 2366…2489).
+  declared: >-
+    строка редакции 11 (скобка о пробе-опыте) · §8 (строка «подбор и время») · §9 DoD (пункт
+    замка kaname#287) · новая строка редакции 12
+  measured: >-
+    Дифф касается РОВНО объявленных мест; не шире и не уже. Счёт сценариев не сдвинулся:
+    §5 → 46 уникальных меток, §6 → 46 строк. Отсылок на тело kaname#287 как место имени пробы
+    в документе не осталось (0).
+
+# ─── ЭКСПЕРИМЕНТ: ПРОБА СУЩЕСТВУЕТ, ИСПОЛНЯЕТСЯ И СПОСОБНА УПАСТЬ ─────────
+experiment:
+  probe: TestF12_46_OnlyCodeSuccessOpensTheWindow
+  file: internal/apps/kaname/api/humansession/second_factor_window_lock_test.go
+  subtest: 'пара «вход»: между сериями вход ПАРОЛЁМ'
+  exists_in_tree: >-
+    Да: файл и функция добавлены коммитом 0ffe0c7f (`git diff 20a5dcaa...HEAD -- '*_test.go'`),
+    имя ветви дословно совпадает с документом.
+  green_after_fix: >-
+    go test -run '^TestF12_46_OnlyCodeSuccessOpensTheWindow$' -count=1 -v
+    ./internal/apps/kaname/api/humansession/ на ветке 287 @ 0ffe0c7f → ok; исполнено ветвей 3,
+    зелёных 3, красных 0 (go1.26.8).
+  red_before_fix: >-
+    Тот же прогон на экспорте базы волны (`git archive 20a5dcaa`) с подложенным файлом пробы,
+    обвязка пробы на базе не менялась (`git diff --quiet 20a5dcaa HEAD` по файлам обвязки) → FAIL:
+    ветвь «вход ПАРОЛЁМ» красная, ветвь «церемония ПАРОЛЕМ» красная, ветвь-близнец «церемония
+    КОДОМ» зелёная. Замок краснеет до фикса и зеленеет после — пункт 2 предиката снятия
+    kaname#304 показан прогоном в обе стороны. Экспорт удалён после прогона.
+
+# ─── ПРОВЕРКИ ПО КАНОНУ ────────────────────────────────────────────────────
+checks:
+  fingerprint_match: true
+  scenario_count: '§5 = 46, §6 = 46, дельтой не тронуты'
+  producer_present_for_every_then: >-
+    Не изменилось против круга 8: §6 не тронут. Держатель в дереве для Ф12-46 теперь назван
+    координатой (функция, файл, ветвь) вместо отсылки на тело задачи. Сценариев без
+    производителя — 0.
+  positive_twin_for_every_negation: >-
+    Не изменилось против круга 8; близнец Ф12-46 (б) в названной пробе — ветвь «церемония
+    КОДОМ», зелёная на обеих ревизиях.
+  constructibility: >-
+    Нового «Дано» дельта не вводит. Конструируемость «Дано» Ф12-46 показана ИСПОЛНЕНИЕМ: обвязка
+    пробы строит личность с паролём и фактором и сессию «1» на обеих ревизиях (прогоны выше).
+    Посеяно 1 из 1 (через фикстуру пробы), «не выполнилось» 0.
+  dod_measurable: >-
+    Пункт замка kaname#287 измерим: проба, файл и ветвь названы, обе стороны показаны прогоном.
+  open_questions: none
+  conventions: 'Контракт, RPC, поля, отказы — не тронуты дельтой.'
+  disclosure: >-
+    Новый текст не добавляет ни условия, ни следствия сверх одобренной редакции 11: он называет
+    место пробы (тестовый файл) и то, что проба-опыт в дерево не вошла. Имя пробы-опыта в документ
+    не внесено. Текст этой записи и тела события удержан на уровне «предикат переадресован,
+    проба исполнена в обе стороны», без описания наблюдаемого до фикса. НЕ блокирующее.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: N1
+    kind: finding
+    class: neighbour-same-defect
+    text: >-
+      Сосед Ф3 (`login-lane-issues-our-session-and-logout-ends-it-server-side.md`, 713ff0bd…,
+      редакция 11) несёт ту же мёртвую отсылку: строка 16 называет местом имени пробы-опыта тело
+      kaname#287 (`grep -c 'имя — в теле\|приведено в теле'` → 1). Предмет этого круга — только
+      Ф12, поэтому не блокер; но пункт 1 предиката снятия kaname#304 («предикат ссылается на пробу
+      в дереве») закрыт не во всех местах, пока Ф3 не получит свою редакцию и свой круг по своему
+      отпечатку.
+  - id: N2
+    kind: observation
+    class: tracker-predicate
+    text: >-
+      Пункт 3 предиката снятия kaname#304 — «изменение предиката записано комментарием в #287» —
+      не выполнен: у kaname#287 комментариев ноль. Это действие трекера, не содержание приёмки.
+  - id: N3
+    kind: observation
+    class: doc-truthfulness
+    text: >-
+      Строка состояния в шапке отстаёт от каталога записей (называет шесть кругов и редакцию 11;
+      записей теперь девять, текст — редакция 12, санкция по дельте 9…11 выдана событием
+      5737617038). Документ отставание сам называет в строке редакции 12 и выносит его за объём
+      правки. Класс повторяется (редакция 9 уже приводила эту строку к правде), поэтому при
+      следующей правке лучше заменить числа в строке предикатом по каталогу записей, чтобы строка
+      перестала устаревать.
+  - id: N4
+    kind: observation
+    class: holder-independence
+    text: >-
+      Пункт DoD замка теперь держится одной пробой в обеих половинах (весь замок и его ветвь
+      «вход ПАРОЛЁМ»); независимое воспроизведение заменено замком полосы. Это прямо разрешённый
+      исход 2 kaname#304, и замок показан способным упасть, поэтому не блокер.
+
+seed_attempt:
+  performed: true
+  outcome: green
+  reason: >-
+    Изоляция — собственный экспорт `git archive 20a5dcaa` в tmp/ воркспейса (удалён) и рабочая
+    копия ветки 287; стенд не нужен: «Дано» Ф12-46 строит обвязка пробы в процессе.

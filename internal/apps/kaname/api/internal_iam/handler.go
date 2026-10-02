@@ -15,7 +15,7 @@
 //
 // Методы:
 //   - LookupSubject(by external_id|id|email) — для auth-interceptor api-gateway
-//     после валидации JWT (Ory Hydra).
+//     после валидации JWT.
 //   - Check — single-tuple authorization gate; delegate к AuthorizeService.
 //     Вызывается per-RPC authz-interceptor'ами
 //     kacho-vpc / kacho-compute / kacho-loadbalancer.
@@ -105,15 +105,14 @@ type Handler struct {
 	// nil → глагол fail-closed Unavailable.
 	basicCredentials basicCredentialResolver
 
+	// basicOutcomes — перепись исходов полосы базового секрета по глаголу и
+	// исходу (kaname#379). Нулевое значение готово к работе.
+	basicOutcomes basicCredentialCensus
+
 	// logger — поверхность НАБЛЮДАЕМОСТИ отказов. Различимость причин отказа
 	// живёт здесь, а не в том, что видит предъявитель: «ноль отказов за всю
 	// жизнь контроля» обязано быть заметно, иначе мёртвый контроль невидим.
 	logger *slog.Logger
-
-	// sessionRevoker — writer for ForceLogout. nil → the RPC
-	// fails closed Unavailable. Shares the session_revocations table with the
-	// user-logout Revoke path and the refresh-hook reader.
-	sessionRevoker sessionRevoker
 
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate for the
 	// privileged admin RPCs (ForceLogout). nil → fail-closed (the gate denies).
@@ -125,12 +124,10 @@ type Handler struct {
 	// closed Unavailable rather than returning an id that names no row.
 	operations forceLogoutOperationRepo
 
-	// providerSessions / externalIDs — the identity provider's login-session
-	// surface and the resolver naming a kacho user to it, used by ForceLogout to
-	// END the session rather than only record that it must not be honoured.
-	// Both nil when that surface is not configured.
-	providerSessions providerSessions
-	externalIDs      externalIDResolver
+	// ownSessions — снятие НАШИХ записей сессии входа (`human_sessions`),
+	// отсечка и запись события одной транзакцией (kaname#340). nil → ForceLogout
+	// fails closed Unavailable.
+	ownSessions OwnSessions
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not

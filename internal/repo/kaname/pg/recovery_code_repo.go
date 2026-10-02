@@ -23,9 +23,9 @@ package pg
 //
 // Таблицу способа входа — её называет только её адаптер; замещение материала
 // делегируется `replaceLoginVerifierTx` (см. `human_session_repo.go`). Журнал
-// завершений пишется той же функцией, что у приёмника обратного вызова
-// поставщика (`insertRecoveryCompletionTx`): источника события два, запись одна
-// (Р4).
+// завершений пишется функцией `insertRecoveryCompletionTx`
+// (`recovery_completions_repo.go`); источник события у журнала один — наша
+// полоса восстановления (kaname#564).
 
 import (
 	"context"
@@ -138,10 +138,21 @@ func (w *humanSessionWriter) ConsumeRecoveryCode(ctx context.Context, userID dom
 	return out, true, nil
 }
 
-// EmitRecoveryMail — намерение письма той же транзакцией (Ф5-09).
+// EmitRecoveryMail — намерение письма той же транзакцией (Ф5-09), после
+// списания окна писем адресата тем же оператором, что у приглашения
+// (`chargeInviteMailWindowTx`, окно вида `recovery`; kaname#456). Окно полно —
+// `humansession.ErrLetterWindowFull`: письма нет, строка кода откатывается
+// вместе с транзакцией.
 func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansession.RecoveryMailIntent) error {
 	if in.Code.IsZero() {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument recovery_mail.code: required")
+	}
+	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowRecovery, in.To, in.Limit)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return humansession.ErrLetterWindowFull
 	}
 	if err := invite_mail_outbox.EmitRecoveryTx(ctx, w.tx, string(in.UserID), string(in.AccountID), in.To, in.Code.Letter(), in.ValidFor); err != nil {
 		return mapErr(err, "RecoveryMail.Emit", string(in.UserID))
@@ -149,9 +160,9 @@ func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansessi
 	return nil
 }
 
-// InsertRecoveryCompletion — журнал завершений по ключу потока: та же вставка,
-// что у приёмника обратного вызова (Р4). Внешний субъект у нашего потока не
-// задан — столбец NULL.
+// InsertRecoveryCompletion — журнал завершений по ключу потока
+// (`insertRecoveryCompletionTx`). Внешний субъект у нашего потока не задан —
+// столбец NULL.
 func (w *humanSessionWriter) InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (bool, error) {
 	if err := rc.Validate(); err != nil {
 		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())

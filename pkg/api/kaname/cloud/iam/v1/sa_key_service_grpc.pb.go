@@ -33,14 +33,16 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // SAKeyService — public-facing CRUD for static ServiceAccount OAuth keys
-// (Class A workload identity). Each key maps to an OAuth 2.0 client registered
-// with `grant_types=[client_credentials]`; external workloads exchange it for a
-// Kachō-issued JWT at the provider's standard token endpoint.
+// (Class A workload identity). Each key is a client of the service's own
+// registry, named by the id of its row. A key pair and a federated key are
+// exchanged for an access JWT at the platform token endpoint
+// (`POST /iam/v1/token`), which the service signs itself; a basic secret is
+// presented as is.
 //
 // AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
 // the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
 // client assertion with it; nothing symmetric is exchanged, and kaname stores
-// only the public half plus the `hydra_client_id` → ServiceAccount mapping in
+// only the public half plus the key → ServiceAccount mapping in
 // `service_account_oauth_clients`.
 //
 // `private_key_pem` is returned EXACTLY ONCE in the Issue response and is never
@@ -104,14 +106,16 @@ func (c *sAKeyServiceClient) Revoke(ctx context.Context, in *RevokeSAKeyRequest,
 // for forward compatibility.
 //
 // SAKeyService — public-facing CRUD for static ServiceAccount OAuth keys
-// (Class A workload identity). Each key maps to an OAuth 2.0 client registered
-// with `grant_types=[client_credentials]`; external workloads exchange it for a
-// Kachō-issued JWT at the provider's standard token endpoint.
+// (Class A workload identity). Each key is a client of the service's own
+// registry, named by the id of its row. A key pair and a federated key are
+// exchanged for an access JWT at the platform token endpoint
+// (`POST /iam/v1/token`), which the service signs itself; a basic secret is
+// presented as is.
 //
 // AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
 // the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
 // client assertion with it; nothing symmetric is exchanged, and kaname stores
-// only the public half plus the `hydra_client_id` → ServiceAccount mapping in
+// only the public half plus the key → ServiceAccount mapping in
 // `service_account_oauth_clients`.
 //
 // `private_key_pem` is returned EXACTLY ONCE in the Issue response and is never

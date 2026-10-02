@@ -55,6 +55,11 @@ var secretMaterialKeeps = map[string]string{
 	"access_bindings.target_digest": "не секретный материал: свёртка ЦЕЛИ выдачи " +
 		"(умолчание 'all'), и она входит в ключ уникальности выдачи — " +
 		"по ней отбирают, поэтому исключение стоило бы плана",
+	"interactive_clients.secret_verifier_set_at": "не секретный материал: МОМЕНТ установки " +
+		"проверочного значения, попавший в кандидаты по имени (kaname#313). Значение само " +
+		"исключено (SET STATISTICS 0); момент — время, и выборка времён в pg_stats не даёт " +
+		"ни одного знака секрета. По нему же отбирают: он предикат согласия пары " +
+		"«значение — отметка», и исключение стоило бы плана",
 	// Здесь стояла запись о `human_sessions.password_change_required` — колонка
 	// снята вместе с полем контракта (kacho#2697, kaname#201), и запись, которой
 	// нечего решать, снята тем же изменением: ведомость истекает сама.
@@ -162,9 +167,9 @@ func seedSecretRows(t *testing.T, db *sql.DB) {
 			}
 			hash[0], hash[1] = byte(sa), byte(i)
 			_, err := db.Exec(`INSERT INTO kaname.service_account_oauth_clients
-			    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
+			    (id, sva_id, created_by_user_id, credential_kind, secret_hash,
 			     public_key_pem, key_algorithm, trusted_subjects, expires_at)
-			  VALUES ($1, $2, NULL, 'usr00000000000000dwn', 'SECRET', $3, '', '', '[]'::jsonb,
+			  VALUES ($1, $2, 'usr00000000000000dwn', 'SECRET', $3, '', '', '[]'::jsonb,
 			          now() + interval '30 days')`,
 				fmt.Sprintf("soc_%014d%03d", i, sa), svaID, hash)
 			require.NoError(t, err)

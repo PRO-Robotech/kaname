@@ -5,15 +5,14 @@
 // auth-server HTTP listener (the `/iam/token` endpoint only). There is NO
 // key-set endpoint on this listener: ключи проверки плоскости данных отдаёт
 // ОТДЕЛЬНЫЙ внутренний публикатор (jwks_proxy.go /
-// internal/handler/jwksproxyhttp), и записей у него две — зеркало провайдера и
-// наша.
+// internal/handler/jwksproxyhttp), и запись у него одна — наша (зеркало набора
+// провайдера снято, kaname#361).
 //
-// ЗДЕСЬ СТОЯЛО «Hydra stays the issuer/signer; iam mints nothing here» — и
-// противоречило соседнему абзацу этого же комментария, который говорит про
-// «the minted identity-JWT». Верно второе: на переведённом контуре докерный
-// токен чеканит НАШ подписант (`internal/registrytokenwire`, LocalMintAdapter
-// поверх tokensigner). Признак перевода — объявленная своя чеканка; там, где её
-// не объявляли, полоса по-прежнему брокерит токен у провайдера.
+// Здесь стояло, что токен выпускает внешний провайдер, а служба не чеканит
+// ничего, — и противоречило соседнему абзацу про «the minted identity-JWT».
+// Верно второе, и без оговорок: докерный токен чеканит НАШ подписант
+// (`internal/registrytokenwire`, LocalMintAdapter поверх tokensigner); полоса
+// без своей чеканки не собирается вовсе (kaname#494).
 //
 // The listener is EXTERNAL-reachable (docker clients hit `/iam/token` through
 // the edge); TLS is terminated at the ingress, so the process binds plaintext —

@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
@@ -49,6 +50,9 @@ type harness struct {
 	// Восстановление доступа (Ф5).
 	recoveryRequest  *humansession.RequestRecoveryUseCase
 	recoveryComplete *humansession.CompleteRecoveryUseCase
+	// journal — ряд обращений ЗАВЕРШЕНИЯ восстановления к портам хранилища
+	// (`recording_store_test.go`): завершение собрано над обёртками с записью.
+	journal *storeJournal
 }
 
 // rcCodeTTL — срок кода в пробах: величина Ф1 §4.1, объявляемая настройкой.
@@ -90,7 +94,8 @@ func probeTOTPVerifier(t *testing.T) *totpverify.Verifier {
 
 func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	t.Helper()
-	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, envelope: &laneEnvelope{}, totp: probeTOTPVerifier(t)}
+	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, envelope: &laneEnvelope{}, totp: probeTOTPVerifier(t),
+		journal: &storeJournal{}}
 	h.envelopePort = h.envelope
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
@@ -122,10 +127,13 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	require.NoError(t, err)
 	h.recoveryRequest, err = humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: h.store, CodeTTL: rcCodeTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: h.obs, Now: now, Logger: logger,
+		Sources: admitEverySource{}, SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 10000, Window: time.Hour},
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
+		Store: recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+		Observer: h.obs, Now: now, Logger: logger,
 	})
 	require.NoError(t, err)
 	return h
@@ -721,3 +729,11 @@ func (b *fakeBreach) Check(_ context.Context, password string) (humansession.Bre
 }
 
 var _ = errors.Is
+
+// admitEverySource — окно источника, пропускающее всякое обращение: темп
+// источника судят пробы полосы над базой (kaname#456).
+type admitEverySource struct{}
+
+func (admitEverySource) ChargeSource(context.Context, humansession.SourceLane, string, time.Time, humansession.SourcePace) (bool, error) {
+	return true, nil
+}

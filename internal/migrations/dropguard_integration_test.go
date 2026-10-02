@@ -33,6 +33,8 @@
 //     returns carrying exactly that one — and the count in it is measured against
 //     the database, not asserted: declaring 0 where the table holds 24 refuses the
 //     drop with `row-count-mismatch`, which is how the number below was obtained.
+//     The retirement of subject consent (kaname#404) put the second one in, with
+//     a measured count of zero: the chain never seeds that table.
 package migrations_test
 
 import (
@@ -44,7 +46,7 @@ import (
 )
 
 // dropsExpected — храповик: сколько снятий объявлено в цепи службы.
-const dropsExpected = 1
+const dropsExpected = 2
 
 func TestIntegration_IamDropsAreMeasured(t *testing.T) {
 	rep := dropguardtest.Run(t, dropguardtest.Options{
@@ -53,7 +55,8 @@ func TestIntegration_IamDropsAreMeasured(t *testing.T) {
 		ManifestPath: "dropguard.json",
 
 		// The ratchet, declared rather than inferred. It moved 0 -> 1 with the
-		// retirement of kaname.limits (kaname#58); adding a second drop moves it
+		// retirement of kaname.limits (kaname#58) and 1 -> 2 with the retirement
+		// of subject consent (kaname#404); adding a third drop moves it
 		// again and turns this red until somebody declares that too.
 		DropsExpected: dropsExpected,
 	})

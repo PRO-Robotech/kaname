@@ -3,7 +3,7 @@
 
 // oauth_client_id_test.go — доменная валидация id токенов после перехода на
 // конвенцию corelib `ids.NewID` (3-char prefix + 17-char crockford, БЕЗ
-// подчёркивания). id существующих строк immutable (id = Hydra client id + JWK
+// подчёркивания). id существующих строк immutable (id = client id + JWK
 // kid), поэтому валидатор обязан принимать ОБА формата: legacy `<prefix>_<17>` и
 // новый `<prefix><17>`.
 package domain

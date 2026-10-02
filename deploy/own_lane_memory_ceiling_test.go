@@ -15,7 +15,8 @@
 // оператор подставить в обход среды не может — в том и замысел.
 //
 // Замер, из которого проба выведена (2026-09-17, kind, чарт с профиля
-// `values.prod.yaml` и накладкой `authn.identityProvider: own`): контейнер
+// `values.prod.yaml` и накладкой, объявлявшей посадку `own` ключом, который с
+// тех пор снят, kaname#363): контейнер
 // вышел с этим отказом на первом же старте. Шаблон развёртывания не рендерил
 // `resources` вовсе — ни ключом профиля, ни умолчанием, — то есть посадка `own`
 // была неподнимаема ПОСТАВЛЯЕМЫМ ЧАРТОМ by construction: любой профиль
@@ -36,8 +37,10 @@
 //	    арифметики здесь не заводится намеренно — она разошлась бы со стражем
 //	    молча, на первой же смене потолка формата записи пароля.
 //
-// Р2 рендерится с накладкой `authn.identityProvider=own`: судится тот вход,
-// который получит установка, переведённая на `own` поверх боевого профиля.
+// Р2 рендерится с накладкой оператора (`operatorOverlay`: включённый
+// токен-эндпоинт и его величины — без эндпоинта чарт боевую установку не
+// собирает, задача #337): судится тот вход, который получит установка поверх
+// боевого профиля.
 // Оба вердикта берутся с РЕНДЕРА, а не с текста профиля: ключ, стоящий под
 // условием, в тексте есть, а в рендере его может не быть.
 //
@@ -62,9 +65,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
-
-// ownPostureSet — накладка, переводящая поставляемую цепочку на посадку `own`.
-const ownPostureSet = "authn.identityProvider=own"
 
 // memoryLimitOfServiceContainer — предел памяти контейнера службы из рендера.
 //
@@ -215,7 +215,7 @@ func TestDeliveredChartDeclaresTheServiceContainerMemoryLimit(t *testing.T) {
 
 // TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard — Р2.
 func TestProdProfileMemoryLimitSatisfiesTheOwnLaneGuard(t *testing.T) {
-	sets := append([]string{ownPostureSet}, minimalOperatorCoordinates...)
+	sets := withOperatorOverlay(minimalOperatorCoordinates...)
 	rendered := renderStandaloneChart(t, chartProfiles, sets...)
 	limit, declared, raw := memoryLimitOfServiceContainer(t, rendered)
 	login := loginLaneOfRender(t, rendered)

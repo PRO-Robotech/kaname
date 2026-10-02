@@ -102,24 +102,27 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 не работает. Антецедент самоистекает: перестал профиль называть файлы под
 каталогом — обязательность снялась сама.
 
-ТРИ ЗАПИСИ, А НЕ ОБХОД ПО СПИСКУ, и это решение. Обход даёт условие с
+ЗАПИСИ, А НЕ ОБХОД ПО СПИСКУ, и это решение. Обход даёт условие с
 вычисляемым ключом (`get $tls $lane.knob`) и текст, собранный `printf`-ом из
 переменной, — то есть форму, в которой ни одна проверка не увидит НИ ИМЕНИ
-координаты, ни того, что она вообще стережётся. Три записи той же формы, что и
+координаты, ни того, что она вообще стережётся. Записи той же формы, что и
 четыре выше, читаются и человеком, и гейтом
-(`operator_supplied_roster_test.go`). */}}
+(`operator_supplied_roster_test.go`).
+
+Записей ДВЕ — лист слушателя и клиентский лист. Третья стерегла якорь
+поставщика личности и снята вместе с его единственной дорогой — обменом у
+прежнего издателя (kaname#494): тома нет, и путь под его каталогом называет
+файл, которого в поде не бывает. */}}
 {{- $tls := .Values.tls | default dict -}}
 {{- $mount := $tls.mountPath | default "" -}}
 {{- $envs := .Values.env | default dict -}}
 {{- $namesServer := "" -}}
 {{- $namesClient := "" -}}
-{{- $namesProvider := "" -}}
 {{- if $mount -}}
 {{- range $k, $v := $envs -}}
 {{- $val := printf "%v" $v -}}
 {{- if contains (printf "%s/server/" $mount) $val -}}{{- $namesServer = $k -}}{{- end -}}
 {{- if contains (printf "%s/client/" $mount) $val -}}{{- $namesClient = $k -}}{{- end -}}
-{{- if contains (printf "%s/provider/" $mount) $val -}}{{- $namesProvider = $k -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if and $namesServer (not $tls.secretName) -}}
@@ -127,9 +130,6 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 {{- end -}}
 {{- if and $namesClient (not $tls.clientSecretName) -}}
 {{- $missing = append $missing (printf "  tls.clientSecretName   — имя объекта Secret с КЛИЕНТСКИМ листом: им служба представляется,\n                           когда звонит сама (назначение `client auth`, отдельный лист от серверного).\n                           Обязательна ЗДЕСЬ потому, что профиль называет файл под %s/client/ (например %s)." $mount $namesClient) -}}
-{{- end -}}
-{{- if and $namesProvider (not $tls.providerSecretName) -}}
-{{- $missing = append $missing (printf "  tls.providerSecretName — имя объекта Secret с ЯКОРЕМ доверия к серверным сертификатам ВАШЕГО\n                           поставщика личности. Это ДРУГАЯ величина, чем круг клиентских листов выше:\n                           «чьим сертификатам сервера я верю у соседа» против «кто вправе прийти ко мне».\n                           Обязательна ЗДЕСЬ потому, что профиль называет файл под %s/provider/ (например %s)." $mount $namesProvider) -}}
 {{- end -}}
 {{- if $missing -}}
 {{- fail (printf "чарт службы прав не ставится: НЕ НАЗВАНО координат — %d.\n\nЭтот чарт создаёт свои объекты (Deployment, Service, ConfigMap %s-config и, при включённой ручке alertRules, PrometheusRule) и НЕ заводит ни образа, ни базы, ни секретов. Всё, на что он ссылается за своими объектами, заводит тот, кто ставит, — и называет здесь. Умолчания у этих ключей нет намеренно: непустое умолчание называло бы объект нашей установки, которого у вас нет, выглядело бы настройкой и отказало бы уже в кластере.\n\n%s\n\nЧТО СДЕЛАТЬ: заведите эти координаты у себя (объекты — в своём пространстве имён, образ — в своём реестре) и назовите их профилю, например\n  helm install <релиз> <чарт> -f values.yaml \\\n    --set image=<реестр>/pro-robotech/kaname:<тег> \\\n    --set db.host=postgres.<ваше-пространство>.svc \\\n    --set db.passwordSecretName=kaname-db \\\n    --set db.passwordSecretKey=password\nГотовый образец всех величин боевой посадки — values.prod.yaml рядом с чартом."
@@ -166,10 +166,10 @@ kaname-svc.trustDomain — ДОМЕН ДОВЕРИЯ установки, ОДН�
 неотличимым от вызова без личности. Отказ старта на этом фоне — исход дешевле на
 порядок: он приходит сразу и называет, что задать.
 
-Три соседние величины той же полосы (`authn.domain`, `authn.identity-provider`,
-`authn.trustedForwarderSANs`) незаданными и доезжают — ветвью в configmap.yaml.
-Эта была четвёртой и единственной, кто из полосы выпадал; различия между ними
-никто не решал. Держит согласие полосы `boot_guard_defaults_test.go`.
+Соседние величины той же полосы (`authn.domain`, `authn.trustedForwarderSANs`)
+незаданными и доезжают — ветвью в configmap.yaml. Эта была единственной, кто из
+полосы выпадал; различия между ними никто не решал. Держит согласие полосы
+`boot_guard_defaults_test.go`.
 */}}
 {{- define "kaname-svc.trustDomain" -}}
 {{- $authn := .Values.authn | default dict -}}
@@ -205,13 +205,15 @@ kaname-svc.processDefaultPort — порт поверхности, чей адр
 containerPort, но НЕ двигающий сам слушатель, есть объявленная и неисполнимая
 возможность: оператор правит ручку, рендер зелёный, процесс слушает прежний
 адрес — и Service ведёт в никуда. Ровно такой ключ здесь был у вебхуков
-(`ports.hooksHttp`), и не задавал его ни один из трёх профилей.
+внешнего поставщика (`ports.hooksHttp`), и не задавал его ни один из трёх
+профилей; вебхуки сняты вместе с поставщиком (kaname#363), и их порта в
+словаре ниже больше нет.
 
-ЧЕТВЁРТОЙ поверхностью стала диагностика (задача #2394): её `ports.metrics`
+Такой же поверхностью стала диагностика (задача #2394): её `ports.metrics`
 двигал порт пода и объявление сбора, а карта настроек адреса метрик не эмитит
 вовсе. До той задачи величина `metrics` в словаре ниже стояла БЕЗ ЕДИНОГО
 вызывающего — то есть форма была объявлена и не применена ровно там, где её
-предмет и жил. Снятый ключ отвергается вслух: `kaname-svc.requireNoRetiredPortKnobs`.
+предмет и жил. Снятый ключ отвергается вслух: `kaname-svc.requireNoRetiredKnobs`.
 
 Величины зеркалят `internal/apps/kaname/config/defaults.go`. Согласие с ним
 держит не этот комментарий, а гейт `TestServiceRoutesEverySurfaceItRaises`: он
@@ -219,32 +221,226 @@ containerPort, но НЕ двигающий сам слушатель, есть 
 и на расхождении называет обе величины.
 */}}
 {{/*
-kaname-svc.requireNoRetiredPortKnobs — СНЯТЫЙ КЛЮЧ ПОСАДКИ ОТВЕРГАЕТСЯ ВСЛУХ.
+kaname-svc.requireNoRetiredKnobs — СНЯТЫЙ КЛЮЧ ОТВЕРГАЕТСЯ ВСЛУХ.
 
 Ключ, снятый молча, оператору неотличим от работающего: он правит профиль,
 рендер зелёный, поведение прежнее — то есть ровно «принято-и-проигнорировано»,
-только на поверхности установки. Здесь снят `ports.metrics` (задача #2394), и
-снятие обязано быть НАЗВАНО, а не подразумеваться отсутствием ключа в профиле
-поставки: `-f своё.yaml` оператора наш профиль не читает.
+только на поверхности установки. Снятие обязано быть НАЗВАНО, а не
+подразумеваться отсутствием ключа в профиле поставки: `-f своё.yaml`
+оператора наш профиль не читает.
 
-ЧТО НАЗЫВАЕТ ОТКАЗ: снятый ключ · почему снят · чем двигать предмет теперь.
+Снято здесь два предмета:
+
+  · `ports.metrics` (задача #2394) — ключ порта диагностики;
+  · ключ посадки личности (kaname#363) — в ЗНАЧЕНИЯХ (`authn.identityProvider`)
+    и в ОКРУЖЕНИИ пода (переменная процесса `KANAME_AUTHN__IDENTITY_PROVIDER` в
+    картах `env` и `secrets`). Процесс ту же переменную и тот же ключ файла
+    настроек отвергает сам (`config/retired_settings.go`); отказ здесь приходит
+    на установке, а не в кластере. Ключ отвергается при ЛЮБОМ значении, в том
+    числе `own`: он был обязательным и выбирал требования старта, и оставленный
+    в профиле выглядел бы решением, которого больше никто не принимает.
+
+ЧТО НАЗЫВАЕТ ОТКАЗ: снятый ключ · почему снят · что делать теперь.
 
 ПЕРЕЧНЕМ, а не одним `if`: следующий снятый ключ обязан попасть сюда строкой, а
-не завести второе место об одном предмете.
+не завести второе место об одном предмете. Присутствие судится по ИМЕНИ ключа
+(`hasKey`), а не по значению: значение снятого ключа не читает ни один шаблон, и
+держит это `retired_posture_key_test.go`.
 */}}
-{{- define "kaname-svc.requireNoRetiredPortKnobs" -}}
+{{- define "kaname-svc.requireNoRetiredKnobs" -}}
 {{- $ports := .Values.ports | default dict -}}
+{{- $authn := .Values.authn | default dict -}}
 {{- $retired := list -}}
 {{- if hasKey $ports "metrics" -}}
 {{- $retired = append $retired "  ports.metrics — диагностическая поверхность (:9095).\n                  Ключ двигал порт пода и объявление сбора, но НЕ слушатель: адрес\n                  метрик приходит умолчанием процесса, и карты настроек у него нет.\n                  Оператор правил ручку, рендер был зелёным, собиратель шёл в никуда.\n                  ЧЕМ ДВИГАТЬ ТЕПЕРЬ: адресом процесса — переменной\n                  KANAME_API_SERVER__METRICS_ENDPOINT (пустая — слушателя нет вовсе)." -}}
 {{- end -}}
+{{- $postureWhy := "посадка личности у службы одна — свой вход и своя чеканка, — и ключа, который её\n                  выбирал, больше нет: требования, которые он выбирал, судятся на каждом\n                  боевом старте. Уберите ключ из профиля при любом значении, в том числе own." -}}
+{{- if hasKey $authn "identityProvider" -}}
+{{- $retired = append $retired (printf "  authn.identityProvider — снят (kaname#363):\n                  %s" $postureWhy) -}}
+{{- end -}}
+{{- range $carrier := list "env" "secrets" -}}
+{{- $inCarrier := index $.Values $carrier | default dict -}}
+{{- if hasKey $inCarrier "KANAME_AUTHN__IDENTITY_PROVIDER" -}}
+{{- $retired = append $retired (printf "  %s.KANAME_AUTHN__IDENTITY_PROVIDER — переменная снятого ключа посадки (kaname#363):\n                  %s" $carrier $postureWhy) -}}
+{{- end -}}
+{{- end -}}
 {{- if $retired -}}
-{{- fail (printf "чарт службы прав не ставится: профиль задаёт СНЯТЫЕ ключи посадки — %d.\n\nКлюч, снятый молча, неотличим от работающего: профиль правится, рендер зелёный,\nповедение прежнее. Поэтому отказ, а не игнорирование.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите ключ из профиля и задайте предмет названным способом." (len $retired) (join "\n\n" $retired)) -}}
+{{- fail (printf "чарт службы прав не ставится: профиль задаёт СНЯТЫЕ ключи — %d.\n\nКлюч, снятый молча, неотличим от работающего: профиль правится, рендер зелёный,\nповедение прежнее. Поэтому отказ, а не игнорирование.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите ключ из профиля и задайте предмет названным способом." (len $retired) (join "\n\n" $retired)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kaname-svc.blockEnabled — ВЫКЛЮЧАТЕЛЬ БЛОКА ЧАРТА, ОДНИМ ПРАВИЛОМ НА ВСЕ БЛОКИ
+(задача #391). Принимает `(list $ "<координата блока>")`, например
+`(list $ "authn.tokenSigning")`; отдаёт `true`, когда `<координата>.enabled`
+есть булево true, и пустую строку, когда булево false.
+
+ЧТО ОН ЗАПРЕЩАЕТ. Условие `if $x.enabled` судит ИСТИННОСТЬ, а не булевость:
+непустая строка истинна при любом тексте. Поэтому `false`, поданное строкой
+(`--set-string`, `--set-literal`, `enabled: "false"` в накладке), включало блок,
+который оператор выключал, — а у блока токен-эндпоинта вдобавок обходило отказ
+«own без эндпоинта». Снятый ключ (`null`) выключал блок молча. Здесь любой вид,
+кроме булева, — отказ рендера с координатой и тем, что пришло.
+
+ПОЧЕМУ ПРАВИЛО ОДНО. Выключатель читался в пяти местах шаблонов пятью
+условиями, и каждое было отдельным местом об одном предмете. Координата
+выключателя здесь и находит значение, и называет его в отказе — разойтись им
+не на чем. Читать `.enabled` мимо правила запрещает проба
+`block_switch_is_boolean_test.go`: она обходит шаблоны, выводит выключатели из
+умолчаний чарта и сверяет их с вызовами правила в обе стороны.
+*/}}
+{{- define "kaname-svc.blockEnabled" -}}
+{{- $root := index . 0 -}}
+{{- $at := index . 1 -}}
+{{- $cur := $root.Values -}}
+{{- $found := true -}}
+{{- range $seg := splitList "." $at -}}
+{{- if $found -}}
+{{- if kindIs "map" $cur -}}
+{{- if hasKey $cur $seg -}}
+{{- $cur = index $cur $seg -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $kind := "absent" -}}
+{{- $v := false -}}
+{{- if and $found (kindIs "map" $cur) -}}
+{{- if hasKey $cur "enabled" -}}
+{{- $v = index $cur "enabled" -}}
+{{- $kind = kindOf $v -}}
+{{- end -}}
+{{- end -}}
+{{- if ne $kind "bool" -}}
+{{- $got := "ключ не задан" -}}
+{{- if ne $kind "absent" -}}{{- $got = printf "получено: %s %s" $kind (toJson $v) -}}{{- end -}}
+{{- fail (printf "чарт службы прав не ставится: выключатель %s.enabled — не булево значение (%s).\n\nБлок включается только значением true и выключается только значением false. Условие по истинности приняло бы любую непустую строку за «включён»: «false», поданное строкой (--set-string, --set-literal, enabled: \"false\" в накладке), включало бы блок, который выключали, а снятый ключ выключал бы его молча.\n\nЧТО СДЕЛАТЬ: задайте выключатель булевым значением — --set %s.enabled=false (либо =true) или enabled: false без кавычек в накладке." $at $got $at) -}}
+{{- end -}}
+{{- if and (eq $kind "bool") $v }}true{{ end -}}
+{{- end -}}
+
+{{/*
+kaname-svc.requireClientTokenEndpoint — СЛУЖБА БЕЗ ТОКЕН-ЭНДПОИНТА ПЛАТФОРМЫ И
+ВКЛЮЧЁННЫЙ ЭНДПОИНТ БЕЗ ЕГО ВЕЛИЧИН НЕ СОБИРАЮТСЯ (задача #337).
+
+ЧТО ОН ЗАПРЕЩАЕТ. Первое — невключённый `authn.clientToken` в боевом режиме:
+страж старта процесса такую службу не поднимает. Вне боевого режима (`dev`)
+процесс требований полосы не предъявляет, и шаблон — тоже: он зеркалит стража,
+а не строже его на режиме, где стража нет. Ключ служебной учётки обменивается на токен
+именно эндпоинтом, и другого исполнителя выдачи у службы нет. Прежде это
+требование стояло под ключом посадки (`own` при невключённом эндпоинте); ключ
+снят (kaname#363), и требование безусловно. Собранная чартом, такая служба
+отказывала бы уже в кластере, после выкатки; здесь — на установке, с той же
+ручкой в тексте, что называет страж процесса.
+
+Второе — включённый эндпоинт без его величин. Боевой профиль объявляет их
+заглушками (INSTALL.md §1), а накладка оператора их переопределяет; снятая
+любая из них — отказ. Недостающие называются ОДНИМ ПЕРЕЧНЕМ, а не `required` на
+каждой, — тот же довод, что у перечня координат выше.
+
+Третье — ТЕНЬ ручки стража в окружении пода (задача #392). Страж судит ключи
+значений, а карты `env` и `secrets` уходят в под как есть, и переменная
+перекрывает файл настроек. Выключатель `env.KANAME_AUTHN__CLIENT_TOKEN__ENABLED=false`
+проходил бы рендер, и отказ приходил бы уже в кластере. Выбран ОДИН АДРЕС, а не
+суд обеих форм: суд обеих повторил бы здесь правило старшинства процесса
+(переменная перекрывает файл), то есть завёл бы второе место об одном
+предмете. Поэтому переменная с именем ручки стража в любом источнике окружения
+пода — отказ, называющий ключ значений. Переменная снятого ключа посадки сюда
+больше не входит: её отвергает страж снятых ключей (`requireNoRetiredKnobs`). Перечень ручек ниже сверяется с
+таблицей стража старта в обе стороны, а источники окружения пода судит
+исполнение чарта (`pod_env_execution_test.go`): пробный ключ в каждой карте
+дерева значений каждой посадки при каждом принуждённом исполнении ветвей;
+карта, чей ключ стал именем переменной пода в любой форме и которой нет в
+обходе ниже, — находка суда теней.
+
+Шесть величин темпа поверхности выдачи (kaname#315, приёмка
+ceremony-pace-is-named-by-number.md) требуются здесь при включённом эндпоинте,
+одним условием с прочими — тем же, что у стража процесса: церемония собрана
+ровно тогда, когда эндпоинт включён.
+
+ОБЛАСТЬ НАЗВАНА: судится только ОБЪЯВЛЕННОСТЬ величин. Их согласованность
+(адресат по умолчанию — член перечня, срок не выше потолка платформы, потолок
+тела положителен) судит страж старта (`ClientTokenConfig.Validate`), и второго
+места о ней здесь не заводится. Популяцию величин держит проба
+`client_token_endpoint_chart_test.go`: она берёт её у таблицы стража и
+требует, чтобы отказ называл каждую строку.
+*/}}
+{{- define "kaname-svc.requireClientTokenEndpoint" -}}
+{{- $canonical := dict
+      "KANAME_AUTHN__CLIENT_TOKEN__ENABLED" "authn.clientToken.enabled"
+      "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES" "authn.clientToken.allowedAudiences"
+      "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE" "authn.clientToken.defaultAudience"
+      "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL" "authn.clientToken.tokenTtl"
+      "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING" "authn.clientToken.bodyCeiling"
+      "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING" "authn.clientToken.inFlightCeiling"
+      "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC" "authn.clientToken.exchangesPerClientPerSec"
+      "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE" "authn.clientToken.failedProofsPerSource"
+      "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW" "authn.clientToken.failedProofWindow"
+      "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC" "authn.clientToken.authorizePerSourcePerSec"
+      "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING" "authn.clientToken.authorizeInFlightCeiling" -}}
+{{- $shadows := list -}}
+{{- range $source := list "env" "secrets" -}}
+{{- $carried := index $.Values $source | default dict -}}
+{{- range $name := keys $canonical | sortAlpha -}}
+{{- if hasKey $carried $name -}}
+{{- $shadows = append $shadows (printf "  %s.%s — её адрес в профиле: %s" $source $name (get $canonical $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $shadows -}}
+{{- fail (printf "чарт службы прав не ставится: окружение пода несёт ручки стража токен-эндпоинта — %d.\n\nСтраж шаблона судит токен-эндпоинт по ключам значений, а окружение пода уходит процессу как есть и перекрывает файл настроек: объявленная переменной, ручка обошла бы отказ установки, и отказ пришёл бы уже в кластере. Адрес у каждой из них один — ключ значений.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите переменную из карты env (secrets) и задайте ключ значений — накладкой -f либо --set; образец накладки own — INSTALL.md §1." (len $shadows) (join "\n" $shadows)) -}}
+{{- end -}}
+{{- $authn := .Values.authn | default dict -}}
+{{- $ct := $authn.clientToken | default dict -}}
+{{- $ctOn := include "kaname-svc.blockEnabled" (list $ "authn.clientToken") -}}
+{{- $mode := default "production" (include "kaname-svc.authMode" .) -}}
+{{- if and (not $ctOn) (ne $mode "dev") -}}
+{{- fail "чарт службы прав не ставится: authn.clientToken.enabled не включён.\n\nКлюч служебной учётки обменивается на токен токен-эндпоинтом платформы, и другого исполнителя выдачи ключей у службы нет. Страж старта процесса такую службу не поднимает (authn.client-token.enabled=false); отказ здесь приходит на установке, а не в кластере.\n\nЧТО СДЕЛАТЬ: включите эндпоинт — authn.clientToken.enabled=true и его величины (INSTALL.md §1, §3)." -}}
+{{- end -}}
+{{- if $ctOn -}}
+{{- $missing := list -}}
+{{- if not $ct.allowedAudiences -}}
+{{- $missing = append $missing "  authn.clientToken.allowedAudiences — authn.client-token.allowed-audiences: перечень адресатов,\n                                       которым платформа чеканит удостоверения, через запятую; адресат\n                                       докерной полосы (apiServer.registryToken.service) обязан в него входить." -}}
+{{- end -}}
+{{- if not $ct.defaultAudience -}}
+{{- $missing = append $missing "  authn.clientToken.defaultAudience  — authn.client-token.default-audience: адресат, когда запрос\n                                       его не назвал; член перечня выше." -}}
+{{- end -}}
+{{- if not $ct.tokenTtl -}}
+{{- $missing = append $missing "  authn.clientToken.tokenTtl         — authn.client-token.token-ttl: срок выпускаемого токена\n                                       (длительность Go), не выше потолка платформы." -}}
+{{- end -}}
+{{- if not $ct.bodyCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.bodyCeiling      — authn.client-token.body-ceiling: потолок тела запроса к\n                                       эндпоинту, байт; положительное целое — ноль величиной не является." -}}
+{{- end -}}
+{{- if not $ct.inFlightCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.inFlightCeiling  — authn.client-token.in-flight-ceiling: потолок одновременных\n                                       обменов на реплику, все четыре вида выдачи; сверх — 503." -}}
+{{- end -}}
+{{- if not $ct.exchangesPerClientPerSec -}}
+{{- $missing = append $missing "  authn.clientToken.exchangesPerClientPerSec — authn.client-token.exchanges-per-client-per-sec:\n                                       обменов в секунду на идентификатор клиента, на реплику; сверх — 429." -}}
+{{- end -}}
+{{- if not $ct.failedProofsPerSource -}}
+{{- $missing = append $missing "  authn.clientToken.failedProofsPerSource — authn.client-token.failed-proofs-per-source:\n                                       неудавшихся доказательств клиента за окно на источник, на реплику." -}}
+{{- end -}}
+{{- if not $ct.failedProofWindow -}}
+{{- $missing = append $missing "  authn.clientToken.failedProofWindow — authn.client-token.failed-proof-window: скользящее окно\n                                       этих отказов (длительность Go)." -}}
+{{- end -}}
+{{- if not $ct.authorizePerSourcePerSec -}}
+{{- $missing = append $missing "  authn.clientToken.authorizePerSourcePerSec — authn.client-token.authorize-per-source-per-sec:\n                                       запросов авторизации в секунду на источник, на реплику." -}}
+{{- end -}}
+{{- if not $ct.authorizeInFlightCeiling -}}
+{{- $missing = append $missing "  authn.clientToken.authorizeInFlightCeiling — authn.client-token.authorize-in-flight-ceiling:\n                                       потолок одновременных запросов авторизации на реплику." -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "чарт службы прав не ставится: токен-эндпоинт платформы включён (authn.clientToken.enabled=true), а его величины не названы — %d.\n\nУмолчаний у них нет намеренно: каждую выбирает тот, кто ставит, и без любой из них страж старта процесса службу не поднимает.\n\n%s\n\nЧТО СДЕЛАТЬ: назовите их профилю — накладкой `-f` либо `--set`; образцы величин — INSTALL.md §3." (len $missing) (join "\n\n" $missing)) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "kaname-svc.processDefaultPort" -}}
-{{- $ports := dict "hooks" "9092" "metrics" "9095" "registryToken" "9096" "jwksProxy" "9097" -}}
+{{- $ports := dict "metrics" "9095" "registryToken" "9096" "jwksProxy" "9097" -}}
 {{- $port := index $ports . -}}
 {{- if not $port -}}{{- fail (printf "поверхность %q не значится среди тех, чей адрес приходит умолчанием процесса" .) -}}{{- end -}}
 {{- $port -}}
@@ -252,7 +448,7 @@ kaname-svc.requireNoRetiredPortKnobs — СНЯТЫЙ КЛЮЧ ПОСАДКИ О
 
 {{/*
 kaname-svc.edgeScheme — СХЕМА ОБРАЩЕНИЯ К РЕБРУ, выведенная из ручки, которая
-поднимает его транспорт. Принимает имя ребра (`HOOKS`, `METRICS`, …).
+поднимает его транспорт. Принимает имя ребра (`METRICS`, …).
 
 ПОЧЕМУ ВЫВОДИТСЯ. Обращающийся к ребру — проба пода, объявление сбора — говорит,
 КУДА идти; включённый транспорт меняет это «куда». Объявление, о нём умолчавшее,

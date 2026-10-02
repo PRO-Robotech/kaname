@@ -72,6 +72,7 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	_, _, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "conc", email)
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, inviteeID)
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,
 		domain.ExternalSubject(ext), domain.DisplayName("Bootstrap Concurrent"))
 	require.NoError(t, err)

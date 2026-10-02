@@ -9,9 +9,9 @@ package sa_keys
 //
 // Drives the real IssueSAKeyUseCase / RevokeSAKeyUseCase against a
 // testcontainers Postgres (so the audit row INSERT actually hits the
-// audit_outbox CHECK constraints), with a fake Hydra OAuth2 admin. The audit
-// row is emitted inside the SAME worker-tx as the persist of the
-// service_account_oauth_clients row (Issue) / its delete (Revoke).
+// audit_outbox CHECK constraints). The audit row is emitted inside the SAME
+// worker-tx as the persist of the service_account_oauth_clients row (Issue) /
+// its delete (Revoke).
 //
 // Acceptance scenarios (SAKey slice):
 //   - 5.2-20 Issue emits exactly one iam.sa_key.issued row — actor=verified
@@ -19,8 +19,9 @@ package sa_keys
 //   - 5.2-21 Revoke emits exactly one iam.sa_key.revoked row, atomic with the
 //     mapping delete.
 //   - 5.2-34 commit-together: a committed mutation always has its audit row.
-//   - 5.2-35 rollback-no-orphan: a worker-tx that fails to commit (Insert
-//     conflict) leaves neither the mapping row nor the audit row.
+//   - 5.2-35 rollback-no-orphan: a worker-tx whose Insert the database refuses
+//     (the credential ceiling of the service account) leaves neither the
+//     mapping row nor the audit row.
 //   - 5.2-36 no-secrets: the serialized payload contains none of
 //     client_secret / privateKey / BEGIN / PRIVATE KEY / access_token /
 //     refresh_token / password.
@@ -47,7 +48,6 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -141,20 +141,21 @@ func sakeyAuditRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool, event
 	return out
 }
 
-// buildIssueUC wires a real IssueSAKeyUseCase against the live pool + the given
-// fake Hydra, with the durable audit emitter attached.
-func buildIssueUC(pool *pgxpool.Pool, hydra OAuthClientAdmin) *IssueSAKeyUseCase {
+// buildIssueUC wires a real IssueSAKeyUseCase against the live pool, with the
+// durable audit emitter attached, on a landing that runs the platform token
+// endpoint.
+func buildIssueUC(pool *pgxpool.Pool) *IssueSAKeyUseCase {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	uc := NewIssueSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), hydra, opsRepo)
+	uc := NewIssueSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), opsRepo).WithOwnIssuance()
 	uc.WithAuditEmitter(kanamepg.NewAuditOutboxEmitter(pool))
 	return uc
 }
 
-func buildRevokeUC(pool *pgxpool.Pool, hydra OAuthClientAdmin) *RevokeSAKeyUseCase {
+func buildRevokeUC(pool *pgxpool.Pool) *RevokeSAKeyUseCase {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	uc := NewRevokeSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), hydra, opsRepo)
+	uc := NewRevokeSAKeyUseCase(repo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
 	uc.WithAuditEmitter(kanamepg.NewAuditOutboxEmitter(pool))
 	return uc
 }
@@ -179,41 +180,6 @@ func awaitAudit(ctx context.Context, t *testing.T, pool *pgxpool.Pool, eventType
 	t.Fatalf("audit row %s for key %s never appeared", eventType, keyID)
 }
 
-// fakeHydra — minimal OAuthClientAdmin recording calls and returning a fixed
-// client id. No secret material is produced (private_key_jwt mode).
-type fakeHydra struct {
-	createCalls int
-	deleteCalls int
-}
-
-func (f *fakeHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
-	f.createCalls++
-	return clients.HydraOAuthClient{ClientID: "hydra-cli-" + fmt.Sprint(f.createCalls)}, nil
-}
-func (f *fakeHydra) DeleteOAuthClient(ctx context.Context, clientID string) error {
-	f.deleteCalls++
-	return nil
-}
-
-// collidingHydra returns a CONSTANT ClientID on every CreateOAuthClient, so the
-// second Issue's mapping INSERT collides on the (unchanged) UNIQUE hydra_client_id
-// index → the worker-tx rolls back. Used by the atomicity test after migration
-// 0047 relaxed sva_unique (N:1 keys per ServiceAccount) removed the previous
-// duplicate-Issue rollback trigger.
-type collidingHydra struct {
-	createCalls int
-	deleteCalls int
-}
-
-func (f *collidingHydra) CreateOAuthClient(_ context.Context, _ clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
-	f.createCalls++
-	return clients.HydraOAuthClient{ClientID: "hydra-cli-collision-const"}, nil
-}
-func (f *collidingHydra) DeleteOAuthClient(_ context.Context, _ string) error {
-	f.deleteCalls++
-	return nil
-}
-
 // ── 5.2-20 Issue emits durable iam.sa_key.issued WITHOUT key material ─────────
 
 func TestSAKeyAudit_5_2_20_IssueEmitsNoSecret(t *testing.T) {
@@ -227,7 +193,7 @@ func TestSAKeyAudit_5_2_20_IssueEmitsNoSecret(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5220")
-	uc := buildIssueUC(pool, &fakeHydra{})
+	uc := buildIssueUC(pool)
 
 	op, err := uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID,
@@ -275,7 +241,7 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5221")
 
 	// Issue a key first.
-	issueUC := buildIssueUC(pool, &fakeHydra{})
+	issueUC := buildIssueUC(pool)
 	_, err = issueUC.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID,
 		CreatedByUserID:  string(uid),
@@ -290,7 +256,7 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 
 	// Revoke it (different principal to prove actor-from-context).
 	revoker := uid
-	revokeUC := buildRevokeUC(pool, &fakeHydra{})
+	revokeUC := buildRevokeUC(pool)
 	_, err = revokeUC.Execute(withSAKeyPrincipal(ctx, string(revoker)), RevokeInput{
 		ServiceAccountID: svaID,
 		KeyID:            domain.SAOAuthClientID(keyID),
@@ -315,14 +281,15 @@ func TestSAKeyAudit_5_2_21_RevokeEmits(t *testing.T) {
 	require.Equal(t, 0, n, "the revoked mapping row must be deleted (commit-together)")
 }
 
-// ── 5.2-35 rollback-no-orphan: an Insert that violates a UNIQUE index rolls
-// back the whole worker-tx → neither mapping nor audit row. ───────────────────
+// ── 5.2-35 rollback-no-orphan: an Insert the database refuses rolls back the
+// whole worker-tx → neither mapping nor audit row. ───────────────────────────
 //
-// The trigger is the (unchanged) UNIQUE hydra_client_id index: migration 0047
-// relaxed sva_unique to N:1, so a duplicate sva no longer rolls back. We drive
-// the collision with a hydra stub that returns a CONSTANT client id, so the
-// second Issue's mapping INSERT deterministically fails and rolls the worker-tx
-// back — the atomicity property under test is unchanged.
+// The refusal is the credential ceiling of the service account, stated at 1:
+// the second Issue's mapping INSERT is refused by the counting trigger (KQ001)
+// and the worker-tx rolls back. The trigger used to be a provider stub handing
+// out one client name twice against the unique index of the mirror column;
+// column and index are gone (kaname#362), the atomicity property under test is
+// unchanged.
 
 func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	if testing.Short() {
@@ -335,9 +302,14 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5235")
-	uc := buildIssueUC(pool, &collidingHydra{})
+	tag, err := pool.Exec(ctx, `
+		UPDATE kaname.own_ceilings SET limit_value = 1, stated_at = now()
+		 WHERE kind = 'iam.serviceAccount.credential'`)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected(), "потолок ключей служебной учётки не объявлен — отказывать нечему")
+	uc := buildIssueUC(pool)
 
-	// First Issue succeeds and lands one key (hydra_client_id="…collision-const").
+	// First Issue succeeds and lands one key.
 	_, err = uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID, CreatedByUserID: string(uid),
 	})
@@ -350,9 +322,9 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 	awaitAudit(ctx, t, pool, "iam.sa_key.issued", firstKey)
 
-	// Second Issue collides on UNIQUE hydra_client_id — the mapping Insert hits
-	// service_account_oauth_clients' hydra_client_id unique index (23505) → the
-	// worker-tx rolls back. No second mapping row and no orphan audit row.
+	// Second Issue is over the ceiling — the mapping Insert is refused by the
+	// database → the worker-tx rolls back. No second mapping row and no orphan
+	// audit row.
 	op2, err := uc.Execute(withSAKeyPrincipal(ctx, string(uid)), IssueInput{
 		ServiceAccountID: svaID, CreatedByUserID: string(uid),
 	})
@@ -361,8 +333,8 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 
 	// Deterministic barrier: block until the second Operation is Done (positive
 	// signal that the worker actually dequeued and attempted it), then assert it
-	// carries the constraint error — so the negative counts below only fire after
-	// the 23505-rollback path provably ran (not because the worker was merely slow).
+	// carries the refusal — so the negative counts below only fire after the
+	// rollback path provably ran (not because the worker was merely slow).
 	opsRepo := operations.NewRepo(pool, "kaname")
 	var finalOp *operations.Operation
 	require.Eventually(t, func() bool {
@@ -374,13 +346,13 @@ func TestSAKeyAudit_5_2_35_IssueRollbackNoOrphan(t *testing.T) {
 		return true
 	}, 10*time.Second, 20*time.Millisecond, "second Issue Operation never reached Done")
 	require.NotNil(t, finalOp.Error,
-		"the rolled-back duplicate-hydra_client_id Issue Operation must carry the constraint error")
+		"the rolled-back over-the-ceiling Issue Operation must carry the refusal")
 
 	var keyCount int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.service_account_oauth_clients WHERE sva_id = $1`,
 		string(svaID)).Scan(&keyCount))
-	require.Equal(t, 1, keyCount, "duplicate Issue must not create a second mapping row")
+	require.Equal(t, 1, keyCount, "the refused Issue must not create a second mapping row")
 
 	var auditCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -401,7 +373,7 @@ func TestSAKeyAudit_5_2_40_ActorFromPrincipal(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	uid, svaID := seedSAKeyUserAndSA(t, ctx, pool, "5240")
-	uc := buildIssueUC(pool, &fakeHydra{})
+	uc := buildIssueUC(pool)
 
 	// CreatedByUserID body field set to the real principal (handler enforces
 	// equality); the audit actor must equal the principal regardless.

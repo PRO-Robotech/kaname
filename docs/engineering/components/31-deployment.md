@@ -21,21 +21,29 @@ helm-chart, config + секреты, миграции и порядок запу
 
 ## Listener-порты
 
-`kaname serve` поднимает шесть независимых listener'ов:
+`kaname serve` поднимает пять слушателей по умолчанию; ещё три (собственные
+REST-фронты и полоса входа паролем) поднимаются только по адресу, который объявила
+посадка (`api-server.rest-endpoint`, `api-server.internal-rest-endpoint`,
+`api-server.login-lane-endpoint`; умолчаний у них нет).
 
 | Порт | Протокол | Назначение | TLS |
 |---|---|---|---|
 | `:9090` | gRPC | публичный API (tenant-facing, через api-gateway) | per-edge TLS; обязателен в production |
 | `:9091` | gRPC | cluster-internal API (`Internal*`, service→service) | `RequireAndVerifyClientCert`; обязателен в production |
-| `:9092` | HTTP | webhooks Ory (Hydra `token`/`refresh`, Kratos `provision`) + `/healthz`, `/readyz` | per-edge, server-TLS опционально |
-| `:9095` | HTTP | Prometheus `/metrics` | per-edge, server-TLS опционально |
-| `:9096` | HTTP | docker-token (`/iam/token`) для плоскости данных реестра | server-TLS (односторонняя) |
+| `:9095` | HTTP | диагностика: Prometheus `/metrics`, `/healthz`, `/readyz` | per-edge, server-TLS опционально |
+| `:9096` | HTTP | выдача токенов: docker-token (`/iam/token`), токен-эндпоинт платформы (`/iam/v1/token`) и эндпоинты церемонии OAuth | server-TLS (односторонняя) |
 | `:9097` | HTTP | **cluster-internal**: публикуемые наборы проверочных ключей + авторитет отзыва наших токенов | server-TLS (односторонняя), внутренний Service |
 
 Порты конфигурируемы (`api-server.endpoint`, `api-server.internal-endpoint`,
-`authn.hooks-http-endpoint`, `api-server.metrics-endpoint`); значения в таблице —
-дефолты. `/metrics` живет на отдельном cluster-internal порту, а не на публичной
-gRPC-поверхности — иначе утекла бы внутренняя кардинальность метрик.
+`api-server.metrics-endpoint`, `api-server.registry-token.endpoint`,
+`api-server.jwks-proxy.endpoint`); значения в таблице — дефолты. Диагностика живёт
+на отдельном cluster-internal порту, а не на публичной gRPC-поверхности — иначе
+утекла бы внутренняя кардинальность метрик. Пробы пода (`readinessProbe`,
+`livenessProbe`) идут на неё же: она поднимается на каждом старте.
+
+Слушателя обратных вызовов внешнего поставщика личности (`:9092`) у службы больше
+нет: он снят вместе с поставщиком (kaname#363), и ключа `authn.hooks-http-endpoint`
+карта настроек не эмитит.
 
 ### Сервисы по listener'ам
 
@@ -43,8 +51,8 @@ gRPC-поверхности — иначе утекла бы внутрення�
 `AccountService`, `ProjectService`, `UserService`, `ServiceAccountService`,
 `GroupService`, `RoleService`, `AccessBindingService`, `AuthorizeService`
 (`Check`/`BatchCheck`/`ListSubjects`/`ExpandRelations`/`WhoAmI`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
-taxonomy), `SAKeyService` (ключи служебных учёток; зеркало у внешнего поставщика — только
-на непереведённом контуре).
+taxonomy), `SAKeyService` (ключи служебных учёток; токен по ключу чеканит сама служба на
+своём токен-эндпоинте).
 
 **Internal `:9091`** (`registerInternalServices`, только cluster-internal —
 запрет #6): `InternalIAMService` (`Check` + `RegisterResource`/`UnregisterResource`
@@ -56,10 +64,9 @@ taxonomy), `SAKeyService` (ключи служебных учёток; зерк�
 вердикт по уже доверенному mTLS-ребру `:9091`, не открывая отдельный публичный
 коннект.
 
-**HTTP `:9092`** (`iamhooks`): `POST /iam/v1/hooks/token`,
-`POST /iam/v1/hooks/refresh` (Hydra OAuth2-хуки), `POST /iam/v1/hooks/provision`
-(Kratos registration/login → `UpsertFromIdentity`), `GET /healthz` (liveness),
-`GET /readyz` (readiness — ping БД + готовность LRO-worker'а).
+**HTTP `:9095`** (`internal/handler/diagnostics`): `GET /metrics`,
+`GET /healthz` (liveness), `GET /readyz` (readiness — ping БД, версия схемы,
+готовность LRO-worker'а).
 
 **HTTP `:9097`** — **только cluster-internal** (выставлен на внутреннем Service,
 на внешнюю поверхность не публикуется, запрет #6). Три маршрута, и у каждого свой
@@ -104,9 +111,9 @@ flowchart TB
     subgraph PlatformNS[Namespace kacho]
         APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kaname]
         IAM -- pgx master + read-replica --> PG[(Postgres kaname)]
-        Kratos[Ory Kratos] -- provision-hook :9092 --> IAM
-        Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
-        IAM -- admin API: OAuth-клиенты --> Hydra
+        APIGW -- полоса входа, mTLS --> IAM
+        APIGW -- выдача токенов :9096 --> IAM
+        APIGW -- наборы ключей и отзыв :9097 --> IAM
         Migrate[initContainer kaname-migrator] -. goose up .-> PG
         Prom[Prometheus] -- scrape :9095 --> IAM
     end
@@ -204,11 +211,8 @@ repository:
 authn:
   mode: dev                        # dev | production | production-strict
   domain: api.kacho.cloud
-  hydra-issuer: ""                 # пусто → выводится из domain
-  hook-shared-secret-env: KANAME_HOOK_TOKEN
   # Ключ ОБЁРТКИ приватной половины подписного ключа (см. ниже).
   jwks-encryption-key-hex-env: KANAME_JWKS_ENC_KEY
-  hooks-http-endpoint: "tcp://0.0.0.0:9092"
   # Своя чеканка токенов. Блок рендерится ТОЛЬКО при enabled: пока чеканка
   # выключена, её настройки не требуются — страж, требующий того, чем не
   # пользуются, отказывал бы в старте без предмета.
@@ -218,8 +222,15 @@ authn:
     algorithm: ""                                 # RS256 | ES256 | EdDSA
     allowed-algorithms: ""                        # через запятую; считаются ЭЛЕМЕНТЫ
     key-set-path: "/.well-known/kaname/jwks.json"  # путь НАШЕЙ записи набора
-    key-lifetime: "2160h"                         # срок ключа ключницы
+    # key-lifetime: "2160h"                       # срок ключа ключницы — умолчания нет;
+                                                  # рендерится только НАЗВАННЫЙ накладкой
 ```
+
+Срок ключа (`key-lifetime`) отдаётся ветвью: умолчания у него нет ни у процесса,
+ни в базовых значениях чарта, и незаданный он в файл настроек не попадает вовсе —
+доезжает до стража незаданным, и при включённой чеканке старт отвергается с
+именем ключа. Пустой строкой он не рендерится намеренно: пустая строка — не срок,
+и разбор настроек отверг бы её раньше стража, не назвав причины (#321).
 
 `authn.mode` безопасен по умолчанию (`production` в дефолтах кода —
 anonymous fail-closed); dev-стенд явно опускает его до `dev` через
@@ -234,9 +245,7 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 | ENV | Назначение |
 |---|---|
 | `KANAME_DB_PASSWORD` | пароль Postgres (`password-from-env`) |
-| `KANAME_HOOK_TOKEN` | shared secret HMAC для Ory-webhooks |
 | `KANAME_JWKS_ENC_KEY` | 32-байтный ключ (hex) ОБЁРТКИ приватной половины подписного ключа в ключнице (смысл ручки сменился, имя — нет; см. ниже) |
-| `KANAME_HYDRA_ADMIN_TOKEN` | Bearer для Hydra admin API (опц.) |
 | `KANAME_BOOTSTRAP_ROOT_EMAIL` | если задан — bootstrap-admin reconciler выдает `system_admin@cluster` этому юзеру (опц.) |
 
 > [!note] До стадии S6 здесь стояли четыре переменные внешнего движка прав
@@ -253,11 +262,12 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 - **Postgres** (`kaname`) — master-pool обязателен; read-replica (`slave-url`)
   опциональна (CQRS Reader-TX, иначе fallback на master).
-- **Ory Kratos** — identity-provider; `provision`-хук создает/активирует
-  Account/Project/AccessBinding для нового identity (`UpsertFromIdentity`).
-- **Ory Hydra** — OAuth2/OIDC: интерактивный вход человека, а на непереведённом контуре ещё
-  и издатель программных токенов. `token`/`refresh`-хуки обогащают claims и проверяют
-  ревокации; admin API публикует ротируемые JWKS.
+
+Внешнего поставщика личности у службы нет: вход, регистрация, сессия и чеканка
+токенов — её собственные (единственная посадка — своя; ключ
+`authn.identity-provider` снят, `internal/apps/kaname/config/retired_settings.go`).
+Переменные окружения прежнего поставщика (секрет его обратных вызовов, токен его
+административного API) процесс не читает, и выставлять их не нужно.
 
 ## In-process worker'ы
 
@@ -325,7 +335,7 @@ KANAME_DB_PASSWORD=secret kaname-migrator up
 | `algorithm` | алгоритм, закрепляемый за порождаемым ключом 1:1 | **отказ в старте**; умолчания у подписи нет — оно было бы решением за оператора |
 | `allowed-algorithms` | перечень допустимых алгоритмов ПРИЁМА, через запятую | **отказ в старте**: пустой перечень означает «любой», и на нём же держится сверка «алгоритм токена равен алгоритму ключа» |
 | `key-set-path` | путь НАШЕЙ записи публикуемого набора | **отказ в старте** вместо вывода пути из издателя |
-| `key-lifetime` | срок ключа ключницы | берётся умолчание |
+| `key-lifetime` | срок ключа ключницы — политика ротации | **отказ в старте**: срок, выбранный за оператора умолчанием, он не увидит и не пересмотрит, а страж, судящий подставленную величину, не отказал бы ни разу (#321) |
 
 Страж считает **элементы** перечня, а не длину строки: одинокая запятая непуста
 по длине и пуста по существу. Алгоритм чеканки обязан входить в перечень приёма —
@@ -469,6 +479,105 @@ listener-порты выше). Публикация идёт **целиком л
 невозможной: документ, который отдаёт публикатор, стандартен по форме, чтобы
 будущее решение было решением о поверхности, а не переписыванием публикатора.
 
+### Токен доступа церемонии подписывает тот же подписант — в процессе службы
+
+Церемония OAuth 2.0 фундамента (`corelib/oauthceremony`) своего подписного
+материала не имеет: токен доступа выпускает и опознаёт порт службы. Его адаптер
+(`internal/ceremonyport.AccessTokens`) стоит над подписантом и публикуемым
+набором службы — второго подписного материала, который пришлось бы хранить,
+вращать и беречь, нет (задача #396).
+
+**Церемония собрана в композиционном корне** (`cmd/kaname/ceremony.go`, задача
+#423) под посадкой `own` и при поднятом токен-эндпоинте: эндпоинт авторизации
+`GET /iam/v1/authorize` и метаданные обнаружения
+`GET /.well-known/oauth-authorization-server` смонтированы на внешней поверхности
+выдачи рядом с `/iam/v1/token`, а виды выдачи `authorization_code` и
+`refresh_token` — полоса того же токен-эндпоинта. Под `external` церемонии нет: её
+пути на поверхности не резолвятся, её виды выдачи — вне перечня эндпоинта.
+Адреса точек выводятся из издателя подписанта (`authn.token-signing.issuer`):
+издатель — начало координат сервера авторизации, и издатель с путём сборка
+отвергает — метаданные смонтированы без суффикса пути издателя.
+
+**Сроки церемонии называет установка** (задача #318): срок кода
+`authn.ceremony.code-ttl` и срок семейства токенов обновления
+`authn.ceremony.refresh-ttl` (переменные `KANAME_AUTHN__CEREMONY__CODE_TTL` и
+`KANAME_AUTHN__CEREMONY__REFRESH_TTL`, ключи чарта `authn.ceremony.codeTtl` и
+`authn.ceremony.refreshTtl`). Умолчания нет ни у одной: под `own` незаданная,
+нулевая или отрицательная величина и величина выше потолка фундамента
+(`tokenpolicy.MaxAuthorizationCodeTTL`, `tokenpolicy.MaxRefreshTokenFamilyTTL`)
+отвергают старт; под `external` ручки не судятся. Срок семейства читают двое:
+срок одного токена обновления и граница семейства (рождение плюс срок, не позже
+сессии) — оборот предела не сдвигает. Поставляемый профиль и оба стенда называют
+`60s` и `168h` — поведение сборки до ручек. Журнал старта «own OAuth ceremony is
+on» называет обе применённые величины.
+
+**Где работает подписант: в процессе службы.** Адаптер принимает подписанта
+значением процесса, а не адресом, и церемония собрана над **тем же**
+подписантом, что чеканит все токены службы: она и подписант исполняются в одном
+процессе, и отметка выпуска `iat` берётся с тех же часов, что границы церемонии.
+Класс отказа «часы подписанта отстают от часов церемонии на секунду и больше —
+обмен отвергнут» при такой сборке не возникает по построению, и счётчика у него
+нет. Что сборка передаёт именно подписанта службы, судят пробы `TestLINEA1_*`
+(`cmd/kaname`): предъявитель церемонии проверяется ключом и издателем подписанта
+мира пробы, собранного той же функцией, что у корня. Подписант вне процесса —
+другое развёртывание: вместе с ним заводится объявленный счётчик отказов обмена
+по часам подписанта и проба, которая его судит.
+
+**Получатель выданного — регистрация клиента.** Получателя токена церемонии
+штампует служба по записи клиента (`interactive_clients.audiences`), а не
+вызывающий; сужение регистрации действует на следующий выпуск семейства.
+
+**Секрет клиента сверяет проверяющий полосы входа** — тот же пул вычислений, под
+который посчитан бюджет памяти полосы (`authn.login`); занятость его ёмкости —
+повторяемый отказ `503 temporarily_unavailable`, а не отказ сервера.
+
+**Темп поверхности выдачи и адрес источника** (задача kaname#315, приёмка
+`docs/engineering/acceptance/ceremony-pace-is-named-by-number.md`). Пять осей —
+шесть величин `authn.client-token.*`, все на реплику: потолок одновременных
+обменов (`in-flight-ceiling`, все четыре вида выдачи, сверх — `503`), темп
+обменов на идентификатор клиента (`exchanges-per-client-per-sec`, машинные
+полосы, `429`), неудавшихся доказательств клиента за окно на источник
+(`failed-proofs-per-source` и `failed-proof-window`, `429` со сроком) — при
+включённом эндпоинте; запросов авторизации в секунду на источник
+(`authorize-per-source-per-sec`, `429`) и потолок одновременных запросов
+авторизации (`authorize-in-flight-ceiling`, `503`) — при собранной церемонии.
+Нулевое умолчание загрузчика, отказ старта с именем ключа; чарт требует все
+шесть при включённом эндпоинте.
+
+Адрес источника — одно правило на обе точки (`internal/issuingsource`):
+слушатель выдачи ЗАПРАШИВАЕТ клиентский сертификат и проверяет предъявленный
+(`KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual`, корень —
+`…_CLIENTCAFILES`); вызывающий без сертификата допускается. Только у пира с
+проверенным сертификатом края (SAN api-gateway, тот же признак, что у полосы
+входа) источник — значение `X-Forwarded-For`, если это ровно один адрес; во всех
+остальных случаях — адрес пира соединения, а заголовки пересылки не читаются и
+считаются в `kaname_issuing_source_fallbacks_total{point,reason}`. При собранной
+церемонии иной режим слушателя — отказ старта: в `server-tls-only` все люди за
+краем делили бы предел самого края. **Перед слушателем выдачи не ставится
+балансировщик, подменяющий адрес пира**: прямые вызывающие за ним делили бы один
+ключ. Край предъявляет свою клиентскую пару на ретрансляции к слушателю выдачи —
+поведение края, его дом `PRO-Robotech/kacho` (стадия S2 приёмки).
+
+Выпуск токена доступа церемонии **записывает себя в семейство** — запись
+«идентификатор выпуска → семейство» (задача #319), и отказ записи роняет выпуск.
+Отзыв семейства (повтор кода, повтор токена обновления, просьба клиента об отзыве,
+снятие сессии) доезжает до каждой его записи, и по записи о семействе отвечают все
+места предъявления — служба отзыва, которую край спрашивает по одному
+идентификатору токена, авторитет отзыва и читатель предъявленного: токен
+отозванного семейства отвергается при любой отметке выпуска, а выпуск в уже
+отозванное семейство не состоится. Ключа семейства в самом токене нет. Просьбу
+клиента журнал семейства называет своим словом `client-revoke` (задача #406), и
+отозвать семейство ею может только клиент, которому грант выдан.
+
+Обмен кода — **одна транзакция запроса**, открытая погашением кода
+(`internal/repo/kaname/pg/oauth_ceremony_vaults.go`): запись выпуска и первый
+токен обновления ложатся в ней же. Одновременный повтор кода стоит на строке
+кода, пока опередивший не закрепит выдачу, и отзывает семейство уже ПОСЛЕ неё —
+ровно один обмен проходит, и выданное им снимается отзывом. Единственный поход
+опередившего в пул мимо этой транзакции — чтение активного ключа подписантом:
+при числе одновременных повторов одного кода не меньше размера пула опередивший
+ждёт соединения до предела вызова (`credentialLanePeerTimeout`).
+
 ### Что снято и не возвращается
 
 Прежнее хранилище подписных ключей снято миграцией; вместе с ним — задание
@@ -511,8 +620,8 @@ sequenceDiagram
     Init-->>Pod: init complete → старт kaname serve
     Pod->>Pod: load config.yaml + ENV-override
     Pod->>PG: pgxpool master (+ опц. read-replica)
-    Pod->>Pod: gRPC :9090/:9091 + HTTP :9092/:9095 + worker'ы
-    Pod-->>Helm: Ready (TCP-probe :9090)
+    Pod->>Pod: gRPC :9090/:9091 + HTTP :9095/:9096/:9097 + worker'ы
+    Pod-->>Helm: Ready (HTTP-probe /readyz на :9095)
     Note over Pod: authz активен сразу — отдельной задачи подготовки хранилища прав нет
 ```
 
@@ -522,9 +631,9 @@ sequenceDiagram
 # 1. Pod готов.
 kubectl -n kacho rollout status deployment/iam --timeout=60s
 
-# 2. Liveness / readiness на hooks-порту.
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9092/healthz
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9092/readyz
+# 2. Liveness / readiness на диагностическом порту.
+kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/healthz
+kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/readyz
 
 # 3. gRPC reflection публичного API (через api-gateway).
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
@@ -544,7 +653,7 @@ grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.clo
 
 ## Ссылки на код
 
-- `cmd/kaname/{main,serve,wiring,env,grpc_register,hooks_mux}.go`
+- `cmd/kaname/{main,serve,wiring,env,grpc_register}.go`
 - `cmd/migrator/main.go`
 - `internal/apps/kaname/config/`
 - `internal/migrations/0001_initial.sql`

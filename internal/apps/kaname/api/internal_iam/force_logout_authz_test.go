@@ -47,11 +47,15 @@ func (f *fakeForceLogoutChecker) Check(_ context.Context, subject, relation, obj
 	return f.allow, f.err
 }
 
-func forceLogoutHandlerWithGate(rec sessionRevoker, chk *fakeForceLogoutChecker) *Handler {
+func forceLogoutHandlerWithGate(rec *fakeForceLogoutRecorder, chk *fakeForceLogoutChecker) *Handler {
 	return NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(rec).
 		WithAdminChecker(chk).
-		WithOperations(&recordingForceLogoutOps{})
+		WithOperations(&recordingForceLogoutOps{}).
+		// Исполнитель снятия провязан как в корне: без него глагол отказывает
+		// закрыто, и пробы стража судили бы отказ провязки вместо своего
+		// предмета (kaname#313). Отсечку кладёт его транзакция (kaname#340),
+		// поэтому это та же заглушка, что считает отсечки.
+		WithOwnSessions(rec)
 }
 
 func ctxAdmin(id string) context.Context {
@@ -109,7 +113,7 @@ func TestForceLogout_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 
 func TestForceLogout_DeniesWhenCheckerNil(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil).WithSessionRevoker(rec) // no checker
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil).WithOwnSessions(rec) // no checker
 	_, err := h.ForceLogout(ctxAdmin("usr0000000000000admin"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
 	})

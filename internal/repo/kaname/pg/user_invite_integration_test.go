@@ -291,22 +291,23 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 	// Activate
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, err := w2.UsersW().ActivateInvite(ctx, pending.ID,
-		domain.ExternalSubject("kratos-sub-s05"),
+		domain.ExternalSubject("external-sub-s05"),
 		domain.DisplayName("Real Name"))
 	require.NoError(t, err)
 	require.NoError(t, w2.Commit(ctx))
 
 	assert.Equal(t, pending.ID, activated.ID)
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
-	assert.Equal(t, domain.ExternalSubject("kratos-sub-s05"), activated.ExternalID)
+	assert.Equal(t, domain.ExternalSubject("external-sub-s05"), activated.ExternalID)
 	assert.Equal(t, domain.DisplayName("Real Name"), activated.DisplayName)
 
 	// FindActive should now find it
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
-	rows, err := rd.Users().FindActiveByExternalID(ctx, "kratos-sub-s05")
+	rows, err := rd.Users().FindActiveByExternalID(ctx, "external-sub-s05")
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 	assert.Equal(t, pending.ID, rows[0].ID)
@@ -329,6 +330,7 @@ func TestUserInvite_S05b_ActivateInvite_NotPending_NotFound(t *testing.T) {
 	adminID, _ := bootstrapAdmin(t, ctx, repo, "s05b")
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	markAddressVerified(t, ctx, pool, adminID)
 	_, err = w.UsersW().ActivateInvite(ctx, adminID,
 		domain.ExternalSubject("new-sub"), domain.DisplayName("X"))
 	_ = w.Rollback(ctx)

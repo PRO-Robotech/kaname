@@ -7,9 +7,9 @@ package audit_test
 // UpsertFromIdentity insert-branch → iam.user.created;
 // activate-invite update-branch → iam.user.updated; Delete → iam.user.deleted.
 //
-// UpsertFromIdentity is the InternalUserService bootstrap/provision path (Kratos
-// hook + admin-tooling). When no caller principal is present (Kratos provision)
-// the actor is the system/bootstrap identity — recorded, never fabricated.
+// UpsertFromIdentity is the InternalUserService bootstrap/provision path
+// (admin-tooling). When no caller principal is present (provision without a
+// JWT) the actor is the system/bootstrap identity — recorded, never fabricated.
 // Delete runs through the public UserService.Delete (self-delete).
 
 import (
@@ -28,7 +28,7 @@ func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// No caller principal → Kratos-provision bootstrap path. actor = system/bootstrap.
+	// No caller principal → provision bootstrap path. actor = system/bootstrap.
 	bootstrapCtx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "bootstrap", DisplayName: "kaname-bootstrap"})
 
@@ -47,11 +47,11 @@ func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
 	r := requireOneAuditRow(ctx, t, env.pool, "iam.user.created", usrID)
 	require.Equal(t, "user", r.payload["resource_type"])
 	require.Equal(t, usrID, r.payload["resource_id"])
-	// Kratos-provision has no user principal → IsAnonymous(bootstrap)=true →
+	// Provision without a principal → IsAnonymous(bootstrap)=true →
 	// PrincipalUserID="" → the use-case records the non-fabricated system
 	// identity "system" (never an invented user id). 5.2-14.
 	require.Equal(t, "system", r.payload["actor"],
-		"Kratos-provision actor is the system identity, never fabricated")
+		"provision actor is the system identity, never fabricated")
 	require.Regexp(t, evtIDFormat, r.id)
 
 	// Здесь стояло требование, чтобы нагрузка НЕСЛА почту и отображаемое имя.
@@ -76,13 +76,16 @@ func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// Seed a PENDING invite row by email (no external_id yet).
+	// Seed a PENDING invite row by email (no external_id yet). Приглашение путь
+	// хука активирует только при отметке подтверждения нашей полосы
+	// (kaname#456, Р11 п. 5): строка её несёт — предмет пробы событие, а не
+	// отметка.
 	owner, accID := seedUserAccount(t, ctx, env.pool, "usr14upd")
 	_ = owner
 	pendingID := domain.UserID("usr0000000000005214pp")
 	_, err := env.pool.Exec(ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, '', $3, $4, 'PENDING')`,
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, '', $3, $4, 'PENDING', now())`,
 		string(pendingID), string(accID), "u-5214-activate@example.com", "Pending Invitee")
 	require.NoError(t, err)
 

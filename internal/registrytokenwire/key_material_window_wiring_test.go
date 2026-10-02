@@ -55,8 +55,10 @@ func buildLane(t *testing.T, until time.Time, obs *countingObserver) http.Handle
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
 		Realm:                  "https://api.kacho.local/iam/token",
 		Service:                "registry.probe.local",
+		BasicCredentialTimeout: time.Second,
 		KeyMaterialWindowUntil: until,
 		CredentialKindObserver: obs,
+		Signer:                 ourSigner(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка полосы: %v", err)

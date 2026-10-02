@@ -106,7 +106,6 @@ var unresolvedMetadata = []string{
 	"InviteUserMetadata",
 	"IssueSAKeyMetadata",
 	"IssueUserTokenMetadata",
-	"OnRecoveryCompletedMetadata",
 	"RemoveGroupMemberMetadata",
 	"RevokeClusterAdminMetadata",
 	"RevokeMetadata",

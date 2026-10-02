@@ -240,12 +240,6 @@ func (w *invPrincWriter) EmitFGARelationWrite(_ context.Context, tuples []servic
 func (w *invPrincWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *invPrincWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *invPrincWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *invPrincWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 func (w *invPrincWriter) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil
@@ -285,9 +279,6 @@ func (w *invPrincUserWtr) InsertPending(_ context.Context, u domain.User, _ time
 	return u, true, nil
 }
 
-func (w *invPrincUserWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
-	return u, false, nil
-}
 func (w *invPrincUserWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domain.ExternalSubject, _ domain.DisplayName) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }

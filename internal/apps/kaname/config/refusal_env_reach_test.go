@@ -179,18 +179,17 @@ func auditRefusalNamedEnv(profiles []refusalProfile, world refusalWorld) ([]stri
 
 // refusalProfilesUnderTest — профили, на которых спрашивают стража.
 //
-// Четыре, а не один: половина отказов производится только в боевом режиме, а
-// часть — только на объявленной полосе посадки личности. Профиль, оставшийся вне
-// обхода, унёс бы с собой все переменные, которые называют только его отказы.
+// Два, а не один: половина отказов производится только в боевом режиме.
+// Профиль, оставшийся вне обхода, унёс бы с собой все переменные, которые
+// называют только его отказы.
+//
+// Профиля «боевой, полоса own» здесь больше нет (kaname#363): отказы полосы
+// своего входа прежде производились только на объявленной посадке, а теперь —
+// на всяком боевом старте, то есть на первом профиле ниже; ключ посадки снят, и
+// его переменная профилем отвергается загрузчиком.
 func refusalProfilesUnderTest() []refusalProfile {
 	return []refusalProfile{
 		{Name: "боевой, ничего не объявлено", Env: map[string]string{}},
-		{Name: "боевой, полоса external", Env: map[string]string{
-			"KANAME_AUTHN__IDENTITY_PROVIDER": "external",
-		}},
-		{Name: "боевой, полоса own", Env: map[string]string{
-			"KANAME_AUTHN__IDENTITY_PROVIDER": "own",
-		}},
 		{Name: "стенд разработчика", Env: map[string]string{
 			"KANAME_AUTHN__MODE": "dev",
 		}},
@@ -309,8 +308,10 @@ func TestRefusalEnvGate_SaysNothingAboutNamesMentionedOnlyInProse(t *testing.T) 
 
 	// Положительный контроль: имя, которое отказ действительно называет, в
 	// перечне ЕСТЬ. Без него отрицание выше зеленело бы на пустом перечне.
-	if !contains(census.NamedList, "KANAME_HOOK_TOKEN") {
-		t.Fatalf("перечень названных отказами не содержит KANAME_HOOK_TOKEN — "+
+	// Прежде контролем стояла переменная общего секрета хуков; хуки сняты вместе
+	// с внешним поставщиком (kaname#363).
+	if !contains(census.NamedList, "KANAME_AUTHN__CLIENT_TOKEN__ENABLED") {
+		t.Fatalf("перечень названных отказами не содержит KANAME_AUTHN__CLIENT_TOKEN__ENABLED — "+
 			"обход не состоялся, и отрицание выше беспредметно: %s", census)
 	}
 }

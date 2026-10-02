@@ -255,3 +255,92 @@ func TestDeclaredPendingEntryMustNameOurOwnVerb(t *testing.T) {
 		requireSilent(t, findings, err)
 	})
 }
+
+// ── ГЛАГОЛЫ, СНЯТЫЕ СЛУЖБОЙ, КОТОРЫЕ КРАЙ ЕЩЁ НАЗЫВАЕТ (kaname#564) ───────────
+
+const testRetiredFQN = "kaname.cloud.demo.v1.DemoService/Callback"
+
+// testRetired — ведомость проб: одна запись того же вида, что действующая.
+func testRetired() []CatalogRetiredEntry {
+	return []CatalogRetiredEntry{{
+		EdgeFQN: testRetiredFQN,
+		Why:     "синтетика пробы",
+		Removal: "край перестал называть глагол",
+		Refs:    "kaname#564",
+	}}
+}
+
+// TestDeclaredRetiredEntryExplainsAnEdgeOnlyVerb — ось ВЕДОМОСТИ СНЯТЫХ: запись
+// края без пары у нас — находка, пока снятие не объявлено; объявленное — молчит.
+// Ровно один факт между близнецами: наличие записи в ведомости.
+func TestDeclaredRetiredEntryExplainsAnEdgeOnlyVerb(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+	edge := catalogFile(a, catalogEntry(testRetiredFQN, "<exempt>"))
+	own := catalogFile(a)
+
+	t.Run("дефект: снятый глагол не объявлен", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, nil, edge, own)
+		requireFinding(t, findings, err, testRetiredFQN, CatalogFindingCopies)
+	})
+
+	t.Run("близнец: тот же глагол ОБЪЯВЛЕН снятым службой", func(t *testing.T) {
+		findings, census, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(), edge, own)
+		requireSilent(t, findings, err)
+		if census.RetiredApplied != 1 || census.RetiredDeclared != 1 {
+			t.Fatalf("перепись не назвала применённую запись: %s", census)
+		}
+	})
+
+	t.Run("контроль: ведомость выносит ТОЛЬКО объявленное — второй лишний глагол края остаётся находкой", func(t *testing.T) {
+		edge2 := catalogFile(a, catalogEntry(testRetiredFQN, "<exempt>"),
+			catalogEntry("kaname.cloud.demo.v1.DemoService/Other", "demo.other"))
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(), edge2, own)
+		requireFinding(t, findings, err, "kaname.cloud.demo.v1.DemoService/Other", CatalogFindingCopies)
+	})
+
+	t.Run("контроль: расхождение содержимым соседней записи остаётся находкой", func(t *testing.T) {
+		own2 := catalogFile(catalogEntry("kacho.cloud.a.v1.A/Get", "a.ADMIN"))
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(), edge, own2)
+		requireFinding(t, findings, err, "kacho.cloud.a.v1.A/Get", CatalogFindingCopies)
+	})
+}
+
+// TestDeclaredRetiredEntryExpiresOnItsOwn — САМОИСТЕЧЕНИЕ: край перестал называть
+// глагол — запись обязана уйти, а не прощать дальше.
+func TestDeclaredRetiredEntryExpiresOnItsOwn(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+
+	t.Run("дефект: край уже не несёт глагол, запись стоит", func(t *testing.T) {
+		both := catalogFile(a)
+		findings, census, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(), both, both)
+		requireFinding(t, findings, err, testRetiredFQN, CatalogFindingLedger)
+		if census.RetiredApplied != 0 {
+			t.Fatalf("запись, которой нечего исключать, объявлена применённой: %s", census)
+		}
+	})
+
+	t.Run("близнец: край ещё называет глагол — запись при предмете", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(),
+			catalogFile(a, catalogEntry(testRetiredFQN, "<exempt>")), catalogFile(a))
+		requireSilent(t, findings, err)
+	})
+}
+
+// TestDeclaredRetiredEntryMustNotNameOurOwnVerb — вторая сторона: запись
+// объявляет глагол снятым, а в НАШЕЙ копии он есть — она утверждает неправду.
+func TestDeclaredRetiredEntryMustNotNameOurOwnVerb(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+	retiredRow := catalogEntry(testRetiredFQN, "<exempt>")
+
+	t.Run("дефект: наша запись на месте, ведомость объявляет её снятой", func(t *testing.T) {
+		both := catalogFile(a, retiredRow)
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(), both, both)
+		requireFinding(t, findings, err, testRetiredFQN, CatalogFindingLedger)
+	})
+
+	t.Run("близнец: нашей записи нет", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWithLedgers(nil, nil, testRetired(),
+			catalogFile(a, retiredRow), catalogFile(a))
+		requireSilent(t, findings, err)
+	})
+}

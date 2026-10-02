@@ -89,6 +89,33 @@ type stubLane struct {
 	removeIn   []humansession.RemoveSecondFactorInput
 	regenIn    []humansession.RegenerateBackupCodesInput
 	stepUpIn   []humansession.StepUpInput
+
+	// Подтверждение адреса (kaname#456).
+	verifyOut        humansession.RequestVerificationOutput
+	verifyErr        error
+	verifyIn         []domain.SessionBearer
+	verifyConfirmOut humansession.ConfirmVerificationOutput
+	verifyConfirmErr error
+	verifyConfirmIn  []humansession.ConfirmVerificationInput
+	position         humansession.Position
+	positionErr      error
+}
+
+// Подтверждение адреса (kaname#456): дублёр отвечает объявленным исходом;
+// положение по умолчанию — «сессии нет», и отказ положения на пути, объявленном
+// отказом, не срабатывает: предмет соседних проб — глаголы, а не положение.
+func (s *stubLane) RequestEmailVerification(_ context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
+	s.verifyIn = append(s.verifyIn, b)
+	return s.verifyOut, s.verifyErr
+}
+
+func (s *stubLane) ConfirmEmailVerification(_ context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error) {
+	s.verifyConfirmIn = append(s.verifyConfirmIn, in)
+	return s.verifyConfirmOut, s.verifyConfirmErr
+}
+
+func (s *stubLane) AddressPosition(context.Context, domain.SessionBearer) (humansession.Position, error) {
+	return s.position, s.positionErr
 }
 
 func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {

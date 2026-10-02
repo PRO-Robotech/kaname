@@ -30,12 +30,11 @@ import (
 
 func standSecretsFixture() ([]secretRef, map[string][]string) {
 	refs := []secretRef{
-		{Env: "KANAME_HOOK_TOKEN", Name: "kaname-authn", Key: "hook-shared-secret", Profile: "values.prod.yaml"},
 		{Env: "KANAME_JWKS_ENC_KEY", Name: "kaname-authn", Key: "jwks-encryption-key-hex", Profile: "values.prod.yaml"},
 		{Env: "KANAME_SECOND_FACTOR_ENC_KEY", Name: "kaname-authn", Key: "second-factor-encryption-key-hex", Profile: "values.prod.yaml"},
 	}
 	stand := map[string][]string{
-		"kaname-authn": {"hook-shared-secret", "jwks-encryption-key-hex", "second-factor-encryption-key-hex"},
+		"kaname-authn": {"jwks-encryption-key-hex", "second-factor-encryption-key-hex"},
 		"kaname-db":    {"password"},
 	}
 	return refs, stand
@@ -45,7 +44,7 @@ func standSecretsFixture() ([]secretRef, map[string][]string) {
 func TestInjection_StandSecretsControlIsSilent(t *testing.T) {
 	refs, stand := standSecretsFixture()
 	findings, judged := judgeStandSecretsCoverTheProfile(refs, stand)
-	require.Equal(t, 3, judged)
+	require.Equal(t, 2, judged)
 	require.Empty(t, findings, "контроль красен — вердикты инъекций ниже недействительны")
 }
 
@@ -53,9 +52,9 @@ func TestInjection_StandSecretsControlIsSilent(t *testing.T) {
 // до починки, снятое живым подом.
 func TestInjection_StandDroppingADeclaredKeyIsFound(t *testing.T) {
 	refs, stand := standSecretsFixture()
-	stand["kaname-authn"] = stand["kaname-authn"][:2]
+	stand["kaname-authn"] = stand["kaname-authn"][:1]
 	findings, judged := judgeStandSecretsCoverTheProfile(refs, stand)
-	require.Equal(t, 3, judged)
+	require.Equal(t, 2, judged)
 	require.Len(t, findings, 1, "мера не нашла снятый ключ")
 	require.Contains(t, findings[0], "KANAME_SECOND_FACTOR_ENC_KEY")
 	require.Contains(t, findings[0], `"second-factor-encryption-key-hex"`)
@@ -65,7 +64,7 @@ func TestInjection_StandDroppingADeclaredKeyIsFound(t *testing.T) {
 // TestInjection_StandExtraKeyIsLegal — ЗАКОННЫЙ БЛИЗНЕЦ.
 func TestInjection_StandExtraKeyIsLegal(t *testing.T) {
 	refs, stand := standSecretsFixture()
-	stand["kaname-authn"] = append(stand["kaname-authn"], "provider-admin-token")
+	stand["kaname-authn"] = append(stand["kaname-authn"], "operator-extra-key")
 	findings, _ := judgeStandSecretsCoverTheProfile(refs, stand)
 	require.Empty(t, findings, "лишний ключ стенда объявлен находкой — мера строже предмета: лишний ключ пода не ломает")
 }
@@ -73,9 +72,9 @@ func TestInjection_StandExtraKeyIsLegal(t *testing.T) {
 // TestInjection_StandForeignObjectIsNotJudged — объект не стенда в счёт не идёт.
 func TestInjection_StandForeignObjectIsNotJudged(t *testing.T) {
 	refs, stand := standSecretsFixture()
-	refs = append(refs, secretRef{Env: "KANAME_HYDRA_ADMIN_TOKEN", Name: "operator-provider", Key: "token", Profile: "values.prod.yaml"})
+	refs = append(refs, secretRef{Env: "KANAME_OPERATOR_TOKEN", Name: "operator-object", Key: "token", Profile: "values.prod.yaml"})
 	findings, judged := judgeStandSecretsCoverTheProfile(refs, stand)
-	require.Equal(t, 3, judged, "чужой объект попал в счёт судимых")
+	require.Equal(t, 2, judged, "чужой объект попал в счёт судимых")
 	require.Empty(t, findings)
 }
 
@@ -89,14 +88,14 @@ func TestInjection_StandScriptReaderSkipsComments(t *testing.T) {
 	script := "#!/usr/bin/env bash\n" +
 		"# здесь ключ упомянут прозой: --from-literal=ghost-key=x в объекте \"$RELEASE-authn\"\n" +
 		"kubectl create secret generic \"$RELEASE-authn\" \\\n" +
-		"\t\t--from-literal=hook-shared-secret=\"$(openssl rand -hex 16)\" \\\n" +
+		"\t\t--from-file=second-factor-encryption-key-hex=\"$PKI/s\" \\\n" +
 		"\t\t--from-file=jwks-encryption-key-hex=\"$PKI/k\" >/dev/null\n" +
 		"kubectl create secret generic \"$RELEASE-db\" --from-literal=password=\"$PG_PASSWORD\"\n"
 	require.NoError(t, os.WriteFile(filepath.Join(root, standChartScriptRel), []byte(script), 0o600))
 
 	keys, lines := standSecretKeys(t, root)
 	require.Equal(t, 7, lines, "шесть строк и хвостовой перевод строки")
-	require.Equal(t, []string{"hook-shared-secret", "jwks-encryption-key-hex"}, keys["kaname-authn"],
+	require.Equal(t, []string{"second-factor-encryption-key-hex", "jwks-encryption-key-hex"}, keys["kaname-authn"],
 		"продолжение команды не собрано либо ключ из комментария засчитан")
 	require.Equal(t, []string{"password"}, keys["kaname-db"])
 }

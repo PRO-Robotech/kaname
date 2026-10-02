@@ -4,13 +4,12 @@
 // usecase_audience_narrowing_test.go — перечень адресатов, названный заказчиком
 // при выдаче, ЗАПИСЫВАЕТСЯ на строку ключа (задача #1136).
 //
-// # Зачем запись, если перечень и так уезжает в регистрацию
+// # Зачем запись
 //
-// Регистрация — у прежнего издателя, и на переведённом контуре её нет вовсе.
-// Пока перечень существовал только в ней, на своей полосе выпуска у него не было
-// читателя: поле принималось, возвращалось в ответе и не отвергало ни одного
-// входа. Строка ключа — единственное место, откуда выпуск может его прочитать,
-// не спрашивая постороннего.
+// Строка ключа — единственное место, откуда выпуск может прочитать сужение: у
+// ключа нет регистрации ни у кого, кроме нашего реестра (kaname#362). Сужение,
+// не доехавшее до строки, принималось бы, возвращалось в ответе и не отвергало
+// ни одного входа.
 //
 // # Что здесь утверждается
 //
@@ -54,7 +53,6 @@ func TestIssue_DeclaredAudienceIsRecordedOnTheKeyRow(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newTTLHarness(t)
-			h.uc.RegistryAudience = audNarrowRegistry
 
 			err := h.issue(t, IssueInput{
 				TrustedSubjects: subjects,
@@ -73,12 +71,12 @@ func TestIssue_DeclaredAudienceIsRecordedOnTheKeyRow(t *testing.T) {
 				t.Fatalf("на строке записано %v, а заказчик назвал [%s]: сужение, не доехавшее до "+
 					"строки, не имеет читателя на своей полосе выпуска", got, audNarrowExternal)
 			}
-			// Адресат реестра добавляется в перечень ЗЕРКАЛА (задача #320) и не
-			// вправе попадать в сужение: он расширил бы ключ за пределы того,
-			// что назвал заказчик, — молча и в сторону большего доступа.
+			// Адресат реестра не вправе попадать в сужение, которого заказчик
+			// не называл: он расширил бы ключ за пределы названного — молча и
+			// в сторону большего доступа.
 			for _, a := range got {
 				if a == audNarrowRegistry {
-					t.Errorf("сужение %v несёт адресат зеркала %q — заказчик его не называл",
+					t.Errorf("сужение %v несёт адресат %q — заказчик его не называл",
 						got, audNarrowRegistry)
 				}
 			}
@@ -94,8 +92,6 @@ func TestIssue_DeclaredAudienceIsRecordedOnTheKeyRow(t *testing.T) {
 // пока не спросить оба входа.
 func TestIssue_WithoutDeclaredAudienceTheRowRecordsNoNarrowing(t *testing.T) {
 	h := newTTLHarness(t)
-	h.uc.RegistryAudience = audNarrowRegistry
-	h.uc.AudiencePrefix = "https://internal.example/iam"
 
 	if err := h.issue(t, IssueInput{}); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -103,8 +99,8 @@ func TestIssue_WithoutDeclaredAudienceTheRowRecordsNoNarrowing(t *testing.T) {
 	waitForOp(t, h.ops)
 
 	if got := h.repo.inserted.DeclaredAudiences; len(got) != 0 {
-		t.Fatalf("сужение %v записано ключу, который его не объявлял: перечень зеркала строится "+
-			"иначе и сузил бы такой ключ до недостижимого", got)
+		t.Fatalf("сужение %v записано ключу, который его не объявлял: такой ключ был бы сужен "+
+			"до недостижимого", got)
 	}
 }
 
@@ -137,16 +133,10 @@ func TestIssue_DeclaredAudienceDropsEmptiesAndCollapsesDuplicates(t *testing.T) 
 	}
 }
 
-// TestIssue_OwnIssuance_ResponseEchoesTheRecordedNarrowing — ответ выдачи на
-// переведённом контуре называет то, что ключ ДЕЙСТВИТЕЛЬНО сможет заказать.
-//
-// Прежде он эхом отдавал перечень зеркала — величину, которая на переведённом
-// контуре не регистрируется нигде и не читается ничем. Ответ утверждал о ключе
-// то, чего про него не верно.
+// TestIssue_OwnIssuance_ResponseEchoesTheRecordedNarrowing — ответ выдачи
+// называет то, что ключ ДЕЙСТВИТЕЛЬНО сможет заказать: записанное сужение.
 func TestIssue_OwnIssuance_ResponseEchoesTheRecordedNarrowing(t *testing.T) {
 	h := newTTLHarness(t)
-	h.uc.WithOwnIssuance()
-	h.uc.RegistryAudience = audNarrowRegistry
 
 	if err := h.issue(t, IssueInput{Audience: []string{audNarrowExternal}}); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -158,48 +148,18 @@ func TestIssue_OwnIssuance_ResponseEchoesTheRecordedNarrowing(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(resp.Audiences) != 1 || resp.Audiences[0] != audNarrowExternal {
-		t.Fatalf("ответ называет %v, а ключ записан с сужением [%s]: перечень зеркала на "+
-			"переведённом контуре не регистрируется нигде", resp.Audiences, audNarrowExternal)
-	}
-}
-
-// TestIssue_MirroredContour_ResponseStillEchoesTheMirrorWhitelist —
-// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ к предыдущей пробе.
-//
-// Пока зеркало заводится, эхо перечня зеркала верно и обязано остаться: там он
-// и вправду решает, какой обмен пройдёт. Без этой пары отрицание выше зеленело
-// бы на правке, снявшей эхо со ВСЕХ посадок.
-func TestIssue_MirroredContour_ResponseStillEchoesTheMirrorWhitelist(t *testing.T) {
-	h := newTTLHarness(t)
-	h.uc.RegistryAudience = audNarrowRegistry
-
-	if err := h.issue(t, IssueInput{Audience: []string{audNarrowExternal}}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	waitForOp(t, h.ops)
-
-	resp := &iamv1.IssueSAKeyResponse{}
-	if err := anyUnmarshalTo(h.ops.lastResp, resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Audiences) != 2 ||
-		resp.Audiences[0] != audNarrowExternal || resp.Audiences[1] != audNarrowRegistry {
-		t.Fatalf("ответ непереведённого контура = %v; ожидался перечень зеркала [%s %s]",
-			resp.Audiences, audNarrowExternal, audNarrowRegistry)
+		t.Fatalf("ответ называет %v, а ключ записан с сужением [%s]", resp.Audiences, audNarrowExternal)
 	}
 }
 
 // TestIssue_OwnIssuance_ResponseWithoutNarrowingSaysSo — ключ, сужения не
-// объявивший, получает ПУСТОЙ перечень в ответе, а не перечень зеркала.
+// объявивший, получает ПУСТОЙ перечень в ответе.
 //
 // Пусто здесь — утверждение: «сужения нет, действует перечень посадки». Отдать
-// вместо него перечень зеркала значило бы назвать адресатов, которых этот ключ
-// заказать не сможет, и назвать не всех, кого сможет.
+// вместо него любой другой перечень значило бы назвать адресатов, которых этот
+// ключ заказать не сможет, и назвать не всех, кого сможет.
 func TestIssue_OwnIssuance_ResponseWithoutNarrowingSaysSo(t *testing.T) {
 	h := newTTLHarness(t)
-	h.uc.WithOwnIssuance()
-	h.uc.RegistryAudience = audNarrowRegistry
-	h.uc.AudiencePrefix = "https://internal.example/iam"
 
 	if err := h.issue(t, IssueInput{}); err != nil {
 		t.Fatalf("Execute: %v", err)

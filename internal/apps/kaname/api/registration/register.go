@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
@@ -52,12 +53,13 @@ type Input struct {
 	Source string
 }
 
-// Output — исход успешной регистрации: состав ответа, носитель, активировано
-// ли приглашение.
+// Output — исход успешной регистрации: состав ответа, носитель, лёг ли способ
+// входа на строку приглашения (kaname#456, Р11 п. 1: приглашение регистрация
+// не активирует — его активирует подтверждение адреса).
 type Output struct {
-	View      humansession.SessionView
-	Bearer    domain.SessionBearer
-	Activated bool
+	View    humansession.SessionView
+	Bearer  domain.SessionBearer
+	Invited bool
 }
 
 // Deps — зависимости глагола; все обязательны, кроме наблюдателя, журнала и
@@ -70,6 +72,14 @@ type Deps struct {
 	TTL        time.Duration
 	Observer   Observer
 	Reconciler OwnerBindingReconciler
+	// Letter — пять величин подтверждения адреса (kaname#456, Р7, Р9): письмо
+	// подтверждения ставится той же транзакцией, что заводит человека.
+	Letter humansession.VerificationPace
+	// Sources / SourcePace — окно регистраций одного источника: списывается ДО
+	// транзакции одним оператором; сверх окна — единый отказ, ни строки
+	// человека, ни письма.
+	Sources    humansession.SourcePacer
+	SourcePace humansession.SourcePace
 	Now        func() time.Time
 	Logger     *slog.Logger
 }
@@ -83,6 +93,9 @@ type RegisterUseCase struct {
 	ttl        time.Duration
 	observer   Observer
 	reconciler OwnerBindingReconciler
+	letter     humansession.VerificationPace
+	sources    humansession.SourcePacer
+	sourcePace humansession.SourcePace
 	now        func() time.Time
 	logger     *slog.Logger
 }
@@ -102,6 +115,14 @@ func NewRegisterUseCase(d Deps) (*RegisterUseCase, error) {
 		return nil, fmt.Errorf("registration: session ttl must be positive")
 	case d.Lane.Name == "":
 		return nil, fmt.Errorf("registration: lane must be named")
+	case d.Sources == nil:
+		return nil, fmt.Errorf("registration: source pacer required — registration sends a letter, and its pace per source is not optional")
+	}
+	if err := d.Letter.Validate(); err != nil {
+		return nil, fmt.Errorf("registration: %w", err)
+	}
+	if err := d.SourcePace.Validate(); err != nil {
+		return nil, fmt.Errorf("registration: %w", err)
 	}
 	for _, c := range Consequences() {
 		if !d.Lane.Produces(c) {
@@ -120,7 +141,8 @@ func NewRegisterUseCase(d Deps) (*RegisterUseCase, error) {
 	}
 	return &RegisterUseCase{
 		store: d.Store, rule: d.Rule, hasher: d.Hasher, lane: d.Lane, ttl: d.TTL,
-		observer: d.Observer, reconciler: d.Reconciler, now: d.Now, logger: d.Logger,
+		observer: d.Observer, reconciler: d.Reconciler, letter: d.Letter, sources: d.Sources,
+		sourcePace: d.SourcePace, now: d.Now, logger: d.Logger,
 	}, nil
 }
 
@@ -153,6 +175,25 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 		return Output{}, humansession.ErrStoreUnavailable
 	}
 	now := uc.now().UTC()
+
+	// (2а) Окно регистраций источника — ДО транзакции, одним оператором
+	// (kaname#456): регистрация ставит письмо на адрес, который назвал
+	// вызывающий без удостоверения, и число таких писем с одного источника
+	// ограничено. Сверх окна — тот же единый отказ, без строки человека и без
+	// письма. Источник не назван — ось не спрашивается: на живом проводе адрес
+	// ставит край всегда (форма оси источника полосы входа).
+	if src := strings.TrimSpace(in.Source); src != "" {
+		admitted, perr := uc.sources.ChargeSource(ctx, humansession.SourceLaneRegistration, src, now, uc.sourcePace)
+		if perr != nil {
+			uc.logger.Error("registration: source window not charged — store refused", "err", perr.Error())
+			uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
+			return Output{}, humansession.ErrStoreUnavailable
+		}
+		if !admitted {
+			uc.observer.RegistrationObserved(uc.lane.Name, OutcomeRefusedSource)
+			return Output{}, ErrRefused
+		}
+	}
 
 	// (3) Одна транзакция трёх следствий — в объявленном порядке полосы.
 	w, err := uc.store.Writer(ctx)
@@ -198,12 +239,22 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 					// Без адреса и без имени (гейт `audit_payload_pii`): субъект
 					// назван неизменяемым идентификатором.
 					Payload: map[string]any{
-						"user_id":          string(mirror.User.ID),
-						"session_id":       string(session.ID),
-						"lane":             uc.lane.Name,
-						"invite_activated": mirror.Activated,
+						"user_id":    string(mirror.User.ID),
+						"session_id": string(session.ID),
+						"lane":       uc.lane.Name,
+						"invited":    mirror.Invited,
 					},
 				})
+			}
+			// Письмо подтверждения — ТОЙ ЖЕ транзакцией, что заводит человека
+			// (kaname#456, Р9): зарегистрирован ⟹ письмо поставлено. Письмо
+			// регистрации идёт в счёт предела писем.
+			if err == nil {
+				var refusal humansession.LetterRefusal
+				refusal, err = humansession.EnqueueVerificationLetter(ctx, w, mirror.User, now, uc.letter)
+				if err == nil && refusal.Refused {
+					err = fmt.Errorf("registration: verification letter refused by its pace for a person just registered")
+				}
 			}
 		}
 		if err != nil {
@@ -225,15 +276,15 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 		}
 	}
 	outcome := OutcomeIssued
-	if mirror.Activated {
+	if mirror.Invited {
 		outcome = OutcomeIssuedInvited
 	}
 	uc.observer.RegistrationObserved(uc.lane.Name, outcome)
 	return Output{
 		// Адрес только что заведён и подтверждён быть не может (Ф1-20).
-		View:      humansession.SessionView{User: mirror.User, Session: session, EmailVerified: false},
-		Bearer:    bearer,
-		Activated: mirror.Activated,
+		View:    humansession.SessionView{User: mirror.User, Session: session, EmailVerified: false},
+		Bearer:  bearer,
+		Invited: mirror.Invited,
 	}, nil
 }
 

@@ -19,6 +19,27 @@ type stubReader struct {
 	before map[string]time.Time
 	err    error
 	asked  []string
+
+	// families — ответ хранилища о семействе выпуска по его идентификатору:
+	// true — семейство отозвано либо снято. Нет ключа — выпуск семейству не
+	// принадлежит.
+	families    map[string]bool
+	familyErr   error
+	familyAsked []string
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (*stubReader) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (s *stubReader) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	s.familyAsked = append(s.familyAsked, jti)
+	if s.familyErr != nil {
+		return false, s.familyErr
+	}
+	return s.families[jti], nil
 }
 
 func (s *stubReader) RevokedBefore(_ context.Context, subject string) (time.Time, bool, error) {

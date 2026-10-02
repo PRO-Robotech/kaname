@@ -52,6 +52,11 @@ const (
 	SigningKeyEventCompromised = "compromised"
 	// SigningKeyEventFailure — ключница не смогла выполнить действие.
 	SigningKeyEventFailure = "failure"
+	// SigningKeyEventSwept — проход сметателя ЗАВЕРШЁН, снято сколько угодно,
+	// включая ноль. Отдельная клетка, потому что ноль снятий один не
+	// различает «снимать было нечего» и «сметатель не ходит»; ноль проходов —
+	// различает, и его читает правило тревоги.
+	SigningKeyEventSwept = "swept"
 )
 
 // KeySetOutcomes / IntrospectOutcomes / SigningKeyEvents — закрытые наборы.
@@ -61,6 +66,7 @@ var (
 	SigningKeyEvents   = []string{
 		SigningKeyEventGenerated, SigningKeyEventActivated, SigningKeyEventRetired,
 		SigningKeyEventRemoved, SigningKeyEventCompromised, SigningKeyEventFailure,
+		SigningKeyEventSwept,
 	}
 )
 
@@ -86,6 +92,7 @@ type SigningKeyCounts struct {
 	Removed     uint64
 	Compromised uint64
 	Failures    uint64
+	Sweeps      uint64
 }
 
 // ── Три коллектора, а не один обобщённый ────────────────────────────────────
@@ -207,6 +214,7 @@ func (c *signingKeyCollector) Collect(ch chan<- prometheus.Metric) {
 		SigningKeyEventRemoved:     counts.Removed,
 		SigningKeyEventCompromised: counts.Compromised,
 		SigningKeyEventFailure:     counts.Failures,
+		SigningKeyEventSwept:       counts.Sweeps,
 	} {
 		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(value), event)
 	}

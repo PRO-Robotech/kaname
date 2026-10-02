@@ -45,21 +45,71 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧЕГО ЭТОТ СТЕНД НЕ ДЕЛАЕТ, И ЭТО НАЗВАНО, А НЕ ПОДРАЗУМЕВАЕТСЯ
 #
-#   · он НЕ поднимает внешнего поставщика удостоверений. Адреса поставщика
-#     ОБЪЯВЛЕНЫ и недостижимы намеренно: страж требует, чтобы их НАЗВАЛИ
-#     (выведенный из издателя адрес выглядел бы настроенным, никуда не ведя), но
-#     соединения при старте не делает. Пути, которым поставщик нужен, отвечают
-#     честным отказом — и это ровно то состояние, в котором служба стоит у того,
-#     у кого поставщика нет;
-#   · он НЕ поднимает посадку `own` — его предмет ПОСТАВЛЯЕМЫЙ профиль, а тот
-#     объявляет `external`. Здесь стояло «на ней служба сегодня стартовать
-#     отказывается» — больше не верно: 2026-09-17 служба поднята под `own` этим
-#     же чартом с накладкой `authn.identityProvider: own` (kaname#21) — при
-#     пределе памяти в профиле, трёх ключах объекта Secret и клиентском листе с
-#     именем края для полосы входа. Стенд посадки `own` со своим листом края —
-#     предмет kaname#183.
+#   · он НЕ поднимает внешнего поставщика удостоверений и не называет ни его
+#     адреса, ни якоря: у службы нет ни одной дороги к нему — последняя, обмен
+#     докерного контура у прежнего издателя, снята вместе со своими ручками
+#     (kaname#494). Докерный контур выдаёт своей чеканкой, которую объявляет
+#     боевой профиль, — ровно так служба стоит у всякого, кто её ставит;
+#   · он НЕ выбирает посадку. Посадка у службы одна — `own`, её объявляет
+#     поставляемый профиль (kaname#424), а ключа, который её выбирал, нет
+#     (kaname#363). Условия сквозного набора полосы входа (лист края, приёмник
+#     писем, ключ бутстрап-контура, накладка `own`) стенд создаёт ВСЕГДА — см.
+#     раздел «ПОСАДКА `own`» ниже. Ручки, которая их выключала бы, нет: подъём
+#     без них был бы вторым видом того же подъёма, а не другой посадкой;
 #   · он НЕ утверждает ничего о поведении API за пределами того, что перечислено
-#     в `assert`: это подъём, а не сквозной прогон.
+#     в `assert`: это подъём, а не сквозной прогон. Сквозной прогон полосы входа
+#     на посадке `own` — задание `chart-own` процесса `e2e-newman.yml`, и его
+#     условие создаёт подкоманда `seed-login-lane`.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ПОСАДКА `own`: ЧЕМ СТЕНД ОТЛИЧАЕТСЯ И ПОЧЕМУ ИМЕННО ЭТИМ
+#
+# Посадку объявляет боевой профиль, и стенд её не выбирает. Поверх профиля и
+# накладки координат он кладёт НАКЛАДКУ ОПЕРАТОРА `own` (`values.stand-own.yaml`),
+# а не второй профиль: токен-эндпоинт платформы (`authn.clientToken`,
+# `enabled: true` и его величины) своими числами — ровно то, что называет
+# INSTALL.md §1; без эндпоинта боевую установку не собирает сам чарт
+# (kaname#337). Ключа посадки в накладке нет: он снят (kaname#363), и чарт
+# отвергает его вслух. Прочее — адрес полосы, её взаимный TLS, предел памяти,
+# ключи Secret — боевой профиль уже несёт, и стенд его не повторяет: повтор
+# проверял бы накладку, а не поставку.
+#
+# Сверх накладки стенд создаёт ДВА условия, без которых набор полосы входа
+# исполняется и не утверждает ничего:
+#
+#   · КЛИЕНТСКИЙ ЛИСТ С ИМЕНЕМ КРАЯ. Слушатель полосы допускает РОВНО край — по
+#     короткому имени службы из SAN проверенного листа под доменом доверия
+#     установки (Р7, Р16); лист самой службы получает 403 до чтения тела. Края
+#     на стенде нет, и его место занимает прогонщик набора: ретранслирует форму
+#     человека и ставит адрес источника. Лист лежит Secret'ом стенда
+#     (`<релиз>-edge-client-tls`) и предъявляется ТОЛЬКО полосе;
+#   · ЧЕЛОВЕК СО СПОСОБОМ ВХОДА ПАРОЛЕМ. Заводит его посев
+#     (`tests/authz-fixtures/seed_login_lane.py`) глаголом продукта на той же
+#     двери, учётные данные живут Secret'ом стенда (`<релиз>-login-lane-human`)
+#     и в дерево не попадают. Адрес человека посев подтверждает тоже глаголом:
+#     с kaname#456 неподтверждённому дальше входа не открыто ничего, и код он
+#     берёт из письма, которое служба сдала ПРИЁМНИКУ ПИСЕМ СТЕНДА
+#     (`.github/scripts/stand-mailbox.py`, Service `<релиз>-mail`, SMTP поверх
+#     TLS листом УЦ стенда). Узел накладка `own` называет почтовой полосой
+#     службы (`inviteMail`) — это координата установки, а не посадка.
+#
+# Третье условие — ПРЕДЪЯВИТЕЛЬ ЧЕЛОВЕКА СВОЕЙ ЦЕРЕМОНИЕЙ (`seed-ceremony`,
+# `tests/authz-fixtures/seed_ceremony.py`, kaname#398). Для него накладка `own`
+# несёт ещё две величины, и обе — координаты этой установки, а не посадка:
+#
+#   · КЛЮЧ БУТСТРАП-КОНТУРА (Secret `<релиз>-bootstrap`) и круг вызывающих его
+#     чеканки — ровно лист службы. Первое машинное удостоверение `system_admin`
+#     на дереве без личностей выдаёт только эта чеканка;
+#   · ИМЯ КРАЯ В КРУГЕ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ рядом с именем службы. Глагол
+#     `Create` интерактивного клиента фронтируется краем
+#     (`GatewayFrontedInternalRPCs`): хоп собственного фронта его не проходит
+#     by construction, и пересланный принципал принимается только от
+#     доверенного пересылающего. В боевом профиле этот круг и есть край; стенд
+#     дописывает его к имени службы, а не заменяет.
+#
+# Посадку, с которой процесс поднялся, `assert` сверяет по самоотчёту: к шести
+# осям боевой посадки добавлена седьмая, `identity_provider=own`. Поле процесс
+# отдаёт всегда (`cmd/kaname/bootposture.go`), и его пропажа — находка.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # ПОЧЕМУ ПОСАДКА БЕРЁТСЯ ИЗ deploy/values.prod.yaml, А НЕ ПИШЕТСЯ ЗДЕСЬ
@@ -67,8 +117,10 @@
 # Профиль есть ОБЪЯВЛЕНИЕ посадки. Стенд, объявляющий её сам, проверял бы
 # СОБСТВЕННУЮ накладку, а поставляемый профиль остался бы непроверенным — то
 # есть вердикт выносился бы о файле, который клиенту не уезжает. Поэтому боевой
-# профиль подключается КАК ЕСТЬ, а накладка стенда несёт ТОЛЬКО координаты этой
-# установки (образ, узел базы, имена секретов, домен) и посадки не касается.
+# профиль подключается КАК ЕСТЬ, а накладка координат несёт ТОЛЬКО координаты
+# этой установки (образ, узел базы, имена секретов, домен) и посадки не
+# касается. Накладка `own` посадки тоже не выбирает — её величины перечислены
+# в разделе выше.
 
 set -euo pipefail
 
@@ -94,10 +146,22 @@ lane_tag() {
 }
 LANE="$(lane_tag "$ROOT_EARLY")"
 
-CLUSTER="${KANAME_STAND_CLUSTER:-kaname-chart-$LANE}"
+# УМОЛЧАНИЕ И ФАКТ — РАЗНЫЕ ВЕЛИЧИНЫ, и у каждой своё имя.
+#
+# Умолчание — то, на чём стенд встаёт, когда координату НЕ назвали; факт — то, на
+# чём он стоит сейчас. Названное снаружи законно (задание конвейера задаёт свои
+# имена на все шаги), и самопроба «признак полосы входит в каждое умолчание»
+# судит УМОЛЧАНИЯ: судя факт, она краснела на всяком задании с названными
+# координатами — находкой о дереве, которого никто не ломал (kaname#183, задание
+# `chart-own`), — и в нём же ничего не спрашивала о самих умолчаниях.
+DEFAULT_CLUSTER="kaname-chart-$LANE"
+DEFAULT_IMAGE="kaname:stand-$LANE"
+DEFAULT_WORK="${TMPDIR:-/tmp}/kaname-stand-chart-$LANE"
+
+CLUSTER="${KANAME_STAND_CLUSTER:-$DEFAULT_CLUSTER}"
 NS="${KANAME_STAND_NS:-kaname}"
 RELEASE="${KANAME_STAND_RELEASE:-kaname}"
-IMAGE="${KANAME_STAND_IMAGE:-kaname:stand-$LANE}"
+IMAGE="${KANAME_STAND_IMAGE:-$DEFAULT_IMAGE}"
 DOMAIN="${KANAME_STAND_DOMAIN:-kaname.local}"
 PG_PASSWORD="${KANAME_STAND_PG_PASSWORD:-standpassword}"
 ALERT_RULES="${KANAME_STAND_ALERT_RULES:-on}"
@@ -112,10 +176,37 @@ ALERT_RULES="${KANAME_STAND_ALERT_RULES:-on}"
 # создания не существует, и вписать его в накладку заранее нельзя.
 DB_ADDR="${KANAME_STAND_DB_ADDR:-}"
 
+# Имя края в SAN листа, которым прогонщик стоит на месте края у полосы входа.
+# Полоса разбирает из него короткое имя службы (`kacho-` снимается) и сравнивает
+# с константой края — `api-gateway`.
+EDGE_SA="kacho-api-gateway"
+
+# РЕВИЗИЯ, КОТОРУЮ ИСПОЛНЯЕТ СТЕНД. Образ собирается с ней (`OCI_IMAGE_REVISION`),
+# и `assert` сверяет её с файлом ревизии в РАБОТАЮЩЕМ контейнере: без этого
+# вердикт о стенде нечем связать с деревом, которое судят.
+REVISION="${KANAME_STAND_REVISION:-$(git -C "$ROOT_EARLY" rev-parse HEAD 2>/dev/null || true)}"
+
 SCRIPT_DIR="$SCRIPT_DIR_EARLY"
 ROOT="$ROOT_EARLY"
-WORK="${KANAME_STAND_WORKDIR:-${TMPDIR:-/tmp}/kaname-stand-chart-$LANE}"
+WORK="${KANAME_STAND_WORKDIR:-$DEFAULT_WORK}"
 PKI="$WORK/pki"
+
+# Кластер, который поднял ЭТОТ стенд, помечается файлом в рабочем каталоге, и
+# `down` сносит кластер только с этой меткой. Чужой кластер (стенд подселён в
+# уже поднятый) остаётся стоять: снимаются лишь релиз и пространство имён,
+# которые стенд завёл сам.
+CREATED_MARK="$WORK/cluster-created-by-stand"
+
+# Переадресация порта полосы входа живёт между шагами: посев доказывает по ней
+# способность, прогон набора ходит по ней же. Снимает её `down`.
+# ПРИЁМНИК ПИСЕМ СТЕНДА. С kaname#456 человек, чей адрес не
+# подтверждён, дальше входа не проходит, а подтверждает адрес код из письма:
+# посев полосы входа доводит человека стенда до обычного положения кодом из
+# письма, которое служба сдала этому узлу (`.github/scripts/stand-mailbox.py`).
+MAIL_SVC="$RELEASE-mail"
+LANE_FORWARD_PID="$WORK/login-lane-forward.pid"
+LANE_FORWARD_LOG="$WORK/login-lane-forward.log"
+EDGE_DIR="$WORK/edge"
 
 # KUBECONFIG У СКРИПТА СВОЙ, И ЭТО НЕ УДОБСТВО.
 #
@@ -171,6 +262,14 @@ make_pki() {
 	_leaf cli "URI:spiffe://$DOMAIN/ns/$NS/sa/$RELEASE,DNS:$RELEASE" "clientAuth,serverAuth"
 	_leaf pg  "DNS:$RELEASE-postgres,DNS:$RELEASE-postgres.$NS,DNS:$RELEASE-postgres.$NS.svc,DNS:$RELEASE-postgres.$NS.svc.cluster.local" "serverAuth"
 	say "стенд: УЦ и три листа выписаны ($PKI)"
+	# Лист края предъявляет прогонщик набора, стоящий у полосы входа на месте
+	# края. Только клиентский: сервером край для службы не бывает.
+	_leaf edge "URI:spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA" "clientAuth"
+	say "стенд: четвёртый лист — клиентский, с именем края ($EDGE_SA) для полосы входа"
+	# Лист приёмника писем стенда — серверный, тем же УЦ: служба проверяет
+	# узел якорем, который уже несёт её серверный секрет (`ca.crt`).
+	_leaf mail "DNS:$MAIL_SVC,DNS:$MAIL_SVC.$NS,DNS:$MAIL_SVC.$NS.svc,DNS:$MAIL_SVC.$NS.svc.cluster.local" "serverAuth"
+	say "стенд: пятый лист — серверный, приёмника писем стенда ($MAIL_SVC)"
 }
 
 # RESOLVER_TIMEOUT — предел ОЖИДАНИЯ готовности резолвера, в секундах.
@@ -218,11 +317,22 @@ resolver_ready_count() {
 start_cluster() {
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 		say "стенд: кластер $CLUSTER уже есть"
+		# Контекст уже поднятого кластера пишется в СВОЙ файл стенда, и только
+		# если его там нет: чужой файл, названный снаружи, не трогается (шапка,
+		# «KUBECONFIG у скрипта свой»).
+		if ! "${KCTL[@]}" get namespace default >/dev/null 2>&1; then
+			kind export kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG" >/dev/null 2>&1 || {
+				unmet "контекст кластера $CLUSTER не выписался в $KUBECONFIG"
+				exit "$RC_UNMET"
+			}
+			say "стенд: контекст kind-$CLUSTER выписан в $KUBECONFIG"
+		fi
 	else
 		kind create cluster --name "$CLUSTER" --wait 180s >/dev/null 2>&1 || {
 			unmet "kind не поднял кластер $CLUSTER"
 			exit "$RC_UNMET"
 		}
+		: > "$CREATED_MARK"
 		say "стенд: кластер $CLUSTER поднят"
 	fi
 	# DNS кластера — ПРЕДПОСЫЛКА, а не свойство продукта. Накат ходит к базе по
@@ -349,9 +459,64 @@ EOF
 	say "стенд: база поднята, канал шифруется (ssl=on)"
 }
 
+# start_mailbox — приёмник писем стенда: SMTP поверх TLS с первого байта и
+# чтение принятого. Образ — тот же зеркальный источник, что у узла базы;
+# сценарий — файлом дерева через ConfigMap, а не образом: судится ровно тот
+# текст, чью самопроверку гоняет конвейер. Не поднялся — условие не создано:
+# вердикта о дереве нет.
+start_mailbox() {
+	"${KCTL[@]}" create namespace "$NS" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" delete secret "$MAIL_SVC-tls" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create secret generic "$MAIL_SVC-tls" \
+		--from-file=tls.crt="$PKI/mail.crt" --from-file=tls.key="$PKI/mail.key" >/dev/null
+	"${KCTL[@]}" -n "$NS" delete configmap "$MAIL_SVC-script" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create configmap "$MAIL_SVC-script" \
+		--from-file=stand-mailbox.py="$SCRIPT_DIR/stand-mailbox.py" >/dev/null
+	"${KCTL[@]}" apply -f - <<EOF >/dev/null
+apiVersion: v1
+kind: Service
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  selector: { app: $MAIL_SVC }
+  ports:
+    - { name: smtps, port: 465, targetPort: 1465 }
+    - { name: http, port: 8025, targetPort: 8025 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: $MAIL_SVC, namespace: $NS }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: $MAIL_SVC } }
+  template:
+    metadata: { labels: { app: $MAIL_SVC } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534 }
+      volumes:
+        - { name: tls, secret: { secretName: $MAIL_SVC-tls } }
+        - { name: script, configMap: { name: $MAIL_SVC-script } }
+      containers:
+        - name: mailbox
+          image: mirror.gcr.io/library/python:3.12-alpine
+          command: ["python3","/app/stand-mailbox.py","serve","--smtp-port","1465","--http-port","8025","--cert","/tls/tls.crt","--key","/tls/tls.key"]
+          ports: [{ containerPort: 1465 }, { containerPort: 8025 }]
+          volumeMounts:
+            - { name: tls, mountPath: /tls, readOnly: true }
+            - { name: script, mountPath: /app, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8025 }
+            periodSeconds: 2
+EOF
+	"${KCTL[@]}" -n "$NS" rollout status "deploy/$MAIL_SVC" --timeout=180s >/dev/null || {
+		unmet "приёмник писем стенда не поднялся за 180 с"
+		exit "$RC_UNMET"
+	}
+	say "стенд: приёмник писем поднят — $MAIL_SVC (SMTP поверх TLS :465, чтение :8025)"
+}
+
 make_secrets() {
 	local s
-	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-provider-ca" "$RELEASE-authn"; do
+	for s in "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-authn"; do
 		"${KCTL[@]}" -n "$NS" delete secret "$s" >/dev/null 2>&1 || true
 	done
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-db" \
@@ -362,12 +527,10 @@ make_secrets() {
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-client-tls" \
 		--from-file=tls.crt="$PKI/cli.crt" --from-file=tls.key="$PKI/cli.key" \
 		--from-file=ca.crt="$PKI/ca.crt" >/dev/null
-	# ЯКОРЬ ПОСТАВЩИКА — ТРЕТЬЯ КООРДИНАТА, а не ключ в чужом секрете: «чьим
-	# сертификатам сервера я верю у соседа» и «кто вправе прийти ко мне
-	# клиентом» суть разные вопросы. Здесь совпадает содержимое — поставщика
-	# выпускал бы тот же УЦ, — но координата своя, и выбор поэтому выразим.
-	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-provider-ca" \
-		--from-file=ca.crt="$PKI/ca.crt" >/dev/null
+	# ЯКОРЯ ПОСТАВЩИКА стенд больше не заводит: том снят из чарта вместе с
+	# единственной дорогой, которой он служил, — обменом у прежнего издателя
+	# (kaname#494). Объект, которого под не монтирует, был бы секретом без
+	# читателя.
 	# ПЕРЕЧЕНЬ КЛЮЧЕЙ ЭТОГО ОБЪЕКТА ДИКТУЕТ ПРОФИЛЬ, А НЕ СТЕНД: каждая запись
 	# карты `secrets` боевого профиля рендерится `secretKeyRef` без `optional`,
 	# и ключ, которого в объекте нет, останавливает контейнер до старта
@@ -375,26 +538,52 @@ make_secrets() {
 	# о посадке нет. Так и случилось: Ф12 добавила третью запись, стенд заводил
 	# два ключа, и подъём на голове линии вставал на первом поде. Согласие
 	# перечней держит `deploy/stand_secrets_cover_the_profile_test.go`.
-	#
-	# Кольцо обёртки секретов второго фактора читается только под `own`, но
-	# объект обязан нести ключ на любой посадке: `secretKeyRef` судится
-	# кластером при создании контейнера, а не процессом при чтении.
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-authn" \
-		--from-literal=hook-shared-secret="$(openssl rand -hex 16)" \
 		--from-literal=jwks-encryption-key-hex="$(openssl rand -hex 32)" \
 		--from-literal=second-factor-encryption-key-hex="$(openssl rand -hex 32)" >/dev/null
-	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: три ключа)"
+	say "стенд: четыре секрета заведены (база · серверный лист · клиентский лист · величины authn: два ключа)"
+	# Лист края — Secret'ом стенда, а не только файлом рабочего каталога: посев
+	# и прогон берут его ОТСЮДА (`seed-login-lane`), то есть предъявляется ровно
+	# тот лист, что выписан под этот УЦ, в каком бы каталоге ни шёл следующий шаг.
+	"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-edge-client-tls" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-edge-client-tls" \
+		--from-file=tls.crt="$PKI/edge.crt" --from-file=tls.key="$PKI/edge.key" \
+		--from-file=ca.crt="$PKI/ca.crt" >/dev/null
+	say "стенд: шестой секрет — клиентский лист с именем края"
+	# КЛЮЧ БУТСТРАП-КОНТУРА — седьмой секрет. Посев церемонии (`seed-ceremony`)
+	# заводит интерактивных клиентов ГЛАГОЛОМ `Create`, а у глагола пол —
+	# машинный `system_admin`; первое такое удостоверение на дереве без
+	# личностей выдаёт ровно чеканка бутстрапа (`InternalBootstrapTokenService`
+	# на :9091). Ключ — P-256 PKCS#8, как у автономного стенда (`stand-own.sh`):
+	# его открытой половиной служба заводит строку соответствия бутстрап-клиента
+	# при старте.
+	( umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+		-out "$PKI/bootstrap-sa.key" >/dev/null 2>&1 ) || {
+		unmet "ключ бутстрап-контура не выпустился (openssl)"
+		exit "$RC_UNMET"
+	}
+	"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-bootstrap" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-bootstrap" \
+		--from-file=private-key-pem="$PKI/bootstrap-sa.key" >/dev/null
+	say "стенд: седьмой секрет — ключ бутстрап-контура для посева церемонии"
 }
 
 build_image() {
 	if [ "${KANAME_STAND_SKIP_BUILD:-0}" = "1" ]; then
 		say "стенд: сборка образа пропущена по KANAME_STAND_SKIP_BUILD=1"
 	else
-		docker build -f "$ROOT/Dockerfile" -t "$IMAGE" "$ROOT" >/dev/null 2>&1 || {
+		# Незакоммиченная правка в образ уезжает, а в ревизию — нет: ревизия
+		# называет коммит, контекст сборки — рабочее дерево. Сказано вслух, чтобы
+		# «сходится» у `assert` не читалось шире сделанного.
+		if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+			say "стенд: ВНИМАНИЕ — в дереве незакоммиченные правки; ревизия образа $REVISION их не называет"
+		fi
+		docker build -f "$ROOT/Dockerfile" --build-arg "OCI_IMAGE_REVISION=$REVISION" \
+			-t "$IMAGE" "$ROOT" >/dev/null 2>&1 || {
 			unmet "образ $IMAGE не собрался"
 			exit "$RC_UNMET"
 		}
-		say "стенд: образ $IMAGE собран"
+		say "стенд: образ $IMAGE собран с ревизией ${REVISION:-<не названа>}"
 	fi
 	kind load docker-image "$IMAGE" --name "$CLUSTER" >/dev/null 2>&1 || {
 		unmet "образ $IMAGE не уехал в узлы кластера"
@@ -404,6 +593,12 @@ build_image() {
 
 # Накладка несёт ТОЛЬКО координаты этой установки. Посадку объявляет боевой
 # профиль чарта, и он подключается как есть — см. шапку.
+#
+# Адресаты токен-эндпоинта (`authn.clientToken`) — тоже КООРДИНАТЫ установки, как
+# имя докерной полосы: профиль несёт заглушки `.example.invalid`, а страж старта
+# требует, чтобы адресат докерной полосы стоял ВНУТРИ перечня. Без них профиль,
+# объявивший `own` с включённым эндпоинтом (kaname#424), не поднимался на
+# координатах стенда: `registry.$DOMAIN` вне перечня заглушек.
 write_overlay() {
 	cat > "$WORK/values.stand.yaml" <<EOF
 image: "$IMAGE"
@@ -423,6 +618,9 @@ authn:
     issuer: "https://$DOMAIN"
   presentedCredential:
     audience: "https://$DOMAIN"
+  clientToken:
+    allowedAudiences: "https://$DOMAIN,registry.$DOMAIN"
+    defaultAudience: "https://$DOMAIN"
 apiServer:
   registryToken:
     issuer: "https://$DOMAIN/iam/token"
@@ -430,18 +628,61 @@ apiServer:
 tls:
   secretName: $RELEASE-server-tls
   clientSecretName: $RELEASE-client-tls
-  providerSecretName: $RELEASE-provider-ca
 secrets:
-  KANAME_HOOK_TOKEN:
-    secretName: $RELEASE-authn
-    secretKey: hook-shared-secret
   KANAME_JWKS_ENC_KEY:
     secretName: $RELEASE-authn
     secretKey: jwks-encryption-key-hex
+EOF
+	# НАКЛАДКА ОПЕРАТОРА `own` — отдельным файлом и ПОСЛЕ накладки координат:
+	# она несёт величины оператора и условия набора, а не координаты, и читатель
+	# рендера видит её целиком. Кладётся всегда — посадка у службы одна.
+	#
+	# Перечень адресатов — координата установки и стоит в накладке координат
+	# выше. Срок токена ни одним шагом этого стенда не расходуется
+	# (набор полосы входа токенов не чеканит): величина — законная ниже потолка
+	# платформы 30m, та, с которой посадка перемерена живым стартом (INSTALL.md
+	# §1). Потолок тела — тот же, что у автономного стенда, и довод тот же
+	# (`stand-own.sh`, «СРОК ТОКЕНА И ПОТОЛОК ТЕЛА»). Сроки церемонии (kaname#318)
+	# накладка называет сама, а не берёт у профиля поставки: церемонию собирает
+	# именно эта посадка, и величины — перенос поведения сборки до ручек,
+	# равного потолкам фундамента; коллекции церемонии судят прежнее поведение.
+	cat > "$WORK/values.stand-own.yaml" <<EOF
+authn:
+  trustedForwarderSANs:
+    - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
+    - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"
+  clientToken:
+    enabled: true
+    tokenTtl: 15m
+    bodyCeiling: 16384
+    # Темп поверхности выдачи — числа §3 приёмки
+    # ceremony-pace-is-named-by-number.md (kaname#315): без любой из шести
+    # величин чарт включённый эндпоинт не собирает. Режим слушателя выдачи
+    # optional-mutual и его корень объявляет боевой профиль.
+    inFlightCeiling: 32
+    exchangesPerClientPerSec: 5
+    failedProofsPerSource: 50
+    failedProofWindow: 15m
+    authorizePerSourcePerSec: 10
+    authorizeInFlightCeiling: 32
+  ceremony:
+    codeTtl: 60s
+    refreshTtl: 168h
+# Почтовый узел — приёмник писем стенда (start_mailbox): посадка полосы
+# implicit, лист узла проверяется якорем серверного секрета службы. Без узла
+# письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
+# положении подтверждения (kaname#456).
+inviteMail:
+  relay: "$MAIL_SVC.$NS.svc.cluster.local:465"
+  from: "kaname@$DOMAIN"
+  tlsMode: implicit
+  caBundleFile: /etc/kaname/tls/server/ca.crt
+secrets:
+  KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM:
+    secretName: $RELEASE-bootstrap
+    secretKey: private-key-pem
 env:
-  KANAME_HYDRA_ADMIN_URL: "https://127.0.0.1:14445"
-  KANAME_HYDRA_JWKS_URL: "https://127.0.0.1:14444/.well-known/jwks.json"
-  KANAME_HYDRA_TOKEN_URL: "https://127.0.0.1:14444/oauth2/token"
+  KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS: "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
 EOF
 }
 
@@ -452,6 +693,7 @@ install_chart() {
 		-f "$ROOT/deploy/values.yaml" \
 		-f "$ROOT/deploy/values.prod.yaml" \
 		-f "$WORK/values.stand.yaml" \
+		-f "$WORK/values.stand-own.yaml" \
 		--kube-context "kind-$CLUSTER" -n "$NS" "${extra[@]}" || {
 		fail "чарт не поставился — вердикт о дереве"
 		exit 1
@@ -466,17 +708,22 @@ install_chart() {
 	say "стенд: выкат дошёл до готовности"
 }
 
-# ─── ШЕСТЬ ОСЕЙ ПОСАДКИ, СРАВНИВАЕМЫЕ С ОБЪЯВЛЕННЫМ ────────────────────────
+# ─── СЕМЬ ОСЕЙ ПОСАДКИ, СРАВНИВАЕМЫЕ С ОБЪЯВЛЕННЫМ ─────────────────────────
 #
 # Вынесено отдельной функцией НЕ ради красоты: так сравнение проверяемо без
 # кластера. `--self-test` кормит её строками самоотчёта — законной, изменённой
-# на ОДИН факт и отсутствующей вовсе — и требует, чтобы она молчала на первой и
-# падала на второй. Без этой пробы «сверка прошла» было бы неотличимо от
-# «сверка ничего не спросила».
+# на ОДИН факт, без поля посадки личности и отсутствующей вовсе — и требует,
+# чтобы она молчала на первой и падала на остальных. Без этой пробы «сверка
+# прошла» было бы неотличимо от «сверка ничего не спросила».
+#
+# Седьмая ось — посадка личности. Значение у неё одно (kaname#363), и
+# спрашивается она не ради выбора, а ради поля: гейт платформы читает его у
+# живого процесса, и поле, пропавшее из самоотчёта, он прочёл бы пропуском.
+POSTURE_AXES="auth_mode=production-strict db_sslmode=require public_mtls=true internal_mtls=true authz_check=true trusted_forwarders=true identity_provider=own"
+
 posture_matches() {
-	local posture="$1" rc=0 key want
-	for kv in auth_mode=production-strict db_sslmode=require public_mtls=true \
-		internal_mtls=true authz_check=true trusted_forwarders=true; do
+	local posture="$1" axes="${2:-$POSTURE_AXES}" rc=0 key want
+	for kv in $axes; do
 		key="${kv%%=*}"; want="${kv#*=}"
 		case "$posture" in
 			*"\"$key\":\"$want\""*|*"\"$key\":$want"*) say "  посадка: $key=$want — сходится" ;;
@@ -486,21 +733,122 @@ posture_matches() {
 	return "$rc"
 }
 
+# probe <что утверждается> — объявление утверждения самопробы. Число
+# утверждений в итоге выводится из этих объявлений, а не выписывается.
+PROBES=0
+probe() {
+	PROBES=$((PROBES + 1))
+	say "самопроба: $*"
+}
+
 self_test() {
-	local legal off rc=0 out
-	legal='{"msg":"boot security posture","auth_mode":"production-strict","db_sslmode":"require","public_mtls":true,"internal_mtls":"true","authz_check":true,"trusted_forwarders":true}'
+	local legal off unnamed rc=0 out
+	legal='{"msg":"boot security posture","auth_mode":"production-strict","db_sslmode":"require","public_mtls":true,"internal_mtls":"true","authz_check":true,"trusted_forwarders":true,"identity_provider":"own"}'
 	# ОДИН факт против законного близнеца, не два: иначе неизвестно, который
 	# из них дал красное, и вердикт пробы недействителен.
 	off="${legal/\"db_sslmode\":\"require\"/\"db_sslmode\":\"disable\"}"
+	# Посадка личности ПРОПАЛА из самоотчёта — ровно тот дефект, которого стоит
+	# ждать: значение у поля одно, и снять поле «за ненадобностью» легко. Гейт
+	# платформы, читающий поле у живого процесса, прочёл бы пропуск.
+	unnamed="${legal/,\"identity_provider\":\"own\"/}"
 
-	say "самопроба: законный самоотчёт — сверка обязана молчать"
+	# Оси НЕ передаются: самопроба судит ровно те оси, которые судит `assert`.
+	# Переданные явно, они судили бы сверку при осях, которых стенд не
+	# применяет, — и молчали бы о том, что он применяет на деле.
+	probe "законный самоотчёт — сверка обязана молчать"
 	posture_matches "$legal" >/dev/null 2>&1 || { fail "самопроба: сверка упала на законном самоотчёте"; rc=1; }
 
-	say "самопроба: один факт изменён (db_sslmode) — сверка обязана упасть"
+	probe "один факт изменён (db_sslmode) — сверка обязана упасть"
 	posture_matches "$off" >/dev/null 2>&1 && { fail "самопроба: сверка смолчала на изменённом факте — она ничего не спрашивает"; rc=1; }
 
-	say "самопроба: самоотчёта нет вовсе — сверка обязана упасть"
+	probe "самоотчёта нет вовсе — сверка обязана упасть"
 	posture_matches "" >/dev/null 2>&1 && { fail "самопроба: сверка смолчала на пустом самоотчёте"; rc=1; }
+
+	probe "посадка личности пропала из самоотчёта — сверка обязана упасть"
+	posture_matches "$unnamed" >/dev/null 2>&1 && { fail "самопроба: сверка смолчала на самоотчёте без посадки личности — седьмую ось стенд не судит"; rc=1; }
+
+	# ── ЛИСТЫ КРАЯ И ПРИЁМНИКА ПИСЕМ ───────────────────────────────────────
+	#
+	# Настоящий `make_pki` в своём каталоге и БЕЗ единой ручки: оба листа —
+	# условия набора полосы входа, и стенд обязан выписать их всегда. Близнец
+	# листа края — лист самой службы: имени края в нём нет.
+	local pki_tmp san eku
+	pki_tmp="$(mktemp -d)"
+	( PKI="$pki_tmp/pki"; make_pki >/dev/null 2>&1 ) || true
+	san="$(openssl x509 -in "$pki_tmp/pki/edge.crt" -noout -ext subjectAltName 2>/dev/null | tail -n +2 | tr -d ' ' || true)"
+	eku="$(openssl x509 -in "$pki_tmp/pki/edge.crt" -noout -ext extendedKeyUsage 2>/dev/null | tail -n +2 | tr -d ' ' || true)"
+	probe "лист края выписан, несёт имя края и только клиентское назначение"
+	[ "$san" = "URI:spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA" ] && [ "$eku" = "TLSWebClientAuthentication" ] || {
+		fail "самопроба: лист края выписан не так либо не выписан вовсе (SAN «$san», назначение «$eku»)"; rc=1; }
+	probe "лист края не выписан на имя службы и выписан УЦ стенда"
+	openssl verify -CAfile "$pki_tmp/pki/ca.crt" "$pki_tmp/pki/edge.crt" >/dev/null 2>&1 \
+		&& ! openssl x509 -in "$pki_tmp/pki/cli.crt" -noout -ext subjectAltName 2>/dev/null | grep -q "sa/$EDGE_SA" || {
+		fail "самопроба: лист края не проверяется УЦ стенда либо имя края стоит и в листе службы"; rc=1; }
+	san="$(openssl x509 -in "$pki_tmp/pki/mail.crt" -noout -ext subjectAltName 2>/dev/null | tail -n +2 | tr -d ' ' || true)"
+	eku="$(openssl x509 -in "$pki_tmp/pki/mail.crt" -noout -ext extendedKeyUsage 2>/dev/null | tail -n +2 | tr -d ' ' || true)"
+	probe "лист приёмника писем выписан УЦ стенда на имя его Service и только серверный"
+	openssl verify -CAfile "$pki_tmp/pki/ca.crt" "$pki_tmp/pki/mail.crt" >/dev/null 2>&1 \
+		&& [ "${san%%,*}" = "DNS:$MAIL_SVC" ] && [ "$eku" = "TLSWebServerAuthentication" ] || {
+		fail "самопроба: лист приёмника писем выписан не так либо не выписан вовсе (SAN «$san», назначение «$eku»)"; rc=1; }
+	rm -rf "$pki_tmp"
+
+	# ── ПЕРЕАДРЕСАЦИЯ И ПРОВЕНАНС ───────────────────────────────────────────
+	#
+	# Порт берётся из строки IPv4 и только из неё: переадресация, вставшая лишь
+	# на `[::1]`, уже давала прогон на чужом слушателе того же номера.
+	local log_tmp
+	log_tmp="$(mktemp)"
+	printf 'Forwarding from [::1]:41000 -> 9100\n' > "$log_tmp"
+	probe "переадресация только на [::1] — порта нет"
+	[ -z "$(forward_port_of "$log_tmp" 9100)" ] || { fail "самопроба: порт взят из строки [::1]"; rc=1; }
+	printf 'Forwarding from 127.0.0.1:41001 -> 9100\nForwarding from [::1]:41000 -> 9100\n' > "$log_tmp"
+	probe "строка IPv4 есть — порт её"
+	[ "$(forward_port_of "$log_tmp" 9100)" = "41001" ] || { fail "самопроба: порт IPv4 не распознан"; rc=1; }
+	rm -f "$log_tmp"
+
+	# ── СНОС: ЧУЖОЙ КЛАСТЕР НЕ СНОСИТСЯ ─────────────────────────────────────
+	#
+	# Настоящий `down` против подставных kind/helm/kubectl: они только пишут, что
+	# их позвали. Без метки создания кластер обязан остаться (снимаются релиз и
+	# пространство имён), с меткой — сноситься. Путь разрушительный, и различие
+	# двух миров — ровно один файл.
+	local fake calls
+	fake="$(mktemp -d)"
+	mkdir -p "$fake/bin"
+	for tool in kind helm kubectl; do
+		printf '#!/bin/sh\nif [ "$1 $2" = "get clusters" ]; then echo "%s"; exit 0; fi\necho "%s $*" >> "%s/calls"\n' \
+			"$CLUSTER" "$tool" "$fake" > "$fake/bin/$tool"
+		chmod +x "$fake/bin/$tool"
+	done
+	( PATH="$fake/bin:$PATH"; WORK="$fake/work-borrowed"; mkdir -p "$WORK"
+	  CREATED_MARK="$WORK/cluster-created-by-stand"; LANE_FORWARD_PID="$WORK/none.pid"
+	  down >/dev/null 2>&1 ) || true
+	calls="$(cat "$fake/calls" 2>/dev/null || true)"
+	probe "кластер без метки создания — не сносится, снят только релиз"
+	case "$calls" in
+		*"kind delete"*) fail "самопроба: down снёс кластер, которого стенд не поднимал"; rc=1 ;;
+		*"helm uninstall"*) ;;
+		*) fail "самопроба: down на чужом кластере не снял и релиза (вызовы: ${calls:-нет})"; rc=1 ;;
+	esac
+	: > "$fake/calls"
+	( PATH="$fake/bin:$PATH"; WORK="$fake/work-own"; mkdir -p "$WORK"
+	  CREATED_MARK="$WORK/cluster-created-by-stand"; : > "$CREATED_MARK"
+	  LANE_FORWARD_PID="$WORK/none.pid"
+	  down >/dev/null 2>&1 ) || true
+	calls="$(cat "$fake/calls" 2>/dev/null || true)"
+	probe "кластер с меткой создания — сносится"
+	case "$calls" in
+		*"kind delete cluster --name $CLUSTER"*) ;;
+		*) fail "самопроба: down не снёс кластер, который стенд поднял (вызовы: ${calls:-нет})"; rc=1 ;;
+	esac
+	rm -rf "$fake"
+
+	probe "провенанс — четыре исхода различены"
+	[ "$(revision_outcome abc123def abc123def)" = "сходится" ] \
+		&& [ "$(revision_outcome abc123def 999999999)" = "расходится" ] \
+		&& [ "$(revision_outcome "" abc123def)" = "у образа нет метки" ] \
+		&& [ "$(revision_outcome abc123def "")" = "ожидаемая ревизия не названа" ] || {
+		fail "самопроба: исходы сверки ревизии не различены"; rc=1; }
 
 	# ── УМОЛЧАНИЯ РАЗЛИЧАЮТ ПОЛОСУ ─────────────────────────────────────────
 	#
@@ -508,23 +856,50 @@ self_test() {
 	# признак полосы разошёлся. Законный близнец рядом: тот же путь даёт тот же
 	# признак, иначе имена кластера гуляли бы от вызова к вызову и `down` сносил
 	# бы не то, что поднял `up`.
-	local a b
+	local a b name fact want
 	a="$(lane_tag /полоса/один)"
 	b="$(lane_tag /полоса/два)"
-	say "самопроба: две рабочие копии — признак полосы обязан разойтись"
+	probe "две рабочие копии — признак полосы обязан разойтись"
 	[ "$a" != "$b" ] || { fail "самопроба: разные копии дали один признак полосы ($a) — кластер, тег образа и рабочий каталог остались бы общими"; rc=1; }
-	say "самопроба: та же копия — признак полосы обязан совпасть"
+	probe "та же копия — признак полосы обязан совпасть"
 	[ "$a" = "$(lane_tag /полоса/один)" ] || { fail "самопроба: один путь дал два признака — down сносил бы не то, что поднял up"; rc=1; }
+	# Две пробы выше судят ФУНКЦИЮ `lane_tag`, а умолчания строятся из ВЕЛИЧИНЫ
+	# `$LANE`, и связь между ними держит только эта проба. Без неё следующая
+	# исполнялась бы на подменённом признаке и зеленела: пустой входит в любую
+	# строку (`*""*`), а умолчания `kaname-chart-`, `kaname:stand-`, … становятся
+	# общими для всех полос; постоянный (`ci`) входит в умолчания и делит их между
+	# копиями ровно так же.
+	probe "признак полосы не пуст и выведен из пути этой рабочей копии"
+	want="$(lane_tag "$ROOT_EARLY")"
+	[ -n "$LANE" ] && [ "$LANE" = "$want" ] || {
+		fail "самопроба: признак полосы «$LANE», а из пути копии $ROOT_EARLY выводится «$want» — умолчания строятся не из признака этой копии, и полосы делили бы их"; rc=1; }
 	# КАЖДОЕ умолчание проверяется ОТДЕЛЬНО: склейка трёх в одну строку
 	# зеленела бы, когда признак вошёл в одну из них, — а делят полосы все три.
-	say "самопроба: признак полосы входит в КАЖДОЕ из трёх умолчаний"
-	for pair in "кластер=$CLUSTER" "образ=$IMAGE" "каталог=$WORK"; do
+	#
+	# Судятся УМОЛЧАНИЯ, а не факты (шапка, «Умолчание и факт»): вердикт этой
+	# пробы не зависит от того, назвал ли вызывающий свои координаты, — и в
+	# задании, которое их назвало, умолчание без признака полосы по-прежнему
+	# красное.
+	probe "признак полосы входит в КАЖДОЕ из трёх умолчаний"
+	for pair in "кластер=$DEFAULT_CLUSTER" "образ=$DEFAULT_IMAGE" "каталог=$DEFAULT_WORK"; do
 		case "${pair#*=}" in
 			*"$LANE"*) ;;
 			*) fail "самопроба: признак полосы не вошёл в умолчание ${pair%%=*} (${pair#*=}) — полосы делили бы его"; rc=1 ;;
 		esac
 	done
-	say "самопроба: KUBECONFIG у скрипта свой"
+	# Законный близнец и связь умолчания с фактом: координата стенда — либо
+	# названная снаружи, либо РОВНО умолчание. Без этой пробы факт, выведенный
+	# мимо умолчания, оставил бы предыдущую пробу судить величину, которой никто
+	# не пользуется.
+	probe "координата стенда — названная снаружи либо ровно её умолчание"
+	for pair in "кластер|$CLUSTER|${KANAME_STAND_CLUSTER:-$DEFAULT_CLUSTER}" \
+		"образ|$IMAGE|${KANAME_STAND_IMAGE:-$DEFAULT_IMAGE}" \
+		"каталог|$WORK|${KANAME_STAND_WORKDIR:-$DEFAULT_WORK}"; do
+		IFS='|' read -r name fact want <<<"$pair"
+		[ "$fact" = "$want" ] || {
+			fail "самопроба: $name стенда «$fact», а ждали «$want» (названное снаружи, иначе умолчание) — координата выведена в обход них"; rc=1; }
+	done
+	probe "KUBECONFIG у скрипта свой"
 	[ -n "${KUBECONFIG:-}" ] || { fail "самопроба: KUBECONFIG не задан — kind писал бы в общий файл и уводил kubectl соседа"; rc=1; }
 
 	# ── ОЖИДАНИЕ УСЛОВИЯ ────────────────────────────────────────────────────
@@ -536,9 +911,9 @@ self_test() {
 	RESOLVER_POLL=1
 	self_never_ready() { printf '0'; }
 	self_always_ready() { printf '2'; }
-	say "самопроба: условие выполнено сразу — ожидание обязано вернуть величину и ноль секунд"
+	probe "условие выполнено сразу — ожидание обязано вернуть величину и ноль секунд"
 	[ "$(wait_ready self_always_ready 2)" = "2:0" ] || { fail "самопроба: готовое условие не распознано"; rc=1; }
-	say "самопроба: условие не наступает — предел обязан исчерпаться и назвать ожидание"
+	probe "условие не наступает — предел обязан исчерпаться и назвать ожидание"
 	if out="$(wait_ready self_never_ready 1)"; then
 		fail "самопроба: ожидание объявило готовность там, где условие не наступало ни разу"
 		rc=1
@@ -548,7 +923,12 @@ self_test() {
 	fi
 	RESOLVER_POLL="$saved_poll"
 
-	say "самопроба: утверждений 9 · осей сверки 6"
+	# Оба числа ВЫВЕДЕНЫ: утверждений — из объявлений `probe`, осей — из того
+	# перечня, который судит `assert`. Выписанные, они расходились бы с
+	# исполненным молча — здесь так и стояло «22», пережив смену состава.
+	local axes=0 kv
+	for kv in $POSTURE_AXES; do axes=$((axes + 1)); done
+	say "самопроба: утверждений $PROBES · осей сверки $axes"
 	[ "$rc" -eq 0 ] && say "===== самопроба пройдена =====" || fail "самопроба не пройдена"
 	return "$rc"
 }
@@ -572,6 +952,22 @@ assert_posture() {
 		2>/dev/null | tail -1 || true)"
 	[ -n "$pod" ] || { unmet "готового пода службы нет — сверять нечего"; exit "$RC_UNMET"; }
 	say "сверяется под: $pod"
+
+	# ПРОВЕНАНС — ДО ПОСАДКИ: посадка, сверенная у процесса чужой ревизии, —
+	# вердикт о чужом дереве. Файл ревизии читается в РАБОТАЮЩЕМ контейнере, а не
+	# у образа на машине: исполняет кластер то, что загружено в узел.
+	local running prov
+	if ! running="$("${KCTL[@]}" -n "$NS" exec "$pod" -c "$RELEASE" -- cat /etc/kacho/image-revision 2>/dev/null)"; then
+		unmet "провенанс: стенд не опрошен — файл ревизии в контейнере $pod не прочитан"
+		exit "$RC_UNMET"
+	fi
+	running="$(printf '%s' "$running" | tr -d ' \r\n')"
+	prov="$(revision_outcome "$running" "$REVISION")"
+	say "  провенанс: контейнер ${running:-<пусто>} · ожидалась ${REVISION:-<не названа>} — $prov"
+	if [ "$prov" != "сходится" ]; then
+		unmet "провенанс: $prov — стенд не исполняет ревизию, о которой выносится вердикт"
+		exit "$RC_UNMET"
+	fi
 
 	posture="$("${KCTL[@]}" -n "$NS" logs "$pod" -c "$RELEASE" 2>/dev/null \
 		| grep -m1 'boot security posture' || true)"
@@ -636,10 +1032,241 @@ assert_posture() {
 	return 0
 }
 
+# revision_outcome <в контейнере> <ожидаемая> — исход сверки провенанса словом.
+#
+# Сверка ПО КОММИТУ: ожидаемая может быть названа сокращённо, и тогда ревизия
+# контейнера обязана с неё начинаться. Исходов четыре, и «не названа» не
+# сливается со «сходится»: сверить нечем — не значит сошлось.
+revision_outcome() {
+	local running="$1" want="$2"
+	if [ -z "$running" ]; then printf 'у образа нет метки'; return 0; fi
+	if [ -z "$want" ]; then printf 'ожидаемая ревизия не названа'; return 0; fi
+	case "$running" in
+		"$want"*) printf 'сходится' ;;
+		*) printf 'расходится' ;;
+	esac
+}
+
+# forward_port_of <журнал переадресации> <порт полосы> — местный порт IPv4.
+forward_port_of() {
+	sed -n "s/^Forwarding from 127\.0\.0\.1:\([0-9][0-9]*\) -> $2\$/\1/p" "$1" 2>/dev/null | head -1
+}
+
+stop_lane_forward() {
+	if [ -f "$LANE_FORWARD_PID" ]; then
+		kill "$(cat "$LANE_FORWARD_PID")" 2>/dev/null || true
+		rm -f "$LANE_FORWARD_PID"
+	fi
+}
+
+# start_lane_forward — переадресация порта полосы на 127.0.0.1, местный порт
+# выбирает ядро. Номер удалённого порта читается у Service ПО ИМЕНИ, а не
+# выписывается: адрес полосы объявляет профиль (`apiServer.loginLaneEndpoint`).
+start_lane_forward() {
+	local remote pid i port=""
+	remote="$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+		-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у Service $RELEASE-internal нет порта http-login-lane — профиль не объявил полосу входа"
+		exit 1
+	fi
+	stop_lane_forward
+	nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "svc/$RELEASE-internal" ":$remote" \
+		> "$LANE_FORWARD_LOG" 2>&1 < /dev/null &
+	pid=$!
+	echo "$pid" > "$LANE_FORWARD_PID"
+	for i in $(seq 1 30); do
+		port="$(forward_port_of "$LANE_FORWARD_LOG" "$remote")"
+		[ -n "$port" ] && break
+		kill -0 "$pid" 2>/dev/null || break
+		sleep 1
+	done
+	if [ -z "$port" ]; then
+		unmet "переадресация полосы не встала: $(tail -2 "$LANE_FORWARD_LOG" 2>/dev/null | tr '\n' ' ')"
+		stop_lane_forward
+		exit "$RC_UNMET"
+	fi
+	LANE_URL="https://127.0.0.1:$port"
+	say "стенд: полоса входа переадресована — $LANE_URL (порт службы $remote)"
+}
+
+# ensure_forward <тег> <Service> <имя порта> — переадресация порта Service на
+# 127.0.0.1 для поверхностей, которые зовёт посев церемонии. Порт службы читается
+# у Service ПО ИМЕНИ, местный выбирает ядро; итог — в FORWARD_PORT.
+#
+# ЖИВАЯ ПЕРЕАДРЕСАЦИЯ ТОГО ЖЕ ТЕГА ПЕРЕИСПОЛЬЗУЕТСЯ, А НЕ ПЕРЕЗАПУСКАЕТСЯ: адрес,
+# уже записанный посевом в окружение, обязан остаться верным до прогона набора.
+# Снимает их `down` (stop_forwards).
+FORWARD_PORT=""
+ensure_forward() {
+	local tag="$1" svc="$2" pname="$3" remote pid i port=""
+	local pidf="$WORK/forward-$tag.pid" logf="$WORK/forward-$tag.log"
+	remote="$("${KCTL[@]}" -n "$NS" get svc "$svc" \
+		-o "jsonpath={.spec.ports[?(@.name==\"$pname\")].port}" 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у Service $svc нет порта $pname — чарт не объявил поверхность, которую зовёт посев"
+		exit 1
+	fi
+	if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+		port="$(forward_port_of "$logf" "$remote")"
+	fi
+	if [ -z "$port" ]; then
+		if [ -f "$pidf" ]; then kill "$(cat "$pidf")" 2>/dev/null || true; fi
+		nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "svc/$svc" ":$remote" \
+			> "$logf" 2>&1 < /dev/null &
+		pid=$!
+		echo "$pid" > "$pidf"
+		for i in $(seq 1 30); do
+			port="$(forward_port_of "$logf" "$remote")"
+			[ -n "$port" ] && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+	fi
+	if [ -z "$port" ]; then
+		unmet "переадресация $tag ($svc:$pname) не встала: $(tail -2 "$logf" 2>/dev/null | tr '\n' ' ')"
+		exit "$RC_UNMET"
+	fi
+	FORWARD_PORT="$port"
+	say "стенд: $tag переадресована — 127.0.0.1:$port (порт службы $remote)"
+}
+
+stop_forwards() {
+	local f
+	for f in "$WORK"/forward-*.pid; do
+		[ -f "$f" ] || continue
+		kill "$(cat "$f")" 2>/dev/null || true
+		rm -f "$f"
+	done
+}
+
+# secret_value <имя объекта> <ключ> — значение ключа Secret стенда.
+secret_value() {
+	local key="${2//./\\.}"
+	"${KCTL[@]}" -n "$NS" get secret "$1" -o "jsonpath={.data.$key}" 2>/dev/null | base64 -d
+}
+
+# ─── ПОСЕВ ЧЕЛОВЕКА ПОЛОСЫ ВХОДА ────────────────────────────────────────────
+#
+# Отдельная подкоманда, а не часть `up`: подъём создаёт стенд, посев — данные
+# стенда, и отказ посева не должен выглядеть отказом подъёма. Исходы — те же три:
+# 0 — человек входит паролем и окружение записано; 1 — находка (от посева либо
+# профиль без полосы); 75 — условие не создано.
+#
+# Учётные данные человека живут Secret'ом стенда и заводятся ОДИН раз: повторный
+# посев на том же стенде берёт их оттуда, и посев входом доказывает, что человек
+# есть, а не заводит второго. Пароль в аргументы процессов не попадает: kubectl
+# читает его из файла под 0600, посев — из переменной окружения.
+seed_login_lane() {
+	need_tool python3; need_tool base64
+	mkdir -p "$EDGE_DIR"; chmod 700 "$EDGE_DIR"
+	local k f
+	for k in tls.crt:edge.crt tls.key:edge.key ca.crt:ca.crt; do
+		f="$EDGE_DIR/${k#*:}"
+		secret_value "$RELEASE-edge-client-tls" "${k%%:*}" > "$f" || true
+		[ -s "$f" ] || { unmet "лист края не вынесен из Secret $RELEASE-edge-client-tls (ключ ${k%%:*}) — стенд поднят не подъёмом этого скрипта?"; exit "$RC_UNMET"; }
+	done
+	chmod 600 "$EDGE_DIR/edge.key"
+
+	local human="$RELEASE-login-lane-human"
+	if ! "${KCTL[@]}" -n "$NS" get secret "$human" >/dev/null 2>&1; then
+		local hdir="$WORK/human"
+		mkdir -p "$hdir"; chmod 700 "$hdir"
+		( umask 077
+		  printf 'login-lane-%s@%s' "$(openssl rand -hex 6)" "$DOMAIN" > "$hdir/email"
+		  openssl rand -hex 16 | tr -d '\n' > "$hdir/password" )
+		"${KCTL[@]}" -n "$NS" create secret generic "$human" \
+			--from-file=email="$hdir/email" --from-file=password="$hdir/password" >/dev/null
+		rm -rf "$hdir"
+		say "стенд: учётные данные человека заведены Secret'ом $human"
+	else
+		say "стенд: учётные данные человека взяты из Secret $human"
+	fi
+	local email password
+	email="$(secret_value "$human" email || true)"
+	password="$(secret_value "$human" password || true)"
+
+	start_lane_forward
+	# Код подтверждения адреса посев берёт из письма в приёмнике писем стенда.
+	ensure_forward mailbox "$MAIL_SVC" http
+	local mailbox="http://127.0.0.1:$FORWARD_PORT"
+	local rc=0
+	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
+		python3 "$ROOT/tests/authz-fixtures/seed_login_lane.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" || rc=$?
+	return "$rc"
+}
+
+# ─── ПОСЕВ ЦЕРЕМОНИИ ────────────────────────────────────────────────────────
+#
+# Отдельная подкоманда ПОСЛЕ `seed-login-lane`: человек и его вход — условие
+# этого посева, и отказ церемонии не должен выглядеть отказом входа. Исходы — те
+# же три. Посев куёт предъявителя человека СВОЕЙ церемонией службы (вход → код →
+# обмен → приём фронтом) и заводит двух конфиденциальных клиентов глаголом
+# `Create`; разбор шагов и границ — шапка `tests/authz-fixtures/seed_ceremony.py`.
+#
+# Листы — из Secret'ов стенда, как у посева полосы: лист службы (круг чеканки
+# бутстрапа) и лист края (единственная дверь к глаголу, который фронтирует край, и
+# к полосе). Поверхностей четыре; полоса переиспользует уже живую переадресацию
+# посева полосы, и адрес, записанный им в окружение, остаётся верным.
+seed_ceremony() {
+	need_tool python3; need_tool base64; need_tool grpcurl
+	local cdir="$WORK/ceremony-pki" k f
+	mkdir -p "$cdir"; chmod 700 "$cdir"
+	for k in "$RELEASE-server-tls:tls.crt:srv.crt" "$RELEASE-server-tls:tls.key:srv.key" \
+		"$RELEASE-server-tls:ca.crt:ca.crt" "$RELEASE-edge-client-tls:tls.crt:edge.crt" \
+		"$RELEASE-edge-client-tls:tls.key:edge.key"; do
+		f="$cdir/${k##*:}"
+		secret_value "${k%%:*}" "$(printf '%s' "$k" | cut -d: -f2)" > "$f" || true
+		[ -s "$f" ] || { unmet "лист не вынесен из Secret ${k%%:*} — стенд поднят не подъёмом этого скрипта?"; exit "$RC_UNMET"; }
+	done
+	chmod 600 "$cdir/srv.key" "$cdir/edge.key"
+
+	local human="$RELEASE-login-lane-human" email password
+	email="$(secret_value "$human" email || true)"
+	password="$(secret_value "$human" password || true)"
+	if [ -z "$email" ] || [ -z "$password" ]; then
+		unmet "человека нет: Secret $human не заведён — сначала seed-login-lane"
+		exit "$RC_UNMET"
+	fi
+
+	local lane grpc issuance own
+	if [ -f "$LANE_FORWARD_PID" ] && kill -0 "$(cat "$LANE_FORWARD_PID")" 2>/dev/null; then
+		lane="$(forward_port_of "$LANE_FORWARD_LOG" \
+			"$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+				-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null)")"
+	fi
+	if [ -n "${lane:-}" ]; then
+		LANE_URL="https://127.0.0.1:$lane"
+		say "стенд: полоса входа — живая переадресация посева полосы, $LANE_URL"
+	else
+		start_lane_forward
+	fi
+	ensure_forward grpc-internal "$RELEASE-internal" grpc-internal; grpc="127.0.0.1:$FORWARD_PORT"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+
+	local rc=0
+	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
+		python3 "$ROOT/tests/authz-fixtures/seed_ceremony.py" \
+		--lane-url "$LANE_URL" --issuance-url "$issuance" --own-url "$own" \
+		--grpc-addr "$grpc" --pki "$cdir" || rc=$?
+	return "$rc"
+}
+
 down() {
+	stop_lane_forward
+	stop_forwards
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
-		kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
-		say "стенд: кластер $CLUSTER снесён"
+		if [ -f "$CREATED_MARK" ]; then
+			kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
+			say "стенд: кластер $CLUSTER снесён"
+		else
+			# Кластер поднимал не этот стенд: снимается то, что стенд завёл сам.
+			helm uninstall "$RELEASE" --kube-context "kind-$CLUSTER" -n "$NS" >/dev/null 2>&1 || true
+			"${KCTL[@]}" delete namespace "$NS" --wait=true >/dev/null 2>&1 || true
+			say "стенд: кластер $CLUSTER чужой — сняты релиз $RELEASE и пространство имён $NS, кластер стоит"
+		fi
 	else
 		say "стенд: кластера $CLUSTER нет — сносить нечего"
 	fi
@@ -656,11 +1283,12 @@ case "${1:-}" in
 		check_alert_rules_kind
 		make_pki
 		start_pg
+		start_mailbox
 		make_secrets
 		build_image
 		write_overlay
 		install_chart
-		say "===== стенд поднят чартом, без платформы и без поставщика ====="
+		say "===== стенд поднят чартом (посадка own, условия набора полосы входа созданы), без платформы и без поставщика ====="
 		;;
 	assert)
 		need_tool kubectl
@@ -669,12 +1297,20 @@ case "${1:-}" in
 	--self-test)
 		self_test
 		;;
+	seed-login-lane)
+		need_tool kubectl
+		seed_login_lane
+		;;
+	seed-ceremony)
+		need_tool kubectl
+		seed_ceremony
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac

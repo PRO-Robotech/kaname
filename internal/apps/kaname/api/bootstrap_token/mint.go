@@ -168,7 +168,6 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 		c = domain.ServiceAccountOAuthClient{
 			ID:              domain.SAOAuthClientID(id.SocID),
 			SvaID:           domain.ServiceAccountID(id.SvaID),
-			OAuthClientID:   domain.OAuthClientID(id.ClientID),
 			Description:     domain.Description("bootstrap-admin token-mint client (#58)"),
 			CreatedByUserID: domain.UserID(id.CreatedByUserID),
 			PublicKeyPEM:    pubPEM,
@@ -195,7 +194,6 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 	// winner-provisioned values).
 	id.SvaID = string(c.SvaID)
 	id.SocID = string(c.ID)
-	id.ClientID = string(c.OAuthClientID)
 	return id, nil
 }
 
@@ -238,6 +236,12 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 		// полосе INTERNAL. Прежняя редакция возвращала ДО записи в журнал —
 		// то есть на этой полосе причина не доставалась вообще никому, кроме
 		// вызывающего, которому она не адресована.
+		u.logErr(ctx, action, err)
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —
+		// канонический текст недоступности, причина — журналу тем же глаголом.
+		// Набор полос сходится с каноном, и сходимость держит гейт.
 		u.logErr(ctx, action, err)
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, iamerr.ErrInternal):

@@ -5,8 +5,8 @@
 
 """ДОЛГ СКВОЗНОГО НАБОРА, НАЗВАННЫЙ ЧИСЛОМ: что на автономном стенде НЕ гоняется.
 
-ПРЕДМЕТ. Автономный стенд поднимает службу и её базу без края платформы, её
-сервисов и достижимого поставщика удостоверений. Сквозной набор при этом
+ПРЕДМЕТ. Автономный стенд поднимает службу посадкой `own` и её базу без края
+платформы и её сервисов. Сквозной набор при этом
 адресуется почти целиком к КРАЮ, и край — не транспорт: он производит проверяемые
 свойства. Значит прогон здесь покрывает НЕ ВСЁ, и разница обязана быть напечатана
 ЧИСЛОМ по каждой позиции — иначе зелёный шаг читается шире сделанного, а это брак
@@ -72,7 +72,50 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 
 Объявление читается РАЗОБРАННЫМ (`yaml.safe_load`), а не подстрокой: имя
 коллекции встречается в комментариях объявления десятки раз, и проверка по
-подстроке считала бы собственное объяснение.
+подстроке считала бы собственное объяснение. Тело шага `run:` тоже читается
+разобранным — как программа bash: прогон засчитывается команде прогонщика, а флаг
+`--service` в комментарии тела, в строковом литерале и в данных heredoc прогоном
+не является (`shell_commands`, `runner_stems`).
+
+У КАЖДОЙ КОЛЛЕКЦИИ ЕСТЬ ПРОИЗВОДИТЕЛЬ В КОНВЕЙЕРЕ: шаг, который её гоняет, либо
+ДЕРЖАТЕЛЬ — третье поле записи ведомости, задача, которая её прогонит. Прежде
+запись несла категорию и довод, и «не гоняется» было концом записи: причина
+печаталась, а кто снимет препятствие, не было записано нигде. Замер на `d22123ba`:
+коллекций 47, гоняют шаги 17, у тридцати остальных держателя не было ни одного.
+Сверка идёт В ОБЕ СТОРОНЫ: негоняемая коллекция без держателя роняет перепись, и
+держатель у коллекции, которую шаг уже гоняет, роняет её же — запись пережила
+свой предмет и истекает вместе с препятствием, а не остаётся ведомостью прощения.
+Форма держателя закрыта (`HOLDER_RE`): адрес задачи и то, что она сделает.
+
+ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, СВЕРЯЕТСЯ С МОДУЛЕМ КЕЙСОВ (kaname#361). Держатель
+вправе назвать полосы своей коллекции, и такое имя — утверждение о модуле:
+полоса `<СЕМЕЙСТВО>-<номер>` стоит там приставкой значения `id=` кейса. Держатель
+продолжал называть полосу IBT-12 после того, как её сняли вместе с зеркалом набора
+ключей, и перепись этого не видела. Судится только семейство, которое модуль ведёт
+сам; прочитанное, названное и судимое печатается числом (`reconcile_holder_lanes`).
+
+ПОЗИЦИЯ ПРИЁМКИ — ВТОРАЯ ЕДИНИЦА ДОЛГА, И ОНА МЕЛЬЧЕ КОЛЛЕКЦИИ (kaname#449).
+Ведомость производителя судит коллекцию, а приёмка объявляет сквозным отдельный
+СЦЕНАРИЙ заголовком с перечнем уровней, где `E` — прогон на стенде, а `K` — прогон
+снаружи через край платформы; оба сквозные (`THROUGH_LEVELS`). Законных форм
+заголовка три, и каждая выведена обходом каталога приёмок: `**ID: <ID>** · I + E —
+…`, `**<ID> — <заголовок>** · E + I` (уровни в конце строки) и `**<ID> (I).**`
+(`SCENARIO_FORMS`). Прежде читалась одна первая, и позиция второй формы без кейса
+давала код 0 (опыт J4 по kaname#449); прочитанное печатается числом ПО КАЖДОЙ
+форме, а строка с перечнем, не разобранная ни одной, — находка незнакомой формы.
+Такой сценарий без кейса ни в одной коллекции не виден ведомости коллекций вовсе:
+ни одна коллекция не пропала, и перепись зеленела, пока DoD приёмки называл
+позицию, которую никто не гоняет. Поэтому позиции уровня E ВЫВОДЯТСЯ из приёмок
+(`docs/engineering/acceptance/*.md`) разбором заголовков сценариев, и каждая либо
+НЕСЁТСЯ модулем кейсов (идентификатор стоит в строковом литерале модуля
+`tests/newman/cases/<коллекция>.py`; комментарий не в счёт), либо записана в
+`SCENARIO_DEBT` с доводом и держателем в закрытой форме `HOLDER_RE`, либо записана
+в `SCENARIO_HOME` — её кейс лежит в наборе другого репозитория, и гоняет его шаг
+конвейера там (координаты закрытой формы `HOME_CASE_RE`, `HOME_STEP_RE`; дерева
+дома рядом нет, и перепись говорит, что его не сверяла). Сверка — в обе стороны:
+позиция без кейса и без записи роняет перепись; запись, чью позицию уже несёт
+модуль, запись без позиции уровня E и позиция, записанная и долгом, и домом,
+роняют её же.
 
 ИСХОДЫ:
     0  — перепись напечатана (долг — не отказ: он именно объявляется);
@@ -111,13 +154,16 @@ CFG_RE = re.compile(r"pm\.environment\.get\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*BaseU
 EDGE_VARS = frozenset({"baseUrl", "internalBaseUrl", "externalBaseUrl"})
 # Переменные адреса СОБСТВЕННЫХ HTTP-поверхностей службы — те, что автономный
 # стенд производит сам: два REST-фронта и слушатель полосы входа паролем (Ф3,
-# kacho#1269; поднимается посадкой `own`, kaname#183). Ярлык поверхности у трёх
+# kacho#1269; поднимается посадкой `own` — стенд чарта, задание `chart-own`,
+# посев `seed_login_lane.py`). Ярлык поверхности у трёх
 # один — он контракт с посевом стенда (`--minted-surface`), а не описание порта.
 OWN_VARS = frozenset({"ownRestBaseUrl", "ownInternalRestBaseUrl", "loginLaneBaseUrl"})
 # Поверхности, которые служба поднимает, но чей ОТВЕТ зависит от недостижимого
-# соседа: зеркало набора ключей и полоса docker-токена.
+# соседа: публикатор набора ключей и полоса docker-токена. Адрес публичного
+# эндпоинта поставщика здесь больше не стоит: его читал только оракул сверки
+# зеркала набора ключей, снятого вместе с зеркалом (kaname#361).
 NEIGHBOUR_VARS = frozenset({"iamJwksBaseUrl", "iamRegistryTokenBaseUrl",
-                            "providerPublicBaseUrl", "registryDataPlaneBaseUrl"})
+                            "registryDataPlaneBaseUrl"})
 # ─────────────── СОСТОЯНИЕ КЛЮЧА: ТРИ, А НЕ ДВА ────────────────────────────
 #
 # Непосеянность — не одно состояние, и разные состояния ЛОМАЮТСЯ ПО-РАЗНОМУ.
@@ -170,13 +216,27 @@ CEREMONY_PREFIXES = ("jwtHuman", "ceremony")
 # приглашённого человека, а кейсы читают его при `subjectType=service_account` —
 # это МАШИННЫЙ ключ, и он обязан остаться в машинном препятствии.
 CEREMONY_ID_RE = re.compile(r"^human[A-Z][A-Za-z0-9]*UserId$")
-# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — тоже церемония, под каким бы именем слот ни
-# стоял. Сходится из двух независимых мест: набор объявляет
-# `jwtAccountAdminAStepUp` НЕПОДДЕЛЫВАЕМЫМ посевом (шапка
-# `cases/iam-interactive-client.py`), а продукт берёт `kaname_acr` только из сессии
-# поставщика (`token_enrichment_service.go` кладёт пробросом,
-# `authzguard/acr_floor.go` читает) — служебная учётка от порога освобождена, то
-# есть поднять уровень машине нечем.
+# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОГО ЖЕ ПРИНЦИПАЛА, ЧТО И БЕЗ ПОВЫШЕНИЯ, И
+# ПРИРОДУ ОН НАСЛЕДУЕТ ОТ НЕГО (kaname#398). Уровень — свойство сессии входа:
+# продукт берёт `acr` только из неё (`token_enrichment_service.go` кладёт
+# пробросом, `authzguard/acr_floor.go` читает), и у ЧЕЛОВЕКА повышенный уровень
+# куёт только церемония — вход вторым фактором. У МАШИНЫ уровня нет вовсе:
+# общее правило повышения (`grpcsrv.EvaluateStepUp`) освобождает машинного
+# принципала ПЕРВОЙ ветвью, до всякого сравнения `acr`, и порог его не касается.
+#
+# ЗДЕСЬ СТОЯЛО «`*StepUp` — церемония, под каким бы именем слот ни стоял», и
+# довод опирался на шапку `cases/iam-interactive-client.py`: «`jwtAccountAdminAStepUp`
+# is declared unforgeable by the seed itself». Довод ложен: шапка пересказывала
+# запись платформы, которую там же сняли как опровергнутую — машинный посев этот
+# слот ВЫДАЁТ, и законно, по той же ветви освобождения. Кейсы подтверждают это
+# своим устройством: выпуск под `jwtAccountAdminAStepUp` опрашивается под
+# `jwtAccountAdminA` (`iam-service-account.py`, `iam-user.py`,
+# `iam-authz-grant-check-propagation.py`), то есть оба слота — ОДИН принципал.
+# Человек под этим именем был бы другим принципалом, и его операция соседнему
+# шагу не читалась бы (замер на автономном стенде: `404 operation … not found`).
+#
+# Поэтому признак — не суффикс сам по себе, а суффикс ПОВЕРХ ключа церемонии:
+# `jwtHumanCeremonyStepUp` — человек, `jwtAccountAdminAStepUp` — машина.
 CEREMONY_STEPUP_SUFFIX = "StepUp"
 # АДРЕС ПОВЕРХНОСТИ — не удостоверение и не предмет посева: его НАЗЫВАЕТ посадка.
 # Объединение всех трёх наборов адресов выше; своя поверхность здесь тоже нужна —
@@ -185,10 +245,14 @@ ADDRESS_VARS = EDGE_VARS | OWN_VARS | NEIGHBOUR_VARS
 
 
 def is_ceremony_key(key: str) -> bool:
-    """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор."""
-    return (key.startswith(CEREMONY_PREFIXES)
-            or key.endswith(CEREMONY_STEPUP_SUFFIX)
-            or bool(CEREMONY_ID_RE.match(key)))
+    """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор.
+
+    Повышенный уровень наследует природу предъявителя, которого повышает: суффикс
+    снимается, и судится то, что осталось (см. `CEREMONY_STEPUP_SUFFIX`).
+    """
+    if key.endswith(CEREMONY_STEPUP_SUFFIX) and len(key) > len(CEREMONY_STEPUP_SUFFIX):
+        return is_ceremony_key(key[: -len(CEREMONY_STEPUP_SUFFIX)])
+    return key.startswith(CEREMONY_PREFIXES) or bool(CEREMONY_ID_RE.match(key))
 
 
 def collections(newman: pathlib.Path) -> list[pathlib.Path]:
@@ -298,6 +362,8 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
     природы «человек» (`humanAccCrudUserId`, `humanAccRdDeriveUserId`,
     `humanAccRdSagaUserId`, `jwtAccountAdminAStepUp`) и 2 природы «адрес»
     (`iamJwksBaseUrl`, `providerPublicBaseUrl`) — то есть каждый третий.
+    Четвёртый «человек» того замера отнесён ошибочно: `jwtAccountAdminAStepUp` —
+    слот машинного распорядителя (см. `CEREMONY_STEPUP_SUFFIX`, kaname#398).
 
       · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — предъявитель человека либо его идентификатор;
       · АДРЕС поверхности — его называет посадка, не подписант;
@@ -342,8 +408,13 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
         shown = ", ".join(f"{k} ({states[k]})" for k in ks[:3])
         return shown + ("…" if len(ks) > 3 else "")
 
-    ceremony = [k for k in need if is_ceremony_key(k)]
-    rest = [k for k in need if k not in ceremony and k not in minted]
+    # КЛЮЧ ЦЕРЕМОНИИ, КОТОРЫЙ ПОСЕВ ЭТОЙ ПОВЕРХНОСТИ КУЁТ, ПРЕПЯТСТВИЕМ НЕ
+    # ЯВЛЯЕТСЯ (kaname#398) — по тому же правилу, что машинный: зачитывается
+    # только своей поверхности. Кто вправе ковать такой ключ, судит не перепись, а
+    # основание объявления волны (`ceremony_credentials.py --verify`): машинный
+    # посев с ключом церемонии — находка, и зачесть его здесь было бы нечем.
+    ceremony = [k for k in need if is_ceremony_key(k) and k not in minted]
+    rest = [k for k in need if not is_ceremony_key(k) and k not in minted]
     address = [k for k in rest if k in ADDRESS_VARS]
     machine = [k for k in rest if k not in ADDRESS_VARS]
     if ceremony:
@@ -362,8 +433,278 @@ def blockers(surface: str, keys: set[str], declared: dict[str, str],
     return out, census
 
 
-# Коллекция, которую гоняет шаг конвейера: `run.sh --service <stem>`.
-SERVICE_ARG_RE = re.compile(r"--service\s+([A-Za-z0-9._-]+)")
+# ─────────────── ПРОГОН — ЭТО КОМАНДА ПРОГОНЩИКА, А НЕ ТЕКСТ ТЕЛА ─────────────
+#
+# Коллекцию гоняет шаг, чьё тело `run:` ВЫЗЫВАЕТ прогонщик набора
+# (`tests/newman/scripts/run.sh`) с аргументом `--service <stem>`. Прежний
+# распознаватель искал образец `--service <stem>` по всему телу и потому
+# засчитывал прогоном флаг в комментарии тела, в строковом литерале `echo` и в
+# данных heredoc: шаг, у которого прогон сняли, а упоминание оставили, числился
+# гоняющим, и держателя у такой коллекции перепись не требовала.
+#
+# Тело разбирается как программа bash — оболочка шагов дерева (`defaults.run.shell:
+# bash`, у GitHub-исполнителя она же по умолчанию): слова, кавычки, продолжение
+# строки, комментарий с начала слова, разделители команд, перенаправления,
+# heredoc и подстановка команды. Прогоном считается простая команда, чьё слово
+# команды — путь к прогонщику, после необязательных присваиваний окружения,
+# служебных слов (`if`, `then`, `!`, `exec`, …) и интерпретатора `bash`/`sh`;
+# `bash -c '<строка>'` разбирается как вложенная программа. Шаг с иной
+# оболочкой (`shell: python`, `pwsh`) не читается вовсе: его тело — не bash.
+#
+# ГРАНИЦА НАЗВАНА: судится команда, а не достижимость. Команда в теле функции
+# или в ветке, которая не исполнится, засчитывается; условие `if:` шага и
+# задания не вычисляется. Пропуск в обратную сторону — громкий: имя коллекции,
+# вычисляемое во время прогона (`--service "$s"`), прогоном не засчитывается, и
+# перепись потребует у такой коллекции держателя.
+RUNNER_RE = re.compile(r"(?:^|/)scripts/run\.sh$")
+STEM_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PREFIX_WORDS = frozenset({"if", "then", "elif", "else", "do", "while", "until",
+                           "!", "{", "time", "exec", "command", "env"})
+_SHELLS = frozenset({"bash", "sh"})
+# Операторы, отсортированные по длине: первым совпадает самый длинный.
+_SEP_OPS = ("&&", "||", ";;&", ";;", ";&", "|&", ";", "&", "|")
+_REDIR_OPS = ("<<<", "<<-", "&>>", "<<", ">>", "<&", ">&", "&>", "<>", ">|",
+              "<", ">")
+_OPS = tuple(sorted(_SEP_OPS + _REDIR_OPS, key=len, reverse=True))
+
+
+class _ShellEOF(Exception):
+    """Кавычка либо подстановка не закрыта до конца тела: bash отказал бы."""
+
+
+def _braced(s: str, i: int, word: list[str]) -> int:
+    """`${…}` целиком — одно слово: внутри бывают пробел и `}` вложенной формы."""
+    depth, j = 0, i
+    while j < len(s):
+        if s[j] == "{":
+            depth += 1
+        elif s[j] == "}":
+            depth -= 1
+            if depth == 0:
+                word.append("$" + s[i:j + 1])
+                return j + 1
+        j += 1
+    raise _ShellEOF
+
+
+def _dquoted(s: str, i: int, word: list[str], cmds: list[list[str]]) -> int:
+    """Тело двойных кавычек с позиции после `"`; подстановки внутри — команды."""
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            return i + 1
+        if c == "\\" and i + 1 < len(s) and s[i + 1] in '$`"\\\n':
+            if s[i + 1] != "\n":
+                word.append(s[i + 1])
+            i += 2
+        elif c == "$" and s.startswith("$(", i):
+            inner, i = _shell_list(s, i + 2, ")")
+            cmds.extend(inner)
+            word.append("$(…)")
+        elif c == "`":
+            inner, i = _shell_list(s, i + 1, "`")
+            cmds.extend(inner)
+            word.append("`…`")
+        elif c == "$" and s.startswith("${", i):
+            i = _braced(s, i + 1, word)
+        else:
+            word.append(c)
+            i += 1
+    raise _ShellEOF
+
+
+def _skip_heredocs(s: str, i: int, pending: list[tuple[str, bool]]) -> int:
+    """С позиции после перевода строки пропускает тела heredoc — это данные."""
+    for delim, strip_tabs in pending:
+        while i < len(s):
+            end = s.find("\n", i)
+            line = s[i:] if end < 0 else s[i:end]
+            i = len(s) if end < 0 else end + 1
+            if (line.lstrip("\t") if strip_tabs else line) == delim:
+                break
+    pending.clear()
+    return i
+
+
+def _shell_list(s: str, i: int, closer: str | None) -> tuple[list[list[str]], int]:
+    """Простые команды программы bash с позиции `i` до `closer` (либо до конца).
+
+    Команда — список слов после снятия кавычек. Возвращает команды и позицию
+    после закрывающего знака. Незакрытая кавычка либо подстановка внутри
+    вложенного разбора — `_ShellEOF` вызывающему; на верхнем уровне
+    (`closer is None`) недописанная команда отбрасывается вместе с подстановками
+    внутри неё, как отбросил бы её bash, а завершённые до неё сохраняются — их
+    bash уже исполнил.
+    """
+    cmds: list[list[str]] = []
+    cur: list[str] = []
+    word: list[str] | None = None
+    target: str | None = None      # "delim<-" | "delim" | "skip" — судьба слова
+    pending: list[tuple[str, bool]] = []
+    depth = 0
+    mark = 0                       # len(cmds) после последней завершённой команды
+
+    def end_word() -> None:
+        nonlocal word, target
+        if word is None:
+            return
+        w = "".join(word)
+        word = None
+        if target in ("delim", "delim<-"):
+            pending.append((w, target == "delim<-"))
+        elif target != "skip":
+            cur.append(w)
+        target = None
+
+    def end_cmd() -> None:
+        nonlocal cur, target, mark
+        end_word()
+        # Перенаправление не переходит границу команды: `<(` открывает новую.
+        target = None
+        if cur:
+            cmds.append(cur)
+        cur = []
+        mark = len(cmds)
+
+    n = len(s)
+    try:
+        while i < n:
+            c = s[i]
+            if closer == "`" and c == "`":
+                end_cmd()
+                return cmds, i + 1
+            if closer == ")" and c == ")" and depth == 0:
+                end_cmd()
+                return cmds, i + 1
+            if c == "\\":
+                if s.startswith("\\\n", i):
+                    i += 2
+                    continue
+                word = (word or []) + [s[i + 1:i + 2]]
+                i += 2
+                continue
+            if c == "'":
+                j = s.find("'", i + 1)
+                if j < 0:
+                    raise _ShellEOF
+                word = (word or []) + [s[i + 1:j]]
+                i = j + 1
+                continue
+            if c == '"':
+                word = word or []
+                i = _dquoted(s, i + 1, word, cmds)
+                continue
+            if c == "$" and s.startswith("$'", i):
+                j, buf = i + 2, []
+                while j < n and s[j] != "'":
+                    esc = s[j] == "\\" and j + 1 < n
+                    buf.append(s[j + 1] if esc else s[j])
+                    j += 2 if esc else 1
+                if j >= n:
+                    raise _ShellEOF
+                word = (word or []) + buf
+                i = j + 1
+                continue
+            if c == "$" and s.startswith("$(", i):
+                inner, i = _shell_list(s, i + 2, ")")
+                cmds.extend(inner)
+                word = (word or []) + ["$(…)"]
+                continue
+            if c == "`":
+                inner, i = _shell_list(s, i + 1, "`")
+                cmds.extend(inner)
+                word = (word or []) + ["`…`"]
+                continue
+            if c == "$" and s.startswith("${", i):
+                word = word or []
+                i = _braced(s, i + 1, word)
+                continue
+            if c == "#" and word is None:
+                j = s.find("\n", i)
+                i = n if j < 0 else j
+                continue
+            if c in " \t":
+                end_word()
+                i += 1
+                continue
+            if c == "\n":
+                end_cmd()
+                i = _skip_heredocs(s, i + 1, pending)
+                continue
+            if c in "()":
+                end_cmd()
+                depth += 1 if c == "(" else -1
+                i += 1
+                continue
+            op = next((o for o in _OPS if s.startswith(o, i)), None)
+            if op is None:
+                word = (word or []) + [c]
+                i += 1
+                continue
+            if op in _SEP_OPS:
+                end_cmd()
+            else:
+                # Номер дескриптора перед перенаправлением (`2>&1`) — не слово.
+                if word is not None and "".join(word).isdigit():
+                    word = None
+                end_word()
+                target = {"<<": "delim", "<<-": "delim<-"}.get(op, "skip")
+            i += len(op)
+        if closer is not None:
+            raise _ShellEOF
+        end_cmd()
+        return cmds, i
+    except _ShellEOF:
+        if closer is not None:
+            raise
+        del cmds[mark:]
+        return cmds, n
+
+
+def shell_commands(body: str) -> list[list[str]]:
+    """Простые команды тела шага `run:` — разбором, а не поиском по тексту."""
+    return _shell_list(body, 0, None)[0]
+
+
+def runner_stems(argv: list[str]) -> list[str]:
+    """Коллекции, которые называет ОДНА простая команда, — если она прогонщик."""
+    k = 0
+    while k < len(argv) and (argv[k] in _PREFIX_WORDS or _ASSIGN_RE.match(argv[k])):
+        k += 1
+    if k < len(argv) and argv[k].rsplit("/", 1)[-1] in _SHELLS:
+        k += 1
+        while k < len(argv) and argv[k].startswith("-"):
+            if argv[k] == "-c" and k + 1 < len(argv):
+                return [st for sub in shell_commands(argv[k + 1])
+                        for st in runner_stems(sub)]
+            k += 1
+    if k >= len(argv) or not RUNNER_RE.search(argv[k]):
+        return []
+    out: list[str] = []
+    j = k + 1
+    while j < len(argv):
+        # Та же грамматика, что у разбора прогонщика: `--service` берёт следующее
+        # слово целиком. Имя, собранное во время прогона, не литерал — и не счёт.
+        if argv[j] == "--service" and j + 1 < len(argv):
+            if STEM_RE.match(argv[j + 1]):
+                out.append(argv[j + 1])
+            j += 2
+            continue
+        j += 1
+    return out
+
+
+def _step_shell(step: dict, job: dict, doc: dict) -> str:
+    """Оболочка шага: шаг → `defaults.run` задания → процесса → bash исполнителя."""
+    def run_defaults(owner: dict) -> object:
+        d = owner.get("defaults")
+        return d.get("run") if isinstance(d, dict) else None
+
+    for holder in (step, run_defaults(job), run_defaults(doc)):
+        if isinstance(holder, dict) and isinstance(holder.get("shell"), str):
+            return holder["shell"]
+    return "bash"
 
 
 def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
@@ -372,7 +713,9 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
     Читается РАЗОБРАННЫЙ YAML: ключи `jobs:`, их `steps[]`, тело `run:`. Имя
     коллекции стоит в комментариях объявления десятки раз, поэтому подстрочный
     предикат считал бы собственное объяснение — тот же порядок, что требует ban #17
-    от гейта на кириллический ключ задания.
+    от гейта на кириллический ключ задания. Тело `run:` тоже читается РАЗОБРАННЫМ —
+    как программа bash (`shell_commands`), и прогоном засчитывается только
+    команда прогонщика (`runner_stems`), а не упоминание флага в её тексте.
 
     Пустой словарь означает РОВНО «ни один шаг не гоняет ни одной коллекции».
     Отличить это от «объявлений не прочитано» — забота вызывающего: он спрашивает
@@ -400,9 +743,13 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
                 body = stepv.get("run")
                 if not isinstance(body, str):
                     continue
+                shell = _step_shell(stepv, job, doc).split()
+                if not shell or shell[0].rsplit("/", 1)[-1] not in _SHELLS:
+                    continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
-                for stem in SERVICE_ARG_RE.findall(body):
-                    out.setdefault(stem, []).append(label)
+                for argv in shell_commands(body):
+                    for stem in runner_stems(argv):
+                        out.setdefault(stem, []).append(label)
     return out
 
 
@@ -481,6 +828,36 @@ def minted_by_seeds(scripts: list[pathlib.Path]
     return minted, mute
 
 
+def ceremony_need_of(text: str, declared: dict[str, str]) -> list[str]:
+    """Ключи ЦЕРЕМОНИИ, которых коллекция ждёт от посева, а не ставит сама.
+
+    ОДНА функция на двух читателей: этот разрез и объявление волны церемонии
+    (`tests/authz-fixtures/ceremony_credentials.py`). Перечень волны обязан быть
+    равен перечню «нужна церемония» отсюда, и равенство держится построением —
+    второй предикат того же предмета разошёлся бы с первым молча.
+    """
+    own = set(OWN_KEY_RE.findall(text))
+    return sorted(k for k in used_keys(text)
+                  if key_state(k, declared, own) is not None and is_ceremony_key(k))
+
+
+def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
+    """По КАЖДОЙ коллекции набора — ключи церемонии, которых она ждёт от посева.
+
+    Пустой обход — отказ, а не пустой ответ: «ни одной коллекции не нужна
+    церемония» и «не прочитано ни одной коллекции» ведут читателя в разные места.
+    """
+    cols = collections(newman)
+    if not cols:
+        raise ValueError(f"в {newman / 'collections'} не прочитано ни одной коллекции")
+    declared = template_keys(newman)
+    if not declared:
+        raise ValueError("шаблона окружения нет — природу ключа вывести не из чего")
+    return {col.name[: -len(".postman_collection.json")]:
+            ceremony_need_of(col.read_text(encoding="utf-8"), declared)
+            for col in cols}
+
+
 def survey(newman: pathlib.Path, workflows: pathlib.Path):
     """Разрез дерева: (гоняемые, заблокированные, по поверхности, по препятствию, …).
 
@@ -521,9 +898,7 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
         # оставляя `.postman_collection`, и перепись читалась бы шумом.
         stem = col.name[: -len(".postman_collection.json")]
         own = set(OWN_KEY_RE.findall(text))
-        ceremony_need[stem] = sorted(
-            k for k in keys
-            if key_state(k, declared, own) is not None and is_ceremony_key(k))
+        ceremony_need[stem] = ceremony_need_of(text, declared)
         bl, states = blockers(surface, keys, declared, own, minted,
                               runs.get(stem, []))
         for state, n in states.items():
@@ -547,7 +922,7 @@ def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, li
 
 # ─────────────────── ВЕДОМОСТЬ ПРОИЗВОДИТЕЛЯ: РЕШЕНИЕ, А НЕ ВЫВОД ───────────
 #
-# Ключ — стебель коллекции, значение — (категория, довод). Источник решения —
+# Ключ — стебель коллекции, значение — (категория, довод, держатель). Источник решения —
 # разрез #24, читавший ПРОДУКТ: какие свойства утверждает коллекция и чей
 # производитель их даёт. Адрес, по которому она сегодня стучится, решения не
 # определяет: генератор приписывает переменную края каждому шагу сам.
@@ -561,6 +936,13 @@ def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, li
 # ВЕДОМОСТЬ СВЕРЯЕТСЯ С ДЕРЕВОМ В ОБЕ СТОРОНЫ, и это то, чем снят довод против
 # второго списка: коллекция без записи роняет перепись, запись без коллекции
 # роняет её же. Перечень поэтому не может ни отстать от дерева, ни пережить его.
+#
+# ДЕРЖАТЕЛЬ — ТРЕТЬЕ ПОЛЕ, и оно пусто ровно у тех коллекций, которые гоняет шаг
+# конвейера: производитель у них уже есть. У остальных держатель — задача, которая
+# коллекцию прогонит, в закрытой форме `HOLDER_RE`. Категория говорит, ЧЕЙ
+# производитель отвечает на утверждения; держатель — КТО снимет препятствие.
+# Это разные вопросы: у одной категории бывают разные держатели (B — церемония
+# либо недостижимый сосед, #156), а одна задача держит коллекции разных категорий.
 PRODUCER_CATEGORIES = {
     "A": "служба",
     "B": "служба + человеческий предъявитель",
@@ -568,69 +950,464 @@ PRODUCER_CATEGORIES = {
     "D": "чужой домен",
 }
 
-PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
-    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек"),
-    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит"),
-    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)"),
-    "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155"),
-    "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра"),
-    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль"),
-    "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
-    "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
-    "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль"),
-    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction"),
-    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10"),
-    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`"),
-    "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается"),
-    "iam-group": ("C", "2 утверждения читают `md.resource`"),
-    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…"),
-    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»"),
-    "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam"),
-    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор"),
-    "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200"),
-    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)"),
-    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается"),
-    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем"),
-    "iam-permission-catalog": ("A", "каталог прав — данные службы"),
-    "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь"),
-    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)"),
-    "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200"),
-    "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт"),
-    "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC"),
-    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»"),
-    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)"),
-    "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция"),
-    "iam-service-account": ("C", "2 утверждения читают `md.resource`"),
-    "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`"),
-    "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи"),
-    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…"),
-    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B"),
-    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`"),
-    "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль"),
-    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена"),
-    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`"),
-    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc"),
-    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов"),
-    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`"),
+# ФОРМА ДЕРЖАТЕЛЯ ЗАКРЫТА: адрес задачи и, через тире, что она сделает. Адрес —
+# с владельцем и репозиторием, потому что держатель бывает и в дереве платформы, а
+# голый `#N` читался бы номером того репозитория, где его прочли. Состояние задачи
+# в трекере перепись НЕ сверяет — сверка сетевая; это названо строкой вывода.
+HOLDER_RE = re.compile(r"^PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]* — \S")
+HOLDER_REF_RE = re.compile(r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]*)")
+
+# Держатели, общие нескольким позициям, — ИМЕНОВАННЫЕ ВЕЛИЧИНЫ, а не текст в
+# одиннадцати местах: разойдись копии, свод по держателю посчитал бы две задачи.
+_HOLDER_EDGE_HALF = (
+    "PRO-Robotech/kaname#155 — исход половины предмета, которую производит край: "
+    "расщепить коллекцию либо переутвердить по фактическому производителю")
+# ИСХОД ПО КОЛЛЕКЦИЯМ ПРЕДМЕТА ПЛАТФОРМЫ РЕШЁН ПО ДЕРЕВУ, А НЕ ПО ЯРЛЫКУ
+# (kaname#415). Пять были записаны C с доводом «читает `md.resource`», а коммит
+# #50 перевёл их пины на `md.scope` своей двери: против края они упали бы,
+# исполнимы только на собственном фронте, и производитель у них — служба.
+# `geo-read` снята: обе половины её предмета держит набор geo платформы
+# (`region.py`, `zone.py`, `authz-deny.py`).
+#
+# СЕМЬ КОЛЛЕКЦИЙ ПЕРЕНЕСЕНЫ в наборы платформы, и в этом дереве их нет, как нет и
+# их записей: сверка ведомости с деревом идёт в обе стороны. `authz-sa-apitoken`
+# и `label-revoke-vpc` — в `services/vpc/tests/newman`, `label-revoke-nlb` — в
+# `services/nlb/tests/newman`, `label-revoke-storage` — в
+# `services/storage/tests/newman`, `iam-internal-only-check` и
+# `iam-project-edge-format` — в `gateway/tests/newman` (держатель переноса —
+# PRO-Robotech/kacho#2912); `iam-account-id-edge-format` — в
+# `gateway/tests/newman` (PRO-Robotech/kacho#2939). Там кейсы гоняют шаги «гейт —
+# newman зелёный (vpc | nlb | storage | api-gateway)».
+
+
+# ОТКАЗ БЕЗ ВЕРДИКТА ПЕРЕУТВЕРЖДЁН ПО ФАКТИЧЕСКОМУ ПРОИЗВОДИТЕЛЮ (kaname#415):
+# `authz-failclosed` гоняет шаг волны свёртки базы задания `stand` —
+# `stand-own.sh failclosed-prepare` (тишина в срок кешей рубежа предъявителя,
+# прогрев промахом и контроль при живой базе, свёртка), прогон,
+# `failclosed-judge` (окно не истекло до конца прогона), а базу возвращает
+# следующий шаг (`db-unfold`). Различитель полос края снят вместе
+# с краем: на автономном стенде отказ производит сама служба. Держателя у записи
+# поэтому нет.
+# ФАСАД ТОКЕНОВ РАСЩЕПЛЁН ПО ПРОИЗВОДИТЕЛЮ (kaname#415) и гоняется заданием
+# `stand`: полосы, которые на автономном стенде производит сама служба (IBT-04,
+# IBT-05, IBT-10, IBT-13), переадресованы на её собственный фронт и публикатор
+# ключей; полосы о слушателях края сняты из модуля с держателями, названными его
+# шапкой (IBT-06 — пробы регистрации маршрута по обе стороны, IBT-15 — предмет
+# снят вместе с поставщиком). Держателя у записи поэтому нет.
+# Две коллекции производителя-службы, которые адресовались краю (kaname#416).
+# Членство гоняет задание `stand` собственным фронтом. Коллекция интерактивного
+# клиента СНЯТА из этого дерева: её дом — набор края платформы
+# (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`,
+# перенос держит PRO-Robotech/kacho#2913, гоняет шаг «гейт — newman зелёный
+# (api-gateway)» на стенде платформы под посадкой `own`).
+# Почему не здесь — замер задания `chart-own` (стенд kind): под `own` глагол
+# `Create` свой реестр исполняет (kaname#405), но все пять глаголов
+# `InternalInteractiveClientService` фронтируются краем
+# (`internal/authzguard/caller_policy.go`, `GatewayFrontedInternalRPCs`), а хоп
+# собственного внутреннего фронта кругом края не становится by construction:
+# `POST /iam/v1/internal/interactiveClients` через него — 403 `AUTHZ_DENIED`.
+# Чёрный ящик доходит до этих глаголов только через край.
+
+PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
+    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек без выдач, его куёт волна церемонии автономного стенда (`seed_ceremony.py --wave`); цели привязки `userPA1Id`/`userPureNoBindingsId` — строки людей машинного посева; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "authz-failclosed": ("A", "отказ без вердикта на собственном фронте автономного стенда: при свёрнутой базе удостоверение со свежим вердиктом об отзыве получает 503/14 фиксированным текстом рубежа, которому нужна база, на чтении объекта и на семи списках — никогда 200 с пустой страницей; близнец с чужим `kid` — 401 рубежа предъявителя; производитель всех утверждений — служба; гоняет шаг волны свёртки базы задания `stand` (kaname#415)", ""),
+    "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155", _HOLDER_EDGE_HALF),
+    "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра", ""),
+    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, машине порог уровня не подлежит, и его пишет машинный посев; отказ формы идентификатора аккаунта-цели авторизации, который производит край, утверждает набор края платформы (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-edge-format.py`); гоняет задание `stand-ceremony`", ""),
+    "iam-access-binding-include-revoked": ("A", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ВОЗВРАЩЕНА В A (kaname#398): `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA`, и его пишет машинный посев; гоняет задание `stand-ceremony`", ""),
+    "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль", ""),
+    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction — у каждого заводящего кейса своя личность уровней «1» и «2», их куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10 — личности уровней «1» и «2» куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-authz-grant-check-propagation": ("A", "выдача → внутренний `iam:check` собственного внутреннего фронта — всё внутри службы; 1 пин отказа — `md.scope` СВОЕЙ двери (#50); 3 шага из 33 предъявляют `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA` (выпуск под одним опрашивается под другим), и его пишет машинный посев. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415), затем с B (kaname#398); гоняет задание `stand-ceremony`", ""),
+    "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается", ""),
+    "iam-group": ("A", "CRUD группы и её членов — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` края не читается; все ключи, включая цель привязки `userINVId`, пишет посев автономного стенда (#415)", ""),
+    "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam", ""),
+    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор", ""),
+    "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200", ""),
+    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)", ""),
+    "iam-membership-mine": ("B", "свой список членств `MembershipService.ListMine` (kaname#206, IAM-ID-2 S2 §2.5): читает `jwtHumanCeremonyNoBindings` — человек без выдач видит ровно свои строки; распорядитель аккаунта приглашает его машинным предъявителем; все утверждения — свои коды и тела службы (сужение по субъекту, страница `pageSize`/`pageToken`, `?userId=` ответа не меняет), `md.resource` не читается; людей куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем, его куёт волна церемонии автономного стенда вторым фактором; отказ формы идентификатора аккаунта, который производит край, утверждает набор края платформы (`PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-edge-format.py`); гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-permission-catalog": ("A", "каталог прав — данные службы", ""),
+    "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь", ""),
+    "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200", ""),
+    "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт", ""),
+    "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC", ""),
+    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»; человека куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-role": ("A", "CRUD роли и её операций — глаголы службы; пин отказа — `md.scope` СВОЕЙ двери (`assert_unscoped_rejected('iam.roles.create','account')`, #50), `md.resource` края не читается; все ключи пишет посев автономного стенда", ""),
+    "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция", ""),
+    "iam-service-account": ("A", "служебная учётка и её ключи — глаголы службы; 2 пина отказа — `md.scope` СВОЕЙ двери (#50), `md.resource` не читается; 9 шагов из 74 (снятие выпущенных ключей) предъявляют `jwtAccountAdminAStepUp` — тот же машинный распорядитель, что `jwtAccountAdminA` (выпуск под одним опрашивается под другим), и его пишет машинный посев. КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415), затем с B (kaname#398); гоняет задание `stand-ceremony`", ""),
+    "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`", ""),
+    "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи", ""),
+    "iam-token-facade-conformance": ("A", "фасад токенов на собственном фронте автономного стенда: ключ, которым проверен принятый предъявитель, публикует своя запись публикатора (IBT-04); выдача и отзыв удостоверений — глаголы службы (IBT-05); принят только асимметричный предъявитель своей чеканки (IBT-10); состав утверждений и названный фронтом принципал — служба (IBT-13); полосы о слушателях края сняты с держателями, названными шапкой модуля (kaname#415); гоняет задание `stand`", ""),
+    "iam-user": ("B", "пользователь и его удостоверения — глаголы службы; 5 пинов отказа — `md.scope` СВОЕЙ двери (#50); 16 шагов из 152 — человек церемонии (`jwtHumanCeremony`, `…StepUp`), его куёт волна церемонии автономного стенда; ещё 23 — `jwtAccountAdminAStepUp`, машинный распорядитель машинного посева; приглашается человек волны с подтверждённым адресом (kaname#456). КАТЕГОРИЯ ИСПРАВЛЕНА С C (#415); гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`; людей куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль", ""),
+    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов; человека куёт волна церемонии автономного стенда, гоняет задание `stand-ceremony` (kaname#398)", ""),
+    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp` — личность уровней «1» и «2» куёт волна церемонии автономного стенда; гоняет задание `stand-ceremony` (kaname#398)", ""),
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
     # разрезом #24 не судилась — судить было нечего.
-    "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность"),
+    "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность", ""),
     # Полоса входа паролем (Ф3, kacho#1269): собственный слушатель формы службы,
     # предъявителя-JWT не читает вовсе — человек предъявляет пароль, а сессию
     # выдаёт сама служба. Условие стенда — посадка `own`, лист с SAN края и посев
-    # человека со способом входа (kaname#183); до него — третья категория.
-    "kaname-login-lane": ("A", "собственный слушатель формы службы (Р7, Р16): вход, выход, признак формы, смена пароля — всё производит служба; ни одного `jwt…` ключа не читает, человек предъявляет пароль"),
+    # человека со способом входа: их создаёт задание `chart-own` (стенд чарта
+    # посадки `own` и `seed_login_lane.py`); без них — третья категория.
+    "kaname-login-lane": ("A", "собственный слушатель формы службы (Р7, Р16): вход, выход, признак формы, смена пароля — всё производит служба; ни одного `jwt…` ключа не читает, человек предъявляет пароль", ""),
     # Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на ТОМ ЖЕ
-    # слушателе формы, что вход (`internal/handler/loginlanehttp`), те же две
-    # переменные (`loginLaneBaseUrl`, `loginLaneEmail`) и то же условие стенда —
-    # посадка `own`; без неё каждый шаг уходит в третью категорию помеченным
-    # утверждением. Счастливого завершения с настоящим кодом набор не несёт: код
-    # уходит письмом, и его наблюдает стенд с почтой (ID-MAIL-1 MAIL-04), не край.
-    "kaname-recovery-lane": ("A", "собственный слушатель формы службы, полоса входа (Ф5-01, Ф5-02, Ф5-04): один ответ на запрос кода для существующего и несуществующего адреса, один отказ на неверный код без носителя, форма без признака — поле названо; всё производит служба, ни одного `jwt…` ключа не читает"),
+    # слушателе формы, что вход (`internal/handler/loginlanehttp`), те же
+    # переменные полосы и то же условие стенда — посадка `own`; без неё каждый шаг
+    # уходит в третью категорию помеченным утверждением. Код завершения набор
+    # берёт из письма у приёмника писем стенда (`standMailboxUrl`, дверь `GET
+    # /codes` — под именем `codes` чистка отчёта режет значение), и людей
+    # заводит сам глаголами полосы: человек посева пароля не меняет.
+    "kaname-recovery-lane": ("A", "собственный слушатель формы службы, полоса входа (Ф5-01…03, Ф5-05, Ф5-08, Ф5-18, Ф5-19): ответ на запрос кода один при любом исходе; завершение кодом из письма приёмника стенда — негодный пароль не тратит код, прежние сессии отозваны, новая годна, повтор и одновременное предъявление проходят ровно однажды, счёт по адресу — N спрошено у полосы; всё производит служба, ни одного `jwt…` ключа не читает, людей заводит сам", ""),
     # Второй фактор (Ф12, kacho#1281): те же слушатель, посадка и условие стенда,
     # что у полосы входа; код по времени вычисляет сам посев из секрета ответа.
-    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев"),
+    # Гоняет его задание `chart-own` тем же вызовом прогонщика, что вход и
+    # восстановление (kaname#417): выход готов к публикации — срез отчёта знает
+    # виды удостоверений полосы, а утверждения набора их значений не печатают.
+    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев", ""),
+    # Регистрация нашей полосой (Ф4, kacho#1270): тот же слушатель формы, что вход;
+    # человека набор заводит сам, адрес — свой у прогона, из человека посева берёт
+    # только домен адреса.
+    "kaname-registration": ("A", "регистрация на собственном слушателе формы службы (Ф4-17, Ф4-20): первая регистрация, её сессия и единый отказ занятому адресу — всё производит служба, ключей `jwt…` не читает, человека заводит сам набор", ""),
+    # Подтверждение адреса (kaname#456): тот же слушатель формы; людей набор заводит
+    # сам регистрацией, код письма читает у приёмника писем стенда (`GET /codes`),
+    # из человека посева берёт только домен адреса.
+    "kaname-address-verification": ("A", "положение подтверждения адреса и глагол подтверждения на собственном слушателе формы службы (EV-01, EV-02, EV-10, EV-11, EV-20, EV-21, EV-30, EV-32): сессию, отказы положения и письмо производит служба, ключей `jwt…` не читает, людей заводит сам набор", ""),
+    # Церемония `authorization_code` (LINE-A-1, kaname#423): три поверхности службы
+    # — слушатель формы (вход), поверхность выдачи (точка авторизации и
+    # токен-эндпоинт), собственный фронт (приём выданного токена). Условие стенда
+    # создаёт задание `chart-own` двумя посевами: полосы входа и церемонии
+    # (`seed_ceremony.py`, kaname#398). Конфиденциальных клиентов посев заводит
+    # глаголом `Create` — производитель клиента со способом секретом у продукта
+    # есть (kaname#405), и секрет берётся из ответа вызова.
+    "kaname-authorization-code": ("A", "церемония `authorization_code` нашими силами (LINE-A-1): точка авторизации, обмен кода и обёртка токена обновления на поверхности выдачи службы, вход — полоса входа службы, приём токена — собственный фронт; все утверждения производит служба, ключей `jwt…` не читает; конфиденциальные клиенты — глагол `Create` в посеве церемонии", ""),
 }
+
+# ДОЛГ ПОЗИЦИЙ ПРИЁМОК УРОВНЯ E: ID сценария → (довод, держатель). Запись живёт,
+# пока позицию не несёт ни один модуль кейсов, и снимается тем же изменением, что
+# заводит кейс (`reconcile_scenario_debt`).
+ScenarioDebt = dict[str, tuple[str, str]]
+
+# ПОЗИЦИЯ, ЧЕЙ СКВОЗНОЙ ДОМ — ДРУГОЙ РЕПОЗИТОРИЙ: ID сценария → (кейс в доме, шаг
+# конвейера дома). Это не долг: у позиции есть кейс и шаг, который его гоняет, и нет
+# задачи, которая её прогонит. Это и не позиция, которую несёт модуль: модуль лежит
+# в чужом дереве, и перепись его не читает. Координаты — в межрепозиторной форме
+# `<владелец>/<репозиторий>:<путь>` закрытого вида (`HOME_CASE_RE`, `HOME_STEP_RE`),
+# и свой репозиторий домом не бывает: свой модуль судится модулем. Запись сверяется в
+# обе стороны, как и долг (`reconcile_scenario_debt`). Сверку с деревом дома перепись
+# НЕ выполняет — его рядом нет, — и печатает это строкой вывода.
+ScenarioHome = dict[str, tuple[str, str]]
+HOME_CASE_RE = re.compile(
+    r"^(PRO-Robotech/(?!kaname:)[a-z0-9][a-z0-9-]*):"
+    r"(?:[A-Za-z0-9_.-]+/)*tests/newman/cases/[A-Za-z0-9_-]+\.py$")
+HOME_STEP_RE = re.compile(
+    r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*):\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml «[^«»]+»$")
+
+# Позиции DoD п.7 приёмки секрета клиента (kaname#405,
+# `docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md`).
+# Уровень I у них держат интеграционные пробы; здесь — только сквозной уровень.
+#
+# Стенд посадки `own` у службы один — задание `chart-own`, и его набор ходит REST-ом.
+# До глаголов интерактивного клиента REST на нём не доходит: их круг вызывающих —
+# край (`internal/authzguard/caller_policy.go`, `GatewayFrontedInternalRPCs`), а хоп
+# собственного внутреннего фронта кругом края не становится и получает 403
+# `AUTHZ_DENIED`. Посев церемонии зовёт `Create` gRPC-ом с листом края
+# (`tests/authz-fixtures/seed_ceremony.py`), поэтому 06 гоняется здесь. Позиции 01,
+# 04, 08, 09 и 10 утверждает кейс набора края платформы, и его гоняет шаг
+# конвейера края.
+_HOME_IC_SECRET = (
+    "PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py",
+    "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — newman зелёный (api-gateway)»")
+SCENARIO_HOME: ScenarioHome = {
+    sid: _HOME_IC_SECRET
+    for sid in ("IC-SECRET-01", "IC-SECRET-04", "IC-SECRET-08", "IC-SECRET-09", "IC-SECRET-10")}
+
+# Записей долга у позиций секрета клиента нет: позиция посадки `external` снята
+# приёмкой вместе с предметом (kaname#363, §4 группа E), и её запись ушла тем же
+# изменением — иначе перепись красна: запись пережила бы предмет.
+SCENARIO_DEBT: ScenarioDebt = {}
+
+# Позиции уровня E формы `**<ID> — <заголовок>** · <уровни>` (опыт J4 по #449):
+# прежний распознаватель эту форму не читал, и позиции шести приёмок не были видны
+# переписи вовсе. Общая запись «кейса нет» на такие позиции снята kaname#460: каждая
+# позиция теперь либо несётся модулем, либо записана ниже СВОИМ доводом — чем
+# неисполнима на дереве — и держателем, чей предмет это условие строит.
+
+
+# Позиции Ф3 и ID-PW-1, чьё «Дано» стенд службы кейсу newman не строит (kaname#467).
+# Прочие позиции E этих двух приёмок несёт `tests/newman/cases/kaname-login-lane.py`
+# (трасса — его шапка). Здесь — только неисполнимые на дереве, и у каждой названо,
+# ЧЕМ: стенд `chart-own` ставит поставляемый профиль как есть, края платформы на нём
+# нет (его место занимает прогонщик набора с листом края), а кейс newman ходит
+# только HTTP по слушателю формы. Производитель каждой — по §7 приёмки Ф3.
+_HOLDER_F3_PLATFORM = (
+    "PRO-Robotech/kacho#1269 — фаза Ф3 закрывается сквозной пробой на живом стенде "
+    "платформы после перевода посадки (§7 приёмки Ф3 называет производителя): там есть "
+    "край, его полоса сессии и распорядитель, и позиция утверждается там")
+_HOLDER_PWV_SEEDED_VALUE = (
+    "PRO-Robotech/kaname#237 — новая редакция ID-PW-1 строит «Дано» посевом хранимого "
+    "значения вместо переноса; по ней позиция получает посев стенда и кейс либо "
+    "снимается вместе с переносом")
+_NO_TRANSFER = ("перенос снят решением kacho#1268, и значения формата `2a` не пишет ни "
+                "один глагол продукта — формат только читаемый")
+_NO_EDGE = ("края платформы на стенде `chart-own` нет: его место занимает прогонщик "
+            "набора с листом края, и ответов службы он не подменяет")
+
+SCENARIO_DEBT.update({
+    "Ф3-04": ("«Дано» — перенесённая личность со значением формата прежнего поставщика "
+              "(ID-PW-1 Д-01); " + _NO_TRANSFER, _HOLDER_PWV_SEEDED_VALUE),
+    "Ф3-06": ("«Дано» — посадка с доменным именем; поставляемый профиль объявляет "
+              "`authn.login.cookieDomain: none`, стенд `chart-own` ставит его как есть, и "
+              "атрибуты адресной посадки несёт IAM-LOGINLANE-OK-COOKIE-HOST-ONLY; посадки с "
+              "именем ни один стенд службы не поднимает", _HOLDER_F3_PLATFORM),
+    "Ф3-13": ("предмет — три исхода края на ответы службы (`Resolve` недоступен, "
+              "`UNIMPLEMENTED` о годности и об отсечке), «Дано» — дублёр службы за краем; "
+              + _NO_EDGE, _HOLDER_F3_PLATFORM),
+    "Ф3-14": ("«кто я» (`GET /iam/v1/auth/me`) — маршрут края, на слушателе формы службы "
+              "его нет (`internal/handler/loginlanehttp`); " + _NO_EDGE, _HOLDER_F3_PLATFORM),
+    "Ф3-17": ("«Дано» — подставной отказ порта хранилища, а половина ретрансляции — дублёр "
+              "службы за краем; хранилище живого стенда отвечает, кейс newman порта не "
+              "подменяет, и " + _NO_EDGE, _HOLDER_F3_PLATFORM),
+    "Ф3-24": ("блокировку зовёт распорядитель уровня «2» (`UserService.Block`: отношение "
+              "`identity_suspender`, `required_acr_min` 2), такого предъявителя стенд "
+              "`chart-own` не куёт; отказ живым сессиям — на полосе личности края",
+              _HOLDER_F3_PLATFORM),
+    "Ф3-25": ("принудительный выход — глагол внутреннего gRPC-слушателя без REST-проекции "
+              "(`InternalIAMService.ForceLogout`, `INTERNAL_LISTENER`), кейсу newman его не "
+              "позвать; гашение носителя — край, и " + _NO_EDGE, _HOLDER_F3_PLATFORM),
+    "Ф3-26": ("гашение обеих прежних сессий завершением восстановления и годность выданной "
+              "им на слушателе формы несёт IAM-RECOVERY-OK-ENDS-EVERY-SESSION набора "
+              "восстановления (Ф5-19); предмет позиции сверх того — отказ F4d-22 на "
+              "предъявлении полосе личности края, и " + _NO_EDGE, _HOLDER_F3_PLATFORM),
+    "Ф3-27": ("пять отвергнутых носителей предъявляются полосе личности края; две причины "
+              "из пяти — блокировка распорядителем уровня «2» и принудительный выход "
+              "внутренним gRPC — стенд `chart-own` кейсу newman не производит (завершение "
+              "восстановления кодом из письма производит набор восстановления)",
+              _HOLDER_F3_PLATFORM),
+    "Ф3-34": ("«Дано» — включённая проверка утечек и дублёр её авторитета; поставляемый "
+              "профиль объявляет `authn.login.breachCheck: disabled`, стенд `chart-own` "
+              "ставит его как есть", _HOLDER_F3_PLATFORM),
+    "Ф3-43": ("«Дано» — значения формата A и формата B ниже ручки «что писать» и "
+              "подставной отказ записи замещения; продукт пишет только формат ручки, "
+              + _NO_TRANSFER, _HOLDER_PWV_SEEDED_VALUE),
+    "PWV-01": ("«Дано» — перенесённое значение формата A; " + _NO_TRANSFER,
+               _HOLDER_PWV_SEEDED_VALUE),
+    "PWV-02": ("«Дано» — перенесённое значение формата B с параметрами источника; перенос "
+               "снят решением kacho#1268, а значение, которое пишет сам продукт, — класс "
+               "ручки «что писать», и вход на нём несёт набор полосы входа",
+               _HOLDER_PWV_SEEDED_VALUE),
+    "PWV-03": ("«Дано» — значения каждого класса стоимости мира прогона (два класса "
+               "формата A, три — формата B), заведённые переносом; стенд несёт один класс "
+               "— ручку, а полоса времени Ф1-48 — проба уровня I; " + _NO_TRANSFER,
+               _HOLDER_PWV_SEEDED_VALUE),
+})
+
+
+# ПОЗИЦИИ Ф13 И Ф5, НЕИСПОЛНИМЫЕ НА ДЕРЕВЕ (kaname#468): у каждой названо, ЧЕМ
+# неисполнима, и держатель — задача, которая создаёт условие. Позиции Ф5,
+# исполнимые на стенде `chart-own`, несёт `kaname-recovery-lane`, и их записей
+# здесь нет.
+#
+# Ф13 — полосы входа ключом в дереве НЕТ: путей `/iam/v1/auth/access-key/begin`,
+# `/iam/v1/auth/access-key/login` и вида формы `access-key-login` не называет ни
+# один файл продукта (`git grep -c -E 'access-key/(begin|login)|access-key-login'
+# -- internal cmd proto deploy` → 0 при положительном контроле: пути полосы входа
+# паролем `auth/(login|recovery)` те же каталоги называют). Кейс набора заводится
+# той же правкой, что полоса (test-first), и снимает запись.
+_F13_LANE_ABSENT = (
+    "полосы входа ключом в дереве нет: путей `/iam/v1/auth/access-key/begin` и "
+    "`/iam/v1/auth/access-key/login` и вида формы `access-key-login` не называет ни один "
+    "файл продукта (`internal`, `cmd`, `proto`, `deploy` → 0) — слать кейсу некуда")
+_HOLDER_F13 = (
+    "PRO-Robotech/kacho#1282 — реализация Ф13 заводит полосу входа ключом и её кейсы "
+    "набора той же правкой (test-first); запись снимается тем же изменением")
+# Ф5-17 и Ф5-25 (в): блокировка — глагол `UserService.Block` (и `Unblock`, без
+# которого сменённые учётные данные заблокированной не наблюдаются) с отношением
+# `identity_suspender` и полом уровня «2» (`proto/kaname/cloud/iam/v1/user_service.proto`).
+# Круг отношения — надзор облака. Сценарии — полосы восстановления, и гоняет их
+# набор `kaname-recovery-lane` на стенде `chart-own`; посев церемонии там пишет
+# человека уровня «1» и предъявителя надзора облака в окружение не кладёт.
+# Держатель — задача позиций E приёмки Ф5 без кейса набора (kaname#468): волна
+# церемонии kaname#398 этих позиций не несёт — её коллекции судят свои сущности
+# на автономном стенде, а не восстановление.
+_F5_NO_SUSPENDER = (
+    "заблокировать личность может только распорядитель с отношением `identity_suspender` "
+    "(надзор облака) на уровне «2» (`UserService.Block`/`Unblock`, `user_service.proto`); "
+    "набор восстановления гоняется на стенде `chart-own`, и посев церемонии там кладёт в "
+    "окружение человека уровня «1», а предъявителя надзора облака не кладёт — блокировать "
+    "личность кейсу набора нечем (`seed_ceremony.py`, режим без `--wave`)")
+_HOLDER_F5_SUSPENDER = (
+    "PRO-Robotech/kaname#468 — позиции E приёмки Ф5 без кейса набора: посев стенда "
+    "`chart-own` кладёт предъявителя надзора облака, и набор восстановления заводит кейс "
+    "блокированной личности той же правкой")
+# Ф5-12, Ф5-20…22, Ф5-24: условия и форма пробы, которых не создаёт ни стенд, ни
+# набор; у каждой держатель — существующая задача, чей предмет это условие строит
+# (kaname#460 передал записи, kaname#468 назвал условия).
+#
+# Ф5-24 — половина через край: §7 приёмки Ф5 называет производителем состава
+# `Resolve` Ф3 (`kacho#1269`), а дом сквозной половины — PRO-Robotech/kacho; проба
+# связки службы с краем живёт в доме платформы (`e2e-flow.md` §7а), и набор службы
+# её не переутверждает.
+_HOLDER_F5_EDGE_HALF = (
+    "PRO-Robotech/kacho#1269 — фаза Ф3 закрывается сквозной пробой на живом стенде "
+    "платформы после перевода посадки: там край спрашивает `Resolve` о сессии "
+    "восстановления и о сессии входа, и «кто я» и глагол платформы под обеими "
+    "утверждаются там")
+# Ф5-12 — исход отправки при недоступном узле: утверждение, способное упасть, — клетка
+# «лечится временем» счётчика исходов, а ответ вызывающему от узла не зависит по
+# построению (письмо ставится в очередь, Р2). Клетки счётчика набор не читает, и
+# узел стенда не гаснет; предмет узла посадки `own` и его клеток — kaname#475.
+_HOLDER_F5_MAIL_NODE = (
+    "PRO-Robotech/kaname#475 — почтовый узел становится условием посадки `own`, стенд "
+    "`own` получает его объявлением, и исходы отправки — клетки счётчика — "
+    "наблюдаются на стенде: там же строится узел, погасший после старта")
+# Ф5-20…22 — измерительная форма Ф1-48: на стенде `chart-own` (kind на общем
+# ранере) размах полосы выше потолка годности by construction (Ф1-50), а внесённое
+# различие Ф5-21 — постановка письма на пути ответа — правка продукта, которой
+# снаружи не внести. Прибор этой формы в дереве есть — ручка уровня I
+# (`internal/repo/kaname/pg/recovery_timing_probe_integration_test.go`,
+# `KACHO_RECOVERY_TIMING`). Фаза Ф5 (`kacho#1271`) закрыта, и её сквозные позиции,
+# неисполнимые стендом службы, держит эпик фаз.
+_HOLDER_F5_TIMING = (
+    "PRO-Robotech/kacho#1266 — эпик фаз своей личности держит сквозные позиции закрытой "
+    "фазы Ф5: измерение полосы восстановления на стенде, где размах полосы ниже потолка "
+    "годности, с инъекцией внесённого различия")
+SCENARIO_DEBT.update({
+    **{sid: (_F13_LANE_ABSENT, _HOLDER_F13) for sid in (
+        "Ф13-01 Ф13-02 Ф13-03 Ф13-04 Ф13-05 Ф13-06 Ф13-07 Ф13-08 Ф13-09 Ф13-10 Ф13-11 "
+        "Ф13-12 Ф13-13 Ф13-15 Ф13-16 Ф13-17 Ф13-18 Ф13-19 Ф13-20 Ф13-21 Ф13-22 Ф13-23 "
+        "Ф13-24 Ф13-26 Ф13-27 Ф13-32").split()},
+    "Ф13-25": (_F13_LANE_ABSENT + "; сверх того восстановление у личности без пароля "
+               "отвечает 503 — производитель шага (2) `kacho#2698` не посажен", _HOLDER_F13),
+    "Ф13-28": (_F13_LANE_ABSENT + "; половина через край — связка службы с платформой, "
+               "её проба живёт в доме платформы (`e2e-flow.md` §7а)", _HOLDER_F13),
+    "Ф5-17": (_F5_NO_SUSPENDER, _HOLDER_F5_SUSPENDER),
+    "Ф5-25": ("ветвь (в) — личность, заблокированная распорядителем: " + _F5_NO_SUSPENDER
+              + "; ветви (а) и (б) без (в) сценарий не исполняют — (в) замок, (б) его близнец",
+              _HOLDER_F5_SUSPENDER),
+    "Ф5-24": ("состав ответа службы краю о сессии — `InternalHumanSessionService/Resolve`, "
+              "глагол внутреннего слушателя без HTTP-привязки (`human_session_service.proto`), "
+              "а набор ходит только HTTP; «кто я» и глагол платформы под сессией восстановления "
+              "— связка с краем, дом пробы — платформа (`e2e-flow.md` §7а)",
+              _HOLDER_F5_EDGE_HALF),
+    "Ф5-14": ("письма стенда не покидают кластер по построению приёмника, а «ноль "
+              "доставленных» видно возрастом самого старого неотправленного — величиной "
+              "наблюдаемости, которую набор не читает и которой без гаснущей доставки не "
+              "изменить; производитель — почтовая задача (§4.3 приёмки)",
+              "PRO-Robotech/kacho#1773 — доставка письма восстановления за пределы кластера и "
+              "наблюдаемость недоставленного (вторая половина Ф1-31); запись снимается её "
+              "сквозной пробой"),
+    "Ф5-12": ("почтовый узел не отвечает: стенд `chart-own` держит приёмник писем поднятым "
+              "весь прогон, и ни шага стенда, ни двери у набора, которой узел гасится "
+              "посреди прогона, в дереве нет; утверждение, способное упасть, — клетка "
+              "«лечится временем» счётчика исходов отправки, а её набор не читает: ответ "
+              "вызывающему от узла не зависит по построению (письмо ставится очередью, Р2)",
+              _HOLDER_F5_MAIL_NODE),
+    **{sid: ("измерительная (форма Ф1-48): на стенде `chart-own` — kind на общем ранере — "
+             "размах полосы выше потолка годности by construction, и исход — «не "
+             "выполнилось» (Ф1-50); внесённое различие Ф5-21 — постановка письма на пути "
+             "ответа — правка продукта, снаружи его не внести; прибор этой формы в дереве "
+             "— ручка уровня I (`internal/repo/kaname/pg/recovery_timing_probe_integration_test.go`)",
+             _HOLDER_F5_TIMING)
+       for sid in ("Ф5-20", "Ф5-21", "Ф5-22")},
+})
+
+
+# Позиции Ф12 и Ф4, чьё «Дано» стенд службы не строит (kaname#469). Держатель —
+# задача, которая это «Дано» строит либо которой приёмка отдала сквозного
+# держателя; довод называет, чем позиция неисполнима на дереве службы.
+_F12_EDGE = ("сценарий идёт через край платформы на посадке `own` (Ф3-44, Ф3-45); края у "
+             "стенда службы нет, а собственный фронт кругом края не становится")
+_HOLDER_F12_PHASE = ("PRO-Robotech/kacho#1281 — DoD Ф12 (§9): сквозные позиции, чьё «Дано» "
+                     "стенд службы не строит, — набором на стенде, где оно строится")
+_HOLDER_CLOUD_ADMIN = ("PRO-Robotech/kacho#2878 — человек-администратор облака на стенде "
+                       "`own` платформы: сброс чужого фактора через край и отказы тем, кто "
+                       "отношения не держит")
+_F4_EDGE_SNAPSHOT = ("наблюдение исхода регистрации — форма Ф-ж приёмки, дом "
+                     "PRO-Robotech/kacho (§5.2, §10а п. 2): снимок «кто я» — маршрут края, "
+                     "печенье регистрации в принципала превращает край, собственный фронт "
+                     "службы печенья не разрешает")
+_HOLDER_F4_EDGE = ("PRO-Robotech/kacho#2699 — стенд платформы под `own` с величинами "
+                   "регистрации: сквозной держатель формы Ф-ж и снимка «кто я»")
+_HOLDER_F4_INVITE = ("PRO-Robotech/kacho#2968 — стенд платформы под `own`: приглашение "
+                     "глаголом сессии уровня 2 для сквозной пробы приглашённого")
+_HOLDER_F4_RESERVE = ("PRO-Robotech/kaname#256 — производитель резерва имени (§10а п. 1а, "
+                      "правка 3) и его сквозной кейс тем же изменением, красный до и зелёный "
+                      "после")
+
+SCENARIO_DEBT.update({
+    "Ф12-20": (_F12_EDGE + "; пол «2» и вызов `acr_values` производит край (Ф11-25, Ф11-26)",
+               _HOLDER_F12_PHASE),
+    "Ф12-38": (_F12_EDGE + "; предмет — ретрансляция шести глаголов краем, дом "
+               "PRO-Robotech/kacho `gateway/` (§6)", _HOLDER_F12_PHASE),
+    "Ф12-35": ("неоткрываемый материал производит смена перечня ключей обёртки между шагами "
+               "пробы — перекатка процесса с другим ключом; прогон набора процесса не "
+               "перезапускает", _HOLDER_F12_PHASE),
+    # Ветви (а) и (в) — несвежие сессии — стенд строит ожиданием окна профиля (кейс
+    # `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED` набора второго фактора, kaname#480), но
+    # позиция одна: кейс, назвавший её идентификатор, зачёл бы и ветвь (б).
+    "Ф12-45": (_F12_EDGE + "; ветвь (б) и её одно-фактный близнец — "
+               "`UserService/ResetSecondFactor` через край со своим `user_id`, а без (б) "
+               "позиция не исполняется целиком: (а) и (в) — её одно-фактная пара по годности "
+               "кода, (б) — её отказ административному глаголу", _HOLDER_F12_PHASE),
+    "Ф12-30": (_F12_EDGE + "; «Дано» — администратор облака с сессией «2», распорядители "
+               "аккаунта и посторонний, которых стенд не заводит", _HOLDER_CLOUD_ADMIN),
+    "Ф4-01": (_F4_EDGE_SNAPSHOT + "; четвёртое следствие наблюдается снимком (Ф4-26)",
+              _HOLDER_F4_EDGE),
+    "Ф4-13": (_F4_EDGE_SNAPSHOT + "; успех — исход Ф4-01", _HOLDER_F4_EDGE),
+    "Ф4-26": (_F4_EDGE_SNAPSHOT, _HOLDER_F4_EDGE),
+    "Ф4-11": (_F4_EDGE_SNAPSHOT + "; отказ сверяется побайтово с Ф4-12 и нетронутостью "
+              "личного аккаунта владельца адреса", _HOLDER_F4_EDGE),
+    "Ф4-12": (_F4_EDGE_SNAPSHOT + "; «Дано» — свободный адрес при исчерпанном пределе темпа "
+              "его носителя", _HOLDER_F4_EDGE),
+    "Ф4-14": (_F4_EDGE_SNAPSHOT + "; обе полосы измерения строятся Ф4-11 и Ф4-12 (§7), "
+              "измерительный держатель службы — уровень I "
+              "(`internal/apps/kaname/api/registration/timing_probe_test.go`)", _HOLDER_F4_EDGE),
+    "Ф4-15": (_F4_EDGE_SNAPSHOT + "; инъекция в пробу Ф4-14", _HOLDER_F4_EDGE),
+    "Ф4-16": (_F4_EDGE_SNAPSHOT + "; исход «не выполнилось» пробы Ф4-14", _HOLDER_F4_EDGE),
+    "Ф4-23": ("«Дано» — приглашение глаголом, требующим сессии уровня 2, на стенде платформы "
+              "под `own` (§12 п. 10): стенд службы этого приглашения не заводит", _HOLDER_F4_INVITE),
+    "Ф4-27": ("сквозного держателя приёмка не заказывает (§12 п. 10): «Дано» — приглашение "
+              "глаголом сессии уровня 2 на стенде платформы под `own`", _HOLDER_F4_INVITE),
+    "Ф4-29": ("производителя резерва имени на дереве нет (§5.5, §7): «Тогда» не производится "
+              "ничем, и кейс принадлежит изменению, которое производителя заводит", _HOLDER_F4_RESERVE),
+    "Ф4-30": ("производителя резерва имени на дереве нет (§5.5, §7): «Тогда» не производится "
+              "ничем, и кейс принадлежит изменению, которое производителя заводит", _HOLDER_F4_RESERVE),
+    # Окно материализации: «Дано» — ТА ЖЕ сессия регистрации, а действие в своём
+    # аккаунте — глагол API, куда печенье сессии не доходит без края.
+    "Ф4-21": ("«Дано» — та же сессия регистрации (Ф4-20), а первое действие в своём аккаунте — "
+              "глагол API: печенье сессии в принципала превращает край (§5.4), собственный "
+              "фронт службы печенья не разрешает (читает его только слушатель формы, "
+              "`internal/handler/loginlanehttp/handler.go`)", _HOLDER_F4_EDGE),
+    "Ф4-22": ("положительный близнец Ф4-21 на той же сессии регистрации: действие в своём "
+              "аккаунте идёт глаголом API, печенье сессии разрешает край (§5.4), собственный "
+              "фронт службы — нет", _HOLDER_F4_EDGE),
+    # Измерительная позиция формы Ф1-48: приборы этой формы в дереве — ручка
+    # уровня I, потому что на общем ранере размах выше потолка годности by
+    # construction (Ф1-50), а стенд `chart-own` — kind на общем ранере.
+    "Ф12-33": ("измерительная (форма Ф1-48): на стенде `chart-own` — kind на общем ранере — "
+               "размах полосы выше потолка годности by construction, и исход — «не "
+               "выполнилось» (Ф1-50); приборы этой формы в дереве потому — ручка уровня I "
+               "(`internal/apps/kaname/api/humansession/timing_probe_test.go`, «Почему ручной "
+               "прогон»); вдобавок одиннадцать классов без единого отказа по частоте при "
+               "`addressAttempts: 5` за `addressWindow: 15m` требуют свежего человека с "
+               "подтверждённым адресом на каждые четыре обращения", _HOLDER_F12_PHASE),
+})
+
+# Позиции уровня K приёмки идентификатора аккаунта (kaname#549,
+# `docs/engineering/acceptance/account-id-may-be-supplied-at-create.md`, §5 полоса
+# «сторона платформы»). Уровень K — снаружи через край платформы, и стенд службы
+# края не несёт, поэтому позиции записаны домом, а не долгом: край пинит службу с
+# полем `id`, и кейсы IAM-ACC-ID-K1 и IAM-ACC-ID-K2 с их близнецами несёт модуль
+# набора края платформы (kacho#2984, стадия S2). Его гоняет шаг конвейера края на
+# шарде `edge`; запись долга с держателем kacho#2984 снята тем же изменением, что
+# назвало дом (kaname#560).
+_HOME_AID_EDGE = (
+    "PRO-Robotech/kacho:gateway/tests/newman/cases/iam-account-id-at-create.py",
+    "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — newman зелёный (api-gateway)»")
+SCENARIO_HOME.update({sid: _HOME_AID_EDGE for sid in ("AID-K1", "AID-K2")})
 
 
 def _surface_of_stem(stem, runnable, blocked) -> str:
@@ -641,19 +1418,130 @@ def _surface_of_stem(stem, runnable, blocked) -> str:
     return ""
 
 
-def producer_of(stem: str, ledger: dict[str, tuple[str, str]] | None = None) -> tuple[str, str]:
+Ledger = dict[str, tuple[str, str, str]]
+
+
+def producer_of(stem: str, ledger: Ledger | None = None) -> tuple[str, str]:
     """Решение о производителе — ЧИТАЕТСЯ, а не выводится.
 
     Ведомость — ПАРАМЕТР, а не глобаль: самопроверка судит синтетические деревья,
     и подставить им объявленный перечень значило бы требовать записи о коллекциях,
     которых в дереве нет. Умолчание — объявленная ведомость.
     """
-    cat, why = (PRODUCER_LEDGER if ledger is None else ledger)[stem]
+    cat, why, _holder = (PRODUCER_LEDGER if ledger is None else ledger)[stem]
     return cat, why
 
 
+def holder_of(stem: str, ledger: Ledger | None = None) -> str:
+    """Держатель позиции: задача, которая её прогонит. Пусто — держателя нет."""
+    return (PRODUCER_LEDGER if ledger is None else ledger)[stem][2]
+
+
+def reconcile_holders(stems: set[str], runs: dict[str, list[str]],
+                      ledger: Ledger | None = None) -> list[str]:
+    """Производитель в конвейере — шаг ЛИБО держатель, и сверка идёт В ОБЕ СТОРОНЫ.
+
+    Негоняемая коллекция без держателя — долг без читателя: причина напечатана, а
+    кто её снимет, не записано нигде. Держатель у коллекции, которую шаг уже
+    гоняет, — запись, пережившая свой предмет: она обязана уйти тем же изменением,
+    что завело шаг, иначе ведомость держателей стала бы ведомостью прощения.
+    Позиция без записи ведомости здесь не судится — её называет
+    `reconcile_producer_ledger`, и второй раз она не считается.
+    """
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out = []
+    for stem in sorted(stems & set(ledger)):
+        holder = ledger[stem][2]
+        where = runs.get(stem, [])
+        if where and holder:
+            out.append(f"держатель коллекции {stem} ({holder}) пережил предмет: её уже "
+                       f"гоняет {'; '.join(where)} — запись снимается тем же изменением, "
+                       f"что завело шаг")
+        if not where and not holder:
+            out.append(f"коллекция {stem} не гоняется ни одним шагом конвейера, а "
+                       f"держателя в ведомости нет — кто снимет препятствие, не "
+                       f"записано нигде")
+        if holder and not HOLDER_RE.match(holder):
+            out.append(f"держатель коллекции {stem} вне закрытой формы "
+                       f"«PRO-Robotech/<репозиторий>#<номер> — <что сделает>»: {holder!r}")
+    return out
+
+
+# ─────────────── ПОЛОСЫ, НАЗВАННЫЕ ДЕРЖАТЕЛЕМ ───────────────────────────────
+#
+# Держатель вправе назвать полосы своей коллекции (`IBT-05`, `IBT-13`), и
+# названная полоса — утверждение о МОДУЛЕ КЕЙСОВ: задача переутвердит то, что
+# модуль несёт. Утверждение стареет вместе с модулем молча. Так и было: полосу
+# IBT-12 сняли вместе с зеркалом набора ключей (kaname#361), модуль сказал это
+# своей докстрокой, а держатель продолжал называть её полосой, которую задача
+# переутвердит.
+#
+# Полоса модуля — приставка `<СЕМЕЙСТВО>-<номер>` у значения `id=` в вызове,
+# которым модуль заводит кейс. Докстрока и комментарий полосы НЕ несут: снятая
+# полоса в докстроке названа именно затем, чтобы сказать, что её нет.
+# Судится только семейство, которое модуль сам ведёт: ссылка на полосу чужого
+# семейства — не утверждение о модуле, и она печатается несудимой, а не
+# прощается молча.
+LANE_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*)-([0-9]+)(?:-|$)")
+LANE_REF_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Z][A-Z0-9]*)-([0-9]+)(?![0-9A-Za-z])")
+
+
+def module_case_ids(cases: pathlib.Path, stem: str) -> list[str] | None:
+    """Значения `id=` вызовов модуля кейсов коллекции. None — модуля нет."""
+    import ast as _ast
+    mod = cases / f"{stem}.py"
+    if not mod.is_file():
+        return None
+    tree = _ast.parse(mod.read_text(encoding="utf-8"), filename=str(mod))
+    return [k.value.value for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+            for k in n.keywords
+            if k.arg == "id" and isinstance(k.value, _ast.Constant)
+            and isinstance(k.value.value, str)]
+
+
+def reconcile_holder_lanes(cases: pathlib.Path, ledger: Ledger | None = None
+                           ) -> tuple[list[str], dict[str, int]]:
+    """Полоса, названная держателем, есть у модуля кейсов его коллекции.
+
+    Возвращает находки и перепись: держателей прочитано, полос ими названо, из
+    них судимо (семейство модуля). Модуль, не давший ни одного `id=`, при
+    названной держателем полосе — находка: «полосы нет» тогда значило бы «кейсов
+    не прочитано».
+    """
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out: list[str] = []
+    census = {"holders": 0, "named": 0, "judged": 0}
+    for stem, (_cat, _why, holder) in sorted(ledger.items()):
+        if not holder:
+            continue
+        census["holders"] += 1
+        refs = [f"{fam}-{num}" for fam, num in LANE_REF_RE.findall(holder)]
+        if not refs:
+            continue
+        census["named"] += len(refs)
+        ids = module_case_ids(cases, stem)
+        if ids is None:
+            continue
+        if not ids:
+            out.append(f"держатель коллекции {stem} называет полосы ({', '.join(refs)}), а "
+                       f"модуль кейсов {stem}.py не дал ни одного `id=` — судить их не по чему, "
+                       f"и «полосы нет» значило бы «кейсов не прочитано»")
+            continue
+        lanes = {f"{m.group(1)}-{m.group(2)}" for m in map(LANE_ID_RE.match, ids) if m}
+        families = {lane.split("-")[0] for lane in lanes}
+        for ref in refs:
+            if ref.split("-")[0] not in families:
+                continue
+            census["judged"] += 1
+            if ref not in lanes:
+                out.append(f"держатель коллекции {stem} называет полосу {ref}, а модуль кейсов "
+                           f"{stem}.py её не несёт ни одним кейсом — полоса снята либо не "
+                           f"заведена, и переутверждать задаче нечего")
+    return out, census
+
+
 def reconcile_producer_ledger(stems: set[str],
-                              ledger: dict[str, tuple[str, str]] | None = None) -> list[str]:
+                              ledger: Ledger | None = None) -> list[str]:
     """Сверка ведомости с деревом В ОБЕ СТОРОНЫ."""
     ledger = PRODUCER_LEDGER if ledger is None else ledger
     out = []
@@ -663,7 +1551,7 @@ def reconcile_producer_ledger(stems: set[str],
     for stem in sorted(set(ledger) - stems):
         out.append(f"запись про {stem} пережила свой предмет — такой коллекции в "
                    f"дереве нет, и прощать/объявлять нечего")
-    for stem, (cat, why) in sorted(ledger.items()):
+    for stem, (cat, why, _holder) in sorted(ledger.items()):
         if cat not in PRODUCER_CATEGORIES:
             out.append(f"запись про {stem} называет категорию {cat!r} вне закрытого "
                        f"словаря {sorted(PRODUCER_CATEGORIES)}")
@@ -674,7 +1562,7 @@ def reconcile_producer_ledger(stems: set[str],
 
 
 def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
-                            ledger: dict[str, tuple[str, str]] | None = None
+                            ledger: Ledger | None = None
                             ) -> list[str]:
     """Категория A у коллекции, требующей ЦЕРЕМОНИИ ЧЕЛОВЕКА, — находка.
 
@@ -698,8 +1586,178 @@ def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
     return out
 
 
+# ─────────────── ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (kaname#449) ──────────────────────
+#
+# Каталог приёмок относительно корня дерева: у синтетических деревьев
+# самопроверки он свой, поэтому путь выводится от каталога набора, а не от ROOT.
+ACCEPTANCE_REL = pathlib.Path("docs") / "engineering" / "acceptance"
+
+# Словарь уровней — объединение легенд приёмок, выведенное обходом каталога, а не
+# по памяти: E — наблюдаемо снаружи (стенд: слушатель службы либо край); I —
+# изнутри процесса (интеграционный); G — гейт дерева; K — снаружи через край
+# платформы (легенда account-id-may-be-supplied-at-create, kaname#549); P —
+# свойство дерева, проверяемое переписью; U — модульный. Уровень — одиночная
+# латинская заглавная.
+LEVELS = "EIGKPU"
+# СКВОЗНЫЕ уровни — наблюдаемые снаружи процесса: позиция любого из них обязана
+# нестись кейсом, долгом либо домом. K сквозной так же, как E, — только его стенд
+# платформы, и без этого множества позиция K выпала бы из переписи молча.
+THROUGH_LEVELS = "EK"
+_LV = rf"[{LEVELS}](?![A-Za-z0-9])"
+# Одиночная латинская заглавная в ХВОСТЕ за перечнем: уровень за незнакомым
+# разделителем («I / E», «(I, E)») либо буква вне словаря за знакомым («I + X»)
+# были бы потеряны разбором молча. Поэтому хвост судится любой одиночной
+# заглавной, а не только буквой словаря.
+_LEVEL_IN_TAIL_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])")
+
+# ЗАКОННЫХ ФОРМ ЗАГОЛОВКА СЦЕНАРИЯ ТРИ (kaname#449, опыт J4), и каждая выведена
+# обходом `docs/engineering/acceptance/*.md`:
+#   prefix — `**ID: IC-SECRET-01** · I + E — …`: перечень между разделителями;
+#   titled — `**Ф3-08 — заголовок** · E + I`: перечень в конце строки, уровни
+#            разделены « + » либо « · », за перечнем бывает хвост — пометка
+#            редакции `· *новый*`, ссылка `(→ **Ф11-02**)`, довод `— **…**`;
+#   parens — `**CRED-CAP-04 (I, управляемые часы).**`: перечень в скобках, за ним
+#            бывает примечание после запятой.
+# Прежний распознаватель знал одну prefix: позиция E формы titled давала код 0 и
+# «позиций 7», пока DoD шести приёмок называл 132 такие позиции.
+#
+# У каждой формы два выражения. «Несёт перечень» — после разделителя стоит
+# одиночная латинская заглавная; «разобрана» — перечень прочитан целиком. Строка,
+# несущая перечень и не разобранная, — НЕЗНАКОМАЯ форма, и она называется, а не
+# отбрасывается: разбор, молча пропустивший форму, дал бы «позиций E ноль».
+# Заголовок, где после разделителя идёт довод словами («· отрицание; близнец —
+# …», «(RED)», «(`kacho#1`)»), перечня уровней не несёт и позицией не является.
+_BOLD_TITLE = r"(?:[^*]|\*(?!\*))+"
+SCENARIO_FORMS: tuple[tuple[str, str, re.Pattern, re.Pattern], ...] = (
+    ("prefix", "«**ID: <ID>** · <уровни> — …»",
+     re.compile(r"^\*\*ID: [^*]+\*\* · [A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*ID: (?P<id>[^*\s]+)\*\* · (?P<lv>{_LV}(?: \+ {_LV})*) — ")),
+    ("titled", "«**<ID> — <заголовок>** · <уровни>»",
+     re.compile(rf"^\*\*[^*\s]+ — {_BOLD_TITLE}\*\* · [A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*(?P<id>[^*\s]+) — {_BOLD_TITLE}\*\* · "
+                rf"(?P<lv>{_LV}(?:(?: \+ | · ){_LV})*)(?P<tail>(?:\s.*)?)$")),
+    ("parens", "«**<ID> (<уровни>).**»",
+     re.compile(r"^\*\*[^*\s]+ \([A-Z](?![A-Za-z])"),
+     re.compile(rf"^\*\*(?P<id>[^*\s]+) \((?P<lv>{_LV}(?: \+ {_LV})*)"
+                rf"(?P<tail>(?:, [^)]*)?)\)\.?\*\*")),
+)
+_LEVEL_SEP_RE = re.compile(r" [+·] ")
+
+
+def acceptance_positions(acceptance: pathlib.Path
+                         ) -> tuple[dict[str, str], int, list[str], dict[str, list[int]]]:
+    """Позиции сквозных уровней (`THROUGH_LEVELS`): ID → приёмка; сколько приёмок
+    прочитано; незнакомые формы; по каждой форме — [заголовков с перечнем прочитано,
+    из них сквозных]."""
+    positions: dict[str, str] = {}
+    unknown: list[str] = []
+    forms: dict[str, list[int]] = {key: [0, 0] for key, *_ in SCENARIO_FORMS}
+    docs = sorted(acceptance.glob("*.md")) if acceptance.is_dir() else []
+    for doc in docs:
+        for n, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            for key, _label, leveled, head in SCENARIO_FORMS:
+                if not leveled.match(line):
+                    continue
+                m = head.match(line)
+                tail = (m.groupdict().get("tail") or "") if m else ""
+                if m is None or _LEVEL_IN_TAIL_RE.search(tail):
+                    unknown.append(f"{doc.name}:{n}: {line[:90]}")
+                    break
+                forms[key][0] += 1
+                if set(_LEVEL_SEP_RE.split(m.group("lv"))) & set(THROUGH_LEVELS):
+                    forms[key][1] += 1
+                    positions[m.group("id")] = doc.name
+                break
+    return positions, len(docs), unknown, forms
+
+
+def carried_positions(cases: pathlib.Path, ids: set[str]) -> dict[str, list[str]]:
+    """Какой модуль кейсов несёт позицию: ID стоит в СТРОКОВОМ ЛИТЕРАЛЕ модуля.
+
+    Модуль читается разобранным (`ast`): комментарий, объясняющий, почему позиции
+    здесь нет, позицию не несёт. Докстрока — литерал, и она в счёт: трасса
+    «сценарий — кейс» в наборе пишется именно ею.
+    """
+    import ast as _ast
+    out: dict[str, list[str]] = {}
+    pats = {i: re.compile(r"(?<![A-Z0-9-])" + re.escape(i) + r"(?![0-9])") for i in ids}
+    for mod in sorted(cases.glob("*.py")) if cases.is_dir() else []:
+        tree = _ast.parse(mod.read_text(encoding="utf-8"), filename=str(mod))
+        text = "\n".join(n.value for n in _ast.walk(tree)
+                         if isinstance(n, _ast.Constant) and isinstance(n.value, str))
+        for i, pat in pats.items():
+            if pat.search(text):
+                out.setdefault(i, []).append(mod.stem)
+    return out
+
+
+def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt,
+                            home: ScenarioHome | None = None
+                            ) -> tuple[list[str], dict[str, str], dict[str, list[str]], int,
+                                       dict[str, list[int]]]:
+    """Позиции уровня E против модулей кейсов, записей долга и записей о доме в
+    другом репозитории — В ОБЕ СТОРОНЫ.
+
+    Возвращает находки, позиции (ID → приёмка), кто их несёт, сколько приёмок
+    прочитано и перепись заголовков по формам.
+    """
+    home = {} if home is None else home
+    positions, docs, unknown, forms = acceptance_positions(newman.parents[1] / ACCEPTANCE_REL)
+    carried = carried_positions(newman / "cases", set(positions) | set(debt) | set(home))
+    out = [f"заголовок сценария в незнакомой форме (уровни не разобраны): {u}" for u in unknown]
+    for sid in sorted(positions):
+        if sid not in carried and sid not in debt and sid not in home:
+            out.append(f"позиция {sid} ({positions[sid]}) объявлена сквозной (уровень E либо K), а ни "
+                       f"кейса в модулях набора, ни записи долга, ни записи о доме в другом "
+                       f"репозитории о ней нет")
+    for sid, (case, step) in sorted(home.items()):
+        if sid not in positions:
+            out.append(f"запись дома позиции {sid} пережила предмет: сквозного сценария (E либо K) с таким "
+                       f"ID нет ни в одной приёмке")
+        elif sid in carried:
+            out.append(f"запись дома позиции {sid} пережила предмет: её несёт модуль "
+                       f"{', '.join(carried[sid])} этого дерева — запись снимается тем же "
+                       f"изменением, что завело кейс")
+        if sid in debt:
+            out.append(f"позиция {sid} записана и долгом, и домом в другом репозитории — исход "
+                       f"у позиции один")
+        cm, sm = HOME_CASE_RE.match(case), HOME_STEP_RE.match(step)
+        if cm is None:
+            out.append(f"кейс дома позиции {sid} вне закрытой формы «PRO-Robotech/<другой "
+                       f"репозиторий>:<путь>/tests/newman/cases/<модуль>.py»: {case!r}")
+        if sm is None:
+            out.append(f"шаг дома позиции {sid} вне закрытой формы «PRO-Robotech/<репозиторий>:"
+                       f".github/workflows/<файл>.yml «<имя шага>»»: {step!r}")
+        if cm and sm and cm.group(1) != sm.group(1):
+            out.append(f"шаг дома позиции {sid} назван в другом репозитории, чем её кейс: "
+                       f"{sm.group(1)} против {cm.group(1)}")
+    for sid, (why, holder) in sorted(debt.items()):
+        if sid not in positions:
+            out.append(f"запись долга позиции {sid} пережила предмет: сквозного сценария (E либо K) с таким "
+                       f"ID нет ни в одной приёмке")
+        elif sid in carried:
+            out.append(f"запись долга позиции {sid} пережила предмет: её несёт модуль "
+                       f"{', '.join(carried[sid])} — запись снимается тем же изменением, что "
+                       f"завело кейс")
+        if not why.strip():
+            out.append(f"запись долга позиции {sid} без довода")
+        if not HOLDER_RE.match(holder):
+            out.append(f"держатель позиции {sid} вне закрытой формы "
+                       f"«PRO-Robotech/<репозиторий>#<номер> — <что сделает>»: {holder!r}")
+    return out, positions, carried, docs, forms
+
+
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-        ledger: dict[str, tuple[str, str]] | None = None) -> int:
+        ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None,
+        scenario_home: ScenarioHome | None = None) -> int:
+    # Ведомости позиций, как и ведомость производителя, — ПАРАМЕТРЫ. Объявленные
+    # берутся только для объявленного дерева: синтетическая ведомость коллекций
+    # значит синтетическое дерево, и объявленных позиций у него нет.
+    declared_tree = ledger is None and scenario_debt is None and scenario_home is None
+    if scenario_debt is None:
+        scenario_debt = SCENARIO_DEBT if ledger is None else {}
+    if scenario_home is None:
+        scenario_home = SCENARIO_HOME if ledger is None else {}
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
@@ -726,13 +1784,32 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     # Цена названа: такая запись переносит коллекцию в план переезда, где её
     # нельзя закрыть ничем, и мера работы становится недостижимой.
     drift += ledger_matches_ceremony(ceremony_need, ledger)
+    # ПРОИЗВОДИТЕЛЬ В КОНВЕЙЕРЕ: шаг либо держатель, по каждой позиции и в обе
+    # стороны (`reconcile_holders`). Судится по объявлению конвейера (`runs`), а не
+    # по половинам переписи: у гоняемой шагом коллекции бывают и препятствия — их
+    # расхождение со шагом держит `pipeline_claims_test.py`.
+    all_stems = {stem for stem, *_ in [*runnable, *blocked]}
+    drift += reconcile_holders(all_stems, runs, ledger)
+    # ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, — утверждение о модуле кейсов, и оно
+    # сверяется с модулем, а не с памятью о нём (`reconcile_holder_lanes`).
+    lane_drift, lane_census = reconcile_holder_lanes(newman / "cases", ledger)
+    drift += lane_drift
+    # ПОЗИЦИЯ ПРИЁМКИ — мельче коллекции, и её долг судится отдельно (kaname#449).
+    pos_drift, positions, carried, acc_docs, acc_forms = reconcile_scenario_debt(
+        newman, scenario_debt, scenario_home)
+    if declared_tree and acc_docs == 0:
+        pos_drift.append(f"приёмок в {ACCEPTANCE_REL} прочитано 0 — перепись позиций "
+                         f"беспредметна: «долга позиций нет» значило бы «ничего не прочитано»")
+    drift += pos_drift
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
             print(f"  · {d}", file=sys.stderr)
         return 1
 
-    print("===== сквозной набор на АВТОНОМНОМ стенде: что гоняется, а что нет =====")
+    # «Здесь» — стенды службы, которые поднимает её конвейер: автономный и стенд
+    # чарта посадки `own`. Какой именно гоняет коллекцию, называет её строка ниже.
+    print("===== сквозной набор на стендах службы (автономный · посадка own): что гоняется, а что нет =====")
     print(f"коллекций в дереве: {len(cols)}")
     print(f"  гоняется здесь:    {len(runnable)}")
     print(f"  НЕ гоняется здесь: {len(blocked)}")
@@ -744,6 +1821,25 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print(f"коллекций гоняют шаги конвейера: {len(runs)}")
     for stem, where in sorted(runs.items()):
         print(f"  · {stem} ← {'; '.join(where)}")
+    # ОСТАТОК И ЕГО ДЕРЖАТЕЛИ — ТЕМ ЖЕ ВЫВОДОМ: предикат «каждая из M−N названа
+    # с держателем» читается здесь, а не прочтением ведомости. Сверка выше
+    # уже отказала бы на позиции без держателя, поэтому «назван у K» при K < M−N
+    # здесь не печатается никогда — строка есть свидетель, а не второй суд.
+    unrun = sorted(all_stems - set(runs))
+    by_holder: dict[str, list[str]] = {}
+    for stem in unrun:
+        m = HOLDER_REF_RE.match(holder_of(stem, ledger))
+        by_holder.setdefault(m.group(1) if m else "—", []).append(stem)
+    held_n = sum(len(v) for k, v in by_holder.items() if k != "—")
+    print(f"НЕ гоняет ни один шаг: {len(unrun)} — держатель назван у {held_n}")
+    print("по ДЕРЖАТЕЛЮ (задача, которая прогонит; состояние в трекере здесь НЕ сверяется):")
+    for ref, stems in sorted(by_holder.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        print(f"  · {ref}: {len(stems)} ({', '.join(stems)})")
+    # Объём осмотренного сверкой полос — рядом со сводом держателей: «ноль
+    # находок» без него не отличает «названа живая полоса» от «не судилось ничего».
+    print(f"полосы, названные держателями: держателей прочитано {lane_census['holders']} · "
+          f"полос названо {lane_census['named']} · из них судимо модулем кейсов "
+          f"{lane_census['judged']}")
     print()
     print("по АДРЕСАЦИИ (к чьему базовому адресу стучатся шаги):")
     for s, n in sorted(by_surface.items(), key=lambda kv: -kv[1]):
@@ -804,17 +1900,57 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
               f"{cat} ({PRODUCER_CATEGORIES[cat]})] — {why}")
         for b in bl:
             print(f"      — {b}")
+        holder = holder_of(stem, ledger)
+        if holder:
+            print(f"      держатель: {holder}")
+    print()
+    # ПОЗИЦИИ ПРИЁМОК УРОВНЯ E — числом и по каждой: гоняется ли модуль, который
+    # её несёт, либо чем и кем записан её долг.
+    ran = [sid for sid in positions if any(runs.get(st) for st in carried.get(sid, []))]
+    built = [sid for sid in positions if sid in carried and sid not in ran]
+    homed = [sid for sid in positions if sid not in carried and sid in scenario_home]
+    owed = [sid for sid in positions if sid not in carried and sid not in scenario_home]
+    print(f"ПОЗИЦИИ ПРИЁМОК СКВОЗНЫХ УРОВНЕЙ E И K (прогон на стенде): приёмок прочитано {acc_docs}, "
+          f"позиций {len(positions)} — гоняется {len(ran)} · собрана, коллекция не гоняется "
+          f"{len(built)} · долг {len(owed)} · в доме другого репозитория {len(homed)}")
+    # Дом другого репозитория — ЗАПИСЬ, а не измерение: его дерева рядом нет, и
+    # сказать это надо там же, где названо число.
+    print(f"  дом в другом репозитории: записей {len(homed)}; сверка с деревом дома здесь НЕ "
+          f"выполняется — кейс и шаг названы записью, их наличие в доме этот прогон не измерил")
+    # Прочитанное ПО КАЖДОЙ ФОРМЕ: «позиций N» без него не отличает «форма не
+    # встречается» от «форму не читают» — ровно тот случай, что был слеп (J4).
+    print("  формы заголовка сценария (с перечнем уровней прочитано · из них сквозных, E либо K): "
+          + "; ".join(f"{label} {acc_forms[key][0]} · {acc_forms[key][1]}"
+                      for key, label, *_ in SCENARIO_FORMS))
+    for sid in sorted(positions):
+        if sid in carried:
+            where = "; ".join(w for st in carried[sid] for w in runs.get(st, []))
+            state = (f"гоняется ← {where}" if where else
+                     f"собрана в {', '.join(carried[sid])}, коллекция не гоняется "
+                     f"(её держатель — строкой выше)")
+            print(f"  · {sid} [{positions[sid]}] — {state}")
+        elif sid in scenario_home:
+            case, step = scenario_home[sid]
+            print(f"  · {sid} [{positions[sid]}] — в доме {HOME_CASE_RE.match(case).group(1)}: "
+                  f"кейс {case}, шаг {step}")
+        else:
+            why, holder = scenario_debt[sid]
+            print(f"  · {sid} [{positions[sid]}] — ДОЛГ: {why}")
+            print(f"      держатель: {holder}")
     print()
     print("ЧТО ЭТОТ ДОЛГ ЗНАЧИТ, СКАЗАНО ПРЯМО:")
     print("  · прогон автономного стенда проверяет свойства, чей производитель —")
     print("    САМА служба (её фронты, их непроницаемость, рубеж, разбор доступа,")
-    print("    честный отказ при недостижимом соседе). Список — stand-assert.py;")
+    print("    набор ключей своей чеканки, честный отказ не той форме входа).")
+    print("    Список — stand-assert.py;")
     print("  · свойства КРАЯ платформы здесь не проверяются вовсе и остаются")
     print("    предметом её конвейера;")
-    print("  · полоса личности `own` (внешнего поставщика нет ВООБЩЕ) сегодня")
-    print("    НЕ ПОДНИМАЕТСЯ: страж посадки отказывает и называет причины. Стенд")
-    print("    идёт на полосе `external` с ОБЪЯВЛЕННЫМ, но недостижимым")
-    print("    поставщиком — см. врезку в .github/scripts/stand-own.sh.")
+    print("  · полоса личности у службы одна — `own` (внешнего поставщика нет ВООБЩЕ,")
+    print("    kaname#424); автономный стенд идёт на ней, людей заводит полосой входа")
+    print("    листом края стенда, а сквозной набор полосы входа и церемонии гоняет")
+    print("    стенд чарта — задание `chart-own` (врезка в .github/scripts/stand-own.sh);")
+    print("  · человеческого предъявителя не куёт ни один посев: волна церемонии")
+    print("    печатает свой долг сама (tests/authz-fixtures/ceremony_credentials.py --debt).")
     return 0
 
 
@@ -860,16 +1996,24 @@ def _wf(tmp: pathlib.Path, runs: list[str]) -> pathlib.Path:
     return wf
 
 
-def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
+def _st_ledger(newman: pathlib.Path, workflows: pathlib.Path | None) -> Ledger:
     """Синтетическая ведомость для синтетического дерева: одна запись на коллекцию.
 
     Самопроверка судит ДРУГИЕ оси; требовать от неё объявленных решений о
     коллекциях, которых в дереве нет, значило бы уронить её на предмете, к
     которому она не относится. Сверку самой ведомости держат оси 10 и 11 ниже —
-    там расхождение вносится НАМЕРЕННО.
+    там расхождение вносится НАМЕРЕННО; сверку держателя — ось 16.
+
+    Держатель ставится ровно там, где его требует сверка: у коллекции, которую
+    шаг синтетического конвейера не гоняет. Иначе оси о посеве и адресации падали
+    бы на держателе, к которому они не относятся.
     """
     declared = template_keys(newman)
-    out: dict[str, tuple[str, str]] = {}
+    try:
+        runs = pipeline_runs(workflows) if workflows is not None else {}
+    except (Unmet, ModuleNotFoundError):
+        runs = {}
+    out: Ledger = {}
     for p in sorted((newman / "collections").glob("*.postman_collection.json")):
         stem = p.name.replace(".postman_collection.json", "")
         text = p.read_text(encoding="utf-8")
@@ -880,14 +2024,15 @@ def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
         # этого не становится вакуумной — её ось ниже подаёт ведомость ЯВНО.
         cer = any(key_state(k, declared, own) is not None and is_ceremony_key(k)
                   for k in used_keys(text))
-        out[stem] = ("B" if cer else "A", "синтетика самопроверки")
+        holder = "" if runs.get(stem) else "PRO-Robotech/kaname#1 — синтетика самопроверки"
+        out[stem] = ("B" if cer else "A", "синтетика самопроверки", holder)
     return out
 
 
 def _st_run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
-            ledger: dict[str, tuple[str, str]] | None = None) -> int:
+            ledger: Ledger | None = None) -> int:
     return run(newman, workflows=workflows,
-               ledger=_st_ledger(newman) if ledger is None else ledger)
+               ledger=_st_ledger(newman, workflows) if ledger is None else ledger)
 
 
 def self_test() -> int:
@@ -1081,6 +2226,98 @@ def self_test() -> int:
         _c("`--service` только в комментарии — НЕ шаг прогона",
            "гоняется здесь:    0" in out, out[:500])
 
+        # ── Ось 6г: ВНУТРИ ТЕЛА `run:` ПРОГОН — ЭТО КОМАНДА, А НЕ ТЕКСТ ─────
+        #
+        # Ось 6б держит комментарий ВНЕ тела шага; эта — внутри. Флаг в
+        # комментарии тела, в строковом литерале, в аргументах чужой команды и в
+        # данных heredoc — не прогон: шаг, которому оставили только такое
+        # упоминание, коллекцию не гоняет, и перепись обязана потребовать у неё
+        # держателя. Пара у каждой формы — та же строка КОМАНДОЙ прогонщика, в
+        # том числе в формах, которыми дерево её пишет (продолжение строки и
+        # `|| rc=$?` у шага chart-own). Каждая форма судится обоими признаками:
+        # ответом разборщика и половиной переписи.
+        def _wf_body(base: pathlib.Path, body: str,
+                     shell: str | None = None) -> pathlib.Path:
+            wfb = base / ".github" / "workflows"
+            wfb.mkdir(parents=True, exist_ok=True)
+            block = "".join(f"          {ln}\n" if ln else "\n"
+                            for ln in body.split("\n"))
+            (wfb / "e2e-newman.yml").write_text(
+                "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n"
+                "      - name: шаг с упоминанием прогонщика\n"
+                + (f"        shell: {shell}\n" if shell else "")
+                + "        run: |\n" + block, encoding="utf-8")
+            return wfb
+
+        body_forms = (
+            ("комментарий тела", False,
+             "cd tests/newman\n# снято до #999: ./scripts/run.sh --service own-only"),
+            ("хвост-комментарий после команды", False,
+             "cd tests/newman\ntrue  # ./scripts/run.sh --service own-only"),
+            # Комментарий с разделителем команд: без разбора комментария `;`
+            # отделил бы упоминание в самостоятельную команду.
+            ("комментарий тела с разделителем команд", False,
+             "cd tests/newman\n# снято до #999; ./scripts/run.sh --service own-only"),
+            ("литерал echo в кавычках", False,
+             'cd tests/newman\necho "снято: ./scripts/run.sh --service own-only"'),
+            ("аргументы echo без кавычек", False,
+             "cd tests/newman\necho снято: ./scripts/run.sh --service own-only"),
+            ("литерал аргумента чужой команды", False,
+             "printf '%s\\n' './scripts/run.sh --service own-only'"),
+            ("данные heredoc", False,
+             "cat <<'NOTE'\n./scripts/run.sh --service own-only\nNOTE"),
+            ("та же строка командой", True,
+             "cd tests/newman\n./scripts/run.sh --service own-only"),
+            ("командой с продолжением строки и `|| rc=$?`", True,
+             "cd tests/newman\nrc=0\n./scripts/run.sh \\\n  --service own-only \\\n"
+             '  --ssl-client-cert "$W/edge.crt" || rc=$?'),
+            # Продолжение строки посреди слова снимается целиком, как у bash:
+            # имя коллекции склеивается, а не рвётся на два слова.
+            ("командой с продолжением строки посреди имени", True,
+             "./scripts/run.sh --service own-\\\nonly"),
+            ("командой в условии if", True,
+             "if ./scripts/run.sh --service own-only; then echo ok; fi"),
+            ("командой внутри подстановки в кавычках", True,
+             'out="$(./scripts/run.sh --service own-only)"'),
+            # Апостроф в комментарии кавычки не открывает: иначе она проглотила
+            # бы команду ниже, и настоящий прогон выпал бы из счёта.
+            ("командой после комментария с апострофом", True,
+             "# it's the recovery lane\n./scripts/run.sh --service own-only"),
+            ("командой после heredoc", True,
+             "cat <<'NOTE'\nничего\nNOTE\n./scripts/run.sh --service own-only"),
+            ("командой через bash -c", True,
+             "bash -c './scripts/run.sh --service own-only'"),
+        )
+        for k, (label, runs_it, body) in enumerate(body_forms):
+            base = tmp / f"pipeline-body-{k}"
+            t6g = _mk(base, {"own-only": clean},
+                      {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            wfb = _wf_body(base, body)
+            parsed = pipeline_runs(wfb)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t6g, workflows=wfb)
+            out = buf.getvalue()
+            want = 1 if runs_it else 0
+            _c(f"`--service` в теле `run:` — {label}: "
+               f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
+               bool(parsed.get("own-only")) == runs_it
+               and f"гоняется здесь:    {want}" in out,
+               f"разборщик: {parsed}; перепись: {out[:300]}")
+
+        # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
+        # похожая на команду прогонщика, прогоном не засчитывается. Близнец —
+        # то же тело под `shell: bash`: различие ровно в оболочке шага.
+        same = "./scripts/run.sh --service own-only"
+        for k, (shell, runs_it) in enumerate((("python {0}", False),
+                                              ("bash {0}", True))):
+            base = tmp / f"pipeline-shell-{k}"
+            wfb = _wf_body(base, same, shell=shell)
+            parsed = pipeline_runs(wfb)
+            _c(f"та же строка под `shell: {shell}` — "
+               f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
+               bool(parsed.get("own-only")) == runs_it, f"разборщик: {parsed}")
+
         # Ось 6в: объявлений конвейера НЕТ — третий исход, а не «гоняется 0».
         base = tmp / "pipeline-absent"
         t6c = _mk(base, {"own-only": clean},
@@ -1135,22 +2372,22 @@ def self_test() -> int:
                and ("нужен машинный посев поверхности" in out) != want_ceremony,
                out[:900])
 
-        # ── Ось 7б: ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОЖЕ ЦЕРЕМОНИЯ ─────────
+        # ── Ось 7б: ПОВЫШЕННЫЙ УРОВЕНЬ НАСЛЕДУЕТ ПРИРОДУ ПРЕДЪЯВИТЕЛЯ ───────
         #
-        # ЗАМЕР, И ОН СХОДИТСЯ ИЗ ДВУХ НЕЗАВИСИМЫХ МЕСТ. Шапка
-        # `cases/iam-interactive-client.py` говорит дословно:
-        # «`jwtAccountAdminAStepUp` is declared unforgeable by the seed itself …
-        # and every other `jwt*` fixture is a ServiceAccount token, i.e.
-        # acr-exempt». И это подтверждается устройством продукта: `kaname_acr`
-        # приходит ТОЛЬКО из сессии поставщика (`token_enrichment_service.go`
-        # кладёт его пробросом, `authzguard/acr_floor.go` читает), а служебная
-        # учётка от порога ОСВОБОЖДЕНА — то есть поднять уровень машине нечем.
+        # Уровень — свойство сессии входа, и у человека его поднимает только
+        # церемония (вход вторым фактором). У машины уровня нет: общее правило
+        # повышения освобождает машинного принципала первой ветвью, и слот
+        # повышенного уровня машинного распорядителя — ТОТ ЖЕ принципал (кейсы
+        # выпускают под `jwtAccountAdminAStepUp` и опрашивают под
+        # `jwtAccountAdminA`). Прежняя редакция объявляла церемонией ЛЮБОЙ
+        # `*StepUp` и опиралась на шапку, пересказывавшую опровергнутую запись
+        # платформы (kaname#398).
         #
-        # Значит приставки `jwtHuman` недостаточно: `*StepUp` — предъявитель, чей
-        # производитель церемония, под каким бы именем слот ни стоял.
-        # Законный близнец отличается ОДНИМ фактом: `jwtAccountAdminA` без
-        # повышения — служебная учётка, и он обязан остаться машинным.
-        for lane, key, want_ceremony in (("stepup", "jwtAccountAdminAStepUp", True),
+        # ТРИ ПОЛОСЫ, КАЖДАЯ МЕНЯЕТ ОДИН ФАКТ: человек повышенного уровня —
+        # церемония; машина повышенного уровня — машинный посев; та же машина без
+        # суффикса — машинный посев (законный близнец второй полосы).
+        for lane, key, want_ceremony in (("human-stepup", "jwtHumanCeremonyStepUp", True),
+                                         ("machine-stepup", "jwtAccountAdminAStepUp", False),
                                          ("plain", "jwtAccountAdminA", False)):
             base = tmp / f"stepup-{lane}"
             body = ('{"item":[{"name":"s","request":{"url":{"raw":'
@@ -1168,6 +2405,42 @@ def self_test() -> int:
                ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
                and ("нужен машинный посев поверхности" in out) != want_ceremony,
                out[:900])
+
+        # ── Ось 7в: КЛЮЧ ЦЕРЕМОНИИ СНИМАЕТ ПОСЕВ СВОЕЙ ПОВЕРХНОСТИ, И ТОЛЬКО ОН ─
+        #
+        # Посев церемонии (`seed_ceremony.py`) куёт предъявителя человека на
+        # собственном фронте службы; коллекция того же фронта, его читающая,
+        # препятствия «нужна церемония» больше не несёт (kaname#398). Та же
+        # коллекция при посеве, объявившем ДРУГУЮ поверхность, препятствие
+        # сохраняет: предъявитель через стенды не переносится.
+        for lane, surface_decl, lifted in (
+                ("own", "служба (собственный REST-фронт)", True),
+                ("foreign", SURFACE_EDGE, False)):
+            base = tmp / f"ceremony-credit-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"prerequest","script":{"exec":['
+                    '"pm.environment.get(\'ownRestBaseUrl\')",'
+                    '"pm.environment.get(\'jwtHumanCeremony\')"]}}]}]}')
+            t7c = _mk(base, {"cer": body},
+                      {"baseUrl": "http://edge", "ownRestBaseUrl": "https://own",
+                       "jwtHumanCeremony": "", "runId": ""})
+            fx = t7c.parent / "authz-fixtures"
+            fx.mkdir(parents=True, exist_ok=True)
+            (fx / "seed_ceremony.py").write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                "    print('jwtHumanCeremony')\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                f"    print({surface_decl!r})\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t7c, workflows=_wf(base, runs=["cer"]))
+            out = buf.getvalue()
+            _c(f"ключ церемонии, посев поверхности «{surface_decl}»: препятствие "
+               f"{'снято' if lifted else 'ОСТАЛОСЬ'}",
+               ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) != lifted, out[:900])
 
         # ── Ось 8: АДРЕС — НЕ ПОСЕВ, И ЕГО ПРОИЗВОДИТ СТЕНД ──────────────────
         #
@@ -1362,30 +2635,31 @@ def self_test() -> int:
         # ── Ось 15: КАТЕГОРИЯ A ПРИ ТРЕБОВАНИИ ЦЕРЕМОНИИ — НАХОДКА ──────────
         #
         # Ведомость сама определяет B как «нужен ЧЕЛОВЕЧЕСКИЙ предъявитель».
-        # Запись A у коллекции, читающей `*StepUp`, объявляет её переводимой
-        # машинным посевом — возможность, неисполнимую by construction.
+        # Запись A у коллекции, читающей предъявителя человека повышенного
+        # уровня, объявляет её переводимой машинным посевом — возможность,
+        # неисполнимую by construction.
         # Ведомость подаётся ЯВНО, мимо `_st_ledger`: иначе ось судила бы то же
         # правило, которым синтетическая ведомость и строится, то есть себя.
         base = tmp / "misfiled"
         stepup_body = ('{"item":[{"name":"s","request":{"url":{"raw":'
                        '"{{ownRestBaseUrl}}/x"}},'
                        '"event":[{"listen":"test","script":{"exec":['
-                       '"pm.environment.get(\'jwtAccountAdminAStepUp\')"]}}]}]}')
+                       '"pm.environment.get(\'jwtHumanCeremonyStepUp\')"]}}]}]}')
         t15 = _mk(base, {"misfiled": stepup_body},
                   {"ownRestBaseUrl": "https://localhost:9098",
-                   "jwtAccountAdminAStepUp": "", "runId": ""})
+                   "jwtHumanCeremonyStepUp": "", "runId": ""})
         wf15 = _wf(base, runs=["misfiled"])
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(t15, workflows=wf15, ledger={"misfiled": ("A", "довод")})
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("A", "довод", "")})
         _c("A при требовании церемонии — код 1", rc == 1, f"код {rc}")
         _c("и находка называет коллекцию и ключ",
            "misfiled" in err.getvalue()
-           and "jwtAccountAdminAStepUp" in err.getvalue(), err.getvalue()[:400])
+           and "jwtHumanCeremonyStepUp" in err.getvalue(), err.getvalue()[:400])
 
         # ЗАКОННЫЙ БЛИЗНЕЦ ПЕРВЫЙ: та же коллекция, категория B — молчание.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            rc = run(t15, workflows=wf15, ledger={"misfiled": ("B", "довод")})
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("B", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: та же коллекция как B — код 0", rc == 0, f"код {rc}")
 
         # ЗАКОННЫЙ БЛИЗНЕЦ ВТОРОЙ: категория A у коллекции БЕЗ церемонии —
@@ -1400,7 +2674,7 @@ def self_test() -> int:
                     "jwtAccountAdminA": "", "runId": ""})
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rc = run(t15b, workflows=_wf(base, runs=["filed-ok"]),
-                     ledger={"filed-ok": ("A", "довод")})
+                     ledger={"filed-ok": ("A", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: A без церемонии — код 0", rc == 0, f"код {rc}")
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
@@ -1438,7 +2712,7 @@ def self_test() -> int:
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             rc = run(lt, workflows=lwf,
-                     ledger={"edge-only": ("C", "довод"), "ушедшая": ("A", "довод")})
+                     ledger={"edge-only": ("C", "довод", ""), "ушедшая": ("A", "довод", "")})
         _c("запись БЕЗ коллекции роняет перепись — перечень не переживает предмет",
            rc == 1, f"код {rc}")
         _c("и находка называет запись",
@@ -1447,18 +2721,18 @@ def self_test() -> int:
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "довод")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "довод", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: ведомость сходится с деревом — перепись печатается",
            rc == 0, f"код {rc}")
 
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("Z", "довод")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("Z", "довод", "")})
         _c("категория вне закрытого словаря — находка", rc == 1, f"код {rc}")
 
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "   ")})
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "   ", "")})
         _c("категория БЕЗ довода — находка: это мнение, а не решение",
            rc == 1, f"код {rc}")
 
@@ -1470,7 +2744,7 @@ def self_test() -> int:
         # ничего не добавляла бы к выводу из адреса.
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(lt, workflows=lwf, ledger={"edge-only": ("A", "предмет службы")})
+            run(lt, workflows=lwf, ledger={"edge-only": ("A", "предмет службы", "")})
         out = buf.getvalue()
         _c("адресация и производитель напечатаны ОБЕ",
            f"адресация: {SURFACE_EDGE}" in out and "производитель: A" in out,
@@ -1480,7 +2754,7 @@ def self_test() -> int:
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(lt, workflows=lwf, ledger={"edge-only": ("C", "предмет края")})
+            run(lt, workflows=lwf, ledger={"edge-only": ("C", "предмет края", "")})
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: производитель края — расхождения ноль",
            "адресуется к краю, а производитель — служба: 0" in buf.getvalue(),
            buf.getvalue()[:900])
@@ -1489,6 +2763,300 @@ def self_test() -> int:
         _c("печатаются обе величины, а не только одна",
            "гоняется здесь:" in out and "НЕ гоняется здесь:" in out)
 
+        # ── Ось 16: У НЕГОНЯЕМОЙ КОЛЛЕКЦИИ ЕСТЬ ДЕРЖАТЕЛЬ, У ГОНЯЕМОЙ — НЕТ ─────
+        #
+        # Производитель коллекции — шаг конвейера, который её гоняет, либо
+        # ДЕРЖАТЕЛЬ в ведомости: задача, которая её прогонит. Без третьего поля
+        # «не гоняется» было концом записи: причина печаталась, а кто снимет
+        # препятствие, не было записано нигде, и долг стоял без читателя.
+        #
+        # Пара по каждой стороне, различие ровно в одном факте. Сторона первая:
+        # коллекция не гоняется, держателя нет — находка; тот же вход с
+        # держателем по форме — молчание. Сторона вторая, САМОИСТЕЧЕНИЕ: шаг её
+        # гоняет, а держатель записан — запись пережила свой предмет; тот же
+        # шаг без держателя — молчание.
+        hdir = tmp / "holder"
+        held = _mk(hdir, {"edge-only": edge}, {"baseUrl": "http://x", "runId": ""})
+        hwf_none = _wf(hdir / "none", runs=[])
+        hwf_runs = _wf(hdir / "runs", runs=["edge-only"])
+        holder = "PRO-Robotech/kaname#1 — синтетика: прогонит на своём стенде"
+        for label, wf16, entry, want_rc, want_text in (
+                ("не гоняется, держателя нет — находка",
+                 hwf_none, ("C", "довод", ""), 1, "держателя"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: не гоняется, держатель по форме — молчание",
+                 hwf_none, ("C", "довод", holder), 0, ""),
+                ("гоняется шагом, а держатель записан — запись пережила предмет",
+                 hwf_runs, ("C", "довод", holder), 1, "пережил"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: гоняется шагом, держателя нет — молчание",
+                 hwf_runs, ("C", "довод", ""), 0, ""),
+                ("держатель вне закрытой формы — находка",
+                 hwf_none, ("C", "довод", "когда-нибудь прогоним"), 1, "форм")):
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(held, workflows=wf16, ledger={"edge-only": entry})
+            _c(f"держатель: {label} (код {want_rc})",
+               rc == want_rc and (not want_text or (
+                   want_text in err.getvalue() and "edge-only" in err.getvalue())),
+               f"код {rc}; {err.getvalue()[:300]}")
+
+        # Держатель ПЕЧАТАЕТСЯ рядом с позицией и сводится по задаче: предикат
+        # задачи читается выводом переписи, а не прочтением ведомости.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(held, workflows=hwf_none, ledger={"edge-only": ("C", "довод", holder)})
+        out16 = buf.getvalue()
+        _c("строка позиции называет держателя",
+           f"держатель: {holder}" in out16, out16[-900:])
+        _c("свод по держателю назван числом",
+           "по ДЕРЖАТЕЛЮ" in out16 and "PRO-Robotech/kaname#1: 1" in out16, out16[-900:])
+        _c("негоняемые с держателем названы числом",
+           "НЕ гоняет ни один шаг: 1 — держатель назван у 1" in out16, out16[-900:])
+
+
+        # Ось 17: ПОЗИЦИИ ПРИЁМОК УРОВНЯ E (kaname#449). Позиция мельче коллекции:
+        # приёмка объявляет сквозным сценарий, и без кейса он не виден ведомости
+        # коллекций вовсе. Пара по каждой стороне, различие в одном факте.
+        pdir = tmp / "positions"
+        pn = _mk(pdir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        pwf_runs = _wf(pdir / "runs", runs=["carrier"])
+        pwf_none = _wf(pdir / "none", runs=[])
+        acc = pdir / ACCEPTANCE_REL
+        acc.mkdir(parents=True, exist_ok=True)
+        base_heads = ("**ID: SYN-01** · I + E — несётся кейсом\n"
+                      "**ID: SYN-02** · I — только интеграция\n"
+                      "**ID: SYN-03** · E — не несётся ничем\n"
+                      "**ID: SYN-05** · отрицание; близнец — SYN-01, довод словами\n")
+        (pn / "cases").mkdir(parents=True, exist_ok=True)
+        (pn / "cases" / "carrier.py").write_text(
+            '"""Модуль кейсов: несёт SYN-01."""\n# SYN-03 здесь только комментарием\nCASES = []\n',
+            encoding="utf-8")
+        hold = "PRO-Robotech/kaname#1 — синтетика: заведёт кейс"
+        pled = {"carrier": ("A", "довод", "")}
+        for label, debt, extra, want_rc, want_text in (
+                ("позиция E без кейса и без записи — находка; комментарий кейсом не считается",
+                 {}, "", 1, "позиция SYN-03"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: та же позиция записана долгом по форме — молчание",
+                 {"SYN-03": ("довод", hold)}, "", 0, ""),
+                ("запись долга позиции, которую несёт модуль, — пережила предмет",
+                 {"SYN-03": ("довод", hold), "SYN-01": ("довод", hold)}, "", 1, "несёт модуль carrier"),
+                ("запись долга позиции без уровня E — без предмета",
+                 {"SYN-03": ("довод", hold), "SYN-02": ("довод", hold)}, "", 1, "нет ни в одной приёмке"),
+                ("держатель позиции вне закрытой формы — находка",
+                 {"SYN-03": ("довод", "когда-нибудь")}, "", 1, "вне закрытой формы"),
+                ("перечень уровней в незнакомой форме — находка, а не пропуск",
+                 {"SYN-03": ("довод", hold)}, "**ID: SYN-04** · I+E — слитно\n", 1, "незнакомой форме")):
+            (acc / "synthetic.md").write_text(base_heads + extra, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt=debt)
+            _c(f"позиции: {label} (код {want_rc})",
+               rc == want_rc and (not want_text or want_text in err.getvalue()),
+               f"код {rc}; {err.getvalue()[:400]}")
+        (acc / "synthetic.md").write_text(base_heads, encoding="utf-8")
+        for label, wf17, led17, want in (
+                ("модуль гоняется шагом", pwf_runs, pled,
+                 "позиций 2 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 1"),
+                ("модуль собран, коллекцию не гоняет ни один шаг", pwf_none,
+                 {"carrier": ("A", "довод", hold)},
+                 "позиций 2 — гоняется 0 · собрана, коллекция не гоняется 1 · долг 1")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = run(pn, workflows=wf17, ledger=led17, scenario_debt={"SYN-03": ("довод", hold)})
+            _c(f"позиции: перепись числом — {label}", rc == 0 and want in buf.getvalue(),
+               f"код {rc}; {buf.getvalue()[-700:]}")
+
+        # Ось 18: ВСЕ ЗАКОННЫЕ ФОРМЫ ЗАГОЛОВКА СЦЕНАРИЯ (kaname#449, опыт J4).
+        # Приёмки пишут уровни тремя формами, выведенными обходом каталога: ID-префикс
+        # `**ID: X** · I + E — …`, жирный ID с заголовком `**X — …** · E + I` (уровни
+        # в конце строки, за ними бывает хвост) и уровни в скобках `**X (I).**`.
+        # Распознаватель, знающий одну, молчит о двух других: позиция E второй формы
+        # без кейса давала код 0. Пара по каждой форме, различие в одном факте.
+        fdir = tmp / "forms"
+        fn = _mk(fdir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        fwf = _wf(fdir / "runs", runs=["carrier"])
+        facc = fdir / ACCEPTANCE_REL
+        facc.mkdir(parents=True, exist_ok=True)
+        fheads = ("**ID: SYN-01** · I + E — форма ID-префикса\n"
+                  "**SYN-11 — несётся кейсом** · E + I\n"
+                  "**SYN-12 — не несётся ничем** · E\n"
+                  "**SYN-13 — хвост после уровней** · E · *новый, редакция 3*\n"
+                  "**SYN-14 — перечень через точку** · I · P\n"
+                  "**SYN-15 — ссылка в хвосте** · I (→ **SYN-12**)\n"
+                  "**SYN-16 — довод словами, уровней нет** (`kacho#1`)\n"
+                  "**SYN-21 (E).** Given стенд.\n"
+                  "**SYN-22 (I, управляемые часы).** Given контейнер.\n"
+                  "**SYN-23 (U).** Given модуль.\n"
+                  "**SYN-24 (RED)** пометка, а не уровни\n")
+        (fn / "cases").mkdir(parents=True, exist_ok=True)
+        (fn / "cases" / "carrier.py").write_text(
+            '"""Модуль кейсов: несёт SYN-11."""\nCASES = []\n', encoding="utf-8")
+        ftwin = {s: ("довод", hold) for s in ("SYN-01", "SYN-12", "SYN-13", "SYN-21")}
+
+        def _less(sid):
+            return {k: v for k, v in ftwin.items() if k != sid}
+
+        for label, debt, extra, want_rc, want_texts in (
+                ("вторая форма: позиция E без кейса и без записи — находка",
+                 _less("SYN-12"), "", 1, ("позиция SYN-12",)),
+                ("вторая форма: уровни с хвостом за ними — позиция E",
+                 _less("SYN-13"), "", 1, ("позиция SYN-13",)),
+                ("третья форма: уровни в скобках — позиция E",
+                 _less("SYN-21"), "", 1, ("позиция SYN-21",)),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: позиции трёх форм записаны либо несутся — молчание",
+                 ftwin, "", 0, ()),
+                ("вторая форма: запись долга позиции, которую несёт модуль, — пережила предмет",
+                 {**ftwin, "SYN-11": ("довод", hold)}, "", 1, ("несёт модуль carrier",)),
+                ("вторая форма: запись долга позиции без уровня E — без предмета",
+                 {**ftwin, "SYN-14": ("довод", hold)}, "", 1,
+                 ("позиции SYN-14", "нет ни в одной приёмке")),
+                ("вторая форма: слитный перечень уровней — незнакомая форма",
+                 ftwin, "**SYN-17 — слитно** · E+I\n", 1, ("незнакомой форме", "SYN-17")),
+                ("вторая форма: буква вне словаря уровней — незнакомая форма",
+                 ftwin, "**SYN-18 — буква вне словаря** · X\n", 1, ("незнакомой форме", "SYN-18")),
+                ("вторая форма: уровень за незнакомым разделителем — незнакомая форма, а не "
+                 "потерянный E", ftwin, "**SYN-19 — косая черта** · I / E\n", 1,
+                 ("незнакомой форме", "SYN-19")),
+                ("третья форма: слитный перечень в скобках — незнакомая форма",
+                 ftwin, "**SYN-25 (E+I).** Given\n", 1, ("незнакомой форме", "SYN-25")),
+                ("третья форма: уровень в примечании скобок — незнакомая форма",
+                 ftwin, "**SYN-26 (I, E).** Given\n", 1, ("незнакомой форме", "SYN-26")),
+                ("первая форма: буква вне словаря уровней — незнакомая форма",
+                 ftwin, "**ID: SYN-02** · X — буква вне словаря\n", 1,
+                 ("незнакомой форме", "SYN-02")),
+                # Уровень K — снаружи через край платформы (легенда приёмки
+                # account-id-may-be-supplied-at-create, kaname#549). Он сквозной, как E:
+                # позиция K без кейса и без записи — находка, а не молчание; записанная
+                # долгом — законный близнец. Различие в одном факте — записи долга.
+                ("вторая форма: позиция K без кейса и без записи — находка, а не незнакомая форма",
+                 ftwin, "**SYN-31 — через край** · K\n", 1, ("позиция SYN-31",)),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: та же позиция K записана долгом — молчание",
+                 {**ftwin, "SYN-31": ("довод", hold)}, "**SYN-31 — через край** · K\n", 0, ()),
+                ("вторая форма: K вторым в перечне — позиция",
+                 ftwin, "**SYN-32 — интеграция и край** · I + K\n", 1, ("позиция SYN-32",)),
+                ("вторая форма: буква вне словаря ВТОРОЙ за знакомым разделителем — "
+                 "незнакомая форма, а не молчание", ftwin,
+                 "**SYN-35 — вторая буква вне словаря** · I + X\n", 1,
+                 ("незнакомой форме", "SYN-35")),
+                ("первая форма: позиция K без записи — находка",
+                 ftwin, "**ID: SYN-34** · K — через край\n", 1, ("позиция SYN-34",)),
+                ("третья форма: позиция K без записи — находка",
+                 ftwin, "**SYN-33 (K).** Given край\n", 1, ("позиция SYN-33",))):
+            (facc / "synthetic.md").write_text(fheads + extra, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(fn, workflows=fwf, ledger=pled, scenario_debt=debt)
+            _c(f"формы заголовка: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:500]}")
+        (facc / "synthetic.md").write_text(fheads, encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(fn, workflows=fwf, ledger=pled, scenario_debt=ftwin)
+        fout = buf.getvalue()
+        _c("формы заголовка: перепись позиций числом по трём формам",
+           rc == 0 and "позиций 5 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 4" in fout,
+           f"код {rc}; {fout[-900:]}")
+        _c("формы заголовка: прочитанное и уровня E названы числом по каждой форме",
+           "«**ID: <ID>** · <уровни> — …» 1 · 1; «**<ID> — <заголовок>** · <уровни>» 5 · 3; "
+           "«**<ID> (<уровни>).**» 3 · 1" in fout, fout[-900:])
+
+        # Ось 19: ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, ЕСТЬ У МОДУЛЯ КЕЙСОВ (kaname#361).
+        # Держатель переутверждал полосу IBT-12, снятую вместе с зеркалом набора
+        # ключей: модуль сказал это докстрокой, ведомость — нет. Пара по каждому
+        # исходу, различие в одном факте против близнеца: названа живая полоса —
+        # молчание; снятая (она стоит только докстрокой) либо стоящая только
+        # комментарием — находка; полоса чужого семейства не судится; модуль без
+        # единого `id=` — находка о слепоте, а не молчание.
+        ldir = tmp / "lanes"
+        ln = _mk(ldir, {"carrier": own}, {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        lwf = _wf(ldir / "none", runs=[])
+        (ln / "cases").mkdir(parents=True, exist_ok=True)
+        live_mod = ('"""Модуль кейсов. SYN-02 — СНЯТА вместе с предметом."""\n'
+                    '# SYN-04 здесь только комментарием\n'
+                    'CASES = [Case(id="SYN-01-LIVE"), Case(id="SYN-03-LIVE")]\n')
+        blind_mod = 'CASES = [Case(name="SYN-01-LIVE")]\n'
+        lhold = "PRO-Robotech/kaname#1 — синтетика: переутвердит полосы "
+        for label, mod, holder, want_rc, want_texts in (
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: названы живые полосы модуля — молчание",
+                 live_mod, lhold + "SYN-01 и SYN-03", 0, ()),
+                ("названа полоса, которую модуль называет только докстрокой, — находка",
+                 live_mod, lhold + "SYN-01 и SYN-02", 1, ("полосу SYN-02", "carrier")),
+                ("названа полоса, стоящая только комментарием, — находка",
+                 live_mod, lhold + "SYN-01 и SYN-04", 1, ("полосу SYN-04",)),
+                ("полоса чужого семейства не судится — молчание",
+                 live_mod, lhold + "SYN-01 и OTHER-07", 0, ()),
+                ("модуль без единого id= при названной полосе — находка, а не молчание",
+                 blind_mod, lhold + "SYN-01", 1, ("не дал ни одного `id=`",))):
+            (ln / "cases" / "carrier.py").write_text(mod, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(ln, workflows=lwf, ledger={"carrier": ("A", "довод", holder)})
+            _c(f"полосы держателя: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:400]}")
+        (ln / "cases" / "carrier.py").write_text(live_mod, encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(ln, workflows=lwf,
+                     ledger={"carrier": ("A", "довод", lhold + "SYN-01 и OTHER-07")})
+        _c("полосы держателя: перепись называет прочитанное, названное и судимое",
+           rc == 0 and ("держателей прочитано 1 · полос названо 2 · из них судимо модулем "
+                        "кейсов 1") in buf.getvalue(), f"код {rc}; {buf.getvalue()[-900:]}")
+
+        # Ось 20: ПОЗИЦИЯ, ЧЕЙ СКВОЗНОЙ ДОМ — ДРУГОЙ РЕПОЗИТОРИЙ (kaname#416). Позицию
+        # несёт кейс набора платформы, и её прогоняет шаг конвейера там. Записью долга
+        # она не является — у неё нет задачи, которая её прогонит, — а модулем этого
+        # дерева не несётся. Запись о доме судится в обе стороны, как и долг: позиция
+        # без уровня E, позиция, которую несёт свой модуль, и позиция с двумя исходами
+        # сразу — находки; координата вне закрытой формы — тоже. Различие против
+        # законного близнеца — в одном факте.
+        (acc / "synthetic.md").write_text(base_heads, encoding="utf-8")
+        hcase = "PRO-Robotech/kacho:gateway/tests/newman/cases/synthetic.py"
+        hstep = "PRO-Robotech/kacho:.github/workflows/e2e-newman.yml «гейт — синтетика»"
+        for label, debt, home, want_rc, want_texts in (
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: позиция E записана домом другого репозитория по форме — "
+                 "молчание", {}, {"SYN-03": (hcase, hstep)}, 0, ()),
+                ("запись дома позиции, которую несёт свой модуль, — пережила предмет",
+                 {}, {"SYN-03": (hcase, hstep), "SYN-01": (hcase, hstep)}, 1,
+                 ("позиции SYN-01", "несёт модуль carrier")),
+                ("запись дома позиции без уровня E — без предмета",
+                 {}, {"SYN-03": (hcase, hstep), "SYN-02": (hcase, hstep)}, 1,
+                 ("позиции SYN-02", "нет ни в одной приёмке")),
+                ("позиция записана и долгом, и домом — исход у позиции один",
+                 {"SYN-03": ("довод", hold)}, {"SYN-03": (hcase, hstep)}, 1,
+                 ("позиция SYN-03", "исход у позиции один")),
+                ("кейс дома без приставки репозитория — находка",
+                 {}, {"SYN-03": ("gateway/tests/newman/cases/synthetic.py", hstep)}, 1,
+                 ("кейс дома позиции SYN-03", "вне закрытой формы")),
+                ("кейс дома в ЭТОМ репозитории — находка: свой модуль судится модулем",
+                 {}, {"SYN-03": ("PRO-Robotech/kaname:tests/newman/cases/synthetic.py", hstep)},
+                 1, ("кейс дома позиции SYN-03", "вне закрытой формы")),
+                ("шаг дома без файла конвейера — находка",
+                 {}, {"SYN-03": (hcase, "PRO-Robotech/kacho: «гейт — синтетика»")}, 1,
+                 ("шаг дома позиции SYN-03", "вне закрытой формы")),
+                ("шаг другого репозитория, чем кейс, — находка",
+                 {}, {"SYN-03": (hcase, "PRO-Robotech/kaname:.github/workflows/e2e-newman.yml "
+                                        "«гейт — синтетика»")}, 1,
+                 ("позиции SYN-03", "в другом репозитории, чем её кейс"))):
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt=debt,
+                         scenario_home=home)
+            _c(f"дом позиции: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:500]}")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt={},
+                     scenario_home={"SYN-03": (hcase, hstep)})
+        hout = buf.getvalue()
+        _c("дом позиции: перепись числом — позиция не в долге, а в доме другого репозитория",
+           rc == 0 and ("позиций 2 — гоняется 1 · собрана, коллекция не гоняется 0 · долг 0 · "
+                        "в доме другого репозитория 1") in hout, f"код {rc}; {hout[-900:]}")
+        _c("дом позиции: строка позиции называет кейс и шаг дома и говорит, что дом здесь "
+           "не сверялся",
+           f"SYN-03 [synthetic.md] — в доме PRO-Robotech/kacho: кейс {hcase}, шаг {hstep}" in hout
+           and "сверка с деревом дома здесь НЕ выполняется" in hout, hout[-900:])
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)

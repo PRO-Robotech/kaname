@@ -121,9 +121,11 @@ func seedUserRow(
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Адрес строки подтверждён (kaname#456, Р12): посев выдаёт только
+	// подтверждённому, и предмет проб этого файла — выбор строки, а не отметка.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())`,
 		uid, accID, externalID, email, "Bootstrap Admin", inviteStatus)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `

@@ -179,8 +179,9 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
 
-	// Четыре записи одним исходом (Р6).
-	w, err := uc.store.Writer(ctx)
+	// Четыре записи одним исходом (Р6) — транзакцией, первым оператором
+	// которой взята строка личности (`SessionSetWriter`, kaname#340).
+	w, err := uc.store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}

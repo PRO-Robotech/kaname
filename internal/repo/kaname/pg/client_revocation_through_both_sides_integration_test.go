@@ -116,7 +116,7 @@ func TestF2_32_RevocationReachesBothIssuanceAndPresentation(t *testing.T) {
 		for _, cause := range causes {
 			t.Run(string(kind)+"/"+cause.name, func(t *testing.T) {
 				f := newAssertionFixture(t)
-				rig := newIssuanceRig(t)
+				rig := newIssuanceRig(t, f.pool)
 				revocations := kanamepg.NewMintedTokenRevocationRepo(f.pool)
 				h := newIntrospectAuthority(rig, revocations)
 
@@ -177,7 +177,7 @@ func TestF2_32_UnavailableRevocationAuthorityRefuses(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newAssertionFixture(t)
-	rig := newIssuanceRig(t)
+	rig := newIssuanceRig(t, f.pool)
 
 	clientID, _ := seedAssertionClientOfKind(t, f, domain.AssertionClientUser)
 	row, err := f.repo.ResolveAssertionClient(ctx, clientID)
@@ -232,11 +232,11 @@ func seedAssertionClientOfKind(t *testing.T, f assertionFixture, kind domain.Ass
 	switch kind {
 	case domain.AssertionClientUser:
 		clientID = "uoc_mmmmmmmmmmmmmmmmm"
-		f.seedUserClient(t, clientID, "kaname-usr-cutoff", testPublicKeyPEM, "ES256", nil)
+		f.seedUserClient(t, clientID, testPublicKeyPEM, "ES256", nil)
 		return clientID, f.user
 	case domain.AssertionClientServiceAccount:
 		clientID = "soc_mmmmmmmmmmmmmmmmm"
-		f.seedSAClient(t, clientID, "kaname-sak-cutoff", testPublicKeyPEM, "ES256")
+		f.seedSAClient(t, clientID, testPublicKeyPEM, "ES256")
 		return clientID, f.sva
 	default:
 		t.Fatalf("вид клиента вне закрытого словаря: %q", kind)

@@ -10,14 +10,18 @@ devops, архитектор: все, что нужно, чтобы поднят
 
 ## Capability map
 
-`kaname` поднимает 4 сетевых слушателя (порты конфигурируются):
+`kaname` поднимает сетевые слушатели (порты конфигурируются; полный перечень с назначением —
+[`33-runbook.md`](33-runbook.md), раздел «Назначение»):
 
 | Слушатель      | Порт  | Протокол  | Назначение                                                                       |
 |----------------|-------|-----------|----------------------------------------------------------------------------------|
 | public-gRPC    | 9090  | gRPC+TLS  | tenant-facing RPC: Account/Project/User/SA/Group/Role/AccessBinding/Conditions/Authorize/PermissionCatalog/SAKey/Operation |
 | internal-gRPC  | 9091  | gRPC+mTLS | admin/peer-call RPC: InternalIAM/InternalCluster/InternalUser/InternalOperations/InternalSessionRevocations |
-| hooks-HTTP     | 9092  | HTTP      | Ory Kratos provision-хук + Ory Hydra token/refresh OAuth2-хуки (cluster-internal) |
-| metrics-HTTP   | 9095  | HTTP      | Prometheus `/metrics` (cluster-internal)                                          |
+| metrics-HTTP   | 9095  | HTTP      | Prometheus `/metrics`, `/healthz`, `/readyz` (cluster-internal)                   |
+| issuing-HTTP   | 9096  | HTTP+TLS  | поверхность выдачи: `/iam/token`, `/iam/v1/token`, `/iam/v1/authorize`, метаданные обнаружения |
+| jwks-HTTP      | 9097  | HTTP+TLS  | публикатор набора ключей проверки и авторитет отзыва (cluster-internal)           |
+| login-lane     | 9100  | HTTP+mTLS | полоса входа; адрес объявляет профиль, вызывающий — только край                   |
+| own-REST       | 9098 / 9099 | HTTP+TLS | собственные REST-фронты, публичный и внутренний; адрес объявляет посадка   |
 
 Плюс `api-gateway` (внешний HTTP) транслирует public-gRPC в REST
 (`/iam/v1/...`); в локальном стенде доступен через port-forward на `18080`.
@@ -30,7 +34,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 ### Ядро ресурсной модели (Account / Project / IAM-сущности)
 - [`01-account.md`](01-account.md) — Account (top-level tenant; глобально-уникальное имя; owner_user_id RESTRICT).
 - [`02-project.md`](02-project.md) — Project (child Account-а; Move через atomic CAS; уникальность per-Account).
-- [`03-user.md`](03-user.md) — User (mirror Ory Kratos identity; Invite-flow; immutable external_id).
+- [`03-user.md`](03-user.md) — User (одна личность на платформу; Invite-flow; immutable external_id).
 - [`04-service-account.md`](04-service-account.md) — ServiceAccount (машинная identity).
 - [`05-sa-keys.md`](05-sa-keys.md) — SA Keys (ключевая пара и строка реестра; OpsResponseRedactor; ротация Delete+Create). `client_secret` как вида удостоверения в системе нет.
 - [`06-group.md`](06-group.md) — Group + GroupMember (триггер `group_members_member_exists_trg`).

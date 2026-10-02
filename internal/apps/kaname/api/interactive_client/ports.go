@@ -30,18 +30,31 @@ type clientRepo interface {
 	// produced by the same code — a caller cannot re-derive a cursor from a page
 	// it has already truncated.
 	List(ctx context.Context, limit int, pageToken, nameFilter string) ([]domain.InteractiveClient, string, error)
-	Insert(ctx context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error)
+	// Insert records the row AND, in the same statement, the verification value
+	// of the client's secret with the moment it was set (kaname#405, Р5). The
+	// zero material means "no secret" (a client with method `none`). There is no
+	// second writer of the material: a separate write after the insert would
+	// open a window in which a client with a secret method exists and nothing
+	// can be presented for it.
+	Insert(ctx context.Context, c domain.InteractiveClient, material domain.LoginVerifier) (domain.InteractiveClient, error)
 	Update(ctx context.Context, c domain.InteractiveClient) (domain.InteractiveClient, error)
 	Delete(ctx context.Context, id domain.InteractiveClientID) (domain.InteractiveClient, bool, error)
 }
 
-// providerClients — the identity provider's client-registration port.
+// ProviderClients — порт заведения и снятия клиента интерактивного входа.
 //
 // WHY IT IS A PORT AND NOT A DIRECT CALL. iam is the single facade to the
 // provider (core rule #16); expressing the dependency here keeps the use-case
 // testable without a live provider and keeps the provider's HTTP shape out of
-// the business layer. The adapter is *clients.HydraAdminClient.
-type providerClients interface {
+// the business layer.
+//
+// ИМЕНОВАН НАРУЖУ, и это не косметика: исполнитель собирается композиционным
+// корнем, а не use-case, — наш собственный реестр
+// (`*pg.OwnInteractiveClientProvider`). Прежде исполнителей было два и
+// выбирала их посадка (kaname#313); зеркало чужого реестра снято вместе с
+// посадкой внешнего поставщика (kaname#363), а порт остался границей: бизнес-слой
+// не знает, чем исполняется заведение клиента.
+type ProviderClients interface {
 	Register(ctx context.Context, in ProviderClientSpec) (ProviderClient, error)
 	Deregister(ctx context.Context, providerClientID string) error
 }
@@ -62,9 +75,22 @@ type ProviderClientSpec struct {
 }
 
 // ProviderClient — what the provider gives back.
+//
+// The triple «method ⟺ material ⟺ secret» must agree: a secret method
+// (`client_secret_basic`, `client_secret_post`) comes with BOTH a secret and its
+// verification value, `none` with neither. The use-case refuses any other
+// combination before the row is written (`secretMaterialAgrees`): the schema
+// holds only one direction of it on purpose (a client of an external provider
+// has no material in our row).
 type ProviderClient struct {
 	ClientID                string
 	GrantTypes              []string
 	TokenEndpointAuthMethod string
 	Audiences               []string
+	// Secret — the secret, minted by the registry, shown once in the answer of
+	// the call. A carrier and not a string: see client_secret.go.
+	Secret ClientSecret
+	// SecretVerifier — the verification value of Secret; it is what the row
+	// keeps. Zero — no secret.
+	SecretVerifier domain.LoginVerifier
 }

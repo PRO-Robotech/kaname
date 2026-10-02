@@ -17,7 +17,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -182,7 +181,7 @@ func (w *writeTx) EmitReconcileEvent(ctx context.Context, eventType, objectType,
 // ошибкой: отказ по частоте обязан быть неотличим для вызывающего от ответа в
 // норме (Р9), и различать их вправе только счётчик исходов у use-case.
 func (w *writeTx) EmitInviteMail(ctx context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
-	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, intent.To, intent.Limit)
+	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowInvite, intent.To, intent.Limit)
 	if err != nil {
 		return false, err
 	}
@@ -209,7 +208,12 @@ func (w *writeTx) EmitInviteMail(ctx context.Context, intent outboxtypes.InviteM
 //
 // Непозитивное ограничение — ОТКАЗ, а не «сколько угодно»: значения «без
 // ограничения» у ручки не существует (MAIL-43), и здесь оно не изобретается.
-func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit outboxtypes.InviteMailRateLimit) (bool, error) {
+//
+// Окно — у ПАРЫ «вид письма, адрес» (kaname#456): приглашение и восстановление
+// списываются каждое своим окном под той же величиной ограничения — одно
+// ограничение на каждый наш глагол, отправляющий письмо (Р22), и письмо одного
+// вида не выедает окно другого.
+func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, kind mailWindowKind, to string, limit outboxtypes.InviteMailRateLimit) (bool, error) {
 	if limit.MaxPerWindow <= 0 || limit.Window <= 0 {
 		return false, fmt.Errorf(
 			"invite mail rate limit: max-per-window=%d window=%s — both must be positive; there is "+
@@ -225,9 +229,9 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit o
 		windowSeconds = 1
 	}
 	tag, err := tx.Exec(ctx, `
-		INSERT INTO invite_mail_windows AS w (recipient, window_started_at, sent, updated_at)
-		VALUES ($1, now(), 1, now())
-		ON CONFLICT (recipient) DO UPDATE
+		INSERT INTO invite_mail_windows AS w (kind, recipient, window_started_at, sent, updated_at)
+		VALUES ($4, $1, now(), 1, now())
+		ON CONFLICT (kind, recipient) DO UPDATE
 		   SET window_started_at = CASE
 		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
 		           THEN now() ELSE w.window_started_at END,
@@ -238,34 +242,21 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit o
 		 WHERE CASE
 		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
 		           THEN 1 ELSE w.sent + 1 END <= $2`,
-		recipient, limit.MaxPerWindow, windowSeconds)
+		recipient, limit.MaxPerWindow, windowSeconds, string(kind))
 	if err != nil {
 		return false, mapErr(err, "", recipient)
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-// InsertRecoveryCompletion — idempotency-gate INSERT on THIS writer-tx
-// (recovery_completions, migration 0015). ON CONFLICT DO NOTHING
-// + backstop SELECT → (stored row, inserted). PK row-lock serializes concurrent
-// deliveries of one recovery_jti.
-func (w *writeTx) InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return insertRecoveryCompletionTx(ctx, w.tx, rc)
-}
+// mailWindowKind — вид письма в ключе окна частоты: словарь ограничения
+// `invite_mail_windows_kind_check` (миграция `20260927190000`).
+type mailWindowKind string
 
-// UpsertUserTokenRevokeAll — per-user monotonic revoke-all cutoff on THIS
-// writer-tx (user_token_revocations, migration 0012). Reuses the canonical
-// GREATEST upsert (single source of truth with the pool-scoped repo) so the
-// cutoff commits atomically with the recovery audit event (запрет #10).
-func (w *writeTx) UpsertUserTokenRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
-	_, err := w.tx.Exec(ctx, upsertRevokeAllSQL,
-		string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy),
-	)
-	if err != nil {
-		return mapErr(err, "", string(u.UserID))
-	}
-	return nil
-}
+const (
+	mailWindowInvite   mailWindowKind = "invite"
+	mailWindowRecovery mailWindowKind = "recovery"
+)
 
 // AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.
 // The key is passed as a bind parameter (hashtext maps it to the int4 lock key),

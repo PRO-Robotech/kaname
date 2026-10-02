@@ -33,7 +33,16 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
+  Poll hits /operations/{id} on the service's own front (iop* → kaname).
+
+ГДЕ ГОНЯЕТСЯ (e2e-flow.md §7а; kaname#415). Производитель каждого утверждения —
+служба: CRUD роли и её операций — её глаголы, а пин отказа — `md.scope` СВОЕЙ
+двери (`assert_unscoped_rejected`, `assert_scoped_authz_deny`, коммит #50), тогда
+как `md.resource` ставит только край и здесь не читается. Поэтому шаги идут на
+собственный публичный фронт (`ownRestBaseUrl`, `address_own_front` в конце
+модуля), и гоняет модуль задание `stand` процесса `e2e-newman.yml`. Все ключи
+окружения пишет посев автономного стенда
+(`tests/authz-fixtures/seed_own_stand.py --minted-keys`).
 
 Case IDs follow the IAM-ROL-<RPC>-<CLASS>[-detail] scheme.
 
@@ -874,8 +883,18 @@ CASES.append(Case(
 # на объекте `iam_role`; у типа `iam_role` в модели нет ни каскада от кластера, ни
 # wildcard — только прямая выдача и `super_admin: admin from account`. У системной роли
 # аккаунта нет вовсе (`account_id` пуст), значит вторая ветка недостижима, а прямой выдачи
-# у `jwtAccountAdminA` нет. Отказ терминальный и выносится краем: сервис не набирается,
-# и его собственный страж «System role is read-only» на этом пути НЕ исполняется.
+# у `jwtAccountAdminA` нет. Отказ терминальный и выносится рубежом прав самой службы
+# (`internal/authzguard`) ДО обработчика, и её страж «System role is read-only» на этом
+# пути НЕ исполняется.
+#
+# ДЕЙСТВИЕ ОТКАЗ НАЗЫВАЕТ В ДЕТАЛЯХ, А НЕ В ТЕКСТЕ. Текст отказа службы дословный
+# «permission denied» на каждом отказе (`internal/authzguard/deny_details.go`: различимый
+# текст и есть оракул существования), а действие и ярус несёт `ErrorInfo.metadata`. Здесь
+# стояло вхождение `iam.roles.update` в `message` — утверждение, написанное против края, и
+# на собственном фронте оно падало на верном ответе (job 108572398281, сборка 435). Пин
+# теперь общий дискриминатор `assert_scoped_authz_deny`: действие плюс ярус `resource`,
+# потому что строка каталога `RoleService/Update` спрашивает `v_update` на объекте
+# `iam_role`, а `scopeTier()` сводит такой объект в ярус `resource`.
 #
 # Сам страж покрыт отдельно и правильно — `IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG` идёт под
 # `jwtBootstrap`, действительно доходит до сервиса и пинит точный текст. Прежний заголовок
@@ -883,7 +902,7 @@ CASES.append(Case(
 # все три исхода — включая приём обновления системной роли.
 CASES.append(Case(
     id="IAM-ROL-UP-NEG-SYSTEM-NO-PATH",
-    title="Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the edge "
+    title="Update system role as a tenant-tier subject → 403 PERMISSION_DENIED at the service's door "
           "(immutability itself is pinned by IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG under jwtBootstrap)",
     classes=["NEG", "AUTHZ"],
     priority="P1",
@@ -895,10 +914,7 @@ CASES.append(Case(
             body={"description": "trying to update system role", "updateMask": "description"},
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_status(403),
-                *assert_grpc_code(7, "PERMISSION_DENIED"),
-                "pm.test('отказ называет действие', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.roles.update'));",
+                *assert_scoped_authz_deny("iam.roles.update", "resource"),
                 # Отказ не должен раскрывать, что роль системная: это свойство объекта,
                 # а вызывающему нечего о нём знать без доступа.
                 "pm.test('отказ не раскрывает свойства роли', () => "
@@ -1371,7 +1387,18 @@ CASES.append(Case(
         ),
         poll_operation_until_done(),
         assert_op_success(),
+        # ОКНО ПРАВ НА СВЕЖЕЙ РОЛИ ЗАКРЫВАЕТ ЧТЕНИЕ ТОГО ЖЕ ПЕРЕЧНЯ БЕЗ МАРКЕРА, а не
+        # повтор отрицания (kaname#393): цель проверки прав — сама роль, и до
+        # материализации её прав владельца шлюз ответил бы 403/404 вместо 400
+        # предмета. Отрицание ниже уходит один раз и читается с первого ответа.
         retry_until_authorized(Step(
+            name="lsop-warm-read",
+            method="GET",
+            path="/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10",
+            auth="jwtAccountAdminA",
+            test_script=[*assert_status(200)],
+        ), retry_on=(403, 404)),
+        Step(
             name="lsop-bad-token",
             method="GET",
             path="/iam/v1/roles/{{lsopTokRoleId}}/operations?pageSize=10&pageToken=not-a-real-token",
@@ -1402,7 +1429,7 @@ CASES.append(Case(
                 "  pm.expect(fields, JSON.stringify(j)).to.include('page_token');",
                 "});",
             ],
-        ), retry_on=(403, 404)),
+        ),
         Step(name="cleanup-lsop-role", method="DELETE", path="/iam/v1/roles/{{lsopTokRoleId}}",
              auth="jwtAccountAdminA", test_script=[*save_from_response("j.id", "opId")]),
         poll_operation_until_done(required=False),
@@ -1522,6 +1549,15 @@ CASES.append(Case(
 # (feed-gate reversed — iam.role/user/serviceAccount/group/accessBinding are
 # label-selectable, materialized iam-direct same-DB from own-table labels).
 # verifies: a matchLabels rule on an iam content type (iam.role) is accepted on Create.
+#
+# ГЛАГОЛ — ЖИВОЙ ГЛАГОЛ ТИПА. Здесь стоял `get`: его сняли с `iam.role` вместе с
+# отношением без читателя (kacho#1922, миграция
+# 20260914120000_role_read_relation_leaves_the_catalog), и операция отвечала
+# «verbs: get is not a live verb of resource role» (code 9, REFERENCE_MISSING, job
+# 108572398281, сборка 435). Предмет кейса — приём matchLabels на типе iam, а не выбор
+# глагола; живые пообъектные глаголы типа — `list`, `update`, `delete`, и `list` —
+# тот, которым поимённо читается роль. Та же правка и та же причина — у близнеца
+# RBACLBL-IAMTYPE-ACCEPTED (`iam-rbac-rules-labels.py`), и на том же стенде он зелёный.
 CASES.append(Case(
     id="IAM-ROL-CR-RULES-FEEDGATE-IAMROLE-OK",
     title="Create custom role with matchLabels on iam content type (iam.role) → Operation succeeds (feed-gate reversed)",
@@ -1535,7 +1571,7 @@ CASES.append(Case(
             body={
                 "accountId": "{{accountAId}}",
                 "name": "feedgate_iamrole_{{runId}}",
-                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["get"],
+                "rules": [{"module": "iam", "resources": ["role"], "verbs": ["list"],
                            "matchLabels": {"tier": "gold"}}],
             },
             auth="jwtAccountAdminA",
@@ -1734,7 +1770,7 @@ CASES.append(Case(
 # RBAC rules model: rules[] is the only writable policy surface; the compiled
 # `permissions` field is OUTPUT-only (empty/absent on the public Get/List
 # projection) and is REJECTED if supplied to Create. Black-box through
-# api-gateway. Do not weaken assertions.
+# the service's own front. Do not weaken assertions.
 # ===========================================================================
 
 
@@ -1945,11 +1981,10 @@ CASES.append(Case(
 #
 # The case hard-expected 400 INVALID_ARGUMENT, i.e. that the request reaches the
 # backend's scope validation. It does not, and by design: with no scope in the body
-# the gateway scope_extractor has nothing to resolve for the anti-BOLA check, so it
-# fail-closes on the unscoped anchor `account:*` FIRST (403 AUTHZ_DENIED,
-# `no authorization path to the resource`) — the platform-wide authz-before-
-# validation ordering (security.md), the same one the vpc/nlb/compute/storage suites
-# already encode via assert_unscoped_rejected.
+# the door's scope extractor has nothing to resolve for the anti-BOLA check, so it
+# fail-closes on the unscoped anchor FIRST (403 AUTHZ_DENIED) — the platform-wide
+# authz-before-validation ordering (security.md). Both doors order it this way; on
+# the service's own front the pinned tier is `md.scope = account`.
 #
 # So: tolerate 400 OR 403 — but PIN the refusal. A bare "403 or 400" would also be
 # satisfied by a permission-catalog miss or a malformed body, which is exactly the
@@ -2100,3 +2135,9 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

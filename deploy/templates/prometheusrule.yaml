@@ -41,7 +41,7 @@
 экранировано: без экранирования helm вычислил бы его сам и отказал на
 неизвестной переменной.
 */}}
-{{- if .Values.alertRules.enabled }}
+{{- if include "kaname-svc.blockEnabled" (list $ "alertRules") }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -115,14 +115,6 @@ spec:
           annotations:
             summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
 
-        - alert: KanameProviderMirrorUnsampled
-          # Ноль зеркал — цель, ради которой ряд заведён. Незаконно НЕ ЗНАТЬ, ноль
-          # это или неснятый замер: этот ноль открывает необратимое снятие компонента.
-          expr: increase(kaname_provider_mirror_samples_total{outcome="ok"}[10m]) == 0
-          for: 10m
-          annotations:
-            summary: "замер окна прежнего издателя не идёт — kaname_provider_mirror_rows перестал что-либо утверждать"
-
         - alert: KanameReadinessDependencyUnready
           expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
           for: 5m
@@ -136,38 +128,14 @@ spec:
           annotations:
             summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
 
-{{- $authn := .Values.authn | default dict }}
-{{- if eq $authn.identityProvider "external" }}
-        # ПРАВИЛА ПОЛОСЫ ВНЕШНЕГО ПОСТАВЩИКА — ТОЛЬКО ПОД `authn.identityProvider:
-        # external` (задача #210). Под `own` хуков поставщика нет by construction:
-        # тишина на них штатна, и правило о тишине звонило бы ВЕЧНО. Порог,
-        # срабатывающий на штатном состоянии, перестают читать — и вместе с ним
-        # теряют настоящую тревогу там, где она нужна. Посадка выбирает полосу,
-        # полоса — правила; профиль без посадки не получает ни тех, ни других.
-        - alert: KanameAuthnHooksSilent
-          # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
-          expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
-          for: 30m
-          annotations:
-            summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
-
-        - alert: KanameAuthnHookRefused
-          expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
-          for: 15m
-          annotations:
-            summary: "хук {{ "{{ $labels.route }}" }} отвергает обращения поставщика — провязка на его стороне неверна"
-
-        - alert: KanameAuthnHookFailing
-          expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
-          annotations:
-            summary: "хук {{ "{{ $labels.route }}" }} не смог ответить — вход человека отказывает"
-{{- end }}
-{{- if eq $authn.identityProvider "own" }}
-        # ПРАВИЛА СОБСТВЕННОЙ ПОЛОСЫ ВХОДА — ТОЛЬКО ПОД `own` (задача #210).
+        # ПРАВИЛА СОБСТВЕННОЙ ПОЛОСЫ ВХОДА (задача #210). Прежде они стояли под
+        # ключом посадки (`own`), а рядом — правила хуков внешнего поставщика под
+        # «не own»; посадка у службы одна, ключ снят (kaname#363), и правила
+        # полосы входа везёт каждый профиль, а правил хуков нет ни у одного.
         # Правила о ТИШИНЕ здесь нет намеренно: час без единого входа у небольшой
         # установки ночью — штатное состояние, и порог на нём перестали бы читать.
-        # Звонят отказы НАШЕЙ стороны, у которых производитель есть только на этой
-        # посадке: человек получает один и тот же отказ, причина видна лишь здесь.
+        # Звонят отказы НАШЕЙ стороны: человек получает один и тот же отказ,
+        # причина видна лишь здесь.
         - alert: KanameLoginLaneFailing
           expr: |
             sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
@@ -183,7 +151,6 @@ spec:
           for: 5m
           annotations:
             summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
-{{- end }}
 
         - alert: KanameExpiredCredentialReclaimStalled
           # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
@@ -200,6 +167,13 @@ spec:
           annotations:
             summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
 
+        - alert: KanameSigningKeySweeperSilent
+          # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
+          expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+          for: 30m
+          annotations:
+            summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"
+
         - alert: KanameClientTokenRefusalRate
           expr: |
             sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
@@ -209,9 +183,9 @@ spec:
             summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
 
         - alert: KanameClientTokenIssuanceBroken
-          # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+          # Отказы НАШЕЙ стороны: реестр, склад однократности, склад отсечек отзыва, подписант.
           expr: |
-            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|revocation-check-failed|issuance-failed"}[10m])) > 0
           for: 5m
           annotations:
             summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"

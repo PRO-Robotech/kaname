@@ -1,25 +1,30 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package main — single-purpose binary `kaname`.
-// Этот binary обслуживает только `serve` (gRPC API + internal endpoint);
-// миграции — отдельный binary `cmd/migrator` (cobra-based).
+// Package main — binary `kaname`.
+// Подкоманд три: `serve` (gRPC API + internal endpoint; она же — умолчание),
+// `signing-key` — жизненный цикл ключа подписи, достижимый оператором
+// (signing_key_command.go, #314), и `second-factor-key` — переобёртка секретов
+// второго фактора под первый ключ перечня (second_factor_key_command.go,
+// #259). Миграции — отдельный binary `cmd/migrator`.
 //
 // Thin entry-point. Responsibilities кратко: загрузить config, выбрать
-// subcommand (только `serve` поддерживается), передать управление в
-// runServe (см. serve.go). Все реальное wiring живет в:
+// subcommand, передать управление в runServe (см. serve.go), в
+// runSigningKeyCommand либо в runSecondFactorKeyCommand. Все реальное wiring живет в:
 //   - serve.go — lifecycle (pools, listeners, parallel.ExecAbstract, shutdown)
 //   - wiring.go — composition (services struct + builders)
 //   - grpc_register.go — public/internal RPC registration
-//   - hooks_mux.go — HTTP hooks mux (Hydra token/refresh)
 //   - env.go — env-helpers (DSN mask, FGA timeouts)
 //   - listeners.go / governance_wiring.go /
 //     wiring.go — phase-specific wiring
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/PRO-Robotech/corelib/observability"
 
@@ -32,7 +37,6 @@ import (
 const configPathEnv = "KANAME_CONFIG_PATH"
 
 func main() {
-	// kaname — single-purpose binary.
 	// Миграции вынесены в отдельный `cmd/migrator` (cobra-based).
 
 	// Bootstrap logger for the pre-config phase: config.Load/Validate run before
@@ -65,11 +69,25 @@ func main() {
 		switch os.Args[1] {
 		case "serve":
 			// no-op: продолжаем в runServe
+		case signingKeyCommandName:
+			// Команда оператора идёт ПОСЛЕ той же загрузки и того же стража
+			// настройки, что служба: ключ меняет процесс, настроенный как она.
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+			code := runSigningKeyCommand(ctx, cfg, os.Args[2:], os.Stdout, bootLog)
+			stop()
+			os.Exit(code)
+		case secondFactorKeyCommandName:
+			// Та же загрузка и тот же страж настройки, что у службы: секреты
+			// переобёртывает процесс, настроенный как она, тем же перечнем.
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+			code := runSecondFactorKeyCommand(ctx, cfg, os.Args[2:], os.Stdout, bootLog)
+			stop()
+			os.Exit(code)
 		case "migrate":
 			bootLog.Error("`kaname migrate ...` is not supported — use the separate binary `kaname-migrator {up|down|status}`")
 			os.Exit(1)
 		default:
-			bootLog.Error("unknown command (this binary only serves the API; migrations live in `kaname-migrator`)",
+			bootLog.Error("unknown command (commands: `serve`, `signing-key`, `second-factor-key`; migrations live in `kaname-migrator`)",
 				slog.String("command", os.Args[1]))
 			os.Exit(1)
 		}

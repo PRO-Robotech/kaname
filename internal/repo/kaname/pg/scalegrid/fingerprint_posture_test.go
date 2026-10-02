@@ -163,8 +163,8 @@ func buildPostureTree(t *testing.T, standalone bool, verdictSource string) strin
 		}
 	}
 	writeFile(t, filepath.Join(inside(verdictDir), "query.go"), verdictSource)
-	writeFile(t, filepath.Join(inside(gridDir), "fingerprint.go"), "package scalegrid\n\nfunc fp() int { return 1 }\n")
-	writeFile(t, filepath.Join(inside(gridDir), "report.go"), "package scalegrid\n\nfunc rep() int { return 2 }\n")
+	// Оснастка — ВЫВЕДЕННАЯ из объявления, а не выписанная: см. writeScaffolding.
+	writeScaffolding(t, inside)
 	writeFile(t, filepath.Join(inside(gridDir), "grid.go"),
 		"package scalegrid\n\nconst gridReport = \"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt\"\n\nfunc grid() string { return gridReport }\n")
 	writeFile(t, filepath.Join(inside(migrateDir), "0001_initial.sql"),

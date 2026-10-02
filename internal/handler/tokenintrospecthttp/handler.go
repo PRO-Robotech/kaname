@@ -32,13 +32,8 @@ package tokenintrospecthttp
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -51,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/httpbody"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/publishedkey"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
@@ -72,14 +68,14 @@ type KeySetSource interface {
 	PublishedSet(ctx context.Context) ([]domain.PublishedKey, error)
 }
 
-// RevocationReader — хранилище отзывов субъектов.
+// RevocationReader — хранилище отзывов: отсечки по ключам и принадлежность
+// выпуска семейству.
 //
-// Отвечает «с какого момента токены субъекта недействительны». Отсутствие
-// записи — законный ответ «отзыва нет», а НЕ ошибка: пустое обязано означать
-// пусто.
-type RevocationReader interface {
-	RevokedBefore(ctx context.Context, subject string) (time.Time, bool, error)
-}
+// ТОТ ЖЕ порт, что у правила (`tokenrevocation.Reader`), а не своя копия:
+// копия с одной половиной порта собиралась бы, отвечая только об отсечках, и
+// авторитет — место, куда край идёт на пути запроса за нашим токеном, —
+// принимал бы выпуск отозванного семейства до его срока (kaname#319).
+type RevocationReader = tokenrevocation.Reader
 
 // Config — настройка авторитета.
 type Config struct {
@@ -203,10 +199,6 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("key set: %w", err)
 	}
-	byKID := make(map[string]domain.PublishedKey, len(keys))
-	for _, k := range keys {
-		byKID[string(k.KID)] = k
-	}
 
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(
@@ -220,30 +212,18 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 		jwt.WithLeeway(tokenpolicy.ClockSkew),
 		jwt.WithTimeFunc(h.cfg.Clock),
 	)
-	tok, err := parser.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		if !domain.ValidKeyIDForm(kid) {
-			return nil, fmt.Errorf("key id has illegal form")
-		}
-		pub, ok := byKID[kid]
-		if !ok {
-			return nil, fmt.Errorf("key id does not resolve")
-		}
-		// Алгоритм заголовка СВЕРЯЕТСЯ с закреплённым за найденным ключом;
-		// заголовок алгоритм не выбирает.
-		if t.Method.Alg() != string(pub.Algorithm) {
-			return nil, fmt.Errorf("header algorithm does not match the key")
-		}
-		// Параметр, помеченный отправителем обязательным к пониманию, мы обязаны
-		// либо исполнить, либо отвергнуть токен целиком (RFC 7515 §4.1.11).
-		// Обратная сторона того же требования — НЕ помеченное неизвестное
-		// игнорируется (RFC 7519, EID 8060); на этом держится совместимость,
-		// поэтому прочие неизвестные поля разбор молча пропускает.
-		if ok, name := tokenpolicy.CriticalHeadersUnderstood(critHeaders(t.Header)); !ok {
-			return nil, fmt.Errorf("critical header %q is not understood", name)
-		}
-		return parsePublicKey(pub.PublicKeyPEM)
-	})
+	// Ключ проверки выбирает правило набора (`publishedkey`) — то же, что у
+	// читателя предъявленного: форма `kid`, ключ по `kid`, алгоритм,
+	// закреплённый за ключом (заголовок его только СВЕРЯЕТ), параметры,
+	// помеченные обязательными к пониманию (RFC 7515 §4.1.11; непомеченные
+	// незнакомые игнорируются, RFC 7519, EID 8060), открытая половина.
+	tok, err := publishedkey.Parse(parser, raw, claims, publishedkey.SetLookup(keys))
+	if errors.Is(err, publishedkey.ErrUnavailable) {
+		// Ключ ИЗ НАШЕГО набора не разобрался — наша поломка, а не суждение о
+		// токене: спрашивающий получает отказ, по которому закрывается сам, а
+		// ряд «ответить не смогли» растёт вместо ряда «недействителен».
+		return false, fmt.Errorf("key set: %w", err)
+	}
 	if err != nil || !tok.Valid {
 		// Токен, за который поручиться нельзя, недействителен. Это СУЖДЕНИЕ,
 		// а не сбой: спрашивающий получил ответ.
@@ -265,6 +245,10 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 	// Токен без отметки выпуска правило считает отозванным: он не сопоставим ни с
 	// какой отсечкой, и принять его значило бы завести материал, который отозвать
 	// нечем.
+	//
+	// Отзыв СЕМЕЙСТВА выпуска правило судит тем же вызовом (kaname#319): край
+	// спрашивает о нашем токене ровно здесь, и отдельного вопроса о семействе он
+	// не задаёт.
 	revoked, err := tokenrevocation.Revoked(ctx, h.cfg.Revocations, claims)
 	if err != nil {
 		// Недоступность источника отсечек НЕ ЕСТЬ «не отозван»: это третий
@@ -275,23 +259,6 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 		return false, nil
 	}
 	return true, nil
-}
-
-func parsePublicKey(pemStr string) (crypto.PublicKey, error) {
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		return nil, fmt.Errorf("public half is not PEM")
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("public half does not parse")
-	}
-	switch pub.(type) {
-	case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-		return pub, nil
-	default:
-		return nil, fmt.Errorf("unsupported public key type")
-	}
 }
 
 // clientCertVerified отвечает, предъявил ли пир сертификат, ПРОВЕРЕННЫЙ
@@ -306,33 +273,6 @@ func writeJSON(w http.ResponseWriter, code int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
-}
-
-// critHeaders приводит `crit` к перечню имён.
-//
-// Разбор отдаёт заголовок как произвольный JSON, поэтому годятся ровно два вида:
-// список строк и его отсутствие. Всё прочее — не перечень имён, и принимать по
-// нему решение нельзя; такой вход даёт одно ЗАВЕДОМО неизвестное имя, то есть
-// отказ. Молчаливый пропуск здесь означал бы «параметр помечен обязательным, а
-// мы не разобрали его форму и приняли токен».
-func critHeaders(h map[string]any) []string {
-	raw, ok := h["crit"]
-	if !ok {
-		return nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return []string{"<crit is not a list>"}
-	}
-	out := make([]string, 0, len(list))
-	for _, v := range list {
-		name, ok := v.(string)
-		if !ok {
-			return []string{"<crit entry is not a string>"}
-		}
-		out = append(out, name)
-	}
-	return out
 }
 
 // DeclaredDeviations — обязательные проверки, которых интроспекция НЕ исполняет,

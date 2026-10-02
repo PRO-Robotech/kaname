@@ -84,6 +84,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
@@ -165,7 +166,7 @@ func (f *ACRFloor) allow(ctx context.Context, fullMethod string) error {
 	}
 	// 3. No acr requirement for this RPC — pass.
 	required := f.requiredACRMin(fullMethod)
-	if grpcsrv.ACRRank(required) == 0 {
+	if acrlevel.Rank(required) == 0 {
 		return nil
 	}
 	// 4. Production + acr_min > 0 — hand the inputs to THE shared rule.

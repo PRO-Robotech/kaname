@@ -42,11 +42,30 @@ func (SyncDispatcher) Dispatch(reqCtx context.Context, work func(ctx context.Con
 
 // GoDispatcher исполняет работу горутиной под своим пределом времени и считает
 // начатое, чтобы остановка дождалась её.
+//
+// Число одновременных работ ограничено (kaname#456): запрос восстановления
+// приходит без удостоверения, и горутина с транзакцией записи на каждый
+// запрос без предела была бы ценой, которую назначает вызывающий. Работа сверх
+// предела не принимается и СЧИТАЕТСЯ (`onDrop`); ответ вызывающему от этого не
+// меняется — он постановки и не ждал.
 type GoDispatcher struct {
-	timeout time.Duration
-	mu      sync.Mutex
-	wg      sync.WaitGroup
-	stopped bool
+	timeout  time.Duration
+	mu       sync.Mutex
+	wg       sync.WaitGroup
+	stopped  bool
+	inFlight int
+	cap      int
+	onDrop   func()
+}
+
+// WithCap — предел одновременных работ и приёмник отвергнутой. Непозитивный
+// предел — отказ построения корня, а не «без предела»: здесь он паникой не
+// становится, корень судит величину до сборки.
+func (d *GoDispatcher) WithCap(limit int, onDrop func()) *GoDispatcher {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.cap, d.onDrop = limit, onDrop
+	return d
 }
 
 // NewGoDispatcher — диспетчер с пределом времени на одну работу.
@@ -72,10 +91,24 @@ func (d *GoDispatcher) Dispatch(_ context.Context, work func(ctx context.Context
 		run()
 		return
 	}
+	if d.cap > 0 && d.inFlight >= d.cap {
+		onDrop := d.onDrop
+		d.mu.Unlock()
+		if onDrop != nil {
+			onDrop()
+		}
+		return
+	}
+	d.inFlight++
 	d.wg.Add(1)
 	d.mu.Unlock()
 	go func() {
-		defer d.wg.Done()
+		defer func() {
+			d.mu.Lock()
+			d.inFlight--
+			d.mu.Unlock()
+			d.wg.Done()
+		}()
 		run()
 	}()
 }

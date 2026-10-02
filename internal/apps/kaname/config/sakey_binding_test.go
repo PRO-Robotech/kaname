@@ -44,7 +44,6 @@ import (
 func contourTranslated(t *testing.T) config.Config {
 	t.Helper()
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",
@@ -56,6 +55,7 @@ func contourTranslated(t *testing.T) config.Config {
 		Algorithm:         tokenpolicy.AlgES256,
 		AllowedAlgorithms: tokenpolicy.AlgES256,
 		KeySetPath:        "/.well-known/kaname/jwks.json",
+		KeyLifetime:       90 * 24 * time.Hour,
 	}
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:          true,
@@ -63,6 +63,14 @@ func contourTranslated(t *testing.T) config.Config {
 		DefaultAudience:  "registry.kacho.local",
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
+		// Темп эндпоинта (kaname#315): предмет пробы не он, но без него
+		// эндпоинт не стартует.
+		ExchangesPerClientPerSec: 5,
+		InFlightCeiling:          32,
+		FailedProofsPerSource:    50,
+		FailedProofWindow:        15 * time.Minute,
+		AuthorizePerSourcePerSec: 10,
+		AuthorizeInFlightCeiling: 32,
 	}
 	return cfg
 }
@@ -95,15 +103,27 @@ func TestValidate_BindDPoPOnTranslatedContour_RefusesToStart(t *testing.T) {
 	}
 }
 
-// TestValidate_BindDPoPOnMirroredContour_Starts — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ.
+// TestValidate_BindDPoPOnMirroredContour_IsNotRefusedByTheBindingGuard —
+// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ.
 //
 // Без него отрицание выше зеленело бы на страже, отвергающем ручку ВЕЗДЕ, — то
 // есть на снятии работающего контроля вместо починки неработающего.
-func TestValidate_BindDPoPOnMirroredContour_Starts(t *testing.T) {
+//
+// Прежде контроль утверждал, что непереведённый контур с ручкой СТАРТУЕТ. Это
+// было верно на посадке `external`; она снята фундаментом
+// (PRO-Robotech/corelib#30), и проверка старта её отвергает (#424). На
+// единственной законной посадке `own` непереведённый контур сам отвергается
+// строкой полосы (authn.client-token.enabled) — поэтому утверждается то, что
+// от ручки зависит: страж связанного токена на этом контуре молчит.
+func TestValidate_BindDPoPOnMirroredContour_IsNotRefusedByTheBindingGuard(t *testing.T) {
 	cfg := contourMirrored(t)
 	cfg.AuthN.SAKeyBindDPoP = true
 
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "authn.client-token.enabled is false") {
+		t.Fatalf("предпосылка: на посадке own непереведённый контур отвергает строка полосы, получено: %v", err)
+	}
+	if strings.Contains(err.Error(), "sakey-bind-dpop") {
 		t.Fatalf("Validate() = %v: на непереведённом контуре у ручки есть читатель — регистрация "+
 			"клиента у прежнего издателя, — и отвергать её значит снимать работающий контроль", err)
 	}

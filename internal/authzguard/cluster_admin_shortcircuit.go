@@ -102,3 +102,30 @@ func SubjectIsClusterAdminPlainE(ctx context.Context, checker RelationChecker, s
 	}
 	return allowed, nil
 }
+
+// RequireClusterAdmin — защитная проверка «вызывающий — администратор облака» в
+// виде ответа RPC. Решение принимает модель (IsClusterAdminE); здесь только
+// перевод её исхода в код:
+//
+//	модель ответила «да»                          → nil
+//	модель ответила «нет», принципала не назвать,
+//	проверяющий не подключён                      → PERMISSION_DENIED "permission denied"
+//	спросить модель не удалось                    → UNAVAILABLE "authz backend unavailable"
+//
+// Текст недоступности фиксированный: причина отказа хранилища в ответ не
+// попадает (§Hardening-инварианты п. 1).
+//
+// Один дом на всех, кто задаёт этот вопрос защитной проверкой: прежде он был
+// выписан двумя рукописными копиями (защитная проверка выдачи администратора
+// облака и принудительного выхода), и третью — право указать идентификатор
+// аккаунта при создании (kaname#549) — заводить было нельзя.
+func RequireClusterAdmin(ctx context.Context, checker RelationChecker) error {
+	admin, err := IsClusterAdminE(ctx, checker)
+	if err != nil {
+		return AuthzBackendUnavailable()
+	}
+	if !admin {
+		return PermissionDenied()
+	}
+	return nil
+}

@@ -175,23 +175,37 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 
 	// ── ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) ───────────────────────────────
 	//
-	// Судится ТОЙ посадкой, что объявляет профиль: под `own` страж требует адрес
-	// слушателя формы и взаимный TLS на нём, под `external` полосы нет и
-	// требований к ней нет. Посадка и адрес берутся у профиля и у умолчаний
-	// САМОГО процесса, а не выписываются: выписанное разошлось бы молча.
-	postureRaw, found := dig(values, "authn", "identityProvider")
-	require.True(t, found, "профиль не объявляет посадки личности (`authn.identityProvider`) — стража полосы входа судить не на чем")
-	posture, err := config.ParseIdentityProvider(valueAsString(t, "authn.identityProvider", postureRaw))
-	require.NoError(t, err, "посадка личности профиля не разбирается тем же разборщиком, что у процесса")
+	// Страж требует адрес слушателя формы и взаимный TLS на нём на каждом
+	// боевом старте: полосу больше не выбирает ключ посадки (kaname#363). Адрес
+	// берётся у профиля и у умолчаний САМОГО процесса, а не выписывается:
+	// выписанное разошлось бы молча.
 	var laneCfg config.Config
-	laneCfg.AuthN.IdentityProvider = posture
 	laneCfg.APIServer.LoginLaneEndpoint = defaults.GetString("api-server.login-lane-endpoint")
 	if declared, ok := dig(values, "apiServer", "loginLaneEndpoint"); ok {
 		laneCfg.APIServer.LoginLaneEndpoint = valueAsString(t, "apiServer.loginLaneEndpoint", declared)
 	}
 	require.NoError(t, requireLoginLaneTLS(productionMode, laneCfg, mtlsCfg),
 		"боевой профиль не проходит стража старта полосы входа: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-	t.Logf("полоса входа: посадка %q · адрес %q", posture, laneCfg.APIServer.LoginLaneEndpoint)
+	t.Logf("полоса входа: адрес %q", laneCfg.APIServer.LoginLaneEndpoint)
+
+	// ── РЕЖИМ СЛУШАТЕЛЯ ВЫДАЧИ (kaname#315, Р7 п.5) ────────────────────────
+	//
+	// Страж читает режим только при собранной церемонии, а собирает её
+	// включённый токен-эндпоинт. Включение берётся у профиля, а не ставится
+	// здесь: профиль, выключивший эндпоинт, сделал бы вердикт вакуумным, и
+	// проба обязана это назвать, а не пройти молча.
+	clientTokenRaw, found := dig(values, "authn", "clientToken", "enabled")
+	require.True(t, found, "профиль не объявляет токен-эндпоинта (`authn.clientToken.enabled`) — "+
+		"церемония не собрана, и страж режима слушателя выдачи был бы вакуумен")
+	clientTokenEnabled, ok := clientTokenRaw.(bool)
+	require.True(t, ok, "включение токен-эндпоинта объявлено не булевым: %T", clientTokenRaw)
+	require.True(t, clientTokenEnabled, "боевой профиль выключает токен-эндпоинт — церемония не собрана, "+
+		"и страж режима слушателя выдачи был бы вакуумен")
+	var ceremonyCfg config.Config
+	ceremonyCfg.AuthN.ClientToken.Enabled = clientTokenEnabled
+	require.NoError(t, requireIssuingListenerAsksForACertificate(ceremonyCfg, mtlsCfg),
+		"боевой профиль не проходит стража режима слушателя выдачи — собранная церемония не поднимется")
+	t.Logf("режим слушателя выдачи: %q", mtlsCfg.RegistryTokenClientAuthModeValue())
 
 	// ── ТРАНСПОРТ ОСТАЛЬНЫХ HTTP-РЁБЕР ──────────────────────────────────────
 	//
@@ -210,12 +224,9 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"apiServer", "endpoint")
 	internalGRPCAddr := httpEdgeAddr(t, values, defaults, "api-server.internal-endpoint",
 		"apiServer", "internalEndpoint")
-	hooksAddr := httpEdgeAddr(t, values, defaults, "authn.hooks-http-endpoint",
-		"authn", "hooksHttpEndpoint")
 	metricsAddr := httpEdgeAddr(t, values, defaults, "api-server.metrics-endpoint",
 		"apiServer", "metricsEndpoint")
 	httpEdges := iamHTTPEdges(
-		hooksAddr,
 		metricsAddr,
 		jwksProxyAddr,
 		// Адрес фронтов профиль объявляет ПОРТОМ, и шаблон выводит эндпоинт из
@@ -233,7 +244,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	// поэтому ребро, чей адрес профиль не объявил, проходит проверку МОЛЧА и
 	// неотличимо от объявленного верно. Именно так и было с фронтами: их адрес
 	// приходит из порта, а не из ключа эндпоинта, и первая редакция читала не тот
-	// путь — вердикт был бы о пяти рёбрах из семи.
+	// путь — вердикт был бы о части рёбер.
 	judged := 0
 	for _, e := range httpEdges {
 		if e.addr != "" {
@@ -261,17 +272,10 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"(о ПОЛНОТЕ перечня эта строка не утверждает ничего — её держит "+
 		"TestIAM2641_EveryNonGRPCSurfaceIsJudgedByATransportGuard)",
 		len(httpEdges), judged)
-	declaredPlaintext, edgeErr := requireHTTPEdgeTLS(productionMode, httpEdges)
-	require.NoError(t, edgeErr,
+	// Исключений открытого текста у рёбер нет вовсе (kaname#363): единственное
+	// было у слушателя вебхуков внешнего поставщика и снято вместе с ним.
+	require.NoError(t, requireHTTPEdgeTLS(productionMode, httpEdges),
 		"боевой профиль не проходит стража транспорта HTTP-рёбер: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-	// ОБЪЯВЛЕННЫЕ ИСКЛЮЧЕНИЯ НАЗЫВАЮТСЯ ЧИСЛОМ, а не подразумеваются. Профиль
-	// ЭТОГО чарта их не объявляет: у отдельно поставленной службы вызывающий
-	// слушателя вебхуков не тот, ради которого исключение заводилось, и молча
-	// унаследовать его она не вправе. Пустой перечень здесь — утверждение, а не
-	// умолчание: вырастет он — проба скажет, чем именно.
-	require.Empty(t, declaredPlaintext,
-		"боевой профиль этого чарта объявил исключение открытого текста: %v", declaredPlaintext)
-	t.Logf("объявленных исключений открытого текста: %d", len(declaredPlaintext))
 
 	// ── РУБЕЖ ВНУТРЕННЕГО REST-ФРОНТА ───────────────────────────────────────
 	//
@@ -307,7 +311,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		requireRevocationAuthorityCallerAuth(ownMinting, jwksProxyAddr, mtlsCfg),
 		"боевой профиль не проходит стража авторитета отзыва: объявленная посадка "+
 			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-	t.Logf("своя чеканка: %v · слушатель зеркала ключей %q, режим проверки клиента %q, устанавливает вызывающего: %v",
+	t.Logf("своя чеканка: %v · слушатель публикатора ключей %q, режим проверки клиента %q, устанавливает вызывающего: %v",
 		ownMinting, jwksProxyAddr, mtlsCfg.JWKSProxyClientAuthModeValue(),
 		mtlsCfg.JWKSProxyVerifiesCaller())
 
@@ -320,7 +324,6 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	profileSurfaceAddrs := []surfaceAddr{
 		{knobPublicGRPC, publicGRPCAddr},
 		{knobInternalGRPC, internalGRPCAddr},
-		{knobHooks, hooksAddr},
 		{knobMetrics, metricsAddr},
 		{knobRegistryToken, registryTokenAddr},
 		{knobJWKSProxy, jwksProxyAddr},
@@ -343,16 +346,10 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"боевой профиль не проходит стража различимости адресов поверхностей")
 	t.Logf("различимость адресов: объявлено %d · с адресом %d · сверено пар %d",
 		surfaceCensus.Declared, surfaceCensus.Addressed, surfaceCensus.Pairs)
-	// Полоса входа поднимается ПОСАДКОЙ, а не ручкой: под `external` её адрес
-	// пуст by design, а не забыт, и требовать его значило бы требовать от
-	// профиля украшение — ручку, которую страж на этой посадке не читает.
-	// Под `own` адрес обязателен, и это судит `requireLoginLaneTLS` выше.
-	expectedAddressed := len(profileSurfaceAddrs)
-	if !loginLaneWanted(laneCfg) && strings.TrimSpace(laneCfg.APIServer.LoginLaneEndpoint) == "" {
-		expectedAddressed--
-		t.Logf("полоса входа на посадке %q не поднимается и адреса не объявляет: в перепись с адресом не входит", posture)
-	}
-	require.Equal(t, expectedAddressed, surfaceCensus.Addressed,
+	// Адрес обязателен у КАЖДОЙ поверхности, включая полосу входа: её больше
+	// не снимает посадка (kaname#363), и пустой адрес страж различимости
+	// пропустил бы как «не поднята».
+	require.Equal(t, len(profileSurfaceAddrs), surfaceCensus.Addressed,
 		"поверхность без адреса в боевом профиле: страж пропускает её by construction "+
 			"(«не поднята»), и профиль, забывший ручку, прошёл бы молча")
 
@@ -361,24 +358,6 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		requireRESTUpstreamCredential(productionMode, restAddr, internalRESTAddr, mtlsCfg),
 		"боевой профиль не проходит стража удостоверения фронта: объявленная посадка "+
 			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-
-	// ── ПАРА «АДРЕС + УДОСТОВЕРЕНИЕ» АДМИНИСТРАТИВНОГО КОНТУРА ──────────────
-	//
-	// Адрес приходит картой `env` профиля (она уже разложена в окружение выше),
-	// а ВЫБОР способа — ключом настроек: он уезжает поду файлом, а не
-	// переменной, поэтому читается из значений профиля, а не из окружения.
-	// Прочитать его отсюда переменной значило бы судить путь, которым величина
-	// не приходит (задача #2471).
-	adminAuth := ""
-	if raw, found := dig(values, "authn", "providerAdminAuth"); found {
-		adminAuth = valueAsString(t, "authn.providerAdminAuth", raw)
-	}
-	adminHop := config.AuthNConfig{ProviderAdminAuth: adminAuth}
-	require.NoError(t, requireProviderAdminCredentialPair(adminHop),
-		"боевой профиль не проходит стража пары административного контура: объявленная "+
-			"посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
-	t.Logf("административный контур: адрес %q · способ аутентификации %q",
-		adminHop.DeclaredHydraAdminURL(), adminHop.ProviderAdminAuthValue())
 }
 
 // httpEdgeAddr — адрес слушателя: объявленный профилем либо умолчание процесса.

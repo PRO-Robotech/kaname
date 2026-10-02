@@ -54,7 +54,7 @@ import (
 
 // TestRegistryThresholdsAreTheReadersPredicate — RET-SWP-04.
 func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
-	subjects := Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{})
+	subjects := Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{})
 
 	want := map[string]time.Duration{
 		SubjectClientAssertionReplay:    tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
@@ -67,6 +67,12 @@ func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
 		// числом: [outbox.DeliveredRetention] выведен из читателя доставленной
 		// строки — оператора, разбирающего «доехало ли снятие».
 		SubjectProviderCompensationOutbox: outbox.DeliveredRetention,
+		// Восьмой предмет — записи выпуска токена доступа церемонии
+		// (kaname#319). Строку читают поверхности предъявления, и каждая из них
+		// отвергает истёкший токен по его сроку с допуском ClockSkew; запас на
+		// расхождение источников часов — RemovalSlack. После этого строка ни
+		// одного исхода не меняет. Имя предмета — имя таблицы.
+		"access_tokens": tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
 	}
 
 	if len(subjects) != len(want) {
@@ -102,7 +108,7 @@ func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
 // копия совпадает.
 func TestRegistryThresholdsFollowPolicyRatherThanACopy(t *testing.T) {
 	byName := map[string]time.Duration{}
-	for _, s := range Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}) {
+	for _, s := range Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}) {
 		byName[s.Name] = s.Grace
 	}
 
@@ -151,6 +157,10 @@ func (stubReaper) SweepDeliveredCompensations(_ context.Context, _ time.Duration
 	return 0, false, nil
 }
 
+func (stubReaper) SweepExpiredAccessTokens(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
 func (stubReaper) SweepAgedRows(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
 }
@@ -165,14 +175,18 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	full := HumanSessionReapers{
 		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: window,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
+		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,
 	}
 	got := WithHumanSessions(nil, full)
 	byName := map[string]Subject{}
 	for _, s := range got {
 		byName[s.Name] = s
 	}
-	if len(got) != 5 {
-		t.Fatalf("предметов полосы входа %d, ждали 5: %v", len(got), byName)
+	// Восемь предметов: пять прежних и три подтверждения адреса (kaname#456) —
+	// коды, окна источника, письма с истёкшим кодом.
+	if len(got) != 8 {
+		t.Fatalf("предметов полосы входа %d, ждали 8: %v", len(got), byName)
 	}
 	s, ok := byName[SubjectSecondFactorEnrollments]
 	if !ok {
@@ -184,10 +198,12 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	if s.Sweep == nil {
 		t.Errorf("предмет %q объявлен без уборщика", s.Name)
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{}, LetterWindow: time.Hour, SourceWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без уборщика заведений полоса даёт %d записей, ждали 0", len(got))
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{}, LetterWindow: time.Hour, SourceWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без окна заведений полоса даёт %d записей, ждали 0: порог нулём снимал бы живые pending", len(got))
 	}
 }
@@ -201,6 +217,8 @@ func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	full := HumanSessionReapers{
 		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
+		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,
 	}
 	byName := map[string]Subject{}
 	for _, s := range WithHumanSessions(nil, full) {
@@ -241,4 +259,49 @@ func (stubReaper) SweepAgedFailures(_ context.Context, _ time.Duration, _ int) (
 
 func (stubReaper) SweepUnservableRecoveryCodes(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
+}
+
+func (stubReaper) SweepUnservableVerificationCodes(context.Context, time.Duration, int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepAgedSourceWindows(context.Context, time.Duration, int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepExpiredBearerLetters(context.Context, time.Duration, int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+// TestWithHumanSessionsCarriesTheAddressVerificationSweepers — kaname#456:
+// коды подтверждения с порогом окна писем, окна источника с порогом окна
+// источника, письма с истёкшим кодом с порогом ноль; полоса без любого из
+// уборщиков записей не даёт вовсе.
+func TestWithHumanSessionsCarriesTheAddressVerificationSweepers(t *testing.T) {
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
+		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,
+	}
+	byName := map[string]Subject{}
+	for _, s := range WithHumanSessions(nil, full) {
+		byName[s.Name] = s
+	}
+	for name, grace := range map[string]time.Duration{
+		SubjectVerificationCodes: 24 * time.Hour, SubjectSourceRequestWindows: 10 * time.Minute, SubjectBearerLetters: 0,
+	} {
+		s, ok := byName[name]
+		if !ok {
+			t.Fatalf("предмета %q нет среди %v", name, byName)
+		}
+		if s.Grace != grace || s.Sweep == nil {
+			t.Errorf("предмет %q: порог %v (ждали %v), уборщик %v", name, s.Grace, grace, s.Sweep != nil)
+		}
+	}
+	without := full
+	without.BearerLetters = nil
+	if got := WithHumanSessions(nil, without); len(got) != 0 {
+		t.Errorf("без уборщика писем с истёкшим кодом полоса даёт %d записей, ждали 0", len(got))
+	}
 }

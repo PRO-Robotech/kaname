@@ -13,7 +13,7 @@ import (
 // InviteStatus — invite-flow state for a User row.
 //
 // PENDING — created via `UserService.Invite`, external_id="" until first
-// login; the invitee has not yet confirmed identity through Kratos.
+// login; the invitee has not yet registered and verified the address.
 // ACTIVE  — either self-signup via `UpsertFromIdentity` without a pending
 // invite, or a PENDING row activated on first-login (matched by email).
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается
@@ -25,11 +25,11 @@ import (
 // строке на каждый Account, поэтому запрет принадлежит тому аккаунту, который его
 // наложил, и не отключает личность там, где она законно активна: выдача токена
 // перебирает набор членств и обслуживает первое аутентифицирующееся, отказывая
-// лишь когда ни одно не может (token_enrichment_service.go, iamhooks).
+// лишь когда ни одно не может (token_enrichment_service.go).
 //
 // Снимать запрет самостоятельным действием нельзя: восстановление пароля
 // доказывает владение почтовым ящиком — ровно то, чего администратор, ставя
-// запрет, под сомнение не ставил (см. internal_on_recovery.go). Поэтому у пути
+// запрет, под сомнение не ставил (см. humansession/recovery_complete.go). Поэтому у пути
 // блокировки ОБЯЗАН быть административный путь снятия, иначе заблокированный
 // окажется заперт навсегда. Гейт blocked_state_reachability_test.go требует,
 // чтобы каждый писатель этого состояния был объявлен вместе со ссылкой на
@@ -58,6 +58,16 @@ const (
 // path), and an unset state is not an authorisation.
 func (s InviteStatus) MayAuthenticate() bool {
 	return s == InviteStatusActive
+}
+
+// MaySignInToOwnLane reports whether a person in this state may sign in on OUR
+// sign-in lane and hold a session there (kaname#456, Р11 п. 1). Wider than
+// [InviteStatus.MayAuthenticate] by exactly one state: an invitee who registered
+// by the invite's address (PENDING) signs in to the verification position — the
+// only screens a session reaches before the address is confirmed — while a
+// token is issued to nobody in that position. BLOCKED never signs in.
+func (s InviteStatus) MaySignInToOwnLane() bool {
+	return s == InviteStatusActive || s == InviteStatusPending
 }
 
 func (s InviteStatus) Validate() error {

@@ -167,7 +167,7 @@ func TestTrustedSubject_Validate(t *testing.T) {
 }
 
 // TestTrustedSubject_LiteralSubject — a valid literal-anchored pattern yields the
-// unanchored literal (the exact subject the Hydra trust-grant enforces); a
+// unanchored literal (the exact subject the trust-grant enforces); a
 // non-literal / non-anchored pattern is not extractable.
 func TestTrustedSubject_LiteralSubject(t *testing.T) {
 	ok := TrustedSubject{Issuer: "https://kube.cluster.local", SubjectPattern: "^system:serviceaccount:ci:deployer$"}
@@ -189,7 +189,6 @@ func TestSAOAuthClient_Validate_FederatedVsPrivateKey(t *testing.T) {
 	base := ServiceAccountOAuthClient{
 		ID:              "soc_01abcdefghjkmnpqr",
 		SvaID:           "sva_01",
-		OAuthClientID:   "hydra-cli",
 		CreatedByUserID: "usr_01",
 		// Имя названо явно, потому что предмет этой пробы — вид удостоверения,
 		// а не имя: строка без имени отвергалась бы формой (#1279), и

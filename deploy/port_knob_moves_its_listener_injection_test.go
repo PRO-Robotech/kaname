@@ -35,7 +35,7 @@ import (
 const portsBlockAfterTheFix = "ports:\n  grpc: 9090\n  internalGrpc: 9091\n"
 
 // retiredKnobGuardInclude — провязка стража снятых ключей.
-const retiredKnobGuardInclude = `{{- include "kaname-svc.requireNoRetiredPortKnobs" . -}}`
+const retiredKnobGuardInclude = `{{- include "kaname-svc.requireNoRetiredKnobs" . -}}`
 
 // chartCopyBeforeTheFix — копия чарта в состоянии ДО починки #2394: ключ
 // `ports.metrics` объявлен профилем, шаблон пода читает ЕГО, стража снятых

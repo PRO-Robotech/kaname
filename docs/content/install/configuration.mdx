@@ -11,8 +11,8 @@ import dedent from 'ts-dedent'
 
 Kaname конфигурируется через переменные окружения с префиксом **`KANAME_`** (плюс
 опциональный YAML-файл через `KANAME_CONFIG_PATH`). Эта страница перечисляет ключевые группы
-настроек: подключение к БД, посадка личности (`external` — внешний поставщик, `own` — свой
-вход), listener'ы и mTLS, режим аутентификации. Секреты (пароли, токены) подаются из окружения /
+настроек: подключение к БД, посадка личности (она одна — свой вход), listener'ы и mTLS, режим
+аутентификации. Секреты (пароли, токены) подаются из окружения /
 секрет-хранилища, не хардкодятся.
 
 Перечень **обязательных** величин — тех, без которых служба не пускается, — порождается из
@@ -69,22 +69,19 @@ Kaname конфигурируется через переменные окруж
 
 ## Идентичность — посадка и что она требует
 
-Посадку выбирают **до** установки, и умолчания у неё нет. Под `external` человека проверяет
-внешний поставщик удостоверений, и обязательны три его адреса; под `own` внешнего поставщика
-нет — обязательны слушатель и величины полосы входа, обёртка секретов второго фактора, окно
-свежести и своя чеканка. Состояние посадки `own` на линии названо с предикатом на странице
+Посадка у службы одна: человека проверяет сама служба, внешнего поставщика удостоверений нет.
+Обязательны слушатель и величины полосы входа, обёртка секретов второго фактора, окно свежести
+и своя чеканка. Ключа, который прежде выбирал посадку, больше нет — и он отвергается вслух
+(строка ниже). Состояние посадки на линии названо с предикатом на странице
 [Идентичность и токены](/architecture/identity).
 
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KANAME_AUTHN__IDENTITY_PROVIDER</code></td><td><b>Посадка личности</b>: чем стенд проверяет человека — <code>external</code> (внешний поставщик удостоверений) или <code>own</code> (собственная чеканка платформы). <b>Умолчания нет</b>: незаданное и неизвестное значение — отказ старта с именем поля. Разводит требования старта: под <code>external</code> обязательны три адреса поставщика (строки ниже), под <code>own</code> — ни одного, зато обязательна включённая своя чеканка. Значение сверяется <b>точно</b>: регистр не приводится, пробелы не обрезаются</td></tr>
-    <tr><td><code>KANAME_HYDRA_ADMIN_URL</code> / <code>KANAME_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra: регистрация OAuth-клиентов, выдача доверия, снятие сессии входа. Адрес обязателен <b>только</b> под <code>external</code>; объявленный по <code>https</code> требует корня доверия <code>KANAME_HYDRA_ADMIN_CA_FILE</code>, а в боевой посадке открытый текст на этом контуре отвергается. Имя переменной предъявителя объявляется настройкой <code>authn.hydra-admin-token-env</code> (без неё — <code>KANAME_HYDRA_ADMIN_TOKEN</code>) — значение в YAML не пишется никогда; нужен ли предъявитель, объявляет <code>authn.provider-admin-auth</code> (<code>bearer</code> либо <code>none</code>), и объявленный <code>bearer</code> без пришедшего предъявителя — отказ старта</td></tr>
-    <tr><td><code>KANAME_HYDRA_JWKS_URL</code> / <code>KANAME_HYDRA_TOKEN_URL</code></td><td>Адрес набора проверочных ключей поставщика (его служба зеркалит на внутреннем слушателе, и по нему решается, чьи подписи принимаются) и адрес обмена подписанного утверждения на токен. Оба обязательны <b>только</b> под <code>external</code>; объявленный по <code>https</code> требует своего корня доверия — <code>KANAME_HYDRA_JWKS_CA_FILE</code> / <code>KANAME_HYDRA_TOKEN_CA_FILE</code></td></tr>
-    <tr><td><code>KANAME_HYDRA_ISSUER</code></td><td>Издатель (issuer) внешнего поставщика; из него выводится адресат подписанного утверждения при обмене (<code>&lt;издатель&gt;/oauth2/token</code>). <b>Необязательна</b>: ключ <code>authn.hydra-issuer</code> важнее переменной, а незаданные оба дают <code>https://hydra.&lt;authn.domain&gt;</code>. Задаётся, когда поставщик объявляет издателя, который из домена не выводится</td></tr>
+    <tr><td><code>KANAME_AUTHN__IDENTITY_PROVIDER</code></td><td><b>Снята</b> (kaname#363). Прежде выбирала посадку личности; посадка у службы одна, и переменная отвергается при старте <b>при любом значении</b>, в том числе <code>own</code> и пустом: отказ называет её и путь, которым она пришла. Уберите её из окружения пода; чарт отвергает её в картах <code>env</code> и <code>secrets</code> ещё на рендере, а ключ <code>authn.identityProvider</code> — в значениях</td></tr>
     <tr><td><code>KANAME_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
     <tr><td><code>KANAME_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
-    <tr><td><code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей <b>обёртки</b> секретов второго фактора (код по времени): 32 байта в <b>hex</b> (64 знака) через запятую — первый оборачивает, все открывают. <b>Своя</b> ручка, а не ключ выше: предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана останавливать другой. Требуется <b>только</b> под <code>own</code>; незаданная — отказ старта с именем ручки <code>authn.second-factor-encryption-key-hex</code>. Материал, который не открывается ни одним ключом перечня, служба отдаёт как недоступность (503), а не как отказ предъявителю</td></tr>
+    <tr><td><code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей <b>обёртки</b> секретов второго фактора (код по времени): 32 байта в <b>hex</b> (64 знака) через запятую — первый оборачивает, все открывают. <b>Своя</b> ручка, а не ключ выше: предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана останавливать другой. Требуется <b>только</b> под <code>own</code>; незаданная — отказ старта с именем ручки <code>authn.second-factor-encryption-key-hex</code>. Материал, который не открывается ни одним ключом перечня, служба отдаёт как недоступность (503), а не как отказ предъявителю. Прежний ключ снимается из перечня только после переобёртки уже записанных секретов командой <code>kaname second-factor-key rewrap</code> — порядок смены на странице <a href="/advanced/second-factor-wrapping-key">Смена ключа обёртки второго фактора</a></td></tr>
     <tr><td><code>KANAME_AUTHN&#95;&#95;SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных (<code>authn.self-service-freshness</code>, перенос Ф1 §4.1 — <code>15m</code> в профилях): заведение и подтверждение второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок неподтверждённого заведения. Требуется <b>только</b> под <code>own</code>; умолчания нет</td></tr>
     <tr><td><code>KANAME_SAKEY_REDACT_GRACE</code> / <code>KANAME_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
   </tbody>
@@ -92,8 +89,8 @@ Kaname конфигурируется через переменные окруж
 
 ## Listener'ы и mTLS
 
-Сервис поднимает публичный (`:9090`), internal (`:9091`), hooks (`:9092`) и metrics (`:9095`)
-listener'ы, а под посадкой `own` — ещё слушатель полосы входа. Каждый может требовать mTLS.
+Сервис поднимает публичный (`:9090`), internal (`:9091`) и metrics (`:9095`, он же несёт
+`/healthz` и `/readyz`) listener'ы и слушатель полосы входа. Каждый может требовать mTLS.
 
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
@@ -101,10 +98,9 @@ listener'ы, а под посадкой `own` — ещё слушатель по
     <tr><td><code>KANAME_GRPC_PORT</code> / <code>KANAME_INTERNAL_PORT</code></td><td>Порты public / internal listener'ов. Значение — <b>голый номер порта</b> (<code>9091</code>); всё прочее отвергается при старте с именем ручки. См. предупреждение ниже: эти имена совпадают с формой, которой Kubernetes сам объявляет поду адреса служб</td></tr>
     <tr><td><code>KANAME_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
     <tr><td><code>KANAME_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
-    <tr><td><code>KANAME_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (хуки поставщика удостоверений; читается под <code>external</code>)</td></tr>
-    <tr><td><code>KANAME_API_SERVER&#95;&#95;LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается только под посадкой <code>own</code>, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…&#95;CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. Под <code>external</code> адрес читается, поверхность объявляется выключенной с причиной, слушатель не поднимается</td></tr>
+    <tr><td><code>KANAME_API_SERVER&#95;&#95;LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается на каждом старте, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…&#95;CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. В боевом режиме необъявленный адрес — отказ старта</td></tr>
     <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
-    <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS зеркала ключей проверки (<code>/.well-known/jwks.json</code>, односторонняя)</td></tr>
+    <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS публикатора ключей проверки (путь — <code>authn.token-signing.key-set-path</code>, умолчание <code>/.well-known/kaname/jwks.json</code>; односторонняя)</td></tr>
     <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS докерной полосы (<code>/iam/token</code>, односторонняя)</td></tr>
     <tr><td><code>KANAME_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
   </tbody>
@@ -143,9 +139,9 @@ HTTP-рёбер приходят умолчанием процесса и пот
 называет ручку, адрес и то, что по этому проводу едет:
 
 ```
-production mode requires TLS on the identity-provider hooks listener 0.0.0.0:9092
-(set KANAME_HOOKS_SERVER_MTLS_ENABLE=true with its cert/key): the identity
-provider's shared secret travels this hop …
+production mode requires TLS on the собственный внутренний REST-фронт listener 0.0.0.0:9099
+(set KANAME_INTERNALREST_SERVER_MTLS_ENABLE=true with its cert/key): …; refusing to
+start with it in the clear
 ```
 
 Отказ называет **все** незакрытые рёбра сразу — профиль чинится за один заход, а не
@@ -159,10 +155,10 @@ provider's shared secret travels this hop …
 iam не поднимался там, где api-gateway нет вовсе; теперь iam разворачивается без него.
 :::
 
-## Полоса входа — только под `own` {#login-lane}
+## Полоса входа {#login-lane}
 
-Величины полосы входа читаются **только** под посадкой `own`; ни у одной нет умолчания, и
-незаданная — отказ старта с именем ключа. Под `external` блок не читается. Что на полосе
+Величины полосы входа читаются на каждом старте; ни у одной нет умолчания, и незаданная —
+отказ сборки полосы с именем ключа. Что на полосе
 происходит — [Полоса входа](/api/auth-lane); перечень обязательных величин целиком
 порождён в `INSTALL.md` §3.
 
@@ -176,8 +172,11 @@ iam не поднимался там, где api-gateway нет вовсе; те
     <tr><td><code>authn.registration.admissions-per-window</code> / <code>admission-window</code></td><td>Потолок темпа заведения аккаунтов <b>одной личностью</b> за окно <code>admission-window</code>; носитель счёта под <code>own</code> — адрес, которым человек представился. Величина считает и первое заведение: при <code>3</code> в окне проходят три, четвёртое отвергается. Первое заведение носителя — сама регистрация — проходит при любой величине, поэтому <code>0</code> означает «после первого — ни одного». Ограничивает повторную регистрацию тем же адресом и последующие заведения аккаунтов того же человека; регистрация сверх потолка отвечает единым <code>registration refused</code></td></tr>
     <tr><td><code>authn.login.password-min-length</code> · <code>authn.login.breach-check</code> (+ <code>breach-check-url</code>)</td><td>Правило пароля: минимальная длина и состояние проверки по корпусу утечек (<code>enabled</code> требует адреса авторитета)</td></tr>
     <tr><td><code>authn.login.hasher-format</code> · <code>hasher-memory</code> · <code>hasher-iterations</code> · <code>hasher-parallelism</code></td><td>Чем писать новый материал пароля и его стоимость</td></tr>
-    <tr><td><code>authn.login.verifier-capacity</code> · <code>memory-reserve-bytes</code></td><td>Одновременных проверок пароля и резерв памяти процесса сверх них; страж старта сверяет их с пределом памяти контейнера — <b>предел обязан быть наложен средой</b> (cgroup), без него старт под <code>own</code> отказывает. В чарте предел объявляет ключ <code>resources.limits.memory</code> (контейнер службы); боевой профиль несёт <code>1280Mi</code> — ёмкость 8 × 128 МиБ на потолке формата записи + резерв 256 МиБ, и согласие профиля со стражем держит проба <code>deploy/own_lane_memory_ceiling_test.go</code></td></tr>
+    <tr><td><code>authn.login.verifier-capacity</code> · <code>memory-reserve-bytes</code></td><td>Одновременных проверок пароля и резерв памяти процесса сверх них; страж старта сверяет их с пределом памяти контейнера — <b>предел обязан быть наложен средой</b> (cgroup), без него старт под <code>own</code> отказывает. В чарте предел объявляет ключ <code>resources.limits.memory</code> (контейнер службы); боевой профиль несёт <code>1280Mi</code> — ёмкость 8 × 128 МиБ на потолке формата записи + резерв 256 МиБ, и согласие профиля со стражем держит проба <code>deploy/own_lane_memory_ceiling_test.go</code>. Тот же проверяющий сверяет секрет клиента на полосах церемонии токен-эндпоинта: сверка церемонии занимает не больше половины ёмкости, вторая половина остаётся входу людей, и под церемонией ёмкость меньше 2 — отказ старта</td></tr>
     <tr><td><code>authn.login.recovery-code-ttl</code> · <code>KANAME_AUTHN&#95;&#95;LOGIN&#95;&#95;RECOVERY_CODE_TTL</code></td><td>Срок кода восстановления доступа</td></tr>
+    <tr><td><code>authn.login.verification-code-ttl</code> · <code>verification-code-attempts</code> · <code>verification-resend-interval</code> · <code>verification-resend-limit</code> · <code>verification-resend-window</code></td><td>Подтверждение адреса (kaname#456): срок кода и предел неподошедших попыток на код, промежуток между письмами, число писем за окно и само окно. Умолчаний нет — незаданная величина роняет старт с именем ключа и переменной; величина за границей (попыток больше 10, срок дольше 24 ч, промежуток короче 30 с, писем больше 20) — тоже. В поставляемом профиле — <code>30m</code> · <code>5</code> · <code>60s</code> · <code>5</code> · <code>24h</code></td></tr>
+    <tr><td><code>authn.ceremony.code-ttl</code> · <code>KANAME_AUTHN&#95;&#95;CEREMONY&#95;&#95;CODE_TTL</code></td><td>Срок кода авторизации собственной церемонии от его выдачи. Допустимо <code>0 &lt; срок ≤ потолок</code>, потолок — константа фундамента <code>tokenpolicy.MaxAuthorizationCodeTTL</code>, 60 с; вне диапазона — отказ старта с именем ключа, выше потолка — ещё и с величиной и потолком. В поставляемом профиле — <code>60s</code></td></tr>
+    <tr><td><code>authn.ceremony.refresh-ttl</code> · <code>KANAME_AUTHN&#95;&#95;CEREMONY&#95;&#95;REFRESH_TTL</code></td><td>Срок семейства токенов обновления от первой выдачи: оборот его не продлевает, и семейство кончается не позже сессии, в которой выдан код. Допустимо <code>0 &lt; срок ≤ потолок</code>, потолок — константа фундамента <code>tokenpolicy.MaxRefreshTokenFamilyTTL</code>, 168 ч; вне диапазона — отказ старта. В поставляемом профиле — <code>168h</code></td></tr>
     <tr><td><code>authn.self-service-freshness</code> · <code>KANAME_AUTHN&#95;&#95;SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных: заведение и подтверждение второго фактора требуют предъявления не старше окна, и им же ограничен срок неподтверждённого заведения</td></tr>
     <tr><td><code>authn.second-factor-encryption-key-hex</code> · <code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей обёртки секретов второго фактора (см. таблицу идентичности выше)</td></tr>
   </tbody>
@@ -188,8 +187,30 @@ iam не поднимался там, где api-gateway нет вовсе; те
 `authn.login.recovery-code-ttl` шаблон карты настроек рендерит с kaname#205 (ключи
 `authn.registration.*` и `authn.login.recoveryCodeTtl` профиля); паритет «строка стража ↔
 ключ чарта» в обе стороны держит `deploy/own_lane_knobs_declared_test.go`. Предупреждение
-пережило свой предмет и снято 2026-09-17 при замере живого старта `own` (kaname#21).
+пережило свой предмет и снято 2026-09-17 при замере живого старта (kaname#21).
 :::
+
+## Почтовая полоса — одна на все виды письма {#mail-lane}
+
+Каждое письмо службы уходит одной очередью и одним почтовым узлом: ключи названы по
+приглашению, с которым полоса появилась, но второго узла под письма полосы входа нет. Через
+узел уходят коды восстановления доступа и подтверждения адреса, а доступ дальше
+входа получает только человек с подтверждённым адресом — поэтому без узла ни один человек, и
+первый администратор тоже, дальше входа не пройдёт. Старт узла не требует: незаданный узел —
+законная величина, и письмо тогда не уходит ни разу, что видно только счётчиком исходов
+отправки. Порядок объявления и формы адреса — `INSTALL.md` §3 «Почтовая полоса».
+
+<table>
+  <thead><tr><th>Ключ · переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>invite-mail.relay</code> · <code>KANAME_INVITE_MAIL&#95;&#95;RELAY</code></td><td>Адрес почтового узла: <code>host:port</code> либо <code>smtp://[имя@]host:port/</code> / <code>smtps://…</code>. Несёт письма всех видов очереди: <code>mail.invite.send</code> — приглашение; <code>mail.recovery.send</code> — код восстановления доступа (только <code>own</code>); <code>mail.verification.send</code> — код подтверждения адреса (только <code>own</code>). Пусто — полосы нет</td></tr>
+    <tr><td><code>invite-mail.from</code> · <code>KANAME_INVITE_MAIL&#95;&#95;FROM</code></td><td>Адрес отправителя, один на установку; обязателен при заданном узле — узел без отправителя отвергается при старте</td></tr>
+    <tr><td><code>invite-mail.from-name</code> · <code>KANAME_INVITE_MAIL&#95;&#95;FROM_NAME</code></td><td>Отображаемое имя отправителя; необязательно</td></tr>
+    <tr><td><code>invite-mail.username-env</code> · <code>invite-mail.password-env</code></td><td><b>Имена переменных</b> с логином и паролем к узлу, а не сами величины; половина пары отвергается при старте</td></tr>
+    <tr><td><code>invite-mail.tls-mode</code> · <code>invite-mail.ca-bundle-file</code></td><td>Посадка полосы — <code>starttls</code> (умолчание) либо <code>implicit</code>; незащищённой среди имён нет. Якорь доверия к сертификату узла; пусто — системные корни</td></tr>
+    <tr><td><code>invite-mail.login-url</code> · <code>KANAME_INVITE_MAIL&#95;&#95;LOGIN_URL</code></td><td>Адрес страницы входа, который несёт письмо; пусто — ссылки в письме нет</td></tr>
+  </tbody>
+</table>
 
 ## Потолок темпа и одновременности запросов
 
@@ -221,7 +242,6 @@ iam не поднимался там, где api-gateway нет вовсе; те
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
     <tr><td><code>KANAME_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
-    <tr><td><code>KANAME_HOOK_TOKEN</code></td><td>Общий секрет хуков поставщика удостоверений (<code>:9092</code>); под <code>own</code> хуки не приходят</td></tr>
   </tbody>
 </table>
 

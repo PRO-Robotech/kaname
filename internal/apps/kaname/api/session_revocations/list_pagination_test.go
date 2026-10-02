@@ -44,6 +44,14 @@ type pagingReader struct {
 }
 
 func (f *pagingReader) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (*pagingReader) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (f *pagingReader) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 func (f *pagingReader) GetByJTI(context.Context, string) (domain.SessionRevocation, error) {
 	return domain.SessionRevocation{}, nil
 }

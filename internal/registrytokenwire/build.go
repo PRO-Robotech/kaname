@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -32,30 +31,16 @@ type BuildConfig struct {
 	// Service — the default registry service name (→ requested token audience +
 	// WWW-Authenticate service, e.g. registry.kacho.local).
 	Service string
-	// HydraTokenURL — the Hydra public token endpoint the shim POSTs the exchange
-	// to (cluster-internal in production, e.g.
-	// http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token).
-	HydraTokenURL string
-	// AssertionAudience — the `aud` of the client_assertion: the Hydra token
-	// endpoint URL Hydra recognises (its external issuer's token endpoint).
-	AssertionAudience string
-	// Scope — optional scope requested from Hydra.
+	// Scope — объём, который полоса кладёт в выпускаемый токен (пусто — не
+	// кладёт).
 	Scope string
-	// AnonymousClientID / AnonymousKeyID / AnonymousPrivateKeyPEM — the configured
-	// public-principal identity the shim authenticates as for anonymous pull (RG-1
-	// D-7). The data-plane resolves this client_id's token to the FGA wildcard
-	// `user:*`. Empty (the default) leaves anonymous pull DISABLED — no-Basic-creds
-	// then fails closed to a 401 challenge (secure-by-default; anon is opt-in).
-	// HydraTokenCAFile — the anchor the hop to the provider's token endpoint is
-	// verified against, when the profile pins one. Empty ⇒ the default transport,
-	// which is what a plaintext in-cluster address needs; the production boot guard
-	// is what forbids claiming https without an anchor.
-	HydraTokenCAFile       string
-	AnonymousClientID      string
-	AnonymousKeyID         string
-	AnonymousPrivateKeyPEM string
-	// Signer — НАШ подписант. nil означает «контур ещё на прежнем издателе»:
-	// законное состояние до перевода, а не полусобранная зависимость.
+	// AnonymousClientID — объявленный публичный принципал анонимного чтения
+	// (RG-1 D-7): субъект токена, который приёмная сторона резолвит в
+	// подстановочного `user:*`. Пусто (умолчание) — анонимный поток ВЫКЛЮЧЕН, и
+	// вход без удостоверения получает 401-вызов (secure-by-default).
+	AnonymousClientID string
+	// Signer — НАШ подписант, ЕДИНСТВЕННЫЙ издатель полосы. Обязателен: без него
+	// сборка отказывает (kaname#494), другого издателя у полосы нет.
 	Signer *tokensigner.Signer
 	// TokenTTL — срок выпускаемого токена контура. Слагаемое арифметики
 	// отсрочки снятия ключа, поэтому объявлено числом, а не выведено.
@@ -81,33 +66,44 @@ type BuildConfig struct {
 	// открытое можно закрыть.
 	CredentialKindObserver registrytokenuc.CredentialKindObserver
 
-	// ProviderRoadObserver — счётчик исходов ДОРОГИ ОБМЕНА к прежнему издателю
-	// (kacho#2491). nil → счёта нет; решения полосы это не меняет.
+	// BasicCredentialTimeout — предел ОДНОГО обращения авторитета о базовом
+	// секрете к базе (kaname#379). Обязателен: без него сборка отказывает.
 	//
-	// Заводится ЗДЕСЬ, а не у сборщика дороги, потому что дорога строится лишь
-	// на непереведённом контуре: у переведённого обмена не происходит вовсе, и
-	// счётчик на нём обязан молчать, а не показывать ноль обращений как отказ.
-	ProviderRoadObserver clients.ProviderRoadObserver
+	// Предел подаётся авторитету, а не ставится этой полосой у своего вызова:
+	// у авторитета вызывающих больше одного, и оператор у них один. Величину
+	// объявляет композиционный корень — ту же, что у полос выдачи токена:
+	// для строки удостоверения человека оператор читает и отсечку
+	// отзыва-всех.
+	BasicCredentialTimeout time.Duration
 }
 
 // Build assembles the registry `/iam/token` shim from a pgx pool: the authority
 // on the presented BASIC ACCESS TOKEN (the only credential kind this lane accepts,
-// задача #1143), plus the ES256 client_assertion signer and the Hydra token
-// exchanger the ANONYMOUS flow still needs on a contour not yet moved to our own
-// minting. The caller mounts the returned mux on an EXTERNAL-reachable HTTP
-// listener.
+// задача #1143) and OUR signer, the lane's only issuer. The caller mounts the
+// returned mux on an EXTERNAL-reachable HTTP listener.
 //
-// Composition root only — this is the single wire-up call for serve.go. Who
-// mints is decided by `cfg.Signer` (providerExchangeFor, provider_hop.go): with
-// our signer wired — every chain this chart offers — the shim mints the registry
-// token itself through NewLocalMinter, and the data-plane verifies it against OUR
-// key set published by the cluster-internal key-set listener
-// (internal/handler/jwksproxyhttp, record keyed by our issuer). Without a signer
-// the shim only exchanges an assertion with the previous issuer, and the
-// data-plane reads that issuer's mirrored keys from the same listener. In neither
-// case does the shim decrypt any at-rest signing key: key material lives in the
-// signer's keystore, not here.
+// Composition root only — this is the single wire-up call for serve.go. The shim
+// mints the registry token itself through NewLocalMinter, and the data-plane
+// verifies it against OUR key set published by the cluster-internal key-set
+// listener (internal/handler/jwksproxyhttp, record keyed by our issuer). The shim
+// decrypts no at-rest signing key: key material lives in the signer's keystore,
+// not here.
+//
+// # Без нашего подписанта — отказ в старте (kaname#494)
+//
+// Прежде пустой подписант выбирал другую дорогу — обмен подписанного
+// утверждения у внешнего поставщика. Дорога снята, и пустой подписант выбирать
+// больше нечего: собранная без него полоса поднималась бы Ready и не выдавала бы
+// ни одного токена. Поэтому это ПЕРВЫЙ отказ сборки, до всякого другого её
+// входа, и он называет оба выхода оператора. Режима посадки сборка не читает —
+// отказ один на любую посадку.
 func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
+	if cfg.Signer == nil {
+		return nil, fmt.Errorf(
+			"registrytokenwire: the docker-token lane has no issuer — our own signer is not wired, " +
+				"and the lane has no other one. Enable authn.token-signing.enabled, or declare " +
+				"api-server.registry-token.endpoint empty in the settings file so the lane is not raised")
+	}
 	// Страж построения полосы: без объявленного адресата выдача чеканит тому,
 	// кого назовёт вызывающий (задача #1184).
 	//
@@ -120,18 +116,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 			"registrytokenwire: api-server.registry-token.service is empty — it is the audience this " +
 				"lane is declared to mint for, and an unset one means «mint for whatever the caller names»")
 	}
-	signer := registrytokenuc.ES256AssertionSigner{}
-	// Полоса обмена выбирается по тому, ПЕРЕВЕДЁН ли контур на свою чеканку:
-	// переведённый к прежнему издателю не ходит ни одним путём, поэтому дорога к
-	// нему не строится и её пригодность ничего не решает. Непереведённый требует
-	// её ровно как прежде. Разбор — provider_hop.go.
-	exchanger, err := providerExchangeFor(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	useCase := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
-		AssertionAudience: cfg.AssertionAudience,
+	useCase, err := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		// Внешняя граница ЭТОЙ полосы — служба реестра, объявленная посадкой.
 		// Ровно её реестр называет докер-клиенту в вызове на аутентификацию, и
 		// ровно её клиент возвращает в `?service=`; всё прочее эта полоса не
@@ -140,24 +125,28 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 		AllowedAudiences: []string{cfg.Service},
 		DefaultService:   cfg.Service,
 		Scope:            cfg.Scope,
-		// Anonymous-pull identity (RG-1 D-7). Empty → anonymous pull disabled; the
-		// shim then serves the SA-key path only (no-Basic-creds → 401 challenge).
-		Anonymous: registrytokenuc.AnonymousIdentity{
-			ClientID:      cfg.AnonymousClientID,
-			KeyID:         cfg.AnonymousKeyID,
-			PrivateKeyPEM: cfg.AnonymousPrivateKeyPEM,
-		},
-	}, signer, exchanger)
+		// Anonymous-pull identity (RG-1 D-7). Empty → anonymous pull disabled
+		// (no-Basic-creds → 401 challenge).
+		Anonymous: registrytokenuc.AnonymousIdentity{ClientID: cfg.AnonymousClientID},
+	}, NewLocalMinter(cfg.Signer, cfg.TokenTTL))
+	if err != nil {
+		return nil, fmt.Errorf("registrytokenwire: %w", err)
+	}
 
 	// ПОЛОСА БАЗОВОГО СЕКРЕТА (#1142) — ЕДИНСТВЕННАЯ полоса предъявленного
 	// удостоверения после задачи #1143. Авторитет — тот же пул, что и у прочих
-	// читателей: своей связи и своих величин полоса не заводит.
+	// читателей, и тот же объявленный корнем предел на обращение: своей связи и
+	// своих величин полоса не заводит.
 	//
 	// Провязка безусловна: полоса, объявленная и не провязанная, — мёртвый
 	// контроль. Непровязанная, она отвечала бы недоступностью издателя на
 	// КАЖДЫЙ вход в реестр, и заметить это можно было бы только по жалобе
 	// клиента.
-	useCase = useCase.WithBasicCredentialResolver(kanamepg.NewBasicCredentialRepo(pool))
+	basicAuthority, err := kanamepg.NewBasicCredentialRepo(pool, cfg.BasicCredentialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("registrytokenwire: %w", err)
+	}
+	useCase = useCase.WithBasicCredentialResolver(basicAuthority)
 
 	// СЧЁТЧИК ИСХОДОВ — до окна: он обязан считать и отказы прежнему виду,
 	// то есть работать ИМЕННО ТОГДА, когда окна нет. Счётчик, провязываемый
@@ -177,13 +166,6 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 			cfg.KeyMaterialWindowUntil,
 			registrytokenuc.NewSAKeyValidator(NewSAClientLookup(kanamepg.NewSAOAuthClientRepo(pool))),
 		)
-	}
-
-	if cfg.Signer != nil {
-		// Контур переводится на СВОЮ чеканку. Прежний издатель на нём больше
-		// не звучит; окно двух издателей закрывается сроком уже выданных
-		// токенов, а не решением.
-		useCase = useCase.WithLocalMinter(NewLocalMinter(cfg.Signer, cfg.TokenTTL))
 	}
 
 	tokenHandler := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{

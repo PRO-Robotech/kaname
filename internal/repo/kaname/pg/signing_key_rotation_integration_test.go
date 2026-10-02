@@ -282,7 +282,9 @@ func TestSigningKey_F1_31_CompromisedLeavesTheKeySetImmediately(t *testing.T) {
 
 	// And — глагол ОТДЕЛЁН от вывода из ротации: вывод оставил бы ключ в
 	// наборе, объявление утёкшим — нет.
-	other := seedKey(t, repo, "kaname-f131-ret", domain.SigningKeyActive)
+	// Выводимый — опубликованный: подписывающего без преемника вывод не
+	// выражает (#314), и глагол судится на том, что он выражает.
+	other := seedKey(t, repo, "kaname-f131-ret", domain.SigningKeyPublished)
 	require.NoError(t, repo.Retire(ctx, other.KID, time.Now().UTC()))
 	set, err = repo.KeySet(ctx)
 	require.NoError(t, err)

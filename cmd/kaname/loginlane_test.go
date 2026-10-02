@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // loginlane_test.go — посадка полосы входа (Ф3-44, Ф3-45 в доме службы):
-// под `own` полоса поднимается и наблюдатель провязки видит хранилища; под
-// `external` полоса не поднимается; режим слушателя формы, отличный от
-// `mutual`, под `own` — отказ старта с именем ручки; предел памяти не наложен —
-// отказ с числами.
+// полоса поднимается на каждом старте и наблюдатель провязки видит хранилища;
+// режим слушателя формы, отличный от `mutual`, на боевом старте — отказ с
+// именем ручки; предел памяти не наложен — отказ с числами. Ключа посадки,
+// который прежде снимал полосу, больше нет (kaname#363).
 package main
 
 import (
@@ -16,14 +16,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-func loginLaneCfg(p config.IdentityProvider) config.Config {
-	cfg := roadCfg(p, "9097")
+func loginLaneCfg() config.Config {
+	cfg := productionRootCfg("9097")
 	cfg.APIServer.LoginLaneEndpoint = "tcp://0.0.0.0:9098"
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
 	cfg.AuthN.Login = config.LoginLaneConfig{
@@ -45,10 +46,10 @@ func mutualLane() config.MTLSConfig {
 }
 
 // TestLoginLane_F3_44_ListenerModeIsMutualOrTheStartIsRefused — (в): режим,
-// отличный от `mutual`, под `own` — отказ с именем ручки; пустой адрес под
-// `own` — отказ; под `external` — ни то ни другое не требуется.
+// отличный от `mutual`, на боевом старте — отказ с именем ручки; пустой адрес —
+// отказ; вне боевого режима стража нет.
 func TestLoginLane_F3_44_ListenerModeIsMutualOrTheStartIsRefused(t *testing.T) {
-	own := loginLaneCfg(config.IdentityProviderOwn)
+	own := loginLaneCfg()
 	require.NoError(t, requireLoginLaneTLS(true, own, mutualLane()), "положительный контроль: mutual и адрес — старт")
 
 	plain := mutualLane()
@@ -67,21 +68,17 @@ func TestLoginLane_F3_44_ListenerModeIsMutualOrTheStartIsRefused(t *testing.T) {
 	noAddr := own
 	noAddr.APIServer.LoginLaneEndpoint = ""
 	err = requireLoginLaneTLS(true, noAddr, mutualLane())
-	require.Error(t, err, "под own полоса обязана подняться: пустой адрес — отказ")
+	require.Error(t, err, "полоса обязана подняться: пустой адрес — отказ")
 	require.Contains(t, err.Error(), knobLoginLane)
 
-	ext := loginLaneCfg(config.IdentityProviderExternal)
-	ext.APIServer.LoginLaneEndpoint = ""
-	require.NoError(t, requireLoginLaneTLS(true, ext, config.MTLSConfig{}), "под external полосы нет и требований к ней нет")
 	require.NoError(t, requireLoginLaneTLS(false, own, config.MTLSConfig{}), "не production — стража нет (in-process фикстура)")
 }
 
-// TestLoginLane_F3_45_LaneIsRaisedOnlyUnderOwn — под `external` полоса не
-// строится вовсе: ни слушателя, ни `Resolve`; наблюдатель провязки сообщает
-// хранилища не провязанными.
-func TestLoginLane_F3_45_LaneIsRaisedOnlyUnderOwn(t *testing.T) {
-	require.False(t, loginLaneWanted(loginLaneCfg(config.IdentityProviderExternal)))
-	require.True(t, loginLaneWanted(loginLaneCfg(config.IdentityProviderOwn)))
+// TestLoginLane_F3_45_AnUnbuiltLaneReportsItsStoresUnwired — полосы, которую
+// сборка не построила (отказ сборки до старта), наблюдатель провязки называет
+// непровязанной: методы полосы безопасны на пустом значении, и стадия сборки
+// видит отсутствие, а не падение.
+func TestLoginLane_F3_45_AnUnbuiltLaneReportsItsStoresUnwired(t *testing.T) {
 	var none *loginLane
 	require.False(t, none.wired(), "полосы нет — хранилища не провязаны")
 	require.Nil(t, none.signInMethods())
@@ -124,6 +121,7 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	lane := &loginLane{
 		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
 		freshness: 15 * time.Minute, keys: kanamepg.NewAccessKeyRepo(nil), keyFreshness: kanamepg.NewHumanSessionFreshness(nil),
+		letterWindow: 24 * time.Hour, limits: humansession.Limits{SourceWindow: time.Hour},
 	}
 	require.True(t, lane.wired())
 	require.Equal(t, []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}, lane.signInMethods())
@@ -136,12 +134,15 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	for _, s := range retention.WithHumanSessions(nil, reapers) {
 		names[s.Name] = s.Grace
 	}
-	require.Len(t, names, 5, "пятый — испытания ключей доступа (Ф7)")
+	require.Len(t, names, 8, "пятый — испытания ключей доступа (Ф7); шестой–восьмой — коды подтверждения адреса, окна источника, письма с открытым кодом (kaname#456)")
+	require.Equal(t, 24*time.Hour, names[retention.SubjectVerificationCodes])
+	require.Equal(t, time.Hour, names[retention.SubjectSourceRequestWindows])
+	require.Contains(t, names, retention.SubjectBearerLetters)
 	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
 	require.Contains(t, names, retention.SubjectAccessKeyChallenges)
 
 	// Ф12-37: сброс распорядителем провязан ровно там, где полоса поднята.
 	require.NotNil(t, lane.resetSecondFactorUseCase(nil, nil))
 	var none *loginLane
-	require.Nil(t, none.resetSecondFactorUseCase(nil, nil), "под external глагол не провязан")
+	require.Nil(t, none.resetSecondFactorUseCase(nil, nil), "непостроенной полосе глагол не провязан")
 }

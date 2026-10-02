@@ -179,10 +179,18 @@ func (h *harness) useCase(t *testing.T, store registration.Store) *registration.
 	require.True(t, ok)
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: store, Rule: h.rule, Hasher: h.hasher, Lane: lane, TTL: 24 * time.Hour,
-		Observer: h.obs, Now: time.Now, Logger: slog.New(slog.DiscardHandler),
+		Observer: h.obs, Letter: harnessLetterPace, Sources: h.sessions,
+		SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
+		Now:        time.Now, Logger: slog.New(slog.DiscardHandler),
 	})
 	require.NoError(t, err)
 	return uc
+}
+
+// harnessLetterPace — величины профиля продукта для письма подтверждения
+// (kaname#456, Р7, Р9): письмо регистрации ставится той же транзакцией.
+var harnessLetterPace = humansession.VerificationPace{
+	CodeTTL: 30 * time.Minute, Attempts: 5, Interval: 60 * time.Second, Limit: 5, Window: 24 * time.Hour,
 }
 
 // rows — сколько строк каждого следствия несёт база по адресу.
@@ -356,9 +364,11 @@ func TestRegisterIntegration_F1_62_ConcurrentRegistrationsAdmitExactlyOne(t *tes
 }
 
 // TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane — адрес с
-// приглашением: те же три следствия, строка приглашения перестаёт числиться
-// ожидающей, второго личного аккаунта не заводится; идентичность отчеканена
-// нашей полосой (Р6).
+// приглашением: способ входа и сессия ложатся на строку приглашения, строка
+// остаётся ожидающей, личности и личного аккаунта у неё нет — приглашение
+// активирует подтверждение адреса (kaname#456, Р11 п. 1, заменяет исход Ф4-23
+// «регистрация активирует»). Повтор — единый отказ: способ входа первого не
+// замещается.
 func TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane(t *testing.T) {
 	h := newHarness(t)
 	email := freshEmail("f4-23")
@@ -378,16 +388,24 @@ func TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane(t *testin
 
 	out, err := h.register(t, h.useCase(t, h.store), email)
 	require.NoError(t, err)
-	require.True(t, out.Activated, "регистрация активировала приглашение")
+	require.True(t, out.Invited, "регистрация легла на строку приглашения")
 	require.Equal(t, pending.ID, out.View.User.ID, "строка приглашённого сохранила свой идентификатор")
-	h.assertAllThree(t, email, out)
+	require.Equal(t, rows{users: 1, methods: 1, sessions: 1, accounts: 0}, h.rowsFor(t, email),
+		"способ входа и сессия на строке приглашения; личного аккаунта до активации нет")
 
-	var pendingLeft int
+	var (
+		status, ext string
+	)
 	require.NoError(t, h.pool.QueryRow(h.ctx,
-		`SELECT count(*) FROM users WHERE lower(email) = lower($1) AND invite_status = 'PENDING'`, email).Scan(&pendingLeft))
-	require.Zero(t, pendingLeft, "строка приглашения перестала числиться ожидающей")
+		`SELECT invite_status, external_id FROM users WHERE lower(email) = lower($1)`, email).Scan(&status, &ext))
+	require.Equal(t, "PENDING", status, "строка приглашения остаётся ожидающей до подтверждения адреса")
+	require.Equal(t, "", ext, "личности на строке приглашения нет")
 	require.Equal(t, "Invited One", string(out.View.User.DisplayName), "имя приглашённого сохранено")
 	require.Equal(t, 1, h.obs.count(registration.OutcomeIssuedInvited))
+	resolved, reason, rerr := h.sessions.Resolve(h.ctx, out.Bearer.Digest(), time.Now())
+	require.NoError(t, rerr)
+	require.Equal(t, humansession.SessionFound, reason, "сессия приглашённого резолвится — в положении подтверждения")
+	require.False(t, resolved.EmailVerified)
 
 	// Повтор — тот же единый отказ (Ф4-24).
 	_, err = h.register(t, h.useCase(t, h.store), email)

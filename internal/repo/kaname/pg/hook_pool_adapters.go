@@ -1,13 +1,14 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// hook_pool_adapters.go — pool-scoped adapters для handler/internal port-iface.
+// hook_pool_adapters.go — pool-scoped session-revocation adapter.
 //
-// Hook handlers (token / refresh) are stateless HTTP endpoints that need
-// lightweight pool-scoped writes without the CQRS Writer-TX overhead.
-// These adapters wrap the existing AuditOutboxRepo / SessionRevocationRepo
-// in single-statement TX (autocommit-style), serving the
-// kaname.audit_outbox and kaname.session_revocations tables.
+// The file is named after its first readers, the external identity provider's
+// token and refresh hooks (gone, kaname#363), which needed lightweight
+// pool-scoped writes without the CQRS Writer-TX overhead. What remains is the
+// SessionRevocationsAdapter: it wraps SessionRevocationRepo /
+// UserTokenRevocationRepo for the revocation service, the own sign-in lane and
+// the edge's revoke-all reader.
 package pg
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
 // Session/force-logout audit_outbox taxonomy. Values satisfy
@@ -30,71 +32,19 @@ const (
 	sessionAuditEventRevoked = "iam.session.revoked"
 	// SessionAuditEventAllRevoked — Revoke(revoke_all_user_tokens=true).
 	SessionAuditEventAllRevoked = "iam.session.all_revoked"
-	// SessionAuditEventForceLogout — InternalIAMService.ForceLogout.
+	// SessionAuditEventForceLogout — InternalIAMService.ForceLogout. Дверями
+	// этого файла НЕ пишется: запись принудительного выхода несёт исход снятия
+	// записей сессии, и кладёт её транзакция снятия (`humanSessionWriter`,
+	// kaname#340). Значение здесь — вид в таксономии очереди аудита, по
+	// которому её читают.
 	SessionAuditEventForceLogout = "iam.session.force_logout"
 )
-
-// AuditEmitterAdapter — pool-scoped wrapper. Каждый Emit открывает мини-TX,
-// INSERT audit row, commit. Это не идеально для atomic-coupling с domain
-// mutation, но hook handlers — асинхронный side-channel, atomicity не критична
-// (loss tolerable; drainer-side dedupe handles duplicates).
-type AuditEmitterAdapter struct {
-	pool *pgxpool.Pool
-	repo *AuditOutboxRepo
-	now  func() time.Time
-}
-
-// NewAuditEmitterAdapter — constructor.
-func NewAuditEmitterAdapter(pool *pgxpool.Pool) *AuditEmitterAdapter {
-	return &AuditEmitterAdapter{
-		pool: pool,
-		repo: NewAuditOutboxRepo(pool),
-		now:  time.Now,
-	}
-}
-
-// Emit append-only пишет audit event.
-func (a *AuditEmitterAdapter) Emit(ctx context.Context, eventType string, tenantAccountID string, payload map[string]any) error {
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	entry := domain.AuditOutboxEntry{
-		// newAuditEventID yields an `evt_<22-char>` id; the previous
-		// NewKac127ID("evt") produced a 17-char body that FAILS the
-		// audit_outbox_id_check ({20,30}) → every hook audit Emit was silently
-		// rejected (23514) at INSERT. Same generator the grant/revoke + bootstrap
-		// audit paths use.
-		ID:           domain.AuditEventID(newAuditEventID()),
-		EventType:    domain.EventTypeName(eventType),
-		EventPayload: payloadJSON,
-		Status:       domain.AuditOutboxStatusPending,
-		CreatedAt:    a.now(),
-	}
-	if tenantAccountID != "" {
-		aid := domain.AccountID(tenantAccountID)
-		entry.TenantAccountID = &aid
-	}
-
-	tx, err := a.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := a.repo.InsertTx(ctx, tx, entry); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
 
 // SessionRevocationsAdapter — pool-scoped wrapper над SessionRevocationRepo +
 // UserTokenRevocationRepo. Backs the per-jti revocation path (Revoke / IsRevoked)
 // AND the user-level "revoke-all-before" path (RevokeAllUserTokens /
-// UserRevokedBefore) — one adapter shared by ForceLogout, the
-// InternalSessionRevocationsService Revoke path, and the refresh-hook reader.
+// UserRevokedBefore) — one adapter shared by the InternalSessionRevocationsService
+// Revoke path and its readers.
 type SessionRevocationsAdapter struct {
 	pool      *pgxpool.Pool
 	repo      *SessionRevocationRepo
@@ -148,9 +98,8 @@ func (s *SessionRevocationsAdapter) RevokeTx(ctx context.Context, rev domain.Ses
 	return tx.Commit(ctx)
 }
 
-// RevokeAllUserTokens — записать per-user revoke-all cutoff (monotonic upsert).
-// Это шлюз, который refresh-hook реально энфорсит против session auth_time;
-// используется admin ForceLogout и Revoke(revoke_all_user_tokens=true).
+// RevokeAllUserTokens — записать per-user revoke-all cutoff (monotonic upsert)
+// на пуле, без записи события.
 func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error {
 	return s.userRepo.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
 		UserID:       userID,
@@ -161,16 +110,24 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokens(ctx context.Context, use
 }
 
 // RevokeAllUserTokensTx — atomic per-user revoke-all cutoff + durable
-// audit_outbox emit in ONE tx (запрет #10). Shared by the
-// Revoke(revoke_all_user_tokens=true) path (eventType iam.session.all_revoked)
-// and admin ForceLogout (eventType iam.session.force_logout). The cutoff upsert
-// is identical to RevokeAllUserTokens (monotonic GREATEST); only the tx
-// ownership + audit row differ. eventType MUST be one of the session taxonomy
-// values that satisfy the audit_outbox_event_type CHECK.
+// iam.session.all_revoked audit_outbox row in ONE tx (запрет #10), for the
+// Revoke(revoke_all_user_tokens=true) path. The cutoff upsert is identical to
+// RevokeAllUserTokens (monotonic GREATEST); only the tx ownership + audit row
+// differ.
+//
+// ВИД ЗАПИСИ — СВОЙ, А НЕ ИЗ РУК ВЫЗЫВАЮЩЕГО (kaname#380). Прежде вид приходил
+// параметром: дверь делили отзыв всех токенов и принудительный выход на
+// посадке `external`, и запись принудительного выхода ложилась здесь четырьмя
+// величинами — без исхода снятия. Посадка снята (kaname#363), вызов вместе с
+// ней. Запись принудительного выхода обязана нести исход снятия записей
+// сессии, которого эта дверь не видит, и кладёт её транзакция снятия
+// (`humanSessionWriter`, kaname#340). Вид параметром держал бы такую запись в
+// одном аргументе от любого вызова двери; без параметра она здесь
+// непредставима — как у двери отзыва одного носителя (`RevokeTx`). Держит
+// `revoke_all_door_record_kind_test.go`.
 func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 	ctx context.Context,
 	userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID,
-	eventType string,
 ) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -185,13 +142,20 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 	}, revokedBy); err != nil {
 		return err
 	}
+	// ОБЕ ЗАПИСИ ОТСЕЧКИ КЛАДЁТ ДВЕРЬ (`upsertSubjectCutoff`, kaname#313), и
+	// кладёт их ЭТОЙ транзакцией — вместе с записью журнала ниже.
+	//
+	// Здесь стоял отдельный второй вызов. Он был верен, но оставлял состояние
+	// «одна запись без другой» ПРЕДСТАВИМЫМ: писателей отсечки пять, и второй
+	// вызов стоял у одного. Теперь оператор первой записи виден только двери, а
+	// дверь кладёт обе — сторожить стало нечего.
 	payload := map[string]any{
 		"actor":        string(revokedBy),
 		"subject_type": "user",
 		"subject_id":   string(userID),
 		"reason":       reason,
 	}
-	if err := s.emitAuditTx(ctx, tx, eventType, payload); err != nil {
+	if err := s.emitAuditTx(ctx, tx, SessionAuditEventAllRevoked, payload); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -202,10 +166,16 @@ func (s *SessionRevocationsAdapter) IsRevoked(ctx context.Context, jti string) (
 	return s.repo.IsRevoked(ctx, jti)
 }
 
-// UserRevokedBefore делегирует — per-user revoke-all cutoff lookup для
-// refresh-hook user-level gate.
+// UserRevokedBefore делегирует — отсечка человека для правила выдачи нашего
+// токен-эндпоинта (`clienttokenwire`).
 func (s *SessionRevocationsAdapter) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
 	return s.userRepo.RevokedBefore(ctx, userID)
+}
+
+// PersonMarks — отметка подтверждения адреса (kaname#456, Р5): второй вопрос
+// правила выдачи тем же пулом и единственным оператором чтения отметки.
+func (s *SessionRevocationsAdapter) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
+	return personmarks.Read(ctx, s.pool, ids)
 }
 
 // GetByJTI делегирует (used by IsRevoked enrichment in the gRPC service).

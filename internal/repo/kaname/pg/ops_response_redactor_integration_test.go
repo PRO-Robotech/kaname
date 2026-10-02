@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -73,15 +74,22 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 	}
 	require.NoError(t, opsRepo.Create(ctx, op))
 
-	// 2. Build an IssueSAKeyResponse with a plaintext client_secret.
+	// 2. Build an IssueSAKeyResponse with a plaintext client_secret — in the
+	//    shape a response was STORED in before kaname#362: the key still
+	//    carries field 3 (the provider's client name), which the regenerated
+	//    contract has reserved. The stored bytes are read by a reader that no
+	//    longer knows the field, and it must stay an unknown field rather than
+	//    fail the read or the redaction.
+	key := &iamv1.ServiceAccountOAuthClient{
+		Id:        "soc_kac164test01",
+		SvaId:     "sva_test",
+		CreatedAt: timestamppb.Now(),
+	}
+	key.ProtoReflect().SetUnknown(protowire.AppendString(
+		protowire.AppendTag(nil, 3, protowire.BytesType), "provider_client_kac164"))
 	resp := &iamv1.IssueSAKeyResponse{
-		Key: &iamv1.ServiceAccountOAuthClient{
-			Id:            "soc_kac164test01",
-			SvaId:         "sva_test",
-			HydraClientId: "hydra_client_kac164",
-			CreatedAt:     timestamppb.Now(),
-		},
-		ClientId:     "hydra_client_kac164",
+		Key:          key,
+		ClientId:     "provider_client_kac164",
 		ClientSecret: "topsecret_plaintext_should_be_redacted",
 	}
 	respAny, err := anypb.New(resp)
@@ -101,7 +109,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Equal(t, "topsecret_plaintext_should_be_redacted", out.ClientSecret,
 			"pre-redact baseline: secret present")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId,
+		assert.Equal(t, "provider_client_kac164", out.ClientId,
 			"pre-redact baseline: client_id present")
 	}
 
@@ -119,11 +127,15 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Empty(t, out.ClientSecret,
 			"post-redact: client_secret must be cleared")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId,
+		assert.Equal(t, "provider_client_kac164", out.ClientId,
 			"post-redact: client_id must be unchanged")
 		require.NotNil(t, out.Key)
 		assert.Equal(t, "soc_kac164test01", out.Key.Id,
 			"post-redact: key.id must be unchanged")
+		// The reserved field of the stored response survives as unknown bytes:
+		// the redaction rewrote the row and neither dropped nor rejected them.
+		assert.Contains(t, string(out.Key.ProtoReflect().GetUnknown()), "provider_client_kac164",
+			"post-redact: a field reserved after the row was stored stays readable as unknown bytes")
 	}
 
 	// 6. Idempotent re-redact — second call must not error and must not flip
@@ -136,7 +148,7 @@ func TestKAC164_RedactSAKeyClientSecret_FullFlow(t *testing.T) {
 		out := &iamv1.IssueSAKeyResponse{}
 		require.NoError(t, got.Response.UnmarshalTo(out))
 		assert.Empty(t, out.ClientSecret, "idempotent")
-		assert.Equal(t, "hydra_client_kac164", out.ClientId, "idempotent")
+		assert.Equal(t, "provider_client_kac164", out.ClientId, "idempotent")
 	}
 }
 

@@ -257,9 +257,22 @@ func (s setJudgingStore) Resolve(ctx context.Context, digest domain.BearerDigest
 // намерения письма (постановка синхронна), завершение с новым паролем.
 func (h *sessionLane) recover(t *testing.T, newPassword string) laneSession {
 	t.Helper()
+	code, ctxCk := h.requestRecoveryCode(t, fwd())
+	done := h.completeRecovery(t, code, newPassword, fwd(), ctxCk)
+	require.Equal(t, http.StatusOK, done.status, "Дано: завершение восстановления выдаёт сессию (Ф5-03): %s", done.body)
+	s := laneSession{bearer: cookieNamed(done.cookies, loginlanehttp.CookieSession), form: cookieNamed(done.cookies, loginlanehttp.CookieForm)}
+	require.NotNil(t, s.bearer, "Дано: восстановление пишет носитель")
+	require.NotNil(t, s.form, "Дано: выдача сессии сменяет контекст формы")
+	return s
+}
+
+// requestRecoveryCode — запрос кода через слушатель и код из намерения письма
+// (постановка синхронна); с ним — контекст формы, в котором код предъявят.
+func (h *sessionLane) requestRecoveryCode(t *testing.T, headers map[string]string) (string, *http.Cookie) {
+	t.Helper()
 	tok, ctxCk := h.lane.csrf(t, h.c, string(domain.FormRecovery), nil)
 	req := h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathRecovery,
-		map[string]any{"email": h.email, "csrfToken": tok}, fwd(), ctxCk)
+		map[string]any{"email": h.email, "csrfToken": tok}, headers, ctxCk)
 	require.Equal(t, http.StatusOK, req.status, "Дано: запрос кода: %s", req.body)
 
 	var letters int
@@ -272,14 +285,15 @@ func (h *sessionLane) recover(t *testing.T, newPassword string) laneSession {
 		`SELECT payload->>'code' FROM invite_mail_outbox WHERE resource_id = $1 AND event_type = 'mail.recovery.send'`,
 		string(h.user.ID)).Scan(&code))
 	require.NotEmpty(t, code, "Дано: письмо несёт код")
+	return code, ctxCk
+}
 
-	done := h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathRecoveryComplete, map[string]any{
+// completeRecovery — предъявление кода с новым паролем через слушатель; исход
+// судит проба.
+func (h *sessionLane) completeRecovery(t *testing.T, code, newPassword string, headers map[string]string, ctxCk *http.Cookie) reply {
+	t.Helper()
+	return h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathRecoveryComplete, map[string]any{
 		"email": h.email, "code": code, "newPassword": newPassword,
 		"csrfToken": h.csrfFor(t, domain.FormRecoveryComplete, ctxCk),
-	}, fwd(), ctxCk)
-	require.Equal(t, http.StatusOK, done.status, "Дано: завершение восстановления выдаёт сессию (Ф5-03): %s", done.body)
-	s := laneSession{bearer: cookieNamed(done.cookies, loginlanehttp.CookieSession), form: cookieNamed(done.cookies, loginlanehttp.CookieForm)}
-	require.NotNil(t, s.bearer, "Дано: восстановление пишет носитель")
-	require.NotNil(t, s.form, "Дано: выдача сессии сменяет контекст формы")
-	return s
+	}, headers, ctxCk)
 }

@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 )
@@ -37,15 +39,62 @@ import (
 type memStore struct {
 	rows map[domain.KeyID]domain.SigningKeyRecord
 	err  error
+	// insertErr — отказ ТОЛЬКО записи новой строки: так проба получает
+	// частичный исход «снять удалось, завести замену — нет».
+	insertErr error
+	// beforeReplace — вмешательство соседней реплики между чтением
+	// подписывающего и передачей подписи.
+	beforeReplace func()
+	// activeErr — отказ ТОЛЬКО чтения подписывающего: сбой хранилища на этом
+	// чтении, при том что сам подписывающий может и существовать.
+	activeErr error
+	// beforeInsert — то, что случается в момент записи новой строки (например,
+	// кончается срок вызова).
+	beforeInsert func()
+	// beforeActivate — то, что случается, пока повышение ключа в подпись ждёт
+	// чужого замка: соседняя транзакция повышает СВОЙ ключ и фиксируется
+	// первой. Настоящее хранилище отвечает на это нарушением уникальности
+	// подписывающего, а не понижением соседа, — поэтому не-nil из хука есть
+	// отказ повышения, а не повод повысить.
+	beforeActivate func() error
+	// beforeRetire — то, что случается между чтением набора сметателем и его
+	// выводом ключа: передача подписи этому ключу успевает лечь у соседа.
+	beforeRetire func(kid domain.KeyID)
+	// onWrite — каким контекстом пришла запись: живым ли и с каким сроком.
+	// Снимается в МОМЕНТ вызова, а не после возврата — после возврата свой
+	// контекст вызывающий уже отменил.
+	onWrite func(op string, ctx context.Context)
+}
+
+// refuseEnded — как настоящее хранилище: по оконченному вызову ни чтения, ни
+// записи. Дублёр, принимающий запись по оконченному вызову, прятал бы ровно тот
+// дефект, при котором очистку ведут под контекстом, чей конец её и вызвал.
+func refuseEnded(ctx context.Context) error { return ctx.Err() }
+
+func (m *memStore) sawWrite(op string, ctx context.Context) {
+	if m.onWrite != nil {
+		m.onWrite(op, ctx)
+	}
 }
 
 func newMemStore() *memStore { return &memStore{rows: map[domain.KeyID]domain.SigningKeyRecord{}} }
 
 var errTwoActive = errors.New("memstore: two signing keys would be active")
 
-func (m *memStore) Insert(_ context.Context, rec domain.SigningKeyRecord) error {
+func (m *memStore) Insert(ctx context.Context, rec domain.SigningKeyRecord) error {
+	m.sawWrite("Insert", ctx)
+	if m.beforeInsert != nil {
+		m.beforeInsert()
+	}
 	if m.err != nil {
 		return m.err
+	}
+	// Как настоящее хранилище: по оконченному вызову строка не пишется.
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
+	if m.insertErr != nil {
+		return m.insertErr
 	}
 	if rec.State == domain.SigningKeyActive && m.activeKID() != "" {
 		return errTwoActive
@@ -63,30 +112,77 @@ func (m *memStore) activeKID() domain.KeyID {
 	return ""
 }
 
-func (m *memStore) Get(_ context.Context, kid domain.KeyID) (domain.SigningKeyRecord, error) {
+func (m *memStore) Get(ctx context.Context, kid domain.KeyID) (domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return domain.SigningKeyRecord{}, m.err
 	}
+	if err := refuseEnded(ctx); err != nil {
+		return domain.SigningKeyRecord{}, err
+	}
 	r, ok := m.rows[kid]
 	if !ok {
-		return domain.SigningKeyRecord{}, errors.New("memstore: no such key")
+		return domain.SigningKeyRecord{}, fmt.Errorf("%w: SigningKey %s", iamerr.ErrNotFound, kid)
 	}
 	return r, nil
 }
 
-func (m *memStore) Active(_ context.Context) (domain.SigningKeyRecord, error) {
+func (m *memStore) Active(ctx context.Context) (domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return domain.SigningKeyRecord{}, m.err
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return domain.SigningKeyRecord{}, err
+	}
+	if m.activeErr != nil {
+		return domain.SigningKeyRecord{}, m.activeErr
 	}
 	if kid := m.activeKID(); kid != "" {
 		return m.rows[kid], nil
 	}
-	return domain.SigningKeyRecord{}, errors.New("memstore: no active signing key")
+	// Тот же отказ, что у настоящего хранилища: «подписывающего нет» —
+	// невыполненное предусловие, а не сбой; дублёр, отвечающий иначе, прятал
+	// бы ровно ту развилку, которую судят пробы.
+	return domain.SigningKeyRecord{}, fmt.Errorf("%w: no active signing key", iamerr.ErrFailedPrecondition)
 }
 
-func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) {
+// ReplaceActive — передача подписи УСЛОВНО на ожидаемого подписывающего, с
+// тем же контрактом, что у настоящего хранилища: ожидаемый обязан быть
+// подписывающим, следующий — опубликованным; иначе невыполненное предусловие.
+func (m *memStore) ReplaceActive(ctx context.Context, next, expected domain.KeyID, at time.Time) error {
+	m.sawWrite("ReplaceActive", ctx)
+	if m.err != nil {
+		return m.err
+	}
+	if m.beforeReplace != nil {
+		m.beforeReplace()
+	}
+	// После вмешательства: вызов мог кончиться, пока передача ждала замка.
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
+	cur, ok := m.rows[expected]
+	if !ok || cur.State != domain.SigningKeyActive {
+		return fmt.Errorf("%w: SigningKey %s is no longer the signing key", iamerr.ErrFailedPrecondition, expected)
+	}
+	nr, ok := m.rows[next]
+	if !ok || nr.State != domain.SigningKeyPublished {
+		return fmt.Errorf("%w: SigningKey %s cannot become the signing key", iamerr.ErrFailedPrecondition, next)
+	}
+	cur.State = domain.SigningKeyRetired
+	cur.RetiredAt = &at
+	m.rows[expected] = cur
+	nr.State = domain.SigningKeyActive
+	nr.ActivatedAt = &at
+	m.rows[next] = nr
+	return nil
+}
+
+func (m *memStore) KeySet(ctx context.Context) ([]domain.SigningKeyRecord, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return nil, err
 	}
 	var out []domain.SigningKeyRecord
 	for _, r := range m.rows {
@@ -97,9 +193,18 @@ func (m *memStore) KeySet(_ context.Context) ([]domain.SigningKeyRecord, error) 
 	return out, nil
 }
 
-func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Activate(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Activate", ctx)
 	if m.err != nil {
 		return m.err
+	}
+	if m.beforeActivate != nil {
+		if err := m.beforeActivate(); err != nil {
+			return err
+		}
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return err
 	}
 	r, ok := m.rows[kid]
 	if !ok || !r.State.CanActivate() {
@@ -117,15 +222,38 @@ func (m *memStore) Activate(_ context.Context, kid domain.KeyID, at time.Time) e
 	return nil
 }
 
-func (m *memStore) Retire(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Retire(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Retire", ctx)
+	if m.beforeRetire != nil {
+		m.beforeRetire(kid)
+	}
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
+	// Предусловие перехода — то же, что у настоящего хранилища: выводится
+	// только опубликованный; подписывающий уходит передачей преемнику.
+	if r, ok := m.rows[kid]; ok && r.State != domain.SigningKeyPublished {
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
+	}
 	return m.set(kid, domain.SigningKeyRetired, &at, func(r *domain.SigningKeyRecord) { r.RetiredAt = &at })
 }
 
-func (m *memStore) Remove(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Remove(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Remove", ctx)
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
 	return m.set(kid, domain.SigningKeyRemoved, &at, func(r *domain.SigningKeyRecord) { r.RemovedAt = &at })
 }
 
-func (m *memStore) Compromise(_ context.Context, kid domain.KeyID, at time.Time) error {
+func (m *memStore) Compromise(ctx context.Context, kid domain.KeyID, at time.Time) error {
+	m.sawWrite("Compromise", ctx)
+	if err := refuseEnded(ctx); err != nil {
+		return err
+	}
+	if r, ok := m.rows[kid]; ok && r.State == domain.SigningKeyCompromised {
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
+	}
 	return m.set(kid, domain.SigningKeyCompromised, &at, func(r *domain.SigningKeyRecord) { r.CompromisedAt = &at })
 }
 
@@ -135,7 +263,9 @@ func (m *memStore) set(kid domain.KeyID, st domain.SigningKeyState, _ *time.Time
 	}
 	r, ok := m.rows[kid]
 	if !ok {
-		return errors.New("memstore: no such key")
+		// Настоящее хранилище на неизвестный ключ отвечает невыполненным
+		// предусловием перехода (ноль строк условного оператора).
+		return fmt.Errorf("%w: SigningKey %s cannot take this transition", iamerr.ErrFailedPrecondition, kid)
 	}
 	r.State = st
 	stamp(&r)
@@ -154,11 +284,14 @@ func mustKeystore(t *testing.T, store *memStore, logBuf *bytes.Buffer) *signingk
 		logger = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		Clock:        fixedClock(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
-		Logger:       logger,
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)),
+		Logger:        logger,
 	}, store, store, wrapper)
 	require.NoError(t, err)
 	return ks
@@ -171,10 +304,13 @@ func TestKeystore_F1_01_AlgorithmComesFromConfigurationAndBindsToTheKey(t *testi
 		wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
 		require.NoError(t, err)
 		ks, err := signingkeys.New(signingkeys.Config{
-			Algorithm:    alg,
-			KeyLifetime:  time.Hour,
-			RemovalGrace: tokenpolicy.KeyRemovalGrace,
-			Clock:        fixedClock(time.Now()),
+			Algorithm:     alg,
+			KeyLifetime:   time.Hour,
+			RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+			RotationLead:  time.Minute,
+			HandoverLimit: time.Minute,
+			StrandedAfter: 2 * time.Minute,
+			Clock:         fixedClock(time.Now()),
 		}, store, store, wrapper)
 		require.NoError(t, err)
 
@@ -294,24 +430,30 @@ func TestKeystore_F1_05_PublishedFormCannotCarryThePrivateHalf(t *testing.T) {
 	require.Equal(t, published, rec.Published())
 }
 
-// TestKeystore_RefusesToBuildIncomplete — часы, алгоритм, срок ключа и
-// отсрочка — входы, а не умолчания.
+// TestKeystore_RefusesToBuildIncomplete — часы, алгоритм, срок ключа,
+// отсрочка, предел передачи и возраст застревания — входы, а не умолчания.
 func TestKeystore_RefusesToBuildIncomplete(t *testing.T) {
 	store := newMemStore()
 	wrapper, err := keywrap.New(bytes.Repeat([]byte{7}, keywrap.KeySize))
 	require.NoError(t, err)
 	full := signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		Clock:        fixedClock(time.Now()),
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         fixedClock(time.Now()),
 	}
 	for name, mutate := range map[string]func(*signingkeys.Config){
-		"без алгоритма":  func(c *signingkeys.Config) { c.Algorithm = "" },
-		"чужой алгоритм": func(c *signingkeys.Config) { c.Algorithm = "HS256" },
-		"без часов":      func(c *signingkeys.Config) { c.Clock = nil },
-		"без срока":      func(c *signingkeys.Config) { c.KeyLifetime = 0 },
-		"без отсрочки":   func(c *signingkeys.Config) { c.RemovalGrace = 0 },
+		"без алгоритма":        func(c *signingkeys.Config) { c.Algorithm = "" },
+		"чужой алгоритм":       func(c *signingkeys.Config) { c.Algorithm = "HS256" },
+		"без часов":            func(c *signingkeys.Config) { c.Clock = nil },
+		"без срока":            func(c *signingkeys.Config) { c.KeyLifetime = 0 },
+		"без отсрочки":         func(c *signingkeys.Config) { c.RemovalGrace = 0 },
+		"без предела передачи": func(c *signingkeys.Config) { c.HandoverLimit = 0 },
+		// Сметатель выводил бы ключ, чья передача ещё идёт.
+		"застревание не длиннее передачи": func(c *signingkeys.Config) { c.StrandedAfter = c.HandoverLimit },
 	} {
 		cfg := full
 		mutate(&cfg)
@@ -360,10 +502,13 @@ func TestKeystore_F1_30_SweepRemovesOnlyAfterTheComputedGrace(t *testing.T) {
 
 	clockAt := at
 	ks, err := signingkeys.New(signingkeys.Config{
-		Algorithm:    domain.SigningAlgRS256,
-		KeyLifetime:  90 * 24 * time.Hour,
-		RemovalGrace: tokenpolicy.KeyRemovalGrace,
-		Clock:        func() time.Time { return clockAt },
+		Algorithm:     domain.SigningAlgRS256,
+		KeyLifetime:   90 * 24 * time.Hour,
+		RemovalGrace:  tokenpolicy.KeyRemovalGrace,
+		RotationLead:  time.Minute,
+		HandoverLimit: time.Minute,
+		StrandedAfter: 2 * time.Minute,
+		Clock:         func() time.Time { return clockAt },
 	}, store, store, wrapper)
 	require.NoError(t, err)
 

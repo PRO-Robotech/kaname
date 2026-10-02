@@ -35,10 +35,11 @@ import re
 import subprocess
 import sys
 import uuid
+import urllib.parse
 import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field, replace
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 # --- общий слой генератора (задача #1367) ------------------------------------
 # Помощники ниже общие для ВСЕХ наборов newman и живут в дереве в одном
@@ -233,6 +234,22 @@ class Step:
     # silently and invisibly. Here it is declared on the one item that needs it and
     # is visible in the generated collection.
     insecure_tls: bool = False
+    # ШАГ, ГОВОРЯЩИЙ КАК БРАУЗЕР И КАК КЛИЕНТ OAuth (приёмка LINE-A-1). Три поля
+    # ниже нужны церемонии `authorization_code`, и у каждого умолчание — прежнее
+    # поведение байт в байт (держит `scripts/browser_lane_step_test.py`).
+    #
+    #   follow_redirects=False — ответ `302` точки авторизации виден шагу как есть:
+    #     иначе прогонщик уходит по `Location` сам, и «код выдан перенаправлением»
+    #     неотличим от «отказ без перенаправления»;
+    #   cookie_jar=False — банка печений прогонщика шагу не прикладывается: порт
+    #     границей печенья не является, и отрицание «сессии нет» получало бы
+    #     сессию из банки. Печенье такой шаг несёт только явным заголовком;
+    #   form — тело `application/x-www-form-urlencoded` парами «имя, значение»
+    #     (RFC 6749 §4.1.3). Литерал кодируется здесь; подстановка `{{имя}}`
+    #     уходит как есть — закодированное значение кладёт пред-скрипт.
+    follow_redirects: bool = True
+    cookie_jar: bool = True
+    form: Optional[List[Tuple[str, str]]] = None
 
 
 # Sentinel `auth` value: "poll the Operation as whoever MINTED it".
@@ -316,9 +333,10 @@ class Case:
 # три отказа стража против двух ложных зеленей в одном кейсе.
 #
 # ЧИТАЕТСЯ `raw` — И ЭТО ВСЯ ПОВЕРХНОСТЬ, А НЕ ЧАСТЬ ЕЁ. `step_to_postman` эмитит
-# тело единственным режимом `raw` (см. ниже по файлу); режима, который страж не
-# прочитал бы, генератор не производит. Появится второй режим — эта посылка станет
-# ложной, поэтому она записана здесь, а не подразумевается.
+# тело единственным режимом `raw` (см. ниже по файлу), и тело формы шага (`form`,
+# `_iam_item_hook`) эмитится тем же режимом; режима, который страж не прочитал бы,
+# генератор не производит. Появится второй режим — эта посылка станет ложной,
+# поэтому она записана здесь, а не подразумевается.
 _UNRESOLVED_VAR_GUARD = [
     "(function () {",
     "  var _u = '';",
@@ -952,8 +970,80 @@ def address_own_front(cases: List["Case"], why: str) -> List["Case"]:
 # спрашивает не о ресурсе: окно видимости прав такой адрес не наполнит никогда, а
 # отказ по нему приходит кодом ИЗ полосы ожидания — то есть шаг выжигает весь бюджет
 # и падает, называя следствие вместо предмета.
-_rya = functools.partial(retry_until_authorized,
-                        budget=15, interval_ms=400, lane_head=True)
+_rya_window = functools.partial(retry_until_authorized,
+                                budget=15, interval_ms=400, lane_head=True)
+
+
+# ── ГДЕ ОКНО ЕСТЬ, А ГДЕ ЕГО НЕТ — РЕШЕНИЕ НАБОРА (kaname#393) ──────────────
+#
+# Повтор пережидает ОДНО окно — материализацию прав владельца на свой свежий
+# ресурс — и потому законен в одном месте: на первом обращении к такому ресурсу с
+# ОЖИДАЕМЫМ УСПЕХОМ. Предикат общего слоя (`_wrap_own_fresh_reads`) требования
+# «шаг ждёт успеха» не несёт — его шапка снимает его прямо, — и свежей считает
+# ЛЮБУЮ переменную, записанную раньше в кейсе. Замер по порождённым коллекциям
+# дерева до этой правки: 33 обёрнутых шага без единого 2xx в объявленном исходе
+# (12 коллекций из 47) и 25 обёрнутых шагов слушателя формы.
+#
+# Слой вендорен (`tests/newman/vendor-provenance.json`), поэтому решение принято
+# ЗДЕСЬ, адаптером повтора, который общий слой получает аргументом: он зовёт
+# обёртку, а обёртка набора отказывается ставить повтор там, где окна нет.
+# Отрицание на свежем ресурсе получает окно ЧТЕНИЕМ этого ресурса перед собой,
+# а не повтором самого отрицания: отказ отрицания читается с первого ответа.
+#
+# ПОВЕРХНОСТЬ БЕЗ ОКНА. Слушатель формы стоит не за шлюзом прав: его шаги
+# ссылаются на признак формы и печенье, и материализации прав, которую пережидает
+# повтор, у него нет. Когда слушатель отвечает `403` на каждый запрос, повтор
+# уводил шаги выхода по шестнадцать раз (39 запросов вместо 9, замер 2026-09-23).
+NO_AUTHZ_WINDOW_SURFACES = frozenset({"loginLaneBaseUrl"})
+
+_SURFACE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _addressed_surface(step) -> Optional[str]:
+    """Переменная адреса, которой шаг адресован САМИМ кейсом (`require_env_url`)."""
+    for line in step.pre_script:
+        if line.startswith(_ENV_URL_MARK):
+            m = _SURFACE_NAME_RE.match(line[len(_ENV_URL_MARK):])
+            return m.group(0) if m else None
+    return None
+
+
+def _window_refusal(step) -> Optional[str]:
+    """Почему повтору окна прав на этом шаге НЕ место; None — место есть.
+
+    Исход читается тем же разбором, что у общего слоя (`_accepted_http_codes`):
+    второй разборщик того же предмета разошёлся бы с ним молча. Шаг без
+    объявленного статуса отказом не объявлен и под запрет не подпадает.
+    """
+    accepted = _accepted_http_codes("\n".join(step.test_script))
+    if accepted and not any(200 <= c < 300 for c in accepted):
+        return (f"шаг {step.name!r} ждёт отказа {sorted(accepted)}: повтор окна прав "
+                f"на отрицании пережидал бы ровно то, что шаг проверяет; окно даёт "
+                f"обёрнутое ЧТЕНИЕ свежего ресурса перед ним")
+    surface = _addressed_surface(step)
+    if surface in NO_AUTHZ_WINDOW_SURFACES:
+        return (f"шаг {step.name!r} адресован {surface}: эта поверхность стоит не за "
+                f"шлюзом прав, окна материализации у неё нет")
+    return None
+
+
+def _rya(step, **kw):
+    """Явная обёртка кейса: там, где окна нет, — ОТКАЗ генерации, а не тихий пропуск.
+
+    Автор, попросивший повтор на отрицании, просит маску; молча не обернуть значило
+    бы оставить его думать, что окно закрыто. Отказ называет шаг и причину.
+    """
+    why = _window_refusal(step)
+    if why:
+        raise ValueError(f"retry_until_authorized: {why}")
+    return _rya_window(step, **kw)
+
+
+def _auto_rya(step, retry_on):
+    """Адаптер для предиката общего слоя: там, где окна нет, шаг остаётся как есть."""
+    if _window_refusal(step):
+        return step
+    return _rya_window(step, retry_on=retry_on)
 
 # То же окно у СПИСОЧНОГО ожидания — и то же правило: величину называет НАБОР,
 # а не общий слой (#1379). Форма общая: до сведения ЭТОТ набор нёс ЧЕТВЁРТУЮ
@@ -1744,7 +1834,7 @@ def _iam_case_steps(case):
     # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
     case = replace(case, steps=_assert_published_id_outcome(
         _reset_captured_operation_id(_assert_delete_operation_outcome(
-            _wrap_own_fresh_reads(case.steps, _rya, rename=False)))))
+            _wrap_own_fresh_reads(case.steps, _auto_rya, rename=False)))))
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
     # Newman's `setNextRequest(<name>)`
@@ -1834,10 +1924,52 @@ def _iam_case_steps(case):
     return items
 
 
+# Подстановка набора в значении формы: уходит как есть, кодирует её пред-скрипт.
+_FORM_PLACEHOLDER_RE = re.compile(r"(\{\{[A-Za-z_][A-Za-z0-9_]*\}\})")
+
+
+def _form_raw(pairs: List[Tuple[str, str]]) -> str:
+    """Пары формы — в строку `application/x-www-form-urlencoded`.
+
+    Литерал кодируется целиком (`safe=''`: `/`, `:`, `?`, `&`, `=` в адресе
+    возврата разорвали бы форму), подстановка `{{имя}}` остаётся нетронутой —
+    её значение неизвестно до прогона, и закодированным его кладёт пред-скрипт.
+    """
+    def enc(value: str) -> str:
+        return "".join(part if _FORM_PLACEHOLDER_RE.fullmatch(part)
+                       else urllib.parse.quote(part, safe="")
+                       for part in _FORM_PLACEHOLDER_RE.split(value) if part)
+    return "&".join(f"{enc(k)}={enc(v)}" for k, v in pairs)
+
+
 def _iam_item_hook(step, item):
-    """Ослабленная проверка сертификата — по свойству шага, а не по умолчанию."""
+    """Поведение шага, объявленное ИМ САМИМ, а не умолчание прогонщика.
+
+    Ослабленная проверка сертификата, неследование перенаправлению, выключенная
+    банка печений и тело формы — у каждого умолчание прежнее байт в байт
+    (`scripts/browser_lane_step_test.py`): шаг без этих полей эмитится как раньше.
+    Три поведения делят ОДИН блок `protocolProfileBehavior` — второе присваивание
+    блока целиком стёрло бы первое молча.
+    """
+    ppb = {}
     if step.insecure_tls:
-        item["protocolProfileBehavior"] = {"strictSSL": False}
+        ppb["strictSSL"] = False
+    if not step.follow_redirects:
+        ppb["followRedirects"] = False
+    if not step.cookie_jar:
+        ppb["disableCookies"] = True
+    if ppb:
+        item["protocolProfileBehavior"] = ppb
+    if step.form is not None:
+        if step.body is not None:
+            raise ValueError(
+                f"шаг {step.name!r}: заданы и form, и body — тело у запроса одно, и "
+                f"второе молча перезаписало бы первое")
+        # Режим тот же `raw`, что у JSON: страж неразрешённой подстановки читает
+        # `pm.request.body.raw` и потому видит и эту форму (см. его шапку).
+        item["request"]["header"] = [
+            {"key": "Content-Type", "value": "application/x-www-form-urlencoded"}]
+        item["request"]["body"] = {"mode": "raw", "raw": _form_raw(step.form)}
 
 
 # Опрос операции: тело общее (#1475), решения набора — здесь. У iam их три, и

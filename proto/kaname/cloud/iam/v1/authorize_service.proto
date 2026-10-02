@@ -426,11 +426,13 @@ message WhoAmIResponse {
   //     condition, so an account a blocked person owns is still listed to him;
   //   - the caller OWNS it (`Account.owner_user_id`) — owning is not being a
   //     member, so it is asked separately;
-  //   - the caller holds an ACTIVE account-scoped AccessBinding on it. This is
-  //     the source that can list an account to an invited person BEFORE his
-  //     first login, whose membership is still PENDING — but only when the
-  //     invitation actually granted a role; an invitation with an empty role
-  //     grants nothing, and then nothing lists the account until he logs in.
+  //   - the caller holds an ACTIVE account-scoped AccessBinding on it. It does
+  //     not list an account to an invited person whose membership is still
+  //     PENDING: such a person has not confirmed his address — the confirmation
+  //     is what activates the invitation (kaname#456) — and his call never
+  //     reaches this snapshot, it is refused `EMAIL_NOT_VERIFIED`. The
+  //     confirmation turns the membership ACTIVE, and the first source lists
+  //     the account.
   //
   // THE PREDICATE USED TO BE STATED AS "has an ACTIVE user row", and that
   // outlived the model it came from. While a person was a ROW IN an account,
@@ -456,9 +458,10 @@ message WhoAmIResponse {
   // property of the membership row, and they are read on the caller's own
   // membership list (`MembershipService.ListMine`, `GET /iam/v1/me/memberships`):
   // there `invited_by` and `created_at` name the inviter and the moment. After the
-  // first login the snapshot DOES list the account of an invitation (membership
-  // becomes ACTIVE at login) — so "the snapshot carries no invitations" would be
-  // false; what it lacks is the DISTINCTION, not the account.
+  // invitee confirms his address the snapshot DOES list the account of an
+  // invitation (the confirmation activates the invitation and the membership
+  // becomes ACTIVE) — so "the snapshot carries no invitations" would be false;
+  // what it lacks is the DISTINCTION, not the account.
   repeated AccountMembership accounts = 7;
 
   // Timestamp at which the snapshot was computed (truncated to seconds).

@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -45,15 +46,42 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 }
 
 // Writer — одна транзакция трёх следствий.
+//
+// Транзакцию открывает открытие писателя сессии (`beginHumanSessionWriter`),
+// а не эта дверь: писатель сессии встроен сюда целиком, снятие записи с
+// отзывом выданного в ней этой транзакции представимо, и уровень её назван
+// там же, где у остальных дверей писателя сессии (kaname#316).
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	w, err := beginHumanSessionWriter(ctx, s.pool)
 	if err != nil {
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
-		humanSessionWriter: &humanSessionWriter{tx: tx},
-		mirror:             &writeTx{readTx: readTx{tx: tx}},
-		tx:                 tx,
+		humanSessionWriter: w,
+		mirror:             &writeTx{readTx: readTx{tx: w.tx}},
+		tx:                 w.tx,
+	}, nil
+}
+
+// VerificationWriter — транзакция исхода подтверждения адреса (kaname#456,
+// Р10): тот же состав, что у регистрации (писатель сессии и писатель зеркала
+// над ОДНОЙ `pgx.Tx`, — активация приглашения идёт тем же исходом), но ПЕРВЫМ
+// оператором взята строка человека замком писателя нескольких сессий:
+// подтверждение снимает прочие сессии человека, а запрос письма судит предел
+// писем, и одновременные обращения одного человека сериализованы этим замком.
+func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
+	w, err := beginHumanSessionWriter(ctx, s.pool)
+	if err != nil {
+		return nil, mapErr(err, "Verification.Writer", "")
+	}
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return &RegistrationWriter{
+		humanSessionWriter: w,
+		mirror:             &writeTx{readTx: readTx{tx: w.tx}},
+		tx:                 w.tx,
 	}, nil
 }
 

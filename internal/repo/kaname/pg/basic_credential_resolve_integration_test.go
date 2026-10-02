@@ -29,7 +29,6 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 func basicCredPool(t *testing.T) *pgxpool.Pool {
@@ -60,9 +59,9 @@ INSERT INTO accounts (id, name, owner_user_id)
 VALUES ('acc0000000000000bat1', 'bat-1', 'usr0000000000000bat1') ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
-INSERT INTO users (id, external_id, email, account_id, invite_status)
-VALUES ('usr0000000000000bat1', 'ext-bat-1', 'bat1@example.invalid', 'acc0000000000000bat1', 'ACTIVE'),
-       ('usr0000000000000bat2', 'ext-bat-2', 'bat2@example.invalid', 'acc0000000000000bat1', 'ACTIVE')
+INSERT INTO users (id, external_id, email, account_id, invite_status, email_verified_at)
+VALUES ('usr0000000000000bat1', 'ext-bat-1', 'bat1@example.invalid', 'acc0000000000000bat1', 'ACTIVE', now()),
+       ('usr0000000000000bat2', 'ext-bat-2', 'bat2@example.invalid', 'acc0000000000000bat1', 'ACTIVE', now())
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
@@ -80,8 +79,8 @@ func mintUserCredential(t *testing.T, pool *pgxpool.Pool, credID, userID string)
 	require.NoError(t, err)
 	_, err = pool.Exec(context.Background(), `
 INSERT INTO user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, $2, 'SECRET', $3, now() + interval '30 days')`, credID, userID, hash)
+    (id, user_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, $2, 'SECRET', $3, now() + interval '30 days')`, credID, userID, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -92,8 +91,8 @@ func mintSACredential(t *testing.T, pool *pgxpool.Pool, credID, svaID string) st
 	require.NoError(t, err)
 	_, err = pool.Exec(context.Background(), `
 INSERT INTO service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ($1, $2, NULL, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30 days')`, credID, svaID, hash)
+    (id, sva_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ($1, $2, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30 days')`, credID, svaID, hash)
 	require.NoError(t, err)
 	return secret
 }
@@ -105,7 +104,7 @@ VALUES ($1, $2, NULL, 'usr0000000000000bat1', 'SECRET', $3, now() + interval '30
 func TestBAT1_42_RevocationReachesPresentationThroughBothSides(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	first := mintUserCredential(t, pool, "uoc_0000000000000bat1", "usr0000000000000bat1")
@@ -144,7 +143,7 @@ func TestBAT1_42_RevocationReachesPresentationThroughBothSides(t *testing.T) {
 func TestBAT1_45_OwnerStateIsPartOfTheSingleResolveStatement(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	human := mintUserCredential(t, pool, "uoc_0000000000000bat3", "usr0000000000000bat2")
@@ -214,7 +213,7 @@ SELECT tc.constraint_name, kcu.column_name
 	require.NotEmpty(t, causes,
 		"поводов ноль — перечень пуст, и «утверждён каждый» здесь означало бы «не утверждён ни один»")
 
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	mine := mintUserCredential(t, pool, "uoc_0000000000000bat4", "usr0000000000000bat2")
 	neighbour := mintUserCredential(t, pool, "uoc_0000000000000bat5", "usr0000000000000bat1")
 
@@ -240,15 +239,15 @@ SELECT tc.constraint_name, kcu.column_name
 func TestBAT1_48_ExpiryIsRefusedByTheSameRefusalAndTheBoundaryIsCheckedBothWays(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	// За секунду до истечения — проходит.
 	alive, hash, err := credsecret.Mint("uoc_0000000000000bat6")
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO user_oauth_clients (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, expires_at)
-VALUES ('uoc_0000000000000bat6', 'usr0000000000000bat1', NULL, 'usr0000000000000bat1', 'SECRET', $1,
+INSERT INTO user_oauth_clients (id, user_id, created_by_user_id, credential_kind, secret_hash, expires_at)
+VALUES ('uoc_0000000000000bat6', 'usr0000000000000bat1', 'usr0000000000000bat1', 'SECRET', $1,
         now() + interval '5 seconds')`, hash)
 	require.NoError(t, err)
 	// Дату создания сдвигаем в прошлое, чтобы истёкший срок оставался ЗАКОННЫМ
@@ -276,7 +275,7 @@ UPDATE user_oauth_clients SET expires_at = now() - interval '1 second'
 func TestBAT1_10_TheRefusalIsSingleAndIsNoOracle(t *testing.T) {
 	pool := basicCredPool(t)
 	seedBasicOwners(t, pool)
-	repo := pg.NewBasicCredentialRepo(pool)
+	repo := newBasicAuthority(t, pool)
 	ctx := context.Background()
 
 	good := mintUserCredential(t, pool, "uoc_0000000000000bat7", "usr0000000000000bat1")

@@ -175,7 +175,7 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		DefaultAudience:  audRegistry,
 		TokenTTL:         15 * time.Minute,
 		Clock:            func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
-	}, newSigner(t), stubClaims{})
+	}, newSigner(t), stubClaims{}, noCutoffs{})
 	require.NoError(t, err)
 
 	var want []string
@@ -192,6 +192,14 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		RequestedAudience: want,
 	})
 	return err
+}
+
+// noCutoffs — отсечек отзыва-всех нет. Предмет этой пробы — адресат, и
+// принципал здесь машинный: отсечка человека для него не читается вовсе.
+type noCutoffs struct{}
+
+func (noCutoffs) UserRevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
 }
 
 // stubClaims — источник состава утверждений. Дублёр НЕ снисходительнее
@@ -248,14 +256,15 @@ func issueViaRegistryToken(t *testing.T, declared []string, requested string) er
 	secret, _, err := credsecret.Mint(clientID)
 	require.NoError(t, err)
 
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(
+	uc, err := registrytokenuc.NewIssueRegistryTokenUseCase(
 		registrytokenuc.Config{
-			AssertionAudience: "https://hydra.kacho.local/oauth2/token",
-			AllowedAudiences:  []string{audRegistry},
-			DefaultService:    audRegistry,
+			AllowedAudiences: []string{audRegistry},
+			DefaultService:   audRegistry,
 		},
-		dockerSigner{}, dockerExchanger{},
-	).WithLocalMinter(dockerMinter{}).WithBasicCredentialResolver(dockerAuthority{secret: secret})
+		dockerMinter{},
+	)
+	require.NoError(t, err)
+	uc = uc.WithBasicCredentialResolver(dockerAuthority{secret: secret})
 
 	_, err = uc.Execute(context.Background(), registrytokenuc.IssueInput{
 		Username: clientID, Password: secret, Service: requested,
@@ -279,18 +288,14 @@ func (a dockerAuthority) ResolveBasic(_ context.Context, presented string) (doma
 	}, nil
 }
 
-type dockerSigner struct{}
-
-func (dockerSigner) Sign(registrytokenuc.AssertionInput) (string, error) { return "assertion", nil }
-
-type dockerExchanger struct{}
-
-func (dockerExchanger) Exchange(context.Context, registrytokenuc.ExchangeInput) (registrytokenuc.ExchangeOutput, error) {
-	return registrytokenuc.ExchangeOutput{AccessToken: "token", ExpiresIn: 300}, nil
-}
-
 type dockerMinter struct{}
 
 func (dockerMinter) MintToken(context.Context, registrytokenuc.MintInput) (registrytokenuc.MintOutput, error) {
 	return registrytokenuc.MintOutput{AccessToken: "token", ExpiresIn: 300}, nil
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (noCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }

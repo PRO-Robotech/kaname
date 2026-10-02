@@ -73,8 +73,8 @@ type bridged struct {
 	valuePath []string // путь в дереве значений чарта; пуст, когда значение выводится
 	derive    func(*valueReader) any
 	omitEmpty bool // пустое значение шаблон не рендерит вовсе
-	// gate — путь ВЫКЛЮЧАТЕЛЯ блока: шаблон рендерит ключ только при истинном
-	// значении по этому пути (`{{- if $ts.enabled }}`).
+	// gate — путь ВЫКЛЮЧАТЕЛЯ блока: шаблон рендерит ключ только при булевом
+	// true по этому пути (правило `kaname-svc.blockEnabled`, задача #391).
 	//
 	// Отдельное поле, а не `omitEmpty` на самом выключателе: у блока выключатель
 	// ОДИН, а ключей в нём несколько, и каждый из них при выключенном блоке
@@ -207,14 +207,8 @@ var configBridge = []bridged{
 	// каждом выпущенном токене. Умолчания у ключа нет (задача #2127), поэтому
 	// профиль обязан его назвать, а страж — отказать без него.
 	{configKey: "authn.domain", valuePath: []string{"authn", "domain"}, omitEmpty: true},
-	{configKey: "authn.identity-provider", valuePath: []string{"authn", "identityProvider"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
-	// ЧЕМ АДМИНИСТРАТИВНЫЙ КОНТУР ПОСТАВЩИКА АУТЕНТИФИЦИРУЕТ НАС (задача #2471).
-	// Умолчания нет намеренно: величина, которую построение подставляет молча,
-	// предметом стража быть не может. Профиль, называющий АДРЕС контура, обязан
-	// сказать и это — иначе объявлена половина пары, и она выглядит настроенной.
-	{configKey: "authn.provider-admin-auth", valuePath: []string{"authn", "providerAdminAuth"}, omitEmpty: true},
 	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
 	// приходящий умолчанием процесса, непуст всегда — профиль, о ребре
 	// умолчавший, поднимал бы его молча.
@@ -254,12 +248,24 @@ var configBridge = []bridged{
 	// ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271): срок кода — ключ того же блока
 	// `login`, та же ветвь `with`.
 	{configKey: "authn.login.recovery-code-ttl", valuePath: []string{"authn", "login", "recoveryCodeTtl"}, omitEmpty: true},
+	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ключей того же блока `login`;
+	// числа ветвятся по `hasKey`, сроки — по `with`.
+	{configKey: "authn.login.verification-code-ttl", valuePath: []string{"authn", "login", "verificationCodeTtl"}, omitEmpty: true},
+	{configKey: "authn.login.verification-code-attempts", valuePath: []string{"authn", "login", "verificationCodeAttempts"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-interval", valuePath: []string{"authn", "login", "verificationResendInterval"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-limit", valuePath: []string{"authn", "login", "verificationResendLimit"}, omitEmpty: true},
+	{configKey: "authn.login.verification-resend-window", valuePath: []string{"authn", "login", "verificationResendWindow"}, omitEmpty: true},
 	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; задача #205): предел ветвится по
 	// `hasKey` (ноль законен), окно — по `with`. `omitEmpty` у предела НЕ
 	// ставится по тому же доводу, что у собственных потолков: ноль — величина,
 	// а не пустота, и вычет пустого выбросил бы её из входа.
 	{configKey: "authn.registration.admissions-per-window", valuePath: []string{"authn", "registration", "admissionsPerWindow"}},
 	{configKey: "authn.registration.admission-window", valuePath: []string{"authn", "registration", "admissionWindow"}, omitEmpty: true},
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318): обе ветвью `with`, читаются
+	// под `own`, на которой стоит боевой профиль (#424): снятие любой роняет
+	// старт, и в ведомости восстановленных намеренно их нет.
+	{configKey: "authn.ceremony.code-ttl", valuePath: []string{"authn", "ceremony", "codeTtl"}, omitEmpty: true},
+	{configKey: "authn.ceremony.refresh-ttl", valuePath: []string{"authn", "ceremony", "refreshTtl"}, omitEmpty: true},
 	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281): окно свежести правки своих данных —
 	// та же форма, что у величин полосы: ветвь, читается только под `own`.
 	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
@@ -279,11 +285,32 @@ var configBridge = []bridged{
 	{configKey: "authn.token-signing.algorithm", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "algorithm"}},
 	{configKey: "authn.token-signing.allowed-algorithms", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "allowedAlgorithms"}},
 	{configKey: "authn.token-signing.key-set-path", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keySetPath"}},
-	{configKey: "authn.token-signing.key-lifetime", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keyLifetime"}},
+	// Срок ключа отдан ВЕТВЬЮ (`with`): пустой в файл не попадает, а не
+	// рендерится пустой строкой, которую разбор отверг бы раньше стража (#321).
+	{configKey: "authn.token-signing.key-lifetime", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keyLifetime"}, omitEmpty: true},
 	// ЧИТАТЕЛЬ ПРЕДЪЯВЛЕННОГО УДОСТОВЕРЕНИЯ. Тот же выключатель блока.
 	{configKey: "authn.presented-credential.enabled", gate: presentedCredentialGate, derive: func(*valueReader) any { return true }},
 	{configKey: "authn.presented-credential.audience", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "audience"}},
-	{configKey: "authn.presented-credential.revocation-cache-ttl", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "revocationCacheTtl"}},
+	// Срок кеша отзыва — та же ветвь и по той же причине, что срок ключа выше.
+	{configKey: "authn.presented-credential.revocation-cache-ttl", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "revocationCacheTtl"}, omitEmpty: true},
+	// ТОКЕН-ЭНДПОИНТ ПЛАТФОРМЫ (#337). Тот же выключатель блока; четыре величины
+	// отданы ветвью `with` без умолчаний шаблона, поэтому `omitEmpty` у всех.
+	// Записей здесь не было, пока боевой профиль стоял на снятой посадке
+	// `external` и блока не включал; профиль на `own` его включает (#424), и
+	// вход переложения обязан его нести — иначе он уже рендера ровно на нём.
+	{configKey: "authn.client-token.enabled", gate: clientTokenGate, derive: func(*valueReader) any { return true }},
+	{configKey: "authn.client-token.allowed-audiences", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "allowedAudiences"}, omitEmpty: true},
+	{configKey: "authn.client-token.default-audience", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "defaultAudience"}, omitEmpty: true},
+	{configKey: "authn.client-token.token-ttl", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "tokenTtl"}, omitEmpty: true},
+	{configKey: "authn.client-token.body-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "bodyCeiling"}, omitEmpty: true},
+	// ТЕМП ПОВЕРХНОСТИ ВЫДАЧИ (kaname#315): шесть величин того же блока, ветвью
+	// `with` без умолчаний шаблона, поэтому `omitEmpty` у всех.
+	{configKey: "authn.client-token.in-flight-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "inFlightCeiling"}, omitEmpty: true},
+	{configKey: "authn.client-token.exchanges-per-client-per-sec", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "exchangesPerClientPerSec"}, omitEmpty: true},
+	{configKey: "authn.client-token.failed-proofs-per-source", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "failedProofsPerSource"}, omitEmpty: true},
+	{configKey: "authn.client-token.failed-proof-window", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "failedProofWindow"}, omitEmpty: true},
+	{configKey: "authn.client-token.authorize-per-source-per-sec", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "authorizePerSourcePerSec"}, omitEmpty: true},
+	{configKey: "authn.client-token.authorize-in-flight-ceiling", gate: clientTokenGate, valuePath: []string{"authn", "clientToken", "authorizeInFlightCeiling"}, omitEmpty: true},
 }
 
 // Выключатели блоков — названы ОДИН раз: путь, повторённый у каждого ключа
@@ -291,6 +318,7 @@ var configBridge = []bridged{
 var (
 	tokenSigningGate        = []string{"authn", "tokenSigning", "enabled"}
 	presentedCredentialGate = []string{"authn", "presentedCredential", "enabled"}
+	clientTokenGate         = []string{"authn", "clientToken", "enabled"}
 )
 
 // restatedDeliberately — ручки боевого профиля, чьё СНЯТИЕ страж не замечает, и
@@ -299,129 +327,44 @@ var (
 // Перечень утверждается В ОБЕ СТОРОНЫ: запись, чью ручку страж начал читать,
 // становится находкой и подлежит удалению. Иначе послабление переживает свой
 // предмет и начинает прощать ту ручку, которая в него следующей провалится.
+// loginLaneRootGuardReason — причина записей слушателя ПОЛОСЫ ВХОДА ПАРОЛЕМ.
+//
+// Прежде причиной было «боевой профиль стоит на `external`, страж читает
+// величину только под `own`», и запись истекала с первым профилем на `own`.
+// Профиль на `own` (#424) — и снятие величин блока `authn.login` теперь роняет
+// старт, их записи сняты. Эти три остались по ДРУГОЙ причине: их страж живёт в
+// композиционном корне (requireLoginLaneTLS и адрес слушателя в cmd/kaname), а
+// проба судит стража настройки (config.Validate) и корня не видит.
+const loginLaneRootGuardReason = "величина СЛУШАТЕЛЯ ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): её судит страж " +
+	"композиционного корня (requireLoginLaneTLS и адрес слушателя в cmd/kaname), а эта проба спрашивает " +
+	"стража настройки, который корня не видит, поэтому снятие ручки здесь посадку не роняет. Объявлена по " +
+	"приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в профилях обоих чартов, где его видит " +
+	"читающий. Запись истекает, когда страж корня станет достижим стражу настройки"
+
+// issuingListenerRootGuardReason — причина записи режима СЛУШАТЕЛЯ ВЫДАЧИ.
+//
+// Прежде причиной было «боевой профиль стоит на `external`, где умолчание
+// server-tls-only законно», и запись истекала с первым профилем на `own`.
+// Профиль на `own` с включённым эндпоинтом (#424) — и церемония собирается,
+// но страж режима живёт в композиционном корне
+// (requireIssuingListenerAsksForACertificate в cmd/kaname), а проба судит
+// стража настройки и корня не видит.
+const issuingListenerRootGuardReason = "режим слушателя выдачи (kaname#315, приёмка " +
+	"ceremony-pace-is-named-by-number.md, Р7 п.5, KN-PACE-39): его судит страж композиционного корня " +
+	"(requireIssuingListenerAsksForACertificate в cmd/kaname) при собранной церемонии, а эта проба " +
+	"спрашивает стража настройки, который корня не видит, поэтому снятие ручки здесь посадку не роняет. " +
+	"Объявлен приёмкой в боевом профиле, который стоит на own с включённым эндпоинтом (#424). Запись " +
+	"истекает, когда страж корня станет достижим стражу настройки"
+
 var restatedDeliberately = map[string]string{
 	// ПОЛОСА ВХОДА ПАРОЛЕМ — одна причина на все записи, и она названа у каждой:
 	// ведомость сверяется по ключу, а не по блоку.
-	"apiServer.loginLaneEndpoint": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.sessionTtl": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.cookieDomain": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.addressAttempts": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.addressWindow": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.sourceAttempts": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.sourceWindow": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.passwordMinLength": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.breachCheck": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.hasherFormat": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.hasherMemory": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.hasherIterations": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.hasherParallelism": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.verifierCapacity": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.memoryReserveBytes": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.login.recoveryCodeTtl": "величина ВОССТАНОВЛЕНИЯ ДОСТУПА (Ф5, kacho#1271, Р1): срок кода восстановления от " +
-		"чеканки; страж читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль " +
-		"стоит на `external`. Объявлена по приёмке Ф5 (Ф5-06): дословный перенос Ф1 §4.1 (5 мин) живёт в " +
-		"профилях обоих чартов, где его видит читающий (задача #205). Запись истекает с первым профилем на " +
-		"`own`: там снятие ручки роняет СТАРТ",
-	"authn.registration.admissionsPerWindow": "величина РЕГИСТРАЦИИ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270, Р5): " +
-		"потолок темпа заведения аккаунтов одной личностью; страж читает её только под посадкой `own` " +
-		"(config.ValidateLaneRequirements), а боевой профиль стоит на `external`. Объявлена по приёмке Ф4 " +
-		"(Ф4-18/19): перенос строки справочника (3 за 1 ч) живёт в профилях обоих чартов, где его видит " +
-		"читающий (задача #205). Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.registration.admissionWindow": "величина РЕГИСТРАЦИИ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270, Р5): окно " +
-		"счёта заведений; страж читает её только под посадкой `own` (config.ValidateLaneRequirements), а " +
-		"боевой профиль стоит на `external`. Объявлена по приёмке Ф4 (Ф4-18/19): перенос строки справочника " +
-		"(3 за 1 ч) живёт в профилях обоих чартов, где его видит читающий (задача #205). Запись истекает с " +
-		"первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"authn.selfServiceFreshness": "величина ВТОРОГО ФАКТОРА (Ф12, kacho#1281, Р8): окно свежести правки своих данных; страж " +
-		"читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль стоит на " +
-		"`external`. Объявлена по приёмке Ф12 (Ф12-36): дословный перенос Ф1 §4.1 (15 мин) живёт в " +
-		"профилях обоих чартов, где его видит читающий. Запись истекает с первым профилем на `own`: там " +
-		"снятие ручки роняет СТАРТ",
-	"authn.accessKeys.rpId": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): имя доверяющей стороны; страж читает " +
-		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
-		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
-		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
-		"на `own`: там снятие ручки роняет СТАРТ",
-	"authn.accessKeys.origins": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): перечень происхождений консоли; страж читает " +
-		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
-		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
-		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
-		"на `own`: там снятие ручки роняет СТАРТ",
-	"authn.accessKeys.algorithms": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): перечень алгоритмов открытого ключа; страж читает " +
-		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
-		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
-		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
-		"на `own`: там снятие ручки роняет СТАРТ",
-	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
-	"env.KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
-		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
-		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
-		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
-		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"apiServer.loginLaneEndpoint":                     loginLaneRootGuardReason,
+	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE":         loginLaneRootGuardReason,
+	"env.KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE": loginLaneRootGuardReason,
+	// РЕЖИМ СЛУШАТЕЛЯ ВЫДАЧИ (kaname#315) — та же причина, что у слушателя
+	// полосы входа: его страж живёт в композиционном корне.
+	"env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE": issuingListenerRootGuardReason,
 	"authMode": "базовые значения чарта уже несут production, поэтому снятие этой строки " +
 		"посадку не роняет. Строка стоит затем, чтобы будущая правка умолчания чарта не " +
 		"уронила посадку МОЛЧА: профиль называет её сам",
@@ -445,33 +388,27 @@ var restatedDeliberately = map[string]string{
 		"дотягивается не арендатор, а сосед по кластеру, приходящий со своим сертификатом, " +
 		"— поэтому связывания на нём нет и отказу взяться неоткуда. Транспорт фронта " +
 		"судится ручками env.KANAME_INTERNALREST_* рядом",
-	// Две величины своей чеканки, у которых встроенное умолчание процесса
-	// НЕПУСТО и годно: страж на снятии молчит по построению.
+	// Величина своей чеканки, у которой встроенное умолчание процесса НЕПУСТО и
+	// годно: страж на снятии молчит по построению. Срок ключа отсюда снят
+	// (#321): умолчания у него нет ни у процесса, ни в базовых значениях чарта,
+	// и снятие ручки роняет посадку — и здесь, где ручка снимается из слитого
+	// дерева, и в рендере, где о ней молчит накладка
+	// (`TestProdProfile_RenderedWithoutAKeyLifetimeRefusesStartNamingIt`).
 	"authn.tokenSigning.keySetPath": "встроенное умолчание процесса непусто и годно " +
 		"(/.well-known/kaname/jwks.json), поэтому страж на снятии молчит. Величина объявлена " +
 		"потому, что это АДРЕС, по которому всякий проверяющий наш токен читает набор " +
 		"ключей: оставленный умолчанием, он верен ровно до первого решения сменить путь — и " +
 		"тогда смена окажется невидимой в профиле",
-	"authn.tokenSigning.keyLifetime": "встроенное умолчание процесса непусто (90 суток), " +
-		"поэтому страж на снятии молчит. Величина объявлена потому, что это ПОЛИТИКА " +
-		"РОТАЦИИ ключа подписи — решение установки, а не наше; оставленная умолчанием, она " +
-		"не видна тому, кто ставит, и потому не пересматривается",
 	"apiServer.registryToken.issuer": "встроенное умолчание процесса непусто (локальное имя), " +
 		"поэтому страж на снятии молчит. Величина объявлена потому, что это realm, который " +
 		"докерный клиент слышит от нас: оставленное умолчание отправило бы его на хост, " +
 		"которого у этой установки нет",
-	// Три HTTP-ребра, чей транспорт задавал ЗОНТИЧНЫЙ чарт монорепо: у отдельно
-	// поставленной службы его нет, а адреса всех трёх приходят умолчанием
-	// процесса и потому непусты всегда. Причина у всех трёх одна и та же, что у
-	// докерной полосы ниже: страж живёт в композиционном корне, отсюда
-	// недостижимом by construction.
-	"env.KANAME_HOOKS_SERVER_MTLS_ENABLE": "ручка НЕСУЩАЯ, но её страж живёт в " +
-		"композиционном корне (requireHTTPEdgeTLS в cmd/kaname), а не в Config.Validate, " +
-		"который зовёт эта проба, — то есть недостижим отсюда by construction: пакет main не " +
-		"импортируется. Снятие ручки роняет не посадку, а СТАРТ: слушатель вебхуков " +
-		"поднимается умолчанием процесса, и боевой режим отказывается пускать открытым текстом " +
-		"хоп, по которому идёт общий секрет поставщика личности. Держит это " +
-		"TestProductionProfileSatisfiesTheStartupGuards в services/iam/cmd/kaname",
+	// Два HTTP-ребра, чей транспорт задавал ЗОНТИЧНЫЙ чарт монорепо: у отдельно
+	// поставленной службы его нет, а адреса обоих приходят умолчанием процесса и
+	// потому непусты всегда (третьим было ребро вебхуков поставщика, снятое
+	// вместе с ним, kaname#363). Причина у обоих одна и та же, что у докерной
+	// полосы ниже: страж живёт в композиционном корне, отсюда недостижимом by
+	// construction.
 	"env.KANAME_JWKSPROXY_SERVER_MTLS_ENABLE": "ручка НЕСУЩАЯ, но её страж живёт в " +
 		"композиционном корне (requireHTTPEdgeTLS в cmd/kaname) и отсюда недостижим. " +
 		"Снятие роняет СТАРТ: аутентификация с этой поверхности снята задокументированно, и " +
@@ -483,7 +420,7 @@ var restatedDeliberately = map[string]string{
 		"текст выносит её всякому, кто слушает сеть пода. Держит это " +
 		"TestProductionProfileSatisfiesTheStartupGuards",
 	// Собственные REST-фронты службы (KAN-REST-1). Причина у обеих пар ручек та
-	// же, что у четырёх рёбер рядом: страж живёт в композиционном корне.
+	// же, что у рёбер рядом: страж живёт в композиционном корне.
 	"env.KANAME_REST_SERVER_MTLS_ENABLE": "ручка НЕСУЩАЯ, но её страж живёт в " +
 		"композиционном корне (requireHTTPEdgeTLS в cmd/kaname) и отсюда недостижим. " +
 		"Снятие роняет СТАРТ: по этому проводу идёт ПРЕДЪЯВЛЕННОЕ УДОСТОВЕРЕНИЕ " +
@@ -522,19 +459,8 @@ var restatedDeliberately = map[string]string{
 		"роняет СТАРТ: пустое значение процесс читает как server-tls-only, а на нём " +
 		"вызывающий не назван ничем — рубеж у этой поверхности бывает только транспортный. " +
 		"Держит это TestProductionProfileSatisfiesTheStartupGuards",
-	// Ручка ЗАВЕДЕНА задачей #2471, и её снятие СТАРТ НЕ РОНЯЕТ — намеренно.
-	"authn.providerAdminAuth": "снятие не роняет посадку BY CONSTRUCTION, и это область " +
-		"стража, а не мёртвая ручка. Незаданная ручка означает «оператор не высказывался», " +
-		"и прежнее поведение (предъявитель не требуется) остаётся: потребовать высказывания " +
-		"на уровне ПРОЦЕССА значило бы не пустить в старт каждый существующий стенд — то есть " +
-		"завести объявленную и неисполнимую посадку вместо той, которую чиним. Страж старта " +
-		"(requireProviderAdminCredentialPair в cmd/kaname) судит ПОЛОВИНУ ПАРЫ: объявленный " +
-		"bearer без пришедшего предъявителя и значение вне закрытого словаря. А того, что " +
-		"профиль, называющий АДРЕС контура, обязан назвать и ВЫБОР, требует перепись в две " +
-		"колонки — provider_admin_pair_test.go, и она краснеет ровно на снятии этой строки " +
-		"из поставляемого профиля",
 	// Ручка ЗАВЕДЕНА задачей #2476: профиль включает свою чеканку, а вместе с ней
-	// на слушателе зеркала ключей поднимается АВТОРИТЕТ ОТЗЫВА. Без неё боевая
+	// на слушателе публикатора ключей поднимается АВТОРИТЕТ ОТЗЫВА. Без неё боевая
 	// посадка не стартовала НИ ПРИ КАКОМ входе — и проба профиля этого не видела,
 	// потому что условие жило встроенной ветвью подъёма, а не именованным стражем.
 	"env.KANAME_JWKSPROXY_SERVER_MTLS_CLIENTAUTHMODE": "ручка НЕСУЩАЯ, но её страж " +
@@ -582,7 +508,6 @@ var restatedDeliberately = map[string]string{
 // Перечень утверждается в обе стороны: заменитель без объявленной переменной —
 // находка, а не запас.
 var secretStandIns = map[string]string{
-	"KANAME_HOOK_TOKEN": "stand-in-not-a-secret",
 	// Ключ обёртки разбирается как шестнадцатеричная строка объявленной длины,
 	// поэтому заменитель обязан быть годен по форме.
 	"KANAME_JWKS_ENC_KEY": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -1187,16 +1112,12 @@ func filesAreMountable(merged map[string]any, envs map[string]string) error {
 	leafSecretKey := map[string]string{
 		"server": "secretName",
 		"client": "clientSecretName",
-		// ЛИСТОВ СТАЛО ТРИ (задача #2487): якорь доверия к серверным
-		// сертификатам ПОСТАВЩИКА личности — своя координата, а не `ca.crt`
-		// серверного секрета. Тот отвечает на другой вопрос — «кто вправе прийти
-		// ко мне клиентом», — и склеенные, две величины не давали оператору
-		// развести их, не тронув чужую.
-		//
-		// Запись заведена ТЕМ ЖЕ изменением, что и подкаталог: эта карта — второе
-		// место об одном предмете, и своей правки она не получает молча. Гейт
-		// назвал расхождение сам, как и задумано fail-closed предикатом ниже.
-		"provider": "providerSecretName",
+		// ТРЕТЬЕГО ЛИСТА — якоря доверия к серверным сертификатам поставщика
+		// личности (задача #2487) — БОЛЬШЕ НЕТ: он служил единственной дороге к
+		// прежнему издателю и снят вместе с ней (kaname#494). Запись снята ТЕМ
+		// ЖЕ изменением, что подкаталог шаблона: эта карта — второе место об
+		// одном предмете, и путь под снятым подкаталогом теперь находка
+		// fail-closed предиката ниже, а не молчание.
 	}
 
 	named := materialPathsNamed(envs)

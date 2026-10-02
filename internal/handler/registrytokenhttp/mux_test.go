@@ -12,8 +12,8 @@ import (
 )
 
 // TestNewMux_RoutesToken — the mux dispatches the canonical token path to its
-// handler. There is no JWKS endpoint: the data-plane verifies against Hydra's
-// JWKS, not an IAM-served key set.
+// handler. There is no JWKS endpoint on this mux: key sets are published on
+// the separate cluster-internal key-set listener (:9097).
 func TestNewMux_RoutesToken(t *testing.T) {
 	iss := &fakeIssuer{out: registrytokenuc.IssueOutput{Token: "t", ExpiresIn: 60}}
 	mux := NewMux(newTokenHandler(iss))

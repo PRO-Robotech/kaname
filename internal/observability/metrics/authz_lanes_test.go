@@ -78,6 +78,33 @@ func (f fakeSubjectAuthorizer) ExpandRelations(context.Context, service.ExpandRe
 	return nil, nil
 }
 
+func (f fakeSubjectAuthorizer) NeutralDenyReasons(_ context.Context, req service.CheckRequest) []string {
+	return []string{"neutral:" + req.Subject}
+}
+
+// TestNeutralDenyReasonsPassThroughVerbatim — текст отказа проходит декоратор
+// дословно и не попадает в счёт проверок: транспорт сверяет его побайтно с
+// отказом подтверждённому субъекту, а вопросом о доступе он не является.
+func TestNeutralDenyReasonsPassThroughVerbatim(t *testing.T) {
+	t.Parallel()
+	reg := metrics.NewRegistry()
+	dec := metrics.NewInstrumentedSubjectAuthorizer(fakeSubjectAuthorizer{}, reg)
+
+	got := dec.NeutralDenyReasons(context.Background(), service.CheckRequest{Subject: "user:usr_n"})
+	if len(got) != 1 || got[0] != "neutral:user:usr_n" {
+		t.Fatalf("декоратор подменил текст отказа: %q, ждали [neutral:user:usr_n]", got)
+	}
+	// Серии полос заведены нулём заранее, поэтому судится ЗНАЧЕНИЕ, а не
+	// присутствие серии.
+	dump := dumpMetrics(t, reg)
+	for _, decision := range []string{"allow", "deny"} {
+		series := `kaname_authz_check_decisions_total{decision="` + decision + `",rpc="Check"}`
+		if got := counterValue(t, dump, series); got != 0 {
+			t.Fatalf("текст отказа посчитан проверкой края: %s = %v", series, got)
+		}
+	}
+}
+
 // TestEdgeLaneCheckIsObserved — полоса КРАЯ растёт, и растёт независимо от
 // полосы модулей.
 //

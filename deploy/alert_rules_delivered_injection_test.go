@@ -27,11 +27,15 @@
 package deploy_test
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
 
@@ -87,9 +91,7 @@ func TestAlertRulesInjection_TheRealChartStopsCarryingWhatThePagePromises(t *tes
 	root, err := surfaceroster.IAMRoot(".")
 	require.NoError(t, err, "корень дерева службы")
 
-	// Обещание берётся для посадки поставляемого профиля: правила чужой полосы
-	// установке этой посадки не обещаны и недоставленными не считаются.
-	page := pageAlertRules(t, root).forPosture(postureOfProfiles(t, chartProfiles))
+	page, _ := pageAlertRules(t, root)
 	require.NotEmpty(t, page, "инъекция беспредметна: страница не несёт правил")
 
 	off := renderStandaloneChart(t, chartProfiles, alertRulesToggle+"=false")
@@ -198,33 +200,101 @@ func TestAlertRulesInjection_RenderWithoutAnyObjectIsNotSilentlyEqual(t *testing
 		"вердиктом не является, и непустоту обеих сторон обязана требовать проба дерева")
 }
 
-// TestAlertRulesInjection_PostureMarkerSplitsThePage — пометка посадки перед
-// блоком относит его правила к полосе; блок без пометки — общий. Обе стороны:
-// правило полосы НЕ обещано установке чужой посадки, общее обещано каждой.
-func TestAlertRulesInjection_PostureMarkerSplitsThePage(t *testing.T) {
+// TestAlertRulesInjection_PostureMarkerIsAFinding — пометка посадки перед
+// блоком называется находкой, а правила блока всё равно читаются: без этого
+// помеченный блок выпал бы из сверки молча. Законный близнец — тот же текст
+// без пометки: находок нет, правил столько же. Отличие ровно одно — строка
+// пометки (kaname#363: посадка у службы одна, и пометке нечего выбирать).
+func TestAlertRulesInjection_PostureMarkerIsAFinding(t *testing.T) {
 	t.Parallel()
-	text := "текст\n```yaml\n" + syntheticPageBody + "```\n" +
-		"<!-- posture: own -->\n```yaml\n- alert: LaneOnly\n  expr: kaname_lane_total > 1\n  annotations:\n    summary: \"полоса\"\n```\n"
-	rules := posturedRules{}
-	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(text, -1) {
-		parsed, err := parseAlertRules(m[2])
-		require.NoError(t, err)
-		rules[m[1]] = append(rules[m[1]], parsed...)
-	}
-	require.Len(t, rules[""], 1, "блок без пометки не прочитан общим")
-	require.Len(t, rules["own"], 1, "блок с пометкой не отнесён к полосе")
+	lane := "```yaml\n- alert: LaneOnly\n  expr: kaname_lane_total > 1\n  annotations:\n    summary: \"полоса\"\n```\n"
+	unmarked := "текст\n```yaml\n" + syntheticPageBody + "```\n" + lane
+	marked := "текст\n```yaml\n" + syntheticPageBody + "```\n" + "<!-- posture: own -->\n" + lane
 
-	names := func(rs []alertRule) []string {
-		out := []string{}
-		for _, r := range rs {
-			out = append(out, r.Alert)
-		}
-		return out
-	}
-	require.ElementsMatch(t, []string{"SampleStuck", "LaneOnly"}, names(rules.forPosture("own")),
-		"установке `own` обещаны общие правила И правила её полосы")
-	require.ElementsMatch(t, []string{"SampleStuck"}, names(rules.forPosture("external")),
-		"правило полосы `own` уехало в обещание установке `external` — под ней оно звонило бы вечно")
-	require.ElementsMatch(t, []string{"SampleStuck"}, names(rules.forPosture("")),
-		"профиль без посадки получает только общие правила")
+	rules, markers, err := splitPageAlertRules(marked)
+	require.NoError(t, err)
+	require.Equal(t, []string{"own"}, markers, "пометка посадки не названа находкой")
+	require.Len(t, rules, 2, "правила помеченного блока выпали из сверки")
+
+	twinRules, twinMarkers, err := splitPageAlertRules(unmarked)
+	require.NoError(t, err)
+	require.Empty(t, twinMarkers, "близнец без пометки назван помеченным")
+	require.Len(t, twinRules, 2, "близнец: правила обоих блоков")
+}
+
+// ── Ряд прохода сметателя берётся у производителя (#314) ─────────────────────
+//
+// Опыт S1: значение клетки прохода переименовано у производителя, и ни одна
+// проба не покраснела — правило ждало ряд, которого больше нет, и не зазвонило
+// бы никогда. Здесь S1 подаётся в процессе: производитель — дублёр с ОДНИМ
+// изменённым фактом, чарт — настоящий.
+
+// fakeSigningKeyProducer — производитель ряда событий ключницы: клетка прохода
+// под меткой label со значением passValue несёт pass проходов.
+//
+// Печатает тем же кодом выдачи, что настоящий (реестр и обработчик клиента
+// Prometheus), а не строкой руками: дублёр со своим форматом доказывал бы
+// разбор своего формата, а не формата производителя.
+func fakeSigningKeyProducer(label, passValue string, pass float64) http.Handler {
+	reg := prometheus.NewRegistry()
+	events := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: metrics.SigningKeyEventsMetric,
+		Help: "проба",
+	}, []string{label})
+	reg.MustRegister(events)
+	events.WithLabelValues(metrics.SigningKeyEventRemoved).Add(0)
+	events.WithLabelValues(passValue).Add(pass)
+	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+}
+
+// deliveredRules — правила, которые везёт объект поставляемого профиля.
+func deliveredRules(t *testing.T) []alertRule {
+	t.Helper()
+	rules, objects := chartAlertRules(t, renderStandaloneChart(t, chartProfiles))
+	require.Equal(t, 1, objects, "инъекция беспредметна: объект правил не отрендерился")
+	return rules
+}
+
+// TestSweeperSilenceInjection_ControlProducerIsHeard — КОНТРОЛЬ: производитель
+// печатает клетку прохода так, как её читает поставляемое правило.
+func TestSweeperSilenceInjection_ControlProducerIsHeard(t *testing.T) {
+	series, err := sweepPassSeriesFrom(fakeSigningKeyProducer("event", metrics.SigningKeyEventSwept, 1))
+	require.NoError(t, err)
+	require.Equal(t, metrics.SigningKeyEventsMetric+`{event="`+metrics.SigningKeyEventSwept+`"}`, series)
+	require.Lenf(t, sweeperSilenceAlerts(deliveredRules(t), series), 1,
+		"контроль красный: клетку %s поставляемое правило не читает — либо значение "+
+			"разошлось у производителя и чарта, либо разбор выдачи ослеп", series)
+}
+
+// TestSweeperSilenceInjection_ValueRenamedAtTheProducer — S1: у производителя
+// переименовано значение клетки прохода. Проба обязана искать НОВЫЙ ряд и не
+// найти его в чарте, а не искать старый и найти.
+func TestSweeperSilenceInjection_ValueRenamedAtTheProducer(t *testing.T) {
+	series, err := sweepPassSeriesFrom(fakeSigningKeyProducer("event", "sweep_pass", 1))
+	require.NoError(t, err)
+	require.Equalf(t, metrics.SigningKeyEventsMetric+`{event="sweep_pass"}`, series,
+		"проба ищет ряд %s, а производитель печатает клетку прохода как sweep_pass — "+
+			"ряд выписан литералом, и переименование у производителя её не роняет", series)
+	require.Empty(t, sweeperSilenceAlerts(deliveredRules(t), series),
+		"правило, ждущее ряд, которого производитель не печатает, признано звонящим")
+}
+
+// TestSweeperSilenceInjection_LabelRenamedAtTheProducer — у производителя
+// переименована МЕТКА клетки прохода, значение прежнее.
+func TestSweeperSilenceInjection_LabelRenamedAtTheProducer(t *testing.T) {
+	series, err := sweepPassSeriesFrom(fakeSigningKeyProducer("kind", metrics.SigningKeyEventSwept, 1))
+	require.NoError(t, err)
+	require.Equalf(t, metrics.SigningKeyEventsMetric+`{kind="`+metrics.SigningKeyEventSwept+`"}`, series,
+		"проба ищет ряд %s, а производитель печатает клетку прохода под меткой kind", series)
+	require.Empty(t, sweeperSilenceAlerts(deliveredRules(t), series),
+		"правило, ждущее метку, которой производитель не печатает, признано звонящим")
+}
+
+// TestSweeperSilenceInjection_ProducerWithoutAPassCellIsRefused — производитель
+// не печатает клетки с проходом вовсе: ряда брать неоткуда, и это отказ, а не
+// пустая строка, с которой любое выражение «совпадает».
+func TestSweeperSilenceInjection_ProducerWithoutAPassCellIsRefused(t *testing.T) {
+	series, err := sweepPassSeriesFrom(fakeSigningKeyProducer("event", metrics.SigningKeyEventSwept, 0))
+	require.Errorf(t, err, "производитель без клетки прохода дал ряд %q", series)
+	require.Contains(t, err.Error(), metrics.SigningKeyEventsMetric)
 }

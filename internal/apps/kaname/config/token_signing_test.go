@@ -9,6 +9,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // fullSigningConfig — минимально ЗАКОННАЯ настройка своей чеканки.
@@ -22,7 +23,7 @@ func fullSigningConfig() TokenSigningConfig {
 		Algorithm:         "ES256",
 		AllowedAlgorithms: "ES256,RS256",
 		KeySetPath:        "/.well-known/kaname/jwks.json",
-		KeyLifetime:       dayDuration * 90,
+		KeyLifetime:       90 * 24 * time.Hour,
 	}
 }
 
@@ -128,6 +129,55 @@ func TestF1_46_KeySetPathMustBeDeclaredAndUsable(t *testing.T) {
 	}
 	if err := fullSigningConfig().Validate(); err != nil {
 		t.Fatalf("законный путь отвергнут: %v", err)
+	}
+}
+
+func TestUnsetSigningKeyLifetimeRefusesStart(t *testing.T) {
+	// Срок ключа — политика ротации, решение установки. Незаданный (нулевой)
+	// срок отвергается так же, как отрицательный: ключница ниже по стеку
+	// отказалась бы строиться, но до неё отказ доезжать не обязан.
+	for _, bad := range []time.Duration{0, -time.Second} {
+		cfg := fullSigningConfig()
+		cfg.KeyLifetime = bad
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("срок ключа %s принят — старт обязан отвергаться", bad)
+		}
+		if !strings.Contains(err.Error(), "authn.token-signing.key-lifetime") {
+			t.Fatalf("отказ обязан называть НАСТРОЙКУ, получено: %v", err)
+		}
+	}
+	// Положительный близнец — тот же вход с заданным сроком стартует.
+	if err := fullSigningConfig().Validate(); err != nil {
+		t.Fatalf("полная настройка отвергнута: %v", err)
+	}
+}
+
+// TestSigningKeyLifetimeRefusalNamesItsCause — отказ называет ПРИЧИНУ, а не
+// только ключ: нулевой срок — «не объявлен», отрицательный — объявлен негодным.
+//
+// Оператор, задавший `-1h`, прочитав «is not declared», ищет ключ, который уже
+// задал, и не находит ошибки: текст отказа обязан вести к следующему шагу.
+func TestSigningKeyLifetimeRefusalNamesItsCause(t *testing.T) {
+	const notDeclared = "authn.token-signing.key-lifetime is not declared"
+	const mustBePositive = "authn.token-signing.key-lifetime must be positive"
+
+	zero := fullSigningConfig()
+	zero.KeyLifetime = 0
+	err := zero.Validate()
+	if err == nil || !strings.Contains(err.Error(), notDeclared) || strings.Contains(err.Error(), mustBePositive) {
+		t.Fatalf("нулевой срок обязан отвергаться как НЕОБЪЯВЛЕННЫЙ, получено: %v", err)
+	}
+
+	negative := fullSigningConfig()
+	negative.KeyLifetime = -time.Hour
+	err = negative.Validate()
+	if err == nil || !strings.Contains(err.Error(), mustBePositive) || strings.Contains(err.Error(), notDeclared) {
+		t.Fatalf("отрицательный срок объявлен — отказ обязан называть его негодным, а не "+
+			"необъявленным; получено: %v", err)
+	}
+	if !strings.Contains(err.Error(), "-1h0m0s") {
+		t.Fatalf("отказ обязан называть объявленную величину, получено: %v", err)
 	}
 }
 

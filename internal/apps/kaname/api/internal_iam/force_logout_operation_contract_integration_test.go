@@ -56,9 +56,13 @@ func newForceLogoutHandler(t *testing.T) (*internaliam.Handler, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
 		WithAdminChecker(allowAdmin{}).
-		WithOperations(operations.NewRepo(pool, "kaname"))
+		WithOperations(operations.NewRepo(pool, "kaname")).
+		// Исполнитель снятия сессии — ТОТ ЖЕ, что провязывает композиционный
+		// корень под `own`. Без него глагол отказывает закрыто, и пробы
+		// контракта операции судили бы отказ провязки вместо своего предмета
+		// (kaname#313).
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
 	return h, pool
 }
 
@@ -81,8 +85,8 @@ func seedForceLogoutUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 		string(uid), string(accID),
 		"ext-"+string(uid), fmt.Sprintf("u-%s@example.com", uid), "Force Logout Target")
 	require.NoError(t, err, "seed user")
@@ -207,8 +211,10 @@ func TestForceLogout_UnwiredOperationRepo_FailsClosed(t *testing.T) {
 	uid := seedForceLogoutUser(t, ctx, pool)
 
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
-		WithAdminChecker(allowAdmin{})
+		WithAdminChecker(allowAdmin{}).
+		// The teardown IS wired, as the composition root wires it, so the refusal
+		// below is the operation repository's and nothing else's.
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
 	// deliberately no WithOperations
 
 	_, err = h.ForceLogout(forceLogoutAdminCtx(), &iamv1.ForceLogoutRequest{UserId: string(uid)})

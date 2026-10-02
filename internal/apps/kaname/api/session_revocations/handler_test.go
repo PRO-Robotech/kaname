@@ -44,20 +44,19 @@ import (
 // user-level RevokeAllUserTokensTx calls so a test can prove a bulk
 // revoke_all_user_tokens request writes a user-level cutoff (not a no-op row).
 // The port is the tx-scoped *Tx variants (revocation + audit row committed
-// atomically); allEventType captures the audit taxonomy value passed.
+// atomically); each owns its audit taxonomy value, so none is passed.
 type fakeRevoker struct {
 	got     domain.SessionRevocation
 	gotBy   domain.UserID
 	err     error
 	callCnt int
 
-	allCnt       int
-	allUser      domain.UserID
-	allBy        domain.UserID
-	allBefore    time.Time
-	allReason    string
-	allEventType string
-	allErr       error
+	allCnt    int
+	allUser   domain.UserID
+	allBy     domain.UserID
+	allBefore time.Time
+	allReason string
+	allErr    error
 }
 
 func (f *fakeRevoker) RevokeTx(_ context.Context, rev domain.SessionRevocation, by domain.UserID) error {
@@ -67,13 +66,12 @@ func (f *fakeRevoker) RevokeTx(_ context.Context, rev domain.SessionRevocation, 
 	return f.err
 }
 
-func (f *fakeRevoker) RevokeAllUserTokensTx(_ context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID, eventType string) error {
+func (f *fakeRevoker) RevokeAllUserTokensTx(_ context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error {
 	f.allCnt++
 	f.allUser = userID
 	f.allBefore = revokeBefore
 	f.allReason = reason
 	f.allBy = revokedBy
-	f.allEventType = eventType
 	return f.allErr
 }
 
@@ -87,6 +85,26 @@ type fakeReader struct {
 	listErr   error
 	gotJTI    string
 	gotUserID string
+
+	// families — ответ о семействе выпуска по идентификатору: true — семейство
+	// отозвано либо снято. Нет ключа — выпуск семейству не принадлежит.
+	families    map[string]bool
+	familyErr   error
+	familyAsked []string
+}
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (*fakeReader) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (f *fakeReader) FamilyRevoked(_ context.Context, jti string) (bool, error) {
+	f.familyAsked = append(f.familyAsked, jti)
+	if f.familyErr != nil {
+		return false, f.familyErr
+	}
+	return f.families[jti], nil
 }
 
 func (f *fakeReader) IsRevoked(_ context.Context, jti string) (bool, error) {

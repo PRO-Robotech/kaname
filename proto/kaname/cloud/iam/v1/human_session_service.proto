@@ -89,7 +89,13 @@ message HumanSession {
   // Assurance level by the Ф11 rule (`internal/assurance`): password → "1".
   string assurance_level = 6;
 
-  // Whether the CURRENT e-mail value has been verified (Ф2 П1).
+  // Whether the CURRENT e-mail value has been verified (Ф2 П1). `false` also
+  // names the VERIFICATION POSITION of the session (kaname#456): the session
+  // then acts only for the verification screens — requesting the letter,
+  // presenting the code, "who am I" and signing out; every other call is
+  // refused with `EMAIL_NOT_VERIFIED`, and no right of the person acts. The
+  // position is derived from the current mark on every request and is not
+  // stored in the session.
   bool email_verified = 7;
 
   // Field 8 `password_change_required` is RETIRED (kacho#2697, kaname#201):

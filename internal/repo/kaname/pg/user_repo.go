@@ -11,7 +11,7 @@ package pg
 // external_id <> ''` — с условием на непустоту. Принадлежность аккаунтам
 // выражают ЧЛЕНСТВА (`memberships`), и их у человека может быть несколько.
 //
-// Здесь стояло «User is scoped per-Account (один Kratos identity → N User-row)»
+// Здесь стояло «User is scoped per-Account (одна identity → N User-row)»
 // — верное до отрыва идентичности от аккаунта (стадия S4-expand) и ложное
 // после. Утверждение расходилось с перечнем инвариантов НИЖЕ В ЭТОЙ ЖЕ шапке:
 // там уже стояли глобальные ключи. Два места об одном предмете, и неверным было
@@ -195,7 +195,7 @@ func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email)
 	return out, nil
 }
 
-// FindActiveByExternalID — все ACTIVE-row'ы по identity (Kratos sub) через
+// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
 // все Account'ы. Использует partial index `users_active_external_id_idx`.
 func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
 	if externalID == "" {
@@ -222,10 +222,11 @@ func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID doma
 	return out, nil
 }
 
-// FindByExternalIDInStatuses — все row'ы по identity (Kratos sub) через все
+// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 // Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at ASC.
-// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы —
-// recovery обязан их находить и re-enable'ить (OnRecoveryCompleted).
+// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы:
+// читатели (поиск субъекта, административное заведение личности) обязаны
+// отличать заблокированную личность от отсутствующей.
 // Пустой externalID / пустой statuses → nil-срез.
 func (r *userReader) FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
 	if externalID == "" || len(statuses) == 0 {
@@ -550,71 +551,6 @@ type userWriter struct {
 	membershipHintSink *string
 }
 
-// Upsert — legacy path retained for backward-compat with integration tests
-// that call Upsert directly (TestUser_2_0_15a/15b).
-//
-// Ключ по external_id — ГЛОБАЛЬНЫЙ (partial WHERE external_id<>”): один внешний
-// субъект есть одна строка. Upsert делает INSERT с {AccountID +
-// invite_status='ACTIVE'}; при дубле по external_id → UPDATE email/display_name
-// и добавление членства в названном аккаунте.
-//
-// Production paths use InsertPending / ActivateInvite / InsertActive directly
-// — not Upsert.
-func (w *userWriter) Upsert(ctx context.Context, u domain.User) (domain.User, bool, error) {
-	now := time.Now().UTC()
-	accountID := nullableAccountID(u.AccountID)
-	inviteStatus := string(u.InviteStatus)
-	if inviteStatus == "" {
-		inviteStatus = string(domain.InviteStatusActive)
-	}
-	invitedBy := nullableInvitedBy(u.InvitedBy)
-
-	// Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта
-	// (`users_identity_external_id_uniq`, миграция 20260823050000), а не пара с
-	// аккаунтом: человек есть одна строка, в скольких бы аккаунтах он ни
-	// состоял. Пер-аккаунтный арбитр заводил бы ему вторую строку — второй
-	// идентификатор, второй набор прав, из которых действует один.
-	//
-	// Предикат `WHERE external_id <> ''` выбирает ИМЕННО этот индекс: предикат
-	// пер-состоянийного `users_active_external_id_uniq` им не подразумевается,
-	// поэтому вывод индекса однозначен.
-	//
-	// Членство пишется ЯВНО и в той же транзакции: при попадании в конфликт
-	// строка не переписывается, зеркалящий триггер не срабатывает, и членство в
-	// названном аккаунте не появилось бы вовсе.
-	q := fmt.Sprintf(`
-		WITH ins AS (
-			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (external_id) WHERE external_id <> '' DO UPDATE
-			   SET email = EXCLUDED.email,
-			       display_name = EXCLUDED.display_name
-			RETURNING %s, (xmax = 0) AS created
-		), membership AS (
-			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
-			SELECT membership_mirror_id(i.id, $2), i.id, $2,
-			       CASE WHEN i.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
-			       $7, $8, $8
-			  FROM ins i
-			 WHERE $2 IS NOT NULL AND $2 <> ''
-			ON CONFLICT (user_id, account_id) DO NOTHING
-		)
-		SELECT %s, created FROM ins`, userCols, userCols)
-	row := w.tx.QueryRow(ctx, q,
-		string(u.ID), accountID, string(u.ExternalID), string(u.Email), string(u.DisplayName),
-		inviteStatus, invitedBy, now,
-	)
-	var (
-		out     domain.User
-		created bool
-	)
-	err := scanUserWithCreated(row, &out, &created)
-	if err != nil {
-		return domain.User{}, false, mapErr(err, "", string(u.ExternalID))
-	}
-	return out, created, nil
-}
-
 // InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно и
 // идемпотентно.
 //
@@ -730,6 +666,11 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 //
 // NULL-срок означает «не назначен» и активацию не отвергает: иначе колонка,
 // заведённая позже строк, обесценила бы каждое приглашение, выданное раньше.
+//
+// ОТМЕТКА ПОДТВЕРЖДЕНИЯ — третье условие того же оператора (kaname#456, Р11):
+// приглашение активирует только подтверждение адреса, а оно ставит отметку той
+// же транзакцией раньше активации. Внутренний глагол заведения личности
+// отметки нашей полосы не несёт и приглашения не активирует.
 func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, externalID domain.ExternalSubject, displayName domain.DisplayName) (domain.User, error) {
 	q := fmt.Sprintf(`
 		UPDATE users
@@ -739,6 +680,7 @@ func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, e
 		 WHERE id = $3
 		   AND invite_status = 'PENDING'
 		   AND (invite_expires_at IS NULL OR invite_expires_at > now())
+		   AND email_verified_at IS NOT NULL
 		RETURNING %s`, userCols)
 	row := w.tx.QueryRow(ctx, q, string(externalID), string(displayName), string(userID))
 	out, err := scanUser(row)
@@ -755,15 +697,17 @@ func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, e
 // каждый говорит человеку СВОЙ следующий шаг.
 func (w *userWriter) explainRefusedActivation(ctx context.Context, userID domain.UserID) error {
 	var (
-		status  string
-		expired bool
+		status   string
+		expired  bool
+		verified bool
 	)
 	const q = `
 		SELECT invite_status,
-		       (invite_expires_at IS NOT NULL AND invite_expires_at <= now()) AS expired
+		       (invite_expires_at IS NOT NULL AND invite_expires_at <= now()) AS expired,
+		       (email_verified_at IS NOT NULL) AS verified
 		  FROM users
 		 WHERE id = $1`
-	if err := w.tx.QueryRow(ctx, q, string(userID)).Scan(&status, &expired); err != nil {
+	if err := w.tx.QueryRow(ctx, q, string(userID)).Scan(&status, &expired, &verified); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found in PENDING state", userID)
 		}
@@ -772,6 +716,13 @@ func (w *userWriter) explainRefusedActivation(ctx context.Context, userID domain
 	if status == string(domain.InviteStatusPending) && expired {
 		return iamerr.Wrapf(iamerr.ErrInviteExpired,
 			"Invite for User %s has expired — ask an account administrator to invite again", userID)
+	}
+	if status == string(domain.InviteStatusPending) && !verified {
+		// Приглашение живо, адрес не подтверждён нашей полосой (kaname#456,
+		// Р11): активирует его только подтверждение. Свой признак — не «не
+		// найдено» и не «срок истёк».
+		return iamerr.Wrapf(iamerr.ErrInviteNotVerified,
+			"Invite for User %s is activated only by confirming the address", userID)
 	}
 	// Строка есть и уже не PENDING — её активировал конкурент либо участие
 	// сняли. Тон отказа тот же, что был до появления срока: он не менялся.
@@ -989,7 +940,7 @@ func scanUser(row scanner) (domain.User, error) {
 
 // scanUserInto — ЕДИНСТВЕННОЕ объявление порядка назначений под userCols.
 // `extra` — приёмники, дописанные запросом ПОСЛЕ проекции (признак вставки у
-// CTE-форм InsertPending/Upsert); без них это обычное чтение userCols.
+// CTE-формы InsertPending); без них это обычное чтение userCols.
 //
 // Порядок объявлен один раз намеренно. Прежде его несли два независимых списка
 // — `scanUser` и этот, — и компилятор их не связывал: расхождение выражалось бы
@@ -1053,13 +1004,6 @@ func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
 
 func scanUserWithInserted(row scanner, out *domain.User, inserted *bool) error {
 	return scanUserWithCreated(row, out, inserted)
-}
-
-func nullableAccountID(id domain.AccountID) any {
-	if id == "" {
-		return nil
-	}
-	return string(id)
 }
 
 func nullableInvitedBy(id domain.UserID) any {

@@ -92,6 +92,13 @@ var (
 	// месте и следующий шаг у него другой — попросить пригласить заново.
 	ErrInviteExpired = fmt.Errorf("%w: invite expired", ErrFailedPrecondition)
 
+	// ErrInviteNotVerified — строка приглашения жива, но адрес приглашённого не
+	// подтверждён нашей полосой (kaname#456, Р11): приглашение активируется
+	// ТОЛЬКО подтверждением. Вложена в ErrFailedPrecondition — строка есть, не
+	// позволяет состояние; отдельный признак, а не «не найдено» и не «срок
+	// истёк»: вызывающий обязан не читать этот отказ как штатный исход гонки.
+	ErrInviteNotVerified = fmt.Errorf("%w: invite address not verified", ErrFailedPrecondition)
+
 	// ErrAborted — a transient concurrency conflict the caller can retry (the
 	// operation was aborted, typically a transaction serialization failure).
 	// Maps to gRPC ABORTED, the idiomatic "retry the transaction" code — unlike

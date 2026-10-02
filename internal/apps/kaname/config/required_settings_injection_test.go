@@ -102,9 +102,9 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		},
 		{
 			name:        "снятая строка: страж требует, таблица молчит",
-			table:       dropKey(cloneTable(), "authn.hook-shared-secret"),
+			table:       dropKey(cloneTable(), "authn.jwks-encryption-key-hex"),
 			wantFinding: true,
-			coordinate:  "authn.hook-shared-secret",
+			coordinate:  "authn.jwks-encryption-key-hex",
 			why: "документ не назвал бы обязательную величину, и оператор упёрся бы в неё на стенде. " +
 				"Ловится Т3: отказ пустого профиля, не принадлежащий ни одной строке",
 		},
@@ -122,7 +122,7 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		},
 		{
 			name: "путь подачи объявлен ФАЙЛОМ там, где работает и окружение",
-			table: mutate(cloneTable(), "authn.hook-shared-secret", func(s *config.RequiredSetting) {
+			table: mutate(cloneTable(), "authn.domain", func(s *config.RequiredSetting) {
 				s.Supply = config.SupplyFile
 			}),
 			wantFinding: false,
@@ -139,7 +139,7 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 		},
 		{
 			name: "безусловная строка объявлена условной",
-			table: mutate(cloneTable(), "authn.hydra-jwks-url", func(s *config.RequiredSetting) {
+			table: mutate(cloneTable(), "authn.client-token.enabled", func(s *config.RequiredSetting) {
 				s.Conditional = true
 			}),
 			wantFinding: false,
@@ -148,66 +148,23 @@ func TestRequiredSettingsAudit_CanFailAndStaysSilent(t *testing.T) {
 				"перестала быть настоящей; здесь она настоящая. Случай стоит здесь, чтобы область разбора " +
 				"не выводил читатель",
 		},
-		// ── ось ПРИМЕНИМОСТИ (задача #2340) ─────────────────────────────────
+		// ── ось УСЛОВНОСТИ ────────────────────────────────────────────────
 		//
-		// Применимость объявляется полем, а страж строит свой антецедент сам.
-		// Пока эти два расходились молча, семь строк были помечены как нужные
-		// только посадке `own`, тогда как страж требует их и на `external` с
-		// поднятым собственным публичным фронтом — то есть на ЕДИНСТВЕННОЙ
-		// посадке, которую поднимает боевой профиль.
-		//
-		// Ловит расхождение Т2: строка, объявленная неприменимой там, где страж
-		// её требует, не подаётся — и полный профиль посадки отвергается с её
-		// отказом в тексте.
+		// Прежде здесь стояла ось ПРИМЕНИМОСТИ (задача #2340): поле объявляло
+		// посадки, на которых строка нужна, и расходилось со стражем молча.
+		// Посадка у службы одна (kaname#363), поле снято вместе с осью, и
+		// разойтись ему больше не с чем. У строки осталось одно свойство —
+		// условна она или нет, — и его расхождение со стражем ловится Т3.
 		{
-			name: "применимость УЖЕ антецедента: страж требует, поле молчит",
-			table: mutate(cloneTable(), "authn.presented-credential.enabled", func(s *config.RequiredSetting) {
-				s.WhenOwnPublicRESTFront = false
+			name: "условная строка объявлена безусловной",
+			table: mutate(cloneTable(), "authn.token-signing.issuer", func(s *config.RequiredSetting) {
+				s.Conditional = false
 			}),
 			wantFinding: true,
-			coordinate:  "presented-credential",
-			why: "поднятый собственный публичный REST-фронт требует читателя предъявленного " +
-				"удостоверения на ЛЮБОЙ посадке (PresentedCredentialConfig.ValidateBinding), а поле " +
-				"объявляет строку нужной только посадке own. Оператор внешней полосы сканирует " +
-				"столбец применимости, делает вывод «моей посадке не требуется» — и процесс не " +
-				"стартует",
-		},
-		{
-			name: "применимость ШИРЕ антецедента: поле требует, страж молчит",
-			table: mutate(cloneTable(), "authn.hydra-jwks-url", func(s *config.RequiredSetting) {
-				s.WhenOwnPublicRESTFront = true
-			}),
-			wantFinding: true,
-			coordinate:  "authn.hydra-jwks-url",
-			why: "набор ключей внешнего поставщика к поднятости СОБСТВЕННОГО фронта отношения не " +
-				"имеет: на посадке own с фронтом страж его не требует, а поле объявило бы требование. " +
-				"Т1 ловит это с другой стороны — снятая строка обязана дать отказ на КАЖДОЙ посадке, " +
-				"где объявлена применимой",
-		},
-		{
-			name: "условность объявлена посадочной там, где строка требуется САМА",
-			table: mutate(cloneTable(), "authn.token-signing.enabled", func(s *config.RequiredSetting) {
-				s.UnconditionalOn = nil
-			}),
-			wantFinding: true,
-			coordinate:  "authn.token-signing.enabled",
-			why: "у величины ДВА производителя отказа с разными антецедентами: на посадке own её " +
-				"требует полосное правило само по себе, при поднятом фронте — читатель, то есть уже " +
-				"после него. Снятая разметка объявляет строку безусловной ВЕЗДЕ, и Т3 требует от " +
-				"пустого профиля отказа там, где страж молчит by construction",
-		},
-		{
-			name: "законный близнец применимости: пометка сходится со стражем",
-			table: mutate(cloneTable(), "authn.presented-credential.audience", func(s *config.RequiredSetting) {
-				// ТОТ ЖЕ вид правки, что в двух случаях выше, но приводящий поле
-				// к тому, чем оно уже является: разбор обязан смолчать, иначе он
-				// краснеет на форме, а не на существе.
-				s.WhenOwnPublicRESTFront = true
-			}),
-			wantFinding: false,
-			why: "строка уже помечена так; повторная пометка ничего не меняет, и разбор обязан " +
-				"смолчать. Без близнеца два случая выше доказывали бы лишь то, что правка ЭТОГО поля " +
-				"роняет разбор при любом значении",
+			coordinate:  "authn.token-signing.issuer",
+			why: "издателя страж требует только при включённой своей чеканке; объявленный " +
+				"безусловным, он попал бы в документ как величина, без которой служба не стартует " +
+				"никогда, — а пустой профиль на неё не отказывает. Ловится Т3 обратного направления",
 		},
 		{
 			name:        "пустая таблица",

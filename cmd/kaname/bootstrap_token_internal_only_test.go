@@ -21,7 +21,7 @@
 //
 // Pure registration/transport test (bufconn, no DB). A use-case with no signing
 // key wired makes Execute fail closed (Unavailable) without touching any
-// store/Hydra — enough to prove reachability without a DB.
+// store — enough to prove reachability without a DB.
 package main
 
 import (

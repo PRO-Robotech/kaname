@@ -139,12 +139,6 @@ func (w *lcaWriter) EmitReconcileEvent(_ context.Context, _, objectType, objectI
 	}
 	return nil
 }
-func (w *lcaWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *lcaWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *lcaWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 func (w *lcaWriter) Commit(context.Context) error                   { return nil }
 func (w *lcaWriter) Rollback(context.Context) error                 { return nil }

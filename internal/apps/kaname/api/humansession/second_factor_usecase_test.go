@@ -833,7 +833,9 @@ func TestF12_28_29_RemoveEndsOtherSessionsAndKeepsTheCurrentAtTwo(t *testing.T) 
 
 // ───────────────────────────── подбор ─────────────────────────────────────
 
-// TestF12_31_32_WrongCodesShareTheAttemptCountWithThePassword — Ф12-31 (а, б, д), Ф12-32.
+// TestF12_31_32_WrongCodesShareTheAttemptCountWithThePassword — Ф12-31 (а, б, д),
+// Ф12-32 исход «не заведён» (Ф12-17). Исходы Ф12-32 «свежесть», «материал» и
+// «ёмкость» в форме позиции — `second_factor_not_an_attempt_test.go`.
 func TestF12_31_32_WrongCodesShareTheAttemptCountWithThePassword(t *testing.T) {
 	h := newSFHarness(t)
 	_, secret, _ := h.enrolled(t, "usr-rt", "rt@example.invalid", "correct horse battery")
@@ -869,7 +871,7 @@ func TestF12_31_32_WrongCodesShareTheAttemptCountWithThePassword(t *testing.T) {
 	_, err = h.stepUp.Execute(context.Background(), humansession.StepUpInput{Bearer: login.Bearer, Method: assurance.MethodTOTP, Code: probeTOTP(t, secret, h.step()), Source: "203.0.113.7"})
 	require.ErrorAs(t, err, &tma, "N+1-й — 429: пароль и код — один счёт")
 
-	// Ф12-32: что попыткой не считается — состояние, свежесть, ёмкость.
+	// Ф12-32, исход «не заведён» у другой личности: состояние — не попытка.
 	h.clock = h.clock.Add(sfLimits().AddressWindow + time.Second)
 	h.person(t, "usr-rt2", "rt2@example.invalid", "correct horse battery", true)
 	other := h.mustLogin(t, "rt2@example.invalid", "correct horse battery")

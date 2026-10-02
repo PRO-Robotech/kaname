@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // login_lane_test.go — стражи настройки полосы входа (Ф3-06, Ф3-28, Ф3-33,
-// Ф3-41, Ф3-42): незаданная величина — отказ с именем ручки; под `external`
-// не требуется ничего; положительный контроль — годный профиль стартует.
+// Ф3-41, Ф3-42): незаданная величина — отказ с именем ручки; положительный
+// контроль — годный профиль стартует.
+//
+// Половины «под `external` не требуется ничего» здесь больше нет (#424):
+// посадка снята фундаментом (PRO-Robotech/corelib#30), и проверка старта
+// отвергает её раньше требований любой полосы — случай «величины полосы
+// свободны» зеленел бы на отказе старта, ничего о величинах не утверждая.
 package config_test
 
 import (
@@ -16,7 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-func TestLoginLane_F3_28_33_41_EveryKnobRefusesByNameUnderOwnAndIsFreeUnderExternal(t *testing.T) {
+func TestLoginLane_F3_28_33_41_EveryKnobRefusesByNameUnderOwn(t *testing.T) {
 	cases := []struct {
 		name  string
 		mut   func(*config.LoginLaneConfig)
@@ -45,26 +50,20 @@ func TestLoginLane_F3_28_33_41_EveryKnobRefusesByNameUnderOwnAndIsFreeUnderExter
 	}
 	for _, c := range cases {
 		t.Run("own/"+c.name, func(t *testing.T) {
-			cfg := laneCfg(config.IdentityProviderOwn)
+			cfg := laneCfg()
 			c.mut(&cfg.AuthN.Login)
 			err := cfg.Validate()
 			require.Error(t, err, "под own незаданная величина — отказ")
 			for _, k := range c.knobs {
 				require.Contains(t, err.Error(), k)
 			}
-			require.Contains(t, err.Error(), "declare authn.identity-provider=external and this requirement is lifted")
-		})
-		t.Run("external/"+c.name, func(t *testing.T) {
-			cfg := laneCfg(config.IdentityProviderExternal)
-			c.mut(&cfg.AuthN.Login)
-			err := cfg.Validate()
-			if err != nil {
-				require.NotContains(t, err.Error(), "authn.login.", "под external величины полосы не требуются")
-			}
+			// Прежде отказ нёс пометку «[required because authn.identity-provider=own]»;
+			// ключ посадки снят (kaname#363), и отказ его не называет.
+			require.NotContains(t, err.Error(), "identity-provider")
 		})
 	}
 	t.Run("положительный контроль: годный профиль стартует, домен none — пустой ключ", func(t *testing.T) {
-		cfg := laneCfg(config.IdentityProviderOwn)
+		cfg := laneCfg()
 		require.NoError(t, cfg.Validate())
 		require.Empty(t, cfg.AuthN.Login.ResolvedCookieDomain())
 		cfg.AuthN.Login.CookieDomain = "console.example.invalid"

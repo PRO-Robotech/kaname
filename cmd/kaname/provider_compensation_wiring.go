@@ -1,150 +1,44 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// provider_compensation_wiring.go — дренаж очереди компенсаций частично
-// исполненной саги «зарегистрировать OAuth-клиента у провайдера → закоммитить
-// свою строку» + наблюдаемость этой очереди.
+// provider_compensation_wiring.go — наблюдаемость очереди компенсаций саги
+// «зарегистрировать клиента у внешнего поставщика → закоммитить свою строку».
 //
-// Почему это отдельный дренаж, а не ветка в fga_outbox: у той очереди другой
-// предмет (наши tuple'ы), другой применитель и другой режим отказа. Общей у
-// них остаётся МЕХАНИКА — corelib drainer: claim под FOR UPDATE SKIP LOCKED,
-// at-least-once, backoff, poison-gate. Она переиспользуется, а не копируется.
+// Дренажа здесь больше нет: у очереди нет ни производителя, ни исполнителя —
+// оба сняты вместе с административной дорогой к поставщику (kaname#363).
+// Таблица же в схеме осталась, и строки, записанные прежней посадкой, в ней
+// могли остаться; перепись ниже держит их видимыми (разбор —
+// `internal/clients/provider_compensation_outbox.go`).
 package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/corelib/outbox/drainer"
 	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
 
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
-// compensationMaxAttempts — порог отравления. Компенсация обязана дожать
-// провайдера через сколь угодно долгую недоступность (транзиентная строка
-// держится ниже порога и ретраится вечно), поэтому порог отсекает только то,
-// что повтором не чинится — нерастолковываемый payload, завёрнутый декодером в
-// ErrPermanent.
+// compensationMaxAttempts — порог отравления, которым прежний дренаж отмечал
+// строку, не поддавшуюся повтору. Перепись считает отравленными строки на этом
+// пороге, поэтому он остаётся тем же числом, что писал дренаж: иначе строки,
+// отравленные прежним дренажом, перестали бы читаться отравленными.
 const compensationMaxAttempts = 10
-
-// buildProviderCompensationDrainer собирает дренаж очереди компенсаций.
-//
-// Ошибка сборки ФАТАЛЬНА для старта: очередь без исполнителя означает, что
-// намерения копятся, а занятое у провайдера не освобождается — при этом всё
-// выглядит работающим (запись-то проходит). Молчаливо поднятый сервис с мёртвым
-// дренажом — ровно тот класс, который мы ловим в коде.
-//
-// # СРОК ЖИЗНИ ЗАДАЧИ ВЫБИРАЕТ ВЫЗЫВАЮЩИЙ, И ЭТО ЧАСТЬ ФОРМЫ ВОЗВРАТА
-//
-// Возвращается `func(context.Context) error`, а не `func() error`. Разбор — у
-// сборщика дренажа писем (`invite_mail_wiring.go`), где он и живёт одним
-// экземпляром; здесь важно следствие: неотменяемый контекст сборщику взять
-// неоткуда, поэтому задача возвращается по гашению процесса, а снятие клиента у
-// провайдера не рвётся посреди разговора.
-func buildProviderCompensationDrainer(
-	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver,
-	roadObs clients.ProviderRoadObserver, logger *slog.Logger,
-) (func(context.Context) error, error) {
-	// Дорога СНЯТИЯ у поставщика — та самая, где ответ «не найдено» читался как
-	// успех и помечал строку доставленной. Счётчик здесь и есть то, что делает
-	// её неразличимость видимой (kacho#2492).
-	releaser := mustProviderAdminClient(cfg, roadObs)
-
-	drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
-	d, err := drainer.New[clients.ProviderCompensationEvent](
-		pool,
-		providerCompensationDrainerConfig(clients.ProviderAdminHopTimeout),
-		clients.DecodeProviderCompensation,
-		clients.NewProviderCompensationApplier(releaser, obs),
-		drainerLogger,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("init provider compensation drainer: %w", err)
-	}
-
-	return func(ctx context.Context) error {
-		logger.Info("kaname provider compensation drainer starting",
-			"table", clients.ProviderCompensationTable,
-			"channel", clients.ProviderCompensationChannel)
-		return d.Run(ctx)
-	}, nil
-}
-
-// providerCompensationDrainerConfig собирает проводку дренажа из объявленных
-// величин.
-//
-// ВЫНЕСЕНО ОТДЕЛЬНОЙ ФУНКЦИЕЙ РАДИ ПРОВЕРЯЕМОСТИ — тем же ходом и по той же
-// причине, что у почтовой полосы (`invite_mail_wiring.go`): связь двух величин
-// есть ТРЕБОВАНИЕ, а требование, живущее только в комментарии, проверить нечем.
-func providerCompensationDrainerConfig(attemptTimeout time.Duration) drainer.Config {
-	return drainer.Config{
-		Table:        clients.ProviderCompensationTable,
-		Channel:      clients.ProviderCompensationChannel,
-		BatchSize:    32,
-		PollFallback: 30 * time.Second,
-		MaxAttempts:  compensationMaxAttempts,
-		BackoffMin:   time.Second,
-		BackoffMax:   30 * time.Second,
-		// ТЕРПЕНИЕ ДРЕНАЖА ВЫВОДИТСЯ из предела попытки клиента, а не
-		// назначается рядом: два независимо выбранных числа разошлись бы молча —
-		// и разошлись (kacho#2490). Стояло 5 с при пределе клиента 10 с, то есть
-		// разговор обрывал ВСЕГДА дренаж, и предел клиента не фигурировал ни в
-		// одном исходе. Запас объявлен ОДНАЖДЫ и применяется обеими полосами.
-		ApplyTimeout: attemptTimeout + applyTimeoutHeadroom,
-		// PartitionColumn намеренно пуст: поток коммутативен, сериализовать
-		// порядок нечем и незачем (условие (а) из drainer.Config.PartitionColumn).
-		// Перечень видов события и вывод из него здесь НЕ повторяются: они живут
-		// одним экземпляром в росписи commutativeDrainExempt, которую держит гейт
-		// порядка очередей (`internal/check/drain_order_declared_test.go`).
-		// Прежняя редакция этого комментария перечень пересказывала —
-		// «единственный вид события: снять клиента» — и была ложна уже в день
-		// написания: словарь к тому дню допускал два вида, а коммутативность
-		// обосновывалась ключом, которого у второго вида нет by construction.
-		// Вывод уцелел, основание — нет.
-		//
-		// ЗДЕСЬ СТОЯЛА ССЫЛКА НА РОСПИСЬ МОНОРЕПО (`repohygiene.…`) — она
-		// пережила свой предмет: после выноса службы отдельным продуктом записи
-		// её очередей в той росписи истекли, и ссылка вела туда, где про эту
-		// очередь не написано ничего.
-
-		// Постоянный отказ применения НЕ травится (kacho#455). Травление
-		// покупает разблокировку партиции, а её тут нет — значит покупает
-		// ничего, платя потерей намерения: недоставленное снятие означает, что
-		// снятое у нас осталось выданным у провайдера.
-		//
-		// Отказ разбора травится по-прежнему, и это безопасно: КАЖДОЕ его
-		// условие закрыто ограничением миграций 0079/0080 — тело обязано быть
-		// объектом jsonb, вид события взят из закрытого CHECK'ом словаря, и
-		// ровно один предмет из двух непуст. То есть строки, на которой разбор
-		// откажет, записать НЕЛЬЗЯ; проверяется это пробой
-		// TestPoisonPathHasNoProducer.
-		PermanentPolicy: drainer.RetryPermanent,
-	}
-}
 
 // runProviderCompensationMetrics — периодический скан очереди: глубина, возраст
 // самой старой недоставленной строки, число отравленных.
 //
-// Без него застрявшая компенсация тиха: счётчики записанных и исполненных
-// намерений отвечают на «доезжает ли вообще», а возраст — на «висит ли ЭТА
-// строка дольше N». Обе величины нужны, ни одна не заменяет другую.
-//
-// Разложения по направлению здесь нет и не может быть: все виды события этой
-// очереди — СНЯТИЯ, обратной половины у потока не существует by construction,
-// поэтому разложение разложило бы её на неё саму и на пустоту. Перечень видов
-// и обоснование здесь НЕ повторяются: они живут одним экземпляром в записи
-// исключения гейта repohygiene.TestEveryDrainedOutboxIsSplitByDirection, и там
-// же перечень машинно сверяется со словарём, который закрывает миграция. Прежняя
-// редакция этого комментария перечень пересказывала — «событие ровно одного
-// вида» — и стала ложной в тот день, когда приехал второй вид.
+// Писать в очередь и исполнять её больше некому (kaname#363), и именно поэтому
+// скан остаётся: без него строки, пережившие снятие прежней посадки, были бы
+// невидимы — ни один счётчик записанных или исполненных намерений о них уже не
+// скажет. Ненулевая глубина здесь означает остаток, который исполнить нечем,
+// и снимается он вместе с таблицей, отдельным предметом миграции.
 func runProviderCompensationMetrics(
 	ctx context.Context, pool *pgxpool.Pool, rec *metrics.OutboxRecorder, logger *slog.Logger,
 ) {

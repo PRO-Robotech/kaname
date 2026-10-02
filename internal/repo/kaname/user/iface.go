@@ -27,16 +27,17 @@ type ReaderIface interface {
 	// для активации pending-invites при first-login.
 	FindPendingByEmail(ctx context.Context, email domain.Email) ([]domain.User, error)
 
-	// FindActiveByExternalID — все ACTIVE-row'ы по identity (Kratos sub) через
+	// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
 	// все Account'ы. Используется в UpsertFromIdentity чтобы определить,
 	// нужен ли bootstrap новый Account.
 	FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
 
-	// FindByExternalIDInStatuses — все row'ы по identity (Kratos sub) через все
+	// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 	// Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at
 	// ASC. В отличие от FindActiveByExternalID (ACTIVE-only), этот reader видит
-	// и BLOCKED-row'ы — recovery обязан их находить и re-enable'ить
-	// (InternalUserService.OnRecoveryCompleted). Пустой externalID либо пустой
+	// и BLOCKED-row'ы: читатели (поиск субъекта, административное заведение
+	// личности) обязаны отличать заблокированную личность от отсутствующей.
+	// Пустой externalID либо пустой
 	// statuses → nil-срез. Возвращает nil-срез если
 	// нет ни одной row.
 	FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error)
@@ -89,15 +90,6 @@ type ReaderIface interface {
 }
 
 type WriterIface interface {
-	// Upsert — InternalUserService.UpsertFromIdentity (legacy path; ACTIVE-only).
-	// Kept for backward compatibility with tests; production-path —
-	// `InsertPending` / `ActivateInvite` / `bootstrapNewIdentity` use-case.
-	// Создаёт строку, если внешний субъект новый, иначе UPDATE
-	// email/display_name; членство в названном аккаунте пишется в том же
-	// стейтменте. Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта, не пара с
-	// аккаунтом. Caller должен заполнить AccountID + InviteStatus=ACTIVE.
-	Upsert(ctx context.Context, u domain.User) (domain.User, bool /*created*/, error)
-
 	// InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно
 	// и идемпотентно: строка человека (арбитр — ГЛОБАЛЬНЫЙ ключ почты
 	// `users_identity_email_uniq`) плюс его членство в названном аккаунте, одним

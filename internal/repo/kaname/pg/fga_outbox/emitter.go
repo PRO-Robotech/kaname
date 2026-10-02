@@ -65,9 +65,11 @@
 package fga_outbox
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -251,14 +253,11 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 		}
 		payloads = append(payloads, string(payload))
 	}
-	// ОДИН стейтмент на все строки вместо одного на строку. Порядок строк сохраняется:
-	// `unnest` в FROM выдаёт элементы в порядке массива, поэтому возрастающие id
-	// назначаются в том же порядке, в каком вызывающий перечислил кортежи, — а на
-	// порядке id держится проекция журнала в прямой факт: выдача и отзыв одного
-	// ключа НЕ коммутативны, и перестановка двух строк одного набора дала бы
-	// пережившее отзыв право. Прежде тем же порядком держался и поголовный FIFO
-	// партиции у клейма дренажа; дренажа больше нет (стадия S6), а требование к
-	// порядку осталось — сменился только тот, кто на него опирается.
+	// ОДИН стейтмент на все строки вместо одного на строку. `unnest` в FROM выдаёт
+	// элементы в порядке массива, поэтому возрастающие id назначаются в том порядке,
+	// какой задал groupByGrant, — а ему порядок задан ОБЩИЙ для всех писателей (см.
+	// там). Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
+	// коммутативны, и id второго вызова всегда больше id первого.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		 SELECT $1, p::jsonb, now() FROM unnest($2::text[]) AS p`,
@@ -277,16 +276,28 @@ type grantGroup struct {
 	relations []string
 }
 
-// groupByGrant buckets tuples by (user, object), preserving first-seen order for
-// both the groups and the relations inside them, and dropping a relation repeated
-// within one group.
+// groupByGrant buckets tuples by (user, object), drops a relation repeated within
+// one group, and returns the groups in ONE canonical order — by object, then user,
+// with the relations inside a group sorted too.
 //
-// Order matters twice over: the INSERT assigns ascending ids in slice order, and
-// per-partition FIFO — which is what keeps a revoke behind the grant it supersedes
-// — rests on those ids. De-duplication matters because the store rejected a request
-// naming the same tuple twice (cannot_allow_duplicate_tuples_in_one_request), and a
-// caller that legitimately derives one tuple from two rules would otherwise turn a
-// whole grant into a permanent poison.
+// WHY THE ORDER IS CANONICAL AND NOT THE CALLER'S. The journal trigger
+// (`kaname.relation_fact_from_journal`) locks one fact row per tuple in the order the
+// rows lie in the set. Two transactions folding overlapping tuples of one subject in
+// different orders take the same locks crosswise, and the database breaks the cycle
+// by failing one of them with 40P01. Observed on a stand: a binding delete that ran
+// while a sibling binding of the same subject was being materialized ended ABORTED,
+// and the binding the caller removed stayed alive. One order shared by every writer
+// turns the cycle into a queue.
+//
+// Reordering is safe because nothing inside one call depends on the caller's order:
+// the rows of one set are always different (user, object) keys, and rows of different
+// keys commute. The order that does matter — a grant and a revoke of the SAME key —
+// lies across calls, and the INSERT below keeps it (later call, larger id).
+//
+// De-duplication matters because the store rejected a request naming the same tuple
+// twice (cannot_allow_duplicate_tuples_in_one_request), and a caller that
+// legitimately derives one tuple from two rules would otherwise turn a whole grant
+// into a permanent poison.
 func groupByGrant(tuples []clients.RelationTuple) []grantGroup {
 	type key struct{ user, object string }
 	idx := make(map[key]int, len(tuples))
@@ -305,5 +316,11 @@ func groupByGrant(tuples []clients.RelationTuple) []grantGroup {
 		idx[k] = len(groups)
 		groups = append(groups, grantGroup{user: t.User, object: t.Object, relations: []string{t.Relation}})
 	}
+	for i := range groups {
+		slices.Sort(groups[i].relations)
+	}
+	slices.SortFunc(groups, func(a, b grantGroup) int {
+		return cmp.Or(cmp.Compare(a.object, b.object), cmp.Compare(a.user, b.user))
+	})
 	return groups
 }

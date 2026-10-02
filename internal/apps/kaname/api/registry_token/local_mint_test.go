@@ -22,16 +22,6 @@ import (
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 )
 
-// recordingExchanger — прежний путь выдачи. Пробе он нужен ровно затем, чтобы
-// утверждать, что его БОЛЬШЕ НЕ ЗОВУТ: «мы теперь чеканим сами» без этого
-// утверждения зелено и на реализации, которая по-прежнему ходит к соседу.
-type recordingExchanger struct{ calls int }
-
-func (e *recordingExchanger) Exchange(context.Context, registrytokenuc.ExchangeInput) (registrytokenuc.ExchangeOutput, error) {
-	e.calls++
-	return registrytokenuc.ExchangeOutput{AccessToken: "from-the-previous-issuer", ExpiresIn: 300}, nil
-}
-
 // stubMinter — наш подписант с точки зрения контура выдачи.
 type stubMinter struct {
 	in  registrytokenuc.MintInput
@@ -51,71 +41,61 @@ func (m *stubMinter) MintToken(_ context.Context, in registrytokenuc.MintInput) 
 	return registrytokenuc.MintOutput{AccessToken: raw, ExpiresIn: 300}, nil
 }
 
-type nopSigner struct{}
+// mustLane — полоса на НАШЕЙ чеканке: подписант — обязательный вход
+// построителя (kaname#494), и проба, которой нужна собранная полоса, его подаёт.
+func mustLane(t *testing.T, cfg registrytokenuc.Config, m registrytokenuc.LocalMinter) *registrytokenuc.IssueRegistryTokenUseCase {
+	t.Helper()
+	uc, err := registrytokenuc.NewIssueRegistryTokenUseCase(cfg, m)
+	require.NoError(t, err, "построитель полосы отказал на исправном входе")
+	return uc
+}
 
-func (nopSigner) Sign(registrytokenuc.AssertionInput) (string, error) { return "assertion", nil }
-
-func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter, ex registrytokenuc.TokenExchanger) (*registrytokenuc.IssueRegistryTokenUseCase, string) {
+func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter) (*registrytokenuc.IssueRegistryTokenUseCase, string) {
 	t.Helper()
 	secret, authority := newBasicCredential(t)
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
-		AssertionAudience: "https://provider/oauth2/token",
-		AllowedAudiences:  []string{"registry.kacho.local"},
-		DefaultService:    "registry.kacho.local",
-		Anonymous: registrytokenuc.AnonymousIdentity{
-			ClientID: "anon-client", KeyID: "anon-kid", PrivateKeyPEM: "anon-pem",
-		},
-	}, nopSigner{}, ex).WithBasicCredentialResolver(authority)
-	if minter != nil {
-		uc = uc.WithLocalMinter(minter)
-	}
+	uc := mustLane(t, registrytokenuc.Config{
+		AllowedAudiences: []string{"registry.kacho.local"},
+		DefaultService:   "registry.kacho.local",
+		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-client"},
+	}, minter).WithBasicCredentialResolver(authority)
 	return uc, secret
 }
 
-// TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer — приземление.
-func TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer(t *testing.T) {
-	ex := &recordingExchanger{}
+// TestExecute_MintsWithOurSigner — приземление: вход базовым секретом получает
+// токен НАШЕГО подписанта за ту служебную учётку, за которую говорит секрет.
+//
+// Прежде проба утверждала ещё и обратное — «прежний издатель на переведённом
+// контуре не звучит», — с положительным контролем на анонимном потоке без
+// подписанта, который шёл к прежнему издателю. Той половины больше нет не
+// послаблением, а построением (kaname#494): без подписанта полоса не строится
+// (TestUseCaseWithoutOurMinterIssuesNothing), и звучать прежнему издателю
+// негде.
+func TestExecute_MintsWithOurSigner(t *testing.T) {
 	minter := &stubMinter{}
-	uc, secret := newUseCase(t, minter, ex)
+	uc, secret := newUseCase(t, minter)
 
 	in := dockerLogin(secret)
 	in.Service = "registry.kacho.local"
 	out, err := uc.Execute(context.Background(), in)
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Token)
-	require.Equal(t, 0, ex.calls, "прежний издатель не должен звучать на переведённом контуре")
 
-	// Субъект токена — ТОТ ЖЕ, что приёмная сторона резолвила до перевода:
-	// иначе смена чеканки тихо сменила бы принципала, и запросы отвергались бы
-	// уже правами, а не подписью.
+	// Субъект токена — служебная учётка, за которую говорит секрет: иначе
+	// запросы отвергались бы уже правами, а не подписью.
 	require.Equal(t, dockerSubject, minter.in.Subject)
 	require.Equal(t, "registry.kacho.local", minter.in.Audience)
-
-	// Положительный контроль обратной стороны переехал на АНОНИМНЫЙ поток, и
-	// это не послабление, а следствие #1143: полоса предъявленного
-	// удостоверения к прежнему издателю не ходит НИ ПРИ КАКОЙ настройке —
-	// подписывать утверждение нечем, ключевого материала у принимаемого вида
-	// не существует. Без этой половины «не зовём» зелено и на контуре, который
-	// не зовёт никого.
-	legacy, _ := newUseCase(t, nil, ex)
-	out, err = legacy.ExecuteAnonymous(context.Background(), "registry.kacho.local")
-	require.NoError(t, err)
-	require.Equal(t, 1, ex.calls)
-	require.Equal(t, "from-the-previous-issuer", out.Token)
 }
 
-// TestExecuteAnonymous_MintsWithOurSigner — анонимный путь переводится тем же
-// решением: два издателя на ОДНОМ контуре означали бы, что приёмная сторона
+// TestExecuteAnonymous_MintsWithOurSigner — анонимный путь чеканит тот же
+// подписант: два издателя на ОДНОМ контуре означали бы, что приёмная сторона
 // обязана держать обе записи ради одного и того же реестра.
 func TestExecuteAnonymous_MintsWithOurSigner(t *testing.T) {
-	ex := &recordingExchanger{}
 	minter := &stubMinter{}
-	uc, _ := newUseCase(t, minter, ex)
+	uc, _ := newUseCase(t, minter)
 
 	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Token)
-	require.Equal(t, 0, ex.calls)
 
 	// Субъект анонимного токена — тот же идентификатор, который приёмная
 	// сторона резолвит в подстановочного принципала.
@@ -125,16 +105,15 @@ func TestExecuteAnonymous_MintsWithOurSigner(t *testing.T) {
 	require.Equal(t, registrytokenuc.AnonymousReadScope, minter.in.Scope)
 }
 
-// TestExecute_MinterFailureIsFailClosed — отказ нашего подписанта НЕ
-// возвращает контур к прежнему издателю: молчаливый откат означал бы, что
-// перевод контура снимается сам собой при первой же неисправности.
+// TestExecute_MinterFailureIsFailClosed — отказ нашего подписанта — отказ
+// выдачи недоступностью издателя: запасного издателя у полосы нет, и токена на
+// этом пути не бывает.
 func TestExecute_MinterFailureIsFailClosed(t *testing.T) {
-	ex := &recordingExchanger{}
-	uc, secret := newUseCase(t, &stubMinter{err: errors.New("no signing key")}, ex)
+	uc, secret := newUseCase(t, &stubMinter{err: errors.New("no signing key")})
 
-	_, err := uc.Execute(context.Background(), dockerLogin(secret))
+	out, err := uc.Execute(context.Background(), dockerLogin(secret))
 	require.Error(t, err)
 	require.ErrorIs(t, err, registrytokenuc.ErrIssuerUnavailable,
 		"неисправность своей чеканки — недоступность издателя, а не негодные учётные данные")
-	require.Equal(t, 0, ex.calls, "откат к прежнему издателю при отказе своего — молчаливое снятие перевода")
+	require.Empty(t, out.Token, "токен на отказе своей чеканки")
 }

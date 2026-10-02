@@ -96,7 +96,12 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 
-	w, err := uc.deps.Store.Writer(ctx)
+	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
+	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
+	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
+	// Транзакция снимает прочие записи сессии, поэтому строку личности она
+	// берёт первой — раньше строк фактора (`SessionSetWriter`, kaname#340).
+	w, err := uc.deps.Store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
@@ -126,7 +131,14 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	if err := w.ResetFailures(ctx, FailureByAddress, addressKey); err != nil {
+	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
+	// личности факторов (Ф12 Р7 ред. 11, Ф3 Р10 ред. 11). Сюда путь лежит
+	// только через совпавший КОД, доводящий сессию до «2», — но решает это
+	// единственный писатель, а не эта полоса.
+	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		AddressKey: addressKey, Presented: methods,
+	}); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditSecondFactorRemoved, user, resolved.Session.ID, in.Factor.Method); err != nil {

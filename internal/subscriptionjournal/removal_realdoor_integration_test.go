@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
@@ -74,7 +75,7 @@ func TestIntegration_RemovalReachesTheGrantHolderAndNobodyElse(t *testing.T) {
 		INSERT INTO kaname.groups (id, account_id, name) VALUES ('grp-1', 'acc-1', 'watched');`)
 	require.NoError(t, err)
 
-	door := authzcascade.Wrap(relverdict.NewAsker(pool))
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	const holder, stranger = "service_account:sva-1", "service_account:sva-nobody"
 	rel := "v_get"
 

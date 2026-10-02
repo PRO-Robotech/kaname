@@ -4,11 +4,12 @@
 package pg
 
 // recovery_completions_repo.go — kaname.recovery_completions: idempotency
-// ledger of recovery completions. Two event sources, one row shape (Ф5 Р4):
-// the identity-provider webhook (InternalUserService.OnRecoveryCompleted, names
-// an external subject) and our own recovery flow (`humansession`, Ф5 —
-// external subject absent, written as NULL; recovery_jti is the recovery_codes
-// row id).
+// ledger of recovery completions. One event source: our own recovery flow
+// (`humansession`, Ф5) — external subject absent, written as NULL;
+// recovery_jti is the recovery_codes row id. The second source — the internal
+// callback verb of the retired identity provider — was removed together with
+// that provider (kaname#564); the nullable external_id column stays as the
+// applied schema has it (ban #5), rows written by the flow leave it NULL.
 //
 // Within-service invariants — DB-level (ban #10):
 //   - PK recovery_jti                         → ON CONFLICT DO NOTHING dedup-gate,
@@ -16,10 +17,9 @@ package pg
 //   - CHECK length(recovery_jti/external_id/user_id) + revoked_session_count>=0.
 //
 // Write-only adapter: the gate INSERT must run inside the recovery writer-tx
-// (atomic with re-enable + revoke-all + audit), so it is exposed via the
-// tx-scoped writeTx.InsertRecoveryCompletion, NOT a pool-scoped repo. There is
-// no read path — Operation.metadata is computed from the deterministic matched
-// set, not read back from the ledger.
+// (atomic with the cutoff and the audit event), so it is exposed via the
+// tx-scoped humanSessionWriter.InsertRecoveryCompletion, NOT a pool-scoped repo.
+// There is no read path.
 
 import (
 	"context"

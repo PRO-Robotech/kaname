@@ -672,8 +672,8 @@ func TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTh
 }
 
 // TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPasswordChange —
-// завершение восстановления (существующий хук пишет отсечку `now` тем же
-// оператором транзакции, `UpsertUserTokenRevokeAll`) датирует отсечку не раньше
+// завершение восстановления (отсечка `now` пишется дверью отсечки,
+// `upsertSubjectCutoff`) датирует отсечку не раньше
 // обеих прежних сессий — включая ту, из которой восстановление запрошено, —
 // причиной `password-change`, тем же значением, что пишет смена пароля (Р6);
 // сессия, выданная восстановлением после отсечки, — позже неё.
@@ -690,7 +690,7 @@ func TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPass
 	hsIssue(t, repo, s2)
 
 	completed := hsBase.Add(2 * time.Minute)
-	// Тот же оператор, что у хука `internal_on_recovery`: причина — словарь домена.
+	// Та же дверь отсечки, что у нашей полосы восстановления: причина — словарь домена.
 	require.NoError(t, revs.UpsertRevokeAll(ctx,
 		domain.UserTokenRevocation{UserID: subject, RevokeBefore: completed, Reason: domain.RevokeReasonPasswordChange}, ""))
 
@@ -741,6 +741,9 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 	require.True(t, got.Session.LastPresentedAt.Equal(presented), "момент последнего предъявления сдвинут")
 
 	// Словарь и ось держит база: способ вне словаря, уровень вне оси, пустое множество.
+	// Множество и уровень выводит служба из сверенных способов — вызывающий их не
+	// присылает, и отказ ограничения на них есть дефект службы: фиксированный
+	// INTERNAL, а не обвинение вызывающего (kaname#395).
 	for _, bad := range []struct {
 		name    string
 		methods []string
@@ -754,7 +757,8 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 		next, err := domain.NewSessionBearer()
 		require.NoError(t, err)
 		err = w.PresentInSession(ctx, "hss-12p", bad.methods, bad.level, next.Digest(), presented.Add(time.Minute))
-		require.ErrorIs(t, err, iamerr.ErrInvalidArg, "%s: CHECK строки → InvalidArgument", bad.name)
+		require.ErrorIs(t, err, iamerr.ErrInternal, "%s: CHECK строки значения службы → INTERNAL", bad.name)
+		require.Equal(t, iamerr.ErrInternal.Error(), err.Error(), "%s: текст отказа фиксированный", bad.name)
 		require.NotContains(t, err.Error(), "SQLSTATE", "%s: текст драйвера наружу не течёт", bad.name)
 		_ = w.Rollback(ctx)
 	}

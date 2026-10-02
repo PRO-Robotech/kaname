@@ -35,7 +35,7 @@
 // ГРАНИЦА НАЗВАНА
 //
 // Судится ОБЪЯВЛЕНИЕ правила в блоке кода. Имя тревоги, названное в прозе
-// («правило `KanameAuthnHooksSilent` звонит, когда…»), объявлением НЕ является
+// («правило `KanameLoginLaneFailing` звонит, когда…»), объявлением НЕ является
 // и находкой не становится: проза не срабатывает, а объяснить действующее
 // правило документ вправе где угодно. Различие несущее — оба текста лежат в
 // одних и тех же файлах.
@@ -57,8 +57,11 @@
 // неотличим от необойдённого.
 //
 // ЧЕГО ЭТА ПРОВЕРКА НЕ ЗАКРЫВАЕТ: верность самих выражений и совпадение объекта
-// со страницей. Первое держит `TestObservabilityPagePromisesOnlyWhatTheServiceProduces`
-// и `TestAlertSelectorsNameAContractTheTreeProduces`, второе —
+// со страницей. Первое держится по частям: имя ряда —
+// `TestObservabilityPagePromisesOnlyWhatTheServiceProduces`, отбор по имени
+// контракта — `TestAlertSelectorsNameAContractTheTreeProduces`, отбор по исходу
+// у рядов её таблицы — `TestAlertOutcomeSelectorsNameValuesTheTreeProduces`, ряд
+// прохода сметателя ключей — `TestSigningKeySweeperSilenceIsAlerted`. Второе —
 // `TestDeliveredAlertRulesMatchThePublishedPage`.
 package supplyhygiene
 

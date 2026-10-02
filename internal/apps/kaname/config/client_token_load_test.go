@@ -58,6 +58,18 @@ func profileWithClientTokenOn(omit ...string) string {
 	if !skip["body-ceiling"] {
 		b.WriteString("    body-ceiling: 65536\n")
 	}
+	if !skip["exchanges-per-client-per-sec"] {
+		b.WriteString("    exchanges-per-client-per-sec: 5\n")
+	}
+	if !skip["in-flight-ceiling"] {
+		b.WriteString("    in-flight-ceiling: 64\n")
+	}
+	if !skip["failed-proofs-per-source"] {
+		b.WriteString("    failed-proofs-per-source: 50\n")
+	}
+	if !skip["failed-proof-window"] {
+		b.WriteString("    failed-proof-window: \"15m\"\n")
+	}
 	return b.String()
 }
 
@@ -118,6 +130,8 @@ func TestFullyDeclaredClientTokenProfileStarts(t *testing.T) {
 	got := loadClientToken(t, yaml)
 	require.NotZero(t, got.BodyCeiling, "названный профилем потолок обязан доехать")
 	require.NotZero(t, got.TokenTTL, "названный профилем срок обязан доехать")
+	require.Equal(t, 5, got.ExchangesPerClientPerSec, "названный профилем темп на клиента обязан доехать")
+	require.Equal(t, 64, got.InFlightCeiling, "названный профилем потолок одновременных обязан доехать")
 
 	require.NoError(t, validateLoaded(t, yaml),
 		"полностью объявленный профиль обязан стартовать")

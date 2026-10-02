@@ -57,6 +57,7 @@ func (h *Handler) CheckBasicCredentialLive(
 	if h.basicCredentials == nil {
 		// Непровязанный контроль не есть «живо»: fail-closed по тому же
 		// разделителю, что у резолва.
+		h.countBasic(BasicCredentialLiveness, BasicOutcomeUnavailable)
 		return nil, status.Error(codes.Unavailable, credentialStateUnknownText)
 	}
 
@@ -65,7 +66,8 @@ func (h *Handler) CheckBasicCredentialLive(
 		// Пустое отвергается тем же единым отказом: «поле не заполнено» и
 		// «удостоверение не действует» различимы только тем, что первое
 		// подсказывает форму, — а подсказывать нечему.
-		return nil, status.Error(codes.Unauthenticated, refusalText)
+		return nil, h.refuseBasic(ctx, BasicCredentialLiveness,
+			domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
 	}
 	if _, err := credsecret.Parse(id); err == nil {
 		// Сюда прислали ПРЕДЪЯВЛЕННУЮ СТРОКУ целиком. Поле идентификатора не
@@ -79,15 +81,18 @@ func (h *Handler) CheckBasicCredentialLive(
 			h.logger.WarnContext(ctx, "basic credential liveness asked with a presented string "+
 				"instead of an identifier; the value is not logged")
 		}
-		return nil, status.Error(codes.Unauthenticated, refusalText)
+		return nil, h.refuseBasic(ctx, BasicCredentialLiveness,
+			domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
 	}
 
 	switch err := h.basicCredentials.CheckBasicLive(ctx, id); {
 	case err == nil:
+		h.countBasic(BasicCredentialLiveness, BasicOutcomeAccepted)
 		return &iamv1.CheckBasicCredentialLiveResponse{}, nil
 	case errors.Is(err, domain.ErrBasicCredentialRefused):
-		return nil, status.Error(codes.Unauthenticated, refusalText)
+		return nil, h.refuseBasic(ctx, BasicCredentialLiveness, err)
 	default:
+		h.countBasic(BasicCredentialLiveness, BasicOutcomeUnavailable)
 		// Сырой текст драйвера наружу не течёт: он ЛОГИРУЕТСЯ, а на провод
 		// уходит фиксированный.
 		if h.logger != nil {

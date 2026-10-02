@@ -4,32 +4,23 @@
 // token_enrichment_own_lane.go — вторая точка входа в ОДНО объявление состава
 // утверждений (задача #898, приёмка F2 §2.11).
 //
-// # Почему второй ВХОД, а не второй состав
+// # Почему ВХОД, а не свой состав
 //
-// С этой фазы токен принципалу выдают ДВА пути: обратный вызов прежнего
-// провайдера, пока он жив, и наш собственный эндпоинт. Пока перечень утверждений
-// и правила их вычисления живут у каждого свои, различие между ними НЕ ЯВЛЯЕТСЯ
-// НИЧЬЕЙ НАХОДКОЙ: оно не выражено и потому не может покраснеть. Первая же
-// правка одной стороны разойдётся с другой молча — и разойдётся у ПРИНЦИПАЛА,
-// чей токен выдан не тем путём.
+// Токен принципалу выдавали ДВА пути: обратный вызов прежнего провайдера и наш
+// собственный эндпоинт. Пока перечень утверждений и правила их вычисления живут
+// у каждого свои, различие между ними НЕ ЯВЛЯЕТСЯ НИЧЬЕЙ НАХОДКОЙ: оно не
+// выражено и потому не может покраснеть. Поэтому здесь заведена не вторая
+// сборка утверждений, а СПОСОБ ДОЙТИ до единственной: состав собирают
+// `userTokenClaims` и `saClaims`.
 //
-// Поэтому здесь заводится не вторая сборка утверждений, а второй СПОСОБ ДОЙТИ
-// до той же: состав по-прежнему собирают `userTokenClaims` и `saClaims`, и
-// правка любого из них доезжает до обеих сторон by construction.
+// Обратного вызова провайдера больше нет (kaname#363), и этот вход — один; все
+// полосы собственной выдачи идут через него.
 //
-// # Чем эта точка входа отличается от прежней
+// # По какому имени читается строка
 //
-// Прежняя резолвит строку по ЗЕРКАЛЬНОМУ значению — идентификатору клиента во
-// внешнем сервере, потому что именно его прежний провайдер кладёт субъектом
-// выпускаемого токена. Наш путь резолвит по НАШЕМУ идентификатору: зеркальное
-// значение на пути разрешения клиента не участвует вовсе.
-//
-// Значением утверждения зеркало при этом остаётся — и это не противоречие, а
-// разные роли одного поля. «По чему мы НАХОДИМ строку» и «что мы КЛАДЁМ в
-// токен» — разные вопросы: первый решает, кого мы аутентифицировали, второй
-// обязан дать тот же состав, что и прежний путь, иначе сверка составов
-// невозможна. Роль зеркала как значения истекает вместе с самим внешним
-// сервером.
+// По НАШЕМУ идентификатору строки из реестра утверждений. С kaname#362 второго
+// имени у клиента нет, столбец, где его хранили, снят. Значением утверждения
+// `kaname_external_id` на этом пути стоит поэтому идентификатор строки.
 package service
 
 import (
@@ -41,9 +32,10 @@ import (
 
 // TokenEnrichmentOwnClientPort — чтение строки реестра по НАШЕМУ идентификатору.
 //
-// Отдельный порт, а не расширение прежних: те резолвят по зеркальному значению,
-// и добавить сюда метод «по нашему» значило бы дать одному порту два разных
-// вопроса — после чего вызывающий рано или поздно задаст не тот.
+// Отдельный порт, а не расширение прежних: прежние читают ВЛАДЕЛЬЦА строки
+// (служебную учётку, пользователя), а этот — саму строку реестра, уже
+// разрешённую проверкой утверждения. Один порт с двумя вопросами рано или
+// поздно задал бы не тот.
 type TokenEnrichmentOwnClientPort interface {
 	// GetUserToken читает клиента пользовательского токена по нашему id.
 	GetUserToken(ctx context.Context, id domain.UserOAuthClientID) (domain.UserOAuthClient, error)
@@ -60,10 +52,10 @@ func (s *TokenEnrichmentService) WithOwnClientPort(p TokenEnrichmentOwnClientPor
 // ClaimsForAssertionClient собирает утверждения для клиента, аутентифицировавшего
 // себя подписанным утверждением.
 //
-// Состав собирают ТЕ ЖЕ функции, что и на пути обратного вызова, поэтому
-// множества имён и значений у обоих путей совпадают для одного и того же
-// принципала. Проба сверяет именно МНОЖЕСТВА: проверка «есть поле X» зелена на
-// токене, потерявшем поле Y.
+// Состав собирают ОДНИ функции для всех полос собственной выдачи, поэтому
+// множества имён и значений у них совпадают для одного и того же принципала.
+// Проба сверяет именно МНОЖЕСТВА: проверка «есть поле X» зелена на токене,
+// потерявшем поле Y.
 func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 	ctx context.Context, client domain.AssertionClient, hookCtx TokenHookContext,
 ) (map[string]any, ResolvedPrincipal, error) {
@@ -76,6 +68,11 @@ func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 
 	switch client.Kind {
 	case domain.AssertionClientUser:
+		if s.userTokens == nil {
+			// Владельца нечем прочитать — ОТКАЗ, а не состав без владельца и не
+			// паника: чьё состояние не прочитано, того и не судили.
+			return nil, ResolvedPrincipal{}, fmt.Errorf("token enrichment: user-token owner port is not wired")
+		}
 		row, err := s.ownClients.GetUserToken(ctx, domain.UserOAuthClientID(client.ID))
 		if err != nil {
 			return nil, ResolvedPrincipal{}, fmt.Errorf("token enrichment: user-token client: %w", err)
@@ -85,13 +82,21 @@ func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 			return nil, ResolvedPrincipal{}, fmt.Errorf("token enrichment: owner of user-token client: %w", err)
 		}
 		if !user.InviteStatus.MayAuthenticate() {
-			// Состояние владельца читается ЗДЕСЬ так же, как на прежнем пути:
-			// иначе один и тот же принципал получал бы токен одним путём и не
-			// получал другим.
+			// Состояние владельца читается ЗДЕСЬ, до выпуска: чьё состояние не
+			// судили, тому и не выдаём.
 			return nil, ResolvedPrincipal{}, ErrSubjectNotActive
 		}
-		return s.userTokenClaims(row, user, string(row.OAuthClientID), hookCtx),
-			ResolvedPrincipal{Kind: PrincipalUser, UserID: string(row.UserID)}, nil
+		// Принципал — ЦЕЛИКОМ, включая момент выдачи ключа: ключ человека сессии не несёт,
+		// и его полномочие считается от собственной выдачи. По этому моменту
+		// вызывающий судит отсечку отзыва-всех владельца — принципал без него
+		// оставил бы правило без входа на одной из полос.
+		issued := row.CreatedAt
+		return s.userTokenClaims(row, user, string(row.ID), hookCtx),
+			ResolvedPrincipal{
+				Kind:                       PrincipalUser,
+				UserID:                     string(row.UserID),
+				StandingCredentialIssuedAt: &issued,
+			}, nil
 
 	case domain.AssertionClientServiceAccount:
 		row, err := s.ownClients.GetSAKey(ctx, domain.SAOAuthClientID(client.ID))
@@ -105,7 +110,7 @@ func (s *TokenEnrichmentService) ClaimsForAssertionClient(
 		if !sa.MayAuthenticate() {
 			return nil, ResolvedPrincipal{}, ErrServiceAccountDisabled
 		}
-		return s.saClaims(row, sa, string(row.OAuthClientID), hookCtx),
+		return s.saClaims(row, sa, string(row.ID), hookCtx),
 			ResolvedPrincipal{Kind: PrincipalServiceAccount}, nil
 
 	default:

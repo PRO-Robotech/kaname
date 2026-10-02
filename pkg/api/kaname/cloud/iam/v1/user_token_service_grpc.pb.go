@@ -33,15 +33,16 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // UserTokenService — публичный CRUD для персональных access-токенов
-// пользователя (private_key_jwt). Каждый токен маппится на Hydra OAuth 2.0
-// client (`grant_types=[client_credentials]`, `token_endpoint_auth_method =
-// private_key_jwt`); клиент сам подписывает `client_assertion` (ES256) и
-// обменивает его в Hydra `/oauth2/token` на JWT доступа, принципалом которого
-// становится `user:<user_id>`.
+// пользователя (private_key_jwt). Каждый токен — клиент собственного реестра
+// службы с именем своей строки (`uoc…`: `client_id` и `key_id` ответа Issue —
+// одно значение); владелец сам подписывает `client_assertion` (ES256) и
+// обменивает его на токен-эндпоинте платформы (`POST /iam/v1/token`, вид выдачи
+// `client_credentials`) на JWT доступа, принципалом которого становится сам
+// человек.
 //
 // Приватный ключ (`private_key_pem`) возвращается РОВНО ОДИН РАЗ в ответе Issue
 // и не хранится нигде — kaname держит только публичную часть в
-// `user_oauth_clients`; подпись проверяется по публичному ключу в OAuth2-обмене.
+// `user_oauth_clients`; подпись утверждения сверяется с ней при обмене.
 //
 // authz: parent-scoped на `iam_user`. Мутации требуют `token_issuer`, чтение —
 // `token_reader`. У ОБОИХ круг держателей один и тот же: сам человек и надзор
@@ -137,15 +138,16 @@ func (c *userTokenServiceClient) Revoke(ctx context.Context, in *RevokeUserToken
 // for forward compatibility.
 //
 // UserTokenService — публичный CRUD для персональных access-токенов
-// пользователя (private_key_jwt). Каждый токен маппится на Hydra OAuth 2.0
-// client (`grant_types=[client_credentials]`, `token_endpoint_auth_method =
-// private_key_jwt`); клиент сам подписывает `client_assertion` (ES256) и
-// обменивает его в Hydra `/oauth2/token` на JWT доступа, принципалом которого
-// становится `user:<user_id>`.
+// пользователя (private_key_jwt). Каждый токен — клиент собственного реестра
+// службы с именем своей строки (`uoc…`: `client_id` и `key_id` ответа Issue —
+// одно значение); владелец сам подписывает `client_assertion` (ES256) и
+// обменивает его на токен-эндпоинте платформы (`POST /iam/v1/token`, вид выдачи
+// `client_credentials`) на JWT доступа, принципалом которого становится сам
+// человек.
 //
 // Приватный ключ (`private_key_pem`) возвращается РОВНО ОДИН РАЗ в ответе Issue
 // и не хранится нигде — kaname держит только публичную часть в
-// `user_oauth_clients`; подпись проверяется по публичному ключу в OAuth2-обмене.
+// `user_oauth_clients`; подпись утверждения сверяется с ней при обмене.
 //
 // authz: parent-scoped на `iam_user`. Мутации требуют `token_issuer`, чтение —
 // `token_reader`. У ОБОИХ круг держателей один и тот же: сам человек и надзор

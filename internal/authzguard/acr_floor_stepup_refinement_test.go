@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/acrlevel"
 )
 
 const clusterGetMethod = "/kaname.cloud.iam.v1.InternalClusterService/Get"
@@ -57,10 +57,10 @@ func TestACRFloor_Refinement_GrantAdminSensitive_GetRoutine(t *testing.T) {
 	}
 }
 
-// SEC-ACR-16 (iam side): the floor's ranking wrapper (grpcsrv.ACRSatisfies) gives
+// SEC-ACR-16 (iam side): the floor's ranking wrapper (acrlevel.Satisfies) gives
 // the expected verdicts over the acr matrix — locked here so a drift on the iam
 // side is caught symmetrically with the gateway verdict-parity test.
-func TestACRFloor_Refinement_ACRSatisfiesMatrix(t *testing.T) {
+func TestACRFloor_Refinement_SatisfiesMatrix(t *testing.T) {
 	cases := []struct {
 		presented, required string
 		want                bool
@@ -71,8 +71,8 @@ func TestACRFloor_Refinement_ACRSatisfiesMatrix(t *testing.T) {
 		{"1", "", true}, {"weird", "1", false}, {"weird", "", true},
 	}
 	for _, c := range cases {
-		if got := grpcsrv.ACRSatisfies(c.presented, c.required); got != c.want {
-			t.Fatalf("ACRSatisfies(%q,%q)=%v want %v", c.presented, c.required, got, c.want)
+		if got := acrlevel.Satisfies(c.presented, c.required); got != c.want {
+			t.Fatalf("acrlevel.Satisfies(%q,%q)=%v want %v", c.presented, c.required, got, c.want)
 		}
 	}
 }

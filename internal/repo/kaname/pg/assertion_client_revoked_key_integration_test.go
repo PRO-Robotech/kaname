@@ -44,16 +44,16 @@ func TestF2_31_RevokedRegisteredKeyGetsNoToken(t *testing.T) {
 	for _, kind := range kinds {
 		t.Run(string(kind), func(t *testing.T) {
 			f := newAssertionFixture(t)
-			rig := newIssuanceRig(t)
+			rig := newIssuanceRig(t, f.pool)
 
 			var clientID string
 			switch kind {
 			case domain.AssertionClientUser:
 				clientID = "uoc_kkkkkkkkkkkkkkkkk"
-				f.seedUserClient(t, clientID, "kaname-usr-revoked-key", testPublicKeyPEM, "ES256", nil)
+				f.seedUserClient(t, clientID, testPublicKeyPEM, "ES256", nil)
 			case domain.AssertionClientServiceAccount:
 				clientID = "soc_kkkkkkkkkkkkkkkkk"
-				f.seedSAClient(t, clientID, "kaname-sak-revoked-key", testPublicKeyPEM, "ES256")
+				f.seedSAClient(t, clientID, testPublicKeyPEM, "ES256")
 			}
 
 			// ── Положительный контроль: ДО отзыва тот же клиент токен получает.

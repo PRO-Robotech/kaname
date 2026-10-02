@@ -1,7 +1,8 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// invite_mail.go — НАШ отправитель писем: приглашение и восстановление доступа.
+// invite_mail.go — НАШ отправитель писем: приглашение, восстановление доступа и
+// подтверждение адреса.
 //
 // # Почему отправитель здесь, а не у поставщика личности
 //
@@ -10,7 +11,9 @@
 // ничего. Восстановление доступа с фазы Ф5 (`kacho#1271`, приёмка
 // `recovery-of-access.md`, Р3, Д5) — тоже наше: код чеканим мы, поток
 // поставщика истёк вместе с поставщиком, и у письма не осталось бы ни одного
-// отправителя. Подтверждение адреса остаётся за поставщиком до своей фазы (Ф6).
+// отправителя. Подтверждение адреса — тоже наше (kaname#456, приёмка
+// `access-beyond-login-needs-a-verified-address.md`, Р8): код чеканим мы, и без
+// подтверждения человеку не открывается ничего дальше экрана подтверждения.
 //
 // Второй вид живёт в ТОЙ ЖЕ полосе, а не во второй (Р3): отправитель,
 // настройка, закрытый набор клеток исхода, ограниченный повтор и предел времени
@@ -59,6 +62,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"time"
 
@@ -77,7 +81,16 @@ const (
 	// EventRecoveryMailSend — вид события письма восстановления доступа (Ф5 Р3);
 	// заведён миграцией `20260917015400_recovery_code_is_our_record`.
 	EventRecoveryMailSend = "mail.recovery.send"
+	// EventVerificationMailSend — вид события письма подтверждения адреса
+	// (kaname#456, Р8); заведён миграцией
+	// `20260927190000_address_verification_is_our_verb`.
+	EventVerificationMailSend = "mail.verification.send"
 )
+
+// VerificationScreenPath — путь экрана подтверждения адреса в консоли. Адрес
+// экрана — происхождение консоли, объявленное той же настройкой, что адрес
+// входа в письмах службы, и этот путь, без параметров и фрагмента.
+const VerificationScreenPath = "/verification"
 
 // Клетки счётчика исходов отправки. Набор ЗАКРЫТ (Р25): форма взята у зеркала
 // набора ключей вместе с обоснованием — успехи считаются НАРАВНЕ с отказами,
@@ -212,11 +225,11 @@ type MailEvent struct {
 	UserID string `json:"user_id"`
 	// LoginURL — адрес страницы входа. Пусто → берётся из настройки установки.
 	LoginURL string `json:"login_url,omitempty"`
-	// Code — код восстановления в форме для человека; только у вида
-	// восстановления. Строка этого вида без кода нерастолковываема.
+	// Code — код в форме для человека; у видов восстановления и подтверждения.
+	// Строка этих видов без кода нерастолковываема.
 	Code string `json:"code,omitempty"`
 	// CodeValidMinutes — срок кода в минутах, как его называет письмо (Ф1-25:
-	// «код с объявленным сроком»). Только у вида восстановления.
+	// «код с объявленным сроком»). У видов восстановления и подтверждения.
 	CodeValidMinutes int `json:"code_valid_minutes,omitempty"`
 	// Kind — вид события строки; проставляется применителем, в нагрузке не
 	// хранится.
@@ -572,10 +585,76 @@ func addressOnly(s string) string {
 // RenderMail — тело письма по виду события. Вид неизвестный применитель до
 // транспорта не доводит (постоянный отказ), поэтому здесь исходов два.
 func RenderMail(relay MailRelay, ev MailEvent) []byte {
-	if ev.Kind == EventRecoveryMailSend {
+	switch ev.Kind {
+	case EventRecoveryMailSend:
 		return RenderRecoveryMail(relay, ev)
+	case EventVerificationMailSend:
+		return RenderVerificationMail(relay, ev)
+	default:
+		return RenderInviteMail(relay, ev)
 	}
-	return RenderInviteMail(relay, ev)
+}
+
+// letterAddress — адрес, который несёт письмо любого вида: происхождение и
+// путь, БЕЗ параметров и фрагмента (kaname#456). Письмо не несёт
+// предъявителя, и адрес не становится местом, куда его можно положить: ни
+// значение из очереди, ни ошибка настройки не доведут до письма адрес с `?` или
+// `#`. Неразбираемый либо без происхождения — пусто: письмо тогда без адреса,
+// а не с адресом, которого установка не объявляла.
+func letterAddress(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+}
+
+// verificationScreenAddress — адрес экрана подтверждения: происхождение адреса
+// входа, объявленного настройкой установки, и путь экрана, — без параметров и
+// фрагмента. Адрес входа не объявлен либо не разбирается как адрес с
+// происхождением — пусто: письмо тогда несёт код и срок без адреса, а не адрес,
+// которого установка не объявляла.
+func verificationScreenAddress(loginURL string) string {
+	u, err := url.Parse(strings.TrimSpace(loginURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: VerificationScreenPath}).String()
+}
+
+// RenderVerificationMail собирает тело письма подтверждения адреса (kaname#456,
+// Р8).
+//
+// Письмо несёт КОД, его срок в минутах и адрес экрана подтверждения — и ничего
+// сверх. Кода в адресе нет: адрес ведёт на экран, код вводится руками, — так
+// устроены и письма восстановления и приглашения, и письмо, действующее одним
+// нажатием, приучало бы нажимать на ссылки о своей учётной записи.
+func RenderVerificationMail(relay MailRelay, ev MailEvent) []byte {
+	subject := "Код подтверждения адреса"
+	if relay.FromName != "" {
+		subject = "Код подтверждения адреса — " + relay.FromName
+	}
+	b := mailHeaders(relay, ev, subject)
+	b.WriteString("Подтвердите адрес почты, чтобы продолжить работу.\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("Код подтверждения:\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("    " + ev.Code + "\r\n")
+	b.WriteString("\r\n")
+	if ev.CodeValidMinutes > 0 {
+		fmt.Fprintf(b, "Код действует %d мин. с момента отправки и применяется один раз.\r\n", ev.CodeValidMinutes)
+	} else {
+		b.WriteString("Код применяется один раз.\r\n")
+	}
+	if screen := verificationScreenAddress(relay.LoginURL); screen != "" {
+		b.WriteString("Введите его на экране подтверждения: " + screen + "\r\n")
+	} else {
+		b.WriteString("Введите его на экране подтверждения адреса.\r\n")
+	}
+	b.WriteString("\r\n")
+	b.WriteString("Никому не сообщайте этот код. Если вы не регистрировались — не вводите его нигде и не\r\n")
+	b.WriteString("отвечайте на это письмо: без кода адрес не подтвердится.\r\n")
+	return []byte(b.String())
 }
 
 // mailHeaders — общая шапка обоих видов: отправитель, получатель, тема,
@@ -608,6 +687,7 @@ func RenderRecoveryMail(relay MailRelay, ev MailEvent) []byte {
 	if loginURL == "" {
 		loginURL = relay.LoginURL
 	}
+	loginURL = letterAddress(loginURL)
 	subject := "Код восстановления доступа"
 	product := "облаку"
 	if relay.FromName != "" {
@@ -650,6 +730,7 @@ func RenderInviteMail(relay MailRelay, ev MailEvent) []byte {
 	if loginURL == "" {
 		loginURL = relay.LoginURL
 	}
+	loginURL = letterAddress(loginURL)
 	// ИМЯ ПРИГЛАШАЮЩЕГО — отображаемое имя отправителя, и другого источника у
 	// письма нет. Литерал с именем платформы стоял здесь, пока служба была её
 	// частью; отдельным продуктом в ЧУЖОМ облаке он сообщает приглашённому имя,
@@ -741,6 +822,12 @@ func NewInviteMailApplier(
 				// Письмо восстановления без кода не восстанавливает ничего, и
 				// повтор этого не изменит: постоянный отказ, транспорт не зовётся.
 				return fmt.Errorf("%w: recovery mail row carries no code", drainer.ErrPermanent)
+			}
+		case EventVerificationMailSend:
+			if strings.TrimSpace(ev.Code) == "" {
+				// Письмо подтверждения без кода не подтверждает ничего: постоянный
+				// отказ, транспорт не зовётся.
+				return fmt.Errorf("%w: verification mail row carries no code", drainer.ErrPermanent)
 			}
 		default:
 			return fmt.Errorf("%w: unknown mail event type %q", drainer.ErrPermanent, eventType)

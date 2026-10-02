@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package service_account — ServiceAccountService.
-// Key-credentials (key/secret create) — отдельный pipeline (через Ory Hydra
-// client_credentials grant, OAuth2 token endpoint).
+// Key-credentials (key/secret create) — отдельный pipeline (SAKeyService; токен
+// по ключу чеканит токен-эндпоинт платформы, `POST /iam/v1/token`).
 package service_account
 
 import (

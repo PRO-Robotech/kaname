@@ -1,0 +1,234 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 572416018fe6d2d25fb94bbb49d30df8cc88142c67b928a96b563ab6dcbe02a0
+  static_status: DRAFT
+  static_status_note: >-
+    Токен `DRAFT` в шапке — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (восемь) не
+    трогаются — редакция 14 получает соседнюю запись по своему отпечатку.
+  base_commit: 4edbb2821f029306f871f1d5338b5e2f366e8c84
+  content_commit: none
+  content_commit_note: >-
+    Редакция 14 на момент круга НЕ закоммичена (так требовало задание автору): рабочая копия
+    ветки `295` @ 4edbb2821 (= origin/377), `git status --short` → ровно один файл, этот документ.
+    Если редакция будет закоммичена, `git show <коммит>:<путь> | sha256sum` обязан дать 57241601…
+    дословно; вердикт этой записи — только о нём.
+  branch: '295'
+  wave_branch: '377'
+  pull_request: none
+  task: PRO-Robotech/kacho#1269
+  edition_task: PRO-Robotech/kaname#295
+  lines: 3669
+  round: 9
+  predecessor_record: docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/3f0dca23af753cc5dffc400306db950f92ac07bc925a9b58ae1bcb9a346d108a.yaml
+  predecessor_note: >-
+    Непосредственный предшественник — редакция 13 (3f0dca23…, круг 8 APPROVED, событие
+    5797646739); она же в HEAD копии (`git show HEAD:<путь> | sha256sum` → 3f0dca23…). Одобрение
+    на редакцию 14 НЕ переносится (change-graph.md §2).
+  fingerprint_predicate: >-
+    sha256sum <путь> в рабочей копии tmp/kaname-295a (ветка 295 @ 4edbb2821) →
+    572416018fe6d2d25fb94bbb49d30df8cc88142c67b928a96b563ab6dcbe02a0, совпал с объявленным
+    заданием; wc -l → 3669; `git diff --stat` → 1 файл, +261 −43.
+  task_premise_remeasured: >-
+    (1) Отпечаток и база — ПОДТВЕРЖДЕНО. (2) «Порт меры вносит только #295, назначенная мера —
+    только в файлах проб» — ПОДТВЕРЖДЕНО: `git grep -l assignedMeter 4edbb2821` → 2 файла, оба
+    `_test.go`; `git grep -n 'NewEnvelope(' 4edbb2821 -- '*.go' ':!*_test.go' | grep -vc 'func
+    NewEnvelope('` → 1 (cmd/kaname/loginlane.go:404, WallClockCostMeter). (3) Довод замера для
+    перевода (д) в принятое — ПОДТВЕРЖДЕНО собственным повтором (ниже). (4) «Страж корня
+    заказан полосе kaname#295 поимённо» — ОПРОВЕРГНУТО на трекере (Б2).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-24'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Два блокирующих: Б1 (COVERAGE) — новый сценарий Ф3-53 (м) утверждает освобождение места
+    ёмкости после паники меры, но молчит о состоянии класса, и замер показывает, что класс
+    остаётся «в калибровке»; Б2 (PRODUCER) — у новой строки стража корня заявленный носитель
+    заказа (kaname#295) заказа не несёт. Перевод (д) в принятое, граница «назначенная мера —
+    только в пробах», держатели (а)…(н) и конструируемость «Дано» — подтверждены опытом.
+    Вердикт круга 8 (APPROVED, редакция 13) на редакцию 14 не переносится и ею не отзывается;
+    запрет #1 для порта меры по этой редакции остаётся в силе.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Для отказа событие санкцию не выдаёт и не отзывает. Тело, если публикуется:
+      role: acceptance-reviewer · verdict: CHANGES_REQUESTED · subject_sha256:
+      572416018fe6d2d25fb94bbb49d30df8cc88142c67b928a96b563ab6dcbe02a0.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Рецензент событий не публикует; для CHANGES_REQUESTED
+    это безвредно.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: record_only
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакций 13 → 14 целиком (444 строки диффа): шапка (строка редакции 14), Р17 (абзац
+    «Мера прогона», (д) снято, новые (е), (ж), пометка о гейте, счёт проб), Ф3-31 «Дано»,
+    Ф3-53 (заголовок, «Дано», «Когда» (г), (и)…(н), «Тогда» (а), (в), (г), (д), (д′), (и)…(н),
+    строка стража), §7, §8 инв. 2, §9, §10, §12, §17, новый §19 — против производителя на
+    4edbb2821 (internal/passwordverify/envelope.go, envelope_test.go,
+    cmd/kaname/loginlane.go, loginlane_envelope_test.go, humansession/timing_probe_test.go).
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+checks:
+  fingerprint_match: true
+  scenario_count: 'метки Ф3-N не менялись (53, из них 52 живых) — редакция новых ID не заводит'
+  producer_present_for_every_then: >-
+    Да у (а)…(н): каждое имя держателя существует на 4edbb2821 и зелёно (13 проб огибающей, 4
+    корневые); факты «Тогда» сверены с утверждениями проб (5 мс; 1,25 / 20 мс; 9 → 11,25 мс;
+    «ни разу»/«дважды»; 0 и −1 мс против 1 нс; три замера по 20 мс). Строка стража корня —
+    держателя нет, заявленный носитель заказа его не несёт (Б2).
+  positive_twin_for_every_negation: >-
+    (и) — строится с мерой; (к) — (а); (л) — 1 нс; (н) — отрицательный контроль I7 поимённо;
+    страж — назначенная мера в файле пробы молчит. У (м) отрицания в смысле «отвергнуто» нет;
+    незаявленная половина его «Тогда» — Б1.
+  constructibility: >-
+    Посеяно 5 из 6 новых/изменённых форм «Дано» (прогоном держателей на 4edbb2821): назначенная
+    стоимость у проб выбора; настенные часы у проб одного класса; мера, нарушающая контракт
+    (нет · ни разу/дважды · ≤0 · паника); прогон со сном 20 мс; не-тестовое дерево для стража
+    (предикат → 1). «Не выполнилось» 1: Ф3-31 на настенных часах — пакет собран (`go test -run
+    '^$'` → ok), замер по ручке KACHO_LOGIN_TIMING=1 не гнался (машина под чужой нагрузкой,
+    load average ≈ 30).
+  d_moved_to_accepted: >-
+    ПОДТВЕРЖДЕНО повтором тем же приёмом (одно ядро + два нагрузчика того же ядра, -test.cpu 1,
+    count 200): база 8ba158e48 — TestLoginLane_188_EnvelopeIsCalibratedOnThePopulationAndTheKnob
+    195 зелёных · 5 красных, во всех пяти потолком вышел «2a cost=4» вместо «2a cost=6»; голова
+    4edbb2821 — четыре корневые пробы 800 · 0. Мера корня: TestWallClockCostMeter_… под той же
+    нагрузкой 200 · 0; с инъекцией I7 (часы прочитаны до прогона, overlay) 0 · 200. Однократный
+    прогон под I7: огибающая 12 зелёных · 1 красная (ровно TestWallClockCostMeter_…, текст «мера
+    61ns короче прогона 20.2ms — часы прочитаны мимо прогона»), корень 4 · 0. Числа автора (595 ·
+    5; 800 · 0; 2400 + 400 подпроб · 0) сверены по сырому выводу tmp/kaname-295-meta/runs.
+  boundary_assigned_meter_only_in_probes: >-
+    Верна сегодня по предикату (выше) и держится только чтением — документ это и говорит; гейт
+    заказан (Б2).
+  open_questions: none
+  conventions: 'Контракт, RPC, поля, отказы, миграции — не тронуты.'
+  disclosure: >-
+    Уровень свойства и проб; пути, по которому посторонний восстановил бы отличимость, текст не
+    собирает. Мера — довод композиционного корня, внешним входом не задаётся.
+  doc_gates: >-
+    `go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure'`
+    на правленом дереве → 62 PASS · 0 FAIL · 0 SKIP.
+
+blocking_findings:
+  - id: Б1
+    kind: COVERAGE
+    where: Ф3-53 «Когда» (м), «Тогда» (м)
+    text: >-
+      (м) обосновано так: «иначе каждая такая калибровка отнимала бы у полосы входа место до
+      перезапуска» — и утверждает только место ёмкости и выход паники к вызывающему. Состояния
+      КЛАССА после паники контракт не называет, а производитель его портит: запись калибровки,
+      идущей сейчас, заведённая до прогона, при панике не снимается, и следующий допуск того же
+      класса ждёт её исхода до срока вызывающего — тот же вред «до перезапуска», что (м) называет
+      для места ёмкости, на соседнем ресурсе.
+    predicate: >-
+      Проба рецензента через `go test -overlay` (дерево не тронуто) на 4edbb2821: мера паникует
+      на первом прогоне и отдаёт 1 мс на последующих; после паники Admit того же класса со сроком
+      300 мс → «password_envelope: ожидание калибровки класса 2a cost=4: context deadline
+      exceeded» — КРАСНАЯ; близнец (другой класс после той же паники) — зелёный.
+    remedy: >-
+      Дописать в «Тогда» (м): после паники меры класс не остаётся в калибровке — следующий
+      допуск того же класса не ждёт прерванной калибровки (калибрует заново либо отказывает с
+      именем класса), и допуск, ждавший её в момент паники, получает отказ, а не срок; законный
+      близнец — мера, паникующая один раз, затем отдающая стоимость. Держатель — проба огибающей.
+  - id: Б2
+    kind: PRODUCER
+    where: Ф3-53 строка «страж корня композиции»; Р17 абзац «Мера прогона»; §7 строка Ф3-53; §10
+    text: >-
+      Документ утверждает, что страж корня композиции «заказан полосе kaname#295 поимённо». На
+      трекере заказа нет: тело kaname#295 и шесть его комментариев стража не называют, а
+      предикат снятия задачи — устойчивость пробы 188 либо перевод на детерминированную
+      координату — уже выполнен этой же правкой; полоса влита в 377 (4edbb2821), задача ждёт
+      status:test. У строки «Тогда» без держателя носителя заказа, таким образом, нет: при
+      вливании в main задача закроется по своему предикату, а строка стража останется без
+      ответственного (ban #11, третий исход — предмет с причиной и предикатом снятия).
+    predicate: >-
+      `gh api --paginate 'repos/PRO-Robotech/kaname/issues/295/comments?per_page=100' -q
+      '.[].body' | grep -ciE 'страж|WallClock|корн[ья] композиц|guard'` → 0; тело
+      (`gh issue view 295`) — тот же поиск → 0.
+    remedy: >-
+      Любое из двух, перемеряется следующим кругом: (а) заказ на kaname#295 комментарием,
+      называющим страж, его красное и предикат снятия (тогда текст документа становится верным
+      без правки); (б) отдельная задача со стражем, названная в документе вместо «#295
+      поимённо».
+
+non_blocking_findings:
+  - id: N1
+    class: doc-truthfulness
+    text: >-
+      Р17 (строка ≈1495): «одно свойство держится только гейтом дерева» при том, что гейта нет, —
+      рядом абзац «Мера прогона» говорит верно: «не держится ничем, кроме чтения». Привести к
+      одной форме.
+  - id: N2
+    class: doc-truthfulness
+    text: >-
+      Находка §19 подтверждена перемером: login_envelope_test.go — 4 пробы на 4edbb2821 против 3
+      на faf4f67e, TestLogin_F3_31_TheCapacitySlotIsFreeDuringTheWait есть, 16b5cade — предок
+      origin/main, kaname#220 CLOSED 2026-09-17T09:05:33Z. Документ оставляет «без держателя» в
+      Ф3-31, Р17, §10 и пишет «задачи на приведение нет» — долг без предмета (ban #11): завести
+      задачу. Устаревание — в сторону «сложнее, чем есть», санкцию не портит.
+  - id: N3
+    class: format
+    text: >-
+      «Дано» Ф3-53 объявляет стоимости «в соотношении настоящих классов», а «Когда» (г) назначает
+      argon2id 8 КиБ·1·1 9 мс. (г) говорит это явно, поэтому конструируемо; общей фразе
+      «Дано» уместна оговорка «кроме (г)».
+  - id: N4
+    class: doc-truthfulness
+    text: >-
+      Строка «Статус» («кругов ревью ноль») отстаёт от каталога записей (с этой — девять). Тот же
+      класс, что N1 кругов 7 и 8; документ выносит его за объём правки.
+
+predicates_run:
+  - where: tmp/kaname-295a (ветка 295 @ 4edbb2821, документ правлен)
+    command: "sha256sum <путь>; wc -l; git diff --stat; git show HEAD:<путь> | sha256sum"
+    got: "57241601… · 3669 · 1 файл +261 −43 · HEAD 3f0dca23…"
+  - where: PRO-Robotech/kaname@4edbb2821
+    command: "go test ./internal/passwordverify/ -run 'Envelope|WallClock|NewEnvelope|ParseCostClassPrefix' -count=1 -v; go test ./cmd/kaname/ -run '_188_' -count=1 -v"
+    got: "13 PASS · 0 FAIL; 4 PASS · 0 FAIL"
+  - where: PRO-Robotech/kaname@4edbb2821 + overlay I7 (envelope.go из #334, дифф — 2 строки в WallClockCostMeter)
+    command: "go test -overlay … ./internal/passwordverify/ …; go test -overlay … ./cmd/kaname/ -run '_188_'"
+    got: "12 PASS · 1 FAIL (TestWallClockCostMeter_MeasuresTheWholeRunItCalls); 4 PASS · 0 FAIL"
+  - where: git archive 8ba158e48 (база волны) и 4edbb2821; kaname-295-meta/load.sh, ядро 30
+    command: "load.sh 30 <бинарь> <проба> 200 <вывод>"
+    got: "база (а): 195 · 5 (все 5 — cost=4 вместо cost=6); голова _188_: 800 · 0; WallClock чистая 200 · 0; WallClock под I7 0 · 200"
+  - where: PRO-Robotech/kaname@4edbb2821 + overlay пробы рецензента (новый файл, дерево не тронуто)
+    command: "go test -overlay … ./internal/passwordverify/ -run TestReviewerExperiment -count=1 -v"
+    got: "тот же класс после паники меры: FAIL «ожидание калибровки класса 2a cost=4: context deadline exceeded»; другой класс: PASS"
+  - where: tmp/kaname-295a (правленое дерево)
+    command: "go test ./internal/check/ -run 'Acceptance|Docs|Measurement|Coordinate|Deferred|Foreign|Disclosure' -count=1 -v"
+    got: "62 PASS · 0 FAIL · 0 SKIP"
+  - where: GitHub
+    command: "gh issue view 295 / 220; gh api issues/295/comments"
+    got: "#295 OPEN, предикат снятия — флейк 188, стража не называет (0 из тела и 6 комментариев); #220 CLOSED 2026-09-17"
+
+seed_attempt:
+  performed: true
+  outcome: red
+  note: >-
+    Посев «Дано» — зелёный (5 из 6, одно «не выполнилось»); красное — проба рецензента на
+    незаявленную половину (м) (Б1).

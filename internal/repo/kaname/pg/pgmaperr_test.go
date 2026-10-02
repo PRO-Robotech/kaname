@@ -287,6 +287,19 @@ func TestWrapPgErr_ConnectionRefusals_AreUnavailable(t *testing.T) {
 	}
 }
 
+// TestWrapPgErr_LockNotAvailable_IsUnavailable — `55P03 lock_not_available`:
+// замок строки не выдан в пределе ожидания, который транзакция назначила себе
+// сама (`lock_timeout`). Это состояние чужой транзакции, а не поломка службы:
+// оно проходит, как только та зафиксируется, и повтор осмыслен. `Internal`
+// здесь сказал бы вызывающему «сломано, не повторяй» (kaname#340).
+func TestWrapPgErr_LockNotAvailable_IsUnavailable(t *testing.T) {
+	err := wrapPgErr(mkPgErr("55P03", ""), "HumanSession.End", "usr_x")
+	if !stderrors.Is(err, iamerr.ErrUnavailable) {
+		t.Fatalf("lock_not_available: want ErrUnavailable, got %v", err)
+	}
+	assertNoLeak(t, iamerr.StripSentinel(err))
+}
+
 // TestWrapPgErr_DialFailure_IsUnavailable — отказ, приехавший НЕ строкой
 // состояния сервера, а невозможностью до него дозвониться.
 //

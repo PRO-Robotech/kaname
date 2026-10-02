@@ -5,7 +5,7 @@
 // (зовётся auth-интерсептором api-gateway gRPC-direct; см. handler.go про то,
 // почему это loop-prevention, а не отсутствие REST-маршрута).
 //
-// Oneof key: external_id (OIDC `sub`, Ory) | id (`usr...` / `sva...`) | email.
+// Oneof key: external_id (субъект личности, `sub`) | id (`usr...` / `sva...`) | email.
 // Возвращает либо User, либо ServiceAccount (oneof subject).
 package internal_iam
 
@@ -27,7 +27,7 @@ import (
 // Repo — узкий port-iface, чтобы не тащить весь Repository в этот use-case.
 type Repo = kanamerepo.Repository
 
-// LookupSubjectUseCase резолвит внешний OIDC subject (`sub` claim, Ory) в локальный
+// LookupSubjectUseCase резолвит субъект личности (`sub` claim) в локальный
 // kacho subject (User mirror или ServiceAccount). Internal-only (запрет #6):
 // на внешний endpoint не выходит, но REST-маршрут на ВНУТРЕННЕМ mux api-gateway у
 // него есть — см. handler.go.
@@ -90,8 +90,8 @@ func (uc *LookupSubjectUseCase) byExternalID(ctx context.Context, ext string) (*
 	if len(rows) > 0 {
 		return nil, status.Errorf(codes.FailedPrecondition, "identity %s is blocked", ext)
 	}
-	// Future: ServiceAccount external_id (Ory Hydra client identity) — отложен
-	// на SA-key-flow follow-up. Текущий behaviour: NOT_FOUND.
+	// ServiceAccount по external_id не резолвится: внешнего субъекта у служебной
+	// учётки нет, её ищут по id (`sva...`, ветка byID). Исход: NOT_FOUND.
 	return nil, status.Errorf(codes.NotFound, "subject not found by external_id=%s", ext)
 }
 

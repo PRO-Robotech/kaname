@@ -100,7 +100,6 @@ func TestRevoke_AccountIDStampedOnMetadata(t *testing.T) {
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000009",
 			UserID:         "usr00000000000000001",
-			OAuthClientID:  "hydra-uoc-9",
 		},
 	}
 	ops := &stubOpsRepo{}

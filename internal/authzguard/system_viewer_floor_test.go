@@ -52,8 +52,6 @@ const (
 	readFloorMethod = "/kaname.cloud.iam.v1.InternalIAMService/LookupSubject"
 	// checkMethod — the PDP, exempt from the floor (INV-FLOOR-5).
 	checkMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
-	// recoveryMethod — secret-authed Kratos hook, exempt (INV-FLOOR-6).
-	recoveryMethod = "/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted"
 	// isRevokedMethod — hot-path, exempt (INV-FLOOR-6).
 	isRevokedMethod = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
 	// registerMethod — mutation, exempt from READ-floor (INV-FLOOR-8).
@@ -186,10 +184,10 @@ func TestSystemViewerFloor_Prod_CheckExempt(t *testing.T) {
 	}
 }
 
-// 05/06-unit — secret-authed webhook OnRecoveryCompleted + hot-path IsRevoked
-// (NON-floor FQNs) → pass without consulting the checker (INV-FLOOR-6).
-func TestSystemViewerFloor_Prod_ExemptWebhookAndHotPath(t *testing.T) {
-	for _, m := range []string{recoveryMethod, isRevokedMethod} {
+// 05/06-unit — hot-path IsRevoked (NON-floor FQN) → pass without consulting the
+// checker (INV-FLOOR-6).
+func TestSystemViewerFloor_Prod_ExemptHotPath(t *testing.T) {
+	for _, m := range []string{isRevokedMethod} {
 		ck := &recordingChecker{allowed: false}
 		f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithProductionMode(true)
 		if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), m); err != nil {
@@ -240,7 +238,8 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 		// RPCs this service answers; listing one it does not is dead policy that
 		// reads as coverage.
 		"/kaname.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
-		// secret-authed webhook (INV-FLOOR-6).
+		// Retired with the external identity provider (kaname#564): iam serves no
+		// implementation for it — listing it in the floor would be dead policy.
 		"/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 		// hot-path chicken-and-egg (INV-FLOOR-6).
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",

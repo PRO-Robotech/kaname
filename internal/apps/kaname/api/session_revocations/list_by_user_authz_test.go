@@ -50,6 +50,14 @@ type countingReader struct {
 }
 
 func (r *countingReader) IsRevoked(context.Context, string) (bool, error) { return false, nil }
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отзыв, а
+// не отметка адреса (kaname#456, её держат пробы правила предъявления).
+func (*countingReader) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (r *countingReader) FamilyRevoked(context.Context, string) (bool, error) { return false, nil }
 func (r *countingReader) GetByJTI(context.Context, string) (domain.SessionRevocation, error) {
 	return domain.SessionRevocation{}, nil
 }

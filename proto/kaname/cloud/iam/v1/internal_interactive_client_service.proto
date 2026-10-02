@@ -33,6 +33,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/interactive_client.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
 import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
@@ -77,10 +78,26 @@ service InternalInteractiveClientService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  // Registers a new interactive-login client at the identity provider and
-  // records it. The provider call happens on the request path and is
-  // fail-closed: if the provider is unreachable the mutation ends
-  // `UNAVAILABLE` and leaves NO row behind — the name does not stay taken.
+  // Registers a new interactive-login client in the service's own registry and
+  // records it. The client is CONFIDENTIAL (`token_endpoint_auth_method =
+  // client_secret_basic`): the service mints its secret and returns it ONCE, in
+  // `CreateInteractiveClientResponse.client_secret` of THIS call. The secret is
+  // stored nowhere in readable form — only its verification value — and no
+  // other call returns it.
+  //
+  // The operation completes on the request path (`done = true` in the answer
+  // of this call). A refused Create (name taken, registry failure) answers
+  // synchronously, returns no operation and issues no secret.
+  //
+  // A LOST ANSWER MEANS A LOST SECRET, and the secret cannot be recovered or
+  // re-read. After a timeout or a dropped connection: list clients by the
+  // `name` the request carried; if one exists, delete it and create it anew. A
+  // Create without `name` must not be repeated blindly — every such call
+  // registers another client with another secret.
+  //
+  // CHANGE OF THE OPERATION RESPONSE TYPE. The response used to be the bare
+  // `InteractiveClient`; it is now `CreateInteractiveClientResponse`, whose
+  // `interactive_client` carries the same projection `Get` returns.
   //
   // REST exposed ONLY on the cluster-internal listener.
   rpc Create (CreateInteractiveClientRequest) returns (corelib.operation.Operation) {
@@ -90,7 +107,7 @@ service InternalInteractiveClientService {
     };
     option (corelib.api.v1.operation) = {
       metadata: "CreateInteractiveClientMetadata"
-      response: "InteractiveClient"
+      response: "CreateInteractiveClientResponse"
     };
     option (corelib.authz.v1.permission)        = "iam.interactive_clients.create";
     option (corelib.authz.v1.required_relation) = "system_admin";
@@ -125,9 +142,9 @@ service InternalInteractiveClientService {
     option (corelib.authz.v1.required_acr_min) = "2";
   }
 
-  // Removes the client at the identity provider and its row. Idempotent —
-  // deleting an already-absent client does not differ in code from the first
-  // delete.
+  // Removes the client's row; its token families, authorization codes and
+  // refresh tokens go with it by the schema's cascade. Idempotent — deleting an
+  // already-absent client does not differ in code from the first delete.
   //
   // REST exposed ONLY on the cluster-internal listener.
   rpc Delete (DeleteInteractiveClientRequest) returns (corelib.operation.Operation) {
@@ -183,8 +200,8 @@ message CreateInteractiveClientRequest {
   // Resource labels as `key:value` pairs.
   map<string, string> labels = 3;
 
-  // Where the provider may redirect the authorization code. Required, and
-  // every entry must be an absolute `https://` URL.
+  // Where the sign-in ceremony may redirect the authorization code. Required,
+  // and every entry must be an absolute `https://` URL.
   repeated string redirect_uris = 4;
 
   // Optional post-logout redirect targets; same `https://` rule when present.
@@ -195,6 +212,32 @@ message CreateInteractiveClientRequest {
   // output-only. Accepting it would be a field that cannot be set correctly;
   // accepting it and ignoring it is forbidden outright (api-conventions,
   // "принято-и-проигнорировано").
+  //
+  // NOTE — there is deliberately NO client secret field either, for the same
+  // reason: the secret is minted by the service and shown once in
+  // `CreateInteractiveClientResponse.client_secret`; a secret chosen by the
+  // caller is a value the service cannot vouch for.
+}
+
+// CreateInteractiveClientResponse — the response of the Create operation.
+//
+// The secret lives in THIS message and nowhere else: `InteractiveClient` has no
+// secret field, so `Get`, `List`, `Update` and `Delete` do not carry it by the
+// form of the contract.
+message CreateInteractiveClientResponse {
+  // The registered client — the same projection `Get` returns.
+  InteractiveClient interactive_client = 1;
+
+  // The client secret, SHOWN ONCE. The client presents it at the token
+  // endpoint together with `interactive_client.client_id`, by HTTP Basic
+  // (RFC 6749 §2.3.1), as `token_endpoint_auth_method` says.
+  //
+  // WHAT EMPTINESS MEANS. Non-empty EXACTLY in the answer of the Create call:
+  // Create registers every client with `client_secret_basic`. Empty ALWAYS in
+  // the operation read back later (`OperationService.Get`): the secret is shown
+  // once. Whether a client has a secret is told by
+  // `token_endpoint_auth_method`, not by this field being empty.
+  string client_secret = 2 [(kaname.cloud.iam.v1.secret_bearing) = true];
 }
 
 message UpdateInteractiveClientRequest {

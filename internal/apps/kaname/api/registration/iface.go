@@ -39,6 +39,9 @@ type Writer interface {
 	// Сессия, память первой аутентификации, событие аудита (Ф3 Р1) — тем же
 	// writer'ом: `humansession.IssueSession` зовётся изнутри этой транзакции.
 	humansession.Writer
+	// Строка кода и письмо подтверждения адреса (kaname#456, Р9) — той же
+	// транзакцией, что заводит человека.
+	humansession.VerificationLetterWriter
 
 	// Mirror — зеркало пользователя (Р6): приглашение по адресу активируется
 	// той же полосой, иначе заводится новая строка; личный аккаунт, проект,
@@ -71,8 +74,11 @@ type OwnerBindingReconciler = user.OwnerBindingReconciler
 type Outcome string
 
 const (
-	OutcomeIssued        Outcome = "issued"
-	OutcomeIssuedInvited Outcome = "issued-invited" // приглашение активировано (Ф4-23)
+	OutcomeIssued Outcome = "issued"
+	// OutcomeIssuedInvited — способ входа и сессия легли на строку живого
+	// приглашения; приглашение активирует подтверждение адреса (kaname#456,
+	// Р11 п. 1).
+	OutcomeIssuedInvited Outcome = "issued-invited"
 	// OutcomeRefusedOccupied — адрес принадлежит личности, либо приглашение
 	// уже активировал конкурент, либо тот же человек повторил обращение (Ф4-24).
 	OutcomeRefusedOccupied Outcome = "refused-occupied"
@@ -83,7 +89,9 @@ const (
 	OutcomeRefusedRate Outcome = "refused-rate"
 	// OutcomeRefusedPassword — правило пароля отвергло (Ф1-32).
 	OutcomeRefusedPassword Outcome = "refused-password"
-	OutcomeStoreFailed     Outcome = "store-failed"
+	// OutcomeRefusedSource — окно регистраций источника полно (kaname#456).
+	OutcomeRefusedSource Outcome = "refused-source"
+	OutcomeStoreFailed   Outcome = "store-failed"
 )
 
 // Outcomes — закрытый перечень исходов: клетки заводятся нулём до первого
@@ -91,7 +99,7 @@ const (
 func Outcomes() []Outcome {
 	return []Outcome{
 		OutcomeIssued, OutcomeIssuedInvited, OutcomeRefusedOccupied, OutcomeRefusedInviteExpired,
-		OutcomeRefusedRate, OutcomeRefusedPassword, OutcomeStoreFailed,
+		OutcomeRefusedRate, OutcomeRefusedPassword, OutcomeRefusedSource, OutcomeStoreFailed,
 	}
 }
 

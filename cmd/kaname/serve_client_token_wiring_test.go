@@ -10,6 +10,15 @@
 // половины несущие: собранный и никуда не смонтированный эндпоинт зелен по
 // всем своим пробам и не обслуживает ни одного клиента; смонтированный на
 // внутренний слушатель — выставляет наружу то, чего наружу быть не должно.
+//
+// Здесь — первая половина: поверхность выдачи обслуживает путь и не затирает
+// соседа. Вторую — «путь резолвится ровно на ОДНОЙ поверхности процесса, и она
+// внешняя» — держит гейт по дереву TestCeremonySurfaceIsSingularAcrossTheCompositionRoot
+// (internal/check/ceremony_surface*.go): поверхности и места регистрации он
+// выводит из того, что линкуется в бинарь, а не выписывает. Прежняя проба этого
+// файла считала имя постоянной по тексту одного файла корня и сверяла строку с
+// перечнем внутренних мультиплексоров, покрывавшим две поверхности из семи;
+// снята вместе с заменой (kaname#320).
 package main
 
 import (
@@ -25,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
@@ -59,6 +69,14 @@ func (wiringClaims) ClaimsForAssertionClient(context.Context, domain.AssertionCl
 	return map[string]any{}, service.ResolvedPrincipal{}, nil
 }
 
+// wiringCutoffs — читатель отсечки отзыва-всех. Отсечек нет: проба утверждает
+// достижимость поверхности, а не исход выдачи.
+type wiringCutoffs struct{}
+
+func (wiringCutoffs) UserRevokedBefore(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
 type wiringSigner struct{}
 
 func (wiringSigner) Sign(context.Context, tokensigner.Request) (tokensigner.Token, error) {
@@ -74,8 +92,10 @@ func (wiringSigner) Issuer() string { return "https://kaname.kacho.local" }
 // наступают до любого обращения к базе, поэтому поверхность проверяется без неё.
 func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) {
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
-		Realm:   "https://api.kacho.local/iam/token",
-		Service: "registry.kacho.local",
+		Realm:                  "https://api.kacho.local/iam/token",
+		Service:                "registry.kacho.local",
+		BasicCredentialTimeout: credentialLanePeerTimeout,
+		Signer:                 registryLaneSigner(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка поверхности выдачи: %v", err)
@@ -92,7 +112,12 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		TokenTTL:                 15 * time.Minute,
 		BodyCeiling:              64 << 10,
 		PeerTimeout:              3 * time.Second,
-	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{})
+		ExchangesPerClientPerSec: 1 << 20,
+		InFlightCeiling:          64,
+		FailedProofsPerSource:    failurewindow.MaxStoredFailures,
+		FailedProofWindow:        time.Minute,
+		Source:                   func(*http.Request) string { return "probe-source" },
+	}, wiringResolver{}, wiringIssuers{}, wiringReplay{}, wiringSigner{}, wiringClaims{}, wiringCutoffs{})
 	if err != nil {
 		t.Fatalf("сборка токен-эндпоинта: %v", err)
 	}
@@ -135,38 +160,11 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 	}
 }
 
-// TestServeMountsTheClientTokenEndpointOnTheExternalSurfaceAndNowhereElse —
-// перечень мест регистрации ВЫВОДИТСЯ из исходника корня, а не выписывается.
-//
-// Утверждение о единственном маршруте оставалось бы зелёным, уедь второй не
-// туда: поэтому считается число регистраций, а не факт наличия одной.
-func TestServeMountsTheClientTokenEndpointOnTheExternalSurfaceAndNowhereElse(t *testing.T) {
-	src := readFileT(t, "serve.go")
-
-	if !strings.Contains(src, "buildClientTokenEndpoint(pool, cfg, tokenSigner, logger)") {
-		t.Error("serve.go: токен-эндпоинт платформы не собирается — эндпоинт без производственного вызывающего")
-	}
-	if !strings.Contains(src, "mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)") {
-		t.Error("serve.go: токен-эндпоинт платформы не смонтирован ни на одну поверхность")
-	}
-
-	// Регистрация ровно одна, и она не на внутренних слушателях. Внутренние
-	// муксы корня названы поимённо: строка, монтирующая наш путь на любой из
-	// них, есть нарушение ban #6 — административная поверхность наружу.
-	if n := strings.Count(src, "clienttokenhttp.TokenPath"); n != 1 {
-		t.Errorf("serve.go: путь токен-эндпоинта упомянут %d раз(а), ожидалась одна регистрация", n)
-	}
-	for _, line := range strings.Split(src, "\n") {
-		if !strings.Contains(line, "clienttokenhttp.TokenPath") {
-			continue
-		}
-		for _, internalMux := range []string{"jwksMux", "metricsMux", "hooksMux", "internalSrv"} {
-			if strings.Contains(line, internalMux) {
-				t.Errorf("serve.go: токен-эндпоинт смонтирован на внутренний слушатель (%s): %s", internalMux, strings.TrimSpace(line))
-			}
-		}
-	}
-}
-
 var _ = client_token.Input{}
 var _ = clientassertion.OutcomeAccepted
+
+// PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
+// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+func (wiringCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

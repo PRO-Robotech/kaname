@@ -25,6 +25,10 @@ const (
 	// систематическое истечение означает либо мёртвую доставку письма, либо
 	// слишком узкое окно, — тогда как рост клетки отказов означает поломку.
 	InviteActivationOutcomeExpired = "expired"
+	// InviteActivationOutcomeNotVerified — приглашение живо, адрес приглашённого
+	// не подтверждён нашей полосой (kaname#456, Р11 п. 5): путь хука
+	// поставщика его не активирует.
+	InviteActivationOutcomeNotVerified = "not_verified"
 )
 
 // InviteActivationOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
@@ -33,6 +37,7 @@ var InviteActivationOutcomes = []string{
 	InviteActivationOutcomeAlreadyActive,
 	InviteActivationOutcomeFailed,
 	InviteActivationOutcomeExpired,
+	InviteActivationOutcomeNotVerified,
 }
 
 // InviteActivationRecorder — исходы активации приглашения на первом входе.

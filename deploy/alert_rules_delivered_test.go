@@ -43,14 +43,21 @@
 //
 // Она судит СОВПАДЕНИЕ объекта со страницей, а не верность самих выражений.
 // Что каждый названный ряд имеет производителя, держит соседняя проба
-// (`TestObservabilityPagePromisesOnlyWhatTheServiceProduces`); что отбор внутри
-// ряда называет живой контракт — `TestAlertSelectorsNameAContractTheTreeProduces`.
-// Объект попадает в ИХ популяцию ЧЕРЕЗ совпадение, доказанное здесь: страница
-// осмотрена обеими, а объект ей равен. Цепочка держится, пока зелены все три —
-// и рвётся заметно, потому что рвётся она красным.
+// (`TestObservabilityPagePromisesOnlyWhatTheServiceProduces`); что отбор по
+// имени контракта (`grpc_service`) называет живой контракт —
+// `TestAlertSelectorsNameAContractTheTreeProduces`; что отбор по исходу
+// называет значение из словаря — `TestAlertOutcomeSelectorsNameValuesTheTreeProduces`,
+// и только у рядов, чей словарь несёт её таблица. Объект попадает в ИХ
+// популяцию ЧЕРЕЗ совпадение, доказанное здесь: страница осмотрена ими, а
+// объект ей равен. Отбор по ЗНАЧЕНИЮ метки ряда, которого нет ни в одной из
+// этих популяций, цепочкой не судится: ряд прохода сметателя поэтому судит
+// `TestSigningKeySweeperSilenceIsAlerted`, беря его у производителя.
 package deploy_test
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,6 +68,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
 
@@ -74,25 +82,13 @@ const alertRulesToggle = "alertRules.enabled"
 
 // pageAlertBlockRe — блок кода страницы с правилами. Берётся блок, а не строки:
 // имя `alert:` встречается и в прозе вокруг. Первая группа — ПОМЕТКА ПОСАДКИ
-// на строке перед блоком (`<!-- posture: own -->`), вторая — тело блока.
+// на строке перед блоком (`<!-- posture: … -->`), вторая — тело блока.
 //
-// Пометка машинно читаемая намеренно: заголовок прозой распознаватель судил бы
-// словом, а слово «own» стоит на странице и там, где посадка не при чём.
+// Пометок больше не бывает: посадка у службы одна (kaname#363), и набор правил
+// один на каждую установку. Пометка всё равно читается — затем, чтобы блок,
+// ею помеченный, был отказом, а не молчаливым выпадением из сверки: прежде
+// пометка выбирала, какой установке правила обещаны.
 var pageAlertBlockRe = regexp.MustCompile("(?s)(?:<!-- posture: ([a-z]+) -->\n)?```yaml\n(.*?)```")
-
-// posturedRules — правила страницы, разложенные по посадке: пустой ключ —
-// правила, действующие на ЛЮБОЙ посадке.
-type posturedRules map[string][]alertRule
-
-// forPosture — что страница обещает установке названной посадки: общие
-// правила плюс правила её полосы. Правила чужой посадки в обещание НЕ входят.
-func (p posturedRules) forPosture(posture string) []alertRule {
-	out := append([]alertRule{}, p[""]...)
-	if posture != "" {
-		out = append(out, p[posture]...)
-	}
-	return out
-}
 
 // alertRule — правило в том виде, в каком его сверяют две стороны.
 type alertRule struct {
@@ -122,55 +118,51 @@ func parseAlertRules(text string) ([]alertRule, error) {
 	return out, nil
 }
 
-// pageAlertRules — правила, обещанные опубликованной страницей, по посадке.
-func pageAlertRules(t *testing.T, root string) posturedRules {
-	t.Helper()
-	path := filepath.Join(root, publishedObservabilityPage)
-	raw, err := os.ReadFile(path) // #nosec G304 -- путь из корня службы
-	require.NoErrorf(t, err, "опубликованная страница не читается: %s", path)
-
-	rules := posturedRules{}
-	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(string(raw), -1) {
+// splitPageAlertRules — правила из блоков текста страницы и пометки посадки,
+// которые стоят перед блоками. СУЖДЕНИЕ отделено от чтения файла: инъекция
+// зовёт его же, а не свою копию.
+func splitPageAlertRules(text string) (rules []alertRule, markers []string, err error) {
+	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(text, -1) {
 		if !strings.Contains(m[2], "- alert:") {
 			continue
 		}
 		parsed, perr := parseAlertRules(m[2])
-		require.NoErrorf(t, perr, "блок правил страницы не разбирается как YAML: %s", path)
-		rules[m[1]] = append(rules[m[1]], parsed...)
+		if perr != nil {
+			return nil, nil, perr
+		}
+		if m[1] != "" {
+			markers = append(markers, m[1])
+		}
+		rules = append(rules, parsed...)
 	}
-	return rules
+	return rules, markers, nil
 }
 
-// identityPostureSet — ручка чарта, выбирающая посадку личности.
-const identityPostureSet = "authn.identityProvider"
-
-// postureOfProfiles — посадка, которую объявляет цепочка профилей; пусто —
-// профиль посадки не объявляет.
-func postureOfProfiles(t *testing.T, chain []string) string {
+// pageAlertRules — правила, обещанные опубликованной страницей, и пометки
+// посадки, которые на ней нашлись (каждая — находка).
+func pageAlertRules(t *testing.T, root string) (rules []alertRule, markers []string) {
 	t.Helper()
-	v, _ := at(mergeChartProfiles(t, chain), "authn", "identityProvider").(string)
-	return v
+	path := filepath.Join(root, publishedObservabilityPage)
+	raw, err := os.ReadFile(path) // #nosec G304 -- путь из корня службы
+	require.NoErrorf(t, err, "опубликованная страница не читается: %s", path)
+	rules, markers, err = splitPageAlertRules(string(raw))
+	require.NoErrorf(t, err, "блок правил страницы не разбирается как YAML: %s", path)
+	return rules, markers
 }
 
-// alertRenders — что рендерится и под какой посадкой. ОБЕ полосы личности
-// рендерятся явно, а не только та, что стоит в поставляемом профиле: правило
-// чужой полосы, уехавшее не под свой выключатель, видно только на второй.
+// alertRenders — что рендерится: каждый поставляемый профиль как есть. Набор
+// правил один на каждую установку, поэтому раскладок по посадкам больше нет.
 type alertRender struct {
-	name    string
-	chain   []string
-	sets    []string
-	posture string
+	name  string
+	chain []string
+	sets  []string
 }
 
 func alertRenders(t *testing.T) []alertRender {
 	t.Helper()
-	prod := []string{"values.yaml", "values.prod.yaml"}
-	dev := []string{"values.yaml", "values.dev.yaml"}
 	return []alertRender{
-		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
-		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
-		{name: "values.prod.yaml+own", chain: prod, sets: []string{identityPostureSet + "=own"}, posture: "own"},
-		{name: "values.prod.yaml+external", chain: prod, sets: []string{identityPostureSet + "=external"}, posture: "external"},
+		{name: "values.prod.yaml", chain: []string{"values.yaml", "values.prod.yaml"}},
+		{name: "values.dev.yaml", chain: []string{"values.yaml", "values.dev.yaml"}},
 	}
 }
 
@@ -233,45 +225,42 @@ func diffRuleSets(page, chart []alertRule) (onlyPage, onlyChart []string) {
 	return onlyPage, onlyChart
 }
 
-// TestDeliveredAlertRulesMatchThePublishedPage — Р2 ПО ПОСАДКАМ (задача #210).
+// TestDeliveredAlertRulesMatchThePublishedPage — Р2 на каждом поставляемом
+// профиле (задачи #210, #363).
 //
-// Правило о хуках поставщика личности под посадкой `own` звонило бы вечно:
-// хуков поставщика там нет by construction, тишина на них штатна, а порог,
-// срабатывающий на штатном состоянии, перестают читать — и вместе с ним
-// теряют настоящую тревогу под `external`. Поэтому набор правил ЗАВИСИТ от
-// посадки: общие правила плюс правила своей полосы, и страница обещает
-// ровно то, что объект везёт установке этой посадки.
-//
-// Сверяется в обе стороны на каждой из четырёх раскладок: два поставляемых
-// профиля как есть и боевой профиль, явно переведённый на каждую из полос.
-// Правило чужой полосы, уехавшее не под свой выключатель, видно только на
-// второй полосе — поэтому обе рендерятся явно.
+// Прежде набор правил зависел от посадки: правило о хуках поставщика под своей
+// посадкой звонило бы вечно, и страница обещала каждой посадке своё. Посадка
+// у службы одна, хуков поставщика нет ни на каком старте, и страница обещает
+// один набор — общие правила и правила собственной полосы входа, — а объект
+// обязан везти его на каждом профиле. Пометка посадки на странице — находка:
+// она обещала бы правила установке, которой больше не бывает.
 func TestDeliveredAlertRulesMatchThePublishedPage(t *testing.T) {
 	root, err := surfaceroster.IAMRoot(".")
 	require.NoError(t, err, "корень дерева службы")
 
-	paged := pageAlertRules(t, root)
-	require.NotEmpty(t, paged["own"], "страница не несёт ни одного правила полосы `own` — "+
-		"тревога под этой посадкой не объявлена вовсе")
-	require.NotEmpty(t, paged["external"], "страница не несёт ни одного правила полосы `external`")
+	page, markers := pageAlertRules(t, root)
+	require.Emptyf(t, markers, "страница помечает блоки правил посадкой %v — посадка у службы одна, "+
+		"и пометка обещала бы правила установке, которой не бывает", markers)
+	ownLane := 0
+	for _, r := range page {
+		if r.Alert == "KanameLoginLaneFailing" || r.Alert == "KanameLoginVerifierCapacityExhausted" {
+			ownLane++
+		}
+	}
+	require.Equal(t, 2, ownLane, "страница не несёт обоих правил собственной полосы входа — "+
+		"тревога о входе человека не объявлена")
 
 	for _, r := range alertRenders(t) {
 		t.Run(r.name, func(t *testing.T) {
 			rendered := renderStandaloneChart(t, r.chain, r.sets...)
 			chart, objects := chartAlertRules(t, rendered)
-			page := paged.forPosture(r.posture)
-			lane := 0
-			if r.posture != "" {
-				lane = len(paged[r.posture])
-			}
 
 			onlyPage, onlyChart := diffRuleSets(page, chart)
 
-			t.Logf("ПЕРЕПИСЬ правил тревоги (%s, посадка %q):\n"+
-				"  объектов правил %d · правил у объекта %d · правил на странице для посадки %d "+
-				"(общих %d · полосы %d) · только на странице %d · только у объекта %d",
-				r.name, r.posture, objects, len(chart), len(page), len(paged[""]), lane,
-				len(onlyPage), len(onlyChart))
+			t.Logf("ПЕРЕПИСЬ правил тревоги (%s):\n"+
+				"  объектов правил %d · правил у объекта %d · правил на странице %d "+
+				"(собственной полосы входа %d) · только на странице %d · только у объекта %d",
+				r.name, objects, len(chart), len(page), ownLane, len(onlyPage), len(onlyChart))
 
 			// Предпосылка: обе стороны непусты. Пустая страница дала бы
 			// совпадение с пустым объектом, и «расхождений ноль» означало бы
@@ -315,4 +304,94 @@ func TestAlertRulesObjectCanBeSwitchedOff(t *testing.T) {
 		alertRulesToggle)
 	require.NotContains(t, off, "PrometheusRule",
 		"выключенный объект оставил след в рендере — выключение обязано быть полным")
+}
+
+// TestSigningKeySweeperSilenceIsAlerted — ноль проходов сметателя выведенных
+// ключей читается правилом тревоги как СИГНАЛ, а не как тишина (#314).
+//
+// Сметатель, переставший ходить, не отказывает — он молчит: выведенные ключи
+// остаются в наборе дольше отсрочки, и ни одна проба положительного пути этого
+// не видит. Поэтому предмет — правило, звонящее на ОТСУТСТВИЕ прохода, в
+// объекте, который поставляет чарт, на каждой посадке. Совпадение объекта со
+// страницей держит TestDeliveredAlertRulesMatchThePublishedPage.
+//
+// Производителя ряда держит САМА проба: ряд берётся с выдачи коллектора
+// ключницы ([sweepPassSeries]), а не литералом. Литерал пережил опыт S1 —
+// значение клетки прохода переименовано у производителя, и ни одна проба не
+// покраснела, а правило ждало ряд, которого нет. Способность упасть на этом
+// доказывают TestSweeperSilenceInjection_*.
+func TestSigningKeySweeperSilenceIsAlerted(t *testing.T) {
+	series := sweepPassSeries(t)
+	t.Logf("ряд прохода у производителя: %s", series)
+	renders := alertRenders(t)
+	require.NotEmpty(t, renders, "перепись посадок пуста — проверять нечего, это не зелёное")
+	for _, r := range renders {
+		t.Run(r.name, func(t *testing.T) {
+			rules, objects := chartAlertRules(t, renderStandaloneChart(t, r.chain, r.sets...))
+			require.Positive(t, objects, "объект правил не отрендерился — вердикта о правиле нет")
+			found := sweeperSilenceAlerts(rules, series)
+			t.Logf("перепись: правил в объекте %d · звонящих на ноль проходов сметателя %d %v", len(rules), len(found), found)
+			require.Lenf(t, found, 1, "ноль проходов сметателя обязан звонить ровно одним правилом, "+
+				"читающим ряд %s, как его печатает производитель; ноль таких правил — правило "+
+				"ждёт ряд, которого производитель не печатает, и не зазвонит никогда", series)
+		})
+	}
+}
+
+// sweeperSilenceAlerts — правила, звонящие на НОЛЬ проходов: выражение несёт
+// ряд прохода и сравнение с нулём.
+func sweeperSilenceAlerts(rules []alertRule, series string) []string {
+	var found []string
+	for _, rule := range rules {
+		expr := strings.Join(strings.Fields(rule.Expr), " ")
+		if strings.Contains(expr, series) && strings.Contains(expr, "== 0") {
+			found = append(found, rule.Alert)
+		}
+	}
+	return found
+}
+
+// sweepPassSeries — ряд прохода сметателя, как его печатает НАСТОЯЩИЙ
+// производитель: коллектор ключницы, которому источник сообщил ровно один
+// проход и ни одного иного события.
+func sweepPassSeries(t *testing.T) string {
+	t.Helper()
+	reg := metrics.NewRegistry()
+	reg.NewSigningKeyCollector(func() metrics.SigningKeyCounts {
+		return metrics.SigningKeyCounts{Sweeps: 1}
+	})
+	series, err := sweepPassSeriesFrom(reg.Handler())
+	require.NoError(t, err, "ряд прохода у производителя не читается — судить правило не с чем")
+	return series
+}
+
+// exposedCellRe — клетка ряда в текстовой выдаче: имя, отбор меток, величина.
+var exposedCellRe = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\} (\S+)$`)
+
+// sweepPassSeriesFrom — клетка ряда событий ключницы, несущая ровно один
+// проход, в той записи, в какой её отбирает правило: `имя{метка="значение"}`.
+//
+// Ряд читается с ВЫДАЧИ, а не с констант: переименование значения, метки или
+// перепутанная провязка клетки меняют то, что видит Prometheus, и проба видит
+// то же самое. Клеток с проходом не одна — отказ, а не пустая строка: пустой
+// отбор «совпал» бы с любым выражением.
+func sweepPassSeriesFrom(producer http.Handler) (string, error) {
+	rec := httptest.NewRecorder()
+	producer.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		return "", fmt.Errorf("выдача производителя ответила %d", rec.Code)
+	}
+	var cells []string
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		m := exposedCellRe.FindStringSubmatch(line)
+		if m == nil || m[1] != metrics.SigningKeyEventsMetric || m[3] != "1" {
+			continue
+		}
+		cells = append(cells, m[1]+"{"+m[2]+"}")
+	}
+	if len(cells) != 1 {
+		return "", fmt.Errorf("в выдаче %s клеток с одним проходом %d %v, а ожидается ровно одна",
+			metrics.SigningKeyEventsMetric, len(cells), cells)
+	}
+	return cells[0], nil
 }
