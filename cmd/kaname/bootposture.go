@@ -22,8 +22,8 @@ import (
 //     может прийти как из repository.postgres.ssl-mode, так и из самого raw-URL
 //     (composeDSN не перетирает уже заданный), пустое поле деривится в `disable`.
 //
-//   - public/internal mtls — у iam листенеров больше двух (hooks :9092, metrics
-//     :9095, jwks-proxy :9097), но в контракт попадают РОВНО два gRPC-листенера:
+//   - public/internal mtls — у iam листенеров больше двух (metrics :9095,
+//     registry-token :9096, jwks-proxy :9097), но в контракт попадают РОВНО два gRPC-листенера:
 //     public :9090 и cluster-internal :9091. Именно их server-creds строятся из
 //     mtlsCfg.{Public,Internal}ServerMTLS и именно их гейтит production-guard.
 //

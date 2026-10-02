@@ -87,24 +87,6 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 			},
 		},
 		{
-			// Завершение восстановления — пишущей транзакцией репозитория, тем
-			// же оператором, что зовёт его вариант использования.
-			name: "завершение восстановления",
-			path: "writeTx.UpsertUserTokenRevokeAll",
-			write: func(t *testing.T, f assertionFixture, before time.Time) {
-				t.Helper()
-				ctx := context.Background()
-				w, err := kanamepg.New(f.pool, nil).Writer(ctx)
-				require.NoError(t, err)
-				require.NoError(t, w.UpsertUserTokenRevokeAll(ctx, domain.UserTokenRevocation{
-					UserID:       domain.UserID(f.user),
-					RevokeBefore: before,
-					Reason:       domain.RevokeReasonPasswordChange,
-				}, ""))
-				require.NoError(t, w.Commit(ctx))
-			},
-		},
-		{
 			// Транзакция сессии человека — путь, которым пишут отсечку выход из
 			// сессии, принудительный выход, смена пароля, завершение
 			// восстановления нашей полосой и сброс второго фактора.

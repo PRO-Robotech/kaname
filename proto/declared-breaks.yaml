@@ -164,3 +164,26 @@ breaks:
     symbol: UserOAuthClient.3
     reason: имя клиента у прежнего поставщика снято вместе со столбцом; клиент называется id строки; номер и имя зарезервированы
     issue: kaname#362
+  # СНЯТИЕ ГЛАГОЛА ПРИЁМА ИСХОДА ВОССТАНОВЛЕНИЯ ОТ ПРЕЖНЕГО ПОСТАВЩИКА (kaname#564).
+  # Вызывающим глагола был обратный вызов поставщика, ушедшего с kaname#363;
+  # глагол снят вместе со снятым поставщиком, вызывающего у него не осталось ни в
+  # дереве службы, ни в дереве платформы. Глагол снят вместе со своими
+  # сообщениями; восстановление ведёт собственная полоса входа.
+  #
+  # Предикат снятия записей: ветка влита в ствол, база сравнения не несёт
+  # глагола, и решатель называет все три записи потерявшими предмет.
+  - rule: RPC_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_user_service.proto
+    symbol: InternalUserService.OnRecoveryCompleted
+    reason: глагол обратного вызова прежнего поставщика снят вместе со снятым поставщиком — вызывающего нет
+    issue: kaname#564
+  - rule: MESSAGE_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_user_service.proto
+    symbol: OnRecoveryCompletedRequest
+    reason: запрос снятого глагола обратного вызова прежнего поставщика
+    issue: kaname#564
+  - rule: MESSAGE_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_user_service.proto
+    symbol: OnRecoveryCompletedMetadata
+    reason: метаданные операции снятого глагола обратного вызова прежнего поставщика
+    issue: kaname#564

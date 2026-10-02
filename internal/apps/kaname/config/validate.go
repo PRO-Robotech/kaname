@@ -276,7 +276,7 @@ func (c Config) validateDeclaredDomain() error {
 // bootstrap-admin token mint is ENABLED (the signing key is present, so the RPC
 // will actually issue tokens) but has NO caller allow-list.
 //
-// MintBootstrapToken returns a Hydra-signed cluster `system_admin` Bearer. It
+// MintBootstrapToken returns a cluster `system_admin` Bearer signed by our own signer. It
 // carries no ReBAC gate by construction (it exists to obtain the FIRST token,
 // before any relation exists), so the ONLY thing standing between a caller and
 // full control-plane takeover is the client-certificate SPIFFE allow-list

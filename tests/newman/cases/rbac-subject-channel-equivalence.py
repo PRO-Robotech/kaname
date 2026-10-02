@@ -16,7 +16,7 @@
 ║                                                                                   ║
 ║ The old note said the pairing COULD NOT be made: under production posture a       ║
 ║ machine harness obtains only `client_credentials`, i.e. a service account, while  ║
-║ a user token needs an interactive Kratos→Hydra login. That was true of the        ║
+║ a user token needed an interactive login at an external provider. That was        ║
 ║ harness AS IT WAS, and it named its own remedy — «its own wave that CREATES the   ║
 ║ condition». That wave now exists (seed `tests/authz-fixtures/seed_ceremony.py     ║
 ║ --wave`, job `stand-ceremony`), so the user channel here reads as                 ║

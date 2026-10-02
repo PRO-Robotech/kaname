@@ -2,20 +2,25 @@
 
 ## Назначение
 
-**User** — mirror identity-сущности из внешнего IdP (Ory Kratos). В Kachō
-у User'а нет паролей и MFA-настроек — этим занимается IdP. Сервис `kaname`
-хранит только то, что нужно для авторизации и audit'a: `external_id` (subject
-из OIDC-токена), `email`, `display_name`, `account_id`, `invite_status`.
+**User** — строка членства личности человека в Account'е. Личность заводит сама
+служба: регистрация полосы входа чеканит субъект (`external_id`,
+`domain.NewOwnLaneSubject`), способ входа и второй фактор хранятся у неё же
+(`login_methods`, `UserService.ResetSecondFactor`). Строка `users` несёт то, что
+нужно для авторизации и audit'а: `external_id`, `email`, `display_name`,
+`account_id`, `invite_status`.
 
 Особенность: **публичный** `UserService` НЕ имеет метода `Create` — пользователи
 создаются ТОЛЬКО двумя путями:
 
-1. **Self-signup** через OIDC-callback (Ory Kratos logged in → api-gateway вызывает
-   `InternalUserService.UpsertFromIdentity`).
+1. **Self-signup** — регистрация полосы входа (`POST /iam/v1/auth/register`,
+   `internal/apps/kaname/api/registration`): одной транзакцией заводятся личность,
+   личный Account и проект, строка способа входа и сессия.
 2. **Invite-flow** через `UserService.Invite` — admin создает PENDING-запись с
    `external_id=""`; письмо приглашения ставится в `invite_mail_outbox` той же
    транзакцией и уходит нашим отправителем (ссылки-предъявителя оно не несёт;
-   решение Р24 приёмки ID-MAIL-1); при первом login заполняется `external_id`.
+   решение Р24 приёмки ID-MAIL-1); приглашённый регистрируется на тот же адрес, и
+   строка активируется в исходе подтверждения адреса (kaname#456) — тогда же
+   заполняется `external_id`.
    Повторно письмо шлёт `UserService.ResendInvite`; оба глагола — под одним
    ограничением частоты на адрес (`invite.mail-rate-limit`, списывается
    писателем очереди).
@@ -28,7 +33,8 @@
 **Ограничения:**
 - `external_id` immutable (изменение → identity-mismatch).
 - `account_id` immutable.
-- Создавать User напрямую нельзя — только через Invite или UpsertFromIdentity.
+- Создавать User напрямую нельзя — только регистрацией, через Invite либо
+  административным `InternalUserService.UpsertFromIdentity` на `:9091`.
 
 ## Доменная модель
 
@@ -36,7 +42,7 @@
 |----------------|------------------|--------------|-----------|---------------------------------------------------------------------|
 | `id`           | `UserID`         | да           | да        | `usr<17-char>`. Длина 20.                                           |
 | `account_id`   | `AccountID`      | да           | **да**    | FK → `accounts(id)`.                                                |
-| `external_id`  | `ExternalSubject`| зависит от status | **да** | OIDC `sub` (Ory). PENDING → "", ACTIVE/BLOCKED → non-empty.         |
+| `external_id`  | `ExternalSubject`| зависит от status | **да** | субъект личности, отчеканенный полосой входа. PENDING → "", ACTIVE/BLOCKED → non-empty. |
 | `email`        | `Email`          | да           | нет       | `^[^\s@]+@[^\s@]+\.[^\s@]+$`, ≤254.                                 |
 | `display_name` | `DisplayName`    | нет          | нет       | len 1..128.                                                          |
 | `invite_status`| `InviteStatus`   | да           | нет       | `PENDING | ACTIVE | BLOCKED`. Меняется ТОЛЬКО действиями `Block`/`Unblock`, НЕ через `Update`. |
@@ -70,9 +76,7 @@ sequenceDiagram
     participant GW as api-gateway
     participant IAM as kaname :9090
     participant DB as Postgres
-    participant Kratos as Kratos
     participant Invitee as Invitee inbox
-    participant Ory as Ory
 
     Admin->>GW: POST /iam/v1/users:invite<br/>{"account_id":"acc","email":"bob@x","role_id":"rol_..."}
     GW->>IAM: gRPC UserService.Invite
@@ -88,44 +92,39 @@ sequenceDiagram
     IAM-->>GW: Operation
     GW-->>Admin: 200 {operationId, userId:"usr_pending"}
 
-    Note over Invitee,Ory: ─── ASYNC: invitee идёт на страницу входа из письма ───
-    Invitee->>Ory: login flow
-    Ory->>GW: OIDC callback (id_token c "sub":"ory-sub-xyz", email)
-    GW->>IAM: gRPC InternalUserService.UpsertFromIdentity<br/>{external_id:"ory-sub-xyz", email:"bob@x"}
-    IAM->>DB: SELECT user WHERE account_id=? AND email=? AND status=PENDING
-    alt Existing PENDING
-        IAM->>DB: UPDATE users SET external_id=$sub, status=ACTIVE WHERE id=usr_pending
-    else No PENDING row
-        IAM->>DB: INSERT users (status=ACTIVE, external_id=$sub, ...)
-    end
-    IAM-->>GW: User (ACTIVE, usr_id)
+    Note over Invitee,DB: ─── ASYNC: invitee регистрируется на адрес из письма ───
+    Invitee->>GW: POST /iam/v1/auth/register {email:"bob@x", password}
+    GW->>IAM: полоса входа (mTLS) — регистрация
+    IAM->>DB: BEGIN; строка способа входа + письмо подтверждения адреса; COMMIT
+    Invitee->>GW: подтверждение адреса (код из письма)
+    GW->>IAM: исход подтверждения
+    IAM->>DB: UPDATE users SET external_id=$own_subject, status=ACTIVE WHERE id=usr_pending AND status=PENDING
+    IAM-->>GW: сессия
     GW-->>Invitee: Set-Cookie session ; 302 → tenant-UI
 ```
 
-## Sequence diagram — UpsertFromIdentity (self-signup bootstrap)
+## Sequence diagram — регистрация (self-signup bootstrap)
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant User as Browser
     participant GW as api-gateway
-    participant Ory
-    participant IAM as kaname :9091
+    participant IAM as kaname (полоса входа)
     participant DB as Postgres
 
-    User->>Ory: OIDC login (first time)
-    Ory-->>GW: id_token (sub, email)
-    GW->>IAM: InternalUserService.UpsertFromIdentity<br/>{external_id, email, display_name}
-    IAM->>DB: SELECT user by (account_id IS NULL, external_id) → not found
-    Note over IAM,DB: Bootstrap path (новый user без Account)
+    User->>GW: POST /iam/v1/auth/register {email, password}
+    GW->>IAM: полоса входа (mTLS) — регистрация
+    Note over IAM,DB: одна транзакция — все следствия
     IAM->>DB: BEGIN
-    IAM->>DB: INSERT users (status=ACTIVE, external_id, email)
+    IAM->>DB: INSERT users (status=ACTIVE, external_id=$own_subject, email)
     IAM->>DB: INSERT accounts (owner_user_id=$new_user)
     IAM->>DB: INSERT projects (account_id=$new_account, name='default')
     IAM->>DB: INSERT access_bindings (subject=$user, role=account-admin)
     IAM->>DB: INSERT fga_outbox (owner + hierarchy + role)
+    IAM->>DB: INSERT login_methods; сессия; письмо подтверждения адреса
     IAM->>DB: COMMIT
-    IAM-->>GW: User (usr_*, account_id=acc_*)
+    IAM-->>GW: сессия
 ```
 
 ## API surface
@@ -142,13 +141,13 @@ sequenceDiagram
 | `Delete` | async      | Удаление. RESTRICT-FK если есть AccessBinding.        |
 | `Block`  | async      | Участие в Account'е запрещено. Идемпотентно по состоянию; `v_update` + порог повышенной аутентификации. |
 | `Unblock`| async      | Участие разрешено снова. Та же форма и то же право.   |
-| ~~`Create`~~ | — | **Намеренно отсутствует.** Используйте Invite или OIDC self-signup. |
+| ~~`Create`~~ | — | **Намеренно отсутствует.** Используйте Invite или регистрацию. |
 
 ### Internal gRPC (порт 9091)
 
 | RPC                    | Описание                                                    |
 |------------------------|-------------------------------------------------------------|
-| `UpsertFromIdentity`   | OIDC-callback creates/updates User (+ bootstrap Account/Project). |
+| `UpsertFromIdentity`   | Административное заведение/обновление User по субъекту (+ bootstrap Account/Project). Внешнего вызывающего у метода нет. |
 | `Get`                  | Admin Get.                                                  |
 
 ### REST mapping
@@ -200,7 +199,7 @@ Account'а (`super_admin: admin from account`) и, каскадом, админ�
 аутентификации — интерактивный; машинный принципал от него освобождён.
 
 **Что НЕ делает.** Уже выданный access-токен доживает свой срок. Немедленно
-прекращается ВЫДАЧА нового — на каждой двери (хук токена, хук обновления, выдача
+прекращается ВЫДАЧА нового — на каждой двери (вход полосой входа, выдача
 персонального токена, резолв субъекта на краю). Отсечка живых сессий
 (`user_token_revocations`) здесь не применяется намеренно: её область — вся
 личность, и она обрубила бы сессии там, где личность активна законно. Для «выгнать
@@ -209,22 +208,16 @@ Account'а (`super_admin: admin from account`) и, каскадом, админ�
 **PENDING не блокируется и не разблокируется** → `FAILED_PRECONDITION`
 «User \<id\> is not active». У приглашения нет подтверждённой личности (DB-CHECK
 `users_invite_status_consistency`), а перевод приглашённого в действующего — это
-активация при первом входе, свой путь. Приглашение отзывают, а не разблокируют.
+активация в исходе подтверждения адреса, свой путь. Приглашение отзывают, а не разблокируют.
 
 ## Конфигурация
 
-**Своих ручек у приглашения нет.** Предикат: `grep -rhoE 'KANAME_KRATOS_[A-Z0-9]*'`
-по всему дереву даёт **ноль** вхождений (замер 2026-08-06).
-
-> [!note] Здесь стояли две переменные под админ-API поставщика личности — их нет
-> Прежняя редакция объявляла адрес и токен админского API Kratos с YAML-двойниками
-> и описывала dev-заглушку клиента. Ни переменных, ни YAML-ключей, ни самого клиента
-> в дереве нет: клиент удалён, и об этом прямо сказано в шапке
-> `internal/apps/kaname/api/user/invite.go`. Приглашение создаёт строку пользователя в
-> состоянии PENDING и (опционально) привязку доступа; **чем именно** приглашённый
-> активирует строку — вход через поставщика личности, ссылка, помощь администратора —
-> вынесено за пределы сервиса. Имена переменных не воспроизводятся: в обратных кавычках
-> они читаются как живые ручки, которые кто-нибудь пропишет в чарт.
+Ручки приглашения: срок строки `invite.ttl`, ограничение частоты писем
+`invite.mail-rate-limit.{max-per-window,window}` и отправитель письма `invite-mail.*`
+(умолчания — `internal/apps/kaname/config/defaults.go`). Ручек под API внешнего
+поставщика личности нет: клиент к нему удалён (шапка
+`internal/apps/kaname/api/user/invite.go`), и приглашённый активирует строку
+собственной регистрацией.
 
 ## Как пользоваться
 
@@ -255,7 +248,7 @@ curl "http://localhost:18080/iam/v1/users?account_id=acc_xxx" -H "Authorization:
 
 ```bash
 grpcurl -plaintext -d '{
-  "external_id":"ory-sub-xyz",
+  "external_id":"sub-xyz",
   "email":"alice@example.com",
   "display_name":"Alice"
 }' localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
@@ -303,10 +296,12 @@ go test -short -count=1 -timeout 120s \
 
 - **Use-cases:** `internal/apps/kaname/api/user/` (`get.go`, `list.go`, `delete.go`,
   `invite.go`, `internal_upsert.go`, `set_blocked.go`, `update.go`, `audit.go`).
-- **Handler:** `internal/apps/kaname/api/user/handler.go` (public); internal-полоса —
-  `internal_upsert.go` и `internal_on_recovery.go` в том же каталоге (отдельного файла
-  с обобщённым именем внутреннего обработчика здесь нет).
-- **Repo:** `internal/repo/kaname/pg/user_repo.go` + `user_pool_repo.go` (Hydra hooks).
+- **Handler:** `internal/apps/kaname/api/user/handler.go` (public и internal —
+  `InternalHandler` в том же файле); вариант использования internal-полосы —
+  `internal_upsert.go`. Глагола приёма исхода восстановления от прежнего поставщика
+  у internal-полосы больше нет (kaname#564): восстановление доступа ведёт полоса
+  входа, `internal/apps/kaname/api/humansession/recovery_complete.go`.
+- **Repo:** `internal/repo/kaname/pg/user_repo.go` + `user_pool_repo.go`.
 - **Bootstrap path:** `UpsertFromIdentity` создает User + Account + Project +
   AccessBindings в одной transaction, минуя per-resource `CreateUseCase`.
   FGA tuples — все в одном `fga_outbox` batch.

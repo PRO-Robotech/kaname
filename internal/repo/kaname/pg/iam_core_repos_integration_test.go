@@ -13,7 +13,7 @@ package pg_test
 // - TestIamExt_Condition_Insert_Whitelist / RejectsUnknown
 // - TestIamExt_Federation_HappyPath / WildcardRejected / ExpiresNotNull / ExpiresOver1Y /
 // DuplicateIssuerPattern
-// - TestIamExt_SAOAuthClient_Happy / DuplicateHydra / FKMissing / RestrictDelete
+// - TestIamExt_SAOAuthClient_Happy / Duplicate / FKMissing / RestrictDelete
 // - TestIamExt_JIT_Happy / DurationOver8h
 // - TestIamExt_OutboxAtomicity_Commit / Rollback
 // - TestIamExt_Bootstrap_UserNotFound / Happy / Idempotent / Concurrent

@@ -15,7 +15,7 @@
 //
 // Методы:
 //   - LookupSubject(by external_id|id|email) — для auth-interceptor api-gateway
-//     после валидации JWT (Ory Hydra).
+//     после валидации JWT.
 //   - Check — single-tuple authorization gate; delegate к AuthorizeService.
 //     Вызывается per-RPC authz-interceptor'ами
 //     kacho-vpc / kacho-compute / kacho-loadbalancer.

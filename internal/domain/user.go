@@ -13,7 +13,7 @@ import (
 // InviteStatus — invite-flow state for a User row.
 //
 // PENDING — created via `UserService.Invite`, external_id="" until first
-// login; the invitee has not yet confirmed identity through Kratos.
+// login; the invitee has not yet registered and verified the address.
 // ACTIVE  — either self-signup via `UpsertFromIdentity` without a pending
 // invite, or a PENDING row activated on first-login (matched by email).
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается
@@ -29,7 +29,7 @@ import (
 //
 // Снимать запрет самостоятельным действием нельзя: восстановление пароля
 // доказывает владение почтовым ящиком — ровно то, чего администратор, ставя
-// запрет, под сомнение не ставил (см. internal_on_recovery.go). Поэтому у пути
+// запрет, под сомнение не ставил (см. humansession/recovery_complete.go). Поэтому у пути
 // блокировки ОБЯЗАН быть административный путь снятия, иначе заблокированный
 // окажется заперт навсегда. Гейт blocked_state_reachability_test.go требует,
 // чтобы каждый писатель этого состояния был объявлен вместе со ссылкой на

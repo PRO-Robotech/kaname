@@ -21,11 +21,11 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // Transport:
 //   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
 //   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`); REST вызывается
-//     OIDC-callback handler'ом.
+//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
+//     listener'а; вызывающий — admin-tooling.
 service InternalUserService {
-  // Upsert User mirror'а из OIDC identity (Ory Kratos).
-  // Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+  // Upsert User по субъекту личности (административный путь).
+  // Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
   //
   // REST exposed ONLY on the cluster-internal listener;
   // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
@@ -49,29 +49,14 @@ service InternalUserService {
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
 
-  // hook called by Ory Kratos after a successful
-  // self-service recovery flow (magic-link e-mail recovery). kaname
-  // re-enables the User (if `invite_status` was `DISABLED`), invalidates all
-  // active sessions for the user (writes `session_revocations` rows with
-  // reason=`password-change`), and emits `iam.user.recovery_completed` audit.
-  //
-  // Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
-  // does NOT spawn duplicate revocations.
-  rpc OnRecoveryCompleted (OnRecoveryCompletedRequest) returns (corelib.operation.Operation) {
-    option (corelib.api.v1.operation) = {
-      metadata: "OnRecoveryCompletedMetadata"
-      response: "User"
-    };
-    // Cluster-internal listener-protected; Kratos is the only
-    // authorized caller via secret-token (configured in Kratos webhooks
-    // config). No per-RPC authz check.
-    option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
-  }
+  // Глагола приёма исхода восстановления от внешнего поставщика здесь больше
+  // нет (kaname#564): он снят вместе со снятым поставщиком (kaname#363),
+  // вызывающего не осталось. Восстановление доступа ведёт собственная полоса
+  // входа (`/iam/v1/auth/recovery/complete`).
 }
 
 message UpsertFromIdentityRequest {
-  // OIDC `sub` claim (Ory) — UNIQUE-key.
+  // Субъект личности (`sub` claim) — UNIQUE-key.
   string external_id = 1;
 
   // Email (case-insensitive). Required.
@@ -87,28 +72,4 @@ message UpsertFromIdentityMetadata {
 
   // True если был создан новый User; false если обновился existing.
   bool created = 2;
-}
-
-// payload from Kratos recovery webhook.
-message OnRecoveryCompletedRequest {
-  // Kratos identity id (= kaname User.external_id) whose recovery just
-  // completed.
-  string external_id = 1;
-
-  // Kratos recovery-flow id (used as idempotency key — `INSERT ... ON
-  // CONFLICT (recovery_jti) DO NOTHING`).
-  string recovery_jti = 2;
-
-  // E-mail at which the recovery was completed (echo from Kratos identity
-  // traits — kaname matches it against `users.email` to defend against
-  // mismatched payloads).
-  string email = 3;
-}
-
-message OnRecoveryCompletedMetadata {
-  // ID локального User row.
-  string user_id = 1;
-
-  // Number of active sessions revoked as part of the recovery flow.
-  int32 revoked_session_count = 2;
 }

@@ -304,12 +304,6 @@ func (w *fakeProjWriter) EmitFGARelationDelete(_ context.Context, tuples []servi
 	w.parent.mu.Unlock()
 	return nil
 }
-func (w *fakeProjWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *fakeProjWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *fakeProjWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type fakeProjPRdr struct {

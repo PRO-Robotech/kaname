@@ -45,7 +45,7 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("api-server.subscription.idle-poll", 5*time.Second)
 	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
 	// external-reachable plaintext port (ingress-terminated TLS), distinct from
-	// the hooks (:9092) and metrics (:9095) listeners. Issuer/service/TTL shape
+	// the metrics (:9095) and key-set (:9097) listeners. Issuer/service/TTL shape
 	// the minted identity-JWT and must match the data-plane's advertised Bearer
 	// realm. Override via KANAME_API_SERVER__REGISTRY_TOKEN__{ENDPOINT,ISSUER,SERVICE,TTL}.
 	v.SetDefault("api-server.registry-token.endpoint", "tcp://0.0.0.0:9096")

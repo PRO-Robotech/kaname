@@ -39,8 +39,8 @@ const (
 //
 // A set of methods for managing ServiceAccount resources.
 //
-// Без key-credentials RPC (CreateKey/ListKeys появятся позже через Ory Hydra
-// client_credentials, OAuth2 token endpoint).
+// Без key-credentials RPC: ключи служебной учётки — отдельный сервис
+// `SAKeyService`, токен по ключу чеканит токен-эндпоинт платформы.
 type ServiceAccountServiceClient interface {
 	// Returns the specified ServiceAccount resource.
 	Get(ctx context.Context, in *GetServiceAccountRequest, opts ...grpc.CallOption) (*ServiceAccount, error)
@@ -197,8 +197,8 @@ func (c *serviceAccountServiceClient) ListOperations(ctx context.Context, in *Li
 //
 // A set of methods for managing ServiceAccount resources.
 //
-// Без key-credentials RPC (CreateKey/ListKeys появятся позже через Ory Hydra
-// client_credentials, OAuth2 token endpoint).
+// Без key-credentials RPC: ключи служебной учётки — отдельный сервис
+// `SAKeyService`, токен по ключу чеканит токен-эндпоинт платформы.
 type ServiceAccountServiceServer interface {
 	// Returns the specified ServiceAccount resource.
 	Get(context.Context, *GetServiceAccountRequest) (*ServiceAccount, error)

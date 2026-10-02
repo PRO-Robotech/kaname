@@ -7,8 +7,8 @@ package seed
 // reconciler loop.
 //
 // RunBootstrapAdmin is idempotent + graceful: it skips when the bootstrap
-// user is not yet registered (the Kratos identity is mirrored into
-// kaname.users only on first login / fixture upsert, which happens AFTER
+// user is not yet registered (the identity lands in kaname.users only on
+// registration / fixture upsert, which happens AFTER
 // kaname boots). A single startup invocation therefore races the user
 // row and usually skips — the cluster-admin tuple is never written.
 //

@@ -48,7 +48,7 @@ func tableOfSix() map[string][]string {
 		"dev":         {"values.dev.yaml"},
 		"dev-prod":    {"values.dev.yaml", "values.dev-prod.yaml"},
 		"prod":        {"values.prod.yaml"},
-		"fe3455":      {"values.prod.yaml", "values.fe3455.yaml", "values.fe3455-prod.yaml", "values.fe3455-ory-posture.yaml"},
+		"fe3455":      {"values.prod.yaml", "values.fe3455.yaml", "values.fe3455-prod.yaml", "values.fe3455-identity-posture.yaml"},
 		"prorobotech": {"values.dev.yaml", "values.dev-prod.yaml", "values.prorobotech.yaml"},
 		"a8f60d":      {"values.dev.yaml", "values.dev-prod.yaml", "values.a8f60d.yaml"},
 	}

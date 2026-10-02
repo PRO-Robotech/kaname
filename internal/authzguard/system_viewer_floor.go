@@ -37,10 +37,6 @@
 //     end-user, NOT as the subject; floor-gating it on "caller has viewer"
 //     would break the core authz path (every downstream Check would deny). It
 //     stays on the mTLS-module floor only.
-//   - InternalUserService.OnRecoveryCompleted — Kratos recovery hook,
-//     HMAC/secret-authed; Kratos is not a kaname-seeded SA → relation-Check
-//     inapplicable. (Hydra token/refresh hooks live on the separate :9092 HTTP
-//     listener, not this gRPC chain — N/A by construction.)
 //   - InternalSessionRevocationsService.IsRevoked — курица и яйцо (шло бы до
 //     того, как может пойти пер-пользовательская проверка); пер-вызовный поход
 //     в движок добавил бы задержку, а его недоступность массово роняла бы
@@ -93,7 +89,6 @@ const (
 //
 // NOT in this set (exempt — see the package doc-comment for the rationale):
 //   - InternalIAMService/Check — PDP, never floor-gated.
-//   - InternalUserService/OnRecoveryCompleted — Kratos secret-authed hook.
 //   - InternalSessionRevocationsService/IsRevoked — курица и яйцо: клиент края
 //     (`IsSessionRevoked`) спрашивает её до того, как может пойти проверка
 //     доступа (#1122).

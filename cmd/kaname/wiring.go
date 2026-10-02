@@ -398,8 +398,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// намерения — тоже один. Величину судит страж старта: непозитивную он
 		// не пропускает, поэтому здесь читается уже проверенное.
 		WithInviteMailRateLimit(inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
-	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
-		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
 	// типа, поэтому перестановка их здесь — ошибка компиляции, а не контроль,
 	// тихо ставший своей противоположностью.
@@ -417,7 +415,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		userBlock, userUnblock, userRemoveFromAccount).
 		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
-	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
+	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet)
 
 	// ServiceAccountService.
 	saCreate := serviceaccountapp.NewCreateServiceAccountUseCase(kanameRepo, opsRepo).
@@ -811,7 +809,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ── SAKey wiring (Class A static SA keys of service accounts) ─────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
-	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
+	// ── UserToken wiring (персональные access-токены пользователя, наша чеканка) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
 
 	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
@@ -987,10 +985,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// RBAC rules-model G — public grantable role-rule catalog.
 		permissionCatalogHandler: permissionCatalogHandler,
 
-		// SAKey (Class A static keys via Hydra).
+		// SAKey (Class A static keys; токен чеканит наш подписант).
 		saKeysHandler: saKeysH,
 
-		// UserToken (персональные access-токены пользователя via Hydra).
+		// UserToken (персональные access-токены пользователя, наша чеканка).
 		userTokensHandler: userTokensH,
 
 		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.

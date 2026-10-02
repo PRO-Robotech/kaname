@@ -168,7 +168,7 @@ type isLookupSubjectRequest_Key interface {
 }
 
 type LookupSubjectRequest_ExternalId struct {
-	// OIDC `sub` claim (Ory).
+	// Субъект личности (`sub` claim).
 	ExternalId string `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3,oneof"`
 }
 

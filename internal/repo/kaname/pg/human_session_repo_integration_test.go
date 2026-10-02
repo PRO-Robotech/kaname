@@ -672,8 +672,8 @@ func TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTh
 }
 
 // TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPasswordChange —
-// завершение восстановления (существующий хук пишет отсечку `now` тем же
-// оператором транзакции, `UpsertUserTokenRevokeAll`) датирует отсечку не раньше
+// завершение восстановления (отсечка `now` пишется дверью отсечки,
+// `upsertSubjectCutoff`) датирует отсечку не раньше
 // обеих прежних сессий — включая ту, из которой восстановление запрошено, —
 // причиной `password-change`, тем же значением, что пишет смена пароля (Р6);
 // сессия, выданная восстановлением после отсечки, — позже неё.
@@ -690,7 +690,7 @@ func TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPass
 	hsIssue(t, repo, s2)
 
 	completed := hsBase.Add(2 * time.Minute)
-	// Тот же оператор, что у хука `internal_on_recovery`: причина — словарь домена.
+	// Та же дверь отсечки, что у нашей полосы восстановления: причина — словарь домена.
 	require.NoError(t, revs.UpsertRevokeAll(ctx,
 		domain.UserTokenRevocation{UserID: subject, RevokeBefore: completed, Reason: domain.RevokeReasonPasswordChange}, ""))
 
