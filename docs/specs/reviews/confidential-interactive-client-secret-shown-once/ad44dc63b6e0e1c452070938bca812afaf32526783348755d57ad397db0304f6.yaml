@@ -60,12 +60,49 @@ constructibility: >-
   под новым именем (PASS), гейт координат приёмок зелен. «Не выполнилось» 0 по предмету круга.
 event_body: acceptance-reviewer · APPROVED · ad44dc63b6e0e1c452070938bca812afaf32526783348755d57ad397db0304f6
 effective_approval:
+  issued: true
+  issued_at: '2026-10-02T05:05:58Z'
+  ban1_lifted: true
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Первый комментарий
+    (5945650846) этой формы не нёс и событием полномочия не распознавался. Событие
+    5945937806 учётки pointpu несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision c808472e1e5c опубликована на origin раньше события
+    (git branch -r --contains c808472e1e5c даёт origin/553); запрет #1 по этому
+    отпечатку снят. Дописано отдельным коммитом поверх записи, вердикт и разбор
+    задним числом не правились.
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#553
+  status: performed
+  published: true
+  database_id: 5945937806
+  node_id: IC_kwDOUO26pM8AAAABYmfPjg
+  url: https://github.com/PRO-Robotech/kaname/issues/553#issuecomment-5945937806
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5945937806
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-02T05:05:58Z'
+  body_sha256: 350e63ce8f935109b4b0c200d2a1ec9edb6f5a1de64171fc99470dac421d728c
+  subject_sha256: ad44dc63b6e0e1c452070938bca812afaf32526783348755d57ad397db0304f6
+  subject_revision_commit: c808472e1e5c91d2eab8445b4b63280e8796bc7e
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  superseded_comment:
+    url: https://github.com/PRO-Robotech/kaname/issues/553#issuecomment-5945650846
+    created_at: '2026-10-02T04:33:08Z'
+    why: >-
+      Список с телом event_body этой записи без строк ключ-значение до первой черты;
+      событием полномочия не является, оставлен как обсуждение.
