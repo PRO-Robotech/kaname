@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/PRO-Robotech/corelib v1.10.0-rc.5.0.20261001232603-1a37f81d0e94
+	github.com/PRO-Robotech/corelib v1.10.0-rc.5.0.20261002043402-fe0dccf1794e
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
