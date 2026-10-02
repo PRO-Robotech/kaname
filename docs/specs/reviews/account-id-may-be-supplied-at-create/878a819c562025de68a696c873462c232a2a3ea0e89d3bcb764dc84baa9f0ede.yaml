@@ -1,0 +1,104 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: 878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede
+  static_status: DRAFT
+  base_commit: b90430b42272
+  content_commit: 75914da0e401b3a0bdb48ea6c4862431fd6e2378
+  branch: '549'
+  task: PRO-Robotech/kaname#549
+  wave: PRO-Robotech/kaname#548
+  epic: PRO-Robotech/kaname#357
+  platform_side: PRO-Robotech/kacho#2984
+  lines: 990
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/account-id-may-be-supplied-at-create.md в копии ветки 549
+    на 75914da0e401, и git show HEAD:<путь> | sha256sum — оба 878a819c…0ede
+  fingerprint_note: >-
+    Отпечаток снят своим замером и совпал с объявленным. Голова origin/549 сверена
+    git ls-remote — 75914da0e401, она же HEAD копии. Дифф к b90430b42272 — только этот документ.
+    Каталога записей у документа не было, круг первый.
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_uncommitted_event_by_courier
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+
+blocking:
+  count: 1
+  kinds: [CONSTRUCTIBILITY]
+  items:
+    - id: B1
+      kind: CONSTRUCTIBILITY
+      scenario: AID-18
+      claim: >-
+        Дано AID-18 требует после каждого заведения удалить строку accounts штатным удалением
+        хранилища. Это состояние при действующей схеме не строится ни в одной из трёх ветвей.
+      evidence:
+        - >-
+          internal/repo/kaname/pg/account_repo.go:301-319 — accountWriter.Delete удаляет только при
+          NOT EXISTS projects / service_accounts / groups / roles с этим account_id.
+        - >-
+          internal/apps/kaname/api/account/create.go, doCreate — в той же транзакции вставляется
+          проект по умолчанию (projects_account_fk ON DELETE RESTRICT, 0001_initial.sql:5490);
+          значит ветви создания с генератором и с указанным id дают отказ has_projects.
+        - >-
+          internal/apps/kaname/api/user/mirror_tx.go — личный аккаунт заводится вместе с личным
+          проектом и строкой users с account_id этого аккаунта (users_account_fk ON DELETE
+          RESTRICT DEFERRABLE, 0001_initial.sql:5691); штатного удаления личного аккаунта нет.
+      required_fix: >-
+        Назвать путь удаления, который строится: снять зависимые строки (проект; для личного
+        аккаунта — строку users либо её account_id) и затем удалить аккаунт — штатным Delete или
+        прямым DELETE в интеграционной пробе — с координатой фикстуры. Утверждение о реестре
+        не ослаблять.
+
+non_blocking:
+  - id: N1
+    kind: FORMAT
+    note: >-
+      §6.2 обосновывает правило слотов потолком живых аккаунтов (§1.8), а связывающее
+      ограничение — темп заведения: KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW=3 за 1h
+      на стенде (.github/scripts/stand-own.sh:302-303), считая регистрацию; удаление заведение
+      не возвращает (AID-16). Числа слотов укладываются, довод надо назвать верный: не больше
+      двух заведений сверх регистрации за окно, неудавшиеся не списываются (счёт — триггер в
+      транзакции вставки, 20260917120000_registration_carrier_keys_the_admission_rate.sql).
+  - id: N2
+    kind: DoD
+    note: >-
+      DoD S1 п.2 требует, чтобы пробы уровня I падали по утверждению, а не по сборке. Пробы,
+      читающие поле id запроса, соберутся только после регенерации pkg/api; порядок
+      контракт → пробы → реализация стоит назвать в DoD явно.
+
+checks:
+  scope: >-
+    Совпадает с решениями владельца: поле необязательное, режима обязательного поля и ручки
+    нет (§0.1, §4.2 строка 1); отдельного Internal-RPC нет; §4.2 перечисляет отложенное с доводом.
+  coverage: >-
+    без id (AID-01, 02), с id (03, 04), формат (05-07), право (08-11), занят и повтор (12-16),
+    обратное заполнение и производители (17, 18), сокрытие и лента (19, 20), имя формы id
+    (21-25), аудит (26), прочие места создания (27), край kacho (K1, K2). 29 сценариев,
+    предикат счёта документа перемерен — 29 и 29.
+  producer: 29 из 29 названы в §6.1; координаты выборочно сверены (create.go:205-248,
+    IsClusterAdminE, authzguard.go:63 и :86, request_field_has_a_reader_test.go:55,
+    list_all_operations.go скрытие существования).
+  twin: у каждого отрицания назван положительный близнец в самом сценарии.
+  constructibility: >-
+    Посев на стенде не исполнялся (стенд не поднимался) — не выполнилось. По коду и
+    названным фикстурам: 10 из 11 строк §6.2 подтверждены, AID-18 опровергнут (B1).
+  conventions: >-
+    Пара HTTP-статус и code; Operation на мутации; тексты отказа канонические; ids.IsValid
+    подтверждён по corelib v1.10.0-rc.5 ids/ids.go:220-234; ownerUserId-отказ структурный.
+  security: >-
+    Право задаёт модель (system_admin без подстановки, fga_model.fga:203); nil-хранилище даёт
+    false и отказ; форма раньше права; занятость видна только тому, кто читает любой аккаунт;
+    реестр и CHECK имени — на уровне базы; публичность §10 соблюдена.
+  open_questions: ноль, дефолтов фиксировать не потребовалось.
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · sha256 878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede

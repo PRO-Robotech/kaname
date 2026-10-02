@@ -61,6 +61,9 @@ func (h *Handler) WithListAllOperations(uc *ListAllOperationsUseCase) *Handler {
 // Create — sync-validation + create Operation + spawn worker.
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccountRequest) (*operationpb.Operation, error) {
 	a := domain.Account{
+		// Пусто — идентификатор чеканит генератор; указан — use-case судит его
+		// форму и право вызывающего задать его.
+		ID:          domain.AccountID(req.GetId()),
 		Name:        domain.AccountName(req.GetName()),
 		Description: domain.Description(req.GetDescription()),
 		Labels:      labelsFromProto(req.GetLabels()),

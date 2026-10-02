@@ -240,6 +240,9 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 	// Перечислена по тому же основанию, что и SubjectIsClusterAdminE ниже — вопрос
 	// один на запрос, и «один» здесь видит только этот гейт.
 	"IsClusterAdminE": {relationGuardRoot, -1, -1, -1},
+	// RequireClusterAdmin(ctx, checker) — IsClusterAdminE, переведённый в ответ
+	// RPC; та же форма и тот же один вопрос на запрос (kaname#549).
+	"RequireClusterAdmin": {relationGuardRoot, -1, -1, -1},
 	// SubjectIsClusterAdmin(ctx, checker, subject) — the subject IS argument 2 here,
 	// which is precisely why argument 2 is not globally the relation.
 	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},

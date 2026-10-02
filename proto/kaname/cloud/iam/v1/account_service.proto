@@ -196,6 +196,26 @@ message CreateAccountRequest {
   // before the Operation is minted. The verified principal becomes the owner
   // and the subject of the owner AccessBinding co-committed by the Create saga.
   string owner_user_id = 4;
+
+  // OPTIONAL. ID of the account to create. Empty — the service mints it, exactly
+  // as without the field; an empty string and an absent field are the same.
+  //
+  // When set, it is accepted only in the generator's own form: prefix `acc` and
+  // 17 characters of `0123456789abcdefghjkmnpqrstvwxyz`, 20 bytes in all
+  // (for example `acc7m3k9q2x5v8b4n6t1`). No normalisation: case is not folded,
+  // spaces are not trimmed. Any other value is a sync INVALID_ARGUMENT
+  // "invalid account id '<id>'" on field `id`, before the Operation is minted
+  // and before any rights question.
+  //
+  // Only a holder of `system_admin` on the cluster may set it; anyone else gets
+  // a sync PERMISSION_DENIED "permission denied", and an unreachable rights
+  // model is a sync UNAVAILABLE "authz backend unavailable". The model is not
+  // asked when the field is empty.
+  //
+  // An ID held by a live account, or ever issued before — also to an account
+  // deleted since — is refused in the Operation outcome with ALREADY_EXISTS
+  // "Account <id> already exists". An issued ID is never issued again.
+  string id = 5;
 }
 
 message UpdateAccountRequest {

@@ -210,7 +210,26 @@ type CreateAccountRequest struct {
 	// "Illegal argument ownerUserId (derived from caller)", first statement,
 	// before the Operation is minted. The verified principal becomes the owner
 	// and the subject of the owner AccessBinding co-committed by the Create saga.
-	OwnerUserId   string `protobuf:"bytes,4,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	OwnerUserId string `protobuf:"bytes,4,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	// OPTIONAL. ID of the account to create. Empty — the service mints it, exactly
+	// as without the field; an empty string and an absent field are the same.
+	//
+	// When set, it is accepted only in the generator's own form: prefix `acc` and
+	// 17 characters of `0123456789abcdefghjkmnpqrstvwxyz`, 20 bytes in all
+	// (for example `acc7m3k9q2x5v8b4n6t1`). No normalisation: case is not folded,
+	// spaces are not trimmed. Any other value is a sync INVALID_ARGUMENT
+	// "invalid account id '<id>'" on field `id`, before the Operation is minted
+	// and before any rights question.
+	//
+	// Only a holder of `system_admin` on the cluster may set it; anyone else gets
+	// a sync PERMISSION_DENIED "permission denied", and an unreachable rights
+	// model is a sync UNAVAILABLE "authz backend unavailable". The model is not
+	// asked when the field is empty.
+	//
+	// An ID held by a live account, or ever issued before — also to an account
+	// deleted since — is refused in the Operation outcome with ALREADY_EXISTS
+	// "Account <id> already exists". An issued ID is never issued again.
+	Id            string `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -269,6 +288,13 @@ func (x *CreateAccountRequest) GetLabels() map[string]string {
 func (x *CreateAccountRequest) GetOwnerUserId() string {
 	if x != nil {
 		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *CreateAccountRequest) GetId() string {
+	if x != nil {
+		return x.Id
 	}
 	return ""
 }
@@ -653,12 +679,13 @@ const file_kaname_cloud_iam_v1_account_service_proto_rawDesc = "" +
 	"\x06filter\x18\x03 \x01(\tR\x06filter\"x\n" +
 	"\x14ListAccountsResponse\x128\n" +
 	"\baccounts\x18\x01 \x03(\v2\x1c.kaname.cloud.iam.v1.AccountR\baccounts\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xfa\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x8a\x02\n" +
 	"\x14CreateAccountRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12M\n" +
 	"\x06labels\x18\x03 \x03(\v25.kaname.cloud.iam.v1.CreateAccountRequest.LabelsEntryR\x06labels\x12\"\n" +
-	"\rowner_user_id\x18\x04 \x01(\tR\vownerUserId\x1a9\n" +
+	"\rowner_user_id\x18\x04 \x01(\tR\vownerUserId\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb2\x02\n" +
