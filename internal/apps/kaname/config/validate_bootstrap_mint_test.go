@@ -26,7 +26,7 @@ import (
 )
 
 // prodCfgWithSecrets — a production Config whose unrelated production invariants
-// (hook secret, JWKS key, TLS-mode DSN) are already satisfied.
+// (JWKS encryption key, TLS-mode DSN) are already satisfied.
 func prodCfgWithSecrets(t *testing.T) config.Config {
 	t.Helper()
 	cfg := goodEndpoints(config.ModeProduction, "require")

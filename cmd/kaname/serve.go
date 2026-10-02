@@ -1025,9 +1025,10 @@ func runServe(cfg config.Config) error {
 	//     on the READ-RPC set (ReadFloorRPCs): the caller module-SA must hold
 	//     `system_viewer@cluster:cluster_root` (relation-tier Check beyond
 	//     the coarse mTLS floor above). Prod fail-closed (PermissionDenied /
-	//     Unavailable); dev no-op. Exempt: PDP Check, secret webhooks, hot-path
-	//     IsRevoked, all mutations. MUST run after internalCallerPolicy (it needs
-	//     the same verified-SAN floor to have passed).
+	//     Unavailable); dev no-op. Exempt (absent from ReadFloorRPCs): PDP
+	//     Check, hot-path IsRevoked, all mutations. MUST run after
+	//     internalCallerPolicy (it needs the same verified-SAN floor to have
+	//     passed).
 	//  5. internalACRFloor — per-RPC `required_acr_min` (step-up)
 	//     floor on the GATEWAY-FRONTED set: for a gateway-fronted RPC whose catalog
 	//     acr_min>0, the FD-4-trusted forwarded acr must satisfy it (else
