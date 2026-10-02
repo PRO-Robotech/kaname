@@ -38,7 +38,6 @@ import (
 	"context"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // adminChecker — narrow ReBAC port (Check(subject, relation, object)) satisfied
@@ -51,46 +50,15 @@ type adminChecker = authzguard.RelationChecker
 // there was no nameable principal / no wired checker), Unavailable when it could
 // not be asked.
 func requireClusterSystemAdmin(ctx context.Context, checker adminChecker) error {
-	// 1. authenticated principal required, and it must be NAMEABLE (anonymous /
-	//    empty ctx / unknown principal type / an id carrying an FGA separator →
-	//    deny).
+	// Вопрос и перевод его исхода в код живут в одном доме —
+	// authzguard.RequireClusterAdmin; здесь его второй копии нет.
 	//
-	//    The subject was previously spelled as "user:" joined to the principal id.
-	//    That is a string, not a policy: a machine granted cluster administration
-	//    holds `service_account:<id>`, so asking about `user:<id>` named nobody and
-	//    the grant could be issued and never used. PrincipalSubject resolves the
-	//    principal to its own type, and fails closed on anything it cannot name.
-	subject, ok := authzguard.PrincipalSubject(ctx)
-	if !ok {
-		return authzguard.PermissionDenied()
-	}
-	// 2. nil checker → fail closed (never silently allow an unwired gate).
-	if checker == nil {
-		return authzguard.PermissionDenied()
-	}
-	allowed, err := checker.Check(ctx,
-		subject,
-		"system_admin",
-		"cluster:"+domain.ClusterSingletonID,
-	)
-	if err != nil {
-		// Backend outage — NOT an authorization decision. Fail-closed either way
-		// (the mutation does not run), but the caller is told "I could not ask",
-		// not "you may not": the latter means an identical retry is pointless, and
-		// a cluster admin locked out by a two-second FGA flap would read it as a
-		// revoked grant. Same answer the sibling gates in this service already give
-		// (RelationWriteGate, SystemViewerFloor, scope).
-		//
-		// The previous edition collapsed this into the refusal below and justified
-		// it as "fail-closed deny is the safe default — no false-allow". That
-		// justification does not distinguish the two: Unavailable is equally
-		// fail-closed and equally free of false-allows. What it did distinguish was
-		// how long the outage lasts in the caller's eyes — forever.
-		return authzguard.AuthzBackendUnavailable()
-	}
-	if !allowed {
-		// Explicit deny: the Check succeeded and answered no.
-		return authzguard.PermissionDenied()
-	}
-	return nil
+	// Что держит этот дом и почему так: субъект называется своим родом
+	// (PrincipalSubject), а не склейкой "user:" с идентификатором — машина,
+	// которой выдано администрирование облака, держит `service_account:<id>`, и
+	// вопрос о `user:<id>` не называл бы никого. Неподключённый проверяющий и
+	// неназываемый принципал — отказ. Недоступность модели — UNAVAILABLE, а не
+	// отказ: отказ говорит «повторять бессмысленно», и администратор, отрезанный
+	// двухсекундным сбоем хранилища, прочёл бы его как отзыв права.
+	return authzguard.RequireClusterAdmin(ctx, checker)
 }

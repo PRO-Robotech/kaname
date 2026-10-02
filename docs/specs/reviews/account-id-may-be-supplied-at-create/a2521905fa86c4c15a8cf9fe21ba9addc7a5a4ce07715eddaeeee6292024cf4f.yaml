@@ -1,0 +1,148 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: a2521905fa86c4c15a8cf9fe21ba9addc7a5a4ce07715eddaeeee6292024cf4f
+  static_status: DRAFT
+  base_commit: b90430b42272
+  content_commit: b0008ecb96614afd8d9899d265533cfc6a81c8ec
+  branch: '549'
+  task: PRO-Robotech/kaname#549
+  wave: PRO-Robotech/kaname#548
+  epic: PRO-Robotech/kaname#357
+  platform_side: PRO-Robotech/kacho#2984
+  lines: 1025
+  round: 2
+  predecessor_record: docs/specs/reviews/account-id-may-be-supplied-at-create/878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/account-id-may-be-supplied-at-create.md в копии ветки 549
+    на b0008ecb9661, и git show HEAD:<путь> | sha256sum — оба a2521905…cf4f
+  fingerprint_note: >-
+    Отпечаток снят своим замером и совпал с объявленным. Голова origin/549 сверена
+    git ls-remote — b0008ecb9661, она же HEAD копии. Дифф документа к 75914da0e — ответ на
+    круг 1: шапка (история ревью), §1.8, AID-18, строка AID-18 в §6.1, §6.2, §8 S1 п.2.
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_uncommitted_event_by_courier
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+
+blocking:
+  count: 0
+  kinds: []
+  items: []
+
+round_1_closure:
+  B1:
+    status: closed
+    evidence:
+      - >-
+        Путь снятия ветвей (а) и (б) построен ПОСЕВОМ существующими фикстурами:
+        go test -run TestAccountAudit_5_2_12_DeleteEmits ./internal/apps/kaname/api/audit/ —
+        PASS (создание use-case с проектом по умолчанию, снятие проекта, Delete аккаунта успешен);
+        go test -run TestProject_DeleteHappy ./internal/repo/kaname/pg/ — PASS
+        (projectWriter.Delete на свежем проекте). Оба через слот, testcontainers, @b0008ecb9661.
+      - >-
+        Иных удерживающих нет: на accounts ссылаются только groups, projects, roles,
+        service_accounts, users (RESTRICT) и memberships (CASCADE) — 0001_initial.sql:5466-5691,
+        поздних миграций с REFERENCES accounts нет; access_bindings ссылки на accounts не несёт;
+        BEFORE DELETE-триггер журнала ресурсов удаления не отменяет. Создание ролей, групп и
+        сервисных аккаунтов не заводит (create.go doCreate:275-380).
+      - >-
+        Ветвь (в) не снимается — довод проверен: users.account_id text NOT NULL
+        (0001_initial.sql:3104), users_account_fk RESTRICT (:5691). Свойство «удаление не
+        освобождает» от производителя не зависит и утверждается на (а) и (б); (в) утверждает
+        внесение. Утверждение о реестре не ослаблено.
+  N1: closed — §1.8 и §6.2 называют темп (stand-own.sh:302-303), счёт триггером вставки и
+    TestAccountRate_DeletingAnAccountDoesNotReturnARateSlot; координаты сверены, файлы есть.
+  N2: closed — §8 S1 п.2 называет порядок контракт и регенерация pkg/api, затем пробы, затем реализация.
+
+non_blocking:
+  - id: N3
+    kind: TWIN
+    note: >-
+      AID-18, ветвь (в): вставка с идентификатором живого личного аккаунта отвергается и первичным
+      ключом accounts, поэтому этот пункт не отличает реестр от ключа. Внесение (в) утверждается
+      прямым чтением реестра — его и держать главным; пункт о повторной вставке для (в) в пробе
+      можно оставить как контроль текста, а не как довод о реестре.
+  - id: N4
+    kind: FORMAT
+    note: >-
+      Образец порядка снятия в дереве (account_audit_integration_test.go:89-95) снимает проект
+      сырым DELETE, а AID-18 предписывает projectWriter.Delete. Порядок тот же, оператор другой;
+      проба вправе брать любой, но координату образца стоит читать как образец порядка, а не оператора.
+
+checks:
+  scope: >-
+    Без изменений к кругу 1: поле необязательное, режима обязательного поля и ручки нет;
+    отложенное перечислено с доводом.
+  coverage: >-
+    29 сценариев, перемерено: grep заголовков AID — 29, строк §6.1 — 29. Покрытие без id, с id,
+    формат, право, занят, повтор, прочие места создания, край kacho — как в круге 1.
+  producer: 29 из 29; строка AID-18 дополнена путём снятия (project_repo.go:296, account_repo.go:301).
+  twin: 29 из 29 отрицаний несут близнеца в сценарии; N3 — уточнение различимости, не пропуск.
+  constructibility: >-
+    Посеяно 2 из 2 новых Дано (снятие аккаунта с проектом по умолчанию, снятие свежего проекта
+    писателем). Прочие строки §6.2 не менялись — 10 из 11 подтверждены в круге 1 по коду и
+    фикстурам; стендовые Дано (слоты церемонии) на стенде не посеяны — не выполнилось, стенд
+    не поднимался, к одобрению засчитаны названные фикстуры seed_ceremony.py.
+  conventions: без изменений к кругу 1.
+  security: без изменений к кругу 1; правка круга 2 поверхности прав не трогает; §10 соблюдён.
+  open_questions: ноль.
+
+event_body: acceptance-reviewer · APPROVED · sha256 a2521905fa86c4c15a8cf9fe21ba9addc7a5a4ce07715eddaeeee6292024cf4f
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  policy_revision: 9fb4acd99
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-02T02:48:08Z'
+  ban1_lifted: true
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Первый комментарий
+    (5942086010) этой формы не нёс и событием полномочия не распознавался. Событие
+    5944671740 учётки pointpu несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision b0008ecb9661 опубликована на origin раньше события
+    (git branch -r --contains b0008ecb9661 даёт origin/548 и origin/549); запрет #1 по
+    этому отпечатку снят. Дописано отдельным коммитом поверх записи, вердикт и разбор
+    задним числом не правились.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#549
+  status: performed
+  published: true
+  database_id: 5944671740
+  node_id: IC_kwDOUO26pM8AAAABYlR9_A
+  url: https://github.com/PRO-Robotech/kaname/issues/549#issuecomment-5944671740
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5944671740
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-02T02:48:08Z'
+  body_sha256: c6a64ab02096629170684004f75de01a184a853233169ce0e6654f3a97f88852
+  subject_sha256: a2521905fa86c4c15a8cf9fe21ba9addc7a5a4ce07715eddaeeee6292024cf4f
+  subject_revision_commit: b0008ecb96614afd8d9899d265533cfc6a81c8ec
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  superseded_comment:
+    url: https://github.com/PRO-Robotech/kaname/issues/549#issuecomment-5942086010
+    created_at: '2026-10-01T22:37:42Z'
+    why: >-
+      Тело event_body этой записи без строк ключ-значение до первой черты; событием
+      полномочия не является, оставлен как обсуждение.

@@ -155,7 +155,28 @@ MINTED_CEREMONY = ("jwtHumanCeremony", "ceremonyUserId", "ceremonyEmail")
 # отвергает. Имена слотов — те, что читают кейсы (`cases/iam-account.py`,
 # `cases/iam-account-redesign.py`, `cases/rbac-visibility-set.py`).
 ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop",
-                   "AccRdDerive", "AccRdSaga", "AccRdRestrict", "RbacVisSet")
+                   "AccRdDerive", "AccRdSaga", "AccRdRestrict", "RbacVisSet",
+                   # Арендаторы полосы «идентификатор указан при создании» (kaname#549,
+                   # приёмка account-id-may-be-supplied-at-create §6.2): по человеку на
+                   # заводящий сценарий и один общий для незаводящих.
+                   "AidTen01", "AidTen21", "AidTen23", "AidTen25", "AidTenShared")
+
+# СЛОТЫ АДМИНИСТРАТОРОВ ОБЛАКА (kaname#549, §6.2 приёмки). Тот же человек слота,
+# и посев выдаёт ему `system_admin` на кластере глаголом
+# `InternalClusterService.GrantAdmin` под машинным `system_admin` шага 1 — так же,
+# как шаг 2 проходит внутренний глагол заведения клиента. Выдача утверждается
+# ВОПРОСОМ, на который отвечает только администратор облака (чтение посеянного
+# служебного аккаунта под предъявителем слота), прежде чем слот уезжает в
+# окружение: «выдано» не должно быть неотличимо от «выдано и не видно модели».
+# Правило слотов то же — один заводящий сценарий, один человек.
+ADMIN_SLOTS = ("AidAdm03", "AidAdm04", "AidAdm12", "AidAdm13", "AidAdm16",
+               "AidAdm19", "AidAdm22", "AidAdmShared")
+
+# Посеянный служебный аккаунт: есть в каждой установке (миграция), и чужой ему
+# читает только администратор облака — это и есть вопрос-доказательство выдачи.
+SEEDED_SYSTEM_ACCOUNT = "acc1a18042d81fb438d6"
+ADMIN_PROOF_BUDGET_S = 30.0
+ADMIN_PROOF_STEP_S = 1.0
 
 
 def slot_keys(slot: str) -> tuple[str, str, str]:
@@ -175,7 +196,7 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS for k in slot_keys(s))
+) + tuple(k for s in ADMISSION_SLOTS + ADMIN_SLOTS for k in slot_keys(s))
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
 # опрашивают под другим), а машине уровень не поднимается и не нужен — его пишет
@@ -204,6 +225,8 @@ BOOTSTRAP_METHOD = "kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootst
 BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
 CREATE_METHOD = "kaname.cloud.iam.v1.InternalInteractiveClientService/Create"
 CREATE_PROTO = "kaname/cloud/iam/v1/internal_interactive_client_service.proto"
+GRANT_ADMIN_METHOD = "kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"
+GRANT_ADMIN_PROTO = "kaname/cloud/iam/v1/internal_cluster_service.proto"
 SECRET_METHOD = "client_secret_basic"
 STATE_BYTES = 32
 
@@ -289,6 +312,12 @@ class Surfaces:
             {"name": name, "redirect_uris": redirects},
             (f"{PRINCIPAL_TYPE_MD}: service_account", f"{PRINCIPAL_ID_MD}: {principal_id}"))
 
+    def grant_admin(self, principal_id: str, user_id: str) -> tuple[int, str]:
+        return self._grpcurl(
+            "edge", GRANT_ADMIN_PROTO, GRANT_ADMIN_METHOD,
+            {"subject_type": "USER", "subject_id": user_id},
+            (f"{PRINCIPAL_TYPE_MD}: service_account", f"{PRINCIPAL_ID_MD}: {principal_id}"))
+
     def http(self, url: str, *, method: str = "GET", headers: dict | None = None,
              form: dict | None = None) -> tuple[int, dict, str]:
         """(код, заголовки, тело). Перенаправлению НЕ следуем: предмет — сам `302`."""
@@ -358,6 +387,39 @@ def create_confidential(stand, principal: str, name: str, redirects: list[str]) 
     if sorted(client.get("redirectUris") or []) != sorted(redirects):
         raise Finding(f"Create {name}: адреса возврата не совпали с заведёнными")
     return client_id, secret
+
+
+def grant_cluster_admin(stand, principal: str, user: str) -> None:
+    """`system_admin` на кластере человеку слота глаголом `GrantAdmin`."""
+    rc, out = stand.grant_admin(principal, user)
+    if rc != 0:
+        raise Finding(f"GrantAdmin {user}: глагол отказал (grpcurl rc={rc}): {out.strip()[:300]}")
+    try:
+        op = json.loads(out or "{}")
+    except json.JSONDecodeError:
+        raise Finding(f"GrantAdmin {user}: ответ не JSON") from None
+    if op.get("error"):
+        raise Finding(f"GrantAdmin {user}: операция завершилась ошибкой {op.get('error')!r}")
+
+
+def prove_cluster_admin(stand, http, token: str, user: str, sleep=time.sleep) -> None:
+    """Выдача видна модели: предъявитель слота читает посеянный служебный аккаунт.
+
+    Чужой этому аккаунту читает его только администратор облака, поэтому `200`
+    здесь и есть исход выдачи. Ожидание — до предмета, с конечным бюджетом: окно
+    материализации выдачи законно, бесконечное ожидание — нет."""
+    waited, code = 0.0, 0
+    while True:
+        code, body = http.json_ask(f"{stand.own}/iam/v1/accounts/{SEEDED_SYSTEM_ACCOUNT}", token=token)
+        if code == 200 and (body or {}).get("id") == SEEDED_SYSTEM_ACCOUNT:
+            return
+        if waited >= ADMIN_PROOF_BUDGET_S:
+            break
+        sleep(ADMIN_PROOF_STEP_S)
+        waited += ADMIN_PROOF_STEP_S
+    raise Finding(f"выдача system_admin человеку {user} не видна модели: чтение посеянного "
+                  f"служебного аккаунта под его предъявителем — код {code} за "
+                  f"{ADMIN_PROOF_BUDGET_S:.0f} с")
 
 
 def human_session(lane, email: str, password: str) -> tuple[str, str]:
@@ -637,6 +699,16 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
         values[kid] = su
     say(f"  ok   слоты заведения аккаунта: {len(ADMISSION_SLOTS)} людей, у каждого "
         f"предъявители уровней «1» и «2»")
+    for slot in ADMIN_SLOTS:
+        _, ss, su = person(slot_slug(slot))
+        grant_cluster_admin(stand, principal, su)
+        k1, k2, kid = slot_keys(slot)
+        values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
+        values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
+        values[kid] = su
+        prove_cluster_admin(stand, http, values[k1], su, sleep)
+    say(f"  ok   слоты администраторов облака: {len(ADMIN_SLOTS)} людей, выдача "
+        f"system_admin утверждена чтением посеянного служебного аккаунта")
     say(f"  ok   людей заведено {len(people)}, все разные")
     return values
 
@@ -813,6 +885,7 @@ class _WaveWorld:
         self.sent_at: dict[str, float] = {}
         self.requests = 0
         self.codes: dict[str, tuple[str, str]] = {}
+        self.admins: set[str] = set()
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -883,6 +956,13 @@ class _WaveWorld:
     def create_client(self, principal, name, redirects):
         return self.base.create_client(principal, name, redirects)
 
+    def grant_admin(self, principal, user):
+        if self.inj.get("grant_refused"):
+            return 1, "ERROR: Code: PermissionDenied Message: permission denied"
+        if not self.inj.get("grant_invisible"):
+            self.admins.add(user)
+        return 0, json.dumps({"done": True, "response": {"subjectId": user}})
+
     def http(self, url, *, method="GET", headers=None, form=None):
         headers = headers or {}
         if url.startswith(self.issuance + "/iam/v1/authorize"):
@@ -919,6 +999,12 @@ class _WaveWorld:
                                       for w in self.people.values()]}
         if "/iam/v1/projects?" in url:
             return 200, {"projects": [{"id": "prj1"}]}
+        if url.endswith("/iam/v1/accounts/" + SEEDED_SYSTEM_ACCOUNT):
+            # Чужой посеянный аккаунт читает только администратор облака.
+            sub = token_claims(kw.get("token", "")).get("sub")
+            if sub in self.admins:
+                return 200, {"id": SEEDED_SYSTEM_ACCOUNT}
+            return 404, {"code": 5, "message": f"Account {SEEDED_SYSTEM_ACCOUNT} not found"}
         return 404, {}
 
 
@@ -1043,6 +1129,9 @@ def self_test() -> int:
     _c("(−) уровень каждого предъявителя — по имени слота: `…StepUp` — «2», прочие — «1»",
        bool(levels) and all(lv == ("2" if k.endswith("StepUp") else "1")
                             for k, lv in levels.items()), f"{levels}")
+    _c("(−) администраторами облака стали ровно люди слотов администраторов",
+       got[0] == "ok" and world.admins == {vals.get(slot_keys(s)[2]) for s in ADMIN_SLOTS}
+       and len(world.admins) == len(ADMIN_SLOTS), f"{sorted(world.admins)}")
     _c("(−) люди волны разные, и каждый подтвердил адрес",
        len({w["id"] for w in world.people.values()}) == len(world.people) >= 11
        and all(w["verified"] for w in world.people.values()), f"{world.people}")
@@ -1067,6 +1156,9 @@ def self_test() -> int:
         # тоже упоминает письмо подтверждения, и по одному слову их не различить.
         ("письмо подтверждения не дошло", {"no_letter": True}, "не дошло до приёмника"),
         ("личный аккаунт у другого человека", {"foreign_owner": True}, "у другого человека"),
+        ("GrantAdmin отказал", {"grant_refused": True}, "GrantAdmin"),
+        ("выдача system_admin принята, но модели не видна", {"grant_invisible": True},
+         "не видна модели"),
     ):
         got, _ = wave(**inj)
         _c(f"(+) {label} — находка, причина названа",

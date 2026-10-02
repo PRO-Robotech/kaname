@@ -196,22 +196,7 @@ func (h *Handler) WithAdminChecker(c authzguard.RelationChecker) *Handler {
 // after the same spelling was fixed in the invite gate; no e2e case covers this
 // route, which is why it survived there.
 func (h *Handler) requireSystemAdmin(ctx context.Context) error {
-	subject, ok := authzguard.PrincipalSubject(ctx)
-	if !ok {
-		return status.Error(codes.PermissionDenied, "permission denied")
-	}
-	if h.adminCheck == nil {
-		return status.Error(codes.PermissionDenied, "permission denied")
-	}
-	allowed, err := h.adminCheck.Check(ctx,
-		subject, "system_admin", "cluster:"+domain.ClusterSingletonID)
-	if err != nil {
-		return authzguard.AuthzBackendUnavailable()
-	}
-	if !allowed {
-		return status.Error(codes.PermissionDenied, "permission denied")
-	}
-	return nil
+	return authzguard.RequireClusterAdmin(ctx, h.adminCheck)
 }
 
 // ForceLogout — end the target's own login sessions and record a user-level

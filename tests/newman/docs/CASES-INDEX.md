@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 740
+Всего кейсов: 758
 
 ## Перепись по модулям
 
@@ -41,7 +41,7 @@
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
 | `cases/iam-account-redesign.py` | 9 |
-| `cases/iam-account.py` | 38 |
+| `cases/iam-account.py` | 56 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
@@ -454,7 +454,7 @@
 - `IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG`
 - `IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT`
 
-## `cases/iam-account.py` — 38 кейсов
+## `cases/iam-account.py` — 56 кейсов
 
 > Case-set для AccountService.
 
@@ -496,6 +496,24 @@
 - `IAM-ACC-LSOP-CRUD-OK`
 - `IAM-ACC-LSOP-NEG-NOTFOUND`
 - `IAM-ACC-LSOP-AUTHZ-ANON-DENY`
+- `IAM-ACC-ID-01`
+- `IAM-ACC-ID-03`
+- `IAM-ACC-ID-04`
+- `IAM-ACC-ID-05`
+- `IAM-ACC-ID-07`
+- `IAM-ACC-ID-08`
+- `IAM-ACC-ID-09`
+- `IAM-ACC-ID-10`
+- `IAM-ACC-ID-12`
+- `IAM-ACC-ID-13`
+- `IAM-ACC-ID-15`
+- `IAM-ACC-ID-16`
+- `IAM-ACC-ID-19`
+- `IAM-ACC-ID-20`
+- `IAM-ACC-ID-21`
+- `IAM-ACC-ID-22`
+- `IAM-ACC-ID-23`
+- `IAM-ACC-ID-25`
 
 ## `cases/iam-authz-grant-check-propagation.py` — 10 кейсов
 
