@@ -95,3 +95,39 @@ checks:
   open_questions: ноль.
 
 event_body: acceptance-reviewer · APPROVED · sha256 a2521905fa86c4c15a8cf9fe21ba9addc7a5a4ce07715eddaeeee6292024cf4f
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  policy_revision: 9fb4acd99
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Опубликованный
+    комментарий этой формы не несёт, поэтому событием полномочия он не распознаётся,
+    и запись санкцию не утверждает.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#549
+  status: not_performed
+  published: true
+  comment: https://github.com/PRO-Robotech/kaname/issues/549#issuecomment-5942086010
+  actor: pointpu
+  created_at: '2026-10-01T22:37:42Z'
+  reason: >-
+    Комментарий учётки pointpu с телом event_body этой записи опубликован, но строки
+    ключ-значение до первой черты в нём нет: пяти обязательных полей заголовка
+    события нет. Исполненным событие станет, когда допущенная учётка опубликует
+    заголовок из пяти полей с subject_sha256 этой записи; тогда блок event и
+    effective_approval приводятся к факту отдельным коммитом поверх записи.

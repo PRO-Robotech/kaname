@@ -102,3 +102,28 @@ checks:
   open_questions: ноль, дефолтов фиксировать не потребовалось.
 
 event_body: acceptance-reviewer · CHANGES_REQUESTED · sha256 878a819c562025de68a696c873462c232a2a3ea0e89d3bcb764dc84baa9f0ede
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  policy_revision: 9fb4acd99
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт CHANGES_REQUESTED, санкции он не выдаёт; запрет #1 по этому отпечатку в силе.
+
+event:
+  type: none
+  status: not_performed
+  target: PRO-Robotech/kaname#549
+  published: false
+  reason: >-
+    Событие о круге 1 на задаче не публиковалось: перепись комментариев kaname#549
+    (gh api repos/PRO-Robotech/kaname/issues/549/comments, 2026-10-02) даёт один
+    комментарий, и он о круге 2. Для CHANGES_REQUESTED отсутствие события безвредно.
