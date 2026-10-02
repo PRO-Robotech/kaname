@@ -1,0 +1,71 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+  sha256: ad44dc63b6e0e1c452070938bca812afaf32526783348755d57ad397db0304f6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: b90430b42
+  content_commit: c808472e1
+  head_commit: 20a3432ce38e1e558fda1ccdf3c512b89b84ce4f
+  branch: '553'
+  worktree: tmp/kn-553
+  pull_request: PRO-Robotech/kaname#554
+  task: PRO-Robotech/kaname#553
+  wave: PRO-Robotech/kaname#497
+  subject_task: PRO-Robotech/kaname#363
+  lines: 681
+  round: 5
+  round_note: круг 3 снятия позиции IC-SECRET-11 (редакция 5 — перевод пробы Р4 исполнен)
+  predecessor_record: >-
+    docs/specs/reviews/confidential-interactive-client-secret-shown-once/0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> на tmp/kn-553 @ 20a3432ce → ad44dc63…04f6; git show c808472e1:<путь> | sha256sum
+    → то же; совпал с заданием.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: git diff 400262d9f 20a3432ce -- <путь> — строка истории круга 4 в шапке, имя пробы
+    в §4 группа E и DoD п.7, имя прозой в §11 N1, новый §12; ID, Дано, Когда, Тогда не тронуты;
+    grep -oE '^\*\*ID: IC-SECRET-[0-9]+' → 12. Предмет правки исполнен в дереве:
+    git grep -n -e 'IC11' -e 'IC-SECRET-11' -- internal cmd tests .github | wc -l → 0;
+    go test -run '^TestCreate_R4_' ./internal/apps/kaname/api/interactive_client/ → PASS (1 тест);
+    утверждение пробы не тронуто (git diff 400262d9f HEAD -- create_secret_test.go — только имя и
+    комментарий); go test -run '^TestAcceptanceProbeCoordinate' ./internal/check/ → PASS, находок 0,
+    приёмок 52, координат 824.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      §4 группа E (строки 444-446) и DoD п.7 (строки 570-572) говорят о переводе пробы в будущем
+      времени («переводится», «Пока имя прежнее, это ссылка на снятый сценарий»), хотя §12 и дерево
+      показывают его исполненным. Ложью не стало: условие «пока» сейчас ложно, предикат п.7 зелен.
+      Править только вместе со следующей редакцией по существу.
+  - id: N2
+    summary: >-
+      Ветка дописала поля effective_approval и authority в прежнюю запись 249b53cd (git diff
+      400262d9f HEAD — 9 строк). Запись ревью добавляется, а не переписывается (change-graph.md §2);
+      предмет этой записи — документ, а не история записей: решение — за посадочным.
+accepted_parts: >-
+  Редакция 5 правит ровно то, что называет §12: строку круга 4 в истории, координату пробы Р4 на новое
+  имя в двух местах и прежнее имя прозой в §11. Производители «Тогда» и близнецы отрицаний — как в
+  одобренной редакции 4, правкой не задеты; scope, Р1–Р8, §3, §5, §6, §8–§10 без изменений.
+constructibility: >-
+  Посева не было: стенда в задании нет. Предмет круга — координата пробы, а не Given; проба исполнена
+  под новым именем (PASS), гейт координат приёмок зелен. «Не выполнилось» 0 по предмету круга.
+event_body: acceptance-reviewer · APPROVED · ad44dc63b6e0e1c452070938bca812afaf32526783348755d57ad397db0304f6
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
