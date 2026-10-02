@@ -293,12 +293,10 @@ func TestCreate_SecretMaterialMustAgreeWithTheMethod(t *testing.T) {
 	}
 }
 
-// TestCreate_R4_PublicClientAnswersWithAnEmptySecret — правило ответа Р4 на
-// слое use-case, ветка способа `none`: клиент, которого реестр завёл
-// публичным, получает ответ того же типа с пустым секретом, и об отсутствии
-// секрета говорит способ. Предмет — согласие тройки «способ ⟺ материал ⟺
-// секрет» над подставным реестром, а не посадка.
-func TestCreate_R4_PublicClientAnswersWithAnEmptySecret(t *testing.T) {
+// TestCreate_IC11_PublicClientAnswersWithAnEmptySecret — IC-SECRET-11 на слое
+// use-case: клиент, которого реестр завёл публичным, получает ответ того же
+// типа с пустым секретом, и об отсутствии секрета говорит способ.
+func TestCreate_IC11_PublicClientAnswersWithAnEmptySecret(t *testing.T) {
 	resp, err := createWith(t, &insertRecordingRepo{}, &secretRegistry{method: "none"}, &fakeOps{}, nil)
 	if err != nil {
 		t.Fatalf("заведение публичного клиента отказало: %v", err)
