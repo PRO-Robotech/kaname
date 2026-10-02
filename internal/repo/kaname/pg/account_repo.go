@@ -231,9 +231,18 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
+	// ON CONFLICT (id) DO NOTHING — не проглатывание, а порядок ключей: у вставки
+	// два ключа, и ключ имени создан в схеме раньше первичного, поэтому база
+	// проверяет его первым. Побайтовый повтор создания (тот же id и то же имя)
+	// без этой оговорки отказывался бы текстом имени (AID-13). Арбитр
+	// проверяется до вставки, конфликт идентификатора даёт пустой RETURNING и
+	// отказ ниже; гонку одного id решает та же спекулятивная вставка (AID-14).
+	// Конфликт одного имени по-прежнему приходит отказом accounts_name_unique,
+	// конфликт с реестром выданных — отказом его ключа из триггера.
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO NOTHING
 		RETURNING %s`, accountCols)
 
 	row := w.tx.QueryRow(ctx, q,
@@ -241,6 +250,9 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		string(a.OwnerUserID), now,
 	)
 	out, err := scanAccount(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Account{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+	}
 	if err != nil {
 		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
 		switch pgfault.Classify(err).Class {

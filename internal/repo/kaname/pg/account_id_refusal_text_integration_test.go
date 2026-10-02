@@ -91,6 +91,19 @@ func TestAccountID12_InsertRefusalNamesTheIDWhicheverKeyFiresFirst(t *testing.T)
 		requireAccountTaken(t, insertAccountTx(ctx, repo, accountWith(x2, x2, owner)), x2)
 	})
 
+	t.Run("live_id_with_the_same_ordinary_name", func(t *testing.T) {
+		owner := ownerOf(t)
+		// AID-13: побайтовый повтор запроса. Оба ключа заняты одной и той же
+		// строкой, а имя обычное — не формы идентификатора. Ключ имени создан в
+		// схеме раньше первичного, и база проверяет его первым; отказ всё равно
+		// обязан назвать идентификатор, а не имя.
+		x := ids.NewID(domain.PrefixAccount)
+		require.NoError(t, insertAccountTx(ctx, repo, accountWith(x, "aid13-repeat", owner)))
+		err := insertAccountTx(ctx, repo, accountWith(x, "aid13-repeat", owner))
+		requireAccountTaken(t, err, x)
+		require.NotContains(t, err.Error(), "Account with name", "повтор с тем же id отказан проверкой имени")
+	})
+
 	t.Run("deleted_id", func(t *testing.T) {
 		owner := ownerOf(t)
 		x := ids.NewID(domain.PrefixAccount)
