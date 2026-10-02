@@ -1,0 +1,71 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+  sha256: 0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: b90430b42
+  content_commit: 400262d9fbe455b820f2b064cf957c25b20a7a40
+  branch: '553'
+  worktree: tmp/kn-553
+  pull_request: null
+  task: PRO-Robotech/kaname#553
+  wave: PRO-Robotech/kaname#497
+  subject_task: PRO-Robotech/kaname#363
+  lines: 652
+  round: 4
+  round_note: круг 2 снятия позиции IC-SECRET-11 (редакция 4)
+  predecessor_record: >-
+    docs/specs/reviews/confidential-interactive-client-secret-shown-once/249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> на tmp/kn-553 @ 400262d9f → 0110eeff…6aea, совпал с заданием.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: git ls-files tests/newman/cases | grep -c interactive-client → 0 на 553;
+    .github/scripts/newman-suite-debt.py:1117-1122 _HOME_IC_SECRET ставит дом 01, 04, 08, 09, 10 в
+    PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py и шаг
+    «гейт — newman зелёный (api-gateway)»; tests/newman/cases/kaname-authorization-code.py:85 — дом 06.
+    Платформа: файл есть на origin/2564 = 5a5e3870efe (1), нет на origin/main = bea4495e934 (0);
+    git show 5a5e3870efe:<файл> | grep -c 'j\.response' → 9; REDIRECT = "https://api.kacho.local/auth/callback"
+    (строка 92); кейс утверждает @type CreateInteractiveClientResponse и clientSecret (строки 146-161);
+    e2e-newman.yml origin/2564:859 — шаг «гейт — newman зелёный (api-gateway)» есть.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+publication_mode: courier_of_agent_verdict
+blocking: []
+resolved_from_predecessor:
+  - id: B1
+    kind: PRODUCER
+    status: снято
+    evidence: >-
+      §1 строка 14, общие Given §4, третье And IC-SECRET-08 и DoD п.7 называют дом сквозного уровня
+      по ведомости службы; довод о проверке снятой посадки в снятом файле убран; утверждение
+      «сверка по значению S» сохранено без ослабления.
+  - id: N1
+    status: снято
+    evidence: >-
+      DoD п.7 называет перевод пробы IC11 запросом волны kaname#497 с предикатом
+      git grep -n -e 'IC11' -e 'IC-SECRET-11' -- internal cmd tests .github → 0; сейчас 3 попадания
+      (create_secret_test.go:296,299; newman-suite-debt.py:1133) — все снимаются тем же запросом.
+non_blocking:
+  - id: N1
+    summary: >-
+      Перепись ведомости по-прежнему красна на 400262d9f (python3 .github/scripts/newman-suite-debt.py →
+      «запись долга позиции IC-SECRET-11 пережила предмет»). Документ этого не требует править, но
+      запрос волны kaname#497 без снятия записи и _HOLDER_EXTERNAL_LANDING_REMOVAL не сводится.
+  - id: N2
+    summary: >-
+      Дом 01, 04, 08, 09, 10 сейчас только на ветке эпика платформы 2564; до посадки kacho#2564 в main
+      DoD п.7 исполним лишь на этой ветке — документ это и пишет (строка 14), держатель kacho#2913.
+accepted_parts: >-
+  Редакция 4 правит ровно то, что назвала запись круга 3; ID, Дано, Когда, Тогда сценариев не тронуты
+  (кроме снятого довода в IC-SECRET-08); 12 живых из 13 меток; производители «Тогда» и близнецы
+  отрицаний — как в одобренной редакции 2, правкой не задеты.
+constructibility: >-
+  Посева не было: стенда в задании нет. Предмет круга — координаты дома и довод, а не Given; общий
+  Given «R = REDIRECT набора края» сверен по дереву платформы. «Не выполнилось» 0 по предмету круга.
+event_body: acceptance-reviewer · APPROVED · 0110eeff2d397c9280c1f96e84ccf3b798089547f69fa50da0d8789d47e96aea

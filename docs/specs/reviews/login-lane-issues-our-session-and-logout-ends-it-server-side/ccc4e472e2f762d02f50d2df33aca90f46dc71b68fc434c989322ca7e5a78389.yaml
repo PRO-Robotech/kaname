@@ -1,0 +1,67 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: ccc4e472e2f762d02f50d2df33aca90f46dc71b68fc434c989322ca7e5a78389
+  static_status: DRAFT
+  static_status_note: >-
+    «DRAFT — кругов ревью ноль» в шапке — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: b90430b42
+  content_commit: 400262d9fbe455b820f2b064cf957c25b20a7a40
+  branch: '553'
+  worktree: tmp/kn-553
+  pull_request: null
+  task: PRO-Robotech/kaname#553
+  wave: PRO-Robotech/kaname#497
+  subject_task: PRO-Robotech/kaname#363
+  lines: 3879
+  round: 12
+  round_note: круг 2 снятия позиции Ф3-46 (редакция 17); предыдущие записи — круги 1…11
+  predecessor_record: >-
+    docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/0026c279efb0f7c9f01ef9ff3bf5bc279d47cc5939a8e802cc63324cb4576433.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> на tmp/kn-553 @ 400262d9f → ccc4e472…8389; задание отпечатка этого документа не
+    назвало — перемерен целиком.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: internal/apps/kaname/config/retired_posture_key_test.go:43 retiredPostureValues =
+    {"own","external",""}; cmd/kaname/bootposture.go:92 IdentityProvider: identityposture.Own.String();
+    git grep -n -e 'Ф1-60' -e 'F1_60' -e 'F1-60' -- ':!docs' | wc -l → 0; меток Ф3 в §6 → 53.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+publication_mode: courier_of_agent_verdict
+blocking: []
+resolved_from_predecessor:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    status: снято
+    evidence: >-
+      Ф3-44 (строка 2764): Given — профиль без ключа посадки; And о профиле external снято;
+      «четыре глагола Р2 зарегистрированы и отвечают» перенесено в Тогда (а); близнец (б) —
+      непровязанное хранилище, отличие ровно в одном факте. Р15 пункт «служба», §7 строка Ф3-44 и
+      §8 инв. 2 согласованы. Оставшиеся упоминания external (строки 1253, 1988, 2096, 2786-2790) —
+      сторона края (Р15 «край», Ф3-12, Ф3-45), где ResolvedIdentityProvider существует.
+  - id: N1
+    status: снято
+    evidence: >-
+      §7.1 строка Ф1-60 — пробы в не-документном дереве нет (предикат → 0), снимать в коде нечего.
+non_blocking:
+  - id: N1
+    summary: >-
+      Перепись ведомости красна на 400262d9f (newman-suite-debt.py → «запись долга позиции Ф3-46
+      пережила предмет»); снятие записи и _HOLDER_F3_SWITCH_REMOVAL обязано войти в тот же запрос волны.
+  - id: N2
+    summary: >-
+      Заголовок Р15 «обе полосы посадки живут до S3» после редакции 17 верен только для края:
+      у службы посадка одна. Тело Р15 это говорит; заголовок при следующей правке уточнить.
+accepted_parts: >-
+  Правка ровно по записи круга 11; ID и счёт (53 метки, 51 живая) не тронуты; Ф3-45 и Ф3-12 не
+  задеты; Ф1 не правлен; отказ от сценария-замены для ветки external верен — свойство «ключ
+  отвергается» держит проба #363, второго места об одном предмете не заводится.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given Ф3-44 «профиль без ключа посадки» конструируем
+  деревом: ключа нет в deploy/values.prod.yaml и deploy/values.yaml (предикат §21 → 0), самоотчёт
+  называет own словом фундамента (bootposture.go:92).
+event_body: acceptance-reviewer · APPROVED · ccc4e472e2f762d02f50d2df33aca90f46dc71b68fc434c989322ca7e5a78389
