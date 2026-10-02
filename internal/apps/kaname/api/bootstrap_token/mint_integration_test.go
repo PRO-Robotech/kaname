@@ -127,7 +127,7 @@ func TestMintBootstrapToken_Idempotent_ReusesSA(t *testing.T) {
 		"exactly one mapping row (singleton invariant)")
 }
 
-// ── IBT-03: concurrency — exactly one bootstrap SA / one Hydra client ────────────
+// ── IBT-03: concurrency — exactly one bootstrap SA / one OAuth-client mapping ────
 
 func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 	dsn := setupTestDB(t)

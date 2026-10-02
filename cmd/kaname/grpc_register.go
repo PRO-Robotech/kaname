@@ -85,12 +85,12 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.permissionCatalogHandler != nil {
 		iamv1.RegisterPermissionCatalogServiceServer(srv, svcs.permissionCatalogHandler)
 	}
-	// SAKey (Class A static service-account keys via Hydra).
+	// SAKey (Class A static service-account keys; токен чеканит наш подписант).
 	// Workload Identity Federation (FederationExchangeService) removed.
 	if svcs != nil && svcs.saKeysHandler != nil {
 		iamv1.RegisterSAKeyServiceServer(srv, svcs.saKeysHandler)
 	}
-	// UserToken (персональные access-токены пользователя via Hydra). Public под
+	// UserToken (персональные access-токены пользователя, наша чеканка). Public под
 	// /iam/v1/users/{id}/tokens — зеркало SAKeyService на iam_user.
 	if svcs != nil && svcs.userTokensHandler != nil {
 		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)

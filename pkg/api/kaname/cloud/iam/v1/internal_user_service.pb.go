@@ -30,7 +30,7 @@ const (
 
 type UpsertFromIdentityRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// OIDC `sub` claim (Ory) — UNIQUE-key.
+	// Субъект личности (`sub` claim) — UNIQUE-key.
 	ExternalId string `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	// Email (case-insensitive). Required.
 	Email string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
@@ -145,16 +145,16 @@ func (x *UpsertFromIdentityMetadata) GetCreated() bool {
 	return false
 }
 
-// payload from Kratos recovery webhook.
+// payload of the recovery-completed callback.
 type OnRecoveryCompletedRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Kratos identity id (= kaname User.external_id) whose recovery just
+	// Identity id (= kaname User.external_id) whose recovery just
 	// completed.
 	ExternalId string `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	// Kratos recovery-flow id (used as idempotency key — `INSERT ... ON
+	// Recovery-flow id (used as idempotency key — `INSERT ... ON
 	// CONFLICT (recovery_jti) DO NOTHING`).
 	RecoveryJti string `protobuf:"bytes,2,opt,name=recovery_jti,json=recoveryJti,proto3" json:"recovery_jti,omitempty"`
-	// E-mail at which the recovery was completed (echo from Kratos identity
+	// E-mail at which the recovery was completed (echo from the identity
 	// traits — kaname matches it against `users.email` to defend against
 	// mismatched payloads).
 	Email         string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`

@@ -285,7 +285,8 @@ func (h *InternalHandler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*
 	return pb, nil
 }
 
-// OnRecoveryCompleted — Kratos password-recovery webhook. Mutation → async Operation.
+// OnRecoveryCompleted — recovery-completed callback of the retired external identity
+// provider (kaname#363); mounted, no caller in this tree. Mutation → async Operation.
 func (h *InternalHandler) OnRecoveryCompleted(ctx context.Context, req *iamv1.OnRecoveryCompletedRequest) (*operationpb.Operation, error) {
 	op, err := h.onRecovery.Execute(ctx, OnRecoveryCompletedInput{
 		ExternalID:  domain.ExternalSubject(req.GetExternalId()),

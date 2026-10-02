@@ -39,11 +39,11 @@ const (
 // Transport:
 //   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
 //   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`); REST вызывается
-//     OIDC-callback handler'ом.
+//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
+//     listener'а; вызывающий — admin-tooling.
 type InternalUserServiceClient interface {
-	// Upsert User mirror'а из OIDC identity (Ory Kratos).
-	// Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+	// Upsert User по субъекту личности (административный путь).
+	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
 	//
 	// REST exposed ONLY on the cluster-internal listener;
 	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
@@ -51,8 +51,9 @@ type InternalUserServiceClient interface {
 	UpsertFromIdentity(ctx context.Context, in *UpsertFromIdentityRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error)
-	// hook called by Ory Kratos after a successful
-	// self-service recovery flow (magic-link e-mail recovery). kaname
+	// callback of the retired external identity provider (kaname#363) after a
+	// successful self-service recovery flow (magic-link e-mail recovery); the
+	// method stays mounted, and no caller of it remains in this tree. kaname
 	// re-enables the User (if `invite_status` was `DISABLED`), invalidates all
 	// active sessions for the user (writes `session_revocations` rows with
 	// reason=`password-change`), and emits `iam.user.recovery_completed` audit.
@@ -111,11 +112,11 @@ func (c *internalUserServiceClient) OnRecoveryCompleted(ctx context.Context, in 
 // Transport:
 //   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
 //   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`); REST вызывается
-//     OIDC-callback handler'ом.
+//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
+//     listener'а; вызывающий — admin-tooling.
 type InternalUserServiceServer interface {
-	// Upsert User mirror'а из OIDC identity (Ory Kratos).
-	// Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+	// Upsert User по субъекту личности (административный путь).
+	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
 	//
 	// REST exposed ONLY on the cluster-internal listener;
 	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
@@ -123,8 +124,9 @@ type InternalUserServiceServer interface {
 	UpsertFromIdentity(context.Context, *UpsertFromIdentityRequest) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(context.Context, *GetUserRequest) (*User, error)
-	// hook called by Ory Kratos after a successful
-	// self-service recovery flow (magic-link e-mail recovery). kaname
+	// callback of the retired external identity provider (kaname#363) after a
+	// successful self-service recovery flow (magic-link e-mail recovery); the
+	// method stays mounted, and no caller of it remains in this tree. kaname
 	// re-enables the User (if `invite_status` was `DISABLED`), invalidates all
 	// active sessions for the user (writes `session_revocations` rows with
 	// reason=`password-change`), and emits `iam.user.recovery_completed` audit.

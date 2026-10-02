@@ -32,16 +32,11 @@
 // This service idempotently provisions a SINGLE bootstrap-admin ServiceAccount
 // (cluster `system_admin`) and mints a short-lived access-token for it.
 //
-// WHO SIGNS THAT TOKEN DEPENDS ON THE DEPLOYMENT, and this line used to claim
-// otherwise. It said "Hydra remains the issuer / signer; iam only brokers the
-// exchange (never re-signs)" — the claim outlived its subject (#1119). Today:
-//
-//   own minting declared → the PLATFORM signer mints it (internal/tokensigner,
-//                          wired through internal/bootstraptokenwire);
-//   not declared         → the provider mints it, brokered through the existing
-//                          client_credentials exchange, and the bootstrap-admin
-//                          gets a mirrored OAuth client (client_credentials +
-//                          private_key_jwt) as before.
+// THE PLATFORM SIGNER MINTS THAT TOKEN (internal/tokensigner, wired through
+// internal/bootstraptokenwire). This line used to say that the external
+// provider stays the signer and iam only brokers the exchange — the claim
+// outlived its subject (#1119); the provider and both roads to it were removed
+// (kaname#363), and a production start without own minting is refused.
 //
 // Only the requested `audience` differs from the registry lane —
 // `https://{API_DOMAIN}` vs the registry service.
@@ -134,7 +129,7 @@ func (*MintBootstrapTokenRequest) Descriptor() ([]byte, []int) {
 // MintBootstrapTokenResponse — the minted bootstrap Bearer.
 type MintBootstrapTokenResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The RS256 JWT access-token (Hydra-signed; `alg=RS256`, Hydra `kid`). The
+	// The RS256 JWT access-token (signed by the platform signer; `alg=RS256`, its `kid`). The
 	// gateway accepts it as a valid production-mode Bearer.
 	//
 	// Помечен носителем секрета: это привилегированный предъявитель. Ответ

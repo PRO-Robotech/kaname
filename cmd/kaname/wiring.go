@@ -811,7 +811,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ── SAKey wiring (Class A static SA keys of service accounts) ─────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
-	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
+	// ── UserToken wiring (персональные access-токены пользователя, наша чеканка) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
 
 	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
@@ -987,10 +987,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// RBAC rules-model G — public grantable role-rule catalog.
 		permissionCatalogHandler: permissionCatalogHandler,
 
-		// SAKey (Class A static keys via Hydra).
+		// SAKey (Class A static keys; токен чеканит наш подписант).
 		saKeysHandler: saKeysH,
 
-		// UserToken (персональные access-токены пользователя via Hydra).
+		// UserToken (персональные access-токены пользователя, наша чеканка).
 		userTokensHandler: userTokensH,
 
 		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.

@@ -27,8 +27,8 @@ const (
 
 // A ServiceAccount resource. Machine-identity (non-human) субъект внутри Account.
 //
-// Текущая поверхность — только CRUD без key-credentials. Key-creds RPC (CreateKey/ListKeys через Ory Hydra
-// client_credentials, OAuth2 token endpoint) появятся позже.
+// Поверхность ресурса — только CRUD без key-credentials. Ключи служебной учётки —
+// отдельный сервис `SAKeyService`; токен по ключу чеканит токен-эндпоинт платформы.
 //
 // Служебная учётка привязана к Account'у; `enabled` решает, вправе ли она
 // аутентифицироваться.

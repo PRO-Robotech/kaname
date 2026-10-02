@@ -10,8 +10,9 @@
 |--------|---------------------------------------------|-----------------------------|
 | `:9090`| Публичный gRPC (tenant-facing API)          | TLS + validated JWT         |
 | `:9091`| Cluster-internal gRPC (service→service)     | **mTLS** (verified client-cert) |
-| `:9092`| AuthN-webhooks Ory (Kratos provision, Hydra token/refresh) + `/healthz`,`/readyz` | cluster-internal HTTP |
-| `:9095`| Prometheus `/metrics`                        | cluster-internal            |
+| `:9095`| Диагностика: `/metrics`, `/healthz`, `/readyz` | cluster-internal            |
+| `:9096`| Выдача токенов (`/iam/token`, `/iam/v1/token`, церемония OAuth) | server-TLS |
+| `:9097`| Наборы проверочных ключей + авторитет отзыва | cluster-internal, server-TLS |
 
 `Internal*`-сервисы (`InternalIAMService`, `InternalUserService`,
 `InternalClusterService`, …) живут **только** на `:9091` и никогда не публикуются на

@@ -132,8 +132,8 @@ sequenceDiagram
 ```bash
 kubectl -n kacho port-forward svc/kaname 9091:9091 &
 
-# LookupSubject by external_id (OIDC sub from Ory).
-grpcurl -plaintext -d '{"external_id":"ory-sub-xyz"}' localhost:9091 \
+# LookupSubject by external_id (субъект личности).
+grpcurl -plaintext -d '{"external_id":"sub-xyz"}' localhost:9091 \
   kaname.cloud.iam.v1.InternalIAMService/LookupSubject
 
 # Check. Тройка называется subject_id / relation / object — все три строки в
@@ -143,9 +143,9 @@ grpcurl -plaintext -d '{
   "subject_id":"user:usr_alice","relation":"editor","object":"project:prj_yyy"
 }' localhost:9091 kaname.cloud.iam.v1.InternalIAMService/Check
 
-# UpsertFromIdentity (api-gateway после OIDC).
+# UpsertFromIdentity (административный путь; внешнего вызывающего нет).
 grpcurl -plaintext -d '{
-  "external_id":"ory-sub-xyz","email":"alice@example.com","display_name":"Alice"
+  "external_id":"sub-xyz","email":"alice@example.com","display_name":"Alice"
 }' localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 
 # PollSubjectChanges (api-gateway cache invalidation poll).

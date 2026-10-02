@@ -7,9 +7,9 @@ package audit_test
 // UpsertFromIdentity insert-branch → iam.user.created;
 // activate-invite update-branch → iam.user.updated; Delete → iam.user.deleted.
 //
-// UpsertFromIdentity is the InternalUserService bootstrap/provision path (Kratos
-// hook + admin-tooling). When no caller principal is present (Kratos provision)
-// the actor is the system/bootstrap identity — recorded, never fabricated.
+// UpsertFromIdentity is the InternalUserService bootstrap/provision path
+// (admin-tooling). When no caller principal is present (provision without a
+// JWT) the actor is the system/bootstrap identity — recorded, never fabricated.
 // Delete runs through the public UserService.Delete (self-delete).
 
 import (
@@ -28,7 +28,7 @@ func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// No caller principal → Kratos-provision bootstrap path. actor = system/bootstrap.
+	// No caller principal → provision bootstrap path. actor = system/bootstrap.
 	bootstrapCtx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "bootstrap", DisplayName: "kaname-bootstrap"})
 
@@ -47,11 +47,11 @@ func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
 	r := requireOneAuditRow(ctx, t, env.pool, "iam.user.created", usrID)
 	require.Equal(t, "user", r.payload["resource_type"])
 	require.Equal(t, usrID, r.payload["resource_id"])
-	// Kratos-provision has no user principal → IsAnonymous(bootstrap)=true →
+	// Provision without a principal → IsAnonymous(bootstrap)=true →
 	// PrincipalUserID="" → the use-case records the non-fabricated system
 	// identity "system" (never an invented user id). 5.2-14.
 	require.Equal(t, "system", r.payload["actor"],
-		"Kratos-provision actor is the system identity, never fabricated")
+		"provision actor is the system identity, never fabricated")
 	require.Regexp(t, evtIDFormat, r.id)
 
 	// Здесь стояло требование, чтобы нагрузка НЕСЛА почту и отображаемое имя.

@@ -27,12 +27,12 @@ type ReaderIface interface {
 	// для активации pending-invites при first-login.
 	FindPendingByEmail(ctx context.Context, email domain.Email) ([]domain.User, error)
 
-	// FindActiveByExternalID — все ACTIVE-row'ы по identity (Kratos sub) через
+	// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
 	// все Account'ы. Используется в UpsertFromIdentity чтобы определить,
 	// нужен ли bootstrap новый Account.
 	FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
 
-	// FindByExternalIDInStatuses — все row'ы по identity (Kratos sub) через все
+	// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 	// Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at
 	// ASC. В отличие от FindActiveByExternalID (ACTIVE-only), этот reader видит
 	// и BLOCKED-row'ы — recovery обязан их находить и re-enable'ить

@@ -12,10 +12,10 @@
   единственный User (`owner_user_id`).
 - **Project** — рабочее пространство-контейнер ресурсов внутри Account; уникальное имя
   per-Account; операция Move (atomic CAS).
-- **User** — mirror identity, заполняется AuthN-хуком при первом входе.
-- **ServiceAccount** — машинная identity. Ключ к ней — своя строка реестра; зеркало
-  OAuth2-клиента у внешнего поставщика заводится только там, где своя чеканка не объявлена
-  (`architecture/sa-key-issuance-leaves-the-provider.md`).
+- **User** — личность человека; заводится собственной регистрацией службы либо
+  приглашением.
+- **ServiceAccount** — машинная identity. Ключ к ней — своя строка реестра; зеркала
+  OAuth2-клиента на стороне не заводится (`architecture/sa-key-issuance-leaves-the-provider.md`).
 - **Group** — набор субъектов (User / ServiceAccount) для group-grant.
 - **Role** — набор permission'ов формата `<module>.<resource>.<verb>`; system-роли
   (seed с детерминированными id) + custom-роли per-Account.
@@ -39,14 +39,17 @@
 - **Cluster-admin grants** — internal-only `InternalClusterService`: time-bombed либо
   permanent привязки cluster-admin.
 
-**AuthN-плоскость** (интеграция с Ory):
+**AuthN-плоскость** (собственная, внешнего поставщика личности нет):
 
-- **Hooks-listener** принимает webhooks Ory Hydra (`token` / `refresh`) и Ory Kratos
-  (`provision`): на регистрации/входе вызывается `UpsertFromIdentity` — bootstrap
-  Account/Project/AccessBinding для нового identity либо активация PENDING-invite.
-- **SAKeyService** выдаёт Class A static service-account-ключи. Токен по такому ключу
-  выпускает НАШ подписант на переведённом контуре и внешний поставщик — на непереведённом;
-  признак перевода — объявленный токен-эндпоинт платформы.
+- **Полоса входа паролем** (`internal/handler/loginlanehttp`, слушатель по адресу
+  `api-server.login-lane-endpoint`, вызывающий — край по mTLS) выдаёт нашу сессию
+  человека (`InternalHumanSessionService`); **регистрация**
+  (`internal/apps/kaname/api/registration`) заводит личность.
+- **Поверхность выдачи** (`:9096`): docker-token, токен-эндпоинт платформы и церемония
+  OAuth `authorization_code` (`internal/handler/ceremonyhttp`). Токены чеканит сама
+  служба; публичные половины ключей и авторитет отзыва — на cluster-internal `:9097`.
+- **SAKeyService** выдаёт Class A static service-account-ключи; токен по ключу
+  выпускает НАШ подписант на токен-эндпоинте платформы.
 
 **Что делает:**
 
@@ -55,13 +58,12 @@
 - авторизует запросы (вердикт реляционной формы + условия);
 - записывает намерение об отношении в журнал `fga_outbox` внутри writer-tx, откуда
   триггер складывает прямой факт;
-- обслуживает AuthN-хуки Ory и выдает SA-ключи.
+- ведёт вход, сессию и выдачу токенов, выдаёт SA-ключи.
 
 **Что НЕ делает:**
 
 - не валидирует JWT — это работа `api-gateway`, который сверяет подпись по набору ключей
   ОБЪЯВЛЕННОГО издателя (издателей принимается несколько);
-- не управляет паролями пользователей — Ory Kratos;
 - не хранит OAuth `client_secret` в plaintext — отдаёт один раз и redact'ит; приватную
   половину подписной пары не хранит вовсе;
 - не выносит решение о доступе за пределы своей базы — вердикт складывается там же,
@@ -69,7 +71,7 @@
 
 ## Топология процесса
 
-`kaname` (бинарник `cmd/kaname`) поднимает четыре сетевых слушателя и набор
+`kaname` (бинарник `cmd/kaname`) поднимает пять сетевых слушателей по умолчанию и набор
 фоновых worker'ов в одном процессе. Параллельный запуск — через
 `golang.org/x/sync/errgroup` с общим shutdown-триггером
 (SIGTERM / SIGINT или первая ошибка задачи).
@@ -80,8 +82,9 @@ flowchart LR
         direction TB
         gRPCpub[":9090 public gRPC<br/>TLS-terminated<br/>tenant API"]
         gRPCint[":9091 internal gRPC<br/>mTLS<br/>admin/peer API"]
-        hooks[":9092 HTTP<br/>Ory hooks + health"]
-        metrics[":9095 HTTP<br/>Prometheus /metrics"]
+        metrics[":9095 HTTP<br/>/metrics + /healthz /readyz"]
+        issuing[":9096 HTTP<br/>выдача токенов"]
+        keys[":9097 HTTP<br/>наборы ключей + отзыв"]
 
         lro[(LRO operations worker<br/>+ orphan-reconciler)]
         bootDr[(bootstrap-admin reconciler)]
@@ -96,8 +99,8 @@ flowchart LR
     Compute[kacho-compute] -- Check / RegisterResource --> gRPCint
     NLB[kacho-nlb] -- Check / RegisterResource --> gRPCint
 
-    Hydra[Ory Hydra] -- token / refresh hook --> hooks
-    Kratos[Ory Kratos] -- provision hook --> hooks
+    APIGW -- выдача токенов --> issuing
+    APIGW -- наборы ключей / introspect --> keys
 
     iam --- Postgres[("Postgres<br/>schema kaname")]
 ```
@@ -117,10 +120,12 @@ flowchart LR
 |------|----------|-----------------------------------------------------|----------------------------------|
 | 9090 | gRPC+TLS | public-API (tenant)                                 | `api-server.endpoint`            |
 | 9091 | gRPC+mTLS| internal-API (admin, peer-call)                     | `api-server.internal-endpoint`   |
-| 9092 | HTTP     | Ory hooks (Hydra token/refresh, Kratos provision) + `/healthz` `/readyz` | `authn.hooks-http-endpoint` |
-| 9095 | HTTP     | Prometheus `/metrics`                               | `api-server.metrics-endpoint`    |
+| 9095 | HTTP     | `/metrics` + `/healthz` `/readyz`                   | `api-server.metrics-endpoint`    |
+| 9096 | HTTP     | выдача токенов (`/iam/token`, `/iam/v1/token`, церемония OAuth) | `api-server.registry-token.endpoint` |
+| 9097 | HTTP     | cluster-internal: наборы проверочных ключей + авторитет отзыва | `api-server.jwks-proxy.endpoint` |
 
-Все четыре слушателя поддерживают per-edge TLS (default-off в dev, fail-closed в
+Слушателя обратных вызовов внешнего поставщика (`:9092`) нет — он снят вместе с
+поставщиком (kaname#363). Все слушатели поддерживают per-edge TLS (default-off в dev, fail-closed в
 production: internal :9091 и public :9090 обязаны нести mTLS/TLS, иначе процесс не
 стартует).
 
@@ -137,8 +142,6 @@ C4Context
 
     Person(tenant, "Tenant user / Service account", "Через api-gateway")
     Person(admin, "Cluster admin / oncall", "Через internal-tooling")
-    System_Ext(kratos, "Ory Kratos", "Identity / login")
-    System_Ext(hydra, "Ory Hydra", "Interactive login; issuer where own minting is off")
 
     System_Boundary(kacho, "Kachō cluster") {
         System(apigw, "kacho-api-gateway", "Edge REST/gRPC, JWT")
@@ -155,9 +158,7 @@ C4Context
     Rel(vpc, iam, "Check / RegisterResource :9091")
     Rel(compute, iam, "Check / RegisterResource :9091")
     Rel(nlb, iam, "Check / RegisterResource :9091")
-    Rel(kratos, iam, "provision hook")
-    Rel(hydra, iam, "token / refresh hook")
-    Rel(iam, hydra, "OAuth2 client (interactive; mirror where own minting is off)")
+    Rel(apigw, iam, "login lane (mTLS), token issuing :9096, key sets :9097")
     Rel(iam, pg, "pgxpool (master + read-replica)")
 ```
 
@@ -199,9 +200,9 @@ apps/kaname/
   seed/              # system-role seed, bootstrap-admin, backfill/verify, workers.
 repo/kaname/          # Reader/Writer port-interfaces (CQRS).
 repo/kaname/pg/       # pgxpool + dto-mapping. Реализует Reader/Writer.
-clients/             # peer-clients (Hydra, api-gateway authz-cache).
-handler/             # тонкий gRPC transport (operation handler).
-handler/iamhooks/    # HTTP-хуки Ory (token / refresh / provision) + health.
+clients/             # исходящие клиенты (почта приглашений, проверка утечек паролей).
+handler/             # HTTP-поверхности: diagnostics, loginlanehttp, ceremonyhttp,
+                     # clienttokenhttp, registrytokenhttp, jwksproxyhttp, tokenintrospecthttp.
 authzguard/          # caller-policy + anti-anonymous + viewer/acr-floor интерсепторы.
 migrations/          # embed.FS goose-миграции.
 errors/              # sentinel + WrapPgErr.
@@ -335,9 +336,6 @@ sequenceDiagram
 **Runtime-зависимости (peer):**
 
 - Postgres 16 — schema `kaname`.
-- Ory Hydra — интерактивный вход человека (`authorization_code`) на любой посадке; на
-  непереведённом контуре ещё и издатель программных токенов с зеркалами клиентов.
-- Ory Kratos — identity / login (provision-хук).
 - api-gateway — edge JWT-валидация и REST-проекция.
 
 ## Дальнейшее чтение

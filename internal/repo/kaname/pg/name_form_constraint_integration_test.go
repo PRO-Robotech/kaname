@@ -139,7 +139,7 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 					        VALUES ($1, $2, $3, ARRAY['https://console.example/cb'], 'none')`,
 						[]any{
 							fmt.Sprintf("ic-%017d", seq),
-							fmt.Sprintf("hydra-ic-%d", seq),
+							fmt.Sprintf("client-ic-%d", seq),
 							name,
 						}
 				},

@@ -17,8 +17,8 @@ import (
 // TestRegistryTokenListener_ConfiguredSeparatePort — the composition root must
 // expose the Docker Registry v2 `/iam/token` auth-server on its OWN
 // external-reachable port (default :9096), never sharing the public/internal
-// gRPC surfaces or the cluster-internal hooks (:9092) / metrics (:9095)
-// listeners. Behavioural check against the loaded config.
+// gRPC surfaces or the cluster-internal metrics (:9095) / key-set publisher
+// (:9097) listeners. Behavioural check against the loaded config.
 func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	cfg, err := config.Load("")
 	if err != nil {

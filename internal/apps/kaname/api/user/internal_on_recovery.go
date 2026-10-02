@@ -5,8 +5,10 @@ package user
 
 // internal_on_recovery.go — InternalUserService.OnRecoveryCompleted.
 //
-// Ory Kratos delivers this webhook (via api-gateway) after a successful
-// self-service password-recovery flow. kaname:
+// Its caller was the retired external identity provider (kaname#363), after a
+// self-service password-recovery flow; the method stays mounted, and our own
+// recovery runs through the sign-in lane (`/iam/v1/auth/recovery/complete`).
+// kaname:
 //
 //   1. validates the payload (all three fields required + length) — sync,
 //      before spawning the Operation (malformed → INVALID_ARGUMENT);
@@ -41,7 +43,7 @@ package user
 // одного её мало: у персонального токена доступа обновления нет, и такой токен
 // не пересматривался бы вовсе.
 //
-// The idempotency key is the flow-scoped recovery_jti (one Kratos recovery flow
+// The idempotency key is the flow-scoped recovery_jti (one recovery flow
 // = one event), NOT (user_id): one identity may own N User-rows across N
 // Accounts, and recovery changes the identity credential as a whole → revoke
 // touches all its live sessions.

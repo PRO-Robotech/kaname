@@ -144,10 +144,10 @@ type APIServerConfig struct {
 	MetricsEndpoint string `mapstructure:"metrics-endpoint"`
 	// RegistryToken — the Docker Registry v2 `/iam/token` auth-server HTTP
 	// listener. A SEPARATE, EXTERNAL-reachable plaintext port (default
-	// `tcp://0.0.0.0:9096`; TLS terminated at the ingress, like the hooks /
-	// metrics listeners) — docker clients hit `/iam/token` through the edge to
+	// `tcp://0.0.0.0:9096`; TLS terminated at the ingress, like the metrics
+	// listener) — docker clients hit `/iam/token` through the edge to
 	// exchange an SA-key for a short-lived identity-JWT. Distinct from the
-	// cluster-internal hooks (:9092) and metrics (:9095) listeners. Empty
+	// cluster-internal metrics (:9095) and key-set (:9097) listeners. Empty
 	// endpoint disables it.
 	RegistryToken RegistryTokenConfig `mapstructure:"registry-token"`
 	// RESTEndpoint — собственный ПУБЛИЧНЫЙ REST-фронт службы.
@@ -464,7 +464,7 @@ func (a AuthNConfig) TrustedForwarders() grpcsrv.TrustedForwarders {
 // BootstrapMintConfig — authn.bootstrap-mint section: the non-interactive
 // cluster-admin token mint (#58).
 //
-// The mint hands out a Hydra-signed RS256 Bearer for a cluster `system_admin`
+// The mint hands out a Bearer signed by our own signer for a cluster `system_admin`
 // ServiceAccount. It cannot be gated by a ReBAC relation (it exists to obtain the
 // FIRST token, when no relation exists yet) and it must NOT be gated by network
 // position, so its credential is the CALLER'S CLIENT CERTIFICATE: only the SPIFFE

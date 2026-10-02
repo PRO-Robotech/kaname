@@ -30,7 +30,7 @@ func TestUser_Validate_AcceptsRowWithoutAccount(t *testing.T) {
 		AccountID:    "acc_00000000000000000",
 		Email:        "u@example.com",
 		InviteStatus: InviteStatusActive,
-		ExternalID:   "kratos-sub-abc",
+		ExternalID:   "sub-abc",
 	}
 
 	// Положительный контроль: валидатор в принципе пропускает годную строку.
