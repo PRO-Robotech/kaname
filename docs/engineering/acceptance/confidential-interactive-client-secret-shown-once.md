@@ -14,6 +14,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > 2026-09-26 · круг 2 · APPROVED · `6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325` ·
 > `docs/specs/reviews/confidential-interactive-client-secret-shown-once/6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325.yaml`
 > (строка вписана редакцией 3, как велит запись круга 2: вердикт — о редакции 2 и на правки после неё не переносится)
+> 2026-10-02 · круг 3 · CHANGES_REQUESTED · `249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5` ·
+> `docs/specs/reviews/confidential-interactive-client-secret-shown-once/249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5.yaml`
+> (строка вписана редакцией 4)
 > **Дата:** 2026-09-26
 > **Редакция:** 2 (круг 2). Документ правлен ПОСЛЕ вердикта круга 1 (CHANGES_REQUESTED на редакцию 1,
 > отпечаток `f1786b6a…`); строка состояния не тронута; что и по какой находке изменено — §9.
@@ -21,6 +24,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > снятию посадки внешнего поставщика (`kaname#363`, волна `kaname#497`). Прежде неё дерево уже правило
 > документ снятием `#363` (коммит `69e61c563`: §1 строка 2, общие Given §4) — отпечаток `4f8a8c66…`, записи
 > ревью у него нет. Состав редакции 3 и довод — §10; строка состояния не тронута.
+> **Редакция 4** — правка ПОСЛЕ вердикта круга 3 (CHANGES_REQUESTED на редакцию 3, отпечаток `249b53cd…`):
+> дом сквозного уровня назван по дереву — набор края платформы и набор церемонии службы. Состав — §11.
 > **Задача:** `PRO-Robotech/kaname#405` (волна-3 `#366`, эпик службы `#357`); эпик платформы `PRO-Robotech/kacho#2564`
 > **Дом:** `PRO-Robotech/kaname`, `docs/engineering/acceptance/` — предмет внутри одной службы:
 > исполнитель заведения, контракт ресурса, хранение проверочного значения и зачистка — всё в службе.
@@ -96,7 +101,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | 11 | пометка поля-носителя и её читатели | `proto/kaname/cloud/iam/v1/secret_options.proto`; перечень подметальщика `cmd/kaname/secret_backstop.go`; гейт `TestBAT1_73_EverySecretBearingOperationResponseFieldIsInTheSweeperLedger` | помечено 7 полей; в перечне подметальщика 2 типа ответа (ключ служебной учётки, токен пользователя) | `git grep -n 'secret_bearing) = true' origin/366 -- proto \| wc -l` → 7; `git grep -n 'ResponseType: ' origin/366 -- cmd/kaname/secret_backstop.go` → 2 записи перечня |
 | 12 | снятие материала при снятии клиента | `internal/repo/kaname/pg/own_interactive_client_provider.go` (`Deregister`) + удаление строки глаголом `Delete` | есть: строка уходит первой, снятие идемпотентно на её отсутствии; держит `TestIntegration_OwnInteractiveClientDeregistrationLeavesNoSecretBehind` — и та же проба закрепляет способ `none` | чтение пробы, `require.Equal(t, "none", …)` |
 | 13 | аудит и лента подписки ресурса | `internal/apps/kaname/api/interactive_client/` | нет ни того, ни другого: путей записи у выдачи три — ответ, строка операции, строка ресурса — плюс журнал службы | `git grep -n -i audit origin/366 -- internal/apps/kaname/api/interactive_client/ \| wc -l` → 0 |
-| 14 | читатели тела ответа операции `Create` | служба, Go: `internal/apps/kaname/api/interactive_client/name_canon_test.go` (строка 33); служба, сквозной набор: `tests/newman/cases/iam-interactive-client.py`; платформа: `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py` | проба службы разбирает тело целиком как `InteractiveClient` — при смене типа ответа она переписывается тем же изменением; набор и посев читают `metadata.interactiveClientId` и затем `Get`, тела `response` не разбирают — только факт его наличия | Go: `git grep -n 'GetResponse().UnmarshalTo' origin/366 -- internal/apps/kaname/api/interactive_client/` → 1 (на ветке 425 — тот же 1); перепись шире — все файлы Go вне сгенерированного кода, которые разбирают `Any` (`UnmarshalTo`, `UnmarshalNew`) и называют `InteractiveClient`, — тот же один файл на обеих ревизиях; newman: `grep -n 'j\.response' tests/newman/cases/iam-interactive-client.py tests/newman/scripts/gen.py` → 1 (проверка наличия); в `prodseed_ceremony.py` обращений к `response` 0 |
+| 14 | читатели тела ответа операции `Create` | служба, Go: `internal/apps/kaname/api/interactive_client/name_canon_test.go` (строка 33); платформа, сквозной набор края: `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py` (ветка эпика `2564` @ `5a5e3870efe`; на `main` @ `bea4495e934` файла нет); платформа, посев: `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py` | проба службы разбирает тело целиком как `InteractiveClient` — при смене типа ответа она переписывается тем же изменением; набор края уже написан под новый тип: читает `response["@type"]` как `CreateInteractiveClientResponse`, `response.interactiveClient` и `response.clientSecret` (IC-SECRET-01) и видит контракт службы через пин края (Р8); посев читает `metadata.interactiveClientId` и затем `Get`, тела `response` не разбирает | Go: `git grep -n 'GetResponse().UnmarshalTo' origin/366 -- internal/apps/kaname/api/interactive_client/` → 1 (на ветке 425 — тот же 1); перепись шире — все файлы Go вне сгенерированного кода, которые разбирают `Any` (`UnmarshalTo`, `UnmarshalNew`) и называют `InteractiveClient`, — тот же один файл на обеих ревизиях; набор края: `git show origin/2564:gateway/tests/newman/cases/iam-interactive-client.py \| grep -c 'j\.response'` → 9 (в репозитории платформы); в дереве службы файла нет — снят коммитом `13d26776f` (`#415`, держатель переезда `PRO-Robotech/kacho#2913`, сторона службы `kaname#416`): `git ls-files tests/newman/cases \| grep -c interactive-client` → 0 на `553`; в `prodseed_ceremony.py` обращений к `response` 0 |
 | 15 | край платформы, проксирующий ресурс | `PRO-Robotech/kacho:gateway/internal/restmux/mux.go` (`RegisterInternalInteractiveClientServiceHandlerFromEndpoint`) при пине службы `v0.4.1-0.20260917085954-16b5cadead2a` | переводит ответ в JSON своим реестром типов: тип ответа, которого нет в пине, край не разберёт | чтение `PRO-Robotech/kacho:gateway/internal/restmux/mux.go` на `origin/main` платформы @ `1d42a6728bf` (строки 829–840) и строки пина службы в `PRO-Robotech/kacho:go.mod` (строка 120) |
 | 16 | ссылки посева на `#405` как на отсутствующего производителя | ветка 425: `.github/scripts/newman-suite-debt.py`, tests/newman/cases/kaname-authorization-code.py, tests/newman/environments/local.postman_environment.template.json | 8 строк в 3 файлах: «производителя конфиденциального клиента у продукта нет (kaname#405), поэтому это посев» | `git grep -n 'kaname#405' origin/425 -- tests .github \| wc -l` → 8; из них называют производителя отсутствующим — все 8: `git grep -n -e 'нет (kaname#405)' -e 'ПУБЛИЧНЫМ (kaname#405)' origin/425 -- tests .github \| wc -l` → 8, на `origin/366` → 0 |
 | 17 | посадка стенда | `deploy/values.prod.yaml` | ключа посадки нет: он снят `kaname#363`, его подача чарту — отказ рендера; посадка одна, `own`, стенд — задание `chart-own` | `git grep -n identityProvider -- deploy/values.prod.yaml` → 0; отказ держит `deploy/retired_posture_key_test.go` |
@@ -234,13 +239,14 @@ integration (testcontainers, применённые миграции, компо
 
 **Общие Given — все конструируются посевом, ни одно не берётся со стенда на веру:**
 - *посадка `own`* — I: композиционный корень выбирает собственный реестр (как
-  `TestCompositionRoot_InteractiveClientCreateHasAnExecutor`); E: стенд задания
-  `chart-own`;
+  `TestCompositionRoot_InteractiveClientCreateHasAnExecutor`); E: для 06 — стенд задания
+  `chart-own` службы; для 01, 04, 08, 09, 10 — стенд платформы под посадкой `own`, где их гоняет
+  набор края (§7 п.7);
 - *вызывающий* — машинный принципал `system_admin` на внутреннем листенере (посев учётки бутстрапа;
   пол `"2"` у `Create`/`Update`/`Delete` снимает только машинный принципал — довод IAM-INT-1, здесь
   не повторяется);
-- *адрес возврата R* — `https://api.kacho.local/auth/callback`, то же значение, что `GOOD_REDIRECT`
-  набора `tests/newman/cases/iam-interactive-client.py`; K заводится с `redirectUris = [R]` (01),
+- *адрес возврата R* — `https://api.kacho.local/auth/callback`, то же значение, что `REDIRECT`
+  набора края `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`; K заводится с `redirectUris = [R]` (01),
   то есть R — это `redirectUris[0]` заведения 01;
 - *клиент K и секрет S* — K заведён глаголом `Create` сценария 01 в том же прогоне; S — значение
   `response.clientSecret` из ответа того вызова, сохранённое пробой как секретная величина (в отчёт
@@ -366,9 +372,7 @@ LINE-A-1-10, здесь не переутверждаются)
 **And** тело ответа не содержит S ни как подстроку; поля под секрет или проверочное значение у
 сообщения ресурса нет (Р4)
 **And** сверка — **по значению** S, а не образцом имени: образец `client_secret` совпадает с законным
-значением способа `client_secret_basic` и краснел бы на верном ответе (так устроена нынешняя проверка
-посадки `external` в `tests/newman/cases/iam-interactive-client.py` — там способ `none`, и образец
-законен только там)
+значением способа `client_secret_basic` и краснел бы на верном ответе
 **And** положительный контроль: в теле есть `id` и `clientId` K, и S в тот же момент проходит обмен
 (06) — секрет существует, его нет в ответе
 
@@ -546,11 +550,24 @@ InteractiveClient.Create` стоит и сообщением статуса, и 
 7. **Строгий TDD** (ban #12): падающая проба до кода на каждый сценарий §4. Уровни: integration на
    01–05, 07–10, 12, 13; гейт по дереву — 03 (одноместность записи) и 12; сквозь композиционный
    корень с провязанной церемонией — 06 (обе отрицательные ветки: (а) с `client_id` в форме, (б) с
-   искажённым секретом в заголовке) и 07 (после сведения с `425`); newman на стенде посадки `own`
-   (задание `chart-own`) — 01, 04, 06, 08, 09, 10;
+   искажённым секретом в заголовке) и 07 (после сведения с `425`); сквозной уровень — по дому,
+   который ему назначает ведомость службы `.github/scripts/newman-suite-debt.py`:
+   - 06 — набор церемонии службы `tests/newman/cases/kaname-authorization-code.py` на стенде
+     задания `chart-own` (случаи 10 и 12 набора);
+   - 01, 04, 08, 09, 10 — набор края платформы
+     `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`, шаг
+     «гейт — newman зелёный (api-gateway)» `.github/workflows/e2e-newman.yml` платформы, на стенде
+     платформы под посадкой `own`: стенд `chart-own` службы ходит REST-ом, а круг вызывающих
+     глаголов интерактивного клиента — край. В ведомости это записи `SCENARIO_HOME`, а не долг;
+     держатель переезда — `PRO-Robotech/kacho#2913`, сторона службы — `kaname#416`;
    позиция 11 снята редакцией 3 вместе с посадкой `external` (`kaname#363`; §4, группа E).
-   Новая коллекция получает запись в ведомости `.github/scripts/newman-suite-debt.py`; позиция,
-   которую `chart-own` ещё не гоняет, остаётся записью долга с держателем, а не зелёным.
+   Позиция, у которой ни модуля службы, ни записи дома нет, остаётся записью долга с держателем,
+   а не зелёным.
+   Проба слоя use-case `TestCreate_IC11_PublicClientAnswersWithAnEmptySecret` переводится тем же
+   запросом волны `kaname#497`, что снимает запись долга `IC-SECRET-11` (§4, группа E): имя и
+   комментарий перестают называть снятый ID. Пройдено, когда
+   `git grep -n -e 'IC11' -e 'IC-SECRET-11' -- internal cmd tests .github | wc -l` → 0 на голове
+   запроса волны, а проба зелена под новым именем.
 8. **Посев ветки 425**: строки, называющие `kaname#405` отсутствующим производителем (§1 строка 16),
    на сведённой ветке — 0:
    `git grep -n -e 'нет (kaname#405)' -e 'ПУБЛИЧНЫМ (kaname#405)' -- tests .github | wc -l` → 0
@@ -607,3 +624,29 @@ InteractiveClient.Create` стоит и сообщением статуса, и 
 
 **Не тронуты:** ID и «Дано», «Когда», «Тогда» сценариев 01–10, 12, 13; решения Р1–Р8 по существу; §2
 кроме довода (3) Р1; §6; §7 кроме п.7; §8; §9. Сценариев 12 живых из 13 меток (01–13 без 11).
+
+---
+
+## §11 Редакция 4 — по записи ревью круга 3
+
+Запись — `docs/specs/reviews/confidential-interactive-client-secret-shown-once/249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5.yaml`.
+Перемерено на ветке `553` @ `cc8f8d352`; дом набора края — `PRO-Robotech/kacho`, ветка эпика `2564` @ `5a5e3870efe`.
+
+```sh
+# ДОМ: PRO-Robotech/kaname, ветка 553
+git ls-files tests/newman/cases | grep -c interactive-client                 # → 0: файла в службе нет
+grep -n '_HOME_IC_SECRET' .github/scripts/newman-suite-debt.py               # → дом 01, 04, 08, 09, 10 — набор края
+grep -n 'IC-SECRET-06' tests/newman/cases/kaname-authorization-code.py       # → 06 — набор церемонии службы
+# ДОМ: PRO-Robotech/kacho
+git ls-tree -r --name-only origin/2564 | grep -c 'gateway/tests/newman/cases/iam-interactive-client.py'   # → 1
+git ls-tree -r --name-only origin/main | grep -c 'gateway/tests/newman/cases/iam-interactive-client.py'   # → 0
+```
+
+| находка | род | что изменено |
+|---|---|---|
+| B1 (блокирующая) | PRODUCER | §1 строка 14 — читатель тела ответа `Create` на сквозном уровне — набор края платформы с координатой и ревизией; он уже разбирает новый тип ответа и видит контракт через пин (Р8). §4 общие Given — посадка E разведена по дому (06 — `chart-own`, прочие — стенд платформы); R равен `REDIRECT` набора края. IC-SECRET-08, третье And — снят довод о проверке снятой посадки в снятом файле; утверждение «сверка по значению S, а не образцом имени» и его причина — прежние. DoD п.7 — сквозной уровень по `SCENARIO_HOME` ведомости службы, держатели `kacho#2913` и `kaname#416` |
+| N1 | DoD | DoD п.7 — перевод пробы `TestCreate_IC11_PublicClientAnswersWithAnEmptySecret` назван изменением (запрос волны `kaname#497`) и предикатом пройденности |
+| N2 | — | правки документа не требует: запись долга `IC-SECRET-11` и держатель `_HOLDER_EXTERNAL_LANDING_REMOVAL` снимаются тем же запросом волны (§4, группа E) |
+
+**Не тронуты:** ID, «Дано», «Когда» и «Тогда» сценариев, кроме довода в третьем And IC-SECRET-08;
+решения Р1–Р8; §2, §3, §5, §6, §8, §9, §10. Сценариев 12 живых из 13 меток.

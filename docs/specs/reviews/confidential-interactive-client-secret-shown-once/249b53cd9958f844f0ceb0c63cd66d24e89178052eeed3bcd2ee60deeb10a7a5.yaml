@@ -1,0 +1,85 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/confidential-interactive-client-secret-shown-once.md
+  sha256: 249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: b90430b42
+  content_commit: cc8f8d352771825c099a98f9b56e3592195083ee
+  branch: '553'
+  worktree: tmp/kn-553
+  pull_request: null
+  task: PRO-Robotech/kaname#553
+  wave: PRO-Robotech/kaname#497
+  subject_task: PRO-Robotech/kaname#363
+  lines: 609
+  round: 3
+  round_note: круг 1 снятия позиции IC-SECRET-11 (редакция 3)
+  predecessor_record: >-
+    docs/specs/reviews/confidential-interactive-client-secret-shown-once/6390a37fc12f15150749c4039663196806afd16d84c9ed795ba2a33d93336325.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> и git show cc8f8d352:<путь> | sha256sum — оба 249b53cd…a7a5, совпал с заданием.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: отпечаток совпал; меток IC-SECRET — 12 живых (grep -oE '^\*\*ID: IC-SECRET-[0-9]+' → 12),
+    группа E снята; ключа посадки в values.prod.yaml нет (git grep identityProvider → 0); ключ
+    отвергается при любом значении (internal/apps/kaname/config/retired_posture_key_test.go:12,43).
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: PRODUCER
+    summary: >-
+      Документ называет домом сквозного набора и «нынешней проверкой посадки external»
+      файл tests/newman/cases/iam-interactive-client.py службы, которого на ревизии измерения
+      (553 @ b90430b42, голова cc8f8d352) нет.
+    evidence: >-
+      Файл снят из службы коммитом 13d26776f (#415, предок головы; позже базы fc9f5aff1 редакции 2):
+      «iam-interactive-client — gateway/tests/newman, держатель PRO-Robotech/kacho#2913». Ведомость
+      службы называет дом сама: .github/scripts/newman-suite-debt.py:1118
+      «PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py». На origin/main
+      платформы (bea4495e934) файла тоже нет.
+    where:
+      - >-
+        IC-SECRET-08 And (строка 370) — «так устроена нынешняя проверка посадки `external` в
+        tests/newman/cases/iam-interactive-client.py — там способ `none`»: живой сценарий утверждает
+        проверку снятой посадки в снятом файле — остаток предмета, который редакция 3 объявляет
+        снятым, а §10 объявляет 01–10 нетронутыми.
+      - >-
+        §4 общие Given (строка 243) — R равен GOOD_REDIRECT набора по снятой координате.
+      - >-
+        §1 строка 14 — читатель тела ответа Create назван файлом службы, а он в доме платформы
+        и видит контракт через пин.
+      - >-
+        DoD п.7 — newman 01, 04, 06, 08, 09, 10 «на стенде посадки own (задание chart-own)»: ведомость
+        службы ставит их SCENARIO_HOME в набор края платформы, chart-own их не гоняет.
+    fix: >-
+      Перемерить координаты набора на 553 и назвать дом и держателя (kacho#2913 / kaname#416);
+      из IC-SECRET-08 убрать довод о проверке снятой посадки либо заменить наблюдением по дереву,
+      где она есть; DoD п.7 согласовать с SCENARIO_HOME ведомости.
+non_blocking:
+  - id: N1
+    summary: >-
+      Перевод пробы TestCreate_IC11_PublicClientAnswersWithAnEmptySecret
+      (create_secret_test.go:296,299) не назван ни в DoD, ни изменением-исполнителем; сам документ
+      говорит, что до переименования это ссылка на снятый сценарий. Назвать изменение (волна #497).
+  - id: N2
+    summary: >-
+      Перепись ведомости красна на голове cc8f8d352: python3 .github/scripts/newman-suite-debt.py →
+      «запись долга позиции IC-SECRET-11 пережила предмет». Снятие записи и держателя
+      _HOLDER_EXTERNAL_LANDING_REMOVAL обязано войти в тот же запрос волны, что эта редакция.
+accepted_parts: >-
+  Снятие IC-SECRET-11 целиком, без ослабления, номер не переиспользуется; довод неконструируемости
+  подтверждён деревом; решение не заводить сценарий-замену (Р4 держат 01 и 08, «посадка одна» —
+  отказ ключа #363) — верно, второго места об одном предмете не заводит; §1 строки 2 и 17, §3, §5
+  строка 11 согласованы.
+constructibility: >-
+  Посева не было: стенда в задании нет. Неконструируемость снятого Given показана деревом
+  (два стража ключа); живые Given 01–10, 12, 13 этой редакцией не менялись — «не выполнилось» 0
+  по предмету круга.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 249b53cd9958f844f0ceb0c63cd66d24e89178052eeed3bcd2ee60deeb10a7a5
