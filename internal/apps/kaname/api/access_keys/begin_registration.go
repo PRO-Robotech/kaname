@@ -188,7 +188,7 @@ func ceremonyHandleOf(ctx context.Context, d Deps, user domain.User) (domain.Cer
 }
 
 // checkCeremonyHandle — ЗАМОК у производителя: рукоятка годной формы и не
-// несёт имени человека. В соседнем поле церемонии адрес стоит законно
+// несёт идентификатора человека (`id`, адрес). В соседнем поле церемонии адрес стоит законно
 // (`CeremonyUser.Name`), и подстановка его в рукоятку — правка на один символ.
 // Нарушение — дефект хранилища либо кода, а не вход вызывающего: отказ —
 // недоступность, причина — только в журнале оператора.
@@ -198,7 +198,7 @@ func checkCeremonyHandle(d Deps, handle domain.CeremonyHandle, user domain.User)
 		return storeUnavailable()
 	}
 	if err := handle.CarriesNoNameOf(user); err != nil {
-		d.Logger.Error("access keys: ceremony handle carries a name of the person", "err", err.Error())
+		d.Logger.Error("access keys: ceremony handle carries an identifier of the person", "err", err.Error())
 		return storeUnavailable()
 	}
 	return nil

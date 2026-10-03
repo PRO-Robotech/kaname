@@ -73,9 +73,8 @@ func TestCeremonyHandle_CarriesNoNameOfThePerson(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, clean.CarriesNoNameOf(u), "близнец: случайное значение")
 	for field, raw := range map[string][]byte{
-		"id":           pad(string(u.ID)),
-		"email":        pad(strings.ToUpper(string(u.Email))),
-		"display_name": pad(string(u.DisplayName)),
+		"id":    pad(string(u.ID)),
+		"email": pad(strings.ToUpper(string(u.Email))),
 	} {
 		h, err := domain.RestoreCeremonyHandle(raw)
 		require.NoError(t, err, "%s: форма годна — судится только имя", field)
@@ -83,6 +82,24 @@ func TestCeremonyHandle_CarriesNoNameOfThePerson(t *testing.T) {
 		require.Error(t, err, field)
 		require.Contains(t, err.Error(), field)
 	}
+}
+
+// TestCeremonyHandle_DisplayNameIsNotJudged — отображаемое имя рукоятку НЕ
+// судит. Его длина — от одного символа, и случайные 64 байта несут однобуквенное
+// имя примерно в четырёх чеканках из десяти (без учёта регистра); рукоятка
+// заводится один раз и не меняется, поэтому такой отказ был бы вечным отказом
+// человеку в регистрации ключа. Имя — не идентификатор: им ничего не ищут и не
+// ключуют, а `id` (20 знаков) и адрес (не короче пяти, с `@` и точкой)
+// случайно в 64 байтах не встречаются.
+//
+// Отличие от близнеца `TestCeremonyHandle_CarriesNoNameOfThePerson` — ровно
+// один факт: вхождение имени, а не `id` либо адреса.
+func TestCeremonyHandle_DisplayNameIsNotJudged(t *testing.T) {
+	t.Parallel()
+	u := domain.User{ID: "usr00000000000000a01", Email: "alice@example.invalid", DisplayName: "A"}
+	h, err := domain.RestoreCeremonyHandle(bytes.Repeat([]byte("a"), 64))
+	require.NoError(t, err)
+	require.NoError(t, h.CarriesNoNameOf(u), "однобуквенное имя внутри случайных байтов — не имя человека в рукоятке")
 }
 
 func TestAccessKey_HandleCarryingThePlatformIdIsRefused(t *testing.T) {

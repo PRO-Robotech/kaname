@@ -139,8 +139,8 @@ func (k AccessKey) Validate() error {
 	}
 	// ЗАМОК на рукоятку там, где строка судит саму себя: значение, несущее
 	// платформенный `id`, уехало бы в чужой аутентификатор без способа его
-	// оттуда отозвать (Ф13 Р3). Адрес и имя судит производитель
-	// (`CeremonyHandle.CarriesNoNameOf`) — их в строке нет.
+	// оттуда отозвать (Ф13 Р3). Адрес судит производитель
+	// (`CeremonyHandle.CarriesNoNameOf`) — его в строке нет.
 	if len(k.UserHandle) > 0 && bytes.Contains(bytes.ToLower(k.UserHandle), bytes.ToLower([]byte(k.UserID))) {
 		return fmt.Errorf("Illegal argument user_handle: carries the platform user id")
 	}
