@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Приёмка: темп церемонии авторизации назван числом
 
-- **Статус:** DRAFT — редакция 4. Вердикта на неё нет, санкции на код по ней нет (ban #1).
+- **Статус:** DRAFT — редакция 5. Вердикта на неё нет, санкции на код по ней нет (ban #1).
   Вердикт выносит `acceptance-reviewer`
 - **Статическая форма:** DRAFT. Слово выше вписано и вердиктом не является. Действующее
   одобрение выводится из записи ревью по отпечатку редакции и из внешнего события, на
@@ -24,6 +24,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   - 2026-09-27 · круг 3 · APPROVED ·
     `51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637` ·
     `docs/specs/reviews/ceremony-pace-is-named-by-number/51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637.yaml`
+  - 2026-10-03 · круг 4 · CHANGES_REQUESTED ·
+    `027dbe1a64c6e3a39362eef47a3a272e4532676ba0ea9aa41950a4c94f5856c3` ·
+    `docs/specs/reviews/ceremony-pace-is-named-by-number/027dbe1a64c6e3a39362eef47a3a272e4532676ba0ea9aa41950a4c94f5856c3.yaml`
 - **Журнал редакций:** только дописывается
   - **ред. 1 · 2026-09-27** — первая редакция
   - **ред. 2 · 2026-09-27** — по находкам круга 1. Блокирующие: удержания посевов Т и А
@@ -57,7 +60,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     KN-PACE-43 (а–в), 44, 45 (а–в) с близнецами; строки 43–45 и строка держателей «ответа без
     сессии» в «сценарий → производитель»; новая стадия S3 (§6) и §8 — отношение к предикату
     снятия `#525`; две строки §4 — вход с возвратом и правка приёмки LINE-A-1
-- **Дата:** 2026-09-27 (ред. 1–3); 2026-10-03 (ред. 4)
+  - **ред. 5 · 2026-10-03** — по находкам круга 4. Блокирующая: счётчики группы I утверждались
+    на посеве А, а его шов входа сессии не строит, и исход уровня там недостижим. Теперь
+    счётчики 43–45 утверждаются в переписи мира — посев Ц, тот же мир, что строит Given. В §1.6
+    добавлены координаты переписи мира и замер по строкам: 43 а–в — login-required +1, 44 —
+    step-up-required +1, близнецы и 45 а–в — +0 (находка 1). Неблокирующие: в записи ред. 4
+    прежнее имя ответа — «ответ LINE-A-1»; сама запись не правится, журнал только дописывается
+    (2). В посеве Ц `R2` и `RQ` названы порознь (3). Кейс newman — `:626` (4)
+- **Дата:** 2026-09-27 (ред. 1–3); 2026-10-03 (ред. 4–5)
 - **Задача:** `PRO-Robotech/kaname#315`, волна `#366`, эпик `#357`, цель линии —
   `PRO-Robotech/kacho#2564`. Приёмка — санкция на код `#315`: пять осей темпа поверхности
   выдачи, правило адреса источника и их пробы. Ветка `315` уже несёт две оси из пяти (коммит
@@ -268,7 +278,7 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
   (тем же `requireNoCodeDelivered`), `TestLINEA1Cutoff_AuthorizeAfterTheSubjectCutoff`
   (`ceremony_cutoff_integration_test.go:53`), в `pace_test.go` — `requireLineA1` (:195, пять
   вызовов) и ожидания `401` проб группы F (:381, :388, :398, :436), кейс newman
-  `IAM-AUTHCODE-NEG-NO-SESSION` (`kaname-authorization-code.py:627`) и его коллекция. Ожидание
+  `IAM-AUTHCODE-NEG-NO-SESSION` (`kaname-authorization-code.py:626`) и его коллекция. Ожидание
   `401` в `pace_test.go:476` — полоса токен-эндпоинта, не точка авторизации.
 - Мир интеграционных проб церемонии строит все Given группы I: клиент `ic-1` с адресами `R`,
   `R2`, `RQ` (`cmd/kaname/ceremony_world_integration_test.go:158–160`, `:329`),
@@ -277,6 +287,34 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
   отсечка субъекта — `cutSubject` (`ceremony_cutoff_integration_test.go:24`, вызов — `:49`). Темп мира —
   `1 << 20` в секунду на источник и потолок `1 << 10` (`ceremony_world_integration_test.go:615–616`):
   пробы группы его не достигают.
+- Перепись исходов строится тем же миром, а не посевом обработчика. Мир держит перепись
+  поверхности, собранной сборкой корня, и читает её клетку:
+  `git grep -n -e 'census \*ceremonyhttp.Census' -e 'w.census = ceremony.Census' -e 'func (w \*ceremonyWorld) censusOf' 9bac42bdc -- cmd/kaname/`
+  → `ceremony_world_integration_test.go:224`, `:638`, `address_admission_ceremony_integration_test.go:47`.
+  Посев А (`seedA`) сессии не строит: его шов входа — `silentAuthority`
+  (`git grep -n 'Authority: &silentAuthority' 9bac42bdc -- internal/handler/ceremonyhttp/pace_test.go`
+  → `:119`), он всегда отвечает «сессии нет». Поэтому исход уровня сессии на посеве А недостижим,
+  и счётчики группы I утверждаются в мире.
+- Замер счётчиков в мире на `9bac42bdc` — временная проба в `cmd/kaname` (файл создан и удалён,
+  `git status --porcelain` после — пусто), `go test -count=1 -v -run <проба> ./cmd/kaname/`, Postgres
+  в контейнере. Для каждой строки — ответ сегодня и рост клеток `authorize-login-required` /
+  `authorize-step-up-required` через `censusOf` до и после одного запроса:
+
+  | запрос | ответ сегодня | login-required | step-up-required |
+  |---|---|---|---|
+  | 43 а: к `R` без сессии | `401` | +1 | +0 |
+  | 43 б: к `RQ` без сессии | `401` | +1 | +0 |
+  | близнец 43 а: к `R` с сессией | `302` с кодом | +0 | +0 |
+  | 43 в: сессия, отсечка через секунду после аутентификации | `401` | +1 | +0 |
+  | близнец 43 в: отсечка за секунду до аутентификации | `302` с кодом | +0 | +0 |
+  | 44: сессия уровня `"1"`, `acr_values=2` | `401` | +0 | +1 |
+  | 44+: сессия уровня `"2"`, `acr_values=2` | `302` с кодом | +0 | +0 |
+  | 45 а: к `RF` без сессии | `400` | +0 | +0 |
+  | 45 б: к `RT` без сессии | `400` | +0 | +0 |
+  | 45 в: к `RF`, сессия уровня `"1"`, `acr_values=2` | `400` | +0 | +0 |
+
+  Счёт исхода уже производится сегодня (`challenge`, `authorize.go:257`); меняется только форма
+  ответа (Р11). Значит, «And» о счётчиках в группе I зелёные до кода и после.
 
 ---
 
@@ -1138,14 +1176,16 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
 
 **Посев Ц, Given группы I:** мир интеграционных проб церемонии `cmd/kaname` (§1.6): клиент
 церемонии `ic-1` в состоянии `ACTIVE` с зарегистрированными адресами возврата
-`R` = `https://console.line-a-1.test/auth/callback`, `R2` и `RQ` =
+`R` = `https://console.line-a-1.test/auth/callback`, `R2` =
+`https://console.line-a-1.test/auth/other` и `RQ` =
 `https://console.line-a-1.test/auth/cb?tenant=a` (адрес с собственной строкой запроса);
 незарегистрированные `RF` = `https://elsewhere.line-a-1.test/auth/callback` (другой хост) и
 `RT` = `R` с хвостовым слэшем. Человек с сессией уровня `"1"`, если сценарий не называет иной.
 «Годный запрос Ц к адресу X» — `GET /iam/v1/authorize` с `client_id=ic-1`, `redirect_uri=X`,
 `response_type=code`, `scope=openid`, `code_challenge` по S256, `code_challenge_method=S256` и
 `state` длиной 30 знаков; «без сессии» — без печенья сессии, «с сессией» — с печеньем сессии
-мира.
+мира. «Перепись мира» — перепись исходов поверхности, собранной миром сборкой корня; клетка
+читается `censusOf` до и после запроса (§1.6).
 
 ## Сценарий KN-PACE-43: без сессии — отказ уходит приложению на зарегистрированный адрес
 
@@ -1166,8 +1206,9 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
 иного параметра сверх названных
 **And** тела JSON нет; `Cache-Control: no-store`
 **And** записей кода после запроса столько же, сколько до него
-**And** на посеве обработчика (`seedA`, `internal/handler/ceremonyhttp/pace_test.go`) тот же
-исход растит `authorize-login-required` в `kaname_ceremony_outcomes_total` ровно на 1
+**And** в переписи мира клетка `authorize-login-required` выросла ровно на 1, клетка
+`authorize-step-up-required` не изменилась — в каждой из трёх строк; у близнеца строк а и в обе
+клетки не изменились (замер — §1.6)
 
 ## Сценарий KN-PACE-44: уровень сессии ниже запрошенного — отказ уходит приложению
 
@@ -1181,7 +1222,9 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
 **And** в строке нет ни `code`, ни `acr_values`, ни `error_description`; тела JSON нет;
 `Cache-Control: no-store`
 **And** записей кода после запроса столько же, сколько до него
-**And** на посеве обработчика тот же исход растит `authorize-step-up-required` ровно на 1
+**And** в переписи мира клетка `authorize-step-up-required` выросла ровно на 1, клетка
+`authorize-login-required` не изменилась; у близнеца KN-PACE-44+ обе клетки не изменились
+(замер — §1.6)
 
 **Близнец KN-PACE-44+:** мир с сессией уровня `"2"`, тот же запрос с `acr_values=2` — `302` на
 `R` с `code` и `state`, код несёт уровень `"2"`. В дереве:
@@ -1208,6 +1251,8 @@ git grep -n -e login_required -e insufficient_user_authentication 9bac42bdc -- d
 **And** `Location` нет; ни `RF`, ни `RT`, ни `R` перенаправления не получают
 **And** тело не несёт ни `login_required`, ни `insufficient_user_authentication`, ни `state`
 **And** записей кода после запроса столько же, сколько до него
+**And** в переписи мира клетки `authorize-login-required` и `authorize-step-up-required` не
+изменились (замер — §1.6, строки 45 а–в)
 
 Тот же отказ к `RF` и `RT` при годной сессии уже держит
 `ceremony_authorize_integration_test.go:195` (`TestLINEA1_04_UnregisteredRedirectRefusedWithoutRedirect`);
@@ -1248,14 +1293,14 @@ KN-PACE-45 утверждает, что отсутствие сессии и н�
 | 42 | ноль клеток по всем репликам после наборов стенда на непустом множестве ретранслированных краем запросов | шаг заказан: полоса стенда в `PRO-Robotech/kacho`. Непустоту производит счётчик края, он есть на ветке `2817`: `PRO-Robotech/kacho@2e8867d21:gateway/internal/handler/login_lane_relay.go`, строки 198 (ретрансляция по глаголу) и 212 (недостижимость по цели); в стволе продукта счётчика по глаголу нет | шаг заказан; счётчик края — `PRO-Robotech/kacho@2e8867d21:TestLoginLaneRelay_F3_17_ServiceRefusalIsRelayedAsIsAndUnreachableServiceIs503` (рост по глаголу и недостижимость) и `PRO-Robotech/kacho@2e8867d21:TestSessionLane_L13_UnreachableIsCountedPerTargetAndCeremonyVerbsHaveCells` (клетки `authorize` и `issuance`) |
 | 42b | рост клетки ровно на 1 от прямого запроса с заголовком пересылки | заказан: тот же шаг полосы стенда и его прямой запрос к слушателю выдачи | заказан |
 
-Строки ниже — редакция 4. «Есть» в них — производитель на `origin/536` @ `9bac42bdc`, «заказан» —
+Строки ниже — редакции 4–5. «Есть» в них — производитель на `origin/536` @ `9bac42bdc`, «заказан» —
 его пишет исполнитель `#525`.
 
 | ID | что производит «Тогда» | координата | чем измерено |
 |---|---|---|---|
 | 43 а, б | `302` на цель с `error=login_required` и `state`; параметры цели сохранены | заказан: ветка `VerdictLoginRequired` в `internal/handler/ceremonyhttp/authorize.go:180` (сегодня `401` JSON через `challenge`, :254); перенаправление на доверенную цель с сохранением её параметров есть — `refuseByRedirect`, :230, без `state` | заказан: `TestLINEA1_03_UnauthenticatedSeamIssuesNoCode` переписывается под форму Р11 |
 | 43 в | то же после отсечки субъекта | заказан той же веткой; Given строит `cutSubject` | заказан: строка предмета `TestLINEA1Cutoff_AuthorizeAfterTheSubjectCutoff` переписывается |
-| 43, 44 (перепись) | `authorize-login-required`, `authorize-step-up-required` +1 | есть: `challenge` считает исход, `authorize.go:257`; форма ответа заказана | заказан: проба обработчика на `seedA` (`pace_test.go`, `outcome`, :192) |
+| 43, 44, 45 (перепись мира) | `authorize-login-required` +1 у 43 а–в, `authorize-step-up-required` +1 у 44, +0 у близнецов и у 45 а–в | есть: `challenge` считает исход, `authorize.go:257`; перепись мира — `ceremony_world_integration_test.go:638`, чтение — `censusOf` (`address_admission_ceremony_integration_test.go:47`) | есть сегодня: замер §1.6 (временная проба в мире); пробы 43–45 читают `censusOf` тем же изменением |
 | 44 | `302` на цель с `error=insufficient_user_authentication` и `state` | заказан: ветка `VerdictStepUpRequired`, `authorize.go:182` | заказан: `TestLINEA1_08_StepUpIsServedAndReachedLevelIsCarried` переписывается |
 | 45 а–в | `400` без перенаправления | есть: `authorize.go:136` (`TrustRedirectUnregistered`) раньше шва входа (:165), `refuseUntrusted` :219 | есть с годной сессией: `TestLINEA1_04_…` (:195); без сессии и при уровне — заказан |
 | 26–36 (ответ без сессии) | ответ, который не отказ по темпу | заказан: форма — та же ветка, что у 43 | держатели `requireLineA1` и ожидания `401` в `pace_test.go` (§1.6) переписываются под форму Р11 тем же изменением; «Тогда» по темпу не меняются |
@@ -1329,8 +1374,10 @@ B (09), C (17), E и F судят точку авторизации и поло�
 Стадия садится на ветку волны `#536`, где S1 уже влита
 (`git grep -c 'a.cfg.Pace.Reserve' 9bac42bdc -- internal/handler/ceremonyhttp/authorize.go` → 1).
 
-1. Пробы до кода (ban #12). Отрицания с заказанным производителем — 43 а–в и 44 (с переписью):
-   красные до кода (сегодня `401` с телом JSON) и зелёные после. Производитель «есть» — 45 а–в:
+1. Пробы до кода (ban #12). Отрицания с заказанным производителем — 43 а–в и 44:
+   красные до кода (сегодня `401` с телом JSON) и зелёные после. «And» о переписи мира в 43–45
+   держит производитель «есть» (`authorize.go:257`): по отдельности они зелёные до кода и после
+   (замер §1.6). Производитель «есть» — 45 а–в:
    зелёные до и после. Положительные близнецы 43 а–в и 44+ (координаты — в таблицах сценариев)
    зелёные до и после. Число исполненного по каждому роду и пара прогонов RED → GREEN — в
    отчёте сдачи.
