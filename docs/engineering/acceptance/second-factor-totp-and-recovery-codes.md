@@ -232,8 +232,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `docs/specs/reviews/second-factor-totp-and-recovery-codes/194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939.yaml`,
   событие опубликовано) относится к редакции 12 и на этот текст **не переносится**
   (`change-graph.md` §2, §3). Коммит `69e61c563` (`kaname#363`, снятие ключа посадки и ветвей
-  внешней посадки) заменил в §2 строке **Ф-д** имя пробы
-  `TestF4d10_EveryLaneRequirementRefusesTheStartOnItsOwnLane` на
+  внешней посадки) заменил в §2 строке **Ф-д** имя пробы — прежнее, прозой: TestF4d10
+  EveryLaneRequirementRefusesTheStartOnItsOwnLane — на
   `TestF4d10_EveryLaneRequirementRefusesTheProductionStart` — проба переименована тем же
   изменением, потому что полос посадки больше нет и требования предъявляются всякому боевому
   старту, — и строки редакции не завёл; отпечаток стал `9e9f22ce…`, а записи на него нет. Эта
