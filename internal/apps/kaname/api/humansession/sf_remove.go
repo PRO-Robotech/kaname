@@ -120,7 +120,7 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 	if !removed {
-		// Сверка прошла, а строки `active` нет: гонка со сбросом распорядителем.
+		// Сверка прошла, а строки `active` нет: гонка со сбросом администратором облака.
 		_ = w.Rollback(ctx)
 		uc.deps.Observer.SecondFactorRefusalObserved(RefusalNotEnrolled)
 		return RemoveSecondFactorOutput{}, ErrSecondFactorNotEnrolled

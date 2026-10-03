@@ -25,7 +25,7 @@ const (
 	// строка, которой больше нет, ответа не хранит (#1127).
 	auditEventUserRemovedFromAccount = "iam.user.removed_from_account"
 
-	// Сброс второго фактора распорядителем (Ф12 Р10, Р11): событие с обоими
+	// Сброс второго фактора администратором облака (Ф12 Р10, Р11): событие с обоими
 	// акторами — кто сбросил и у кого; рядом с событиями самого человека
 	// (`iam.user.second_factor_enrolled` / `_removed`, полоса входа).
 	auditEventUserSecondFactorReset = "iam.user.second_factor_reset"

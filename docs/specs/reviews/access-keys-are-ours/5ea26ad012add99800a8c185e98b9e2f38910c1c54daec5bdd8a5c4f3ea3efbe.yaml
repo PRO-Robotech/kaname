@@ -1,0 +1,63 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-keys-are-ours.md
+  sha256: 5ea26ad012add99800a8c185e98b9e2f38910c1c54daec5bdd8a5c4f3ea3efbe
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: bfbfa3a07d38d23a40ea9ce42e1b74e1fb02022e
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 5750
+  round: 11
+  round_note: >-
+    круг 11 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/access-keys-are-
+    ours/16913dff98e3090afc57c40690180b93618ed4ae4f82258344ba869e8877cab1.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/access-keys-are-ours.md на tmp/535-na3a @ 33b0f8aa9 →
+    5ea26ad012add99800a8c185e98b9e2f38910c1c54daec5bdd8a5c4f3ea3efbe; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      Четыре документа (Ф1, Ф4, Ф7, Ф13) ссылаются на решение kacho#2703 «полосы регистрации ключом не
+      будет» от 2026-10-03; сама задача OPEN, и последний её комментарий (2026-09-25) решения не несёт
+      — оно записано только в плане сессии (plan-final.md R1). Событие одобрения не публиковать, пока
+      решение не опубликовано комментарием в kacho#2703: иначе ссылка документа указывает на носитель,
+      которого нет.
+  - id: N2
+    summary: >-
+      Таблица §4.4 Ф13 и шапка Ф7 называют ветвь (б) одобренной без события (issued: false); новая
+      запись снимает этот хвост только после публикации её собственного события.
+accepted_parts: >-
+  Сведение проверено диффом против 16913dff (782e8694c) и 3ab7b401: шесть сценариев переноса сняты
+  блоками, номера не сдвинуты; предикат шва §3.0 перемерен на голове — меток 51, строк Тогда/И
+  445, нарушений 0 и 0; Р12 сохраняет три состояния, писатель «не сообщено» — приём результата
+  церемонии; §4.21 называет исход по каждой находке круга 10; поле discoverable BoolValue есть в
+  proto/kaname/cloud/iam/v1/access_key_service.proto:268.
+constructibility: >-
+  Посева не было: стенда в задании нет. Новые Given редакции — Ф7-16 и Ф7-26 строятся ЗАПИСЬЮ
+  строки ключа (Ф7-26 — с признаком «не сообщено», т.е. NULL поля discoverable) — названная
+  фикстура, а не церемония; прочие Given не менялись.
+event_body: acceptance-reviewer · APPROVED · 5ea26ad012add99800a8c185e98b9e2f38910c1c54daec5bdd8a5c4f3ea3efbe
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

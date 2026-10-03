@@ -34,6 +34,18 @@
 // ОСТАВЛЯЕТ: распоряжение выдачами своего аккаунта. Если бы правка записи
 // отвалилась вместе с ним, проба покраснела бы — а не отчиталась о победе.
 //
+// # Сброс второго фактора — тот же класс (kaname#254, Ф12 Р10)
+//
+// `ResetSecondFactor` снимает фактор глобальной личности и гасит ВСЕ её сессии,
+// то есть действует во всех её аккаунтах сразу. Решение владельца 2026-09-18:
+// «2fa может сбросить или пользователь или администратор облака». Пользователь
+// снимает свой фактор кодом (`remove`, Р9), а этот глагол — только администратор
+// облака: распорядитель аккаунта (владелец и делегированный администратор),
+// посторонний держатель выдачи и сам человек, не будучи администратором облака,
+// получают здесь «нет» (Ф12-30, Ф12-45 «б»). Гейт спрашивается у каталога, как и
+// у соседей: вернись глагол на отношение с источником уровня аккаунта под
+// другим именем — проба покраснеет на вердикте, а не на написании.
+//
 // Настоящий Postgres. Пропускается под кратким режимом.
 
 package service_test
@@ -94,11 +106,13 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	editRel, editType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Update")
 	blockRel, blockType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Block")
 	unblockRel, unblockType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Unblock")
+	resetRel, resetType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/ResetSecondFactor")
 	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
 	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
 	for _, c := range []struct{ what, got string }{
 		{"правка записи", editType}, {"запрет", blockType},
-		{"снятие запрета", unblockType}, {"чтение записи", readType},
+		{"снятие запрета", unblockType}, {"сброс второго фактора", resetType},
+		{"чтение записи", readType},
 	} {
 		require.Equalf(t, "iam_user", c.got,
 			"%s гейтится не на объекте личности (%s) — предмет пробы сменился", c.what, c.got)
@@ -129,6 +143,9 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 		{owner, unblockRel, "снятие запрета"},
 		{stranger, editRel, "правка записи"},
 		{stranger, blockRel, "запрет личности"},
+		{inviter, resetRel, "сброс второго фактора"},
+		{owner, resetRel, "сброс второго фактора"},
+		{stranger, resetRel, "сброс второго фактора"},
 	} {
 		require.Falsef(t, w.allowed(t, "user:"+c.who, c.rel, person),
 			"%s (%s) досталась держателю права ВНУТРИ аккаунта (user:%s).\n"+
@@ -148,6 +165,11 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 		"человек правит свою запись: сегодня это метки, то есть административный отбор, "+
 			"по которому селекторные выдачи решают, кому он виден и над кем даёт власть — "+
 			"вводить себя в них он не вправе")
+	// Свой фактор человек снимает кодом (`remove`, Ф12 Р9), а не этим глаголом:
+	// без кода «2» не было бы сильнее пароля (Ф12-45 «б»).
+	require.False(t, w.allowed(t, "user:"+invitee, resetRel, person),
+		"человек сбросил свой второй фактор административным глаголом без кода — "+
+			"тогда второй фактор не сильнее пароля, которым он вошёл")
 
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ 1: то, что директива ОСТАВЛЯЕТ ────────────────
 	// Без этого утверждения запрет выше зеленел бы на дереве, где у пригласившего
@@ -169,14 +191,15 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// не разделением прав, а недостижимостью.
 	for _, c := range []struct{ rel, what string }{
 		{editRel, "правку записи"}, {blockRel, "запрет"}, {unblockRel, "снятие запрета"},
+		{resetRel, "сброс второго фактора"},
 	} {
 		require.Truef(t, w.allowed(t, "user:"+cloudAdmin, c.rel, person),
 			"уровень 1 (администратор облака) обязан сохранить %s (%s): иначе строкой личности "+
 				"не распоряжается никто, и управление ею сломано незаметно", c.what, c.rel)
 	}
 
-	t.Logf("перепись: гейт правки %s.%s · запрета %s.%s · снятия %s.%s · чтения %s.%s · "+
-		"выдачи %s.%s · субъектов спрошено 5",
-		editType, editRel, blockType, blockRel, unblockType, unblockRel,
+	t.Logf("перепись: гейт правки %s.%s · запрета %s.%s · снятия %s.%s · сброса фактора %s.%s · "+
+		"чтения %s.%s · выдачи %s.%s · субъектов спрошено 5",
+		editType, editRel, blockType, blockRel, unblockType, unblockRel, resetType, resetRel,
 		readType, readRel, grantType, grantRel)
 }

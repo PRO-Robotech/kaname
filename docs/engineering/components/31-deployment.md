@@ -30,9 +30,9 @@ REST-фронты и полоса входа паролем) поднимают�
 |---|---|---|---|
 | `:9090` | gRPC | публичный API (tenant-facing, через api-gateway) | per-edge TLS; обязателен в production |
 | `:9091` | gRPC | cluster-internal API (`Internal*`, service→service) | `RequireAndVerifyClientCert`; обязателен в production |
-| `:9095` | HTTP | диагностика: Prometheus `/metrics`, `/healthz`, `/readyz` | per-edge, server-TLS опционально |
-| `:9096` | HTTP | выдача токенов: docker-token (`/iam/token`), токен-эндпоинт платформы (`/iam/v1/token`) и эндпоинты церемонии OAuth | server-TLS (односторонняя) |
-| `:9097` | HTTP | **cluster-internal**: публикуемые наборы проверочных ключей + авторитет отзыва наших токенов | server-TLS (односторонняя), внутренний Service |
+| `:9095` | HTTP | диагностика: Prometheus `/metrics`, `/healthz`, `/readyz` | server-TLS (односторонняя: клиентский сертификат не запрашивается); обязателен в production |
+| `:9096` | HTTP | выдача токенов: docker-token (`/iam/token`), токен-эндпоинт платформы (`/iam/v1/token`) и эндпоинты церемонии OAuth | TLS, в боевом профиле запрашивающий (`optional-mutual`): сертификат края проверяется, вызывающий без сертификата соединяется; при собранной церемонии иной режим — отказ старта |
+| `:9097` | HTTP | **cluster-internal**: публикуемые наборы проверочных ключей + авторитет отзыва наших токенов | TLS, запрашивающий (`optional-mutual`): набор ключей — без сертификата, авторитет отзыва отказывает вызывающему без проверенного сертификата; при своей чеканке односторонний режим — отказ старта; внутренний Service |
 
 Порты конфигурируемы (`api-server.endpoint`, `api-server.internal-endpoint`,
 `api-server.metrics-endpoint`, `api-server.registry-token.endpoint`,
@@ -629,11 +629,13 @@ sequenceDiagram
 
 ```bash
 # 1. Pod готов.
-kubectl -n kacho rollout status deployment/iam --timeout=60s
+kubectl -n kacho rollout status deployment/kaname --timeout=60s
 
-# 2. Liveness / readiness на диагностическом порту.
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/healthz
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/readyz
+# 2. Liveness / readiness на диагностическом порту. В production-профиле порт
+#    поднят по TLS (https); стенд без транспорта — http. Сверка листа снята:
+#    запрос не покидает под, а корня внутреннего УЦ в хранилище образа нет.
+kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/healthz
+kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/readyz
 
 # 3. gRPC reflection публичного API (через api-gateway).
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
