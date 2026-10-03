@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 // TestBuild_RefusesAnUndeclaredBasicCredentialLimit — без предела сборка
@@ -27,7 +28,7 @@ func TestBuild_RefusesAnUndeclaredBasicCredentialLimit(t *testing.T) {
 		Service: "registry.probe.local",
 		// Наш подписант подан: без него сборка отказывает раньше предела, и
 		// отказ ниже был бы не о пределе (kaname#494).
-		Signer: ourSigner(t),
+		Signer: lanesigner.New(t),
 	}
 	_, err := registrytokenwire.Build(nil, cfg)
 	if err == nil {
