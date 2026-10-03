@@ -365,7 +365,8 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 			// предсказуемого вида: угадываемое удостоверение хуже отсутствующего.
 			return nil, status.Error(codes.Internal, "credential minting failed")
 		}
-		expires := u.now().UTC().Add(ttl)
+		issued := u.now().UTC()
+		expires := issued.Add(ttl)
 		row := domain.UserOAuthClient{
 			ID:              tokenID,
 			UserID:          in.UserID,
@@ -375,6 +376,7 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 			Labels:          in.Labels,
 			CredentialKind:  domain.CredentialKindSecret,
 			SecretHash:      hash,
+			CreatedAt:       issued,
 			ExpiresAt:       &expires,
 		}
 		persisted, err := u.commitMapping(ctx, row, actor, "")
@@ -514,8 +516,11 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		return nil, fmt.Errorf("generate user token keypair: %w", err)
 	}
 
-	// 2. Персистим строку удостоверения в TX.
+	// 2. Персистим строку удостоверения в TX. Момент выдачи и срок — от ОДНИХ
+	//    часов, тех же, что ставят отсечку отзыва-всех (kaname#388).
+	issued := u.now().UTC()
 	row := domain.UserOAuthClient{
+		CreatedAt:       issued,
 		ID:              tokenID,
 		UserID:          in.UserID,
 		Description:     domain.Description(in.Description),
@@ -528,7 +533,7 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		CredentialKind: domain.CredentialKindKeypair,
 	}
 	if in.TTLSeconds > 0 {
-		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+		t := issued.Add(time.Duration(in.TTLSeconds) * time.Second)
 		row.ExpiresAt = &t
 	}
 	persisted, err := u.commitMapping(ctx, row, actor, key.Algorithm)
@@ -562,6 +567,15 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
 	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
 	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
+
+	// Момент выдачи ставит ВЫДАЮЩИЙ — часами варианта использования, теми же,
+	// что пишут отсечку отзыва-всех (kaname#388). Строка без момента ушла бы
+	// в умолчание столбца, то есть к часам базы, — ко второму источнику
+	// времени, и граница правила отсечки стала бы разницей двух часов.
+	// Непроставленный момент — наш дефект, а не вход вызывающего.
+	if row.CreatedAt.IsZero() {
+		return domain.UserOAuthClient{}, status.Error(codes.Internal, "credential issuance moment is not stamped")
+	}
 
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
