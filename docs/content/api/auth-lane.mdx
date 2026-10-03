@@ -193,7 +193,9 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 приглашения: способ входа и сессия ложатся на неё, второй строки не заводится, а приглашение
 остаётся `PENDING` до подтверждения адреса), требование подтверждения адреса
 (`emailVerified: false`) и сессия. Отображаемое имя сюда не принимается — оно выводится из
-адреса и правится отдельным глаголом.
+адреса, и глагола его правки в публичном API нет: `displayName` у пользователя только для
+чтения, а `UpdateUser` с ним в `updateMask` отвечает `INVALID_ARGUMENT`
+([Пользователь](/api/user)).
 
 Правило пароля судится **до** транзакции и называет поле: `Illegal argument password: shorter
 than the declared minimum length` (`authn.login.password-min-length`) ·
