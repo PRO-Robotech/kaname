@@ -14,18 +14,18 @@ import (
 //
 // # Предмет
 //
-// Половина пары «публичный фронт поднят, читателя предъявленного нет» хуже
-// отсутствия обеих: она выглядит настроенной. Арендатор дотягивается до
-// поверхности, предъявляет годное удостоверение и получает тот же отказ, что и
-// предъявивший мусор, — потому что назвать его нечем.
+// Боевой старт без читателя предъявленного удостоверения выглядит настроенным:
+// арендатор дотягивается до поверхности, предъявляет годное удостоверение и
+// получает тот же отказ, что и предъявивший мусор, — потому что назвать его
+// нечем.
 //
-// # Антецедент — ПОДНЯТЫЙ ФРОНТ, а не объявленная посадка
+// # Антецедент — БОЕВОЙ РЕЖИМ
 //
-// Прежнее связывание требовало читателя при посадке `own`, которую не выбирает
-// ни один профиль развёртывания. Собственный публичный фронт при этом
-// поднимается на ЛЮБОЙ посадке: его поднимает объявленный адрес, а не выбор
-// посадки. Связывание существовало, его антецедент не наступал никогда, и
-// выглядело всё настроенным.
+// Прежде антецедент был дизъюнкцией «поднят собственный фронт ЛИБО посадка без
+// внешнего поставщика», и пробы доказывали обе половины порознь, в том числе
+// «без фронта на посадке external требования нет». Посадка у службы одна
+// (kaname#363): вторая половина наступает на всяком боевом старте, и случай
+// «без фронта требования нет» стал ложным — он снят, а не ослаблен.
 
 const bindTokenTTL = 15 * time.Minute
 
@@ -44,20 +44,21 @@ func bindReaderOn() PresentedCredentialConfig {
 	}
 }
 
-// TestKAN_BIND_01_PublicFrontWithoutAReaderRefusesToStart — фронт поднят,
-// читателя нет ⇒ отказ в старте, и он называет ОБЕ ручки.
-func TestKAN_BIND_01_PublicFrontWithoutAReaderRefusesToStart(t *testing.T) {
+// TestKAN_BIND_01_ProductionWithoutAReaderRefusesToStart — боевой старт без
+// читателя ⇒ отказ, и он называет ручку читателя и НЕ называет снятого ключа
+// посадки: совет объявить его послал бы оператора за вторым отказом.
+func TestKAN_BIND_01_ProductionWithoutAReaderRefusesToStart(t *testing.T) {
 	var off PresentedCredentialConfig
-	err := off.ValidateBinding(true, "tcp://0.0.0.0:9098", IdentityProviderExternal)
+	err := off.ValidateBinding(true)
 	if err == nil {
-		t.Fatal("поднятый публичный фронт без читателя предъявленного принят: половина пары " +
-			"выглядит настроенной, а арендатору нечем назваться")
+		t.Fatal("боевой старт без читателя предъявленного принят: арендатору нечем назваться")
 	}
 	msg := err.Error()
-	for _, knob := range []string{"api-server.rest-endpoint", "authn.presented-credential.enabled"} {
-		if !strings.Contains(msg, knob) {
-			t.Errorf("отказ не называет ручку %q — оператору нечем снять требование:\n%s", knob, msg)
-		}
+	if !strings.Contains(msg, "authn.presented-credential.enabled") {
+		t.Errorf("отказ не называет ручку читателя — оператору нечем снять требование:\n%s", msg)
+	}
+	if strings.Contains(msg, "identity-provider") {
+		t.Errorf("отказ называет снятый ключ посадки:\n%s", msg)
 	}
 }
 
@@ -68,47 +69,13 @@ func TestKAN_BIND_01_PublicFrontWithoutAReaderRefusesToStart(t *testing.T) {
 // профиль.
 func TestKAN_BIND_02_TheSameProfileWithAReaderStarts(t *testing.T) {
 	on := bindReaderOn()
-	if err := on.ValidateBinding(true, "tcp://0.0.0.0:9098", IdentityProviderExternal); err != nil {
-		t.Fatalf("законная посадка отвергнута: фронт поднят И читатель включён: %v", err)
+	if err := on.ValidateBinding(true); err != nil {
+		t.Fatalf("законный боевой старт отвергнут: читатель включён: %v", err)
 	}
 	// И величины читателя при этом обязаны быть годными — связывание не
 	// подменяет проверку самих величин.
 	if err := on.Validate(bindSigningOn(), bindTokenTTL); err != nil {
 		t.Fatalf("величины включённого читателя отвергнуты: %v", err)
-	}
-}
-
-// TestKAN_BIND_03_NoFrontMeansNoRequirement — ВТОРАЯ ПОЛОВИНА связывания.
-//
-// Страж, требующий читателя там, где предъявлять его некому, отвергал бы
-// законную посадку — то есть требовал бы того, чем не пользуются. Предмет
-// стража — ПРОТИВОРЕЧИЕ, а не наличие ручки.
-func TestKAN_BIND_03_NoFrontMeansNoRequirement(t *testing.T) {
-	var off PresentedCredentialConfig
-	for _, addr := range []string{"", "   "} {
-		if err := off.ValidateBinding(true, addr, IdentityProviderExternal); err != nil {
-			t.Errorf("посадка БЕЗ собственного публичного фронта отвергнута (адрес %q): %v", addr, err)
-		}
-	}
-}
-
-// TestKAN_BIND_04_OwnPostureStillRequiresTheReader — прежний антецедент НЕ
-// потерян: посадка, у которой нет края платформы, требует читателя и без
-// поднятого фронта.
-//
-// Требование ПЕРЕЕХАЛО из таблицы полос сюда, а не исчезло: два стража об одном
-// предмете разошлись бы молча, поэтому он один, а антецедент у него —
-// дизъюнкция.
-func TestKAN_BIND_04_OwnPostureStillRequiresTheReader(t *testing.T) {
-	var off PresentedCredentialConfig
-	err := off.ValidateBinding(true, "", IdentityProviderOwn)
-	if err == nil {
-		t.Fatal("посадка без края платформы принята без читателя предъявленного — " +
-			"арендатору нечем назваться, и все публичные RPC отвечают честным " +
-			"и бесполезным отказом")
-	}
-	if !strings.Contains(err.Error(), IdentityProviderSetting) {
-		t.Errorf("отказ не называет ручку посадки:\n%s", err)
 	}
 }
 
@@ -125,10 +92,10 @@ func TestKAN_BIND_04_OwnPostureStillRequiresTheReader(t *testing.T) {
 // Без него «в дев не требуем» зеленело бы на страже, снятом целиком.
 func TestKAN_BIND_05_DevPostureIsAnInstallStep(t *testing.T) {
 	var off PresentedCredentialConfig
-	if err := off.ValidateBinding(false, "tcp://0.0.0.0:9098", IdentityProviderOwn); err != nil {
+	if err := off.ValidateBinding(false); err != nil {
 		t.Errorf("промежуточный шаг установки отвергнут: %v", err)
 	}
-	if err := off.ValidateBinding(true, "tcp://0.0.0.0:9098", IdentityProviderOwn); err == nil {
-		t.Error("страж снят целиком: боевая посадка приняла фронт без читателя")
+	if err := off.ValidateBinding(true); err == nil {
+		t.Error("страж снят целиком: боевая посадка приняла отсутствие читателя")
 	}
 }

@@ -41,7 +41,7 @@
 //
 // Класс держит гейт `TestRefusalNamedEnvVarReachesItsField` (тот же пакет):
 // всякая переменная, названная текстом отказа стража, обязана менять исход —
-// проверяется ОПЫТОМ на четырёх профилях посадки.
+// проверяется ОПЫТОМ на двух профилях: боевом и стенде разработчика.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ОБЛАСТЬ ТАБЛИЦЫ НАЗВАНА ЧЕСТНО: отказов старта ТРИ СТАДИИ, здесь — ОДНА
@@ -61,7 +61,6 @@ package config
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
@@ -108,209 +107,72 @@ type RequiredSetting struct {
 	Env string
 	// Supply — каким путём величина доезжает до поля.
 	Supply SupplyPath
-	// Lanes — полосы посадки личности, на которых величина обязательна.
-	// Пустой перечень — обязательна на любой.
-	Lanes []IdentityProvider
-	// WhenOwnPublicRESTFront — ВТОРАЯ ПОЛОВИНА АНТЕЦЕДЕНТА: величина обязательна
-	// СВЕРХ полос выше всюду, где поднят собственный публичный REST-фронт
-	// службы (`api-server.rest-endpoint`).
-	//
-	// # Почему поле, а не ещё одна полоса
-	//
-	// Полоса — это ПОСАДКА ЛИЧНОСТИ, одна величина. Антецедент стража —
-	// ДИЗЪЮНКЦИЯ ДВУХ («посадка без внешнего поставщика» ЛИБО «поднят
-	// собственный публичный фронт», PresentedCredentialConfig.ValidateBinding),
-	// и вторую половину перечень посадок выразить не может вовсе: фронт
-	// поднимает объявленный адрес, а не выбор поставщика.
-	//
-	// # Цена, из-за которой поле заведено
-	//
-	// Семь строк были помечены как нужные только посадке `own`, тогда как страж
-	// требует их и на `external` с поднятым фронтом — то есть на ЕДИНСТВЕННОЙ
-	// посадке, которую сегодня поднимает боевой профиль. Оператор сканирует
-	// столбец применимости и делает вывод, что семи величин его посадка не
-	// требует; без них процесс не стартует (задачи #2333, #2340).
-	//
-	// Расхождение было МОЛЧАЛИВЫМ by construction: применимость объявлялась
-	// вторым способом, отдельно от антецедента, который судит страж, — поле
-	// правят коммитом в свой файл, страж в свой.
-	WhenOwnPublicRESTFront bool
 	// Why — почему без неё не пускаемся, словами оператора. Идёт в документ.
 	Why string
 	// Sample — годное значение. Им величина подаётся в прогоне, и оно же
 	// печатается в документе примером.
 	Sample string
-	// SampleIsLane — годное значение этой величины ЕСТЬ имя полосы (так у
-	// самой посадки личности). Тогда Sample служит только примером в документе.
-	SampleIsLane bool
 	// FileList — в файле настроек величина записывается СПИСКОМ, а не строкой.
 	FileList bool
 	// Conditional — величина обязательна не всегда, а при выполненном условии
 	// (обычно — при заданной соседней величине). Такая строка на ПУСТОМ профиле
-	// отказа не производит НИ НА ОДНОЙ посадке, и проба полноты её из обратного
-	// направления исключает, называя причину.
+	// отказа не производит, и проба полноты её из обратного направления
+	// исключает, называя причину.
 	Conditional bool
-	// UnconditionalOn — посадки, на которых строка требуется САМА ПО СЕБЕ, то
-	// есть производит отказ уже на ПУСТОМ профиле. Пусто (при Conditional ==
-	// false) — значит на всех, где строка применима.
-	//
-	// # Зачем поле, если есть Conditional
-	//
-	// У величины бывает ДВА производителя отказа с РАЗНЫМИ антецедентами, и
-	// тогда «условна ли она» — свойство посадки, а не строки. Ровно так у
-	// `authn.token-signing.enabled`: на посадке `own` её требует полосное
-	// правило само по себе (внешнего поставщика нет, и без своей чеканки
-	// служба не выдаст ни одного токена), а на посадке с поднятым фронтом её
-	// требует ЧИТАТЕЛЬ предъявленного удостоверения — то есть только после
-	// того, как включён он.
-	//
-	// Пометить такую строку `Conditional` значило бы потерять утверждение,
-	// которое на `own` верно и держит полосное правило живым: пустой боевой
-	// профиль обязан на неё отказать. Оставить как есть — объявить требование
-	// там, где страж на пустом профиле молчит.
-	UnconditionalOn []IdentityProvider
 	// Refusal — подстрока текста отказа. Ею строка доказывается прогоном, и она
 	// же ведёт оператора от сообщения к строке документа.
 	Refusal string
 }
 
-// Landing — ПОСАДКА, на которой судится применимость строки: ровно то, из чего
-// стражи строят свои антецеденты.
-//
-// Заведена затем, чтобы применимость выводилась из ТОГО ЖЕ, что судит страж, а
-// не объявлялась вторым способом рядом. Полей ровно столько, сколько половин у
-// антецедентов; появится третья — она приедет сюда, а не отдельным перечнем.
-type Landing struct {
-	// Provider — посадка поставщика личности.
-	Provider IdentityProvider
-	// OwnPublicRESTFront — поднят ли собственный публичный REST-фронт службы
-	// (`api-server.rest-endpoint` объявлен непустым).
-	OwnPublicRESTFront bool
-}
-
-// String — имя посадки для текстов прогона и порождённой таблицы.
-func (l Landing) String() string {
-	if l.OwnPublicRESTFront {
-		return l.Provider.String() + "+фронт"
-	}
-	return l.Provider.String()
-}
-
-// AppliesTo сообщает, обязательна ли величина на названной посадке.
-//
-// Дизъюнкция, а не перечень: половины антецедента независимы, и «нет» одной
-// не отменяет «да» другой.
-func (s RequiredSetting) AppliesTo(l Landing) bool {
-	if len(s.Lanes) == 0 {
-		return true
-	}
-	for _, lane := range s.Lanes {
-		if lane == l.Provider {
-			return true
-		}
-	}
-	return s.WhenOwnPublicRESTFront && l.OwnPublicRESTFront
-}
-
 // ProducesRefusalOnEmptyProfile сообщает, обязана ли строка дать отказ уже на
-// ПУСТОМ боевом профиле названной посадки.
+// ПУСТОМ боевом профиле.
 //
 // Утвердительный ответ — то, что проба полноты таблицы требует доказать
 // прогоном; отрицательный она пропускает, называя причину.
-func (s RequiredSetting) ProducesRefusalOnEmptyProfile(l Landing) bool {
-	if s.Conditional || !s.AppliesTo(l) {
-		return false
-	}
-	if len(s.UnconditionalOn) == 0 {
-		return true
-	}
-	for _, p := range s.UnconditionalOn {
-		if p == l.Provider {
-			return true
-		}
-	}
-	return false
+//
+// Прежде ответ зависел от посадки: строка могла быть безусловной на одной и
+// условной на другой (`UnconditionalOn`), а обязательной — только на части
+// посадок (`Lanes`) либо сверх них при поднятом собственном публичном фронте.
+// Посадка у службы одна (kaname#363), и у строки осталось одно свойство —
+// условна она или нет.
+func (s RequiredSetting) ProducesRefusalOnEmptyProfile() bool {
+	return !s.Conditional
 }
 
-// SampleValue — годное значение для подачи на названной посадке.
-func (s RequiredSetting) SampleValue(l Landing) string {
-	if s.SampleIsLane {
-		return l.Provider.String()
+// FileValue — образец в той форме, в какой его читает файл настроек.
+func (s RequiredSetting) FileValue() any {
+	if s.FileList {
+		return []string{s.Sample}
 	}
 	return s.Sample
 }
 
-// FileValue — значение в той форме, в какой его читает файл настроек.
-func (s RequiredSetting) FileValue(l Landing) any {
-	v := s.SampleValue(l)
-	if s.FileList {
-		return []string{v}
-	}
-	return v
-}
+// Формы столбца «Когда обязателен» порождённого документа. Словарь ЗАКРЫТ:
+// двух слов хватает всем строкам, и третье появится только вместе со вторым
+// свойством строки. Разбирают столбец не только люди — проба платформы читает
+// его у пиненной службы и на незнакомой форме отказывает, поэтому форма
+// объявлена здесь один раз, а не собирается по месту.
+const (
+	// ApplicabilityAlways — строка обязательна на каждом боевом старте.
+	ApplicabilityAlways = "всегда"
+	// ApplicabilityConditional — строка обязательна при выполненном условии.
+	ApplicabilityConditional = "при выполненном условии"
+)
 
-// OnlyOnWithdrawnPostures сообщает, что строка обязательна ТОЛЬКО на посадках
-// вне словаря — снятых (PRO-Robotech/corelib#30). Такую посадку объявить нельзя:
-// разбор её не производит, а число мимо разбора отвергает проверка старта
-// (#424). Значит, ни на одной объявимой посадке строка не обязательна, и
-// документ оператора её не печатает.
-//
-// Строка, применимая ещё и при поднятом собственном публичном фронте, сюда не
-// относится: фронт поднимается на любой посадке.
-func (s RequiredSetting) OnlyOnWithdrawnPostures() bool {
-	if len(s.Lanes) == 0 || s.WhenOwnPublicRESTFront {
-		return false
-	}
-	for _, l := range s.Lanes {
-		if l.IsLegal() {
-			return false
-		}
-	}
-	return true
-}
-
-// LaneNames — имена полос посадки личности, на которых величина обязательна.
-// Пустой перечень означает «на любой».
-//
-// ЭТО ПОЛОВИНА ПРИМЕНИМОСТИ, а не вся она: вторую несёт
-// WhenOwnPublicRESTFront. Порождающий документ обязан звать Applicability, а не
-// этот перечень, — иначе столбец применимости скажет оператору неправду ровно
-// там, где страж откажет в пуске.
-func (s RequiredSetting) LaneNames() []string {
-	if len(s.Lanes) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(s.Lanes))
-	for _, l := range s.Lanes {
-		out = append(out, l.String())
-	}
-	return out
-}
-
-// Applicability — применимость строки ЦЕЛИКОМ, словами оператора: обе половины
-// антецедента в одной фразе.
-//
-// Единственный источник для столбца «когда обязателен» порождённого документа.
+// Applicability — применимость строки словами оператора. Единственный источник
+// для столбца «Когда обязателен» порождённого документа.
 func (s RequiredSetting) Applicability() string {
-	lanes := s.LaneNames()
-	switch {
-	case len(lanes) == 0:
-		// Безусловная строка. Вторая половина антецедента её не сужает и не
-		// расширяет: шире «на любой посадке» не бывает.
-		return "на любой посадке"
-	case s.WhenOwnPublicRESTFront:
-		return "посадка `" + strings.Join(lanes, "` либо `") +
-			"` — И ВСЮДУ, где поднят собственный публичный REST-фронт (`api-server.rest-endpoint`)"
-	default:
-		return "посадка `" + strings.Join(lanes, "` либо `") + "`"
+	if s.Conditional {
+		return ApplicabilityConditional
 	}
+	return ApplicabilityAlways
 }
 
 // RequiredSettings — ТАБЛИЦА. Единственное объявление; второе разошлось бы с
 // первым молча.
 //
 // Порядок строк — порядок, в котором величины встречает оператор: сперва
-// общие для любой посадки, затем полосные.
+// общие для всякой установки, затем величины своего входа и своей чеканки.
 var RequiredSettings = append([]RequiredSetting{
 	{
 		Key:    "authn.domain",
@@ -326,24 +188,6 @@ var RequiredSettings = append([]RequiredSetting{
 			"построением имя означало бы, что адресата каждого удостоверения выбрал не тот, " +
 			"кто ставит службу, — и установка выглядела бы настроенной",
 		Refusal: "authn.domain is not declared",
-	},
-	{
-		Key:          IdentityProviderSetting,
-		Env:          "KANAME_AUTHN__IDENTITY_PROVIDER",
-		Supply:       SupplyEnv,
-		SampleIsLane: true,
-		// ВЫВЕДЕНО из словаря посадки, а не выписано: второе перечисление
-		// канонических имён разошлось бы с типом на первом же новом значении,
-		// и разошлось бы молча. Образец — законное значение словаря: снятая
-		// посадка `external` (PRO-Robotech/corelib#30) печатается числом вне
-		// словаря, и образец, собранный из неё, называл бы величину, которую
-		// разбор не принимает (#424).
-		Sample: IdentityProviderOwn.String(),
-		Why: "чем установка проверяет человека. Законное значение одно — собственная чеканка " +
-			"платформы (own): посадка внешнего поставщика удостоверений снята, и разбор её не принимает. " +
-			"Умолчания нет намеренно — оно молча подняло бы профиль, посадки не выбравший, в том числе " +
-			"написанный под снятую посадку и не обновлённый",
-		Refusal: "authn.identity-provider is not declared",
 	},
 	{
 		Key:      "authn.trusted-forwarder-sans",
@@ -391,7 +235,7 @@ var RequiredSettings = append([]RequiredSetting{
 	// ЧЕТВЁРТЫЙ ПОТОЛОК — ключи доступа (Ф7 Р8, Ф7-38; kacho#1273): та же форма.
 	ownCeilingRequirement("iam.user.accessKey", "3"),
 
-	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины посадки `own`; строки
+	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины своего входа; строки
 	// ВЫВОДЯТСЯ из перечня ручек полосы, а не выписываются рядом с ним.
 	loginLaneRequirement("session-ttl", "24h",
 		"срок нашей сессии человека, абсолютный, от выдачи. Умолчания нет: перенос прежней величины (24 ч) объявляется профилем, а не построением"),
@@ -405,10 +249,10 @@ var RequiredSettings = append([]RequiredSetting{
 		"сколько неверных предъявлений с одного источника (адрес из X-Forwarded-For края) допускается в окне"),
 	loginLaneRequirement("source-window", "15m",
 		"окно счёта неверных предъявлений по источнику"),
-	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270) — величины посадки `own`;
+	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270) — величины своего входа;
 	// строки ВЫВОДЯТСЯ из перечня ручек регистрации.
 	registrationRequirement("admissions-per-window", "3",
-		"потолок ТЕМПА заведения аккаунтов одной личностью: сколько за окно, СЧИТАЯ первое, — при 3 четвёртое в окне отвергается. Первое заведение носителя — сама регистрация — проходит при любой величине; величина ограничивает повторную регистрацию адресом и последующие заведения аккаунтов того же человека. Носитель ключа на этой посадке — адрес, которым человек представился (Ф4 Р5). 0 законен: после первого — ни одного. Служба проецирует величину в схему на старте; под `external` строку авторитета правит администратор"),
+		"потолок ТЕМПА заведения аккаунтов одной личностью: сколько за окно, СЧИТАЯ первое, — при 3 четвёртое в окне отвергается. Первое заведение носителя — сама регистрация — проходит при любой величине; величина ограничивает повторную регистрацию адресом и последующие заведения аккаунтов того же человека. Носитель ключа — адрес, которым человек представился (Ф4 Р5). 0 законен: после первого — ни одного. Служба проецирует величину в схему на старте"),
 	registrationRequirement("admission-window", "1h",
 		"окно счёта заведений аккаунтов одной личностью"),
 	loginLaneRequirement("password-min-length", "8",
@@ -438,15 +282,15 @@ var RequiredSettings = append([]RequiredSetting{
 		"сколько писем подтверждения одному человеку за окно, письмо регистрации в счёт"),
 	loginLaneRequirement("verification-resend-window", "24h",
 		"скользящее окно числа писем подтверждения; промежуток между письмами обязан быть короче окна"),
-	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318) — величины посадки `own`; строки
+	// СРОКИ СОБСТВЕННОЙ ЦЕРЕМОНИИ (kaname#318) — величины своей чеканки; строки
 	// ВЫВОДЯТСЯ из таблицы ручек сроков, потолок в объяснении — из константы
 	// фундамента. Образцы — поведение сборки до ручек, равное потолкам.
 	ceremonyLifespanRequirement("code-ttl", "60s",
 		"срок кода авторизации собственной церемонии от его выдачи: столько перехваченный код остаётся обмениваемым"),
 	ceremonyLifespanRequirement("refresh-ttl", "168h",
 		"срок семейства токенов обновления собственной церемонии от первой выдачи; оборот его не продлевает, и семейство кончается не позже сессии, в которой выдан код"),
-	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13) — величины посадки
-	// `own`; строки ВЫВОДЯТСЯ из перечня ручек привязки. Образцы намеренно
+	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13) — величины своего
+	// входа; строки ВЫВОДЯТСЯ из перечня ручек привязки. Образцы намеренно
 	// НЕРЕЗОЛВИМЫЕ (RFC 2606) и согласованы между собой: хост происхождения
 	// лежит под именем доверяющей стороны, иначе страж отверг бы образец.
 	accessKeyRequirement("rp-id", "access.example.invalid",
@@ -455,36 +299,6 @@ var RequiredSettings = append([]RequiredSetting{
 		"перечень происхождений (origin) консоли `https://хост[:порт]` через запятую, каждое под именем доверяющей стороны; сверяется побайтово на приёме результата церемонии и на каждом предъявлении. Слово «"+AccessKeyOriginsNone+"» (в файле — пустой список) означает «никого»: служба стартует и отвергает всякий ключ. Незаданный перечень — отказ старта: «принимаем любое» не политика, а отсутствие привязки"),
 	accessKeyRequirement("algorithms", "-7",
 		"перечень алгоритмов открытого ключа (идентификаторы COSE через запятую), в которых принимаются ключи: -7 (ES256), -8 (EdDSA), -257 (RS256). Пустого «никого» не бывает: перечень без единого алгоритма делает церемонию невыполнимой. Сужение перечня делает уже принятые ключи вне его непринимаемыми — перепись переноса называет их числом"),
-	// СЕКРЕТ ХУКОВ закрывает ЧЕТЫРЕ маршрута, а не два. Перечень их сюда вторым
-	// экземпляром не переписан: строка `Why` ссылается на опись пакета
-	// `internal/handler/iamhooks`, а полноту самой описи держит проба
-	// `route_prose_names_every_route_test.go`
-	// (`TestPackageProseNamesEveryRouteOfTheProducer`): всякая шапка, назвавшая
-	// более одного маршрута, обязана назвать каждый маршрут производителя.
-	//
-	// ПОЧЕМУ ИМЯ ПРОБЫ СТОИТ ЗДЕСЬ, А НЕ В `Why`. Поле `Why` рендерится в
-	// INSTALL.md дословно, а руководство читает оператор ЧУЖОЙ установки: дерева
-	// у него нет и `go test` он не запустит. Координаты, названные руководством,
-	// держит `tools/operatordocs/install_coordinates_test.go`, и держит он два
-	// класса — ряды измерителей и ключи настройки; имя файла пробы ни к одному
-	// не относится, то есть переименование пробы сделало бы руководство лживым
-	// МОЛЧА. Пакет в `Why` при этом остаётся: без него «четырёх» не на что
-	// проверить, и число стало бы вторым экземпляром перечня маршрутов — ровно
-	// тем, что эта ссылка и отменяет.
-	{
-		Key:    "authn.hook-shared-secret",
-		Env:    "KANAME_HOOK_TOKEN",
-		Supply: SupplyEnv,
-		Sample: "заменить-на-случайную-строку",
-		Why: "предъявитель, которым поставщик удостоверений аутентифицируется на ВСЕХ ЧЕТЫРЁХ " +
-			"хуках слушателя `:9092`: выдача токена, продление, заведение человека по первому " +
-			"входу, завершение восстановления доступа. Перечень их — опись пакета " +
-			"`internal/handler/iamhooks`. Прежняя редакция называла два хука из четырёх: " +
-			"читатель, отводящий секрету только выдачу и продление, не знал, что тем же секретом " +
-			"закрыты заведение человека и восстановление доступа. Без секрета хуки принимали бы " +
-			"вызов без всякой проверки",
-		Refusal: "authn.hook-shared-secret is empty",
-	},
 	{
 		Key:    "authn.jwks-encryption-key-hex",
 		Env:    "KANAME_JWKS_ENC_KEY",
@@ -500,19 +314,19 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:    "authn.second-factor-encryption-key-hex",
 		Env:    "KANAME_SECOND_FACTOR_ENC_KEY",
 		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderOwn},
 		Sample: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
 		Why: "перечень ключей ОБЁРТКИ секретов второго фактора (код по времени): 32 байта в hex (64 знака) " +
 			"через запятую — первый оборачивает, все открывают. СВОЯ ручка, а не ключ подписного ключа: " +
 			"предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана " +
-			"останавливать другой",
+			"останавливать другой. Прежний ключ снимается из перечня только после переобёртки уже " +
+			"записанных секретов командой `kaname second-factor-key rewrap` (исход outcome=done): до неё " +
+			"он открывает секреты, обёрнутые им, и снятый раньше отдаёт 503 каждому их владельцу",
 		Refusal: "authn.second-factor-encryption-key-hex",
 	},
 	{
 		Key:    "authn.self-service-freshness",
 		Env:    "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
 		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderOwn},
 		Sample: "15m",
 		Why: "окно свежести правки своих данных от последнего предъявления: заведение и подтверждение " +
 			"второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок " +
@@ -529,174 +343,96 @@ var RequiredSettings = append([]RequiredSetting{
 			"намеренно — это чужое имя, и совпадение подставленного с настоящим не выбирал бы никто",
 		Refusal: "api-server.registry-token.service is not declared",
 	},
-	// ЧЕТЫРЕ СТРОКИ ПОЛОСЫ СНЯТОЙ ПОСАДКИ `external` — адреса внешнего
-	// поставщика. Посадка снята фундаментом (PRO-Robotech/corelib#30):
-	// объявить её профиль не может — разбор её не производит, а число мимо
-	// разбора отвергает проверка старта (#424). Поэтому строки не обязательны
-	// ни на одной посадке, которую можно объявить (OnlyOnWithdrawnPostures), и
-	// документ оператора их не печатает: требование величины, без которой
-	// служба поднимается, было бы ложью. В таблице они остаются как
-	// объявление владельца о СВОЁМ имени переменной у этих ключей (его читает
-	// гейт исходящих полос поставки) и снимаются вместе с полосой целиком (#363).
 	{
-		Key:    "authn.hydra-admin-url",
-		Env:    "KANAME_HYDRA_ADMIN_URL",
+		Key:    "authn.token-signing.enabled",
+		Env:    "KANAME_AUTHN__TOKEN_SIGNING__ENABLED",
 		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderExternal},
-		Sample: "https://hydra-admin.kacho.svc:4445",
-		Why: "административная дорога к внешнему поставщику: по ней заводится клиент OAuth и " +
-			"сносится сессия входа. Незаданный адрес не пуст — он ВЫВОДИТСЯ из издателя и указывает " +
-			"на публичное имя, которого внутри кластера не существует; служба читается настроенной, " +
-			"адресуя хост, которого никто не выбирал",
-		Refusal: "authn.hydra-admin-url is not declared",
-	},
-	{
-		Key:         "authn.hydra-admin-ca-file",
-		Env:         "KANAME_HYDRA_ADMIN_CA_FILE",
-		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderExternal},
-		Conditional: true,
-		Sample:      "/etc/kaname/tls/server/ca.crt",
-		Why: "корень доверия для административной дороги. Обязателен, КОГДА адрес выше объявлен по " +
-			"https: сертификат поставщика внутри кластера выпущен внутренним удостоверяющим центром, " +
-			"а процесс доверяет системным корням — без этой связки каждый вызов падает на неизвестном центре",
-		Refusal: "authn.hydra-admin-ca-file is empty",
-	},
-	{
-		Key:    "authn.hydra-jwks-url",
-		Env:    "KANAME_HYDRA_JWKS_URL",
-		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderExternal},
-		Sample: "http://hydra-public.kacho.svc:4444/.well-known/jwks.json",
-		Why: "набор проверочных ключей поставщика — единственная опора, по которой решается, его ли " +
-			"подписью подписан предъявленный токен. Незаданный адрес выводится из издателя ровно так же, " +
-			"как административный выше",
-		Refusal: "authn.hydra-jwks-url is not declared",
-	},
-	{
-		Key:    "authn.hydra-token-url",
-		Env:    "KANAME_HYDRA_TOKEN_URL",
-		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderExternal},
-		Sample: "http://hydra-public.kacho.svc:4444/oauth2/token",
-		Why: "адрес обмена подписанного утверждения на токен у внешнего поставщика. Незаданный " +
-			"выводится из издателя — с теми же последствиями",
-		Refusal: "authn.hydra-token-url is not declared",
-	},
-	{
-		Key:                    "authn.token-signing.enabled",
-		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__ENABLED",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		// Производителей отказа ДВА, и антецеденты у них разные: на посадке own
-		// величину требует полосное правило само по себе, а при поднятом фронте
-		// — читатель предъявленного удостоверения, то есть уже ПОСЛЕ того, как
-		// включён он. Поэтому «условна ли она» — свойство посадки.
-		UnconditionalOn: []IdentityProvider{IdentityProviderOwn},
-		Sample:          "true",
-		Why: "своя чеканка токенов. На посадке own внешнего поставщика нет вовсе, поэтому с " +
-			"выключенной чеканкой процесс поднялся бы и не смог выдать ни одного токена. " +
-			"ТА ЖЕ чеканка требуется и вне этой посадки — всюду, где поднят собственный " +
-			"публичный REST-фронт: читатель предъявленного удостоверения проверяет подпись " +
-			"НАШИМ реестром ключей, и без включённой чеканки реестра не существует вовсе " +
+		Sample: "true",
+		Why: "своя чеканка токенов. Внешнего поставщика удостоверений у службы нет, поэтому с " +
+			"выключенной чеканкой процесс поднялся бы и не смог выдать ни одного токена. Её же " +
+			"требует читатель предъявленного удостоверения: он проверяет подпись НАШИМ реестром " +
+			"ключей, и без включённой чеканки реестра не существует вовсе " +
 			"(PresentedCredentialConfig.Validate)",
 		Refusal: "authn.token-signing.enabled is false",
 	},
 	{
-		Key:                    "authn.token-signing.issuer",
-		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__ISSUER",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "https://iam.example.internal/",
+		Key:         "authn.token-signing.issuer",
+		Env:         "KANAME_AUTHN__TOKEN_SIGNING__ISSUER",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "https://iam.example.internal/",
 		Why: "издатель, которым подписывается наш токен, и он же — единственная принимаемая " +
 			"форма издателя на входе. Незаданный означает не «любой наш», а «не сужаем»: токен " +
 			"любого происхождения прошёл бы за наш",
 		Refusal: "authn.token-signing.issuer is empty",
 	},
 	{
-		Key:                    "authn.token-signing.algorithm",
-		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__ALGORITHM",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "RS256",
-		Why:                    "чем подписывается выпускаемый токен. Умолчания нет: выбор подписи — решение установки, а не наше",
-		Refusal:                "authn.token-signing.algorithm",
+		Key:         "authn.token-signing.algorithm",
+		Env:         "KANAME_AUTHN__TOKEN_SIGNING__ALGORITHM",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "RS256",
+		Why:         "чем подписывается выпускаемый токен. Умолчания нет: выбор подписи — решение установки, а не наше",
+		Refusal:     "authn.token-signing.algorithm",
 	},
 	{
-		Key:                    "authn.token-signing.allowed-algorithms",
-		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__ALLOWED_ALGORITHMS",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "RS256",
+		Key:         "authn.token-signing.allowed-algorithms",
+		Env:         "KANAME_AUTHN__TOKEN_SIGNING__ALLOWED_ALGORITHMS",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "RS256",
 		Why: "перечень подписей, принимаемых на входе (через запятую). Пустой означает «любая»: " +
 			"на нём сверка заголовка токена с ключом теряет предмет, и подделанный заголовок прошёл бы",
 		Refusal: "authn.token-signing.allowed-algorithms has no elements",
 	},
 	{
-		Key:                    "authn.token-signing.key-lifetime",
-		Env:                    "KANAME_AUTHN__TOKEN_SIGNING__KEY_LIFETIME",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "2160h",
+		Key:         "authn.token-signing.key-lifetime",
+		Env:         "KANAME_AUTHN__TOKEN_SIGNING__KEY_LIFETIME",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "2160h",
 		Why: "срок ключа подписи (Go duration) — политика его ротации. Умолчания нет ни у " +
 			"процесса, ни в базовых значениях чарта: срок, выбранный за оператора, он не увидит " +
 			"и не пересмотрит, а страж, судящий подставленную величину, не отказал бы ни разу",
 		Refusal: "authn.token-signing.key-lifetime is not declared",
 	},
 	{
-		Key:                    "authn.presented-credential.enabled",
-		Env:                    "KANAME_AUTHN__PRESENTED_CREDENTIAL__ENABLED",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Sample:                 "true",
+		Key:    "authn.presented-credential.enabled",
+		Env:    "KANAME_AUTHN__PRESENTED_CREDENTIAL__ENABLED",
+		Supply: SupplyEnv,
+		Sample: "true",
 		Why: "читает ли публичный слушатель удостоверение, ПРЕДЪЯВЛЕННОЕ самим вызывающим. " +
-			"На посадке own иного способа назваться у арендатора нет: нашего края, чтобы " +
-			"передать личность, в его установке не существует, а модульного сертификата у " +
-			"человека не бывает. С выключенным приёмом процесс поднимется и ответит честным " +
-			"отказом на каждый публичный вызов. ТОТ ЖЕ приём требуется и вне этой посадки — " +
-			"всюду, где поднят собственный публичный REST-фронт (api-server.rest-endpoint): " +
-			"дотянувшийся до него приходит обычным клиентом, и предъявленное удостоверение — " +
-			"единственное, чем он может назваться (PresentedCredentialConfig.ValidateBinding)",
+			"Иного способа назваться у арендатора нет: нашего края, чтобы передать личность, в " +
+			"его установке не существует, а модульного сертификата у человека не бывает; " +
+			"дотянувшийся до собственного публичного REST-фронта (api-server.rest-endpoint) " +
+			"приходит обычным клиентом. С выключенным приёмом процесс поднимется и ответит " +
+			"честным отказом на каждый публичный вызов (PresentedCredentialConfig.ValidateBinding)",
 		Refusal: "authn.presented-credential.enabled is false",
 	},
 	{
-		Key:                    "authn.presented-credential.audience",
-		Env:                    "KANAME_AUTHN__PRESENTED_CREDENTIAL__AUDIENCE",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "kaname-public",
+		Key:         "authn.presented-credential.audience",
+		Env:         "KANAME_AUTHN__PRESENTED_CREDENTIAL__AUDIENCE",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "kaname-public",
 		Why: "адресат публичного слушателя: токен, выпущенный этой же установкой для ДРУГОЙ " +
 			"её поверхности, здесь не годится. Незаданный означает «любой», и тогда токен, " +
 			"добытый для одной поверхности, открывает все",
 		Refusal: "authn.presented-credential.audience is empty",
 	},
 	{
-		Key:                    "authn.presented-credential.revocation-cache-ttl",
-		Env:                    "KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL",
-		Supply:                 SupplyEnv,
-		Lanes:                  []IdentityProvider{IdentityProviderOwn},
-		WhenOwnPublicRESTFront: true,
-		Conditional:            true,
-		Sample:                 "30s",
+		Key:         "authn.presented-credential.revocation-cache-ttl",
+		Env:         "KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL",
+		Supply:      SupplyEnv,
+		Conditional: true,
+		Sample:      "30s",
 		Why: "срок кеша положительного вердикта об отзыве. Это И ЕСТЬ окно отзыва: столько " +
 			"времени субъект, у которого доступ отобрали, продолжает проходить. Умолчания нет " +
 			"намеренно — окно, выбранное за оператора, он не увидит и не пересмотрит",
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
-	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК на посадке `own` (задача #337):
-	// токен-эндпоинт платформы требуется полосным правилом САМ ПО СЕБЕ, а восемь
+	// КОНТУР ВЫДАЧИ КЛЮЧЕЙ СЛУЖЕБНЫХ УЧЁТОК (задача #337): токен-эндпоинт
+	// платформы требуется строкой таблицы полосы САМ ПО СЕБЕ, а восемь
 	// его величин (четыре F2 и четыре темпа токен-эндпоинта, #315) — его
 	// собственным стражем [ClientTokenConfig.Validate], то есть только после
 	// того, как эндпоинт включён. Две величины темпа точки авторизации требует
@@ -708,20 +444,17 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:    "authn.client-token.enabled",
 		Env:    "KANAME_AUTHN__CLIENT_TOKEN__ENABLED",
 		Supply: SupplyEnv,
-		Lanes:  []IdentityProvider{IdentityProviderOwn},
 		Sample: "true",
 		Why: "токен-эндпоинт платформы, на котором ключ служебной учётки обменивается на токен. " +
-			"На посадке own внешнего поставщика нет вовсе, а с выключенным эндпоинтом выдача ключа " +
-			"заводит клиента у внешнего поставщика: процесс поднялся бы и отказывал на всякой выдаче " +
-			"ключа. Эндпоинт монтируется на слушателе api-server.registry-token.endpoint, и тот обязан " +
-			"быть поднят",
+			"Другого исполнителя выдачи ключей у службы нет: с выключенным эндпоинтом процесс " +
+			"поднялся бы и отказывал на всякой выдаче ключа. Эндпоинт монтируется на слушателе " +
+			"api-server.registry-token.endpoint, и тот обязан быть поднят",
 		Refusal: "authn.client-token.enabled is false",
 	},
 	{
 		Key:         "authn.client-token.allowed-audiences",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "kacho-registry,https://api.example.invalid",
 		Why: "перечень адресатов, которым платформа вообще чеканит удостоверения (через запятую). " +
@@ -733,7 +466,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.default-audience",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "https://api.example.invalid",
 		Why: "адресат токена, когда запрос его не назвал; обязан быть членом перечня выше, " +
@@ -744,7 +476,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.token-ttl",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "15m",
 		Why: "срок выпускаемого токена, не выше платформенного потолка. Умолчания нет: срок — " +
@@ -755,7 +486,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.body-ceiling",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "65536",
 		Why: "потолок тела запроса к эндпоинту, байт. Ноль означал бы «без потолка», и эндпоинт " +
@@ -766,7 +496,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.exchanges-per-client-per-sec",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__EXCHANGES_PER_CLIENT_PER_SEC",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "5",
 		Why: "темп обменов в секунду на идентификатор клиента, на реплику. Судится по заявленному " +
@@ -778,7 +507,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.in-flight-ceiling",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__IN_FLIGHT_CEILING",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "32",
 		Why: "потолок одновременных обменов на реплику, все четыре вида выдачи. Обмен сверх потолка " +
@@ -789,7 +517,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.failed-proofs-per-source",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOFS_PER_SOURCE",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "50",
 		Why: "неудавшихся доказательств клиента за окно на источник, на реплику: отказов проверки " +
@@ -805,7 +532,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.failed-proof-window",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__FAILED_PROOF_WINDOW",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "15m",
 		Why: "скользящее окно отказов доказательства на источник. Отказ в окне, пока с него прошло " +
@@ -816,7 +542,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.authorize-per-source-per-sec",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "10",
 		Why: "запросов авторизации в секунду на источник, на реплику; обязательна при собранной " +
@@ -828,7 +553,6 @@ var RequiredSettings = append([]RequiredSetting{
 		Key:         "authn.client-token.authorize-in-flight-ceiling",
 		Env:         "KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING",
 		Supply:      SupplyEnv,
-		Lanes:       []IdentityProvider{IdentityProviderOwn},
 		Conditional: true,
 		Sample:      "32",
 		Why: "потолок одновременных запросов авторизации на реплику, свой — не общий с потолком " +
@@ -899,7 +623,6 @@ func registrationRequirement(short, sample, why string) RequiredSetting {
 		Key:     key,
 		Env:     registrationEnv(key),
 		Supply:  SupplyEnv,
-		Lanes:   []IdentityProvider{IdentityProviderOwn},
 		Sample:  sample,
 		Why:     why,
 		Refusal: key,
@@ -914,7 +637,6 @@ func accessKeyRequirement(short, sample, why string) RequiredSetting {
 		Key:     key,
 		Env:     accessKeyEnv(key),
 		Supply:  SupplyEnv,
-		Lanes:   []IdentityProvider{IdentityProviderOwn},
 		Sample:  sample,
 		Why:     why,
 		Refusal: key,
@@ -930,7 +652,6 @@ func loginLaneRequirement(short, sample, why string) RequiredSetting {
 		Key:     key,
 		Env:     loginLaneEnv(key),
 		Supply:  SupplyEnv,
-		Lanes:   []IdentityProvider{IdentityProviderOwn},
 		Sample:  sample,
 		Why:     why,
 		Refusal: key,

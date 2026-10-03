@@ -82,31 +82,28 @@ const DefaultRevocationTTL = 30 * 24 * time.Hour
 // ограничен, отзыв не работает, следа нет.
 const MaxRevocationTTL = DefaultRevocationTTL + tokenpolicy.ClockSkew
 
-// eventSessionAllRevoked — audit_outbox taxonomy value for the
-// revoke-all session path. Defined locally so the use-case stays free of a
-// repo/pg import (clean-arch boundary); it must match the pg-side session
-// taxonomy + audit_outbox_event_type CHECK. The single-jti path's event_type
-// (iam.session.revoked) is owned by the tx-scoped RevokeTx adapter (always the
-// same value, so it is not threaded through the port).
-const eventSessionAllRevoked = "iam.session.all_revoked"
-
 // sessionRevocationWriter — narrow write port. Implemented
-// by *repo/kaname/pg.SessionRevocationsAdapter (the SAME adapter the refresh-hook
-// reads through), so writer and reader share one table.
+// by *repo/kaname/pg.SessionRevocationsAdapter, the same adapter the IsRevoked
+// and ListByUser readers go through, so writer and reader share one table.
 //
 // Both methods are the tx-scoped *Tx variants — they commit the
 // revocation AND the durable audit_outbox compliance row in ONE transaction
-// (commit-together-or-rollback-together, запрет #10). eventType selects the
-// audit taxonomy value (revoked / all_revoked).
+// (commit-together-or-rollback-together, запрет #10). Each owns its audit
+// taxonomy value (always the same one, so it is not threaded through the
+// port):
 //
 //   - RevokeTx              — per-jti session_revocations row (single-token logout)
 //   - iam.session.revoked audit row, atomically.
 //   - RevokeAllUserTokensTx — per-user revoke-all cutoff (user_token_revocations)
-//   - iam.session.all_revoked audit row, atomically. The cutoff is the gate the
-//     refresh-hook enforces against the token's session auth_time.
+//   - iam.session.all_revoked audit row, atomically.
+//
+// Вид записи двери отзыва-всех прежде приходил параметром: дверь делил с этим
+// глаголом принудительный выход на посадке `external`, и его запись ложилась
+// без исхода снятия. Посадка снята (kaname#363), и параметр снят вслед за ней
+// (kaname#380): запись принудительного выхода кладёт транзакция снятия.
 type sessionRevocationWriter interface {
 	RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error
-	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID, eventType string) error
+	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error
 }
 
 // operationRepo — Operation-порт Revoke. Шире operations.Repo ровно на
@@ -259,9 +256,10 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// ── Mutate ──────────────────────────────────────────────────────────────
 	revokedCount := int32(0)
 
-	// User-level revoke-all cutoff — the gate the refresh-hook actually enforces.
+	// User-level revoke-all cutoff — the gate its readers enforce against the
+	// token's session authentication instant.
 	if marker != nil {
-		if err := uc.writer.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy, eventSessionAllRevoked); err != nil {
+		if err := uc.writer.RevokeAllUserTokensTx(ctx, marker.UserID, marker.RevokeBefore, marker.Reason, revokedBy); err != nil {
 			return nil, uc.failOperation(ctx, op.ID, err)
 		}
 		// A user-level revoke-all is a real, non-no-op revocation. Report ≥1 so

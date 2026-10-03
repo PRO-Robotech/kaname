@@ -32,16 +32,11 @@
 // This service idempotently provisions a SINGLE bootstrap-admin ServiceAccount
 // (cluster `system_admin`) and mints a short-lived access-token for it.
 //
-// WHO SIGNS THAT TOKEN DEPENDS ON THE DEPLOYMENT, and this line used to claim
-// otherwise. It said "Hydra remains the issuer / signer; iam only brokers the
-// exchange (never re-signs)" — the claim outlived its subject (#1119). Today:
-//
-//   own minting declared → the PLATFORM signer mints it (internal/tokensigner,
-//                          wired through internal/bootstraptokenwire);
-//   not declared         → the provider mints it, brokered through the existing
-//                          client_credentials exchange, and the bootstrap-admin
-//                          gets a mirrored OAuth client (client_credentials +
-//                          private_key_jwt) as before.
+// THE PLATFORM SIGNER MINTS THAT TOKEN (internal/tokensigner, wired through
+// internal/bootstraptokenwire). This line used to say that the external
+// provider stays the signer and iam only brokers the exchange — the claim
+// outlived its subject (#1119); the provider and both roads to it were removed
+// (kaname#363), and a production start without own minting is refused.
 //
 // Only the requested `audience` differs from the registry lane —
 // `https://{API_DOMAIN}` vs the registry service.
@@ -98,18 +93,18 @@ const (
 type InternalBootstrapTokenServiceClient interface {
 	// MintBootstrapToken idempotently provisions the singleton bootstrap-admin
 	// ServiceAccount (if absent) and mints a short-lived RS256 access-token for
-	// it via the Hydra client_credentials exchange (aud = `https://{API_DOMAIN}`).
+	// it with the platform signer (aud = `https://{API_DOMAIN}`).
 	//
 	// SYNCHRONOUS request/response — NOT an `Operation` (declared deviation from
 	// mutations→Operation, D-2): the mint is a read-shaped derivation (a single
-	// round-trip to Hydra → `{accessToken, expiresIn}`), exactly like the
-	// token-hooks and the registry `/iam/token` shim. The only durable part is the
+	// signing step → `{accessToken, expiresIn}`), exactly like the registry
+	// `/iam/token` lane. The only durable part is the
 	// idempotent provisioning, which is not the subject of the mint and is safe to
 	// repeat (D-3). The token is returned in the response body, not in an
 	// `Operation.response`.
 	//
-	// Fail-closed: Hydra unreachable/misbehaving → UNAVAILABLE (no token; raw Hydra
-	// body never leaks — no auth-oracle).
+	// Fail-closed: signer unavailable → UNAVAILABLE (no token; the raw cause
+	// never leaks — no auth-oracle).
 	//
 	// NO `google.api.http` binding — gRPC-over-mTLS only, by design (see the
 	// file-level comment: a REST route on the plain-HTTP internal listener would be
@@ -144,18 +139,18 @@ func (c *internalBootstrapTokenServiceClient) MintBootstrapToken(ctx context.Con
 type InternalBootstrapTokenServiceServer interface {
 	// MintBootstrapToken idempotently provisions the singleton bootstrap-admin
 	// ServiceAccount (if absent) and mints a short-lived RS256 access-token for
-	// it via the Hydra client_credentials exchange (aud = `https://{API_DOMAIN}`).
+	// it with the platform signer (aud = `https://{API_DOMAIN}`).
 	//
 	// SYNCHRONOUS request/response — NOT an `Operation` (declared deviation from
 	// mutations→Operation, D-2): the mint is a read-shaped derivation (a single
-	// round-trip to Hydra → `{accessToken, expiresIn}`), exactly like the
-	// token-hooks and the registry `/iam/token` shim. The only durable part is the
+	// signing step → `{accessToken, expiresIn}`), exactly like the registry
+	// `/iam/token` lane. The only durable part is the
 	// idempotent provisioning, which is not the subject of the mint and is safe to
 	// repeat (D-3). The token is returned in the response body, not in an
 	// `Operation.response`.
 	//
-	// Fail-closed: Hydra unreachable/misbehaving → UNAVAILABLE (no token; raw Hydra
-	// body never leaks — no auth-oracle).
+	// Fail-closed: signer unavailable → UNAVAILABLE (no token; the raw cause
+	// never leaks — no auth-oracle).
 	//
 	// NO `google.api.http` binding — gRPC-over-mTLS only, by design (see the
 	// file-level comment: a REST route on the plain-HTTP internal listener would be

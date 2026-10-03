@@ -44,7 +44,6 @@ import (
 func contourTranslated(t *testing.T) config.Config {
 	t.Helper()
 	cfg := goodEndpoints(config.ModeProduction, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",

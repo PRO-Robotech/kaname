@@ -113,12 +113,6 @@ func (w *authzProjWriter) EmitFGARelationWrite(context.Context, []service.Relati
 func (w *authzProjWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *authzProjWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *authzProjWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *authzProjWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type authzAcctRdr struct{ ownerUserID domain.UserID }

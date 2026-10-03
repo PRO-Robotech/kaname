@@ -100,8 +100,11 @@ func TestRegistration_KnobsAllHaveARequiredSettingRow(t *testing.T) {
 	for _, s := range config.RequiredSettings {
 		if strings.HasPrefix(s.Key, prefix) {
 			fromTable[s.Key] = true
-			if len(s.Lanes) != 1 || s.Lanes[0] != config.IdentityProviderOwn {
-				t.Errorf("строка %s обязана быть полосной (own): %v", s.Key, s.Lanes)
+			// Прежде строка обязана была быть полосной (own); посадка у службы
+			// одна (kaname#363), и строка обязана быть БЕЗУСЛОВНОЙ: регистрация
+			// требует величину на каждом боевом старте.
+			if s.Conditional {
+				t.Errorf("строка %s обязана быть безусловной, а объявлена условной", s.Key)
 			}
 		}
 	}

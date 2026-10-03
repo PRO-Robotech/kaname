@@ -27,7 +27,7 @@ func TestIssueSAKey_ServiceAccountIDIsRequiredByBehaviour(t *testing.T) {
 	// Пустые зависимости намеренно: отказ обязан наступить до первой из них.
 	// Дойди исполнение до репозитория — проба упала бы паникой, и это отличает
 	// «отвергнуто первым стейтментом» от «отвергнуто когда-нибудь».
-	uc := NewIssueSAKeyUseCase(nil, nil, nil, nil)
+	uc := NewIssueSAKeyUseCase(nil, nil, nil).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		// service_account_id не назван — это и есть предмет.
@@ -48,7 +48,7 @@ func TestIssueSAKey_ServiceAccountIDIsRequiredByBehaviour(t *testing.T) {
 // пары: отказ обязан быть про ДРУГОЕ поле, иначе проба выше зеленела бы на крае,
 // отвергающем всякий запрос целиком.
 func TestIssueSAKey_CreatedByOmitted_IsNotRefusedForBeingAbsent(t *testing.T) {
-	uc := NewIssueSAKeyUseCase(nil, nil, nil, nil)
+	uc := NewIssueSAKeyUseCase(nil, nil, nil).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		ServiceAccountID: "sva00000000000000009",

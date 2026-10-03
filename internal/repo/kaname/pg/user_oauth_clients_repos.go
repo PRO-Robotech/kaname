@@ -5,17 +5,9 @@
 // пользователя (UserTokenService — private_key_jwt), зеркало SAOAuthClientRepo
 // без federation-полей.
 //
-// # Колонка зеркала читается и пишется как ОТСУТСТВУЮЩАЯ величина
-//
-// `hydra_client_id` хранит идентификатор клиента у внешнего поставщика. У строк
-// нового выпуска его НЕТ (`NULL`): выдача больше не заводит там клиента. Пустая
-// доменная строка означает «нет», и обратно она читается тем же «нет».
-//
-// Пустая СТРОКА в колонку не пишется намеренно. Колонка несёт уникальный индекс,
-// и пустая строка — обычное значение: второй токен того же пользователя упёрся
-// бы в 23505. Отсутствие значения уникальный индекс различает, поэтому таких
-// строк может быть сколько угодно (миграция
-// 20260823180500_user_token_credential_needs_no_provider_mirror).
+// Клиентом токен называется по идентификатору своей строки; второго имени у
+// него нет (kaname#362): столбец имени клиента у прежнего внешнего издателя
+// снят вместе с поиском по нему.
 package pg
 
 import (
@@ -47,7 +39,7 @@ func NewUserOAuthClientRepo(pool *pgxpool.Pool) *UserOAuthClientRepo {
 	return &UserOAuthClientRepo{pool: pool}
 }
 
-const uocCols = `id, user_id, hydra_client_id, description, created_by_user_id,
+const uocCols = `id, user_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
                  public_key_pem, key_algorithm, name, labels,
                  credential_kind, secret_hash`
@@ -66,35 +58,6 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 	return out, nil
 }
 
-// GetByOAuthClientID — обратный lookup обратного вызова внешнего поставщика: он
-// отдаёт `client_id` выпустившего токен клиента, а нам нужен принципал —
-// владеющий User.
-//
-// Путь обслуживает ТОЛЬКО строки прежнего выпуска — те, у которых зеркало есть.
-// Строку нового выпуска он не разрешает и не должен: клиента с таким именем у
-// поставщика не существует, поэтому и обратного вызова о нём не бывает.
-//
-// Пустой идентификатор отсекается ДО запроса. Иначе сравнение колонки с пустой
-// строкой на дереве с частично заполненной колонкой стало бы способом спросить
-// «дай любую строку без зеркала» — а спрашивающий здесь всегда называет
-// конкретного клиента.
-func (r *UserOAuthClientRepo) GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error) {
-	if hydraClientID == "" {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User credential %s not found", hydraClientID)
-	}
-	row := r.pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM user_oauth_clients WHERE hydra_client_id = $1`, uocCols),
-		string(hydraClientID))
-	out, err := scanUserOAuthClient(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User credential %s not found", hydraClientID)
-	}
-	if err != nil {
-		return domain.UserOAuthClient{}, mapErr(err, "", string(hydraClientID))
-	}
-	return out, nil
-}
-
 // Insert персистит новую строку токена в writer-tx вызывающего. Принимает
 // непрозрачный service.Tx (порт use-case), восстанавливает конкретный pgx.Tx
 // через txAsPgx, чтобы pgx оставался внутри repo/kaname/pg.
@@ -102,19 +65,19 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 	tx := txAsPgx(txh)
 	const q = `
 		INSERT INTO user_oauth_clients (
-		    id, user_id, hydra_client_id, description, created_by_user_id,
+		    id, user_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
 		    public_key_pem, key_algorithm, name, labels,
 		    credential_kind, secret_hash
-		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11, $12::jsonb,
-		          $13, COALESCE($14, ''::bytea))
+		) VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11::jsonb,
+		          $12, COALESCE($13, ''::bytea))
 		RETURNING ` + uocCols
 	labelsJSON, err := marshalLabels(c.Labels)
 	if err != nil {
 		return domain.UserOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	row := tx.QueryRow(ctx, q,
-		string(c.ID), string(c.UserID), nullableProviderMirror(c.OAuthClientID),
+		string(c.ID), string(c.UserID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, string(c.Name), labelsJSON,
@@ -247,22 +210,18 @@ func (r *UserOAuthClientRepo) TouchLastUsed(ctx context.Context, tx pgx.Tx, id d
 func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 	var (
 		c          domain.UserOAuthClient
-		mirror     sql.NullString
 		expiresAt  sql.NullTime
 		lastUsedAt sql.NullTime
 		labelsBody []byte
 	)
 	if err := row.Scan(
-		(*string)(&c.ID), (*string)(&c.UserID), &mirror,
+		(*string)(&c.ID), (*string)(&c.UserID),
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
 		&c.PublicKeyPEM, &c.KeyAlgorithm, (*string)(&c.Name), &labelsBody,
 		(*string)(&c.CredentialKind), &c.SecretHash,
 	); err != nil {
 		return domain.UserOAuthClient{}, err
-	}
-	if mirror.Valid {
-		c.OAuthClientID = domain.OAuthClientID(mirror.String)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time
@@ -278,17 +237,4 @@ func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 	}
 	c.Labels = labels
 	return c, nil
-}
-
-// nullableProviderMirror — доменное «зеркала нет» в отсутствие значения колонки.
-//
-// Пустая доменная строка и `NULL` здесь одно и то же состояние, названное на
-// двух языках. Писать вместо `NULL` пустую строку нельзя: уникальный индекс
-// зеркала считает её обычным значением, и вторая такая строка не легла бы вовсе.
-func nullableProviderMirror(id domain.OAuthClientID) *string {
-	if id == "" {
-		return nil
-	}
-	s := string(id)
-	return &s
 }

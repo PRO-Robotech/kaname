@@ -425,6 +425,77 @@ func TestKAN_REV_04_WindowIsTheCacheTTLNotTheTokenTTL(t *testing.T) {
 	}
 }
 
+// TestKAN_REV_04_PresentationInsideTheWindowDoesNotExtendIt — окно отсчитывается
+// от ОБРАЩЕНИЯ к хранилищу, а не от последнего предъявления (kaname#558).
+//
+// Предъявление, попавшее в кеш, срока записи не продлевает — ни вердикта об
+// отзыве, ни снимка набора ключей. Продление на попадании превратило бы окно в
+// скользящее: токен, предъявляемый чаще срока кеша, не спрашивал бы авторитет
+// никогда, и отзыв на нём не действовал бы до истечения самого токена, — то
+// есть ровно тот контроль на выдаче, от которого KAN-REV-01 и KAN-REV-04
+// защищают. Соседние пробы этого не различают: в них попадание и истечение
+// разведены по времени так, что скользящее окно проходит их тоже.
+//
+// Это же свойство делает исход при недоступной базе функцией ВОЗРАСТА записи:
+// предъявление «прогрева» внутри окна записи не освежает, и через остаток окна
+// следующий вызов идёт в хранилище. Его отказ — единый отказ аутентификации
+// (KAN-REV-03, KAN-DENY-01), и он не смягчается.
+func TestKAN_REV_04_PresentationInsideTheWindowDoesNotExtendIt(t *testing.T) {
+	t.Run("вердикт об отзыве", func(t *testing.T) {
+		s := newStand(t, withCacheTTL(30*time.Second))
+		raw := s.good(t)
+
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("исходное предъявление обязано пройти: %v", err)
+		}
+		s.clock.advance(20 * time.Second)
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("предъявление внутри окна обязано пройти: %v", err)
+		}
+		asked := s.revs.askedTimes()
+
+		s.revs.revoke(testSubject, s.now.Add(time.Minute))
+		s.clock.advance(11 * time.Second) // 31 с от обращения, 11 с от попадания
+		if _, _, err := s.present(t, raw); err == nil {
+			t.Fatal("отозванный токен принят через 31 с после обращения к авторитету: " +
+				"попадание в кеш продлило окно, и токен, предъявляемый чаще срока кеша, " +
+				"не спрашивает авторитет никогда")
+		} else {
+			assertSingleRefusal(t, err)
+		}
+		if s.revs.askedTimes() == asked {
+			t.Errorf("за окном от обращения авторитет не спрошен (%d) — окно отсчитано от "+
+				"попадания", asked)
+		}
+	})
+
+	t.Run("снимок набора ключей", func(t *testing.T) {
+		s := newStand(t)
+		raw := s.good(t)
+
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("исходное предъявление обязано пройти: %v", err)
+		}
+		s.clock.advance(20 * time.Second)
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("предъявление внутри срока снимка обязано пройти: %v", err)
+		}
+		if got := s.keys.askedTimes(); got != 1 {
+			t.Fatalf("внутри срока снимка реестр спрошен %d раз(а), ожидается 1", got)
+		}
+
+		s.clock.advance(11 * time.Second) // 31 с от снятия снимка, 11 с от попадания
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("предъявление после истечения снимка отвергнуто: %v", err)
+		}
+		if got := s.keys.askedTimes(); got != 2 {
+			t.Errorf("через 31 с после снятия снимка реестр спрошен %d раз(а), ожидается 2 — "+
+				"попадание продлило снимок, и снятый из реестра ключ принимался бы, пока его "+
+				"предъявляют", got)
+		}
+	})
+}
+
 // ── DENY — отказы аутентификации неразличимы между собой ────────────────────
 
 // TestKAN_DENY_01_EveryAuthenticationRefusalIsByteIdentical — ЗАКРЫТЫЙ перечень

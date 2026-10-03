@@ -1,29 +1,25 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// own_sakey_issuance_lane_test.go — посадка `own` без своего контура выдачи
+// own_sakey_issuance_lane_test.go — боевой старт без своего контура выдачи
 // ключей служебных учёток не поднимается (задача #337).
 //
 // # Предмет
 //
-// Две ручки посадки независимы: `authn.identity-provider` и
-// `authn.client-token.enabled`. Контур выдачи ключей переведён на свою чеканку
-// ровно тогда, когда включён токен-эндпоинт платформы
-// (`Config.SAKeyIssuanceIsOurs`); непереведённый контур заводит зеркало клиента
-// у внешнего поставщика. На посадке `own` внешнего поставщика нет вовсе, и
-// непереведённая выдача отказывает на всяком входе — служба при этом
-// поднимается и выглядит исправной до первого вызова.
+// Контур выдачи ключей переведён на свою чеканку ровно тогда, когда включён
+// токен-эндпоинт платформы (`Config.SAKeyIssuanceIsOurs`). Внешнего поставщика
+// у службы нет, и непереведённая выдача отказывает на всяком входе — служба при
+// этом поднималась бы и выглядела исправной до первого вызова.
 //
 // Комбинация обязана быть либо невозможной, либо исполняемой. Исполнить её
 // нечем: ключу без токен-эндпоинта некуда пойти. Поэтому она невозможна —
-// отказ старта, называющий обе ручки.
+// отказ старта, называющий ручку эндпоинта.
 //
 // # Законный близнец
 //
-// Тот же вход с включённым токен-эндпоинтом стартует, и та же выключенная ручка
-// на посадке `external` старт не останавливает: там зеркало заводится у
-// существующего поставщика, и у непереведённого контура есть исполнитель.
-// Без близнецов отрицание зеленело бы на страже, отвергающем всё.
+// Тот же вход с включённым токен-эндпоинтом стартует. Прежде вторым близнецом
+// была та же выключенная ручка на посадке `external`, где зеркало клиента
+// заводилось у поставщика; посадка снята вместе с ключом (kaname#363).
 package config_test
 
 import (
@@ -35,26 +31,26 @@ import (
 
 // withoutOwnSAKeyIssuance — вход случая: всё прочее выполнено, ломается ровно
 // один факт — токен-эндпоинт платформы не включён.
-func withoutOwnSAKeyIssuance(p config.IdentityProvider) config.Config {
-	cfg := laneCfg(p)
+func withoutOwnSAKeyIssuance() config.Config {
+	cfg := laneCfg()
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{}
 	return cfg
 }
 
 // withOwnSAKeyIssuance — законный близнец: тот же вход, токен-эндпоинт
 // объявлен полностью, и слушатель, на котором он монтируется, поднят.
-func withOwnSAKeyIssuance(p config.IdentityProvider) config.Config {
-	cfg := laneCfg(p)
+func withOwnSAKeyIssuance() config.Config {
+	cfg := laneCfg()
 	cfg.APIServer.RegistryToken = registryTokenLaneSettings()
 	cfg.AuthN.ClientToken = clientTokenLaneSettings()
 	return cfg
 }
 
-// TestOwnPostureWithoutOwnSAKeyIssuanceRefusesTheStart — комбинация «`own` +
-// невключённый токен-эндпоинт» не поднимается, и отказ называет ОБЕ ручки:
-// оператору, получившему одну, нечего править во второй.
+// TestOwnPostureWithoutOwnSAKeyIssuanceRefusesTheStart — боевой старт с
+// невключённым токен-эндпоинтом не поднимается, и отказ называет ручку
+// эндпоинта и НЕ называет снятого ключа посадки.
 func TestOwnPostureWithoutOwnSAKeyIssuanceRefusesTheStart(t *testing.T) {
-	cfg := withoutOwnSAKeyIssuance(config.IdentityProviderOwn)
+	cfg := withoutOwnSAKeyIssuance()
 	if cfg.SAKeyIssuanceIsOurs() {
 		t.Fatal("предпосылка случая не создана: контур выдачи уже переведён на свою чеканку")
 	}
@@ -65,20 +61,18 @@ func TestOwnPostureWithoutOwnSAKeyIssuanceRefusesTheStart(t *testing.T) {
 			"а выдача ключа служебной учётки уходит к внешнему поставщику, которого на ней нет")
 	}
 	msg := err.Error()
-	for _, want := range []string{
-		config.IdentityProviderSetting + "=" + config.IdentityProviderOwn.String(),
-		"authn.client-token.enabled",
-	} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("отказ обязан называть %q, получено: %q", want, msg)
-		}
+	if !strings.Contains(msg, "authn.client-token.enabled") {
+		t.Fatalf("отказ обязан называть authn.client-token.enabled, получено: %q", msg)
+	}
+	if strings.Contains(msg, "identity-provider") {
+		t.Fatalf("отказ называет снятый ключ посадки: %q", msg)
 	}
 }
 
 // TestOwnPostureWithOwnSAKeyIssuanceStarts — законный близнец: тот же вход с
 // включённым токен-эндпоинтом стартует.
 func TestOwnPostureWithOwnSAKeyIssuanceStarts(t *testing.T) {
-	cfg := withOwnSAKeyIssuance(config.IdentityProviderOwn)
+	cfg := withOwnSAKeyIssuance()
 	if !cfg.SAKeyIssuanceIsOurs() {
 		t.Fatal("предпосылка близнеца не создана: контур выдачи не переведён")
 	}
@@ -86,9 +80,3 @@ func TestOwnPostureWithOwnSAKeyIssuanceStarts(t *testing.T) {
 		t.Fatalf("Validate() = %v: посадка own со своим контуром выдачи обязана подниматься", err)
 	}
 }
-
-// ЗДЕСЬ СТОЯЛ СЛУЧАЙ «на посадке `external` та же выключенная ручка старт не
-// останавливает». Посадка снята фундаментом (PRO-Robotech/corelib#30), и
-// проверка старта отвергает её раньше требований любой полосы (#424): случай
-// зеленел бы на отказе старта, ничего о ручке не утверждая. Отказ старта на
-// снятой посадке держит identity_provider_validate_test.go.

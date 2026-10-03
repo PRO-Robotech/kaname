@@ -63,8 +63,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/logbuf"
 )
 
-// icRedirect — адрес возврата R приёмки (тот же, что GOOD_REDIRECT набора
-// `tests/newman/cases/iam-interactive-client.py`).
+// icRedirect — адрес возврата R приёмки (тот же, что REDIRECT набора края
+// платформы `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`,
+// куда набор переехал из этого дерева).
 const icRedirect = "https://api.kacho.local/auth/callback"
 
 // icPHC — форма проверочного значения колонки (ограничение

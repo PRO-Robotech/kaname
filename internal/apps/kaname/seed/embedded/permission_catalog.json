@@ -3081,16 +3081,6 @@
     "exempt_reason": "INTERNAL_LISTENER"
   },
   {
-    "fqn": "kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    },
-    "exempt_reason": "INTERNAL_LISTENER"
-  },
-  {
     "fqn": "kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",

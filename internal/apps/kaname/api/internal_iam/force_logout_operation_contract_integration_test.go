@@ -56,7 +56,6 @@ func newForceLogoutHandler(t *testing.T) (*internaliam.Handler, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
 		WithAdminChecker(allowAdmin{}).
 		WithOperations(operations.NewRepo(pool, "kaname")).
 		// Исполнитель снятия сессии — ТОТ ЖЕ, что провязывает композиционный
@@ -212,8 +211,10 @@ func TestForceLogout_UnwiredOperationRepo_FailsClosed(t *testing.T) {
 	uid := seedForceLogoutUser(t, ctx, pool)
 
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
-		WithAdminChecker(allowAdmin{})
+		WithAdminChecker(allowAdmin{}).
+		// The teardown IS wired, as the composition root wires it, so the refusal
+		// below is the operation repository's and nothing else's.
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
 	// deliberately no WithOperations
 
 	_, err = h.ForceLogout(forceLogoutAdminCtx(), &iamv1.ForceLogoutRequest{UserId: string(uid)})

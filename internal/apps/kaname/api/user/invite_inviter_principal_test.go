@@ -240,12 +240,6 @@ func (w *invPrincWriter) EmitFGARelationWrite(_ context.Context, tuples []servic
 func (w *invPrincWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *invPrincWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *invPrincWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *invPrincWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 func (w *invPrincWriter) EmitReconcileEvent(context.Context, string, string, string) error {
 	return nil

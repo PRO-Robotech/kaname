@@ -123,6 +123,12 @@ func vertexLedger() map[string]vertexWaiver {
 		"internal/check/docs_measurement_dating_test.go#rev-parse": {Calls: 1,
 			Why: "`--verify` над самой ссылкой ствола: это и есть проверка, разрешается ли ствол " +
 				"в этом клоне. Аргумент — постоянная `serviceTrunkRef` со склейкой `^{commit}`"},
+		"internal/check/people_address_writers_test.go#cat-file": {Calls: 1,
+			Why: "вершина ЕСТЬ ствол и передана переменной — ответом `trunkRef`, который разрешает " +
+				"постоянную `trunkRefName` соседнего файла пакета (довод о второй копии — у записи " +
+				"migration_version_monotonic_test.go выше). Предмет вопроса — лежит ли файл " +
+				"ведомости применённых миграций в СТВОЛЕ: рабочая вершина ответила бы «да» о " +
+				"миграции самой полосы и узаконила бы её"},
 		"internal/check/docs_measurement_dating_injection_test.go#cat-file": {Calls: 1,
 			Why: "тот же резолв объявленного корня истории, что и у гейта: предпосылка, а не " +
 				"вхождение"},

@@ -83,10 +83,10 @@ type admissionRateProjector interface {
 }
 
 // projectAdmissionRate переносит величину темпа заведения (Ф4 Р5, Ф4-18/19;
-// задача kacho#1270) из посадки в строку авторитета — ТОЛЬКО под `own`: там
-// носитель ключа — адрес, а величину объявляет профиль. Под `external` строку
-// правит администратор облака, и проекция сообщает об этом строкой переписи,
-// а не молчит.
+// задача kacho#1270) из посадки в строку авторитета: носитель ключа — адрес, а
+// величину объявляет профиль. Прежде проекция исполнялась только у посадки
+// `own`, а у посадки внешнего поставщика строку правил администратор облака;
+// посадка у службы одна (kaname#363), и проекция исполняется на каждом старте.
 //
 // Перепись печатается всегда: «записано 1» на живой строке и «записано 1» на
 // заведённой заново — разные события, и обе названы; отказ проекции — отказ
@@ -97,11 +97,6 @@ func projectAdmissionRate(
 	projector admissionRateProjector,
 	cfg config.Config,
 ) error {
-	if !loginLaneWanted(cfg) {
-		logger.Info("проекция темпа заведения не исполняется: посадка не `own` — строку авторитета правит администратор",
-			slog.String("identity_provider", cfg.AuthN.IdentityProvider.String()))
-		return nil
-	}
 	maxEvents, window := cfg.AuthN.Registration.AdmissionRate()
 	census, err := projector.ApplyAdmissionRate(ctx, maxEvents, window)
 	logger.Info("перепись проекции темпа заведения",

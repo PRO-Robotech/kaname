@@ -120,7 +120,7 @@ CASES = []
 POLL_CAP = 50
 
 # Предъявитель, ПРИНАДЛЕЖАЩИЙ ЧЕЛОВЕКУ, — его производит волна церемонии
-# (`scripts/run-ceremony.sh` → `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`).
+# (`tests/authz-fixtures/seed_ceremony.py --wave`, задание `stand-ceremony`).
 # Имя вынесено в константу, потому что оно называется здесь в тринадцати местах
 # одного кейса, и разъехавшаяся половина означала бы отказ в правах посреди
 # фикстуры — симптом, неотличимый на вид от продуктового дефекта видимости.
@@ -752,18 +752,28 @@ CASES.append(Case(
 # `sep` — the run-suffix joiner for this type's name: serviceAccount/group names match
 # ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ (hyphens OK, NO underscore); role names match
 # ^[a-z][a-z0-9_]{0,40}$ (underscores OK, NO hyphen) — so they differ.
+# `grant_verbs` — глаголы выдачи по метке, которой точный набор открывается
+# читателю. У роли глагола `get` в каталоге НЕТ: он снят миграцией
+# 20260914120000_role_read_relation_leaves_the_catalog, и роль с ним отвергается
+# операцией «verbs: get is not a live verb of resource role» (code 9; замер на
+# автономном стенде, kaname#398). Предикат страницы роли — `{viewer, v_list}`
+# (см. врезку у EXACT_SET_TYPES), поэтому её набор открывает `list`, тот же
+# живой глагол, что взяли `iam-role` (FEEDGATE-IAMROLE) и `iam-rbac-rules-labels`.
 TYPE_SPECS = {
     "serviceAccount": {"path": "/iam/v1/serviceAccounts", "key": "serviceAccounts",
                        "idmeta": "serviceAccountId", "rule_res": "serviceAccount",
-                       "stem": "stsa", "sep": "-", "extra": None},
+                       "stem": "stsa", "sep": "-", "extra": None,
+                       "grant_verbs": ["get", "list"]},
     "group": {"path": "/iam/v1/groups", "key": "groups",
-              "idmeta": "groupId", "rule_res": "group", "stem": "stgr", "sep": "-", "extra": None},
+              "idmeta": "groupId", "rule_res": "group", "stem": "stgr", "sep": "-", "extra": None,
+              "grant_verbs": ["get", "list"]},
     # Role.Create requires >=1 rule; a benign rule on the OBJECT role does not affect
     # whether the SELECTOR by-label rule materializes it (selection is by the object's
     # labels, not by its own rules).
     "role": {"path": "/iam/v1/roles", "key": "roles",
              "idmeta": "roleId", "rule_res": "role", "stem": "strl", "sep": "_",
-             "extra": {"rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]}},
+             "extra": {"rules": [{"module": "iam", "resources": ["user"], "verbs": ["get"]}]},
+             "grant_verbs": ["list"]},
 }
 
 
@@ -855,7 +865,7 @@ def _id_list_js(env_vars):
 
 def exact_set_case_steps(kind, pfx, role_name):
     """Exact-set steps: 3 M+ (foo) / 3 M− (no-label) / 2 baz (other-label) objects;
-    by-label grant (get+list) → subject's List == exactly the M+ set."""
+    by-label grant (`grant_verbs` of the type) → subject's List == exactly the M+ set."""
     spec = TYPE_SPECS[kind]
     pp = [f"{pfx}PP{i}" for i in (1, 2, 3)]
     mm = [f"{pfx}PM{i}" for i in (1, 2, 3)]
@@ -908,7 +918,7 @@ def exact_set_case_steps(kind, pfx, role_name):
         *objs,
         *preclean_account_loop(pfx + "Set", "create-role"),
         *grant_bylabel_generic(spec, pfx + "Role", pfx + "Acb", pfx + "RoleOp", pfx + "BindOp",
-                               ["get", "list"], role_name),
+                               spec["grant_verbs"], role_name),
         read,
         *teardowns,
     ]
@@ -1026,7 +1036,7 @@ LIST_READ_PARITY_TYPES = [("serviceAccount", "setSva", "SVA"), ("group", "setGrp
 for _kind, _pfx, _abbr in EXACT_SET_TYPES:
     CASES.append(Case(
         id=f"IAM-SET-{_abbr}-LABEL-EXACT-OK",
-        title=f"exact-set ({_kind}): 3 {{foo=runId}} (M+), 3 no-label (M−), 2 {{baz=runId}}; by-label grant {{iam.{_kind} get,list matchLabels foo}} → subject's List contains exactly the M+ set",
+        title=f"exact-set ({_kind}): 3 {{foo=runId}} (M+), 3 no-label (M−), 2 {{baz=runId}}; by-label grant {{iam.{_kind} {','.join(TYPE_SPECS[_kind]['grant_verbs'])} matchLabels foo}} → subject's List contains exactly the M+ set",
         classes=["RBAC", "AUTHZ", "VISIBILITY", "INV2", "LABELS", "EXACT-SET"],
         priority="P0",
         # verifies (non-matching label hidden)
@@ -1042,3 +1052,11 @@ for _kind, _pfx, _abbr in LIST_READ_PARITY_TYPES:
         # verifies (docs/architecture/list-page-membership-equals-read-relation.md)
         steps=list_read_parity_case_steps(_kind, _pfx, f"stvl{_abbr.lower()}"),
     ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

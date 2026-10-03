@@ -6,7 +6,7 @@ package pg_test
 // bootstrap_owner_mat_integration_test.go — rbac-contract-a-flat-fallout
 // (signup/bootstrap parity with Account.Create owner-path under the FLAT model).
 //
-// ROOT prod-hole: bootstrapPersonalResources (the live signup / Kratos-provision
+// ROOT prod-hole: bootstrapPersonalResources (the live signup / provision
 // path AND the activated-invitee owns-zero-accounts path) was OUT OF SYNC with the
 // Account.Create owner-path:
 //   - it created the account-scoped self-binding with the ADMIN role, not the OWNER

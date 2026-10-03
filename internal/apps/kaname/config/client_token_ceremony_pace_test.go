@@ -38,8 +38,8 @@ var ceremonyPaceValues = []ceremonyPaceValue{
 	{"authorize-in-flight-ceiling", "32", "0"},
 }
 
-// ownCeremonyProfile — посадка own с включённым эндпоинтом: шесть величин
-// числами §3, кроме zero (задана нулём) и omit (сняты).
+// ownCeremonyProfile — профиль с включённым эндпоинтом: шесть величин числами
+// §3, кроме zero (задана нулём) и omit (сняты).
 func ownCeremonyProfile(zero string, omit ...string) string {
 	skip := map[string]bool{}
 	for _, k := range omit {
@@ -47,7 +47,7 @@ func ownCeremonyProfile(zero string, omit ...string) string {
 	}
 	var b strings.Builder
 	b.WriteString("api-server:\n  registry-token:\n    endpoint: \"tcp://0.0.0.0:9096\"\n")
-	b.WriteString("authn:\n  identity-provider: own\n")
+	b.WriteString("authn:\n")
 	b.WriteString("  token-signing:\n    enabled: true\n    issuer: \"https://iam.example.invalid\"\n")
 	b.WriteString("    algorithm: \"RS256\"\n")
 	b.WriteString("  client-token:\n    enabled: true\n")
@@ -105,7 +105,7 @@ func TestKNPACE02_AllSixDeclaredStartAndArrive(t *testing.T) {
 	require.Equal(t, 15*time.Minute, ct.FailedProofWindow)
 	require.Equal(t, 10, ct.AuthorizePerSourcePerSec)
 	require.Equal(t, 32, ct.AuthorizeInFlightCeiling)
-	require.True(t, cfg.AuthN.CeremonyAssembled(), "предпосылка: own и включённый эндпоинт — церемония собрана")
+	require.True(t, cfg.AuthN.CeremonyAssembled(), "предпосылка: включённый эндпоинт — церемония собрана")
 }
 
 // KN-PACE-03 — нулевая величина — не величина.
@@ -121,7 +121,7 @@ func TestKNPACE03_ZeroValueIsNotAValue(t *testing.T) {
 
 // KN-PACE-04 — выключенный эндпоинт величин не требует.
 func TestKNPACE04_DisabledEndpointRequiresNoneOfTheSix(t *testing.T) {
-	const off = "authn:\n  identity-provider: own\n  client-token:\n    enabled: false\n"
+	const off = "authn:\n  client-token:\n    enabled: false\n"
 	cfg, err := ceremonyPaceRefusal(t, off)
 	for _, v := range ceremonyPaceValues {
 		if err != nil {
@@ -132,26 +132,24 @@ func TestKNPACE04_DisabledEndpointRequiresNoneOfTheSix(t *testing.T) {
 	require.False(t, cfg.AuthN.CeremonyAssembled())
 }
 
-// Величины точки авторизации требует собранная церемония, а не включённый
-// эндпоинт: без церемонии точки авторизации нет, и её величины не читаются.
+// Величины точки авторизации требует собранная церемония: без церемонии точки
+// авторизации нет, и её величины не читаются.
 //
-// Посадку без церемонии при включённом эндпоинте — `external` — загрузчик не
-// принимает (#424): посадка снята фундаментом (PRO-Robotech/corelib#30).
-// Поэтому вход собирается загрузчиком под own, половине без церемонии посадка
-// ставится полем собранной настройки, и стражи судятся напрямую — как строки
-// полосы `external` в lane_requirements_test.go. Поле живёт до снятия полосы
-// целиком (#363). Пара различается ровно посадкой.
+// Прежде церемония требовала ещё и посадки `own`, и половина «без церемонии»
+// строилась посадкой `external` при включённом эндпоинте. Посадка у службы одна
+// (kaname#363): церемония собрана ровно тогда, когда включён эндпоинт, и пара
+// различается ровно выключателем эндпоинта на одной и той же собранной
+// настройке — стражи судятся напрямую.
 func TestAuthorizeValuesAreNotRequiredWithoutTheCeremony(t *testing.T) {
 	cfg, err := ceremonyPaceRefusal(t, ownCeremonyProfile("", "authorize-per-source-per-sec", "authorize-in-flight-ceiling"))
-	// Близнец — под own: отказ по обеим.
+	// Близнец — при собранной церемонии: отказ по обеим.
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "authn.client-token.authorize-per-source-per-sec")
 	require.Contains(t, err.Error(), "authn.client-token.authorize-in-flight-ceiling")
 
-	cfg.AuthN.IdentityProvider = config.IdentityProviderExternal
-	require.True(t, cfg.AuthN.ClientToken.Enabled, "предпосылка: эндпоинт включён")
-	require.False(t, cfg.AuthN.CeremonyAssembled(), "предпосылка: вне own церемонии нет")
-	require.NoError(t, ceremonyPaceGuards(cfg))
+	cfg.AuthN.ClientToken.Enabled = false
+	require.False(t, cfg.AuthN.CeremonyAssembled(), "предпосылка: без эндпоинта церемонии нет")
+	require.NoError(t, cfg.AuthN.ValidateCeremonyPace())
 }
 
 // Ключи разрешаются из окружения — имена печатает руководство установки.

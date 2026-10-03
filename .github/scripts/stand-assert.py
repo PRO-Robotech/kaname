@@ -105,9 +105,24 @@ INTERNAL_PROBE_PATH = "/iam/v1/internal/cluster/admins"
 
 # Пути публикатора набора ключей. Своей чеканки — умолчание ручки
 # `authn.token-signing.key-set-path` (стенд её не задаёт); зеркала поставщика —
-# прежний путь `jwksproxyhttp.WellKnownJWKSPath`, под `own` не публикуемый.
+# путь снятой записи (kaname#361): зеркало ушло вместе с поставщиком, и
+# привязка публикатора отвергает вторую запись в старте. Утверждается его
+# ОТСУТСТВИЕ — это наблюдаемая сторона того же свойства.
 OWN_KEYSET_PATH = "/.well-known/kaname/jwks.json"
 PROVIDER_MIRROR_PATH = "/.well-known/jwks.json"
+
+# Семейства величин, по которым судится снятая ДОРОГА ОБМЕНА к прежнему издателю
+# (kaname#494). Дорога была последней привязкой службы к поставщику, и её счётчик
+# регистрировался с поднятым слушателем реестра на ЛЮБОЙ посадке, заводя клетки
+# нулём. Отсутствие семейства на живой поверхности величин — производимый
+# признак снятия, а не прочтение кода.
+#
+# Отсутствие утверждается В ПАРЕ с положительным контролем на той же поверхности:
+# семейство набора ключей своей чеканки. Без него «семейства нет» зеленело бы на
+# поверхности, которая не отдала ни одного семейства вовсе.
+RETIRED_ROAD_FAMILY = "kaname_provider_road_outcomes_total"
+OWN_KEYSET_FAMILY = "kaname_own_keyset_outcomes_total"
+METRICS_PATH = "/metrics"
 
 
 def check(name: str, ok: bool, detail: str) -> None:
@@ -117,6 +132,49 @@ def check(name: str, ok: bool, detail: str) -> None:
     if not ok:
         findings.append(f"{name}: {detail}")
         print(f"       {detail}")
+
+
+def metric_families(body: str) -> set[str]:
+    """Имена семейств в текстовой форме выдачи величин.
+
+    Формы записи имени две, и обе читаются: строка объявления типа
+    (`# TYPE <имя> <тип>`) и строка значения (`<имя>{…} <число>` либо
+    `<имя> <число>`). Знающий одну форму разборщик молчал бы о семействе,
+    отданном другой.
+    """
+    out: set[str] = set()
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            parts = line.split()
+            if len(parts) >= 3 and parts[1] in ("TYPE", "HELP"):
+                out.add(parts[2])
+            continue
+        name = line.split("{", 1)[0].split(" ", 1)[0]
+        if name:
+            out.add(name)
+    return out
+
+
+def retired_road_verdicts(status: int | None, body: str) -> list[tuple[str, bool, str]]:
+    """Утверждения о снятой дороге обмена по ответу поверхности величин.
+
+    Чистая функция — ради инъекции: самопроверка подаёт ей тело с семейством и
+    без него и читает, что она сказала, не поднимая службы.
+    """
+    fams = metric_families(body) if status == 200 else set()
+    own = OWN_KEYSET_FAMILY in fams
+    return [
+        ("поверхность величин отвечает 200 и несёт семейство набора ключей своей чеканки",
+         status == 200 and own,
+         f"код {status}, семейств {len(fams)}, {OWN_KEYSET_FAMILY} {'есть' if own else 'нет'}"),
+        ("семейства дороги обмена к прежнему издателю на ней нет",
+         status == 200 and own and RETIRED_ROAD_FAMILY not in fams,
+         f"код {status}, {RETIRED_ROAD_FAMILY} {'ЕСТЬ' if RETIRED_ROAD_FAMILY in fams else 'нет'}"
+         f"{'' if own else ' — положительного контроля нет, отсутствие не доказано'}"),
+    ]
 
 
 def require_listener(host: str, port: int) -> bool:
@@ -191,10 +249,10 @@ def run(host: str, pki: pathlib.Path, ports: dict[str, int]) -> int:
           a_m.status == 405, f"код {a_m.status}, тело {a_m.body[:200]!r}")
 
     print("── набор проверочных ключей — своей чеканки, зеркала поставщика нет ──")
-    # Под `own` поставщика нет, и публикатор несёт ОДНУ запись — набор своей
-    # чеканки на своём пути. Прежде здесь стояло «зеркало недостижимого
-    # поставщика отвечает 502» — утверждение посадки `external`, снятой
-    # фундаментом (kaname#424). Отсутствие пути зеркала утверждается В ПАРЕ с
+    # Публикатор несёт ОДНУ запись — набор своей чеканки на своём пути; запись
+    # зеркала поставщика снята (kaname#361). Прежде здесь стояло «зеркало
+    # недостижимого поставщика отвечает 502» — утверждение посадки `external`,
+    # снятой фундаментом (kaname#424). Отсутствие пути зеркала утверждается В ПАРЕ с
     # положительным контролем на том же слушателе: 404 даёт и мёртвый слушатель.
     a_own = ask(f"https://{host}:{ports['keyset']}{OWN_KEYSET_PATH}",
                 ca=ca, cert=cert, key=key)
@@ -206,6 +264,14 @@ def run(host: str, pki: pathlib.Path, ports: dict[str, int]) -> int:
     check("зеркала набора ключей поставщика нет: его путь даёт 404 маршрутизатора",
           a_j.status == 404 and '"keys"' not in a_j.body,
           f"код {a_j.status}, тело {a_j.body[:200]!r}")
+
+    print("── дорога обмена к прежнему издателю снята: её величин нет ──────────")
+    # Спрашивается ПОСЛЕ набора ключей выше: обращение к нему заводит клетку
+    # семейства своей чеканки, и положительный контроль не зависит от того,
+    # заводит ли их реестр нулём заранее.
+    a_met = ask(f"https://{host}:{ports['metrics']}{METRICS_PATH}", ca=ca, cert=cert, key=key)
+    for name, ok, detail in retired_road_verdicts(a_met.status, a_met.body):
+        check(name, ok, detail)
 
     print("── форма входа, которой служба не ждёт, даёт ЧЕСТНЫЙ отказ ──────────")
 
@@ -306,7 +372,8 @@ def self_test(pki: pathlib.Path) -> int:
         [sys.executable, str(pathlib.Path(__file__).resolve()),
          "--host", "127.0.0.1", "--pki", str(pki),
          "--port-public", str(closed_port), "--port-internal", str(closed_port),
-         "--port-keyset", str(closed_port), "--port-docker", str(closed_port)],
+         "--port-keyset", str(closed_port), "--port-docker", str(closed_port),
+         "--port-metrics", str(closed_port)],
         capture_output=True, text=True).returncode
     _self_check("нет слушателя — код 75, а НЕ 1 и не 0", rc == RC_UNMET, f"код {rc}")
 
@@ -339,7 +406,8 @@ def self_test(pki: pathlib.Path) -> int:
             [sys.executable, str(pathlib.Path(__file__).resolve()),
              "--host", "localhost", "--pki", str(pki),
              "--port-public", str(port), "--port-internal", str(port),
-             "--port-keyset", str(port), "--port-docker", str(port)],
+             "--port-keyset", str(port), "--port-docker", str(port),
+             "--port-metrics", str(port)],
             capture_output=True, text=True)
         out = proc.stdout + proc.stderr
         _self_check("настоящие утверждения на подставном фронте — код 1 (находка), "
@@ -355,13 +423,37 @@ def self_test(pki: pathlib.Path) -> int:
                     n_found > 1, f"находок {n_found}; вывод: {out[-300:]}")
         for needle in ("отвечает 401", "НЕ резолвится на публичном фронте",
                        "отвечает 403", "отвергает клиента БЕЗ сертификата",
-                       "даёт 405", "несёт ключи", "зеркала набора ключей поставщика нет"):
+                       "даёт 405", "несёт ключи", "зеркала набора ключей поставщика нет",
+                       "семейства дороги обмена к прежнему издателю"):
             _self_check(f"упало утверждение «{needle}»",
                         f"FAIL" in out and needle in out, out[-300:])
         _self_check("перепись напечатана и на красном",
                     "перепись: утверждений" in out, out[-300:])
     finally:
         srv.shutdown()
+
+    # Ось 3: утверждение о снятой дороге — инъекцией в обе стороны, ЧИСТОЙ
+    # функцией и теми же именами семейств, что судит боевой прогон. Случаи
+    # отличаются ОДНИМ фактом.
+    def verdicts(status, body):
+        return {n: ok for n, ok, _ in retired_road_verdicts(status, body)}
+    own_line = f"# TYPE {OWN_KEYSET_FAMILY} counter\n{OWN_KEYSET_FAMILY}{{outcome=\"served\"}} 1\n"
+    road_line = f"{RETIRED_ROAD_FAMILY}{{road=\"token_exchange\",outcome=\"ok\"}} 0\n"
+    twin = verdicts(200, own_line)
+    injected = verdicts(200, own_line + road_line)
+    empty = verdicts(200, "")
+    road_name = "семейства дороги обмена к прежнему издателю на ней нет"
+    own_name = "поверхность величин отвечает 200 и несёт семейство набора ключей своей чеканки"
+    _self_check("законный близнец: своё семейство есть, дороги нет — оба утверждения молчат",
+                all(twin.values()), str(twin))
+    _self_check("инъекция: семейство дороги отдано строкой значения — находка",
+                injected[own_name] and not injected[road_name], str(injected))
+    _self_check("инъекция: семейство дороги отдано одной строкой объявления типа — тоже находка",
+                not verdicts(200, own_line + f"# TYPE {RETIRED_ROAD_FAMILY} counter\n")[road_name])
+    _self_check("пустая поверхность не зеленеет «отсутствием»: оба утверждения падают",
+                not empty[own_name] and not empty[road_name], str(empty))
+    _self_check("поверхность не ответила — утверждение о дороге падает, а не проходит",
+                not verdicts(None, "")[road_name])
 
     print()
     if _SELF_FAILURES:
@@ -384,6 +476,7 @@ def main() -> int:
     ap.add_argument("--port-internal", type=int, default=9099)
     ap.add_argument("--port-keyset", type=int, default=9097)
     ap.add_argument("--port-docker", type=int, default=9096)
+    ap.add_argument("--port-metrics", type=int, default=9095)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     pki = pathlib.Path(args.pki)
@@ -394,6 +487,7 @@ def main() -> int:
         "internal_rest": args.port_internal,
         "keyset": args.port_keyset,
         "docker": args.port_docker,
+        "metrics": args.port_metrics,
     })
 
 

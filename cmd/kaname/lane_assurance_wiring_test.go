@@ -43,13 +43,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 )
 
-// ownLaneWiring — наблюдение корня на посадке `own` с названными способами и
+// ownLaneWiring — наблюдение корня боевой посадки с названными способами и
 // с провязанными хранилищами (условие Ф11-27/28).
 func ownLaneWiring(t *testing.T, wired []assurance.Method) (config.Config, config.LaneWiring) {
 	t.Helper()
-	cfg := roadCfg(config.IdentityProviderOwn, "9097")
+	cfg := productionRootCfg("9097")
 	cfg.AuthN.TokenSigning.Enabled = true
-	w := observeLaneWiring(context.Background(), cfg, nil, wired, nil, quietLogger())
+	w := observeLaneWiring(context.Background(), nil, wired, nil, quietLogger())
 	w.OwnMintSignerWired = true
 	w.HumanCredentialsWired = true
 	w.HumanSessionsWired = true

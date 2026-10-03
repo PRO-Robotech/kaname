@@ -82,19 +82,12 @@ import (
 // и каждый обязан иметь читателя в перечне ручек процесса.
 var ownLaneBlockPrefixes = []string{"authn.login.", "authn.registration.", "authn.access-keys."}
 
-// ownLaneRequiredSettings — строки таблицы стража, применимые к посадке `own`
-// ПОЛОСОЙ, а не любой посадке: у безусловных строк своя проба.
+// ownLaneRequiredSettings — строки таблицы стража, которые судит эта проба:
+// КАЖДАЯ строка. Прежде популяцией были строки, чья полоса называла посадку
+// `own`, а безусловные судила соседняя проба; оси посадки больше нет
+// (kaname#363), и всякое требование таблицы предъявляется боевому старту.
 func ownLaneRequiredSettings() []config.RequiredSetting {
-	var out []config.RequiredSetting
-	for _, s := range config.RequiredSettings {
-		for _, l := range s.Lanes {
-			if l == config.IdentityProviderOwn {
-				out = append(out, s)
-				break
-			}
-		}
-	}
-	return out
+	return append([]config.RequiredSetting(nil), config.RequiredSettings...)
 }
 
 // laneKnobKeys — ключи, которые процесс читает ручками полосы: перечни, по

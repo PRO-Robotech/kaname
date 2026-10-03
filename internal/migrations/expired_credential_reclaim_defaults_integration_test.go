@@ -158,10 +158,9 @@ func TestCredRcl29_TheRevisedCeilingIsTheOneThatChargingUses(t *testing.T) {
 
 	// Одиннадцатое удостоверение — то самое, которому ПРЕЖНИЙ предел отказывал.
 	for i := 1; i <= 11; i++ {
-		mirror := fmt.Sprintf("rcl-limit-mirror-%02d", i)
 		require.NoErrorf(t, insertUserCred(db,
 			fmt.Sprintf("uoc_rcm000000000000%02d", i), "KEYPAIR", noHash,
-			"-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", &mirror, 30),
+			"-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----", "ES256", 30),
 			"выдача %d обязана пройти под пересмотренным пределом", i)
 	}
 

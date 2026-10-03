@@ -35,8 +35,8 @@ package user
 // > (`internal/apps/kaname/api/audit`).
 //
 // Выдача токена по-прежнему перебирает набор членств и обслуживает первое, что
-// может аутентифицироваться (`internal/service/token_enrichment_service.go`,
-// `internal/handler/iamhooks`), отказывая, когда не может ни одно, — но теперь
+// может аутентифицироваться (`internal/service/token_enrichment_service.go`),
+// отказывая, когда не может ни одно, — но теперь
 // «не может ни одно» наступает разом, потому что состояние одно на человека.
 //
 // WHY NOT A FIELD ON Update. Three reasons, each on its own sufficient:

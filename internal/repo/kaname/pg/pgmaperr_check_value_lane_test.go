@@ -140,6 +140,7 @@ var cvCallerValueSpec = map[string]struct{}{
 	"access_bindings_wildcard_subject_is_system_ck":        {},
 	"accounts_description_check":                           {},
 	"accounts_labels_valid":                                {},
+	"accounts_name_is_not_a_foreign_id":                    {},
 	"authorization_codes_challenge_form_ck":                {},
 	"authorization_codes_challenge_method_ck":              {},
 	"authorization_codes_redirect_uri_ck":                  {},

@@ -49,21 +49,15 @@ API следует **конвенциям Kaname**: плоские (flat) рес
 `/iam/v1/<resource>`, единый формат ошибок `{code, message, details[]}`. Чтение — синхронное;
 мутации — асинхронные через `Operation` с поллингом.
 
-:::info Кто проверяет человека — решает посадка, и посадок две
-Kaname управляет **описанием личностей и прав** и на любой посадке — единственный владелец
-субъектов и модели прав. Чей интерактивный вход человека, зависит от ключа
-`authn.identity-provider` установки, и умолчания у него нет:
+:::info Кто проверяет человека — сама служба
+Kaname управляет **описанием личностей и прав** и — единственный владелец субъектов и модели
+прав. Интерактивный вход человека тоже его: способы входа, сессия и второй фактор **наши**,
+форма входа уходит на полосу входа службы, печенье — `kaname_session`, внешнего поставщика
+удостоверений нет вовсе. Посадка личности у службы одна.
 
-- **`external`** — пароль / passkey, форму входа и восстановление держит внешний поставщик
-  удостоверений (Ory Kratos + Ory Hydra); печенье сессии — `ory_kratos_session`; служба хранит
-  проекцию личности и узнаёт о входе хуком;
-- **`own`** — способы входа, сессия и второй фактор **наши**: форма входа уходит на полосу
-  входа службы, печенье — `kaname_session`, внешнего поставщика нет вовсе.
-
-**Программные** токены на обеих посадках платформа выпускает сама там, где объявлен её
-токен-эндпоинт, — своим подписантом и своей ключницей; под `external` без него их выпускает
-Hydra. Что верно под какой посадкой — [Идентичность и токены](/architecture/identity); состояние
-`own` названо там с предикатом.
+**Программные** токены платформа выпускает сама на своём токен-эндпоинте — своим подписантом и
+своей ключницей. Подробнее — [Идентичность и токены](/architecture/identity); состояние посадки
+названо там с предикатом.
 :::
 
 :::tip С чего начать
@@ -103,8 +97,7 @@ Hydra. Что верно под какой посадкой — [Идентич�
 
 Кроме tenant-ресурсов IAM выдаёт **креды доступа**: статические ключи сервис-аккаунтов
 (`SAKey`) и персональные токены пользователя (`UserToken`) — оба по стандарту OAuth 2.0. Токен по
-такому креду выпускает платформа там, где объявлен её токен-эндпоинт, и OAuth-клиент Hydra там,
-где не объявлен (только под посадкой `external`).
+такому креду выпускает платформа на своём токен-эндпоинте.
 
 ### Иерархия и привязки
 
@@ -147,20 +140,14 @@ flowchart LR
     iam["kaname<br/>:9090 public · :9091 internal"]
     peers["kacho-vpc · kacho-compute<br/>kacho-geo · kacho-nlb"]
   end
-  subgraph idp["Поставщик удостоверений — только посадка external"]
-    kratos["Ory Kratos<br/>login / identity"]
-    hydra["Ory Hydra<br/>интерактивный вход,<br/>токены без своей чеканки"]
-  end
   subgraph store["Хранилище"]
     pg[("PostgreSQL<br/>kaname · права · outbox")]
   end
 
   cli --> agw
   agw -->|"kaname.cloud.iam.v1"| iam
-  agw -->|"own: формы входа → полоса входа"| iam
+  agw -->|"формы входа → полоса входа"| iam
   iam -->|"SQL · pgx"| pg
-  iam -->|"external: identity hooks"| kratos
-  iam -->|"external: OAuth2 clients"| hydra
   peers -->|"InternalIAMService.Check"| iam
 ```
 
@@ -195,7 +182,7 @@ flowchart LR
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>🎫</span>
     <span className={hero.featureTitle}>OAuth 2.0-креды</span>
-    <span className={hero.featureBody}>Ключи сервис-аккаунтов и токены пользователей по стандарту OAuth 2.0 (private_key_jwt + jwt-bearer федерация); выпуск — свой либо через Ory Hydra, по установке.</span>
+    <span className={hero.featureBody}>Ключи сервис-аккаунтов и токены пользователей по стандарту OAuth 2.0 (private_key_jwt + jwt-bearer федерация); токены доступа выпускает сама платформа своим подписантом на своём токен-эндпоинте.</span>
   </div>
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>📓</span>
@@ -212,8 +199,6 @@ flowchart LR
     <tr><td>Go</td><td>Язык реализации (чистая архитектура: handler → use-case → domain)</td></tr>
     <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kaname.cloud.iam.v1</code>)</td></tr>
     <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kaname</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
-    <tr><td>Ory Kratos</td><td>Под посадкой <code>external</code>: аутентификация и хранение личностей (login / passkey); User — проекция identity. Под <code>own</code> не используется</td></tr>
-    <tr><td>Ory Hydra</td><td>Под посадкой <code>external</code>: OAuth 2.0 authorization server — интерактивный вход человека; программные токены — там, где токен-эндпоинт платформы не объявлен. Под <code>own</code> не используется</td></tr>
     <tr><td>Goose</td><td>Версионирование схемы (набор миграций <code>0001…</code>)</td></tr>
     <tr><td>grpc-gateway</td><td>REST-проекция gRPC</td></tr>
   </tbody>

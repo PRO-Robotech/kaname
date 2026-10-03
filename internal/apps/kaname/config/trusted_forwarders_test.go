@@ -37,7 +37,6 @@ const (
 // отправителей.
 func forwarderCfg(mode config.Mode, sans ...string) config.Config {
 	cfg := goodEndpoints(mode, "require")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
 	cfg.AuthN.TrustedForwarderSANs = sans
 	return cfg

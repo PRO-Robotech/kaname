@@ -24,7 +24,7 @@ import (
 // настройку по одному отказу на попытку, платит полным циклом подъёма за каждую
 // строку.
 func TestKAN_BOOT_01_EnabledWithoutMaterialRefusesTheStart(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	cfg.AuthN.PresentedCredential = config.PresentedCredentialConfig{Enabled: true}
 
 	err := cfg.Validate()
@@ -54,7 +54,7 @@ func TestKAN_BOOT_01_EnabledWithoutMaterialRefusesTheStart(t *testing.T) {
 func TestKAN_BOOT_01_RefusalNamesTheKnobAndNeverItsContent(t *testing.T) {
 	const secretish = "kaname-public-DO-NOT-PRINT"
 
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	cfg.AuthN.PresentedCredential = config.PresentedCredentialConfig{
 		Enabled:  true,
 		Audience: secretish,
@@ -82,7 +82,7 @@ func TestKAN_BOOT_01_RefusalNamesTheKnobAndNeverItsContent(t *testing.T) {
 // нет вовсе: каждое предъявление отвергалось бы, и отвергалось бы по причине,
 // которую снаружи не видно.
 func TestKAN_BOOT_01_EnabledWithoutOwnMintingRefusesTheStart(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	cfg.AuthN.TokenSigning.Enabled = false
 
 	err := cfg.Validate()
@@ -100,7 +100,7 @@ func TestKAN_BOOT_01_EnabledWithoutOwnMintingRefusesTheStart(t *testing.T) {
 // Без него «отказывает в старте» зеленело бы на страже, отвергающем любой
 // профиль.
 func TestKAN_BOOT_02_MaterialDeclaredLetsTheStartThrough(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() = %v; профиль с объявленным материалом обязан подниматься", err)
@@ -112,10 +112,9 @@ func TestKAN_BOOT_02_MaterialDeclaredLetsTheStartThrough(t *testing.T) {
 
 // ЗДЕСЬ СТОЯЛ СЛУЧАЙ «под посадкой внешнего поставщика выключенный приём
 // требований не предъявляет». Посадка снята фундаментом
-// (PRO-Robotech/corelib#30), и проверка старта отвергает её раньше требований
-// любой полосы (#424): случай зеленел бы на отказе старта, ничего о приёме не
-// утверждая. Отказ старта на снятой посадке держит
-// identity_provider_validate_test.go.
+// (PRO-Robotech/corelib#30), а ключ, её выбиравший, — вместе с осью
+// (kaname#363): загрузчик отвергает его при любом значении. Отказ на снятом
+// ключе держит retired_posture_key_test.go.
 
 // TestKAN_BOOT_01_WindowCeilingIsTheTokenLifetimeNotAConstant — потолок окна
 // отзыва ВЫЧИСЛЯЕТСЯ из срока выпускаемого токена, а не выбирается константой.
@@ -131,7 +130,7 @@ func TestKAN_BOOT_01_WindowCeilingIsTheTokenLifetimeNotAConstant(t *testing.T) {
 	const window = 30 * time.Second
 
 	withTokenTTL := func(ttl time.Duration) config.Config {
-		cfg := laneCfg(config.IdentityProviderOwn)
+		cfg := laneCfg()
 		cfg.AuthN.PresentedCredential.RevocationCacheTTL = window
 		cfg.AuthN.ClientToken.TokenTTL = ttl
 		return cfg

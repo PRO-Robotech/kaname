@@ -50,12 +50,11 @@ func stageIssuedKey(t *testing.T, ctx context.Context, pool *pgxpool.Pool, opsRe
 	}))
 	respAny, err := anypb.New(&iamv1.IssueSAKeyResponse{
 		Key: &iamv1.ServiceAccountOAuthClient{
-			Id:            "soc_sweeper_test01",
-			SvaId:         "sva_test",
-			HydraClientId: "hydra_client_sweeper",
-			CreatedAt:     timestamppb.Now(),
+			Id:        "soc_sweeper_test01",
+			SvaId:     "sva_test",
+			CreatedAt: timestamppb.Now(),
 		},
-		ClientId:      "hydra_client_sweeper",
+		ClientId:      "soc_sweeper_test01",
 		PrivateKeyPem: pem,
 	})
 	require.NoError(t, err)

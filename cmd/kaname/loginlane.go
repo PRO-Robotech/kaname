@@ -14,14 +14,15 @@ package main
 // те же величины частоты, а своё у него — срок кода и диспетчер постановки
 // письма вне пути ответа (Ф5 Р2).
 //
-// # Поднимается ПОСАДКОЙ
+// # Поднимается НА КАЖДОМ СТАРТЕ
 //
-// Под `own` полоса — условие старта: хранилища провязаны, слушатель формы
-// поднят в режиме `mutual` на объявленном адресе, `Resolve` зарегистрирован на
-// внутреннем слушателе. Под `external` полосы нет вовсе: вход человека
-// проверяет поставщик, и наша полоса рядом с ним была бы вторым входом об одном
-// предмете. «Нет» здесь — nil-объект, и наблюдатель провязки сообщает о нём
-// честно (`HumanSessionsWired: false`), а не литералом.
+// Полоса — условие старта: хранилища провязаны, слушатель формы поднят в
+// режиме `mutual` на объявленном адресе, `Resolve` зарегистрирован на
+// внутреннем слушателе. Прежде её снимала посадка внешнего поставщика; той
+// посадки больше нет (kaname#363), и полосу не выключает ничто — неполная
+// настройка полосы есть отказ сборки с именем ручки. Методы полосы безопасны на
+// пустом значении: наблюдатель провязки называет непостроенную полосу
+// непровязанной (`HumanSessionsWired: false`), а не падает.
 //
 // # Порт стража памяти — чтение cgroup
 //
@@ -113,7 +114,7 @@ type loginLane struct {
 	freshness time.Duration
 	// keys — хранилище ключей доступа и их испытаний (Ф7, kacho#1273): служба
 	// ключей поднимается вместе с полосой — окно свежести (Р5) и предъявление
-	// судятся о сессии, которой под `external` нет.
+	// судятся о сессии полосы.
 	keys *kanamepg.AccessKeyRepo
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
@@ -142,11 +143,6 @@ func (l *loginLane) drain() {
 		return
 	}
 	l.dispatcher.Wait()
-}
-
-// loginLaneWanted — поднимается ли полоса на этой посадке: ровно под `own`.
-func loginLaneWanted(cfg config.Config) bool {
-	return cfg.AuthN.IdentityProvider == config.IdentityProviderOwn
 }
 
 // wired — хранилища полосы провязаны (наблюдение для посадки, `kaname#21`).
@@ -209,8 +205,8 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 
 // accessKeyHandler — шесть глаголов ключа доступа (Ф7, kacho#1273) теми же
 // хранилищами, что полоса: свежесть — по сессиям, «последний способ» — по
-// строкам способов; nil — полосы нет (под `external` служба не регистрируется
-// и привязка фронта ведёт к `Unimplemented`).
+// строкам способов; nil — полоса не построена (методы безопасны на пустом
+// значении; на живом старте непостроенная полоса останавливает старт раньше).
 //
 // Привязка (имя доверяющей стороны, происхождения, алгоритмы) — из посадки,
 // прошедшей стража старта (`AccessKeysConfig.Validate` в требованиях полосы);
@@ -239,29 +235,29 @@ func (l *loginLane) accessKeyHandler(cfg config.Config, opsRepo operations.Repo,
 	return h, nil
 }
 
-// requireLoginLaneTLS — страж посадки `own` (Ф3-44 в): адрес объявлен, TLS
-// включён, режим `mutual`. Под `external` и вне production — no-op.
+// requireLoginLaneTLS — страж полосы входа (Ф3-44 в): адрес объявлен, TLS
+// включён, режим `mutual`. Судится на КАЖДОМ боевом старте: полосу больше не
+// выбирает ключ посадки (kaname#363), и вне production страж — no-op.
 func requireLoginLaneTLS(productionMode bool, cfg config.Config, mtlsCfg config.MTLSConfig) error {
-	if !productionMode || !loginLaneWanted(cfg) {
+	if !productionMode {
 		return nil
 	}
 	if strings.TrimSpace(cfg.APIServer.LoginLaneEndpoint) == "" {
-		return fmt.Errorf("%s=%s requires the password sign-in lane listener, and its address is not declared "+
-			"(set %s, e.g. tcp://0.0.0.0:9100 — a port of its own, distinct from the REST fronts): on this posture no other component lets a person sign in",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, knobLoginLane)
+		return fmt.Errorf("production mode requires the password sign-in lane listener, and its address is not declared "+
+			"(set %s, e.g. tcp://0.0.0.0:9100 — a port of its own, distinct from the REST fronts): no other component lets a person sign in",
+			knobLoginLane)
 	}
 	if !mtlsCfg.LoginLaneServerMTLS.Enable {
-		return fmt.Errorf("%s=%s requires TLS on the sign-in lane listener %s "+
+		return fmt.Errorf("production mode requires TLS on the sign-in lane listener %s "+
 			"(set KANAME_LOGINLANE_SERVER_MTLS_ENABLE=true with its cert/key and client CA): the lane admits "+
 			"exactly the edge by its verified client certificate, and without TLS there is no certificate to judge",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, cfg.APIServer.LoginLaneEndpoint)
+			cfg.APIServer.LoginLaneEndpoint)
 	}
 	if !mtlsCfg.LoginLaneRequiresClientCert() {
-		return fmt.Errorf("%s=%s requires the sign-in lane listener in mode %q, got %q "+
+		return fmt.Errorf("production mode requires the sign-in lane listener in mode %q, got %q "+
 			"(set KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE=%s): admission of exactly the edge is judged by the "+
 			"SAN of a verified client certificate, and any other mode leaves the lane open to every peer",
-			config.IdentityProviderSetting, config.IdentityProviderOwn, config.InternalRESTMutualModeName(),
-			mtlsCfg.LoginLaneClientAuthModeValue(), config.InternalRESTMutualModeName())
+			config.InternalRESTMutualModeName(), mtlsCfg.LoginLaneClientAuthModeValue(), config.InternalRESTMutualModeName())
 	}
 	return nil
 }
@@ -387,15 +383,14 @@ func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
 	return passwordverify.NewHasher(cfg.AuthN.Login.Declared())
 }
 
-// buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
+// buildLoginLane — полоса своего входа. Собирается на КАЖДОМ старте: ключа
+// посадки, который её снимал, больше нет (kaname#363), и незаданные величины
+// полосы — отказ сборки с именем ручки, а не старт без полосы.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
 func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
-	if !loginLaneWanted(cfg) {
-		return nil, nil
-	}
 	login := cfg.AuthN.Login
 	if err := login.ValidateAll(); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -810,35 +805,30 @@ func (v laneVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (hum
 func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog.Logger,
 	lane *loginLane, mtlsCfg config.MTLSConfig,
 ) (servicecontract.SurfaceDescriptor, error) {
-	addr := ""
-	var handler http.Handler
-	if lane != nil {
-		// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных
-		// поверхностей. Здесь стояло сырое объявление профиля
-		// (`tcp://0.0.0.0:9100`): под `own` процесс проходил всех стражей и
-		// падал на привязке этой поверхности — «too many colons in address»
-		// (задача kaname#21, живой старт 2026-09-17). Держит
-		// `loginlane_addr_test.go`.
-		addr = cfg.APIServer.LoginLaneListenAddress()
-		handler = lane.handler
-	}
+	// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных поверхностей.
+	// Здесь стояло сырое объявление профиля (`tcp://0.0.0.0:9100`): процесс
+	// проходил всех стражей и падал на привязке этой поверхности — «too many
+	// colons in address» (задача kaname#21, живой старт 2026-09-17). Держит
+	// `loginlane_addr_test.go`. Ветви «полосы нет» больше нет: полоса строится
+	// на каждом старте (kaname#363), и необъявленный адрес — выключенная с
+	// причиной поверхность, а в боевом режиме отказ старта раньше
+	// (`requireLoginLaneTLS`).
+	addr := cfg.APIServer.LoginLaneListenAddress()
+	var handler http.Handler = lane.handler
 	tlsCfg, err := mtlsCfg.LoginLaneServerTLSConfig()
 	if err != nil {
 		return servicecontract.SurfaceDescriptor{}, fmt.Errorf("sign-in lane TLS: %w", err)
-	}
-	if lane == nil {
-		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
 		Name: "полоса входа паролем, регистрации, восстановления доступа и второго фактора " +
 			"(/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete,second-factor,second-factor/{enroll,confirm,remove,backup-codes},step-up})",
 		Mode:   mode,
 		Logger: logger,
-		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход, "+
-			"восстановление доступа и второй фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
-			"/recovery/complete, /second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) "+
-			"служба не обслуживает — их исполняет внешний поставщик"),
+		Addr: addrAxis(addr, "полоса входа паролем поднимается по адресу "+knobLoginLane+", и он не "+
+			"объявлен: вход человека, регистрацию, смену пароля, выход, восстановление доступа и второй "+
+			"фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, /recovery/complete, "+
+			"/second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) этот старт не "+
+			"обслуживает; в боевом режиме необъявленный адрес — отказ старта"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](

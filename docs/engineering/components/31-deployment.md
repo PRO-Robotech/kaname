@@ -21,21 +21,29 @@ helm-chart, config + секреты, миграции и порядок запу
 
 ## Listener-порты
 
-`kaname serve` поднимает шесть независимых listener'ов:
+`kaname serve` поднимает пять слушателей по умолчанию; ещё три (собственные
+REST-фронты и полоса входа паролем) поднимаются только по адресу, который объявила
+посадка (`api-server.rest-endpoint`, `api-server.internal-rest-endpoint`,
+`api-server.login-lane-endpoint`; умолчаний у них нет).
 
 | Порт | Протокол | Назначение | TLS |
 |---|---|---|---|
 | `:9090` | gRPC | публичный API (tenant-facing, через api-gateway) | per-edge TLS; обязателен в production |
 | `:9091` | gRPC | cluster-internal API (`Internal*`, service→service) | `RequireAndVerifyClientCert`; обязателен в production |
-| `:9092` | HTTP | webhooks Ory (Hydra `token`/`refresh`, Kratos `provision`) + `/healthz`, `/readyz` | per-edge, server-TLS опционально |
-| `:9095` | HTTP | Prometheus `/metrics` | per-edge, server-TLS опционально |
-| `:9096` | HTTP | docker-token (`/iam/token`) для плоскости данных реестра | server-TLS (односторонняя) |
+| `:9095` | HTTP | диагностика: Prometheus `/metrics`, `/healthz`, `/readyz` | per-edge, server-TLS опционально |
+| `:9096` | HTTP | выдача токенов: docker-token (`/iam/token`), токен-эндпоинт платформы (`/iam/v1/token`) и эндпоинты церемонии OAuth | server-TLS (односторонняя) |
 | `:9097` | HTTP | **cluster-internal**: публикуемые наборы проверочных ключей + авторитет отзыва наших токенов | server-TLS (односторонняя), внутренний Service |
 
 Порты конфигурируемы (`api-server.endpoint`, `api-server.internal-endpoint`,
-`authn.hooks-http-endpoint`, `api-server.metrics-endpoint`); значения в таблице —
-дефолты. `/metrics` живет на отдельном cluster-internal порту, а не на публичной
-gRPC-поверхности — иначе утекла бы внутренняя кардинальность метрик.
+`api-server.metrics-endpoint`, `api-server.registry-token.endpoint`,
+`api-server.jwks-proxy.endpoint`); значения в таблице — дефолты. Диагностика живёт
+на отдельном cluster-internal порту, а не на публичной gRPC-поверхности — иначе
+утекла бы внутренняя кардинальность метрик. Пробы пода (`readinessProbe`,
+`livenessProbe`) идут на неё же: она поднимается на каждом старте.
+
+Слушателя обратных вызовов внешнего поставщика личности (`:9092`) у службы больше
+нет: он снят вместе с поставщиком (kaname#363), и ключа `authn.hooks-http-endpoint`
+карта настроек не эмитит.
 
 ### Сервисы по listener'ам
 
@@ -43,8 +51,8 @@ gRPC-поверхности — иначе утекла бы внутрення�
 `AccountService`, `ProjectService`, `UserService`, `ServiceAccountService`,
 `GroupService`, `RoleService`, `AccessBindingService`, `AuthorizeService`
 (`Check`/`BatchCheck`/`ListSubjects`/`ExpandRelations`/`WhoAmI`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
-taxonomy), `SAKeyService` (ключи служебных учёток; зеркало у внешнего поставщика — только
-на непереведённом контуре).
+taxonomy), `SAKeyService` (ключи служебных учёток; токен по ключу чеканит сама служба на
+своём токен-эндпоинте).
 
 **Internal `:9091`** (`registerInternalServices`, только cluster-internal —
 запрет #6): `InternalIAMService` (`Check` + `RegisterResource`/`UnregisterResource`
@@ -56,10 +64,9 @@ taxonomy), `SAKeyService` (ключи служебных учёток; зерк�
 вердикт по уже доверенному mTLS-ребру `:9091`, не открывая отдельный публичный
 коннект.
 
-**HTTP `:9092`** (`iamhooks`): `POST /iam/v1/hooks/token`,
-`POST /iam/v1/hooks/refresh` (Hydra OAuth2-хуки), `POST /iam/v1/hooks/provision`
-(Kratos registration/login → `UpsertFromIdentity`), `GET /healthz` (liveness),
-`GET /readyz` (readiness — ping БД + готовность LRO-worker'а).
+**HTTP `:9095`** (`internal/handler/diagnostics`): `GET /metrics`,
+`GET /healthz` (liveness), `GET /readyz` (readiness — ping БД, версия схемы,
+готовность LRO-worker'а).
 
 **HTTP `:9097`** — **только cluster-internal** (выставлен на внутреннем Service,
 на внешнюю поверхность не публикуется, запрет #6). Три маршрута, и у каждого свой
@@ -104,9 +111,9 @@ flowchart TB
     subgraph PlatformNS[Namespace kacho]
         APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kaname]
         IAM -- pgx master + read-replica --> PG[(Postgres kaname)]
-        Kratos[Ory Kratos] -- provision-hook :9092 --> IAM
-        Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
-        IAM -- admin API: OAuth-клиенты --> Hydra
+        APIGW -- полоса входа, mTLS --> IAM
+        APIGW -- выдача токенов :9096 --> IAM
+        APIGW -- наборы ключей и отзыв :9097 --> IAM
         Migrate[initContainer kaname-migrator] -. goose up .-> PG
         Prom[Prometheus] -- scrape :9095 --> IAM
     end
@@ -205,11 +212,8 @@ repository:
 authn:
   mode: dev                        # dev | production | production-strict
   domain: api.kacho.cloud
-  hydra-issuer: ""                 # пусто → выводится из domain
-  hook-shared-secret-env: KANAME_HOOK_TOKEN
   # Ключ ОБЁРТКИ приватной половины подписного ключа (см. ниже).
   jwks-encryption-key-hex-env: KANAME_JWKS_ENC_KEY
-  hooks-http-endpoint: "tcp://0.0.0.0:9092"
   # Своя чеканка токенов. Блок рендерится ТОЛЬКО при enabled: пока чеканка
   # выключена, её настройки не требуются — страж, требующий того, чем не
   # пользуются, отказывал бы в старте без предмета.
@@ -242,9 +246,7 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 | ENV | Назначение |
 |---|---|
 | `KANAME_DB_PASSWORD` | пароль Postgres (`password-from-env`) |
-| `KANAME_HOOK_TOKEN` | shared secret HMAC для Ory-webhooks |
 | `KANAME_JWKS_ENC_KEY` | 32-байтный ключ (hex) ОБЁРТКИ приватной половины подписного ключа в ключнице (смысл ручки сменился, имя — нет; см. ниже) |
-| `KANAME_HYDRA_ADMIN_TOKEN` | Bearer для Hydra admin API (опц.) |
 | `KANAME_BOOTSTRAP_ROOT_EMAIL` | если задан — bootstrap-admin reconciler выдает `system_admin@cluster` этому юзеру (опц.) |
 
 > [!note] До стадии S6 здесь стояли четыре переменные внешнего движка прав
@@ -261,11 +263,12 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 - **Postgres** (`kaname`) — master-pool обязателен; read-replica (`slave-url`)
   опциональна (CQRS Reader-TX, иначе fallback на master).
-- **Ory Kratos** — identity-provider; `provision`-хук создает/активирует
-  Account/Project/AccessBinding для нового identity (`UpsertFromIdentity`).
-- **Ory Hydra** — OAuth2/OIDC: интерактивный вход человека, а на непереведённом контуре ещё
-  и издатель программных токенов. `token`/`refresh`-хуки обогащают claims и проверяют
-  ревокации; admin API публикует ротируемые JWKS.
+
+Внешнего поставщика личности у службы нет: вход, регистрация, сессия и чеканка
+токенов — её собственные (единственная посадка — своя; ключ
+`authn.identity-provider` снят, `internal/apps/kaname/config/retired_settings.go`).
+Переменные окружения прежнего поставщика (секрет его обратных вызовов, токен его
+административного API) процесс не читает, и выставлять их не нужно.
 
 ## In-process worker'ы
 
@@ -618,8 +621,8 @@ sequenceDiagram
     Init-->>Pod: init complete → старт kaname serve
     Pod->>Pod: load config.yaml + ENV-override
     Pod->>PG: pgxpool master (+ опц. read-replica)
-    Pod->>Pod: gRPC :9090/:9091 + HTTP :9092/:9095 + worker'ы
-    Pod-->>Helm: Ready (TCP-probe :9090)
+    Pod->>Pod: gRPC :9090/:9091 + HTTP :9095/:9096/:9097 + worker'ы
+    Pod-->>Helm: Ready (HTTP-probe /readyz на :9095)
     Note over Pod: authz активен сразу — отдельной задачи подготовки хранилища прав нет
 ```
 
@@ -629,9 +632,9 @@ sequenceDiagram
 # 1. Pod готов.
 kubectl -n kacho rollout status deployment/iam --timeout=60s
 
-# 2. Liveness / readiness на hooks-порту.
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9092/healthz
-kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9092/readyz
+# 2. Liveness / readiness на диагностическом порту.
+kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/healthz
+kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9095/readyz
 
 # 3. gRPC reflection публичного API (через api-gateway).
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
@@ -651,7 +654,7 @@ grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.clo
 
 ## Ссылки на код
 
-- `cmd/kaname/{main,serve,wiring,env,grpc_register,hooks_mux}.go`
+- `cmd/kaname/{main,serve,wiring,env,grpc_register}.go`
 - `cmd/migrator/main.go`
 - `internal/apps/kaname/config/`
 - `internal/migrations/0001_initial.sql`

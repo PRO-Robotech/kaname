@@ -50,14 +50,6 @@ type Registry struct {
 	authzDuration  *prometheus.HistogramVec
 	authzDecisions *prometheus.CounterVec
 
-	// compensationOnce/compensation — единственный экземпляр коллекторов
-	// компенсации. Их потребители (writer намерений и дренаж) собираются в
-	// разных местах композиционного корня, а prometheus.MustRegister падает на
-	// повторной регистрации — поэтому экземпляр один и берётся через
-	// CompensationRecorder(), а не создаётся каждым потребителем.
-	compensationOnce sync.Once
-	compensation     *CompensationRecorder
-
 	// outboxOnce/outbox — единственный экземпляр коллекторов состояния очередей.
 	//
 	// Перечня очередей здесь НЕТ намеренно (kacho#2480). Прежняя редакция
@@ -112,27 +104,10 @@ type Registry struct {
 	readinessOnce sync.Once
 	readiness     *ReadinessRecorder
 
-	// authnHooksOnce/authnHooks — единственный экземпляр приёмника исходов
-	// полосы хуков поставщика личности (#2495). Полоса собирается в прогоне не
-	// единожды, а второй конструктор уронил бы старт на повторной регистрации.
-	authnHooksOnce sync.Once
-	authnHooks     *AuthnHooksRecorder
-	// authnHookAuditDropsOnce/authnHookAuditDrops — единственный экземпляр
-	// приёмника незаписанного журнала полос хука (kaname#389); причина та же.
-	authnHookAuditDropsOnce sync.Once
-	authnHookAuditDrops     *AuthnHookAuditDropsRecorder
-
 	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
 	// величин второго уборщика по сроку (#2499).
 	expiredCredSweepOnce sync.Once
 	expiredCredSweep     *ExpiredCredentialSweepRecorder
-
-	// providerRoadOnce/providerRoad — единственный экземпляр счётчика исходов
-	// дорог к внешнему поставщику (#2491). Потребители собираются в разных
-	// местах корня, а второй конструктор уронил бы старт на повторной
-	// регистрации семейства с тем же именем.
-	providerRoadOnce sync.Once
-	providerRoad     *ProviderRoadRecorder
 
 	// loginLaneOnce/loginLane — единственный экземпляр приёмника полосы входа
 	// (Ф3): его делят слушатель формы, варианты использования и проверяющий

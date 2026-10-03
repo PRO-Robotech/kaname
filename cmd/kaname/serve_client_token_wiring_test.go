@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -95,6 +96,7 @@ func TestF2_45_ClientTokenEndpointSharesTheDeclaredIssuingSurface(t *testing.T) 
 		Realm:                  "https://api.kacho.local/iam/token",
 		Service:                "registry.kacho.local",
 		BasicCredentialTimeout: credentialLanePeerTimeout,
+		Signer:                 lanesigner.New(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка поверхности выдачи: %v", err)

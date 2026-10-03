@@ -185,7 +185,7 @@ func TestToken_InvalidCredentials_401(t *testing.T) {
 	}
 }
 
-// TestToken_IssuerUnavailable_503 — Hydra being unreachable (a hard mint-path
+// TestToken_IssuerUnavailable_503 — the issuer being unavailable (a hard mint-path
 // dependency) is fail-closed 503 with no token and no raw error leaked.
 func TestToken_IssuerUnavailable_503(t *testing.T) {
 	rec := httptest.NewRecorder()

@@ -148,12 +148,6 @@ func (w *strictDupFakeWriter) EmitFGARelationWrite(context.Context, []service.Re
 func (w *strictDupFakeWriter) EmitFGARelationDelete(context.Context, []service.RelationTuple) error {
 	return nil
 }
-func (w *strictDupFakeWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *strictDupFakeWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *strictDupFakeWriter) AdvisoryXactLock(context.Context, string) error { return nil }
 
 type strictDupAcctReader struct {

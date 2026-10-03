@@ -18,32 +18,15 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 )
 
-// fakeSigner — records the assertion input and returns a canned assertion.
-// Живёт ради АНОНИМНОГО потока: полоса предъявленного удостоверения утверждений
-// не подписывает — ключевого материала у принимаемого вида не существует.
-type fakeSigner struct {
-	got AssertionInput
-	err error
-}
-
-func (f *fakeSigner) Sign(in AssertionInput) (string, error) {
-	f.got = in
-	if f.err != nil {
-		return "", f.err
+// mustUseCase — полоса на НАШЕЙ чеканке: подписант — обязательный вход
+// построителя, и проба, которой нужна собранная полоса, его подаёт.
+func mustUseCase(t *testing.T, cfg Config, m LocalMinter) *IssueRegistryTokenUseCase {
+	t.Helper()
+	uc, err := NewIssueRegistryTokenUseCase(cfg, m)
+	if err != nil {
+		t.Fatalf("построитель полосы отказал на исправном входе: %v", err)
 	}
-	return "assertion.for." + in.ClientID, nil
-}
-
-// fakeExchanger — a scripted TokenExchanger (тот же анонимный поток).
-type fakeExchanger struct {
-	out ExchangeOutput
-	err error
-	got ExchangeInput
-}
-
-func (f *fakeExchanger) Exchange(_ context.Context, in ExchangeInput) (ExchangeOutput, error) {
-	f.got = in
-	return f.out, f.err
+	return uc
 }
 
 // TestExecute_ServiceFallsBackToDefault — пустой ?service= даёт объявленный
@@ -98,9 +81,10 @@ func TestExecute_LaneWithoutItsAuthority_FailsClosedAsIssuerUnavailable(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	uc := NewIssueRegistryTokenUseCase(Config{
+	minter := &fakeMinter{out: MintOutput{AccessToken: "should-not-happen"}}
+	uc := mustUseCase(t, Config{
 		AllowedAudiences: []string{"registry"}, DefaultService: "registry",
-	}, &fakeSigner{}, &fakeExchanger{})
+	}, minter)
 
 	out, err := uc.Execute(context.Background(), IssueInput{
 		Username: "soc_0000000000001143n", Password: secret,
@@ -111,8 +95,8 @@ func TestExecute_LaneWithoutItsAuthority_FailsClosedAsIssuerUnavailable(t *testi
 	if errors.Is(err, ErrUnauthenticated) {
 		t.Error("неисправность сборки выдана за негодные учётные данные — клиент стал бы менять секрет")
 	}
-	if out.Token != "" {
-		t.Fatal("токен на несобранной полосе")
+	if out.Token != "" || minter.got.Subject != "" {
+		t.Fatal("токен на несобранной полосе либо чеканка без проверки предъявленного")
 	}
 }
 
@@ -129,11 +113,9 @@ func TestExecute_MinterFailure_IsIssuerUnavailable(t *testing.T) {
 		svaOf: map[string]string{credID: svaID},
 	}
 	m := &fakeMinter{err: errors.New("no signing key")}
-	uc := NewIssueRegistryTokenUseCase(Config{
+	uc := mustUseCase(t, Config{
 		AllowedAudiences: []string{"registry"}, DefaultService: "registry",
-	}, &fakeSigner{}, &fakeExchanger{}).
-		WithLocalMinter(m).
-		WithBasicCredentialResolver(res)
+	}, m).WithBasicCredentialResolver(res)
 
 	_, err = uc.Execute(context.Background(), IssueInput{Username: credID, Password: secret})
 	if !errors.Is(err, ErrIssuerUnavailable) {

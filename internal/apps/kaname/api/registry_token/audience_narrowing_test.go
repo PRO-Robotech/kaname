@@ -58,14 +58,10 @@ func newDockerLane(t *testing.T) (*registrytokenuc.IssueRegistryTokenUseCase, *s
 	t.Helper()
 	m := &stubMinter{}
 	secret, authority := newBasicCredential(t)
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(
-		registrytokenuc.Config{
-			AssertionAudience: "https://hydra.kacho.local/oauth2/token",
-			AllowedAudiences:  []string{audRegistry},
-			DefaultService:    audRegistry,
-		},
-		nopSigner{}, &recordingExchanger{},
-	).WithLocalMinter(m).WithBasicCredentialResolver(authority)
+	uc := mustLane(t, registrytokenuc.Config{
+		AllowedAudiences: []string{audRegistry},
+		DefaultService:   audRegistry,
+	}, m).WithBasicCredentialResolver(authority)
 	return uc, m, secret
 }
 
@@ -118,17 +114,11 @@ func TestRequestOmittingTheServiceGetsTheLandingDefault(t *testing.T) {
 // остаётся внешняя граница, и она обязана действовать.
 func TestAnonymousLaneIsBoundByTheSameLandingDeclaration(t *testing.T) {
 	m := &stubMinter{}
-	uc := registrytokenuc.NewIssueRegistryTokenUseCase(
-		registrytokenuc.Config{
-			AssertionAudience: "https://hydra.kacho.local/oauth2/token",
-			AllowedAudiences:  []string{audRegistry},
-			DefaultService:    audRegistry,
-			Anonymous: registrytokenuc.AnonymousIdentity{
-				ClientID: "anon-cid", KeyID: "anon-kid", PrivateKeyPEM: "-----anon-pem-----",
-			},
-		},
-		nopSigner{}, &recordingExchanger{},
-	).WithLocalMinter(m)
+	uc := mustLane(t, registrytokenuc.Config{
+		AllowedAudiences: []string{audRegistry},
+		DefaultService:   audRegistry,
+		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-cid"},
+	}, m)
 
 	// ОТРИЦАНИЕ.
 	_, err := uc.ExecuteAnonymous(context.Background(), audForeign)

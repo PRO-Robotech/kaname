@@ -72,8 +72,7 @@ func (c Config) Validate() error {
 	// Действует в ЛЮБОМ режиме: фронт без читателя отвечает одинаково на годное
 	// и на негодное на всяком поднятом стенде, и «зелёный dev» именно это и
 	// маскирует.
-	errs = multierr.Append(errs, c.AuthN.PresentedCredential.ValidateBinding(
-		c.AuthN.Mode.IsProduction(), c.APIServer.RESTListenAddress(), c.AuthN.IdentityProvider))
+	errs = multierr.Append(errs, c.AuthN.PresentedCredential.ValidateBinding(c.AuthN.Mode.IsProduction()))
 
 	// Страж токен-эндпоинта платформы (задача #898). Он принимает настройку
 	// своей чеканки параметром: эндпоинт выпускает нашим подписантом и
@@ -220,16 +219,15 @@ func (c Config) Validate() error {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
 
-		// ПОСАДКА ЛИЧНОСТИ и требования ЕЁ полосы (задача #1125). Три
-		// провайдерских стража, стоявшие здесь безусловно, стали строками
-		// таблицы LaneRequirements и предъявляются только под `external`: под
-		// `own` внешнего поставщика нет вовсе, и требовать его адресов значило
-		// бы не пускать в старт стенд, которому они не нужны ни для чего.
+		// ТРЕБОВАНИЯ ПОЛОСЫ своего входа и своей чеканки (задача #1125). Прежде
+		// их выбирал ключ посадки; ключ снят вместе с внешним поставщиком
+		// (kaname#363), и строки таблицы LaneRequirements предъявляются всякому
+		// боевому старту.
 		//
 		// Половина ПОЛНОТЫ ПРОВЯЗКИ (ValidateLaneWiring) остаётся в
 		// композиционном корне: настройка объектов не видит и выразить их
 		// отсутствие не может.
-		errs = multierr.Append(errs, c.validateIdentityProviderLane())
+		errs = multierr.Append(errs, c.validateLaneRequirements())
 
 		// АДРЕСАТ выпускаемых удостоверений (задача #2127). Из `authn.domain`
 		// выводится клеймо адресата, уезжающее в КАЖДОМ выпущенном токене и
@@ -284,7 +282,7 @@ func (c Config) validateDeclaredDomain() error {
 // bootstrap-admin token mint is ENABLED (the signing key is present, so the RPC
 // will actually issue tokens) but has NO caller allow-list.
 //
-// MintBootstrapToken returns a Hydra-signed cluster `system_admin` Bearer. It
+// MintBootstrapToken returns a cluster `system_admin` Bearer signed by our own signer. It
 // carries no ReBAC gate by construction (it exists to obtain the FIRST token,
 // before any relation exists), so the ONLY thing standing between a caller and
 // full control-plane takeover is the client-certificate SPIFFE allow-list
@@ -369,210 +367,6 @@ func (c Config) validateTrustDomain() error {
 	})
 }
 
-// validateProductionProviderAdminHop refuses to start a production binary whose
-// route to the identity provider's ADMIN API is GUESSED, or carries the
-// administrative bearer in the clear.
-//
-// iam is the platform's sole facade to the provider: registering the OAuth2
-// client behind a personal token or a service-account key, recording a trust
-// grant, tearing down a login session — all of it goes over this hop, with the
-// administrative bearer attached. The provider's admin API authenticates nobody;
-// being able to reach it IS the authorization. So both properties below are
-// load-bearing, and they fail for different reasons.
-//
-// DECLARED, NOT DERIVED. The address falls back to a derivation from the issuer
-// ("hydra.X" → "hydra-admin.X", else "https://hydra-admin.<domain>"). A derived
-// address is never empty, so the facade reads as configured on a profile that
-// never declared it — and the derivation yields the PUBLIC ingress hostname,
-// which does not resolve inside the cluster. Every call then fails, or worse,
-// eventually resolves to whatever answers on that public name and receives the
-// administrative bearer. Requiring the declaration is the platform rule that a
-// security-relevant dependency address is never worked out from a neighbour's.
-//
-// NOT IN THE CLEAR. Same reason the edge gateway's hop is held to it: the bearer
-// is readable by anything on the path, and it opens an API that asks for nothing
-// else.
-//
-// Only the explicit sources count as declared — the YAML setting and its ENV
-// override — because those are the two an operator actually writes. dev keeps the
-// derivation and tolerates plaintext: an in-process fixture has no provider, and
-// a developer stand may run one without a certificate.
-func (c Config) validateProductionProviderAdminHop() error {
-	declared := c.AuthN.DeclaredHydraAdminURL()
-	if declared == "" {
-		return fmt.Errorf(
-			"production mode: authn.hydra-admin-url is not declared (env override " +
-				"KANAME_HYDRA_ADMIN_URL) — it then falls back to a name DERIVED from the " +
-				"issuer, which is the public ingress host and does not resolve inside the " +
-				"cluster; the derivation is never empty, so the facade reads as configured " +
-				"while addressing a host nobody chose. Name the cluster-internal admin " +
-				"Service explicitly")
-	}
-	u, err := url.Parse(declared)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf(
-			"production mode: authn.hydra-admin-url is not an absolute http(s) URL (got %q)",
-			declared)
-	}
-	if u.Scheme != "https" {
-		return fmt.Errorf(
-			"production mode: authn.hydra-admin-url is plaintext (%q) — every OAuth2 client "+
-				"registration, trust grant and session teardown carries the administrative "+
-				"bearer over this hop, and the admin API it opens authenticates nobody, so "+
-				"anything on the path can read the credential and use it; address the admin "+
-				"listener over https",
-			declared)
-	}
-	// TLS without an anchor is not a partial improvement here. The provider's
-	// in-cluster certificate is issued by the internal CA and this process trusts
-	// the system roots, so every call would fail on an unknown authority — after
-	// the address already reads as hardened.
-	if c.AuthN.ResolveHydraAdminCAFile() == "" {
-		return fmt.Errorf(
-			"production mode: authn.hydra-admin-url is https (%q) but authn.hydra-admin-ca-file "+
-				"is empty (env KANAME_HYDRA_ADMIN_CA_FILE) — the provider's in-cluster "+
-				"certificate is issued by the internal CA and this process trusts the system "+
-				"roots, so every call on the hop fails with an unknown authority; pin the "+
-				"bundle together with the address",
-			declared)
-	}
-	return nil
-}
-
-// providerPublicHop — one of iam's hops to the identity provider's PUBLIC
-// listener, as the boot guard sees it: what an operator declared, what anchor was
-// pinned with it, and the names to put in a refusal so a stand can be fixed
-// without reading this file.
-type providerPublicHop struct {
-	setting     string
-	env         string
-	declared    string
-	caSetting   string
-	caEnv       string
-	caFile      string
-	whatItISFor string
-}
-
-// validateProductionProviderPublicHops holds the two hops to the provider's
-// PUBLIC listener to the same discipline the ADMIN hop already has: the address
-// is DECLARED, never worked out from a neighbour's, and TLS is never claimed
-// without something to verify the peer against.
-//
-// DECLARED, NOT DERIVED. Both addresses fall back to a derivation from the issuer
-// — `<issuer>/.well-known/jwks.json` and `<issuer>/oauth2/token`. A derivation is
-// never empty, so the facade reads as configured on a profile that declared
-// neither, while addressing the PUBLIC ingress hostname: in-cluster that name
-// usually does not resolve at all (the JWKS mirror then fail-closes 502 and every
-// docker pull gets a 401, with no line at start-up naming why), and where it does
-// resolve it is not the process the operator meant. This is the platform rule that
-// the address of a dependency an access decision rests on is never derived.
-//
-// WHAT EACH HOP CARRIES, because the two are not interchangeable:
-//   - the JWKS upstream is the ONLY thing that decides which signatures the
-//     data-plane accepts. iam re-serves the fetched keyset verbatim on its
-//     cluster-internal mirror, so whatever answers this address chooses the
-//     platform's verification keys.
-//   - the token endpoint carries a signed client assertion out and the minted
-//     bearer back in the response body.
-//
-// TRANSPORT IS NOT ASSERTED HERE, and that is a boundary, not an oversight. The
-// provider serves its public listener in plain http on every profile, and the
-// per-listener TLS override this version does NOT support was measured false on
-// 2026-07-30 — see the note in
-// deploy/helm/umbrella/templates/hydra-admin-certificate.yaml. Moving the public
-// listener moves the ingress, the JWKS mirror and the token endpoint together; it
-// is its own change with its own acceptance. Requiring https here would only add a
-// second reason for the same stand not to boot, and the fix for it would not be
-// this guard's.
-//
-// WHAT IS ASSERTED IS THE HALF THAT CAN BE GOT WRONG SILENTLY: the moment a
-// profile writes https, an anchor must be pinned with it. Without one the process
-// verifies against the SYSTEM roots, which an internal-CA certificate never chains
-// to — so the address reads as hardened while every fetch fails on an unknown
-// authority, and the JWKS mirror answers 502 to the whole data-plane.
-//
-// Only the explicit sources count as declared — the YAML setting and its ENV
-// override — because those are the two an operator actually writes. dev keeps the
-// derivation and tolerates anything: an in-process fixture has no provider.
-// providerPublicHopKind — какой из двух публичных контуров проверяется. Их
-// разделили, потому что таблица требований полос называет их РАЗНЫМИ
-// обязательными элементами: набор проверочных ключей решает, чьи подписи
-// принимает data-plane, а адрес обмена возит подписанное утверждение. Отказ по
-// одному не есть отказ по другому, и клетка произведения у каждого своя.
-type providerPublicHopKind int
-
-const (
-	providerHopJWKS providerPublicHopKind = iota
-	providerHopToken
-)
-
-// providerPublicHops — объявление обоих контуров. Одно место: тексты отказов
-// часть контракта оператора, и вторая копия разошлась бы с первой молча.
-func (c Config) providerPublicHops() []providerPublicHop {
-	return []providerPublicHop{
-		{
-			setting:   "authn.hydra-jwks-url",
-			env:       "KANAME_HYDRA_JWKS_URL",
-			declared:  c.AuthN.DeclaredHydraJWKSURL(),
-			caSetting: "authn.hydra-jwks-ca-file",
-			caEnv:     "KANAME_HYDRA_JWKS_CA_FILE",
-			caFile:    c.AuthN.ResolveHydraJWKSCAFile(),
-			whatItISFor: "the keyset this process mirrors on its cluster-internal listener is the " +
-				"data-plane's only anchor for deciding whether a token was signed by the provider",
-		},
-		{
-			setting:   "authn.hydra-token-url",
-			env:       "KANAME_HYDRA_TOKEN_URL",
-			declared:  c.AuthN.DeclaredHydraTokenURL(),
-			caSetting: "authn.hydra-token-ca-file",
-			caEnv:     "KANAME_HYDRA_TOKEN_CA_FILE",
-			caFile:    c.AuthN.ResolveHydraTokenCAFile(),
-			whatItISFor: "the exchange posts a signed client assertion to this address and reads the " +
-				"minted bearer back out of the response body",
-		},
-	}
-}
-
-// validateProviderPublicHop проверяет ОДИН публичный контур поставщика.
-func (c Config) validateProviderPublicHop(kind providerPublicHopKind) error {
-	hops := c.providerPublicHops()
-	if int(kind) < 0 || int(kind) >= len(hops) {
-		return fmt.Errorf("internal: unknown provider public hop %d", int(kind))
-	}
-	return c.validateProviderPublicHops([]providerPublicHop{hops[kind]})
-}
-
-// validateProviderPublicHops — общее тело проверки перечня контуров.
-func (c Config) validateProviderPublicHops(hops []providerPublicHop) error {
-	var errs error
-	for _, h := range hops {
-		if h.declared == "" {
-			errs = multierr.Append(errs, fmt.Errorf(
-				"production mode: %s is not declared (env override %s) — it then falls back to a "+
-					"name DERIVED from the issuer, which is the public ingress host and does not "+
-					"resolve inside the cluster; the derivation is never empty, so the facade reads "+
-					"as configured while addressing a host nobody chose. %s. Name the cluster-internal "+
-					"Service explicitly", h.setting, h.env, h.whatItISFor))
-			continue
-		}
-		u, err := url.Parse(h.declared)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			errs = multierr.Append(errs, fmt.Errorf(
-				"production mode: %s is not an absolute http(s) URL (got %q)", h.setting, h.declared))
-			continue
-		}
-		if u.Scheme == "https" && h.caFile == "" {
-			errs = multierr.Append(errs, fmt.Errorf(
-				"production mode: %s is https (%q) but %s is empty (env %s) — the provider's "+
-					"in-cluster certificate is issued by the internal CA and this process trusts the "+
-					"system roots, so every call on the hop fails with an unknown authority while the "+
-					"address reads as hardened; pin the bundle together with the address",
-				h.setting, h.declared, h.caSetting, h.caEnv))
-		}
-	}
-	return errs
-}
-
 // validateMode ensures Mode is a known ENUM value.
 func (c Config) validateMode() error {
 	switch c.AuthN.Mode {
@@ -583,31 +377,25 @@ func (c Config) validateMode() error {
 	}
 }
 
-// validateProductionAuthNSecrets requires the AuthN secrets the binary needs to
-// authenticate the Ory hooks. Вне production-посадки пустое значение законно, но
-// ОБХОДА НЕ ДАЁТ: обработчик отвечает на него 500 и запрос не обслуживает
-// (`iamhooks.requireHookAuth`). В любой production-посадке пустой секрет — это
-// ошибка настройки, которую страж обязан назвать на старте: иначе она вышла бы
-// наружу только отказом на пути запроса (риск доступности).
+// validateProductionAuthNSecrets requires the key the binary wraps the private
+// half of its signing key with.
 //
-// The JWKS encryption key is still demanded here even though nothing decrypts
 // Ключ обёртки требуется потому, что им оборачивается приватная половина
 // подписного ключа в ключнице (задача #897). Ручка об этом предмете в дереве
 // одна, и её значение меняет исход старта: объявленная и нечитаемая ручка была
 // бы мёртвым стражем.
 //
-// Secrets resolve from the YAML field OR the ENV indirection
-// (hook-shared-secret-env / jwks-encryption-key-hex-env) — the same precedence
-// the composition root uses (cmd/kaname/hooks_mux.go). Only os.Getenv is read
-// (no other side-effects), consistent with the Resolve* methods.
+// Здесь же прежде требовался общий секрет хуков внешнего поставщика. Хуки сняты
+// вместе с поставщиком (kaname#363): секрет не читает никто, и требовать его
+// значило бы требовать величину без читателя.
+//
+// The secret resolves from the YAML field OR the ENV indirection
+// (jwks-encryption-key-hex-env). Only os.Getenv is read (no other
+// side-effects), consistent with the Resolve* methods.
 //
 // Errors name WHICH setting is missing — never the secret value.
 func (c Config) validateProductionAuthNSecrets() error {
 	var errs error
-	if strings.TrimSpace(c.AuthN.ResolveHookSharedSecret()) == "" {
-		errs = multierr.Append(errs, fmt.Errorf(
-			"production mode: authn.hook-shared-secret is empty (set authn.hook-shared-secret-env / KANAME_HOOK_TOKEN)"))
-	}
 	if _, err := c.AuthN.ResolveJWKSEncryptionKeys(); err != nil {
 		// ResolveJWKSEncryptionKeys already reports WHICH setting / what shape is
 		// wrong (empty, bad hex, wrong length) without echoing the value.

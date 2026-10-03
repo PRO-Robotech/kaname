@@ -329,7 +329,7 @@ func TestMailBoundsHaveNoLoaderDefault(t *testing.T) {
 
 // Б7 — страж таблицы провязан в общий страж старта.
 func TestValidateRunsTheMailBoundsGuard(t *testing.T) {
-	cfg := laneCfg(config.IdentityProviderOwn)
+	cfg := laneCfg()
 	require.NoError(t, cfg.Validate(), "близнец: годная фикстура стартует")
 	cfg.Notifications.Enabled = nil
 	err := cfg.Validate()

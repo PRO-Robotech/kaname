@@ -46,24 +46,23 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	interactiveclientapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// icSecretR — адрес возврата R приёмки (тот же, что GOOD_REDIRECT набора
-// `tests/newman/cases/iam-interactive-client.py`); K заводится с
-// `redirectUris = [R]`.
+// icSecretR — адрес возврата R приёмки (тот же, что REDIRECT набора края
+// платформы `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`,
+// куда набор переехал из этого дерева); K заводится с `redirectUris = [R]`.
 const icSecretR = "https://api.kacho.local/auth/callback"
 
-// createClient заводит конфиденциального клиента ГЛАГОЛОМ `Create` посадки
-// `own` (сценарий 01) и отдаёт его запись, прочитанную обратно, и секрет из
+// createClient заводит конфиденциального клиента ГЛАГОЛОМ `Create` своей
+// посадки (сценарий 01) и отдаёт его запись, прочитанную обратно, и секрет из
 // ответа вызова. Отказ заведения — отказ мира: предмет этих проб — обмен.
 func (w *ceremonyWorld) createClient(name string) *ceremonyClient {
 	w.t.Helper()
-	cfg := loginLaneCfg(config.IdentityProviderOwn)
+	cfg := loginLaneCfg()
 	provider := mustOwnExecutor(w.t, cfg, kanamepg.NewOAuthCeremonyRepo(w.pool))
 	repo := kanamepg.NewInteractiveClientRepo(w.pool)
 	ops := operations.NewRepo(w.pool, "kaname")

@@ -54,9 +54,8 @@ const mtlsEnvPrefix = EnvPrefix
 // Server-edge'и:
 //   - PublicServerMTLS   — gRPC public listener (:9090), grpc.ServerOption.
 //   - InternalServerMTLS — gRPC internal listener (:9091), grpc.ServerOption.
-//   - HooksServerMTLS    — HTTP Hydra/Kratos hooks listener (:9092), *tls.Config.
 //   - MetricsServerMTLS  — HTTP Prometheus /metrics listener (:9095), *tls.Config.
-//   - JWKSProxyServerMTLS     — HTTP Hydra-JWKS proxy (:9097), *tls.Config.
+//   - JWKSProxyServerMTLS     — HTTP key-set publisher (:9097), *tls.Config.
 //   - RegistryTokenServerMTLS — HTTP docker-token shim (:9096), *tls.Config.
 //
 // gRPC-ребра отдают grpc.ServerOption (передается в grpcsrv.NewServer);
@@ -77,46 +76,6 @@ type MTLSConfig struct {
 	// извлекатель видит верифицированный peer-cert SAN (на plaintext — no-op).
 	InternalServerMTLS grpcsrv.TLSServer `envconfig:"INTERNAL_SERVER_MTLS"`
 
-	// HooksServerMTLS — server-creds для HTTP Hydra/Kratos hooks listener
-	// (:9092). Listener несет ТРИ HMAC-аутентифицируемых hook-эндпоинта
-	// (Hydra token/refresh + Kratos provision) — все три вызывателя — HTTP-клиенты
-	// без transport client-cert. HMAC shared-secret в handler'е (общий
-	// requireHookAuth) дает fail-closed caller-auth; TLS добавляет шифрование +
-	// server-authentication. ClientAuth-режим — per-edge HooksClientAuthMode:
-	// server-tls-only (default) → tls.NoClientCert (client-cert
-	// не требуется, потому что Ory его не умеет); mutual → RequireAndVerifyClientCert.
-	// Default-off (Enable=false) → plaintext (dev/newman стенд).
-	HooksServerMTLS grpcsrv.TLSServer `envconfig:"HOOKS_SERVER_MTLS"`
-
-	// HooksServerPlaintextAcknowledged — ОБЪЯВЛЕННОЕ ИСКЛЮЧЕНИЕ: слушатель
-	// обратных вызовов работает открытым текстом СОЗНАТЕЛЬНО.
-	// Env: KANAME_HOOKS_SERVER_PLAINTEXT_ACKNOWLEDGED.
-	//
-	// Страж старта в боевой посадке не пускает ни одно HTTP-ребро открытым
-	// текстом. У этого ребра исключение возможно, и основание у него измерено, а
-	// не выведено: вызывающий — вебхук службы личности — ходит по открытому http
-	// и своего доверия не несёт, поэтому TLS здесь означал бы не защиту, а
-	// проваленный хук и неработающую выдачу токенов целиком.
-	//
-	// ПОЛЕ ОДНО НА ВСЮ ПОСАДКУ, И ЭТО ОБЛАСТЬ ИСКЛЮЧЕНИЯ, А НЕ НЕДОДЕЛКА. У
-	// остальных HTTP-рёбер такого поля НЕТ, поэтому объявить им открытый текст
-	// нечем: сужение держится построением, а не дисциплиной оператора. Заводя
-	// такое поле следующему ребру, спроси, чем измерено его основание.
-	//
-	// Объявить исключение ВМЕСТЕ с транспортом — отказ старта: два правила об
-	// одном предмете говорят противоположное, и выбирать между ними молча
-	// процесс не вправе.
-	HooksServerPlaintextAcknowledged bool `envconfig:"HOOKS_SERVER_PLAINTEXT_ACKNOWLEDGED"`
-
-	// HooksClientAuthMode — per-edge TLS ClientAuth-режим для hooks-listener'а
-	// (:9092). Env: KANAME_HOOKS_SERVER_MTLS_CLIENTAUTHMODE. Допустимые
-	// значения — clientAuthServerTLSOnly | clientAuthMutual. Пустая строка
-	// (unset) при enabled-edge → безопасный per-edge дефолт server-tls-only (Ory
-	// не предъявляет client-cert; иначе enabled hooks-edge падал бы в
-	// RequireAndVerifyClientCert). Неизвестный режим → fail-closed
-	// (НИКОГДА не интерпретируется как «без проверок»).
-	HooksClientAuthMode string `envconfig:"HOOKS_SERVER_MTLS_CLIENTAUTHMODE"`
-
 	// MetricsServerMTLS — server-creds для HTTP Prometheus /metrics listener
 	// (:9095). Cluster-internal, never tenant-facing. mTLS закрывает plaintext
 	// metrics-поверхность. ClientAuth-режим — per-edge MetricsClientAuthMode:
@@ -131,8 +90,8 @@ type MTLSConfig struct {
 	// Неизвестный режим → fail-closed.
 	MetricsClientAuthMode string `envconfig:"METRICS_SERVER_MTLS_CLIENTAUTHMODE"`
 
-	// JWKSProxyServerMTLS — server-creds для HTTP Hydra-JWKS proxy listener
-	// (:9097, cluster-internal `GET /.well-known/jwks.json`). Data-plane
+	// JWKSProxyServerMTLS — server-creds для HTTP key-set publisher listener
+	// (:9097, cluster-internal `GET <authn.token-signing.key-set-path>`). Data-plane
 	// verification keys (public OIDC material), served internal-only over
 	// ONE-WAY server-TLS (internal-CA leaf; NOT mutual — see JWKSProxyClientAuthMode
 	// default server-tls-only). The route is unauthenticated-by-design (public keys,
@@ -221,10 +180,9 @@ type MTLSConfig struct {
 const (
 	// clientAuthServerTLSOnly — server-side TLS без верификации client-cert
 	// (tls.NoClientCert). Транспорт зашифрован + server-authentication; caller-auth
-	// обеспечивается выше по стеку (HMAC X-Kacho-Hook-Token на hooks-ребре;
-	// network-segregation на metrics-ребре). Client-CA НЕ требуется. Корректен
-	// для Ory webhooks (Hydra token/refresh + Kratos provision), которые не умеют
-	// предъявлять transport client-cert.
+	// обеспечивается выше по стеку (network-segregation на metrics-ребре, Basic
+	// на ребре докерного токена). Client-CA НЕ требуется. Корректен для
+	// вызывающих, которые не предъявляют transport client-cert.
 	clientAuthServerTLSOnly = "server-tls-only"
 
 	// clientAuthMutual — mTLS с RequireAndVerifyClientCert (требует client-CA).
@@ -311,7 +269,7 @@ func (m MTLSConfig) RegistryTokenClientAuthModeValue() string {
 
 // resolveClientAuthMode возвращает эффективный ClientAuth-режим для ребра:
 // пустая строка → безопасный per-edge дефолт server-tls-only (явное осознанное
-// решение, не случайный zero-value: ни Ory webhooks, ни metrics scrape-клиент
+// решение, не случайный zero-value: ни metrics scrape-клиент, ни docker-клиент
 // не предъявляют client-cert). Известное значение возвращается как есть;
 // неизвестное — как есть (валидируется/отвергается вызывающим builder/Validate).
 func resolveClientAuthMode(mode string) string {
@@ -344,34 +302,30 @@ func (m MTLSConfig) InternalServerCreds() (grpc.ServerOption, error) {
 	return grpcsrv.TLSServerCreds(m.InternalServerMTLS)
 }
 
-// HooksServerTLSConfig возвращает *tls.Config для HTTP hooks listener (:9092),
-// который composition root объявляет полем TLS профиля поверхности.
+// MetricsServerTLSConfig возвращает *tls.Config для HTTP /metrics listener
+// (:9095), который composition root объявляет полем TLS профиля поверхности.
 //
-// Контракт (per-edge ClientAuth mode):
+// Контракт (per-edge ClientAuth mode), общий для всех HTTP-рёбер ниже:
 //   - enable=false → (nil, nil): cert-файлы НЕ читаются, listener остается
 //     PLAINTEXT (dev/newman стенд byte-identical к текущему поведению);
 //   - enable=true, clientAuthMode=server-tls-only (default) → server-side TLS:
 //     предъявляет server-cert (cert/key), ClientAuth=tls.NoClientCert; client-CA
-//     НЕ требуется (Ory webhooks не умеют client-cert, caller-auth — HMAC);
+//     НЕ требуется;
 //   - enable=true, clientAuthMode=mutual → mTLS: + верифицирует client-cert против
 //     client-CA с ClientAuth=RequireAndVerifyClientCert;
 //   - enable=true + нечитаемый/мусорный cert → error; mutual + пустой client-CA →
 //     error; неизвестный clientAuthMode → error (fail-closed; никогда silent
 //     plaintext fallback и никогда не интерпретировать unknown как «без проверок»,
 //     ban #11).
-func (m MTLSConfig) HooksServerTLSConfig() (*tls.Config, error) {
-	return serverTLSConfig(m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode))
-}
-
-// MetricsServerTLSConfig возвращает *tls.Config для HTTP /metrics listener
-// (:9095). Тот же контракт, что HooksServerTLSConfig (default режим —
-// server-tls-only, т.к. в деплое нет scrape-клиента с client-cert).
+//
+// Default режим этого ребра — server-tls-only, т.к. в деплое нет
+// scrape-клиента с client-cert.
 func (m MTLSConfig) MetricsServerTLSConfig() (*tls.Config, error) {
 	return serverTLSConfig(m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode))
 }
 
 // JWKSProxyServerTLSConfig возвращает *tls.Config для HTTP jwks-proxy listener
-// (:9097). Тот же контракт, что HooksServerTLSConfig, но дефолт — ONE-WAY
+// (:9097). Тот же контракт, что MetricsServerTLSConfig, и дефолт — ONE-WAY
 // server-tls-only (registry-verifier предъявляет только server-trust, не
 // client-cert; mutual сломал бы «verifier untouched»). Default-off → (nil, nil) →
 // listener остаётся PLAINTEXT (dev/newman byte-identical).
@@ -380,7 +334,7 @@ func (m MTLSConfig) JWKSProxyServerTLSConfig() (*tls.Config, error) {
 }
 
 // RegistryTokenServerTLSConfig возвращает *tls.Config для HTTP docker-token
-// listener (:9096, `/iam/token`). Тот же контракт, что HooksServerTLSConfig;
+// listener (:9096, `/iam/token`). Тот же контракт, что MetricsServerTLSConfig;
 // дефолт — server-tls-only (caller-auth на этом эндпоинте — сам Basic, не
 // client-cert). Default-off → (nil, nil) → listener остаётся PLAINTEXT (dev).
 func (m MTLSConfig) RegistryTokenServerTLSConfig() (*tls.Config, error) {
@@ -484,7 +438,7 @@ func (m MTLSConfig) RESTUpstreamDialOption() (grpc.DialOption, error) {
 //
 // gRPC-ребра (public/internal) — всегда mutual-семантика (grpcsrv.TLSServerCreds
 // строит RequireAndVerifyClientCert): требуют полный cert-trio. HTTP-ребра
-// (hooks/metrics/jwks-proxy/registry-token) — per-edge clientAuthMode:
+// (metrics/jwks-proxy/registry-token/REST-фронты/полоса входа) — per-edge clientAuthMode:
 // server-tls-only нуждается только в
 // cert+key (client-CA не нужен), mutual — в полном trio; неизвестный режим —
 // ошибка.
@@ -509,7 +463,6 @@ func (m MTLSConfig) Validate() error {
 		edge grpcsrv.TLSServer
 		mode string
 	}{
-		"hooks-server":          {m.HooksServerMTLS, resolveClientAuthMode(m.HooksClientAuthMode)},
 		"metrics-server":        {m.MetricsServerMTLS, resolveClientAuthMode(m.MetricsClientAuthMode)},
 		"jwks-proxy-server":     {m.JWKSProxyServerMTLS, resolveClientAuthMode(m.JWKSProxyClientAuthMode)},
 		"registry-token-server": {m.RegistryTokenServerMTLS, resolveClientAuthMode(m.RegistryTokenClientAuthMode)},
@@ -644,19 +597,13 @@ func loadCAPool(files []string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// HooksTLSEnabled / MetricsTLSEnabled / JWKSProxyTLSEnabled — объявлен ли
-// транспорт соответствующего HTTP-ребра.
+// MetricsTLSEnabled / JWKSProxyTLSEnabled — объявлен ли транспорт
+// соответствующего HTTP-ребра.
 //
 // Существуют затем, чтобы страж старта спрашивал ПОСАДКУ, а не лез в поля:
 // поле переедет вместе с формой, а вопрос останется тем же.
-func (c MTLSConfig) HooksTLSEnabled() bool { return c.HooksServerMTLS.Enable }
-
-// HooksPlaintextAcknowledged — объявлено ли исключение открытого текста на
-// слушателе обратных вызовов. Метод ОДИН на всю посадку намеренно: у остальных
-// рёбер исключения не бывает, и спросить о нём нечем (см. поле выше).
-func (c MTLSConfig) HooksPlaintextAcknowledged() bool { return c.HooksServerPlaintextAcknowledged }
-func (c MTLSConfig) MetricsTLSEnabled() bool          { return c.MetricsServerMTLS.Enable }
-func (c MTLSConfig) JWKSProxyTLSEnabled() bool        { return c.JWKSProxyServerMTLS.Enable }
+func (c MTLSConfig) MetricsTLSEnabled() bool   { return c.MetricsServerMTLS.Enable }
+func (c MTLSConfig) JWKSProxyTLSEnabled() bool { return c.JWKSProxyServerMTLS.Enable }
 
 // RESTTLSEnabled / InternalRESTTLSEnabled — объявлен ли транспорт собственных
 // REST-фронтов. Спрашивается посадка, а не поле: поле переедет вместе с формой,

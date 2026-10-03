@@ -23,9 +23,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InternalUserService_UpsertFromIdentity_FullMethodName  = "/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity"
-	InternalUserService_Get_FullMethodName                 = "/kaname.cloud.iam.v1.InternalUserService/Get"
-	InternalUserService_OnRecoveryCompleted_FullMethodName = "/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted"
+	InternalUserService_UpsertFromIdentity_FullMethodName = "/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity"
+	InternalUserService_Get_FullMethodName                = "/kaname.cloud.iam.v1.InternalUserService/Get"
 )
 
 // InternalUserServiceClient is the client API for InternalUserService service.
@@ -39,11 +38,11 @@ const (
 // Transport:
 //   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
 //   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`); REST вызывается
-//     OIDC-callback handler'ом.
+//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
+//     listener'а; вызывающий — admin-tooling.
 type InternalUserServiceClient interface {
-	// Upsert User mirror'а из OIDC identity (Ory Kratos).
-	// Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+	// Upsert User по субъекту личности (административный путь).
+	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
 	//
 	// REST exposed ONLY on the cluster-internal listener;
 	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
@@ -51,15 +50,6 @@ type InternalUserServiceClient interface {
 	UpsertFromIdentity(ctx context.Context, in *UpsertFromIdentityRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error)
-	// hook called by Ory Kratos after a successful
-	// self-service recovery flow (magic-link e-mail recovery). kaname
-	// re-enables the User (if `invite_status` was `DISABLED`), invalidates all
-	// active sessions for the user (writes `session_revocations` rows with
-	// reason=`password-change`), and emits `iam.user.recovery_completed` audit.
-	//
-	// Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
-	// does NOT spawn duplicate revocations.
-	OnRecoveryCompleted(ctx context.Context, in *OnRecoveryCompletedRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 }
 
 type internalUserServiceClient struct {
@@ -90,16 +80,6 @@ func (c *internalUserServiceClient) Get(ctx context.Context, in *GetUserRequest,
 	return out, nil
 }
 
-func (c *internalUserServiceClient) OnRecoveryCompleted(ctx context.Context, in *OnRecoveryCompletedRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(operation.Operation)
-	err := c.cc.Invoke(ctx, InternalUserService_OnRecoveryCompleted_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // InternalUserServiceServer is the server API for InternalUserService service.
 // All implementations must embed UnimplementedInternalUserServiceServer
 // for forward compatibility.
@@ -111,11 +91,11 @@ func (c *internalUserServiceClient) OnRecoveryCompleted(ctx context.Context, in 
 // Transport:
 //   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
 //   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`); REST вызывается
-//     OIDC-callback handler'ом.
+//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
+//     listener'а; вызывающий — admin-tooling.
 type InternalUserServiceServer interface {
-	// Upsert User mirror'а из OIDC identity (Ory Kratos).
-	// Вызывается admin через grpcurl либо из OIDC-callback в api-gateway.
+	// Upsert User по субъекту личности (административный путь).
+	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
 	//
 	// REST exposed ONLY on the cluster-internal listener;
 	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
@@ -123,15 +103,6 @@ type InternalUserServiceServer interface {
 	UpsertFromIdentity(context.Context, *UpsertFromIdentityRequest) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(context.Context, *GetUserRequest) (*User, error)
-	// hook called by Ory Kratos after a successful
-	// self-service recovery flow (magic-link e-mail recovery). kaname
-	// re-enables the User (if `invite_status` was `DISABLED`), invalidates all
-	// active sessions for the user (writes `session_revocations` rows with
-	// reason=`password-change`), and emits `iam.user.recovery_completed` audit.
-	//
-	// Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
-	// does NOT spawn duplicate revocations.
-	OnRecoveryCompleted(context.Context, *OnRecoveryCompletedRequest) (*operation.Operation, error)
 	mustEmbedUnimplementedInternalUserServiceServer()
 }
 
@@ -147,9 +118,6 @@ func (UnimplementedInternalUserServiceServer) UpsertFromIdentity(context.Context
 }
 func (UnimplementedInternalUserServiceServer) Get(context.Context, *GetUserRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
-}
-func (UnimplementedInternalUserServiceServer) OnRecoveryCompleted(context.Context, *OnRecoveryCompletedRequest) (*operation.Operation, error) {
-	return nil, status.Error(codes.Unimplemented, "method OnRecoveryCompleted not implemented")
 }
 func (UnimplementedInternalUserServiceServer) mustEmbedUnimplementedInternalUserServiceServer() {}
 func (UnimplementedInternalUserServiceServer) testEmbeddedByValue()                             {}
@@ -208,24 +176,6 @@ func _InternalUserService_Get_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _InternalUserService_OnRecoveryCompleted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(OnRecoveryCompletedRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(InternalUserServiceServer).OnRecoveryCompleted(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: InternalUserService_OnRecoveryCompleted_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(InternalUserServiceServer).OnRecoveryCompleted(ctx, req.(*OnRecoveryCompletedRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // InternalUserService_ServiceDesc is the grpc.ServiceDesc for InternalUserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -240,10 +190,6 @@ var InternalUserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _InternalUserService_Get_Handler,
-		},
-		{
-			MethodName: "OnRecoveryCompleted",
-			Handler:    _InternalUserService_OnRecoveryCompleted_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
