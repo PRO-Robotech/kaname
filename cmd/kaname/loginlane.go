@@ -163,7 +163,7 @@ func laneWiringOf(l *loginLane) config.LaneWiring {
 	return config.LaneWiring{HumanCredentialsWired: l.wired(), HumanSessionsWired: l.wired()}
 }
 
-// resetSecondFactorUseCase — сброс второго фактора распорядителем (Ф12 Р10)
+// resetSecondFactorUseCase — сброс второго фактора администратором облака (Ф12 Р10)
 // теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
 // снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
 func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {

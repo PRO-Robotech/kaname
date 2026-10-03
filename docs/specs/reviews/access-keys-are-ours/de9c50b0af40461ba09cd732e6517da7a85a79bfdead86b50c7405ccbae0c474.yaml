@@ -53,6 +53,8 @@ effective_approval:
     (редакция 11) и на `de9c50b0…` НЕ переносится; прежняя запись не отозвана и не правлена —
     эта заведена соседней. Санкция на объём (ban #1) этой записью не выдаётся и выдана быть не
     может: её выпускает внешнее событие полномочия, публикуемое допущенным актором.
+  publication_pending:
+    expected_actor: pointpu
 
 publication_mode: external_event_required
 authority:

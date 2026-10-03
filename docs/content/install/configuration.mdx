@@ -87,10 +87,19 @@ Kaname конфигурируется через переменные окруж
   </tbody>
 </table>
 
-## Listener'ы и mTLS
+## Listener'ы и mTLS {#listeners-tls}
 
 Сервис поднимает публичный (`:9090`), internal (`:9091`) и metrics (`:9095`, он же несёт
-`/healthz` и `/readyz`) listener'ы и слушатель полосы входа. Каждый может требовать mTLS.
+`/healthz` и `/readyz`) listener'ы, слушатель полосы входа, слушатель выдачи (`:9096`) и
+слушатель набора ключей проверки (`:9097`). В боевом режиме каждый поднимается по TLS; режим
+проверки клиентского сертификата у каждого свой и задаётся ручкой `…_CLIENTAUTHMODE`:
+
+- **взаимный** (`mutual`) — сертификат обязателен, без него рукопожатие не проходит;
+- **запрашивающий** (`optional-mutual`) — сертификат спрашивается и, если предъявлен,
+  проверяется против `…_CLIENTCAFILES`; вызывающий без сертификата соединяется, а отказывает
+  ему, где нужно, сам обработчик;
+- **односторонний** (`server-tls-only`) — сертификат не спрашивается; это значение ручки,
+  когда она не задана.
 
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
@@ -99,9 +108,9 @@ Kaname конфигурируется через переменные окруж
     <tr><td><code>KANAME_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
     <tr><td><code>KANAME_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
     <tr><td><code>KANAME_API_SERVER&#95;&#95;LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается на каждом старте, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…&#95;CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. В боевом режиме необъявленный адрес — отказ старта</td></tr>
-    <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
-    <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS публикатора ключей проверки (путь — <code>authn.token-signing.key-set-path</code>, умолчание <code>/.well-known/kaname/jwks.json</code>; односторонняя)</td></tr>
-    <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS докерной полосы (<code>/iam/token</code>, односторонняя)</td></tr>
+    <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>TLS metrics-listener'а (<code>:9095</code>: Prometheus, <code>/healthz</code>, <code>/readyz</code>). Режим — <b>односторонний</b>: ни собиратель, ни kubelet клиентского сертификата не предъявляют, поэтому поставляемый профиль ручку режима не задаёт. В боевом режиме слушатель без TLS — отказ старта; схема объявления сбора и проб пода (<code>https</code>/<code>http</code>) выводится из той же ручки</td></tr>
+    <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS слушателя <code>:9097</code>. На нём две поверхности: набор ключей проверки (путь — <code>authn.token-signing.key-set-path</code>, умолчание <code>/.well-known/kaname/jwks.json</code>) и авторитет отзыва наших токенов. Режим — <b>запрашивающий</b> (<code>…&#95;CLIENTAUTHMODE=optional-mutual</code> вместе с <code>…&#95;CLIENTCAFILES</code>), так стоит в поставляемом боевом профиле. Набор ключей отдаётся без сертификата: его потребители сертификата не предъявляют. Авторитету отзыва вызывающий — край платформы — обязан предъявить клиентский сертификат внутреннего УЦ, без него обработчик отказывает. Пока включена своя чеканка (<code>authn.token-signing.enabled</code>), односторонний режим на этом слушателе — отказ старта; взаимный отрезал бы потребителей набора ключей</td></tr>
+    <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS слушателя выдачи (<code>:9096</code>, в том числе <code>/iam/token</code> докерной полосы). Вызывающего на <code>/iam/token</code> удостоверяет Basic, поэтому клиентский сертификат докерному клиенту не нужен. В поставляемом боевом профиле режим — <b>запрашивающий</b> (<code>optional-mutual</code> вместе с <code>…&#95;CLIENTCAFILES</code>): край опознаётся по проверенному сертификату, вызывающий без сертификата соединяется. Пока собрана своя церемония выдачи, иной режим — отказ старта</td></tr>
     <tr><td><code>KANAME_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
   </tbody>
 </table>
