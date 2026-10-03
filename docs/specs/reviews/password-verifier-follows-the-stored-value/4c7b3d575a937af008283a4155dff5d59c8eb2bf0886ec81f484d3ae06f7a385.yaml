@@ -1,0 +1,121 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385
+  static_status_note: >-
+    Слово «Статус» в шапке документа — то, что туда вписали; шапка рецензентом не правлена
+    намеренно (change-graph.md §2). Действующий вердикт о ЭТОЙ редакции — эта запись вместе с
+    внешним событием. Прежние записи остаются вердиктами о своём содержимом.
+  base_commit: db17d4dd672dd53c64454b3bf74ecd4594ffe419
+  base_sha256: 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+  content_commit: 8839febe489add183069471b574580ae65aa3b1e
+  head_commit: 7755bd8abe4c82975c65791622c1e7a4ed2e4eab
+  branch: '172'
+  branch_on_origin: 'git ls-remote origin refs/heads/172 → 7755bd8abe4c82975c65791622c1e7a4ed2e4eab'
+  pull_request: PRO-Robotech/kaname#583
+  task: PRO-Robotech/kaname#172
+  wave: PRO-Robotech/kaname#536
+  lines: 2157
+  round: 1
+  round_numbering: 'первый круг по этой редакции; прошлых кругов этого захода нет'
+  predecessor_records: >-
+    docs/specs/reviews/password-verifier-follows-the-stored-value/4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9.yaml (APPROVED, редакция 5, kaname#269, санкция действует — база
+    слияния со стороны origin/536); docs/specs/reviews/password-verifier-follows-the-stored-value/6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e.yaml (APPROVED, та же правка
+    датировки поверх редакции 4, kaname#172, санкция действует)
+  fingerprint_predicate: >-
+    git show 7755bd8abe4c:docs/engineering/acceptance/password-verifier-follows-the-stored-value.md | sha256sum → 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385;
+    тот же отпечаток на 8839febe489a (последний коммит, менявший файл) и в рабочей копии
+    tmp/583-acc-review; совпал с заданием
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+publication_mode: courier_of_agent_verdict
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: true
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256) в задаче subject.task. Кругом
+    рецензента событие не публиковалось; до его публикации запрет #1 по этому отпечатку в силе.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#172
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#172
+  status: pending
+  published: false
+  actor_expected: pointpu
+  role: acceptance-reviewer
+  subject_sha256: 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385
+  subject_revision: 7755bd8abe4c82975c65791622c1e7a4ed2e4eab
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385'
+
+premise_check:
+  premise: 'догон 8839febe4 из 536 внёс редакцию 5 (#269); на голове отпечаток 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385, записи на него нет'
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git show 8839febe4^1:<путь> | sha256sum → 6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e (правка датировки над редакцией 4);
+    8839febe4^2 → 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9 (редакция 5); 8839febe4 и 7755bd8ab → 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385; в docs/specs/reviews/password-verifier-follows-the-stored-value/
+    на голове записи с этим именем не было.
+
+delta_judged: >-
+  git diff origin/536 7755bd8ab -- <путь> (origin/536 @db17d4dd6 несёт редакцию 5 побайтово, 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9):
+  1 запись в пункте «Ревизии измерения» — PRO-Robotech/kaname@37ee850953 → «эта история, ревизия 37ee850953» — плюс пункт «Правка ПОСЛЕ вердикта (kaname#172)». Это ровно та же правка, что одобрена записью 6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e поверх редакции 4; слияние конфликтных
+  артефактов не оставило. Сценарии, их ID, «Дано/Когда/Тогда», производители, DoD, решения,
+  строки «Статус» и строка редакции 5 побайтово равны одобренной редакции 5.
+
+predicates_run:
+  sibling_pair_gate: |
+    TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory с четвёртой формой
+    «Ревизии измерения», внесённой локально (tmp/583-acc-review, откачено, не коммитилось):
+      на 7755bd8ab → находок 2: access-keys-are-ours, recovery-of-access (этот документ — нет);
+      близнец — docs/engineering/acceptance из origin/536 @db17d4dd6 → находок 6, среди них
+      НЕОБЪЯВЛЕННАЯ ИСТОРИЯ по password-verifier-follows-the-stored-value.md.
+    Отличие ровно одно (тело документов) — правка снимает находку и поверх редакции 5.
+  revisions_resolve: |
+    git merge-base --is-ancestor <r> origin/main (@8a84dcff6e) → 0 для 37ee850953.
+  constructibility: >-
+    Посева не было: правка сценариев и «Дано» не трогает; конструируемость — предмет записи
+    4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9 (редакция 5), её фикстуры не менялись.
+
+blocking:
+  count: 0
+  genera: []
+
+non_blocking:
+  - id: N1
+    summary: >-
+      Абзац «Правка ПОСЛЕ вердикта (kaname#172)» писан поверх редакции 4 и после слияния с
+      редакцией 5 говорит о той базе: «файл на 8a84dcff6e побайтово равен базе правки» верно о
+      коммите 978510ca2, но не о нынешнем тексте (база теперь — редакция 5, 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9), а перечень
+      «Не тронуты» не называет строку редакции 5. Чисел и контракта не касается; поправить
+      следующей нумерованной редакцией, назвав базу слияния.
+
+coverage:
+  scope: 'правкой не тронут; scope — предмет записи редакции 5'
+  producers: 'правкой не тронуты; «Тогда» без производителя правкой не создано'
+  twins: 'правкой не тронуты'
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
