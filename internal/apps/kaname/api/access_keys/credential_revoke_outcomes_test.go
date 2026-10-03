@@ -159,8 +159,8 @@ func (f *fakeOps) count() int {
 type noTx struct{}
 
 func (noTx) Begin(context.Context) (service.Tx, error) { return noTx{}, nil }
-func (noTx) Commit(context.Context) error                { return nil }
-func (noTx) Rollback(context.Context) error              { return nil }
+func (noTx) Commit(context.Context) error              { return nil }
+func (noTx) Rollback(context.Context) error            { return nil }
 
 // absentUserTokens — хранилище, у которого строки нет: субъект существует,
 // удостоверения у него нет. Отвечает тем же исходом, что настоящее хранилище

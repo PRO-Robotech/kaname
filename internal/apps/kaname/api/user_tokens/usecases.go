@@ -119,6 +119,18 @@ type IssueUserTokenUseCase struct {
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
 	// одноразового private_key_pem. Даёт поллящему клиенту окно. 0 → без окна.
 	redactGrace time.Duration
+	// ownIssuance — посадка обменивает ключевую пару своим токен-эндпоинтом
+	// (`authn.client-token.enabled`). Без него ключевая пара не выдаётся:
+	// обменять её негде (задача kaname#547). Объявляет композиционный корень
+	// тем же условием, что сборка ключей служебных учёток.
+	ownIssuance bool
+}
+
+// WithOwnIssuance объявляет, что посадка обменивает ключевую пару СВОИМ
+// токен-эндпоинтом (`authn.client-token.enabled`). Composition-root only.
+func (u *IssueUserTokenUseCase) WithOwnIssuance() *IssueUserTokenUseCase {
+	u.ownIssuance = true
+	return u
 }
 
 // WithResponseRedactor проводит post-Issue секрет-редактор.
@@ -232,6 +244,20 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Ключевая пара предъявляется ОБМЕНОМ, и обменивает её только
+	// токен-эндпоинт платформы. Посадка без него выдала бы ключ, который
+	// обменять негде, — объявленную возможность, не исполнимую ни при каком
+	// входе. Отказ тот же, что у ключа служебной учётки (приёмка
+	// credential-verbs-refusal-outcomes, Р4): синхронный, ПОСЛЕ разбора запроса
+	// (сформированный неверно запрос получает свой отказ с именем поля на любой
+	// посадке) и ДО всякого чтения и записи. Неназванный вид уже разрешён в
+	// KEYPAIR выше; секрет обмена не требует.
+	if kind != domain.CredentialKindSecret && !u.ownIssuance {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"credential_kind %s: authn.client-token.enabled is false — this key is exchanged for a "+
+				"token on the platform token endpoint, and this landing does not run one", kind)
 	}
 
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
