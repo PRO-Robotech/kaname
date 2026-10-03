@@ -12883,6 +12883,2378 @@
       ]
     },
     {
+      "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT — Ф7-16: смена пароля не трогает строк ключа — оба ключа проходят; третий ключ не трогает пароля",
+      "description": "class:CRUD | class:SEC | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-list-before",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-LIST-BEFORE: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LIST-BEFORE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
+                  "pm.test('AK16-LIST-BEFORE: ключей у человека 2', () => pm.expect(_akL.length).to.eql(2));",
+                  "{",
+                  "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akKBKeyId'))[0] || null;",
+                  "pm.test('AK16-LIST-BEFORE: ключ KB в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
+                  "}",
+                  "{",
+                  "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akKB2KeyId'))[0] || null;",
+                  "pm.test('AK16-LIST-BEFORE: ключ KB2 в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
+                  "}",
+                  "pm.environment.set('ak16Rows', JSON.stringify(_akL.filter((k) => [pm.environment.get('akKBKeyId'), pm.environment.get('akKB2KeyId')].indexOf(k.id) >= 0).sort((x, y) => (x.id < y.id ? -1 : 1))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=password"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=password');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '') + (pm.environment.get('akBSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('akBSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('akBCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBFormCookie', __sc[0].value.split(\";\")[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-password-change",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\": \"{{akBPassword}}\", \"newPassword\": \"{{akBPasswordNext}}\", \"csrfToken\": \"{{akBCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "pm.environment.set('akBPasswordNext', String(pm.environment.get('akBPassword') || '').replace(/-first$/, '') + '-second');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/password');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '') + (pm.environment.get('akBSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('akBSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-PASSWORD-CHANGE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('AK16-PASSWORD-CHANGE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBSessionCookie', __sc[0].value.split(\";\")[0].slice(15)); }",
+                  "}",
+                  "if (pm.response.code === 200) { pm.environment.set('akBPassword', pm.environment.get('akBPasswordNext')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-new-password-login-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-LOGIN-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-LOGIN-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('akBCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBFormCookie', __sc[0].value.split(\";\")[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-new-password-login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{akBEmail}}\", \"password\": \"{{akBPassword}}\", \"csrfToken\": \"{{akBCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-LOGIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-LOGIN: тело называет человека, адрес подтверждён, уровень 1', () => pm.expect([typeof (__j.user && __j.user.id), !!__j.session && __j.session.emailVerified, __j.session && __j.session.assuranceLevel]).to.eql(['string', true, '1']));",
+                  "if (__j.user && __j.user.id) { pm.environment.set('akBUserId', __j.user.id); }",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('AK16-LOGIN-NEW-PASSWORD-LOGIN: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBSessionCookie', __sc[0].value.split(\";\")[0].slice(15)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-new-password-authorize",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/authorize?{{akBQuery}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "authorize?{{akBQuery}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "followRedirects": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (!pm.environment.get('oauthClientId') || !pm.environment.get('oauthClientSecret') || !pm.environment.get('oauthRedirectUri')) {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] посев стенда: oauthClientId, oauthClientSecret, oauthRedirectUri заданы', () => {",
+                  "    pm.expect.fail('посев церемонии стенда посадки own (`stand-chart.sh seed-ceremony`) не завёл конфиденциального клиента — выковать токен человека нечем. Шаг не может исполниться, и молча выпасть ему нельзя.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _akB64u = (wa) => { let s = CryptoJS.enc.Base64.stringify(wa).split('+').join('-').split('/').join('_'); while (s.endsWith('=')) { s = s.slice(0, -1); } return s; };",
+                  "const _akV = _akB64u(CryptoJS.lib.WordArray.random(32));",
+                  "pm.environment.set('akBVerifier', _akV);",
+                  "const _akS = _akB64u(CryptoJS.lib.WordArray.random(32));",
+                  "pm.environment.set('akBState', _akS);",
+                  "const _akQ = [['response_type', 'code'], ['client_id', pm.environment.get('oauthClientId')],",
+                  "  ['redirect_uri', pm.environment.get('oauthRedirectUri')], ['scope', 'openid'], ['state', _akS],",
+                  "  ['code_challenge', _akB64u(CryptoJS.SHA256(_akV))], ['code_challenge_method', 'S256']]",
+                  "  .map((kv) => encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1])).join('&');",
+                  "pm.environment.set('akBQuery', _akQ);",
+                  "pm.environment.unset('akBOauthCode');",
+                  "// HARNESS-CONFIG GUARD — iamRegistryTokenBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('iamRegistryTokenBaseUrl') || pm.variables.get('iamRegistryTokenBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/authorize?{{akBQuery}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamRegistryTokenBaseUrl is set — поверхность выдачи службы: точка авторизации и токен-эндпоинт церемонии стоят на ней и больше нигде', () => {",
+                  "    pm.expect.fail('iamRegistryTokenBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBSessionCookie')) {",
+                  "  pm.test('AK16-LOGIN-NEW-PASSWORD-AUTHORIZE: сессия человека не захвачена входом', () => {",
+                  "    pm.expect.fail('вход выше не выдал kaname_session — точке авторизации нечего предъявить; причина — в шаге входа, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  pm.request.headers.upsert({key: 'Cookie', value: 'kaname_session=' + pm.environment.get('akBSessionCookie')});",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-AUTHORIZE: ответ 302', () => pm.expect(pm.response.code).to.eql(302));",
+                  "const _akLoc = String(pm.response.headers.get('Location') || '');",
+                  "const _akQs = {}; (_akLoc.split('?')[1] || '').split('#')[0].split('&').forEach((kv) => { const i = kv.indexOf('=');",
+                  "  if (i > 0) { _akQs[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); } });",
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-AUTHORIZE: перенаправление несёт код и state запроса', () => pm.expect([typeof _akQs.code === 'string' && _akQs.code.length > 0, _akQs.state === pm.environment.get('akBState')]).to.eql([true, true]));",
+                  "if (_akQs.code) { pm.environment.set('akBOauthCode', _akQs.code); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-new-password-exchange",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "grant_type=authorization_code&code={{_akFCode}}&redirect_uri={{_akFRedirect}}&code_verifier={{_akFVerifier}}"
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (!pm.environment.get('akBOauthCode')) {",
+                  "  pm.test('AK16-LOGIN-NEW-PASSWORD-EXCHANGE: код не выдан точкой авторизации', () => {",
+                  "    pm.expect.fail('шаг авторизации выше не выдал code — обменивать нечего; причина — в нём, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.variables.set('_akFCode', encodeURIComponent(pm.environment.get('akBOauthCode') || ''));",
+                  "pm.variables.set('_akFRedirect', encodeURIComponent(pm.environment.get('oauthRedirectUri') || ''));",
+                  "pm.variables.set('_akFVerifier', encodeURIComponent(pm.environment.get('akBVerifier') || ''));",
+                  "// HARNESS-CONFIG GUARD — iamRegistryTokenBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('iamRegistryTokenBaseUrl') || pm.variables.get('iamRegistryTokenBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/token');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamRegistryTokenBaseUrl is set — поверхность выдачи службы: точка авторизации и токен-эндпоинт церемонии стоят на ней и больше нигде', () => {",
+                  "    pm.expect.fail('iamRegistryTokenBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' + CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
+                  "  encodeURIComponent(pm.environment.get('oauthClientId') || '') + ':' + encodeURIComponent(pm.environment.get('oauthClientSecret') || '')))});",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('akBToken');",
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-EXCHANGE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-NEW-PASSWORD-EXCHANGE: выдан токен доступа человека', () => pm.expect(typeof __j.access_token === 'string' && __j.access_token.length > 0).to.eql(true));",
+                  "if (__j.access_token) { pm.environment.set('akBToken', __j.access_token); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-list-after-change",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-LIST-AFTER-CHANGE: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('AK16-LIST-AFTER-CHANGE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
+                  "pm.test('AK16-LIST-AFTER-CHANGE: ключей у человека 2', () => pm.expect(_akL.length).to.eql(2));",
+                  "pm.test('AK16-LIST-AFTER-CHANGE: строки обоих ключей побайтово те же, что до смены пароля', () => pm.expect(!!pm.environment.get('ak16Rows') && JSON.stringify(_akL.filter((k) => [pm.environment.get('akKBKeyId'), pm.environment.get('akKB2KeyId')].indexOf(k.id) >= 0).sort((x, y) => (x.id < y.id ? -1 : 1))) === pm.environment.get('ak16Rows')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-begin-kb",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessKeys:beginAssertion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessKeys:beginAssertion"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessKeys:beginAssertion');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-BEGIN-KB: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('akAsCh16b');",
+                  "pm.test('AK16-BEGIN-KB: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-BEGIN-KB: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
+                  "if (__j.challenge) { pm.environment.set('akAsCh16b', __j.challenge); }",
+                  "if (__j.expiresAt) { pm.environment.set('akAsExp16b', __j.expiresAt); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-kb-passes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessKeys:finishAssertion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessKeys:finishAssertion"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessKeys:finishAssertion');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-KB-PASSES: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akAsCh16b')) {",
+                  "  pm.test('AK16-KB-PASSES: испытание предъявления не выдано', () => {",
+                  "    pm.expect.fail('шаг выдачи испытания выше не вернул challenge — собирать утверждение не на чем');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akKBCredId')) {",
+                  "  pm.test('AK16-KB-PASSES: удостоверение строки KB не заведено', () => {",
+                  "    pm.expect.fail('кейс выше не завёл ключ — предъявлять нечего');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _akKeys = [{\"n\":\"91572056d7ad57ef06dcc0f6884fc039d3377b17eacc571196329234f883678415f1778e894e6ec7e942091c8a5fda9ea346bcecc41c84eb6dd38a62b559283b6b68de835a32ae377097017e0054431e35feffb0f217df1eb3b8f37e00cf42a734dbbd1edeee41f13b3d101739bb84ff63eb96a9b0bd1458ce2603c1347eb1a841dc50f588bd3fae7b5babe2b5a0587499b9901569c96cab63389c165f8c761f2061d98927d272a1b6689ab12849d566356bb8da7349a60061c626333869e5d8e76cc2f124bb2f3aedc5b054d1b72256bcbc447e7461983e5671559c59c18d02cb3101ed6ef61149d8502776abfc736d6fc6430731563b31a6d40529edfdbe0b\",\"e\":\"010001\",\"p\":\"c14b1ca28dbc97798355e81b4828da6c8d67bd9bb3b231eb554d367da814769d4c40f64774a031348fe53d676f0d3eafc36debf64185e95ffeb255a2a31be8d16c2d3e7ad6f5935cd9b4e509a5955b5f516fb196b68a8f974a4bde2d408c6b50d8a46a7dc78c3bcb0217ba5771b3bced520682838be0012778f4ab8c298706e7\",\"q\":\"c07d8b4faddcf54ebbd2a98181eb05a254d780f08b786be8135745e36950cae906d052021fb1ae71e14a5854ba85478bcd5c8eef626b4ff875ae303c0f9c3da35909c601c6a5cb8aace2174a011e4c49f4e8fa71d7509c4b639904811ecbf93c0a793925a58e9b621157c037407f8fbd8e70bceb810e20936334bc18ee67ff3d\",\"dp\":\"5d767d451875cd64831de1da773cd1c8d563092aa56c0f793448de8549e5832931fae35acfc8b9a229c5f5b7f2d99bab0f3b3272636265e2f5dbb34eadc1cc049f630d280692be0b9275469e308394a7f54fa5b63353b274bc070d4a2241038f170201400a62037378f29236c012e1d27aec0ce5a097d2d70c447a428ebdec97\",\"dq\":\"5b9ca4ac046c7017cbce843c0df0241b5153cb9b3055dccd743f0a1524af7e130fda1fddc0e5d8c77c58dcd75e7a4645e4345416dc79847314d7153fd09224c7d47d914e9113a15edbcf33145699ebe71af7b312714e7d44681f90843f7b06a0abbf6c125dcc1469c5254567467c2f9620efc90a30bedf8426281809a995b765\",\"qi\":\"15065c255aa1c0cde367b0871bf18d6fdc07bcbe0c1e49f6a33dd67fbc2bfa095dd93f68ddea3b0793c8388815c320e4ebd26994daa3770654e6e38208469ca48f6ac7498a6874597b9090a182a49b669b536bd5411b0266f9ec749e31ca2712c3f715451893e9ea6bf39d57e31688bf319d486ad9c8dd2c174cb57e541eec4e\"},{\"n\":\"c6dfa590a3c13a2901429dfc6b5d36566e67fef9b701c90e90f3bca6a2e9d1f4ad97151586339795e378fb2233dce73b24ce8cfcd9d85d8dc2a1a695bdfdee0510cf1390e69d5f1710a9272fa17f584a6f7d63df304520a03d690d6f55c78dc9d342da8c68ce02b40f7f62586aa64ac2418fcbe4414b34fcde4179cc813586cf07b1253cb84c3c30a863b920dae6791c2a48ad05e8a1bb3e6bd1f5a0be47b856a7b9377f3e0d6ceded50675f9fa49195ec8064b22822d65a1bf216b7840707c2cee4f9c835e2ff5f1728a3c92610a2d86a6c5c476baa4cfcb5ac753d4f15db6dd7363ab6b0b3f628dffa9186748801941ab7cbd5d42d831fb38782ccda6377eb\",\"e\":\"010001\",\"p\":\"ed3c54048fa2f03aead86b7a5923340b29f767619419e8a9252758ee646c03d214d26ed226733a93034b1b0dc313ed5a98e5148095bfd5ac411c729909f4dbbb73e562801389e79b53d3bea0d79e2462b17f2b0f7f6996e00aaecfd2a616be731d1ffa36164e89202867831357319a3e6d9f0710b8f6e4ad4a54d9701db81513\",\"q\":\"d69a8b3f287043a65b18b66a841f4c4af58251845142c5a18ee5d71fd817627756e091030dc3aae3db98cf5b0f5cf5d4fcbb844902c0a6da4bc1365f8d4f4f77638264a29970d81cda7c7da3034672fd0dba7dfac6a46bb192b76361214ab627cd24ba1cc5fc3535b465bcf5dc32ac261159e12a9a9b92314af0d0b22652e4c9\",\"dp\":\"98911aab504086642d91ff14d0ec7dd4cc296a97eb69fa21855e57a8007722c1e1582fa300cd4c172da008870234f7893318e7e585e8b81eae4500420190321bcc7df1a9d266f6c702d3031e676c319432f848960fe7b4fae283e7ed5d98f4e40d0ffa96fc2387b661a5a83b30f11a7419859342a2e14cd151235e2ee73df277\",\"dq\":\"149f81662e62ab7d9f1f7ed8399e305cbbbf2c4a44ecdfc528d0599e0bcc2380486f08407ce022da06ce668edfa9154ec482d8b1937c240cb25efcf4adc5c3633bc2da1cee15f40ec1c858e2837c0facd5d6e828635285aee8e48abe58ceaf369ff639946e4a506abacd541d646dd2314e558ed7e347b402dcaacbc372ff6051\",\"qi\":\"b58e15320d76225ec26040961ad70a6b7ed598b0539b9d6854226a956e39777d5e1b2aa7fb849b30c124665d21e81c4f98e532a2f9f669a9f7cb9885b67b9e3ad2353f8461e32150d595fd8b7e3f21b16eb9e1cfab6f55090969c4d3e9b72360ec07238b1b003820ddb68aee6e6a3157cddc33baec6b35efbf74f5906be1c9ab\"}];",
+                  "const _ak = (() => {",
+                  "  const utf8 = (s) => { const out = []; const e = unescape(encodeURIComponent(s)); for (let i = 0; i < e.length; i++) { out.push(e.charCodeAt(i)); } return out; };",
+                  "  const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';",
+                  "  const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 3) { const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);",
+                  "    s += AB[(n >> 18) & 63] + AB[(n >> 12) & 63] + (i + 1 < b.length ? AB[(n >> 6) & 63] : '=') + (i + 2 < b.length ? AB[n & 63] : '='); } return s; };",
+                  "  const b64u = (b) => b64(b).split('+').join('-').split('/').join('_').split('=').join('');",
+                  "  const unb64 = (s) => { s = String(s || '').split('-').join('+').split('_').join('/').split('=').join(''); const out = []; let acc = 0; let bits = 0;",
+                  "    for (let i = 0; i < s.length; i++) { const v = AB.indexOf(s[i]); if (v < 0) { return null; } acc = ((acc << 6) | v) & 0xffffff; bits += 6;",
+                  "      if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); } } return out; };",
+                  "  const hex = (b) => b.map((x) => (x < 16 ? '0' : '') + x.toString(16)).join('');",
+                  "  const unhex = (h) => { const out = []; for (let i = 0; i < h.length; i += 2) { out.push(parseInt(h.slice(i, i + 2), 16)); } return out; };",
+                  "  const sha256 = (b) => unhex(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(hex(b))).toString(CryptoJS.enc.Hex));",
+                  "  const rand = (n) => unhex(CryptoJS.lib.WordArray.random(n).toString(CryptoJS.enc.Hex));",
+                  "  const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];",
+                  "  const u16 = (n) => [(n >>> 8) & 255, n & 255];",
+                  "  const head = (major, n) => { const m = major << 5; if (n < 24) { return [m | n]; } if (n < 256) { return [m | 24, n]; }",
+                  "    if (n < 65536) { return [m | 25].concat(u16(n)); } return [m | 26].concat(u32(n)); };",
+                  "  const cbor = (v) => {",
+                  "    if (typeof v === 'number') { return v >= 0 ? head(0, v) : head(1, -1 - v); }",
+                  "    if (typeof v === 'string') { const b = utf8(v); return head(3, b.length).concat(b); }",
+                  "    if (v && v.bytes) { return head(2, v.bytes.length).concat(v.bytes); }",
+                  "    if (v && v.map) { let out = head(5, v.map.length); v.map.forEach((kv) => { out = out.concat(cbor(kv[0]), cbor(kv[1])); }); return out; }",
+                  "    return null; };",
+                  "  const big = (h) => BigInt('0x' + h);",
+                  "  const bytesOf = (n, len) => { let h = n.toString(16); if (h.length % 2) { h = '0' + h; } const b = unhex(h); while (b.length < len) { b.unshift(0); } return b; };",
+                  "  const modpow = (base, exp, mod) => { let r = 1n; base %= mod; while (exp > 0n) { if (exp & 1n) { r = (r * base) % mod; } base = (base * base) % mod; exp >>= 1n; } return r; };",
+                  "  const DIGEST_INFO = unhex('3031300d060960864801650304020105000420');",
+                  "  const rsaSign = (k, msg) => {",
+                  "    const len = k.n.length / 2; const t = DIGEST_INFO.concat(sha256(msg)); const em = [0, 1];",
+                  "    for (let i = 0; i < len - t.length - 3; i++) { em.push(255); }",
+                  "    const m = big(hex(em.concat([0], t))); const p = big(k.p); const q = big(k.q);",
+                  "    const m1 = modpow(m, big(k.dp), p); const m2 = modpow(m, big(k.dq), q);",
+                  "    const h = (big(k.qi) * (((m1 - m2) % p) + p)) % p;",
+                  "    return bytesOf(m2 + h * q, len); };",
+                  "  const cose = (k, alg) => cbor({ map: [[1, 3], [3, alg], [-1, { bytes: unhex(k.n) }], [-2, { bytes: unhex(k.e) }]] });",
+                  "  const clientData = (type, challenge, origin) => utf8(JSON.stringify({ type: type, challenge: b64u(challenge), origin: origin, crossOrigin: false }));",
+                  "  const authData = (rpId, flags, count) => sha256(utf8(rpId)).concat([flags], u32(count));",
+                  "  const register = (o) => {",
+                  "    const cd = clientData('webauthn.create', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, 0).concat(new Array(16).fill(0), u16(o.credId.length), o.credId, cose(_akKeys[o.key], o.alg));",
+                  "    const att = cbor({ map: [['fmt', 'none'], ['attStmt', { map: [] }], ['authData', { bytes: ad }]] });",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), attestationObject: b64(att) }; };",
+                  "  const assert = (o) => {",
+                  "    const cd = clientData('webauthn.get', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, o.count);",
+                  "    const sig = rsaSign(_akKeys[o.key], ad.concat(sha256(cd)));",
+                  "    if (o.tamper) { sig[sig.length - 1] = sig[sig.length - 1] ^ 1; }",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), authenticatorData: b64(ad), signature: b64(sig) }; };",
+                  "  return { utf8: utf8, b64: b64, unb64: unb64, rand: rand, register: register, assert: assert };",
+                  "})();",
+                  "const _akCred = _ak.unb64(pm.environment.get('akKBCredId') || '');",
+                  "const _akN = parseInt(pm.environment.get('akKBCount') || '0', 10) + 1;",
+                  "pm.environment.set('_akSentCount', String(_akN));",
+                  "const _akA = _ak.assert({ challenge: _ak.unb64(pm.environment.get('akAsCh16b') || ''), rpId: 'access.example.invalid', origin: 'https://console.access.example.invalid', flags: 5, count: _akN, credId: _akCred, key: parseInt(pm.environment.get('akKBMat') || '0', 10), tamper: false });",
+                  "const _akBody = JSON.stringify({ credential: _akA });",
+                  "pm.request.body = { mode: 'raw', raw: _akBody, options: { raw: { language: 'json' } } };",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-KB-PASSES: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-KB-PASSES: ответ называет вызывающего и ключ', () => pm.expect([__j.userId === pm.environment.get('akBUserId'), __j.accessKeyId === pm.environment.get('akKBKeyId')]).to.eql([true, true]));",
+                  "pm.test('AK16-KB-PASSES: флаги утверждения доезжают различимо', () => pm.expect(__j.flags && [__j.flags.userPresent, __j.flags.userVerified, __j.flags.backupEligible]).to.eql([true, true, false]));",
+                  "if (pm.response.code === 200) { pm.environment.set('akKBCount', pm.environment.get('_akSentCount')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-begin-kb2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessKeys:beginAssertion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessKeys:beginAssertion"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessKeys:beginAssertion');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-BEGIN-KB2: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('akAsCh16c');",
+                  "pm.test('AK16-BEGIN-KB2: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-BEGIN-KB2: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
+                  "if (__j.challenge) { pm.environment.set('akAsCh16c', __j.challenge); }",
+                  "if (__j.expiresAt) { pm.environment.set('akAsExp16c', __j.expiresAt); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-kb2-passes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessKeys:finishAssertion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessKeys:finishAssertion"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessKeys:finishAssertion');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-KB2-PASSES: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akAsCh16c')) {",
+                  "  pm.test('AK16-KB2-PASSES: испытание предъявления не выдано', () => {",
+                  "    pm.expect.fail('шаг выдачи испытания выше не вернул challenge — собирать утверждение не на чем');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akKB2CredId')) {",
+                  "  pm.test('AK16-KB2-PASSES: удостоверение строки KB2 не заведено', () => {",
+                  "    pm.expect.fail('кейс выше не завёл ключ — предъявлять нечего');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _akKeys = [{\"n\":\"91572056d7ad57ef06dcc0f6884fc039d3377b17eacc571196329234f883678415f1778e894e6ec7e942091c8a5fda9ea346bcecc41c84eb6dd38a62b559283b6b68de835a32ae377097017e0054431e35feffb0f217df1eb3b8f37e00cf42a734dbbd1edeee41f13b3d101739bb84ff63eb96a9b0bd1458ce2603c1347eb1a841dc50f588bd3fae7b5babe2b5a0587499b9901569c96cab63389c165f8c761f2061d98927d272a1b6689ab12849d566356bb8da7349a60061c626333869e5d8e76cc2f124bb2f3aedc5b054d1b72256bcbc447e7461983e5671559c59c18d02cb3101ed6ef61149d8502776abfc736d6fc6430731563b31a6d40529edfdbe0b\",\"e\":\"010001\",\"p\":\"c14b1ca28dbc97798355e81b4828da6c8d67bd9bb3b231eb554d367da814769d4c40f64774a031348fe53d676f0d3eafc36debf64185e95ffeb255a2a31be8d16c2d3e7ad6f5935cd9b4e509a5955b5f516fb196b68a8f974a4bde2d408c6b50d8a46a7dc78c3bcb0217ba5771b3bced520682838be0012778f4ab8c298706e7\",\"q\":\"c07d8b4faddcf54ebbd2a98181eb05a254d780f08b786be8135745e36950cae906d052021fb1ae71e14a5854ba85478bcd5c8eef626b4ff875ae303c0f9c3da35909c601c6a5cb8aace2174a011e4c49f4e8fa71d7509c4b639904811ecbf93c0a793925a58e9b621157c037407f8fbd8e70bceb810e20936334bc18ee67ff3d\",\"dp\":\"5d767d451875cd64831de1da773cd1c8d563092aa56c0f793448de8549e5832931fae35acfc8b9a229c5f5b7f2d99bab0f3b3272636265e2f5dbb34eadc1cc049f630d280692be0b9275469e308394a7f54fa5b63353b274bc070d4a2241038f170201400a62037378f29236c012e1d27aec0ce5a097d2d70c447a428ebdec97\",\"dq\":\"5b9ca4ac046c7017cbce843c0df0241b5153cb9b3055dccd743f0a1524af7e130fda1fddc0e5d8c77c58dcd75e7a4645e4345416dc79847314d7153fd09224c7d47d914e9113a15edbcf33145699ebe71af7b312714e7d44681f90843f7b06a0abbf6c125dcc1469c5254567467c2f9620efc90a30bedf8426281809a995b765\",\"qi\":\"15065c255aa1c0cde367b0871bf18d6fdc07bcbe0c1e49f6a33dd67fbc2bfa095dd93f68ddea3b0793c8388815c320e4ebd26994daa3770654e6e38208469ca48f6ac7498a6874597b9090a182a49b669b536bd5411b0266f9ec749e31ca2712c3f715451893e9ea6bf39d57e31688bf319d486ad9c8dd2c174cb57e541eec4e\"},{\"n\":\"c6dfa590a3c13a2901429dfc6b5d36566e67fef9b701c90e90f3bca6a2e9d1f4ad97151586339795e378fb2233dce73b24ce8cfcd9d85d8dc2a1a695bdfdee0510cf1390e69d5f1710a9272fa17f584a6f7d63df304520a03d690d6f55c78dc9d342da8c68ce02b40f7f62586aa64ac2418fcbe4414b34fcde4179cc813586cf07b1253cb84c3c30a863b920dae6791c2a48ad05e8a1bb3e6bd1f5a0be47b856a7b9377f3e0d6ceded50675f9fa49195ec8064b22822d65a1bf216b7840707c2cee4f9c835e2ff5f1728a3c92610a2d86a6c5c476baa4cfcb5ac753d4f15db6dd7363ab6b0b3f628dffa9186748801941ab7cbd5d42d831fb38782ccda6377eb\",\"e\":\"010001\",\"p\":\"ed3c54048fa2f03aead86b7a5923340b29f767619419e8a9252758ee646c03d214d26ed226733a93034b1b0dc313ed5a98e5148095bfd5ac411c729909f4dbbb73e562801389e79b53d3bea0d79e2462b17f2b0f7f6996e00aaecfd2a616be731d1ffa36164e89202867831357319a3e6d9f0710b8f6e4ad4a54d9701db81513\",\"q\":\"d69a8b3f287043a65b18b66a841f4c4af58251845142c5a18ee5d71fd817627756e091030dc3aae3db98cf5b0f5cf5d4fcbb844902c0a6da4bc1365f8d4f4f77638264a29970d81cda7c7da3034672fd0dba7dfac6a46bb192b76361214ab627cd24ba1cc5fc3535b465bcf5dc32ac261159e12a9a9b92314af0d0b22652e4c9\",\"dp\":\"98911aab504086642d91ff14d0ec7dd4cc296a97eb69fa21855e57a8007722c1e1582fa300cd4c172da008870234f7893318e7e585e8b81eae4500420190321bcc7df1a9d266f6c702d3031e676c319432f848960fe7b4fae283e7ed5d98f4e40d0ffa96fc2387b661a5a83b30f11a7419859342a2e14cd151235e2ee73df277\",\"dq\":\"149f81662e62ab7d9f1f7ed8399e305cbbbf2c4a44ecdfc528d0599e0bcc2380486f08407ce022da06ce668edfa9154ec482d8b1937c240cb25efcf4adc5c3633bc2da1cee15f40ec1c858e2837c0facd5d6e828635285aee8e48abe58ceaf369ff639946e4a506abacd541d646dd2314e558ed7e347b402dcaacbc372ff6051\",\"qi\":\"b58e15320d76225ec26040961ad70a6b7ed598b0539b9d6854226a956e39777d5e1b2aa7fb849b30c124665d21e81c4f98e532a2f9f669a9f7cb9885b67b9e3ad2353f8461e32150d595fd8b7e3f21b16eb9e1cfab6f55090969c4d3e9b72360ec07238b1b003820ddb68aee6e6a3157cddc33baec6b35efbf74f5906be1c9ab\"}];",
+                  "const _ak = (() => {",
+                  "  const utf8 = (s) => { const out = []; const e = unescape(encodeURIComponent(s)); for (let i = 0; i < e.length; i++) { out.push(e.charCodeAt(i)); } return out; };",
+                  "  const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';",
+                  "  const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 3) { const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);",
+                  "    s += AB[(n >> 18) & 63] + AB[(n >> 12) & 63] + (i + 1 < b.length ? AB[(n >> 6) & 63] : '=') + (i + 2 < b.length ? AB[n & 63] : '='); } return s; };",
+                  "  const b64u = (b) => b64(b).split('+').join('-').split('/').join('_').split('=').join('');",
+                  "  const unb64 = (s) => { s = String(s || '').split('-').join('+').split('_').join('/').split('=').join(''); const out = []; let acc = 0; let bits = 0;",
+                  "    for (let i = 0; i < s.length; i++) { const v = AB.indexOf(s[i]); if (v < 0) { return null; } acc = ((acc << 6) | v) & 0xffffff; bits += 6;",
+                  "      if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); } } return out; };",
+                  "  const hex = (b) => b.map((x) => (x < 16 ? '0' : '') + x.toString(16)).join('');",
+                  "  const unhex = (h) => { const out = []; for (let i = 0; i < h.length; i += 2) { out.push(parseInt(h.slice(i, i + 2), 16)); } return out; };",
+                  "  const sha256 = (b) => unhex(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(hex(b))).toString(CryptoJS.enc.Hex));",
+                  "  const rand = (n) => unhex(CryptoJS.lib.WordArray.random(n).toString(CryptoJS.enc.Hex));",
+                  "  const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];",
+                  "  const u16 = (n) => [(n >>> 8) & 255, n & 255];",
+                  "  const head = (major, n) => { const m = major << 5; if (n < 24) { return [m | n]; } if (n < 256) { return [m | 24, n]; }",
+                  "    if (n < 65536) { return [m | 25].concat(u16(n)); } return [m | 26].concat(u32(n)); };",
+                  "  const cbor = (v) => {",
+                  "    if (typeof v === 'number') { return v >= 0 ? head(0, v) : head(1, -1 - v); }",
+                  "    if (typeof v === 'string') { const b = utf8(v); return head(3, b.length).concat(b); }",
+                  "    if (v && v.bytes) { return head(2, v.bytes.length).concat(v.bytes); }",
+                  "    if (v && v.map) { let out = head(5, v.map.length); v.map.forEach((kv) => { out = out.concat(cbor(kv[0]), cbor(kv[1])); }); return out; }",
+                  "    return null; };",
+                  "  const big = (h) => BigInt('0x' + h);",
+                  "  const bytesOf = (n, len) => { let h = n.toString(16); if (h.length % 2) { h = '0' + h; } const b = unhex(h); while (b.length < len) { b.unshift(0); } return b; };",
+                  "  const modpow = (base, exp, mod) => { let r = 1n; base %= mod; while (exp > 0n) { if (exp & 1n) { r = (r * base) % mod; } base = (base * base) % mod; exp >>= 1n; } return r; };",
+                  "  const DIGEST_INFO = unhex('3031300d060960864801650304020105000420');",
+                  "  const rsaSign = (k, msg) => {",
+                  "    const len = k.n.length / 2; const t = DIGEST_INFO.concat(sha256(msg)); const em = [0, 1];",
+                  "    for (let i = 0; i < len - t.length - 3; i++) { em.push(255); }",
+                  "    const m = big(hex(em.concat([0], t))); const p = big(k.p); const q = big(k.q);",
+                  "    const m1 = modpow(m, big(k.dp), p); const m2 = modpow(m, big(k.dq), q);",
+                  "    const h = (big(k.qi) * (((m1 - m2) % p) + p)) % p;",
+                  "    return bytesOf(m2 + h * q, len); };",
+                  "  const cose = (k, alg) => cbor({ map: [[1, 3], [3, alg], [-1, { bytes: unhex(k.n) }], [-2, { bytes: unhex(k.e) }]] });",
+                  "  const clientData = (type, challenge, origin) => utf8(JSON.stringify({ type: type, challenge: b64u(challenge), origin: origin, crossOrigin: false }));",
+                  "  const authData = (rpId, flags, count) => sha256(utf8(rpId)).concat([flags], u32(count));",
+                  "  const register = (o) => {",
+                  "    const cd = clientData('webauthn.create', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, 0).concat(new Array(16).fill(0), u16(o.credId.length), o.credId, cose(_akKeys[o.key], o.alg));",
+                  "    const att = cbor({ map: [['fmt', 'none'], ['attStmt', { map: [] }], ['authData', { bytes: ad }]] });",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), attestationObject: b64(att) }; };",
+                  "  const assert = (o) => {",
+                  "    const cd = clientData('webauthn.get', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, o.count);",
+                  "    const sig = rsaSign(_akKeys[o.key], ad.concat(sha256(cd)));",
+                  "    if (o.tamper) { sig[sig.length - 1] = sig[sig.length - 1] ^ 1; }",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), authenticatorData: b64(ad), signature: b64(sig) }; };",
+                  "  return { utf8: utf8, b64: b64, unb64: unb64, rand: rand, register: register, assert: assert };",
+                  "})();",
+                  "const _akCred = _ak.unb64(pm.environment.get('akKB2CredId') || '');",
+                  "const _akN = parseInt(pm.environment.get('akKB2Count') || '0', 10) + 1;",
+                  "pm.environment.set('_akSentCount', String(_akN));",
+                  "const _akA = _ak.assert({ challenge: _ak.unb64(pm.environment.get('akAsCh16c') || ''), rpId: 'access.example.invalid', origin: 'https://console.access.example.invalid', flags: 5, count: _akN, credId: _akCred, key: parseInt(pm.environment.get('akKB2Mat') || '0', 10), tamper: false });",
+                  "const _akBody = JSON.stringify({ credential: _akA });",
+                  "pm.request.body = { mode: 'raw', raw: _akBody, options: { raw: { language: 'json' } } };",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-KB2-PASSES: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-KB2-PASSES: ответ называет вызывающего и ключ', () => pm.expect([__j.userId === pm.environment.get('akBUserId'), __j.accessKeyId === pm.environment.get('akKB2KeyId')]).to.eql([true, true]));",
+                  "pm.test('AK16-KB2-PASSES: флаги утверждения доезжают различимо', () => pm.expect(__j.flags && [__j.flags.userPresent, __j.flags.userVerified, __j.flags.backupEligible]).to.eql([true, true, false]));",
+                  "if (pm.response.code === 200) { pm.environment.set('akKB2Count', pm.environment.get('_akSentCount')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-third-key-begin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys:beginRegistration",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys:beginRegistration"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys:beginRegistration');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-THIRD-KEY-BEGIN: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.environment.unset('akRegChKB3');",
+                  "pm.test('AK16-THIRD-KEY-BEGIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-THIRD-KEY-BEGIN: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
+                  "if (__j.challenge) { pm.environment.set('akRegChKB3', __j.challenge); }",
+                  "if (__j.expiresAt) { pm.environment.set('akRegExpKB3', __j.expiresAt); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-third-key-finish",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-THIRD-KEY-FINISH: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akRegChKB3')) {",
+                  "  pm.test('AK16-THIRD-KEY-FINISH: испытание не выдано', () => {",
+                  "    pm.expect.fail('шаг выдачи испытания выше не вернул challenge — собирать результат не на чем');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _akKeys = [{\"n\":\"91572056d7ad57ef06dcc0f6884fc039d3377b17eacc571196329234f883678415f1778e894e6ec7e942091c8a5fda9ea346bcecc41c84eb6dd38a62b559283b6b68de835a32ae377097017e0054431e35feffb0f217df1eb3b8f37e00cf42a734dbbd1edeee41f13b3d101739bb84ff63eb96a9b0bd1458ce2603c1347eb1a841dc50f588bd3fae7b5babe2b5a0587499b9901569c96cab63389c165f8c761f2061d98927d272a1b6689ab12849d566356bb8da7349a60061c626333869e5d8e76cc2f124bb2f3aedc5b054d1b72256bcbc447e7461983e5671559c59c18d02cb3101ed6ef61149d8502776abfc736d6fc6430731563b31a6d40529edfdbe0b\",\"e\":\"010001\",\"p\":\"c14b1ca28dbc97798355e81b4828da6c8d67bd9bb3b231eb554d367da814769d4c40f64774a031348fe53d676f0d3eafc36debf64185e95ffeb255a2a31be8d16c2d3e7ad6f5935cd9b4e509a5955b5f516fb196b68a8f974a4bde2d408c6b50d8a46a7dc78c3bcb0217ba5771b3bced520682838be0012778f4ab8c298706e7\",\"q\":\"c07d8b4faddcf54ebbd2a98181eb05a254d780f08b786be8135745e36950cae906d052021fb1ae71e14a5854ba85478bcd5c8eef626b4ff875ae303c0f9c3da35909c601c6a5cb8aace2174a011e4c49f4e8fa71d7509c4b639904811ecbf93c0a793925a58e9b621157c037407f8fbd8e70bceb810e20936334bc18ee67ff3d\",\"dp\":\"5d767d451875cd64831de1da773cd1c8d563092aa56c0f793448de8549e5832931fae35acfc8b9a229c5f5b7f2d99bab0f3b3272636265e2f5dbb34eadc1cc049f630d280692be0b9275469e308394a7f54fa5b63353b274bc070d4a2241038f170201400a62037378f29236c012e1d27aec0ce5a097d2d70c447a428ebdec97\",\"dq\":\"5b9ca4ac046c7017cbce843c0df0241b5153cb9b3055dccd743f0a1524af7e130fda1fddc0e5d8c77c58dcd75e7a4645e4345416dc79847314d7153fd09224c7d47d914e9113a15edbcf33145699ebe71af7b312714e7d44681f90843f7b06a0abbf6c125dcc1469c5254567467c2f9620efc90a30bedf8426281809a995b765\",\"qi\":\"15065c255aa1c0cde367b0871bf18d6fdc07bcbe0c1e49f6a33dd67fbc2bfa095dd93f68ddea3b0793c8388815c320e4ebd26994daa3770654e6e38208469ca48f6ac7498a6874597b9090a182a49b669b536bd5411b0266f9ec749e31ca2712c3f715451893e9ea6bf39d57e31688bf319d486ad9c8dd2c174cb57e541eec4e\"},{\"n\":\"c6dfa590a3c13a2901429dfc6b5d36566e67fef9b701c90e90f3bca6a2e9d1f4ad97151586339795e378fb2233dce73b24ce8cfcd9d85d8dc2a1a695bdfdee0510cf1390e69d5f1710a9272fa17f584a6f7d63df304520a03d690d6f55c78dc9d342da8c68ce02b40f7f62586aa64ac2418fcbe4414b34fcde4179cc813586cf07b1253cb84c3c30a863b920dae6791c2a48ad05e8a1bb3e6bd1f5a0be47b856a7b9377f3e0d6ceded50675f9fa49195ec8064b22822d65a1bf216b7840707c2cee4f9c835e2ff5f1728a3c92610a2d86a6c5c476baa4cfcb5ac753d4f15db6dd7363ab6b0b3f628dffa9186748801941ab7cbd5d42d831fb38782ccda6377eb\",\"e\":\"010001\",\"p\":\"ed3c54048fa2f03aead86b7a5923340b29f767619419e8a9252758ee646c03d214d26ed226733a93034b1b0dc313ed5a98e5148095bfd5ac411c729909f4dbbb73e562801389e79b53d3bea0d79e2462b17f2b0f7f6996e00aaecfd2a616be731d1ffa36164e89202867831357319a3e6d9f0710b8f6e4ad4a54d9701db81513\",\"q\":\"d69a8b3f287043a65b18b66a841f4c4af58251845142c5a18ee5d71fd817627756e091030dc3aae3db98cf5b0f5cf5d4fcbb844902c0a6da4bc1365f8d4f4f77638264a29970d81cda7c7da3034672fd0dba7dfac6a46bb192b76361214ab627cd24ba1cc5fc3535b465bcf5dc32ac261159e12a9a9b92314af0d0b22652e4c9\",\"dp\":\"98911aab504086642d91ff14d0ec7dd4cc296a97eb69fa21855e57a8007722c1e1582fa300cd4c172da008870234f7893318e7e585e8b81eae4500420190321bcc7df1a9d266f6c702d3031e676c319432f848960fe7b4fae283e7ed5d98f4e40d0ffa96fc2387b661a5a83b30f11a7419859342a2e14cd151235e2ee73df277\",\"dq\":\"149f81662e62ab7d9f1f7ed8399e305cbbbf2c4a44ecdfc528d0599e0bcc2380486f08407ce022da06ce668edfa9154ec482d8b1937c240cb25efcf4adc5c3633bc2da1cee15f40ec1c858e2837c0facd5d6e828635285aee8e48abe58ceaf369ff639946e4a506abacd541d646dd2314e558ed7e347b402dcaacbc372ff6051\",\"qi\":\"b58e15320d76225ec26040961ad70a6b7ed598b0539b9d6854226a956e39777d5e1b2aa7fb849b30c124665d21e81c4f98e532a2f9f669a9f7cb9885b67b9e3ad2353f8461e32150d595fd8b7e3f21b16eb9e1cfab6f55090969c4d3e9b72360ec07238b1b003820ddb68aee6e6a3157cddc33baec6b35efbf74f5906be1c9ab\"}];",
+                  "const _ak = (() => {",
+                  "  const utf8 = (s) => { const out = []; const e = unescape(encodeURIComponent(s)); for (let i = 0; i < e.length; i++) { out.push(e.charCodeAt(i)); } return out; };",
+                  "  const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';",
+                  "  const b64 = (b) => { let s = ''; for (let i = 0; i < b.length; i += 3) { const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);",
+                  "    s += AB[(n >> 18) & 63] + AB[(n >> 12) & 63] + (i + 1 < b.length ? AB[(n >> 6) & 63] : '=') + (i + 2 < b.length ? AB[n & 63] : '='); } return s; };",
+                  "  const b64u = (b) => b64(b).split('+').join('-').split('/').join('_').split('=').join('');",
+                  "  const unb64 = (s) => { s = String(s || '').split('-').join('+').split('_').join('/').split('=').join(''); const out = []; let acc = 0; let bits = 0;",
+                  "    for (let i = 0; i < s.length; i++) { const v = AB.indexOf(s[i]); if (v < 0) { return null; } acc = ((acc << 6) | v) & 0xffffff; bits += 6;",
+                  "      if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); } } return out; };",
+                  "  const hex = (b) => b.map((x) => (x < 16 ? '0' : '') + x.toString(16)).join('');",
+                  "  const unhex = (h) => { const out = []; for (let i = 0; i < h.length; i += 2) { out.push(parseInt(h.slice(i, i + 2), 16)); } return out; };",
+                  "  const sha256 = (b) => unhex(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(hex(b))).toString(CryptoJS.enc.Hex));",
+                  "  const rand = (n) => unhex(CryptoJS.lib.WordArray.random(n).toString(CryptoJS.enc.Hex));",
+                  "  const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];",
+                  "  const u16 = (n) => [(n >>> 8) & 255, n & 255];",
+                  "  const head = (major, n) => { const m = major << 5; if (n < 24) { return [m | n]; } if (n < 256) { return [m | 24, n]; }",
+                  "    if (n < 65536) { return [m | 25].concat(u16(n)); } return [m | 26].concat(u32(n)); };",
+                  "  const cbor = (v) => {",
+                  "    if (typeof v === 'number') { return v >= 0 ? head(0, v) : head(1, -1 - v); }",
+                  "    if (typeof v === 'string') { const b = utf8(v); return head(3, b.length).concat(b); }",
+                  "    if (v && v.bytes) { return head(2, v.bytes.length).concat(v.bytes); }",
+                  "    if (v && v.map) { let out = head(5, v.map.length); v.map.forEach((kv) => { out = out.concat(cbor(kv[0]), cbor(kv[1])); }); return out; }",
+                  "    return null; };",
+                  "  const big = (h) => BigInt('0x' + h);",
+                  "  const bytesOf = (n, len) => { let h = n.toString(16); if (h.length % 2) { h = '0' + h; } const b = unhex(h); while (b.length < len) { b.unshift(0); } return b; };",
+                  "  const modpow = (base, exp, mod) => { let r = 1n; base %= mod; while (exp > 0n) { if (exp & 1n) { r = (r * base) % mod; } base = (base * base) % mod; exp >>= 1n; } return r; };",
+                  "  const DIGEST_INFO = unhex('3031300d060960864801650304020105000420');",
+                  "  const rsaSign = (k, msg) => {",
+                  "    const len = k.n.length / 2; const t = DIGEST_INFO.concat(sha256(msg)); const em = [0, 1];",
+                  "    for (let i = 0; i < len - t.length - 3; i++) { em.push(255); }",
+                  "    const m = big(hex(em.concat([0], t))); const p = big(k.p); const q = big(k.q);",
+                  "    const m1 = modpow(m, big(k.dp), p); const m2 = modpow(m, big(k.dq), q);",
+                  "    const h = (big(k.qi) * (((m1 - m2) % p) + p)) % p;",
+                  "    return bytesOf(m2 + h * q, len); };",
+                  "  const cose = (k, alg) => cbor({ map: [[1, 3], [3, alg], [-1, { bytes: unhex(k.n) }], [-2, { bytes: unhex(k.e) }]] });",
+                  "  const clientData = (type, challenge, origin) => utf8(JSON.stringify({ type: type, challenge: b64u(challenge), origin: origin, crossOrigin: false }));",
+                  "  const authData = (rpId, flags, count) => sha256(utf8(rpId)).concat([flags], u32(count));",
+                  "  const register = (o) => {",
+                  "    const cd = clientData('webauthn.create', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, 0).concat(new Array(16).fill(0), u16(o.credId.length), o.credId, cose(_akKeys[o.key], o.alg));",
+                  "    const att = cbor({ map: [['fmt', 'none'], ['attStmt', { map: [] }], ['authData', { bytes: ad }]] });",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), attestationObject: b64(att) }; };",
+                  "  const assert = (o) => {",
+                  "    const cd = clientData('webauthn.get', o.challenge, o.origin);",
+                  "    const ad = authData(o.rpId, o.flags, o.count);",
+                  "    const sig = rsaSign(_akKeys[o.key], ad.concat(sha256(cd)));",
+                  "    if (o.tamper) { sig[sig.length - 1] = sig[sig.length - 1] ^ 1; }",
+                  "    return { id: b64(o.credId), clientDataJson: b64(cd), authenticatorData: b64(ad), signature: b64(sig) }; };",
+                  "  return { utf8: utf8, b64: b64, unb64: unb64, rand: rand, register: register, assert: assert };",
+                  "})();",
+                  "const _akCred = _ak.rand(16);",
+                  "pm.environment.set('akKB3CredId', _ak.b64(_akCred));",
+                  "const _akR = _ak.register({ challenge: _ak.unb64(pm.environment.get('akRegChKB3') || ''), rpId: 'access.example.invalid', origin: 'https://console.access.example.invalid', flags: 69, credId: _akCred, key: 1, alg: -257 });",
+                  "const _akC = { id: _akR.id, clientDataJson: _akR.clientDataJson, attestationObject: _akR.attestationObject };",
+                  "_akC.discoverable = true;",
+                  "const _akBody = JSON.stringify({ name: '', description: '', credential: _akC });",
+                  "pm.request.body = { mode: 'raw', raw: _akBody, options: { raw: { language: 'json' } } };",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.environment.unset('akKB3Op');",
+                  "pm.test('AK16-THIRD-KEY-FINISH: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-THIRD-KEY-FINISH: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
+                  "if (__j.id) { pm.environment.set('akKB3Op', __j.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-third-key-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{akKB3Op}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{akKB3Op}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akKB3Op}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akKB3Op')) {",
+                  "  pm.test('AK16-THIRD-KEY-OP: операция не возвращена шагом выше', () => {",
+                  "    pm.expect.fail('мутация выше отвергнута синхронно либо не вернула id операции — опрашивать нечего; причина — в ней, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_akops_KB3_ak16_third_key_op') !== pm.info.requestName) {",
+                  "  pm.environment.set('_akop_KB3_ak16_third_key_op', '0');",
+                  "  pm.environment.set('_akops_KB3_ak16_third_key_op', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_akop_KB3_ak16_third_key_op') || '0', 10);",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "if (pm.response.code === 200 && !__j.done && __n < 50) {",
+                  "  pm.environment.set('_akop_KB3_ak16_third_key_op', String(__n + 1));",
+                  "  const _akpd = Date.now(); while (Date.now() - _akpd < 500) { /* inter-poll delay: operation not done yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_akop_KB3_ak16_third_key_op');",
+                  "pm.environment.unset('_akops_KB3_ak16_third_key_op');",
+                  "pm.test('AK16-THIRD-KEY-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AK16-THIRD-KEY-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                  "pm.test('AK16-THIRD-KEY-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));",
+                  "const _akK = (__j.response && __j.response.accessKey) || {};",
+                  "pm.test('AK16-THIRD-KEY-OP: ключ назван платформенным id формы ak-<17>', () => pm.expect(/^ak-[0-9a-hjkmnp-tv-z]{17}$/.test(String(_akK.id || ''))).to.eql(true));",
+                  "if (_akK.id) { pm.environment.set('akKB3KeyId', _akK.id); }",
+                  "pm.environment.set('akKB3Count', '0');",
+                  "pm.environment.set('akKB3LastUsed', '');",
+                  "pm.environment.set('akKB3Mat', '1');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-list-three",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK16-LIST-THREE: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('AK16-LIST-THREE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
+                  "pm.test('AK16-LIST-THREE: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));",
+                  "{",
+                  "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akKB3KeyId'))[0] || null;",
+                  "pm.test('AK16-LIST-THREE: ключ KB3 в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-after-third-key-login-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-LOGIN-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-LOGIN-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('akBCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBFormCookie', __sc[0].value.split(\";\")[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-after-third-key-login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{akBEmail}}\", \"password\": \"{{akBPassword}}\", \"csrfToken\": \"{{akBCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('akBSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('akBFormCookie') ? 'kaname_form' + '=' + pm.environment.get('akBFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-LOGIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-LOGIN: тело называет человека, адрес подтверждён, уровень 1', () => pm.expect([typeof (__j.user && __j.user.id), !!__j.session && __j.session.emailVerified, __j.session && __j.session.assuranceLevel]).to.eql(['string', true, '1']));",
+                  "if (__j.user && __j.user.id) { pm.environment.set('akBUserId', __j.user.id); }",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('AK16-LOGIN-AFTER-THIRD-KEY-LOGIN: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('akBSessionCookie', __sc[0].value.split(\";\")[0].slice(15)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-after-third-key-authorize",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/authorize?{{akBQuery}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "authorize?{{akBQuery}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "followRedirects": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (!pm.environment.get('oauthClientId') || !pm.environment.get('oauthClientSecret') || !pm.environment.get('oauthRedirectUri')) {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] посев стенда: oauthClientId, oauthClientSecret, oauthRedirectUri заданы', () => {",
+                  "    pm.expect.fail('посев церемонии стенда посадки own (`stand-chart.sh seed-ceremony`) не завёл конфиденциального клиента — выковать токен человека нечем. Шаг не может исполниться, и молча выпасть ему нельзя.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _akB64u = (wa) => { let s = CryptoJS.enc.Base64.stringify(wa).split('+').join('-').split('/').join('_'); while (s.endsWith('=')) { s = s.slice(0, -1); } return s; };",
+                  "const _akV = _akB64u(CryptoJS.lib.WordArray.random(32));",
+                  "pm.environment.set('akBVerifier', _akV);",
+                  "const _akS = _akB64u(CryptoJS.lib.WordArray.random(32));",
+                  "pm.environment.set('akBState', _akS);",
+                  "const _akQ = [['response_type', 'code'], ['client_id', pm.environment.get('oauthClientId')],",
+                  "  ['redirect_uri', pm.environment.get('oauthRedirectUri')], ['scope', 'openid'], ['state', _akS],",
+                  "  ['code_challenge', _akB64u(CryptoJS.SHA256(_akV))], ['code_challenge_method', 'S256']]",
+                  "  .map((kv) => encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1])).join('&');",
+                  "pm.environment.set('akBQuery', _akQ);",
+                  "pm.environment.unset('akBOauthCode');",
+                  "// HARNESS-CONFIG GUARD — iamRegistryTokenBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('iamRegistryTokenBaseUrl') || pm.variables.get('iamRegistryTokenBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/authorize?{{akBQuery}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamRegistryTokenBaseUrl is set — поверхность выдачи службы: точка авторизации и токен-эндпоинт церемонии стоят на ней и больше нигде', () => {",
+                  "    pm.expect.fail('iamRegistryTokenBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBSessionCookie')) {",
+                  "  pm.test('AK16-LOGIN-AFTER-THIRD-KEY-AUTHORIZE: сессия человека не захвачена входом', () => {",
+                  "    pm.expect.fail('вход выше не выдал kaname_session — точке авторизации нечего предъявить; причина — в шаге входа, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  pm.request.headers.upsert({key: 'Cookie', value: 'kaname_session=' + pm.environment.get('akBSessionCookie')});",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-AUTHORIZE: ответ 302', () => pm.expect(pm.response.code).to.eql(302));",
+                  "const _akLoc = String(pm.response.headers.get('Location') || '');",
+                  "const _akQs = {}; (_akLoc.split('?')[1] || '').split('#')[0].split('&').forEach((kv) => { const i = kv.indexOf('=');",
+                  "  if (i > 0) { _akQs[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); } });",
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-AUTHORIZE: перенаправление несёт код и state запроса', () => pm.expect([typeof _akQs.code === 'string' && _akQs.code.length > 0, _akQs.state === pm.environment.get('akBState')]).to.eql([true, true]));",
+                  "if (_akQs.code) { pm.environment.set('akBOauthCode', _akQs.code); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT :: ak16-login-after-third-key-exchange",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "grant_type=authorization_code&code={{_akFCode}}&redirect_uri={{_akFRedirect}}&code_verifier={{_akFVerifier}}"
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (!pm.environment.get('akBOauthCode')) {",
+                  "  pm.test('AK16-LOGIN-AFTER-THIRD-KEY-EXCHANGE: код не выдан точкой авторизации', () => {",
+                  "    pm.expect.fail('шаг авторизации выше не выдал code — обменивать нечего; причина — в нём, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.variables.set('_akFCode', encodeURIComponent(pm.environment.get('akBOauthCode') || ''));",
+                  "pm.variables.set('_akFRedirect', encodeURIComponent(pm.environment.get('oauthRedirectUri') || ''));",
+                  "pm.variables.set('_akFVerifier', encodeURIComponent(pm.environment.get('akBVerifier') || ''));",
+                  "// HARNESS-CONFIG GUARD — iamRegistryTokenBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('iamRegistryTokenBaseUrl') || pm.variables.get('iamRegistryTokenBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/token');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: iamRegistryTokenBaseUrl is set — поверхность выдачи службы: точка авторизации и токен-эндпоинт церемонии стоят на ней и больше нигде', () => {",
+                  "    pm.expect.fail('iamRegistryTokenBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' + CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
+                  "  encodeURIComponent(pm.environment.get('oauthClientId') || '') + ':' + encodeURIComponent(pm.environment.get('oauthClientSecret') || '')))});",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('akBToken');",
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-EXCHANGE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK16-LOGIN-AFTER-THIRD-KEY-EXCHANGE: выдан токен доступа человека', () => pm.expect(typeof __j.access_token === 'string' && __j.access_token.length > 0).to.eql(true));",
+                  "if (__j.access_token) { pm.environment.set('akBToken', __j.access_token); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY — Ф7-34, Ф7-54: испытания регистрации и предъявления за сроком — отказ со следующим шагом и единый отказ",
       "description": "class:BVA | class:NEG | priority:P1",
       "item": [
@@ -14778,7 +17150,7 @@
                   "pm.test('AK27-LIST-B-KEPT: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK27-LIST-B-KEPT: ключей у человека 2', () => pm.expect(_akL.length).to.eql(2));",
+                  "pm.test('AK27-LIST-B-KEPT: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));",
                   "{",
                   "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akKBKeyId'))[0] || null;",
                   "pm.test('AK27-LIST-B-KEPT: ключ KB в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
@@ -16350,6 +18722,210 @@
                   "pm.test('AK-CLEANUP-KB2-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('AK-CLEANUP-KB2-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
                   "pm.test('AK-CLEANUP-KB2-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-kb3",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akBUserId}}/accessKeys/{{akKB3KeyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akBUserId}}",
+                "accessKeys",
+                "{{akKB3KeyId}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akBUserId}}/accessKeys/{{akKB3KeyId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akBUserId')) {",
+                  "  pm.test('AK-CLEANUP-KB3: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('akKB3COp');",
+                  "pm.test('AK-CLEANUP-KB3: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK-CLEANUP-KB3: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
+                  "if (__j.id) { pm.environment.set('akKB3COp', __j.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-kb3-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{akKB3COp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{akKB3COp}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akBToken'",
+                  "const __t = pm.environment.get('akBToken') || pm.variables.get('akBToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akBToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akBToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akKB3COp}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akKB3COp')) {",
+                  "  pm.test('AK-CLEANUP-KB3-OP: операция не возвращена шагом выше', () => {",
+                  "    pm.expect.fail('мутация выше отвергнута синхронно либо не вернула id операции — опрашивать нечего; причина — в ней, не здесь');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_akops_KB3C_ak_cleanup_kb3_op') !== pm.info.requestName) {",
+                  "  pm.environment.set('_akop_KB3C_ak_cleanup_kb3_op', '0');",
+                  "  pm.environment.set('_akops_KB3C_ak_cleanup_kb3_op', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_akop_KB3C_ak_cleanup_kb3_op') || '0', 10);",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "if (pm.response.code === 200 && !__j.done && __n < 50) {",
+                  "  pm.environment.set('_akop_KB3C_ak_cleanup_kb3_op', String(__n + 1));",
+                  "  const _akpd = Date.now(); while (Date.now() - _akpd < 500) { /* inter-poll delay: operation not done yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_akop_KB3C_ak_cleanup_kb3_op');",
+                  "pm.environment.unset('_akops_KB3C_ak_cleanup_kb3_op');",
+                  "pm.test('AK-CLEANUP-KB3-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AK-CLEANUP-KB3-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                  "pm.test('AK-CLEANUP-KB3-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));"
                 ]
               }
             }

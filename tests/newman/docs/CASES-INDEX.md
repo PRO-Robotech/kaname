@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 767
+Всего кейсов: 768
 
 ## Перепись по модулям
 
@@ -70,7 +70,7 @@
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
-| `cases/kaname-access-keys.py` | 9 |
+| `cases/kaname-access-keys.py` | 10 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -1024,9 +1024,9 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 9 кейсов
+## `cases/kaname-access-keys.py` — 10 кейсов
 
-> Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 12):
+> Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
 > (`ownRestBaseUrl`) — церемония регистрации, перечень, снятие, испытание
 > предъявления и утверждение. Аутентификатор подставной, в песочнице
@@ -1046,6 +1046,7 @@
 - `IAM-ACCESSKEY-NEG-ASSERTION-SINGLE-REFUSAL`
 - `IAM-ACCESSKEY-NEG-FOREIGN-KEY-AND-FOREIGN-CHALLENGE`
 - `IAM-ACCESSKEY-BVA-CEILING`
+- `IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT`
 - `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
 - `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
 
