@@ -117,7 +117,7 @@
 # на первом же прогоне после посадки («записей без предмета 1», rc=1 —
 # MR #270, прогон 35203684548). Запись снята тем изменением, которое правит
 # этот перечень: послабление, которому нечего прощать, — находка.
-breaks:
+breaks: []
   # ЗАПИСЬ О `magic_link_url` (kaname/cloud/iam/v1/user.proto, kacho#1774) СНЯТА —
   # разрыв стал историей: `reserved 3; reserved "magic_link_url";` лежит в стволе
   # с вливания #218 (`94352d9c`), база сравнения снятие несёт, и решатель
@@ -149,21 +149,6 @@ breaks:
   #
   # Предикат снятия записей: ветка влита в ствол, база сравнения несёт
   # `reserved`, и решатель называет все три записи потерявшими предмет.
-  - rule: ENUM_VALUE_NO_DELETE
-    path: kaname/cloud/iam/v1/credential_kind.proto
-    symbol: CredentialKind.4
-    reason: вид строк прежнего потока снят вместе с полем имени клиента у прежнего издателя; номер и имя зарезервированы
-    issue: kaname#362
-  - rule: FIELD_NO_DELETE
-    path: kaname/cloud/iam/v1/service_account_oauth_client.proto
-    symbol: ServiceAccountOAuthClient.3
-    reason: имя клиента у прежнего издателя снято вместе со столбцом; клиент называется id строки; номер и имя зарезервированы
-    issue: kaname#362
-  - rule: FIELD_NO_DELETE
-    path: kaname/cloud/iam/v1/user_oauth_client.proto
-    symbol: UserOAuthClient.3
-    reason: имя клиента у прежнего поставщика снято вместе со столбцом; клиент называется id строки; номер и имя зарезервированы
-    issue: kaname#362
   # СНЯТИЕ ГЛАГОЛА ПРИЁМА ИСХОДА ВОССТАНОВЛЕНИЯ ОТ ПРЕЖНЕГО ПОСТАВЩИКА (kaname#564).
   # Вызывающим глагола был обратный вызов поставщика, ушедшего с kaname#363;
   # глагол снят вместе со снятым поставщиком, вызывающего у него не осталось ни в
@@ -172,18 +157,11 @@ breaks:
   #
   # Предикат снятия записей: ветка влита в ствол, база сравнения не несёт
   # глагола, и решатель называет все три записи потерявшими предмет.
-  - rule: RPC_NO_DELETE
-    path: kaname/cloud/iam/v1/internal_user_service.proto
-    symbol: InternalUserService.OnRecoveryCompleted
-    reason: глагол обратного вызова прежнего поставщика снят вместе со снятым поставщиком — вызывающего нет
-    issue: kaname#564
-  - rule: MESSAGE_NO_DELETE
-    path: kaname/cloud/iam/v1/internal_user_service.proto
-    symbol: OnRecoveryCompletedRequest
-    reason: запрос снятого глагола обратного вызова прежнего поставщика
-    issue: kaname#564
-  - rule: MESSAGE_NO_DELETE
-    path: kaname/cloud/iam/v1/internal_user_service.proto
-    symbol: OnRecoveryCompletedMetadata
-    reason: метаданные операции снятого глагола обратного вызова прежнего поставщика
-    issue: kaname#564
+  #
+  # ЗАПИСИ kaname#362 И kaname#564 СНЯТЫ — разрывы стали историей (2026-10-03,
+  # kaname#569). ПРЕДИКАТ СНЯТИЯ ИСПОЛНЕН: обе ветки влиты в ствол (8cbc0fdc8),
+  # база сравнения несёт `reserved` и не несёт глагола, и решатель на первом
+  # прогоне ствола назвал все шесть записей потерявшими предмет
+  # («находок разобрано 0 · записей перечня 6 · записей без предмета 6», rc=1 —
+  # прогон 37056093742). Запись снята тем изменением, которое правит этот
+  # перечень: послабление, которому нечего прощать, — находка.
