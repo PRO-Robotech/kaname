@@ -47,7 +47,7 @@ func saCallerCtx() context.Context {
 func TestHandlerIssue_SAPrincipal_UnrecordableCreatedBy_IsRejectedNotDropped(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops), nil, nil)
+	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance(), nil, nil)
 
 	_, err := h.Issue(saCallerCtx(), &iamv1.IssueUserTokenRequest{
 		UserId: "usr00000000000000001",
@@ -73,7 +73,7 @@ func TestHandlerIssue_SAPrincipal_UnrecordableCreatedBy_IsRejectedNotDropped(t *
 func TestHandlerIssue_SAPrincipal_OwnSvaIdAsCreatedBy_IsRejected(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops), nil, nil)
+	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance(), nil, nil)
 
 	_, err := h.Issue(saCallerCtx(), &iamv1.IssueUserTokenRequest{
 		UserId:          "usr00000000000000001",
@@ -91,7 +91,7 @@ func TestHandlerIssue_SAPrincipal_OwnSvaIdAsCreatedBy_IsRejected(t *testing.T) {
 func TestHandlerIssue_SAPrincipal_OmittedCreatedBy_StillSeeds(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops), nil, nil)
+	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance(), nil, nil)
 
 	_, err := h.Issue(saCallerCtx(), &iamv1.IssueUserTokenRequest{
 		UserId: "usr00000000000000001",
@@ -115,7 +115,7 @@ func TestHandlerIssue_SAPrincipal_OmittedCreatedBy_StillSeeds(t *testing.T) {
 func TestHandlerIssue_SAPrincipal_MatchingCreatedBy_IsHonoured(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops), nil, nil)
+	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance(), nil, nil)
 
 	_, err := h.Issue(saCallerCtx(), &iamv1.IssueUserTokenRequest{
 		UserId:          "usr00000000000000001",
@@ -135,7 +135,7 @@ func TestHandlerIssue_SAPrincipal_MatchingCreatedBy_IsHonoured(t *testing.T) {
 func TestHandlerIssue_UserPrincipal_OwnCreatedBy_StillAccepted(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops), nil, nil)
+	h := NewHandler(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance(), nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr00000000000000007"})

@@ -162,7 +162,9 @@ func TestBAT1_21_TheSecretIsInNoWrittenPath(t *testing.T) {
 func TestBAT1_11_UnnamedKindKeepsTheKeypairBehaviourVerbatim(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	// Посадка с токен-эндпоинтом: ключевая пара без него не выдаётся
+	// (kaname#547), и прежнее поведение держится там, где оно исполнимо.
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

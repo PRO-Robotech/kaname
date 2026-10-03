@@ -47,6 +47,9 @@ type stubUserClientRepo struct {
 	// (#1191): решение о потолке принимает атомарный оператор вставки, поэтому
 	// подать его в use-case можно только отказом самой записи.
 	insertErr error
+	// accountCalls — сколько раз резолвился владелец: отказ, решённый до
+	// всякого чтения, оставляет здесь ноль.
+	accountCalls int
 	// accountErr — хранилище НЕ ОТВЕТИЛО на резолв аккаунта. Отдельно от
 	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
 	// эти два состояния — предмет пробы наблюдаемости (#2507).
@@ -56,6 +59,7 @@ type stubUserClientRepo struct {
 // AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
 // фиксированный account; тесты account_id-стемпинга подставляют свой.
 func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
+	s.accountCalls++
 	if s.accountErr != nil {
 		return "", false, s.accountErr
 	}
@@ -196,7 +200,7 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -261,7 +265,7 @@ func TestIssue_ValidationErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
+			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 			_, err := uc.Execute(context.Background(), tc.in)
 			if grpcstatus.Code(err) != codes.InvalidArgument {
 				t.Fatalf("code = %v, want InvalidArgument", grpcstatus.Code(err))
@@ -276,7 +280,7 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
 	audit := &stubAudit{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithAuditEmitter(audit)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance().WithAuditEmitter(audit)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001", Description: "cli",

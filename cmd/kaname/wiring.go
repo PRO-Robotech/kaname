@@ -1075,8 +1075,8 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// заводится — у комбинации он один и живёт в таблице полос.
 	ownIssuance := saKeyIssuanceIsOurs(cfg)
 	if !ownIssuance {
-		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток на этой посадке "+
-			"отказывает: ключ обменивается токен-эндпоинтом платформы, а он не включён — "+
+		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток и ключевой пары человека "+
+			"на этой посадке отказывает: ключ обменивается токен-эндпоинтом платформы, а он не включён — "+
 			"выдаётся только секрет",
 			"authn.client-token.enabled", cfg.AuthN.ClientToken.Enabled,
 			"снимается", "включением authn.client-token.enabled — контур выдачи на свою чеканку "+
@@ -1146,6 +1146,13 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	issueUC := usertokensapp.NewIssueUserTokenUseCase(userClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
+	// Есть ли у посадки токен-эндпоинт — то же условие, что у сборки ключей
+	// служебной учётки (`saKeyIssuanceIsOurs`), а не его копия: ключевую пару
+	// человека обменивает тот же эндпоинт (kaname#547). Предупреждение при
+	// старте в режиме разработчика печатает сборка ключей — одно на оба пути.
+	if saKeyIssuanceIsOurs(cfg) {
+		issueUC.WithOwnIssuance()
+	}
 	// Post-Issue секрет-редактор: после MarkDone с plaintext private_key_pem этот
 	// pg-adapter затирает поле в proto-marshalled response_data (BYTEA) одним UPDATE.
 	issueUC.WithResponseRedactor(kanamepg.NewOpsResponseRedactor(pool, "kaname"))

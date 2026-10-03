@@ -403,3 +403,18 @@ func TestSAKeyIssuanceWarning_SilentWhereIssuanceHasAnExecutor(t *testing.T) {
 		}
 	})
 }
+
+// TestSAKeyIssuanceWarning_NamesThePersonKeypairPathToo — предупреждение
+// режима разработчика называет ОБА пути, которые отказывают без эндпоинта:
+// ключи служебных учёток и ключевую пару человека (kaname#547). Названный
+// один путь при двух отказывающих оставил бы второй до пути запроса.
+func TestSAKeyIssuanceWarning_NamesThePersonKeypairPathToo(t *testing.T) {
+	warns := saKeysWarnings(t, devOwnWithoutOwnSAKeyIssuance())
+	requireOneLiftingWarning(t, warns, "dev-старт без своего контура выдачи")
+	msg, _ := warns[0][slog.MessageKey].(string)
+	for _, want := range []string{"служебных учёток", "ключевой пары человека"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("предупреждение не называет путь %q: %q", want, msg)
+		}
+	}
+}

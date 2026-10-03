@@ -114,6 +114,21 @@ type IssueUserTokenUseCase struct {
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
 	// одноразового private_key_pem. Даёт поллящему клиенту окно. 0 → без окна.
 	redactGrace time.Duration
+	// ownIssuance — посадка обменивает ключевую пару своим токен-эндпоинтом
+	// (`authn.client-token.enabled`). Без него ключевая пара не выдаётся:
+	// обменивает её только эндпоинт (kaname#547). Умолчание — отказ:
+	// полусобранная сборка не выдаёт ключ, который нечем обменять.
+	ownIssuance bool
+}
+
+// WithOwnIssuance объявляет, что у посадки есть токен-эндпоинт.
+//
+// Composition-root only: есть ли у посадки эндпоинт — её свойство, а не
+// запроса. Условие объявления то же, что у выдачи ключей служебной учётки
+// (`Config.SAKeyIssuanceIsOurs`); копии условия здесь нет.
+func (u *IssueUserTokenUseCase) WithOwnIssuance() *IssueUserTokenUseCase {
+	u.ownIssuance = true
+	return u
 }
 
 // WithResponseRedactor проводит post-Issue секрет-редактор.
@@ -227,6 +242,16 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Ключевую пару человека предъявляют ОБМЕНОМ, и обменивает её только
+	// токен-эндпоинт платформы: реестр клиентов, доказывающих владение ключом,
+	// читает эту таблицу, и его единственный потребитель — сборка эндпоинта.
+	// Посадка без него выдала бы ключ, который обменять негде (kaname#547).
+	// Отказ синхронный, после разбора запроса и до всякого чтения и записи —
+	// как на пути служебной учётки. Секрет обмена не требует.
+	if kind != domain.CredentialKindSecret && !u.ownIssuance {
+		return nil, shared.ExchangeEndpointAbsent(kind)
 	}
 
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
