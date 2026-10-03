@@ -1056,7 +1056,7 @@ def _challenge_named(label):
     Идентификатор алгоритма COSE — `int64` контракта, и каноническая форма JSON
     отдаёт его СТРОКОЙ («-7»), а не числом; сравнивается значение, а не запись
     (замер на стенде chart-own: `{"type":"public-key","alg":"-7"}`)."""
-    algs = _json.dumps(_ALGORITHMS)
+    algs = _json.dumps(_ALGORITHMS, separators=(",", ":"))
     return [
         "const _akSix = [",
         f"  ['rp.id', !!__j.rp && __j.rp.id === {js_str(_RP_ID)}],",
