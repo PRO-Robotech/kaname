@@ -28,11 +28,21 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-03'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-03T12:25:45Z'
+  ban1_lifted: true
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
   why: >-
-    Блокирующих 0. Санкция на код вступает с публикацией внешнего события (ниже);
-    до неё эта запись — вердикт рецензента, а не действующее одобрение.
+    Блокирующих 0. Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка
+    из пяти полей (role, verdict, subject, subject_revision, subject_sha256). Событие
+    5969140689 учётки pointpu на #336 несёт все пять полей, subject_sha256 равен
+    отпечатку этой записи, subject_revision 2a829ea0e опубликована на origin раньше
+    события (git branch -r --contains 2a829ea0e даёт origin/336; коммит
+    2026-10-03T11:49:54Z, событие 12:25:45Z); запрет #1 по этому отпечатку снят.
+    Дописано отдельным коммитом поверх записи, вердикт и разбор задним числом не правились.
 
 blocking: []
 
@@ -75,11 +85,23 @@ authority:
   expected_actor: pointpu
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
-    acceptance-reviewer · APPROVED · sha256 b72c19f1385d9824733363d10f0032f7fa0f17b012d3acf75bf633ae991f7a5e
+  type: issue_comment
+  target: PRO-Robotech/kaname#336
+  status: performed
+  published: true
+  database_id: 5969140689
+  node_id: IC_kwDOUO26pM8AAAABY8nb0Q
+  url: https://github.com/PRO-Robotech/kaname/issues/336#issuecomment-5969140689
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969140689
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T12:25:45Z'
+  body_sha256: cc7a94ca6fa2454d85be308e7bb9c68c6b642b570409af4606ed5faaca84f5f9
+  subject_sha256: b72c19f1385d9824733363d10f0032f7fa0f17b012d3acf75bf633ae991f7a5e
+  subject_revision_commit: 2a829ea0ece55723aeb542c5750ea96f53b6e113
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
 
 attribution:
   reviewer_kind: claude_agent
