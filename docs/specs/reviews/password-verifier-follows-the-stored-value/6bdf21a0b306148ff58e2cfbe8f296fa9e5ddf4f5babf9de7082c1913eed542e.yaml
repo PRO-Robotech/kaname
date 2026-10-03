@@ -52,8 +52,9 @@ premise_check:
   premise: 'отпечаток 6bdf21a0…, ветка 172 @978510ca2 от origin/536 9bac42bdc, правка только датировки'
   verdict: ПОДТВЕРЖДЕНА
   detail: >-
-    sha256sum совпал с заданием; git diff origin/536...HEAD трогает 4 файла, только шапки
-    (строк снято 1–2 на файл, все в пункте «Ревизии измерения»).
+    sha256sum совпал с заданием; git diff --numstat origin/main...978510ca2 трогает 4 файла, только шапки
+    (строк снято 2 на файл, все в пункте «Ревизии измерения»); ствол origin/main @8a84dcff6 — предок
+    978510ca2, состав и числа равны диапазону от базы ветки origin/536 (догнана до ствола в 9bac42bdc).
 
 delta_judged: >-
   1 запись: PRO-Robotech/kaname@37ee850953 → 37ee850953 (эта история) + пункт «Правка ПОСЛЕ вердикта». Сценарии, их ID, «Дано/Когда/Тогда», производители, DoD, решения и строки «Статус»
@@ -69,7 +70,8 @@ predicates_run:
     Отличие ровно одно (тело четырёх документов) — правка снимает находку, а не немоту гейта.
   revisions_resolve: |
     git merge-base --is-ancestor <r> origin/main → 0 для 37ee850953, 83ddd08a84, 39628487, a69c79d6;
-    git cat-file -t 5dcefe679b0dcdfb66580161bf7ae57493f6f800 в клоне службы → отказ, в project/kacho → commit;
+    git merge-base --is-ancestor 5dcefe679b0dcdfb66580161bf7ae57493f6f800 origin/main в клоне службы → 128 (объекта нет),
+    в project/kacho (origin/main @ba01514b98b) → 1: коммит есть, стволу не предок — лежит на release/modules-4, lane/1863, lane/1864, lane/line-green;
     851df30ef, 9d005e6c2c6 → commit в project/kacho; 65ea29400, 8a70d56f6, d09e42782, f0d1dae63 → не резолвятся;
     git -C project/kacho ls-remote origin refs/heads/lane/1089 → пусто.
   constructibility: |
