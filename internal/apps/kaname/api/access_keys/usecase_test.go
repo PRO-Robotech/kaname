@@ -352,7 +352,7 @@ func TestAccessKey_F7_04_RegistrationRequiresFreshness(t *testing.T) {
 	uc, err := access_keys.NewBeginRegistrationUseCase(h.deps)
 	require.NoError(t, err)
 	_, err = uc.Execute(h.ctx(), access_keys.BeginRegistrationInput{UserID: alice, Actor: alice})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	require.Contains(t, err.Error(), "present a credential again")
 	require.Equal(t, 1, h.obs.refusal(access_keys.LaneRegistration, access_keys.RefusalSessionNotFresh))
 	h.fresh.set(alice, h.now)
@@ -365,14 +365,14 @@ func TestAccessKey_F7_04_RegistrationRequiresFreshness(t *testing.T) {
 	cd, att := a.Register(t, webauthntest.RegistrationOptions{Challenge: ch.Challenge, Origin: origin, RPID: rpID})
 	h.fresh.set(alice, h.now.Add(-freshness-time.Minute))
 	_, err = h.finishRegistration(access_keys.FinishRegistrationInput{UserID: alice, Actor: alice, CredentialID: a.CredentialID(), ClientDataJSON: cd, AttestationObject: att})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	// Живой сессии нет вовсе — предъявления не было.
 	h.fresh = &fakeFreshness{}
 	h.deps.Freshness = h.fresh
 	uc2, err := access_keys.NewBeginRegistrationUseCase(h.deps)
 	require.NoError(t, err)
 	_, err = uc2.Execute(h.ctx(), access_keys.BeginRegistrationInput{UserID: alice, Actor: alice})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 }
 
 // TestAccessKey_F7_05_DuplicateCredentialIDIsRefusedIdentically — тот же `K` у
@@ -902,7 +902,7 @@ func TestAccessKey_F7_36_RevokeRequiresFreshness(t *testing.T) {
 	h.mustRegister(alice, second)
 	h.fresh.set(alice, h.now.Add(-freshness-time.Minute))
 	_, err := h.revoke(alice, string(k1.ID))
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	require.Equal(t, 2, h.store.keyCount(alice))
 	h.fresh.set(alice, h.now)
 	op, err := h.revoke(alice, string(k1.ID))

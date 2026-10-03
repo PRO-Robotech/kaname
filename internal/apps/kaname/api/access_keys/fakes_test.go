@@ -289,11 +289,16 @@ func (s *fakeStore) keyCount(userID domain.UserID) int {
 type fakeFreshness struct {
 	mu sync.Mutex
 	at map[domain.UserID]time.Time
+	// err — момент предъявления не читается (хранилище сессий недоступно).
+	err error
 }
 
 func (f *fakeFreshness) LastPresentedAt(_ context.Context, id domain.UserID) (time.Time, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return time.Time{}, false, f.err
+	}
 	t, ok := f.at[id]
 	return t, ok, nil
 }
