@@ -73,12 +73,13 @@ func newTrustFixture(t *testing.T) trustFixture {
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ($1,$2,'trust-sva')`,
 		f.sva, f.account)
 	require.NoError(t, err)
-	// Федеративная строка ключевого материала НЕ несёт: подпись проверяется
-	// ключом издателя из записи доверия.
+	// Строка ключа ключевого материала НЕ несёт: подпись проверяется ключом
+	// издателя из записи доверия. Вид — KEYPAIR, чья форма материала не
+	// требует: предмет пробы — запись доверия, а не вид строки.
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.service_account_oauth_clients
-		   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm,
+		   (id, sva_id, created_by_user_id, public_key_pem, key_algorithm,
 		    credential_kind)
-		 VALUES ($1,$2,$1,$3,'','','LEGACY')`, f.client, f.sva, f.user)
+		 VALUES ($1,$2,$3,'','','KEYPAIR')`, f.client, f.sva, f.user)
 	require.NoError(t, err)
 	return f
 }
@@ -155,9 +156,9 @@ func TestTrustedIssuer_PairIsGloballyUnique(t *testing.T) {
 	// Вторая наша строка ключа — другая, пара та же.
 	second := "soc_vvvvvvvvvvvvvvvvv"
 	_, err := f.pool.Exec(context.Background(), `INSERT INTO kaname.service_account_oauth_clients
-		   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm,
+		   (id, sva_id, created_by_user_id, public_key_pem, key_algorithm,
 		    credential_kind)
-		 VALUES ($1,$2,$1,$3,'','','LEGACY')`, second, f.sva, f.user)
+		 VALUES ($1,$2,$3,'','','KEYPAIR')`, second, f.sva, f.user)
 	require.NoError(t, err)
 
 	_, err = f.pool.Exec(context.Background(),

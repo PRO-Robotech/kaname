@@ -552,20 +552,19 @@ var blockSwitchCompanions = map[string]struct{ on, off []string }{
 	"metricsScrape": {off: []string{"metricsScrape.disabledBecause=проба выключателя"}},
 	// Включённый эндпоинт обязан нести четыре величины (`kaname-svc.requireClientTokenEndpoint`).
 	//
-	// Выключенный рендерится только на профиле, посадки НЕ объявившем: боевой
-	// профиль стоит на `own` (#424), а посадка `own` без эндпоинта не
-	// собирается (тот же помощник). Посадки, которая законно обходилась бы без
-	// эндпоинта, нет — `external` снята (PRO-Robotech/corelib#30), — поэтому
-	// положение «выключен» судится на профиле без посадки: предмет пробы —
-	// булевость выключателя, а не выбор посадки.
-	"authn.clientToken": {on: clientTokenValueSets(), off: []string{"authn.identityProvider="}},
+	// Выключенный рендерится только вне боевого режима: боевой старт без
+	// эндпоинта не собирается (тот же помощник). Прежде положение «выключен»
+	// судилось на профиле без ключа посадки; ключ снят (kaname#363), и
+	// единственное законное положение «выключен» — режим разработчика. Предмет
+	// пробы — булевость выключателя, а не выбор режима.
+	"authn.clientToken": {on: clientTokenValueSets(), off: []string{"authMode=dev"}},
 }
 
-// clientTokenValueSets — величины эндпоинта из накладки `own`, без самой
-// посадки и без выключателя: у выключателя здесь своя ось.
+// clientTokenValueSets — величины эндпоинта из накладки оператора, без
+// выключателя: у выключателя здесь своя ось.
 func clientTokenValueSets() []string {
 	var out []string
-	for _, kv := range ownPostureOverlay {
+	for _, kv := range operatorOverlay {
 		if strings.HasPrefix(kv, "authn.clientToken.") && !strings.HasPrefix(kv, clientTokenEnabledKnob+"=") {
 			out = append(out, kv)
 		}

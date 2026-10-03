@@ -330,6 +330,12 @@ git grep -hoE 'rpc OnRecoveryCompleted' -- proto | wc -l                  # → 
 обратным вызовом. Ни начала регистрации, ни начала восстановления у нас не объявлено: их
 начинает чужой компонент, а мы узнаём об исходе.
 
+> **Правка после вердикта (kaname#564), полный состав — этот абзац.** Замер выше поставлен до
+> снятия внешнего поставщика. Глагол приёма исхода восстановления от него снят вместе с
+> поставщиком: вызывающего у глагола не осталось.
+> Контрольная строка блока на нынешнем дереве даёт 0; восстановление ведёт собственная полоса
+> входа. Утверждение §1.1 о регистрации этим не меняется.
+
 ### §1.2 Полоса регистрации — ключ чужого объявления, и полос этих две
 
 ```sh
@@ -931,7 +937,7 @@ comm -13 \
 | **Ф-в** | потолок темпа **одним оператором**: окно и списание считаются вместе, первая вставка безусловна | триггер `accounts_rate_admission` и функция `kacho_admission_rate_count` в применённой миграции | `internal/repo/kaname/pg/account_admission_rate_integration_test.go` · `TestAccountRate_CreationsBeyondTheWindowCeilingAreRefused` · `TestAccountRate_TheFirstAccountOfAnIdentityIsNeverRefused` · `TestAccountRate_ConcurrentCreationAtTheLastSlotAdmitsExactlyOne` · близнец `TestAccountRate_NextWindowAdmitsAgain` | Ф4-12, Ф4-13, Ф4-17 |
 | **Ф-г** | отказ старта на незаданной величине, текст называет ручку | `internal/apps/kaname/config/validate.go` | `TestUnsetDomainRefusesTheStart` · `TestDeclaredDomainPassesTheStart` | Ф4-18, Ф4-19 |
 | **Ф-д** | гейт дерева с переписью осмотренного и инъекцией в обе стороны | `internal/check/` | `TestAcceptancePathCoordinateResolves` — образец формы; способность упасть и смолчать — `internal/check/acceptance_path_coordinate_injection_test.go` | Ф4-06…10 |
-| **Ф-е** | гейт сходимости полос, читающий **объявление**, печатающий две величины и падающий на нулевом разборе | `PRO-Robotech/kacho:deploy/identity_registration_lanes_issue_a_session_test.go` (136 строк) | `PRO-Robotech/kacho:TestIdentity_EveryRegistrationLaneIssuesASession` | Ф4-06, Ф4-10 — **предмет переезжает отсюда** |
+| **Ф-е** | гейт сходимости полос, читающий **объявление**, печатающий две величины и падающий на нулевом разборе | `PRO-Robotech/kacho@cd6bab6829:deploy/identity_registration_lanes_issue_a_session_test.go` (136 строк; снят kacho#2818) | `PRO-Robotech/kacho@cd6bab6829:TestIdentity_EveryRegistrationLaneIssuesASession` | Ф4-06, Ф4-10 — **предмет переезжает отсюда** |
 | **Ф-ж** | сквозная проба регистрации, различающая **три** исхода: печенье выдано · поток отвергнут и напечатал свой разбор · ещё не готово | `PRO-Robotech/kacho:ui-future/e2e/specs/fixtures.ts` | `PRO-Robotech/kacho:ui-future/e2e/specs/registration-refusal-named.spec.ts` | Ф4-01, Ф4-11…13, Ф4-26 |
 | **Ф-з** | снимок «кто я»: аккаунты вызывающего из трёх источников (членство · владение · привязка на аккаунт), метка `owner` по владению; чтение — из базы службы, без опоры на материализацию прав (редакция 3) | `internal/apps/kaname/api/authorize/whoami.go` (280 строк); источник «владение» — `internal/repo/kaname/pg/user_repo.go:328` | `internal/apps/kaname/api/authorize/whoami_test.go` · `TestWhoAmI_User_FullSnapshot` (своему аккаунту — `owner`, чужому — нет); `internal/repo/kaname/pg/user_integration_test.go` · `TestUser_ListAccountsForUser_IncludesOwnedAccounts` | Ф4-26, Ф4-27 |
 | **Ф-и** | проверка имени аккаунта на входе глаголов `Create` и `Update` — синхронно, до операции, отказ `Illegal argument name: <правило>` (редакция 4) | `internal/domain/types.go:313-321` (форма имени, один валидатор); вызов — `internal/apps/kaname/api/account/create.go` (синхронная проверка домена до операции) и `update.go:174`; **резерва префикса в дереве нет** — §5.5 | `tests/newman/cases/iam-account.py` — три утверждения «отказ называет поле `name`»; резерва не держит ничто | Ф4-29, Ф4-30 |

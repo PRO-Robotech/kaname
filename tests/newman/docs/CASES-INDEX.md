@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 806
+Всего кейсов: 758
 
 ## Перепись по модулям
 
@@ -35,19 +35,16 @@
 |---|---:|
 | `cases/authz-deny.py` | 293 |
 | `cases/authz-failclosed.py` | 3 |
-| `cases/authz-sa-apitoken.py` | 30 |
 | `cases/basic-access-token.py` | 2 |
 | `cases/docker-lane-credential-kind.py` | 1 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
 | `cases/iam-account-redesign.py` | 9 |
-| `cases/iam-account.py` | 38 |
+| `cases/iam-account.py` | 56 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
-| `cases/iam-interactive-client.py` | 8 |
-| `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
 | `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
@@ -55,7 +52,6 @@
 | `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
-| `cases/iam-project-edge-format.py` | 1 |
 | `cases/iam-project.py` | 35 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
@@ -66,7 +62,7 @@
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-grant-visibility.py` | 1 |
-| `cases/iam-token-facade-conformance.py` | 7 |
+| `cases/iam-token-facade-conformance.py` | 4 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
@@ -74,12 +70,9 @@
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
-| `cases/kaname-second-factor.py` | 17 |
+| `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
-| `cases/label-revoke-nlb.py` | 1 |
-| `cases/label-revoke-storage.py` | 3 |
-| `cases/label-revoke-vpc.py` | 8 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
 
@@ -385,46 +378,11 @@
 
 ## `cases/authz-failclosed.py` — 3 кейсов
 
-> Case-set authz-failclosed — отказ, когда вердикта о правах взять неоткуда.
+> Case-set authz-failclosed — отказ, когда вердикта взять неоткуда.
 
 - `AUTHZ-FAILCLOSED-OPENFGA-DOWN`
 - `AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200`
-- `AUTHZ-FAILCLOSED-EDGE-KEY-SOURCE-LANE`
-
-## `cases/authz-sa-apitoken.py` — 30 кейсов
-
-> Case-set authz-sa-apitoken для kaname.
-
-- `AUTHZ-SA-NET-GT-A1`
-- `AUTHZ-SA-NET-LS-A1`
-- `AUTHZ-SA-NET-CR-A1`
-- `AUTHZ-SA-NET-LS-A2-DENY`
-- `AUTHZ-SA-NET-GT-B1`
-- `AUTHZ-SA-NET-CR-B1`
-- `AUTHZ-SA-NET-LS-B1-DENY`
-- `AUTHZ-SA-ACCT-GT-A`
-- `AUTHZ-SA-ACCT-UP-A`
-- `AUTHZ-SA-ESC-SELF-ADMIN`
-- `AUTHZ-SA-ESC-SELF-VPC-B1`
-- `AUTHZ-SA-ESC-SELF-MODIFY`
-- `AUTHZ-SA-ESC-ISSUE-KEY`
-- `AUTHZ-SA-ESC-CUSTOM-ROLE`
-- `AUTHZ-SANG-NET-GT-A1`
-- `AUTHZ-SANG-NET-LS-A1-DENY`
-- `AUTHZ-SANG-NET-CR-A1`
-- `AUTHZ-SANG-SA-LS-A-EMPTY`
-- `AUTHZ-APITOK-NET-GT-A1`
-- `AUTHZ-APITOK-NET-LS-A1`
-- `AUTHZ-APITOK-NET-GT-B1`
-- `AUTHZ-APITOK-ACCT-GT-A`
-- `AUTHZ-APITOK-NET-LS-B1-DENY`
-- `AUTHZ-APITOK-REVOKED-GT-A1`
-- `AUTHZ-APITOK-REVOKED-LS-A1`
-- `AUTHZ-APITOK-MALFORMED-GT-A1`
-- `AUTHZ-APITOK-EXPIRED-GT-A1`
-- `AUTHZ-APITOK-REVOKED-CR`
-- `AUTHZ-APITOK-MALFORMED-CR`
-- `AUTHZ-APITOK-ESC-SELF-ADMIN`
+- `AUTHZ-FAILCLOSED-UNKNOWN-KEY-TWIN`
 
 ## `cases/basic-access-token.py` — 2 кейсов
 
@@ -496,7 +454,7 @@
 - `IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG`
 - `IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT`
 
-## `cases/iam-account.py` — 38 кейсов
+## `cases/iam-account.py` — 56 кейсов
 
 > Case-set для AccountService.
 
@@ -538,6 +496,24 @@
 - `IAM-ACC-LSOP-CRUD-OK`
 - `IAM-ACC-LSOP-NEG-NOTFOUND`
 - `IAM-ACC-LSOP-AUTHZ-ANON-DENY`
+- `IAM-ACC-ID-01`
+- `IAM-ACC-ID-03`
+- `IAM-ACC-ID-04`
+- `IAM-ACC-ID-05`
+- `IAM-ACC-ID-07`
+- `IAM-ACC-ID-08`
+- `IAM-ACC-ID-09`
+- `IAM-ACC-ID-10`
+- `IAM-ACC-ID-12`
+- `IAM-ACC-ID-13`
+- `IAM-ACC-ID-15`
+- `IAM-ACC-ID-16`
+- `IAM-ACC-ID-19`
+- `IAM-ACC-ID-20`
+- `IAM-ACC-ID-21`
+- `IAM-ACC-ID-22`
+- `IAM-ACC-ID-23`
+- `IAM-ACC-ID-25`
 
 ## `cases/iam-authz-grant-check-propagation.py` — 10 кейсов
 
@@ -598,37 +574,6 @@
 - `IAM-GRP-DL-NEG-NOTFOUND`
 - `IAM-GRP-DL-AUTHZ-ANON-DENY`
 - `IAM-GRP-LSOP-CRUD-OK`
-
-## `cases/iam-interactive-client.py` — 8 кейсов
-
-> Case-set: InternalInteractiveClientService — the interactive-login client (IAM-INT-1, S1).
-
-- `IAM-IC-CR-CRUD-OK`
-- `IAM-IC-CR-CONF-DUP-NAME`
-- `IAM-IC-CR-VAL-REDIRECT-URIS`
-- `IAM-IC-GT-NEG-ABSENT`
-- `IAM-IC-GT-VAL-MALFORMED-ID`
-- `IAM-IC-UP-VAL-IMMUTABLE-MASK`
-- `IAM-IC-UP-VAL-UNKNOWN-MASK`
-- `IAM-IC-DL-IDM-REPEAT`
-
-## `cases/iam-internal-only-check.py` — 13 кейсов
-
-> Case-set для iam-internal-only-check.
-
-- `IAM-INT-NEG-EXT-REST-ALIVE`
-- `IAM-INT-NEG-EXT-USER-UPSERT`
-- `IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT`
-- `IAM-INT-NEG-EXT-IAM-CHECK`
-- `IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS`
-- `IAM-INT-OK-INT-USER-UPSERT`
-- `IAM-INT-OK-INT-USER-UPSERT-IDEM`
-- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT`
-- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN`
-- `IAM-INT-OK-INT-IAM-CHECK`
-- `IAM-INT-NEG-EXT-IC-LIST`
-- `IAM-INT-NEG-EXT-IC-CREATE`
-- `IAM-INT-OK-INT-IC-LIST`
 
 ## `cases/iam-invite-grant-fga.py` — 4 кейсов
 
@@ -693,12 +638,6 @@
 - `CONF-G-01-catalog-happy`
 - `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
-
-## `cases/iam-project-edge-format.py` — 1 кейсов
-
-> Case-set iam-project-edge-format — ФОРМА ИДЕНТИФИКАТОРА ПРОЕКТА, КОТОРУЮ СУДИТ КРАЙ.
-
-- `IAM-PRJ-DL-NEG-MALFORMED-PREFIX`
 
 ## `cases/iam-project.py` — 35 кейсов
 
@@ -895,16 +834,13 @@
 
 - `IAM-ACB-SYSGRANT-VISIBLE-OK`
 
-## `cases/iam-token-facade-conformance.py` — 7 кейсов
+## `cases/iam-token-facade-conformance.py` — 4 кейса
 
-> Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
+> Case-set: iam is the SINGLE FACADE to the token signer (#59, Phase C).
 
 - `IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS`
-- `IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER`
 - `IBT-05-CREDENTIAL-LIFECYCLE-THROUGH-FACADE-RPCS`
 - `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
-- `IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR`
-- `IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE`
 - `IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED`
 
 ## `cases/iam-user.py` — 43 кейсов
@@ -969,33 +905,6 @@
 
 - `IAM-LBLCLEAR-PROJECT-EMPTY-01`
 - `IAM-LBLREVOKE-PROJECT-01`
-
-## `cases/label-revoke-nlb.py` — 1 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, nlb.listener (e2e).
-
-- `T31-LBLREVOKE-NLB-LISTENER-04`
-
-## `cases/label-revoke-storage.py` — 3 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, storage resources (e2e).
-
-- `T31-LBLREVOKE-STORAGE-VOLUME-03`
-- `T31-LBLREVOKE-STORAGE-SNAPSHOT-03`
-- `T31-LBLREVOKE-STORAGE-IMAGE-03`
-
-## `cases/label-revoke-vpc.py` — 8 кейсов
-
-> Cross-service ARM_LABELS revoke-on-label-change, vpc resources (e2e, black-box).
-
-- `T31-LBLREVOKE-VPC-NETWORK-01`
-- `T31-LBLREVOKE-VPC-SECGROUP-02`
-- `T31-LBLREVOKE-VPC-NETWORK-ADD-01`
-- `T31-LBLREVOKE-VPC-NETWORK-CHANGE-01`
-- `T31-LBLREVOKE-VPC-NETWORK-IDM-01`
-- `T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01`
-- `T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01`
-- `T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE`
 
 ## `cases/rbac-subject-channel-equivalence.py` — 8 кейсов
 
@@ -1136,7 +1045,7 @@
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 
-## `cases/kaname-second-factor.py` — 17 кейсов
+## `cases/kaname-second-factor.py` — 18 кейсов
 
 > Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
@@ -1148,10 +1057,13 @@
 > `active` → снят. Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем
 > же вызовом прогонщика, что вход и восстановление, последним (kaname#417);
 > утверждения набора значений удостоверений не печатают — держит
-> `scripts/second_factor_assertion_values_test.py`. Четыре последних кейса
-> (Ф12-19, Ф12-31, Ф12-32, Ф12-46) заводят своих людей — регистрацией,
-> подтверждением адреса кодом из письма (`standMailboxUrl`) и заведением фактора, —
-> и человека посева не трогают.
+> `scripts/second_factor_assertion_values_test.py`. Пять последних кейсов
+> (Ф12-19, Ф12-31, Ф12-32, Ф12-46 и кейс окна профиля) заводят своих людей —
+> регистрацией, подтверждением адреса кодом из письма (`standMailboxUrl`) и
+> заведением фактора, — и человека посева не трогают. Последний ждёт окна
+> профиля (`addressWindow`, `selfServiceFreshness`) одним ожиданием на четыре
+> ветви (kaname#480): Ф12-31 (г), Ф12-09, Ф12-10, отказ по свежести Ф12-32 и
+> Ф12-04 (а).
 
 - `IAM-2FA-NEG-NOT-ENROLLED-STATE`
 - `IAM-2FA-OK-ENROLL-PENDING-IS-NOT-A-METHOD`
@@ -1170,6 +1082,7 @@
 - `IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET`
 - `IAM-2FA-NEG-CODE-GUESSING-RATE`
 - `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
+- `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

@@ -3,8 +3,8 @@
 
 // audit_session_revocation_repos.go — audit_outbox + session_revocations
 // repositories. The audit_outbox and session_revocations
-// tables back the Hydra token/refresh hooks and the
-// force-logout flow.
+// tables back the logout / force-logout flow and the hot-path
+// IsRevoked read.
 package pg
 
 import (

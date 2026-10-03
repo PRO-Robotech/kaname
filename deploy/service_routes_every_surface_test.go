@@ -14,8 +14,7 @@
 // Следствие для клиента разное у каждой полосы и ни одно не косметическое:
 // докерный клиент не доходит до выдачи токена, которую документ установки
 // обещает внешне достижимой; плоскость данных реестра не берёт ключи проверки, и
-// её верификация остаётся закрытой; поставщик личности не доносит вебхуки, то
-// есть вход по первому обращению не заводит пользователя; а собственный
+// её верификация остаётся закрытой; а собственный
 // публичный REST-фронт — единственная тенантская HTTP-дверь отдельно
 // поставленной службы — существует внутри пода.
 //
@@ -51,7 +50,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/tools/surfaceroster"
 )
 
@@ -64,13 +62,6 @@ type routedSurface struct {
 	via string
 	// why — почему маршрута нет, если его нет.
 	why string
-}
-
-// renderedPosture — посадка личности, которую рендер отдаёт процессу; пусто —
-// незаявленная. Разбирается тем же разборщиком, что у процесса.
-func renderedPosture(t *testing.T, cfg map[string]any) config.IdentityProvider {
-	t.Helper()
-	return parsePosture(t, configString(cfg, "authn.identity-provider"))
 }
 
 // scrapeRoute — имя маршрута диагностической поверхности.
@@ -128,19 +119,6 @@ func judgeSurfaceRoutes(t *testing.T, roster surfaceroster.Roster, rendered stri
 			// посадка его не назвала. Вести к ней нечем, и это не находка —
 			// процесс говорит об этом сам при старте.
 			lines = append(lines, fmt.Sprintf("  %-38s не поднята этим входом (адреса нет)", s.SettingKey))
-			continue
-		}
-		// СЛУШАТЕЛЬ ВЕБХУКОВ ПОСТАВЩИКА ПОДНИМАЕТСЯ ПОСАДКОЙ, а не адресом: у
-		// адреса есть умолчание процесса, но слушатель процесс снимает ровно одним
-		// объявленным значением — `own` (kaname#360, hooksListenAddress в корне).
-		// Боевой профиль стоит на `own` (#424), и вести к двери, которой процесс
-		// при этой посадке не поднимает, нечем. Согласие порта с посадкой по
-		// каждому значению словаря судит соседний гейт
-		// (hooks_port_follows_posture_test.go); здесь спрашивается тот же
-		// предикат процесса, а не своя копия.
-		if s.SettingKey == hooksSettingKey && !hooksRaisedByProcess(renderedPosture(t, cfg)) {
-			lines = append(lines, fmt.Sprintf("  %-38s не поднята этим входом (посадка %s: слушатель вебхуков процесс не поднимает)",
-				s.SettingKey, renderedPosture(t, cfg)))
 			continue
 		}
 		raised++

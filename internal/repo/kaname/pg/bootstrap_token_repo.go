@@ -5,7 +5,7 @@
 // InternalBootstrapTokenService use-case (#58). Provisions the singleton
 // bootstrap SA's OAuth-client mapping (service_account_oauth_clients row),
 // serialising concurrent first-callers with a transaction-scoped advisory lock so
-// the external Hydra client is created at most once (IBT-03); UNIQUE(sva_id) on
+// the mapping is provisioned at most once (IBT-03); UNIQUE(sva_id) on
 // the mapping is the DB backstop. pgx stays confined to this package.
 package pg
 
@@ -46,8 +46,8 @@ func NewBootstrapStore(pool *pgxpool.Pool) *BootstrapStore { return &BootstrapSt
 // mapping (found=false when not yet provisioned).
 func (s *BootstrapStore) LockAndGet(ctx context.Context, txh service.Tx) (domain.ServiceAccountOAuthClient, bool, error) {
 	tx := txAsPgx(txh)
-	// Serialise concurrent first-callers so only the winner reaches the external
-	// Hydra create; losers block here until the winner commits, then read the row.
+	// Serialise concurrent first-callers so only the winner provisions the
+	// mapping; losers block here until the winner commits, then read the row.
 	// The no-orphan guarantee relies on the repo-wide READ COMMITTED isolation: a
 	// loser's post-lock SELECT runs on a fresh snapshot that sees the winner's
 	// committed mapping (found=true → skip create). UNIQUE(sva_id) is the backstop.

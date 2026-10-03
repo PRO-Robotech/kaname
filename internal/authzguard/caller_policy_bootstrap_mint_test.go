@@ -7,7 +7,7 @@ package authzguard
 // by an EXPLICIT per-RPC SPIFFE allow-list, i.e. by a verified CLIENT CERTIFICATE
 // of a named identity — never by network position.
 //
-// InternalBootstrapTokenService/MintBootstrapToken returns a Hydra-signed RS256
+// InternalBootstrapTokenService/MintBootstrapToken returns an RS256 token of our own minting,
 // Bearer for a cluster `system_admin` ServiceAccount, and it cannot carry a
 // ReBAC relation gate (it exists to obtain the FIRST token, where no token
 // exists yet — chicken-and-egg). The credential it DOES require is therefore the

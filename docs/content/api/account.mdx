@@ -33,7 +33,7 @@ Create — **одна транзакция на два ресурса**: с ак
 <table>
   <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
   <tbody>
-    <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор аккаунта (префикс <code>acc</code>)</td></tr>
+    <tr><td><code>id</code></td><td>string</td><td>immutable</td><td>Идентификатор аккаунта (префикс <code>acc</code>). Выдаёт служба; администратор облака может указать его на <code>Create</code> в той же форме. После создания неизменяем</td></tr>
     <tr><td><code>name</code></td><td>string</td><td>mutable</td><td><strong>Глобально уникальное</strong> имя (одно пространство имён на всю платформу, не на аккаунт): DNS label по RFC 1123 — <code>^&#91;a-z0-9&#93;(&#91;-a-z0-9&#93;&#123;0,61&#125;&#91;a-z0-9&#93;)?$</code>, строчные латинские буквы, цифры и дефис, длина 1–63; цифра первым знаком допустима (<code>9lives</code> — валидное имя)</td></tr>
     <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; аккаунт label-selectable для scoped-грантов</td></tr>
@@ -120,6 +120,20 @@ handler возвращает 200 и только те аккаунты, где �
 не то, а о том, что поля на входе нет. Асинхронно: ответ — `Operation` с `response: Account` и
 `metadata: { accountId, defaultProjectId }`.
 
+**Идентификатор аккаунта можно указать полем `id`; не указан — его выдаёт служба.** Пустая строка
+и отсутствие поля — одно и то же. Указанный идентификатор:
+
+- принимается только в той форме, которую выдаёт сама служба: `acc` и 17 знаков алфавита
+  `0123456789abcdefghjkmnpqrstvwxyz`, например `acc7m3k9q2x5v8b4n6t1`. Регистр не сворачивается,
+  пробелы не срезаются. Иная форма — синхронный `INVALID_ARGUMENT` с полем `id`, до операции;
+- задаётся только администратором облака. Остальные получают синхронный `PERMISSION_DENIED`,
+  одинаковый для занятого и свободного идентификатора;
+- выдаётся один раз: занятый живым аккаунтом либо выданный когда-либо — в том числе удалённому —
+  отвечает `ALREADY_EXISTS` в исходе операции. Без имени имя аккаунта равно этому идентификатору.
+
+Имя в форме идентификатора допустимо только равным собственному идентификатору аккаунта — и при
+создании, и при правке.
+
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/accounts' \\
@@ -205,6 +219,10 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
     <tr><td>Get/Update/Delete несуществующего аккаунта</td><td><code>NOT_FOUND</code></td><td><code>"Account &lt;id&gt; not found"</code></td></tr>
     <tr><td><code>name</code> уже занят <strong>любым</strong> аккаунтом платформы</td><td><code>ALREADY_EXISTS</code></td><td><code>"Account with name &lt;name&gt; already exists"</code>. Пространство имён общее для всех арендаторов — занятое имя занято глобально</td></tr>
     <tr><td><code>ownerUserId</code> присутствует в теле <code>Create</code> — <strong>с любым значением, включая ваше собственное</strong></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument ownerUserId (derived from caller)"</code>. Синхронно, до заведения операции: поле выходное, на входе его нет</td></tr>
+    <tr><td><code>id</code> в теле <code>Create</code> не в форме, которую выдаёт служба</td><td><code>INVALID_ARGUMENT</code></td><td><code>"invalid account id '&lt;id&gt;'"</code>, поле <code>id</code>. Синхронно, до заведения операции и до вопроса о праве</td></tr>
+    <tr><td><code>id</code> в теле <code>Create</code> от того, кто не администратор облака</td><td><code>PERMISSION_DENIED</code></td><td><code>"permission denied"</code>. Синхронно, до операции; ответ не зависит от того, занят ли идентификатор. Модель прав недоступна — <code>UNAVAILABLE</code> <code>"authz backend unavailable"</code>, повтор осмыслен</td></tr>
+    <tr><td><code>id</code> занят живым аккаунтом либо выдан когда-либо</td><td><code>ALREADY_EXISTS</code></td><td><code>"Account &lt;id&gt; already exists"</code> в исходе операции. Текст один для живого, удалённого и посеянного; повтор того же запроса получает тот же отказ</td></tr>
+    <tr><td><code>name</code> в форме идентификатора аккаунта, не равный собственному <code>id</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument name: the account id form is reserved for the account's own id"</code>. На <code>Create</code> и <code>Update</code></td></tr>
     <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"ownerUserId is immutable after Account.Create"</code></td></tr>
     <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта — <strong>включая созданный вместе с ним <code>default</code></strong></td></tr>
     <tr><td>Нет нужного отношения</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>

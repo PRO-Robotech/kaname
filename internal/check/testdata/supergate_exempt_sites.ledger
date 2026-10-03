@@ -25,6 +25,7 @@ family github.com/PRO-Robotech/kaname/internal/authzguard.IsClusterAdminE
 family github.com/PRO-Robotech/kaname/internal/authzguard.SubjectIsClusterAdmin
 family github.com/PRO-Robotech/kaname/internal/authzguard.SubjectIsClusterAdminE
 family github.com/PRO-Robotech/kaname/internal/authzguard.SubjectIsClusterAdminPlainE
+family github.com/PRO-Robotech/kaname/internal/authzguard.RequireClusterAdmin
 family (*github.com/PRO-Robotech/kaname/internal/service.AuthorizeService).isClusterAdmin
 family github.com/PRO-Robotech/kaname/internal/service.checkPlan.superGateDecides
 
@@ -36,7 +37,7 @@ site door internal/service.(*AuthorizeService).resolveRun isClusterAdmin 2 Д-4,
 site door internal/authzguard.(checkAdapter).Check SubjectIsClusterAdminPlainE 1 Д-6
 site door internal/authzguard.AllowsVerb SubjectIsClusterAdminPlainE 1 Д-7
 
-# ── fixed: тип объекта или вопроса закреплён самим use-case; 14 ────────────────
+# ── fixed: тип объекта или вопроса закреплён самим use-case; 17 ────────────────
 site fixed internal/apps/kaname/api/access_binding.requireGrantAuthority IsClusterAdminE 1 привязки
 site fixed internal/apps/kaname/api/access_binding.fgaHoldsAdminE IsClusterAdminE 1 привязки
 site fixed internal/apps/kaname/api/access_binding.(*ListUseCase).Execute SubjectIsClusterAdminPlainE 1 привязки
@@ -51,11 +52,15 @@ site fixed internal/apps/kaname/api/user.(*ListUsersUseCase).Execute SubjectIsCl
 site fixed internal/apps/kaname/api/account.(*ListAllOperationsUseCase).requireAccountViewAuthority IsClusterAdminE 1 объект-account
 site fixed internal/apps/kaname/api/authorize.(*Handler).authorizeCaller SubjectIsClusterAdminPlainE 1 право-задать-вопрос
 site fixed internal/apps/kaname/api/module.requireClusterSystemAdmin IsClusterAdminE 1 объект-cluster
+site fixed internal/apps/kaname/api/cluster.requireClusterSystemAdmin RequireClusterAdmin 1 объект-cluster
+site fixed internal/apps/kaname/api/internal_iam.(*Handler).requireSystemAdmin RequireClusterAdmin 1 объект-cluster
+site fixed internal/apps/kaname/api/account.(*CreateAccountUseCase).Execute RequireClusterAdmin 1 идентификатор-аккаунта
 
 # ── definition: определение или обёртка — своего исхода не решают ────────────
 site definition internal/authzguard.IsClusterAdmin SubjectIsClusterAdmin 1
 site definition internal/authzguard.IsClusterAdminE SubjectIsClusterAdminPlainE 1
 site definition internal/authzguard.SubjectIsClusterAdmin SubjectIsClusterAdminPlainE 1
+site definition internal/authzguard.RequireClusterAdmin IsClusterAdminE 1
 site definition internal/service.(*AuthorizeService).isClusterAdmin SubjectIsClusterAdminPlainE 2
 
 # ── plan: метка «вопроса нет», исхода не решает ───────────────────────────────

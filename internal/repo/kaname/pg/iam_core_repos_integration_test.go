@@ -13,7 +13,7 @@ package pg_test
 // - TestIamExt_Condition_Insert_Whitelist / RejectsUnknown
 // - TestIamExt_Federation_HappyPath / WildcardRejected / ExpiresNotNull / ExpiresOver1Y /
 // DuplicateIssuerPattern
-// - TestIamExt_SAOAuthClient_Happy / DuplicateHydra / FKMissing / RestrictDelete
+// - TestIamExt_SAOAuthClient_Happy / Duplicate / FKMissing / RestrictDelete
 // - TestIamExt_JIT_Happy / DurationOver8h
 // - TestIamExt_OutboxAtomicity_Commit / Rollback
 // - TestIamExt_Bootstrap_UserNotFound / Happy / Idempotent / Concurrent
@@ -393,17 +393,20 @@ func TestIamExtRepos_6_6_6_SAOAuth_Insert_Happy(t *testing.T) {
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID(sid),
-		OAuthClientID:   domain.OAuthClientID("provider-client-66-001"),
 		Description:     domain.Description("CI builder OAuth client"),
 		CreatedByUserID: domain.UserID(uid),
 	})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
-	assert.Equal(t, domain.OAuthClientID("provider-client-66-001"), out.OAuthClientID)
+	assert.Equal(t, domain.CredentialKindKeypair, out.CredentialKind)
 	assert.Nil(t, out.LastUsedAt)
 }
 
-func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
+// TestIamExtRepos_6_6_7a_SAOAuth_DuplicateID_Unique — повтор идентификатора
+// строки — отказ ErrAlreadyExists. Прежде предметом был уникальный индекс имени
+// клиента у внешнего поставщика; столбец и индекс сняты (kaname#362), и
+// отображение отказа уникальности держится на ключе строки.
+func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateID_Unique(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires Docker")
 	}
@@ -411,6 +414,7 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
 	uid, accID := kac127SeedUserAndAccount(t, ctx, pool, "so7a")
 	sid1 := seedSvcAccount(t, ctx, pool, accID, "so7a1")
 	sid2 := seedSvcAccount(t, ctx, pool, accID, "so7a2")
+	id := domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient))
 
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
@@ -418,9 +422,8 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
-		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
+		ID:              id,
 		SvaID:           domain.ServiceAccountID(sid1),
-		OAuthClientID:   domain.OAuthClientID("dup-hydra-id-7a"),
 		CreatedByUserID: domain.UserID(uid),
 	})
 	require.NoError(t, err)
@@ -428,12 +431,9 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
 
 	tx2 := mustBeginTx(t, ctx, pool)
 	_, err = repo.Insert(ctx, tx2, domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
-		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
-		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
+		ID:              id,
 		SvaID:           domain.ServiceAccountID(sid2),
-		OAuthClientID:   domain.OAuthClientID("dup-hydra-id-7a"),
 		CreatedByUserID: domain.UserID(uid),
 	})
 	require.Error(t, err)
@@ -456,7 +456,6 @@ func TestIamExtRepos_6_6_7b_SAOAuth_MissingSva_FK(t *testing.T) {
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID("sva_kac127nonexist01"),
-		OAuthClientID:   domain.OAuthClientID("hyd-7b"),
 		CreatedByUserID: domain.UserID(uid),
 	})
 	require.Error(t, err)

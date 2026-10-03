@@ -66,7 +66,7 @@ const (
 //     (kaname#423): its authorization endpoint and the `authorization_code`
 //     and `refresh_token` grants of the token endpoint issue these tokens.
 //
-// A CAEP receiver and a Hydra back-channel logout endpoint were named here as
+// A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
 // the back-channel contract this comment pointed at is in no module. They are
 // named in the negative rather than deleted silently, because an integrator
@@ -251,7 +251,7 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //     (kaname#423): its authorization endpoint and the `authorization_code`
 //     and `refresh_token` grants of the token endpoint issue these tokens.
 //
-// A CAEP receiver and a Hydra back-channel logout endpoint were named here as
+// A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
 // the back-channel contract this comment pointed at is in no module. They are
 // named in the negative rather than deleted silently, because an integrator

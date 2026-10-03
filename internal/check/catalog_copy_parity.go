@@ -50,9 +50,10 @@
 // ЧТО СВЕРКА УТВЕРЖДАЕТ ТЕПЕРЬ
 //
 // Норма прежняя и НЕ ослаблена: копии — ОДИН порождённый артефакт. Изменилось
-// то, что у равенства появились ДВА закрытых перечня объявленных окон —
-// переименования фундамента и записи службы, ждущие края (kaname#181), — и
-// каждая запись обязана держать себя САМА в обе стороны. Остаток после их
+// то, что у равенства появились ТРИ закрытых перечня объявленных окон —
+// переименования фундамента, записи службы, ждущие края (kaname#181), и
+// глаголы, снятые службой, которые край ещё называет (kaname#564), — и каждая
+// запись обязана держать себя САМА в обе стороны. Остаток после их
 // применения — находка с прежним текстом.
 //
 // Сравнение остаётся ПОБАЙТОВЫМ, а не «по смыслу»: файл режется на блоки
@@ -210,83 +211,80 @@ type CatalogPendingEntry struct {
 // части побайтово: пересинхронизация не нужна, а `sync-permission-catalog`
 // здесь ВРЕДНА — наша копия надмножество края на шесть глаголов ключа доступа
 // (kacho#1273), и `cp` копии края поверх снял бы их.
-var catalogPendingEntries = []CatalogPendingEntry{
-	// ШЕСТЬ ГЛАГОЛОВ КЛЮЧА ДОСТУПА (Ф7, kacho#1273; Р11): с ними записей с полом
-	// «1» в копии 289, с полом «2» — по-прежнему 30 (четыре глагола ключа стоят
-	// на «1» при соседях-удостоверениях на «2» — решение Р11, а не недосмотр).
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/BeginRegistration",
-		Why: "глагол начала церемонии регистрации ключа заведён контрактом службы (kacho#1273, Ф7 Р11: " +
-			"пол «1», `token_issuer` на `iam_user` по `user_id`); запись порождена генератором края над " +
-			"этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы с отбором домена iam " +
-			"над деревом, где `kaname/` — контракт службы этой ревизии: 116 имён службы против 110 в " +
-			"копии, остальные 110 совпали побайтово; у края на стволе платформы b5fa093341f записей 341, " +
-			"ни одной из шести нет); край порождает свою копию по пину службы и увидит запись после " +
-			"подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/BeginRegistration` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/FinishRegistration",
-		Why: "глагол приёма результата церемонии регистрации ключа заведён контрактом службы (kacho#1273, " +
-			"Ф7 Р11: пол «1», `token_issuer` на `iam_user` по `user_id`); запись порождена тем же прогоном " +
-			"генератора края, что у `AccessKeyService/BeginRegistration` (шесть глаголов одной службы " +
-			"одним контрактом); край увидит запись после подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/FinishRegistration` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/List",
-		Why: "глагол перечня ключей человека заведён контрактом службы (kacho#1273, Ф7 Р11: пол «1», " +
-			"`token_reader` на `iam_user` по `user_id`); запись порождена тем же прогоном генератора " +
-			"края, что у `AccessKeyService/BeginRegistration`; край увидит запись после подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/List` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/Revoke",
-		Why: "глагол снятия ключа заведён контрактом службы (kacho#1273, Ф7 Р11: пол «1», `token_issuer` " +
-			"на `iam_user` по `user_id`); запись порождена тем же прогоном генератора края, что у " +
-			"`AccessKeyService/BeginRegistration`; край увидит запись после подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/Revoke` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/BeginAssertion",
-		Why: "глагол начала испытания утверждения ключа заведён контрактом службы (kacho#1273, Ф7 Р11: " +
-			"освобождён, `SELF_SERVICE`, без пола — вызывающий ещё не назвался); запись порождена тем же " +
-			"прогоном генератора края, что у `AccessKeyService/BeginRegistration`; край увидит запись " +
-			"после подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/BeginAssertion` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-	{
-		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/FinishAssertion",
-		Why: "глагол проверки утверждения ключа заведён контрактом службы (kacho#1273, Ф7 Р11: освобождён, " +
-			"`SELF_SERVICE`, без пола — предъявление и есть вход); запись порождена тем же прогоном " +
-			"генератора края, что у `AccessKeyService/BeginRegistration`; край увидит запись после " +
-			"подъёма пина",
-		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/FinishAssertion` " +
-			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
-			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
-		Refs: "PRO-Robotech/kacho#1273",
-	},
-}
+//
+// Самоистечение сработало в третий раз 2026-10-03: ствол платформы `e702195f5`
+// (kacho#2718, «край Ф7: шесть глаголов AccessKeyService на внешнем крае»)
+// назвал все шесть глаголов ключа доступа (kacho#1273) — шесть записей сняты
+// тем же изменением, перечень пуст (перепись до снятия: у края 349 · у нас 348 ·
+// ожидающих 6 · применено 0). Наша копия несла их в ФОРМЕ КРАЯ, поэтому в их
+// части копии совпадают побайтово и пересинхронизация не нужна.
+//
+// Пустой перечень — цель, а не отказ: сверка на нём проходит с переписью
+// «ожидающих края объявлено 0» (TestDeclaredPendingEntriesCarryASubject
+// проходит на пустом), а способность записи истечь
+// доказывается синтетикой (TestDeclaredPendingEntryExpiresOnItsOwn), не живой
+// записью.
+var catalogPendingEntries = []CatalogPendingEntry{}
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogPendingEntries() []CatalogPendingEntry {
 	out := make([]CatalogPendingEntry, len(catalogPendingEntries))
 	copy(out, catalogPendingEntries)
+	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ТРЕТИЙ ВИД ЗАПИСИ — ГЛАГОЛ, СНЯТЫЙ СЛУЖБОЙ, КОТОРЫЙ КРАЙ ЕЩЁ НАЗЫВАЕТ (kaname#564)
+//
+// Зеркало второго вида с обратным знаком: служба СНЯЛА свой глагол вместе с его
+// записью, а копия края порождается из контракта службы ПО ПИНУ — то есть
+// перестанет его называть только после посадки снятия в ствол службы и подъёма
+// пина платформой. Промежуточного состояния, в котором обе копии совпали бы, не
+// существует by construction — ровно как у записи, ждущей края.
+//
+// Запись объявляет: у края эта запись ЕСТЬ, у нас её УЖЕ НЕТ, и это не
+// расхождение. Держит себя в обе стороны: край перестал называть глагол —
+// предикат снятия наступил, запись обязана уйти; в нашей копии глагол всё ещё
+// есть — запись утверждает о дереве неправду.
+//
+// Что при этом НЕ ослаблено: из сравнения выносится ровно названная запись края
+// и только пока её нет у нас. Расхождение содержимым любой другой записи, лишняя
+// запись с любой стороны и форма файла судятся побайтово, как прежде.
+
+// CatalogRetiredEntry — запись копии края, чей глагол служба уже сняла, а край
+// ещё называет, потому что порождает её из нашего контракта по пину.
+type CatalogRetiredEntry struct {
+	// EdgeFQN — полное имя снятого метода в копии края.
+	EdgeFQN string
+	// Why — почему присутствие у края не дефект.
+	Why string
+	// Removal — ПРЕДИКАТ СНЯТИЯ, внешний по отношению к этому дереву.
+	Removal string
+	// Refs — где предмет ведётся.
+	Refs string
+}
+
+// catalogRetiredEntries — ЗАКРЫТЫЙ перечень снятых службой глаголов, которые
+// край ещё называет. Условия те же три, что у прочих окон. Самоистечение держит
+// `CompareCatalogCopies`: запись, чей глагол край больше не называет, — находка.
+//
+// Самоистечение сработало 2026-10-03: ствол платформы `e801c0f78` больше не
+// называет `InternalUserService/OnRecoveryCompleted` (kaname#564) — платформа
+// подняла пин службы до `0dd03218` (kacho#3000, `7032505b37e`) и
+// перегенерировала каталог; запись снята тем же
+// изменением, перечень пуст (перепись до снятия: у края 348 · у нас 348 ·
+// снятых службой объявлено 1 · применено 0 · побайтово до ведомости true).
+// Копии теперь совпадают побайтово целиком, ни одного окна не объявлено.
+//
+// Пустой перечень — цель, а не отказ: сверка на нём проходит с переписью
+// «снятых службой объявлено 0», а способность записи истечь доказывается
+// синтетикой (TestDeclaredRetiredEntryExpiresOnItsOwn), не живой записью.
+var catalogRetiredEntries = []CatalogRetiredEntry{}
+
+// CatalogRetiredEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
+func CatalogRetiredEntries() []CatalogRetiredEntry {
+	out := make([]CatalogRetiredEntry, len(catalogRetiredEntries))
+	copy(out, catalogRetiredEntries)
 	return out
 }
 
@@ -322,6 +320,11 @@ type CatalogParityCensus struct {
 	// PendingApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
 	// глагол есть у нас и его ещё нет у края.
 	PendingApplied int
+	// RetiredDeclared — записей о снятых службой глаголах в ведомости.
+	RetiredDeclared int
+	// RetiredApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
+	// глагол есть у края и его уже нет у нас.
+	RetiredApplied int
 	// BytesEqual — совпали ли копии побайтово ДО применения ведомости.
 	BytesEqual bool
 }
@@ -330,16 +333,18 @@ type CatalogParityCensus struct {
 func (c CatalogParityCensus) String() string {
 	return fmt.Sprintf(
 		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · "+
-			"ожидающих края объявлено %d · применено %d · побайтово до ведомости %v",
+			"ожидающих края объявлено %d · применено %d · снятых службой объявлено %d · применено %d · "+
+			"побайтово до ведомости %v",
 		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied,
-		c.PendingDeclared, c.PendingApplied, c.BytesEqual)
+		c.PendingDeclared, c.PendingApplied, c.RetiredDeclared, c.RetiredApplied, c.BytesEqual)
 }
 
 // CompareCatalogCopies — сверка против ДЕЙСТВУЮЩЕЙ ведомости дерева. Возвращает
 // перечень находок (пустой = зелёное) и перепись. Ошибка — это ТРЕТИЙ ИСХОД:
 // разобрать не удалось, вердикта о совпадении копий НЕТ (не путать с находкой).
 func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, CatalogParityCensus, error) {
-	return compareCatalogCopiesWith(catalogFoundationRenames, catalogPendingEntries, edgeRaw, ownRaw)
+	return compareCatalogCopiesWithLedgers(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
+		edgeRaw, ownRaw)
 }
 
 // compareCatalogCopiesWith — та же сверка с ЯВНЫМИ ведомостями.
@@ -350,9 +355,19 @@ func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, Catal
 func compareCatalogCopiesWith(
 	renames []CatalogFoundationRename, pending []CatalogPendingEntry, edgeRaw, ownRaw string,
 ) ([]CatalogParityFinding, CatalogParityCensus, error) {
+	return compareCatalogCopiesWithLedgers(renames, pending, nil, edgeRaw, ownRaw)
+}
+
+// compareCatalogCopiesWithLedgers — та же сверка со всеми тремя ЯВНЫМИ
+// ведомостями (форма для проб третьего вида записи).
+func compareCatalogCopiesWithLedgers(
+	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
+	edgeRaw, ownRaw string,
+) ([]CatalogParityFinding, CatalogParityCensus, error) {
 	census := CatalogParityCensus{
 		RenamesDeclared: len(renames),
 		PendingDeclared: len(pending),
+		RetiredDeclared: len(retired),
 		BytesEqual:      edgeRaw == ownRaw,
 	}
 
@@ -417,6 +432,30 @@ func compareCatalogCopiesWith(
 		awaited[e.OwnFQN] = true
 		census.PendingApplied++
 	}
+	// ── ЗАПИСИ О СНЯТЫХ СЛУЖБОЙ ГЛАГОЛАХ ДЕРЖАТ СЕБЯ В ОБЕ СТОРОНЫ ────────────
+	//
+	// Край больше не называет глагол → предикат снятия наступил: запись обязана
+	// уйти. У нас глагол всё ещё есть → ведомость утверждает о НАШЕМ дереве
+	// неправду. Только при предмете с обеих сторон запись края выносится из
+	// сравнения — и ровно она одна.
+	retiredAway := make(map[string]bool, len(retired))
+	for _, e := range retired {
+		if _, ok := edgeByFQN[e.EdgeFQN]; !ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"край больше не несёт снятый глагол %q — предикат снятия наступил: снимите запись. %s",
+				e.EdgeFQN, e.Refs)})
+			continue
+		}
+		if _, ok := ownByFQN[e.EdgeFQN]; ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись объявляет глагол %q снятым, а в НАШЕЙ копии он есть — она утверждает о дереве неправду. %s",
+				e.EdgeFQN, e.Refs)})
+			continue
+		}
+		retiredAway[e.EdgeFQN] = true
+		census.RetiredApplied++
+	}
+
 	ownCompared := ownBlocks
 	if len(awaited) > 0 {
 		ownCompared = make([]catalogBlock, 0, len(ownBlocks))
@@ -433,6 +472,9 @@ func compareCatalogCopiesWith(
 	// после подстановки блоки пересортировываются, и только тогда сравниваются.
 	projected := make([]catalogBlock, 0, len(edgeBlocks))
 	for _, b := range edgeBlocks {
+		if retiredAway[b.fqn] {
+			continue
+		}
 		if own, ok := renamed[b.fqn]; ok {
 			body := strings.Replace(b.body, catalogFQNField(b.fqn), catalogFQNField(own), 1)
 			if body == b.body {

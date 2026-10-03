@@ -186,7 +186,6 @@ func newConcurrencyScene(t *testing.T) *concurrencyScene {
 	t.Cleanup(pool.Close)
 	log := &storeRefusalLog{}
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithSessionRevoker(kanamepg.NewSessionRevocationsAdapter(pool)).
 		WithAdminChecker(allowAdmin{}).
 		WithOperations(operations.NewRepo(pool, "kaname")).
 		WithOwnSessions(observedOwnSessions{inner: kanamepg.NewHumanSessionRepo(pool), log: log})

@@ -15,7 +15,7 @@
 //
 // Методы:
 //   - LookupSubject(by external_id|id|email) — для auth-interceptor api-gateway
-//     после валидации JWT (Ory Hydra).
+//     после валидации JWT.
 //   - Check — single-tuple authorization gate; delegate к AuthorizeService.
 //     Вызывается per-RPC authz-interceptor'ами
 //     kacho-vpc / kacho-compute / kacho-loadbalancer.
@@ -114,11 +114,6 @@ type Handler struct {
 	// жизнь контроля» обязано быть заметно, иначе мёртвый контроль невидим.
 	logger *slog.Logger
 
-	// sessionRevoker — writer for ForceLogout. nil → the RPC
-	// fails closed Unavailable. Shares the session_revocations table with the
-	// user-logout Revoke path and the refresh-hook reader.
-	sessionRevoker sessionRevoker
-
 	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate for the
 	// privileged admin RPCs (ForceLogout). nil → fail-closed (the gate denies).
 	// See force_logout.go requireSystemAdmin.
@@ -129,17 +124,9 @@ type Handler struct {
 	// closed Unavailable rather than returning an id that names no row.
 	operations forceLogoutOperationRepo
 
-	// providerSessions / externalIDs — the identity provider's login-session
-	// surface and the resolver naming a kacho user to it, used by ForceLogout to
-	// END the session rather than only record that it must not be honoured.
-	// Both nil when that surface is not configured.
-	providerSessions ProviderSessions
-	externalIDs      ExternalIDResolver
-
-	// ownSessions — снятие НАШИХ записей сессии входа (`human_sessions`).
-	// Провязывается на посадке `own`, где внешнего поставщика нет вовсе и
-	// сессия входа человека — наша строка. nil на посадке `external`: там
-	// сессией владеет поставщик, и снимает её поле выше.
+	// ownSessions — снятие НАШИХ записей сессии входа (`human_sessions`),
+	// отсечка и запись события одной транзакцией (kaname#340). nil → ForceLogout
+	// fails closed Unavailable.
 	ownSessions OwnSessions
 }
 

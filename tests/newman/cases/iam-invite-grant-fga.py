@@ -151,7 +151,8 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     (pre-request URL rewrite to {{ownInternalRestBaseUrl}}): /iam/v1/internal/iam:check is
     served ONLY on :18081, so without the redirect gen.py's {{baseUrl}} (:18080)
     404s — the edge's routing error {"code":5,"message":"Not Found"}, byte-identical to a
-    nonsense path. Matches label-revoke-vpc.py."""
+    nonsense path. Same override as the label-revoke suites, now in the platform's
+    vpc suite (PRO-Robotech/kacho:services/vpc/tests/newman/cases/label-revoke-vpc.py)."""
     retry = []
     if poll:
         retry = [
@@ -530,9 +531,9 @@ CASES.append(Case(
 # RC-2 invite-activation member edge — NOT BLACK-BOX-TESTABLE HERE; covered at
 # integration level (T-I3, internal/repo/kaname/pg/upsert_invite_grant_fga_integration_test.go,
 # GREEN). RC-2 co-commits `account:<A>#account@iam_user:<invitee>` ONLY on genuine
-# activation through the Kratos provision-hook flow
+# activation through the provision flow
 # (InternalUserService.UpsertFromIdentity). The black-box own-front harness has
-# no Kratos-hook fixture, so the member tuple is never emitted in e2e — these
+# no provision fixture, so the member tuple is never emitted in e2e — these
 # cases asserted an activation tuple the fixture never produces (RED for a
 # test-authoring reason, not a product bug; RC-2 is 150/0 GREEN at integration).
 # Intentionally not reproduced here.

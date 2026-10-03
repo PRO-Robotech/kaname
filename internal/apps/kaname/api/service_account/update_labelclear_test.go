@@ -149,12 +149,6 @@ func (w *lcsWriter) EmitReconcileEvent(_ context.Context, _, objectType, objectI
 	}
 	return nil
 }
-func (w *lcsWriter) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
-	return domain.RecoveryCompletion{}, false, nil
-}
-func (w *lcsWriter) UpsertUserTokenRevokeAll(context.Context, domain.UserTokenRevocation, domain.UserID) error {
-	return nil
-}
 func (w *lcsWriter) Savepoint(context.Context, string) error           { return nil }
 func (w *lcsWriter) RollbackToSavepoint(context.Context, string) error { return nil }
 func (w *lcsWriter) ReleaseSavepoint(context.Context, string) error    { return nil }

@@ -109,8 +109,9 @@ type IssueSAKeyRequest struct {
 	// доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
 	// АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
 	//
-	// LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
-	// глагол.
+	// Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
+	// потока — отвергается синхронно с именем поля, а не выпускается ключевой
+	// парой.
 	CredentialKind CredentialKind `protobuf:"varint,9,opt,name=credential_kind,json=credentialKind,proto3,enum=kaname.cloud.iam.v1.CredentialKind" json:"credential_kind,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -311,7 +312,9 @@ func (x *TrustedSubject) GetKeyAlgorithm() string {
 type IssueSAKeyResponse struct {
 	state protoimpl.MessageState     `protogen:"open.v1"`
 	Key   *ServiceAccountOAuthClient `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Plaintext OAuth client_id (Hydra-registered).
+	// OAuth client_id — the id of the key row, the same value as `key.id` and
+	// `key_id`. The signed assertion names itself by it (`iss` and `sub`) at the
+	// platform token endpoint.
 	ClientId string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	// DEPRECATED — with private_key_jwt client auth the secret no
 	// longer exists; this field is always empty for new keys. Kept for wire
@@ -325,30 +328,26 @@ type IssueSAKeyResponse struct {
 	ClientSecret string `protobuf:"bytes,3,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
 	// PEM-encoded PKCS#8 ECDSA P-256 private key — SHOWN ONCE; never
 	// recoverable. Caller uses it to sign `client_assertion` (RFC 7521/7523)
-	// in OAuth2 client_credentials requests against Hydra.
+	// in OAuth2 `client_credentials` requests to the platform token endpoint.
 	//
 	// Помечен носителем секрета: приватная половина — предъявительский секрет
 	// ровно в том же смысле, что и однострочный базовый, и оседать в строке
 	// операции, журнале аудита, ленте подписки или строке ресурса не имеет права.
 	PrivateKeyPem string `protobuf:"bytes,4,opt,name=private_key_pem,json=privateKeyPem,proto3" json:"private_key_pem,omitempty"`
-	// PEM-encoded SPKI public key (informational; Hydra holds the canonical
-	// copy as a JWK in the registered client metadata).
+	// PEM-encoded SPKI public key (informational; the canonical copy is the key
+	// row, and the platform token endpoint verifies the assertion against it).
 	PublicKeyPem string `protobuf:"bytes,5,opt,name=public_key_pem,json=publicKeyPem,proto3" json:"public_key_pem,omitempty"`
 	// JOSE signing algorithm used by the private key. Always "ES256".
 	Algorithm string `protobuf:"bytes,6,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
-	// JWK `kid` of the registered public key. Caller MUST set the `kid`
-	// header of signed assertions to this value so Hydra picks the right key.
+	// JWK `kid` of the registered public key; the same value as `client_id`.
 	KeyId string `protobuf:"bytes,7,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
-	// Перечень адресатов, которые этот ключ вправе заказать.
+	// Перечень адресатов, которые этот ключ вправе заказать, — сужение,
+	// записанное на ключе при выдаче (`audience` запроса, задача #1136).
+	// Токен-эндпоинт платформы выдаёт адресата только из этого перечня и только
+	// внутри перечня посадки (`authn.client-token.allowed-audiences`).
 	//
-	// Величина зависит от контура выдачи, и это не деталь реализации, а ответ на
-	// вопрос «что этот ключ сможет заказать». Пока клиент зеркалится у прежнего
-	// издателя, решает перечень зеркала — обмен идёт у него, и он сверяет с ним.
-	// На переведённом контуре зеркала нет вовсе, и решает записанное на ключе
-	// сужение (`audience` запроса, задача #1136).
-	//
-	// Пустой перечень на переведённом контуре — утверждение, а не умолчание:
-	// сужения ключ не объявлял, действует перечень посадки.
+	// Пустой перечень — утверждение, а не умолчание: сужения ключ не объявлял,
+	// действует перечень посадки.
 	Audiences []string `protobuf:"bytes,8,rep,name=audiences,proto3" json:"audiences,omitempty"`
 	// Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
 	// вида SECRET; у KEYPAIR и FEDERATED пуст.

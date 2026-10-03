@@ -78,32 +78,34 @@ func (User_InviteStatus) EnumDescriptor() ([]byte, []int) {
 }
 
 // A User resource. Человек — ГЛОБАЛЬНАЯ личность платформы: одна строка на всё
-// облако, в скольких бы аккаунтах он ни состоял. Активируется при первом входе
-// через поставщика удостоверений с матчингом по почте.
+// облако, в скольких бы аккаунтах он ни состоял. Ключи личности
+// `users_identity_email_uniq` и `users_identity_external_id_uniq` глобальны, а
+// принадлежность аккаунтам выражают строки `memberships` (`membership.proto`):
+// аккаунтов у человека может быть несколько.
 //
-// > Здесь стояла ПРЕЖНЯЯ модель — «один Kratos identity = N User-rows, по одному
-// > per Account, куда invited; external_id уникален per-Account, не глобально».
-// > Она снята: ключи `users_identity_email_uniq` и
-// > `users_identity_external_id_uniq` (миграция 20260823050000) ГЛОБАЛЬНЫ, а
-// > принадлежность аккаунтам выражают строки `memberships` (`membership.proto`).
-// > Утверждение не удалено, а перевёрнуто на месте: оно стояло ПЕРВЫМ абзацем
-// > определения ресурса, то есть читалось раньше всего остального, — и из него
-// > выводили, что аккаунт человека один, а запрет или приглашение действуют в
-// > пределах одного аккаунта. Ниже это же поправлено у `account_id` (снят) и у
-// > `invite_status` (состояние принадлежит личности).
+// Личность заводят регистрация и активация приглашения в исходе подтверждения
+// адреса — обе на полосе входа самой службы — и внутренний
+// `InternalUserService.UpsertFromIdentity` (см. `external_id`, `invite_status`).
 //
 // Resource id prefix: `usr` (concatenated form, `ids.NewID`).
 type User struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the user (kaname internal id).
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// External identity provider id (Kratos `sub` claim). Пусто у PENDING:
-	// личность пишет активация приглашения (kaname#456).
+	// Идентичность субъекта входа. Регистрация и активация приглашения в исходе
+	// подтверждения адреса (kaname#456) пишут значение, отчеканенное полосой
+	// входа службы, — `own:sub-<…>`; внутренний
+	// `InternalUserService.UpsertFromIdentity` пишет значение, которое приносит
+	// его вызывающий. Уникально на всю установку, после записи не меняется.
+	// Пусто у PENDING.
 	ExternalId string `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	// Email (case-insensitive lookup). При Invite — email указывается admin'ом;
-	// при first-login через Kratos — матчится с identity email.
+	// Email (case-insensitive lookup). При Invite адрес указывает пригласивший;
+	// регистрация адресом живого приглашения ложится на строку этого
+	// приглашения, а не заводит вторую.
 	Email string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	// Human-readable display name (snapshot из Kratos identity traits).
+	// Human-readable display name. Задаёт пригласивший при Invite либо
+	// вызывающий `InternalUserService.UpsertFromIdentity`; не задано — берётся
+	// локальная часть адреса (до `@`).
 	DisplayName string `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Creation timestamp.
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
@@ -114,7 +116,11 @@ type User struct {
 	//	входит в положение подтверждения; приглашение активирует подтверждение
 	//	адреса, пока приглашение живо.
 	//
-	// ACTIVE  — login'нулся через Kratos, external_id заполнен.
+	// ACTIVE  — личность заведена, external_id заполнен: регистрацией без
+	//
+	//	приглашения, подтверждением адреса живого приглашения либо внутренним
+	//	`InternalUserService.UpsertFromIdentity`.
+	//
 	// BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
 	//
 	//	`UserService.Unblock`).

@@ -135,13 +135,13 @@ func TestIAMExternalSurfaceWithoutAuthIsRefused(t *testing.T) {
 // есть ОБЪЯВЛЕНИЕ, и цена выключения у каждой своя.
 //
 // Это и есть предмет `addrAxis`: причина требуется аргументом, а не берётся из
-// общего шаблона. У скрейпа выключение стоит наблюдаемости, у зеркала ключей —
+// общего шаблона. У скрейпа выключение стоит наблюдаемости, у публикатора ключей —
 // закрытой верификации всей плоскости данных реестра, и общая формулировка
 // сделала бы обе неразличимыми.
 func TestIAMSurfaceDisabledByDeclarationCarriesItsReason(t *testing.T) {
-	const because = "адрес зеркала ключей не задан: плоскости данных реестра неоткуда взять ключи"
+	const because = "адрес публикатора ключей не задан: плоскости данных реестра неоткуда взять ключи"
 	d, err := iamHTTPSurface(servicecontract.Surface{
-		Name:   "зеркало ключей (проба)",
+		Name:   "публикатор ключей (проба)",
 		Mode:   servicecontract.ModeProduction,
 		Logger: discardSurfaceLogger(),
 		Addr:   addrAxis("", because),

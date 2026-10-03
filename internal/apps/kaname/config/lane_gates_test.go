@@ -1,19 +1,20 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// lane_gates_test.go — ГЕЙТЫ по дереву для полосности посадки личности:
-// сценарии F4d-03, F4d-10 и F4d-11 приёмки Ф4д.
+// lane_gates_test.go — ГЕЙТЫ по дереву для требований полосы своего входа:
+// сценарии F4d-10 и F4d-11 приёмки Ф4д (F4d-03, гейт словаря посадки, снят
+// вместе со словарём, kaname#363).
 //
-// Все три судят РАЗОБРАННЫЙ исходник, а не текст: канонические имена значений
-// стоят и в комментариях, и в текстах отказов, поэтому проверка по подстроке
-// краснела бы на собственном объяснении. Каждый печатает объём осмотренного и
+// Оба судят РАЗОБРАННЫЙ исходник, а не текст: имена стоят и в комментариях, и в
+// текстах отказов, поэтому проверка по подстроке краснела бы на собственном
+// объяснении. Каждый печатает объём осмотренного и
 // падает на пустом обходе — «ноль находок» обязано быть отличимо от «ноль
 // прочитанного». Способность падать и молчать доказана инъекцией в обе стороны
 // (lane_gates_injection_test.go).
 //
 // ПОЧЕМУ ГЕЙТЫ ЖИВУТ ЗДЕСЬ, А НЕ В ОБЩЕЙ ГИГИЕНЕ ДЕРЕВА. Их предмет — ОДИН
-// пакет: словарь значений поля, таблица требований полос и ручки разговора с
-// поставщиком объявлены здесь и нигде больше. Гейт, стоящий рядом со своим
+// пакет: таблица требований и ручки разговора с поставщиком объявлены здесь и
+// нигде больше. Гейт, стоящий рядом со своим
 // предметом, читает его без обхода всего дерева и не может разойтись с ним
 // каталогом.
 package config_test
@@ -64,28 +65,36 @@ func parsePackageFiles(t *testing.T) (*token.FileSet, map[string]*ast.File) {
 // F4d-10 — проба отказа старта ТАБЛИЧНАЯ по объявлению, а не по своему перечню.
 
 // Гейт утверждает три вещи сразу: таблица объявлена ровно одна; проба обходит
-// ИМЕННО её; ни при одном значении поля множество обязательных элементов не
-// пусто.
+// ИМЕННО её; ни одна стадия старта не пуста.
+//
+// Прежде третье утверждение звучало «ни при одном значении поля посадки
+// множество обязательных элементов не пусто», и перепись шла по полосам.
+// Посадка у службы одна (kaname#363); вырожденный исход снятия оси — таблица,
+// у которой строки есть, но ни одна не исполняется на какой-то стадии, — и
+// судится теперь переписью по стадиям.
 func TestF4d10_BootRefusalProbeWalksTheDeclaredTable(t *testing.T) {
 	fset, files := parsePackageFiles(t)
 
 	// (1) таблица объявлена ровно одна
 	census := inspectLaneTable(files)
-	decls, rows, perLane := census.Declarations, census.Rows, census.PerLane
+	decls, rows, perStage := census.Declarations, census.Rows, census.PerStage
 	if decls != 1 {
-		t.Fatalf("объявлений таблицы требований полос — %d, обязано быть ровно 1: второе разошлось бы с первым молча", decls)
+		t.Fatalf("объявлений таблицы требований — %d, обязано быть ровно 1: второе разошлось бы с первым молча", decls)
 	}
 	if rows == 0 {
 		t.Fatal("таблица пуста — обходить нечего, и гейт судил бы о непрочитанном")
 	}
 
-	// (2) НЕ СУЩЕСТВУЕТ значения поля, при котором множество обязательных
-	//     элементов пусто. Самое сильное утверждение сценария.
-	lanes := []string{"laneExternal", "laneOwn"}
-	for _, lane := range lanes {
-		if perLane[lane] == 0 {
-			t.Errorf("полоса %s не несёт НИ ОДНОГО обязательного элемента — посадка поднималась бы без всякой проверки личности", lane)
+	// (2) НИ ОДНА стадия не пуста: стадия без требований означала бы старт,
+	//     поднимающийся без проверки того, чем служба удостоверяет человека.
+	stages := []string{"LaneStageConfig", "LaneStageWiring"}
+	for _, stage := range stages {
+		if perStage[stage] == 0 {
+			t.Errorf("стадия %s не несёт НИ ОДНОГО требования — старт поднимался бы без неё", stage)
 		}
+	}
+	if sum := perStage["LaneStageConfig"] + perStage["LaneStageWiring"]; sum != rows {
+		t.Errorf("строк таблицы %d, а по стадиям насчитано %d — у строки стадия, которой перепись не знает", rows, sum)
 	}
 
 	// (3) проба обходит именно это объявление
@@ -100,39 +109,32 @@ func TestF4d10_BootRefusalProbeWalksTheDeclaredTable(t *testing.T) {
 	}
 	if !rangesOverLaneRequirements(pf) {
 		t.Errorf("проба отказа старта не обходит config.LaneRequirements — она перестала быть табличной, "+
-			"и клетка произведения может остаться непокрытой (%s)", probeFile)
+			"и строка может остаться непокрытой (%s)", probeFile)
 	}
 
-	t.Logf("перепись: клеток в таблице %d (external %d · own %d) · порождено случаев %d · объявлений таблицы %d",
-		rows, perLane["laneExternal"], perLane["laneOwn"], rows*len(lanes), decls)
+	t.Logf("перепись: строк в таблице %d (настройка %d · сборка %d) · порождено случаев %d · объявлений таблицы %d",
+		rows, perStage["LaneStageConfig"], perStage["LaneStageWiring"], rows, decls)
 }
 
-// rowLanes возвращает имена перечней полос, названные строкой таблицы.
-func rowLanes(row *ast.CompositeLit) []string {
-	var out []string
+// rowStage возвращает имя стадии, названной строкой таблицы; пусто — стадии нет.
+func rowStage(row *ast.CompositeLit) string {
 	for _, el := range row.Elts {
 		kv, ok := el.(*ast.KeyValueExpr)
 		if !ok {
 			continue
 		}
 		key, ok := kv.Key.(*ast.Ident)
-		if !ok || key.Name != "Lanes" {
+		if !ok || key.Name != "Stage" {
 			continue
 		}
 		switch v := kv.Value.(type) {
 		case *ast.Ident:
-			out = append(out, v.Name)
-		case *ast.CompositeLit:
-			for _, e := range v.Elts {
-				if id, ok := e.(*ast.Ident); ok {
-					out = append(out, id.Name)
-				} else if sel, ok := e.(*ast.SelectorExpr); ok {
-					out = append(out, sel.Sel.Name)
-				}
-			}
+			return v.Name
+		case *ast.SelectorExpr:
+			return v.Sel.Name
 		}
 	}
-	return out
+	return ""
 }
 
 // rangesOverLaneRequirements — есть ли в пробе обход именно объявленной
@@ -202,11 +204,23 @@ func TestF4d11_EveryProviderKnobIsVisibleToConfigValidation(t *testing.T) {
 	}
 	sort.Strings(invisible)
 
-	t.Logf("перепись: файлов пакета настройки осмотрено %d; ручек разговора с поставщиком в дереве службы %d; видимых проверке %d",
-		len(files), len(env.names), len(env.names)-len(invisible))
+	t.Logf("перепись: файлов пакета настройки осмотрено %d; файлов Go дерева службы прочитано %d; "+
+		"ручек разговора с поставщиком в дереве службы %d; видимых проверке %d",
+		len(files), env.filesRead, len(env.names), len(env.names)-len(invisible))
 
+	// ПРЕДПОСЫЛКА — ПРОЧИТАННОЕ, А НЕ НАЙДЕННОЕ. Ручек разговора с поставщиком в
+	// дереве НОЛЬ с тех пор, как снята последняя дорога к нему — обмен у прежнего
+	// издателя (kaname#494). Это ЦЕЛЬ снятия, и падать на ней гейт не вправе:
+	// прежний отказ «ни одной ручки не найдено» краснел ровно на достигнутом.
+	// Отличить «ноль найдено» от «ноль прочитано» обязана перепись файлов, а
+	// способность найти ручку, если она вернётся, доказывают инъекции оси 3
+	// (lane_gates_injection_test.go) на синтетике.
+	if env.filesRead == 0 {
+		t.Fatal("обход пуст: ни одного файла Go дерева службы не прочитано — гейт судил бы о непрочитанном")
+	}
 	if len(env.names) == 0 {
-		t.Fatal("обход пуст: ни одной ручки разговора с поставщиком не найдено — гейт судил бы о непрочитанном")
+		t.Logf("ручек разговора с поставщиком 0 — предмет гейта снят вместе с последней дорогой к " +
+			"поставщику; вернувшаяся ручка будет судиться здесь же")
 	}
 	if len(invisible) > 0 {
 		t.Errorf("ручки разговора с поставщиком, невидимые проверке настройки при старте (%d): %s — "+
@@ -284,7 +298,7 @@ func looksLikeProviderEnvName(s string) bool {
 func TestF4d11_AKnobUnrelatedToTheProviderIsNotAFinding(t *testing.T) {
 	env := providerEnvKnobs(t, "../../../..")
 	for _, knob := range env.names {
-		if knob == "KANAME_HOOK_TOKEN" || knob == "KANAME_JWKS_ENC_KEY" {
+		if knob == "KANAME_JWKS_ENC_KEY" || knob == "KANAME_SECOND_FACTOR_ENC_KEY" {
 			t.Fatalf("ручка %q к разговору с поставщиком не относится и в перепись попадать не должна", knob)
 		}
 	}
@@ -295,6 +309,9 @@ func TestF4d11_AKnobUnrelatedToTheProviderIsNotAFinding(t *testing.T) {
 type envKnobs struct {
 	names []string
 	where map[string]string
+	// filesRead — сколько непроверочных файлов Go прочитано обходом дерева.
+	// Объём осмотренного: «ручек 0» без него неотличимо от «файлов 0».
+	filesRead int
 }
 
 // providerEnvKnobs собирает имена переменных окружения, читаемых непроверочным
@@ -323,6 +340,7 @@ func providerEnvKnobs(t *testing.T, serviceRoot string) envKnobs {
 		if perr != nil {
 			return nil
 		}
+		out.filesRead++
 		for _, name := range getenvNamesMentioningProvider(f) {
 			if !seen[name] {
 				seen[name] = true
@@ -344,16 +362,16 @@ func providerEnvKnobs(t *testing.T, serviceRoot string) envKnobs {
 // дереве: своя копия предиката в пробе инъекции разошлась бы с настоящим гейтом
 // молча, и доказательство перестало бы относиться к нему.
 
-// laneTableCensus — перепись таблицы требований полос.
+// laneTableCensus — перепись таблицы требований.
 type laneTableCensus struct {
 	Declarations int
 	Rows         int
-	PerLane      map[string]int
+	PerStage     map[string]int
 }
 
-// inspectLaneTable читает объявление таблицы требований полос.
+// inspectLaneTable читает объявление таблицы требований.
 func inspectLaneTable(files map[string]*ast.File) laneTableCensus {
-	c := laneTableCensus{PerLane: map[string]int{}}
+	c := laneTableCensus{PerStage: map[string]int{}}
 	for _, f := range files {
 		ast.Inspect(f, func(n ast.Node) bool {
 			vs, ok := n.(*ast.ValueSpec)
@@ -372,8 +390,8 @@ func inspectLaneTable(files map[string]*ast.File) laneTableCensus {
 						continue
 					}
 					c.Rows++
-					for _, lane := range rowLanes(row) {
-						c.PerLane[lane]++
+					if stage := rowStage(row); stage != "" {
+						c.PerStage[stage]++
 					}
 				}
 			}

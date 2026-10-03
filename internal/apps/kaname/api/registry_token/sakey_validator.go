@@ -29,13 +29,13 @@ import (
 // ErrInvalidCredentials (no detail leaks to the client).
 var errInvalidPEM = errors.New("registry token: invalid key PEM")
 
-// RegisteredKey — the SA-key registered for a Hydra client_id: its PUBLIC half
+// RegisteredKey — the SA-key registered for a client id: its PUBLIC half
 // (SPKI PEM), the JWK kid (the SA-OAuth-client id) and owning ServiceAccount,
 // plus an optional expiry. kaname never stores the private half. A federated
 // client carries no key material (PublicKeyPEM empty) — the docker path rejects it.
 type RegisteredKey struct {
 	ClientID     string
-	KeyID        string // the registered JWK kid → assertion header kid.
+	KeyID        string // the registered key id (the SA-key row id).
 	Subject      string // owning ServiceAccount id.
 	PublicKeyPEM string
 	KeyAlgorithm string
@@ -52,7 +52,7 @@ type RegisteredKey struct {
 	DeclaredAudiences []string
 }
 
-// SAClientLookup — reverse lookup of the SA-key registered for a Hydra client_id.
+// SAClientLookup — reverse lookup of the SA-key registered for a client id.
 // The composition root wires it to the SA-key store; the use-case package stays
 // free of pgx.
 type SAClientLookup interface {
@@ -60,11 +60,11 @@ type SAClientLookup interface {
 }
 
 // SAKeyValidator — the CredentialValidator for the docker path: the Basic user is
-// the Hydra client_id and the Basic password IS the issued SA-key private-key PEM
+// the SA-key client id and the Basic password IS the issued SA-key private-key PEM
 // (the one-shot secret the holder possesses). It authenticates by resolving the
 // registered key for the client_id and matching the derived public half against
 // it — so a rotated/revoked key stops working, and possession of the private key
-// is proof of identity. The verified (client_id, kid) then builds the assertion.
+// is proof of identity. The verified owner is then the subject our signer mints for.
 //
 // Any failure (empty input, unparseable key, unknown/federated client, no match,
 // expired) returns ErrInvalidCredentials — no distinction leaks which check failed.

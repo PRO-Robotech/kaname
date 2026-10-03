@@ -174,3 +174,25 @@ func TestDeclaredPendingEntriesCarryASubject(t *testing.T) {
 		}
 	}
 }
+
+// TestDeclaredRetiredEntriesCarryASubject — та же дисциплина для третьей
+// ведомости: у каждой записи названы причина, внешний предикат снятия и номер
+// предмета. На пустой ведомости проходит с переписью.
+func TestDeclaredRetiredEntriesCarryASubject(t *testing.T) {
+	retired := CatalogRetiredEntries()
+	t.Logf("перепись ведомости снятых службой глаголов: записей %d", len(retired))
+	for _, e := range retired {
+		if e.EdgeFQN == "" {
+			t.Errorf("запись ведомости без глагола: %+v", e)
+		}
+		if strings.TrimSpace(e.Why) == "" {
+			t.Errorf("запись ведомости без причины: %s", e.EdgeFQN)
+		}
+		if strings.TrimSpace(e.Removal) == "" {
+			t.Errorf("запись ведомости без предиката снятия: %s", e.EdgeFQN)
+		}
+		if !strings.Contains(e.Refs, "#") {
+			t.Errorf("запись ведомости без номера предмета: %s (refs=%q)", e.EdgeFQN, e.Refs)
+		}
+	}
+}

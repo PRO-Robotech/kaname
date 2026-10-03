@@ -16,10 +16,10 @@
 ║                                                                                   ║
 ║ The old note said the pairing COULD NOT be made: under production posture a       ║
 ║ machine harness obtains only `client_credentials`, i.e. a service account, while  ║
-║ a user token needs an interactive Kratos→Hydra login. That was true of the        ║
+║ a user token needed an interactive login at an external provider. That was        ║
 ║ harness AS IT WAS, and it named its own remedy — «its own wave that CREATES the   ║
-║ condition». That wave now exists (`scripts/run-ceremony.sh`, seed                 ║
-║ `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
+║ condition». That wave now exists (seed `tests/authz-fixtures/seed_ceremony.py     ║
+║ --wave`, job `stand-ceremony`), so the user channel here reads as                 ║
 ║ `jwtHumanCeremony`: a bearer obtained by a REAL password login, subject           ║
 ║ `user:<id>`. «Здесь его не запустить» was a fact of scheduling, and the schedule  ║
 ║ changed.                                                                          ║
@@ -139,17 +139,19 @@ ROLE_VIEW = "rol1bda80f2be4d3658e"  # md5('view')[:17]
 # ---------------------------------------------------------------------------
 
 def _internal_url_override(path):
-    """Redirect this request to the api-gateway cluster-internal REST listener
-    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
-    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
-    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
-    probe hits the public port → 404 page-not-found → JSONError. Mirrors
-    iam-internal-only-check.py::_internal_url_override. internalBaseUrl is injected
-    at runtime by deploy/scripts/newman-e2e.sh."""
+    """Redirect this request to the service's own internal REST front
+    ({{ownInternalRestBaseUrl}}, written by the autonomous stand seed).
+    Internal* paths (/iam/v1/internal/*) are served ONLY there — the public front
+    404s them by design (ban #6). gen.py emits {{baseUrl}}<path>; without this
+    override the FGA-Check probe hits the public front → 404 → JSONError."""
+    # ВНУТРЕННИЙ ФРОНТ — СВОЙ (kaname#398). `internalBaseUrl` — внутренний
+    # слушатель КРАЯ платформы; на автономном стенде его нет, и шаг ушёл бы в отказ
+    # соединения. Путь `/iam/v1/internal/*` подаёт собственный внутренний
+    # REST-фронт службы (ban #6), и переменную называет автор — свою.
     return require_env_url(
-        "internalBaseUrl", path,
+        "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exists=False):
@@ -815,3 +817,11 @@ CASES.append(Case(
         *revoke_then_gone("teardown-usr-iso", "chUsrIsoAcb", "user:{{ceremonyUserId}}", "reverse-isolation-case", "chUsrIsoRevOp", grant_op_var="chUsrIsoOp"),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

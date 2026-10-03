@@ -47,15 +47,14 @@ func noneReach(string) (bool, string) {
 
 // tableSource — таблица рёбер, написанная ВТОРОЙ формой (срез с безымянными
 // элементами) — той, которой написана настоящая.
-func tableSource(knob, plaintextKnob string) string {
+func tableSource(knob string) string {
 	return `package main
 
 func edges() []httpEdgeTLS {
 	return []httpEdgeTLS{
 		{
 			name: "ребро", knob: "` + knob + `",
-			why:           "по проводу едет KANAME_ПРОЗА_ИЗ_ОБЪЯСНЕНИЯ, и это не координата",
-			plaintextKnob: "` + plaintextKnob + `",
+			why:  "по проводу едет KANAME_ПРОЗА_ИЗ_ОБЪЯСНЕНИЯ, и это не координата",
 		},
 	}
 }
@@ -78,7 +77,7 @@ func knobNames(t *testing.T, src string) []string {
 // TestBootEdgeInjection_InertKnobIsCaught — инертная ручка названа находкой с
 // координатой.
 func TestBootEdgeInjection_InertKnobIsCaught(t *testing.T) {
-	knobs, err := bootEdgeKnobsIn("edges.go", []byte(tableSource("KANAME_X_ENABLE", "")))
+	knobs, err := bootEdgeKnobsIn("edges.go", []byte(tableSource("KANAME_X_ENABLE")))
 	if err != nil {
 		t.Fatalf("синтетический исходник не разбирается: %v", err)
 	}
@@ -102,7 +101,7 @@ func TestBootEdgeInjection_InertKnobIsCaught(t *testing.T) {
 // Без него красное выше не доказывает ничего: суждение, объявляющее инертной
 // любую ручку, дало бы тот же результат.
 func TestBootEdgeInjection_ReachableKnobStaysSilent(t *testing.T) {
-	knobs, err := bootEdgeKnobsIn("edges.go", []byte(tableSource("KANAME_X_ENABLE", "")))
+	knobs, err := bootEdgeKnobsIn("edges.go", []byte(tableSource("KANAME_X_ENABLE")))
 	if err != nil {
 		t.Fatalf("синтетический исходник не разбирается: %v", err)
 	}
@@ -121,7 +120,7 @@ func TestBootEdgeInjection_ReachableKnobStaysSilent(t *testing.T) {
 // распознаватель, знающий только явную, прочитал бы НОЛЬ — то есть отчитался бы
 // «инертных нет», не спросив ни об одной ручке.
 func TestBootEdgeInjection_BothLiteralFormsAreRead(t *testing.T) {
-	implicit := tableSource("KANAME_IMPLICIT_ENABLE", "")
+	implicit := tableSource("KANAME_IMPLICIT_ENABLE")
 	explicit := `package main
 
 var edge = httpEdgeTLS{name: "ребро", knob: "KANAME_EXPLICIT_ENABLE"}
@@ -149,7 +148,7 @@ var edge = httpEdgeTLS{knob: "KANAME_" + "SPLIT_ENABLE"}
 // TestBootEdgeInjection_ProseIsNotACoordinate — имя ручки в поле объяснения и в
 // комментарии рядом координатой НЕ является.
 func TestBootEdgeInjection_ProseIsNotACoordinate(t *testing.T) {
-	got := knobNames(t, tableSource("KANAME_X_ENABLE", ""))
+	got := knobNames(t, tableSource("KANAME_X_ENABLE"))
 	if len(got) != 1 {
 		t.Fatalf("прочитано имён %d, ожидалось 1: %v", len(got), got)
 	}
@@ -168,21 +167,6 @@ var edge = httpEdgeTLS{knob: "KANAME_X_ENABLE"}
 		if strings.Contains(name, "КОММЕНТАРИЯ") {
 			t.Fatalf("имя из комментария зачтено координатой: %q — гейт судил бы прозу", name)
 		}
-	}
-}
-
-// TestBootEdgeInjection_EmptyPlaintextKnobIsNotACoordinate — пустая ручка
-// исключения есть объявленная величина, а не координата.
-//
-// Без этой ветви гейт краснел бы на КАЖДОМ ребре, у которого исключения не
-// бывает, — то есть на пяти из шести, и первый же ложный срабат снял бы его.
-func TestBootEdgeInjection_EmptyPlaintextKnobIsNotACoordinate(t *testing.T) {
-	if got := knobNames(t, tableSource("KANAME_X_ENABLE", "")); len(got) != 1 {
-		t.Fatalf("пустая ручка исключения зачтена координатой: %v", got)
-	}
-	got := knobNames(t, tableSource("KANAME_X_ENABLE", "KANAME_X_PLAINTEXT_ACKNOWLEDGED"))
-	if len(got) != 2 {
-		t.Fatalf("непустая ручка исключения НЕ прочитана: %v", got)
 	}
 }
 

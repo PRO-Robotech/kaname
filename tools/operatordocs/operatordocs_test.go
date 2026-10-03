@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestOperatorDocsGate_CanFail_OnDriftedTable(t *testing.T) {
 		{
 			name: "объяснение величины изменилось, документ — нет",
 			table: mutated(func(s *config.RequiredSetting) {
-				if s.Key == "authn.hook-shared-secret" {
+				if s.Key == "authn.domain" {
 					s.Why = "объяснение переписано, а документ остался прежним"
 				}
 			}),
@@ -147,13 +148,22 @@ func TestOperatorDocsGate_CanFail_OnDriftedTable(t *testing.T) {
 }
 
 // mutated — копия действующей таблицы с применённой правкой (nil — без правки).
+// mutated — копия действующей таблицы с правкой f. Правка, не задевшая ни
+// одной строки, — не инъекция, а тождество: случай смолчал бы не потому, что
+// гейт слеп, а потому, что его ключа в таблице больше нет (так истёк случай о
+// снятом общем секрете хуков, kaname#363). Поэтому правка обязана что-то
+// изменить, иначе копия не отдаётся вовсе.
 func mutated(f func(*config.RequiredSetting)) []config.RequiredSetting {
 	out := make([]config.RequiredSetting, len(config.RequiredSettings))
 	copy(out, config.RequiredSettings)
-	if f != nil {
-		for i := range out {
-			f(&out[i])
-		}
+	if f == nil {
+		return out
+	}
+	for i := range out {
+		f(&out[i])
+	}
+	if reflect.DeepEqual(out, config.RequiredSettings) {
+		return nil
 	}
 	return out
 }

@@ -11,7 +11,7 @@ package pg
 // external_id <> ''` — с условием на непустоту. Принадлежность аккаунтам
 // выражают ЧЛЕНСТВА (`memberships`), и их у человека может быть несколько.
 //
-// Здесь стояло «User is scoped per-Account (один Kratos identity → N User-row)»
+// Здесь стояло «User is scoped per-Account (одна identity → N User-row)»
 // — верное до отрыва идентичности от аккаунта (стадия S4-expand) и ложное
 // после. Утверждение расходилось с перечнем инвариантов НИЖЕ В ЭТОЙ ЖЕ шапке:
 // там уже стояли глобальные ключи. Два места об одном предмете, и неверным было
@@ -195,7 +195,7 @@ func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email)
 	return out, nil
 }
 
-// FindActiveByExternalID — все ACTIVE-row'ы по identity (Kratos sub) через
+// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
 // все Account'ы. Использует partial index `users_active_external_id_idx`.
 func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
 	if externalID == "" {
@@ -222,10 +222,11 @@ func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID doma
 	return out, nil
 }
 
-// FindByExternalIDInStatuses — все row'ы по identity (Kratos sub) через все
+// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 // Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at ASC.
-// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы —
-// recovery обязан их находить и re-enable'ить (OnRecoveryCompleted).
+// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы:
+// читатели (поиск субъекта, административное заведение личности) обязаны
+// отличать заблокированную личность от отсутствующей.
 // Пустой externalID / пустой statuses → nil-срез.
 func (r *userReader) FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
 	if externalID == "" || len(statuses) == 0 {
@@ -668,8 +669,8 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 //
 // ОТМЕТКА ПОДТВЕРЖДЕНИЯ — третье условие того же оператора (kaname#456, Р11):
 // приглашение активирует только подтверждение адреса, а оно ставит отметку той
-// же транзакцией раньше активации. Путь хука поставщика отметки нашей полосы
-// не несёт и приглашения не активирует.
+// же транзакцией раньше активации. Внутренний глагол заведения личности
+// отметки нашей полосы не несёт и приглашения не активирует.
 func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, externalID domain.ExternalSubject, displayName domain.DisplayName) (domain.User, error) {
 	q := fmt.Sprintf(`
 		UPDATE users

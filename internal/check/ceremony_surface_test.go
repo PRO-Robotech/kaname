@@ -314,19 +314,32 @@ func TestCeremonySurfaceGateSeesTheLiveTwins(t *testing.T) {
 	}
 	t.Logf("чтений пути запроса %d, решений маршрута по нему %d", report.Census.URLPathReads, len(report.Census.ManualRouting))
 
-	// Т6 и Т7: полоса входа и набор ключей видны своими маршрутами.
-	for _, want := range []string{"/iam/v1/auth/login", "/.well-known/jwks.json", "/iam/token", "/metrics"} {
-		var seen bool
+	// Т6 и Т7: полоса входа и слушатель набора ключей видны своими маршрутами.
+	//
+	// У слушателя набора ключей статически разрешимый маршрут ОДИН — авторитет
+	// отзыва: путь нашей записи рождается в профиле развёртывания и стоит в
+	// ведомости неразрешённых листов (liveUnresolvedLedger). Маршрут зеркала
+	// чужого набора (`/.well-known/jwks.json`) снят вместе с зеркалом
+	// (kaname#361), и его возвращение утверждается отрицанием ниже — в паре с
+	// тем, что соседний маршрут того же слушателя виден.
+	routed := func(want string) bool {
 		for _, s := range report.Surfaces {
 			for _, p := range s.Patterns {
 				if strings.HasSuffix(p, want) {
-					seen = true
+					return true
 				}
 			}
 		}
-		if !seen {
+		return false
+	}
+	for _, want := range []string{"/iam/v1/auth/login", "/internal/tokens/introspect", "/iam/token", "/metrics"} {
+		if !routed(want) {
 			t.Errorf("маршрут %s не попал ни в одну выведенную таблицу — близнец молчит по слепоте", want)
 		}
+	}
+	if routed("/.well-known/jwks.json") {
+		t.Errorf("маршрут /.well-known/jwks.json снова стоит на поверхности — вернулась запись набора " +
+			"второго издателя рядом с нашей (kaname#361)")
 	}
 }
 

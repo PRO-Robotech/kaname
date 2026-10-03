@@ -33,7 +33,6 @@ package operatordocs
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -48,43 +47,39 @@ const (
 // SettingsCensus — объём осмотренного.
 type SettingsCensus struct {
 	Rows     int
-	ByLane   map[string]int
 	BySupply map[string]int
-	Anywhere int
-	FileOnly int
-	// OwnPublicFront — строк, обязательных СВЕРХ полос всюду, где поднят
-	// собственный публичный REST-фронт. Печатается отдельной величиной: пока
-	// вторая половина антецедента не была видна в переписи, её отсутствие
-	// нельзя было отличить от нуля.
-	OwnPublicFront int
-	Condition      int
-	// WithdrawnOnly — строк, обязательных только на посадках вне словаря
-	// (снятых, PRO-Robotech/corelib#30). Документ их не печатает: объявить такую
-	// посадку нельзя (#424). Печатается отдельной величиной, чтобы «не
-	// напечатано» было отличимо от «не прочитано».
-	WithdrawnOnly int
+	// Always / Condition — строк в каждой форме столбца «Когда обязателен».
+	// Печатаются обе: сумма их обязана равняться числу строк, и строка, не
+	// попавшая ни в одну форму, была бы видна расхождением, а не молчанием.
+	Always    int
+	Condition int
+	FileOnly  int
 }
 
 func (c SettingsCensus) String() string {
-	lanes := make([]string, 0, len(c.ByLane))
-	for l := range c.ByLane {
-		lanes = append(lanes, l)
-	}
-	sort.Strings(lanes)
-	parts := make([]string, 0, len(lanes))
-	for _, l := range lanes {
-		parts = append(parts, fmt.Sprintf("%s %d", l, c.ByLane[l]))
-	}
-	return fmt.Sprintf("строк %d · на любой посадке %d · полосных: %s · сверх полос при поднятом "+
-		"собственном публичном фронте %d · подаются только файлом %d · условных %d · "+
-		"только на снятых посадках, не напечатано %d",
-		c.Rows, c.Anywhere, strings.Join(parts, ", "), c.OwnPublicFront, c.FileOnly, c.Condition, c.WithdrawnOnly)
+	return fmt.Sprintf("строк %d · «%s» %d · «%s» %d · подаются только файлом %d",
+		c.Rows, config.ApplicabilityAlways, c.Always, config.ApplicabilityConditional, c.Condition, c.FileOnly)
 }
 
 // BuildSettingsBlock рендерит блок обязательных величин из таблицы стража.
+//
+// СТОЛБЕЦ «КОГДА ОБЯЗАТЕЛЕН» — ЗАКРЫТЫЙ СЛОВАРЬ ИЗ ДВУХ ФОРМ, и обе объявлены в
+// таблице стража (`config.ApplicabilityAlways`, `config.ApplicabilityConditional`):
+//
+//	всегда                    строка обязательна на каждом боевом старте;
+//	при выполненном условии   строка обязательна, когда выполнено её условие
+//	                          (обычно — задана соседняя величина).
+//
+// Прежде форм было три, и две называли посадку личности («посадка own» и её
+// вариант «И ВСЮДУ, где поднят собственный публичный REST-фронт»), а третья —
+// «на любой посадке». Посадка у службы одна (kaname#363), и называть её в
+// столбце нечем. Столбец читают не только люди: проба платформы разбирает его у
+// пиненной службы и на незнакомой форме отказывает, поэтому набор форм
+// перечислен здесь целиком, а сама форма берётся у таблицы, а не собирается в
+// этом цикле. Закрытость набора держит `applicability_forms_test.go`.
 func BuildSettingsBlock(table []config.RequiredSetting) (string, []string, SettingsCensus) {
 	var findings []string
-	census := SettingsCensus{Rows: len(table), ByLane: map[string]int{}, BySupply: map[string]int{}}
+	census := SettingsCensus{Rows: len(table), BySupply: map[string]int{}}
 
 	if len(table) == 0 {
 		return "", []string{"таблица обязательных величин пуста — порождённый блок был бы пуст молча"}, census
@@ -99,40 +94,11 @@ func BuildSettingsBlock(table []config.RequiredSetting) (string, []string, Setti
 	b.WriteString("|---|---|---|---|\n")
 
 	for _, s := range table {
-		// СТРОКА СНЯТОЙ ПОСАДКИ НЕ ПЕЧАТАЕТСЯ (#424). Посадку вне словаря
-		// объявить нельзя — разбор её не производит, проверка старта отвергает
-		// число мимо разбора, — поэтому величина, обязательная только на ней,
-		// оператору не нужна ни на одной посадке, которую он может выбрать.
-		if s.OnlyOnWithdrawnPostures() {
-			census.WithdrawnOnly++
-			continue
-		}
-		// ПРИМЕНИМОСТЬ БЕРЁТСЯ ЦЕЛИКОМ, а не собирается здесь из полос.
-		//
-		// Перечень полос — лишь ПОЛОВИНА антецедента, который судит страж:
-		// вторая половина («поднят собственный публичный REST-фронт») полосой
-		// не выражается вовсе, потому что фронт поднимает объявленный адрес, а
-		// не выбор поставщика личности. Пока столбец собирался из одних полос,
-		// он говорил оператору внешней полосы, что семи величин его посадка не
-		// требует, — а без них процесс не стартует (задачи #2333, #2340).
-		//
-		// Фраза приходит из `Applicability()`: у применимости один автор, и
-		// им остаётся таблица, а не этот цикл.
 		when := s.Applicability()
-		lanes := s.LaneNames()
-		if len(lanes) > 0 {
-			for _, l := range lanes {
-				census.ByLane[l]++
-			}
-		} else {
-			census.Anywhere++
-		}
-		if s.WhenOwnPublicRESTFront {
-			census.OwnPublicFront++
-		}
 		if s.Conditional {
-			when += ", при выполненном условии"
 			census.Condition++
+		} else {
+			census.Always++
 		}
 
 		var how string

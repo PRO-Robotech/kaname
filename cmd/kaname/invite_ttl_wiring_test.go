@@ -39,9 +39,23 @@ func buildServicesNoPanic(t *testing.T, cfg config.Config) (svcs *services, err 
 	return buildServices(pool, nil, nil, nil, nil, nil, nil, metrics.NewRegistry(), cfg, nil, logger)
 }
 
+// inviteWiringBaseCfg — общая часть обоих кейсов: пустая настройка с
+// объявленным классом хешера полосы входа. Исполнитель заведения
+// интерактивных клиентов строится над хешером на ЛЮБОМ старте (kaname#405,
+// #363), и без него сборка уходит в отказ старта раньше, чем дойдёт до
+// службы приглашений, — близнец не дошёл бы до своего предмета.
+func inviteWiringBaseCfg() config.Config {
+	cfg := config.Config{}
+	cfg.AuthN.Login.HasherFormat = "argon2id"
+	cfg.AuthN.Login.HasherMemory = 65536
+	cfg.AuthN.Login.HasherIterations = 3
+	cfg.AuthN.Login.HasherParallelism = 4
+	return cfg
+}
+
 func TestBuildServices_UndeclaredInviteTTLRefusesWithTheKeyNotAPanic(t *testing.T) {
 	t.Run("срок не объявлен — отказ с именем ключа и переменной", func(t *testing.T) {
-		svcs, err := buildServicesNoPanic(t, config.Config{})
+		svcs, err := buildServicesNoPanic(t, inviteWiringBaseCfg())
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "ПАНИКУЕТ")
 		require.Contains(t, err.Error(), "invite.ttl")
@@ -51,7 +65,7 @@ func TestBuildServices_UndeclaredInviteTTLRefusesWithTheKeyNotAPanic(t *testing.
 
 	t.Run("близнец: срок объявлен — службы собраны", func(t *testing.T) {
 		ttl := 72 * time.Hour
-		cfg := config.Config{}
+		cfg := inviteWiringBaseCfg()
 		cfg.Invite.TTL = &ttl
 		svcs, err := buildServicesNoPanic(t, cfg)
 		require.NoError(t, err)

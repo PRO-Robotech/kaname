@@ -28,10 +28,9 @@
 |----------------------------------|-------------------------|--------------------------------------------|
 | форма утверждений                | обе (плоская/вложенная) | ни одной формы в токене                    |
 | алгоритм предъявителя            | ES256 / RS256           | HS256 — симметричный                       |
-| kid опубликован фасадом          | своя запись / зеркало   | kid, которого нет ни в одной записи        |
-| kid ровно в ОДНОЙ записи         | как есть                | один kid в обеих записях                   |
+| kid опубликован фасадом          | своя запись             | kid, которого в записи нет; kid поставщика |
 | alg записи = alg заголовка       | как есть                | запись объявляет другой алгоритм           |
-| материал ключа для подделки      | RSA `n` / EC `x`+`y`    | запись без публичного материала            |
+| материал ключа для подделки      | EC `x`+`y`              | запись без публичного материала            |
 | состав ≠ пересказ субъекта       | `soc_…` ≠ `sva…`        | `kaname_sa_key_id` = `kaname_principal_id`   |
 | ответ платформы = состав         | совпадает               | платформа называет другого принципала      |
 | публикатор — только открытое     | нет приватных членов    | в записи появился приватный член ключа     |
@@ -43,6 +42,14 @@
 входе отвечает именно так» — это свойство продукта, и его подтверждает прогон
 против поднятого стенда. Подпись подставных предъявителей не проверяется никем:
 здесь предмет — то, что суита ЧИТАЕТ, а не то, что край ПРОВЕРЯЕТ.
+
+# Запись публикатора одна
+
+Запись у публикатора фасада ОДНА — наша: зеркало публичного набора поставщика
+снято вместе с поставщиком (kaname#361). Поэтому предъявитель полосы поставщика
+для IBT-04 — уже не законный вход, а дефект: его kid фасад не публикует, и ось
+утверждает, что кейс это называет. Для IBT-13 (форма утверждений) полоса
+поставщика остаётся законным входом: её предмет — состав, а не набор ключей.
 
 Запуск (стенд не нужен, newman нужен):
     python3 scripts/selftest_token_facade_forms.py
@@ -65,16 +72,21 @@ import tempfile
 import threading
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import gen  # noqa: E402  — имя собственного фронта службы: один источник, копии здесь нет
+
 ROOT = Path(__file__).resolve().parents[1]
 COLLECTION = ROOT / "collections" / "iam-token-facade-conformance.postman_collection.json"
 
-MIRROR_PATH = "/.well-known/jwks.json"
 OWN_PATH = "/.well-known/kaname/jwks.json"
 
 # Публичный материал ниже — синтетический и никем не проверяется: подставной
-# сервер ничего не подписывает. Форма взята с живого публикатора (RSA-запись
-# зеркала, EC-запись своя), потому что именно форму суита и разбирает.
-MIRROR_KEY = {
+# сервер ничего не подписывает. Форма своей записи взята с живого публикатора
+# (EC), потому что именно форму суита и разбирает. Ключ поставщика фасад больше
+# не публикует (kaname#361): он нужен только затем, чтобы собрать предъявителя
+# полосы поставщика с его kid.
+PROVIDER_KEY = {
     "use": "sig", "kty": "RSA", "kid": "provider-kid-0001", "alg": "RS256",
     "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
     "e": "AQAB",
@@ -126,26 +138,31 @@ def own_lane_bearer(**over) -> str:
 
 
 def provider_lane_bearer(**over) -> str:
-    """Полоса ПОСТАВЩИКА: RS256, kid зеркала, состав ВЛОЖЕН, `sub` — клиент OAuth."""
+    """Полоса ПОСТАВЩИКА: RS256, его kid, состав ВЛОЖЕН, `sub` — клиент OAuth."""
     claims = base_claims()
     claims.update(over.pop("claims", {}))
     payload = {"iss": "https://provider.example/.ory/hydra/public",
                "aud": ["https://api.kacho.cloud"], "sub": "kacho-bootstrap-admin",
                "exp": 4102444800, "ext": {"ext_claims": claims}, "ext_claims": claims}
     payload.update(over.pop("payload", {}))
-    header = {"alg": "RS256", "kid": MIRROR_KEY["kid"], "typ": "JWT"}
+    header = {"alg": "RS256", "kid": PROVIDER_KEY["kid"], "typ": "JWT"}
     header.update(over.pop("header", {}))
     return jwt(header, payload)
 
 
 class Stand:
-    """Подставной стенд: край (`/iam/v1/me`) и публикатор ключей фасада."""
+    """Подставной стенд: собственный фронт службы (`/iam/v1/me`) и публикатор ключей.
+
+    Суита адресована собственному фронту службы (kaname#415, `address_own_front`):
+    производитель её утверждений — сама служба. Поэтому подставной сервер стоит на
+    переменной фронта, а переменная края не задаётся вовсе — шаг, ушедший бы на
+    край, остался бы без адреса и покраснел бы, а не прошёл.
+    """
 
     def __init__(self, bearer: str, subject: str = SUBJECT,
-                 mirror=None, own=None, own_status: int = 200):
+                 own=None, own_status: int = 200):
         self.bearer = bearer
         self.subject = subject
-        self.mirror = {"keys": [copy.deepcopy(MIRROR_KEY)]} if mirror is None else mirror
         self.own = {"keys": [copy.deepcopy(OWN_KEY)]} if own is None else own
         self.own_status = own_status
         outer = self
@@ -164,8 +181,6 @@ class Stand:
 
             def do_GET(self):
                 path = self.path.split("?")[0]
-                if path == MIRROR_PATH:
-                    return self._send(200, outer.mirror)
                 if path == OWN_PATH:
                     if outer.own_status != 200:
                         return self._send(outer.own_status, {"error": "not_found"})
@@ -211,10 +226,8 @@ def run_folder(stand: Stand, folder: str) -> tuple[int, int, list[str]]:
         base = f"http://127.0.0.1:{stand.port}"
         cmd = [
             "newman", "run", str(COLLECTION), "--folder", folder,
-            "--env-var", f"baseUrl={base}",
-            "--env-var", f"internalBaseUrl={base}",
+            "--env-var", f"{gen.OWN_FRONT_VAR}={base}",
             "--env-var", f"iamJwksBaseUrl={base}",
-            "--env-var", f"providerPublicBaseUrl={base}",
             "--env-var", f"jwtBootstrap={stand.bearer}",
             "--reporters", "json", "--reporter-json-export", str(out),
             "--timeout-request", "8000",
@@ -291,18 +304,14 @@ def main() -> int:
         # --- алгоритм и запись публикатора (IBT-04) ---
         ("IBT-04: ES256 + своя запись — молчит", ibt04,
          lambda: Stand(own_lane_bearer()), False, None),
-        ("IBT-04: RS256 + зеркало — молчит", ibt04,
-         lambda: Stand(provider_lane_bearer()), False, None),
+        ("IBT-04: предъявитель поставщика — его kid фасад не публикует — падает", ibt04,
+         lambda: Stand(provider_lane_bearer()), True, "by its OWN key-set record"),
         ("IBT-04: симметричный HS256 — падает", ibt04,
          lambda: Stand(own_lane_bearer(header={"alg": "HS256"})),
          True, "ASYMMETRIC algorithm"),
-        ("IBT-04: kid не опубликован ни одной записью — падает", ibt04,
+        ("IBT-04: kid не опубликован записью фасада — падает", ibt04,
          lambda: Stand(own_lane_bearer(header={"kid": "kid-nobody-publishes"})),
-         True, "EXACTLY ONE of its records"),
-        ("IBT-04: один kid в ОБЕИХ записях — падает", ibt04,
-         lambda: Stand(own_lane_bearer(),
-                       mirror={"keys": [dict(MIRROR_KEY, kid=OWN_KEY["kid"])]}),
-         True, "EXACTLY ONE of its records"),
+         True, "by its OWN key-set record"),
         ("IBT-04: запись объявляет ДРУГОЙ алгоритм — падает", ibt04,
          lambda: Stand(own_lane_bearer(header={"alg": "RS256"})),
          True, "SAME algorithm the Bearer header names"),
@@ -321,8 +330,6 @@ def main() -> int:
         # --- материал подделки (IBT-10) ---
         ("IBT-10: EC-материал своей записи — подделка строится, молчит", ibt10,
          lambda: Stand(own_lane_bearer()), False, None),
-        ("IBT-10: RSA-модуль зеркала — подделка строится, молчит", ibt10,
-         lambda: Stand(provider_lane_bearer()), False, None),
         ("IBT-10: у записи нет публичного материала — падает предусловием", ibt10,
          lambda: Stand(own_lane_bearer(),
                        own={"keys": [{"kty": "EC", "kid": OWN_KEY["kid"], "alg": "ES256",

@@ -1,0 +1,83 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 0026c279efb0f7c9f01ef9ff3bf5bc279d47cc5939a8e802cc63324cb4576433
+  static_status: DRAFT
+  static_status_note: >-
+    «DRAFT — кругов ревью ноль» в шапке — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: b90430b42
+  content_commit: cc8f8d352771825c099a98f9b56e3592195083ee
+  branch: '553'
+  worktree: tmp/kn-553
+  pull_request: null
+  task: PRO-Robotech/kaname#553
+  wave: PRO-Robotech/kaname#497
+  subject_task: PRO-Robotech/kaname#363
+  lines: 3846
+  round: 11
+  round_note: круг 1 снятия позиции Ф3-46 (редакция 16); предыдущие записи — круги 1…10
+  predecessor_record: >-
+    docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/43c16647c57a7d53ccdf9060d805b8541df2360a5de5f11805c0dba15a644c7d.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> и git show cc8f8d352:<путь> | sha256sum — оба 0026c279…6433; задание дало
+    отпечаток обрезанным, перемерен целиком.
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: предикаты §7 документа перемерены — меток 53 (§6) и 53 (§7), живых 51 и 51,
+    множества совпали (diff пуст); git grep 'Ф3-46' -- ':!docs' → одна запись долга
+    (.github/scripts/newman-suite-debt.py:1207).
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-02'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    summary: >-
+      Ф3-44 (строка 2754) стоит на той же снятой посылке, что сняла Ф3-46: Given «профиль
+      authn.identityProvider=own», And «профиль external стартует без полосы входа». Ключ
+      посадки служба отвергает при ЛЮБОМ значении, в том числе own.
+    evidence: >-
+      internal/apps/kaname/config/retired_posture_key_test.go:12 «отвергается вслух при любом
+      значении, в том числе `own`», :43 retiredPostureValues = {"own","external",""};
+      deploy/retired_posture_key_test.go Ч2 — отказ рендера. Значит (а) Ф3-44 упадёт отказом
+      ключа, а не проверкой хранилища сессии, и ветка external неисполнима.
+    why_blocking: >-
+      Редакция 16 сама называет этот довод основанием снятия Ф3-46 и при этом пишет «Не трогает …
+      Ф3-44 и Ф3-45. Их тексты о посадке — предмет их собственной редакции» — без задачи, держателя
+      и предиката снятия: это отложенная работа, а не один из трёх исходов (ban #11). Ф3-12 (близнец
+      «читатель под external») и Ф3-45 — сторона края платформы, где переключатель есть
+      (PRO-Robotech/kacho origin/main bea4495e934: gateway/internal/config/config.go:890
+      ResolvedIdentityProvider) — к ним замечание не относится.
+    fix: >-
+      Привести Ф3-44 к одной посадке: Given — профиль без ключа посадки; ветку external снять
+      (свойство «ключ отвергается» держит #363); строки §7/§9 по Ф3-44 согласовать.
+non_blocking:
+  - id: N1
+    summary: >-
+      §7.1 Ф1-60 «производителя здесь нет; правка Ф1 — у её владельца»: задачи на снятие пробы
+      Ф1-60 у владельца Ф1 не названо (для половин Ф1-61/66 о «кто я» названа kaname#177).
+  - id: N2
+    summary: >-
+      Перепись ведомости красна на голове cc8f8d352: python3 .github/scripts/newman-suite-debt.py →
+      «запись долга позиции Ф3-46 пережила предмет». Снятие записи и _HOLDER_F3_SWITCH_REMOVAL
+      обязано войти в тот же запрос волны.
+accepted_parts: >-
+  Снятие Ф3-46 целиком, без ослабления, номер не переиспользуется; разнос половин Ф1-52/61/66,
+  не зависящих от отката, на Ф3-12, 14, 16, 21 сверен по их «Тогда»; счёт 53/51 и DoD согласованы;
+  отказ от сценария-замены верен.
+constructibility: >-
+  Посева не было: стенда в задании нет. Неконструируемость Ф3-46 и Ф3-44 показана двумя стражами
+  ключа в дереве службы.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 0026c279efb0f7c9f01ef9ff3bf5bc279d47cc5939a8e802cc63324cb4576433
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

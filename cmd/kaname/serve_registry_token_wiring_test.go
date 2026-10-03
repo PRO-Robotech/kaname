@@ -12,13 +12,14 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 // TestRegistryTokenListener_ConfiguredSeparatePort — the composition root must
 // expose the Docker Registry v2 `/iam/token` auth-server on its OWN
 // external-reachable port (default :9096), never sharing the public/internal
-// gRPC surfaces or the cluster-internal hooks (:9092) / metrics (:9095)
-// listeners. Behavioural check against the loaded config.
+// gRPC surfaces or the cluster-internal metrics (:9095) / key-set publisher
+// (:9097) listeners. Behavioural check against the loaded config.
 func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	cfg, err := config.Load("")
 	if err != nil {
@@ -32,7 +33,6 @@ func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	for name, other := range map[string]string{
 		"public gRPC":   cfg.APIServer.ListenAddress(),
 		"internal gRPC": cfg.APIServer.InternalListenAddress(),
-		"hooks HTTP":    cfg.AuthN.HooksHTTPListenAddress(),
 		"metrics HTTP":  cfg.APIServer.MetricsListenAddress(),
 	} {
 		if addr == other {
@@ -69,11 +69,9 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 		"cfg.APIServer.RegistryToken.ListenAddress()",
 		"cfg.APIServer.RegistryToken.TokenIssuer()",
 		"cfg.APIServer.RegistryToken.TokenService()",
-		"cfg.AuthN.ResolveHydraTokenURL()",
-		// The anchor of the hop travels with its address: a root that passes one
-		// without the other is how https ends up verified against the system roots.
-		"cfg.AuthN.ResolveHydraTokenCAFile()",
-		"cfg.AuthN.ResolveHydraTokenEndpoint()",
+		// НАШ подписант — единственный издатель полосы (kaname#494): корень,
+		// не подающий его, получил бы отказ сборки на каждом старте.
+		"Signer:   tokenSigner,",
 		// Подъём, гашение и строка самоотчёта переехали в профиль не-gRPC
 		// поверхности: докладывает о себе она сама, и доклад несёт то, чего прежняя
 		// строка не несла никогда, — досягаемость и решение об аутентификации.
@@ -107,8 +105,7 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 		Realm:                  tok.TokenIssuer(),
 		Service:                laneService,
 		BasicCredentialTimeout: credentialLanePeerTimeout,
-		HydraTokenURL:          cfg.AuthN.ResolveHydraTokenURL(),
-		AssertionAudience:      cfg.AuthN.ResolveHydraTokenEndpoint(),
+		Signer:                 lanesigner.New(t),
 	})
 	if err != nil {
 		t.Fatalf("registrytokenwire.Build: %v", err)

@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package bootstrap_token — the InternalBootstrapTokenService use-case (#58):
-// idempotently provision the singleton bootstrap-admin ServiceAccount's Hydra
-// OAuth client + mapping, then broker a short-lived RS256 access-token for it via
-// the existing Hydra client_credentials exchange (aud = https://{API_DOMAIN}).
+// idempotently provision the singleton bootstrap-admin ServiceAccount's key
+// mapping, then mint a short-lived access-token for it with OUR signer
+// (aud = https://{API_DOMAIN}).
 //
-// The bootstrap SA row + its cluster system_admin grant are seeded by migration
-// 0058 (deterministic id → DB-singleton). This use-case provisions only the
-// runtime Hydra-backed halves (the OAuth client + its 1:1
-// service_account_oauth_clients mapping), gated by the UNIQUE(sva_id) mapping
-// index + a transaction-scoped advisory lock (winner-only external create,
-// IBT-03), and mints the token. The signing key is env-held (k8s Secret), NEVER
-// persisted in the DB — the secrets-at-rest posture of the platform.
+// The bootstrap SA row + its cluster system_admin grant are seeded by the
+// baseline (deterministic id → DB-singleton). This use-case provisions only the
+// 1:1 service_account_oauth_clients mapping, gated by the UNIQUE(sva_id)
+// mapping index + a transaction-scoped advisory lock (IBT-03), and mints the
+// token. The signing key is env-held (k8s Secret), NEVER persisted in the DB —
+// the secrets-at-rest posture of the platform.
 package bootstrap_token
 
 // ids.go — идентификаторы посевной идентичности, ПИННУТЫЕ литералом.
@@ -43,27 +42,25 @@ package bootstrap_token
 // идентификатор двигаются ВМЕСТЕ, и деривация верна. Единственность её
 // объявления держит `TestDeterministicIDDerivationIsDeclaredOnce`.
 //
-// # ЧТО НЕ ПЕРЕИМЕНОВЫВАЕТСЯ ВОВСЕ
+// # ИМЕНИ КЛИЕНТА У ВНЕШНЕГО ПРОВАЙДЕРА ЗДЕСЬ БОЛЬШЕ НЕТ
 //
-// `bootstrapClientID` — идентификатор клиента у ВНЕШНЕГО провайдера, а не строка
-// нашей базы. Его переход требует окна у провайдера, цена которого не измерена;
-// предмет вынесен П1 приёмки. Здесь он остаётся прежним намеренно.
+// Строка чеканки называлась у прежнего издателя своим именем, отличным от её
+// `id`, и путь запроса писал это имя в столбец зеркала. Столбец снят (kaname#362): токен
+// бутстрапа чеканит наш подписант, клиентом строка называется по своему `id`, а
+// край токенов прежнего издателя не принимает. Прежние строки с этим именем
+// миграция снятия пропускает названным исключением ровно по этой тройке.
 
 const (
-	// bootstrapClientID — Hydra OAuth2 client_id (fixed, readable). Живёт у
-	// внешнего провайдера; предмет перехода — П1 приёмки, не эта правка.
-	bootstrapClientID = "kacho-bootstrap-admin"
-
 	// pinnedBootstrapSvaID — `service_accounts.id` служебной записи чеканки.
 	// Посеян `0001_initial.sql:3843`.
 	pinnedBootstrapSvaID = "svab91854890de887e6d"
 
 	// pinnedBootstrapSocID — `service_account_oauth_clients.id`, он же `kid`
-	// ключа, которым подписывается утверждение клиента.
+	// ключа и имя клиента.
 	//
 	// Свод этой строки НЕ сеет — её заводит путь запроса, — но значение обязано
-	// оставаться тем же: по нему провайдер находит зарегистрированный ключ, и
-	// сдвиг сделал бы уже выпущенные утверждения непроверяемыми.
+	// оставаться тем же: строку, заведённую прежним выпуском, путь запроса
+	// находит по нему, и исключение миграции снятия зеркала названо им же.
 	pinnedBootstrapSocID = "soc_db27d17291ff453b6"
 
 	// pinnedSystemOwnerUserID — `users.id` владельца системного аккаунта,
@@ -77,10 +74,8 @@ type Identity struct {
 	// SvaID — the bootstrap ServiceAccount id (`sva…`, seeded by 0058).
 	SvaID string
 	// SocID — the service_account_oauth_clients mapping id (`soc_…`); also the
-	// JWK `kid` registered with Hydra and stamped in the client_assertion header.
+	// key `kid` and the client name.
 	SocID string
-	// ClientID — the Hydra OAuth2 client_id.
-	ClientID string
 	// CreatedByUserID — the system owner user (`usr…`, FK for the mapping row).
 	CreatedByUserID string
 }
@@ -96,7 +91,6 @@ func DeriveIdentity() Identity {
 	return Identity{
 		SvaID:           pinnedBootstrapSvaID,
 		SocID:           pinnedBootstrapSocID,
-		ClientID:        bootstrapClientID,
 		CreatedByUserID: pinnedSystemOwnerUserID,
 	}
 }

@@ -67,8 +67,9 @@ type IssueUserTokenRequest struct {
 	// доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
 	// АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
 	//
-	// LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
-	// глагол.
+	// Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
+	// потока — отвергается синхронно с именем поля, а не выпускается ключевой
+	// парой.
 	CredentialKind CredentialKind `protobuf:"varint,7,opt,name=credential_kind,json=credentialKind,proto3,enum=kaname.cloud.iam.v1.CredentialKind" json:"credential_kind,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -175,8 +176,7 @@ type IssueUserTokenResponse struct {
 	PublicKeyPem string `protobuf:"bytes,4,opt,name=public_key_pem,json=publicKeyPem,proto3" json:"public_key_pem,omitempty"`
 	// JOSE signing algorithm приватного ключа. Всегда "ES256".
 	Algorithm string `protobuf:"bytes,5,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
-	// JWK `kid` публичного ключа. Вызывающий ОБЯЗАН выставить `kid`-header
-	// подписанных assertion'ов в это значение. Совпадает с `client_id`.
+	// JWK `kid` публичного ключа. Совпадает с `client_id`.
 	KeyId string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	// Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
 	// вида SECRET; у KEYPAIR и FEDERATED пуст.

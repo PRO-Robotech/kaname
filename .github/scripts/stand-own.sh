@@ -63,6 +63,30 @@ RC_UNMET=75
 # самопроверке ниже: она доказывает исход «слушатель не появился», а шестьдесят
 # секунд ожидания там были бы платой за уже известный ответ. Умолчание прежнее.
 SERVICE_TRIES="${KANAME_STAND_SERVICE_TRIES:-60}"
+# Бюджет ожидания готовности базы после возврата из свёртки (`db-unfold`) — тем же
+# счётом попыток по секунде и по той же причине: самопроверке нужен короткий.
+DB_READY_TRIES="${KANAME_STAND_DB_READY_TRIES:-60}"
+
+# ─── СРОКИ КЕШЕЙ РУБЕЖА ПРЕДЪЯВИТЕЛЯ: посадка службы и волна свёртки базы ─────
+#
+# Рубеж предъявителя (`internal/presentedcred/reader.go`) держит два кеша, и оба
+# окна НЕ скользящие: попадание запись не продлевает, окно начинается с ПРОМАХА
+# (держит `TestKAN_REV_04_PresentationInsideTheWindowDoesNotExtendIt`). Волне
+# свёртки базы (`failclosed-prepare` и `failclosed-judge` ниже) нужны оба кеша свежими на всё время её
+# коллекции, поэтому она меряет тишину и окно этими величинами, а не литералом.
+#
+# REVOCATION_CACHE_TTL — ручка службы: ею же `stand_env` задаёт
+# KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL.
+REVOCATION_CACHE_TTL=30s
+# KEY_SET_TTL — срок снимка публикуемого набора ключей. Ручки у него нет: это
+# константа читателя (`keySetTTL`), и строка ниже — её отражение для стенда.
+# Расхождение роняет `TestStandKeySetTTLMirrorsTheReader`
+# (`internal/presentedcred/standwave_test.go`), так что значение одно, хоть
+# записано дважды. Форма — длительность Go (целые часы, минуты, секунды).
+KEY_SET_TTL=30s
+# Запас волны: тишина длиннее большего из сроков на столько, и столько же
+# окна обязано остаться к началу коллекции.
+WAVE_MARGIN_S=2
 
 PG_NAME="${KANAME_STAND_PG_NAME:-kaname-stand-pg}"
 PG_PORT="${KANAME_STAND_PG_PORT:-15432}"
@@ -230,23 +254,32 @@ stand_env() {
   export KANAME_DB_USER=kaname KANAME_DB_NAME=kaname KANAME_DB_PASSWORD=stand
   export KANAME_DB_SSLMODE=require
   export KANAME_JWKS_ENC_KEY="$(cat "$WRAPKEY_FILE")"
-  export KANAME_HOOK_TOKEN=stand-hook-secret-0123456789
   export KANAME_AUTHN__DOMAIN=kaname.local
   export KANAME_AUTHN__TRUST_DOMAIN=kaname.local
-  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS='spiffe://kaname.local/ns/kaname/sa/kaname'
+  # КРУГ ПЕРЕСЫЛАЮЩИХ ЛИЧНОСТЬ — имя службы И имя края (kaname#398), как у
+  # стенда чарта посадки `own` (`stand-chart.sh`, накладка `own`). Глагол `Create`
+  # интерактивного клиента фронтируется краем (`GatewayFrontedInternalRPCs`):
+  # хоп собственного фронта его не проходит by construction, а пересланный
+  # принципал принимается только от доверенного пересылающего. Посев церемонии
+  # (`seed_ceremony.py`) заводит клиентов этим глаголом, стоя на месте края
+  # листом края стенда (`edge.crt`). В боевом профиле этот круг и есть край;
+  # стенд дописывает его к имени службы, а не заменяет. Без него пол
+  # подтверждения глагола читает принципал как непроверенный и отвечает
+  # `authz.step_up` (замер на стенде: 403, PreconditionFailure).
+  export KANAME_AUTHN__TRUSTED_FORWARDER_SANS="spiffe://kaname.local/ns/kaname/sa/kaname,spiffe://kaname.local/ns/kaname/sa/$EDGE_SA"
   export KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE=registry.kaname.local
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5
   export KANAME_OWN_CEILINGS__ACCESS_KEYS_PER_USER=5
-  # ПОЛОСА ЛИЧНОСТИ — `own`, И ДРУГОЙ У СЛУЖБЫ НЕТ.
+  # ПОЛОСА ЛИЧНОСТИ ОДНА — СВОЙ ВХОД, И КЛЮЧА, КОТОРЫЙ ЕЁ ВЫБИРАЛ, НЕТ.
   #
-  # Здесь стояло `external` с объявленными и недостижимыми адресами поставщика.
-  # Посадку `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424):
-  # разбор ключа принимает ровно `own`, и накатчик отвергал настройку раньше,
-  # чем стенд доходил до службы, — задание краснело на загрузке настройки.
+  # Здесь стояло сперва `external`, затем `own` ключом посадки. Посадку
+  # `external` снял фундамент (PRO-Robotech/corelib#30, kaname#424), а ключ
+  # снят вместе с осью (kaname#363): загрузчик отвергает его переменную вслух,
+  # при любом значении.
   #
-  # Под `own` вход человека держит сама служба, и старт требует величин полосы
+  # Вход человека держит сама служба, и старт требует величин полосы
   # входа, обёртки секретов второго фактора, окна свежести и привязки ключей
   # доступа. Числа ниже — те же, что объявляет боевой профиль
   # (`deploy/values.prod.yaml`, блок `authn.login`): стенд судит ту посадку,
@@ -254,8 +287,7 @@ stand_env() {
   # адрес консоли установки под её доменом, как у профиля: консоли на стенде
   # нет, и ключ, привязанный к этому адресу, не предъявит никто.
   #
-  # Адресов поставщика здесь больше нет: под `own` их не читает никто.
-  export KANAME_AUTHN__IDENTITY_PROVIDER=own
+  # Адресов поставщика здесь больше нет: их не читает никто.
   export KANAME_AUTHN__LOGIN__SESSION_TTL=24h
   export KANAME_AUTHN__LOGIN__COOKIE_DOMAIN=none
   export KANAME_AUTHN__LOGIN__ADDRESS_ATTEMPTS=5
@@ -355,7 +387,9 @@ stand_env() {
   # реестру, а без чеканки реестра нет вовсе).
   export KANAME_AUTHN__PRESENTED_CREDENTIAL__ENABLED=true
   export KANAME_AUTHN__PRESENTED_CREDENTIAL__AUDIENCE=https://kaname.local
-  export KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL=30s
+  # Срок — из ОДНОГО места (`REVOCATION_CACHE_TTL` в начале файла): по нему же
+  # волна свёртки базы меряет свою тишину и своё окно.
+  export KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL="$REVOCATION_CACHE_TTL"
   export KANAME_AUTHN__TOKEN_SIGNING__ENABLED=true
   export KANAME_AUTHN__TOKEN_SIGNING__ISSUER=https://kaname.local
   export KANAME_AUTHN__TOKEN_SIGNING__ALGORITHM=RS256
@@ -387,12 +421,14 @@ stand_env() {
   #
   # Срок выводится из БЮДЖЕТА ШАГОВ, которые живут выданным токеном: посев
   # чеканит его и передаёт прогону, и токен обязан пережить остаток посева
-  # (`timeout-minutes: 10`) плюс прогон коллекций (`timeout-minutes: 15`) —
-  # иначе истечение посреди прогона пришло бы отказом доступа, неотличимым от
-  # дефекта дерева. Сумма 25 минут не выходит за платформенный потолок
-  # `tokenpolicy.MaxTokenTTL` (30 минут), сверх которого страж отказывает.
-  # Предикат: `grep -n 'timeout-minutes' .github/workflows/e2e-newman.yml` у
-  # шагов посева и прогона.
+  # плюс прогон коллекций — иначе истечение посреди прогона пришло бы отказом
+  # доступа, неотличимым от дефекта дерева. Заданий на этом стенде два, и у
+  # каждого сумма пределов его шагов — 25 минут: `stand` — посев 10 и прогон 15,
+  # `stand-ceremony` — машинный посев 5, посев церемонии 5 и прогон 15 (его
+  # предъявители людей выданы той же поверхностью и живут тот же срок). Сумма не
+  # выходит за платформенный потолок `tokenpolicy.MaxTokenTTL` (30 минут), сверх
+  # которого страж отказывает. Предикат: `grep -n 'timeout-minutes'
+  # .github/workflows/e2e-newman.yml` у шагов посева и прогона обоих заданий.
   export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
   # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
   # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело
@@ -420,7 +456,7 @@ stand_env() {
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_PER_SOURCE_PER_SEC=10
   export KANAME_AUTHN__CLIENT_TOKEN__AUTHORIZE_IN_FLIGHT_CEILING=32
   local l u
-  for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
+  for l in INTERNAL INTERNALREST METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN LOGINLANE; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \
       KANAME_${l}_SERVER_MTLS_CERTFILE=$PKI/srv.crt \
       KANAME_${l}_SERVER_MTLS_KEYFILE=$PKI/srv.key \
@@ -584,8 +620,8 @@ start_service() {
 # ниже подставляет свою пару: судить готовность на восьми боевых номерах значило бы
 # мерить, свободны ли они на этой машине, а не различает ли скрипт исходы.
 #
-# Слушателя хуков поставщика (`:9092`) в перечне нет: под `own` поставщика нет, и
-# слушатель не поднимается (kaname#360). Есть слушатель полосы входа (`:9100`).
+# Слушателя хуков поставщика (`:9092`) в перечне нет: поставщика у службы нет, и
+# слушателя тоже (kaname#360, kaname#363). Есть слушатель полосы входа (`:9100`).
 PORTS="${KANAME_STAND_PORTS:-9090 9091 9095 9096 9097 9098 9099 9100}"
 
 # Счёт слушателей ВЫВОДИТСЯ из перечня: выписанное число разошлось бы с ним молча,
@@ -640,6 +676,194 @@ down() {
   fi
   command -v docker >/dev/null 2>&1 && docker rm -f "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
   say "стенд снесён"
+}
+
+# ─── СВЁРТКА БАЗЫ: условие волны отказа без вердикта (kaname#415) ────────────
+#
+# Коллекции `authz-failclosed` нужно условие, несовместимое с остальным прогоном:
+# база стенда НЕДОСТИЖИМА, а служба ЖИВА. Свёртка останавливает контейнер базы и
+# службу не трогает; возврат запускает его обратно и ждёт, пока база снова
+# принимает соединения (служба переподключается сама — замер 2026-10-01: первый
+# же запрос после возврата отвечает 200).
+#
+# Исходы — те же два класса, что у подъёма. Не вышло остановить или запустить —
+# УСЛОВИЕ НЕ СОЗДАНО (75): волна без свёртки проверяла бы живую базу, и это не
+# вердикт о дереве. Код клиента контейнера при этом не единственный свидетель:
+# остановка сверяется с СОСТОЯНИЕМ контейнера, потому что «команда прошла» и
+# «база недостижима» — разные факты.
+fold_db() {
+  need_tool docker
+  local out running
+  if ! out="$(docker stop "$PG_NAME" 2>&1)"; then
+    unmet "базу стенда не свернуть: контейнер $PG_NAME не остановлен ($out)"
+    exit "$RC_UNMET"
+  fi
+  running="$(docker inspect -f '{{.State.Running}}' "$PG_NAME" 2>/dev/null)"
+  if [ "$running" != "false" ]; then
+    unmet "базу стенда не свернуть: контейнер $PG_NAME по-прежнему исполняется (состояние «${running:-не прочитано}»)"
+    exit "$RC_UNMET"
+  fi
+  say "база стенда свёрнута: контейнер $PG_NAME остановлен, служба оставлена жить"
+}
+
+unfold_db() {
+  need_tool docker
+  local out i
+  if ! out="$(docker start "$PG_NAME" 2>&1)"; then
+    unmet "базу стенда не вернуть: контейнер $PG_NAME не запущен ($out)"
+    exit "$RC_UNMET"
+  fi
+  for i in $(seq 1 "$DB_READY_TRIES"); do
+    if docker exec "$PG_NAME" pg_isready -U kaname >/dev/null 2>&1; then
+      say "база стенда возвращена и принимает соединения, попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  unmet "база стенда не ответила pg_isready за $DB_READY_TRIES с после возврата"
+  exit "$RC_UNMET"
+}
+
+# ─── ВОЛНА СВЁРТКИ БАЗЫ: условие создаётся, а не предполагается (kaname#558) ──
+#
+# Коллекция `authz-failclosed` утверждает 503 рубежа положения. Дойти до него
+# запрос может, только пройдя рубеж предъявителя, а тот под свёрткой отвечает
+# единым 401 (KAN-REV-03, KAN-DENY-01), как только ему понадобится база: при
+# устаревшем снимке набора ключей либо вердикте об отзыве. Значит условие
+# коллекции — ОБА кеша свежи на всё её время.
+#
+# Прежняя волна предъявляла удостоверения «для прогрева» сразу после соседних
+# коллекций. Окна не скользящие, поэтому такое предъявление было ПОПАДАНИЕМ и
+# окна не освежало: остаток окна был равномерен на [0, срок) и задавался
+# расписанием соседей, а при остатке меньше длины коллекции снимок истекал
+# посреди неё — и 401 продукта, верный по приёмке, выходил красным коллекции.
+#
+# Теперь условие СОЗДАЁТСЯ:
+#   1. тишина без предъявлений длиной в больший из сроков плюс запас — после неё
+#      обе записи истекли, и следующее предъявление обязано быть промахом;
+#   2. прогрев — этот промах: окна начинаются с него, отметка t0 снята ДО него,
+#      так что t0 + меньший срок — нижняя граница конца обоих окон;
+#   3. свёртка базы;
+#   4. страж ДО вызовов: если от t0 прошло столько, что запаса окна не осталось,
+#      коллекция не гоняется, исход — УСЛОВИЕ НЕ СОЗДАНО (75);
+#   5. коллекция; страж ПОСЛЕ: красное, полученное, когда окно уже могло
+#      истечь, — тоже 75 с названной причиной, а не красное о дереве. Красное
+#      внутри окна и зелёное отдаются как есть: утверждения коллекции не тронуты.
+#
+# Часы и пауза — функции, чтобы самопроверка судила этот же код подставным
+# временем, не выжидая сроков.
+now_s()   { date +%s; }
+pause_s() { sleep "$1"; }
+
+# dur_seconds <длительность> — секунды целым числом из формы `[Nh][Nm][Ns]`
+# (подмножество длительности Go, которой написана посадка службы). Пустое и
+# прочее — отказ: срок, которого не разобрать, волна не угадывает.
+dur_seconds() {
+  local d="$1" h=0 m=0 s=0
+  [[ "$d" =~ ^(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?$ ]] && [ -n "$d" ] || return 1
+  [ -n "${BASH_REMATCH[2]}" ] && h="${BASH_REMATCH[2]}"
+  [ -n "${BASH_REMATCH[4]}" ] && m="${BASH_REMATCH[4]}"
+  [ -n "${BASH_REMATCH[6]}" ] && s="${BASH_REMATCH[6]}"
+  printf '%s' "$(( 10#$h * 3600 + 10#$m * 60 + 10#$s ))"
+}
+
+# present_own <env-файл> <фронт> <ключ окружения> — код ответа фронта на
+# предъявление; предъявитель уходит через стандартный ввод, а не доводом.
+present_own() {
+  local env_file="$1" own="$2" key="$3" code
+  code="$(jq -r --arg k "$key" '.values[] | select(.key == $k) | "Authorization: Bearer " + .value' "$env_file" \
+    | curl -sS -o /dev/null -w '%{http_code}' -H @- \
+        --cacert "$PKI/ca.crt" --cert "$PKI/srv.crt" --key "$PKI/srv.key" \
+        "$own/iam/v1/accounts?pageSize=1")" || code="нет ответа"
+  printf '%s' "$code"
+}
+
+# Волна — ДВЕ подкоманды вокруг прогона, а не одна, обёртывающая его: прогон
+# коллекции остаётся командой прогонщика в теле шага, и перепись гоняемого
+# (`newman-suite-debt.py`) читает его как прогон, а не как строку внутри довода.
+# Между ними состояние — файл: отметка прогрева и окно.
+WAVE_STATE="$RUNDIR/failclosed-wave.state"
+
+# wave_ttls — печатает «тишина окно» в секундах из сроков посадки; срок,
+# которого не разобрать, — НАХОДКА о дереве (1).
+wave_ttls() {
+  local key_s rev_s
+  if ! key_s="$(dur_seconds "$KEY_SET_TTL")"; then
+    fail "срок снимка набора ключей KEY_SET_TTL=«$KEY_SET_TTL» не разобран — тишину волны не отмерить"
+    exit 1
+  fi
+  if ! rev_s="$(dur_seconds "$REVOCATION_CACHE_TTL")"; then
+    fail "срок кеша отзыва REVOCATION_CACHE_TTL=«$REVOCATION_CACHE_TTL» не разобран — тишину волны не отмерить"
+    exit 1
+  fi
+  printf '%s %s %s %s' "$(( (key_s > rev_s ? key_s : rev_s) + WAVE_MARGIN_S ))" \
+    "$(( key_s < rev_s ? key_s : rev_s ))" "$key_s" "$rev_s"
+}
+
+# failclosed_prepare <env-файл> — тишина, прогрев промахом, свёртка, страж ДО
+# вызовов. Исходы: 0 — условие создано, отметка записана; 75 — не создано.
+failclosed_prepare() {
+  local env_file="${1:-}"
+  if [ -z "$env_file" ]; then
+    printf 'использование: %s failclosed-prepare <env-файл>\n' "$0" >&2
+    exit 2
+  fi
+  need_tool jq
+  need_tool curl
+  local ttls quiet window key_s rev_s own key code t0 t_ready
+  ttls="$(wave_ttls)" || exit $?
+  read -r quiet window key_s rev_s <<EOF
+$ttls
+EOF
+  own="$(jq -r '.values[] | select(.key == "ownRestBaseUrl") | .value' "$env_file")"
+  if [ -z "$own" ] || [ "$own" = "null" ]; then
+    unmet "в окружении $env_file нет адреса собственного фронта — свёртка не начиналась, коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+    exit "$RC_UNMET"
+  fi
+  rm -f "$WAVE_STATE"
+
+  say "тишина $quiet с без предъявлений: снимок ключей $key_s с, кеш отзыва $rev_s с, запас $WAVE_MARGIN_S с — прогрев обязан быть промахом обоих кешей"
+  pause_s "$quiet"
+  t0="$(now_s)"
+  for key in jwtBootstrap jwtAccountAdminA; do
+    code="$(present_own "$env_file" "$own" "$key")"
+    if [ "$code" != "200" ]; then
+      unmet "предъявитель $key не принят фронтом при ЖИВОЙ базе (код $code) — свёртка не начиналась, коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+      exit "$RC_UNMET"
+    fi
+    say "контроль до свёртки: $key принят фронтом (200) после тишины — окна обоих кешей начаты этим предъявлением"
+  done
+  fold_db
+  t_ready="$(now_s)"
+  if [ $(( t_ready - t0 + WAVE_MARGIN_S )) -ge "$window" ]; then
+    unmet "окно свежих кешей истекло до вызовов: от прогрева прошло $(( t_ready - t0 )) с из $window с, запас $WAVE_MARGIN_S с — коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
+    exit "$RC_UNMET"
+  fi
+  mkdir -p "$(dirname "$WAVE_STATE")"
+  printf '%s %s\n' "$t0" "$window" > "$WAVE_STATE"
+  say "окно свежих кешей $window с, к началу коллекции от прогрева прошло $(( t_ready - t0 )) с"
+}
+
+# failclosed_judge <код коллекции> — страж ПОСЛЕ вызовов. Красное, полученное,
+# когда окно уже могло истечь, — 75 с названной причиной; иначе код коллекции
+# как есть: зелёное и красное внутри окна — вердикт о дереве.
+failclosed_judge() {
+  local rc="${1:-}" t0 window t_end
+  if ! [[ "$rc" =~ ^[0-9]+$ ]]; then
+    printf 'использование: %s failclosed-judge <код коллекции>\n' "$0" >&2
+    exit 2
+  fi
+  if ! read -r t0 window < "$WAVE_STATE" 2>/dev/null || [ -z "${window:-}" ]; then
+    unmet "отметки прогрева нет ($WAVE_STATE) — подготовка волны не завершилась, исход коллекции (код $rc) не вердикт о дереве"
+    exit "$RC_UNMET"
+  fi
+  t_end="$(now_s)"
+  if [ "$rc" -ne 0 ] && [ $(( t_end - t0 )) -ge "$window" ]; then
+    unmet "окно свежих кешей истекло посреди коллекции: от прогрева до её конца $(( t_end - t0 )) с при окне $window с — её красное (код $rc) может быть верным 401 рубежа предъявителя, вердикта о дереве нет"
+    exit "$RC_UNMET"
+  fi
+  say "коллекция завершилась: от прогрева $(( t_end - t0 )) с из окна $window с (код $rc)"
+  return "$rc"
 }
 
 # --- самопроверка: доказательство инъекцией в обе стороны ---------------------
@@ -838,6 +1062,78 @@ PYEOF
              "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname" \
              "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
 
+    # ─── ПОДЛОЖНЫЕ КЛИЕНТЫ КОНТЕЙНЕРА ДЛЯ СВЁРТКИ БАЗЫ ──────────────────────
+    #
+    # Свёртка и возврат базы зовут `docker stop|start|inspect|exec`. Подложный
+    # клиент держит СОСТОЯНИЕ контейнера в файле (`SELFTEST_PG_STATE`): `stop`
+    # пишет `false`, `start` — `true`, `inspect` печатает записанное, а
+    # `pg_isready` отвечает успехом ровно у исполняющегося. Четыре мира отличаются
+    # от него ОДНИМ фактом каждый: остановить не вышло · остановка не подействовала
+    # · база не поднимается · клиента нет вовсе.
+    mkdir -p "$TMP/pg-ok" "$TMP/pg-stop-fails" "$TMP/pg-stays" "$TMP/pg-never-ready"
+    cat > "$TMP/pg-ok/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    echo false > "$SELFTEST_PG_STATE" ;;
+  start)   echo true > "$SELFTEST_PG_STATE" ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+  exec)    [ "$(cat "$SELFTEST_PG_STATE")" = true ] ;;
+esac
+EOF
+    cat > "$TMP/pg-stop-fails/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    echo 'Error response from daemon: No such container' >&2; exit 1 ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+esac
+EOF
+    cat > "$TMP/pg-stays/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    exit 0 ;;
+  inspect) echo true ;;
+esac
+EOF
+    cat > "$TMP/pg-never-ready/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  start)   echo true > "$SELFTEST_PG_STATE" ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+  exec)    exit 1 ;;
+esac
+EOF
+    chmod +x "$TMP/pg-ok/docker" "$TMP/pg-stop-fails/docker" "$TMP/pg-stays/docker" \
+             "$TMP/pg-never-ready/docker"
+
+    # ─── ПОДСТАВНОЙ МИР ВОЛНЫ СВЁРТКИ: время — файл, а не ожидание ────────────
+    #
+    # Часы волны (`now_s`) читают файл, пауза (`pause_s`) его сдвигает, подложный
+    # `curl` печатает в вывод, В КАКОЙ МОМЕНТ было предъявление, и отвечает кодом
+    # мира. Так проба утверждает ПОРЯДОК «тишина, затем прогрев» по самим
+    # часам, а не по тексту объявления. Подложный клиент контейнера `pg-slow`
+    # останавливает базу, сдвигая часы за окно, — мир «окно истекло до вызовов».
+    mkdir -p "$TMP/wave" "$TMP/pg-slow"
+    printf '{"values":[]}\n' > "$TMP/wave-env.json"
+    cat > "$TMP/wave/jq" <<'EOF'
+#!/bin/sh
+echo selftest-value
+EOF
+    cat > "$TMP/wave/curl" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+echo "предъявлено фронту в $(cat "$SELFTEST_CLOCK")" >&2
+printf '%s' "${SELFTEST_CURL_CODE:-200}"
+EOF
+    cat > "$TMP/pg-slow/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+  stop)    echo false > "$SELFTEST_PG_STATE"
+           echo $(( $(cat "$SELFTEST_CLOCK") + 40 )) > "$SELFTEST_CLOCK" ;;
+  inspect) cat "$SELFTEST_PG_STATE" ;;
+esac
+EOF
+    chmod +x "$TMP/wave/jq" "$TMP/wave/curl" "$TMP/pg-slow/docker"
+
     # Порты берутся СВОБОДНЫМИ у ядра, а не выписываются: судить готовность на
     # восьми боевых номерах значило бы мерить, заняты ли они на этой машине.
     SELFTEST_FREE_PORTS="$("$PY" -c '
@@ -899,6 +1195,53 @@ EOF
           export SELFTEST_BIND_PORTS=""
           need_tool docker; need_tool go; migrate; start_service )
     }
+
+    world_fold_ok() {
+        ( PATH="$TMP/pg-ok:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_stop_fails() {
+        ( PATH="$TMP/pg-stop-fails:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_stays() {
+        ( PATH="$TMP/pg-stays:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo true > "$SELFTEST_PG_STATE"; fold_db )
+    }
+    world_fold_no_docker() { ( PATH="$TMP/empty"; fold_db ); }
+    world_unfold_ok() {
+        ( PATH="$TMP/pg-ok:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo false > "$SELFTEST_PG_STATE"; DB_READY_TRIES=3; unfold_db )
+    }
+    world_unfold_never_ready() {
+        ( PATH="$TMP/pg-never-ready:$PATH"; export SELFTEST_PG_STATE="$TMP/pg-state"
+          echo false > "$SELFTEST_PG_STATE"; DB_READY_TRIES=2; unfold_db )
+    }
+
+    # wave_world <код коллекции> <её длительность, с> [каталог клиента контейнера]
+    # Часы стартуют с 1000: момент прогрева после тишины читается в выводе числом.
+    wave_world() {
+        local crc="$1" cdur="$2" dk="${3:-$TMP/pg-ok}"
+        ( PATH="$TMP/wave:$dk:$PATH"
+          export SELFTEST_PG_STATE="$TMP/pg-state" SELFTEST_CLOCK="$TMP/clock"
+          echo true > "$SELFTEST_PG_STATE"; echo 1000 > "$SELFTEST_CLOCK"
+          now_s()   { cat "$SELFTEST_CLOCK"; }
+          pause_s() { echo $(( $(cat "$SELFTEST_CLOCK") + $1 )) > "$SELFTEST_CLOCK"; }
+          WAVE_STATE="$TMP/wave.state"
+          failclosed_prepare "$TMP/wave-env.json" || exit $?
+          echo $(( $(cat "$SELFTEST_CLOCK") + cdur )) > "$SELFTEST_CLOCK"
+          echo "коллекция исполнялась"
+          failclosed_judge "$crc" )
+    }
+    world_wave_ok()            { wave_world 0 2; }
+    world_wave_red_inside()    { wave_world 1 2; }
+    world_wave_red_expired()   { wave_world 1 31; }
+    world_wave_slow_fold()     { wave_world 0 2 "$TMP/pg-slow"; }
+    world_wave_rev_longer()    { ( REVOCATION_CACHE_TTL=45s; wave_world 0 2 ); }
+    world_wave_window_smaller(){ ( KEY_SET_TTL=1m; wave_world 1 31 ); }
+    world_wave_warm_refused()  { ( export SELFTEST_CURL_CODE=401; wave_world 0 2 ); }
+    world_wave_ttl_garbage()   { ( KEY_SET_TTL=30sec; wave_world 0 2 ); }
+    world_wave_no_state()      { ( WAVE_STATE="$TMP/wave-absent.state"; failclosed_judge 1 ); }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -986,6 +1329,40 @@ EOF
     # значит 75 здесь был бы маской настоящего отказа.
     assert 1  "(+) тот же мир, служба отвергнута — 1, а не 75"      world_chain_guard    "служба не поднялась" "KANAME_AUTHN__TRUSTED_FORWARDER_SANS" "УСЛОВИЕ НЕ СОЗДАНО"
 
+    echo "--- ось 6: свёртка базы для волны отказа — несозданное условие не выдаётся за вердикт"
+    # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым: контейнер остановлен и остановку видно.
+    assert 0  "(−) свёртка: контейнер остановлен — 0"                world_fold_ok        "база стенда свёрнута" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца: остановить не вышло. Волна без свёртки
+    # проверяла бы живую базу — это несозданное условие, а не находка.
+    assert 75 "(+) свёртка: остановить не вышло — 75"                world_fold_stop_fails "базу стенда не свернуть" "No such container" "НАХОДКА"
+    # (+) другой факт: остановка «прошла», а контейнер исполняется. Код клиента
+    # здесь успешен, поэтому без сверки состояния свёртка была бы объявлена.
+    assert 75 "(+) свёртка: контейнер продолжает исполняться — 75"   world_fold_stays     "по-прежнему исполняется" "-" "НАХОДКА"
+    assert 75 "(+) свёртка без клиента контейнера — 75"              world_fold_no_docker "инструмента нет: docker" "-" "НАХОДКА"
+    # (−) возврат: база снова принимает соединения.
+    assert 0  "(−) возврат: база снова принимает соединения — 0"     world_unfold_ok      "база стенда возвращена" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца: контейнер стартовал, база не отвечает.
+    assert 75 "(+) возврат: база не ответила — 75"                   world_unfold_never_ready "не ответила pg_isready" "-" "НАХОДКА"
+
+    echo "--- ось 7: волна свёртки СОЗДАЁТ условие свежих кешей, а истёкшее окно не выдаёт за вердикт"
+    # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым. Прогрев — в 1032, то есть ПОСЛЕ тишины
+    # 30 + 2 с по часам мира: без тишины он пришёлся бы на 1000.
+    assert 0  "(−) волна: тишина, прогрев промахом, коллекция в окне — 0" world_wave_ok "предъявлено фронту в 1032" "коллекция исполнялась" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) красное ВНУТРИ окна — вердикт о дереве, и страж его не глотает.
+    assert 1  "(+) волна: красное внутри окна — код коллекции"            world_wave_red_inside "коллекция исполнялась" "код 1" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца выше: коллекция кончилась за окном.
+    assert 75 "(+) волна: красное за окном — 75, причина названа"        world_wave_red_expired "истекло посреди коллекции" "коллекция исполнялась" "НАХОДКА"
+    # (+) окно истекло ещё до вызовов — коллекция не гоняется вовсе.
+    assert 75 "(+) волна: окно истекло до вызовов — 75, коллекции нет"   world_wave_slow_fold "истекло до вызовов" "-" "коллекция исполнялась"
+    # (+) тишина — функция ПОСАДКИ: другой срок кеша отзыва даёт другую тишину.
+    assert 0  "(+) волна: срок отзыва 45 с — тишина 47 с"                world_wave_rev_longer "тишина 47 с" "предъявлено фронту в 1047" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) окно — МЕНЬШИЙ из сроков: снимок 60 с не продлевает окна отзыва 30 с.
+    assert 75 "(+) волна: окно по меньшему сроку — 75"                    world_wave_window_smaller "истекло посреди коллекции" "при окне 30 с" "НАХОДКА"
+    assert 75 "(+) волна: прогрев отвергнут — 75, коллекции нет"          world_wave_warm_refused "не принят фронтом" "код 401" "коллекция исполнялась"
+    assert 1  "(+) волна: срок не разобран — 1, коллекции нет"            world_wave_ttl_garbage "не разобран" "KEY_SET_TTL" "коллекция исполнялась"
+    # (+) суд без подготовки: отметки нет — красное коллекции не вердикт.
+    assert 75 "(+) волна: суд без отметки прогрева — 75"                  world_wave_no_state "отметки прогрева нет" "код 1" "НАХОДКА"
+
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
@@ -1009,8 +1386,12 @@ case "${1:-}" in
     exit 0
     ;;
   down) down; exit 0 ;;
+  db-fold) fold_db; exit 0 ;;
+  db-unfold) unfold_db; exit 0 ;;
+  failclosed-prepare) failclosed_prepare "${2:-}"; exit 0 ;;
+  failclosed-judge) failclosed_judge "${2:-}"; exit $? ;;
   *)
-    printf 'использование: %s {up|env|down|--self-test}\n' "$0" >&2
+    printf 'использование: %s {up|env|down|db-fold|db-unfold|failclosed-prepare|failclosed-judge|--self-test}\n' "$0" >&2
     exit 2
     ;;
 esac

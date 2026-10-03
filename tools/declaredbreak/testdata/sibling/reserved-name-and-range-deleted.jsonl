@@ -1,0 +1,2 @@
+{"path":"kaname/cloud/iam/v1/account.proto","start_line":21,"start_column":1,"end_line":59,"end_column":2,"type":"RESERVED_MESSAGE_NO_DELETE","message":"Previously present reserved name \"organization_id\" on message \"Account\" was deleted."}
+{"path":"kaname/cloud/iam/v1/account.proto","start_line":21,"start_column":1,"end_line":59,"end_column":2,"type":"RESERVED_MESSAGE_NO_DELETE","message":"Previously present reserved range \"[7]\" on message \"Account\" is missing values: [7] were removed."}

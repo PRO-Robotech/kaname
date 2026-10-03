@@ -73,50 +73,23 @@ type revokeAllWriter struct {
 func revokeAllWritersUnderTest() []revokeAllWriter {
 	return []revokeAllWriter{
 		{
-			// Принудительный выход пишет отсечку транзакцией адаптера вместе с
-			// записью аудита своего вида.
-			name: "принудительный выход",
-			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
-			write: func(t *testing.T, f assertionFixture, before time.Time) {
-				t.Helper()
-				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
-					context.Background(), domain.UserID(f.user), before,
-					"admin-force-logout", "", "iam.session.force_logout"))
-			},
-		},
-		{
-			// Отзыв всех токенов субъекта — тем же адаптером, своим видом аудита.
+			// Отзыв всех токенов субъекта пишет отсечку транзакцией адаптера
+			// вместе с записью аудита своего вида. Принудительный выход этой
+			// дверью больше не пишет (kaname#380): его отсечку кладёт
+			// транзакция сессии человека, поданная ниже.
 			name: "отзыв всех токенов",
 			path: "UserTokenRevocationRepo.UpsertRevokeAllTx",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
 				t.Helper()
 				require.NoError(t, kanamepg.NewSessionRevocationsAdapter(f.pool).RevokeAllUserTokensTx(
 					context.Background(), domain.UserID(f.user), before,
-					"admin-revoke", "", "iam.session.all_revoked"))
-			},
-		},
-		{
-			// Завершение восстановления — пишущей транзакцией репозитория, тем
-			// же оператором, что зовёт его вариант использования.
-			name: "завершение восстановления",
-			path: "writeTx.UpsertUserTokenRevokeAll",
-			write: func(t *testing.T, f assertionFixture, before time.Time) {
-				t.Helper()
-				ctx := context.Background()
-				w, err := kanamepg.New(f.pool, nil).Writer(ctx)
-				require.NoError(t, err)
-				require.NoError(t, w.UpsertUserTokenRevokeAll(ctx, domain.UserTokenRevocation{
-					UserID:       domain.UserID(f.user),
-					RevokeBefore: before,
-					Reason:       domain.RevokeReasonPasswordChange,
-				}, ""))
-				require.NoError(t, w.Commit(ctx))
+					"admin-revoke", ""))
 			},
 		},
 		{
 			// Транзакция сессии человека — путь, которым пишут отсечку выход из
-			// сессии, смена пароля, завершение восстановления нашей полосой и
-			// сброс второго фактора.
+			// сессии, принудительный выход, смена пароля, завершение
+			// восстановления нашей полосой и сброс второго фактора.
 			name: "транзакция сессии человека",
 			path: "humanSessionWriter.UpsertCutoff",
 			write: func(t *testing.T, f assertionFixture, before time.Time) {
@@ -188,7 +161,7 @@ func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *tes
 				saKeyID     = "soc_rvka0000000000003"
 			)
 			before := ctNewKey(t)
-			f.seedUserClient(t, keyBeforeID, "mirror-revoke-all-before", before.publicPEM, tokenpolicy.AlgES256, nil)
+			f.seedUserClient(t, keyBeforeID, before.publicPEM, tokenpolicy.AlgES256, nil)
 			issued := userClientIssuedAt(t, f, keyBeforeID)
 
 			// (1) Положительный контроль ДО отсечки: ключ токен получает.
@@ -214,7 +187,7 @@ func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *tes
 
 			// (3) Законный близнец: ключ, выданный ПОСЛЕ отсечки, токен получает.
 			after := ctNewKey(t)
-			f.seedUserClient(t, keyAfterID, "mirror-revoke-all-after", after.publicPEM, tokenpolicy.AlgES256, nil)
+			f.seedUserClient(t, keyAfterID, after.publicPEM, tokenpolicy.AlgES256, nil)
 			afterIssued := userClientIssuedAt(t, f, keyAfterID)
 			require.True(t, afterIssued.After(issued),
 				"предпосылка близнеца: второй ключ выдан позже отсечки (%s против %s)", afterIssued, issued)
@@ -224,7 +197,7 @@ func TestClientTokenOwnLane_RevokeAllCutoffRefusesAKeyIssuedNoLaterThanIt(t *tes
 			// (4) Ключ служебной учётки того же аккаунта отсечкой человека не
 			// затронут.
 			sa := ctNewKey(t)
-			f.seedSAClient(t, saKeyID, "mirror-revoke-all-sa", sa.publicPEM, tokenpolicy.AlgES256)
+			f.seedSAClient(t, saKeyID, sa.publicPEM, tokenpolicy.AlgES256)
 			code, body = ctPost(t, contour.endpoint, ctAssertion(t, sa, saKeyID, "jti-sa", now))
 			require.Equal(t, 200, code, "%s: ключ служебной учётки не затронут отсечкой человека; ответ %v", w.name, body)
 			executed[w.path] = struct{}{}

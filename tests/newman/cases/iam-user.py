@@ -6,7 +6,8 @@
 Covered RPCs:  Get, List, Invite, Delete + глаголы-действия :block / :unblock /
   :removeFromAccount (public UserService).
 Not covered here: InternalUserService.UpsertFromIdentity, InternalUserService.Get —
-  those are internal-port-only RPCs covered in iam-internal-only-check.py.
+  those are internal-port-only RPCs; their route census on the platform's listeners is
+  held by PRO-Robotech/kacho:gateway/tests/newman/cases/iam-internal-only-check.py.
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):
@@ -44,11 +45,14 @@ CRUD fixture dependency:
 
     IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS дополнительно требует:
       jwtBootstrap      — предъявитель пробы модели прав (InternalIAMService.Check);
-      internalBaseUrl   — адрес cluster-internal REST-листенера (инжектится
-                          прогонщиком через --env-var; без него шаг ОТКАЗЫВАЕТ и
+      ownInternalRestBaseUrl — адрес собственного внутреннего REST-фронта службы
+                          (пишет посев автономного стенда; без него шаг ОТКАЗЫВАЕТ и
                           пропускается, а не уезжает молча на публичный порт);
       projectA1Id       — область, которую называет само приглашение;
-      projectB1Id       — проект ЧУЖОГО аккаунта, отрицательный контроль пробы.
+      projectB1Id       — проект ЧУЖОГО аккаунта, отрицательный контроль пробы;
+      ceremonyInviteeEmail / ceremonyInviteeUserId — ЧЕЛОВЕК, которого приглашают:
+                          адрес подтверждён, выдач на арендаторах посева нет
+                          (пишет волна церемонии, `seed_ceremony.py --wave`).
 
 Operation envelope:
   Mutations return `operation.Operation` with id prefix `iop`.
@@ -127,10 +131,12 @@ def assert_iam_operation_envelope():
 # РАДИ доступа, и снятие роли сменило бы предмет их кейсов. Сам страж при этом
 # покрытия не теряет — он утверждается через край отдельным кейсом
 # IAM-USR-EXCL-NEG-LIVE-GRANT, где живая выдача и есть предмет.
-def _invite_probe(var: str, email_tag: str, with_grant: bool = True):
+def _invite_probe(var: str, email_tag: str, with_grant: bool = True, email: str = ""):
+    # `email` — адрес уже заведённого человека (волна церемонии); пусто — свежий
+    # адрес прогона, то есть строка в положении приглашения.
     body = {
         "accountId": "{{accountAId}}",
-        "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
+        "email": email or f"{email_tag}-{{{{runId}}}}@kacho.local",
     }
     if with_grant:
         # `role_id` обязателен ТОГДА И ТОЛЬКО ТОГДА, когда назван `project_id`
@@ -162,18 +168,20 @@ def _invite_probe(var: str, email_tag: str, with_grant: bool = True):
 
 
 # Адрес пробы модели прав. `/iam/v1/internal/*` обслуживает ТОЛЬКО
-# cluster-internal REST-листенер, поэтому шаг переписывает адрес на
-# {{internalBaseUrl}} санкционированной формой require_env_url: утвердить (назвав
+# собственный внутренний REST-фронт службы, поэтому шаг переписывает адрес на
+# {{ownInternalRestBaseUrl}} санкционированной формой require_env_url: утвердить (назвав
 # переменную) и пропустить запрос. Без переписывания шаг ушёл бы на публичный порт
 # и получил маршрутный 404, неотличимый от отказа модели.
 CHECK_PATH = "/iam/v1/internal/iam:check"
 
 
 def _internal_check_url():
+    # ВНУТРЕННИЙ ФРОНТ — СВОЙ (kaname#398): `internalBaseUrl` — слушатель края
+    # платформы, на автономном стенде его нет.
     return require_env_url(
-        "internalBaseUrl", CHECK_PATH,
+        "ownInternalRestBaseUrl", CHECK_PATH,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 # ---------------------------------------------------------------------------
@@ -1026,8 +1034,18 @@ CASES.append(Case(
     classes=["FLOW", "AUTHZ"],
     priority="P1",
     steps=[
-        # Своё приглашение со своим адресом (общая фикстура не задействована).
-        *_invite_probe("inviteAccessUserId", "accessprobe"),
+        # ПРИГЛАШАЕТСЯ ЧЕЛОВЕК С ПОДТВЕРЖДЁННЫМ АДРЕСОМ (kaname#456, kaname#398).
+        # С приёмки `access-beyond-login-needs-a-verified-address.md` выдачи
+        # действуют только на человека, чей адрес подтверждён, и дверь решения
+        # судит допуск РАНЬШЕ отношения: приглашённый по свежему адресу, ни разу не
+        # входивший, получает `allowed: false, reason: email_not_verified` на ЛЮБОЙ
+        # вопрос — и на подаренном проекте, и на чужом (замер на автономном стенде).
+        # Пара «держит здесь / не держит там» на нём неразличима, то есть кейс
+        # перестал бы спрашивать о приглашении. Поэтому приглашается человек,
+        # заведённый волной церемонии и уже подтвердивший адрес, без единой выдачи
+        # на арендаторах посева; ветвь «приглашённый ещё не входил» судит свой набор
+        # (`kaname-address-verification`).
+        *_invite_probe("inviteAccessUserId", "accessprobe", email="{{ceremonyInviteeEmail}}"),
         # ПОЛОЖИТЕЛЬНАЯ ПОЛОВИНА — приглашённый держит v_get на подаренном проекте.
         poll_request_until_status(
             name="invitee-holds-v-get-on-invited-project",
@@ -1049,6 +1067,9 @@ CASES.append(Case(
                 "pm.test('фикстура записала id приглашённого', () => "
                 "  pm.expect(pm.environment.get('inviteAccessUserId'), 'inviteAccessUserId')"
                 "   .to.be.a('string').and.not.empty);",
+                "pm.test('приглашение нашло строку уже вошедшего человека, а не завело вторую', () => "
+                "  pm.expect(pm.environment.get('inviteAccessUserId'), 'inviteAccessUserId')"
+                "   .to.eql(pm.environment.get('ceremonyInviteeUserId')));",
                 "pm.test('приглашение материализовало v_get на подаренном проекте', () => {",
                 "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200);",
                 "  pm.expect(j && j.allowed, JSON.stringify(j)).to.eql(true);",
@@ -2808,3 +2829,11 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
+# предъявители людей куёт своя церемония службы на автономном стенде
+# (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь
+# отвечать не на что.
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "волны церемонии нет поверхности, которую она судит")

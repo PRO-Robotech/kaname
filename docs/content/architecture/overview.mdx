@@ -22,7 +22,7 @@ database-per-service, интеграцию с провайдерами иден�
 flowchart TD
   handler["handler<br/>(тонкий transport: parse → use-case → format)"] --> uc["use-case<br/>(apps/kaname/api/{account,project,user,…})"]
   repo["repo (pgx adapter)"] --> uc
-  clients["clients (Hydra / Kratos)"] --> uc
+  clients["clients (почта)"] --> uc
   uc --> domain["domain<br/>(сущности + Validate, чистый Go)"]
   repo --> domain
 ```
@@ -33,7 +33,7 @@ flowchart TD
     <tr><td><strong>domain</strong></td><td><code>internal/domain/</code></td><td>Сущности + <code>Validate()</code>; закрытые наборы (verbs, subject-types). Только stdlib + proto</td></tr>
     <tr><td><strong>use-case</strong></td><td><code>internal/apps/kaname/api/&lt;resource&gt;/</code></td><td>Бизнес-логика; определяет port-интерфейсы (Repo, Client). Не импортирует transport</td></tr>
     <tr><td><strong>repo (adapter)</strong></td><td><code>internal/repo/</code></td><td>Реализация портов на handwritten pgx; SQLSTATE → sentinel; outbox-emit в TX</td></tr>
-    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Hydra (OAuth-клиенты), Kratos (identity), сброс кэша прав на краю</td></tr>
+    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Почтовый отправитель. Дороги к прежнему издателю здесь больше нет: последняя — обмен докерного контура — снята (kaname#494)</td></tr>
     <tr><td><strong>handler</strong></td><td><code>internal/handler/</code></td><td>Тонкий transport: parse → use-case → format. Без бизнес-логики</td></tr>
     <tr><td><strong>authz</strong></td><td><code>internal/authzguard</code>, <code>authzmap</code>, <code>authztypes</code></td><td>Интерсепторы, permission-map, verb→relation, объектные типы</td></tr>
     <tr><td><strong>composition root</strong></td><td><code>cmd/kaname/</code></td><td>Единственное место wiring (serve.go); <code>cmd/migrator/</code> — миграции</td></tr>
@@ -75,24 +75,22 @@ IAM — не только владелец модели прав, но и **то
 Изменение прав (роль, привязка) действует **с момента фиксации транзакции** — отдельного
 хранилища, до которого право должно доехать, нет. Полная модель — [Авторизация](/architecture/authz).
 
-## Идентичность — по посадке: внешний поставщик либо свой вход
+## Идентичность — свой вход
 
-Кто проверяет человека, решает ключ `authn.identity-provider`, и посадок две. Под **`external`**
-личность и интерактивный вход вынесены в Ory-стек: **Kratos** хранит личности и обслуживает
-вход (пароль / passkey), **Hydra** — OAuth 2.0 authorization server; IAM интегрируется с ними
-через hook-listener (активация User при первом входе) и клиент Hydra (регистрация
-OAuth-клиентов), а User — проекция Kratos-identity. Под **`own`** внешнего поставщика нет:
-способы входа, сессия (`kaname_session`) и второй фактор — записи самой службы, форма входа
-приходит на её слушатель полосы входа от края.
+Человека проверяет сама служба: внешнего поставщика удостоверений нет, способы входа, сессия
+(`kaname_session`) и второй фактор — записи самой службы, форма входа приходит на её слушатель
+полосы входа от края. Посадка у службы одна.
 
 **Программные токены платформа выпускает сама** там, где объявлена своя чеканка
 (`authn.token-signing` + `authn.client-token`): у неё своя ключница, свой подписант и своя запись
-публикуемого набора ключей. Под `external` без своей чеканки ключ и токен по-прежнему зеркалятся
-у Hydra, и издателем выступает она.
+публикуемого набора ключей. Без своего токен-эндпоинта ключевая пара и федеративный ключ не
+выдаются вовсе: обменять такой ключ было бы негде.
 
-Вида выдачи `authorization_code` наш токен-эндпоинт не принимает ни на одной посадке — перечень
-видов у него закрыт и состоит из `client_credentials` и `jwt-bearer`: человек входит либо у
-поставщика, либо на полосе входа службы, а токен для терминала выпускает уже сессией.
+Токен-эндпоинт (`POST /iam/v1/token`) принимает четыре вида выдачи, и перечень закрыт:
+`client_credentials` и `urn:ietf:params:oauth:grant-type:jwt-bearer` — программные полосы,
+`authorization_code` и `refresh_token` — [церемония входа приложения](/api/oauth-ceremony). Иной
+вид отвергается `400 unsupported_grant_type`; формы запроса — [Токены доступа](/api/tokens#token-endpoint-grants).
+Человек входит только на полосе входа службы, а токен для терминала выпускает уже сессией.
 
 Детали и потоки — [Идентичность и токены](/architecture/identity).
 
@@ -105,9 +103,8 @@ OAuth-клиентов), а User — проекция Kratos-identity. Под **
   <tbody>
     <tr><td><code>:9090</code></td><td>public</td><td>Tenant через <code>api-gateway</code> (TLS+JWT); peer-сервисы (mTLS)</td><td>Публичные RPC ресурсов + AuthorizeService + OperationService</td></tr>
     <tr><td><code>:9091</code></td><td>internal</td><td>Peer-сервисы (mTLS)</td><td><code>InternalIAMService</code> (<code>Check</code> / <code>RegisterResource</code> / ...) — authz-gate платформы</td></tr>
-    <tr><td><code>:9092</code></td><td>hooks</td><td>Ory Kratos (mTLS) — посадка <code>external</code></td><td>Identity-хуки (активация User при первом входе, завершение восстановления)</td></tr>
     <tr><td><code>:9095</code></td><td>metrics</td><td>Prometheus (cluster-internal)</td><td><code>/metrics</code></td></tr>
-    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane</td><td>ровно край платформы (взаимный TLS, допуск по SAN) — посадка <code>own</code></td><td>Формы входа: регистрация, вход, выход, смена пароля, восстановление, второй фактор</td></tr>
+    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane</td><td>ровно край платформы (взаимный TLS, допуск по SAN)</td><td>Формы входа: регистрация, вход, выход, смена пароля, восстановление, второй фактор</td></tr>
   </tbody>
 </table>
 
@@ -128,7 +125,6 @@ flowchart LR
   geo["kacho-geo"] -->|"Check"| iam
   nlb["kacho-nlb"] -->|"Check"| iam
   iam -->|"вердикт запросом"| pg[("PostgreSQL kaname")]
-  iam -->|"identity / OAuth — посадка external"| ory["Ory Kratos + Hydra"]
 ```
 
 По сборке IAM — **leaf-узел**: он не зависит ни от одного доменного сервиса (как kacho-geo). По
@@ -138,6 +134,5 @@ RPC, а vpc/compute дополнительно регистрируют влад
 
 :::info Циклов нет
 Рёбра `* → iam` однонаправлены — IAM не зовёт своих консументов обратно. Единственные исходящие
-рёбра IAM — к инфраструктуре (Postgres; под `external` ещё Kratos и Hydra), не к доменным
-сервисам.
+рёбра IAM — к инфраструктуре (Postgres, почтовый узел), не к доменным сервисам.
 :::

@@ -24,9 +24,17 @@
 // The token carries IDENTITY only (Вариант B): kacho-registry re-checks
 // authorization per request against IAM, so no registry scope is embedded.
 //
-// Clean-arch: this package defines the ports (LocalMinter, AssertionSigner,
-// TokenExchanger, basicCredentialResolver) and the use-case; the infra-touching
-// halves live behind the ports, wired in the composition root.
+// # Издатель у полосы ОДИН — наш подписант (kaname#494)
+//
+// Прежде у полосы было два издателя: наш подписант и обмен подписанного
+// утверждения у внешнего поставщика, который шёл, когда подписант не провязан.
+// Обмен снят целиком: без нашего подписанта use-case не строится вовсе
+// (NewIssueRegistryTokenUseCase), и состояния «подписанта нет, выдаём иначе» у
+// типа нет.
+//
+// Clean-arch: this package defines the ports (LocalMinter,
+// basicCredentialResolver, CredentialValidator) and the use-case; the
+// infra-touching halves live behind the ports, wired in the composition root.
 package registry_token
 
 import (
@@ -38,7 +46,6 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/registrytoken"
 )
 
 // ErrInvalidCredentials — a validator's rejection (bad/unknown/expired/
@@ -48,8 +55,7 @@ var ErrInvalidCredentials = errors.New("registry token: invalid credentials")
 
 // ErrUnauthenticated — the use-case's outward auth-failure. The HTTP handler maps
 // it to 401 + WWW-Authenticate (fail-closed; no distinction between missing,
-// malformed and rejected credentials, and no distinction between a Hydra
-// client/grant rejection and a local reject).
+// malformed and rejected credentials).
 var ErrUnauthenticated = errors.New("registry token: unauthenticated")
 
 // ErrAudienceNotAllowed — заказанный `?service=` вне того, чему эта полоса
@@ -68,11 +74,11 @@ var ErrAudienceNotAllowed = errors.New("registry token: requested audience is no
 // Живёт только ради окна перехода #1143 и уходит вместе с ним: предикат снятия
 // — снятие ручки `api-server.registry-token.key-material-window-until`.
 type Credential struct {
-	// ClientID — the Hydra OAuth2 client_id; lands in the assertion iss & sub
-	// and is the identity the data-plane resolves to a ServiceAccount.
+	// ClientID — идентификатор ключа служебной учётки, которым назвался
+	// предъявитель (строка реестра ключей).
 	ClientID string
-	// KeyID — the registered JWK kid (the SA-OAuth-client id); the assertion
-	// protected-header kid so Hydra selects the right verification key.
+	// KeyID — идентификатор зарегистрированного ключа; непустой означает, что
+	// строка реестра найдена и её открытая половина сверена.
 	KeyID string
 	// Subject — the owning ServiceAccount id (informational / audit).
 	Subject string
@@ -87,7 +93,7 @@ type Credential struct {
 }
 
 // CredentialValidator — verifies the presented Basic credential (client_id +
-// SA-key private PEM) and resolves the assertion identity. An unsupported or
+// SA-key private PEM) and resolves the identity the token is minted for. An unsupported or
 // invalid credential MUST return ErrInvalidCredentials (never a partial-detail
 // error that leaks which half was wrong).
 //
@@ -111,60 +117,21 @@ var ErrCredentialKindNotAccepted = errors.New("registry token: the presented cre
 // в 503 (fail-closed): недоступность издателя НЕ даёт токена и НЕ открывает
 // проход.
 //
-// ЧЕЙ ЭТО ОТКАЗ — ЗАВИСИТ ОТ ПОСАДКИ, и здесь стояло обратное. Прежняя редакция
-// называла внешнего поставщика «жёсткой зависимостью пути чеканки», при том что
-// на переведённом контуре (`BuildConfig.Signer` подключён) до обменника дело не
-// доходит вовсе: четыре из шести производственных мест этого признака ниже
-// оборачивают ошибку НАШЕГО подписанта, а не ответ постороннего.
-//
-// Цена ошибки — не стиль: эту строку читают в момент 503, и она отправляла
-// чинить чужой процесс там, где отказала своя чеканка. Тот же класс уже назван
+// ЧЕЙ ЭТО ОТКАЗ. Издатель у полосы один — НАШ подписант, — и каждое
+// производственное место этого признака ниже оборачивает ошибку нашей чеканки
+// либо нашего авторитета о базовом секрете, а не ответ постороннего. Строку
+// читают в момент 503, и она обязана отправлять чинить своё. Тот же класс назван
 // у соседа своим именем — `bootstrap_token/local_mint.go`, врезка «ЗАМЕНА, А НЕ
 // ПЕРЕИМЕНОВАНИЕ».
 var ErrIssuerUnavailable = errors.New("registry token: issuer unavailable")
 
-// AssertionInput — the RFC 7523 client_assertion parameters.
-type AssertionInput struct {
-	KeyID         string // protected-header kid.
-	ClientID      string // iss & sub.
-	Audience      string // aud — the Hydra token endpoint URL.
-	PrivateKeyPEM string // the presented EC private key (signs the assertion).
-	IssuedAt      int64  // iat — unix seconds.
-	ExpiresAt     int64  // exp — unix seconds (short, ≤ MaxAssertionTTL).
-	JTI           string // jti — unique assertion id.
-}
+// ErrOwnMinterRequired — use-case собирают без нашего подписанта. Отказ
+// построения, а не состояние: другого издателя у полосы нет, и use-case без
+// подписанта выдавать было бы нечем (kaname#494).
+var ErrOwnMinterRequired = errors.New("registry token: our own minter is required — this lane has no other issuer")
 
-// AssertionSigner — signs an ES256 client_assertion (JWS) from the presented
-// private key. Pure crypto; no infra.
-type AssertionSigner interface {
-	Sign(in AssertionInput) (string, error)
-}
-
-// ExchangeInput — the token exchange request relayed to Hydra.
-type ExchangeInput struct {
-	ClientAssertion string // the signed ES256 assertion.
-	Audience        string // requested token aud (the registry service).
-	Scope           string // requested scope (may be empty).
-}
-
-// ExchangeOutput — Hydra's access_token relayed to the docker client.
-type ExchangeOutput struct {
-	AccessToken string
-	ExpiresIn   int
-}
-
-// TokenExchanger — brokers the `client_credentials` + `private_key_jwt` exchange
-// with Hydra. Implementations return ErrIssuerUnavailable when the issuer is
-// unreachable (→ 503); any other error is collapsed to ErrUnauthenticated (401).
-type TokenExchanger interface {
-	Exchange(ctx context.Context, in ExchangeInput) (ExchangeOutput, error)
-}
-
-// Config — brokering policy.
+// Config — политика выдачи.
 type Config struct {
-	// AssertionAudience — the `aud` of the client_assertion: the Hydra token
-	// endpoint URL Hydra recognises (its external issuer's token endpoint).
-	AssertionAudience string
 	// AllowedAudiences — адресаты, которым ЭТА полоса вправе чеканить, —
 	// внешняя граница выдачи, объявленная посадкой (задача #1184).
 	//
@@ -173,41 +140,35 @@ type Config struct {
 	AllowedAudiences []string
 	// DefaultService — requested token `aud` fallback when ?service= is omitted.
 	DefaultService string
-	// AssertionTTL — client_assertion lifetime. <=0 or > MaxAssertionTTL is
-	// clamped to MaxAssertionTTL.
-	AssertionTTL time.Duration
-	// Scope — optional scope requested from Hydra (empty → not requested).
+	// Scope — объём, который полоса кладёт в выпускаемый токен (пусто — не
+	// кладёт).
 	Scope string
-	// Anonymous — the configured public-principal identity the shim authenticates
-	// as for anonymous pull (RG-1 D-7 / B13). A zero ClientID/PrivateKeyPEM leaves
-	// anonymous pull DISABLED (no-Basic-creds → 401 challenge, secure-by-default).
+	// Anonymous — объявленный публичный принципал анонимного чтения (RG-1 D-7 /
+	// B13). Пустой ClientID оставляет анонимный поток ВЫКЛЮЧЕННЫМ (вход без
+	// удостоверения → 401-вызов, secure-by-default).
 	Anonymous AnonymousIdentity
 }
 
-// AnonymousIdentity — the configured public-principal the shim authenticates as
-// for anonymous pull. Its Hydra client_id is one the registry data-plane resolves
-// to the FGA wildcard AnonymousSubject (`user:*`); the shim holds its signing key
-// — NO user/SA credential is presented for the anonymous flow. Because `user:*`
-// carries only the per-repo `v_get` wildcard grant emitted for PUBLIC repos, an
-// anonymous token can pull a PUBLIC repo but can never write (B13/B14).
+// AnonymousIdentity — объявленный публичный принципал, за которого наш
+// подписант выпускает токен анонимного чтения. Приёмная сторона реестра
+// резолвит его в подстановочного принципала AnonymousSubject (`user:*`); у
+// `user:*` есть только грант чтения публичных репозиториев, поэтому анонимный
+// токен читает публичный репозиторий и не пишет никогда (B13/B14).
+//
+// Поле ОДНО — идентичность. Прежде рядом стояли идентификатор ключа и закрытая
+// половина, которыми подписывалось утверждение для обмена у внешнего
+// поставщика; обмен снят (kaname#494), читателя у них не осталось, и условием
+// включённости анонимного потока ключ, которым ничего не подписывается, быть
+// не может.
 type AnonymousIdentity struct {
-	// ClientID — the Hydra OAuth2 client_id the shim authenticates as; the
-	// data-plane resolves its token to AnonymousSubject.
+	// ClientID — субъект анонимного токена; приёмная сторона резолвит его в
+	// AnonymousSubject.
 	ClientID string
-	// KeyID — the anon client's registered JWK kid (assertion protected-header).
-	KeyID string
-	// PrivateKeyPEM — the EC private key the shim signs the anon client_assertion
-	// with (IAM-held; never a presented credential).
-	PrivateKeyPEM string
 }
-
-// MaxAssertionTTL — hard ceiling on the client_assertion lifetime (a short-lived
-// bearer proving possession of the SA-key private half).
-const MaxAssertionTTL = 60 * time.Second
 
 const (
 	// AnonymousSubject — the FGA principal an anonymous (no-credential) docker
-	// pull resolves to on the registry data-plane. The anon Hydra client's token
+	// pull resolves to on the registry data-plane. The anonymous identity's token
 	// is mapped to this wildcard subject; `user:*` holds ONLY the per-repo `v_get`
 	// wildcard grant emitted for PUBLIC repositories, so it can pull a PUBLIC repo
 	// but can never write (D-7). PRIVATE/absent repos deny uniformly (404).
@@ -243,19 +204,17 @@ type IssueInput struct {
 
 // IssueOutput — the Docker-compatible token response payload.
 type IssueOutput struct {
-	Token     string // the Hydra-issued access_token.
-	ExpiresIn int    // seconds until exp (from Hydra).
+	Token     string // токен, выпущенный нашим подписантом.
+	ExpiresIn int    // seconds until exp.
 	IssuedAt  int64  // unix seconds (informational).
 }
 
-// IssueRegistryTokenUseCase — verify the SA-key, sign a client_assertion, and
-// broker a Hydra token.
+// IssueRegistryTokenUseCase — проверить предъявленное и выпустить токен реестра
+// нашим подписантом.
 type IssueRegistryTokenUseCase struct {
-	cfg       Config
-	signer    AssertionSigner
-	exchanger TokenExchanger
-	// minter — НАШ подписант. nil означает «контур ещё на прежнем издателе»;
-	// это законное состояние до перевода, а не полусобранная зависимость.
+	cfg Config
+	// minter — НАШ подписант, единственный издатель полосы. Не бывает nil:
+	// конструктор без него отказывает.
 	minter LocalMinter
 	// basicResolver — авторитет о предъявленном базовом секрете (#1142).
 	// nil → полосы нет.
@@ -269,38 +228,31 @@ type IssueRegistryTokenUseCase struct {
 	// kindObserver — счётчик исходов полос. nil → счёта нет.
 	kindObserver CredentialKindObserver
 	now          func() time.Time
-	jti          func() (string, error)
 }
 
-// NewIssueRegistryTokenUseCase — builder. AssertionTTL is clamped to
-// (0, MaxAssertionTTL].
+// NewIssueRegistryTokenUseCase — построитель. Наш подписант — ОБЯЗАТЕЛЬНЫЙ вход:
+// без него отказ построения ErrOwnMinterRequired (kaname#494).
 //
-// Подписант и обмен остаются параметрами: их зовёт АНОНИМНЫЙ поток на контуре,
-// ещё не переведённом на нашу чеканку. Полоса предъявленного удостоверения ими
-// не пользуется — подписывать утверждение нечем: ключевого материала у
-// принимаемого вида не существует.
-func NewIssueRegistryTokenUseCase(cfg Config, s AssertionSigner, ex TokenExchanger) *IssueRegistryTokenUseCase {
-	if cfg.AssertionTTL <= 0 || cfg.AssertionTTL > MaxAssertionTTL {
-		cfg.AssertionTTL = MaxAssertionTTL
+// Обязательный аргумент, а не опциональная провязка: необязательный подписант
+// оставлял типу состояние «подписанта нет», и каждая точка выдачи обязана была
+// решать, что в нём делать. Прежде она уходила к внешнему поставщику; снятый
+// обмен оставил бы ей только отказ на каждом запросе — полосу, которая
+// поднимается и не выдаёт ничего. Состояние, у которого нет законного исхода,
+// не должно быть представимо.
+func NewIssueRegistryTokenUseCase(cfg Config, m LocalMinter) (*IssueRegistryTokenUseCase, error) {
+	if m == nil {
+		return nil, ErrOwnMinterRequired
 	}
 	return &IssueRegistryTokenUseCase{
-		cfg:       cfg,
-		signer:    s,
-		exchanger: ex,
-		now:       time.Now,
-		jti:       registrytoken.NewJTI,
-	}
+		cfg:    cfg,
+		minter: m,
+		now:    time.Now,
+	}, nil
 }
 
-// WithClock overrides the clock (tests / deterministic exp).
+// WithClock overrides the clock (tests / deterministic iat).
 func (u *IssueRegistryTokenUseCase) WithClock(now func() time.Time) *IssueRegistryTokenUseCase {
 	u.now = now
-	return u
-}
-
-// WithJTIFunc overrides the jti generator (tests).
-func (u *IssueRegistryTokenUseCase) WithJTIFunc(f func() (string, error)) *IssueRegistryTokenUseCase {
-	u.jti = f
 	return u
 }
 
@@ -421,15 +373,6 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 		return IssueOutput{}, aerr
 	}
 
-	// Обмена НЕТ и быть не может: подписывать утверждение нечем — ключевого
-	// материала у этого вида не существует. Значит токен обязан чеканить НАШ
-	// подписант; непереведённый контур честно отвечает недоступностью издателя,
-	// а не тихо отдаёт что-нибудь.
-	if !u.mintsLocally() {
-		return IssueOutput{}, fmt.Errorf(
-			"%w: basic credential requires our own minting — there is no key material to sign an assertion with",
-			ErrIssuerUnavailable)
-	}
 	out, merr := u.minter.MintToken(ctx, MintInput{
 		Subject:  cred.PrincipalID,
 		Audience: service,
@@ -474,58 +417,18 @@ func (u *IssueRegistryTokenUseCase) executeKeyMaterialInWindow(ctx context.Conte
 	}
 	now := u.now()
 
-	// Контур переведён на НАШУ чеканку — токен выпускает наш подписант, и
-	// утверждение для прежнего издателя не строится вовсе.
-	if u.mintsLocally() {
-		out, merr := u.minter.MintToken(ctx, MintInput{
-			Subject:  cred.Subject,
-			Audience: service,
-			Scope:    u.cfg.Scope,
-			// Материал привязки — ровно тот, что предъявлен транспортом.
-			ConfirmationX5TS256: in.ConfirmationX5TS256,
-		})
-		if merr != nil {
-			// Неисправность СВОЕЙ чеканки — недоступность издателя, а не
-			// негодные учётные данные: предъявитель ни при чём, и повтор
-			// осмыслен.
-			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
-		}
-		u.observeKind(OutcomeKeyMaterialAcceptedInWindow)
-		return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
-	}
-
-	jti, jerr := u.jti()
-	if jerr != nil {
-		return IssueOutput{}, jerr
-	}
-	assertion, serr := u.signer.Sign(AssertionInput{
-		KeyID:         cred.KeyID,
-		ClientID:      cred.ClientID,
-		Audience:      u.cfg.AssertionAudience,
-		PrivateKeyPEM: in.Password,
-		IssuedAt:      now.Unix(),
-		ExpiresAt:     now.Add(u.cfg.AssertionTTL).Unix(),
-		JTI:           jti,
+	// Токен выпускает НАШ подписант — другого издателя у полосы нет.
+	out, merr := u.minter.MintToken(ctx, MintInput{
+		Subject:  cred.Subject,
+		Audience: service,
+		Scope:    u.cfg.Scope,
+		// Материал привязки — ровно тот, что предъявлен транспортом.
+		ConfirmationX5TS256: in.ConfirmationX5TS256,
 	})
-	if serr != nil {
-		// The presented key could not sign — treat as an invalid credential
-		// (fail-closed 401), never leaking the crypto failure detail.
-		return IssueOutput{}, ErrUnauthenticated
-	}
-
-	out, xerr := u.exchanger.Exchange(ctx, ExchangeInput{
-		ClientAssertion: assertion,
-		Audience:        service,
-		Scope:           u.cfg.Scope,
-	})
-	if xerr != nil {
-		if errors.Is(xerr, ErrIssuerUnavailable) {
-			// Причина ОБОРАЧИВАЕТСЯ: наружу обработчик всё равно отдаст
-			// фиксированное тело, а вот в журнал без неё не уходило бы ничего.
-			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, xerr)
-		}
-		// Провайдер отверг обмен (негодный/истёкший/отозванный ключ) — 401.
-		return IssueOutput{}, ErrUnauthenticated
+	if merr != nil {
+		// Неисправность СВОЕЙ чеканки — недоступность издателя, а не негодные
+		// учётные данные: предъявитель ни при чём, и повтор осмыслен.
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
 	}
 	u.observeKind(OutcomeKeyMaterialAcceptedInWindow)
 	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
@@ -533,24 +436,20 @@ func (u *IssueRegistryTokenUseCase) executeKeyMaterialInWindow(ctx context.Conte
 
 // AnonymousEnabled reports whether anonymous-pull issuance is configured. When
 // false the shim MUST fall back to the 401 Bearer challenge (secure-by-default:
-// anonymous pull is opt-in and requires a configured anon identity + its key).
+// anonymous pull is opt-in and requires a declared anonymous identity).
 func (u *IssueRegistryTokenUseCase) AnonymousEnabled() bool {
-	return u.cfg.Anonymous.ClientID != "" && u.cfg.Anonymous.PrivateKeyPEM != ""
+	return u.cfg.Anonymous.ClientID != ""
 }
 
-// ExecuteAnonymous brokers a short-lived, read-only Bearer for the public
-// AnonymousSubject principal — the docker anonymous-pull flow (no Basic creds,
-// RG-1 B13). It signs a client_assertion AS the configured anonymous identity
-// (whose token the data-plane resolves to `user:*`) and exchanges it with Hydra
-// requesting the registry data-plane audience and the read-only AnonymousReadScope
-// — NEVER a write verb (B14). No user/SA credential is validated: an anonymous
-// caller is the wildcard principal, not a specific subject. Bounded TTL is
-// inherited from the assertion clamp + the anon Hydra client's configured token
-// lifespan (RG-1 introduces no new expiry mechanism).
+// ExecuteAnonymous выпускает НАШИМ подписантом короткоживущий токен ТОЛЬКО
+// ЧТЕНИЯ за объявленного анонимного принципала — докерный поток анонимного
+// чтения (вход без удостоверения, RG-1 B13). Объём — AnonymousReadScope и
+// никогда глагол записи (B14). Удостоверения не проверяется: анонимный
+// вызывающий — подстановочный принципал, а не конкретный субъект. Срок —
+// срок токенов полосы, объявленный её настройкой.
 //
-// A missing/rejected exchange yields ErrUnauthenticated (→ 401 challenge); an
-// unreachable issuer yields ErrIssuerUnavailable (→ 503, no token). Anonymous
-// pull being unconfigured also fails closed (ErrUnauthenticated → 401).
+// Необъявленный анонимный поток — ErrUnauthenticated (→ 401-вызов); отказ нашей
+// чеканки — ErrIssuerUnavailable (→ 503, токена нет).
 func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, service string) (IssueOutput, error) {
 	if !u.AnonymousEnabled() {
 		// Anonymous pull not configured → fail-closed (handler issues 401).
@@ -566,59 +465,17 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 	}
 	now := u.now()
 
-	// Анонимный поток переводится тем же решением: два издателя на ОДНОМ
-	// контуре означали бы, что приёмная сторона обязана держать обе записи
-	// ради одного и того же реестра.
-	if u.mintsLocally() {
-		out, merr := u.minter.MintToken(ctx, MintInput{
-			Subject:  u.cfg.Anonymous.ClientID,
-			Audience: service,
-			// Пол чтения энфорсится ЗДЕСЬ и приёмной стороной: анонимный
-			// токен никогда не просит глагола записи.
-			Scope: AnonymousReadScope,
-		})
-		if merr != nil {
-			return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
-		}
-		return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
-	}
-
-	jti, err := u.jti()
-	if err != nil {
-		return IssueOutput{}, err
-	}
-	assertion, err := u.signer.Sign(AssertionInput{
-		KeyID:         u.cfg.Anonymous.KeyID,
-		ClientID:      u.cfg.Anonymous.ClientID,
-		Audience:      u.cfg.AssertionAudience,
-		PrivateKeyPEM: u.cfg.Anonymous.PrivateKeyPEM,
-		IssuedAt:      now.Unix(),
-		ExpiresAt:     now.Add(u.cfg.AssertionTTL).Unix(),
-		JTI:           jti,
-	})
-	if err != nil {
-		// The anon key could not sign — fail-closed 401, never leaking the detail.
-		return IssueOutput{}, ErrUnauthenticated
-	}
-
-	out, err := u.exchanger.Exchange(ctx, ExchangeInput{
-		ClientAssertion: assertion,
-		Audience:        service,
-		// Read-only floor — the anon token NEVER requests a write/push verb (B14).
+	out, merr := u.minter.MintToken(ctx, MintInput{
+		Subject:  u.cfg.Anonymous.ClientID,
+		Audience: service,
+		// Пол чтения энфорсится ЗДЕСЬ и приёмной стороной: анонимный токен
+		// никогда не просит глагола записи.
 		Scope: AnonymousReadScope,
 	})
-	if err != nil {
-		if errors.Is(err, ErrIssuerUnavailable) {
-			return IssueOutput{}, ErrIssuerUnavailable
-		}
-		// Hydra rejected the anon exchange — fail-closed 401.
-		return IssueOutput{}, ErrUnauthenticated
+	if merr != nil {
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
 	}
-	return IssueOutput{
-		Token:     out.AccessToken,
-		ExpiresIn: out.ExpiresIn,
-		IssuedAt:  now.Unix(),
-	}, nil
+	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
 }
 
 // resolveAudience выбирает адресат выпускаемого токена докерной полосы.

@@ -218,7 +218,7 @@ func (uc *UpsertFromIdentityUseCase) Execute(ctx context.Context, in UpsertFromI
 	}
 
 	// Audit actor: the verified principal when one is present (admin-tooling
-	// Upsert with a JWT); for the Kratos provision-hook there is no user
+	// Upsert with a JWT); for a provision call without a JWT there is no user
 	// principal, so the actor is the system/bootstrap identity — recorded, never
 	// fabricated (5.2-14). Captured sync (the async worker ctx may not carry it).
 	actor := authzguard.PrincipalUserID(ctx)

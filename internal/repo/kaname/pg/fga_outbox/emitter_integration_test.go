@@ -87,13 +87,20 @@ func TestFGAOutboxEmitter_EmitWriteTx_AppendsRowsAtomically(t *testing.T) {
 			Payload   map[string]string
 		}{et, m})
 	}
+	// Сверка по ОБЪЕКТУ, а не по позиции: внутри одного вызова строки ложатся в общем
+	// для всех писателей порядке, а не в порядке перечисления (groupByGrant), и предмет
+	// этой пробы — что каждая строка доехала целиком, а не где она легла.
 	require.Len(t, seen, 2)
+	want := map[string]clients.RelationTuple{tuples[0].Object: tuples[0], tuples[1].Object: tuples[1]}
 	for i, s := range seen {
+		exp, ok := want[s.Payload["object"]]
+		require.True(t, ok, "row %d: объект %q не из фикстуры", i, s.Payload["object"])
+		delete(want, s.Payload["object"])
 		require.Equal(t, "fga.tuple.write", s.EventType, "row %d event_type", i)
-		require.Equal(t, tuples[i].User, s.Payload["user"], "row %d user", i)
-		require.Equal(t, tuples[i].Relation, s.Payload["relation"], "row %d relation", i)
-		require.Equal(t, tuples[i].Object, s.Payload["object"], "row %d object", i)
+		require.Equal(t, exp.User, s.Payload["user"], "row %d user", i)
+		require.Equal(t, exp.Relation, s.Payload["relation"], "row %d relation", i)
 	}
+	require.Empty(t, want, "каждый кортеж фикстуры доехал своей строкой")
 }
 
 func TestFGAOutboxEmitter_EmitDeleteTx_AppendsRevokeRows(t *testing.T) {
@@ -190,14 +197,14 @@ func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
 // Порядок ОДНОГО КЛЮЧА переживает переход на набор.
 //
 // Выдача и отзыв одного (субъект, отношение, объект) НЕ коммутативны: переставь их —
-// и кортеж останется жив, то есть право не будет отозвано. Дренаж держит поголовный
-// FIFO партиции по возрастанию id, поэтому всё, на чём стоит эта гарантия, — что id
-// назначаются в том порядке, в каком вызывающий перечислил события. Вставка набором
-// (`unnest` в FROM) обязана сохранять это дословно.
+// и кортеж останется жив, то есть право не будет отозвано. Проекция журнала в прямой
+// факт идёт по возрастанию id, поэтому всё, на чём стоит эта гарантия, — что id
+// назначаются в том порядке, в каком вызывающий ВЫЗВАЛ эмиттер. Внутри одного вызова
+// ключи всегда разные, и там порядок общий для всех писателей, а не вызывающего.
 //
 // Проба утверждает ИСХОД (какой id у какого события), а не «позвали ли набор», и несёт
-// парный контроль: тот же набор, перечисленный в обратном порядке, обязан дать обратный
-// порядок id — иначе утверждение было бы тождественно истинным на любой реализации.
+// парный контроль: те же два вызова в обратном порядке обязаны дать обратный порядок
+// id — иначе утверждение было бы тождественно истинным на любой реализации.
 func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -243,32 +250,53 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 	require.Equal(t, "fga.tuple.delete", evs[1].typ, "отзыв обязан быть строго после неё")
 	require.Greater(t, evs[1].id, evs[0].id)
 
-	// ВНУТРИ одного набора порядок обязан следовать порядку массива — на ОБОИХ уровнях,
-	// потому что уровней теперь два: строки идут в порядке первого упоминания субъекта, а
-	// отношения внутри строки — в порядке перечисления. Без этого утверждения проба
-	// покрывала бы только соседство двух ВЫЗОВОВ и оставалась зелёной на реализации,
-	// которая переставляет элементы внутри набора, — а именно перестановка внутри набора и
-	// есть то, что вставка через `unnest` могла бы потерять (проверено инъекцией: без этой
-	// части проба на развороте набора не краснела).
-	inner, err := pool.Query(ctx, `
-		SELECT payload->>'user' || '|' ||
-		       coalesce((SELECT string_agg(r, '+') FROM jsonb_array_elements_text(payload->'relations') AS t(r)),
-		                payload->>'relation')
-		  FROM kaname.fga_outbox
-		 WHERE event_type='fga.tuple.write' AND payload->>'object'=$1
-		 ORDER BY id ASC`, key.Object)
+	// ВНУТРИ одного набора порядок ОБЩИЙ для всех писателей и от перечисления не
+	// зависит — на ОБОИХ уровнях: строки идут по объекту, затем по субъекту, отношения
+	// внутри строки — по возрастанию. Триггер журнала берёт блокировку факта в порядке
+	// строк, и два писателя с пересекающимися наборами в разном порядке встали бы в
+	// тупик (TestEmitSetsOfOneSubjectDoNotDeadlockOnOppositeEnumeration). Строки одного
+	// набора — всегда разные ключи, поэтому перестановка внутри набора ничего не меняет
+	// по существу; порядок, который значим, лежит МЕЖДУ вызовами и утверждён выше.
+	//
+	// Контроль того же утверждения — тот же набор, перечисленный ВСТРЕЧНО на другом
+	// объекте: он обязан лечь в ту же форму. Без него проба зеленела бы на реализации,
+	// которая просто сохраняет порядок вызывающего, — первый набор и так перечислен
+	// по возрастанию.
+	ctrlObj := "account:acc_order_rev"
+	txc, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	defer inner.Close()
-	var got []string
-	for inner.Next() {
-		var s string
-		require.NoError(t, inner.Scan(&s))
-		got = append(got, s)
+	t.Cleanup(func() { _ = txc.Rollback(ctx) })
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, txc, []clients.RelationTuple{
+		{User: "user:usr_order2", Relation: "admin", Object: ctrlObj},
+		{User: key.User, Relation: other.Relation, Object: ctrlObj},
+		{User: key.User, Relation: key.Relation, Object: ctrlObj}}))
+	require.NoError(t, txc.Commit(ctx))
+
+	setForm := func(object string) []string {
+		inner, err := pool.Query(ctx, `
+			SELECT payload->>'user' || '|' ||
+			       coalesce((SELECT string_agg(r, '+') FROM jsonb_array_elements_text(payload->'relations') AS t(r)),
+			                payload->>'relation')
+			  FROM kaname.fga_outbox
+			 WHERE event_type='fga.tuple.write' AND payload->>'object'=$1
+			 ORDER BY id ASC`, object)
+		require.NoError(t, err)
+		defer inner.Close()
+		var got []string
+		for inner.Next() {
+			var s string
+			require.NoError(t, inner.Scan(&s))
+			got = append(got, s)
+		}
+		require.NoError(t, inner.Err())
+		return got
 	}
-	require.Equal(t, []string{
+	want := []string{
 		key.User + "|" + key.Relation + "+" + other.Relation,
 		"user:usr_order2|admin",
-	}, got, "порядок строк и порядок отношений внутри строки обязаны совпасть с порядком, в котором их перечислил вызывающий")
+	}
+	require.Equal(t, want, setForm(key.Object), "строки и отношения внутри строки лежат в общем порядке")
+	require.Equal(t, want, setForm(ctrlObj), "встречное перечисление ложится в ту же форму — порядок от вызывающего не зависит")
 
 	// Парный контроль: обратный порядок перечисления даёт обратный порядок id.
 	// Без него утверждение выше зеленело бы на реализации, которая сортирует как угодно.

@@ -34,10 +34,12 @@ const (
 	cttlRefreshEnv = "KANAME_AUTHN__CEREMONY__REFRESH_TTL"
 )
 
-var cttlOwn = config.Landing{Provider: config.IdentityProviderOwn}
+// cttlOwn — боевой профиль, на котором судятся ручки сроков (имя историческое:
+// прежде это была посадка `own`, kaname#363).
+var cttlOwn = profilesUnderTest[0]
 
 // ceremonyLifespanSettings — годные сроки церемонии для собранной руками
-// настройки посадки `own`: величины поставки, равные потолкам фундамента.
+// боевой настройки: величины поставки, равные потолкам фундамента.
 func ceremonyLifespanSettings() config.CeremonyConfig {
 	return config.CeremonyConfig{CodeTTL: time.Minute, RefreshTTL: 168 * time.Hour}
 }
@@ -46,7 +48,7 @@ func ceremonyLifespanSettings() config.CeremonyConfig {
 // которого поданы величины set; пустая величина снимает переменную. Окружение
 // возвращается на выходе из пробы, а не из сборки: часть секретов профиля
 // страж читает в момент `Validate`.
-func cttlProfile(t *testing.T, lane config.Landing, omit string, set map[string]string) config.Config {
+func cttlProfile(t *testing.T, lane profileUnderTest, omit string, set map[string]string) config.Config {
 	t.Helper()
 	saved := snapshotEnv()
 	t.Cleanup(func() { restoreEnv(saved) })
@@ -226,55 +228,23 @@ func TestKNCTTL07_BothLifespansMissingAreNamedInOneRefusal(t *testing.T) {
 	requireCttlRefusalNames(t, "KN-CTTL-07", got, cttlCodeKey, cttlRefreshKey)
 }
 
-// KN-CTTL-08 — строки полосы `external` ручек сроков не требуют и не судят;
-// тот же вход под `own` отвергается. Без половин под `own` молчание строк
-// `external` было бы неотличимо от стража, который не судит ничего.
+// KN-CTTL-08 — сроки судятся на боевом старте: обе не названы · срок кода выше
+// потолка — отказ.
 //
-// Половины `external` судят СТРОКИ полосы напрямую, а не проверкой старта
-// (#424): посадка `external` снята фундаментом (PRO-Robotech/corelib#30),
-// профиль с ней не собирается, и старт отвергает её раньше требований любой
-// полосы — случай «ручки свободны» зеленел бы на отказе разбора. Вход у пары
-// один и тот же профиль, и меняется в ней ровно один факт — полоса.
-func TestKNCTTL08_LifespansAreJudgedOnlyOnTheOwnLane(t *testing.T) {
-	t.Run("08/1 строки external, обе не названы", func(t *testing.T) {
-		requireExternalLaneRowsSilentOnLifespans(t, "KN-CTTL-08/1",
-			cttlProfile(t, cttlOwn, cttlCodeKey, map[string]string{cttlRefreshEnv: ""}))
-	})
-	t.Run("08/2 строки external, срок кода выше потолка", func(t *testing.T) {
-		requireExternalLaneRowsSilentOnLifespans(t, "KN-CTTL-08/2",
-			cttlProfile(t, cttlOwn, "", map[string]string{cttlCodeEnv: "2m"}))
-	})
-	t.Run("08/3 own, обе не названы", func(t *testing.T) {
+// Прежде у сценария были две половины `external` — «строки полосы external
+// ручек сроков не требуют и не судят», — и половины `own` были им близнецами.
+// Посадка `external` снята вместе с ключом посадки (kaname#363): её строк в
+// таблице нет, и половин, которые их судили, — тоже. Сценарий приёмки
+// возвращается в приёмку (его «Дано» больше не выполнимо); здесь остаются
+// половины, чей предмет жив, и близнец у них свой — годный профиль
+// (KN-CTTL-02/05 выше).
+func TestKNCTTL08_LifespansAreJudgedOnTheProductionStart(t *testing.T) {
+	t.Run("08/3 обе не названы", func(t *testing.T) {
 		got := cttlRefusal(cttlProfile(t, cttlOwn, cttlCodeKey, map[string]string{cttlRefreshEnv: ""}))
 		requireCttlRefusalNames(t, "KN-CTTL-08/3", got, cttlCodeKey, cttlRefreshKey)
 	})
-	t.Run("08/4 own, срок кода выше потолка", func(t *testing.T) {
+	t.Run("08/4 срок кода выше потолка", func(t *testing.T) {
 		got := cttlRefusal(cttlProfile(t, cttlOwn, "", map[string]string{cttlCodeEnv: "2m"}))
 		requireCttlRefusalNames(t, "KN-CTTL-08/4", got, cttlCodeKey, "1m0s")
 	})
-}
-
-// requireExternalLaneRowsSilentOnLifespans — строки стадии «настройка» полосы
-// `external` на входе cfg не называют ни одной ручки сроков. Пустой набор строк
-// — не молчание, а «не выполнилось»: судить было нечем.
-func requireExternalLaneRowsSilentOnLifespans(t *testing.T, id string, cfg config.Config) {
-	t.Helper()
-	rows := 0
-	for _, r := range config.LaneRequirements {
-		if r.Stage == config.LaneStageConfig && r.AppliesTo(config.IdentityProviderExternal) {
-			rows++
-		}
-	}
-	if rows == 0 {
-		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(%s): строк полосы external в таблице нет — молчание судить нечем", id)
-	}
-	err := externalLaneRefusal(cfg)
-	if err == nil {
-		return
-	}
-	for _, name := range []string{cttlCodeKey, cttlRefreshKey, cttlCodeEnv, cttlRefreshEnv} {
-		if strings.Contains(err.Error(), name) {
-			t.Errorf("%s: строка полосы external судит ручку сроков %s:\n%s", id, name, err)
-		}
-	}
 }

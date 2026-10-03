@@ -40,7 +40,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
@@ -83,21 +82,6 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	case <-time.After(timeout):
 		srv.Stop()
 	}
-}
-
-// providerKeySetMirrorIsPublished — ПОПАДЁТ ЛИ запись зеркала ЧУЖОГО набора
-// проверочных ключей в перечень публикуемых (задача kaname#21).
-//
-// Читателей ровно два, и оба обязаны получить ОДНО значение: место публикации
-// ниже в этой же функции и наблюдатель провязки, который об этом отчитывается
-// стражу посадки. Своё условие у каждого разошлось бы молча.
-//
-// ДВЕ ОСИ, И ВТОРАЯ БЫЛА УПУЩЕНА ЛИТЕРАЛОМ. Записи нет, когда внешнего
-// поставщика не существует (посадка `own`) — и когда слушателя публикатора не
-// подняли вовсе: блок публикации тогда не исполняется, и добавлять запись
-// некуда. Прежний литерал `true` докладывал её опубликованной в обоих случаях.
-func providerKeySetMirrorIsPublished(cfg config.Config) bool {
-	return cfg.APIServer.JWKSProxy.ListenAddress() != "" && cfg.AuthN.HasExternalIdentityProvider()
 }
 
 func runServe(cfg config.Config) error {
@@ -179,8 +163,8 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
-	// причине: триггер читает величину из строки авторитета, и под `own` её
-	// объявляет профиль (незаданная — отказ старта стражем полосы).
+	// причине: триггер читает величину из строки авторитета, и её объявляет
+	// профиль (незаданная — отказ старта стражем полосы).
 	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
 		return err
 	}
@@ -543,11 +527,10 @@ func runServe(cfg config.Config) error {
 	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
-	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что
-	// читает её провязку, сообщает «нет» наблюдением, а не литералом
-	// (`loginlane.go`). Собирается ПОСЛЕ служб: регистрация ПРИНИМАЕТ тот же
-	// реконсайлер материализации привязки, что путь запроса и полоса первого
-	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
+	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть
+	// отказ старта с именем ручки. Собирается ПОСЛЕ служб: регистрация
+	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
+	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
 	lane, err := buildLoginLane(ctx, cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
@@ -560,16 +543,16 @@ func runServe(cfg config.Config) error {
 	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
 		return err
 	}
-	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
-	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
+	// `InternalHumanSessionService.Resolve` — внутренний слушатель, исполнитель
+	// от полосы (Ф3-45).
 	svcs.humanSessionHandler = lane.resolveHandler()
 	// `UserService/ResetSecondFactor` (Ф12 Р10) — теми же хранилищами, что
-	// полоса; под `external` не провязан (Ф12-37): второго фактора у службы там нет.
+	// полоса (Ф12-37).
 	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
 		svcs.userHandler.WithResetSecondFactor(reset)
 	}
 	// `AccessKeyService` (Ф7, kacho#1273) — шесть глаголов ключа доступа теми
-	// же хранилищами, что полоса; под `external` не регистрируется.
+	// же хранилищами, что полоса.
 	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)
 	if err != nil {
 		return err
@@ -601,23 +584,17 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("internal listener mTLS creds: %w", err)
 	}
 
-	// HTTP-listener server-side TLS: the Hydra/Kratos hooks
-	// listener (:9092) and the Prometheus /metrics listener (:9095) were
-	// PLAINTEXT. Per-edge, default-off TLS (mirror SEC-H grpcsrv.TLSServer):
+	// HTTP-listener server-side TLS: the Prometheus /metrics listener (:9095)
+	// was PLAINTEXT. Per-edge, default-off TLS (mirror SEC-H grpcsrv.TLSServer):
 	// enable=false → nil *tls.Config → net.Listener stays plaintext
 	// (byte-identical to today, dev/newman stand unchanged); enable=true →
 	// per-edge clientAuthMode, объявленный полем TLS профиля поверхности
-	// (server-tls-only = encryption
-	// only, the default for both the HMAC-authed hooks edge and the no-scrape-cert
+	// (server-tls-only = encryption only, the default for the no-scrape-cert
 	// metrics edge; mutual = RequireAndVerifyClientCert). mtlsCfg.Validate()
 	// fail-closes at boot if ANY edge is enabled with an incomplete cert-set for
 	// its mode, or with an unknown clientAuthMode.
 	if verr := mtlsCfg.Validate(); verr != nil {
 		return fmt.Errorf("listener mTLS config invalid: %w", verr)
-	}
-	hooksTLSConfig, err := mtlsCfg.HooksServerTLSConfig()
-	if err != nil {
-		return fmt.Errorf("hooks listener mTLS config: %w", err)
 	}
 	metricsTLSConfig, err := mtlsCfg.MetricsServerTLSConfig()
 	if err != nil {
@@ -675,24 +652,14 @@ func runServe(cfg config.Config) error {
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
 	// профиль, о них умолчавший, поднимал три слушателя открытым текстом.
-	declaredPlaintext, err := requireHTTPEdgeTLS(productionMode, iamHTTPEdges(
-		hooksListenAddress(cfg),
+	if err := requireHTTPEdgeTLS(productionMode, iamHTTPEdges(
 		cfg.APIServer.MetricsListenAddress(),
 		cfg.APIServer.JWKSProxy.ListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
 		cfg.APIServer.InternalRESTListenAddress(),
 		mtlsCfg,
-	))
-	if err != nil {
+	)); err != nil {
 		return err
-	}
-	// ОБЪЯВЛЕННОЕ ИСКЛЮЧЕНИЕ НАЗЫВАЕТСЯ ВСЛУХ. Контроль, снятый решением, и
-	// контроль, снятый недосмотром, выглядят на поднятом стенде одинаково —
-	// различить их можно только по журналу старта. Молчание здесь означало бы
-	// «ноль находок», неотличимое от «ноль прочитанного».
-	for _, d := range declaredPlaintext {
-		logger.Warn("HTTP-ребро работает открытым текстом по ОБЪЯВЛЕННОМУ исключению",
-			slog.String("edge", d))
 	}
 	// Раздельность поверхностей есть свойство СОКЕТА: «внутреннее не
 	// опубликовано наружу» проверяемо ровно тогда, когда оно недосягаемо.
@@ -733,12 +700,6 @@ func runServe(cfg config.Config) error {
 	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
 	// поверхности, которого на этом шаге ещё нет. Прежде страж стоял здесь и
 	// сверял четыре адреса из восьми (#2639).
-	// ПАРА «адрес + удостоверение» административного контура. Половина пары
-	// хуже отсутствия обеих: она выглядит настроенной, отказывая на каждой
-	// административной операции фасада (задача #2471).
-	if err := requireProviderAdminCredentialPair(cfg.AuthN); err != nil {
-		return err
-	}
 
 	// Самоотчёт о security-posture: ПОСЛЕ boot-guard'ов (cfg.Validate() в main,
 	// mtlsCfg.Validate() и production-гейт обоих gRPC-листенеров выше — конфиг
@@ -753,7 +714,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, lane.signInMethods(), lane, logger)
+	laneWiring := observeLaneWiring(ctx, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
@@ -803,8 +764,7 @@ func runServe(cfg config.Config) error {
 	// Default-OFF: dev/newman (prod=false) → NO-OP pass-through (newman stand
 	// byte-identical). Prod fail-closed: no verified SAN → PermissionDenied;
 	// FGA backend error → Unavailable. EXEMPT (NOT in ReadFloorRPCs): the PDP
-	// Check (INV-FLOOR-5), secret-authed OnRecoveryCompleted + hot-path IsRevoked
-	// (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
+	// Check (INV-FLOOR-5), the hot-path IsRevoked (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
 	// INV-FLOOR-8). Chained AFTER internalCallerPolicy, mirroring its prod-mode
 	// gating. The legitimate reader SAs — api-gateway, vpc and compute, and those
 	// three only — are seeded system_viewer@cluster by migration 0014. The network
@@ -1071,9 +1031,10 @@ func runServe(cfg config.Config) error {
 	//     on the READ-RPC set (ReadFloorRPCs): the caller module-SA must hold
 	//     `system_viewer@cluster:cluster_root` (relation-tier Check beyond
 	//     the coarse mTLS floor above). Prod fail-closed (PermissionDenied /
-	//     Unavailable); dev no-op. Exempt: PDP Check, secret webhooks, hot-path
-	//     IsRevoked, all mutations. MUST run after internalCallerPolicy (it needs
-	//     the same verified-SAN floor to have passed).
+	//     Unavailable); dev no-op. Exempt (absent from ReadFloorRPCs): PDP
+	//     Check, hot-path IsRevoked, all mutations. MUST run after
+	//     internalCallerPolicy (it needs the same verified-SAN floor to have
+	//     passed).
 	//  5. internalACRFloor — per-RPC `required_acr_min` (step-up)
 	//     floor on the GATEWAY-FRONTED set: for a gateway-fronted RPC whose catalog
 	//     acr_min>0, the FD-4-trusted forwarded acr must satisfy it (else
@@ -1124,7 +1085,6 @@ func runServe(cfg config.Config) error {
 	logger.Info("kaname listener mTLS",
 		"public_mtls", mtlsCfg.PublicServerMTLS.Enable,
 		"internal_mtls", mtlsCfg.InternalServerMTLS.Enable,
-		"hooks_mtls", mtlsCfg.HooksServerMTLS.Enable,
 		"metrics_mtls", mtlsCfg.MetricsServerMTLS.Enable,
 		"jwks_proxy_mtls", mtlsCfg.JWKSProxyServerMTLS.Enable)
 	// Потолок темпа и одновременности НА ВЫЗЫВАЮЩЕГО. Регистрация идёт ЧЕРЕЗ
@@ -1174,9 +1134,9 @@ func runServe(cfg config.Config) error {
 	// ── НЕ-gRPC ПОВЕРХНОСТИ: четыре профиля ТОЙ ЖЕ функции ──────────────────
 	//
 	// Решение владельца (XC-7, в-1): не-gRPC слушатели входят в контур ОТДЕЛЬНЫМ
-	// профилем, а не полями общего дескриптора. У iam их четыре, и предметы у них
-	// РАЗНЫЕ — приём вебхуков провайдера личности, выдача docker-токена, зеркало
-	// публичных ключей проверки, скрейп. Профиль их не смешивает: разницу несут
+	// профилем, а не полями общего дескриптора. У iam их шесть, и предметы у них
+	// РАЗНЫЕ — скрейп, выдача docker-токена, полоса входа, публикатор набора
+	// ключей проверки, публичный и внутренний REST-фронты. Профиль их не смешивает: разницу несут
 	// значения двух осей — откуда поверхность досягаема и чем аутентифицирует, — и
 	// именно их пара судится (снаружи досягаемая поверхность с объявленным
 	// ОТСУТСТВИЕМ аутентификации не поднимается вовсе).
@@ -1196,29 +1156,21 @@ func runServe(cfg config.Config) error {
 	surfaceCtx, stopSurfaces := context.WithCancel(context.Background())
 	defer stopSurfaces()
 
-	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
-	// provision/recovery). Cluster-internal-only (запрет #6), отдельный порт от
-	// gRPC. Только посадкой с внешним поставщиком: под `own` полоса не
-	// собирается и слушатель не поднимается (hooksLaneSurface, kaname#360).
-	//
 	// Носитель готовности строится ЗДЕСЬ и отдаётся тому, кто его монтирует, и
 	// гашению: оно переводит `/readyz` в 503 ДО остановки серверов (см.
 	// triggerShutdown ниже). Без этого носитель был бы, а дёрнуть его было бы
 	// некому (#1752).
+	//
+	// Поверхности вебхуков внешнего поставщика личности здесь больше нет: хуки
+	// сняты вместе с поставщиком (kaname#363), и дверь, которую некому звать, не
+	// поднимается ни на каком старте.
 	readiness := buildReadiness(pool, metricsReg)
-	hooksSurface, err := hooksLaneSurface(cfg, surfaceMode, logger, hooksTLSConfig, func() (http.Handler, error) {
-		return buildHooksMux(pool, kanameRepo, opsRepo,
-			svcs.bindingReconciler, metricsReg, cfg, logger)
-	})
-	if err != nil {
-		return fmt.Errorf("профиль поверхности вебхуков: %w", err)
-	}
 
-	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
+	// (1) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
 	// кардинальность туда не выносится.
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
 	// Живость и готовность пода — на ЭТОЙ поверхности (kaname#360): она есть
-	// при любой посадке, а слушатель вебхуков под `own` не поднимается.
+	// на каждом старте.
 	metricsMux := diagnostics.NewMux(diagnostics.Handlers{Health: readiness})
 	metricsMux.Handle("/metrics", metricsReg.Handler())
 	metricsSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1238,7 +1190,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("профиль поверхности диагностики: %w", err)
 	}
 
-	// (3) Выдача docker-токена (`/iam/token`, Registry v2 auth-server).
+	// (2) Выдача docker-токена (`/iam/token`, Registry v2 auth-server).
 	//
 	// Единственная ВНЕШНЕ досягаемая поверхность iam: `docker login` приходит
 	// через вход кластера. Её аутентификация — предъявление БАЗОВОГО ТОКЕНА
@@ -1273,15 +1225,12 @@ func runServe(cfg config.Config) error {
 	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
-			Realm:             cfg.APIServer.RegistryToken.TokenIssuer(),
-			Service:           cfg.APIServer.RegistryToken.TokenService(),
-			HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
-			HydraTokenCAFile:  cfg.AuthN.ResolveHydraTokenCAFile(),
-			AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
-			Logger:            logger,
-			// Приземление подписанта на НАСТОЯЩИЙ путь выдачи. Подписант без
-			// производственного вызывающего — тот же класс, что хранилище без
-			// читателя: он выглядит исправным, потому что его пробы зелены.
+			Realm:   cfg.APIServer.RegistryToken.TokenIssuer(),
+			Service: cfg.APIServer.RegistryToken.TokenService(),
+			Logger:  logger,
+			// НАШ подписант — единственный издатель полосы. Выключенная своя
+			// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
+			// выхода (kaname#494): другого издателя у полосы нет.
 			Signer:   tokenSigner,
 			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
 			// ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ #1143 — уже РАЗОБРАННОЕ выше:
@@ -1295,10 +1244,6 @@ func runServe(cfg config.Config) error {
 			// на посадке БЕЗ окна — иначе оператор, у которого обновление
 			// сломало вход арендаторам, узнаёт об этом из жалобы.
 			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
-			// Счёт исходов ДОРОГИ ОБМЕНА к прежнему издателю (kacho#2491).
-			// Провязывается безусловно: дорога строится лишь на непереведённом
-			// контуре, и на переведённом счётчик обязан молчать сам.
-			ProviderRoadObserver: metricsReg.ProviderRoadRecorder(),
 			// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
 			// же, что у полос выдачи токена: оператор этой полосы для строки
 			// человека читает и отсечку отзыва-всех (kaname#379).
@@ -1318,10 +1263,11 @@ func runServe(cfg config.Config) error {
 		// него выглядит исправным ровно потому, что его пробы подают ему то,
 		// что он умеет разобрать.
 		// Церемония OAuth `authorization_code` нашими силами (приёмка LINE-A-1,
-		// kaname#423) — под `own` и при поднятом токен-эндпоинте: её полосы
-		// обмена живут на нём, а эндпоинт авторизации и метаданные обнаружения
-		// монтируются на ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше
-		// (сценарий 23). Под `external` — nil, и её пути здесь не резолвятся.
+		// kaname#423) — при поднятом токен-эндпоинте: её полосы обмена живут на
+		// нём, а эндпоинт авторизации и метаданные обнаружения монтируются на
+		// ЭТУ ЖЕ внешнюю поверхность выдачи и нигде больше (сценарий 23). При
+		// выключенном эндпоинте (только вне боевого режима) — nil, и её пути
+		// здесь не резолвятся.
 		//
 		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
 		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
@@ -1385,20 +1331,15 @@ func runServe(cfg config.Config) error {
 
 	// (3а) Полоса входа паролем — глаголы формы (перечень —
 	// `loginlanehttp.Paths()`) на своём слушателе, взаимный TLS, вызывающий —
-	// ровно край (Ф3, Р7). Под `external` поверхность объявлена выключенной с
-	// причиной, а не пропущена молча.
+	// ровно край (Ф3, Р7). Полоса строится на каждом старте, и поверхность
+	// поднимается вместе с ней.
 	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
 	if err != nil {
 		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
 	}
 
-	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
-	// Назван здесь потому, что клиент собирается в этом корне, а обработчику
-	// обязана достаться ТА ЖЕ величина, с которой клиент построен: два места с
-	// двумя числами — то, как они расходятся.
-	const jwksUpstreamTimeout = 5 * time.Second
-
-	// (4) Зеркало ПУБЛИЧНЫХ ключей проверки (`GET /.well-known/jwks.json`).
+	// (3) Публикатор ПУБЛИЧНЫХ ключей проверки — наша запись набора на пути
+	// `authn.token-signing.key-set-path`.
 	//
 	// Здесь аутентификация снята — и это ЗАДОКУМЕНТИРОВАННОЕ исключение, а не
 	// упущение (§AuthN+AuthZ ВЕЗДЕ): поверхность выставлена только на
@@ -1412,64 +1353,19 @@ func runServe(cfg config.Config) error {
 	jwksProxyAddr := cfg.APIServer.JWKSProxy.ListenAddress()
 	var jwksProxyHandler http.Handler
 	if jwksProxyAddr != "" {
-		// (4а) ЗАПИСЬ ЗЕРКАЛА ЧУЖОГО НАБОРА — ТОЛЬКО ТАМ, ГДЕ ЧУЖОЙ НАБОР ЕСТЬ
-		// (задача kaname#21).
+		// (4а) ЗАПИСЬ ОДНА — НАША (kaname#361).
 		//
-		// Прежде запись добавлялась БЕЗУСЛОВНО. На посадке без внешнего
-		// поставщика это давало запись, чей издатель ВЫВЕДЕН из доменного имени,
-		// чей верхний хоп не существует, и которая отвечала бы каждому
-		// спросившему «верхний хоп недоступен» вместо честного отказа.
+		// Рядом с ней стояла запись зеркала публичного набора прежнего
+		// издателя; она ушла вместе с ним, и её верхнего хопа, его якоря и
+		// счётчиков в корне больше нет. Вторую запись привязка отвергает в
+		// старте: вернувшись, она снова поставила бы ключ другого издателя
+		// рядом с нашим на том же слушателе.
 		//
-		// Условие читается ТЕМ ЖЕ предикатом, которым о нём отчитывается
-		// наблюдатель провязки: доложенное и сделанное — одно значение.
-		//
-		// Записей у публикатора ДВЕ, и у каждой свой ОБЪЯВЛЕННЫЙ путь.
-		// Объединять наборы в один документ было бы дешевле и уничтожило бы
-		// ровно ту защиту, ради которой развязка заводится: ключ одного
-		// издателя проверял бы токен, объявляющий другого.
-		//
-		// Запись зеркала остаётся на своём прежнем пути ДО последней фазы: её
-		// адрес объявлен у каждого сегодняшнего потребителя, и перенос сменил
-		// бы его у всех разом — цена, которой эта фаза не предусматривала.
+		// Записи нет, когда своя чеканка выключена: публиковать тогда нечего, и
+		// привязка отказывает в старте, называя ручку слушателя, — слушатель,
+		// объявленный профилем и не несущий ни одной записи, отвечал бы каждому
+		// спросившему отказом.
 		var records []jwksproxyhttp.Record
-		if providerKeySetMirrorIsPublished(cfg) {
-			// Клиент верхнего хопа собирается ЗДЕСЬ, а не внутри зеркала: якорь хопа —
-			// настройка развёртывания, и непригодная обязана отказать в старте, а не
-			// деградировать зеркало, от которого зависит вся плоскость данных.
-			jwksUpstreamClient, jerr := clients.ProviderHopHTTPClient(
-				jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
-			if jerr != nil {
-				return fmt.Errorf("jwks-proxy upstream: %w", jerr)
-			}
-			// Зеркало собирается ИМЕНОВАННЫМ: построенное прямо в аргументе, оно
-			// никому не отдаёт своих счётчиков, и «отказов не было» тогда неотличимо
-			// от «сюда никто не приходил» — а это разница между работающим зеркалом и
-			// мёртвой плоскостью данных.
-			jwksMirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
-				UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
-				Client:      jwksUpstreamClient,
-				Timeout:     jwksUpstreamTimeout,
-				Logger:      logger.With(slog.String("component", "jwks_proxy")),
-			})
-			// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
-			// (§Hardening-инвариант 8), а причина отказа держится отдельно:
-			// «не ответил» проходит со временем, «по адресу не то» — никогда.
-			// Свойство «читатель есть» держит гейт по дереву
-			// TestDeclaredAccumulatorsHaveANonTestReader.
-			metricsReg.NewJWKSMirrorCollector(func() metrics.JWKSMirrorCounts {
-				stats := jwksMirror.Stats()
-				return metrics.JWKSMirrorCounts{
-					Served:        stats.Served,
-					Unavailable:   stats.Unavailable,
-					Misconfigured: stats.Misconfigured,
-				}
-			})
-			records = append(records, jwksproxyhttp.Record{
-				Issuer:  cfg.AuthN.ResolveHydraIssuer(),
-				Path:    jwksproxyhttp.WellKnownJWKSPath,
-				Handler: jwksMirror,
-			})
-		}
 		if signingKeystore != nil {
 			ourKeySet := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
 				Source: signingKeystore,
@@ -1498,10 +1394,11 @@ func runServe(cfg config.Config) error {
 		}
 		binding, berr := jwksproxyhttp.NewBinding(records)
 		if berr != nil {
-			// Издатель, объявленный принимаемым, но не имеющий записи
-			// источника, — ОТКАЗ В СТАРТЕ, а не молчаливый перебор записей и
-			// не путь, выведенный из самого издателя.
-			return fmt.Errorf("привязка «издатель → источник набора»: %w", berr)
+			// Издатель без записи источника, вторая запись рядом с нашей или
+			// слушатель без единой записи — ОТКАЗ В СТАРТЕ, а не молчаливый
+			// перебор записей и не путь, выведенный из самого издателя.
+			return fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
+				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr)
 		}
 		jwksMux, merr := jwksproxyhttp.NewMux(binding)
 		if merr != nil {
@@ -1544,7 +1441,7 @@ func runServe(cfg config.Config) error {
 		jwksProxyHandler = jwksMux
 	}
 	jwksProxySurface, err := iamHTTPSurface(servicecontract.Surface{
-		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
+		Name:    "публикатор набора ключей проверки (authn.token-signing.key-set-path)",
 		Mode:    surfaceMode,
 		Logger:  logger,
 		Addr:    addrAxis(jwksProxyAddr, knobJWKSProxy+" не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
@@ -1557,10 +1454,10 @@ func runServe(cfg config.Config) error {
 		TLS: jwksProxyTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности зеркала ключей: %w", err)
+		return fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err)
 	}
 
-	// (5) и (6) Собственные REST-фронты службы — публичный и внутренний.
+	// (4) и (5) Собственные REST-фронты службы — публичный и внутренний.
 	//
 	// Пока служба стоит за краем платформы, её HTTP-поверхность принадлежит
 	// краю. Вынесенная отдельным продуктом, края она не имеет by construction,
@@ -1635,7 +1532,6 @@ func runServe(cfg config.Config) error {
 	// вывести из дескриптора, а страж различимости адресов обязан назвать её в
 	// отказе — иначе оператор знает, что не так, и не знает, где это чинить.
 	httpSurfaces := []raisedSurface{
-		{knobHooks, hooksSurface},
 		{knobMetrics, metricsSurface},
 		{knobRegistryToken, registryTokenSurface},
 		{knobLoginLane, loginLaneSurface},
@@ -1681,7 +1577,8 @@ func runServe(cfg config.Config) error {
 	}
 
 	// Enterprise SSO HTTP listeners (SCIM + SAML) are not part of this service;
-	// identity federation flows exclusively through the Ory stack (Kratos/Hydra OIDC).
+	// sign-in, session and token minting are this service's own (no external
+	// identity provider).
 
 	// Параллельный запуск
 	// public-сервера + internal-сервера + shutdown-waiter через
@@ -1835,46 +1732,11 @@ func runServe(cfg config.Config) error {
 	// (миграция 20260829181500, задача #1396). Схема перестала обещать доставку,
 	// которой нет, а не только перестала её выполнять.
 
-	// Дренаж очереди компенсаций частично исполненной саги регистрации у
-	// провайдера. Намерение записывается собственной транзакцией на неудачном
-	// пути (компенсируемая транзакция откачена и нести его не может), а
-	// исполняется ЗДЕСЬ — at-least-once, поэтому оно переживает и смерть
-	// процесса, и недоступность самого провайдера.
-	compensationDrainerTask, cerr := buildProviderCompensationDrainer(
-		pool, cfg, metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
-	if cerr != nil {
-		_ = listener.Close()
-		_ = internalListener.Close()
-		return fmt.Errorf("provider compensation drainer wiring: %w", cerr)
-	}
-	// ЗАДАЧИ МОЖЕТ НЕ БЫТЬ, И ЭТО НЕ ОТКАЗ: на посадке без внешнего поставщика
-	// дренировать нечего и некуда — разбор в шапке сборщика (kaname#313).
-	// Проверка обязательна: поставленная в очередь nil-задача уронила бы под
-	// разыменованием, то есть отсутствие дороги пришло бы паникой.
-	if compensationDrainerTask == nil {
-		logger.Info("дренаж очереди компенсаций не поднят: на этой посадке нет " +
-			"внешнего поставщика, и снимать у него нечего — у очереди нет ни одного " +
-			"производителя. Перепись очереди поднимается отдельно и продолжает " +
-			"показывать глубину и возраст строк, переживших перевод посадки")
-	} else {
-		tasks = append(tasks, func() (err error) {
-			// Мёртвый дренаж не должен оставлять под тихо работающим: очередь без
-			// исполнителя копит намерения, а занятое у провайдера не освобождается.
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("provider compensation drainer panicked", "panic", r)
-					err = fmt.Errorf("provider compensation drainer panic: %v", r)
-				}
-				if err != nil {
-					triggerShutdown()
-				}
-			}()
-			return compensationDrainerTask(taskCtx)
-		})
-	}
-	// Наблюдаемость очереди: глубина, возраст самой старой недоставленной
-	// строки, число отравленных. Скан не мутирует таблицу и не может уронить
-	// под — ошибки логируются.
+	// Наблюдаемость очереди компенсаций: глубина, возраст самой старой
+	// недоставленной строки, число отравленных. Дренажа у неё нет — нет ни
+	// производителя, ни исполнителя (kaname#363), — и скан держит видимыми
+	// строки, пережившие прежнюю посадку. Скан не мутирует таблицу и не может
+	// уронить под — ошибки логируются.
 	tasks = append(tasks, func() error {
 		runProviderCompensationMetrics(taskCtx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
@@ -1988,16 +1850,6 @@ func runServe(cfg config.Config) error {
 	metricsReg.NewIdentityGrowthCollector(identityGrowth.Counts)
 	tasks = append(tasks, func() error {
 		identityGrowth.Run(taskCtx, logger)
-		return nil
-	})
-
-	// Окно прежнего издателя — строки, чьё зеркало у внешнего OAuth-сервера ещё
-	// предъявимо. Ноль по этому ряду — измеренная половина предиката снятия
-	// компонента (kacho#2564); без ряда окно считалось бы запросом по памяти.
-	providerMirror := newProviderMirrorSampler(kanamepg.NewProviderMirrorRepo(pool))
-	metricsReg.NewProviderMirrorCollector(providerMirror.Counts)
-	tasks = append(tasks, func() error {
-		providerMirror.Run(taskCtx, logger)
 		return nil
 	})
 

@@ -199,6 +199,23 @@ type accountWriter struct {
 	ownerFKHintSink *string
 }
 
+// accountInsertHint — подсказка отказа уникальности вставки аккаунта:
+// идентификатор и имя через `|`. Ни один из них `|` не содержит: идентификатор
+// принимается только в форме генератора, имя — по RFC 1123.
+func accountInsertHint(id domain.AccountID, name domain.AccountName) string {
+	return string(id) + "|" + string(name)
+}
+
+// splitAccountInsertHint — обратный разбор. Короткая форма — одно имя, как её
+// передаёт правка имени, — возвращает пустой идентификатор.
+func splitAccountInsertHint(hint string) (id, name string) {
+	id, name, ok := strings.Cut(hint, "|")
+	if !ok {
+		return "", hint
+	}
+	return id, name
+}
+
 // Insert — INSERT INTO accounts ... RETURNING (id, created_at).
 // CreatedAt здесь явно проставляется в UTC для детерминированности тестов.
 //
@@ -214,9 +231,18 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
+	// ON CONFLICT (id) DO NOTHING — не проглатывание, а порядок ключей: у вставки
+	// два ключа, и ключ имени создан в схеме раньше первичного, поэтому база
+	// проверяет его первым. Побайтовый повтор создания (тот же id и то же имя)
+	// без этой оговорки отказывался бы текстом имени (AID-13). Арбитр
+	// проверяется до вставки, конфликт идентификатора даёт пустой RETURNING и
+	// отказ ниже; гонку одного id решает та же спекулятивная вставка (AID-14).
+	// Конфликт одного имени по-прежнему приходит отказом accounts_name_unique,
+	// конфликт с реестром выданных — отказом его ключа из триггера.
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO NOTHING
 		RETURNING %s`, accountCols)
 
 	row := w.tx.QueryRow(ctx, q,
@@ -224,11 +250,17 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		string(a.OwnerUserID), now,
 	)
 	out, err := scanAccount(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Account{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+	}
 	if err != nil {
 		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
 		switch pgfault.Classify(err).Class {
 		case pgfault.Unique:
-			return domain.Account{}, mapErr(err, "", string(a.Name)) // accounts_name_unique → "Account with name <name> already exists"
+			// Подсказка несёт И идентификатор, И имя: у вставки два ключа
+			// (первичный и имени), плюс ключ реестра выданных из триггера, и текст
+			// обязан не зависеть от того, какой из них база проверила первой.
+			return domain.Account{}, mapErr(err, "", accountInsertHint(a.ID, a.Name))
 		case pgfault.ForeignKey:
 			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
 		case pgfault.Check:

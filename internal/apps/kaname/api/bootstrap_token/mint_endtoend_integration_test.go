@@ -83,14 +83,6 @@ func (k *memKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 // композиционный корень. Тонкие: ни одной строки политики.
 type enrichSAPort struct{ sa *kanamepg.SAOAuthClientRepo }
 
-func (p enrichSAPort) LookupByOAuthClientID(ctx context.Context, id domain.OAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	return p.sa.GetByOAuthClientID(ctx, id)
-}
-
-func (p enrichSAPort) FindByExternalSubject(ctx context.Context, issuer, sub string) (domain.ServiceAccountOAuthClient, error) {
-	return p.sa.FindByExternalSubject(ctx, issuer, sub)
-}
-
 func (p enrichSAPort) GetServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
 	return p.sa.GetServiceAccount(ctx, id)
 }
@@ -134,10 +126,8 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 
 	saRepo := kanamepg.NewSAOAuthClientRepo(pool)
 	userRepo := kanamepg.NewUserOAuthClientRepo(pool)
-	users := kanamepg.NewUserPoolRepo(pool)
 	claims := service.NewTokenEnrichmentService(
-		service.TokenEnrichmentConfig{Domain: "api.kacho.cloud", HydraIssuer: testIssuer},
-		users,
+		service.TokenEnrichmentConfig{Domain: "api.kacho.cloud"},
 	).
 		WithSAPort(enrichSAPort{sa: saRepo}).
 		WithOwnClientPort(ownClientPort{sa: saRepo, users: userRepo})

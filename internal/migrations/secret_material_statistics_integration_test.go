@@ -167,9 +167,9 @@ func seedSecretRows(t *testing.T, db *sql.DB) {
 			}
 			hash[0], hash[1] = byte(sa), byte(i)
 			_, err := db.Exec(`INSERT INTO kaname.service_account_oauth_clients
-			    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
+			    (id, sva_id, created_by_user_id, credential_kind, secret_hash,
 			     public_key_pem, key_algorithm, trusted_subjects, expires_at)
-			  VALUES ($1, $2, NULL, 'usr00000000000000dwn', 'SECRET', $3, '', '', '[]'::jsonb,
+			  VALUES ($1, $2, 'usr00000000000000dwn', 'SECRET', $3, '', '', '[]'::jsonb,
 			          now() + interval '30 days')`,
 				fmt.Sprintf("soc_%014d%03d", i, sa), svaID, hash)
 			require.NoError(t, err)

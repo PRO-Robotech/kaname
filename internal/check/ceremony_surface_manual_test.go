@@ -278,18 +278,38 @@ func TestCeremonySurfaceManualRoutingTwinsAreSilent(t *testing.T) {
 	}
 }
 
-// TestCeremonySurfaceManualRoutingSeesTheLiveCarrier — живой положительный
-// контроль выведения: путь, отданный журналу параметром функции-значения
-// (iamhooks.LoggerMiddleware), насчитан носителем пути, а решением не назван.
-func TestCeremonySurfaceManualRoutingSeesTheLiveCarrier(t *testing.T) {
-	report := judgeLiveCeremony(t)
+// TestCeremonySurfaceManualRoutingSeesTheCarrier — положительный контроль
+// выведения: путь, отданный журналу параметром функции-значения, насчитан
+// носителем пути, а решением не назван.
+//
+// Прежде контроль был живым: носителем служила обёртка журнала слушателя
+// вебхуков поставщика (`LoggerMiddleware`). Слушатель снят вместе с поставщиком
+// (kaname#363), и носителя такой формы в живом дереве больше нет — контроль
+// подаёт ту же форму фикстурой: обёртку диагностики, передающую путь запроса
+// функции журнала. Отличие от инъекций выше ровно одно — путь маршрута не
+// выбирает. Живое дерево при этом судится на отсутствие решений.
+func TestCeremonySurfaceManualRoutingSeesTheCarrier(t *testing.T) {
+	f := newCeremonyFixture(t)
+	ceremonyManualOnMetrics(f, "package main\n\nimport (\n\t\"net/http\"\n)\n\n"+
+		"func ceremonyProbeManual(next http.Handler) http.Handler {\n"+
+		"\treturn ceremonyProbeLog(next, func(method, path string) { _, _ = method, path })\n}\n\n"+
+		"func ceremonyProbeLog(h http.Handler, logFn func(method, path string)) http.Handler {\n"+
+		"\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n"+
+		"\t\th.ServeHTTP(w, r)\n\t\tlogFn(r.Method, r.URL.Path)\n\t})\n}\n")
+	report := f.mustJudge(fixtureCeremonyCoordinates())
 	c := report.Census
 	if c.PathCarriers == 0 {
-		t.Fatalf("носителей пути 0 на живом дереве — выведение ослепло: путь уходит в параметр журнала "+
-			"hooks_mux.go (LoggerMiddleware): %s", c.Summary())
+		t.Fatalf("носителей пути 0 при обёртке, отдающей путь журналу параметром функции-значения, — "+
+			"выведение ослепло: %s", c.Summary())
 	}
 	if len(c.ManualRouting) != 0 {
-		t.Fatalf("живое дерево решает маршрут по пути запроса: %v", c.ManualRouting)
+		t.Fatalf("журнал пути назван решением маршрута: %v", c.ManualRouting)
 	}
-	t.Logf("чтений пути %d · носителей %d · решений %d", c.URLPathReads, c.PathCarriers, len(c.ManualRouting))
+
+	live := judgeLiveCeremony(t).Census
+	if len(live.ManualRouting) != 0 {
+		t.Fatalf("живое дерево решает маршрут по пути запроса: %v", live.ManualRouting)
+	}
+	t.Logf("фикстура: чтений пути %d · носителей %d · решений %d; живое дерево: чтений %d · носителей %d · решений %d",
+		c.URLPathReads, c.PathCarriers, len(c.ManualRouting), live.URLPathReads, live.PathCarriers, len(live.ManualRouting))
 }

@@ -83,9 +83,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
-// AuditRecoveryCompleted — событие завершения восстановления. ТО ЖЕ значение,
-// что пишет приёмник обратного вызова поставщика (`internal/apps/kaname/api/user`,
-// `auditEventUserRecoveryCompleted`): источника события два, событие одно (Р4).
+// AuditRecoveryCompleted — событие завершения восстановления. Источник у
+// события один — эта полоса: приёмник обратного вызова прежнего поставщика,
+// писавший то же значение, снят вместе с поставщиком (kaname#564).
 const AuditRecoveryCompleted = "iam.user.recovery_completed"
 
 // CompleteRecoveryInput — форма предъявления.

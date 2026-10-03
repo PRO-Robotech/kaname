@@ -23,9 +23,9 @@ package pg
 //
 // Таблицу способа входа — её называет только её адаптер; замещение материала
 // делегируется `replaceLoginVerifierTx` (см. `human_session_repo.go`). Журнал
-// завершений пишется той же функцией, что у приёмника обратного вызова
-// поставщика (`insertRecoveryCompletionTx`): источника события два, запись одна
-// (Р4).
+// завершений пишется функцией `insertRecoveryCompletionTx`
+// (`recovery_completions_repo.go`); источник события у журнала один — наша
+// полоса восстановления (kaname#564).
 
 import (
 	"context"
@@ -160,9 +160,9 @@ func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansessi
 	return nil
 }
 
-// InsertRecoveryCompletion — журнал завершений по ключу потока: та же вставка,
-// что у приёмника обратного вызова (Р4). Внешний субъект у нашего потока не
-// задан — столбец NULL.
+// InsertRecoveryCompletion — журнал завершений по ключу потока
+// (`insertRecoveryCompletionTx`). Внешний субъект у нашего потока не задан —
+// столбец NULL.
 func (w *humanSessionWriter) InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (bool, error) {
 	if err := rc.Validate(); err != nil {
 		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())

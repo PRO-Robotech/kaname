@@ -69,9 +69,8 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 // Дублёр НЕ снисходительнее настоящего: он отказывает там, где настоящий
 // отказывает (снятый владелец), и не выдумывает состава.
 type stubClaims struct {
-	set  map[string]any
-	err  error
-	seen service.TokenHookContext
+	set map[string]any
+	err error
 	// keyIssuedAt — момент выдачи ключа пользователя, который настоящее
 	// объявление состава берёт из строки ключа. Незаданный — умолчание
 	// фикстуры, а не «якоря нет»: настоящее объявление якорь у ключа
@@ -86,8 +85,7 @@ type stubClaims struct {
 // относительно часов выдачи.
 var defaultKeyIssuedAt = now.Add(-24 * time.Hour)
 
-func (s *stubClaims) ClaimsForAssertionClient(_ context.Context, c domain.AssertionClient, hookCtx service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error) {
-	s.seen = hookCtx
+func (s *stubClaims) ClaimsForAssertionClient(_ context.Context, c domain.AssertionClient, _ service.TokenHookContext) (map[string]any, service.ResolvedPrincipal, error) {
 	if s.err != nil {
 		return nil, service.ResolvedPrincipal{}, s.err
 	}
@@ -440,10 +438,9 @@ func TestClaimsComeFromTheSingleDeclarationAndCarryTheClientIdentifier(t *testin
 	got, _ := parse(t, out.AccessToken)
 	require.Equal(t, "uoc_0123456789abcdefg", got["kaname_user_token_id"])
 	require.Equal(t, "usr_0123456789abcdefg", got["kaname_principal_id"])
-
-	// Вид выдачи доезжает до объявления состава: путь обратного вызова
-	// различает виды, и наш обязан назвать свой тем же словарём.
-	require.Equal(t, tokenpolicy.GrantTypeClientCredentials, claims.seen.GrantType)
+	// Вида выдачи в объявлении состава больше нет: его различал путь обратного
+	// вызова поставщика, снятый вместе с хуками (kaname#363), и состав собирается
+	// одним входом, которому различать нечего.
 }
 
 // TestIssuanceFailureIsNotSilentlySuccessful — отказ источника состава есть
