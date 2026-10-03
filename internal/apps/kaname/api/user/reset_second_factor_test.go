@@ -179,7 +179,7 @@ func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, op)
 	assert.Equal(t, codes.NotFound, status.Code(err))
-	assert.Equal(t, "User usr000000000000absnt not found", status.Convert(err).Message(), "промах — контракт-тоном, байт-идентичным сокрытию существования")
+	assert.Equal(t, "User usr000000000000absnt not found", status.Convert(err).Message(), "промах держателя — линия прямого чтения его записи: `User <id> not found` (Ф12-30)")
 
 	assert.Zero(t, methods.calls, "до строки способов ни один отказ выше не доходит")
 	assert.Zero(t, sessions.writers)

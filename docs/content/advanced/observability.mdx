@@ -401,10 +401,16 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 Порядок один и тот же для любой жалобы. Каждый шаг отвечает на «продукт сломан или условие не
 создано» и выполняется без других наших компонентов.
 
+Команды ниже записаны для production-профиля: в нём диагностический слушатель `:9095` поднят по
+TLS, поэтому схема — `https`. Клиентский сертификат он не запрашивает, а сверка листа снята
+флагом `--no-check-certificate`: запрос не покидает под, а корня внутреннего УЦ в хранилище
+образа нет. На стенде, где транспорт слушателя не включён (`KANAME_METRICS_SERVER_MTLS_ENABLE`
+не задан), та же команда идёт по `http://127.0.0.1:9095`.
+
 ### Шаг 1 — что вообще исполняется
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics | grep '^kaname_build_info'
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics | grep '^kaname_build_info'
 ```
 
 Метка `revision` не та, что ожидалась, — раскатана другая ревизия, и дальше искать нечего.
@@ -413,7 +419,7 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics | grep '^k
 ### Шаг 2 — готов ли процесс
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- --server-response http://127.0.0.1:9095/readyz
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate --server-response https://127.0.0.1:9095/readyz
 ```
 
 `503` называет неготовую зависимость по имени. «База недоступна» и «образ не той версии, что
@@ -422,7 +428,7 @@ kubectl exec deploy/kaname -- wget -qO- --server-response http://127.0.0.1:9095/
 То же имя видно и с витрины, без запроса к пробе:
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics \
   | grep '^kaname_readiness_dependency_checks_total'
 ```
 
@@ -431,7 +437,7 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
 ### Шаг 3 — отвечает ли служба и чем
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics \
   | grep -E '^kaname_authz_check_decisions_total|^kacho_grpc_server_handled_total'
 ```
 
@@ -445,7 +451,7 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
 ### Шаг 4 — медленно или занято
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics \
   | grep -E '^kaname_db_pool_empty_acquire_total|^kaname_db_pool_acquired_conns|^kaname_db_pool_max_conns'
 ```
 
@@ -465,7 +471,7 @@ kubectl logs deploy/kaname --since=10m | grep -E '"level":"(ERROR|WARN)"'
 ### Шаг 6 — застряла ли фоновая работа
 
 ```bash
-kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics \
   | grep -E '^kaname_lro_terminal_write_failures_total|^kaname_outbox_oldest_pending_age_seconds|^kaname_outbox_delivered_total'
 ```
 

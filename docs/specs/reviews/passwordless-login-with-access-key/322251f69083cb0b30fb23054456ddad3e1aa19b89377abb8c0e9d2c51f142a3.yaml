@@ -1,0 +1,58 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  sha256: 322251f69083cb0b30fb23054456ddad3e1aa19b89377abb8c0e9d2c51f142a3
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 01442f1a1fb68956ebd1a4ad739e0488e92c4a63
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2450
+  round: 7
+  round_note: >-
+    круг 7 — следующий за записями этого документа; в этом заходе прошлый круг — 6
+  predecessor_record: >-
+    docs/specs/reviews/passwordless-login-with-access-key/99b536fc7a1931229586ff80e513f270c4bbad92c9e9ef964124a94805e367ac.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/passwordless-login-with-access-key.md на tmp/535-na3a @ 01442f1a1 → 322251f69083cb0b30fb23054456ddad3e1aa19b89377abb8c0e9d2c51f142a3; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+blocking_recheck:
+  - id: B1
+    outcome: closed
+    evidence: >-
+      Тумба Р11 переписана: снят предмет переноса; ключ церемонии в состоянии не сообщено назван
+      возможно необнаружимым, исход держат Р2 и страж годности Ф7 Р12 (Ф7-56). Сверено с
+      access-keys-are-ours.md: Р12 (строка 1917), Ф7-41 третья сторона и Ф7-56 (2300-2315).
+      N2 круга 6 (писатель один) исполнено в §4.4.
+non_blocking:
+  - id: N1
+    summary: >-
+      N1 круга 6 о kacho#2703 в силе: событие одобрения публиковать только после того, как
+      решение опубликовано комментарием в задаче.
+accepted_parts: >-
+  Диф 33b0f8aa9..01442f1a1 по документу — шапка редакции 8, тумба Р11, одна строка §4.4;
+  сценарии (32), метки и Тогда не тронуты.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given личность без пароля, с ключом — названная
+  фикстура круга 6 (строка ключа с рукояткой, удалённая строка способа пароль).
+event_body: acceptance-reviewer · APPROVED · 322251f69083cb0b30fb23054456ddad3e1aa19b89377abb8c0e9d2c51f142a3
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
