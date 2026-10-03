@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 758
+Всего кейсов: 767
 
 ## Перепись по модулям
 
@@ -70,6 +70,7 @@
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
+| `cases/kaname-access-keys.py` | 9 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -1022,6 +1023,31 @@
 
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
+
+## `cases/kaname-access-keys.py` — 9 кейсов
+
+> Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 12):
+> шесть глаголов `AccessKeyService` на собственном фронте службы
+> (`ownRestBaseUrl`) — церемония регистрации, перечень, снятие, испытание
+> предъявления и утверждение. Аутентификатор подставной, в песочнице
+> прогонщика: RSA 2048 (`RS256`) подписью `BigInt`, CBOR вручную, аттестация
+> `none`. Людей набор заводит сам регистрацией и подтверждает адрес кодом из
+> письма (`standMailboxUrl`); токен человека — нашей церемонией (вход → код →
+> обмен) через `loginLaneBaseUrl` и `iamRegistryTokenBaseUrl` с клиентом посева
+> церемонии. Имя доверяющей стороны, перечни происхождений и алгоритмов и
+> потолок ключей набор берёт из `deploy/values.prod.yaml` при генерации.
+> Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
+> прогонщика, последним.
+
+- `IAM-ACCESSKEY-OK-REGISTRATION-CHALLENGE-NAMES-THE-CONTRACT`
+- `IAM-ACCESSKEY-OK-REGISTER-LIST-ASSERT`
+- `IAM-ACCESSKEY-NEG-REGISTRATION-CHALLENGE-AXIS`
+- `IAM-ACCESSKEY-NEG-CEREMONY-RESULT-AXES`
+- `IAM-ACCESSKEY-NEG-ASSERTION-SINGLE-REFUSAL`
+- `IAM-ACCESSKEY-NEG-FOREIGN-KEY-AND-FOREIGN-CHALLENGE`
+- `IAM-ACCESSKEY-BVA-CEILING`
+- `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
+- `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
 
 ## `cases/kaname-address-verification.py` — 6 кейсов
 
