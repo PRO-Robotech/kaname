@@ -428,10 +428,19 @@ service UserService {
   //
   // Without it such a person signs in with the password and stays at
   // assurance level "1" with no way up: self-service removal of the factor
-  // asks for a code (the very thing that was lost). So the administrator of
-  // the person's Account — `identity_suspender`, the same relation and the
-  // same step-up floor as Block/Unblock — removes it here, and the person
-  // enrolls a new one himself.
+  // asks for a code (the very thing that was lost). So the cloud
+  // administrator — `identity_suspender`, the same relation and the same
+  // step-up floor as Block/Unblock — removes it here, and the person enrolls
+  // a new one himself.
+  //
+  // WHO MAY: the person himself (his own factor, with a code, through the
+  // sign-in lane's `remove`) or the cloud administrator (this method). An
+  // administrator or owner of an Account the person belongs to may not: the
+  // person is one identity across all his Accounts, and the reset ends every
+  // session of his. Anyone who is not a cloud administrator — the person
+  // himself included — gets PERMISSION_DENIED, the same on an existing and on
+  // a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+  // administrator only.
   //
   // ONE TRANSACTION: the time-based code row (active) and the backup-code set
   // are removed; EVERY session of the person is covered by a cutoff at `now`

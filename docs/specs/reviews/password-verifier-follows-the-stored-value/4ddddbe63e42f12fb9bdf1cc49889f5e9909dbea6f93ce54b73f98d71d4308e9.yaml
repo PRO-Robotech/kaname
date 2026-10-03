@@ -1,0 +1,57 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: d32c4d69974f475e97123e433022d6346a8c6c97
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2138
+  round: 4
+  round_note: >-
+    круг 4 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/password-verifier-follows-the-stored-
+    value/2554fb6f46fa7f5768f746b5d620843fc045e53d7778919d9829f1b9467070cb.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/password-verifier-follows-the-stored-value.md на
+    tmp/535-na3a @ 33b0f8aa9 → 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9;
+    совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      Дифф против редакции 4 большой (135+/119-) из-за перекладки строк; проверка шла по перечню
+      правок строки редакции 5 — вне перечня изменений по существу не найдено.
+accepted_parts: >-
+  Снятие переноса проверено: живых сценариев 18 (PWV-01…19 без PWV-12), строк ведомости «Тогда» 97
+  (44 · 32 · 21), grep -c -i перенос → 52 — все три числа перемерены на голове; PWV-12, Д-15,
+  12.1…12.6 — надгробиями, номера не переиспользуются; Тогда PWV-01…11, 13…19 не ослаблены.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given PWV-01…03 — значение формата A/B, положенное посевом
+  и построенное сторонней библиотекой; названная фикстура —
+  internal/passwordverify/fixture_test.go и сторона хранилища
+  internal/repo/kaname/pg/login_method_repo_integration_test.go
+  (TestLoginMethodRepo_MaterialRoundTripsVerbatim).
+event_body: acceptance-reviewer · APPROVED · 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
