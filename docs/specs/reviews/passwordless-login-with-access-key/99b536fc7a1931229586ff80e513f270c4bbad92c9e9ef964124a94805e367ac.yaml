@@ -1,0 +1,80 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  sha256: 99b536fc7a1931229586ff80e513f270c4bbad92c9e9ef964124a94805e367ac
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: bfbfa3a07d38d23a40ea9ce42e1b74e1fb02022e
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2433
+  round: 6
+  round_note: >-
+    круг 6 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/passwordless-login-with-access-
+    key/a5f1b4d2a0d33a03bfcd246abb5c5234ff6146842c9cea7e6f636ade60a4f42c.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/passwordless-login-with-access-key.md на tmp/535-na3a @
+    33b0f8aa9 → 99b536fc7a1931229586ff80e513f270c4bbad92c9e9ef964124a94805e367ac; совпал с
+    отпечатком задания
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: COVERAGE
+    summary: >-
+      Тумба Р11 (строка 1117) утверждает: ключ, заведённый церемонией Ф7-01, обнаруживаем by
+      construction, и «ключ, не появившийся в полосе» больше не возникает. Это ложно на той же
+      ревизии: Ф7 Р12 (редакция 15) держит у ключей церемонии состояние «не сообщено» с писателем —
+      приём результата церемонии без расширения (Ф7-41, третья сторона), и правило годности стража
+      считает такой ключ негодным именно потому, что полоса входа его может не найти. Ф13 §4.4 (строка
+      1424) сама читает три состояния соседки.
+    why_blocking: >-
+      Сведение объявлено как «ни одного нового решения», а довод ветви (а), написанный до Р12 ветви
+      (б), перенесён дословно и противоречит решению, которое сведение же сохраняет: снятие Р11
+      обосновано несуществующим свойством, и исход для ключа в состоянии «не сообщено», не
+      предложенного аутентификатором, документ объявляет невозникающим.
+    fix: >-
+      Переписать обоснование тумбы Р11: предмет снят вместе с переносом; ключ церемонии в состоянии
+      «не сообщено» может не появиться в полосе — его исход держат Р2 (второй формы входа нет; «не
+      предложен аутентификатором» Тогда на нашей стороне не имеет) и страж годности Ф7 Р12, а не
+      свойство by construction. Сценарии и счёт (32) не трогаются.
+non_blocking:
+  - id: N1
+    summary: >-
+      Четыре документа (Ф1, Ф4, Ф7, Ф13) ссылаются на решение kacho#2703 «полосы регистрации ключом не
+      будет» от 2026-10-03; сама задача OPEN, и последний её комментарий (2026-09-25) решения не несёт
+      — оно записано только в плане сессии (plan-final.md R1). Событие одобрения не публиковать, пока
+      решение не опубликовано комментарием в kacho#2703: иначе ссылка документа указывает на носитель,
+      которого нет.
+  - id: N2
+    summary: >-
+      Строка §4.4 (1421) «оба её писателя (церемония и перенос Ф7; писатель переноса снят)» — при
+      правке писать «писатель — церемония», слово «оба» читается как два живых.
+accepted_parts: >-
+  Прочее сведение проверено диффом против a5f1b4d2 (a82f433bd): меток 32, строк ведомости Д 26,
+  «дописано» 4 — предикаты документа перемерены на голове; Ф13-24, Д6, Д28…Д30 сняты без живых
+  ссылок; Р1, Р3, Ф13-33 сохранены.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given «личность без пароля, с ключом» строится записью
+  строки ключа с рукояткой и удалением строки способа пароль — названная фикстура.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 99b536fc7a1931229586ff80e513f270c4bbad92c9e9ef964124a94805e367ac
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
