@@ -1203,7 +1203,7 @@
                   "if (__j.expiresAt) { pm.environment.set('akRegExp40', __j.expiresAt); }",
                   "const _akSix = [",
                   "  ['rp.id', !!__j.rp && __j.rp.id === 'access.example.invalid'],",
-                  "  ['pubKeyCredParams', Array.isArray(__j.pubKeyCredParams) && JSON.stringify(__j.pubKeyCredParams.map((x) => x.alg)) === '[-7, -8, -257]' && __j.pubKeyCredParams.every((x) => x.type === 'public-key')],",
+                  "  ['pubKeyCredParams', Array.isArray(__j.pubKeyCredParams) && JSON.stringify(__j.pubKeyCredParams.map((x) => Number(x.alg))) === '[-7, -8, -257]' && __j.pubKeyCredParams.every((x) => x.type === 'public-key')],",
                   "  ['rp.name', !!__j.rp && typeof __j.rp.name === 'string' && __j.rp.name.length > 0],",
                   "  ['authenticatorSelection.userVerification', !!__j.authenticatorSelection && __j.authenticatorSelection.userVerification === 'preferred'],",
                   "  ['authenticatorSelection.residentKey', !!__j.authenticatorSelection && __j.authenticatorSelection.residentKey === 'required'],",

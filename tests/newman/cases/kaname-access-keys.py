@@ -1051,12 +1051,16 @@ def _single_refusal(label, *, record=False):
 
 
 def _challenge_named(label):
-    """Шесть величин контракта в испытании регистрации (Ф7-40) и перепись пары."""
+    """Шесть величин контракта в испытании регистрации (Ф7-40) и перепись пары.
+
+    Идентификатор алгоритма COSE — `int64` контракта, и каноническая форма JSON
+    отдаёт его СТРОКОЙ («-7»), а не числом; сравнивается значение, а не запись
+    (замер на стенде chart-own: `{"type":"public-key","alg":"-7"}`)."""
     algs = _json.dumps(_ALGORITHMS)
     return [
         "const _akSix = [",
         f"  ['rp.id', !!__j.rp && __j.rp.id === {js_str(_RP_ID)}],",
-        f"  ['pubKeyCredParams', Array.isArray(__j.pubKeyCredParams) && JSON.stringify(__j.pubKeyCredParams.map((x) => x.alg)) === {js_str(algs)}"
+        f"  ['pubKeyCredParams', Array.isArray(__j.pubKeyCredParams) && JSON.stringify(__j.pubKeyCredParams.map((x) => Number(x.alg))) === {js_str(algs)}"
         " && __j.pubKeyCredParams.every((x) => x.type === 'public-key')],",
         "  ['rp.name', !!__j.rp && typeof __j.rp.name === 'string' && __j.rp.name.length > 0],",
         f"  ['authenticatorSelection.userVerification', !!__j.authenticatorSelection && __j.authenticatorSelection.userVerification === {js_str(_UV_PREFERRED)}],",
