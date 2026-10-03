@@ -54,16 +54,23 @@ effective_approval:
       `event` дописывается отдельным коммитом поверх этой записи.
     subject_task_event:
       task: PRO-Robotech/kacho#1271
-      status: not_performed
+      status: performed
+      url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5974296206
       why: >-
         Гейт `.github/scripts/review-event-silence.py` ищет событие в задаче `subject.task`;
-        событие в kaname#246 ему не видно. Событие с тем же заголовком в kacho#1271 (со ссылкой
-        на kaname#246) публикует курьер; после публикации блок `event` переводится на него, а
-        событие kaname#246 уходит в `sanction.prior_event`.
+        событие в kaname#246 ему не видно. Событие с тем же заголовком опубликовано в kacho#1271
+        со ссылкой на kaname#246; блок `event` переведён на него, событие kaname#246 — в
+        `sanction.prior_event` и не снимается.
   sanction:
     outcome: САНКЦИЯ ДЕЙСТВУЕТ
     issued_by_event: 5969000677
     event_url: https://github.com/PRO-Robotech/kaname/issues/246#issuecomment-5969000677
+    subject_task_event_id: 5974296206
+    prior_event:
+      database_id: 5969000677
+      url: https://github.com/PRO-Robotech/kaname/issues/246#issuecomment-5969000677
+      body_sha256: 05f564281ea35bc807a8d10c13be496f04022de380d98b58dc54756d71225a6c
+      created_at: '2026-10-03T12:07:21Z'
     remeasured: >-
       `sha256sum docs/engineering/acceptance/recovery-of-access.md` на origin/246 @48a7aa31 →
       2e441e45…de341, совпал с именем записи и строкой `subject_sha256` события; содержимое
@@ -81,25 +88,24 @@ authority:
 event:
   type: issue_comment
   status: performed
-  database_id: 5969000677
-  node_id: IC_kwDOUO26pM8AAAABY8e45Q
-  url: https://github.com/PRO-Robotech/kaname/issues/246#issuecomment-5969000677
-  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969000677
-  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/246
+  database_id: 5974296206
+  node_id: IC_kwDOTZqgWM8AAAABZBiGjg
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5974296206
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5974296206
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
   actor: pointpu
   role: acceptance-reviewer
   author_association: MEMBER
-  created_at: '2026-10-03T12:07:21Z'
-  body_sha256: 05f564281ea35bc807a8d10c13be496f04022de380d98b58dc54756d71225a6c
+  created_at: '2026-10-03T22:47:00Z'
+  body_sha256: b6f4b277cfddae33ded23c3eab66b37378c2f1675af7d4d3889727cd9db119ba
   subject_sha256: 2e441e45ba4adae493d0e3263f629d6b6e29669c9562bb724c70f8e1438de341
   subject_revision: d59487ada7cf86811fa3b4374a7ee8af906dde87
   verdict: APPROVED
   required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
   publication_note: >-
-    Блок приведён к факту поверх записи рецензента (было `type: none`, `not_performed`);
-    отпечаток тела снят с сырого ответа API (`gh api … | jq -j .body | sha256sum`). Событие —
-    в kaname#246 (edition_task), а не в `subject.task` kacho#1271; событие в kacho#1271 не
-    опубликовано (`effective_approval.publication_pending.subject_task_event`).
+    Событие в задаче `subject.task` (kacho#1271); то же событие ранее опубликовано в kaname#246
+    (`effective_approval.sanction.prior_event`), оно не снимается. Отпечаток тела снят с сырого
+    ответа API (`gh api … | jq -j .body | sha256sum`).
 
 attribution:
   reviewer_kind: claude_agent
