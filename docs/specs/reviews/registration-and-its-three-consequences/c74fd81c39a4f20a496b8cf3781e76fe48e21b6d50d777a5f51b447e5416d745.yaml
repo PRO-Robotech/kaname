@@ -1,0 +1,61 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 512b9df7ebe84ab41633117e56cde689af2cb866
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 1899
+  round: 3
+  round_note: >-
+    круг 3 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/registration-and-its-three-
+    consequences/7c81fa29d71d70f283cc15dc9cf450f2cb39fe7fa7dec4878e2c6f510e2c6293.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md на tmp/535-na3a
+    @ 33b0f8aa9 → c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745; совпал с
+    отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      Четыре документа (Ф1, Ф4, Ф7, Ф13) ссылаются на решение kacho#2703 «полосы регистрации ключом не
+      будет» от 2026-10-03; сама задача OPEN, и последний её комментарий (2026-09-25) решения не несёт
+      — оно записано только в плане сессии (plan-final.md R1). Событие одобрения не публиковать, пока
+      решение не опубликовано комментарием в kacho#2703: иначе ссылка документа указывает на носитель,
+      которого нет.
+  - id: N2
+    summary: >-
+      Строки §3.1, §4.2 п.11 и §12 п.11 о пути первого входа под external стоят на посадке, снятой
+      kaname#363; сценарии на них не опираются — при следующей правке привести.
+accepted_parts: >-
+  Три правки сверены диффом против dd66b5bee: абзац kaname#564, пин Ф-е kacho@cd6bab6829, §1.2 и
+  Д5 приведены к одной полосе; Ф4-06 судит N = M при любом N, Ф4-07…10 не зависят от числа полос;
+  сценарии, ID и Тогда не тронуты.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given редакции не менялись; Ф4-10 «прежнее объявление
+  снято» — состояние нынешнего дерева.
+event_body: acceptance-reviewer · APPROVED · c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

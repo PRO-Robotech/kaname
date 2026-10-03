@@ -149,9 +149,12 @@ gateway. После деплоя обязателен E2E-прогон: логи
 
 ## Production-профиль
 
-В production-профиле включены mTLS на всех listener'ах, production-strict AuthN и `sslmode=require`
-для БД. Сервис откажется стартовать без mTLS на публичном/internal listener'ах (fail-closed).
-Детали ключей — [Конфигурация](/install/configuration).
+В production-профиле каждый слушатель поднимается по TLS, AuthN — production-strict, у БД —
+`sslmode=require`. Сервис откажется стартовать без mTLS на публичном/internal listener'ах и без
+TLS на остальных (fail-closed). Клиентский сертификат требуется не везде: режим проверки клиента
+у каждого слушателя свой — взаимный, запрашивающий или односторонний, и кто обязан предъявлять
+сертификат, названо по каждому слушателю в разделе
+[Listener'ы и mTLS](/install/configuration#listeners-tls).
 
 ## Откат выкатки
 
