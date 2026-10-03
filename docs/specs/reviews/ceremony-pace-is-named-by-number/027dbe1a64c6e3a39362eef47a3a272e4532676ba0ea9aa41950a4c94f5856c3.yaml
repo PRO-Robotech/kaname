@@ -1,0 +1,169 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/ceremony-pace-is-named-by-number.md
+  sha256: 027dbe1a64c6e3a39362eef47a3a272e4532676ba0ea9aa41950a4c94f5856c3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово `DRAFT` в шапке документа — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Эта запись шапку не правит. Вердикт круга 3 (51f437a8…) остаётся
+    вердиктом о редакции 3 и на редакцию 4 не переносится.
+  base_commit: 9bac42bdc
+  content_commit: cea5c3731ab32b758736aa6a3031b71d63fd19e5
+  content_commit_note: >-
+    Ветка `525` (от origin/536 @ 9bac42bdc): один коммит cea5c3731 с одним файлом, документом
+    (257 вставок, 20 удалений). `git ls-remote origin refs/heads/525` → cea5c3731, ревизия
+    опубликована.
+  branch: '525'
+  pull_request: null
+  task: PRO-Robotech/kaname#525
+  wave: PRO-Robotech/kaname#536
+  line_goal: PRO-Robotech/kacho#1266
+  lines: 1378
+  round: 4
+  predecessor_record: >-
+    docs/specs/reviews/ceremony-pace-is-named-by-number/51f437a8e8829c63e9eaba7ff87c99fc2f2c3edee40f68114780c37969aa3637.yaml
+  fingerprint_predicate: >-
+    sha256sum <документ> в копии и `git show cea5c3731:<документ> | sha256sum` — оба
+    027dbe1a64c6e3a39362eef47a3a272e4532676ba0ea9aa41950a4c94f5856c3, совпал с заданием.
+    Отпечатки ред. 1–3 по коммитам 5878c4779, ad22d9fd6, 22e6cd5ce — faa8ff00, ce40e5a0,
+    51f437a8, совпали с историей шапки.
+  measurement_revisions: >-
+    Служба: kaname 9bac42bdc (код = база ветки). Край и консоль: PRO-Robotech/kacho origin/1266 @
+    e801c0f7844. Воркспейс: origin/main (LINE-A-1).
+  task_premise_remeasured: >-
+    ПОДТВЕРЖДЕНА: отпечаток совпал; в доме три записи (круги 1–3), этот круг — 4-й; записи на
+    027dbe1a до этой не было.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Один блокирующий род CONSTRUCTIBILITY: последнее «And» KN-PACE-44 названо на посеве,
+    который его исход построить не может (посеяно, см. constructibility). Санкции на код #525
+    нет. Санкция ред. 3 на код #315 (оси темпа) этим не затронута — она о другом отпечатке.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: not_performed
+  reason: событие публикует курьер, а не рецензент
+  expected_actor: pointpu
+  expected_target: PRO-Robotech/kaname#525
+  subject_revision: cea5c3731ab32b758736aa6a3031b71d63fd19e5
+  event_body: 'acceptance-reviewer · CHANGES_REQUESTED · 027dbe1a64c6e3a39362eef47a3a272e4532676ba0ea9aa41950a4c94f5856c3'
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Разность ред. 3 → ред. 4 (`git diff 22e6cd5ce cea5c3731 -- <документ>`) целиком: шапка,
+    §1.6, Р11, П4 §3, две строки §4, посев А §5, замена имени ответа в KN-PACE-26…36, группа I
+    (KN-PACE-43 а–в, 44/44+, 45 а–в), строки ред. 4 таблицы производителей, S3 §6, §8. Прочее
+    байт-в-байт ред. 3, одобренная кругом 3. Координаты §1.6 перемерены на 9bac42bdc:
+    authorize.go :181/:183/:263, :130/:136/:158/:165, refuseByRedirect, noStore в ServeHTTP
+    (:94) — совпали. Мир: ceremony_world_integration_test.go :158–162, :295, :819;
+    cutSubject :24/:49 — совпали. Держатели прежнего исхода: requireLineA1 :195, пять вызовов;
+    ожидания 401 :381/:388/:398/:436 — совпали. LINE-A-1-03 в воркспейсе действительно
+    называет «перенаправление на наш вход либо 401». Консоль (ui-future @ e801c0f7844) точку
+    авторизации не зовёт; край ретранслирует 302 и Location как есть (login_lane_relay.go:201).
+    Отсюда §8 «консоль и край не требуются» подтверждено.
+
+probes_run:
+  - command: >-
+      go test -count=1 -v -run 'TestLINEA1_02_|TestLINEA1_03_|TestLINEA1_04_|TestLINEA1_08_|TestLINEA1Cutoff_AuthorizeAfter'
+      ./cmd/kaname/ (через слот, MemoryMax=10G, Postgres в контейнере) @ cea5c3731
+    result: 'PASS: 5 функций и 2 подтеста, 0 красных'
+  - command: go test -count=1 ./internal/handler/ceremonyhttp/ @ cea5c3731
+    result: 'ok, 40 исполненных PASS'
+  - command: >-
+      временная проба на seedA (файл создан и удалён, дерево чисто: git status --porcelain → 0)
+    result: >-
+      Годный запрос А без сессии → 401 и authorize-login-required +1. Тот же запрос с
+      acr_values=2 → 401 login_required, authorize-step-up-required +0.
+
+constructibility:
+  seeded: 6
+  of: 7
+  not_executed: 0
+  detail: >-
+    Посеяно в мире и зелено сегодня: близнецы 43 а (:168), 43 б (RQ, :153–154), 43 в (подтест
+    «близнец: отсечка раньше аутентификации»), 44+ (:329), держатель 45 с сессией (LINE-A-1-04).
+    Given отрицаний 43 а, 43 в и 44 строятся: тот же мир сегодня даёт 401 на тех же запросах
+    (LINE-A-1-03, подтест отсечки после аутентификации, LINE-A-1-08). Значит, это честный
+    красный до кода. Счётчик 43 на seedA строится (+1). Счётчик 44 на seedA НЕ строится:
+    шов входа посева — silentAuthority (authorize_test.go:71), он всегда отвечает «сессии нет».
+    Исход step-up на нём недостижим (посеяно: +0).
+
+findings:
+  blocking:
+    - id: 1
+      kind: CONSTRUCTIBILITY
+      severity: medium
+      where: 'KN-PACE-44, последнее «And»; таблица производителей, строка «43, 44 (перепись)»'
+      statement: >-
+        «На посеве обработчика тот же исход растит authorize-step-up-required ровно на 1».
+        Производитель назван: проба на seedA (pace_test.go, outcome :192). Но шов входа seedA —
+        silentAuthority (pace_test.go:119), и сессия уровня "1" на нём не существует. Исход
+        step-up там недостижим при любой реализации Р11. Нужно назвать посев обработчика, шов
+        входа которого отвечает сессией уровня "1" (как он строится — тоже назвать). Другой путь —
+        перенести утверждение счётчика 44 в фикстуру, которая его строит. Тот же вопрос
+        касается счётчика 43 в: на seedA сессии нет, и строка в становится строкой а.
+  non_blocking:
+    - id: 2
+      kind: FORMAT
+      severity: low
+      where: 'журнал редакций, ред. 4'
+      statement: >-
+        «Его имя в сценариях — «ответ без сессии» вместо «ответ без сессии»». Прежнее имя —
+        «ответ LINE-A-1».
+    - id: 3
+      kind: FORMAT
+      severity: low
+      where: 'посев Ц'
+      statement: >-
+        «`R2` и `RQ` = …/auth/cb?tenant=a» читается так, будто оба адреса — один. R2 =
+        …/auth/other (world :159).
+    - id: 4
+      kind: FORMAT
+      severity: low
+      where: '§1.6, кейс newman'
+      statement: >-
+        `kaname-authorization-code.py:627`: id кейса стоит на :626.
+
+twins_and_producers:
+  producer_per_then: >-
+    Новые «Тогда» группы I: у всех назван производитель (заказан либо есть). Исключение —
+    находка 1: производитель назван, но на посеве, который исход не строит.
+  twin_per_negative: >-
+    7 из 7: у 43 а–в — близнец с годной сессией, у 44 — 44+, у 45 а–в — тот же запрос к R. Разница
+    в один факт. Все близнецы зелены сегодня (probes_run).
+  disclosure: >-
+    Р11 п.2 объясняет, почему перенаправление на доверенную цель безопасно. Пути злоупотребления
+    текст не описывает.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+next_step_note: >-
+  acceptance-author исправляет находку 1: посев для счётчика 44 и 43 в. Попутно — 2–4. После
+  этого короткий круг 5 по разности.
