@@ -25,6 +25,20 @@
 а корня внутреннего УЦ в хранилище образа нет. В образе службы есть `wget`, `curl` нет. На
 стенде без транспорта слушателя — `http://127.0.0.1:9095`.
 
+**База службы.** Запросы к базе ниже идут через функцию `kdb`; объявите её под свою установку
+один раз за сессию. Отдельного объекта `postgres` нет ни в одной из поставок.
+
+```bash
+# Зонт платформы (релиз kacho-umbrella, пространство kacho): у службы свой инстанс —
+# StatefulSet подчарта pg-iam; изнутри пода psql пускается без пароля по локальному сокету.
+kdb() { kubectl -n kacho exec statefulset/kacho-umbrella-pg-iam -- psql -U iam -d kaname "$@"; }
+
+# Отдельная установка чарта службы: база — узел оператора (значения чарта db.host, db.port,
+# db.user, db.name), пароль — в его секрете (db.passwordSecretName / db.passwordSecretKey).
+# psql запускается там, откуда этот узел достижим.
+# kdb() { PGPASSWORD='<пароль из секрета>' psql "host=<db.host> port=<db.port> user=<db.user> dbname=<db.name> sslmode=require" "$@"; }
+```
+
 ## P1 — Авторизация полностью не работает
 
 **Симптомы:**
@@ -37,13 +51,12 @@
 # Pod alive?
 kubectl -n kacho get pod -l app=kaname
 
-# DB reachable? (от корня репозитория)
-make -C deploy psql SVC=iam   # либо nc -zv <db-host> 5432
+# DB reachable? (kdb — см. «База службы» в начале страницы)
+kdb -c 'SELECT 1;'
 
 # fga_outbox: глубина журнала и его голова. «Непринятых» строк у него НЕ БЫВАЕТ:
 # журнал читает триггер, складывающий прямой факт в той же транзакции, что и вставку.
-kubectl -n kacho exec deploy/postgres -- \
-  psql -c "SELECT count(*) AS rows, max(created_at) AS last FROM kaname.fga_outbox;"
+kdb -c "SELECT count(*) AS rows, max(created_at) AS last FROM kaname.fga_outbox;"
 
 # Логи последние 5min.
 kubectl -n kacho logs -l app=kaname --since=5m | grep -E "ERROR|FATAL|authz|verdict"
@@ -122,13 +135,13 @@ api-gateway кэширует срез прав субъекта и **гасит 
 
 ```bash
 # Глубина журнала и его голова — это НЕ отставание, а точка отсчёта курсора.
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT count(*) AS rows_total, max(id) AS head_id, max(created_at) AS last_row
 FROM kaname.subject_change_outbox;
 "
 
 # Строки по конкретному субъекту: намерение вообще записалось?
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT id, op, event_type, created_at
 FROM kaname.subject_change_outbox
 WHERE subject_id = '<subject_id>'
@@ -160,7 +173,7 @@ ORDER BY id DESC LIMIT 10;
 проекция:
 
 ```bash
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 -- намерение записано?
 SELECT id, event_type, payload, created_at
   FROM kaname.fga_outbox
@@ -205,13 +218,13 @@ SELECT * FROM kaname.relation_fact
 
 ```bash
 # Состояние личности: активна ли, подтверждён ли адрес, не истекло ли приглашение.
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT id, invite_status, email_verified_at IS NOT NULL AS verified, invite_expires_at, account_id
 FROM kaname.users WHERE lower(email) = lower('<адрес>');
 "
 
 # Членства человека по аккаунтам.
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT account_id, state, invited_by, created_at FROM kaname.memberships
 WHERE user_id = '<usr_id>' ORDER BY created_at;
 "
@@ -379,8 +392,7 @@ kubectl -n kacho get pod -l app=kaname \
 kubectl -n kacho logs -l app=kaname --tail=200 | grep -iE "migrat|goose|schema|relation .* does not exist"
 
 # Текущая версия goose.
-kubectl -n kacho exec deploy/postgres -- \
-  psql -c "SELECT version_id, is_applied, tstamp FROM kaname.goose_db_version ORDER BY id DESC LIMIT 5;"
+kdb -c "SELECT version_id, is_applied, tstamp FROM kaname.goose_db_version ORDER BY id DESC LIMIT 5;"
 ```
 
 **Действия:**
@@ -409,7 +421,7 @@ grpcurl -d '{}' <mTLS-flags> kaname-internal:9091 \
   kaname.cloud.iam.v1.InternalClusterService/ListAdmins
 
 # Либо напрямую в БД.
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT id, subject_id, granted_by, granted_at, granted_until
 FROM kaname.cluster_admin_grants
 ORDER BY granted_at DESC;
@@ -456,8 +468,9 @@ ORDER BY granted_at DESC;
 ## Утилитарные команды
 
 ```bash
-# psql (от корня репозитория).
-make -C deploy psql SVC=iam
+# psql интерактивно. Зонт платформы — так; отдельная установка — psql с той же строкой
+# подключения, что в kdb.
+kubectl -n kacho exec -it statefulset/kacho-umbrella-pg-iam -- psql -U iam -d kaname
 
 # Tail logs.
 kubectl -n kacho logs -l app=kaname -f --tail=200
@@ -467,7 +480,7 @@ kubectl -n kacho logs -l app=kaname -f --tail=200
 # у обоих нет: fga читает триггер в той же транзакции, subject_change читают курсором,
 # «pending» по ним не определён, а строки снимает фоновая уборка по сроку — число
 # выходит на полку, а не растёт монотонно).
-kubectl -n kacho exec deploy/postgres -- psql -c "
+kdb -c "
 SELECT 'fga (УДЕРЖАНО, журнал)'   AS q, count(*)                              AS n, max(created_at) AS last FROM kaname.fga_outbox
 UNION ALL SELECT 'subject_change (УДЕРЖАНО, журнал)', count(*),                          max(created_at)       FROM kaname.subject_change_outbox
 UNION ALL SELECT 'resource_reconcile (всего)',     count(*),                          max(created_at)       FROM kaname.resource_reconcile_outbox
