@@ -230,7 +230,7 @@ func TestAccessKey_F7_01_CeremonyRegistersAKey(t *testing.T) {
 	key := h.mustRegister(alice, a)
 	require.NoError(t, corevalidate.ResourceID("access key", "ak", string(key.ID)), "свой id проходит маршрутизатор (Ф7-47)")
 	require.Equal(t, string(key.ID), string(key.Name), "пустое имя заменено умолчанием от id (Р10)")
-	require.Equal(t, []byte(alice), key.UserHandle, "рукоятка — платформенный id человека (Ф13 Р3)")
+	requireCeremonyHandleOf(t, h, alice, key.UserHandle)
 
 	out, err := h.assertWith(alice, a, webauthntest.AssertionOptions{})
 	require.NoError(t, err)
@@ -282,7 +282,7 @@ func TestAccessKey_F7_40_RegistrationChallengeNamesSixContractValues(t *testing.
 	require.Equal(t, access_keys.Attestation, ch.Attestation)
 	require.True(t, ch.CredProps, "запрос расширения свойств удостоверения (Ф7-41)")
 	require.Equal(t, h.now.Add(access_keys.ChallengeTTL), ch.ExpiresAt)
-	require.Equal(t, []byte(alice), ch.UserHandle)
+	requireCeremonyHandleOf(t, h, alice, ch.UserHandle)
 	named, total := access_keys.ContractValuesInRegistrationChallenge(ch)
 	require.Equal(t, 6, total)
 	require.Equal(t, 6, named)
@@ -774,8 +774,9 @@ func TestAccessKey_UserHandleIsVerifiedWhenPresented(t *testing.T) {
 	as := a.Assert(t, webauthntest.AssertionOptions{Challenge: ch.Challenge, Origin: origin, RPID: rpID})
 	_, err := h.finishAssertion(alice, as, []byte(bob))
 	requireUnifiedRefusal(t, err)
-	_, err = h.finishAssertion(alice, as, []byte(alice))
-	require.NoError(t, err)
+	key := h.list(alice)[0]
+	_, err = h.finishAssertion(alice, as, key.UserHandle)
+	require.NoError(t, err, "законный близнец: рукоятка, сохранённая со строкой ключа")
 }
 
 // ─── §3.5 счётчик ───────────────────────────────────────────────────────────

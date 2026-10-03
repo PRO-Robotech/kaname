@@ -38,7 +38,10 @@ type BeginRegistrationOutput struct {
 	RPDisplayName string
 	// User — человек глазами аутентификатора: имя и отображаемое имя.
 	User domain.User
-	// UserHandle — `user.id` церемонии: платформенный `id` человека как байты.
+	// UserHandle — `user.id` церемонии: байты рукоятки человека
+	// (`domain.CeremonyHandle`, 64 случайных байта, Ф13 Р3). Платформенным
+	// `id` не является: значение, положенное в аутентификатор, оттуда не
+	// отзывается.
 	UserHandle       []byte
 	Algorithms       []int64
 	UserVerification string
@@ -87,6 +90,14 @@ func (uc *BeginRegistrationUseCase) Execute(ctx context.Context, in BeginRegistr
 	if err != nil {
 		return BeginRegistrationOutput{}, err
 	}
+	// Рукоятка — ДО испытания, и порядок несущий: «испытание выдано» обязано
+	// означать «рукоятка у человека уже есть». Не заведена и не прочитана —
+	// испытания нет (fail-closed): испытание с подставленным значением ушло бы
+	// в аутентификатор навсегда.
+	handle, err := ceremonyHandleOf(ctx, uc.deps, user)
+	if err != nil {
+		return BeginRegistrationOutput{}, err
+	}
 	ch, err := issueChallenge(ctx, uc.deps, in.UserID, domain.ChallengeForRegistration, now)
 	if err != nil {
 		return BeginRegistrationOutput{}, err
@@ -95,7 +106,7 @@ func (uc *BeginRegistrationUseCase) Execute(ctx context.Context, in BeginRegistr
 	return BeginRegistrationOutput{
 		Challenge: ch.Challenge, ExpiresAt: ch.ExpiresAt,
 		RPID: uc.deps.Binding.RPID, RPDisplayName: RPDisplayName,
-		User: user, UserHandle: []byte(in.UserID),
+		User: user, UserHandle: handle.Bytes(),
 		Algorithms:       algorithmsOf(uc.deps.Binding.Algorithms),
 		UserVerification: UserVerificationRegistration, ResidentKey: ResidentKey,
 		Attestation: Attestation, CredProps: true,
@@ -145,6 +156,52 @@ func activeUser(ctx context.Context, d Deps, id domain.UserID, verb string) (dom
 		return domain.User{}, userNotActive(id)
 	}
 	return user, nil
+}
+
+// ceremonyHandleOf — рукоятка человека: заводится ЛЕНИВО первой церемонией
+// регистрации и больше не меняется. Своей транзакцией: оператор идемпотентен,
+// поэтому срыв между нею и выдачей испытания оставляет строку, которой
+// воспользуется следующая церемония, а не расхождение.
+func ceremonyHandleOf(ctx context.Context, d Deps, user domain.User) (domain.CeremonyHandle, error) {
+	minted, err := domain.NewCeremonyHandle()
+	if err != nil {
+		d.Logger.Error("access keys: ceremony handle not minted", "err", err.Error())
+		return domain.CeremonyHandle{}, storeUnavailable()
+	}
+	w, err := d.Store.Writer(ctx)
+	if err != nil {
+		return domain.CeremonyHandle{}, storeUnavailable()
+	}
+	defer func() { _ = w.Rollback(ctx) }()
+	handle, err := w.EnsureCeremonyHandle(ctx, user.ID, minted)
+	if err != nil {
+		d.Logger.Error("access keys: ceremony handle not stored", "err", err.Error())
+		return domain.CeremonyHandle{}, storeUnavailable()
+	}
+	if err := w.Commit(ctx); err != nil {
+		return domain.CeremonyHandle{}, storeUnavailable()
+	}
+	if err := checkCeremonyHandle(d, handle, user); err != nil {
+		return domain.CeremonyHandle{}, err
+	}
+	return handle, nil
+}
+
+// checkCeremonyHandle — ЗАМОК у производителя: рукоятка годной формы и не
+// несёт имени человека. В соседнем поле церемонии адрес стоит законно
+// (`CeremonyUser.Name`), и подстановка его в рукоятку — правка на один символ.
+// Нарушение — дефект хранилища либо кода, а не вход вызывающего: отказ —
+// недоступность, причина — только в журнале оператора.
+func checkCeremonyHandle(d Deps, handle domain.CeremonyHandle, user domain.User) error {
+	if err := handle.Validate(); err != nil {
+		d.Logger.Error("access keys: ceremony handle is malformed", "err", err.Error())
+		return storeUnavailable()
+	}
+	if err := handle.CarriesNoNameOf(user); err != nil {
+		d.Logger.Error("access keys: ceremony handle carries a name of the person", "err", err.Error())
+		return storeUnavailable()
+	}
+	return nil
 }
 
 // issueChallenge — случайное испытание, привязанное к вызывающему и
