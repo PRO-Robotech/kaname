@@ -451,7 +451,7 @@ func (uc *LoginUseCase) refuseWith(ctx context.Context, observed LoginOutcome, a
 // называл бы темп окна частоты. Различимость — клеткой исходов входа и
 // журналом; клетка отказов второго фактора считает отказы под сессией и на
 // входе не растёт (`observe` для этого вердикта не зовётся). Токен состояния
-// остаётся у глаголов под живой сессией и у сброса распорядителем.
+// остаётся у глаголов под живой сессией и у сброса администратором облака.
 func (uc *LoginUseCase) refuseSecondFactor(ctx context.Context, pr preparedPresentation, st settledPresentation, addressKey, source string, now time.Time) error {
 	if st.verdict == verdictNotEnrolled {
 		return uc.refuseWith(ctx, LoginOutcomeSecondFactorNotEnrolled, addressKey, source, now, nil)

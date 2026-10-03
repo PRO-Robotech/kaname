@@ -1,0 +1,63 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+  sha256: 0f758d3297d2085e51528663293eb50d39b0fe49a1940e86f34cd22a66ca5da0
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: e6c0db4ab8541742b19166f4893537f045c3d23e
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 4073
+  round: 14
+  round_note: >-
+    круг 14 — следующий за записями этого документа; в этом заходе прошлый круг — 13
+  predecessor_record: >-
+    docs/specs/reviews/login-session-and-credentials-are-our-contract/6b996982c33f2a1067dcee552c9d0ad7cf50d165cf00c12f0307d6d82ae815e0.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md на tmp/535-na3a @ e6c0db4ab → 0f758d3297d2085e51528663293eb50d39b0fe49a1940e86f34cd22a66ca5da0; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      §5.1, пункт «Выход до отката посадки» (строки 1908-1916): фраза «печенье прежнего поставщика,
+      выданное до перевода, кончается и после отката — без этого вышедший снова обслуживался бы по
+      нему» осталась утверждением о поведении, предмет которого снят §3.10 (отката нет, kaname#363).
+      Это не заказ и не Тогда, производителя не требует; при следующей правке документа свести к
+      истории или снять.
+  - id: N2
+    summary: >-
+      Условие N1 круга 12 / N2 круга 13 в силе: Ф1-24 ссылается на решение kacho#2703, а в задаче
+      (gh issue view 2703 -R PRO-Robotech/kacho, OPEN, 1 комментарий) решения нет. Событие
+      одобрения публиковать только после публикации решения комментарием в задаче.
+accepted_parts: >-
+  B1 круга 13 закрыт: diff 01442f1a1..e6c0db4ab по документу — строка Ф3 §5 больше не заказывает
+  печенье поставщика и откат, запись отсечки выходом и сменой пароля переадресована на Тогда
+  Ф1-64 и Ф1-67 (момент в них стоит — строки 967, 969) и на замок момента записи §8 (строка 2219,
+  держит обе половины, включая восстановление как первую нашу сессию). N1 круга 13 закрыт в Ф1-67.
+  Сценариев 59 (awk по §3), метки §5 не тронуты; scope, близнецы, DoD — как на одобренных частях
+  прошлых кругов, редакция 17 их не меняла.
+constructibility: >-
+  Посева не было: стенда в задании нет. Нетривиальные Given правленых мест строятся названными
+  фикстурами: Ф1-04 посевом (§8), управляемые часы, Ф3-16/Ф3-21 в доме службы.
+event_body: acceptance-reviewer · APPROVED · 0f758d3297d2085e51528663293eb50d39b0fe49a1940e86f34cd22a66ca5da0
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    precondition: решение kacho#2703 опубликовано комментарием в задаче (N2)
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

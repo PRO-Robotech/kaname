@@ -4,17 +4,20 @@
 package user
 
 // reset_second_factor.go — `UserService/ResetSecondFactor`: сброс второго
-// фактора распорядителем (фаза Ф12, задача PRO-Robotech/kacho#1281; приёмка
+// фактора администратором облака (фаза Ф12, задача PRO-Robotech/kacho#1281; приёмка
 // `docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md`, Р10;
 // Ф12-30). Человек, утративший устройство И запасные коды, входит паролем и
 // остаётся на «1» без пути к «2» — снятие требует кода (Р9). Путь даёт этот
 // глагол: отношение `identity_suspender` на `iam_user` и пол «2», как у
-// `Block`/`Unblock`; чужой аккаунт — сокрытие существования краем.
+// `Block`/`Unblock`. Держатель — только администратор облака (решение владельца
+// 2026-09-18, kaname#254): распорядитель аккаунта, посторонний и сам человек
+// получают от края `PERMISSION_DENIED`, один на существующем и несуществующем
+// `user_id`; свой фактор человек снимает кодом (`remove`, Р9).
 //
 // # Одна транзакция — писателя сессии, а не зеркала
 //
 // Строки `totp` (`active`) и `lookup_secret` сняты; ВСЕ сессии человека покрыты
-// отсечкой `now` с причиной `second-factor-reset` и актором-распорядителем
+// отсечкой `now` с причиной `second-factor-reset` и актором — администратором облака
 // (держатель украденного устройства мог держать и сессию); событие
 // `iam.user.second_factor_reset` с обоими акторами — одним коммитом писателя
 // хранилища сессий: у него есть и оператор снятия, и отсечка, и очередь аудита.
@@ -85,7 +88,7 @@ type SecondFactorResetWriter interface {
 	Rollback(ctx context.Context) error
 }
 
-// ResetSecondFactorUseCase — сброс второго фактора распорядителем.
+// ResetSecondFactorUseCase — сброс второго фактора администратором облака.
 type ResetSecondFactorUseCase struct {
 	repo     Repo
 	opsRepo  operations.Repo
@@ -190,7 +193,7 @@ func (u *ResetSecondFactorUseCase) doReset(ctx context.Context, subject domain.U
 		EventType:       auditEventUserSecondFactorReset,
 		TenantAccountID: string(subject.AccountID),
 		Payload: map[string]any{
-			// КТО — проверенная личность распорядителя; КОГО — человек, чей
+			// КТО — проверенная личность администратора облака; КОГО — человек, чей
 			// фактор снят. Ни адреса, ни имени: след без личных данных.
 			"actor":   actor,
 			"user_id": string(subject.ID),
