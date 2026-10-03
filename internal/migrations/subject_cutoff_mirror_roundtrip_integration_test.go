@@ -15,6 +15,7 @@ package migrations_test
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,7 +119,7 @@ func TestSubjectCutoff_KN_SCL_13_ApplyConvergesRowsAndTheRoundTripHolds(t *testi
 
 	// Люди A…G — члены одного аккаунта; учётка S в нём же.
 	people := map[string]string{}
-	for _, k := range []string{"A", "B", "C", "D", "E", "F", "G", "O"} {
+	for _, k := range []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "O"} {
 		people[k] = "usr" + "scl13" + "00000000000" + k
 	}
 	account := "acc" + "scl13" + "000000000000"
@@ -151,6 +152,18 @@ func TestSubjectCutoff_KN_SCL_13_ApplyConvergesRowsAndTheRoundTripHolds(t *testi
 	sclPutSecond(t, db, D, t4, "password-change", "kaname:password-change")               // (г) равные моменты
 	sclPutSecond(t, db, E, t4, "owner is no longer active", "kaname:owner-deactivated")   // (д) только вторая
 	sclPutSecond(t, db, sva, t4, "owner is no longer active", "kaname:owner-deactivated") // (е) учётка
+	// (ж) только первая, решившего нет, а причина длинная — так писал писатель
+	// до двери #313. Имя механизма `'kaname:' || reason` у причины в 122 знака
+	// заняло бы 129 при пределе второй записи 128: приведение не может назвать
+	// решившим его и называет общий механизм отсечки, причину перенося целиком.
+	// Отказ здесь отверг бы накат ЦЕЛИКОМ — ни одна строка не была бы приведена.
+	// Близнец (з) — причина в 121 знак: имя в 128 знаков ложится, выводится из
+	// причины, как у (а).
+	H, I := people["H"], people["I"]
+	longReason := strings.Repeat("r", 122)
+	edgeReason := strings.Repeat("e", 121)
+	sclPutFirst(t, db, H, t1, longReason, "") // (ж) имя механизма не помещается
+	sclPutFirst(t, db, I, t1, edgeReason, "") // (з) имя механизма ровно на пределе
 	require.False(t, sclSecond(t, db, A).present, "посылка сцены: до предмета зеркала нет")
 
 	defsBefore := sclFunctionDefs(t, db)
@@ -164,6 +177,8 @@ func TestSubjectCutoff_KN_SCL_13_ApplyConvergesRowsAndTheRoundTripHolds(t *testi
 	wantAfter := func(why string) {
 		requireSclRow(t, sclSecond(t, db, A), t1, "logout", "kaname:logout", why+": (а) вторая из первой")
 		requireSclRow(t, sclSecond(t, db, B), t2.Add(time.Minute), "password-change", "usr-admin-b", why+": (б) вторая догнала первую")
+		requireSclRow(t, sclSecond(t, db, H), t1, longReason, "kaname:subject-cutoff", why+": (ж) длинная причина, общий механизм")
+		requireSclRow(t, sclSecond(t, db, I), t1, edgeReason, "kaname:"+edgeReason, why+": (з) имя механизма на пределе")
 		requireSclRow(t, sclSecond(t, db, C), t3.Add(time.Minute), "owner is no longer active", "kaname:owner-deactivated", why+": (в) не тронута")
 		requireSclRow(t, sclSecond(t, db, D), t4, "password-change", "kaname:password-change", why+": (г) не тронута")
 		requireSclRow(t, sclSecond(t, db, E), t4, "owner is no longer active", "kaname:owner-deactivated", why+": (д) не тронута")

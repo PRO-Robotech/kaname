@@ -77,6 +77,16 @@
 -- запись, уже снятую уборкой как бессмысленную; такая строка не меняет ни
 -- одного исхода, и уборка снимет её снова.
 --
+-- Решивший приведения — по правилу Р2, с одним отличием. Лежащая первая запись
+-- без решившего, чья причина длиннее 121 знака (её мог оставить писатель до
+-- двери #313: у первой записи предел причины 256), дала бы имя механизма длиннее
+-- предела второй записи (128). Живой оператор с таким входом отвергается
+-- целиком (KN-SCL-08) — у него есть вызывающий, которому вернётся отказ. У
+-- приведения его нет: отказ одной строки отверг бы накат целиком, и отсечка не
+-- дошла бы до авторитета отзыва ни у одного субъекта. Поэтому такая строка
+-- называет решившим общий механизм `kaname:subject-cutoff`; момент и причина
+-- переносятся целиком, ничего из отсечки не теряется.
+--
 -- Порядок внутри наката: сперва функции и триггер, потом приведение — строка
 -- первой записи, вставленная параллельно накату, уже идёт через зеркало.
 
@@ -161,7 +171,9 @@ CREATE TRIGGER user_token_revocations_mirror_to_minted_trg
 INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
 SELECT u.user_id, u.revoke_before, u.reason,
        COALESCE(NULLIF(u.revoked_by_user_id, ''),
-                CASE WHEN u.reason = '' THEN 'kaname:subject-cutoff' ELSE 'kaname:' || u.reason END)
+                CASE WHEN u.reason = '' OR length('kaname:' || u.reason) > 128
+                     THEN 'kaname:subject-cutoff'
+                     ELSE 'kaname:' || u.reason END)
   FROM kaname.user_token_revocations u
 ON CONFLICT (subject) DO UPDATE
    SET revoke_before = EXCLUDED.revoke_before,
