@@ -12,6 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 // TestRegistryTokenListener_ConfiguredSeparatePort — the composition root must
@@ -104,7 +105,7 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 		Realm:                  tok.TokenIssuer(),
 		Service:                laneService,
 		BasicCredentialTimeout: credentialLanePeerTimeout,
-		Signer:                 registryLaneSigner(t),
+		Signer:                 lanesigner.New(t),
 	})
 	if err != nil {
 		t.Fatalf("registrytokenwire.Build: %v", err)
