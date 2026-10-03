@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 // TestRequireRegistryTokenTLS — по слушателю docker-token (`/iam/token`) едет
@@ -106,7 +107,7 @@ func TestRegistryTokenListener_TLSRefusesCleartextClient(t *testing.T) {
 		Realm:                  "https://api.kacho.local/iam/token",
 		Service:                "registry.kacho.local",
 		BasicCredentialTimeout: credentialLanePeerTimeout,
-		Signer:                 registryLaneSigner(t),
+		Signer:                 lanesigner.New(t),
 	})
 	if err != nil {
 		t.Fatalf("build registry-token mux: %v", err)
