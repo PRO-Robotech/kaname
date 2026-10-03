@@ -35,13 +35,18 @@ reviewed_at: '2026-10-04'
 publication_mode: courier_of_agent_verdict
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
-  pending_external_event: true
+  issued: true
+  issued_at: '2026-10-03T21:41:57Z'
+  ban1_lifted: true
+  pending_external_event: false
   why: >-
     Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
-    (role, verdict, subject, subject_revision, subject_sha256) в задаче subject.task. Кругом
-    рецензента событие не публиковалось; до его публикации запрет #1 по этому отпечатку в силе.
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5973759083 учётки
+    pointpu на PRO-Robotech/kaname#172 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision 7755bd8abe4c опубликована на origin раньше события
+    (git branch -r --contains 7755bd8abe4c даёт origin/172); запрет #1 по этому
+    отпечатку снят. Дописано отдельной правкой поверх записи, вердикт и разбор задним числом
+    не правились.
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu
@@ -56,12 +61,19 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#172
-  status: pending
-  published: false
-  actor_expected: pointpu
+  status: performed
+  published: true
+  database_id: 5973759083
+  node_id: IC_kwDOUO26pM8AAAABZBBUaw
+  url: https://github.com/PRO-Robotech/kaname/issues/172#issuecomment-5973759083
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5973759083
+  actor: pointpu
   role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T21:41:57Z'
+  body_sha256: 3ead2357faf265895f24117a169eccd09c125a25eaf9f7cf94e2888f1fed1e1d
   subject_sha256: 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385
-  subject_revision: 7755bd8abe4c82975c65791622c1e7a4ed2e4eab
+  subject_revision_commit: 7755bd8abe4c82975c65791622c1e7a4ed2e4eab
   verdict: APPROVED
   publication_mode: courier_of_agent_verdict
   body_for_publication: 'acceptance-reviewer · APPROVED · 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385'
