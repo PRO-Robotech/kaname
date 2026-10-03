@@ -31,10 +31,18 @@ reviewed_at: '2026-10-03'
 publication_mode: courier_of_agent_verdict
 
 effective_approval:
-  issued: false
-  pending_external_event: true
+  issued: true
+  issued_at: '2026-10-03T13:17:49Z'
+  ban1_lifted: true
+  pending_external_event: false
   why: >-
-    Запись — вердикт рецензента; санкцию выдаёт внешнее событие, которое публикует курьер.
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5969539936 учётки
+    pointpu на PRO-Robotech/kaname#172 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision 978510ca291d опубликована на origin раньше события
+    (git branch -r --contains 978510ca291d даёт origin/172); запрет #1 по этому
+    отпечатку снят. Дописано отдельной правкой поверх записи, вердикт и разбор задним числом
+    не правились.
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu
@@ -43,9 +51,21 @@ effective_approval:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#172
-  status: not_performed
-  published: false
-  publication_expected_from_orchestrator: true
+  status: performed
+  published: true
+  database_id: 5969539936
+  node_id: IC_kwDOUO26pM8AAAABY8_zYA
+  url: https://github.com/PRO-Robotech/kaname/issues/172#issuecomment-5969539936
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969539936
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T13:17:49Z'
+  body_sha256: 31cab335c1785bfae2e3e1f76ef977fcfc378d6a0578cc79cf06fed31df837ed
+  subject_sha256: c72db75ef756c3e3a85f7cccfe497ffb61f05bf72306eaa9e9161cdf23bf69a0
+  subject_revision_commit: 978510ca291db50f91d2fe15d215e9441f6dd449
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
   body_for_publication: 'acceptance-reviewer · APPROVED · c72db75ef756c3e3a85f7cccfe497ffb61f05bf72306eaa9e9161cdf23bf69a0'
 
 premise_check:
