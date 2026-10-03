@@ -58,11 +58,41 @@ non_blocking:
       называет платформенный id — предмет исполнителя новой миграцией (§4.4), а не приёмки.
 event_body: acceptance-reviewer · APPROVED · 5fe6cca1aea606f96b2f24174a8f45411291f69250e6fb268b3274fd17a58af4
 effective_approval:
+  issued: true
+  issued_at: '2026-10-03T12:09:41Z'
+  ban1_lifted: true
   publication_pending:
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5969017642 учётки
+    pointpu на PRO-Robotech/kaname#351 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision 9ef12073814d опубликована на origin раньше события
+    (git branch -r --contains 9ef12073814d даёт origin/351; коммит 2026-10-03T11:26:55Z);
+    запрет #1 по этому отпечатку снят. Дописано отдельным коммитом поверх записи, вердикт и
+    разбор задним числом не правились.
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#351
+  status: performed
+  published: true
+  database_id: 5969017642
+  node_id: IC_kwDOUO26pM8AAAABY8f7Kg
+  url: https://github.com/PRO-Robotech/kaname/issues/351#issuecomment-5969017642
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969017642
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T12:09:41Z'
+  body_sha256: 0ad918b6f0e3e4ee513100c7d930adcc915f43cecc81bc3ddfb47bc1f265c922
+  subject_sha256: 5fe6cca1aea606f96b2f24174a8f45411291f69250e6fb268b3274fd17a58af4
+  subject_revision_commit: 9ef12073814d686ee86f17a9906c33ec99575532
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
