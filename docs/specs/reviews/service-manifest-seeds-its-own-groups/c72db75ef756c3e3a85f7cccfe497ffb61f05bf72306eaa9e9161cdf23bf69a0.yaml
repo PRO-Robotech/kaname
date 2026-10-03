@@ -1,0 +1,97 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/service-manifest-seeds-its-own-groups.md
+  sha256: c72db75ef756c3e3a85f7cccfe497ffb61f05bf72306eaa9e9161cdf23bf69a0
+  static_status_note: >-
+    Слово «Статус» в шапке документа — то, что туда вписали; шапка рецензентом не правлена
+    намеренно (change-graph.md §2). Действующий вердикт о ЭТОЙ редакции — эта запись вместе с
+    внешним событием. Прежние записи остаются вердиктами о своём содержимом.
+  base_commit: 9bac42bdcbc5f125ee8d45d7a7df12436dd4b8c6
+  base_sha256: 08550d597bd65e7818815df9391a0e8e62bbf4851e3be9ddc7d72d77351f09cc
+  content_commit: 978510ca291db50f91d2fe15d215e9441f6dd449
+  branch: '172'
+  branch_on_origin: 'git ls-remote origin refs/heads/172 → 978510ca291db50f91d2fe15d215e9441f6dd449'
+  trunk: 8a84dcff6eb1ccde68113353ba28d1e1e399f0e6
+  pull_request: none
+  task: PRO-Robotech/kaname#172
+  lines: 2550
+  round: 1
+  round_numbering: 'первый круг по этой редакции; прошлых кругов этого захода нет'
+  predecessor_record: >-
+    docs/specs/reviews/service-manifest-seeds-its-own-groups/08550d597bd65e7818815df9391a0e8e62bbf4851e3be9ddc7d72d77351f09cc.yaml (APPROVED, круг 3, редакция 6; база правки побайтово равна её предмету)
+  fingerprint_predicate: >-
+    git show 978510ca291db50f91d2fe15d215e9441f6dd449:docs/engineering/acceptance/service-manifest-seeds-its-own-groups.md | sha256sum
+    (снят и с файла рабочей копии tmp/172-dating — совпал с заданием)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+
+effective_approval:
+  issued: false
+  pending_external_event: true
+  why: >-
+    Запись — вердикт рецензента; санкцию выдаёт внешнее событие, которое публикует курьер.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#172
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body_for_publication: 'acceptance-reviewer · APPROVED · c72db75ef756c3e3a85f7cccfe497ffb61f05bf72306eaa9e9161cdf23bf69a0'
+
+premise_check:
+  premise: 'отпечаток c72db75e…, ветка 172 @978510ca2 от origin/536 9bac42bdc, правка только датировки'
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    sha256sum совпал с заданием; git diff origin/536...HEAD трогает 4 файла, только шапки
+    (строк снято 1–2 на файл, все в пункте «Ревизии измерения»).
+
+delta_judged: >-
+  2 записи: PRO-Robotech/kaname@83ddd08a84 → 83ddd08a84, PRO-Robotech/kaname@a69c79d6 → a69c79d6 + пункт «Правка ПОСЛЕ вердикта». Сценарии, их ID, «Дано/Когда/Тогда», производители, DoD, решения и строки «Статус»
+  побайтово те же, что в базе.
+
+predicates_run:
+  sibling_pair_gate: |
+    Гейт TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory с четвёртой формой
+    «Ревизии измерения», внесённой локально в отдельной копии (tmp/172-review-probe, снята):
+      на 978510ca2 (эта редакция) → находок 2: access-keys-are-ours, recovery-of-access;
+      близнец — те же файлы, docs/engineering/acceptance из 9bac42bdc → находок 6, среди них
+      НЕОБЪЯВЛЕННАЯ ИСТОРИЯ по service-manifest-seeds-its-own-groups.md.
+    Отличие ровно одно (тело четырёх документов) — правка снимает находку, а не немоту гейта.
+  revisions_resolve: |
+    git merge-base --is-ancestor <r> origin/main → 0 для 37ee850953, 83ddd08a84, 39628487, a69c79d6;
+    git cat-file -t 5dcefe679b0dcdfb66580161bf7ae57493f6f800 в клоне службы → отказ, в project/kacho → commit;
+    851df30ef, 9d005e6c2c6 → commit в project/kacho; 65ea29400, 8a70d56f6, d09e42782, f0d1dae63 → не резолвятся;
+    git -C project/kacho ls-remote origin refs/heads/lane/1089 → пусто.
+  constructibility: |
+    go test ./internal/modelrender -run TestAcceptanceScenarioCanonValuesAreTodays → PASS,
+    «внутриблочных 724», находок 0 (держатель «Дано» B-07 model-generated-from-manifest);
+    git grep -n 'func ResolveCanonicalModel' → internal/authzplan/canonical.go:158 (производитель A-01).
+
+blocking:
+  count: 0
+  genera: []
+
+non_blocking: []
+
+coverage:
+  scope: 'правкой не тронут; ведомость scope — предмет записи-предшественника'
+  producers: 'правкой не тронуты; «Тогда» без производителя правкой не создано'
+  twins: 'правкой не тронуты'
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
