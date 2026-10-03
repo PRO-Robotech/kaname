@@ -152,12 +152,12 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 	case *iamv1.UnblockUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.ResetSecondFactorMetadata:
-		// Сброс второго фактора распорядителем (Ф12 Р10, kacho#1281) строку
+		// Сброс второго фактора администратором облака (Ф12 Р10, kacho#1281) строку
 		// человека не меняет — его предмет в хранилище способов и сессий, куда
 		// этот читатель не смотрит. Осиротевшая операция разрешается как Update:
 		// строка есть ⇒ ответ — она же, тот же, что даёт состоявшийся вызов;
 		// строки нет ⇒ операция прервана. Снят ли фактор на самом деле, резолвер
-		// не утверждает: распорядитель повторяет вызов — он либо снимает, либо
+		// не утверждает: администратор повторяет вызов — он либо снимает, либо
 		// отвечает «не заведён», и оба исхода терминальны.
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.ResendInviteMetadata:
