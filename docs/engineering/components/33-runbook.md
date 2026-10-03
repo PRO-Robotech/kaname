@@ -20,6 +20,11 @@
 Готовность и живость — HTTP-пробы `/readyz` и `/healthz` на `:9095`; `/readyz` отражает
 коннект к базе, версию схемы и поднятый LRO-worker.
 
+Команды к `:9095` ниже записаны для production-профиля: слушатель поднят по TLS
+(односторонний режим), поэтому `https` и `--no-check-certificate` — запрос не покидает под,
+а корня внутреннего УЦ в хранилище образа нет. В образе службы есть `wget`, `curl` нет. На
+стенде без транспорта слушателя — `http://127.0.0.1:9095`.
+
 ## P1 — Авторизация полностью не работает
 
 **Симптомы:**
@@ -212,7 +217,7 @@ WHERE user_id = '<usr_id>' ORDER BY created_at;
 "
 
 # Исходы регистрации и подтверждения адреса.
-kubectl -n kacho exec deploy/kaname -- curl -s http://localhost:9095/metrics \
+kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics \
   | grep -E 'kaname_(registration|address_verification)_outcomes_total'
 
 # Пост-коммитная материализация собственнической привязки.
@@ -470,10 +475,10 @@ UNION ALL SELECT 'audit (pending)',   count(*) FILTER (WHERE status='pending'), 
 "
 
 # LRO in-flight (метрика на :9095).
-kubectl -n kacho exec deploy/kaname -- curl -s http://localhost:9095/metrics | grep kaname_lro_inflight
+kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics | grep kaname_lro_inflight
 
 # Решения authz (rate/итог) — деградация видна по росту deny.
-kubectl -n kacho exec deploy/kaname -- curl -s http://localhost:9095/metrics | grep kaname_authz_check_decisions_total
+kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1:9095/metrics | grep kaname_authz_check_decisions_total
 
 # Graceful restart Deployment.
 kubectl rollout restart deploy/kaname -n kacho
