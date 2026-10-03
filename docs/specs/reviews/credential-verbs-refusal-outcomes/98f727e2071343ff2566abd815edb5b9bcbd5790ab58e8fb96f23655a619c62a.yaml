@@ -8,7 +8,9 @@ subject:
   base_commit: 9bac42bdcbc5f125ee8d45d7a7df12436dd4b8c6
   content_commit: 9be3d7136410315ce2bce15febcabe3d78f7f4df
   branch: '522'
-  task: PRO-Robotech/kaname#522, PRO-Robotech/kaname#547 (родитель #536)
+  task: PRO-Robotech/kaname#522
+  related_task: PRO-Robotech/kaname#547
+  wave: PRO-Robotech/kaname#536
   lines: 463
   round: 1
   predecessor_record: none
@@ -28,15 +30,55 @@ reviewed_at: '2026-10-03'
 expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: '2026-10-03T12:26:34Z'
+  ban1_lifted: true
   why: >-
-    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict); до него запрет #1
-    не снят. Событие этим кругом не публиковалось.
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Кругом рецензента событие не публиковалось (`event.type: none` на ccd7474ea); опубликовано
+    курьером позже, и запись приведена к факту события отдельной правкой — вердикт и разбор
+    не тронуты.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5969148055
+    event_url: https://github.com/PRO-Robotech/kaname/issues/522#issuecomment-5969148055
+    remeasured: >-
+      `git show 9be3d7136410315ce2bce15febcabe3d78f7f4df:<путь> | sha256sum` и `sha256sum <путь>`
+      на 288b1639 → 98f727e2…c62a, совпал с именем записи и строкой `subject_sha256` события;
+      ревизию несёт origin/522. `gh api repos/PRO-Robotech/kaname/issues/comments/5969148055` →
+      issue_url — kaname#522 (`subject.task`), автор pointpu, author_association MEMBER,
+      created_at == updated_at; пять обязательных строк заголовка дословно.
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
 
 event:
-  type: none
-  status: not_performed
-  body_to_publish: "acceptance-reviewer · APPROVED · credential-verbs-refusal-outcomes.md · sha256 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a · subject_revision 9be3d7136410315ce2bce15febcabe3d78f7f4df"
+  type: issue_comment
+  status: performed
+  database_id: 5969148055
+  node_id: IC_kwDOUO26pM8AAAABY8n4lw
+  url: https://github.com/PRO-Robotech/kaname/issues/522#issuecomment-5969148055
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969148055
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/522
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T12:26:34Z'
+  body_sha256: 8adbb9504669cb124f6abbf92a1c5706734f15d7929e6c69701c087a9a0b2667
+  subject_sha256: 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a
+  subject_revision: 9be3d7136410315ce2bce15febcabe3d78f7f4df
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (ccd7474ea, `event.type: none`); отпечаток тела снят с
+    сырого ответа API (`gh api … | jq -j .body | sha256sum`).
 
 attribution:
   reviewer_kind: claude_agent
