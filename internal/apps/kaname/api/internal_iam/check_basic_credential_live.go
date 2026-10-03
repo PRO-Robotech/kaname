@@ -76,13 +76,12 @@ func (h *Handler) CheckBasicCredentialLive(
 		// секрет поехал бы дальше в поле, которое никто не обязан беречь.
 		//
 		// Отказ — ТОТ ЖЕ единый, и значение НЕ логируется: различимый исход
-		// здесь сообщал бы предъявителю, что его строка разобралась.
-		if h.logger != nil {
-			h.logger.WarnContext(ctx, "basic credential liveness asked with a presented string "+
-				"instead of an identifier; the value is not logged")
-		}
+		// здесь сообщал бы предъявителю, что его строка разобралась. Что поле
+		// идентификатора несло предъявленную строку, говорит подробность ТОЙ ЖЕ
+		// записи об отказе, а не вторая запись (kaname#390).
 		return nil, h.refuseBasic(ctx, BasicCredentialLiveness,
-			domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
+			domain.RefuseBasicCredential(domain.BasicRefusalMalformed),
+			slog.Bool("identifier_field_carried_a_presented_string", true))
 	}
 
 	switch err := h.basicCredentials.CheckBasicLive(ctx, id); {
