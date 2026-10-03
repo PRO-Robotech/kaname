@@ -47,11 +47,52 @@ constructibility: >-
   (TestLoginMethodRepo_MaterialRoundTripsVerbatim).
 event_body: acceptance-reviewer · APPROVED · 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
 effective_approval:
+  issued: true
+  issued_at: '2026-10-03T19:05:25Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Кругом рецензента событие не публиковалось; опубликовано курьером позже, и запись приведена
+    к факту события отдельной правкой — вердикт и разбор не тронуты.
   publication_pending:
+    required_for_sanction: true
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5972531905
+    event_url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972531905
+    remeasured: >-
+      `git show d8ddf4f1111fe316c2939de5e3bbacdf80c0a3fd:<путь> | sha256sum` на origin/536 @d8ddf4f1 → 4ddddbe6…08e9,
+      совпал с именем записи и строкой `subject_sha256` события;
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5972531905` → issue_url — kaname#269
+      (`subject.task`), автор pointpu, author_association MEMBER, created_at == updated_at;
+      пять обязательных строк заголовка дословно.
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5972531905
+  node_id: IC_kwDOUO26pM8AAAABY_2awQ
+  url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972531905
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5972531905
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T19:05:25Z'
+  body_sha256: d76cf6335d7d24bd10f6af1a72aac5555b3d4ab204381f2a1e2531bc945ddb31
+  subject_sha256: 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+  subject_revision: d8ddf4f1111fe316c2939de5e3bbacdf80c0a3fd
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (запись молчала о событии: блока event не было);
+    отпечаток тела снят с сырого ответа API (`gh api … | jq -j .body | sha256sum`).
+    subject_revision события — ревизия ветки волны, на которой отпечаток перемерен; содержимое
+    документа на ней совпадает с content_commit d32c4d699 (тот же sha256).
