@@ -1,0 +1,83 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/credential-verbs-refusal-outcomes.md
+  sha256: 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a
+  static_status: DRAFT
+  base_commit: 9bac42bdcbc5f125ee8d45d7a7df12436dd4b8c6
+  content_commit: 9be3d7136410315ce2bce15febcabe3d78f7f4df
+  branch: '522'
+  task: PRO-Robotech/kaname#522, PRO-Robotech/kaname#547 (родитель #536)
+  lines: 463
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    git show 9be3d7136410315ce2bce15febcabe3d78f7f4df:docs/engineering/acceptance/credential-verbs-refusal-outcomes.md
+    | sha256sum
+  static_status_note: >-
+    Токен DRAFT в шапке документа — то, что туда вписали; шапка кругом не правлена. Вердикт
+    выводится из ЭТОЙ записи и внешнего события (change-graph.md §2).
+  measurement_revisions: >-
+    Копия tmp/522-na24-acc @ 9be3d713. `git diff --stat 8a84dcff6eb1 9bac42bdc` пуст (объявление
+    документа верно); 9bac42bdc..9be3d713 — только сам документ.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict); до него запрет #1
+    не снят. Событие этим кругом не публиковалось.
+
+event:
+  type: none
+  status: not_performed
+  body_to_publish: "acceptance-reviewer · APPROVED · credential-verbs-refusal-outcomes.md · sha256 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a · subject_revision 9be3d7136410315ce2bce15febcabe3d78f7f4df"
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Объём — тела задач #522 и #547 (сверены `gh issue view`): исход отзыва несуществующего у трёх
+    видов и отказ выдачи KEYPAIR человека без токен-эндпоинта. Over/under-scope нет; «Что НЕ
+    входит» явный.
+  scenarios: 18 (CVR-01…12, CVR-21…26); positive 4 (01, 05, 23, 24), negative 11, edge/race/assembly 3
+  producer_coverage: 18 из 18 (есть — 7, заказан полосой NA24 — 11)
+  twin_coverage: каждое отрицание называет близнеца, отличие в один факт
+
+checks_executed:
+  producers: >-
+    §0.1, §0.3 перемерены: `if !found {` → user_tokens:684, sa_keys:1018, access_keys:169;
+    `ownIssuance` в user_tokens → 0; SAKeyIssuanceIsOurs → sakey_binding.go:27; сборки
+    wiring.go:1120/1148/1158; mapPGErr ErrUnavailable → codes.Unavailable (usecases.go:921-935);
+    ttl_seconds < 0 → INVALID_ARGUMENT до разрешения вида (:196), AccountForUser после (:229).
+  constructibility_seed: >-
+    go test -count=1 -run 'RepeatAbsentAndForeignShareOneOutcome|TokenEndpoint|F7_25|F7_27|TestIssue_StoreUnavailable'
+    по user_tokens, sa_keys, access_keys (через heavy-slot) → 8 PASS, 0 FAIL: строят «живое»,
+    «нет/снято», «чужое» (CVR-01…08), посадку без эндпоинта и с ним + SECRET (близнецы CVR-21/23/24
+    на пути учётки), недоступное хранилище (CVR-12), Ф7-25/27 (CVR-09).
+  not_executed: >-
+    Посев на стенде (newman-шаги CVR-03/07) и гонка на настоящей базе (CVR-11) — стенд не поднимался;
+    координаты шагов `issue-basic-secret`, `revoke-basic-secret`, `_revoke_key_steps`,
+    `issue-user-token` прочитаны и существуют.
+
+non_blocking_notes:
+  - >-
+    CVR-12 / DoD п.5: сегодня Revoke синхронно зовёт AccountForUser, и `accountErr` уже даёт
+    UNAVAILABLE до всякой правки. Ошибку инжектировать в НОВОЕ чтение существования, не в
+    резолв аккаунта, — иначе проба зелена на мёртвой ветке.
+  - >-
+    Чтение для синхронной сверки не названо: порт UserClientRepo/SAClientRepo точечного Get не
+    имеет (Insert, DeleteOwnedByID, List, AccountFor*). Если полоса заведёт новый метод
+    хранилища, `internal/repo/kaname/pg/` выходит за перечень «затрагивает» шапки.
+  - >-
+    Р2 без ErrorInfo.reason — выбрано паритетом с ключом доступа; машинное различие по reason
+    у трёх видов остаётся отдельным предметом.
