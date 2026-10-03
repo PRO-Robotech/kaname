@@ -38,11 +38,49 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-03'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-03T12:29:33Z'
+  ban1_lifted: true
   why: >-
     Блокирующих ноль. Одобрение вступает в силу внешним событием (курьер публикует его в
     PRO-Robotech/kaname#525); до события санкции на код #525 нет.
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    decided_by: acceptance-reviewer
+    decided_at: '2026-10-03'
+    issued_by_event: 5969171805
+    event_url: https://github.com/PRO-Robotech/kaname/issues/525#issuecomment-5969171805
+    basis: >-
+      change-graph.md §3: вердикт действителен, когда его подтверждает внешнее событие —
+      принадлежащее названной задаче, с допущенным к роли автором, с телом, связывающим точный
+      отпечаток предмета, роль и вердикт. Все четыре условия перемерены рецензентом на ветке 525 @
+      a3f37d04d (= origin/525) и воркспейсе origin/main f83279caa; ни одно не взято со слов
+      задания или курьера.
+    remeasured: >-
+      (1) Отпечаток — `git show 9ff5e4c4e:docs/engineering/acceptance/ceremony-pace-is-named-by-number.md
+      | sha256sum` и `sha256sum` того же пути на a3f37d04d → оба 05dd1bef…74b2; `git log
+      9ff5e4c4e..a3f37d04d -- <путь>` → 0 коммитов, документ после вердикта не правился. Ревизия
+      опубликована раньше события: `gh api 'repos/PRO-Robotech/kaname/activity?ref=refs/heads/525'`
+      → push cea5c3731 → 9ff5e4c4e в 2026-10-03T12:16:20Z, событие — 12:29:33Z. (2) Принадлежность —
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5969171805` → `issue_url` указывает на
+      PRO-Robotech/kaname#525 = `subject.task`. (3) Полномочие — `pointpu` в
+      `review_authority.acceptance-reviewer` политики `docs/changes/policy.yaml` воркспейса
+      (origin/main f83279caa, строка 41); `collaborators/pointpu/permission` → admin;
+      `author_association` → MEMBER. (4) Тело — пять обязательных строк заголовка до первой `---`
+      дословно; `gh api … | jq -j .body | sha256sum` →
+      c386baff986fce00b46a947a94c370c7c34cabd58f1094744e8fa8b38d311542; `created_at == updated_at`
+      (12:29:33Z) ⇒ тело не правилось. Единственность: в #525 комментариев 2, отпечаток 05dd1bef и
+      заголовок события несёт ровно один — 5969171805.
+    mechanism: >-
+      Правка ЭТОЙ записи на месте отдельным коммитом поверх записи рецензента (e3a716c96) — форма
+      5fa3d525d (#315, запись 51f437a8…). Координата записи есть отпечаток предмета, он не менялся,
+      второй записи о той же редакции не бывает. Записи кругов 1–4 не тронуты. Вердикт, `why`,
+      разбор, находки, числа и `next_step_note` не тронуты — рассуждение на момент вердикта.
+      Тронуты три выводимых поля (issued/issued_at/ban1_lifted), этот блок и блок `event`.
+    silence_gate: >-
+      `.github/scripts/review-event-silence.py` на a3f37d04d до правки — расхождение ровно на этой
+      записи (событие 5969171805, `event.status: not_performed`, `issued: False`), код 1; на дереве
+      правки — расхождений 0, код 0.
 
 authority:
   mode: versioned_policy_authority
@@ -52,12 +90,29 @@ authority:
 
 event:
   type: issue_comment
-  status: not_performed
-  reason: событие публикует курьер, а не рецензент
-  expected_actor: pointpu
-  expected_target: PRO-Robotech/kaname#525
+  status: performed
+  database_id: 5969171805
+  node_id: IC_kwDOUO26pM8AAAABY8pVXQ
+  url: https://github.com/PRO-Robotech/kaname/issues/525#issuecomment-5969171805
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969171805
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/525
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T12:29:33Z'
+  body_sha256: c386baff986fce00b46a947a94c370c7c34cabd58f1094744e8fa8b38d311542
+  subject_sha256: 05dd1befb409f99573547ebdacdde3e12873d9a8b40a3bbc1e53c76e5b8b74b2
   subject_revision: 9ff5e4c4e5232990eff0d5ca4c470e5928fbd289
+  verdict: APPROVED
   event_body: 'acceptance-reviewer · APPROVED · 05dd1befb409f99573547ebdacdde3e12873d9a8b40a3bbc1e53c76e5b8b74b2'
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано отдельной правкой поверх записи рецензента (e3a716c96) вместе с
+    `effective_approval.sanction`. Прежний блок (`status: not_performed`, причина — событие
+    публикует курьер, а не рецензент; ожидаемые учётка pointpu и задача PRO-Robotech/kaname#525)
+    описывал момент вердикта и сохранён в e3a716c96. Перемер всех полей —
+    `effective_approval.sanction.remeasured`.
 
 attribution:
   reviewer_kind: claude_agent
