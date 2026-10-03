@@ -1,0 +1,58 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: c5e535f0573e5ed86a229af1688b05ffad5c179b41b4f99b643cc1c06298486d
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: e6c0db4ab8541742b19166f4893537f045c3d23e
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2704
+  round: 12
+  round_note: >-
+    круг 12 — следующий за записями этого документа; в этом заходе прошлый круг — 11
+  predecessor_record: >-
+    docs/specs/reviews/second-factor-totp-and-recovery-codes/d6570aacde257cc88e15211473057c250089a73e3601ea6691c32787b45df3f8.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md на tmp/535-na3a @ e6c0db4ab → c5e535f0573e5ed86a229af1688b05ffad5c179b41b4f99b643cc1c06298486d; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      §6 строка Ф12-37: держатель ветви (б) без боевого режима — интеграционная проба сборки
+      полосы без перечня, дописываемая Ф12 красной первой. Производитель отказа уже в дереве
+      (cmd/kaname/loginlane.go:479-481), честного красного на нём не будет; пробу доказывать
+      инъекцией (снять проверку перечня — красная, вернуть — зелёная), а не первым прогоном.
+accepted_parts: >-
+  B1 круга 11 закрыт: ветвь (б) Ф12-37 переведена на один факт профиля (перечень Р2 не объявлен),
+  исход — отказ старта с именем ручки и переменной. Сверено с деревом @ e6c0db4ab: боевой режим —
+  validate.go:224 validateLaneRequirements, строка lane_requirements.go:264-271 зовёт
+  ResolveSecondFactorEncryptionKeys, текст authn.go:130 называет ручку и ENV, держатель
+  TestF4d10_EveryLaneRequirementRefusesTheProductionStart (lane_requirements_test.go:66) обходит
+  каждую строку с положительным контролем; без боевого режима — loginlane.go:479-481, корень
+  serve.go:529-531 возвращает отказ. 404 на путях Р4 назван непроизводимым — верно. Сброс у nil
+  полосы — loginlane_test.go:144-147. Близнец (а) — тот же профиль с перечнем. Сценариев 46.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given обеих ветвей строятся профилем в пробе
+  (t.Setenv KANAME_SECOND_FACTOR_ENC_KEY пустым — форма second_factor_knobs_test.go:30).
+event_body: acceptance-reviewer · APPROVED · c5e535f0573e5ed86a229af1688b05ffad5c179b41b4f99b643cc1c06298486d
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

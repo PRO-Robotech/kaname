@@ -436,3 +436,94 @@ func TestMAIL47Injection_KindLiteralIsAnchoredAtBothEnds(t *testing.T) {
 		}
 	}
 }
+
+// TestMAIL47Injection_EveryImportFormOfTheTransportIsASender — законных форм
+// записи транспорта, которые знал снятый гейт `mail_sending_paths` (kaname#342),
+// три сверх голого импорта: псевдоним, точечный импорт и открывающая функция,
+// взятая значением. Ось транспорта судит ПУТЬ импорта, а не его имя и не вызов, и
+// потому знает их все — но знание без инъекции по каждой форме неотличимо от
+// слепоты к ней. Каждая форма подаётся вторым отправителем приглашения и обязана
+// дать находку с координатами обоих путей; законный близнец — тот же отправитель
+// под псевдонимом, единственный, — молчит, и молчит файл, где имя транспорта
+// стоит лишь локальной переменной и в тексте строки.
+func TestMAIL47Injection_EveryImportFormOfTheTransportIsASender(t *testing.T) {
+	t.Parallel()
+	forms := map[string]string{
+		"псевдоним": `package handler
+
+import post "net/smtp"
+
+const eventKind = "mail.invite.send"
+
+func resend(to string) error { return post.SendMail("relay:587", nil, "noreply@example.org", []string{to}, nil) }
+`,
+		"точечный импорт": `package handler
+
+import . "net/smtp"
+
+const eventKind = "mail.invite.send"
+
+var _ = SendMail
+`,
+		"функция значением": `package handler
+
+import "net/smtp"
+
+const eventKind = "mail.invite.send"
+
+type dispatcher struct {
+	send func(string, smtp.Auth, string, []string, []byte) error
+}
+
+func newDispatcher() *dispatcher { return &dispatcher{send: smtp.SendMail} }
+`,
+	}
+	for form, src := range forms {
+		got := findingsFor(t, map[string]string{
+			"internal/clients/invite_mail.go":   mailLawfulSender,
+			"internal/handler/invite_second.go": src,
+		})
+		var hit *check.MailSendFinding
+		for i := range got {
+			if strings.Contains(got[i].What, "путей отправки вида `invite` — 2") {
+				hit = &got[i]
+			}
+		}
+		if hit == nil {
+			t.Errorf("форма «%s»: второй отправитель приглашения НЕ найден — форма вне наблюдения: %+v", form, got)
+			continue
+		}
+		for _, want := range []string{"internal/clients/invite_mail.go", "internal/handler/invite_second.go"} {
+			if !strings.Contains(hit.Where, want) {
+				t.Errorf("форма «%s»: находка не называет координату %s: %q", form, want, hit.Where)
+			}
+		}
+	}
+
+	aliased := strings.Replace(mailLawfulSender, `"net/smtp"`, `mailer "net/smtp"`, 1)
+	aliased = strings.Replace(aliased, "*smtp.Client", "*mailer.Client", 1)
+	if got := findingsFor(t, map[string]string{
+		"internal/clients/invite_mail.go":                     aliased,
+		"internal/repo/kaname/pg/invite_mail_outbox/store.go": mailLawfulQueueStore,
+		"internal/apps/kaname/api/user/validate.go": `package user
+
+import "net/mail"
+
+type fakeTransport struct{}
+
+func (fakeTransport) NewClient() {}
+
+const doc = "smtp.SendMail(addr, nil, from, to, body) здесь не зовётся"
+
+func validAddress(s string) bool {
+	_, err := mail.ParseAddress(s)
+	smtp := fakeTransport{}
+	smtp.NewClient()
+	return err == nil
+}
+`,
+	}); len(got) != 0 {
+		t.Fatalf("законный близнец (единственный отправитель под псевдонимом; имя транспорта "+
+			"локальной переменной и в строке) дал %d находок: %+v", len(got), got)
+	}
+}

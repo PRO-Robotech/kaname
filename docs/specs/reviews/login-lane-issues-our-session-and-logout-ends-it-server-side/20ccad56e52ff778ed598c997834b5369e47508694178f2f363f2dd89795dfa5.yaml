@@ -1,0 +1,65 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 20ccad56e52ff778ed598c997834b5369e47508694178f2f363f2dd89795dfa5
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 01442f1a1fb68956ebd1a4ad739e0488e92c4a63
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 3980
+  round: 14
+  round_note: >-
+    круг 14 — следующий за записями этого документа; в этом заходе прошлый круг — 13
+  predecessor_record: >-
+    docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/118035c42395cbe02c00c8505508aebc91847a047a665af311594893397819af.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md на tmp/535-na3a @ 01442f1a1 → 20ccad56e52ff778ed598c997834b5369e47508694178f2f363f2dd89795dfa5; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+blocking_recheck:
+  - id: B1
+    outcome: closed
+    evidence: >-
+      Ф3-20 (д) — «единственный из четырёх глаголов Р2», девять из пятнадцати отосланы к перечню
+      Р7; утверждение о смене пароля прежнее.
+  - id: B2
+    outcome: closed
+    evidence: >-
+      Ф3-45 под external: носитель не читается никем, ретрансляции нет. Производитель на
+      kacho@e801c0f7844 gateway/cmd/api-gateway/main.go — wireLaneCarrierReader заводит читателя
+      только при identityposture.Own (1415-1424), ретрансляторы и MountLoginLaneRoutes — только
+      под Own (182, 1106). Ф3-12 и Ф3-06 переписаны на нашего читателя как законного близнеца.
+non_blocking:
+  - id: N1
+    summary: >-
+      §9 строка Ф3-19…22 (строка 3314) называет «вторая половина замка Ф1-66»; в Ф1 редакции 16
+      это половина замка момента записи §8. Привести имя при следующей правке.
+accepted_parts: >-
+  Счёты перемерены на голове: §6 меток 53, живых 51; §7 живых 51; §7.1 — 43 различных метки,
+  парность с Ф1 §5 (предикат документа) пуста. Живых утверждений о читателе сессии поставщика
+  под external в §0…§10 не осталось (скан по external рядом со словом поставщик — одно
+  вхождение, историческая строка Ф3-45).
+constructibility: >-
+  Посева не было: стенда в задании нет. Ветви Ф3-45 строятся пробой корня края на значении ручки
+  посадки — производитель обеих ветвей назван строками main.go выше.
+event_body: acceptance-reviewer · APPROVED · 20ccad56e52ff778ed598c997834b5369e47508694178f2f363f2dd89795dfa5
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
