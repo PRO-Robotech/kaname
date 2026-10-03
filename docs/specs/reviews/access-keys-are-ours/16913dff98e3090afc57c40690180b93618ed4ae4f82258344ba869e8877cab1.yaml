@@ -71,6 +71,8 @@ effective_approval:
     Сказано отдельно, чтобы не повторить дефект записи круга 6: там `issued: true` и
     `ban1_lifted: true` стояли рядом с текстом «санкция этой записью НЕ выдаётся … до события
     `ban1_lifted: false`». Здесь поля и текст согласованы.
+  publication_pending:
+    expected_actor: pointpu
 
 publication_mode: external_event_required
 authority:

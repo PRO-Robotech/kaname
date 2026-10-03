@@ -85,6 +85,8 @@ effective_approval:
     `12e9608d…` (редакция 11) и на `ccaf8445…` НЕ переносится. Санкция на объём (ban #1) этой
     записью не выдаётся: её выпускает внешнее событие полномочия, публикуемое допущенным
     актором.
+  publication_pending:
+    expected_actor: pointpu
 
 publication_mode: external_event_required
 authority:

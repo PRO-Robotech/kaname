@@ -51,6 +51,8 @@ effective_approval:
     судимый документ описывает состояние своей соседки (`16913dff…`, round 10).
   role_is_a_coordinate: >-
     Имя роли в этой записи — координата, а не доказательство личности (`change-graph` §3).
+  publication_pending:
+    expected_actor: pointpu
 
 publication_mode: courier_of_agent_verdict
 
