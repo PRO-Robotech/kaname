@@ -51,6 +51,21 @@ type stubUserClientRepo struct {
 	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
 	// эти два состояния — предмет пробы наблюдаемости (#2507).
 	accountErr error
+	// readErr — хранилище НЕ ОТВЕТИЛО на синхронной сверке существования
+	// удостоверения (CVR-12). Отдельно от `getErr`: там ответ «строки нет»,
+	// здесь ответа нет, и неполученный ответ не есть «нет».
+	readErr error
+}
+
+// ExistsOwnedByID — дублёр воспроизводит предикат НАСТОЯЩЕГО чтения: строка
+// «есть» только при совпадении И идентификатора, И владельца — тот же
+// предикат, что у оператора снятия ниже. Чужая строка отсюда неотличима от
+// отсутствующей by construction.
+func (s *stubUserClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.UserID, id domain.UserOAuthClientID) (bool, error) {
+	if s.readErr != nil {
+		return false, s.readErr
+	}
+	return s.getErr == nil && s.getRow.ID == id && s.getRow.UserID == ownerID, nil
 }
 
 // AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
@@ -305,15 +320,12 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 	}
 }
 
-// TestRevoke_CrossUserIsolation (USR-08): токен другого user НЕ снимается.
-//
-// Половина, которая сменилась (#1216): исход больше не `NotFound`. Он совпал с
-// исходом отзыва уже отозванного — успехом, — потому что различие исходов и
-// было оракулом существования чужого удостоверения (security.md §Hardening #6).
-// Что именно все безрезультатные исходы НЕРАЗЛИЧИМЫ, утверждает соседняя проба
-// TestRevoke_RepeatAbsentAndForeignShareOneOutcome; здесь утверждается вторая
-// половина USR-08, которая не менялась и меняться не может: чужая строка
-// переживает вызов.
+// TestRevoke_CrossUserIsolation (USR-08, CVR-04): токен другого user НЕ
+// снимается, и исход — синхронный `NOT_FOUND`, побайтово равный отказу по
+// несуществующему (приёмка credential-verbs-refusal-outcomes.md, Р1, Р2). Что
+// все безрезультатные исходы НЕРАЗЛИЧИМЫ, утверждает соседняя проба
+// TestRevoke_RepeatAbsentAndForeignShareOneOutcome; здесь — что чужая строка
+// переживает вызов и операции не заведено.
 func TestRevoke_CrossUserIsolation(t *testing.T) {
 	repo := &stubUserClientRepo{
 		getRow: domain.UserOAuthClient{
@@ -327,15 +339,17 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 	ops := &stubOpsRepo{}
 	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops)
 
-	_, err := uc.Execute(context.Background(), RevokeInput{
+	op, err := uc.Execute(context.Background(), RevokeInput{
 		UserID: "usr00000000000000001", TokenID: "uoc00000000000000001",
 	})
-	if err != nil {
-		t.Fatalf("Execute (sync) unexpected err: %v", err)
+	if grpcstatus.Code(err) != codes.NotFound {
+		t.Fatalf("отзыв чужого токена: ожидался синхронный NOT_FOUND, получено op=%v err=%v", op, err)
 	}
-	waitForOp(t, ops)
-	if ops.lastErr != nil {
-		t.Fatalf("отзыв чужого токена обязан быть неотличим от промаха, а промах — успех; got %+v", ops.lastErr)
+	if got := grpcstatus.Convert(err).Message(); got != "UserToken uoc00000000000000001 not found" {
+		t.Errorf("текст отказа %q", got)
+	}
+	if ops.created {
+		t.Error("отказ синхронный: операция не заводится")
 	}
 	if repo.deleted {
 		t.Error("cross-user revoke must NOT delete the row")
