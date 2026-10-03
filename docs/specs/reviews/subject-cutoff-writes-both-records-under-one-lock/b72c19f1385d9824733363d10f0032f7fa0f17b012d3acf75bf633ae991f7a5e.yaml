@@ -1,0 +1,88 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/subject-cutoff-writes-both-records-under-one-lock.md
+  sha256: b72c19f1385d9824733363d10f0032f7fa0f17b012d3acf75bf633ae991f7a5e
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 9bac42bdc
+  content_commit: 2a829ea0ece55723aeb542c5750ea96f53b6e113
+  branch: '336'
+  task: PRO-Robotech/kaname#336
+  related_tasks: [PRO-Robotech/kaname#335, PRO-Robotech/kaname#171]
+  lines: 752
+  round: 2
+  predecessor_record: docs/specs/reviews/subject-cutoff-writes-both-records-under-one-lock/4440efd9dcfc442354f5ecc46558f948d719ad58177f7378001fa0997e9efbae.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/subject-cutoff-writes-both-records-under-one-lock.md
+    в копии kacho-workspace/tmp/kaname-336-acc @ 2a829ea0e → b72c19f1…991f7a5e (совпал с заданием)
+  measurement_revisions: >-
+    Все замеры — в копии kaname-336-acc @ 2a829ea0e. 53a220b87..2a829ea0e меняет только
+    документ приёмки (1 файл, +71/−11).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих 0. Санкция на код вступает с публикацией внешнего события (ниже);
+    до неё эта запись — вердикт рецензента, а не действующее одобрение.
+
+blocking: []
+
+closed_from_round_1:
+  - kind: CONSTRUCTIBILITY
+    scenario: KN-SCL-12
+    resolution: >-
+      W сеется членом аккаунта по форме `lmSeed` (не владельцем, без привязок субъекта).
+    measured: >-
+      Временная проба посева в internal/migrations (снята, в дерево не вошла):
+      lmSeed + первая и вторая запись члена + `DELETE FROM kaname.users WHERE id = member`
+      → без ошибки; первая запись 0 (каскад), вторая 1. Команды §4 перемерены: :5402,
+      :93, :112/:256, :5343/:5346 — совпали.
+  - kind: TWIN
+    scenario: KN-SCL-06
+    resolution: KN-SCL-19 — близнец, отличается ровно стоящим моментом.
+    measured: >-
+      Та же проба на текущей голове цепочки (до наката новой миграции): стоящий now()+1h →
+      момент сохранён (в будущем), причина/решивший переписаны на `owner is no longer active`
+      / `kaname:owner-deactivated` — 06 красна до наката; now()-1h → момент транзакции и те же
+      значения — 19 зелена до наката. Первая запись в обоих случаях не тронута
+      (`admin-force-logout`, `usr-admin-z`). Команды :5297 и :1287 перемерены.
+
+important_nonblocking:
+  - "ID 19 стоит вне порядка (объяснено в тексте); в именах проб `KN_SCL_19` — рядом с 06 по смыслу."
+  - "DoD п.12 S1: функция `minted_cutoff_on_owner_deactivation` общая для 04 и 06 — инъекция в неё краснит обе, близнецы 05 и 19 зелены; так и записано."
+
+confirmed:
+  - "Производитель у «Тогда»: 19 из 19 (§5)."
+  - "Близнец у отрицаний: все отрицания с близнецом (01/02, 04/05, 06/19, 07/08, 07/09, 14/15, 16–18 внутри сценария)."
+  - "Конструируемость: посеяно 2 из 2 спорных Given (W-член; пара 06/19); остальные — фикстуры, названные в §4 и подтверждённые кругом 1."
+  - "DoD 12 пунктов измеримы; открытых вопросов нет."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · APPROVED · sha256 b72c19f1385d9824733363d10f0032f7fa0f17b012d3acf75bf633ae991f7a5e
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
