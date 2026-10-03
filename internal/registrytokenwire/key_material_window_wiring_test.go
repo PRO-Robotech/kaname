@@ -31,6 +31,7 @@ import (
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 type countingObserver struct{ seen map[string]int }
@@ -58,7 +59,7 @@ func buildLane(t *testing.T, until time.Time, obs *countingObserver) http.Handle
 		BasicCredentialTimeout: time.Second,
 		KeyMaterialWindowUntil: until,
 		CredentialKindObserver: obs,
-		Signer:                 ourSigner(t),
+		Signer:                 lanesigner.New(t),
 	})
 	if err != nil {
 		t.Fatalf("сборка полосы: %v", err)

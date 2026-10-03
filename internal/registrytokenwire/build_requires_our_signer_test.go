@@ -30,6 +30,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
 
 // laneWithoutSigner — вход сборки, исправный во всём, кроме подписанта.
@@ -59,7 +60,7 @@ func TestBuild_WithoutOurSignerRefusesNamingBothExits(t *testing.T) {
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же вход с нашим подписантом.
 	twin := laneWithoutSigner()
-	twin.Signer = ourSigner(t)
+	twin.Signer = lanesigner.New(t)
 	mux, err = registrytokenwire.Build(nil, twin)
 	if err != nil {
 		t.Fatalf("полоса с нашим подписантом не собралась — отказ выше означал бы «сборка не "+
