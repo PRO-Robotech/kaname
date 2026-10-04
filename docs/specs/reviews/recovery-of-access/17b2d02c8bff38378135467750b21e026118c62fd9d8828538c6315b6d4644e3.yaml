@@ -34,11 +34,14 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-04'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-04T02:49:48Z'
+  ban1_lifted: true
   why: >-
     Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
-    До события ban #1 для кода Ф5-29 не снят.
+    Событие опубликовано курьером в kacho#1271 (задача subject.task) в форме
+    `publication_pending.expected_form`; запись приведена к факту события отдельным коммитом,
+    вердикт и разбор не тронуты.
   what_the_event_would_lift: >-
     ban #1 для Ф5-29 (оператор «заменить либо завести» в адаптере таблицы секрета и его вызов в
     транзакции завершения восстановления) по решению kacho#2698.
@@ -50,6 +53,17 @@ effective_approval:
       issue_comment в kacho#1271 (задача subject.task) с полями role, verdict, subject,
       subject_revision bc3a8206fec8590eb95794a0304e8abdb96a0c89, subject_sha256 дословно; блок
       `event` дописывается отдельным коммитом поверх этой записи.
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5975921239
+    event_url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5975921239
+    remeasured: >-
+      `git show origin/213:docs/engineering/acceptance/recovery-of-access.md | sha256sum` на
+      origin/213 @ff5d0fdb9 → 17b2d02c…63e4, совпал с именем записи и строкой `subject_sha256`
+      события; содержимое документа на ff5d0fdb9 и на content_commit bc3a8206f одно (тот же
+      sha256); `gh api repos/PRO-Robotech/kacho/issues/comments/5975921239` → issue_url
+      kacho#1271, автор pointpu, author_association MEMBER, created_at == updated_at; пять
+      обязательных строк заголовка дословно.
 
 blocking: []
 
@@ -106,11 +120,25 @@ authority:
   authorized_actors: [pointpu]
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    Событие публикует курьер. Тело: acceptance-reviewer · APPROVED · sha256
-    17b2d02c8bff38378135467750b21e026118c62fd9d8828538c6315b6d4644e3
+  type: issue_comment
+  status: performed
+  database_id: 5975921239
+  node_id: IC_kwDOTZqgWM8AAAABZDFSVw
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5975921239
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5975921239
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-04T02:49:48Z'
+  body_sha256: d89e3b3e52c1d21395e97bb7a6c1866d1854eb8349aa6b58320c921179964eae
+  subject_sha256: 17b2d02c8bff38378135467750b21e026118c62fd9d8828538c6315b6d4644e3
+  subject_revision: bc3a8206fec8590eb95794a0304e8abdb96a0c89
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Событие в задаче `subject.task` (kacho#1271). Отпечаток тела снят с сырого ответа API
+    (`gh api … | jq -j .body | sha256sum`).
 
 attribution:
   reviewer_kind: claude_agent
