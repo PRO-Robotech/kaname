@@ -105,6 +105,13 @@ service UserTokenService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
+  // Revoke снимает удостоверение человека. Отзыв того, чего у названного
+  // человека нет, — синхронный `NOT_FOUND` с текстом `UserToken <token_id> not
+  // found`, без операции: никогда не существовавшее, уже отозванное и
+  // принадлежащее другому человеку неразличимы — кодом, текстом (кроме эха
+  // идентификатора) и деталями. Проигравший гонку двух отзывов получает
+  // операцию, завершённую тем же отказом; успех с `revoked_at` получает только
+  // отзыв, снявший удостоверение.
   rpc Revoke (RevokeUserTokenRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/users/{user_id}/tokens/{token_id}"

@@ -246,12 +246,21 @@ func TestSAKeyIssuanceWarning_ReachedOnlyOutsideProductionModes(t *testing.T) {
 	}
 }
 
-// requireOneLiftingWarning — ровно одно предупреждение, и оно называет, чем
-// снимается: ручку и задачу контура выдачи.
+// requireOneLiftingWarning — ровно одно предупреждение; оно называет ОБА пути
+// выдачи, которые на этой посадке отказывают (ключ служебной учётки и
+// ключевую пару человека, приёмка credential-verbs-refusal-outcomes, CVR-26),
+// и чем снимается: ручку и задачу контура выдачи.
 func requireOneLiftingWarning(t *testing.T, warns []map[string]any, why string) {
 	t.Helper()
 	if len(warns) != 1 {
 		t.Fatalf("предупреждений %d, ожидалось ровно одно: %s", len(warns), why)
+	}
+	refusing, _ := warns[0]["отказывают"].(string)
+	for _, want := range []string{"SAKeyService.Issue", "UserTokenService.Issue"} {
+		if !strings.Contains(refusing, want) {
+			t.Errorf("предупреждение обязано называть отказывающий путь выдачи %q; получено «отказывают»=%q",
+				want, refusing)
+		}
 	}
 	lift, _ := warns[0]["снимается"].(string)
 	for _, want := range []string{"authn.client-token.enabled", "kacho#1120"} {

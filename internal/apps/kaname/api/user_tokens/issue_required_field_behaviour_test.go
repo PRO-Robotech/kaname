@@ -50,7 +50,7 @@ import (
 // токена.
 func TestIssueUserToken_UserIDIsRequiredByBehaviour(t *testing.T) {
 	// Пустые зависимости намеренно: отказ обязан наступить до первой из них.
-	uc := NewIssueUserTokenUseCase(nil, nil, nil)
+	uc := NewIssueUserTokenUseCase(nil, nil, nil).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		// user_id не назван — это и есть предмет.
@@ -77,7 +77,7 @@ func TestIssueUserToken_UserIDIsRequiredByBehaviour(t *testing.T) {
 // Без этой стороны первая проба зеленела бы на крае, отвергающем всякий запрос
 // целиком: «отказ есть» и «отказ про названное поле» — разные утверждения.
 func TestIssueUserToken_CreatedByOmitted_IsNotRefusedForBeingAbsent(t *testing.T) {
-	uc := NewIssueUserTokenUseCase(nil, nil, nil)
+	uc := NewIssueUserTokenUseCase(nil, nil, nil).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001",
