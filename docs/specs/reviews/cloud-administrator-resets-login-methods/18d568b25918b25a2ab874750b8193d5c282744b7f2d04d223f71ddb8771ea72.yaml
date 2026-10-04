@@ -24,9 +24,15 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-04'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
-  pending_external_event: true
+  issued: true
+  issued_at: '2026-10-04T02:54:19Z'
+  ban1_lifted: true
+  pending_external_event: false
+  event_note: >-
+    Событие 5975948897 учётки pointpu на PRO-Robotech/kacho#2702 несёт заголовок из пяти
+    полей, subject_sha256 равен отпечатку этой записи, subject_revision bfd8709a опубликована
+    на origin раньше события (git branch -r --contains bfd8709a2 даёт origin/2702); запрет #1
+    по этому отпечатку снят. Дописано отдельным коммитом, вердикт и разбор не правились.
   why: >-
     Вердикт круга 2 — APPROVED: блокирующих ноль, Б1 круга 1 (CONSTRUCTIBILITY) закрыт и
     перепроверен посевом. Санкция на объём §0.2 (ban #1) этой записью НЕ выдаётся: её выпускает
@@ -46,27 +52,39 @@ authority:
   mode: versioned_policy_authority
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
-  event_published: false
+  event_published: true
   note: >-
     Рецензент событие не публикует. Публикует курьер; после публикации запись дополняется
     соседней, а не правится.
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Внешнего события, связывающего отпечаток, роль и
-    вердикт, не создавалось: его публикует курьер.
+  type: issue_comment
+  target: PRO-Robotech/kacho#2702
+  status: performed
+  published: true
+  database_id: 5975948897
+  node_id: IC_kwDOTZqgWM8AAAABZDG-YQ
+  url: https://github.com/PRO-Robotech/kacho/issues/2702#issuecomment-5975948897
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5975948897
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-04T02:54:19Z'
+  body_sha256: 853a2b4e04d766953c213c471444f53e16d9051236b6f0aded6c30916369ae22
+  subject_sha256: 18d568b25918b25a2ab874750b8193d5c282744b7f2d04d223f71ddb8771ea72
+  subject_revision_commit: bfd8709a21f0c0586c6a0633e61c0e324e2a027a
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
 event_body: 'acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/cloud-administrator-resets-login-methods.md @bfd8709a · sha256 18d568b25918b25a2ab874750b8193d5c282744b7f2d04d223f71ddb8771ea72'
 
 sanction:
   scope: §0.2 «Разрешает» и §4.1 этой редакции
-  status: pending_external_event
+  status: issued
   not_covered: §0.2 «Не разрешает» и §4.2
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
+  publishing_actor: pointpu
   personal_review_by_publishing_actor_claimed: false
 
 blocking: []
