@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedAdminRulesRole inserts an ACCOUNT-scoped custom rules-role whose single
@@ -154,7 +155,7 @@ func TestAdminIamContent_AsyncDrain_Materializes(t *testing.T) {
 func seedNativeGroupWithReconcileEvent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc domain.AccountID, name string) string {
 	t.Helper()
 	repo := kanamepg.New(pool, nil)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.GroupsW().Insert(ctx, domain.Group{

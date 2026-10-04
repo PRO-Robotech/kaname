@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertCredential — Insert через writer-tx с ОТКАТОМ на отказе.
@@ -126,7 +127,7 @@ func TestUserToken_RevocationReachesPresentationWithoutTheProvider(t *testing.T)
 		string(row.ID)).Scan(&before))
 	require.Equal(t, 0, before, "отсечка существовала до отзыва")
 
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, deleted, err := repo.DeleteOwnedByID(ctx, tx, row.UserID, row.ID)
 	require.NoError(t, err)

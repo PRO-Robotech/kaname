@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // orphanFixture — общая посадка обеих проб: живая область и мёртвая, у каждой своя
@@ -89,7 +90,7 @@ func setupOrphanScope(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suf
 	// Ведомость пишется ТЕМ ЖЕ путём, что и в проде (`InsertEmittedTuples`), а не
 	// прямым INSERT: фикстура не вправе быть снисходительнее продукта.
 	deadRels := []string{"v_get", "v_update"}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, bLive.ID, []repoab.RelationTuple{
 		{User: subject, Relation: "v_get", Object: objLive},

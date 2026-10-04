@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestRoleIamRoleGet_IsRetiredNotDeletedAndGrantsNothing — GWT-7 и GWT-10
@@ -173,7 +174,7 @@ func TestRoleIamRoleGet_RetirementIsReversible(t *testing.T) {
 
 	repo := kanamepg.NewCatalogWriteRepo(pool)
 	var revived bool
-	require.NoError(t, repo.RunInWriteTx(ctx, func(ctx context.Context, w modulecatalog.CatalogWriter) error {
+	require.NoError(t, repo.RunInWriteTx(journalfixture.Writing(ctx), func(ctx context.Context, w modulecatalog.CatalogWriter) error {
 		var werr error
 		revived, werr = w.UpsertVerb(ctx, catalog.VerbRow{
 			Module: "iam", Resource: "role", Verb: "get", PerObject: true,

@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -75,7 +76,7 @@ func TestLaneIntegration_F5_24_RecoverySessionResolvesLikeTheLoginSession(t *tes
 	h := newSessionLane(t)
 	// Дано: адрес подтверждён — посевом, писателем продукта (Ф6; приёмка §7:
 	// признак подтверждённости ставится посевом).
-	require.NoError(t, kanamepg.NewLoginMethodRepo(h.pool).MarkEmailVerified(h.ctx, h.user.ID, h.user.Email, time.Now().UTC()))
+	require.NoError(t, kanamepg.NewLoginMethodRepo(h.pool).MarkEmailVerified(journalfixture.Writing(h.ctx), h.user.ID, h.user.Email, time.Now().UTC()))
 
 	r := h.recover(t, newPassword)
 	l := h.login(t, newPassword)

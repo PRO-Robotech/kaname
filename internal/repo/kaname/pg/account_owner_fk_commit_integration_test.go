@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestAccountOwnerFK_CommitTime_FailedPrecondition — inserting an account with a
@@ -55,7 +56,7 @@ func TestAccountOwnerFK_CommitTime_FailedPrecondition(t *testing.T) {
 	missingOwner := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 
 	// INSERT itself does NOT fail — accounts_owner_fk is deferred.

@@ -159,6 +159,12 @@ func NewOrphanScopeSweeper(repo kanamerepo.Repository, store OrphanScopeStore, c
 // Повтор безопасен: убранная область в следующую перепись не попадает, а
 // сохранившаяся отсеивается перепроверкой внутри транзакции.
 func (s *OrphanScopeSweeper) RunOnce(ctx context.Context) (OrphanScopeResult, error) {
+	// Уборка снимает выдачи — пишет журналируемую таблицу: её транзакции
+	// несут инициатора компонента уборщика.
+	ctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentSweeper)
+	if err != nil {
+		return OrphanScopeResult{}, fmt.Errorf("orphan-scope sweep: %w", err)
+	}
 	ok, release, err := s.store.TryAcquireSingletonOrphanScopeLock(ctx)
 	if err != nil {
 		return OrphanScopeResult{}, fmt.Errorf("orphan-scope sweep: acquire singleton lock: %w", err)

@@ -67,6 +67,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
@@ -258,6 +259,15 @@ func (r Report) String() string {
 // принимать его оттуда было бы вторым объявлением одного предмета.
 func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string) (Report, error) {
 	rep := Report{Module: m.Module, SectionDeclared: m.RolesDeclared()}
+
+	// Строки ролей — журналируемая таблица, и строка журнала без инициатора
+	// базой не принимается (NTF-3, Р2). Путь старта удостоверенного субъекта
+	// не несёт — его транзакции начинает компонент посева; вызывающий с
+	// удостоверенной личностью остаётся инициатором сам.
+	ctx, jerr := shared.InitiatedOrJournalComponent(ctx, shared.JournalComponentSeed)
+	if jerr != nil {
+		return rep, fmt.Errorf("moduleroles: journal initiator: %w", jerr)
+	}
 
 	// Автор — ПАРАМЕТР, а не умолчание. Подставить здесь «system» значило бы
 	// сделать вопрос «кто у меня отобрал» безответным ровно тогда, когда его

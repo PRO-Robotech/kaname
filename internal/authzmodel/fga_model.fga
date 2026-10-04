@@ -1404,14 +1404,20 @@ type storage_image
 #                              type with no relations of its own.
 #   - notification_feed      — `reader`: which service may read a module's feed.
 #   - notification_namespace — `sender`: which service may send from a namespace.
+#   - notification_recipient_directory — `reader` on the singleton `root`: which
+#                              service may read recipient addresses (NTF-3 Р28,
+#                              kacho#2918). Only the `notify` manifest line
+#                              `recipientDirectory: {readers: [notify]}` writes it.
 #
 # NARROW BY DESIGN: each relation is assigned to `service` directly and to
 # nothing else — no cascade (`from`, `or`), no wildcard, no `group#member`, and
-# no other type names these three. A group or wildcard subject would grant the
+# no other type names these types. A group or wildcard subject would grant the
 # right to send on behalf of a namespace to whoever happens to be in the group.
-# Tuples are written only by the kaname manifest seed applier; tenant surfaces
-# refuse all three types, and the proxy admission rule (corelib
-# `proxytuple.forbiddenObjectTypes`) forbids them. The shape is held by
+# Tuples are written only by the kaname manifest seed applier; none of these
+# types is in the grantable catalog, so tenant surfaces cannot name them. The
+# proxy admission rule (corelib `authz/proxytuple`) forbids `service`,
+# `notification_feed` and `notification_namespace` by type and refuses `reader`
+# on any type as a non-hierarchical relation. The shape is held by
 # internal/authzmodel TestNotifyTypesAreDeclaredInTheirNarrowForm.
 # ---------------------------------------------------------------------------
 
@@ -1424,6 +1430,10 @@ type notification_feed
 type notification_namespace
   relations
     define sender: [service]
+
+type notification_recipient_directory
+  relations
+    define reader: [service]
 
 # ---------------------------------------------------------------------------
 # Conditions catalog — 7 frozen built-ins (acceptance §4.5).

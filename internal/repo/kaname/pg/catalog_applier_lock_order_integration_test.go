@@ -54,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // crossLockEarly / crossLockLate — два типа ОДНОГО модуля, названные так, чтобы
@@ -157,7 +158,7 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 	// ── СТОРОНА B: НАСТОЯЩАЯ правка правил роли по ОБОИМ типам ────────────────
 	bres := make(chan error, 1)
 	go func() {
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		if werr != nil {
 			bres <- werr
 			return

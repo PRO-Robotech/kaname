@@ -45,6 +45,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedSubjectChange кладёт строку ТЕМ ЖЕ путём, каким пишет прод: фикстура не
@@ -52,7 +53,7 @@ import (
 func seedSubjectChange(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subjectID, op string) int64 {
 	t.Helper()
 	abRepo := kanamepg.New(pool, nil)
-	w, err := abRepo.Writer(ctx)
+	w, err := abRepo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx,
 		access_binding.SubjectChangeEvent{SubjectID: subjectID, Op: op}))

@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -510,7 +511,7 @@ func countIdentityRowsByExternalID(ctx context.Context, t *testing.T, env *testE
 // не отличает «писатель работает» от «писатель молча ничего не сделал».
 func insertActiveIdentityRow(ctx context.Context, t *testing.T, env *testEnv, u domain.User) error {
 	t.Helper()
-	w, err := env.repo.Writer(ctx)
+	w, err := env.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	if _, ierr := w.UsersW().InsertActive(ctx, u); ierr != nil {
 		_ = w.Rollback(ctx)

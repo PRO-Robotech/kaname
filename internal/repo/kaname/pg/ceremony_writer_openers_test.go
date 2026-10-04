@@ -17,7 +17,9 @@ package pg_test
 //     формы построения — составной литерал (и под `&`), `new(…)` и объявление
 //     переменной значения;
 //   - R2 открытие писателя сессии и открытие писателя порта (`beginWriter`)
-//     идут через `BeginTx` с уровнем `ceremonyWriterTx()`, и никак иначе;
+//     идут через `BeginTx` с уровнем `ceremonyWriterTx()` — открывающим
+//     пишущей транзакции службы (`journalwrite.BeginTx`) либо пулом, — и никак
+//     иначе;
 //   - R3 отзыв семейств снятием (`revokeFamiliesOfSessionsTx`,
 //     `endSessionsAndRevokeWhatTheyHold`) зовут только методы писателя сессии
 //     и сама дверь снятия — то есть на транзакции, открытой по R1;
@@ -55,6 +57,7 @@ const (
 	ceremonyPortType    = "OAuthCeremonyRepo"
 	ceremonyPortOpener  = "OAuthCeremonyRepo.beginWriter"
 	ceremonyNamedLevel  = "ceremonyWriterTx"
+	journalOpenerPkg    = "journalwrite"
 	sessionEndDoorFunc  = "endSessionsAndRevokeWhatTheyHold"
 )
 
@@ -183,8 +186,13 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 					if !ok {
 						return true
 					}
+					// Открытие — пулом (`BeginTx`/`Begin`) либо открывающим пишущей
+					// транзакции службы (`journalwrite.BeginTx`/`Begin`, NTF-3 Р2),
+					// которому уровень передаётся третьим аргументом.
+					viaOpener := isIdentNamed(sel.X, journalOpenerPkg)
 					if (isOpener || isPortOpener) && (sel.Sel.Name == "BeginTx" || sel.Sel.Name == "Begin") {
-						if sel.Sel.Name == "BeginTx" && len(x.Args) == 2 && isNamedLevelCall(x.Args[1]) {
+						if sel.Sel.Name == "BeginTx" && !viaOpener && len(x.Args) == 2 && isNamedLevelCall(x.Args[1]) ||
+							sel.Sel.Name == "BeginTx" && viaOpener && len(x.Args) == 3 && isNamedLevelCall(x.Args[2]) {
 							namedOpen++
 						} else {
 							wrongOpen++
@@ -308,7 +316,7 @@ const lawfulOpenersSrc = `package pg
 func ceremonyWriterTx() pgx.TxOptions { return pgx.TxOptions{IsoLevel: pgx.ReadCommitted} }
 
 func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (pgx.Tx, error) {
-	return r.pool.BeginTx(ctx, ceremonyWriterTx())
+	return journalwrite.BeginTx(ctx, r.pool, ceremonyWriterTx())
 }
 
 func (r *OAuthCeremonyRepo) refuse(ctx context.Context) error {
@@ -316,7 +324,7 @@ func (r *OAuthCeremonyRepo) refuse(ctx context.Context) error {
 }
 
 func beginHumanSessionWriter(ctx context.Context, pool *pgxpool.Pool) (*humanSessionWriter, error) {
-	tx, err := pool.BeginTx(ctx, ceremonyWriterTx())
+	tx, err := journalwrite.BeginTx(ctx, pool, ceremonyWriterTx())
 	if err != nil {
 		return nil, err
 	}
@@ -402,24 +410,24 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*humanSessionWriter, er
 		{
 			name: "R2-opener-on-empty-options",
 			mutate: func(s string) string {
-				return strings.Replace(s, "tx, err := pool.BeginTx(ctx, ceremonyWriterTx())",
-					"tx, err := pool.BeginTx(ctx, pgx.TxOptions{})", 1)
+				return strings.Replace(s, "tx, err := journalwrite.BeginTx(ctx, pool, ceremonyWriterTx())",
+					"tx, err := journalwrite.BeginTx(ctx, pool, pgx.TxOptions{})", 1)
 			},
 			want: "R2 inj.go:14 beginHumanSessionWriter — открытие транзакции писателя не на ceremonyWriterTx()",
 		},
 		{
 			name: "R2-opener-on-pool-begin",
 			mutate: func(s string) string {
-				return strings.Replace(s, "tx, err := pool.BeginTx(ctx, ceremonyWriterTx())",
-					"tx, err := pool.Begin(ctx)", 1)
+				return strings.Replace(s, "tx, err := journalwrite.BeginTx(ctx, pool, ceremonyWriterTx())",
+					"tx, err := journalwrite.Begin(ctx, pool)", 1)
 			},
 			want: "R2 inj.go:14 beginHumanSessionWriter — открытие транзакции писателя не на ceremonyWriterTx()",
 		},
 		{
 			name: "R2-port-opener-on-other-level",
 			mutate: func(s string) string {
-				return strings.Replace(s, "return r.pool.BeginTx(ctx, ceremonyWriterTx())",
-					"return r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})", 1)
+				return strings.Replace(s, "return journalwrite.BeginTx(ctx, r.pool, ceremonyWriterTx())",
+					"return journalwrite.BeginTx(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.Serializable})", 1)
 			},
 			want: "R2 inj.go:6 OAuthCeremonyRepo.beginWriter — открытие транзакции писателя не на ceremonyWriterTx()",
 		},

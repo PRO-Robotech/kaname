@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
@@ -214,7 +215,7 @@ func (r *AccessKeyRepo) SweepUnservableChallenges(ctx context.Context, grace tim
 
 // Writer открывает транзакцию записи.
 func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return nil, mapErr(err, "AccessKey.Writer", "")
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
@@ -48,7 +49,7 @@ func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
 
 		// Приглашение адреса V.
 		const email = "ev74-invitee@example.test"
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Ctx(t, ctx))
 		require.NoError(t, err)
 		row, _, err := w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: acc, Email: email, DisplayName: "invitee",

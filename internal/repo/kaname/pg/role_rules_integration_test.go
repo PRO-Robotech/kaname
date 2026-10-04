@@ -34,6 +34,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // A-01: a role authored with mixed-arm rules round-trips its rules[] AND its
@@ -70,7 +71,7 @@ func TestRole_A01_RulesRoundTrip(t *testing.T) {
 		Rules:       rules,
 		Permissions: compiled,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err)
@@ -142,7 +143,7 @@ func TestRole_A12_CapRaise300Compiled(t *testing.T) {
 		Rules:       rules,
 		Permissions: compiled,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.RolesW().Insert(ctx, r)
 	require.NoError(t, err, "300 compiled permissions must pass iam_permissions_valid after cap-raise")
@@ -215,7 +216,7 @@ func TestRole_A16_DeleteRestrictByFK(t *testing.T) {
 	require.NoError(t, err)
 
 	// (1) Delete via repo → FAILED_PRECONDITION with the A-16 text, no pgx leak.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.RolesW().Delete(ctx, r.ID)
 	_ = w.Rollback(ctx)
@@ -233,7 +234,7 @@ func TestRole_A16_DeleteRestrictByFK(t *testing.T) {
 	_, err = pool.Exec(ctx, `DELETE FROM access_bindings WHERE id = $1`, abID)
 	require.NoError(t, err)
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.RolesW().Delete(ctx, r.ID))
 	require.NoError(t, w2.Commit(ctx))
@@ -284,7 +285,7 @@ func TestRole_A10_LabelOnlyRolePersists(t *testing.T) {
 
 	// (b) Insert persists it (DB CHECK roles_permissions_valid must allow an empty
 	// permissions array WHEN rules is non-empty).
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err, "label-only role must persist (empty permissions allowed for a rules-role)")
@@ -366,7 +367,7 @@ func TestRole_A16_ConcurrentDeleteVsGrant(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			w, werr := repo.Writer(ctx)
+			w, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				delErr = werr
 				return
@@ -384,7 +385,7 @@ func TestRole_A16_ConcurrentDeleteVsGrant(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			w, werr := repo.Writer(ctx)
+			w, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				grantErr = werr
 				return

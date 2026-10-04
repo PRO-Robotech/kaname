@@ -4,6 +4,8 @@
 package user
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -30,6 +32,6 @@ func TestMain(m *testing.M) {
 		// продукта. Довод целиком — `pkg/pgtest` §searchpath.
 		SearchPath: "kaname,public",
 		Name:       "iam",
-		Migrate:    pgtest.Goose(migrations.FS),
+		Migrate:    journalfixture.Migrate(migrations.FS),
 	}))
 }

@@ -34,6 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // setRoleLabels writes labels on a roles row directly (iam-direct feed source).
@@ -73,7 +74,7 @@ func TestRoleLabels_T33UPD01_RoundTrip(t *testing.T) {
 	want := domain.Labels{"team": "payments", "tier": "gold"}
 	target := got0
 	target.Labels = want
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.RolesW().Update(ctx, target, []string{"labels"})
 	require.NoError(t, err)
@@ -239,7 +240,7 @@ func TestRoleLabels_T33CONC01_ConcurrentUpdateLabels(t *testing.T) {
 			} else {
 				labels = domain.Labels{}
 			}
-			w, werr := fx.repo.Writer(ctx)
+			w, werr := fx.repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				errs <- werr
 				return

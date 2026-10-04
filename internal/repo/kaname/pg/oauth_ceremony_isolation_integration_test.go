@@ -92,6 +92,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // ceremonyPortClassification — ПЕРЕЧЕНЬ методов порта церемонии по отношению к
@@ -1030,7 +1031,7 @@ var sessionEnderDoors = []sessionEnderDoor{
 		// судится дверь, а не вызывающий.
 		name: "RegistrationStore.Writer",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
-			w, err := kanamepg.NewRegistrationStore(pool).Writer(ctx)
+			w, err := kanamepg.NewRegistrationStore(pool).Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				return 0, err
 			}
@@ -1042,7 +1043,7 @@ var sessionEnderDoors = []sessionEnderDoor{
 		// замком строки личности, снимает прочие сессии человека.
 		name: "RegistrationStore.VerificationWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
-			w, err := kanamepg.NewRegistrationStore(pool).VerificationWriter(ctx, domain.UserID(sc.UserID))
+			w, err := kanamepg.NewRegistrationStore(pool).VerificationWriter(journalfixture.Writing(ctx), domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}

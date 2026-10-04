@@ -28,10 +28,17 @@ import (
 // объявленным.
 
 // notifyTypeShape — ожидаемая форма: тип → отношение → единственный субъект.
+//
+// `notification_recipient_directory` — справочник адресов (приёмка NTF-3 Р28,
+// kacho#2918, полоса X4D): `define reader: [service]`, без каскада, без
+// подстановочного знака, без членства групп. Адреса всех пользователей
+// установки выдаются одной службе, и форма уже этой — единственная, при
+// которой «одной службе» остаётся правдой.
 var notifyTypeShape = map[string]map[string]string{
-	"service":                {},
-	"notification_feed":      {"reader": "service"},
-	"notification_namespace": {"sender": "service"},
+	"service":                          {},
+	"notification_feed":                {"reader": "service"},
+	"notification_namespace":           {"sender": "service"},
+	"notification_recipient_directory": {"reader": "service"},
 }
 
 // notifyTypeShapeFindings возвращает расхождения разобранной модели с формой
@@ -117,7 +124,7 @@ func TestNotifyTypesAreDeclaredInTheirNarrowForm(t *testing.T) {
 	}
 }
 
-// notifyTypesLawfulBlock — законная форма трёх типов, от которой пробы инъекции
+// notifyTypesLawfulBlock — законная форма типов уведомлений, от которой пробы инъекции
 // отличаются РОВНО одним фактом.
 const notifyTypesLawfulBlock = `
 type service
@@ -129,6 +136,10 @@ type notification_feed
 type notification_namespace
   relations
     define sender: [service]
+
+type notification_recipient_directory
+  relations
+    define reader: [service]
 `
 
 // TestNotifyTypeShapeProbeRedsOnEachWideningAndStaysSilentOnTheLawfulForm —
@@ -163,6 +174,14 @@ func TestNotifyTypeShapeProbeRedsOnEachWideningAndStaysSilentOnTheLawfulForm(t *
 		{"каскад", "define sender: [service]", "define sender: [service] or reader", "notification_namespace#sender"},
 		{"лишнее отношение", "define reader: [service]", "define reader: [service]\n    define viewer: [service]", "notification_feed#viewer"},
 		{"тип снят", "\ntype notification_namespace\n  relations\n    define sender: [service]\n", "\n", "тип notification_namespace не объявлен"},
+		{"справочник: группа", "type notification_recipient_directory\n  relations\n    define reader: [service]",
+			"type notification_recipient_directory\n  relations\n    define reader: [service, group#member]",
+			"notification_recipient_directory#reader"},
+		{"справочник: пользователь", "type notification_recipient_directory\n  relations\n    define reader: [service]",
+			"type notification_recipient_directory\n  relations\n    define reader: [user]",
+			"notification_recipient_directory#reader"},
+		{"справочник снят", "\ntype notification_recipient_directory\n  relations\n    define reader: [service]\n", "\n",
+			"тип notification_recipient_directory не объявлен"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

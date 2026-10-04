@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
@@ -56,7 +57,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, binding)
 	require.NoError(t, err)
@@ -103,7 +104,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_DeleteEmitsDeleteRows(t *testing.T) {
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().Delete(ctx, binding.ID))
 	require.NoError(t, w.AccessBindingsW().EmitRelationDelete(ctx, tuples))
@@ -146,7 +147,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, binding)
 	require.NoError(t, err)
@@ -190,7 +191,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_EmitWriteTx_EmptyTuplesNoop(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox`).Scan(&before))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, nil))
 	require.NoError(t, w.AccessBindingsW().EmitRelationDelete(ctx, []repoab.RelationTuple{}))

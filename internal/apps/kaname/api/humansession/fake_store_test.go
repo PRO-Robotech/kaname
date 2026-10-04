@@ -215,10 +215,14 @@ func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (human
 }
 
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
+	// Открытие у адаптера — ДВА оператора: `BEGIN` и первый оператор
+	// открывающего пишущей транзакции службы (`journalwrite`), выставляющий
+	// инициатора журнала либо его отсутствие локально к транзакции (NTF-3, Р2).
 	f.trip()
 	if f.failOn == "writer" {
 		return nil, errFakePort
 	}
+	f.trip()
 	w := &fakeWriter{store: f, lockedFor: lockedFor}
 	f.mu.Lock()
 	f.opened = append(f.opened, w)

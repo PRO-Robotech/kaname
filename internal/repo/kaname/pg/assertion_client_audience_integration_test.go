@@ -27,6 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertSAKey — запись строки ключа НАСТОЯЩИМ писателем, в своей транзакции.
@@ -34,7 +35,7 @@ func insertSAKey(t *testing.T, f assertionFixture, c domain.ServiceAccountOAuthC
 	t.Helper()
 	ctx := context.Background()
 	repo := kanamepg.NewSAOAuthClientRepo(f.pool)
-	tx, err := kanamepg.NewPoolTxBeginner(f.pool).Begin(ctx)
+	tx, err := kanamepg.NewPoolTxBeginner(f.pool).Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := repo.Insert(ctx, tx, c)
 	require.NoError(t, err)

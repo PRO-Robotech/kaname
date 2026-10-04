@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedUserInAccount — INSERT an ACTIVE user row whose account_id is the given
@@ -280,7 +281,7 @@ func TestAB_SP_RevokedExcluded_AndAccountIsolation(t *testing.T) {
 	})
 
 	// Revoke the member's roleRevoked binding.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	rb := owner
 	_, err = w.AccessBindingsW().TransitionStatus(ctx, revoked.ID,

@@ -27,6 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestRole_IAM_1_10_DefinitionTierXorRenamedAndIsSystemGenerated(t *testing.T) {
@@ -69,7 +70,7 @@ func TestRole_IAM_1_10_DefinitionTierXorRenamedAndIsSystemGenerated(t *testing.T
 		Rules:       domain.Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}},
 		IsSystem:    true, // intentionally wrong — the generated column ignores it.
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err)

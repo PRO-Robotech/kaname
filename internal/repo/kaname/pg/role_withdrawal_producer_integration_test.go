@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // withdrawalManifest — документ модуля с ПЕРЕЧИСЛЕННЫМИ ролями. Раздел `roles:`
@@ -395,7 +396,7 @@ func TestIAMRW1OwnershipIsDecidedOnceAndProjectionsSurviveDisagreement(t *testin
 	runner := moduleroles.NewRepoTxRunner(kanamepg.New(pool, nil))
 
 	// ЧУЖОЙ модуль: писатель обязан ОТКАЗАТЬ и не тронуть ни одной проекции.
-	err = runner.RunInWriteTx(ctx, func(ctx context.Context, w moduleroles.RoleWriter) error {
+	err = runner.RunInWriteTx(journalfixture.Writing(ctx), func(ctx context.Context, w moduleroles.RoleWriter) error {
 		_, rerr := w.RetireRole(ctx, id, "compute", "чужой модуль", "проба")
 		return rerr
 	})

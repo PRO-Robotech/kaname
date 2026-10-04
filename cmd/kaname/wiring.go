@@ -180,6 +180,11 @@ type services struct {
 	// решение о письме источника и рычаг администратора кластера над выдачей.
 	// Internal-only (запрет #6), регистрируется на :9091.
 	notificationGrantHandler iamv1.InternalNotificationGrantServiceServer
+
+	// recipientDirectoryHandler — InternalNotificationRecipientService (NTF-3
+	// Р7, Р28): справочник адресов получателей для `service:notify`.
+	// Internal-only (запрет #6), регистрируется на :9091.
+	recipientDirectoryHandler iamv1.InternalNotificationRecipientServiceServer
 }
 
 // ownGateWiringComplaint reports why iam's own authorization gates cannot be trusted with
@@ -668,6 +673,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	if err != nil {
 		return nil, err
 	}
+	// InternalNotificationRecipientService — на той же двери, что Check (место
+	// Д-3): и право вызывающего на справочник, и право получателя на ресурс.
+	recipientDirectoryHandler, err := buildRecipientDirectoryServer(pool, authzServices.authorizeSvc,
+		relationStore, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -988,6 +1000,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// решение о письме источника и Revoke/Restore выдачи (NTF-1 Р5).
 		notificationGrantHandler: notificationGrantHandler,
+
+		// справочник адресов получателей (NTF-3 Р7, Р28).
+		recipientDirectoryHandler: recipientDirectoryHandler,
 
 		// interactive-login client lifecycle.
 		interactiveClientHandler: interactiveClientHandler,

@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
@@ -51,7 +52,7 @@ func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
 
 	// Исходное состояние: метки непусты, чтобы «сохранено» отличалось от
 	// «затёрто умолчанием».
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	seeded, err := w.GroupsW().Update(ctx, domain.Group{
 		ID:          g.ID,
@@ -66,7 +67,7 @@ func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
 	require.Equal(t, domain.Labels{"env": "prod"}, seeded.Labels)
 
 	t.Run("маска называет одно поле — остальные сохранены", func(t *testing.T) {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		out, err := w.GroupsW().Update(ctx, domain.Group{
 			ID:          g.ID,
@@ -87,7 +88,7 @@ func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
 	})
 
 	t.Run("пустая маска — полная правка", func(t *testing.T) {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		out, err := w.GroupsW().Update(ctx, domain.Group{
 			ID:          g.ID,
@@ -105,7 +106,7 @@ func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
 	})
 
 	t.Run("неизвестное поле маски — INVALID_ARGUMENT, записи нет", func(t *testing.T) {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		defer func() { _ = w.Rollback(ctx) }()
 		_, err = w.GroupsW().Update(ctx, domain.Group{
@@ -118,7 +119,7 @@ func TestGroup_Update_MaskWritesOnlyWhatItNames(t *testing.T) {
 	})
 
 	t.Run("несуществующая группа — NOT_FOUND", func(t *testing.T) {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		defer func() { _ = w.Rollback(ctx) }()
 		_, err = w.GroupsW().Update(ctx, domain.Group{

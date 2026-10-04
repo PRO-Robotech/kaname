@@ -4,6 +4,8 @@
 package main
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -18,5 +20,5 @@ import (
 // Контейнер поднимается ЛЕНИВО: под `-short`, где контейнерные пробы пропущены,
 // он не поднимается вовсе, и быстрый прогон остаётся быстрым.
 func TestMain(m *testing.M) {
-	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iammigratordown"}))
+	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iammigratordown", Migrate: journalfixture.FixtureInitiatorOnRole()}))
 }

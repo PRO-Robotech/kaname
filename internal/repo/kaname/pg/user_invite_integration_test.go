@@ -39,6 +39,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // bootstrapAdmin — utility: bootstrap-флоу (user + own Account) через одну TX
@@ -47,7 +48,7 @@ func bootstrapAdmin(t *testing.T, ctx context.Context, repo *kanamepg.Repository
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	committed := false
 	defer func() {
@@ -91,7 +92,7 @@ func TestUserInvite_S01_InsertPending_New(t *testing.T) {
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "s01")
 
 	// When Invite new email
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	out, inserted, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -126,7 +127,7 @@ func TestUserInvite_S03_InsertPending_Idempotent(t *testing.T) {
 	repo := kanamepg.New(pool, nil)
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "s03")
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid1 := domain.UserID(ids.NewID(domain.PrefixUser))
 	first, ins1, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -138,7 +139,7 @@ func TestUserInvite_S03_InsertPending_Idempotent(t *testing.T) {
 	require.True(t, ins1)
 
 	// Second Invite to same email — should be idempotent
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid2 := domain.UserID(ids.NewID(domain.PrefixUser))
 	second, ins2, err := w2.UsersW().InsertPending(ctx, domain.User{
@@ -194,7 +195,7 @@ func TestUserInvite_S04_FindPendingByEmail_OneRowManyMemberships(t *testing.T) {
 	// на любом исходе, иначе отказ утверждения увёл бы за собой и закрытие пула.
 	invite := func(acc domain.AccountID, admin domain.UserID, email domain.Email) domain.User {
 		t.Helper()
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		committed := false
 		defer func() {
@@ -274,7 +275,7 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "s05")
 	// Pre-create PENDING
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -289,7 +290,7 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Activate
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, err := w2.UsersW().ActivateInvite(ctx, pending.ID,
@@ -328,7 +329,7 @@ func TestUserInvite_S05b_ActivateInvite_NotPending_NotFound(t *testing.T) {
 	// bootstrapAdmin создает ACTIVE-row сразу. Попытка ActivateInvite на нее
 	// → 0 rows RETURNING → ErrNotFound (row уже не в PENDING-состоянии).
 	adminID, _ := bootstrapAdmin(t, ctx, repo, "s05b")
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, adminID)
 	_, err = w.UsersW().ActivateInvite(ctx, adminID,
@@ -355,7 +356,7 @@ func TestUserInvite_S06_Bootstrap_DeferrableFK(t *testing.T) {
 	// FK на account_id отложен; на COMMIT все проверяется консистентно.
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 
 	// 1. INSERT user первым (FK на account отложен).
@@ -405,7 +406,7 @@ func TestUserInvite_S30_Bootstrap_DeferrableFK_FailOnCommit(t *testing.T) {
 
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 
 	// INSERT user с account_id = несуществующий accID; FK отложен.
@@ -452,7 +453,7 @@ func TestUserInvite_S11_ConcurrentInvite_RaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w, err := repo.Writer(ctx)
+			w, err := repo.Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
@@ -522,7 +523,7 @@ func TestUserInvite_S23_GetByAccountEmail(t *testing.T) {
 	_, accB := bootstrapAdmin(t, ctx, repo, "s23B")
 
 	// Insert PENDING into accA only.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, _, err = w.UsersW().InsertPending(ctx, domain.User{
@@ -570,7 +571,7 @@ func TestUserInvite_S09_List_TenantIsolation(t *testing.T) {
 		{accA, "a1@example.com"}, {accA, "a2@example.com"},
 		{accB, "b1@example.com"},
 	} {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID:        domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -649,7 +650,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 	const email = domain.Email("u@example.com")
 
 	// ── первое появление: строка заводится ──────────────────────────────────
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	first, ins1, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID:        domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -661,7 +662,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 	require.True(t, ins1, "ПРЕДПОСЫЛКА: неизвестная почта обязана завести строку")
 
 	// ── та же почта во ВТОРОЙ аккаунт: тот же человек, второе членство ──────
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	second, ins2, err := w2.UsersW().InsertPending(ctx, domain.User{
 		ID:        domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -696,7 +697,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 	// арбитрирует. Значит утверждать через него, что ключ существует, нельзя:
 	// он зеленел бы и на базе вовсе без ключа. Отказ спрашивается у того
 	// писателя, для которого конфликт есть конфликт.
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w3.UsersW().InsertActive(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -717,7 +718,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 		"сырой текст драйвера наружу не течёт")
 
 	// ── положительный контроль к отказу ─────────────────────────────────────
-	w4, err := repo.Writer(ctx)
+	w4, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	otherID := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err = w4.UsersW().InsertActive(ctx, domain.User{

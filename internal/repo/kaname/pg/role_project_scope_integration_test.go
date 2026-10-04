@@ -32,6 +32,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestRole_212_InsertProjectScoped_RoundTrip(t *testing.T) {
@@ -58,7 +59,7 @@ func TestRole_212_InsertProjectScoped_RoundTrip(t *testing.T) {
 		Permissions: domain.Permissions{"iam.project.*.get"},
 		IsSystem:    false,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err, "Insert must accept a project-scoped role (account_id NULL)")
@@ -112,7 +113,7 @@ func TestRole_212_InsertBothScopes_CheckViolation(t *testing.T) {
 		Permissions: domain.Permissions{"iam.project.*.get"},
 		IsSystem:    false,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.RolesW().Insert(ctx, r)
 	require.Error(t, err, "DB CHECK roles_definition_tier_xor must reject account_id AND project_id both set")

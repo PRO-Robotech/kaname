@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // newLockTimeoutPool — a pgxpool whose every session sets `lock_timeout` so a
@@ -81,7 +82,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 	// realGroupDelete drives the PRODUCTION groupWriter.Delete on a fresh
 	// lock_timeout writer-tx (rolled back — this side never commits a delete).
 	realGroupDelete := func(id domain.GroupID) error {
-		w, werr := delRepo.Writer(ctx)
+		w, werr := delRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		defer func() { _ = w.Rollback(ctx) }()
 		return w.GroupsW().Delete(ctx, id)
@@ -95,7 +96,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 
 		// A real AccessBinding.Create for subject group:g, held open (uncommitted).
 		// Its 0049 subject_ref_exists trigger takes FOR KEY SHARE on the groups row.
-		wIns, err := seedRepo.Writer(ctx)
+		wIns, err := seedRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		committed := false
 		defer func() {
@@ -150,7 +151,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		// child row (the subjects[1..N] path guarded by migration 0050's BEFORE
 		// DELETE trigger + the Delete CTE's second NOT EXISTS).
 		bindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-		wSeed, err := seedRepo.Writer(ctx)
+		wSeed, err := seedRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		_, err = wSeed.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 			ID:           bindingID,
@@ -166,7 +167,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		// Add group:g as an extra subject, held open (uncommitted) — the 0049
 		// trigger fires on access_binding_subjects too, taking FOR KEY SHARE on
 		// the groups row.
-		wIns, err := seedRepo.Writer(ctx)
+		wIns, err := seedRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		committed := false
 		defer func() {

@@ -90,6 +90,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -864,7 +865,7 @@ func (h *overlapLane) startDelete(p overlapPerson) *overlapDeleteCall {
 	call := &overlapDeleteCall{done: make(chan struct{})}
 	go func() {
 		defer close(call.done)
-		w, err := h.users.Writer(h.ctx)
+		w, err := h.users.Writer(journalfixture.Writing(h.ctx))
 		if err != nil {
 			call.err = err
 			return

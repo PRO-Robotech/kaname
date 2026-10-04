@@ -20,6 +20,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestGroup_IsMember_GroupMember coverage:
@@ -46,7 +47,7 @@ func TestGroup_IsMember_GroupMember(t *testing.T) {
 
 	uidMember := mustSeedUser(t, ctx, pool, "ismember2")
 	// Add user member via writer.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,

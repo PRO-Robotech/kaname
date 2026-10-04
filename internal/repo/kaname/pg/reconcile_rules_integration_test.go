@@ -34,6 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedRulesRole inserts a PROJECT-scoped custom role whose rules[] is the supplied
@@ -57,7 +58,7 @@ func seedRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *
 		ID: rid, ProjectID: prj, Name: domain.RoleName(name),
 		Description: domain.Description("rules role " + name), Rules: rules, Permissions: compiled, IsSystem: false,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	// Always release the writer-tx connection. On a failed Insert/Replace a bare
 	// require.NoError → t.FailNow → runtime.Goexit skips the explicit Commit, and
@@ -77,7 +78,7 @@ func seedRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *
 func insertThinBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repository, subject domain.UserID, roleID domain.RoleID, prj domain.ProjectID) domain.AccessBindingID {
 	t.Helper()
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: bid, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subject),
@@ -222,7 +223,7 @@ func TestC20C21_RuleRemoved_EagerRevokeByRuleFP_NoResidual(t *testing.T) {
 	require.Equal(t, domain.VerificationActive, stB)
 
 	// Role.Update removes ruleGone (team=b). Sync role_rule_selectors + reconcile.
-	w, err := fx.repo.Writer(ctx)
+	w, err := fx.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated := domain.Role{ID: roleID, AccountID: fx.accID, ProjectID: fx.prj, Name: "c20role",
 		Rules: domain.Rules{ruleKeep}, Permissions: mustCompile(t, domain.Rules{ruleKeep}), IsSystem: false}
@@ -333,7 +334,7 @@ func TestC23_ExpiredRulesBinding_EagerRevoke(t *testing.T) {
 		        expires_at = now() - interval '1 hour'
 		  WHERE id=$1`, string(bid))
 	require.NoError(t, err)
-	require.NoError(t, rec.ExpireBinding(ctx, bid))
+	require.NoError(t, rec.ExpireBinding(journalfixture.Writing(ctx), bid))
 
 	// Binding REVOKED; member purged; per-object tuple eager-revoked → Check denies.
 	var status string
@@ -394,7 +395,7 @@ func seedAccountRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		ID: rid, AccountID: acc, Name: domain.RoleName(name),
 		Description: domain.Description("account rules role " + name), Rules: rules, Permissions: compiled, IsSystem: false,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	// Release the writer-tx connection on a failed Insert/Replace (a bare
 	// require.NoError → FailNow skips Commit and would leak the held connection →
@@ -413,7 +414,7 @@ func seedAccountRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 func insertThinBindingScope(t *testing.T, ctx context.Context, repo *kanamepg.Repository, subject domain.UserID, roleID domain.RoleID, resType, resID string, scope domain.Scope) domain.AccessBindingID {
 	t.Helper()
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	// Release the connection on EVERY path. A failing require below ends the test
 	// goroutine with the writer still checked out, and the caller's deferred

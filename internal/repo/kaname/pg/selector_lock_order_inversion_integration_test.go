@@ -77,6 +77,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // replaceSelectorsOutcome — исход правки правил роли НАСТОЯЩИМ писателем,
@@ -130,7 +131,7 @@ func TestSelectorWriteTakesTheCatalogRowLockBeforeTheSelectorRows(t *testing.T) 
 	// ── СТОРОНА B: НАСТОЯЩАЯ правка правил роли ───────────────────────────────
 	bres := make(chan replaceSelectorsOutcome, 1)
 	go func() {
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		if werr != nil {
 			bres <- replaceSelectorsOutcome{err: werr}
 			return
@@ -207,7 +208,7 @@ func TestLoneSelectorWriteAgainstALiveCatalogPasses(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		if werr != nil {
 			done <- werr
 			return

@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
@@ -62,7 +63,7 @@ func NewReconcileAdapter(pool *pgxpool.Pool, cat catalog.Source) *ReconcileAdapt
 // WithTx runs fn inside a single writer-tx (reconcile.TxRunner). Commit on
 // success, rollback on error/panic.
 func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) error {
-	tx, err := a.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, a.pool)
 	if err != nil {
 		return fmt.Errorf("reconcile: begin tx: %w", err)
 	}
@@ -1458,7 +1459,7 @@ func (a *ReconcileAdapter) ClaimReconcileEvents(ctx context.Context, limit int) 
 // MarkReconcileEventSent marks an event drained on its own short tx (called after
 // the reconcile pass for that object committed).
 func (a *ReconcileAdapter) MarkReconcileEventSent(ctx context.Context, id int64) error {
-	tx, err := a.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, a.pool)
 	if err != nil {
 		return fmt.Errorf("reconcile: begin mark-sent tx: %w", err)
 	}

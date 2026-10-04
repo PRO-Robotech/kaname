@@ -4,6 +4,8 @@
 package authzguard_test
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
@@ -18,6 +20,6 @@ import (
 func TestMain(m *testing.M) {
 	pgtest.Run(m, pgtest.Config{
 		Name:    "iam",
-		Migrate: pgtest.Goose(migrations.FS),
+		Migrate: journalfixture.Migrate(migrations.FS),
 	})
 }

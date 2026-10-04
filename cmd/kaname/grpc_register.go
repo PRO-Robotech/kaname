@@ -148,6 +148,12 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.notificationGrantHandler != nil {
 		iamv1.RegisterInternalNotificationGrantServiceServer(srv, svcs.notificationGrantHandler)
 	}
+	// InternalNotificationRecipientService (NTF-3 Р7, Р28) — ТОЛЬКО здесь: ни на
+	// публичном слушателе, ни REST-привязок (NTF3-30). Право вызывающего
+	// (`reader` на справочник) решает обработчик той же дверью, что Check.
+	if svcs != nil && svcs.recipientDirectoryHandler != nil {
+		iamv1.RegisterInternalNotificationRecipientServiceServer(srv, svcs.recipientDirectoryHandler)
+	}
 	// Служебных RPC администрирования хранилища отношений здесь больше нет: их
 	// предметом было чужое хранилище — его кортежи, его модель, его store id, — и
 	// вместе с ним снята вся служба.

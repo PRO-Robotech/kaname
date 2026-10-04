@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAB_GD_GroupDerivedPrivilegesResolved(t *testing.T) {
@@ -54,7 +55,7 @@ func TestAB_GD_GroupDerivedPrivilegesResolved(t *testing.T) {
 	proj := seedProject(t, ctx, repo, acc.ID, "proj-gd0")
 
 	grp := seedGroup(t, ctx, repo, acc.ID, "gd0-team")
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID: grp.ID, MemberType: "user", MemberID: domain.SubjectID(member),

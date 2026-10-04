@@ -124,5 +124,10 @@ func CheckDelivery(root string, opts ...LoadOption) CheckReport {
 	// селектор роли адресовал бы несуществующий тип и не дал бы ни одного
 	// пообъектного права, молча. Смена референта в порождающем проходе
 	// (#1930) старту службы не отнимает НИЧЕГО: он идёт этой полосой.
-	return walkManifestsOnDisk(root, isDeliveredManifestName, ReferentShippedTable, opts...)
+	//
+	// Ключ доставки судится против объявленного модуля (правило происхождения
+	// строки `recipientDirectory`, УК3-08): документ, назвавшийся `notify` и
+	// приехавший чужим ключом, не применяется — находка с именем ключа.
+	return readAndJudge(root, listManifestsOnDisk(root, isDeliveredManifestName), ReferentShippedTable,
+		RecipientDirectoryProvenance, opts...)
 }

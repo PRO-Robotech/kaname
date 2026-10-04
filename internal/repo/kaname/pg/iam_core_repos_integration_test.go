@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // kac127Setup — общий setup: testcontainers + pgxpool + return DSN-pool pair.
@@ -189,7 +190,7 @@ func kac127SeedABRow(
 
 	repo = kanamepg.New(pool, nil)
 	abID = padOrTrim20("acb00000kac127" + suffix)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID:              domain.AccessBindingID(abID),
@@ -214,7 +215,7 @@ func TestIamExtRepos_6_5_3_AccessBinding_ActiveToRevoked_CAS(t *testing.T) {
 	repo, abID, uid, _ := kac127SeedABRow(t, ctx, pool, "ab53", domain.AccessBindingStatusActive)
 
 	// ACTIVE → REVOKED via repo.TransitionStatus (single-statement CAS).
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revBy := domain.UserID(uid)
 	out, err := w.AccessBindingsW().TransitionStatus(ctx,
@@ -245,7 +246,7 @@ func TestIamExtRepos_6_5_3b_AccessBinding_PendingToActive_CAS(t *testing.T) {
 	ctx, pool := kac127Setup(t)
 	repo, abID, _, _ := kac127SeedABRow(t, ctx, pool, "ab53b", domain.AccessBindingStatusPending)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.AccessBindingsW().TransitionStatus(ctx,
 		domain.AccessBindingID(abID),
@@ -279,7 +280,7 @@ func TestIamExtRepos_6_5_4_AccessBinding_RevokedTerminal_CAS_NoMatch(t *testing.
 	abID := padOrTrim20("acb00000kac127ab54")
 	// First Insert as ACTIVE (CHECK на revoked_consistency блокирует direct REVOKED insert
 	// без revoked_at), затем CAS → REVOKED.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID:              domain.AccessBindingID(abID),
@@ -294,7 +295,7 @@ func TestIamExtRepos_6_5_4_AccessBinding_RevokedTerminal_CAS_NoMatch(t *testing.
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revBy := domain.UserID(uid)
 	_, err = w2.AccessBindingsW().TransitionStatus(ctx,
@@ -307,7 +308,7 @@ func TestIamExtRepos_6_5_4_AccessBinding_RevokedTerminal_CAS_NoMatch(t *testing.
 	require.NoError(t, w2.Commit(ctx))
 
 	// Now try CAS for ACTIVE/PENDING → must be FailedPrecondition (REVOKED terminal).
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w3.Rollback(ctx) }()
 	_, err = w3.AccessBindingsW().TransitionStatus(ctx,

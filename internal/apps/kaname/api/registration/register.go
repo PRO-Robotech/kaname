@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -196,7 +197,19 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 	}
 
 	// (3) Одна транзакция трёх следствий — в объявленном порядке полосы.
-	w, err := uc.store.Writer(ctx)
+	//
+	// Зеркало пишет строку человека, а значит и ресурсный журнал, чья строка
+	// без инициатора базой не принимается (NTF-3, Р2). Вызывающий здесь не
+	// удостоверен, и приписать изменение человеку, чей адрес ещё не
+	// подтверждён, значило бы утверждать непроверенное; изменение начинает
+	// полоса регистрации службы — её личность компонента и есть инициатор.
+	wctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentRegistration)
+	if err != nil {
+		uc.logger.Error("registration: journal initiator not set", "err", err.Error())
+		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
+		return Output{}, humansession.ErrStoreUnavailable
+	}
+	w, err := uc.store.Writer(wctx)
 	if err != nil {
 		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
 		return Output{}, humansession.ErrStoreUnavailable

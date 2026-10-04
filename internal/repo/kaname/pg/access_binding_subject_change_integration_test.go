@@ -20,6 +20,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAccessBindingWriter_EmitSubjectChange_InTx(t *testing.T) {
@@ -35,7 +36,7 @@ func TestAccessBindingWriter_EmitSubjectChange_InTx(t *testing.T) {
 	repo := kanamepg.New(pool, nil)
 
 	// Happy path: emit + commit → row visible.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccessBindingsW().EmitSubjectChangeEvent(ctx, access_binding.SubjectChangeEvent{
 		SubjectID: "usr_test_subject", Op: "binding_delete",
@@ -51,7 +52,7 @@ func TestAccessBindingWriter_EmitSubjectChange_InTx(t *testing.T) {
 	require.Equal(t, "binding_delete", op)
 
 	// Rollback path: no orphan row.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().EmitSubjectChangeEvent(ctx, access_binding.SubjectChangeEvent{
 		SubjectID: "usr_rollback", Op: "binding_upsert",

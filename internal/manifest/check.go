@@ -445,14 +445,20 @@ func listManifestsOnDisk(root string, accept func(name string) bool) manifestLis
 // именно в той половине, которую никто не читает глазами.
 func walkManifestsFromIndex(root string, accept func(name string) bool, referent TypeReferent,
 	opts ...LoadOption) CheckReport {
-	return readAndJudge(root, listManifestsInIndex(root, accept), referent, opts...)
+	return readAndJudge(root, listManifestsInIndex(root, accept), referent, nil, opts...)
 }
 
 // walkManifestsOnDisk — полоса доставки и синтетического дерева пробы.
 func walkManifestsOnDisk(root string, accept func(name string) bool, referent TypeReferent,
 	opts ...LoadOption) CheckReport {
-	return readAndJudge(root, listManifestsOnDisk(root, accept), referent, opts...)
+	return readAndJudge(root, listManifestsOnDisk(root, accept), referent, nil, opts...)
 }
+
+// keyRule — суд ПУТИ, под которым документ приехал, против разобранного
+// документа. У дерева разработки его нет (nil): путь там — каталог автора, а не
+// ключ доставки. У каталога доставки — правило происхождения
+// ([RecipientDirectoryProvenance]).
+type keyRule func(key string, m *Manifest) error
 
 // readAndJudge — ЧТЕНИЕ перечисленного и СУЖДЕНИЕ о прочитанном: общее у обеих
 // полос.
@@ -471,7 +477,7 @@ func walkManifestsOnDisk(root string, accept func(name string) bool, referent Ty
 // чтениями одного пути лежит окно, и второе чтение вернуло бы другой документ,
 // не сказав об этом ничего. Объём ограничен теми же manifestSizeLimit на путь,
 // которыми ограничена ступень первая.
-func readAndJudge(root string, listing manifestListing, referent TypeReferent,
+func readAndJudge(root string, listing manifestListing, referent TypeReferent, rule keyRule,
 	opts ...LoadOption) CheckReport {
 	// Перепись перечисления переносится в отчёт ДО всякого отказа: без неё
 	// «перечислять было нечего» неотличимо от «перечисление сорвалось».
@@ -522,6 +528,9 @@ func readAndJudge(root string, listing manifestListing, referent TypeReferent,
 	judgeOpts := append(append([]LoadOption(nil), opts...), WithModuleSet(declared))
 	for i, data := range docs {
 		m, err := LoadWithReferent(data, referent, judgeOpts...)
+		if err == nil && rule != nil {
+			err = rule(report.Paths[i], m)
+		}
 		if err != nil {
 			report.Findings = append(report.Findings, report.Paths[i]+": "+err.Error())
 			continue

@@ -59,6 +59,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // overlapRuns — прогонов на клетку «рука × сцена». Сцены построены держателем,
@@ -313,7 +314,7 @@ var deletionScenes = []deletionScene{
 // (`UsersW().Delete`): первый оператор его транзакции берёт строку человека, а
 // каскад идёт вниз — сессия, семейство, код.
 func deleteUserByProductWriter(ctx context.Context, repo *kanamepg.Repository, sc domain.CeremonyContext) error {
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return err
 	}

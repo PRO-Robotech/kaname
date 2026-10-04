@@ -51,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // publicReadRig собирает use-case ТАК ЖЕ, как композиционный корень, — без
@@ -369,12 +370,12 @@ func TestPublicRead_WithdrawalWhoseTransactionStartedFirstStillCloses(t *testing
 	const id = "reg000000000early/team/app"
 	v1, v2 := versions()
 
-	closeTx, err := txb.Begin(ctx) // снятие начало транзакцию ПЕРВЫМ
+	closeTx, err := txb.Begin(journalfixture.Writing(ctx)) // снятие начало транзакцию ПЕРВЫМ
 	require.NoError(t, err)
 	defer func() { _ = closeTx.Rollback(ctx) }()
 	time.Sleep(5 * time.Millisecond) // метка BEGIN у открытия заведомо позже
 
-	openTx, err := txb.Begin(ctx)
+	openTx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	applied, err := pub.ApplyTx(ctx, openTx, publicReadType, id, true, v1)
 	require.NoError(t, err)

@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestOAuthClientNameLabels_SA_PersistOnInsert_RoundTrip(t *testing.T) {
@@ -68,7 +69,7 @@ func TestOAuthClientNameLabels_SA_PersistOnInsert_RoundTrip(t *testing.T) {
 		Labels:          domain.Labels{"env": "prod", "team": "platform"},
 	}
 
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	persisted, err := repo.Insert(ctx, tx, row)
 	require.NoError(t, err)
@@ -123,7 +124,7 @@ func TestOAuthClientNameLabels_SA_EmptyDefaults(t *testing.T) {
 		PublicKeyPEM:    "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
 		KeyAlgorithm:    "ES256",
 	}
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = repo.Insert(ctx, tx, row)
 	require.NoError(t, err)
@@ -163,7 +164,7 @@ func TestOAuthClientNameLabels_User_PersistOnInsert_RoundTrip(t *testing.T) {
 		Labels:          domain.Labels{"device": "macbook", "purpose": "cli"},
 	}
 
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	persisted, err := repo.Insert(ctx, tx, row)
 	require.NoError(t, err)
@@ -215,7 +216,7 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 		KeyAlgorithm:    "ES256",
 		Labels:          tooMany,
 	}
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = repo.Insert(ctx, tx, row)

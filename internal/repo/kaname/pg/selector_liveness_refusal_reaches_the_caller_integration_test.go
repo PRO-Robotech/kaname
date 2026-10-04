@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // replaceSelectorsThrough — правка правил роли НАСТОЯЩИМ писателем в своей
@@ -44,7 +45,7 @@ func replaceSelectorsThrough(t *testing.T, repo *kanamepg.Repository,
 	role domain.RoleID, fp string, types []string) error {
 	t.Helper()
 	ctx := t.Context()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	if rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
 		RuleFP: fp, Arm: domain.ArmAnchor, ObjectTypes: types,

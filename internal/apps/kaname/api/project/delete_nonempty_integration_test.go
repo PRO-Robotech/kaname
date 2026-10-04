@@ -54,6 +54,7 @@ import (
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // reasonReferenceInUse — машинный признак полосы «на ресурс ещё ссылаются»
@@ -156,7 +157,7 @@ func seedProjectRole(t *testing.T, ctx context.Context, repo *kanamepg.Repositor
 		Description: domain.Description("project-scoped child of the project under test"),
 		Permissions: domain.Permissions{"iam.project.*.get"},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err)
@@ -404,7 +405,7 @@ func seedBindingWithLedger(t *testing.T, ctx context.Context, env *pneEnv, uid d
 		string(acb), string(uid), roleID, string(prj))
 	require.NoError(t, err)
 
-	w, err := env.repo.Writer(ctx)
+	w, err := env.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, acb, []abrepo.RelationTuple{
 		{User: "project:" + string(prj), Relation: "project", Object: "iam_access_binding:" + string(acb)},

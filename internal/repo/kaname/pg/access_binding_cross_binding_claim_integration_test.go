@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // claimedProbe runs the survivor probe on a fresh reader-tx.
@@ -80,7 +81,7 @@ func TestABEmittedTuples_CrossBindingClaim_OnlyOtherActiveBindingsKeepATupleAliv
 	// A tuple nobody recorded at all — must never be reported as claimed.
 	unknown := repoab.RelationTuple{User: "user:" + string(uid), Relation: "v_create", Object: "account:" + string(acc.ID)}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, abA.ID, []repoab.RelationTuple{shared, onlyA}))
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, abB.ID, []repoab.RelationTuple{shared}))
@@ -99,7 +100,7 @@ func TestABEmittedTuples_CrossBindingClaim_OnlyOtherActiveBindingsKeepATupleAliv
 
 	// B revoked (soft): a dead grant keeps NOTHING alive, so A's teardown may now
 	// remove `shared` — the LAST ACTIVE claimant's revoke must be effective.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w2.AccessBindingsW().RevokeGuarded(ctx, abB.ID, uid)
 	require.NoError(t, err)

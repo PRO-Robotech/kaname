@@ -2348,8 +2348,13 @@ func internalStreamChain(deps internalChainDeps) ([]grpc.StreamServerInterceptor
 // (замысел З13 «Перечень закрыт в корне kaname»): прочие внутренние вызовы
 // модулей служебного субъекта не получают (NTF1-M07). Форма — как в файле
 // настроек, без ведущей косой.
+//
+// Методы справочника адресов (NTF-3 Р28) — вызывающий их один, `service:notify`;
+// вне перечня у вызова `notify` субъекта нет.
 var serviceIdentityMethods = map[string]struct{}{
-	strings.TrimPrefix(iamv1.InternalNotificationGrantService_ResolveSend_FullMethodName, "/"): {},
+	strings.TrimPrefix(iamv1.InternalNotificationGrantService_ResolveSend_FullMethodName, "/"):             {},
+	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_Resolve_FullMethodName, "/"):             {},
+	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_ListProjectAudience_FullMethodName, "/"): {},
 }
 
 // serviceIdentityLink — звено Р2 из ключа `authn.service-identity`.

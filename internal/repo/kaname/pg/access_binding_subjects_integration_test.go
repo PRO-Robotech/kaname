@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func countABSubjects(t *testing.T, ctx context.Context, repo *kanamepg.Repository, bindingID domain.AccessBindingID) int {
@@ -49,7 +50,7 @@ func countABSubjects(t *testing.T, ctx context.Context, repo *kanamepg.Repositor
 
 func insertSubjects(t *testing.T, ctx context.Context, repo *kanamepg.Repository, id domain.AccessBindingID, subs []domain.Subject) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	if err := w.AccessBindingsW().InsertSubjects(ctx, id, subs); err != nil {
 		_ = w.Rollback(ctx)
@@ -125,7 +126,7 @@ func TestABSubjects_E30_CascadeOnBindingDelete(t *testing.T) {
 	require.Equal(t, 2, countABSubjects(t, ctx, repo, ab.ID))
 
 	// HARD delete the binding row → CASCADE drops subject rows.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().Delete(ctx, ab.ID))
 	require.NoError(t, w.Commit(ctx))
@@ -157,7 +158,7 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 	})
 
 	// Remove ONLY the group subject; the user subject survives.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	deleted, err := w.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
 	require.NoError(t, err)
@@ -176,7 +177,7 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 	assert.Equal(t, domain.SubjectTypeUser, got[0].Type)
 
 	// Idempotent: deleting an absent subject returns false.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	d2, err := w2.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
 	require.NoError(t, err)
@@ -285,7 +286,7 @@ func TestABSubjects_RACE_ConcurrentInsertSameSubject_OneRow(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			w, werr := repo.Writer(ctx)
+			w, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				return
 			}

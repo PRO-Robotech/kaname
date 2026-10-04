@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func mailIntent(to string, limit outboxtypes.InviteMailRateLimit) outboxtypes.InviteMailIntent {
@@ -73,7 +74,7 @@ func TestInviteMailRateLimit_WithinTheCapTheLetterIsQueued(t *testing.T) {
 	const to = "mail25-cap@example.com"
 
 	for i := 1; i <= 2; i++ {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		queued, err := w.EmitInviteMail(ctx, mailIntent(to, limit))
 		require.NoError(t, err)
@@ -83,7 +84,7 @@ func TestInviteMailRateLimit_WithinTheCapTheLetterIsQueued(t *testing.T) {
 	require.Equal(t, 2, countQueuedMail(t, ctx, pool, to))
 
 	// Сверхнормативное: НЕ ошибка и НЕ в очереди.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	queued, err := w.EmitInviteMail(ctx, mailIntent(to, limit))
 	require.NoError(t, err, "сверхнормативное намерение обязано отвечать «не поставлено», а не ошибкой: "+
@@ -93,7 +94,7 @@ func TestInviteMailRateLimit_WithinTheCapTheLetterIsQueued(t *testing.T) {
 	require.Equal(t, 2, countQueuedMail(t, ctx, pool, to), "сверхнормативное письмо попало в очередь")
 
 	// Регистр адреса ограничение не обходит.
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	queued, err = w.EmitInviteMail(ctx, mailIntent("MAIL25-CAP@Example.COM", limit))
 	require.NoError(t, err)
@@ -128,7 +129,7 @@ func TestInviteMailRateLimit_ConcurrentSendersChargeExactlyTheCap(t *testing.T) 
 		go func() {
 			defer wg.Done()
 			<-startGun
-			w, err := repo.Writer(ctx)
+			w, err := repo.Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
@@ -175,14 +176,14 @@ func TestInviteMailRateLimit_ExpiredWindowOpensAgain(t *testing.T) {
 	limit := outboxtypes.InviteMailRateLimit{MaxPerWindow: 1, Window: time.Hour}
 	const to = "mail25-window@example.com"
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	queued, err := w.EmitInviteMail(ctx, mailIntent(to, limit))
 	require.NoError(t, err)
 	require.True(t, queued)
 	require.NoError(t, w.Commit(ctx))
 
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	queued, err = w.EmitInviteMail(ctx, mailIntent(to, limit))
 	require.NoError(t, err)
@@ -194,7 +195,7 @@ func TestInviteMailRateLimit_ExpiredWindowOpensAgain(t *testing.T) {
 		`UPDATE kaname.invite_mail_windows SET window_started_at = window_started_at - interval '2 hours' WHERE recipient = $1`, to)
 	require.NoError(t, err)
 
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	queued, err = w.EmitInviteMail(ctx, mailIntent(to, limit))
 	require.NoError(t, err)
@@ -218,7 +219,7 @@ func TestInviteMailRateLimit_NonPositiveLimitIsRefusedNotUnlimited(t *testing.T)
 		{MaxPerWindow: 0, Window: time.Hour},
 		{MaxPerWindow: 3, Window: 0},
 	} {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		_, err = w.EmitInviteMail(ctx, mailIntent("mail43@example.com", limit))
 		require.Error(t, err, "непозитивное ограничение %+v принято писателем — это «без ограничения», которого не существует", limit)

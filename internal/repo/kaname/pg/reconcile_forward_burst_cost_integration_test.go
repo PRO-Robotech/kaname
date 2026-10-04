@@ -84,6 +84,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // advisoryStatementCounter — наблюдатель операторов, считающий ОТДЕЛЬНО те, что
@@ -191,7 +192,7 @@ func TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize(t *testing.T) {
 
 	// ── ЗАКОННЫЙ БЛИЗНЕЦ: полный проход блокировку БЕРЁТ ──────────────────────
 	// Без него ноль у форварда неотличим от «счётчик ничего не считает».
-	require.NoError(t, adapter.WithTx(ctx, func(ctx context.Context, s reconcile.ReconcileStore) error {
+	require.NoError(t, adapter.WithTx(journalfixture.Writing(ctx), func(ctx context.Context, s reconcile.ReconcileStore) error {
 		return s.AcquireBindingLock(ctx, bid)
 	}))
 	fullAdvisory, fullTotal := counter.take()
