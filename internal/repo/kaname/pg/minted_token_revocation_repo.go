@@ -86,12 +86,11 @@ func (r *MintedTokenRevocationRepo) Revoke(ctx context.Context, subject string, 
 // ТОЛЬКО вместе с принятым моментом, на равных стоит последняя запись.
 // Отброшенный момент не переносит сюда ничего.
 //
-// ЧТО ОСТАЁТСЯ РАСХОЖДЕНИЕМ И ГДЕ ОНО ЖИВЁТ: схемные писатели этой же строки
-// (`kaname.minted_cutoff_on_*`) переписывают причину и актора безусловно — они
-// SQL, и правит их миграция, то есть другая полоса. Номера у задачи пока нет:
-// заводит её не эта полоса, и до заведения адресом служит эта координата.
-// Предикат снятия: у функций
-// `minted_cutoff_on_*` стоит тот же `CASE WHEN` по моменту, что и здесь.
+// Тот же замок стоит у схемных писателей этой строки (`kaname.minted_cutoff_on_*`,
+// четыре триггера): их определения с `CASE WHEN` по моменту ставит миграция
+// `20261003202945_subject_cutoff_writes_both_records_under_one_lock.sql`
+// (kaname#335). Правишь замок здесь — правь его и там новой миграцией: держат
+// совпадение пробы `TestSubjectCutoff_KN_SCL_*` поведением, а не текстом.
 const upsertMintedCutoffSQL = `INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
 		VALUES ($1,$2,$3,$4)
 		ON CONFLICT (subject) DO UPDATE
@@ -164,8 +163,9 @@ func validateMintedCutoffInput(subject, decidedBy string) error {
 //
 // # Предикат бессмысленности — доказательство, а не оценка
 //
-// Строка отвергает токен, отчеканенный РАНЬШЕ `revoke_before`. Токен живёт не
-// дольше `MaxTokenTTL` и принимается с допуском `ClockSkew`. Значит после
+// Строка отвергает токен, отчеканенный НЕ ПОЗЖЕ `revoke_before` (граница
+// включающая, kaname#171). Токен живёт не дольше `MaxTokenTTL` и принимается с
+// допуском `ClockSkew`. Значит после
 // `revoke_before + MaxTokenTTL + ClockSkew` строка не может изменить ни одного
 // исхода: всякий токен, который она отвергла бы, к этому моменту уже отвергнут
 // собственным сроком.

@@ -81,8 +81,9 @@ type AccessKeyServiceClient interface {
 	// BeginRegistration — выдать испытание регистрации ключа (Ф7-40).
 	//
 	// Испытание привязано к вызывающему и однократно; срок — литерал контракта,
-	// строго меньше окна свежести. Отказы: сессия несвежа — FAILED_PRECONDITION
-	// `SESSION_NOT_FRESH` со следующим шагом (Ф7-04).
+	// строго меньше окна свежести. Отказы: сессия несвежа — PERMISSION_DENIED
+	// (HTTP 403) `SESSION_NOT_FRESH` со следующим шагом (Ф7-04); тот же отказ,
+	// что у приёма результата и у снятия.
 	BeginRegistration(ctx context.Context, in *BeginAccessKeyRegistrationRequest, opts ...grpc.CallOption) (*AccessKeyRegistrationChallenge, error)
 	// FinishRegistration — принять результат церемонии и завести ключ (Ф7-01).
 	//
@@ -237,8 +238,9 @@ type AccessKeyServiceServer interface {
 	// BeginRegistration — выдать испытание регистрации ключа (Ф7-40).
 	//
 	// Испытание привязано к вызывающему и однократно; срок — литерал контракта,
-	// строго меньше окна свежести. Отказы: сессия несвежа — FAILED_PRECONDITION
-	// `SESSION_NOT_FRESH` со следующим шагом (Ф7-04).
+	// строго меньше окна свежести. Отказы: сессия несвежа — PERMISSION_DENIED
+	// (HTTP 403) `SESSION_NOT_FRESH` со следующим шагом (Ф7-04); тот же отказ,
+	// что у приёма результата и у снятия.
 	BeginRegistration(context.Context, *BeginAccessKeyRegistrationRequest) (*AccessKeyRegistrationChallenge, error)
 	// FinishRegistration — принять результат церемонии и завести ключ (Ф7-01).
 	//

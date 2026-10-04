@@ -11,14 +11,12 @@ import (
 
 // RegistryTokenCredentialKindOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
 //
-// Собран из констант производителя (`registry_token.Outcome*`), а не выписан
-// здесь: клетка окна перехода — ПРЕДИКАТ его закрытия, и разойдись набор с
-// производителем, предикат отвечал бы «переведены все» на непереведённых.
-var RegistryTokenCredentialKindOutcomes = []string{
-	registrytoken.OutcomeBasicAccepted,
-	registrytoken.OutcomeKeyMaterialAcceptedInWindow,
-	registrytoken.OutcomeKeyMaterialRefused,
-}
+// Берётся у производителя (`registry_token.CredentialKindOutcomes`), а не
+// выписан здесь: клетка окна перехода — ПРЕДИКАТ его закрытия, и разойдись
+// набор с производителем, предикат отвечал бы «переведены все» на
+// непереведённых. Клетки отказа базового секрета по причине (kaname#390)
+// выводятся там же из словаря причин домена.
+var RegistryTokenCredentialKindOutcomes = registrytoken.CredentialKindOutcomes()
 
 // RegistryTokenCredentialKindRecorder — исходы полос предъявленного
 // удостоверения докерной полосы `/iam/token`.
@@ -72,7 +70,11 @@ func (r *Registry) NewRegistryTokenCredentialKindRecorder() *RegistryTokenCreden
 				"обновление уже ломает». key_material_accepted_in_window — ключевой материал " +
 				"принят через ОТКРЫТОЕ окно перехода: это ПРЕДИКАТ ЗАКРЫТИЯ ОКНА — пока он " +
 				"растёт, переведены не все, и ручку " +
-				"api-server.registry-token.key-material-window-until снимать рано.",
+				"api-server.registry-token.key-material-window-until снимать рано. " +
+				"basic_refused_<причина> — отказ базового секрета по причине, названной " +
+				"авторитетом (тот же словарь причин, что у внутренних глаголов базового " +
+				"секрета); basic_refused_reason_unnamed — авторитет причины не назвал; " +
+				"basic_principal_kind_refused — секрет не машинного принципала.",
 		}, []string{"outcome"}),
 	}
 	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей

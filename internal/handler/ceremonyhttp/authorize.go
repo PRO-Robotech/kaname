@@ -178,12 +178,11 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case ceremonyapp.VerdictRefusedUntrusted:
 		a.refuseUntrusted(ctx, w, OutcomeAuthorizeProtocolRefused, clientID, res.Why)
 	case ceremonyapp.VerdictLoginRequired:
-		a.challenge(ctx, w, OutcomeAuthorizeLoginRequired, clientID, res.Subject, errorBody("login_required"))
+		a.challenge(ctx, w, target.RedirectURI, "login_required", q.Get("state"),
+			OutcomeAuthorizeLoginRequired, clientID, res.Subject)
 	case ceremonyapp.VerdictStepUpRequired:
-		a.challenge(ctx, w, OutcomeAuthorizeStepUpRequired, clientID, res.Subject, map[string]string{
-			"error":      "insufficient_user_authentication",
-			"acr_values": res.AcrValues,
-		})
+		a.challenge(ctx, w, target.RedirectURI, "insufficient_user_authentication", q.Get("state"),
+			OutcomeAuthorizeStepUpRequired, clientID, res.Subject)
 	case ceremonyapp.VerdictIssued:
 		// Согласие первопартийного клиента не спрашивается (приёмка §4, 09):
 		// ответ выдачи — сразу перенаправление с кодом. Адрес собрал движок; код
@@ -249,10 +248,25 @@ func (a *Authorize) refuseByRedirect(ctx context.Context, w http.ResponseWriter,
 	w.WriteHeader(http.StatusFound)
 }
 
-// challenge — вызов аутентификации (нет сессии либо уровень ниже запрошенного):
-// кода нет, и цель не получает ничего — вход проводит наша полоса входа.
-func (a *Authorize) challenge(ctx context.Context, w http.ResponseWriter, outcome Outcome, clientID, subject string,
-	body map[string]string,
+// challenge — вызов аутентификации (нет годной сессии либо уровень ниже
+// запрошенного): кода нет, и отказ уходит ПРИЛОЖЕНИЮ — 302 на доверенную цель
+// (приёмка ceremony-pace-is-named-by-number, Р11, задача kaname#525). Адрес
+// авторизации открывает браузер; ответ без перенаправления остался бы у него,
+// и приложение не узнало бы, что человека надо вести на вход либо на шаг
+// вверх.
+//
+// Перенаправлять безопасно: сюда доходит только запрос, чья цель уже доверена
+// — клиент известен, адрес возврата зарегистрирован, `state` не короче пола
+// (ServeHTTP, шаги 2–3). Незарегистрированная цель и неизвестный клиент
+// получают прежний отказ без перенаправления при любой сессии.
+//
+// В строке запроса — собственные параметры цели, `error` и `state` дословно, и
+// ничего сверх: ни описания отказа, ни запрошенного уровня — строка уходит в
+// историю браузера и в заголовок источника перехода, а уровень приложение
+// назвало само. `state` здесь возвращается, в отличие от отказов протокола: он
+// прошёл пол, и приложение по нему связывает ответ со своим запросом.
+func (a *Authorize) challenge(ctx context.Context, w http.ResponseWriter, target, wire, state string,
+	outcome Outcome, clientID, subject string,
 ) {
 	a.cfg.Census.count(outcome)
 	attrs := []any{slog.String("outcome", string(outcome)), slog.String("client", clientID)}
@@ -260,7 +274,20 @@ func (a *Authorize) challenge(ctx context.Context, w http.ResponseWriter, outcom
 		attrs = append(attrs, slog.String("subject", subject))
 	}
 	a.cfg.Logger.InfoContext(ctx, "authorization request needs authentication", attrs...)
-	writeJSON(w, http.StatusUnauthorized, body)
+	u, err := url.Parse(target)
+	if err != nil {
+		// Цель — зарегистрированный адрес, прошедший разбор домена ресурса;
+		// неразбираемой она быть не может. Если всё же стала — отвечать ею
+		// нельзя: отказ без перенаправления, как недоверенной цели.
+		writeText(w, http.StatusBadRequest, untrustedTargetRefusal)
+		return
+	}
+	params := u.Query()
+	params.Set("error", wire)
+	params.Set("state", state)
+	u.RawQuery = params.Encode()
+	w.Header().Set("Location", u.String())
+	w.WriteHeader(http.StatusFound)
 }
 
 // writeRetryText — отказ по темпу точки авторизации: срок ожидания целыми

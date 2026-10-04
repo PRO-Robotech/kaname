@@ -460,7 +460,7 @@ func TestDeclaredServiceHistoryRootIsCarriedByThisTree(t *testing.T) {
 // Расширение, доказанное только на ОДНОЙ форме, оставляет остальные
 // непроверенными: распознаватель мог узнать их «почти» — например, поймать
 // оборот и потерять хеш, — и разница между «не нашёл» и «нечего искать» снова
-// стала бы невидимой. Поэтому каждая из трёх форм получает свою пару: дефект
+// стала бы невидимой. Поэтому каждая из объявленных форм получает свою пару: дефект
 // находится с координатой, законный близнец молчит.
 //
 // ЗАЧЕМ ЕЩЁ ОСЬ ПЕРЕПИСИ. Числа по формам печатаются ПО ОТДЕЛЬНОСТИ, и это
@@ -515,8 +515,56 @@ func TestDatingCensusNamesEveryDeclaredFormEvenWhenAbsent(t *testing.T) {
 			"форма %q исчезла из переписи — её ноль неотличим от «не искали»", phrase)
 	}
 	require.Equal(t, 1, c.byForm[datingPhrases[0]])
-	require.Zero(t, c.byForm[datingPhrases[1]])
-	require.Zero(t, c.byForm[datingPhrases[2]])
+	for _, phrase := range datingPhrases[1:] {
+		require.Zerof(t, c.byForm[phrase], "форма %q сосчитана на входе, где её нет", phrase)
+	}
+}
+
+// pluralDatingPhrase — ЧЕТВЁРТАЯ форма объявления, множественное число второй.
+//
+// Выписана здесь ЛИТЕРАЛОМ, а не взята из `datingPhrases`, и это несущее: проба
+// по перечню (`...SeesEachDeclaredFormAndCountsItApart`) проходит ВСЕГДА — она
+// судит те формы, о которых распознаватель уже знает, и о забытой молчит. Форма,
+// которой корпус пишет, а перечень не несёт, ловится только пробой, называющей
+// её от корпуса (kaname#172: восемь приёмок открывают ею строку датировки).
+const pluralDatingPhrase = "Ревизии измерения"
+
+// TestDatingGateSeesThePluralForm — ИНЪЕКЦИЯ формы, которую пишет корпус.
+//
+// Дефект и законный близнец отличаются РОВНО ОДНИМ фактом — именем дома у
+// ревизии. Без формы в перечне распознаватель не видит ни того, ни другого:
+// не красное и не зелёное, а отсутствие вопроса.
+func TestDatingGateSeesThePluralForm(t *testing.T) {
+	// ДЕФЕКТ: необъявленный дом — находка с координатой и формой в переписи.
+	docs := map[string]string{
+		"acceptance/plural.md": declOfForm(pluralDatingPhrase+" — по дому",
+			"`Some-Other/repo@deadbee` (замер оттуда)"),
+	}
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1,
+		"форма %q оставила гейт зелёным — всё записанное ею вне наблюдения", pluralDatingPhrase)
+	require.Contains(t, findings[0], "НЕОБЪЯВЛЕННАЯ ИСТОРИЯ")
+	require.Contains(t, findings[0], "acceptance/plural.md", "находка обязана НАЗВАТЬ координату")
+	require.Equal(t, 1, c.byForm[pluralDatingPhrase],
+		"перепись не отнесла объявление к его форме: %v", c.byForm)
+	require.Zero(t, c.byForm["Ревизия измерения"],
+		"множественная форма засчитана единственной — полоса прежней формы сдвинулась")
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же текст, дом объявлен — молчание, форма сосчитана.
+	docs["acceptance/plural.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"`PRO-Robotech/kacho@deadbee` (замер оттуда)")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Empty(t, findings, "гейт краснеет на законной датировке формой %q", pluralDatingPhrase)
+	require.Equal(t, 1, c.inherited, "унаследованная датировка не сосчитана")
+	require.Equal(t, 1, c.byForm[pluralDatingPhrase], "перепись потеряла форму на законном входе")
+
+	// ВТОРОЙ ДЕФЕКТ той же формы: ревизия своей истории, которой в ней нет.
+	docs["acceptance/plural.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"дом службы — эта история, ревизия `deadbee`")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "отсутствующая ревизия формой %q не найдена", pluralDatingPhrase)
+	require.Contains(t, findings[0], "РЕВИЗИИ НЕТ В ЭТОЙ ИСТОРИИ")
+	require.Equal(t, 1, c.absent)
 }
 
 // TestDatingGateAcceptsBothDeclaredPredecessors — ИНЪЕКЦИЯ по каждому дому.
@@ -547,6 +595,39 @@ func TestDatingGateAcceptsBothDeclaredPredecessors(t *testing.T) {
 	findings, _ := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
 	require.Len(t, findings, 1, "необъявленный дом принят — форма стала способом сослаться куда угодно")
 	require.Contains(t, findings[0], "НЕОБЪЯВЛЕННАЯ ИСТОРИЯ")
+}
+
+// TestDatingGateJudgesItsOwnQualifiedHistoryByAncestry — ИНЪЕКЦИЯ формы, которой
+// корпус называет СВОЙ дом вместе с репозиторием (`PRO-Robotech/kaname@<хеш>`).
+//
+// Прежде такая цитата шла в ветку «чужой истории» и получала находку «перемерить
+// число негде» — диагноз ложный: дом назван, и он здесь. Хуже того, ревизия своей
+// истории под этой формой НЕ СУДИЛАСЬ на вхождение в ствол вовсе. Поэтому пара:
+// своя ревизия, которой в истории нет, — находка о ревизии; та же форма с
+// ревизией ствола — молчание и счёт в половине «предок», а не «предшественник».
+func TestDatingGateJudgesItsOwnQualifiedHistoryByAncestry(t *testing.T) {
+	require.NotContains(t, predecessorRepos, serviceRepo,
+		"дом службы объявлен собственным предшественником — две истории слились в одну")
+
+	docs := map[string]string{
+		"acceptance/own.md": declOfForm(pluralDatingPhrase+" — по дому",
+			"дом службы `"+serviceRepo+"@deadbee` (ствол)"),
+	}
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "своя ревизия, которой в истории нет, прошла под формой с домом")
+	require.Contains(t, findings[0], "РЕВИЗИИ НЕТ В ЭТОЙ ИСТОРИИ",
+		"находка назвала не ту причину: дом службы — не необъявленная история")
+	require.Contains(t, findings[0], "acceptance/own.md")
+	require.Equal(t, 1, c.absent)
+	require.Zero(t, c.inherited, "своя история засчитана историей предшественника")
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: та же форма, ревизия ствола — молчание.
+	docs["acceptance/own.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"дом службы `"+serviceRepo+"@1234abc` (ствол)")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Empty(t, findings, "гейт краснеет на законной датировке своим домом")
+	require.Equal(t, 1, c.dated, "своя ревизия не попала в половину «предок»")
+	require.Zero(t, c.inherited)
 }
 
 // TestDatingDeclarationSurvivesALineWrap — ИНЪЕКЦИЯ единицы счёта.

@@ -61,6 +61,13 @@ type Store interface {
 type Writer interface {
 	// InsertChallenge кладёт выданное испытание.
 	InsertChallenge(ctx context.Context, c domain.AccessKeyChallenge) error
+	// EnsureCeremonyHandle — рукоятка человека ОДНИМ оператором (Ф13 Р3):
+	// строки нет — ложится `minted`, строка есть — возвращается ЕЁ значение.
+	// Смены нет by construction: рукоятка уже лежит в аутентификаторах
+	// держателя, и наша правка её там не догонит. Исход держит ключ строки, а
+	// не сравнение прочитанного (ban #10): два одновременных заведения дают
+	// одно значение.
+	EnsureCeremonyHandle(ctx context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error)
 	// ConsumeChallenge — ОДИН оператор однократности (Ф7-03, Ф7-53): строка
 	// вызывающего этой процедуры, не потреблённая и не истёкшая на now,
 	// получает отметку; consumed=false — её нет, она потреблена либо истекла.
