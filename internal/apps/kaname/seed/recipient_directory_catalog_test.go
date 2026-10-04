@@ -26,12 +26,15 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+
+	authzv1 "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1" // регистрирует дескрипторы контракта
@@ -108,6 +111,57 @@ func TestNTF3151_RecipientDirectoryMethodsAreInThePermissionCatalog(t *testing.T
 		if e.RequiredRelation != "reader" || e.ScopeExtractor.ObjectType != rdDirectoryTyp {
 			t.Fatalf("запись каталога %s: required_relation=%q object_type=%q, ожидалось reader на %s",
 				fqn, e.RequiredRelation, e.ScopeExtractor.ObjectType, rdDirectoryTyp)
+		}
+	}
+}
+
+// TestD121_RecipientDirectoryReadsCarryTheRoutineFloor — решение Д121: чтения
+// справочника адресов вызывает служба notify по сертификату, второго фактора у
+// неё нет по построению, поэтому оба метода несут рутинную полосу
+// `required_acr_min = "1"`. Мутации выдачи права на письма
+// (`InternalNotificationGrantService/Revoke`, `/Restore`) остаются на «2» —
+// это парный контроль: проба различает полосы, а не читает одно значение у
+// всех.
+//
+// Утверждается обе стороны цепочки: объявление в контракте (опция метода) и
+// запись каталога прав, порождённая из него генератором. Расхождение двух
+// мест — отдельный отказ: каталог, не пересобранный после правки контракта,
+// читался бы зелёным по одному контракту.
+func TestD121_RecipientDirectoryReadsCarryTheRoutineFloor(t *testing.T) {
+	want := map[string]string{
+		rdService + "/Resolve":             "1",
+		rdService + "/ListProjectAudience": "1",
+		rdControlSvc + "/Revoke":           "2",
+		rdControlSvc + "/Restore":          "2",
+	}
+
+	reg, err := seed.LoadPermissionRegistry(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("фикстура: каталог прав не загружен: %v", err)
+	}
+
+	for fqn, floor := range want {
+		svcName, method, _ := strings.Cut(fqn, "/")
+		sd, ok := rdServiceDescriptor(t, svcName)
+		if !ok {
+			t.Fatalf("служба %s не найдена в реестре дескрипторов", svcName)
+		}
+		m := sd.Methods().ByName(protoreflect.Name(method))
+		if m == nil {
+			t.Fatalf("метод %s не объявлен контрактом", fqn)
+		}
+		declared, _ := proto.GetExtension(m.Options(), authzv1.E_RequiredAcrMin).(string)
+		if declared != floor {
+			t.Errorf("контракт %s: required_acr_min=%q, ожидалось %q (Д121)", fqn, declared, floor)
+		}
+
+		e, ok := reg.LookupFQN(fqn)
+		if !ok {
+			t.Fatalf("метода %s нет в каталоге прав (записей %d)", fqn, len(reg.All()))
+		}
+		if e.RequiredACRMin != floor {
+			t.Errorf("каталог %s: required_acr_min=%q, ожидалось %q (Д121; каталог пересобирается генератором из контракта)",
+				fqn, e.RequiredACRMin, floor)
 		}
 	}
 }
