@@ -3050,6 +3050,26 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience",
+    "permission": "iam.notification_recipients.listProjectAudience",
+    "required_relation": "reader",
+    "scope_extractor": {
+      "object_type": "notification_recipient_directory",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve",
+    "permission": "iam.notification_recipients.resolve",
+    "required_relation": "reader",
+    "scope_extractor": {
+      "object_type": "notification_recipient_directory",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.InternalOperationsService/ListIamOperations",
     "permission": "iam.internal_operationses.listIamOperations",
     "required_relation": "system_admin",

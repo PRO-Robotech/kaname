@@ -228,6 +228,10 @@ type CatalogPendingEntry struct {
 // Перечень снова непуст с 2026-10-04: три глагола контракта
 // `InternalNotificationGrantService` (полоса K3c, перепись на заведении: у края
 // 348 · у нас 351 · ожидающих 3 · применено 3; ствол платформы f4c74ba1aa1).
+// Тем же днём к ним прибавились два глагола контракта
+// `InternalNotificationRecipientService` (полоса X4D NTF-3, перепись на
+// заведении: у края 348 · у нас 353 · ожидающих 5 · применено 5; ствол
+// платформы 2afc06571c7).
 var catalogPendingEntries = []CatalogPendingEntry{
 	// ТРИ ГЛАГОЛА ВЫДАЧИ ПРАВА НА ПИСЬМА (NTF-1, kaname#484; замысел kacho#2915 З13, З18,
 	// CX1-104). Контракт `InternalNotificationGrantService` заведён полосой K3c;
@@ -275,6 +279,34 @@ var catalogPendingEntries = []CatalogPendingEntry{
 			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
 			"тогда запись снимается тем же изменением (полоса K3r маршрута kacho#2915)",
 		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2915",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience",
+		Why: "глагол справочника адресов заведён контрактом службы (kaname#484, NTF-3 Р7, Р28: " +
+			"внутренний слушатель, `reader` на `notification_recipient_directory`, вызывающий — `service:notify`); " +
+			"запись порождена генератором края над контрактом этой ревизии (`gateway/scripts/gen-permission-catalog.sh` " +
+			"платформы с отбором домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 123 имени " +
+			"службы, все побайтово равны нашей копии; полный прогон без отбора — 353 записи, побайтово равен нашей " +
+			"копии; у края на стволе платформы 2afc06571c7 записей 348, ни одной из пяти нет); край порождает свою " +
+			"копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается тем же изменением (подъём пина службы эпиком kacho#2918)",
+		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2918",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve",
+		Why: "глагол справочника адресов заведён контрактом службы (kaname#484, NTF-3 Р7, Р28: " +
+			"внутренний слушатель, `reader` на `notification_recipient_directory`, вызывающий — `service:notify`); " +
+			"запись порождена генератором края над контрактом этой ревизии (`gateway/scripts/gen-permission-catalog.sh` " +
+			"платформы с отбором домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 123 имени " +
+			"службы, все побайтово равны нашей копии; полный прогон без отбора — 353 записи, побайтово равен нашей " +
+			"копии; у края на стволе платформы 2afc06571c7 записей 348, ни одной из пяти нет); край порождает свою " +
+			"копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается тем же изменением (подъём пина службы эпиком kacho#2918)",
+		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2918",
 	},
 }
 

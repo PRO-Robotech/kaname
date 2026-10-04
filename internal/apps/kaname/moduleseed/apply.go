@@ -191,7 +191,7 @@ type Census struct {
 	// Manifests — ДОСТАВЛЕННЫХ манифестов прочитано. Свой сюда не входит.
 	Manifests int
 	// Seeding — из доставленных объявили раздел `seed` либо строку
-	// `notifications`. Ноль здесь законен и
+	// `notifications` или `recipientDirectory`. Ноль здесь законен и
 	// означает «модули посева не объявили», а НЕ «применять не стали».
 	Seeding int
 	// Reports — по модулю на каждый объявивший ДОСТАВЛЕННЫЙ манифест.
@@ -270,7 +270,7 @@ func (a *Applier) Apply(ctx context.Context, own *manifest.Manifest, delivered [
 	}
 
 	for _, m := range delivered {
-		if m == nil || (m.Seed == nil && m.Notifications == nil) {
+		if m == nil || !declaresSeeding(m) {
 			// «Посева нет» и «посев объявлен и пуст» — РАЗНЫЕ утверждения
 			// (`seed: null` против `seed: {}`), и различает их указатель.
 			// Первое здесь и остаётся первым: применять нечего.
@@ -298,7 +298,8 @@ func (a *Applier) ApplyAll(ctx context.Context, manifests []*manifest.Manifest) 
 
 // applyOne применяет посев одного манифеста под ОДНОЙ транзакцией.
 //
-// Манифест без раздела `seed` и без строки `notifications` даёт отчёт с нулями
+// Манифест без раздела `seed` и без строк `notifications` и
+// `recipientDirectory` даёт отчёт с нулями
 // и транзакции не открывает: применять нечего, а «подан и пуст» обязано быть
 // отличимо от «не подан» — это различает вызывающий по указателю в переписи.
 //
@@ -307,7 +308,7 @@ func (a *Applier) ApplyAll(ctx context.Context, manifests []*manifest.Manifest) 
 // службой, была бы формой, которую может написать любой модуль.
 func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest, holder manifest.NotificationsHolder) (Report, error) {
 	report := Report{Module: m.Module}
-	if m.Seed == nil && m.Notifications == nil {
+	if !declaresSeeding(m) {
 		return report, nil
 	}
 	seed := m.Seed
@@ -331,6 +332,11 @@ func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest, holder man
 	if err != nil {
 		return report, err
 	}
+	directory, err := directoryTuples(m)
+	if err != nil {
+		return report, err
+	}
+	tuples = append(tuples, directory...)
 	report.DeclaredServiceTuples = len(tuples)
 	if grant != nil {
 		report.DeclaredServiceTuples++
@@ -429,6 +435,34 @@ func notificationTuples(m *manifest.Manifest, holder manifest.NotificationsHolde
 		t, err := feedReaderTuple(reader, feed)
 		if err != nil {
 			return nil, fmt.Errorf("строка notifications: %w", err)
+		}
+		tuples = append(tuples, t)
+	}
+	return tuples, nil
+}
+
+// declaresSeeding — манифест объявил хоть что-то, что применяет посев: раздел
+// `seed`, строку `notifications` либо строку `recipientDirectory`.
+func declaresSeeding(m *manifest.Manifest) bool {
+	return m.Seed != nil || m.Notifications != nil || m.RecipientDirectory != nil
+}
+
+// directoryTuples — кортеж читателя справочника адресов строки
+// `recipientDirectory` манифеста m (приёмка NTF-3 Р28). Строки нет — кортежей
+// нет; строка негодна (не манифест notify, читатель не ровно [notify]) —
+// отказ тем же предикатом, что у загрузчика, до транзакции.
+func directoryTuples(m *manifest.Manifest) ([]ServiceTuple, error) {
+	if m.RecipientDirectory == nil {
+		return nil, nil
+	}
+	if err := manifest.JudgeRecipientDirectory(m); err != nil {
+		return nil, fmt.Errorf("строка recipientDirectory: %w", err)
+	}
+	tuples := make([]ServiceTuple, 0, len(m.RecipientDirectory.Readers))
+	for _, reader := range m.RecipientDirectory.Readers {
+		t, err := directoryReaderTuple(reader)
+		if err != nil {
+			return nil, fmt.Errorf("строка recipientDirectory: %w", err)
 		}
 		tuples = append(tuples, t)
 	}

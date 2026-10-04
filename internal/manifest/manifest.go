@@ -196,6 +196,9 @@ type Manifest struct {
 	// Notifications — строка уведомлений модуля; nil — строки нет. См.
 	// notifications.go.
 	Notifications *Notifications `yaml:"notifications"`
+	// RecipientDirectory — строка читателя справочника адресов; nil — строки
+	// нет. См. recipient_directory.go.
+	RecipientDirectory *RecipientDirectory `yaml:"recipientDirectory"`
 
 	// linkage — перепись валидатора связности, снятая при загрузке. Поле
 	// неэкспортируемое и без yaml-тега: это НЕ ключ документа, а результат
@@ -414,6 +417,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	if err := refuseNullNotifications(doc); err != nil {
 		return nil, err
 	}
+	if err := refuseNullRecipientDirectory(doc); err != nil {
+		return nil, err
+	}
 	// ЗДЕСЬ СТОЯЛ пред-разборный отказ по ключу `verbs` в правиле роли. Он снят
 	// ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (kacho#1844): поимённая форма права вернулась —
 	// вместе с проверкой её полноты по классу, как и предписывал §10 п. 2
@@ -452,6 +458,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
 	if err := judgeNotifications(&m, loadOpts.notificationsHolder, notificationsLine(doc)); err != nil {
+		faults = append(faults, err)
+	}
+	if err := judgeRecipientDirectory(&m, recipientDirectoryLine(doc)); err != nil {
 		faults = append(faults, err)
 	}
 

@@ -38,6 +38,12 @@ const (
 	relationNamespaceSender = "sender"
 	// typeNotificationNamespace — пространство уведомлений модуля.
 	typeNotificationNamespace = "notification_namespace"
+	// relationDirectoryReader — право читать адреса справочника (NTF-3 Р28).
+	relationDirectoryReader = "reader"
+	// typeRecipientDirectory — справочник адресов службы доступа; объект один.
+	typeRecipientDirectory = "notification_recipient_directory"
+	// recipientDirectoryRoot — идентификатор единственного объекта справочника.
+	recipientDirectoryRoot = "root"
 )
 
 // ErrServiceName — имя службы вне формы DNS label: служебного субъекта у него
@@ -103,4 +109,16 @@ func SenderTuple(namespace string) (ServiceTuple, error) {
 		return ServiceTuple{}, fmt.Errorf("%w: пространство %q", ErrServiceName, namespace)
 	}
 	return ServiceTuple{user: user, relation: relationNamespaceSender, objectType: typeNotificationNamespace, objectID: namespace}, nil
+}
+
+// directoryReaderTuple — `service:<reader> reader notification_recipient_directory:root`
+// (приёмка NTF-3 Р28). Имя читателя проходит форму имени службы фундамента; вне
+// формы — отказ.
+func directoryReaderTuple(reader string) (ServiceTuple, error) {
+	user := authz.ServiceSubject(grpcsrv.ServiceName(reader))
+	if user == "" {
+		return ServiceTuple{}, fmt.Errorf("%w: читатель справочника %q", ErrServiceName, reader)
+	}
+	return ServiceTuple{user: user, relation: relationDirectoryReader, objectType: typeRecipientDirectory,
+		objectID: recipientDirectoryRoot}, nil
 }

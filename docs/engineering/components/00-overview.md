@@ -239,6 +239,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalSubscriptionService`   | `Subscribe` — поток изменений семи собственных видов, сужаемый пообъектно |
 | `:9091`   | `InternalHumanSessionService`   | `Resolve` — наша сессия человека по носителю; регистрируется только под посадкой `own` (Ф3) |
 | `:9091`   | `InternalNotificationGrantService` | `ResolveSend` — решение о письме источника (право решает обработчик: служебный субъект `reader` ленты); `Revoke` / `Restore` выдачи — администратор кластера; без REST-привязок (NTF-1 Р5) |
+| `:9091`   | `InternalNotificationRecipientService` | `Resolve`, `ListProjectAudience` — справочник адресов получателей писем для `service:notify` (право решает обработчик: `reader` на `notification_recipient_directory:root`, тип без надзора администратора облака); без REST-привязок (NTF-3 Р7, Р28) |
 
 **Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —
 и расходился на ОБОИХ слушателях сразу. `services/iam/internal/check`

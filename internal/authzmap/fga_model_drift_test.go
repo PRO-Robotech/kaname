@@ -149,6 +149,9 @@ var nonGrantableModelTypes = map[string]string{
 	"service":                "subject type of the service principal service:<name> (corelib authz.ServiceSubject), never an authz object",
 	"notification_feed":      "notification right: reader is granted only by the manifest seed applier, never through the permission catalog",
 	"notification_namespace": "notification right: sender is granted only by the manifest seed applier, never through the permission catalog",
+	// Справочник адресов (NTF-3 Р28, kaname#484): reader пишет только строка
+	// манифеста notify `recipientDirectory` при посеве.
+	"notification_recipient_directory": "recipient directory right: reader is granted only by the notify manifest line recipientDirectory, never through the permission catalog",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the

@@ -104,10 +104,10 @@ func TestAdmitLegalTwinFromCanonIsAdmitted(t *testing.T) {
 	if !rep.Admitted() {
 		t.Fatalf("законный близнец из канона обязан быть допущен; находки: %v; перепись: %s", rep.Findings, rep.Census())
 	}
-	if rep.TypesSeen != 36 || rep.TypesNew != 1 {
-		t.Fatalf("перепись: типов осмотрено %d (ждали 36), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
+	if rep.TypesSeen != 37 || rep.TypesNew != 1 {
+		t.Fatalf("перепись: типов осмотрено %d (ждали 37), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
 	}
-	if !strings.Contains(rep.Census(), "типов осмотрено 36, новых 1, находок 0") {
+	if !strings.Contains(rep.Census(), "типов осмотрено 37, новых 1, находок 0") {
 		t.Fatalf("перепись обязана печататься в форме нормы §5 п. 3, получено: %s", rep.Census())
 	}
 }
@@ -128,7 +128,7 @@ func TestAdmitTypeNameAlreadyCarriedByCanon(t *testing.T) {
 		t.Fatalf("находка обязана называть ЧИСЛО вхождений, получено %q", got[0].Text)
 	}
 	// Переопределение канонического имени новым типом НЕ считается новым типом:
-	// формулировка через множество здесь молчит (различных имён по-прежнему 35).
+	// формулировка через множество здесь молчит (различных имён по-прежнему 36).
 	if rep.TypesNew != 0 {
 		t.Fatalf("новых типов обязано быть 0, получено %d", rep.TypesNew)
 	}
@@ -323,7 +323,7 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 	if n := len(findingsOf(rep, RuleD5)); n != 0 {
 		t.Fatalf("законная форма вывода обязана проходить, находок Д5′: %d", n)
 	}
-	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 272.
+	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 273.
 	// Число перемерено после снятия `cluster#console` (#1820): было 273.
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
@@ -339,8 +339,8 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 272 || bad != 0 {
-		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 272)", bad, pairs)
+	if pairs != 273 || bad != 0 {
+		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 273)", bad, pairs)
 	}
 }
 
@@ -454,7 +454,7 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 	if !strings.Contains(got[0].Text, "acme widget") {
 		t.Fatalf("находка обязана называть ПРЕДЪЯВЛЕННОЕ имя, получено %q", got[0].Text)
 	}
-	// Положительный близнец: все 35 имён типов канона форме удовлетворяют.
+	// Положительный близнец: все 36 имён типов канона форме удовлетворяют.
 	re := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
@@ -466,8 +466,8 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 			bad++
 		}
 	}
-	if len(m.Types) != 35 || bad != 0 {
-		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 35)", bad, len(m.Types))
+	if len(m.Types) != 36 || bad != 0 {
+		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 36)", bad, len(m.Types))
 	}
 }
 
@@ -491,7 +491,7 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 	if !strings.Contains(got[0].Text, "2") {
 		t.Fatalf("находка обязана называть число объявлений, получено %q", got[0].Text)
 	}
-	// Положительный близнец: в каноне 272 объявления и 0 имён, объявленных дважды
+	// Положительный близнец: в каноне 273 объявления и 0 имён, объявленных дважды
 	// (было 273 — перемерено после снятия `cluster#console`, #1820).
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
@@ -510,8 +510,8 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 			}
 		}
 	}
-	if decls != 272 || dups != 0 {
-		t.Fatalf("канон: объявлений %d (ждали 272), дублей имени %d (ждали 0)", decls, dups)
+	if decls != 273 || dups != 0 {
+		t.Fatalf("канон: объявлений %d (ждали 273), дублей имени %d (ждали 0)", decls, dups)
 	}
 }
 
@@ -612,7 +612,7 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 	}
 }
 
-// ── §2.1 · запретное множество канона: 2 из 272, транзитивных сверх прямых 0 ──
+// ── §2.1 · запретное множество канона: 2 из 273, транзитивных сверх прямых 0 ──
 //
 // Это ПРОИЗВОДИТЕЛЬ премиссы, которой ревизия круга 4 (§17.5) не нашла ни одного:
 // «два ребра и три дают на каноне один ответ» названо там числом-ориентиром, а
@@ -622,11 +622,13 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 //
 // ЧИСЛО СТОИТ В ИМЕНИ, и потому имя движется вместе с каноном: всякое снятие
 // или заведение объявления переименовывает эту пробу. Последний раз её двигало
-// заведение типов права на уведомления (kaname#484, NTF-1 З17): `reader` у
-// `notification_feed` и `sender` у `notification_namespace` — 270 → 272; до того
+// заведение типа справочника адресов (kaname#484, NTF-3 Р28): `reader` у
+// `notification_recipient_directory` — 272 → 273; до того типы права на
+// уведомления (NTF-1 З17): `reader` у `notification_feed` и `sender` у
+// `notification_namespace` — 270 → 272; до того
 // снятие `v_get` с типа `iam_role` (#1922) — 271 → 270. Так и задумано: имя,
 // называющее величину, не вправе пережить её молча.
-func TestCanonWildcardSetIsTwoOfTwoHundredSeventyTwo(t *testing.T) {
+func TestCanonWildcardSetIsTwoOfTwoHundredSeventyThree(t *testing.T) {
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -645,8 +647,8 @@ func TestCanonWildcardSetIsTwoOfTwoHundredSeventyTwo(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 272 {
-		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 272 — числа приёмки перемеряются, а не помнятся", pairs)
+	if pairs != 273 {
+		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 273 — числа приёмки перемеряются, а не помнятся", pairs)
 	}
 	if len(direct) != 2 || !direct["cluster.viewer"] || !direct["registry_repository.v_get"] {
 		t.Fatalf("прямых подстановок канона %d, ждали 2 (cluster.viewer, registry_repository.v_get): %v", len(direct), direct)
