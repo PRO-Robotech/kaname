@@ -64,9 +64,12 @@ type IssueUserTokenRequest struct {
 	Labels map[string]string `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Вид выдаваемого удостоверения (§2.5 приёмки BAT-1).
 	//
-	// Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: пустой перечень
-	// доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
-	// АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
+	// Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: выдаётся KEYPAIR.
+	// Выдаваемых видов у личности ДВА — KEYPAIR и SECRET. Перечня доверенных
+	// субъектов в этом запросе нет, поэтому FEDERATED недостижим: названный, он
+	// отвергается синхронно, до всякой записи, `INVALID_ARGUMENT` с текстом
+	// «credential_kind: FEDERATED is not available for this credential — it has
+	// no trusted_subjects field».
 	//
 	// Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
 	// потока — отвергается синхронно с именем поля, а не выпускается ключевой
