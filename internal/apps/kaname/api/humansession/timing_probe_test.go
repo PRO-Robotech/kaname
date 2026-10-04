@@ -48,6 +48,20 @@
 // годности (`timingIQRCeiling`): стенд шумит сильнее, чем различимость, которую
 // меряют, и вердикта нет ни в одну сторону (Ф1-50).
 //
+// # Инъекция Ф1-49 — способность критерия упасть (kaname#223)
+//
+// Ручка `KACHO_LOGIN_TIMING_INJECT=<имя полосы>` вносит в ОДНУ полосу задержку
+// после огибающей — калиброванную стоимость класса ручки «что писать» (Ф1
+// §4.1/§3.9: порядка стоимости проверки пароля, и не больше). С ручкой проба
+// обязана покраснеть критерием пар С ИМЕНЕМ этой полосы; без неё — зелёная
+// (положительный контроль). Потолок годности и N печатаются рядом с исходом
+// инъекции: при них она краснела. Имя, которого среди полос нет, — «не
+// выполнилось» словами, а не молча не внесённая инъекция. Та же способность
+// упасть на синтетических выборках держится без машины и без ручки —
+// `timing_probe_verdict_test.go`, на каждой отправке.
+//
+//	KACHO_LOGIN_TIMING=1 KACHO_LOGIN_TIMING_INJECT='адреса нет' go test ./internal/apps/kaname/api/humansession/ -run TestLogin_F3_31_RefusalTime -count=1 -v -timeout 60m
+//
 // # Почему ручной прогон
 //
 // Стоимость: A-потолок ≈ 1–2 с на обращение, B-потолок сравнимо; при N=12 на
@@ -65,6 +79,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,7 +93,14 @@ import (
 )
 
 const (
-	timingEnv        = "KACHO_LOGIN_TIMING"
+	timingEnv = "KACHO_LOGIN_TIMING"
+	// timingInjectEnv — ручка инъекции Ф1-49: имя полосы, в которую ПОСЛЕ
+	// огибающей вносится задержка объявленной величины (Ф1 §4.1/§3.9 — порядка
+	// стоимости проверки пароля классом ручки «что писать», и не больше).
+	// Величина не выписана: это калиброванная стоимость класса ручки на машине
+	// прогона. С ручкой проба обязана покраснеть С ИМЕНЕМ этой полосы; без неё —
+	// положительный контроль.
+	timingInjectEnv  = "KACHO_LOGIN_TIMING_INJECT"
 	timingRunCommand = "KACHO_LOGIN_TIMING=1 go test ./internal/apps/kaname/api/humansession/ " +
 		"-run TestLogin_F3_31 -count=1 -v -timeout 60m"
 	// timingLaneN — обращений на полосу; нижняя граница Ф1-48 — 10.
@@ -93,6 +115,8 @@ type timingLane struct {
 	email    string
 	password string
 	samples  []time.Duration
+	// inject — задержка инъекции Ф1-49, вносимая ПОСЛЕ огибающей внутри замера.
+	inject time.Duration
 }
 
 func (l *timingLane) stats() (median, iqr time.Duration) {
@@ -100,6 +124,53 @@ func (l *timingLane) stats() (median, iqr time.Duration) {
 	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
 	q := func(p float64) time.Duration { return s[int(float64(len(s)-1)*p)] }
 	return q(0.5), q(0.75) - q(0.25)
+}
+
+// timingRow — полоса с её медианой и размахом: вход критерия пар.
+type timingRow struct {
+	lane        *timingLane
+	median, iqr time.Duration
+}
+
+// timingPairFailures — критерий Ф1-48 по каждой паре полос: нарушившие пары
+// (с именами обеих полос) и строка печати на каждую пару.
+func timingPairFailures(rows []timingRow) (failures, lines []string) {
+	for i := range rows {
+		for j := i + 1; j < len(rows); j++ {
+			diff := rows[i].median - rows[j].median
+			if diff < 0 {
+				diff = -diff
+			}
+			bound := rows[i].iqr
+			if rows[j].iqr > bound {
+				bound = rows[j].iqr
+			}
+			verdict, sign := "ok", "≤"
+			if diff > bound {
+				verdict, sign = "КРАСНОЕ", ">"
+				failures = append(failures, fmt.Sprintf("%s ↔ %s: |Δмедиан| %v > IQR %v",
+					rows[i].lane.name, rows[j].lane.name, diff, bound))
+			}
+			lines = append(lines, fmt.Sprintf("пара %-36s ↔ %-36s |Δмедиан| %10v %s IQR %10v — %s",
+				rows[i].lane.name, rows[j].lane.name, diff, sign, bound, verdict))
+		}
+	}
+	return failures, lines
+}
+
+// timingInjectedLane — полоса, названная ручкой инъекции Ф1-49. Имя, которого
+// среди полос нет, — отказ словами с перечнем законных: молча не внесённая
+// инъекция дала бы зелёное, и оно прочиталось бы как «критерий слеп».
+func timingInjectedLane(lanes []*timingLane, name string) (*timingLane, error) {
+	names := make([]string, 0, len(lanes))
+	for _, l := range lanes {
+		if l.name == name {
+			return l, nil
+		}
+		names = append(names, strconv.Quote(l.name))
+	}
+	return nil, fmt.Errorf("ручка %s называет полосу %q, а такой полосы нет; законные: %s",
+		timingInjectEnv, name, strings.Join(names, ", "))
 }
 
 func argon2Verifier(t *testing.T, memory, iterations, parallelism uint32, password string) domain.LoginVerifier {
@@ -174,10 +245,15 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		argon2Class(65536, 3, 4), argon2Class(131072, 10, 8), argon2Class(32768, 3, 4),
 		{Format: h.hasher.Declared().Format, Params: h.hasher.Declared().Params},
 	}
+	knobClass := population[len(population)-1]
+	var knobCost time.Duration
 	for _, class := range population {
 		adm, err := envelope.Admit(ctx, class, passwordverify.EnvelopeTriggerStartup)
 		require.NoError(t, err, "калибровка класса %s", class.Key())
 		t.Logf("калибровка %-52s стоимость %10v · калибрована %v", class.Key(), adm.Cost, adm.Calibrated)
+		if class.Key() == knobClass.Key() {
+			knobCost = adm.Cost
+		}
 	}
 	ceiling, ok := envelope.Ceiling()
 	require.True(t, ok)
@@ -192,6 +268,19 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	// Адреса нет.
 	lanes = append(lanes, &timingLane{name: "адреса нет", email: "nobody@example.invalid", password: "wrong-nobody"})
 
+	// Инъекция Ф1-49 — по ручке, в одну названную полосу.
+	injectName := os.Getenv(timingInjectEnv)
+	if injectName != "" {
+		l, err := timingInjectedLane(lanes, injectName)
+		if err != nil {
+			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ: %v", err)
+		}
+		require.Positive(t, knobCost, "стоимость класса ручки не откалибрована — величине инъекции не из чего взяться")
+		l.inject = knobCost
+		t.Logf("инъекция Ф1-49: полоса %q · задержка %v после огибающей (калиброванная стоимость класса ручки %s)",
+			l.name, l.inject, knobClass.Key())
+	}
+
 	// Прогрев — по одному обращению на полосу, в замер не идёт.
 	for _, l := range lanes {
 		_, _ = h.login.Execute(ctx, humansession.LoginInput{Email: l.email, Password: l.password, Source: "203.0.113.31"})
@@ -201,6 +290,9 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		for _, l := range lanes {
 			start := time.Now()
 			_, err := h.login.Execute(ctx, humansession.LoginInput{Email: l.email, Password: l.password, Source: "203.0.113.31"})
+			if l.inject > 0 {
+				time.Sleep(l.inject) // Ф1-49: различие ПОСЛЕ огибающей — огибающая его не поглощает
+			}
 			l.samples = append(l.samples, time.Since(start))
 			require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "полоса %s: отказ обязан быть отказом входа, не частоты", l.name)
 		}
@@ -209,16 +301,12 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 
 	t.Logf("предел частоты: N=%d за T=%v · обращений на полосу %d · потолок годности IQR %v · нижняя граница N — 10",
 		limitN, limitT, timingLaneN, timingIQRCeiling)
-	type row struct {
-		lane        *timingLane
-		median, iqr time.Duration
-	}
-	var rows []row
+	var rows []timingRow
 	floor := envelope.Floor()
 	var belowFloor []string
 	for _, l := range lanes {
 		m, q := l.stats()
-		rows = append(rows, row{l, m, q})
+		rows = append(rows, timingRow{l, m, q})
 		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d · потолок %v", l.name, m, q, len(l.samples), floor)
 		if q > timingIQRCeiling {
 			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит сильнее измеряемого, вердикта нет",
@@ -229,24 +317,13 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		}
 	}
 	require.Empty(t, belowFloor, "Ф3-31: медиана раньше потолка огибающей — исход ушёл до потолка (ожидание не настоящее либо числа калибровки выбраны неверно, Р17)")
-	var failures []string
-	for i := range rows {
-		for j := i + 1; j < len(rows); j++ {
-			diff := rows[i].median - rows[j].median
-			if diff < 0 {
-				diff = -diff
-			}
-			bound := rows[i].iqr
-			if rows[j].iqr > bound {
-				bound = rows[j].iqr
-			}
-			verdict := "ok"
-			if diff > bound {
-				verdict = "КРАСНОЕ"
-				failures = append(failures, fmt.Sprintf("%s ↔ %s: |Δмедиан| %v > IQR %v", rows[i].lane.name, rows[j].lane.name, diff, bound))
-			}
-			t.Logf("пара %-36s ↔ %-36s |Δмедиан| %10v ≤ IQR %10v — %s", rows[i].lane.name, rows[j].lane.name, diff, bound, verdict)
-		}
+	failures, lines := timingPairFailures(rows)
+	for _, line := range lines {
+		t.Logf("%s", line)
+	}
+	if injectName != "" {
+		t.Logf("инъекция Ф1-49 при потолке годности IQR %v и N=%d: нарушивших пар %d — ждём красное С ИМЕНЕМ полосы %q",
+			timingIQRCeiling, timingLaneN, len(failures), injectName)
 	}
 	require.Empty(t, failures, "Ф1-48 нарушен на парах полос: время отказа различает класс стоимости либо наличие материала")
 }
