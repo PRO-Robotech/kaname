@@ -80,6 +80,8 @@ var deliveryRoster = []string{
 	"client_token_endpoint_chart_test.go",
 	"client_token_knobs_have_one_address_injection_test.go",
 	"client_token_knobs_have_one_address_test.go",
+	"config_sections_have_a_reader_injection_test.go",
+	"config_sections_have_a_reader_test.go",
 	"defaultless_keys_injection_test.go",
 	"defaultless_keys_test.go",
 	"delivery_roster_test.go",
