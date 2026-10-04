@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestRoleUpdatedAt_IsProducedAndMovesOnMutation(t *testing.T) {
@@ -68,7 +69,7 @@ func TestRoleUpdatedAt_IsProducedAndMovesOnMutation(t *testing.T) {
 	// Роль, которую никто не правил, «правлена» в момент своего появления — та
 	// же форма, что у соседних ресурсов схемы. Пустое значение здесь означало бы
 	// «поля нет», а поле есть.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inserted, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err)
@@ -95,7 +96,7 @@ func TestRoleUpdatedAt_IsProducedAndMovesOnMutation(t *testing.T) {
 	// означать создание.
 	target := got1
 	target.Description = domain.Description("after")
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w2.RolesW().Update(ctx, target, []string{"description"})
 	require.NoError(t, err)

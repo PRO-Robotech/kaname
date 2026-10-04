@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // goodPassword — годный по правилу пароль (длина ≥ 12, не похож на адрес).
@@ -376,7 +377,7 @@ func TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane(t *testin
 	// Приглашение заводится существующим глаголом хранилища: PENDING-строка в
 	// аккаунте приглашающего.
 	inviter := seedActiveUserWithAccount(t, h, freshEmail("inviter"))
-	w, err := h.repo.Writer(h.ctx)
+	w, err := h.repo.Writer(journalfixture.Writing(h.ctx))
 	require.NoError(t, err)
 	pending, _, err := w.UsersW().InsertPending(h.ctx, domain.User{
 		ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: inviter.AccountID,

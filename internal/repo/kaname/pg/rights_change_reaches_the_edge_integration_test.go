@@ -63,6 +63,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // verdictCache — наблюдаемое потребителя: держит ли он ещё закешированный
@@ -102,7 +103,7 @@ func TestRightsChangeReachesTheEdgeAndTheVerdictIsRecomputed(t *testing.T) {
 	abRepo := kanamepg.New(pool, nil)
 	changeRights := func(subjectID, op string) {
 		t.Helper()
-		w, werr := abRepo.Writer(ctx)
+		w, werr := abRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx,
 			access_binding.SubjectChangeEvent{SubjectID: subjectID, Op: op}))

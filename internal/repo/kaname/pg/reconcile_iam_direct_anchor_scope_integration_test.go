@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // iamDirectAnchorCandidates runs the iam-direct fan-out for one object and returns
@@ -62,7 +63,7 @@ func iamDirectAnchorCandidates(
 ) []domain.AccessBindingID {
 	t.Helper()
 	var got []domain.AccessBindingID
-	require.NoError(t, adapter.WithTx(ctx, func(ctx context.Context, s reconcile.ReconcileStore) error {
+	require.NoError(t, adapter.WithTx(journalfixture.Writing(ctx), func(ctx context.Context, s reconcile.ReconcileStore) error {
 		var err error
 		got, err = s.IAMDirectSelectorBindingsMatchingObject(ctx, objectType, objectID)
 		return err

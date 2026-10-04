@@ -50,6 +50,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -194,7 +195,7 @@ func (r *ExpiredCredentialReclaimer) ReclaimExpiredCredentials(
 func (r *ExpiredCredentialReclaimer) sweepOneTable(
 	ctx context.Context, tgt reclaimTarget, spec ExpiredCredentialReclaimSpec,
 ) (int, []reclaimedRow, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return 0, nil, fmt.Errorf("открыть транзакцию: %w", err)
 	}

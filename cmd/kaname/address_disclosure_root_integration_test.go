@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // disclosureRootAsk — ответы края о человеке stranger: распорядителю аккаунта
@@ -72,7 +73,7 @@ func disclosureRootAsk(t *testing.T, reg *metrics.Registry, strangerVerified, st
 	// mark — отметка подтверждения писателем продукта.
 	mark := func(user string) {
 		t.Helper()
-		require.NoErrorf(t, kanamepg.NewLoginMethodRepo(pool).MarkEmailVerified(ctx, domain.UserID(user),
+		require.NoErrorf(t, kanamepg.NewLoginMethodRepo(pool).MarkEmailVerified(journalfixture.Ctx(t, ctx), domain.UserID(user),
 			domain.Email(user+"@example.test"), time.Now().UTC()), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка %s", user)
 	}
 

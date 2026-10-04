@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestInviteDeadline_ExpiredRowDoesNotActivate — ОТРИЦАНИЕ: срок истёк.
@@ -55,7 +56,7 @@ func TestInviteDeadline_ExpiredRowDoesNotActivate(t *testing.T) {
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mail23a")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -69,7 +70,7 @@ func TestInviteDeadline_ExpiredRowDoesNotActivate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	_, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
@@ -110,7 +111,7 @@ func TestInviteDeadline_RowInsideTheDeadlineActivates(t *testing.T) {
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mail23b")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -124,7 +125,7 @@ func TestInviteDeadline_RowInsideTheDeadlineActivates(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
@@ -151,7 +152,7 @@ func TestInviteDeadline_NoDeadlineRowStillActivates(t *testing.T) {
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mail23c")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -164,7 +165,7 @@ func TestInviteDeadline_NoDeadlineRowStillActivates(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
@@ -194,7 +195,7 @@ func TestInviteDeadline_ActivationHappensOnce(t *testing.T) {
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mail22")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -221,7 +222,7 @@ func TestInviteDeadline_ActivationHappensOnce(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			<-start
-			tw, terr := repo.Writer(ctx)
+			tw, terr := repo.Writer(journalfixture.Writing(ctx))
 			if terr != nil {
 				mu.Lock()
 				refusals = append(refusals, terr)
@@ -281,7 +282,7 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	_, accB := bootstrapAdmin(t, ctx, repo, "mail23d2")
 
 	// Первое приглашение — уже истёкшее.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	first, _, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -294,7 +295,7 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Контроль: до повторного приглашения строка НЕ активируется.
-	wx, err := repo.Writer(ctx)
+	wx, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, first.ID)
 	_, xerr := wx.UsersW().ActivateInvite(ctx, first.ID,
@@ -304,7 +305,7 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	require.True(t, stderrors.Is(xerr, iamerr.ErrInviteExpired))
 
 	// Приглашение ЗАНОВО — во второй аккаунт, той же почты.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, _, err = w2.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -317,7 +318,7 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	require.NoError(t, w2.Commit(ctx))
 
 	// Теперь выкупается.
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, first.ID)
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
@@ -344,7 +345,7 @@ func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
 	adminA, accA := bootstrapAdmin(t, ctx, repo, "mail23e1")
 	_, accB := bootstrapAdmin(t, ctx, repo, "mail23e2")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	first, _, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -357,7 +358,7 @@ func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Второе приглашение с УЖЕ ИСТЁКШЕЙ границей: укоротить срок оно не вправе.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, _, err = w2.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -369,7 +370,7 @@ func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w2.Commit(ctx))
 
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, first.ID)
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,

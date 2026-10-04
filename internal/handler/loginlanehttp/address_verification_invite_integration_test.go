@@ -24,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // avInvite — приглашение адреса в аккаунт с ролью на проект.
@@ -53,7 +54,7 @@ func (h *avLane) inviter(t *testing.T) (avSession, domain.AccountID, domain.Proj
 // выдача роли на проект с составом субъектов и указателем предка.
 func (h *avLane) invite(t *testing.T, inv avSession, acc domain.AccountID, prj domain.ProjectID, email string, ttl time.Duration) avInvite {
 	t.Helper()
-	w, err := h.users.Writer(h.ctx)
+	w, err := h.users.Writer(journalfixture.Writing(h.ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(h.ctx) }()
 	row, _, err := w.UsersW().InsertPending(h.ctx, domain.User{
@@ -268,7 +269,7 @@ func (h *avLane) removeInvite(t *testing.T, iv avInvite) {
 	_, err := h.pool.Exec(h.ctx, `UPDATE kaname.access_bindings SET status = 'REVOKED', revoked_at = now()
 		 WHERE subject_id = $1 AND revoked_at IS NULL`, string(iv.user))
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): снятие выдачи")
-	w, err := h.users.Writer(h.ctx)
+	w, err := h.users.Writer(journalfixture.Writing(h.ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(h.ctx) }()
 	removed, err := w.UsersW().RemoveMembership(h.ctx, iv.user, iv.account)

@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAccountCountByOwner_RC5(t *testing.T) {
@@ -42,7 +43,7 @@ func TestAccountCountByOwner_RC5(t *testing.T) {
 	// give inviteeOwner a fresh user that owns zero accounts by inserting only the user.
 	zeroOwner := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		// bootstrap a row + account so the FK on users is satisfiable; then this
 		// user (zeroOwner) is NOT the owner of any account — owns-zero.

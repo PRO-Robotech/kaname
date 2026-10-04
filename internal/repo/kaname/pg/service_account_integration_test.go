@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func seedSA(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.ServiceAccount {
@@ -40,7 +41,7 @@ func seedSA(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID 
 		Name:        domain.SvcAccountName(name),
 		Description: domain.Description("test sa " + name),
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ServiceAccountsW().Insert(ctx, sa)
 	require.NoError(t, err)
@@ -95,7 +96,7 @@ func TestSA_18_DuplicateName(t *testing.T) {
 		AccountID: acc.ID,
 		Name:      "dup-sa",
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ServiceAccountsW().Insert(ctx, sa2)
 	_ = w.Rollback(ctx)
@@ -120,7 +121,7 @@ func TestSA_18b_FKMissingAccount(t *testing.T) {
 		AccountID: "acc0000000000000ghst",
 		Name:      "ghost-sa",
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ServiceAccountsW().Insert(ctx, sa)
 	_ = w.Rollback(ctx)
@@ -151,7 +152,7 @@ func TestSA_19_DeleteWithAccessBinding(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.ServiceAccountsW().Delete(ctx, sa.ID)
 	_ = w.Rollback(ctx)
@@ -175,12 +176,12 @@ func TestSA_DeleteHappy(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-sadel", uid)
 	sa := seedSA(t, ctx, repo, acc.ID, "sa-del")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.ServiceAccountsW().Delete(ctx, sa.ID))
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w2.ServiceAccountsW().Delete(ctx, sa.ID)
 	_ = w2.Rollback(ctx)
@@ -205,7 +206,7 @@ func TestSA_UpdateRename(t *testing.T) {
 
 	patched := sa
 	patched.Name = "renamed-sa"
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.ServiceAccountsW().Update(ctx, patched, []string{"name"})
 	require.NoError(t, err)

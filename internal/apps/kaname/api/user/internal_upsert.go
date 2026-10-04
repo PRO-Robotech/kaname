@@ -306,6 +306,16 @@ func (uc *UpsertFromIdentityUseCase) resolveUserID(ctx context.Context, in Upser
 }
 
 func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUserID string, in UpsertFromIdentityInput, actor string) (*anypb.Any, error) {
+	// Активация приглашения и заведение личных ресурсов пишут журналируемые
+	// таблицы, а строка журнала без инициатора базой не принимается (NTF-3,
+	// Р2). Вызов с предъявленным токеном начинает его субъект; вызов
+	// заведения без токена удостоверенного субъекта не несёт, и его начинает
+	// компонент заведения службы. Контекст с личностью — только открытиям
+	// пишущих транзакций; чтения идут на контексте вызова.
+	wctx, err := shared.InitiatedOrJournalComponent(ctx, shared.JournalComponentProvisioning)
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
 	// Step 1: activate any PENDING-rows by email. firstActivated != nil ⇒ an
 	// activation happened (its id is the resolved/activated user-row; RC-5 bootstrap
 	// gate no longer keys off a separate activatedAny flag — owns-zero-accounts on
@@ -323,7 +333,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 		}
 
 		for _, p := range pendings {
-			w, werr := uc.repo.Writer(ctx)
+			w, werr := uc.repo.Writer(wctx)
 			if werr != nil {
 				return nil, shared.MapRepoErr(werr)
 			}
@@ -448,7 +458,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 		return nil, err
 	}
 	if ownedAccounts == 0 {
-		bootstrap, err := uc.bootstrapPersonalResources(ctx, resolvedUserID, in, actor, newIdentity)
+		bootstrap, err := uc.bootstrapPersonalResources(wctx, resolvedUserID, in, actor, newIdentity)
 		if err != nil {
 			return nil, err
 		}

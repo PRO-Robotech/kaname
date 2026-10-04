@@ -72,6 +72,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -451,7 +452,7 @@ func ceremonyLevels(t *testing.T, body string) (assuranceLevel, sessionLevel str
 // (`UserService.Block` / `Unblock` пишут им же), своей транзакцией.
 func (h *sessionLane) setInviteStatus(t *testing.T, st domain.InviteStatus) {
 	t.Helper()
-	w, err := h.users.Writer(h.ctx)
+	w, err := h.users.Writer(journalfixture.Writing(h.ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(h.ctx) }()
 	_, err = w.UsersW().SetInviteStatus(h.ctx, h.user.ID, st)

@@ -51,6 +51,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // secondFactorRemovalSessionWrites — операторы снятия второго фактора над
@@ -235,8 +236,16 @@ func seedPasswordPerson(t *testing.T, ctx context.Context, s *concurrencyScene, 
 
 // deletePerson — удаление личности тем писателем, которым его исполняет
 // полоса удаления (`UsersW().Delete`).
+//
+// Полоса удаления в продукте идёт под принципалом вызывающего; здесь её
+// заменяет личность посева проб — писатель берёт инициатора журнала у
+// принципала.
 func deletePerson(ctx context.Context, users *kanamepg.Repository, uid domain.UserID) error {
-	w, err := users.Writer(ctx)
+	ctx, err := journalfixture.Context(ctx)
+	if err != nil {
+		return err
+	}
+	w, err := users.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return err
 	}

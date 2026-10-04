@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestServiceAccountSetEnabled_RoundTripsThroughBothReaders(t *testing.T) {
@@ -58,7 +59,7 @@ func TestServiceAccountSetEnabled_RoundTripsThroughBothReaders(t *testing.T) {
 	id := seedSAWithEnabled(t, ctx, pool, acc.ID, "sa-round-trip", true)
 
 	// Disable.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ServiceAccountsW().SetEnabled(ctx, id, false)
 	require.NoError(t, err)
@@ -90,7 +91,7 @@ func TestServiceAccountSetEnabled_RoundTripsThroughBothReaders(t *testing.T) {
 
 	// Enable again — the control has to work in both directions or it is a
 	// one-way door, and an operator who disables by mistake has no way back.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	back, err := w2.ServiceAccountsW().SetEnabled(ctx, id, true)
 	require.NoError(t, err)
@@ -119,7 +120,7 @@ func TestServiceAccountSetEnabled_IsIdempotent(t *testing.T) {
 
 	// Already false. Asking for false again is asking for a state that already
 	// holds, and the answer is that it holds.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ServiceAccountsW().SetEnabled(ctx, id, false)
 	require.NoError(t, err, "setting the state an account is already in must succeed, not fail")
@@ -138,7 +139,7 @@ func TestServiceAccountSetEnabled_MissingRow_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 

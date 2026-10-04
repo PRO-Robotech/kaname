@@ -67,6 +67,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -251,6 +252,14 @@ func (c Census) String() string {
 // сразу.
 func (a *Applier) Apply(ctx context.Context, own *manifest.Manifest, delivered []*manifest.Manifest) (Census, error) {
 	census := Census{Manifests: len(delivered)}
+
+	// Личности, группы и привязки модулей — журналируемые таблицы, и строка
+	// журнала без инициатора базой не принимается (NTF-3, Р2): транзакции
+	// посева начинает компонент посева.
+	ctx, err := shared.InitiatedOrJournalComponent(ctx, shared.JournalComponentSeed)
+	if err != nil {
+		return census, fmt.Errorf("посев модулей: инициатор журнала: %w", err)
+	}
 
 	if own != nil {
 		report, err := a.applyOne(ctx, own, manifest.HolderAccessService)

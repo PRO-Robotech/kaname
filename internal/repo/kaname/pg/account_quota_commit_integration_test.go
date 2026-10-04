@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestAccountQuota_CommitTime_ResourceExhaustedSentinel — шестой аккаунт одной
@@ -66,7 +67,7 @@ func TestAccountQuota_CommitTime_ResourceExhaustedSentinel(t *testing.T) {
 	}
 
 	repo := kanamepg.New(pool, nil)
-	w, werr := repo.Writer(ctx)
+	w, werr := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, werr)
 
 	// Сама вставка НЕ падает: списание отложено до фиксации.

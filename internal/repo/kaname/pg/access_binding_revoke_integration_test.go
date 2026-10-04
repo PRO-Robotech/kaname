@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertActiveBinding is a small helper that Inserts+Commits one ACTIVE binding
@@ -49,7 +50,7 @@ import (
 func insertActiveBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id domain.AccessBindingID, uid domain.UserID, accID string, protected bool) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -77,7 +78,7 @@ func TestAB_IAM_1_28_RevokeGuarded_SoftRevoke(t *testing.T) {
 	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), false)
 
 	// Soft-revoke.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revoked, err := w.AccessBindingsW().RevokeGuarded(ctx, id, uid)
 	require.NoError(t, err)
@@ -114,7 +115,7 @@ func TestAB_IAM_1_28_RevokeGuarded_RefusesProtected(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), true) // protected
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, id, uid)
 	_ = w.Rollback(ctx)
@@ -142,7 +143,7 @@ func TestAB_IAM_1_28_RevokeGuarded_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx,
 		domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)), "usr-nobody")
@@ -168,14 +169,14 @@ func TestAB_IAM_1_28_RevokeGuarded_TerminalRevoked(t *testing.T) {
 	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), false)
 
 	// First revoke wins.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, id, uid)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
 	// Second revoke of the now-REVOKED (terminal) row → FailedPrecondition.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w2.AccessBindingsW().RevokeGuarded(ctx, id, uid)
 	_ = w2.Rollback(ctx)
@@ -219,7 +220,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 			id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 			ready.Done()
 			<-startGate
-			gw, werr := repo.Writer(ctx)
+			gw, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				out <- res{id, werr}
 				return
@@ -259,7 +260,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	assert.Equal(t, 0, other, "no unexpected errors / panics")
 
 	// ── Phase 2: revoke the winner ────────────────────────────────────────
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, winner, uid)
 	require.NoError(t, err)
@@ -267,7 +268,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 
 	// ── Phase 3: identical re-grant is now a NEW ACTIVE row ───────────────
 	regrantID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	regranted, err := w2.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: regrantID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -308,7 +309,7 @@ func TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS(t *testing.T) {
 		go func() {
 			ready.Done()
 			<-startGate
-			gw, werr := repo.Writer(ctx)
+			gw, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				results <- werr
 				return

@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestSubjectChangeRepo_PollSubjectChanges verifies:
@@ -61,7 +62,7 @@ func TestSubjectChangeRepo_PollSubjectChanges(t *testing.T) {
 	abRepo := kanamepg.New(pool, nil)
 	seed := func(subjectID, op string) int64 {
 		t.Helper()
-		w, err := abRepo.Writer(ctx)
+		w, err := abRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx,
 			access_binding.SubjectChangeEvent{SubjectID: subjectID, Op: op}))
@@ -135,7 +136,7 @@ func TestSubjectChangeRepo_PollCarriesTheSubjectType(t *testing.T) {
 
 	seed := func(evt access_binding.SubjectChangeEvent) {
 		t.Helper()
-		w, err := abRepo.Writer(ctx)
+		w, err := abRepo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx, evt))
 		require.NoError(t, w.Commit(ctx))
@@ -226,7 +227,7 @@ func TestSubjectChangeRepo_ZeroHeadMeansAnEmptyJournal(t *testing.T) {
 
 	// ── сторона 2: непустой журнал ноля НЕ даёт ────────────────────────────
 	abRepo := kanamepg.New(pool, nil)
-	w, err := abRepo.Writer(ctx)
+	w, err := abRepo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx,
 		access_binding.SubjectChangeEvent{SubjectID: "usr_head", Op: "binding_upsert"}))

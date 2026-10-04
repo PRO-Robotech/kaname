@@ -39,6 +39,7 @@ import (
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -311,7 +312,7 @@ func TestAccountID14_ConcurrentCreatesWithOneIDLetExactlyOneThrough(t *testing.T
 func removeAccount(t *testing.T, env *testEnv, accID, projID string) {
 	t.Helper()
 	ctx := context.Background()
-	w, err := env.repo.Writer(ctx)
+	w, err := env.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	require.NoError(t, w.ProjectsW().Delete(ctx, domain.ProjectID(projID)), "снятие проекта по умолчанию")
@@ -366,7 +367,7 @@ func TestAccountID18_EveryProducerEntersTheRegistryAndDeletionDoesNotFree(t *tes
 		env := newProbeEnv(t)
 		ctx := context.Background()
 		store := kanamepg.NewRegistrationStore(env.pool)
-		w, err := store.Writer(ctx)
+		w, err := store.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		res, err := userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), userapp.MirrorInput{
 			Email:           domain.Email("aid18c-" + ids.NewID("tst")[3:11] + "@example.invalid"),

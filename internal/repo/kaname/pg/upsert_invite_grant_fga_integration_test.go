@@ -41,6 +41,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedInviterAndPendingInvite creates an ACTIVE inviter + its owned account, then
@@ -51,7 +52,7 @@ func seedInviterAndPendingInvite(t *testing.T, ctx context.Context, repo *kaname
 	t.Helper()
 	inviterID, accID := bootstrapAdmin(t, ctx, repo, suffix)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	inviteeID := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, _, err = w.UsersW().InsertPending(ctx, domain.User{
@@ -175,7 +176,7 @@ func TestUpsertInviteGrant_TI3_RC2_RollbackDiscardsBoth(t *testing.T) {
 
 	// Replicate the Step-1 writer-tx shape, then ROLLBACK: activate + audit + fga
 	// member-tuple, all on one tx, abandoned.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, inviteeID)
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,

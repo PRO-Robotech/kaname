@@ -43,7 +43,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 )
 
@@ -175,7 +177,13 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
 // снова без собственного уровня. Это держит гейт дерева
 // `internal/repohygiene/roleverbreseedwiring_test.go`.
 func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
+	// Посев пишет привязки — журналируемую таблицу: транзакция несёт
+	// инициатора компонента посева.
+	ctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentSeed)
+	if err != nil {
+		return fmt.Errorf("backfill owner-bindings: %w", err)
+	}
+	tx, err := journalwrite.Begin(ctx, pool)
 	if err != nil {
 		return fmt.Errorf("backfill owner-bindings: begin tx: %w", err)
 	}
@@ -229,7 +237,13 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
 // у отказа пересчёта обязана быть собственная полоса, а вход у него —
 // порт записи, которого у этой функции нет.
 func SyncAllSystemRoleSelectors(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
+	// Пересчёт селекторов двигает строку роли — журналируемую таблицу:
+	// транзакция несёт инициатора компонента посева.
+	ctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentSeed)
+	if err != nil {
+		return fmt.Errorf("sync system role selectors: %w", err)
+	}
+	tx, err := journalwrite.Begin(ctx, pool)
 	if err != nil {
 		return fmt.Errorf("sync system role selectors: begin tx: %w", err)
 	}
@@ -487,6 +501,12 @@ func NewBackfillRunner(engine BackfillReconcileEngine, store BackfillStore, cfg 
 // forward-materialization (the ledger partial-UNIQUE backstops a racing
 // forward-emit), so re-running RunOnce makes no further changes.
 func (r *BackfillRunner) RunOnce(ctx context.Context) (BackfillResult, error) {
+	// Досев пересчитывает выдачи сверщиком: его транзакции несут инициатора
+	// компонента посева.
+	ctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentSeed)
+	if err != nil {
+		return BackfillResult{}, fmt.Errorf("backfill: %w", err)
+	}
 	ok, release, err := r.store.TryAcquireSingletonBackfillLock(ctx)
 	if err != nil {
 		return BackfillResult{}, fmt.Errorf("backfill: acquire singleton lock: %w", err)

@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // countAuditRows returns the number of audit_outbox rows whose payload binding_id
@@ -85,7 +86,7 @@ func TestAB_AuditOutboxTx_GrantEmitsGrantedRow(t *testing.T) {
 		TenantAccountID: string(acc.ID),
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, binding)
 	require.NoError(t, err)
@@ -157,7 +158,7 @@ func TestAB_AuditOutboxTx_RevokeEmitsRevokedRow(t *testing.T) {
 		TenantAccountID: string(acc.ID),
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().Delete(ctx, binding.ID))
 	require.NoError(t, w.AccessBindingsW().EmitAuditEvent(ctx, ev))
@@ -213,7 +214,7 @@ func TestAB_AuditOutboxTx_RollbackDiscardsAuditRow(t *testing.T) {
 		TenantAccountID: string(acc.ID),
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, binding)
 	require.NoError(t, err)

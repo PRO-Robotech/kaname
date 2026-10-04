@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // own_ceilings_repo.go — ПРОЕКЦИЯ ПОСАДКИ В СХЕМУ: величины трёх собственных
@@ -91,7 +92,7 @@ func (r *OwnCeilingRepo) Apply(
 	sort.Strings(kinds)
 	census.Kinds = kinds
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return census, fmt.Errorf("проекция собственных потолков: начать транзакцию: %w", err)
 	}
@@ -174,7 +175,7 @@ func (r *OwnCeilingRepo) ApplyAdmissionRate(ctx context.Context, maxEvents int64
 		return census, fmt.Errorf("проекция темпа заведения: величина негодна (предел %d, окно %d с) — страж посадки её не допускает",
 			maxEvents, seconds)
 	}
-	tx, err := r.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return census, fmt.Errorf("проекция темпа заведения: начать транзакцию: %w", err)
 	}

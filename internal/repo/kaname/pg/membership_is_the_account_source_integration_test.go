@@ -68,6 +68,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedMembership кладёт строку членства НАПРЯМУЮ — тем же выражением
@@ -152,7 +153,7 @@ func TestMembershipIsTheAccountSource(t *testing.T) {
 	_, accB := bootstrapAdmin(t, ctx, repo, "msB")
 
 	// Человек, чья колонка называет A. Зеркало S1 заведёт ему членство в A.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	twoAccounts := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err = w.UsersW().InsertActive(ctx, domain.User{
@@ -254,7 +255,7 @@ func TestBlockedIdentityGainsNoAccountThroughMembership(t *testing.T) {
 
 	_, accA := bootstrapAdmin(t, ctx, repo, "blkA")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	blocked := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err = w.UsersW().InsertActive(ctx, domain.User{

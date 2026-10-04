@@ -28,6 +28,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // setUserLabels writes labels on a users row directly (iam-direct feed source).
@@ -64,7 +65,7 @@ func TestUserLabels_T33UPD01_RoundTrip(t *testing.T) {
 	assert.Empty(t, got0.Labels, "fresh user row has empty labels")
 
 	// UpdateLabels sets the tenant-facing labels (mutable).
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.UsersW().UpdateLabels(ctx, domain.UserID(uid),
 		domain.Labels{"tier": "gold", "team": "payments"})
@@ -235,7 +236,7 @@ func TestUserLabels_T33CONC01_ConcurrentUpdateLabels(t *testing.T) {
 			} else {
 				labels = domain.Labels{}
 			}
-			w, werr := fx.repo.Writer(ctx)
+			w, werr := fx.repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				errs <- werr
 				return

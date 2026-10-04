@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // declaredModuleRole — системная роль модуля в том виде, в каком её объявляет
@@ -194,7 +195,7 @@ func upsertSystemRoleTx(
 	ctx context.Context, t *testing.T, repo *kanamepg.Repository, r domain.Role,
 ) (domain.Role, bool, error) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	out, changed, err := w.RolesW().UpsertSystemRole(ctx, r)

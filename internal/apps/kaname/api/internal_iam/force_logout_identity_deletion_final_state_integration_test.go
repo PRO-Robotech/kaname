@@ -51,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 const (
@@ -100,7 +101,13 @@ func seedPriorCutoff(t *testing.T, ctx context.Context, s *concurrencyScene, uid
 }
 
 func deleteIdentity(ctx context.Context, users *kanamepg.Repository, uid domain.UserID) error {
-	w, err := users.Writer(ctx)
+	// Полоса удаления в продукте идёт под принципалом вызывающего; здесь её
+	// заменяет личность посева проб.
+	ctx, err := journalfixture.Context(ctx)
+	if err != nil {
+		return err
+	}
+	w, err := users.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return err
 	}

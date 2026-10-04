@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAB_P6_DeletionProtection_PersistRoundTrip(t *testing.T) {
@@ -65,7 +66,7 @@ func TestAB_P6_DeletionProtection_PersistRoundTrip(t *testing.T) {
 		DeletionProtection: true,
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.AccessBindingsW().Insert(ctx, b)
 	require.NoError(t, err)
@@ -94,7 +95,7 @@ func TestAB_P6_DeleteGuarded_RefusesProtected(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-refuse")
 	acc := seedAccount(t, ctx, repo, "acc-p6-refuse", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -104,7 +105,7 @@ func TestAB_P6_DeleteGuarded_RefusesProtected(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w2.AccessBindingsW().DeleteGuarded(ctx, id)
 	_ = w2.Rollback(ctx)
@@ -127,7 +128,7 @@ func TestAB_P6_DeleteGuarded_DeletesUnprotected(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-del")
 	acc := seedAccount(t, ctx, repo, "acc-p6-del", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -137,7 +138,7 @@ func TestAB_P6_DeleteGuarded_DeletesUnprotected(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().DeleteGuarded(ctx, id))
 	require.NoError(t, w2.Commit(ctx))
@@ -160,7 +161,7 @@ func TestAB_P6_DeleteGuarded_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccessBindingsW().DeleteGuarded(ctx, domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)))
 	_ = w.Rollback(ctx)
@@ -185,7 +186,7 @@ func TestAB_P6_DeleteGuarded_ConcurrentCAS(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-race")
 	acc := seedAccount(t, ctx, repo, "acc-p6-race", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -204,7 +205,7 @@ func TestAB_P6_DeleteGuarded_ConcurrentCAS(t *testing.T) {
 		go func() {
 			ready.Done()
 			<-startGate
-			gw, werr := repo.Writer(ctx)
+			gw, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				results <- werr
 				return
@@ -259,7 +260,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-rearm")
 	acc := seedAccount(t, ctx, repo, "acc-p6-rearm", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -278,7 +279,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	go func() { // re-arm protection
 		defer wg.Done()
 		<-startGate
-		gw, werr := repo.Writer(ctx)
+		gw, werr := repo.Writer(journalfixture.Writing(ctx))
 		if werr != nil {
 			rearmErrCh <- werr
 			return
@@ -294,7 +295,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	go func() { // guarded delete
 		defer wg.Done()
 		<-startGate
-		gw, werr := repo.Writer(ctx)
+		gw, werr := repo.Writer(journalfixture.Writing(ctx))
 		if werr != nil {
 			delErrCh <- werr
 			return
@@ -350,7 +351,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-clear")
 	acc := seedAccount(t, ctx, repo, "acc-p6-clear", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -361,7 +362,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Clear protection (C-03 Update path at the repo level).
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w2.AccessBindingsW().SetDeletionProtection(ctx, id, false)
 	require.NoError(t, err)
@@ -369,7 +370,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	assert.False(t, updated.DeletionProtection)
 
 	// Now Delete passes.
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w3.AccessBindingsW().DeleteGuarded(ctx, id))
 	require.NoError(t, w3.Commit(ctx))

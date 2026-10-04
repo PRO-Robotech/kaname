@@ -36,6 +36,7 @@ import (
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func emittedTuplesCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bindingID domain.AccessBindingID) int {
@@ -100,7 +101,7 @@ func TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet(t *testing.T
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w, ierr := repo.Writer(ctx)
+			w, ierr := repo.Writer(journalfixture.Writing(ctx))
 			if ierr != nil {
 				errs <- ierr
 				return
@@ -151,7 +152,7 @@ func TestABEmittedTuples_178_InsertSelect_RoundTrip(t *testing.T) {
 	}
 
 	// Co-commit the emit + the ledger in one writer-tx.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, tuples))
@@ -166,7 +167,7 @@ func TestABEmittedTuples_178_InsertSelect_RoundTrip(t *testing.T) {
 	require.ElementsMatch(t, tuples, got, "SelectEmittedTuples must return the exact persisted set")
 
 	// Idempotent re-insert (ON CONFLICT DO NOTHING) does not duplicate.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, tuples))
 	require.NoError(t, w2.Commit(ctx))
@@ -191,14 +192,14 @@ func TestABEmittedTuples_178_DeleteBinding_CascadesLedger(t *testing.T) {
 	tuples := []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, tuples))
 	require.NoError(t, w.Commit(ctx))
 	require.Equal(t, 1, emittedTuplesCount(t, ctx, pool, ab.ID))
 
 	// Revoke (delete the binding row) → FK ON DELETE CASCADE clears the ledger.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().Delete(ctx, ab.ID))
 	require.NoError(t, w2.Commit(ctx))
@@ -227,13 +228,13 @@ func TestABEmittedTuples_178_Replace_WholesaleSwap(t *testing.T) {
 	newSet := []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, oldSet))
 	require.NoError(t, w.Commit(ctx))
 
 	// Reconcile: wholesale-replace admin → viewer.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().ReplaceEmittedTuples(ctx, ab.ID, newSet))
 	require.NoError(t, w2.Commit(ctx))
@@ -279,7 +280,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 		{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
 		{User: "account:" + string(acc.ID), Relation: "account", Object: "iam_access_binding:" + string(ab.ID)},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, bindingLevel))
 	require.NoError(t, w.Commit(ctx))
@@ -291,7 +292,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 		{User: "user:" + string(uid), Relation: "viewer", Object: "vpc_subnet:sub-emsrc"},
 	}
 	adapter := kanamepg.NewReconcileAdapter(pool, catalogfixture.Source())
-	require.NoError(t, adapter.WithTx(ctx, func(ctx context.Context, s reconcileapp.ReconcileStore) error {
+	require.NoError(t, adapter.WithTx(journalfixture.Writing(ctx), func(ctx context.Context, s reconcileapp.ReconcileStore) error {
 		return s.RecordEmittedTuples(ctx, ab.ID, memberTuples)
 	}))
 	require.Equal(t, len(bindingLevel)+len(memberTuples), emittedTuplesCount(t, ctx, pool, ab.ID),
@@ -304,7 +305,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 		{User: "account:" + string(acc.ID), Relation: "account", Object: "iam_access_binding:" + string(ab.ID)},
 	}
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().ReplaceEmittedTuples(ctx, ab.ID, newBindingLevel))
 	require.NoError(t, w2.Commit(ctx))
@@ -345,7 +346,7 @@ func TestABEmittedTuples_178_RollbackDiscardsLedger(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-em04", uid)
 	ab := seedABForEmitted(t, ctx, repo, uid, acc.ID)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
@@ -377,7 +378,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	ab := seedABForEmitted(t, ctx, repo, uid, acc.ID)
 
 	// Seed an initial emitted-set.
-	wSeed, err := repo.Writer(ctx)
+	wSeed, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, wSeed.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
@@ -389,7 +390,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	// Goroutine A — reconcile (Role.Update fan-out): replace admin → viewer.
 	go func() {
 		defer wg.Done()
-		w, e := repo.Writer(ctx)
+		w, e := repo.Writer(journalfixture.Writing(ctx))
 		if e != nil {
 			return
 		}
@@ -404,7 +405,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	// Goroutine B — revoke: delete the binding (CASCADE drops the ledger).
 	go func() {
 		defer wg.Done()
-		w, e := repo.Writer(ctx)
+		w, e := repo.Writer(journalfixture.Writing(ctx))
 		if e != nil {
 			return
 		}

@@ -43,6 +43,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // hierarchyTuple builds the parent-pointer tuple shape the create use-cases
@@ -83,7 +84,7 @@ func TestOwnResource_FGAOutbox_ProjectCreateEmitsHierarchyIntent(t *testing.T) {
 	}
 	tup := hierarchyTuple("account", string(acc.ID), "account", "project", string(projID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ProjectsW().Insert(ctx, p)
 	require.NoError(t, err)
@@ -134,7 +135,7 @@ func TestOwnResource_FGAOutbox_RollbackDiscardsBothRowAndIntent(t *testing.T) {
 	}
 	tup := hierarchyTuple("account", string(acc.ID), "account", "project", string(projID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ProjectsW().Insert(ctx, p)
 	require.NoError(t, err)
@@ -183,7 +184,7 @@ func TestOwnResource_FGAOutbox_AccountOwnerSelfGrantEmittedInTx(t *testing.T) {
 	owner := hierarchyTuple("user", string(uid), "owner", "account", string(accID))
 	clusterPtr := hierarchyTuple("cluster", "cluster_root", "cluster", "account", string(accID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, a)
 	require.NoError(t, err)

@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func seedCustomRole(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.Role {
@@ -44,7 +45,7 @@ func seedCustomRole(t *testing.T, ctx context.Context, repo *kanamepg.Repository
 		Permissions: domain.Permissions{"iam.users.*.read"},
 		IsSystem:    false,
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.RolesW().Insert(ctx, r)
 	require.NoError(t, err)
@@ -101,7 +102,7 @@ func TestRole_27_DuplicateName(t *testing.T) {
 		Name:        "dup_role",
 		Permissions: domain.Permissions{"iam.users.*.read"},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.RolesW().Insert(ctx, r2)
 	_ = w.Rollback(ctx)
@@ -151,7 +152,7 @@ func TestRole_30a_DeleteCustom_Happy(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-r30a", uid)
 	r := seedCustomRole(t, ctx, repo, acc.ID, "to_delete")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.RolesW().Delete(ctx, r.ID))
 	require.NoError(t, w.Commit(ctx))
@@ -180,7 +181,7 @@ func TestRole_30b_DeleteCustom_WithBindings(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.RolesW().Delete(ctx, r.ID)
 	_ = w.Rollback(ctx)
@@ -200,7 +201,7 @@ func TestRole_30c_DeleteSystem(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.RolesW().Delete(ctx, seedSystemRoleIDIAMView) // iam.viewer seed
 	_ = w.Rollback(ctx)
@@ -220,7 +221,7 @@ func TestRole_30d_DeleteNotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.RolesW().Delete(ctx, "rol0000000000000ghst")
 	_ = w.Rollback(ctx)
@@ -245,7 +246,7 @@ func TestRole_UpdateRename(t *testing.T) {
 
 	patched := r
 	patched.Name = "renamed_role"
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.RolesW().Update(ctx, patched, []string{"name"})
 	require.NoError(t, err)

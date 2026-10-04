@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse — плечо 1.
@@ -63,7 +64,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 	// Это и есть та фигура, ради которой исключение отделено от удаления.
 	person := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accA,
@@ -73,7 +74,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 		require.NoError(t, w.Commit(ctx))
 	}
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		got, inserted, ierr := w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
@@ -94,7 +95,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 
 	// ── снятие ───────────────────────────────────────────────────────────────
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		removed, rerr := w.UsersW().RemoveMembership(ctx, person, accA)
 		require.NoError(t, rerr)
@@ -115,7 +116,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 
 	// ── идемпотентность: повтор проходит и сообщает, что снимать было нечего ──
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		removed, rerr := w.UsersW().RemoveMembership(ctx, person, accA)
 		require.NoError(t, rerr,
@@ -165,7 +166,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	// которого его исключат, — то есть худший случай, а не удобный.
 	excluded := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: excluded, AccountID: accID,
@@ -178,7 +179,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	// Без этого исключение ниже обесценило бы приглашение (членств не осталось),
 	// и первого входа не было бы — см. шапку пробы.
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		got, inserted, ierr := w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
@@ -194,7 +195,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	// «воскрешения нет» было бы неотличимо от «зеркало сломано целиком».
 	kept := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: kept, AccountID: accID,
@@ -211,7 +212,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 
 	// ── исключение ───────────────────────────────────────────────────────────
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		removed, rerr := w.UsersW().RemoveMembership(ctx, excluded, accID)
 		require.NoError(t, rerr)
@@ -226,7 +227,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 
 	// ── первый вход: строка человека ПРАВИТСЯ, триггер зеркала срабатывает ───
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		markAddressVerified(t, ctx, pool, excluded)
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
@@ -254,7 +255,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — зеркало по-прежнему ПРАВИТ существующее ─────
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		markAddressVerified(t, ctx, pool, kept)
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
@@ -286,7 +287,7 @@ func TestIntegration_MembershipCarryingRightsIsRefusedWithContractTone(t *testin
 
 	person := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accID,
@@ -305,7 +306,7 @@ func TestIntegration_MembershipCarryingRightsIsRefusedWithContractTone(t *testin
 		bindingID, string(person), string(roleID), string(accID))
 	require.NoError(t, err)
 
-	w, werr := repo.Writer(ctx)
+	w, werr := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, werr)
 	removed, rerr := w.UsersW().RemoveMembership(ctx, person, accID)
 	require.NoError(t, rerr,

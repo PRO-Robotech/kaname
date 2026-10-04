@@ -27,6 +27,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // operationRowsFor — строки операций, денормализованные на идентификатор
@@ -149,7 +150,7 @@ func TestAccountID16_ConcurrentDeleteAndCreateOfOneIDNeverReissues(t *testing.T)
 	require.Equal(t, x, responseAccount(t, finished(t, env, first.ID)).GetId())
 
 	// Удаление X в открытой транзакции.
-	w, err := env.repo.Writer(ctx)
+	w, err := env.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	require.NoError(t, w.ProjectsW().Delete(ctx, domain.ProjectID(md.GetDefaultProjectId())))

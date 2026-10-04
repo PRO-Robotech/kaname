@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertBindingWithTarget Inserts+Commits one ACTIVE binding carrying the given
@@ -39,7 +40,7 @@ import (
 func insertBindingWithTarget(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id domain.AccessBindingID, uid domain.UserID, accID string, tgt domain.AccessTarget) (domain.AccessBinding, error) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, ierr := w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
@@ -115,7 +116,7 @@ func TestAB_IAM_1_29_ReGrantWithTarget_Race(t *testing.T) {
 	assert.Equal(t, 0, other, "no unexpected errors / panics")
 
 	// ── Phase 2: revoke the winner ────────────────────────────────────────
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, winner, uid)
 	require.NoError(t, err)

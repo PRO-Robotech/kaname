@@ -30,10 +30,12 @@ package seed
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )
@@ -136,6 +138,12 @@ func NewReconcileWorker(engine ReconcileEngine, queue ReconcileQueue, cfg Reconc
 // а сверка берёт на каждую выдачу её собственный исключающий замок, поэтому
 // конкурирующие проходы сериализуются в базе, а не наперегонки.
 func (w *ReconcileWorker) Run(ctx context.Context) error {
+	// Проход снимает истёкшие выдачи — пишет журналируемую таблицу: его
+	// транзакции несут инициатора компонента сверщика.
+	ctx, err := shared.AsJournalComponent(ctx, shared.JournalComponentReconciler)
+	if err != nil {
+		return fmt.Errorf("reconcile worker: %w", err)
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

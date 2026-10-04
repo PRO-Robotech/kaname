@@ -57,7 +57,7 @@ const (
 )
 
 // ntf363Attempt — исход одной вставки в своей транзакции. setting == "" —
-// настройка не выставлялась вовсе.
+// отсутствие инициатора выставлено пустым значением локально к транзакции.
 func ntf363Attempt(t *testing.T, db *sql.DB, setting, stmt, resourceID string) (int64, error) {
 	t.Helper()
 	ctx := context.Background()
@@ -72,12 +72,19 @@ func ntf363Attempt(t *testing.T, db *sql.DB, setting, stmt, resourceID string) (
 			"фикстура: настройка инициатора обязана выставиться")
 		require.Equal(t, setting, got, "фикстура: настройка выставлена не тем значением")
 	} else {
+		// Отсутствие выставляется ТЕМ ЖЕ оператором, что у открывающего
+		// пишущую транзакцию службы (`journalwrite.Begin` без принципала): соединение
+		// контейнера проб несёт ролевого инициатора посева, и транзакция,
+		// умолчавшая об инициаторе, унаследовала бы его.
 		var got sql.NullString
+		require.NoError(t, tx.QueryRowContext(ctx,
+			`SELECT set_config($1, '', true)`, journaltx.SettingInitiator).Scan(&got),
+			"фикстура: отсутствие инициатора обязано выставиться")
 		require.NoError(t, tx.QueryRowContext(ctx,
 			`SELECT current_setting($1, true)`, journaltx.SettingInitiator).Scan(&got))
 		require.True(t, !got.Valid || got.String == "",
-			"фикстура: в транзакции «без инициатора» настройка уже стоит (%q) — "+
-				"соединение пула унаследовало чужую, и отказ ниже был бы не о том", got.String)
+			"фикстура: в транзакции «без инициатора» настройка стоит (%q) — "+
+				"отказ ниже был бы не о том", got.String)
 	}
 
 	var seq int64

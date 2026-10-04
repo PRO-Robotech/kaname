@@ -57,6 +57,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // rowsWithEmail — сколько строк пользователя несут эту почту (без учёта регистра).
@@ -75,7 +76,7 @@ func invitePending(
 	acc domain.AccountID, email string, invitedBy domain.UserID,
 ) (domain.User, bool) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	committed := false
 	defer func() {
@@ -183,7 +184,7 @@ func TestIntegration_FirstLoginActivatesEveryMembership(t *testing.T) {
 
 	// Первый вход.
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		markAddressVerified(t, ctx, pool, u.ID)
 		_, aerr := w.UsersW().ActivateInvite(ctx, u.ID,
@@ -241,7 +242,7 @@ func TestIntegration_ConcurrentFirstAppearanceSerializes(t *testing.T) {
 		go func(idx int, acc domain.AccountID) {
 			defer wg.Done()
 			<-start
-			w, werr := repo.Writer(ctx)
+			w, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				results[idx] = outcome{err: werr}
 				return

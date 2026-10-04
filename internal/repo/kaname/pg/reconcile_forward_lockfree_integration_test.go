@@ -44,6 +44,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // forwardLockFreeBudget — сколько форварду даётся на проход, пока полный проход
@@ -91,7 +92,7 @@ func TestReconcileForward_07_DoesNotQueueBehindInFlightFullPass(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_ = adapter.WithTx(ctx, func(ctx context.Context, s reconcile.ReconcileStore) error {
+		_ = adapter.WithTx(journalfixture.Writing(ctx), func(ctx context.Context, s reconcile.ReconcileStore) error {
 			// Ровно первые два стейтмента писательской транзакции полного прохода.
 			if err := s.AcquireBindingLock(ctx, bid); err != nil {
 				return err

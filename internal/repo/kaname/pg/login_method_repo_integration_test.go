@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // Адаптер обязан исполнять порт use-case — иначе порт есть обещание без
@@ -311,7 +312,7 @@ func TestLoginMethodRepo_VerificationLandsOnlyOnTheVerifiedValue(t *testing.T) {
 	require.False(t, verified, "новый человек не подтверждён")
 
 	// Подтверждено УСТАРЕВШЕЕ значение — отказ, отметки нет.
-	err = repo.MarkEmailVerified(ctx, user, "someone-else@example.invalid", time.Now())
+	err = repo.MarkEmailVerified(journalfixture.Writing(ctx), user, "someone-else@example.invalid", time.Now())
 	require.ErrorIs(t, err, iamerr.ErrFailedPrecondition)
 	require.Equal(t, fmt.Sprintf("User %s email does not match the address being verified", user),
 		iamerr.StripSentinel(err))
@@ -322,20 +323,20 @@ func TestLoginMethodRepo_VerificationLandsOnlyOnTheVerifiedValue(t *testing.T) {
 
 	// Положительный контроль: подтверждено ТЕКУЩЕЕ значение — ложится.
 	at := time.Now().UTC().Truncate(time.Microsecond)
-	require.NoError(t, repo.MarkEmailVerified(ctx, user, current, at))
+	require.NoError(t, repo.MarkEmailVerified(journalfixture.Writing(ctx), user, current, at))
 	gotAt, verified, err := repo.EmailVerification(ctx, user)
 	require.NoError(t, err)
 	require.True(t, verified)
 	require.True(t, at.Equal(gotAt), "момент подтверждения хранится тем, что записали: %v против %v", at, gotAt)
 
 	// Несуществующий человек — своя полоса.
-	err = repo.MarkEmailVerified(ctx, "usr0000000000000nobody", current, time.Now())
+	err = repo.MarkEmailVerified(journalfixture.Writing(ctx), "usr0000000000000nobody", current, time.Now())
 	require.ErrorIs(t, err, iamerr.ErrNotFound)
 	_, _, err = repo.EmailVerification(ctx, "usr0000000000000nobody")
 	require.ErrorIs(t, err, iamerr.ErrNotFound)
 
 	// Нулевой момент — не «подтверждено в первом году», а отсутствие значения.
-	err = repo.MarkEmailVerified(ctx, user, current, time.Time{})
+	err = repo.MarkEmailVerified(journalfixture.Writing(ctx), user, current, time.Time{})
 	require.ErrorIs(t, err, iamerr.ErrInvalidArg)
 }
 
@@ -388,7 +389,7 @@ func TestLoginMethodRepo_VerificationRacesAnAddressChange(t *testing.T) {
 			defer wg.Done()
 			<-start
 			time.Sleep(markLag)
-			markErr = repo.MarkEmailVerified(ctx, user, oldAddr, time.Now())
+			markErr = repo.MarkEmailVerified(journalfixture.Writing(ctx), user, oldAddr, time.Now())
 		}()
 		go func() {
 			defer wg.Done()

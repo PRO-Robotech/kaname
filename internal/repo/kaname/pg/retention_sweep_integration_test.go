@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // sweepBatch — партия проб. Мала намеренно: предмет проб — предикат и порог, а
@@ -571,7 +572,7 @@ func seedNonOwningUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, su
 // writer-транзакция, тот же охранник, то же ограничение целостности.
 func deleteUser(t *testing.T, ctx context.Context, repo *kanamepg.Repository, uid domain.UserID) error {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	if derr := w.UsersW().Delete(ctx, uid); derr != nil {
 		_ = w.Rollback(ctx)

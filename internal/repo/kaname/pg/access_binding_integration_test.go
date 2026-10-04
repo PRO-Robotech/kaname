@@ -36,6 +36,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertAB — helper для seed-вставки AccessBinding.
@@ -52,7 +53,7 @@ func insertAB(t *testing.T, ctx context.Context, repo *kanamepg.Repository, b do
 	if b.ID == "" {
 		b.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
@@ -129,7 +130,7 @@ func TestAB_31b_Insert_DuplicateActiveIsAlreadyExists(t *testing.T) {
 	// Second insert with a fresh candidate id but identical 5-tuple — must fail.
 	b2 := b
 	b2.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, insErr := w.AccessBindingsW().Insert(ctx, b2)
 	_ = w.Rollback(ctx) // release connection even on error path
@@ -172,7 +173,7 @@ func TestAB_31c_Insert_AfterRevokeIsAllowed(t *testing.T) {
 	first := insertAB(t, ctx, repo, b)
 
 	// Revoke the first binding.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revoker := domain.UserID(uid)
 	_, err = w.AccessBindingsW().TransitionStatus(ctx, first.ID,
@@ -210,7 +211,7 @@ func TestAB_32_Insert_MissingRole(t *testing.T) {
 		ResourceType: "account",
 		ResourceID:   "acc0000000000000xxxx",
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, b)
 	_ = w.Rollback(ctx)
@@ -239,7 +240,7 @@ func TestAB_33_Insert_InvalidSubjectType(t *testing.T) {
 		ResourceType: "account",
 		ResourceID:   "acc0000000000000xxxx",
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, b)
 	_ = w.Rollback(ctx)
@@ -268,7 +269,7 @@ func TestAB_34a_Delete_Happy(t *testing.T) {
 		ResourceID:   string(acc.ID),
 	})
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().Delete(ctx, ab.ID))
 	require.NoError(t, w.Commit(ctx))
@@ -285,7 +286,7 @@ func TestAB_34b_Delete_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccessBindingsW().Delete(ctx, "acb0000000000000ghst")
 	_ = w.Rollback(ctx)
@@ -400,7 +401,7 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 			b := tuple
 			b.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 
-			w, ierr := repo.Writer(ctx)
+			w, ierr := repo.Writer(journalfixture.Writing(ctx))
 			if ierr != nil {
 				otherErrs <- ierr
 				return
@@ -495,7 +496,7 @@ func TestAccessBinding_RegrantAfterRevoke_Succeeds(t *testing.T) {
 
 	// Revoke the first grant via the real repo path (CAS UPDATE sets
 	// revoked_at + status='REVOKED').
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revoker := domain.UserID(uid)
 	revoked, err := w.AccessBindingsW().TransitionStatus(ctx, first.ID,

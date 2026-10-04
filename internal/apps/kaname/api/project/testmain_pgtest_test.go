@@ -4,6 +4,8 @@
 package project_test
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -28,6 +30,6 @@ func TestMain(m *testing.M) {
 		// `pkg/pgtest` §searchpath.
 		SearchPath: "kaname,public",
 		Name:       "iam",
-		Migrate:    pgtest.Goose(migrations.FS),
+		Migrate:    journalfixture.Migrate(migrations.FS),
 	}))
 }

@@ -46,6 +46,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // Test 01 — FAST-MATERIALIZE (IAM-FMB-01). A single create-forward pass materializes the
@@ -262,7 +263,7 @@ func TestReconcileBindingForward_05_CreateVsConcurrentRevoke(t *testing.T) {
 		// B: Role.Update removes `update`, then FULL fan-out recompute of B (delete-stale).
 		go func() {
 			defer wg.Done()
-			w, werr := fx.repo.Writer(ctx)
+			w, werr := fx.repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				errCh <- werr
 				return
@@ -370,7 +371,7 @@ func TestReconcileBindingForward_08_FanoutRevokeSticks(t *testing.T) {
 	require.True(t, ledgerHasTuple(t, ctx, pool, bid, subj, "v_update", obj), "create-forward granted update")
 
 	// Role.Update removes `update` → FULL fan-out recompute (delete-stale).
-	w, err := fx.repo.Writer(ctx)
+	w, err := fx.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated := domain.Role{ID: roleID, ProjectID: fx.prj, Name: "bfwd8role",
 		Rules: domain.Rules{getOnly}, Permissions: mustCompile(t, domain.Rules{getOnly}), IsSystem: false}

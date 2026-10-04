@@ -26,12 +26,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 const genericUniqueText = "resource with these attributes already exists"
 
 func insertAccountTx(ctx context.Context, repo *kanamepg.Repository, a domain.Account) error {
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return err
 	}

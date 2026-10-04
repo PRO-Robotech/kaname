@@ -31,6 +31,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func seedProject(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.Project {
@@ -42,7 +43,7 @@ func seedProject(t *testing.T, ctx context.Context, repo *kanamepg.Repository, a
 		Description: domain.Description("integration test " + name),
 		Labels:      domain.Labels{},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ProjectsW().Insert(ctx, p)
 	require.NoError(t, err)
@@ -103,7 +104,7 @@ func TestProject_10_Create_DuplicateName(t *testing.T) {
 		Name:      "dup-name",
 		Labels:    domain.Labels{},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ProjectsW().Insert(ctx, p2)
 	_ = w.Rollback(ctx)
@@ -130,7 +131,7 @@ func TestProject_11_Create_FKMissingAccount(t *testing.T) {
 		Name:      "ghost-acc-prj",
 		Labels:    domain.Labels{},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.ProjectsW().Insert(ctx, p)
 	_ = w.Rollback(ctx)
@@ -177,7 +178,7 @@ func TestProject_UpdateRename(t *testing.T) {
 
 	patched := p
 	patched.Name = "renamed"
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.ProjectsW().Update(ctx, patched, []string{"name"})
 	require.NoError(t, err)
@@ -203,13 +204,13 @@ func TestProject_DeleteHappy(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-pdel", uid)
 	p := seedProject(t, ctx, repo, acc.ID, "to-delete")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.ProjectsW().Delete(ctx, p.ID))
 	require.NoError(t, w.Commit(ctx))
 
 	// Повторный Delete → NotFound.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w2.ProjectsW().Delete(ctx, p.ID)
 	_ = w2.Rollback(ctx)

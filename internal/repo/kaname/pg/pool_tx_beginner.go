@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -33,7 +34,7 @@ func NewPoolTxBeginner(pool *pgxpool.Pool) *PoolTxBeginner {
 
 // Begin — opens a read-write transaction from the pool.
 func (b *PoolTxBeginner) Begin(ctx context.Context) (service.Tx, error) {
-	return b.pool.Begin(ctx)
+	return journalwrite.Begin(ctx, b.pool)
 }
 
 // Compile-time assertion.

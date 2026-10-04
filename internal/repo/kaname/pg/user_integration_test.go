@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // upsertUser-compatible helper: создает **дополнительного** user-row
@@ -50,7 +51,7 @@ func upsertUser(t *testing.T, ctx context.Context, repo *kanamepg.Repository, ex
 	adminID := domain.UserID(ids.NewID(domain.PrefixUser))
 	targetID := domain.UserID(ids.NewID(domain.PrefixUser))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	committed := false
 	defer func() {
@@ -148,7 +149,7 @@ func TestUser_41a_Delete_Happy(t *testing.T) {
 
 	u, _ := upsertUser(t, ctx, repo, "ext-41a", "u41a@example.com", "U41a")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.UsersW().Delete(ctx, u.ID))
 	require.NoError(t, w.Commit(ctx))
@@ -182,7 +183,7 @@ func TestUser_41b_Delete_WithGroupMember(t *testing.T) {
 	require.NoError(t, err)
 
 	// User cannot be deleted while in group + while owner of account.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, u.ID)
 	_ = w.Rollback(ctx)
@@ -213,7 +214,7 @@ func TestUser_41c_Delete_WithAccessBinding(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, u.ID)
 	_ = w.Rollback(ctx)
@@ -235,7 +236,7 @@ func TestUser_41d_Delete_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, "usr0000000000000ghst")
 	_ = w.Rollback(ctx)
@@ -261,7 +262,7 @@ func TestUser_41e_Delete_OwnerOfAccount(t *testing.T) {
 	// Account существует.
 	userID, _ := bootstrapAdmin(t, ctx, repo, "e41e")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, userID)
 	_ = w.Rollback(ctx)
@@ -297,7 +298,7 @@ func TestUser_ListAccountsForUser_IncludesOwnedAccounts(t *testing.T) {
 	// accounts table, but NO new user row is inserted in users table for that
 	// account. The user's primary row still has account_id = bootstrapAccID.
 	secondAccID := domain.AccountID(ids.NewID(domain.PrefixAccount))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, domain.Account{
 		ID:          secondAccID,

@@ -20,6 +20,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestAB_IAM_1_32_UnifiedListRepo(t *testing.T) {
@@ -121,7 +122,7 @@ func TestAB_IAM_1_32_UnifiedList_HidesRevoked(t *testing.T) {
 	})
 
 	// Soft-revoke `gone` (row retained, status→REVOKED, revoked_at stamped).
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revoked, err := w.AccessBindingsW().RevokeGuarded(ctx, gone.ID, domain.UserID(owner))
 	require.NoError(t, err)
