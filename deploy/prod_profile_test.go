@@ -207,6 +207,10 @@ var configBridge = []bridged{
 	// каждом выпущенном токене. Умолчания у ключа нет (задача #2127), поэтому
 	// профиль обязан его назвать, а страж — отказать без него.
 	{configKey: "authn.domain", valuePath: []string{"authn", "domain"}, omitEmpty: true},
+	// Почтовый узел — условие боевого старта (kaname#475); шаблон отдаёт
+	// секцию ветвью, поэтому пустое не подставляется.
+	{configKey: "invite-mail.relay", valuePath: []string{"inviteMail", "relay"}, omitEmpty: true},
+	{configKey: "invite-mail.from", valuePath: []string{"inviteMail", "from"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
 	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
