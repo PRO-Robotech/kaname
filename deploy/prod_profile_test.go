@@ -310,6 +310,9 @@ var configBridge = []bridged{
 	// ФЛАГ ПОЧТЫ (приёмка NTF-2 Р4): рендерится всегда — незаданный роняет рендер,
 	// а `false` законен, поэтому `omitEmpty` не ставится.
 	{configKey: "notifications.enabled", valuePath: []string{"notifications", "enabled"}},
+	// ПОЛОСА ОТСЕЧКИ ВЫДАЧИ (приёмка NTF-1 Р5): рендерится всегда — незаданная
+	// роняет рендер с именем ручки.
+	{configKey: "notifications.cutoff-guard", valuePath: []string{"notifications", "cutoffGuard"}},
 	// ПРИГЛАШЕНИЯ (приёмка NTF-2 Р7, Р8): срок и возраст — ветвь `with`; счёты —
 	// ветвь `hasKey`, ноль у части из них законен.
 	{configKey: "invite.ttl", valuePath: []string{"invite", "ttl"}, omitEmpty: true},
@@ -893,6 +896,14 @@ func bootGuardVerdict(t *testing.T, cfgPath string, envs map[string]string) erro
 
 	var errs error
 	errs = multierr.Append(errs, cfg.Validate())
+	// СТАДИЯ СБОРКИ, А НЕ НАСТРОЙКИ: полосу отсечки судит строитель службы
+	// выдачи уведомлений (`cmd/kaname/notification_grant_wiring.go`), которого
+	// корень собирает безусловно, — `Validate()` её не видит. Без этой строки
+	// боевой профиль без ключа проходил пробу и не стартовал (kaname#600:
+	// «notifications.cutoff-guard must be declared» на подъёме стенда).
+	if _, err := cfg.Notifications.CutoffGuardValue(); err != nil {
+		errs = multierr.Append(errs, err)
+	}
 
 	mode := coredb.SSLModeFromDSN(cfg.DSN())
 	if !coredb.SSLModeSecure(mode) {

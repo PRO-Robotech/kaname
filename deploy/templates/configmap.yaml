@@ -206,6 +206,43 @@ data:
         - {{ . | quote }}
         {{- end }}
       {{- end }}
+      {{- /* ─── ЗВЕНО ИДЕНТИЧНОСТИ СЛУЖБ Р2 (приёмка NTF-1 Р2 п.2, NTF1-M09; замысел
+      З13 «Производителей значения два», CX1-108; решение Д112 (в)) ──────────
+
+      Блок значений `serviceIdentity: {methods, services}` → ключ процесса
+      `authn.service-identity`. Ключ «только файл» (`strict_env.go`): его
+      единственная форма — эта карта настроек, переменная окружения, выведенная
+      из него, — отказ старта.
+
+      Три исхода, и третьего «подставить как есть» нет:
+        · блок пуст либо не задан — ключа НЕТ: звено `NotApplicable`, служебного
+          субъекта нет никому, `ResolveSend` от notify — отказ (fail-closed);
+        · задана половина (`methods` без `services` и обратно) либо строка
+          таблицы без `san`/`name` — отказ РЕНДЕРА с именем ручки;
+        · согласный блок — ключ целиком.
+      Согласие по существу (перечень закрыт `{ResolveSend}`, SAN канонический,
+      без повторов) судит корень процесса, называя ручку и значение. */}}
+      {{- $si := $.Values.serviceIdentity | default dict }}
+      {{- $siMethods := $si.methods | default list }}
+      {{- $siServices := $si.services | default list }}
+      {{- if and $siMethods (not $siServices) }}
+      {{- fail "kaname: `serviceIdentity.methods` задан, а `serviceIdentity.services` пуст — методы объявлены для служб, которых звено не опознает никогда (ключ процесса `authn.service-identity`, NTF1-M09)" }}
+      {{- end }}
+      {{- if and $siServices (not $siMethods) }}
+      {{- fail "kaname: `serviceIdentity.services` задан, а `serviceIdentity.methods` пуст — службы объявлены, а открыть им нечего (ключ процесса `authn.service-identity`, NTF1-M09)" }}
+      {{- end }}
+      {{- if $siMethods }}
+      service-identity:
+        methods:
+          {{- range $i, $m := $siMethods }}
+          - {{ required (printf "kaname: `serviceIdentity.methods[%d]` пуст — метод звена называется полным именем без ведущей косой" $i) $m | quote }}
+          {{- end }}
+        services:
+          {{- range $i, $s := $siServices }}
+          - san: {{ required (printf "kaname: `serviceIdentity.services[%d].san` не задан — строка таблицы звена без точного SAN службы не опознаёт никого" $i) $s.san | quote }}
+            name: {{ required (printf "kaname: `serviceIdentity.services[%d].name` не задан — субъект `service:<имя>` без имени не выражается" $i) $s.name | quote }}
+          {{- end }}
+      {{- end }}
 
       {{- with $authn.login }}
       # ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269). Каждая величина — условие старта,
@@ -649,6 +686,23 @@ data:
     `"false"` включила бы почту, которую выключали. */}}
     notifications:
       enabled: {{ if include "kaname-svc.blockEnabled" (list $ "notifications") }}true{{ else }}false{{ end }}
+      {{- /* ─── ПОЛОСА ОТСЕЧКИ ВЫДАЧИ УВЕДОМЛЕНИЙ (приёмка NTF-1 Р5, NTF1-F20;
+      решение Д112 (в)) ──────────────────────────────────────────────────────
+
+      Служба выдачи собирается корнем БЕЗУСЛОВНО, и её строитель отказывает в
+      старте без этой величины: умолчания нет ни у процесса, ни здесь (граница
+      [1s..10m] судится стражем строителя). Поэтому ключ отдаётся ВСЕГДА, а
+      незаданная, пустая либо не-длительность — отказ РЕНДЕРА с именем ручки:
+      пустота, подставленная дословно, доехала бы до старта отказом без
+      координаты чарта. Ноль отвергается здесь же — «без полосы» в словаре
+      ручки нет. */}}
+      {{- $ntf := .Values.notifications | default dict }}
+      {{- $cgMsg := "kaname: `notifications.cutoffGuard` не задан: полоса отсечки выдачи уведомлений (ключ процесса `notifications.cutoff-guard`) умолчания не имеет — объявите её явно в профиле длительностью в границах [1s..10m] (приёмка NTF-1 Р5, NTF1-F20)" }}
+      {{- $cg := toString (required $cgMsg $ntf.cutoffGuard) }}
+      {{- if or (not (regexMatch "^([0-9]+(ns|us|ms|s|m|h))+$" $cg)) (regexMatch "^(0+(ns|us|ms|s|m|h))+$" $cg) }}
+      {{- fail (printf "kaname: `notifications.cutoffGuard` = %q — ожидается положительная длительность (`30s`, `1m`) в границах [1s..10m] (ключ процесса `notifications.cutoff-guard`, NTF1-F20)" $cg) }}
+      {{- end }}
+      cutoff-guard: {{ $cg | quote }}
 
     {{- /* ─── СРОК СТРОКИ ПРИГЛАШЕНИЯ И ПОТОЛКИ ПРИГЛАШЕНИЙ (приёмка NTF-2 Р7,
     Р8; решение Д11) ─────────────────────────────────────────────────────────

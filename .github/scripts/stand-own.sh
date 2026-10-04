@@ -102,6 +102,20 @@ HOSTNAME_FOR_TLS="${KANAME_STAND_HOST:-localhost}"
 # Случайный на каждый запуск процесса ломал бы второй же старт.
 WRAPKEY_FILE="$RUNDIR/wrapping.key"
 
+# ФАЙЛ НАСТРОЕК СТЕНДА (`KANAME_CONFIG_PATH`). Две величины службы выдачи
+# уведомлений окружением не задаются (решение Д112 (в)):
+#   · `authn.service-identity` — ключ «только файл» (`strict_env.go`): значение —
+#     список пар, и переменная, выведенная из него, — отказ старта;
+#   · `notifications.cutoff-guard` — ручка без умолчания, которую строитель
+#     службы выдачи требует на ЛЮБОЙ посадке. Переменную, названную её отказом,
+#     процесс к ключу не привязывает (замер: при одной переменной поле nil),
+#     поэтому она едет файлом — тем же, что несёт звено.
+# Остальная посадка — окружением, как прежде: viper сливает оба слоя по ключу.
+CONFIG_FILE="$RUNDIR/kaname.yaml"
+# SAN службы уведомлений, которой стенд открывает `ResolveSend`. Имя службы в
+# субъекте — `notify`; SAN — в домене доверия стенда, той же формы, что у края.
+NOTIFY_SAN="spiffe://kaname.local/ns/kaname/sa/notify"
+
 # Ключ БУТСТРАП-контура — тоже файл и тоже постоянен, и по той же причине: строка
 # соответствия бутстрап-клиента заводится в базе ОДИН раз, открытой половиной
 # этого ключа. Новый ключ на каждый запуск означал бы, что второй старт не
@@ -476,6 +490,21 @@ stand_env() {
       KANAME_${u}_MTLS_CAFILES=$PKI/ca.crt \
       KANAME_${u}_MTLS_SERVERNAME=$HOSTNAME_FOR_TLS"
   done
+  # ─── ФАЙЛ НАСТРОЕК: служба выдачи уведомлений (NTF-1 Р2, Р5; Д112 (в)) ───
+  # Полоса — ориентир приёмки и та же, что объявляет боевой профиль
+  # (`deploy/values.prod.yaml`, `notifications.cutoffGuard`).
+  cat > "$CONFIG_FILE" <<EOF
+notifications:
+  cutoff-guard: 30s
+authn:
+  service-identity:
+    methods:
+      - kaname.cloud.iam.v1.InternalNotificationGrantService/ResolveSend
+    services:
+      - san: "$NOTIFY_SAN"
+        name: notify
+EOF
+  export KANAME_CONFIG_PATH="$CONFIG_FILE"
 }
 
 build_binaries() {
@@ -592,7 +621,8 @@ start_service() {
   docker rm -f "$SERVICE_NAME" >/dev/null 2>&1
   nohup docker run --rm --name "$SERVICE_NAME" --network host \
     --memory "$SERVICE_MEMORY" --memory-swap "$SERVICE_MEMORY" \
-    --user "$(id -u):$(id -g)" -v "$BIN:$BIN:ro" -v "$PKI:$PKI:ro" "${envs[@]}" \
+    --user "$(id -u):$(id -g)" -v "$BIN:$BIN:ro" -v "$PKI:$PKI:ro" \
+    -v "$CONFIG_FILE:$CONFIG_FILE:ro" "${envs[@]}" \
     --entrypoint "" "$SERVICE_IMAGE" "$BIN/kaname" > "$RUNDIR/kaname.log" 2>&1 &
   echo $! > "$RUNDIR/kaname.pid"
   local i alive
