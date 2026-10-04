@@ -224,7 +224,59 @@ type CatalogPendingEntry struct {
 // проходит на пустом), а способность записи истечь
 // доказывается синтетикой (TestDeclaredPendingEntryExpiresOnItsOwn), не живой
 // записью.
-var catalogPendingEntries = []CatalogPendingEntry{}
+//
+// Перечень снова непуст с 2026-10-04: три глагола контракта
+// `InternalNotificationGrantService` (полоса K3c, перепись на заведении: у края
+// 348 · у нас 351 · ожидающих 3 · применено 3; ствол платформы f4c74ba1aa1).
+var catalogPendingEntries = []CatalogPendingEntry{
+	// ТРИ ГЛАГОЛА ВЫДАЧИ ПРАВА НА ПИСЬМА (NTF-1, kaname#484; замысел kacho#2915 З13, З18,
+	// CX1-104). Контракт `InternalNotificationGrantService` заведён полосой K3c;
+	// обработчиков в ней нет — сервер регистрирует K3. Окно закрывает K3r: посадка
+	// эпика в ствол платформы с подъёмом пина службы.
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalNotificationGrantService/ResolveSend",
+		Why: "глагол решения о письме строки ленты заведён контрактом службы (kaname#484, NTF-1 З18: " +
+			"внутренний слушатель, освобождение `INTERNAL_LISTENER` — право решает обработчик вопросом " +
+			"`reader` на `notification_feed`); " +
+			"запись порождена генератором края над контрактом этой ревизии (`gateway/scripts/gen-permission-catalog.sh` " +
+			"платформы с отбором домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 121 имя " +
+			"службы, все побайтово равны нашей копии; полный прогон без отбора — 351 запись, побайтово равен нашей " +
+			"копии; у края на стволе платформы f4c74ba1aa1 записей 348, ни одной из трёх нет); край порождает свою " +
+			"копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalNotificationGrantService/ResolveSend` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается тем же изменением (полоса K3r маршрута kacho#2915)",
+		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2915",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalNotificationGrantService/Restore",
+		Why: "глагол снятия надгробия выдачи заведён тем же контрактом (NTF-1 З18: `system_admin` на " +
+			"`cluster`, пол «2», образец `InternalClusterService/RevokeAdmin`); " +
+			"запись порождена генератором края над контрактом этой ревизии (`gateway/scripts/gen-permission-catalog.sh` " +
+			"платформы с отбором домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 121 имя " +
+			"службы, все побайтово равны нашей копии; полный прогон без отбора — 351 запись, побайтово равен нашей " +
+			"копии; у края на стволе платформы f4c74ba1aa1 записей 348, ни одной из трёх нет); край порождает свою " +
+			"копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalNotificationGrantService/Restore` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается тем же изменением (полоса K3r маршрута kacho#2915)",
+		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2915",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke",
+		Why: "глагол надгробия выдачи заведён тем же контрактом (NTF-1 З18: `system_admin` на " +
+			"`cluster`, пол «2», образец `InternalClusterService/RevokeAdmin`); " +
+			"запись порождена генератором края над контрактом этой ревизии (`gateway/scripts/gen-permission-catalog.sh` " +
+			"платформы с отбором домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 121 имя " +
+			"службы, все побайтово равны нашей копии; полный прогон без отбора — 351 запись, побайтово равен нашей " +
+			"копии; у края на стволе платформы f4c74ba1aa1 записей 348, ни одной из трёх нет); край порождает свою " +
+			"копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается тем же изменением (полоса K3r маршрута kacho#2915)",
+		Refs: "PRO-Robotech/kaname#484, PRO-Robotech/kacho#2915",
+	},
+}
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogPendingEntries() []CatalogPendingEntry {

@@ -87,9 +87,10 @@ const (
 	svcUser        = "/kaname.cloud.iam.v1.InternalUserService/"
 	svcHumanSess   = "/kaname.cloud.iam.v1.InternalHumanSessionService/"
 	svcBootstrap   = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/"
+	svcNotifyGrant = "/kaname.cloud.iam.v1.InternalNotificationGrantService/"
 )
 
-// internalAddressGateTable — таблицы Р4в: 18 строк круга и 13 вне круга.
+// internalAddressGateTable — таблицы Р4в: 18 строк круга и 16 вне круга.
 var internalAddressGateTable = map[string]InternalAddressGateRow{
 	// ── круг края (18) ──
 	svcRevocations + "Revoke": {GateAllowsSelfRevoke,
@@ -114,7 +115,7 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 	svcUser + "UpsertFromIdentity": {GateRefuses,
 		"от лица человека — отказ; без принципала-человека (обратный вызов поставщика от имени системы) рубеж молчит, исход судит правило приглашения"},
 
-	// ── вне круга (13) ──
+	// ── вне круга (16) ──
 	svcIAM + "Check": {GateOutsideCircle,
 		"вопрос о праве субъекта, названного в запросе: ответ судит допуск под дверью решения — неподтверждённому «нет»"},
 	svcIAM + "LookupSubject": {GateOutsideCircle,
@@ -141,6 +142,14 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"запись материализации модуля: тот же довод, что у записи"},
 	svcUser + "Get": {GateOutsideCircle,
 		"чтение строки человека краем: ответ — строка, а не право"},
+	// Служба выдачи права на письма (NTF-1, kaname#484): контракт без REST-привязки, края-маршрута нет,
+	// поэтому в круг края методы не входят. Попадёт метод в круг — строка переходит туда же.
+	svcNotifyGrant + "ResolveSend": {GateOutsideCircle,
+		"решение о письме для службы notify: вызывающий — служебный принципал по сертификату, человека на пути нет; право решает обработчик вопросом reader к модели"},
+	svcNotifyGrant + "Revoke": {GateOutsideCircle,
+		"рычаг оператора над выдачей: маршрута края нет, человек-принципал до метода не доходит; право system_admin судит путь обслуживания, который заводит K3"},
+	svcNotifyGrant + "Restore": {GateOutsideCircle,
+		"рычаг оператора над выдачей: тот же довод, что у Revoke"},
 }
 
 // InternalAddressGateTable — таблицы Р4в копией: метод → строка.

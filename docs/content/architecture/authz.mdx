@@ -157,6 +157,7 @@ Floor стоит на **узком наборе** RPC, а не на пользо
     <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
     <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
     <tr><td>применение модели доступов модуля</td><td><code>InternalModuleService.Apply</code></td></tr>
+    <tr><td>отзыв и возврат права модуля на письма</td><td><code>InternalNotificationGrantService.Revoke</code>, <code>InternalNotificationGrantService.Restore</code></td></tr>
     <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code></td></tr>
   </tbody>
 </table>
@@ -165,6 +166,11 @@ Floor стоит на **узком наборе** RPC, а не на пользо
 `AccessBindingService.Create`: `projectId` + `roleId` заводят привязку атомарно с членством, и
 порог ниже порога привязки был бы обходом step-up через более дешёвую дверь; сброс второго
 фактора — надзор облака над способом входа человека.
+
+Порог `InternalNotificationGrantService.Revoke` и `.Restore` объявлен контрактом, но сегодня не
+исполняется: floor применяется к внутренним методам, которые фронтирует край, а маршрута края у
+этой службы нет — контракт заведён без REST-привязки, обработчика и регистрации сервера (NTF-1,
+kaname#484). Порог начнёт исполняться вместе с маршрутом края.
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.

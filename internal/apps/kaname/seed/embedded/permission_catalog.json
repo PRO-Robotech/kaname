@@ -3020,6 +3020,36 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationGrantService/ResolveSend",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationGrantService/Restore",
+    "permission": "iam.notification_grants.restore",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke",
+    "permission": "iam.notification_grants.revoke",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.InternalOperationsService/ListIamOperations",
     "permission": "iam.internal_operationses.listIamOperations",
     "required_relation": "system_admin",
