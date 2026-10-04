@@ -283,14 +283,11 @@ func (x *User) GetLabels() map[string]string {
 
 type DeleteUserMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User that is being deleted.
+	// ID of the User (the person, platform-wide) that is being deleted.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// ID of the owning Account (denormalized for account-scoped operations
-	// listing — AccountService.ListAllOperations). Non-first field so the
-	// corelib resource_id extractor (first `_id`-suffix match) still picks
-	// `user_id`. Read by exact field name `account_id` by corelib. May be
-	// empty for account-less users (written as SQL NULL — excluded from the
-	// account-scoped list).
+	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+	// этим сообщением: адресует ленту операций одного аккаунта и не называет ни
+	// аккаунт действия, ни аккаунты, которых действие касается.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -342,14 +339,10 @@ func (x *DeleteUserMetadata) GetAccountId() string {
 
 type UpdateUserMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User that is being updated.
+	// ID of the User (the person, platform-wide) that is being updated.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// ID of the owning Account (denormalized for account-scoped operations
-	// listing — AccountService.ListAllOperations). Non-first field so the
-	// corelib resource_id extractor (first `_id`-suffix match) still picks
-	// `user_id`. Read by exact field name `account_id` by corelib. May be empty
-	// for account-less users (written as SQL NULL — excluded from the
-	// account-scoped list).
+	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+	// `DeleteUserMetadata`.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -401,11 +394,14 @@ func (x *UpdateUserMetadata) GetAccountId() string {
 
 type BlockUserMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User membership row that is being blocked.
+	// ID of the User (the person, platform-wide) that is being blocked.
+	// Блокировка — свойство личности: она закрывает вход на платформу во всех
+	// аккаунтах человека разом, членства остаются `ACTIVE`.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
-	// Never empty here: a membership row always has an account, and the block is
-	// an act OF that account.
+	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+	// `DeleteUserMetadata`. Операция блокировки видна в ленте только этого
+	// аккаунта; распорядители остальных аккаунтов человека её в своей ленте не
+	// видят, хотя блокировка действует и у них.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -457,9 +453,10 @@ func (x *BlockUserMetadata) GetAccountId() string {
 
 type UnblockUserMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User membership row that is being unblocked.
+	// ID of the User (the person, platform-wide) that is being unblocked.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+	// `DeleteUserMetadata`.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -513,7 +510,8 @@ type ResetSecondFactorMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the User whose second factor is being reset.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+	// `DeleteUserMetadata`.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
