@@ -1,0 +1,99 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cloud-administrator-resets-login-methods.md
+  sha256: 4024ec8715432a366f9afef6684c7762f033a866edc951aabe9f32dff67b3064
+  static_status: DRAFT
+  base_commit: d2f6f182fab9d9727a7fab35a82a798005eb0d89
+  content_commit: ff3a90603240ff8b8352217612d9c8a63058f37c
+  branch: '2702'
+  task: PRO-Robotech/kacho#2702
+  lines: 493
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/cloud-administrator-resets-login-methods.md
+  fingerprint_note: >-
+    Отпечаток снят своим замером в копии tmp/kaname-2702 на HEAD ff3a9060 (родитель — origin/537 =
+    origin/296 = d2f6f182) и совпал с названным заданием; 493 строки. Записей ревью у документа до
+    этой не было — круг 1. Токен DRAFT в шапке вердиктом не является и не правлен.
+  static_status_note: шапка документа намеренно не правлена; вердикт — эта запись и внешнее событие
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: Один блокирующий (CONSTRUCTIBILITY). Санкции на код этой редакцией нет.
+  publication_pending:
+    expected_actor: pointpu
+
+publication_mode: external_event_required
+authority:
+  event_published: false
+  note: >-
+    Рецензент событие не публикует. Публикует курьер; после публикации запись дополняется
+    соседней, а не правится.
+event_body: 'acceptance-reviewer · CHANGES_REQUESTED · kaname:docs/engineering/acceptance/cloud-administrator-resets-login-methods.md @ff3a9060 · sha256 4024ec8715432a366f9afef6684c7762f033a866edc951aabe9f32dff67b3064'
+
+blocking:
+  - id: Б1
+    genus: CONSTRUCTIBILITY
+    where: LMR-06 (а) Given; LMR-07 (б) близнец; LMR-01 последнее «И»; §8 п.3 DoD
+    finding: >-
+      Три утверждения требуют ЖИВОЙ сессии U (или W), выданной ПОСЛЕ сброса, а единственный
+      названный документом путь к ней — LMR-05, то есть восстановление у личности без строки
+      пароля, которое до посадки kacho#2698 отказывает (∅3, перемерено: 2 вхождения
+      'has no password sign-in method'). (1) LMR-06 (а): «U из LMR-01 после LMR-05» — подъём уровня
+      требует сессии «1»; (2) LMR-07 (б): положительный близнец — «регистрация из сессии, выданной
+      после сброса (LMR-05)»; (3) LMR-01: «предъявление снятого ключа проверяющему Ф7» — испытание
+      предъявления выдаётся и находится только из сессии вызывающего (begin_assertion.go,
+      Ф7-55), а все сессии U сброс отсёк; чья сессия предъявляет — не названо. При этом DoD
+      требует LMR-01, LMR-06, LMR-07 зелёными безусловно, допуская третью категорию только LMR-05.
+      Противоречие: зелёный по DoD недостижим до kacho#2698 либо достигается непоименованным
+      посевом.
+    fix: >-
+      Назвать посев сессии «после сброса» уровня I писателем продукта
+      (humanSessionWriter.InsertSession, internal/repo/kaname/pg/human_session_repo.go:486; посевы
+      этой формы уже есть, напр. internal_iam/force_logout_own_session_integration_test.go) — в
+      «Посеве Дано уровня I» и в Given трёх сценариев; ссылку на LMR-05 оставить только уровню E.
+      Либо условить эти три пункта в DoD так же, как LMR-05.
+
+important: []
+
+premise_recheck:
+  status: ПОДТВЕРЖДЕНА
+  items: >-
+    origin/537 = origin/296 = d2f6f182 (git rev-parse); ∅1 → 0, контроль ResetSecondFactor → 1;
+    ∅2 → 0; ∅3 → 2; ∅4 → 2; П-б governingRPCs → 4; П-а identity_suspender :779 = super_admin from
+    account, account#super_admin :308 = any_admin from cluster; П-е таблица :74, триггер
+    квоты :118 AFTER INSERT OR DELETE, InsertKey :254; П-м и П-н — все функции на объявленных
+    строках; полосы входа ключом — 0.
+
+constructibility:
+  seeded: 1
+  of: 1
+  not_executed: 0
+  run: >-
+    go test -count=1 -v -run TestResetSecondFactorAuthzMatrix ./internal/service/ (слот, MemoryMax
+    10G) → PASS 3.09s: посев LMR-03 той же формы строится — факт user:<A> system_admin
+    cluster:cluster_root через журнал, аккаунт с владельцем, контроль D₂ держит v_get на строке
+    члена (строка 131 теста) — положительный близнец отрицаний LMR-03 конструируем.
+  note: >-
+    Посев сессии после сброса (Б1) не исполнялся: его предмет — назвать производителя, и он
+    отсутствует в тексте.
+
+role_sweep:
+  scope: >-
+    §0.2/§4.1/§4.2 — объём совпадает с предикатом снятия kacho#2702; over-scope нет (2FA,
+    Unblock, заведение способа за человека, консоль — вынесены с носителем).
+  coverage: '8 сценариев: positive LMR-01/02/05/06, negative LMR-03/04, гонки LMR-07, свойства дерева LMR-08'
+  producer_per_then: 'ведомость §6 — у каждого Тогда производитель (существует / заказан / kacho#2698 / kacho#2878)'
+  twin_per_negation: >-
+    LMR-03 (одно-фактные пары + контроль A для U и v_get у D₂), LMR-04 (близнец LMR-01), LMR-05
+    (прежний/новый пароль), LMR-07 (б) — близнец назван, но неконструируем без kacho#2698 (Б1)
+  dod: измеримо, кроме противоречия Б1
+  open_questions: 0
+  route_flags: proto да · схема нет (миграция не нужна по тексту) · публичный RPC да · UI нет · новый домен нет · поверхность безопасности да
