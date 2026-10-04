@@ -1,0 +1,150 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/first-password-from-a-live-session.md
+  sha256: 72825c63669122f239b7b6ffbd580724dd080cee1263bd9f90a98a397df58a37
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена: токен DRAFT — статическая форма объявления;
+    вердикт из неё не выводится и этой записью в неё не вписывается (change-graph.md §2).
+  base_commit: d2f6f182fab9d9727a7fab35a82a798005eb0d89
+  content_commit: 41687a29a36434621b880b4e344bd44d87d721aa
+  branch: '596'
+  head_commit: 41687a29a36434621b880b4e344bd44d87d721aa
+  task: PRO-Robotech/kaname#213
+  lines: 461
+  round: 2
+  predecessor_record: docs/specs/reviews/first-password-from-a-live-session/35820cb246b540d3aefbb03e80f623f5c0c205bed28a11a6fe0e97a47ffd5ef5.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/first-password-from-a-live-session.md
+  fingerprint_note: >-
+    Отпечаток перемерен по файлу на голове 41687a29a и СОВПАЛ с названным заданием дословно;
+    461 строка (wc -l). Вердикт относится к этому отпечатку и ни к какой другой редакции.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт рецензента — APPROVED на этот отпечаток. Действующим одобрение становится
+    внешним событием полномочия, которое публикует курьер; до него запрет ban #1 не снят.
+
+authority:
+  expected_actor: pointpu
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось»: событие публикует курьер, не рецензент. Тело для публикации —
+    `acceptance-reviewer · APPROVED · 72825c63669122f239b7b6ffbd580724dd080cee1263bd9f90a98a397df58a37`.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: null
+  personal_review_by_publishing_actor_claimed: false
+
+prior_blocking_resolved:
+  - id: Б1
+    kind: CONSTRUCTIBILITY
+    outcome: снят
+    evidence: >-
+      FP-11 переписан пятью запросами одного глагола: S0 выдана в t₀, часы сдвинуты на W+1с
+      ДО выдачи S1, S2 в t₁, далее часы стоят; входов неверным паролем внутри прогона нет,
+      положительный контроль (+1 по адресу и источнику) — после снятия «Тогда». Источник
+      счёта — сырой X-Forwarded-For (handler.go:943–944) = fwd() 203.0.113.7
+      (second_factor_test.go:72); запись следа по обеим осям — rate.go:109. FP-03 (а)/(б) на
+      своих посевах; граница: sf_enroll.go:84 `>`; часы avClock усечены до микросекунды,
+      срок сессии laneSessionTTL 24 ч ≫ laneFreshness 15 мин (session_lane_integration_harness_test.go:82–83).
+  - id: Б2
+    kind: CONSTRUCTIBILITY
+    outcome: снят
+    evidence: >-
+      FP-07 (в) перенесён на U: newHarness(t, breach) передаёт авторитет в NewPasswordRule
+      (usecase_test.go:95,111), fakeBreach.found — usecase_test.go:716–728.
+  - id: Б3
+    kind: DoD
+    outcome: снят
+    evidence: >-
+      §7 п.5 требует исполнения FP-12 на стенде: задание chart-own (e2e-newman.yml:1133),
+      `--service kaname-login-lane` (e2e-newman.yml:1318), код 3 «условие не создано» —
+      gen.py:809–817; исход назван непроходным, задача на нём не закрывается.
+
+premises_remeasured:
+  - claim: §1.1–§1.4, §1.3 (ред. 2), §5 «чем измерено», §6 п.1 — все числа
+    outcome: >-
+      подтверждено на 41687a29a: 0 · 0 · 0 · 15 · 10; 4 места записи + 1 оператор вставки;
+      по 1 у каждого производителя §1.3 (14 команд); #213 → 1 файл passwordless-login-with-access-key.md;
+      PathRefusedInVerification → 7; PRIMARY KEY (user_id, kind) → 1; INSERT INTO → 3;
+      loginLaneBaseUrl → 4; EmitAudit(ctx → 1; Judge → 1
+  - claim: названные пробы-образцы существуют
+    outcome: >-
+      подтверждено — TestF12_09_10…, TestEV11_…, TestChangePassword_F3_22_…, TestLane_F3_19_20_…,
+      TestEveryLanePathIsDeclaredInTheR2List, TestLane_F12_41_FormKindsAreOneList — по одному
+  - claim: FP-01 methods = ["webauthn"]
+    outcome: подтверждено — KeyAssertion → MethodWebAuthn{"webauthn"} (assurance/level.go:131,174); IssueSession пишет Method().String() (issue.go:66–69)
+  - claim: FP-06 (б) вид `password` существует; отказ 403 FORM_TOKEN_REJECTED
+    outcome: подтверждено — FormPassword human_session.go:292; refusals.go:22,32
+  - claim: FP-09/FP-10 точки подставного отказа
+    outcome: подтверждено — fake_store_test.go:117 ("resolve"), :536 ("audit"); записи писателя применяются только на Commit (w.ops)
+  - claim: loginLaneBaseUrl — слушатель формы службы, не край
+    outcome: подтверждено — kaname-login-lane.py:12; условие §0.2 (путь края) на FP-12 не влияет
+
+blocking: []
+
+non_blocking:
+  - >-
+    FP-12 «Дано»: личность БЕЗ пароля с ключом на стенде продуктом не строится (регистрации
+    ключом не будет — kacho#2703; снятия строки «пароль» глаголом нет); Ф13 §5 преамбула строит
+    её ЗАПИСЬЮ, а исполнимость на стенде несёт Ф13 DoD п.9 (Ф13-19 в наборе). Назвать это в
+    «Дано» FP-12 ссылкой на преамбулу Ф13 §5 и Ф13 DoD п.9 и добавить в предикат снятия §7 п.5
+    второе условие — посев стенда «личность без пароля с ключом» существует; иначе после
+    посадки пути входа ключом исход «условие не создано» останется, а предикат скажет «снят».
+  - >-
+    Посев I: на базе (до реализации) `lane.csrf(... "password-enroll")` требует 200
+    (handler_test.go:300) и падает на закрытом перечне видов — это красное продукта (новый вид
+    Р1), но падает в «Дано». Для DoD п.1 («красный по каждому FP, не "не выполнилось"») лучше
+    брать признак свёрткой `humansession.FormToken` (как avLane.token) и ставить ступень
+    ВОЗМОЖНОСТИ после мира, по форме харнесса avLane.
+  - >-
+    FP-09: порядок внутри «Дано U» — сессия выдаётся ДО установки failOn = "audit"
+    (IssueSession с событием упал бы на посеве). Сказать явно. Дублёр fakeWriter не несёт
+    InsertLoginMethod — его заведение в харнессе разрешено §0.2, стоит назвать.
+  - >-
+    Р6/FP-01: «той же формы, что Ф3-01» при теле `{"session": {...}}` — у Ф3-01 тело несёт и
+    `user` (Ф13-05 цитирует `{"user", "session"}`). Назвать ключи верхнего уровня дословно.
+  - >-
+    Р5 «момент последнего предъявления не меняется» — ни один сценарий его не утверждает;
+    добавить в FP-01 «And» сверку last_presented_at S до/после.
+
+constructibility:
+  seeded: 0
+  named_fixture_verified: 11
+  of: 12
+  not_executed: >-
+    Посев не исполнялся: глагола нет на дереве, интеграционный прогон требует Docker-слота,
+    задача — суд контракта. Фикстуры сверены чтением на 41687a29a: avLane/avClock/laneFreshness/
+    laneSessionTTL, register/mark/token/failuresOf, IssueSession+Writer (step_up_integration_test.go:135–148),
+    KeyAssertion, fwd(), newHarness(breach)/fakeBreach/person(""), fakeStore failOn "audit"/"resolve".
+    FP-12 — «не выполнилось»: вход ключом и посев личности без пароля на стенде не посажены (Ф13).
+
+producers_named: 12 of 12
+twins_named: 10 of 10 negative
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+next_round:
+  needed: курьер — публикация события APPROVED на этот отпечаток; затем коммит записи в ветку 596
