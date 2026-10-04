@@ -42,6 +42,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // setupTestDB hands the caller its own migrated database on the package's shared
@@ -99,7 +100,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 func seedAccount(t *testing.T, ctx context.Context, repo *kanamepg.Repository, name string, ownerID domain.UserID) domain.Account {
 	t.Helper()
 	a := newAccount(name, ownerID)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.AccountsW().Insert(ctx, a)
 	require.NoError(t, err)
@@ -165,7 +166,7 @@ func TestAccount_02_Create_DuplicateName(t *testing.T) {
 	// Вторая Insert с тем же именем — должен поймать UNIQUE.
 	uid2 := mustSeedUser(t, ctx, pool, "02b")
 	a := newAccount("dup-name", uid2)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, a)
 	_ = w.Rollback(ctx)
@@ -199,7 +200,7 @@ func TestAccount_02_Create_RaceUnique(t *testing.T) {
 			ready.Done()
 			<-startGate // одновременный старт
 			a := newAccount("race-name", uid)
-			w, err := repo.Writer(ctx)
+			w, err := repo.Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				results <- err
 				return
@@ -251,7 +252,7 @@ func TestAccount_04_Create_FKOwner_Missing(t *testing.T) {
 
 	ghost := domain.UserID("usr00000000000000ghost") // не seed'им
 	a := newAccount("ghost-owner", ghost)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, insErr := w.AccountsW().Insert(ctx, a)
 	// DEFERRABLE FK: Insert либо успешен (FK отложен), либо immediate-fail
@@ -315,7 +316,7 @@ func TestAccount_06_Update_Rename(t *testing.T) {
 
 	patched := created
 	patched.Name = "renamed"
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.AccountsW().Update(ctx, patched, []string{"name"})
 	require.NoError(t, err)
@@ -349,7 +350,7 @@ func TestAccount_08_Delete_WithProjects(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccountsW().Delete(ctx, created.ID)
 	_ = w.Rollback(ctx)
@@ -373,7 +374,7 @@ func TestAccount_08_Delete_Happy(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "08b")
 	created := seedAccount(t, ctx, repo, "to-del-happy", uid)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccountsW().Delete(ctx, created.ID)
 	require.NoError(t, err)
@@ -398,7 +399,7 @@ func TestAccount_08_Delete_NotFound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccountsW().Delete(ctx, "acc00000000000000ghst")
 	_ = w.Rollback(ctx)

@@ -26,6 +26,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite — ОТРИЦАНИЕ.
@@ -42,7 +43,7 @@ func TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite(t *testing.T)
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mail46a")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
@@ -56,7 +57,7 @@ func TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite(t *testing.T)
 	require.NoError(t, w.Commit(ctx))
 
 	// Исключение из аккаунта — ДО первого входа.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	removed, rerr := w2.UsersW().RemoveMembership(ctx, pending.ID, accID)
 	require.NoError(t, rerr)
@@ -64,7 +65,7 @@ func TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite(t *testing.T)
 	assert.True(t, removed, "членство обязано было сняться — иначе проба судит не тот путь")
 
 	// Первый вход после исключения: строка НЕ активируется.
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	_, aerr := w3.UsersW().ActivateInvite(ctx, pending.ID,
@@ -96,7 +97,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	_, accB := bootstrapAdmin(t, ctx, repo, "mail46b2")
 
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	pending, _, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID:           uid,
@@ -110,7 +111,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 
 	// Второе приглашение — той же почты во ВТОРОЙ аккаунт: строка одна,
 	// членств два.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, _, err = w2.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -123,7 +124,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	require.NoError(t, w2.Commit(ctx))
 
 	// Исключение из ПЕРВОГО аккаунта.
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	removed, rerr := w3.UsersW().RemoveMembership(ctx, pending.ID, accA)
 	require.NoError(t, rerr)
@@ -131,7 +132,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	require.True(t, removed)
 
 	// Приглашение во ВТОРОЙ аккаунт по-прежнему выкупается.
-	w4, err := repo.Writer(ctx)
+	w4, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, pending.ID)
 	activated, aerr := w4.UsersW().ActivateInvite(ctx, pending.ID,
@@ -166,7 +167,7 @@ func TestInviteRevoked_RemovalDoesNotTouchARedeemedRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, domain.InviteStatusActive, before.InviteStatus)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, rerr := w.UsersW().RemoveMembership(ctx, adminID, accID)
 	require.NoError(t, rerr)

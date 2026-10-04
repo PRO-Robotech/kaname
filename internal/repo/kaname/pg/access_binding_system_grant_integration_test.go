@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // factExists — есть ли действующее основание доступа в том виде, в каком его
@@ -149,7 +150,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 	assert.Equal(t, "cluster:"+domain.ClusterSingletonID, stored[0].Object)
 
 	// ── Защита от удаления держит первое снятие ─────────────────────────────
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.AccessBindingsW().DeleteGuarded(ctx, id)
 	_ = w.Rollback(ctx)
@@ -160,7 +161,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 		"отказ снятия обязан оставить доступ на месте")
 
 	// ── Штатный отзыв: снять защиту, снять выдачу, снять факт ───────────────
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().SetDeletionProtection(ctx, id, false)
 	if err != nil {
@@ -172,7 +173,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	failed := func(err error) bool {
 		if err == nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // SigningKeyRepo — ключница подписных ключей платформы (задача #897).
@@ -148,7 +149,7 @@ func (r *SigningKeyRepo) KeySet(ctx context.Context) ([]domain.SigningKeyRecord,
 // переход в подпись из REMOVED и COMPROMISED не выражается ни здесь, ни в
 // машине состояний домена.
 func (r *SigningKeyRepo) Activate(ctx context.Context, kid domain.KeyID, at time.Time) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return wrapPgErr(err, "SigningKey", string(kid))
 	}
@@ -198,7 +199,7 @@ func (r *SigningKeyRepo) Activate(ctx context.Context, kid domain.KeyID, at time
 // Инвариант «подписывает ровно один» по-прежнему держит частичный
 // уникальный индекс; условие здесь — про то, КОГО сменяем.
 func (r *SigningKeyRepo) ReplaceActive(ctx context.Context, next, expected domain.KeyID, at time.Time) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, r.pool)
 	if err != nil {
 		return wrapPgErr(err, "SigningKey", string(next))
 	}

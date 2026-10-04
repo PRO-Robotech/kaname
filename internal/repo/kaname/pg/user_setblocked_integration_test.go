@@ -32,13 +32,14 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // setInviteStatus прогоняет писателя в собственной writer-транзакции и коммитит.
 func setInviteStatus(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id domain.UserID, st domain.InviteStatus) (domain.User, error) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, serr := w.UsersW().SetInviteStatus(ctx, id, st)
 	if serr != nil {
@@ -166,7 +167,7 @@ func TestUserSetInviteStatus_ConcurrentWritersLeaveARequestedState(t *testing.T)
 			if i%2 == 1 {
 				st = domain.InviteStatusActive
 			}
-			w, err := repo.Writer(ctx)
+			w, err := repo.Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				errs[i] = err
 				return

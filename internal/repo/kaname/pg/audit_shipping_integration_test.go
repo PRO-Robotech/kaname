@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // capturingSink — приёмник, запоминающий доставленное.
@@ -74,7 +75,7 @@ func TestAuditJournalReachesTheSink(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "shipping")
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, domain.Account{
 		ID: accID, Name: domain.AccountName("shipping-acc"), OwnerUserID: uid, Labels: domain.Labels{},

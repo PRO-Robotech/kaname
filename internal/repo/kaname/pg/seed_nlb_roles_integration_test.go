@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // Deterministic ids — must match migration 0025 SQL expression:
@@ -264,7 +265,7 @@ func TestSeed_NLB_05_DeleteSystemRoleForbidden(t *testing.T) {
 	repo := kanamepg.New(pool, nil)
 
 	for _, id := range []string{seedRoleIDLBOperator, seedRoleIDLBTargetManager} {
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		err = w.RolesW().Delete(ctx, domain.RoleID(id))
 		_ = w.Rollback(ctx)

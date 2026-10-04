@@ -18,6 +18,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // UserTokenRevocationRepo — pool-scoped (autocommit-style single-statement
@@ -130,7 +131,7 @@ func upsertSubjectCutoff(ctx context.Context, ex cutoffExecutor,
 	// же дефект под другим именем; отказ виден сразу.
 	switch e := ex.(type) {
 	case *pgxpool.Pool:
-		tx, err := e.Begin(ctx)
+		tx, err := journalwrite.Begin(ctx, e)
 		if err != nil {
 			return mapErr(err, "", string(u.UserID))
 		}

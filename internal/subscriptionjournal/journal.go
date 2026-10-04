@@ -158,6 +158,14 @@ func Journal() subscription.Journal {
 			Project:       subscription.ProjectInColumn,
 			Retention:     subscription.RetainsFromEarliestRow,
 			AgeColumn:     "created_at",
+			// Инициатор и время изменения (NTF-3, Р2). Значение инициатора
+			// даёт умолчание колонки из настройки транзакции `journaltx`, и
+			// строки без него база не принимает
+			// (`20261004160000_resource_journal_carries_the_initiator.sql`).
+			// Время — та же колонка, что держит возраст строки: время
+			// транзакции изменения, а не часы процесса.
+			InitiatorColumn:  "initiator",
+			OccurredAtColumn: "created_at",
 		},
 		Channel: resourceJournalChannel,
 		Mapping: subscription.Mapping{

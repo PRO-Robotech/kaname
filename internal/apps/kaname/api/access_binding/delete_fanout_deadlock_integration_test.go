@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // deadlockQueueBudget — сколько даётся стороне, чтобы встать в очередь за
@@ -97,7 +98,10 @@ func seedRulesRoleWithSelectors(t *testing.T, ctx context.Context, repo *kanamep
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
 	compiled, err := domain.CompileRules(rules)
 	require.NoError(t, err)
-	w, err := repo.Writer(ctx)
+	// Посев продуктовым писателем — под личностью посева проб: писатель берёт
+	// инициатора журнала у принципала.
+	ctx = journalfixture.Ctx(t, ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.RolesW().Insert(ctx, domain.Role{
@@ -116,7 +120,7 @@ func insertAccountBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repo
 	subject domain.UserID, role domain.RoleID, acc domain.AccountID) domain.AccessBindingID {
 	t.Helper()
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{

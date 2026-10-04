@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // raceRole — живая роль модуля со своими проекциями, субъектом и аккаунтом.
@@ -274,7 +275,7 @@ func TestIAMRW127RetirementAgainstRevival(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		retireErr = runner.RunInWriteTx(ctx, func(ctx context.Context, w moduleroles.RoleWriter) error {
+		retireErr = runner.RunInWriteTx(journalfixture.Writing(ctx), func(ctx context.Context, w moduleroles.RoleWriter) error {
 			_, err := w.RetireRole(ctx, id, "vpc", "гонка снятия", "actor-retire")
 			return err
 		})
@@ -282,7 +283,7 @@ func TestIAMRW127RetirementAgainstRevival(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		reviveErr = runner.RunInWriteTx(ctx, func(ctx context.Context, w moduleroles.RoleWriter) error {
+		reviveErr = runner.RunInWriteTx(journalfixture.Writing(ctx), func(ctx context.Context, w moduleroles.RoleWriter) error {
 			_, err := w.ReviveRole(ctx, id)
 			return err
 		})

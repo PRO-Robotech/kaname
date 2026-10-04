@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // withdrawalCostGrid — сетка полосы. Малая по умолчанию: полоса идёт в общем
@@ -103,7 +104,7 @@ func TestRoleWithdrawalCostAgainstModuleRoles(t *testing.T) {
 				resettled int
 			)
 			start := time.Now()
-			require.NoError(t, runner.RunInWriteTx(ctx,
+			require.NoError(t, runner.RunInWriteTx(journalfixture.Writing(ctx),
 				func(ctx context.Context, w moduleroles.RoleWriter) error {
 					for _, id := range roleIDs {
 						out, rerr := w.RetireRole(ctx, id, costModule,

@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	repogroup "github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func seedGroup(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.Group {
@@ -43,7 +44,7 @@ func seedGroup(t *testing.T, ctx context.Context, repo *kanamepg.Repository, acc
 		Description: domain.Description("test grp " + name),
 		Labels:      domain.Labels{},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.GroupsW().Insert(ctx, g)
 	require.NoError(t, err)
@@ -93,7 +94,7 @@ func TestGroup_22_AddMember_Happy_Idempotent(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-g22", uid)
 	g := seedGroup(t, ctx, repo, acc.ID, "g-mems")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -137,7 +138,7 @@ func TestGroup_23_AddMember_NotFound(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-g23", uid)
 	g := seedGroup(t, ctx, repo, acc.ID, "g-23")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -164,7 +165,7 @@ func TestGroup_24_RemoveMember_Idempotent(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-g24", uid)
 	g := seedGroup(t, ctx, repo, acc.ID, "g-24")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -193,7 +194,7 @@ func TestGroup_42a_Delete_Happy(t *testing.T) {
 	g := seedGroup(t, ctx, repo, acc.ID, "g-42a")
 
 	// Add member — CASCADE на DELETE GROUP должна почистить.
-	w0, err := repo.Writer(ctx)
+	w0, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w0.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -202,7 +203,7 @@ func TestGroup_42a_Delete_Happy(t *testing.T) {
 	}))
 	require.NoError(t, w0.Commit(ctx))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().Delete(ctx, g.ID))
 	require.NoError(t, w.Commit(ctx))
@@ -237,7 +238,7 @@ func TestGroup_42b_Delete_WithAccessBinding(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.GroupsW().Delete(ctx, g.ID)
 	_ = w.Rollback(ctx)
@@ -266,7 +267,7 @@ func TestGroup_DuplicateName(t *testing.T) {
 		Name:      "dup-grp",
 		Labels:    domain.Labels{},
 	}
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.GroupsW().Insert(ctx, g2)
 	_ = w.Rollback(ctx)
@@ -296,7 +297,7 @@ func TestGroup_ListMembers_PagesWithTheContinuationToken(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-gpage", owner)
 	g := seedGroup(t, ctx, repo, acc.ID, "g-page")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	want := make([]string, 0, 3)
 	for _, suffix := range []string{"p1", "p2", "p3"} {

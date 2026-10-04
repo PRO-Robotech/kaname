@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // relationWriteRelation — отношение, которым гейт записи кортежей задаёт свой
@@ -166,7 +167,7 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 
 	// Штатный отзыв: снять защиту, снять выдачу, снять факт — тремя вызовами,
 	// которыми это делает путь отзыва в use-case.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().SetDeletionProtection(ctx, id, false)
 	if err != nil {
@@ -175,7 +176,7 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 	}
 	require.NoError(t, w.Commit(ctx))
 
-	w, err = repo.Writer(ctx)
+	w, err = repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	failed := func(err error) bool {
 		if err == nil {

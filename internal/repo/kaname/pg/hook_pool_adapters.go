@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
@@ -77,7 +78,7 @@ func (s *SessionRevocationsAdapter) Revoke(ctx context.Context, rev domain.Sessi
 // The audit payload carries only non-secret identifiers (actor / subject /
 // reason / token_jti — the jti is the id of the revoked token, NOT the token).
 func (s *SessionRevocationsAdapter) RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, s.pool)
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func (s *SessionRevocationsAdapter) RevokeAllUserTokensTx(
 	ctx context.Context,
 	userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID,
 ) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := journalwrite.Begin(ctx, s.pool)
 	if err != nil {
 		return err
 	}

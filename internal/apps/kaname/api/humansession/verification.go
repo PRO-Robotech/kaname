@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -424,7 +425,14 @@ func (uc *ConfirmVerificationUseCase) Execute(ctx context.Context, in ConfirmVer
 	}
 	user := resolved.User
 
-	w, err := uc.d.Store.VerificationWriter(ctx, user.ID)
+	// Транзакция исхода пишет строку человека — отметку и активацию
+	// приглашения, — а значит и ресурсный журнал, чья строка без инициатора
+	// базой не принимается (NTF-3, Р2). Изменение начинает человек, чья
+	// сессия, удостоверенная носителем выше, предъявила код: он и инициатор.
+	// Принципал ставится только на открытие транзакции — прочие операторы
+	// идут на контексте вызова.
+	w, err := uc.d.Store.VerificationWriter(
+		operations.WithPrincipal(ctx, operations.Principal{Type: domain.PrincipalTypeUser, ID: string(user.ID)}), user.ID)
 	if err != nil {
 		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
 		return ConfirmVerificationOutput{}, ErrStoreUnavailable

@@ -4,6 +4,8 @@
 package humansession_test
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -22,6 +24,6 @@ import (
 func TestMain(m *testing.M) {
 	os.Exit(pgtest.Run(m, pgtest.Config{
 		Name:    "iam",
-		Migrate: pgtest.Goose(migrations.FS),
+		Migrate: journalfixture.Migrate(migrations.FS),
 	}))
 }

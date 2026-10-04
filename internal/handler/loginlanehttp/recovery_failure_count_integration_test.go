@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -72,7 +73,7 @@ func TestLaneIntegration_F5_25_RecoveryCompletionDecidesTheAddressCountLikeALogi
 		p.lane = newSessionLane(t)
 		h := p.lane
 		// Дано: адрес подтверждён — посевом писателем продукта (как Ф5-24).
-		require.NoError(t, kanamepg.NewLoginMethodRepo(h.pool).MarkEmailVerified(h.ctx, h.user.ID, h.user.Email, time.Now().UTC()))
+		require.NoError(t, kanamepg.NewLoginMethodRepo(h.pool).MarkEmailVerified(journalfixture.Writing(h.ctx), h.user.ID, h.user.Email, time.Now().UTC()))
 		if p.factor {
 			h.seedEnrolledSecondFactor(t)
 		}

@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedAccountMember — ещё одна активная личность в аккаунте владельца. Владелец
@@ -130,7 +131,10 @@ func TestIntegration_ForceLogoutAndIdentityDeletionDoNotDeadlock(t *testing.T) {
 		awaitSleepingBackend(t, ctx, pool)
 
 		deleteErr := func() error {
-			w, werr := users.Writer(ctx)
+			// Удаление продуктовым писателем — под личностью посева проб:
+			// писатель берёт инициатора журнала у принципала.
+			ctx := journalfixture.Ctx(t, ctx)
+			w, werr := users.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				return werr
 			}

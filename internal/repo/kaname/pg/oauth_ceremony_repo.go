@@ -92,6 +92,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // refuseNoSuchClient — ЕДИНСТВЕННЫЙ производитель отказа «интерактивного
@@ -519,7 +520,7 @@ func ceremonyWriterTx() pgx.TxOptions { return pgx.TxOptions{IsoLevel: pgx.ReadC
 
 // beginWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя в этом порту.
 func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (pgx.Tx, error) {
-	return r.pool.BeginTx(ctx, ceremonyWriterTx())
+	return journalwrite.BeginTx(ctx, r.pool, ceremonyWriterTx())
 }
 
 // execWriter — одиночный оператор писателя на названном уровне.

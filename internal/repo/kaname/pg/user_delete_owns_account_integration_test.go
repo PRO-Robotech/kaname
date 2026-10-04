@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound — снятие владельца аккаунта
@@ -70,7 +71,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 	// Отложенность этого ключа относится к стороне ВСТАВКИ — её и проверяет
 	// соседняя проба. Место отказа утверждается здесь дословно, потому что
 	// именно оно решает, какая подсказка доезжает до разбора.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	cerr := w2.UsersW().Delete(ctx, ownerID)
 	_ = w2.Rollback(ctx)
@@ -97,7 +98,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 	// вообще всё.
 	_, loneAcc := bootstrapAdmin(t, ctx, repo, "loneacc")
 	loneID := domain.UserID(ids.NewID(domain.PrefixUser))
-	w3, err := repo.Writer(ctx)
+	w3, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w3.UsersW().InsertActive(ctx, domain.User{
 		ID:           loneID,
@@ -110,7 +111,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w3.Commit(ctx))
 
-	w4, err := repo.Writer(ctx)
+	w4, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w4.UsersW().Delete(ctx, loneID))
 	require.NoError(t, w4.Commit(ctx),

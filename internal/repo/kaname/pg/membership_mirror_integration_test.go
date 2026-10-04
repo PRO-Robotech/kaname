@@ -39,6 +39,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // membershipsOf — состояние зеркала для одной строки пользователя.
@@ -107,7 +108,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 	// ── InsertPending: приглашённый → членство в состоянии «приглашён» ───────
 	pendingID := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID:          pendingID,
@@ -126,7 +127,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 
 	// ── ActivateInvite: состояние членства едет следом ───────────────────────
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		markAddressVerified(t, ctx, pool, pendingID)
 		_, err = w.UsersW().ActivateInvite(ctx, pendingID,
@@ -143,7 +144,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 
 	// ── Delete: зеркало уходит вместе со строкой ─────────────────────────────
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		require.NoError(t, w.UsersW().Delete(ctx, pendingID))
 		require.NoError(t, w.Commit(ctx))
@@ -183,7 +184,7 @@ func TestIntegration_MembershipMirrorIsOnePerUserAccountPair(t *testing.T) {
 	// отказ выше означал бы «сюда вообще нельзя писать», а не «пара уникальна».
 	otherAcc := domain.AccountID(ids.NewID(domain.PrefixAccount))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, err = w.AccountsW().Insert(ctx, domain.Account{
 			ID:          otherAcc,
@@ -231,7 +232,7 @@ func TestIntegration_MembershipMirrorUnderConcurrentWriters(t *testing.T) {
 			defer wg.Done()
 			<-ready // все стартуют разом: иначе это последовательный прогон с лишними словами
 			uid := domain.UserID(ids.NewID(domain.PrefixUser))
-			w, werr := repo.Writer(ctx)
+			w, werr := repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				errs[i] = werr
 				return
@@ -291,7 +292,7 @@ func TestIntegration_PersonalAccountGateCountsOwnershipNotMembership(t *testing.
 	// Человек в ЧУЖОМ аккаунте: членство есть, собственного аккаунта нет.
 	memberID := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, err = w.UsersW().InsertActive(ctx, domain.User{
 			ID:           memberID,

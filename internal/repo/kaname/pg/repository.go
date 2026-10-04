@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -43,7 +44,7 @@ func (r *Repository) Reader(ctx context.Context) (kaname.Reader, error) {
 
 // Writer открывает read-write TX на master.
 func (r *Repository) Writer(ctx context.Context) (kaname.Writer, error) {
-	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := journalwrite.Begin(ctx, r.master)
 	if err != nil {
 		return nil, err
 	}

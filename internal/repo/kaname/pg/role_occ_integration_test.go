@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestRoleOCC_178_V2_ConcurrentUpdateCAS_ExactlyOneWins — read the role xmin once,
@@ -70,7 +71,7 @@ func TestRoleOCC_178_V2_ConcurrentUpdateCAS_ExactlyOneWins(t *testing.T) {
 		wg.Add(1)
 		go func(i int, perms domain.Permissions) {
 			defer wg.Done()
-			w, e := repo.Writer(ctx)
+			w, e := repo.Writer(journalfixture.Writing(ctx))
 			if e != nil {
 				return
 			}
@@ -119,7 +120,7 @@ func TestRoleOCC_178_V2b_StaleVersion_FailsPrecondition(t *testing.T) {
 	require.NoError(t, err)
 
 	// First update with v0 → succeeds and bumps xmin.
-	w1, err := repo.Writer(ctx)
+	w1, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	p1 := role
 	p1.Permissions = domain.Permissions{"iam.access_bindings.*.admin"}
@@ -128,7 +129,7 @@ func TestRoleOCC_178_V2b_StaleVersion_FailsPrecondition(t *testing.T) {
 	require.NoError(t, w1.Commit(ctx))
 
 	// Second update REUSING the now-stale v0 → FailedPrecondition.
-	w2, err := repo.Writer(ctx)
+	w2, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	p2 := role
 	p2.Permissions = domain.Permissions{"iam.access_bindings.*.get"}

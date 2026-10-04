@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestReview1_DualRuleSameObject_RevokeOne_SurvivorKeepsAccess — review #1 BLOCKER.
@@ -96,7 +97,7 @@ func TestReview1_DualRuleSameObject_RevokeOne_SurvivorKeepsAccess(t *testing.T) 
 	deletesBefore := countFGAOutbox(t, ctx, pool, "fga.tuple.delete", "compute_instance:ishared")
 
 	// Role.Update removes ruleGone (env=prod). ruleKeep (team=a) STILL matches ishared.
-	w, err := fx.repo.Writer(ctx)
+	w, err := fx.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated := domain.Role{ID: roleID, ProjectID: fx.prj, Name: "rv1role",
 		Rules: domain.Rules{ruleKeep}, Permissions: mustCompile(t, domain.Rules{ruleKeep}), IsSystem: false}

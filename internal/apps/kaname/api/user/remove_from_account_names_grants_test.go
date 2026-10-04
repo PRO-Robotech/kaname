@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // dsnWithSchema — DSN этой пробы с путём поиска сервиса. Репозиторий пишет
@@ -68,7 +69,7 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, repo Repo, suffix st
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	committed := false
 	defer func() {
@@ -163,7 +164,7 @@ func TestRemoveFromAccount_RefusalNamesTheGrantsThatHold(t *testing.T) {
 	foreign := grantOnAccount(t, ctx, pool, uid, foreignAcc, role)
 
 	uc := NewRemoveFromAccountUseCase(repo, nil)
-	_, err = uc.doRemove(ctx, uid, accID, "usr-actor")
+	_, err = uc.doRemove(journalfixture.Writing(ctx), uid, accID, "usr-actor")
 
 	require.Error(t, err, "членство, несущее живую выдачу, снять нельзя")
 	st, ok := status.FromError(err)
@@ -222,7 +223,7 @@ func TestRemoveFromAccount_SucceedsOnceTheGrantIsGone(t *testing.T) {
 	require.NoError(t, err)
 
 	uc := NewRemoveFromAccountUseCase(repo, nil)
-	_, err = uc.doRemove(ctx, uid, accID, "usr-actor")
+	_, err = uc.doRemove(journalfixture.Writing(ctx), uid, accID, "usr-actor")
 	require.NoError(t, err, "выдач нет — исключение обязано проходить")
 }
 
@@ -264,7 +265,7 @@ func TestRemoveFromAccount_RefusalNamesGrantsScopedOnAccountProjects(t *testing.
 	require.NoError(t, err)
 
 	uc := NewRemoveFromAccountUseCase(repo, nil)
-	_, err = uc.doRemove(ctx, uid, accID, "usr-actor")
+	_, err = uc.doRemove(journalfixture.Writing(ctx), uid, accID, "usr-actor")
 
 	require.Error(t, err, "выдача на проекте аккаунта держит членство так же, как выдача на самом аккаунте")
 	st, ok := status.FromError(err)

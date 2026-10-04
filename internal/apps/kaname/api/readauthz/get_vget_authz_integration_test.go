@@ -63,6 +63,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // readAuthzFixture — живой репозиторий и живая дверь решения над засеянной
@@ -531,7 +532,7 @@ func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ac
 
 func seedProject(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.ProjectID {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ProjectsW().Insert(ctx, domain.Project{
 		ID:        domain.ProjectID(ids.NewID(domain.PrefixProject)),
@@ -546,7 +547,7 @@ func seedProject(t *testing.T, ctx context.Context, repo *kanamepg.Repository, a
 
 func seedGroup(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.GroupID {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.GroupsW().Insert(ctx, domain.Group{
 		ID:        domain.GroupID(ids.NewID(domain.PrefixGroup)),
@@ -561,7 +562,7 @@ func seedGroup(t *testing.T, ctx context.Context, repo *kanamepg.Repository, acc
 
 func seedServiceAccount(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.ServiceAccountID {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, err := w.ServiceAccountsW().Insert(ctx, domain.ServiceAccount{
 		ID:        domain.ServiceAccountID(ids.NewID(domain.PrefixServiceAccount)),

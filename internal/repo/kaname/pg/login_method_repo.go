@@ -51,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // loginMethodsTable — имя таблицы секрета. Объявлено здесь ОДИН раз и за
@@ -243,7 +244,7 @@ func (r *LoginMethodRepo) PasswordCostClasses(ctx context.Context) ([]loginmetho
 
 // markEmailVerifiedSQL — ЕДИНСТВЕННЫЙ оператор отметки подтверждения: сверка
 // адреса (без различия регистра — ключ почты, F4d-52) и запись — один
-// оператор. Его исполняет пул (писатель адаптера способа входа) либо
+// оператор. Его исполняет пишущая транзакция адаптера способа входа либо
 // транзакция исхода подтверждения (`humanSessionWriter.MarkEmailVerified`).
 const markEmailVerifiedSQL = `
 		WITH person AS (SELECT 1 FROM users WHERE id = $1),
@@ -268,8 +269,19 @@ func (r *LoginMethodRepo) MarkEmailVerified(ctx context.Context, userID domain.U
 	if userID == "" {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
+	// Оператор пишет строку человека, а значит и ресурсный журнал: открывается
+	// пишущей транзакцией службы, выставляющей инициатора (`journalwrite.Begin`), а не
+	// исполняется пулом, чья неявная транзакция инициатора не несёт.
+	tx, err := journalwrite.Begin(ctx, r.pool)
+	if err != nil {
+		return mapErr(err, "User.MarkEmailVerified", string(userID))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var exists, marked bool
-	if err := r.pool.QueryRow(ctx, markEmailVerifiedSQL, string(userID), string(address), at).Scan(&exists, &marked); err != nil {
+	if err := tx.QueryRow(ctx, markEmailVerifiedSQL, string(userID), string(address), at).Scan(&exists, &marked); err != nil {
+		return mapErr(err, "User.MarkEmailVerified", string(userID))
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return mapErr(err, "User.MarkEmailVerified", string(userID))
 	}
 	switch {

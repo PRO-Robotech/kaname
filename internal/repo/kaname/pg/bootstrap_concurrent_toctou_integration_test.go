@@ -46,6 +46,7 @@ import (
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N concurrent
@@ -70,7 +71,7 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	// (no bootstrap) so we have an ACTIVE user owning ZERO accounts — the exact
 	// newIdentity=false path the TOCTOU exposes.
 	_, _, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "conc", email)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	markAddressVerified(t, ctx, pool, inviteeID)
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,

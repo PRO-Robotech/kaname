@@ -4,6 +4,8 @@
 package cursorplan_test
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -31,5 +33,5 @@ import (
 // собственный предел времени. Отдельный пакет даёт и отбор джобы, и свой
 // контейнер, ни на кого не влияя.
 func TestMain(m *testing.M) {
-	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iamcursorplan"}))
+	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iamcursorplan", Migrate: journalfixture.FixtureInitiatorOnRole()}))
 }

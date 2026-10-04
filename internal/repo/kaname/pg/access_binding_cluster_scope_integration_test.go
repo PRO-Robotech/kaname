@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestAB_ClusterScope_InsertEmitsSystemAdminTuple — end-to-end emit-in-tx
@@ -84,7 +85,7 @@ func TestAB_ClusterScope_InsertEmitsSystemAdminTuple(t *testing.T) {
 			Object:   "cluster:" + domain.ClusterSingletonID},
 	}
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, binding)
 	require.NoError(t, err, "Insert AccessBinding(cluster, ...) must succeed")

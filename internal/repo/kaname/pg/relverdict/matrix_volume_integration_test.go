@@ -77,6 +77,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/planrows"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // matrixEnv — ручка «запускать замер матрицы», и только это. Что мерить, она не
@@ -442,7 +443,7 @@ func askOnMatrix(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 func writeOnMatrix(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	capture *verdictCapture, id string) (int64, time.Duration, capturedVerdictStmt) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		t.Fatalf("писатель: %v", err)
 	}
@@ -472,7 +473,7 @@ func writeOnMatrix(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 func revokeOnMatrix(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	capture *verdictCapture, id string) (int64, time.Duration, capturedVerdictStmt) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		t.Fatalf("писатель: %v", err)
 	}
@@ -738,7 +739,7 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 func repoWrite(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id string) (domain.AccessBinding, int64, time.Duration, error) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return domain.AccessBinding{}, 0, 0, err
 	}
@@ -757,7 +758,7 @@ func repoWrite(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 func repoRevoke(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id string) (domain.AccessBinding, int64, time.Duration, error) {
 	t.Helper()
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	if err != nil {
 		return domain.AccessBinding{}, 0, 0, err
 	}

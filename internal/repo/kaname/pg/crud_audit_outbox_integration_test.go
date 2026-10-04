@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestCrudAudit_5_2_34_CommitTogether — AccountsW().Insert + EmitAuditEvent +
@@ -47,7 +48,7 @@ func TestCrudAudit_5_2_34_CommitTogether(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "crud34")
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, domain.Account{
 		ID: accID, Name: domain.AccountName("crud34-acc"), OwnerUserID: uid, Labels: domain.Labels{},
@@ -96,7 +97,7 @@ func TestCrudAudit_5_2_35_RollbackNoOrphan(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "crud35")
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccountsW().Insert(ctx, domain.Account{
 		ID: accID, Name: domain.AccountName("crud35-acc"), OwnerUserID: uid, Labels: domain.Labels{},
@@ -146,7 +147,7 @@ func TestCrudAudit_5_2_37_38_EventIdAndTypeCheck(t *testing.T) {
 
 	for _, et := range eventTypes {
 		marker := "rid-" + et
-		w, err := repo.Writer(ctx)
+		w, err := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, err)
 		require.NoError(t, w.EmitAuditEvent(ctx, service.AuditEvent{
 			EventType: et,

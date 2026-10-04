@@ -35,6 +35,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
@@ -185,7 +186,7 @@ func firstAuthenticationQ(ctx context.Context, q rowQuerier, userID domain.UserI
 // писателя сессии мимо этого открытия перепись пакета не даёт
 // (`ceremony_writer_openers_test.go`).
 func beginHumanSessionWriter(ctx context.Context, pool *pgxpool.Pool) (*humanSessionWriter, error) {
-	tx, err := pool.BeginTx(ctx, ceremonyWriterTx())
+	tx, err := journalwrite.BeginTx(ctx, pool, ceremonyWriterTx())
 	if err != nil {
 		return nil, err
 	}

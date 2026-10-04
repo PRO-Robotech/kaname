@@ -37,6 +37,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // newUOC — доменная строка токена под данного user, с уникальным id.
@@ -119,7 +120,7 @@ func TestUserOAuthClient_09a_ExpiresBeforeCreated_CheckViolation(t *testing.T) {
 	row.CreatedAt = created
 	row.ExpiresAt = &past // expires_at <= created_at → CHECK violation
 
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = repo.Insert(ctx, tx, row)
@@ -152,7 +153,7 @@ func TestUserOAuthClient_09b_ConcurrentIssue_NToOne(t *testing.T) {
 			defer wg.Done()
 			row := newUOC(uid, fmt.Sprintf("c%d", i))
 			ids[i] = row.ID
-			tx, err := txb.Begin(ctx)
+			tx, err := txb.Begin(journalfixture.Writing(ctx))
 			if err != nil {
 				errs[i] = err
 				return
@@ -205,7 +206,7 @@ func TestUserOAuthClient_DuplicateID_Collision(t *testing.T) {
 	second := newUOC(uid, "dup2")
 	second.ID = first.ID // тот же идентификатор строки
 
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = repo.Insert(ctx, tx, second)
@@ -283,7 +284,7 @@ func TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped(t *testing.
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: своя строка снимается и ВОЗВРАЩАЕТСЯ.
 	// Без него три отрицания ниже были бы верны и об операторе, не снимающем
 	// ничего никогда.
-	tx, err := txb.Begin(ctx)
+	tx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	got, found, err := repo.DeleteOwnedByID(ctx, tx, uid, row.ID)
 	require.NoError(t, err)
@@ -292,7 +293,7 @@ func TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped(t *testing.
 	require.NoError(t, tx.Commit(ctx))
 
 	// ── (1) ПОВТОРНОЕ снятие: found=false БЕЗ ошибки (BAT-1-44).
-	tx2, err := txb.Begin(ctx)
+	tx2, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, found, err = repo.DeleteOwnedByID(ctx, tx2, uid, row.ID)
 	require.NoError(t, err, "повторное снятие обязано быть законным исходом, а не ошибкой")
@@ -300,7 +301,7 @@ func TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped(t *testing.
 	require.NoError(t, tx2.Commit(ctx))
 
 	// ── (2) Идентификатор, которого не было НИКОГДА — тот же исход.
-	tx3, err := txb.Begin(ctx)
+	tx3, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, foundNever, errNever := repo.DeleteOwnedByID(ctx, tx3, uid, "uoc00000000000000404")
 	require.NoError(t, errNever)
@@ -308,7 +309,7 @@ func TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped(t *testing.
 	require.NoError(t, tx3.Commit(ctx))
 
 	// ── (3) ЧУЖАЯ строка: тот же исход, и строка ПЕРЕЖИВАЕТ вызов.
-	tx4, err := txb.Begin(ctx)
+	tx4, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, foundForeign, errForeign := repo.DeleteOwnedByID(ctx, tx4, uid, foreign.ID)
 	require.NoError(t, errForeign)

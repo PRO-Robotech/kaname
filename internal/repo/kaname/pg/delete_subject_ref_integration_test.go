@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // seedMemberUser inserts a plain (non-owner) ACTIVE user in the given account —
@@ -83,7 +84,7 @@ func TestUserDelete_ReferencedAsSubjectN_Blocked(t *testing.T) {
 	require.NoError(t, insertABSubjectRaw(ctx, pool, abID, "user", member, 1))
 
 	repo := kanamepg.New(pool, nil)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, domain.UserID(member))
 	_ = w.Rollback(ctx)
@@ -115,7 +116,7 @@ func TestSADelete_ReferencedAsSubjectN_Blocked(t *testing.T) {
 	require.NoError(t, insertABSubjectRaw(ctx, pool, abID, "service_account", member, 1))
 
 	repo := kanamepg.New(pool, nil)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.ServiceAccountsW().Delete(ctx, domain.ServiceAccountID(member))
 	_ = w.Rollback(ctx)
@@ -147,7 +148,7 @@ func TestGroupDelete_ReferencedAsSubjectN_Blocked(t *testing.T) {
 	require.NoError(t, insertABSubjectRaw(ctx, pool, abID, "group", member, 1))
 
 	repo := kanamepg.New(pool, nil)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.GroupsW().Delete(ctx, domain.GroupID(member))
 	_ = w.Rollback(ctx)
@@ -242,7 +243,7 @@ func TestUserDelete_ConcurrentAddSubjectN_NoDangling(t *testing.T) {
 
 	// The real repo User.Delete now sees the committed subjects[1] row and rejects.
 	repo := kanamepg.New(pool, nil)
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	err = w.UsersW().Delete(ctx, domain.UserID(member))
 	_ = w.Rollback(ctx)

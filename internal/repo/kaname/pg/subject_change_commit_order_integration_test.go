@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // subjectChangeStand — журнал, читатель и писатель продукта над одной базой.
@@ -82,7 +83,7 @@ func newSubjectChangeStand(t *testing.T) *subjectChangeStand {
 // очереди не бывает.
 func (s *subjectChangeStand) beginWrite(t *testing.T, subjectID string) kaname.Writer {
 	t.Helper()
-	w, err := s.ab.Writer(s.ctx)
+	w, err := s.ab.Writer(journalfixture.Writing(s.ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(s.ctx,
 		access_binding.SubjectChangeEvent{

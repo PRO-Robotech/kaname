@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // ledgerAuthorProbeSubjects — два РАЗНЫХ инициатора.
@@ -238,7 +239,7 @@ func TestLedgerAuthorFollowsTheApplierNotAConstant(t *testing.T) {
 		rows := []catalog.ResourceRow{{
 			Module: applierProbeModule, Resource: resource, ObjectType: objectType,
 		}}
-		require.NoError(t, repo.RunInWriteTx(ctx,
+		require.NoError(t, repo.RunInWriteTx(journalfixture.Writing(ctx),
 			func(ctx context.Context, w modulecatalog.CatalogWriter) error {
 				// Строка каталога НЕ снимается, и это не упрощение: предмет пробы —
 				// колонка автора, а оба оператора ведомости работают от ПЕРЕДАННОГО

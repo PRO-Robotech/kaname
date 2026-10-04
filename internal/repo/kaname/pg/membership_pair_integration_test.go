@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestUserReader_KAN181_MembershipOfPairReadsInsideTheWriterTx — строка,
@@ -47,7 +48,7 @@ func TestUserReader_KAN181_MembershipOfPairReadsInsideTheWriterTx(t *testing.T) 
 
 	adminID, accID := bootstrapAdmin(t, ctx, repo, "mp181")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 

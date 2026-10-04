@@ -24,6 +24,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestSAKeyNToOne_ConcurrentIssue_NoSvaUnique(t *testing.T) {
@@ -62,7 +63,7 @@ func TestSAKeyNToOne_ConcurrentIssue_NoSvaUnique(t *testing.T) {
 		}
 	}
 	insert := func(c domain.ServiceAccountOAuthClient) error {
-		tx, err := txb.Begin(ctx)
+		tx, err := txb.Begin(journalfixture.Writing(ctx))
 		if err != nil {
 			return err
 		}

@@ -29,6 +29,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // setABLabels writes labels on an access_bindings row directly (iam-direct feed source).
@@ -66,7 +67,7 @@ func TestAccessBindingLabels_T33UPD01_RoundTrip(t *testing.T) {
 
 	// UpdateLabels sets the tenant-facing labels (mutable, widened set).
 	want := domain.Labels{"stage": "prod", "team": "payments"}
-	w, err := fx.repo.Writer(ctx)
+	w, err := fx.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	updated, err := w.AccessBindingsW().UpdateLabels(ctx, objBID, want)
 	require.NoError(t, err)
@@ -236,7 +237,7 @@ func TestAccessBindingLabels_T33CONC01_ConcurrentUpdateLabels(t *testing.T) {
 			} else {
 				labels = domain.Labels{}
 			}
-			w, werr := fx.repo.Writer(ctx)
+			w, werr := fx.repo.Writer(journalfixture.Writing(ctx))
 			if werr != nil {
 				errs <- werr
 				return

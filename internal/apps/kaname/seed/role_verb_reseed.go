@@ -138,6 +138,12 @@ func ReseedSystemRoleVerbs(
 	cat *catalog.Facts,
 	obs RoleVerbReseedObserver,
 ) (RoleVerbReseedCensus, error) {
+	// Пересев двигает строку роли — журналируемую таблицу: его транзакции
+	// несут инициатора компонента посева (NTF-3, Р2).
+	ctx, jerr := shared.AsJournalComponent(ctx, shared.JournalComponentSeed)
+	if jerr != nil {
+		return RoleVerbReseedCensus{}, fmt.Errorf("пересев проекции ролей: %w", jerr)
+	}
 	var census RoleVerbReseedCensus
 
 	roles, err := listMaterializingSystemRoles(ctx, pool)

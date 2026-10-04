@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/corelib/db/pgfault"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // BootstrapAdminInput — bootstrap-run parameters.
@@ -161,7 +162,7 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 	var fgaOutboxID string
 	auditOutboxID := newULIDLikeID(domain.PrefixAuditEvent + "_")
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := journalwrite.Begin(ctx, pool)
 	if err != nil {
 		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: begin tx: %w", err)
 	}

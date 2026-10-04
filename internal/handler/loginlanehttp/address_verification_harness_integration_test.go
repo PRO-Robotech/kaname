@@ -58,6 +58,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -542,7 +543,7 @@ func (h *avLane) latestCode(t *testing.T, id string, user domain.UserID) string 
 // mark — отметка подтверждения посевом, писателем продукта.
 func (h *avLane) mark(t *testing.T, s avSession) {
 	t.Helper()
-	require.NoError(t, h.methods.MarkEmailVerified(h.ctx, s.user, domain.Email(s.email), h.clock.Now()),
+	require.NoError(t, h.methods.MarkEmailVerified(journalfixture.Writing(h.ctx), s.user, domain.Email(s.email), h.clock.Now()),
 		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев отметки")
 }
 

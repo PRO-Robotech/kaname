@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // censusQuerier — общий знаменатель пула и транзакции.
@@ -150,7 +151,7 @@ func TestIntegration_NonCanonicalBindingCensus(t *testing.T) {
 	// (`InsertActive`): он почту не арбитрирует, поэтому упирается в САМ ключ, а
 	// не в собственную ветку разрешения конфликта.
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, err = w.UsersW().InsertActive(ctx, domain.User{
 			ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -170,7 +171,7 @@ func TestIntegration_NonCanonicalBindingCensus(t *testing.T) {
 		// Положительный контроль к отказу: тот же писатель на СВОБОДНОЙ почте в
 		// том же аккаунте обязан пройти. Без него отказ выше доказывал бы лишь
 		// то, что путь сломан целиком.
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, err = w.UsersW().InsertActive(ctx, domain.User{
 			ID:           domain.UserID(ids.NewID(domain.PrefixUser)),

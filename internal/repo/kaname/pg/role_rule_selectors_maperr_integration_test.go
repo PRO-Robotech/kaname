@@ -25,6 +25,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 func TestDB2_ReplaceRuleSelectors_CheckViolation_MapsInvalidArgument(t *testing.T) {
@@ -41,7 +42,7 @@ func TestDB2_ReplaceRuleSelectors_CheckViolation_MapsInvalidArgument(t *testing.
 	acc := seedAccount(t, ctx, repo, "db2-acc", owner)
 	roleID := seedCustomRoleSQL(t, ctx, pool, acc.ID, "db2_role")
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 

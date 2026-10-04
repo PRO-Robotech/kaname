@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // denyingRelations — RelationStore that denies every question.
@@ -146,7 +147,7 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 
 	// One ACTIVE binding with a two-tuple ledger (the grant-time emitted set).
 	abID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
 		ID: abID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),

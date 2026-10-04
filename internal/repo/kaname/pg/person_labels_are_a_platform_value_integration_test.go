@@ -54,6 +54,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestIntegration_APersonHasExactlyOneLabelCarrier — норма #1126.
@@ -112,7 +113,7 @@ func TestIntegration_APersonHasExactlyOneLabelCarrier(t *testing.T) {
 
 	person := domain.UserID(ids.NewID(domain.PrefixUser))
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accA,
@@ -122,7 +123,7 @@ func TestIntegration_APersonHasExactlyOneLabelCarrier(t *testing.T) {
 		require.NoError(t, w.Commit(ctx))
 	}
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
@@ -136,7 +137,7 @@ func TestIntegration_APersonHasExactlyOneLabelCarrier(t *testing.T) {
 			"утверждается о фигуре, которой нет")
 
 	{
-		w, werr := repo.Writer(ctx)
+		w, werr := repo.Writer(journalfixture.Writing(ctx))
 		require.NoError(t, werr)
 		_, err = w.UsersW().UpdateLabels(ctx, person, domain.Labels{"team": "core"})
 		require.NoError(t, err)

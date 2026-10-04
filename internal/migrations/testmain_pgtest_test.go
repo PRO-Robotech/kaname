@@ -4,6 +4,8 @@
 package migrations_test
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"os"
 	"testing"
 
@@ -25,5 +27,5 @@ import (
 // The container starts lazily, so under -short — where the guard reports every drop as
 // uncounted and skips — none is started.
 func TestMain(m *testing.M) {
-	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iamdrop"}))
+	os.Exit(pgtest.Run(m, pgtest.Config{Name: "iamdrop", Migrate: journalfixture.FixtureInitiatorOnRole()}))
 }

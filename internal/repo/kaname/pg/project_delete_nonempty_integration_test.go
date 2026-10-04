@@ -35,6 +35,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // pneWriterEnv — пул, репозиторий и проект на пробу.
@@ -63,7 +64,7 @@ func newPNEWriterEnv(t *testing.T, suffix string) *pneWriterEnv {
 // на успехе. Возвращает ошибку оператора.
 func (e *pneWriterEnv) deleteProject(t *testing.T, ctx context.Context, prj domain.ProjectID) error {
 	t.Helper()
-	w, err := e.repo.Writer(ctx)
+	w, err := e.repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	if derr := w.ProjectsW().Delete(ctx, prj); derr != nil {
 		_ = w.Rollback(ctx)

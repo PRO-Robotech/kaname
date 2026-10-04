@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // ── известный человек, приглашённый во ВТОРОЙ аккаунт ──────────────────────
@@ -78,7 +79,7 @@ func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 
 	// Человек действует в аккаунте A (там его домашний аккаунт).
 	adminA, accA := bootstrapAdmin(t, ctx, repo, "i11aA")
-	w0, err := repo.Writer(ctx)
+	w0, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	activeID := domain.UserID(ids.NewID(domain.PrefixUser))
 	_, err = w0.UsersW().InsertActive(ctx, domain.User{
@@ -98,7 +99,7 @@ func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 	_, accC := bootstrapAdmin(t, ctx, repo, "i11aC")
 
 	// Приглашение ТОЙ ЖЕ почты в аккаунт B.
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	out, inserted, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
@@ -212,7 +213,7 @@ func TestUserInvite_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w, err := repo.Writer(ctx)
+			w, err := repo.Writer(journalfixture.Writing(ctx))
 			if err != nil {
 				atomic.AddInt64(&failures, 1)
 				return

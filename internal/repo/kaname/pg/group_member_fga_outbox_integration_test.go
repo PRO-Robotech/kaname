@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // groupMemberFGATuple is the member-tuple shape AddMember/RemoveMember co-commit:
@@ -67,7 +68,7 @@ func TestGroupMember_FGAOutbox_GM_O1_AddEmitsMemberTupleInTx(t *testing.T) {
 	g := seedGroup(t, ctx, repo, acc.ID, "g-gmo1")
 	tup := groupMemberFGATuple("user", string(uid), string(g.ID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -109,7 +110,7 @@ func TestGroupMember_FGAOutbox_GM_O2_RollbackDiscardsBoth(t *testing.T) {
 	g := seedGroup(t, ctx, repo, acc.ID, "g-gmo2")
 	tup := groupMemberFGATuple("user", string(uid), string(g.ID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 		GroupID:    g.ID,
@@ -149,7 +150,7 @@ func TestGroupMember_FGAOutbox_GM_O3_RemoveEmitsSymmetricDelete(t *testing.T) {
 	g := seedGroup(t, ctx, repo, acc.ID, "g-gmo3")
 	tup := groupMemberFGATuple("user", string(uid), string(g.ID))
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	require.NoError(t, w.GroupsW().RemoveMember(ctx, g.ID, domain.SubjectTypeUser, domain.SubjectID(string(uid))))
 	require.NoError(t, w.EmitFGARelationDelete(ctx, []service.RelationTuple{tup}))

@@ -32,6 +32,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestAccountOwnerBinding_P6_CoCommit_Atomic — the owner-binding row co-commits
@@ -52,7 +53,7 @@ func TestAccountOwnerBinding_P6_CoCommit_Atomic(t *testing.T) {
 	acc := newAccount("acc-p6-owner-cc", uid)
 
 	bindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	insertedAcc, err := w.AccountsW().Insert(ctx, acc)
 	require.NoError(t, err)
@@ -103,7 +104,7 @@ func TestAccountOwnerBinding_P6_RollbackOnBindingFailure(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "p6-owner-rb")
 	acc := newAccount("acc-p6-owner-rb", uid)
 
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	insertedAcc, err := w.AccountsW().Insert(ctx, acc)
 	require.NoError(t, err)

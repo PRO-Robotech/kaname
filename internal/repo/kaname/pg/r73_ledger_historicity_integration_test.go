@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // TestR7_3_29_LedgerHistoricitySurvivesTheRetirement — R7-3-29.
@@ -81,7 +82,7 @@ func TestR7_3_29_LedgerHistoricitySurvivesTheRetirement(t *testing.T) {
 	require.False(t, live.CreatedAt.IsZero(), "начало интервала обязано быть записано")
 
 	// ── Отзыв ПРОДУКТОВЫМ путём ───────────────────────────────────────────────
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	revoked, err := w.AccessBindingsW().RevokeGuarded(ctx, binding.ID, domain.UserID(admin))
 	require.NoError(t, err)

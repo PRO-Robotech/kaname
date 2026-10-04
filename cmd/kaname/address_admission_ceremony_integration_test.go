@@ -25,12 +25,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // markPerson — отметка человека мира писателем продукта.
 func (w *ceremonyWorld) markPerson() {
 	w.t.Helper()
-	if err := kanamepg.NewLoginMethodRepo(w.pool).MarkEmailVerified(w.ctx, w.user, domain.Email(w.email), time.Now().UTC()); err != nil {
+	if err := kanamepg.NewLoginMethodRepo(w.pool).MarkEmailVerified(journalfixture.Ctx(w.t, w.ctx), w.user, domain.Email(w.email), time.Now().UTC()); err != nil {
 		w.fixture("посев отметки человека мира: %v", err)
 	}
 }

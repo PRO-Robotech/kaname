@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
 // insertPerObjectBinding inserts an ACTIVE project-scoped binding carrying a per-object
@@ -38,7 +39,7 @@ func insertPerObjectBinding(t *testing.T, ctx context.Context, repo *kanamepg.Re
 	subject domain.UserID, roleID domain.RoleID, prj domain.ProjectID, refs ...domain.ResourceRef) domain.AccessBindingID {
 	t.Helper()
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	w, err := repo.Writer(ctx)
+	w, err := repo.Writer(journalfixture.Writing(ctx))
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{

@@ -12,6 +12,8 @@ package subscriptionjournal_test
 // разрыв, который не виден ни с одной стороны по отдельности.
 
 import (
+	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
+
 	"context"
 	"database/sql"
 	"os"
@@ -31,7 +33,7 @@ import (
 func TestMain(m *testing.M) {
 	os.Exit(pgtest.Run(m, pgtest.Config{
 		Name:    "subscriptionjournal",
-		Migrate: pgtest.Goose(migrations.FS),
+		Migrate: journalfixture.Migrate(migrations.FS),
 	}))
 }
 
