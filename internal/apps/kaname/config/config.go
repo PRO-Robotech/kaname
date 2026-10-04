@@ -433,6 +433,13 @@ type AuthNConfig struct {
 	//
 	// ENV `KANAME_AUTHN__TRUST_DOMAIN`, ключ YAML `authn.trust-domain`.
 	TrustDomainName string `mapstructure:"trust-domain"`
+
+	// ServiceIdentity — ключ `authn.service-identity`: звено идентичности служб
+	// (приёмка NTF-1 Р2, замысел З13 «Ручка kaname»). Перечень методов и таблица
+	// `{точный SAN → имя службы}` в одной ручке. Ключ живёт ТОЛЬКО в файле
+	// (`fileOnlyKeys`, strict_env.go): переменная, выведенная из него, — отказ
+	// старта. Согласность ручки судит корень (`cmd/kaname`), а не декодер.
+	ServiceIdentity ServiceIdentityConfig `mapstructure:"service-identity"`
 }
 
 // TrustDomain — домен доверия, который РЕАЛЬНО уезжает в пару звеньев извлечения

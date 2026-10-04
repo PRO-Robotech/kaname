@@ -4,6 +4,7 @@
 package main
 
 import (
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/identityposture"
 	"github.com/PRO-Robotech/corelib/observability"
 	"github.com/PRO-Robotech/corelib/servicecontract"
@@ -92,5 +93,22 @@ func bootPosture(posture servicecontract.Descriptor, cfg config.Config,
 		IdentityProvider:   identityposture.Own.String(),
 		OwnRESTPublicTLS:   observability.OwnRESTFrontFrom(restFront),
 		OwnRESTInternalTLS: observability.OwnRESTFrontFrom(internalRESTFront),
+		ServiceIdentity:    serviceIdentityReport(cfg.AuthN),
 	}
+}
+
+// serviceIdentityReport — звено Р2 строкой самоотчёта (приёмка NTF-1 Р2 п.7):
+// перечень методов и строки таблицы из того же сборщика, что ставит звено в
+// цепочку (serviceIdentityLink), — второго разбора ключа нет. Ключа нет — `n/a`
+// с причиной. Несобираемая ручка до самоотчёта не доезжает (старт отказан
+// раньше); здесь она названа отказом, а не подменена «нет звена».
+func serviceIdentityReport(a config.AuthNConfig) string {
+	link, err := serviceIdentityLink(a, nil)
+	if err != nil {
+		return "refused: " + err.Error()
+	}
+	if link.IsEmpty() {
+		return grpcsrv.ServiceIdentityNotApplicable + ": " + config.ServiceIdentityKey + " не задан"
+	}
+	return link.Report()
 }

@@ -49,15 +49,68 @@ const nestedEnvSeparator = "__"
 func DecoderKeys() []string { return decoderKeysOf(reflect.TypeOf(Config{})) }
 
 // NestedEnvNames — множество законных имён пространства `__`, выведенное из
-// ключей декодера правилом EnvNameOfKey, в порядке имени.
+// ключей декодера правилом EnvNameOfKey, в порядке имени. Ключи перечня
+// «только файл» (FileOnlyKeys) и их подпути законных имён не дают.
 func NestedEnvNames() []string {
 	keys := DecoderKeys()
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
+		if _, fileOnly := fileOnlyKeyOf(k); fileOnly {
+			continue
+		}
 		out = append(out, EnvNameOfKey(k))
 	}
 	sort.Strings(out)
 	return out
+}
+
+// fileOnlyKeys — ЗАКРЫТЫЙ перечень ключей «только файл» (замысел NTF-1 З13,
+// CX1-105). Одно объявление, читатели — вывод законных имён (NestedEnvNames) и
+// отказ на выведенном имени (refuseFileOnlyEnv).
+//
+// Ключ сюда попадает, когда его значение — список пар: поле этой формы само
+// добавило бы в выводимое множество законные имена своих подпутей, и
+// `AutomaticEnv` прочёл бы их поверх файла — значение задавалось бы окружением
+// пода мимо рендера, а реплики одного рендера несли бы разные значения.
+var fileOnlyKeys = []string{
+	ServiceIdentityKey,
+}
+
+// FileOnlyKeys — перечень ключей «только файл», копией.
+func FileOnlyKeys() []string { return append([]string(nil), fileOnlyKeys...) }
+
+// fileOnlyKeyOf — ключ перечня «только файл», которому принадлежит key (сам
+// ключ либо его подпуть).
+func fileOnlyKeyOf(key string) (string, bool) {
+	for _, fk := range fileOnlyKeys {
+		if key == fk || strings.HasPrefix(key, fk+".") {
+			return fk, true
+		}
+	}
+	return "", false
+}
+
+// refuseFileOnlyEnv — отказ старта на переменной, выведенной из ключа «только
+// файл» либо его подпути. Судится ДО общего суждения о неизвестных именах и до
+// `Unmarshal`: общий отказ сказал бы «неизвестная переменная», а оператору
+// нужно знать, что ключ живёт в файле.
+func refuseFileOnlyEnv(environ []string) error {
+	var findings []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		for _, fk := range fileOnlyKeys {
+			base := EnvNameOfKey(fk)
+			if name == base || strings.HasPrefix(name, base+nestedEnvSeparator) {
+				findings = append(findings, fmt.Sprintf("configuration variable `%s` sets the file-only key `%s`", name, fk))
+			}
+		}
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	sort.Strings(findings)
+	return fmt.Errorf("%s: этот ключ задаётся только файлом настроек — снимите переменную и "+
+		"объявите значение в файле", strings.Join(findings, "; "))
 }
 
 // decoderKeysOf обходит структуру так же, как её сопоставляет декодер:
