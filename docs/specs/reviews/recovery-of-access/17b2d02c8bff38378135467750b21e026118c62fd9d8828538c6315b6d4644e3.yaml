@@ -1,0 +1,127 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: 17b2d02c8bff38378135467750b21e026118c62fd9d8828538c6315b6d4644e3
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (пять, включая
+    неотслеживаемую запись круга 5 6ac82b2a…) не трогаются — редакция 7 получает соседнюю запись
+    по своему отпечатку.
+  base_commit: d17b4831a4e6ef83bd11eb6cb9d4857a42d223d4
+  base_note: >-
+    Редакция 6 (6ac82b2a…) лежит на d17b4831a; редакция 7 — один коммит поверх него.
+  content_commit: bc3a8206fec8590eb95794a0304e8abdb96a0c89
+  branch: '213'
+  task: PRO-Robotech/kacho#1271
+  edition_task: PRO-Robotech/kacho#2698
+  edition_tasks_also: [PRO-Robotech/kaname#213]
+  lines: 1881
+  round: 6
+  predecessor_record: docs/specs/reviews/recovery-of-access/6ac82b2a3da008cbca25340efe1b413de4fe46a4bca066c5d3511872cabf041a.yaml
+  predecessor_note: >-
+    Круг 5 вернул редакцию 6 (CHANGES_REQUESTED, один блокирующий COVERAGE). Вердикт не
+    переносится; этот круг судит отпечаток 17b2d02c… целиком, предмет правки — §16.
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в копии ветки 213 @ bc3a8206f
+    → 17b2d02c…; wc -l → 1881; git show d17b4831a:<путь> | sha256sum → 6ac82b2a… (предшественник);
+    git diff d17b4831a HEAD --stat → один файл, 93+/7-.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    До события ban #1 для кода Ф5-29 не снят.
+  what_the_event_would_lift: >-
+    ban #1 для Ф5-29 (оператор «заменить либо завести» в адаптере таблицы секрета и его вызов в
+    транзакции завершения восстановления) по решению kacho#2698.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kacho#1271 (задача subject.task) с полями role, verdict, subject,
+      subject_revision bc3a8206fec8590eb95794a0304e8abdb96a0c89, subject_sha256 дословно; блок
+      `event` дописывается отдельным коммитом поверх этой записи.
+
+blocking: []
+
+resolved_from_round_5:
+  - kind: COVERAGE
+    outcome: закрыто
+    how: >-
+      §4.2 PENDING держится исключённостью состояния транзакцией глагола подтверждения, а не
+      «сессию выдают только действующей» (фраза снята). Предложение возврата «производитель —
+      Ф13» редакция опровергла доказательно: Ф13 §5 преамбула (:1523 на d17b4831a, sha256
+      5fe6cca1…) строит такую личность записью; полосы регистрации ключом не будет (kacho#2703
+      CLOSED). Отсутствие производителя названо в Р5, §5.5 (8), §6 и §7. Опровержение принято.
+
+non_blocking:
+  - kind: FORMAT
+    text: >-
+      Строка редакции 6 в шапке «git diff --stat 8a84dcff6 HEAD -- <файлы §5.5> → пусто», на
+      которую редакция 7 опирается («ревизия измерения та же»), для HEAD bc3a8206f неверна по
+      login.go — файлу, который (8) теперь называет: e15ed81e7 правит одну строку комментария
+      (:454), номера строк (:551) не сдвинуты, вывод не меняется. Назвать при следующей правке.
+  - kind: FORMAT
+    text: >-
+      §4.2: «вернуть строку в PENDING не даёт ограничение» — точнее «писатель SetInviteStatus
+      (user_repo.go:859) пройдёт WHERE, но CHECK users_invite_status_consistency отвергнет
+      PENDING при непустом external_id». Вывод верен.
+
+measured:
+  predicates_8_9: >-
+    Все предикаты §5.5 (8), (9) повторены на 8a84dcff6: user.go:70; verification.go:432/461/497/511;
+    recovery_request.go:139; 0001_initial.sql:3112; IssueSession — issue.go:52, login.go:551,
+    recovery_complete.go:309, register.go:227; lanes.go:66; delete login_methods вне проб 0,
+    в пробах 2; отметка — login_method_repo.go:251 и миграция :105 — совпали.
+  counter_check_9: >-
+    Свой предикат шире документа: git grep email_verified_at HEAD (не-тест) — INSERT с отметкой
+    нет, bootstrap_admin.go:175 только читает; вызов .MarkEmailVerified( в не-тестовом дереве
+    один (verification.go:461). ActivateInviteOnVerification (cmd/kaname/loginlane.go:690):
+    строка не PENDING или истёк срок → ErrInviteNotValid → возврат до Commit, отложенный откат
+    снимает отметку. ActivateInvite (user_repo.go:681) требует email_verified_at IS NOT NULL.
+    Посылка (9) ПОДТВЕРЖДЕНА.
+  seed_and_twin: >-
+    Временная проба в пакете humansession (удалена; git status --porcelain -- internal → пусто),
+    через слот: N (h.person с пустым паролем, адрес подтверждён) → завершение «store unavailable»,
+    store-failed=1 (Дано строится посевом, красное §9 до кода подтверждено); близнец W → nil,
+    issued=1. TestRecovery_F5_03_ и TestRecovery_F5_17_ PASS (близнецы W и WB). Посеяно 2 из 2,
+    «не выполнилось» 0.
+  counts: >-
+    grep -oE '^\*\*Ф5-[0-9]+' | sort -u → 29; строк §7 → 29; живых 28 (Ф5-23 снят) — единица
+    названа словами. kacho#2703 CLOSED, kacho#2698 OPEN (gh issue view).
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Событие публикует курьер. Тело: acceptance-reviewer · APPROVED · sha256
+    17b2d02c8bff38378135467750b21e026118c62fd9d8828538c6315b6d4644e3
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes
