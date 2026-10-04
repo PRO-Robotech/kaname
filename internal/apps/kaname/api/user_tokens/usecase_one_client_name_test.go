@@ -34,7 +34,7 @@ import (
 // изменила форму сборки, а не то, что проверяется. Красный прогон до правки
 // собирался этой же функцией с прежней сигнатурой.
 func newIssueUCForTest(repo *stubUserClientRepo, ops *stubOpsRepo) *IssueUserTokenUseCase {
-	return NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	return NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 }
 
 // TestIssue_CredentialCarriesOneName — у выданного удостоверения ОДНО имя, и

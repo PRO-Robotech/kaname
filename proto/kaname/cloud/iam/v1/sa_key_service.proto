@@ -73,6 +73,13 @@ service SAKeyService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
+  // Revoke removes a service account key. Revoking what the named service
+  // account does not hold is a synchronous `NOT_FOUND` with the text `SAKey
+  // <key_id> not found`, and no operation: a key that never existed, one
+  // already revoked and one of another service account are indistinguishable —
+  // by code, by text (but for the echo of the id) and by details. The loser of
+  // two concurrent revokes gets an operation ending with the same refusal;
+  // only the revoke that removed the key succeeds with `revoked_at`.
   rpc Revoke (RevokeSAKeyRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}"

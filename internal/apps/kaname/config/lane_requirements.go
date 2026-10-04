@@ -238,6 +238,28 @@ var LaneRequirements = []LaneRequirement{
 			return c.AuthN.Login.ValidateRecovery()
 		},
 	},
+	// ПОЧТОВЫЙ УЗЕЛ (kaname#475). Доступ дальше входа получает только человек
+	// с подтверждённым адресом (kaname#456), подтвердить адрес и восстановить
+	// доступ можно только кодом из письма — без узла установка стартовала бы
+	// здоровой, а дальше входа не прошёл бы ни один человек, первый
+	// администратор кластера тоже. Согласованность объявленных величин судит
+	// InviteMailConfig.Validate; эта строка судит, объявлен ли узел вообще,
+	// тем же предикатом, что потребитель (RelayConfigured).
+	{
+		Element: "почтовый узел объявлен: адрес узла и адрес отправителя",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			if c.InviteMail.RelayConfigured() && strings.TrimSpace(c.InviteMail.From) != "" {
+				return nil
+			}
+			return fmt.Errorf(
+				"production mode: the mail relay is not declared (invite-mail.relay, env " +
+					"KANAME_INVITE_MAIL__RELAY; invite-mail.from, env KANAME_INVITE_MAIL__FROM) — " +
+					"access beyond sign-in needs a verified address, and the address verification " +
+					"and recovery codes travel only by mail: the process would start and no person, " +
+					"the first cluster administrator included, could get past sign-in. Declare both")
+		},
+	},
 	// ПОДТВЕРЖДЕНИЕ АДРЕСА (kaname#456, Р9): пять ручек без умолчания; письмо
 	// подтверждения — условие входа дальше экрана подтверждения, и полоса без
 	// величин не поднимается.

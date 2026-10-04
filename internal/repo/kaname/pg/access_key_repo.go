@@ -22,6 +22,10 @@ package pg
 // Идентификатор удостоверения, открытый ключ и рукоятка хранятся байтами как
 // приняты; индекс по идентификатору — сам ключ уникальности: по нему ищет
 // проверка утверждения (Ф7-08, Ф7-09).
+//
+// Рукоятка ЧЕЛОВЕКА (`user_ceremony_handles`, Ф13 Р3) заводится одним
+// оператором с разрешением конфликта: «завести, если нет, иначе вернуть то,
+// что есть» — исход держит ключ строки, а не сравнение прочитанного (ban #10).
 
 import (
 	"context"
@@ -234,6 +238,34 @@ func (w *accessKeyWriter) InsertChallenge(ctx context.Context, c domain.AccessKe
 		return mapErr(err, "AccessKey.InsertChallenge", "")
 	}
 	return nil
+}
+
+// EnsureCeremonyHandle — рукоятка человека ОДНИМ оператором. `DO UPDATE` с
+// присваиванием того же ключа значения не меняет, но делает существующую
+// строку видимой `RETURNING`: без него проигравший конкуренцию получил бы ноль
+// строк там, где ответ уже есть. Смены значения нет и быть не может —
+// рукоятка уже лежит в аутентификаторе держателя.
+func (w *accessKeyWriter) EnsureCeremonyHandle(ctx context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error) {
+	if userID == "" {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if err := minted.Validate(); err != nil {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
+	}
+	var stored []byte
+	err := w.tx.QueryRow(ctx, `
+		INSERT INTO user_ceremony_handles (user_id, handle)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING handle`, string(userID), minted.Bytes()).Scan(&stored)
+	if err != nil {
+		return domain.CeremonyHandle{}, mapErr(err, "AccessKey.EnsureCeremonyHandle", "")
+	}
+	handle, err := domain.RestoreCeremonyHandle(stored)
+	if err != nil {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInternal, "stored ceremony handle: %v", err)
+	}
+	return handle, nil
 }
 
 // ConsumeChallenge — ОДИН оператор однократности: строка вызывающего этой

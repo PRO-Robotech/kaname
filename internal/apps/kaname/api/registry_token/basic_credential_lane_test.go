@@ -9,6 +9,7 @@ package registry_token
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -185,7 +186,16 @@ func TestBAT1_40_RevokedOrExpiredIsRefusedByTheSameRefusal(t *testing.T) {
 	if err == nil {
 		t.Fatal("отозванное удостоверение прошло вход в реестр")
 	}
-	if err != ErrUnauthenticated {
+	// Единый отказ полосы — класс ErrUnauthenticated; внутрь он несёт причину
+	// авторитета (kaname#390), а его ТЕКСТ от причины не зависит: тот же, что
+	// у отказа формы, решённого до авторитета.
+	if !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("отказ = %v, ожидался единый отказ полосы", err)
+	}
+	_, formErr := ucRevoked.Execute(context.Background(), IssueInput{
+		Username: "soc_other00000000bat1", Password: secret, Service: "registry",
+	})
+	if formErr == nil || formErr.Error() != err.Error() {
+		t.Errorf("текст отказа зависит от причины: %q против %q", err, formErr)
 	}
 }

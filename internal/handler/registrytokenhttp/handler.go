@@ -45,6 +45,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ
@@ -230,6 +231,7 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 		}
 		h.challenge(w, service)
 	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
+		h.logBasicRefusal(err, service)
 		if errors.Is(err, registrytokenuc.ErrCredentialKindNotAccepted) && h.logger != nil {
 			// Наружу — тот же отказ, что и на всяком другом; в журнал —
 			// причина: «клиент настроен на снятый вход» и «секрет неверен»
@@ -242,6 +244,35 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 		h.challenge(w, service)
 	default:
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+	}
+}
+
+// logBasicRefusal — ОДНА запись журнала об отказе базового секрета (задача
+// kaname#390): причина, которую авторитет назвал, либо отказ полосы по виду
+// принципала. Отказ иного вида (ключевой материал) здесь не журналится — у него
+// своя строка ниже.
+//
+// Уровень — по таблице службы (`docs/engineering/components/32-observability.md`,
+// «Уровни»): отклонённое предъявление — WARN; отказ, причину которого авторитет
+// не назвал, — нарушение его контракта, дефект НАШЕЙ стороны, и он ERROR.
+//
+// Ни предъявленной строки, ни имени (оно и есть идентификатор удостоверения) в
+// записи нет: в журнал не уходит то, чего клиенту не отдают. Текст ошибки тоже
+// не пишется — он не несёт ничего сверх исхода.
+func (h *TokenHandler) logBasicRefusal(err error, service string) {
+	if h.logger == nil {
+		return
+	}
+	switch reason, named := domain.BasicCredentialRefusalReasonOf(err); {
+	case named:
+		h.logger.Warn("docker token: basic credential refused",
+			"outcome", string(reason), "service", service)
+	case errors.Is(err, domain.ErrBasicCredentialRefused):
+		h.logger.Error("docker token: basic credential refused without a named reason "+
+			"(the authority broke its contract)", "service", service)
+	case errors.Is(err, registrytokenuc.ErrBasicPrincipalKindNotAccepted):
+		h.logger.Warn("docker token: basic credential refused",
+			"outcome", registrytokenuc.OutcomeBasicPrincipalKindRefused, "service", service)
 	}
 }
 

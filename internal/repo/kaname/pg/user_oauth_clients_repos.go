@@ -193,6 +193,26 @@ func (r *UserOAuthClientRepo) DeleteOwnedByID(
 	return out, true, nil
 }
 
+// ExistsOwnedByID — есть ли у человека ownerID удостоверение id. Предикат тот
+// же, что у оператора снятия выше (`id AND user_id`): строка чужого владельца
+// отсюда неотличима от отсутствующей BY CONSTRUCTION, ветки, на которой они
+// могли бы разойтись, нет.
+//
+// Ответ классифицирующий, а не решающий: снятие решает оператор снятия под
+// своим замком, и проигравший гонку получает там тот же исход «нет». Ошибка
+// чтения — НЕ «нет»: она уходит вызывающему как есть, чтобы неполученный ответ
+// не был прочитан отсутствием строки.
+func (r *UserOAuthClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.UserID, id domain.UserOAuthClientID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM user_oauth_clients WHERE id = $1 AND user_id = $2)`,
+		string(id), string(ownerID)).Scan(&exists)
+	if err != nil {
+		return false, mapErr(err, "UserOAuthClient.ExistsOwnedByID", string(id))
+	}
+	return exists, nil
+}
+
 // TouchLastUsed — атомарное обновление last_used_at (RETURNING для проверки exists).
 func (r *UserOAuthClientRepo) TouchLastUsed(ctx context.Context, tx pgx.Tx, id domain.UserOAuthClientID, at time.Time) error {
 	tag, err := tx.Exec(ctx,

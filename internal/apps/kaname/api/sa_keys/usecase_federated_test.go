@@ -52,6 +52,19 @@ type stubSAClientRepo struct {
 	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
 	// эти два состояния — предмет пробы наблюдаемости (#2507).
 	accountErr error
+	// readErr — хранилище НЕ ОТВЕТИЛО на синхронной сверке существования ключа
+	// (CVR-12). Отдельно от `getErr`: там ответ «строки нет», здесь ответа нет.
+	readErr error
+}
+
+// ExistsOwnedByID — дублёр воспроизводит предикат НАСТОЯЩЕГО чтения: ключ
+// «есть» только при совпадении И идентификатора, И учётки-владельца — тот же
+// предикат, что у оператора снятия.
+func (s *stubSAClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.ServiceAccountID, id domain.SAOAuthClientID) (bool, error) {
+	if s.readErr != nil {
+		return false, s.readErr
+	}
+	return s.getErr == nil && s.getRow.ID == id && s.getRow.SvaID == ownerID, nil
 }
 
 func (s *stubSAClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error) {
