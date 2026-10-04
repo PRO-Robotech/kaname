@@ -890,6 +890,67 @@ func TestAccessKey_F7_27_ForeignAndAbsentAreOneRefusal(t *testing.T) {
 	require.Equal(t, 1, h.store.keyCount(bob))
 }
 
+// TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheAbsenceLane — чтение
+// ключей человека упало (kaname#586): полоса отсутствия не вправе судить по
+// пустому списку. Ответ — внутренняя ошибка фиксированного текста, сырой текст
+// хранилища наружу не выходит, операции нет. Законный близнец — то же снятие
+// при успешном чтении: прежний NOT_FOUND по отсутствующему ключу.
+func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheAbsenceLane(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	k := h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+
+	// Близнец: чтение успешно — отсутствующий ключ даёт NOT_FOUND.
+	_, err := h.revoke(alice, "ak-0000000000000000z")
+	requireCode(t, err, codes.NotFound)
+
+	h.store.mu.Lock()
+	h.store.keysOfFailFrom = h.store.keysOfCalls + 1
+	h.store.mu.Unlock()
+	opsBefore := h.ops.count()
+	_, err = h.revoke(alice, string(k.ID))
+	st := requireCode(t, err, codes.Internal)
+	require.Equal(t, "internal error", st.Message())
+	require.NotContains(t, err.Error(), keysOfStoreFault)
+	require.Equal(t, opsBefore, h.ops.count(), "операция не заводится")
+	require.Equal(t, 1, h.store.keyCount(alice), "ключ на месте")
+}
+
+// TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane — человек
+// без пароля с двумя ключами; первое чтение (полоса отсутствия) успешно, второе
+// (подсчёт способов входа) упало (kaname#586). Отказ «последний способ входа»
+// не установлен — ответ внутренняя ошибка без текста хранилища, операции нет.
+// Законный близнец — тот же человек при успешном чтении: снятие проходит.
+func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.meth.password[alice] = false
+	k1 := h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+	h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+
+	h.store.mu.Lock()
+	h.store.keysOfFailFrom = h.store.keysOfCalls + 2
+	before := h.store.keysOfCalls
+	h.store.mu.Unlock()
+	opsBefore := h.ops.count()
+	_, err := h.revoke(alice, string(k1.ID))
+	st := requireCode(t, err, codes.Internal)
+	require.Equal(t, "internal error", st.Message())
+	require.NotContains(t, err.Error(), keysOfStoreFault)
+	h.store.mu.Lock()
+	require.Equal(t, before+2, h.store.keysOfCalls, "предпосылка: упало ВТОРОЕ чтение — подсчёт способов")
+	h.store.keysOfFailFrom = 0
+	h.store.mu.Unlock()
+	require.Equal(t, opsBefore, h.ops.count(), "операция не заводится")
+	require.Equal(t, 2, h.store.keyCount(alice), "оба ключа на месте")
+
+	// Близнец: чтение успешно — два ключа, снятие одного проходит.
+	op, err := h.revoke(alice, string(k1.ID))
+	require.NoError(t, err)
+	require.Nil(t, op.Error)
+	require.Equal(t, 1, h.store.keyCount(alice))
+}
+
 // TestAccessKey_F7_36_RevokeRequiresFreshness — окно свежести на снятии: отказ
 // со следующим шагом, оба ключа на месте; после предъявления — снимается.
 func TestAccessKey_F7_36_RevokeRequiresFreshness(t *testing.T) {

@@ -12,6 +12,7 @@ package access_keys_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -34,7 +35,14 @@ type fakeStore struct {
 	// beforeAdvance — крючок конкуренции (Ф7-20, ветвь б): исполняется перед
 	// сдвигом счётчика, чтобы соседнее утверждение успело перехватить слот.
 	beforeAdvance func()
+	// keysOfFailFrom — с какого по счёту чтения (с единицы) KeysOf отвечает
+	// ошибкой хранилища; 0 — никогда. keysOfCalls — сколько чтений было.
+	keysOfFailFrom int
+	keysOfCalls    int
 }
+
+// keysOfStoreFault — сырой текст хранилища: в ответ он попасть не вправе.
+const keysOfStoreFault = "pg: read access_keys: connection reset by peer at db-internal-7"
 
 func newFakeStore() *fakeStore {
 	ten := int64(10)
@@ -73,6 +81,10 @@ func (s *fakeStore) KeyByCredentialID(_ context.Context, cred []byte) (domain.Ac
 func (s *fakeStore) KeysOf(_ context.Context, userID domain.UserID, _ string, _ int32) ([]domain.AccessKey, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.keysOfCalls++
+	if s.keysOfFailFrom > 0 && s.keysOfCalls >= s.keysOfFailFrom {
+		return nil, "", errors.New(keysOfStoreFault)
+	}
 	var out []domain.AccessKey
 	for _, k := range s.keys {
 		if k.UserID == userID {
