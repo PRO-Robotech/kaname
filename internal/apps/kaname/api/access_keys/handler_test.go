@@ -81,7 +81,7 @@ func TestAccessKeyHandler_F7_40_ChallengeIsTheCeremonyForm(t *testing.T) {
 	require.Len(t, ch.GetChallenge(), domain.AccessKeyChallengeBytes)
 	require.Equal(t, rpID, ch.GetRp().GetId())
 	require.Equal(t, access_keys.RPDisplayName, ch.GetRp().GetName())
-	require.Equal(t, []byte(alice), ch.GetUser().GetId())
+	requireCeremonyHandleOf(t, h, alice, ch.GetUser().GetId())
 	require.NotEmpty(t, ch.GetUser().GetName())
 	require.Equal(t, access_keys.UserVerificationRegistration, ch.GetAuthenticatorSelection().GetUserVerification())
 	require.Equal(t, access_keys.ResidentKey, ch.GetAuthenticatorSelection().GetResidentKey())

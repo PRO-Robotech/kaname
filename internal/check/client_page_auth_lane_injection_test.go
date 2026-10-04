@@ -99,3 +99,89 @@ func TestAuthLanePageGateReportsAnEmptyWalkInsteadOfPassing(t *testing.T) {
 	require.Zero(t, census.spansRead)
 	require.NotEmpty(t, findings)
 }
+
+// ── ключи тел примеров (kaname#247) ──────────────────────────────────────────
+//
+// Пример тела на странице — утверждение о том, что приходит клиенту. Ключ,
+// которого производитель тела не печатает, учит клиента обрабатывать поле,
+// которое не приходит никогда; ключ, которого пример не показывает, — поле,
+// о котором клиент не узнает. Судится в обе стороны, по объектам `user`,
+// `session`, `assurance` ответа полосы.
+
+var bodyLaneContract = func() authLaneContract {
+	c := lawfulLaneContract
+	c.BodyKeys = map[string][]string{
+		"user":      {"id", "email", "displayName"},
+		"session":   {"expiresAt", "assuranceLevel", "emailVerified"},
+		"assurance": {"level", "level2Reachable", "missingForLevel2"},
+	}
+	return c
+}()
+
+// laneBodyBlock — пример тела в той форме, которой страница его пишет.
+func laneBodyBlock(json string) string {
+	return "\n<CodeBlock language=\"json\">\n  {dedent`\n" + json + "\n  `}\n</CodeBlock>\n"
+}
+
+const lawfulLaneBody = `    {
+      "user":    { "id": "usr1", "email": "dev@acme.example", "displayName": "dev" },
+      "session": { "expiresAt": "2026-09-18T10:00:00Z", "assuranceLevel": "1",
+                   "emailVerified": false }
+    }`
+
+// lawfulCeremonyBody — испытание церемонии: объект `user` той же буквы, но
+// ДРУГОЙ формы (сущность доверяющей стороны). Ответом полосы оно не является —
+// верхнего ключа `session` у него нет, — и гейт обязан молчать.
+const lawfulCeremonyBody = `    { "challenge": "…", "rp": { "id": "access.example.invalid", "name": "Kacho Cloud" },
+      "user": { "id": "…", "name": "alice@example.invalid", "displayName": "Alice" } }`
+
+func TestAuthLanePageGateIsSilentOnLawfulBodies(t *testing.T) {
+	page := lawfulLanePage + laneBodyBlock(lawfulLaneBody) + laneBodyBlock(lawfulCeremonyBody) +
+		"Ответ — `{\"session\": {…, \"emailVerified\": true}}`.\n"
+	findings, c := auditAuthLanePage(page, bodyLaneContract)
+	require.Empty(t, findings, "законные тела обязаны молчать")
+	require.Equal(t, 2, c.bodyBlocks)
+	require.Equal(t, 1, c.bodyResponses, "испытание церемонии принято за ответ полосы")
+	require.Equal(t, 2, c.bodyObjects)
+	require.Equal(t, 1, c.bodyInline)
+}
+
+// Прямая сторона: пример несёт снятое поле — ровно случай kaname#247.
+func TestAuthLanePageGateRedsOnAnExtraBodyKey(t *testing.T) {
+	body := strings.Replace(lawfulLaneBody, `"emailVerified": false }`,
+		`"emailVerified": false, "passwordChangeRequired": false }`, 1)
+	require.NotEqual(t, lawfulLaneBody, body, "инъекция не внеслась")
+	findings, _ := auditAuthLanePage(lawfulLanePage+laneBodyBlock(body), bodyLaneContract)
+	require.Len(t, findings, 1, "лишний ключ примера оставил гейт зелёным")
+	require.Contains(t, findings[0], "passwordChangeRequired")
+	require.Contains(t, findings[0], "session")
+}
+
+// Обратная сторона: пример полного объекта потерял ключ производителя.
+func TestAuthLanePageGateRedsOnAMissingBodyKey(t *testing.T) {
+	body := strings.Replace(lawfulLaneBody, `, "displayName": "dev"`, ``, 1)
+	require.NotEqual(t, lawfulLaneBody, body, "инъекция не внеслась")
+	findings, _ := auditAuthLanePage(lawfulLanePage+laneBodyBlock(body), bodyLaneContract)
+	require.Len(t, findings, 1, "недостающий ключ примера оставил гейт зелёным")
+	require.Contains(t, findings[0], "displayName")
+	require.Contains(t, findings[0], "user")
+}
+
+// Строчный код: объект с многоточием судится в одну сторону — лишний ключ.
+func TestAuthLanePageGateRedsOnAnExtraKeyInInlineBody(t *testing.T) {
+	page := lawfulLanePage + "Ответ — `{\"session\": {…, \"passwordChangeRequired\": false}}`.\n"
+	findings, c := auditAuthLanePage(page, bodyLaneContract)
+	require.Len(t, findings, 1)
+	require.Contains(t, findings[0], "passwordChangeRequired")
+	require.Equal(t, 1, c.bodyInline)
+}
+
+// Пример ответа полосы, который не разбирается, — слепая зона, а не тишина.
+func TestAuthLanePageGateRedsOnAnUnparsableLaneBody(t *testing.T) {
+	body := strings.Replace(lawfulLaneBody, `"assuranceLevel": "1",`, `"assuranceLevel": [уровень],`, 1)
+	require.NotEqual(t, lawfulLaneBody, body, "инъекция не внеслась")
+	findings, c := auditAuthLanePage(lawfulLanePage+laneBodyBlock(body), bodyLaneContract)
+	require.Len(t, findings, 1, "неразборный пример ответа выпал из суда молча")
+	require.Contains(t, findings[0], "не разбирается")
+	require.Equal(t, 1, c.bodyBlocks)
+}

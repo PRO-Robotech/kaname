@@ -92,8 +92,11 @@ type AccessKeyRegistrationChallenge struct {
 	// Случайное испытание; сверяется с `clientDataJSON.challenge` результата.
 	Challenge []byte        `protobuf:"bytes,1,opt,name=challenge,proto3" json:"challenge,omitempty"`
 	Rp        *RelyingParty `protobuf:"bytes,2,opt,name=rp,proto3" json:"rp,omitempty"`
-	// Человек глазами аутентификатора. `id` — платформенный `id` человека как
-	// байты (Ф13 Р3): без адреса и без имени, один у всех ключей человека.
+	// Человек глазами аутентификатора. `id` — рукоятка человека: 64 случайных
+	// байта, одни у всех его ключей, не выводимые ни из его `id`, ни из адреса,
+	// ни из имени (Ф13 Р3; норма WebAuthn, §14.6.1). Значение уходит в
+	// аутентификатор, и отозвать его оттуда нельзя — поэтому оно не несёт
+	// ничего нашего; снятие человека развязывает его с рукояткой.
 	User *CeremonyUser `protobuf:"bytes,3,opt,name=user,proto3" json:"user,omitempty"`
 	// Допустимые алгоритмы открытого ключа — перечень посадки, в порядке
 	// предпочтения; `type` всегда `public-key`.

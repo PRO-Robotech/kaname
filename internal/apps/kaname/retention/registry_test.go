@@ -173,7 +173,7 @@ func (stubReaper) SweepAgedRows(_ context.Context, _ time.Duration, _ int) (int6
 func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	window := 15 * time.Minute
 	full := HumanSessionReapers{
-		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute,
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: window,
 		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
 		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,
@@ -198,11 +198,11 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	if s.Sweep == nil {
 		t.Errorf("предмет %q объявлен без уборщика", s.Name)
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window,
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute, LongestWindow: time.Minute, EnrollmentWindow: window,
 		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{}, LetterWindow: time.Hour, SourceWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без уборщика заведений полоса даёт %d записей, ждали 0", len(got))
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute,
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute, LongestWindow: time.Minute,
 		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{}, LetterWindow: time.Hour, SourceWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без окна заведений полоса даёт %d записей, ждали 0: порог нулём снимал бы живые pending", len(got))
 	}
@@ -211,11 +211,12 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 // TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper — Ф7 (kacho#1273,
 // Р5 врезка Ф7-34): пятый предмет полосы — испытания ключей, которых приём
 // результата и проверка утверждения уже не обслужат (истёкшие и снятые);
-// порог ноль — граница срока включающая и у читателя, и у уборки; полоса без
-// уборщика испытаний записей не даёт вовсе.
+// порог — срок испытания, а не ноль: приём результата строку ЧИТАЕТ, и три
+// состояния различимы, пока она хранится (Ф7-03, Ф7-34, kaname#590); полоса
+// без уборщика испытаний либо без срока записей не даёт вовсе.
 func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	full := HumanSessionReapers{
-		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute,
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
 		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
 		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,
@@ -228,8 +229,8 @@ func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	if !ok {
 		t.Fatalf("предмета %q нет среди %v", SubjectAccessKeyChallenges, byName)
 	}
-	if s.Grace != 0 {
-		t.Errorf("порог испытаний %v, ждали 0: истёкшее и снятое читатель уже не обслужит", s.Grace)
+	if s.Grace != full.ChallengeTTL {
+		t.Errorf("порог испытаний %v, ждали срок испытания %v: снятая раньше строка читается «не выдавалось» (Ф7-34)", s.Grace, full.ChallengeTTL)
 	}
 	if s.Sweep == nil {
 		t.Errorf("предмет %q объявлен без уборщика", s.Name)
@@ -238,6 +239,11 @@ func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
 	without.Challenges = nil
 	if got := WithHumanSessions(nil, without); len(got) != 0 {
 		t.Errorf("без уборщика испытаний полоса даёт %d записей, ждали 0", len(got))
+	}
+	noTTL := full
+	noTTL.ChallengeTTL = 0
+	if got := WithHumanSessions(nil, noTTL); len(got) != 0 {
+		t.Errorf("без срока испытания полоса даёт %d записей, ждали 0: порог нулём снимал бы предъявленное первым проходом", len(got))
 	}
 }
 
@@ -279,7 +285,7 @@ func (stubReaper) SweepExpiredBearerLetters(context.Context, time.Duration, int)
 // уборщиков записей не даёт вовсе.
 func TestWithHumanSessionsCarriesTheAddressVerificationSweepers(t *testing.T) {
 	full := HumanSessionReapers{
-		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute,
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
 		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
 		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute,

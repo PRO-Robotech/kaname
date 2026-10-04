@@ -4,6 +4,7 @@
 package check_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -21,8 +22,8 @@ import (
 
 // Клиентская страница полосы входа обязана СХОДИТЬСЯ со слушателем: перечень
 // путей — с `loginlanehttp.Paths()`, тексты отказов и токены причин — с
-// константами полосы, имена печений — с объявлением слушателя (задачи
-// kaname#204, kaname#225).
+// константами полосы, имена печений — с объявлением слушателя, ключи тел
+// примеров — с производителями тел (задачи kaname#204, kaname#225, kaname#247).
 //
 // # ПОЧЕМУ ГЕЙТ, А НЕ «ДОПИСАТЬ СТРАНИЦУ»
 //
@@ -39,7 +40,12 @@ import (
 //     отделить их от полосы (они подаются ядру явным перечнем);
 //   - каждый текст отказа и токен причины, которые полоса производит, стоят на
 //     странице дословно — клиент ключуется на них;
-//   - оба имени печений названы.
+//   - оба имени печений названы;
+//   - ключи объектов `user`, `session`, `assurance` в примерах тел ответа полосы
+//     равны ключам, которые печатают производители тел
+//     (`loginlanehttp.ResponseObjectKeys`), — в обе стороны для блока json и в
+//     одну (лишнего нет) для строчного объекта с многоточием (kaname#247: пример
+//     пережил снятое поле `passwordChangeRequired`, гейт ключей не судил).
 //
 // # ГРАНИЦА
 //
@@ -64,6 +70,10 @@ type authLaneCensus struct {
 	textsNamed      int // из них названо дословно
 	cookiesDeclared int
 	cookiesNamed    int
+	bodyBlocks      int // примеров тела в формате json прочитано
+	bodyResponses   int // из них — ответы полосы (несут `session` верхним ключом)
+	bodyObjects     int // объектов тела, сверенных с производителем в обе стороны
+	bodyInline      int // объектов тела в строчном коде, сверенных в одну сторону
 }
 
 // authLaneContract — то, что производит полоса и что страница обязана нести.
@@ -72,6 +82,9 @@ type authLaneContract struct {
 	EdgeRoutes []string // маршруты края, которые страница вправе называть в семействе
 	Texts      []string // тексты отказов и токены причин
 	Cookies    []string
+	// BodyKeys — ключи объектов тела ответа полосы по имени объекта
+	// (`user`, `session`, `assurance`), снятые с производителей тел.
+	BodyKeys map[string][]string
 }
 
 // liveAuthLaneContract — контракт, снятый с самого слушателя, а не выписанный.
@@ -109,8 +122,123 @@ func liveAuthLaneContract() authLaneContract {
 			humansession.ReasonEmailAlreadyVerified,
 			humansession.ReasonInviteNotValid,
 		},
-		Cookies: []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
+		Cookies:  []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
+		BodyKeys: loginlanehttp.ResponseObjectKeys(),
 	}
+}
+
+// reJSONBlock — пример тела: `<CodeBlock language="json">` с текстом в dedent.
+// Других форм блока json на страницах сайта нет — перепись блоков печатается, и
+// пример, записанный иной формой, уменьшил бы её, а не исчез молча.
+var reJSONBlock = regexp.MustCompile("(?s)<CodeBlock language=\"json\">\\s*\\{dedent`(.*?)`\\}\\s*</CodeBlock>")
+
+// reInlineObject — объект тела в строчном коде: `"имя": { … }` без вложенных скобок.
+var reInlineObject = regexp.MustCompile(`"([A-Za-z]+)"\s*:\s*\{([^{}]*)\}`)
+
+// reInlineKey — ключ внутри объекта строчного кода.
+var reInlineKey = regexp.MustCompile(`"([A-Za-z0-9_]+)"\s*:`)
+
+// laneResponseMarker — верхний ключ, по которому пример тела ОПОЗНАЁТСЯ ответом
+// полосы: его несёт каждый ответ, кладущий сессию. Объект той же буквы в чужом
+// теле (сущность `user` испытания церемонии) судом не является.
+const laneResponseMarker = "session"
+
+// auditLaneBodies — ключи тел примеров против производителей тел, в обе стороны.
+func auditLaneBodies(page string, keys map[string][]string, census *authLaneCensus) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	var findings []string
+	names := sortedKeys(func() map[string]bool {
+		m := map[string]bool{}
+		for k := range keys {
+			m[k] = true
+		}
+		return m
+	}())
+	for _, m := range reJSONBlock.FindAllStringSubmatch(page, -1) {
+		census.bodyBlocks++
+		var body map[string]any
+		if err := json.Unmarshal([]byte(m[1]), &body); err != nil {
+			if strings.Contains(m[1], `"`+laneResponseMarker+`"`) {
+				findings = append(findings, fmt.Sprintf(
+					"пример тела ответа полосы на странице %s не разбирается как JSON (%v) — его "+
+						"ключи вне суда; пример обязан быть телом, которое клиент получает",
+					authLanePageRel, err))
+			}
+			continue
+		}
+		if _, ok := body[laneResponseMarker]; !ok {
+			continue
+		}
+		census.bodyResponses++
+		for _, name := range names {
+			obj, ok := body[name].(map[string]any)
+			if !ok {
+				continue
+			}
+			census.bodyObjects++
+			findings = append(findings, compareBodyKeys(name, mapKeys(obj), keys[name], true)...)
+		}
+	}
+	// Строчный код читается со страницы БЕЗ блоков: текст dedent стоит в обратных
+	// кавычках, и блок иначе судился бы второй раз — одной стороной.
+	for _, span := range codeSpans(reJSONBlock.ReplaceAllString(page, "")) {
+		for _, m := range reInlineObject.FindAllStringSubmatch(span, -1) {
+			want, judged := keys[m[1]]
+			if !judged {
+				continue
+			}
+			census.bodyInline++
+			var got []string
+			for _, k := range reInlineKey.FindAllStringSubmatch(m[2], -1) {
+				got = append(got, k[1])
+			}
+			// Строчный объект показывает часть ключей (`{…, "emailVerified": true}`):
+			// судится одна сторона — лишнего ключа нет.
+			findings = append(findings, compareBodyKeys(m[1], got, want, false)...)
+		}
+	}
+	return findings
+}
+
+// compareBodyKeys — находки по одному объекту; both — судить и недостающие.
+func compareBodyKeys(name string, got, want []string, both bool) []string {
+	produced := map[string]bool{}
+	for _, k := range want {
+		produced[k] = true
+	}
+	shown := map[string]bool{}
+	var findings []string
+	for _, k := range got {
+		shown[k] = true
+		if !produced[k] {
+			findings = append(findings, fmt.Sprintf(
+				"пример тела на странице %s показывает в объекте %q ключ %q, которого полоса не "+
+					"печатает — клиент напишет обработку поля, которое не приходит никогда",
+				authLanePageRel, name, k))
+		}
+	}
+	if both {
+		for _, k := range want {
+			if !shown[k] {
+				findings = append(findings, fmt.Sprintf(
+					"пример тела на странице %s не показывает в объекте %q ключ %q, который полоса "+
+						"печатает — пример полного объекта обязан нести все его ключи",
+					authLanePageRel, name, k))
+			}
+		}
+	}
+	return findings
+}
+
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // codeSpans — содержимое код-форматирования страницы в порядке появления.
@@ -194,6 +322,7 @@ func auditAuthLanePage(page string, c authLaneContract) ([]string, authLaneCensu
 		findings = append(findings, fmt.Sprintf(
 			"печенье %s слушатель ставит, а страница его не называет", cookie))
 	}
+	findings = append(findings, auditLaneBodies(page, c.BodyKeys, &census)...)
 	sort.Strings(findings)
 	return findings, census
 }
@@ -210,8 +339,14 @@ func TestAuthLanePageMatchesTheListener(t *testing.T) {
 		"код-спанов прочитано %d · текстов и токенов %d · названо дословно %d · печений %d · названо %d · находок %d",
 		census.pathsDeclared, census.pathsNamed, census.pathsForeign, census.spansRead,
 		census.textsDeclared, census.textsNamed, census.cookiesDeclared, census.cookiesNamed, len(findings))
+	t.Logf("перепись тел: блоков json %d · ответов полосы %d · объектов сверено в обе стороны %d · "+
+		"строчных объектов сверено в одну сторону %d",
+		census.bodyBlocks, census.bodyResponses, census.bodyObjects, census.bodyInline)
 
 	require.NotZerof(t, census.pathsDeclared, "слушатель не объявил ни одного пути — вердикт беспредметен")
+	require.NotZerof(t, census.bodyObjects,
+		"ни один объект тела ответа полосы не сверен с производителем — суд ключей примеров беспредметен "+
+			"(производителей объявлено %d)", len(c.BodyKeys))
 	require.NotZerof(t, census.spansRead, "на странице %s не прочитано ни одного код-спана — вердикт беспредметен", authLanePageRel)
 	require.Emptyf(t, findings, "страница %s разошлась со слушателем полосы:\n%s",
 		authLanePageRel, strings.Join(findings, "\n"))
