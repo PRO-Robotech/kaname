@@ -362,10 +362,12 @@ func TestAccessKeys_F7_13_RequiredSettingsRowsExist(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Ф7-38 — потолок ключей доступа.
 
-// TestAccessKeys_F7_38_CeilingKnobIsTheFourthOfTheSameForm — ручка стоит в
-// таблице величин рядом с тремя, тем же видом, что каталог и триггер.
-func TestAccessKeys_F7_38_CeilingKnobIsTheFourthOfTheSameForm(t *testing.T) {
-	require.Len(t, config.OwnCeilingKnobs, 4)
+// TestAccessKeys_F7_38_CeilingKnobIsATableRowOfTheSameForm — ручка стоит в
+// таблице величин рядом с остальными, тем же видом, что каталог и триггер.
+// Длина таблицы здесь не утверждается: число собственных потолков держит одна
+// таблица (`TestOwnCeilingCountLivesOnlyInTheTable`), и второе его написание
+// разошлось бы с ней со следующей строкой.
+func TestAccessKeys_F7_38_CeilingKnobIsATableRowOfTheSameForm(t *testing.T) {
 	var found bool
 	for _, k := range config.OwnCeilingKnobs {
 		if k.Kind != akCeilKind {
