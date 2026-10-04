@@ -174,7 +174,8 @@ func postureValuePaths(tree map[string]any) [][]string {
 
 var configBridge = []bridged{
 	{configKey: "logger.level", valuePath: []string{"logger", "level"}},
-	// ТРИ СОБСТВЕННЫХ ПОТОЛКА (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	// СОБСТВЕННЫЕ ПОТОЛКИ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117; перечень —
+	// таблица `config.OwnCeilingKnobs`).
 	//
 	// `omitEmpty` НЕ СТАВИТСЯ, и это несущее: ноль здесь законная величина
 	// («ресурсов этого вида не заводить»), и вычет пустого выбросил бы её —
