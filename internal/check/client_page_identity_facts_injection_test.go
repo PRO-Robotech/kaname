@@ -87,3 +87,19 @@ func TestFirstCallSection_InjectionBothWays(t *testing.T) {
 	claim := twin + "состояние «привязка создана, но право ещё не действует» невыразимо\n"
 	require.NotEmpty(t, auditFirstCallSection(claim, &idFactsCensus{}))
 }
+
+func TestTreeLayout_InjectionBothWays(t *testing.T) {
+	twin := "## Структура репозитория\n\n<tr><td><strong>cmd/</strong></td><td>x</td></tr>\n" +
+		"<tr><td><strong>internal/</strong></td><td>y</td></tr>\n\n## Дальше\n" +
+		"<tr><td><strong>services/</strong></td><td>не раздел раскладки</td></tr>\n"
+	dirs := []string{".github", "cmd", "internal"}
+	var c idFactsCensus
+	require.Empty(t, auditTreeLayout(twin, dirs, &c))
+	require.Equal(t, 2, c.layoutDirs)
+
+	foreign := strings.Replace(twin, "internal/", "services/", 1)
+	require.NotEmpty(t, auditTreeLayout(foreign, dirs, &idFactsCensus{}))
+
+	require.NotEmpty(t, auditTreeLayout(twin, append(dirs, "deploy"), &idFactsCensus{}))
+	require.NotEmpty(t, auditTreeLayout(twin, nil, &idFactsCensus{}), "пустой обход — отказ")
+}

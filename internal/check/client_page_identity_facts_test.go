@@ -6,6 +6,7 @@ package check_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -37,7 +38,9 @@ import (
 //     подчёркивание, тогда как выпуск чеканит слитную форму (kaname#514);
 //   - раздел обзора, на который ссылается страница края о первом вызове после
 //     выдачи, отсутствовал, а на его месте стояло «невыразимо by construction»
-//     (kacho#2957).
+//     (kacho#2957);
+//   - раздел введения о раскладке описывал каталоги монорепо платформы, которых
+//     в этом дереве нет (kaname#234). Сверяется с каталогами верхнего уровня.
 //
 // # ГРАНИЦА
 //
@@ -49,7 +52,14 @@ const (
 	idFactsRestSurfaceRel  = "docs/content/api/rest-surface.mdx"
 	idFactsArchOverviewRel = "docs/content/architecture/overview.mdx"
 	idFactsTokensRel       = "docs/content/api/tokens.mdx"
+	idFactsIntroRel        = "docs/content/intro.mdx"
 )
+
+// idFactsLayoutHead — раздел введения с раскладкой дерева (kaname#234).
+const idFactsLayoutHead = "## Структура репозитория"
+
+// idFactsLayoutRow — строка таблицы раскладки: каталог в первой ячейке.
+var idFactsLayoutRow = regexp.MustCompile(`<tr><td><strong>([A-Za-z0-9_.-]+)/</strong></td>`)
 
 // idFactsJournalMarker — то, по чему врезка о журнале службы находится на
 // странице: имя владельца в той форме, которую принимает ручка края.
@@ -84,6 +94,8 @@ type idFactsCensus struct {
 	tokenIDSpans   int // код-спанов страницы токенов с идентификатором клиента
 	paginationRead bool
 	firstCallRead  bool
+	layoutDirs     int // каталогов верхнего уровня в дереве
+	layoutRows     int // строк таблицы раскладки
 }
 
 func idFactsSpans(text string) []string {
@@ -255,6 +267,62 @@ func auditFirstCallSection(page string, c *idFactsCensus) []string {
 	return findings
 }
 
+// auditTreeLayout — таблица раскладки введения против каталогов верхнего уровня
+// дерева, в обе стороны. Каталоги с точкой в начале (служебные) не судятся.
+func auditTreeLayout(page string, dirs []string, c *idFactsCensus) []string {
+	if len(dirs) == 0 {
+		return []string{"каталогов верхнего уровня не прочитано — сверять не с чем"}
+	}
+	start := strings.Index(page, idFactsLayoutHead)
+	if start < 0 {
+		return []string{fmt.Sprintf("раздела %q во введении нет", strings.TrimPrefix(idFactsLayoutHead, "## "))}
+	}
+	rest := page[start+len(idFactsLayoutHead):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		rest = rest[:end]
+	}
+	inTree := map[string]bool{}
+	for _, d := range dirs {
+		if !strings.HasPrefix(d, ".") {
+			inTree[d] = true
+		}
+	}
+	c.layoutDirs = len(inTree)
+	onPage := map[string]bool{}
+	for _, m := range idFactsLayoutRow.FindAllStringSubmatch(rest, -1) {
+		onPage[m[1]] = true
+	}
+	c.layoutRows = len(onPage)
+	var findings []string
+	for _, d := range sortedKeys(inTree) {
+		if !onPage[d] {
+			findings = append(findings, fmt.Sprintf("каталог %s/ есть в дереве, а таблица раскладки его не называет", d))
+		}
+	}
+	for _, d := range sortedKeys(onPage) {
+		if !inTree[d] {
+			findings = append(findings, fmt.Sprintf("таблица раскладки называет %s/, которого в дереве нет", d))
+		}
+	}
+	return findings
+}
+
+// idFactsTopDirs — каталоги верхнего уровня модуля по ОТСЛЕЖИВАЕМЫМ файлам.
+// Чтение диска взяло бы и игнорируемое (каталоги сборки), и таблица краснела бы
+// у того, кто собрал, — индекс git называет ровно раскладку дерева.
+func idFactsTopDirs(t *testing.T) []string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", platformtree.Require(t), "ls-files").Output()
+	require.NoError(t, err, "индекс git не прочитан — раскладку выводить не из чего")
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if i := strings.IndexByte(line, '/'); i > 0 {
+			seen[line[:i]] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
 func idFactsRead(t *testing.T, rel string) string {
 	t.Helper()
 	body, err := os.ReadFile(platformtree.RequirePath(t, rel)) // #nosec G304 -- путь собран из корня собственного модуля
@@ -282,11 +350,13 @@ func TestClientPagesAgreeWithTheirProducers(t *testing.T) {
 	findings = append(findings, auditClientIDForm(idFactsRead(t, idFactsTokensRel), &c)...)
 	findings = append(findings, auditPaginationDefault(overview, corevalidate.DefaultPageSize, &c)...)
 	findings = append(findings, auditFirstCallSection(overview, &c)...)
+	findings = append(findings, auditTreeLayout(idFactsRead(t, idFactsIntroRel), idFactsTopDirs(t), &c)...)
 
 	t.Logf("осмотрено: видов журнала %d, код-спанов врезки %d (слов вида %d), страниц полосы %d, "+
-		"спанов идентификатора клиента %d, раздел пагинации прочитан %v, раздел первого вызова найден %v",
+		"спанов идентификатора клиента %d, раздел пагинации прочитан %v, раздел первого вызова найден %v, "+
+		"каталогов дерева %d, строк раскладки %d",
 		c.journalKinds, c.calloutSpans, c.calloutKinds, c.lanePages, c.tokenIDSpans,
-		c.paginationRead, c.firstCallRead)
+		c.paginationRead, c.firstCallRead, c.layoutDirs, c.layoutRows)
 	require.NotZero(t, c.journalKinds, "объявление владельца журнала не прочитано")
 	require.NotZero(t, c.lanePages, "страницы полосы не прочитаны")
 	require.Empty(t, findings, strings.Join(findings, "\n"))
