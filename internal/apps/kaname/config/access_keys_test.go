@@ -3,8 +3,8 @@
 
 package config_test
 
-// access_keys_test.go — ТРИ ВЕЛИЧИНЫ ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА И ЧЕТВЁРТЫЙ
-// ПОТОЛОК объявляет посадка (фаза Ф7, задача PRO-Robotech/kacho#1273; приёмка
+// access_keys_test.go — ТРИ ВЕЛИЧИНЫ ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА И ПОТОЛОК КЛЮЧЕЙ
+// объявляет посадка (фаза Ф7, задача PRO-Robotech/kacho#1273; приёмка
 // `docs/engineering/acceptance/access-keys-are-ours.md`, Р2, Р8; сценарии
 // Ф7-13 и Ф7-38).
 //
@@ -22,7 +22,7 @@ package config_test
 // # Ф7-38 — три исхода величины потолка
 //
 //	не объявлена → отказ старта с именем ручки; ноль → «ключей не заводить»;
-//	положительная → работа. Форма та же, что у трёх соседних потолков (Р8).
+//	положительная → работа. Форма та же, что у соседних потолков таблицы `OwnCeilingKnobs` (Р8).
 
 import (
 	"strings"
@@ -360,7 +360,7 @@ func TestAccessKeys_F7_13_RequiredSettingsRowsExist(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ф7-38 — четвёртый потолок.
+// Ф7-38 — потолок ключей доступа.
 
 // TestAccessKeys_F7_38_CeilingKnobIsTheFourthOfTheSameForm — ручка стоит в
 // таблице величин рядом с тремя, тем же видом, что каталог и триггер.
@@ -390,7 +390,7 @@ func TestAccessKeys_F7_38_ThreeOutcomesAreDistinct(t *testing.T) {
 		CredentialsPerServiceAccount: ptrInt64(2),
 	}
 	got := refusalsOf(full.Validate())
-	require.Len(t, got, 1, "незаданный четвёртый потолок — ровно один отказ: %v", got)
+	require.Len(t, got, 1, "незаданный потолок ключей доступа — ровно один отказ: %v", got)
 	require.Contains(t, got[0], akCeilKey)
 	require.Contains(t, got[0], akCeilEnv)
 	require.Contains(t, got[0], string(akCeilKind))
@@ -435,7 +435,7 @@ func TestAccessKeys_F7_38_RequiredSettingsRowExists(t *testing.T) {
 	for _, s := range config.RequiredSettings {
 		if s.Key == akCeilKey {
 			require.Equal(t, akCeilEnv, s.Env)
-			require.False(t, s.Conditional, "потолок — величина всякого старта, той же формы, что три соседних")
+			require.False(t, s.Conditional, "потолок — величина всякого старта, той же формы, что соседние строки OwnCeilingKnobs")
 			return
 		}
 	}

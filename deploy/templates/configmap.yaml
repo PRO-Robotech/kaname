@@ -43,7 +43,8 @@ data:
       level: {{ default "INFO" .Values.logger.level | quote }}
 
     {{- $oc := .Values.ownCeilings | default dict }}
-    # ТРИ СОБСТВЕННЫХ ПОТОЛКА СЛУЖБЫ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117):
+    # СОБСТВЕННЫЕ ПОТОЛКИ СЛУЖБЫ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117;
+    # перечень — таблица `OwnCeilingKnobs` службы):
     # сколько аккаунтов заводит одна личность и сколько путей входа держит человек
     # и машина. Величину объявляет ПОСАДКА — внешнего авторитета величин в
     # самостоятельной установке нет by construction, и спросить её не у кого.
@@ -68,7 +69,7 @@ data:
       {{- if hasKey $oc "credentialsPerServiceAccount" }}
       credentials-per-service-account: {{ $oc.credentialsPerServiceAccount }}
       {{- end }}
-      {{- /* ЧЕТВЁРТЫЙ ПОТОЛОК — ключи доступа человека (Ф7, kacho#1273; Р8,
+      {{- /* ПОТОЛОК КЛЮЧЕЙ ДОСТУПА человека (Ф7, kacho#1273; Р8,
            Ф7-38): та же форма, тот же довод про `hasKey` — ноль означает
            «ключей не заводить». */}}
       {{- if hasKey $oc "accessKeysPerUser" }}
