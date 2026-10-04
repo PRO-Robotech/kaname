@@ -27,11 +27,20 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-04'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-04T04:36:32Z'
+  ban1_lifted: true
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
   why: >-
-    Вердикт рецензента — APPROVED на этот отпечаток. Действующим одобрение становится
-    внешним событием полномочия, которое публикует курьер; до него запрет ban #1 не снят.
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5976620247 учётки
+    pointpu несёт все пять полей, subject_sha256 равен отпечатку этой записи,
+    subject_revision 41687a29a36 опубликована на origin раньше события
+    (git branch -r --contains 41687a29a даёт origin/596); запрет #1 по этому отпечатку
+    снят. Дописано отдельным коммитом поверх записи, вердикт и разбор задним числом не
+    правились.
 
 authority:
   expected_actor: pointpu
@@ -39,16 +48,28 @@ authority:
   authorized_actors: [pointpu]
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    «Не выполнилось»: событие публикует курьер, не рецензент. Тело для публикации —
-    `acceptance-reviewer · APPROVED · 72825c63669122f239b7b6ffbd580724dd080cee1263bd9f90a98a397df58a37`.
+  type: issue_comment
+  target: PRO-Robotech/kaname#213
+  status: performed
+  published: true
+  database_id: 5976620247
+  node_id: IC_kwDOUO26pM8AAAABZDv81w
+  url: https://github.com/PRO-Robotech/kaname/issues/213#issuecomment-5976620247
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5976620247
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-04T04:36:32Z'
+  body_sha256: 7dab777d0653228102624f3b36177ff726890f682c889d42c340efb1abd3844c
+  subject_sha256: 72825c63669122f239b7b6ffbd580724dd080cee1263bd9f90a98a397df58a37
+  subject_revision_commit: 41687a29a36434621b880b4e344bd44d87d721aa
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: null
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 prior_blocking_resolved:
