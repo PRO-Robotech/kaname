@@ -14,8 +14,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Задача:** `PRO-Robotech/kaname#213` (линия эпика `PRO-Robotech/kacho#1266`, метка
   `release:identity-own`)
 - **Ревизия измерения:** `8a84dcff6` — ствол службы `origin/main`. Каждая команда §1 и §5
-  перемерена и на голове ветки эпика `296`, от которой ветвится это изменение; на ней результат
-  тот же (вершина ветки названа в §1.0, отдельной строкой — она стволу не предок)
+  перемерена и на голове ветки волны `537` (= голова ветки эпика `296`), от которой ветвится это
+  изменение; на ней результат тот же (вершина названа в §1.0, отдельной строкой — она стволу не
+  предок)
 - **Тип изменения:** **новый глагол** на слушателе полосы формы службы — новое наблюдаемое
   поведение; существующие глаголы не меняются ни одним исходом
 - **Сервис:** `kaname`; затрагивает `internal/apps/kaname/api/humansession/`,
@@ -55,7 +56,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | предмет | владелец | условие возврата |
 |---|---|---|
-| ретрансляция нового пути краем платформы (запись в перечне путей полосы края) | край, репозиторий `PRO-Robotech/kacho`, своя задача края | в `PRO-Robotech/kacho` файл `gateway/internal/middleware/login_lane_paths.go` несёт путь `/iam/v1/auth/password/enroll`; до того путь края отвечает тем же, что на любой неизвестный путь, а глагол достижим на слушателе службы |
+| ретрансляция нового пути краем платформы (запись в перечне путей полосы края) | край, репозиторий `PRO-Robotech/kacho`, своя задача края | в `PRO-Robotech/kacho` файл `gateway/internal/middleware/login_lane_paths.go` несёт путь `/iam/v1/auth/password/enroll` (сегодня → 0: `git grep -c 'password/enroll' origin/main -- gateway/internal/middleware/login_lane_paths.go`, `f4c74ba1a`); до того путь края отвечает тем же, что на любой неизвестный путь, а глагол достижим на слушателе службы |
 | экран консоли «завести пароль» | Ф8 консоли, `PRO-Robotech/kacho` | своя приёмка консоли |
 | заведение строки пароля завершением восстановления у личности без строки | Ф5 (`recovery-of-access.md`) по решению `kacho#2698` | своя редакция Ф5 |
 | сброс способа входа распорядителем | `kacho#2702` | своя приёмка |
@@ -71,14 +72,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ### §1.0 Где измерено
 
-Ствол `origin/main` = `8a84dcff6`; голова ветки эпика службы `296` = `d2f6f182f` (ствол — её
-предок). Каждая команда ниже исполнена на обеих, результат совпал.
+Ствол `origin/main` = `8a84dcff6`; голова ветки волны `537` = голова ветки эпика службы `296` =
+`d2f6f182f` (ствол — её предок). Каждая команда ниже исполнена на обеих, результат совпал. Команды,
+которые нашли бы и сам этот документ, исключают его путь (`:!<этот файл>`): иначе после его
+посадки они считали бы собственный текст.
 
 ### §1.1 Глагола заведения пароля нет — ни на gRPC, ни на полосе формы
 
 ```sh
 git ls-files 'proto/**/*.proto' | xargs grep -lE 'rpc [A-Za-z]*Password' | wc -l      # → 0
-git grep -c -E 'password/enroll|password-enroll|password_enrolled|PASSWORD_ALREADY_SET' -- . | wc -l   # → 0: имена Р1, Р3, Р5 свободны
+git grep -c -E 'password/enroll|password-enroll|password_enrolled|PASSWORD_ALREADY_SET' -- . ':!docs/engineering/acceptance/first-password-from-a-live-session.md' | wc -l   # → 0: имена Р1, Р3, Р5 свободны
+git grep -n -E '"/iam/v1/auth/[a-z/-]*key' -- internal/handler/loginlanehttp/handler.go | wc -l       # → 0: пути входа ключом (Ф13) на полосе ещё нет — см. FP-12
 git grep -n -E '^\s+Path[A-Za-z]+ += "' -- internal/handler/loginlanehttp/handler.go | wc -l          # → 15 путей полосы
 git grep -n 'FormKind = "' -- internal/domain/human_session.go | wc -l                                # → 10 видов признака
 ```
@@ -118,10 +122,11 @@ git grep -n 'failOn string' -- internal/apps/kaname/api/humansession           #
 называет.
 
 ```sh
-git grep -l '#213' -- docs/engineering/acceptance     # → 1 файл: passwordless-login-with-access-key.md
+git grep -l '#213' -- docs/engineering/acceptance ':!docs/engineering/acceptance/first-password-from-a-live-session.md'   # → 1 файл: passwordless-login-with-access-key.md
 ```
 
-То же на голове ветки волны `536` — 1 файл, тот же. Посылка подтверждена.
+То же на голове ветки волны `536` (`e0cbe0798`) и ветки `537` — 1 файл, тот же. Посылка
+подтверждена.
 
 ## §2 Решения — ратифицировать явно
 
@@ -197,9 +202,12 @@ PASSWORD_ALREADY_SET`, текст `password is already set; change it with the c
 `kaname.users` и строкой аккаунта, **без** строки способа входа (форма посева — та же, что
 `serPerson` в `internal/apps/kaname/api/internal_iam/force_logout_session_end_reason_integration_test.go`);
 отметка подтверждения адреса — писателем продукта `MarkEmailVerified` (как `avLane.mark`);
-сессия `S` — операцией выдачи `IssueSession` с множеством предъявленного `{KeyAssertion}`
-(как `serLiveSession` того же файла; ключ доступа — способ, которым такая личность входит,
-Ф13-19) в момент `t₀` по управляемым часам; признак формы `password-enroll` из контекста `S`.
+сессия `S` — операцией выдачи `IssueSession` (форма вызова — та же, что `serLiveSession` того же
+файла) с множеством предъявленного `{assurance.KeyAssertion(true, false)}` вместо
+`PasswordPresented()` у образца (`internal/assurance/level.go`, `func KeyAssertion`; ключ доступа —
+способ, которым такая личность входит, Ф13-19) в момент `t₀` по управляемым часам; признак формы
+`password-enroll` из контекста `S`. Каждый элемент посева — существующий в дереве писатель или
+операция; ни одной вставки строки мимо продукта.
 
 ### FP-01 — личность без пароля заводит пароль из свежей сессии и входит им · I
 
@@ -312,7 +320,8 @@ FORM_TOKEN_REJECTED`; (в) `400` `Illegal argument currentPassword: unknown fiel
 **And** повтор заведения из новой сессии — отказ FP-02
 **And** «Дано» производит вход ключом Ф13 — та же полоса реализации (NA8): кейс пишется тем же
 изменением, что этот глагол, и до посадки входа ключом на стенде уходит в «условие не создано»,
-а не в зелёное и не в красное
+а не в зелёное и не в красное. Сегодня пути входа ключом на полосе нет (§1.1, последняя команда
+→ 0); подставной аутентификатор набора уже есть — `tests/newman/cases/kaname-access-keys.py`
 
 ## §5 Сценарий → производитель
 
