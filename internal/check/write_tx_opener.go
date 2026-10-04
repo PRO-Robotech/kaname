@@ -55,6 +55,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -130,8 +131,20 @@ var (
 // JournaledTables выводит перечень журналируемых таблиц из цепи миграций:
 // триггер функции журнала, созданный и не снятый позже. Возвращает и число
 // прочитанных файлов миграций.
-func JournaledTables(migrationsDir string) ([]string, int, error) {
-	entries, err := os.ReadDir(migrationsDir)
+//
+// Файлы цепи читаются через корень каталога (os.Root): файл, уводящий чтение
+// за каталог миграций (символическая ссылка наружу), отвергается ошибкой.
+func JournaledTables(migrationsDir string) (_ []string, _ int, err error) {
+	root, err := os.OpenRoot(migrationsDir)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() {
+		if cerr := root.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -144,7 +157,7 @@ func JournaledTables(migrationsDir string) ([]string, int, error) {
 	sort.Strings(names)         // порядок применения цепи — порядок имён
 	live := map[string]string{} // триггер → таблица
 	for _, n := range names {
-		b, err := os.ReadFile(filepath.Join(migrationsDir, n))
+		b, err := root.ReadFile(n)
 		if err != nil {
 			return nil, 0, err
 		}

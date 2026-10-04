@@ -149,3 +149,42 @@ DROP TRIGGER group_members_resource_journal_trg ON kaname.group_members;
 		})
 	}
 }
+
+// TestJournaledTablesReadsOnlyInsideTheMigrationsDirectory — файлы цепи
+// читаются через корень каталога миграций (os.Root): файл, уводящий чтение за
+// каталог (символическая ссылка наружу), отвергается ошибкой, а не читается;
+// близнец — ссылка на файл ВНУТРИ каталога — читается.
+func TestJournaledTablesReadsOnlyInsideTheMigrationsDirectory(t *testing.T) {
+	const create = "-- +goose Up\nCREATE TRIGGER groups_resource_journal_insert_trg AFTER INSERT ON kaname.groups\n" +
+		"  FOR EACH ROW EXECUTE FUNCTION kaname.resource_journal_emit('iam_group');\n"
+	for _, tc := range []struct {
+		name    string
+		outside bool
+	}{
+		{name: "escape-is-refused", outside: true},
+		{name: "twin-inside-is-read", outside: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			dir := filepath.Join(base, "migrations")
+			require.NoError(t, os.Mkdir(dir, 0o700))
+			// Ссылки относительные: близнец отличается от инъекции только
+			// тем, куда ведёт ссылка, — внутрь каталога или за него.
+			link, target := "inner.txt", filepath.Join(dir, "inner.txt")
+			if tc.outside {
+				link, target = filepath.Join("..", "outside.sql"), filepath.Join(base, "outside.sql")
+			}
+			require.NoError(t, os.WriteFile(target, []byte(create), 0o600))
+			require.NoError(t, os.Symlink(link, filepath.Join(dir, "0001_a.sql")))
+
+			got, files, err := check.JournaledTables(dir)
+			if tc.outside {
+				require.Error(t, err, "файл за каталогом миграций прочитан: %v", got)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, files)
+			require.Equal(t, []string{"groups"}, got)
+		})
+	}
+}
