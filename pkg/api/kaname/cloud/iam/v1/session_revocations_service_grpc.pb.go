@@ -63,8 +63,9 @@ const (
 //     refuses the issuance when the record is refused, so a token of the
 //     ceremony always belongs to its family. The ceremony is mounted on the
 //     external issuing surface of the service under the `own` sign-in
-//     (kaname#423): its authorization endpoint and the `authorization_code`
-//     and `refresh_token` grants of the token endpoint issue these tokens.
+//     (kaname#423): its authorization endpoint answers with an authorization
+//     code, and only the `authorization_code` and `refresh_token` grants of
+//     the token endpoint issue these tokens.
 //
 // A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -248,8 +249,9 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //     refuses the issuance when the record is refused, so a token of the
 //     ceremony always belongs to its family. The ceremony is mounted on the
 //     external issuing surface of the service under the `own` sign-in
-//     (kaname#423): its authorization endpoint and the `authorization_code`
-//     and `refresh_token` grants of the token endpoint issue these tokens.
+//     (kaname#423): its authorization endpoint answers with an authorization
+//     code, and only the `authorization_code` and `refresh_token` grants of
+//     the token endpoint issue these tokens.
 //
 // A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
