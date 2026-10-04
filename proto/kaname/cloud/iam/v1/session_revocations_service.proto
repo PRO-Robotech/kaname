@@ -260,7 +260,9 @@ message ListByUserRequest {
   // User whose revocations to list.
   string user_id = 1;
 
-  // Page size (default 100, max 1000).
+  // Page size. 0 selects this List's default (100 — not the platform-wide 50
+  // most Lists of the service apply); a value above 1000 is rejected with
+  // INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.

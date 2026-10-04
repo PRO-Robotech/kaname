@@ -396,7 +396,7 @@ posture безопасности). Асинхронно.
   <tbody>
     <tr><td><code>filter</code></td><td><strong>Ровно один</strong> предикат вида <code>&lt;ключ&gt;="&lt;значение&gt;"</code>. Ключи: <code>subject</code>, <code>role</code>, <code>scope</code> (точечный тип якоря — <code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code>), <code>scopeId</code>. Неизвестный ключ → <code>INVALID_ARGUMENT</code>. Пусто — без сужения</td></tr>
     <tr><td><code>includeRevoked</code></td><td>Показать и отозванные (<code>status=REVOKED</code>). По умолчанию <code>false</code>. Это <strong>отдельный флаг, а не ключ фильтра</strong> — иначе он не сочетался бы с предикатом, которых в выражении ровно один</td></tr>
-    <tr><td><code>pageSize</code></td><td>По умолчанию 100; больше 1000 → <code>INVALID_ARGUMENT</code> (отвергается, не подрезается)</td></tr>
+    <tr><td><code>pageSize</code></td><td>По умолчанию 50; больше 1000 → <code>INVALID_ARGUMENT</code> (отвергается, не подрезается)</td></tr>
     <tr><td><code>pageToken</code></td><td>Непрозрачный курсор. Негодный токен → <code>INVALID_ARGUMENT</code>, и проверяется он <strong>до</strong> сужения страницы — то есть ответ на негодный ввод не зависит от того, что вам выдано</td></tr>
   </tbody>
 </table>
