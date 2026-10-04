@@ -351,9 +351,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// верный — ответ, известный до всякого чтения и записи. Секрет обмена не
 	// требует — его предъявляют как есть.
 	if kind != domain.CredentialKindSecret && !u.ownIssuance {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"credential_kind %s: authn.client-token.enabled is false — this key is exchanged for a "+
-				"token on the platform token endpoint, and this landing does not run one", kind)
+		return nil, shared.ExchangeEndpointAbsent(kind)
 	}
 
 	// Resolve the owning account so the Operation metadata carries account_id —

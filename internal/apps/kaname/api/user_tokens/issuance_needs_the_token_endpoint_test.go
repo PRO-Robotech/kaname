@@ -117,6 +117,7 @@ func TestIssue_WithoutTheTokenEndpoint_SecretIsIssued(t *testing.T) {
 	require.NotNil(t, op)
 	require.Nil(t, op.Error)
 	require.Equal(t, domain.CredentialKindSecret, repo.inserted.CredentialKind)
+	require.NotEmpty(t, repo.inserted.ID, "строка секрета обязана быть записана")
 }
 
 // TestIssue_WithoutTheTokenEndpoint_MalformedRequestIsRefusedFirst — CVR-25:
