@@ -51,8 +51,14 @@ func TestTimingCriterion_IsSilentOnIndistinguishableLanes(t *testing.T) {
 func TestTimingCriterion_InjectionNamesTheInjectedLane(t *testing.T) {
 	const injected = "B-ручка"
 	rows := synthRows(synthLane("A", 0), synthLane(injected, 50*time.Millisecond), synthLane("C", 0))
-	failures, _ := timingPairFailures(rows)
+	failures, lines := timingPairFailures(rows)
 	require.Len(t, failures, 2, "сдвиг полосы %q не дал красного на обеих её парах", injected)
+	for _, line := range lines {
+		// Строка печати не противоречит своему вердикту: «≤» у красной пары
+		// читалось бы как выполненный критерий.
+		require.Equal(t, strings.Contains(line, "КРАСНОЕ"), strings.Contains(line, " > IQR"),
+			"знак сравнения разошёлся с вердиктом: %s", line)
+	}
 	for _, f := range failures {
 		require.Contains(t, f, injected, "красное пришло не от внесённого различия: %s", f)
 	}

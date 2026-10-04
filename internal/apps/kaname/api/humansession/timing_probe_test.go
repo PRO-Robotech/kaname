@@ -145,14 +145,14 @@ func timingPairFailures(rows []timingRow) (failures, lines []string) {
 			if rows[j].iqr > bound {
 				bound = rows[j].iqr
 			}
-			verdict := "ok"
+			verdict, sign := "ok", "≤"
 			if diff > bound {
-				verdict = "КРАСНОЕ"
+				verdict, sign = "КРАСНОЕ", ">"
 				failures = append(failures, fmt.Sprintf("%s ↔ %s: |Δмедиан| %v > IQR %v",
 					rows[i].lane.name, rows[j].lane.name, diff, bound))
 			}
-			lines = append(lines, fmt.Sprintf("пара %-36s ↔ %-36s |Δмедиан| %10v ≤ IQR %10v — %s",
-				rows[i].lane.name, rows[j].lane.name, diff, bound, verdict))
+			lines = append(lines, fmt.Sprintf("пара %-36s ↔ %-36s |Δмедиан| %10v %s IQR %10v — %s",
+				rows[i].lane.name, rows[j].lane.name, diff, sign, bound, verdict))
 		}
 	}
 	return failures, lines
