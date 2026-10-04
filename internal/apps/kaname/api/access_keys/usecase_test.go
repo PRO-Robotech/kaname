@@ -907,12 +907,17 @@ func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheAbsenceLane(t *testing.T)
 	h.store.mu.Lock()
 	h.store.keysOfFailFrom = h.store.keysOfCalls + 1
 	h.store.mu.Unlock()
-	opsBefore := h.ops.count()
+	h.ops.mu.Lock()
+	opsBefore := len(h.ops.ops)
+	h.ops.mu.Unlock()
 	_, err = h.revoke(alice, string(k.ID))
 	st := requireCode(t, err, codes.Internal)
 	require.Equal(t, "internal error", st.Message())
 	require.NotContains(t, err.Error(), keysOfStoreFault)
-	require.Equal(t, opsBefore, h.ops.count(), "операция не заводится")
+	h.ops.mu.Lock()
+	opsAfter := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	require.Equal(t, opsBefore, opsAfter, "операция не заводится")
 	require.Equal(t, 1, h.store.keyCount(alice), "ключ на месте")
 }
 
@@ -932,7 +937,9 @@ func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane(t *testing
 	h.store.keysOfFailFrom = h.store.keysOfCalls + 2
 	before := h.store.keysOfCalls
 	h.store.mu.Unlock()
-	opsBefore := h.ops.count()
+	h.ops.mu.Lock()
+	opsBefore := len(h.ops.ops)
+	h.ops.mu.Unlock()
 	_, err := h.revoke(alice, string(k1.ID))
 	st := requireCode(t, err, codes.Internal)
 	require.Equal(t, "internal error", st.Message())
@@ -941,7 +948,10 @@ func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane(t *testing
 	require.Equal(t, before+2, h.store.keysOfCalls, "предпосылка: упало ВТОРОЕ чтение — подсчёт способов")
 	h.store.keysOfFailFrom = 0
 	h.store.mu.Unlock()
-	require.Equal(t, opsBefore, h.ops.count(), "операция не заводится")
+	h.ops.mu.Lock()
+	opsAfter := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	require.Equal(t, opsBefore, opsAfter, "операция не заводится")
 	require.Equal(t, 2, h.store.keyCount(alice), "оба ключа на месте")
 
 	// Близнец: чтение успешно — два ключа, снятие одного проходит.

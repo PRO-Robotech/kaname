@@ -90,10 +90,3 @@ func (f *fakeOps) await(t *testing.T, id string) *operations.Operation {
 		}
 	}
 }
-
-// count — сколько операций заведено.
-func (f *fakeOps) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.ops)
-}
