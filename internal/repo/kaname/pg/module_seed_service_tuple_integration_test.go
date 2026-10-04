@@ -80,7 +80,12 @@ func TestNTF1F01_FeedReaderFactFollowsTheJournalAndRepeatWritesNothing(t *testin
 		"факта reader ленты нет: строка применена, а решение о доступе его не увидит")
 	require.Equal(t, 1, journal(), "факт без строки журнала — второй производитель факта")
 	_, written := first.Totals()
-	require.Equal(t, 1, written)
+	// Два служебных кортежа: читатель ленты и проекция `sender` записи
+	// выдачи пространства, заведённой этим посевом (NTF-1 Р5).
+	require.Equal(t, 2, written)
+	require.Equal(t, 1, factCount(ctx, t, pool,
+		`subject = 'service:probe' AND relation = 'sender' AND object_type = 'notification_namespace' AND object_id = 'probe'`),
+		"проекции sender записи выдачи нет")
 
 	second, err := applier.ApplyAll(ctx, []*manifest.Manifest{m})
 	require.NoError(t, err)
@@ -89,8 +94,9 @@ func TestNTF1F01_FeedReaderFactFollowsTheJournalAndRepeatWritesNothing(t *testin
 	require.Zero(t, written, "повтор посева записал служебный кортеж заново")
 	require.Equal(t, 1, journal(), "повтор посева положил вторую строку журнала")
 
-	require.Zero(t, factCount(ctx, t, pool, `subject LIKE 'service:%' AND subject <> 'service:notify'`),
-		"заведён служебный субъект, кроме notify")
+	require.Zero(t, factCount(ctx, t, pool,
+		`subject LIKE 'service:%' AND subject <> 'service:notify' AND NOT (subject = 'service:probe' AND relation = 'sender')`),
+		"заведён служебный субъект, кроме notify и проекции sender своего модуля")
 }
 
 // TestNTF1F21_OwnManifestGrantsOnlyTheKanameFeedReader — свой манифест службы
