@@ -39,7 +39,7 @@ func TestIssueUserToken_UserIDLengthIsJudged(t *testing.T) {
 	require.Len(t, truncatedUserID, domain.ShortIDLen-1,
 		"отрицание обязано отличаться от контроля РОВНО длиной")
 
-	uc := NewIssueUserTokenUseCase(nil, nil, nil)
+	uc := NewIssueUserTokenUseCase(nil, nil, nil).WithOwnIssuance()
 
 	t.Run("truncated is rejected by format", func(t *testing.T) {
 		// created_by намеренно не назван: без починки исполнение проходит

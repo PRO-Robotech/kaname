@@ -101,9 +101,9 @@ func TestRevoke_DisabledServiceAccount_StillRevokes(t *testing.T) {
 	}
 	// The synchronous return says only that the verb ACCEPTED the request; the
 	// removal happens in the worker. Without the two assertions below this test
-	// stayed green on a revoke that removed nothing at all — and with revoke now
-	// answering success on a barren outcome (#1216), "no error" is exactly what
-	// a broken removal would also look like.
+	// would stay green on a revoke that accepted the request and removed
+	// nothing: "no synchronous error" is what a broken removal would also look
+	// like.
 	waitForOp(t, ops)
 	if ops.lastErr != nil {
 		t.Fatalf("the revoke of a disabled account's key failed in the worker: %+v", ops.lastErr)

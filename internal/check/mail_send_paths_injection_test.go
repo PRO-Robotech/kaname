@@ -527,3 +527,126 @@ func validAddress(s string) bool {
 			"локальной переменной и в строке) дал %d находок: %+v", len(got), got)
 	}
 }
+
+// ─── Путь — ОБЪЯВЛЕНИЕ, открывающее разговор, а не файл (kaname#175) ─────────
+
+// mailOneFileLawful — законный отправитель: ОДНО объявление открывает разговор
+// с узлом (`smtp.NewClient`); второе объявление того же файла транспорт
+// упоминает (`smtp.PlainAuth`, тип `smtp.Auth`), но разговора не открывает.
+const mailOneFileLawful = `package clients
+
+import (
+	"net"
+	"net/smtp"
+)
+
+const EventInviteMailSend = "mail.invite.send"
+const EventRecoveryMailSend = "mail.recovery.send"
+const EventVerificationMailSend = "mail.verification.send"
+
+func deliver(conn net.Conn, host string) error {
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+func authFor(user, pass, host string) smtp.Auth {
+	return smtp.PlainAuth("", user, pass, host)
+}
+`
+
+// mailOneFileSecondSendMail — дефект: второе объявление того же файла
+// открывает разговор само (`smtp.SendMail`). Против близнеца меняется один
+// факт — вызов во втором объявлении.
+const mailOneFileSecondSendMail = `package clients
+
+import (
+	"net"
+	"net/smtp"
+)
+
+const EventInviteMailSend = "mail.invite.send"
+const EventRecoveryMailSend = "mail.recovery.send"
+const EventVerificationMailSend = "mail.verification.send"
+
+func deliver(conn net.Conn, host string) error {
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+func authFor(user, pass, host string) error {
+	return smtp.SendMail(host, nil, user, []string{pass}, nil)
+}
+`
+
+// mailOneFileVerificationMailer — дефект: метод другого типа в том же файле
+// открывает разговор через `smtp.Dial`.
+const mailOneFileVerificationMailer = `package clients
+
+import (
+	"net"
+	"net/smtp"
+)
+
+const EventInviteMailSend = "mail.invite.send"
+const EventRecoveryMailSend = "mail.recovery.send"
+const EventVerificationMailSend = "mail.verification.send"
+
+func deliver(conn net.Conn, host string) error {
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+type VerificationMailer struct{ host string }
+
+func (m VerificationMailer) Send() error {
+	c, err := smtp.Dial(m.host)
+	if err != nil {
+		return err
+	}
+	return c.Quit()
+}
+`
+
+// secondPathFinding — находка «второй путь одного вида» с координатами обоих
+// объявлений.
+func secondPathFinding(fs []check.MailSendFinding, lines ...string) (check.MailSendFinding, bool) {
+	for _, f := range fs {
+		if !strings.Contains(f.What, "путей отправки вида") {
+			continue
+		}
+		all := true
+		for _, l := range lines {
+			all = all && strings.Contains(f.Where, l)
+		}
+		if all {
+			return f, true
+		}
+	}
+	return check.MailSendFinding{}, false
+}
+
+func TestMAIL47Injection_SecondOpenerInTheSameFileIsASecondPath(t *testing.T) {
+	// Законный близнец: второе объявление транспорт упоминает, но не открывает.
+	if fs := findingsFor(t, map[string]string{"internal/clients/invite_mail.go": mailOneFileLawful}); len(fs) != 0 {
+		t.Fatalf("законный отправитель с PlainAuth во втором объявлении дал находки: %+v", fs)
+	}
+	// Дефект: smtp.SendMail во втором объявлении того же файла.
+	fs := findingsFor(t, map[string]string{"internal/clients/invite_mail.go": mailOneFileSecondSendMail})
+	if _, ok := secondPathFinding(fs, "internal/clients/invite_mail.go:13", "internal/clients/invite_mail.go:21"); !ok {
+		t.Fatalf("второе открывающее объявление в том же файле не названо вторым путём с координатами обоих: %+v", fs)
+	}
+	// Дефект: метод другого типа через smtp.Dial в том же файле.
+	fs = findingsFor(t, map[string]string{"internal/clients/invite_mail.go": mailOneFileVerificationMailer})
+	if _, ok := secondPathFinding(fs, "internal/clients/invite_mail.go:13", "internal/clients/invite_mail.go:23"); !ok {
+		t.Fatalf("VerificationMailer.Send через smtp.Dial в том же файле не назван вторым путём: %+v", fs)
+	}
+}

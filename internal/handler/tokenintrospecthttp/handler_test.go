@@ -340,3 +340,31 @@ func TestIntrospect_MethodAndShape(t *testing.T) {
 		}
 	}
 }
+
+// TestIntrospect_KN_SCL_17_CutoffEqualToIatIsInactive — интроспекция судит
+// отсечку тем же правилом, что прочие читатели (kaname#171, S3): отсечка ровно
+// в `iat` — `active: false`; близнец — отсечка секундой раньше, `active: true`.
+func TestIntrospect_KN_SCL_17_CutoffEqualToIatIsInactive(t *testing.T) {
+	n := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	var pub domain.PublishedKey
+	tok := mintToken(t, "sva-eq", n, &pub)
+	keys := stubKeys{keys: []domain.PublishedKey{pub}}
+
+	t.Run("равенство", func(t *testing.T) {
+		h := newHandler(keys, stubRevocations{before: map[string]time.Time{"sva-eq": n}}, n.Add(time.Minute))
+		code, out := ask(t, h, tok.raw)
+		if code != http.StatusOK {
+			t.Fatalf("код %d, ожидался 200", code)
+		}
+		if out["active"] != false {
+			t.Errorf("токен с iat, РАВНЫМ отсечке, объявлен действительным: active=%v", out["active"])
+		}
+	})
+	t.Run("близнец: секундой раньше", func(t *testing.T) {
+		h := newHandler(keys, stubRevocations{before: map[string]time.Time{"sva-eq": n.Add(-time.Second)}}, n.Add(time.Minute))
+		code, out := ask(t, h, tok.raw)
+		if code != http.StatusOK || out["active"] != true {
+			t.Errorf("токен, выпущенный после отсечки, обязан быть действительным: %d %v", code, out["active"])
+		}
+	})
+}

@@ -230,7 +230,7 @@ func TestAccessKey_F7_01_CeremonyRegistersAKey(t *testing.T) {
 	key := h.mustRegister(alice, a)
 	require.NoError(t, corevalidate.ResourceID("access key", "ak", string(key.ID)), "свой id проходит маршрутизатор (Ф7-47)")
 	require.Equal(t, string(key.ID), string(key.Name), "пустое имя заменено умолчанием от id (Р10)")
-	require.Equal(t, []byte(alice), key.UserHandle, "рукоятка — платформенный id человека (Ф13 Р3)")
+	requireCeremonyHandleOf(t, h, alice, key.UserHandle)
 
 	out, err := h.assertWith(alice, a, webauthntest.AssertionOptions{})
 	require.NoError(t, err)
@@ -282,7 +282,7 @@ func TestAccessKey_F7_40_RegistrationChallengeNamesSixContractValues(t *testing.
 	require.Equal(t, access_keys.Attestation, ch.Attestation)
 	require.True(t, ch.CredProps, "запрос расширения свойств удостоверения (Ф7-41)")
 	require.Equal(t, h.now.Add(access_keys.ChallengeTTL), ch.ExpiresAt)
-	require.Equal(t, []byte(alice), ch.UserHandle)
+	requireCeremonyHandleOf(t, h, alice, ch.UserHandle)
 	named, total := access_keys.ContractValuesInRegistrationChallenge(ch)
 	require.Equal(t, 6, total)
 	require.Equal(t, 6, named)
@@ -352,7 +352,7 @@ func TestAccessKey_F7_04_RegistrationRequiresFreshness(t *testing.T) {
 	uc, err := access_keys.NewBeginRegistrationUseCase(h.deps)
 	require.NoError(t, err)
 	_, err = uc.Execute(h.ctx(), access_keys.BeginRegistrationInput{UserID: alice, Actor: alice})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	require.Contains(t, err.Error(), "present a credential again")
 	require.Equal(t, 1, h.obs.refusal(access_keys.LaneRegistration, access_keys.RefusalSessionNotFresh))
 	h.fresh.set(alice, h.now)
@@ -365,14 +365,14 @@ func TestAccessKey_F7_04_RegistrationRequiresFreshness(t *testing.T) {
 	cd, att := a.Register(t, webauthntest.RegistrationOptions{Challenge: ch.Challenge, Origin: origin, RPID: rpID})
 	h.fresh.set(alice, h.now.Add(-freshness-time.Minute))
 	_, err = h.finishRegistration(access_keys.FinishRegistrationInput{UserID: alice, Actor: alice, CredentialID: a.CredentialID(), ClientDataJSON: cd, AttestationObject: att})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	// Живой сессии нет вовсе — предъявления не было.
 	h.fresh = &fakeFreshness{}
 	h.deps.Freshness = h.fresh
 	uc2, err := access_keys.NewBeginRegistrationUseCase(h.deps)
 	require.NoError(t, err)
 	_, err = uc2.Execute(h.ctx(), access_keys.BeginRegistrationInput{UserID: alice, Actor: alice})
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 }
 
 // TestAccessKey_F7_05_DuplicateCredentialIDIsRefusedIdentically — тот же `K` у
@@ -774,8 +774,9 @@ func TestAccessKey_UserHandleIsVerifiedWhenPresented(t *testing.T) {
 	as := a.Assert(t, webauthntest.AssertionOptions{Challenge: ch.Challenge, Origin: origin, RPID: rpID})
 	_, err := h.finishAssertion(alice, as, []byte(bob))
 	requireUnifiedRefusal(t, err)
-	_, err = h.finishAssertion(alice, as, []byte(alice))
-	require.NoError(t, err)
+	key := h.list(alice)[0]
+	_, err = h.finishAssertion(alice, as, key.UserHandle)
+	require.NoError(t, err, "законный близнец: рукоятка, сохранённая со строкой ключа")
 }
 
 // ─── §3.5 счётчик ───────────────────────────────────────────────────────────
@@ -890,6 +891,77 @@ func TestAccessKey_F7_27_ForeignAndAbsentAreOneRefusal(t *testing.T) {
 	require.Equal(t, 1, h.store.keyCount(bob))
 }
 
+// TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheAbsenceLane — чтение
+// ключей человека упало (kaname#586): полоса отсутствия не вправе судить по
+// пустому списку. Ответ — внутренняя ошибка фиксированного текста, сырой текст
+// хранилища наружу не выходит, операции нет. Законный близнец — то же снятие
+// при успешном чтении: прежний NOT_FOUND по отсутствующему ключу.
+func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheAbsenceLane(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	k := h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+
+	// Близнец: чтение успешно — отсутствующий ключ даёт NOT_FOUND.
+	_, err := h.revoke(alice, "ak-0000000000000000z")
+	requireCode(t, err, codes.NotFound)
+
+	h.store.mu.Lock()
+	h.store.keysOfFailFrom = h.store.keysOfCalls + 1
+	h.store.mu.Unlock()
+	h.ops.mu.Lock()
+	opsBefore := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	_, err = h.revoke(alice, string(k.ID))
+	st := requireCode(t, err, codes.Internal)
+	require.Equal(t, "internal error", st.Message())
+	require.NotContains(t, err.Error(), keysOfStoreFault)
+	h.ops.mu.Lock()
+	opsAfter := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	require.Equal(t, opsBefore, opsAfter, "операция не заводится")
+	require.Equal(t, 1, h.store.keyCount(alice), "ключ на месте")
+}
+
+// TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane — человек
+// без пароля с двумя ключами; первое чтение (полоса отсутствия) успешно, второе
+// (подсчёт способов входа) упало (kaname#586). Отказ «последний способ входа»
+// не установлен — ответ внутренняя ошибка без текста хранилища, операции нет.
+// Законный близнец — тот же человек при успешном чтении: снятие проходит.
+func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.meth.password[alice] = false
+	k1 := h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+	h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+
+	h.store.mu.Lock()
+	h.store.keysOfFailFrom = h.store.keysOfCalls + 2
+	before := h.store.keysOfCalls
+	h.store.mu.Unlock()
+	h.ops.mu.Lock()
+	opsBefore := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	_, err := h.revoke(alice, string(k1.ID))
+	st := requireCode(t, err, codes.Internal)
+	require.Equal(t, "internal error", st.Message())
+	require.NotContains(t, err.Error(), keysOfStoreFault)
+	h.store.mu.Lock()
+	require.Equal(t, before+2, h.store.keysOfCalls, "предпосылка: упало ВТОРОЕ чтение — подсчёт способов")
+	h.store.keysOfFailFrom = 0
+	h.store.mu.Unlock()
+	h.ops.mu.Lock()
+	opsAfter := len(h.ops.ops)
+	h.ops.mu.Unlock()
+	require.Equal(t, opsBefore, opsAfter, "операция не заводится")
+	require.Equal(t, 2, h.store.keyCount(alice), "оба ключа на месте")
+
+	// Близнец: чтение успешно — два ключа, снятие одного проходит.
+	op, err := h.revoke(alice, string(k1.ID))
+	require.NoError(t, err)
+	require.Nil(t, op.Error)
+	require.Equal(t, 1, h.store.keyCount(alice))
+}
+
 // TestAccessKey_F7_36_RevokeRequiresFreshness — окно свежести на снятии: отказ
 // со следующим шагом, оба ключа на месте; после предъявления — снимается.
 func TestAccessKey_F7_36_RevokeRequiresFreshness(t *testing.T) {
@@ -901,7 +973,7 @@ func TestAccessKey_F7_36_RevokeRequiresFreshness(t *testing.T) {
 	h.mustRegister(alice, second)
 	h.fresh.set(alice, h.now.Add(-freshness-time.Minute))
 	_, err := h.revoke(alice, string(k1.ID))
-	requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonSessionNotFresh)
+	requireReason(t, err, codes.PermissionDenied, access_keys.ReasonSessionNotFresh)
 	require.Equal(t, 2, h.store.keyCount(alice))
 	h.fresh.set(alice, h.now)
 	op, err := h.revoke(alice, string(k1.ID))
