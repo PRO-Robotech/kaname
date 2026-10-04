@@ -132,8 +132,8 @@ const (
 
 // HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
 // у второго — самое длинное окно счёта, у четвёртого — окно свежести правки
-// своих данных; обе величины посадки и приходят параметром вместе с
-// уборщиком, а не выписываются длительностью.
+// своих данных, у пятого — срок испытания ключа; величины приходят
+// параметром вместе с уборщиком, а не выписываются длительностью.
 type HumanSessionReapers struct {
 	Sessions         HumanSessionReaper
 	Failures         LoginFailureReaper
@@ -142,6 +142,10 @@ type HumanSessionReapers struct {
 	Challenges       AccessKeyChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
+	// ChallengeTTL — срок испытания ключа доступа, величина КОНТРАКТА (врезка
+	// Ф7-34); порог уборки испытаний. Нулевой порог снимал бы предъявленное
+	// испытание первым же проходом, и повтор читался бы «не выдавалось».
+	ChallengeTTL time.Duration
 	// Подтверждение адреса (kaname#456): коды, окна источника, письма с
 	// истёкшим кодом; LetterWindow — окно писем подтверждения, SourceWindow —
 	// окно обращений источника.
@@ -198,7 +202,7 @@ type AccessKeyChallengeReaper interface {
 // и неполный их набор — отказ, а не уборщик без предмета, который выглядел бы
 // исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 ||
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 || r.ChallengeTTL <= 0 ||
 		r.VerificationCodes == nil || r.SourceWindows == nil || r.BearerLetters == nil || r.LetterWindow <= 0 || r.SourceWindow <= 0 {
 		return base
 	}
@@ -234,10 +238,16 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 		},
 		Subject{
 			Name: SubjectAccessKeyChallenges,
-			// Порог — предикат читателя: истёкшее испытание не примет ни
-			// приём результата церемонии, ни проверка утверждения (Ф7-34,
-			// Ф7-54), снятое — тоже (Ф7-03, Ф7-53); граница включающая у обоих.
-			Grace: 0,
+			// Порог — срок испытания, а не ноль. Истёкшее и предъявленное
+			// испытание не ПРИМЕТ ни приём результата церемонии, ни проверка
+			// утверждения, но приём результата его ЧИТАЕТ: три состояния
+			// (просрочено · не выдавалось · уже предъявлено) вызывающему
+			// различимы (Ф7-34), повтор отвергается как однократное (Ф7-03), и
+			// различимость держит только хранение строки — снятая читается
+			// как «не выдавалось». Порог в срок испытания хранит предъявленную
+			// строку не меньше, чем она прожила бы непредъявленной
+			// (consumed_at ≥ issued_at), а истёкшую — ещё один срок (kaname#590).
+			Grace: r.ChallengeTTL,
 			Sweep: r.Challenges.SweepUnservableChallenges,
 		},
 		Subject{

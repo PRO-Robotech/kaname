@@ -92,6 +92,13 @@ const (
 type UserTokenServiceClient interface {
 	Issue(ctx context.Context, in *IssueUserTokenRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	List(ctx context.Context, in *ListUserTokensRequest, opts ...grpc.CallOption) (*ListUserTokensResponse, error)
+	// Revoke снимает удостоверение человека. Отзыв того, чего у названного
+	// человека нет, — синхронный `NOT_FOUND` с текстом `UserToken <token_id> not
+	// found`, без операции: никогда не существовавшее, уже отозванное и
+	// принадлежащее другому человеку неразличимы — кодом, текстом (кроме эха
+	// идентификатора) и деталями. Проигравший гонку двух отзывов получает
+	// операцию, завершённую тем же отказом; успех с `revoked_at` получает только
+	// отзыв, снявший удостоверение.
 	Revoke(ctx context.Context, in *RevokeUserTokenRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 }
 
@@ -197,6 +204,13 @@ func (c *userTokenServiceClient) Revoke(ctx context.Context, in *RevokeUserToken
 type UserTokenServiceServer interface {
 	Issue(context.Context, *IssueUserTokenRequest) (*operation.Operation, error)
 	List(context.Context, *ListUserTokensRequest) (*ListUserTokensResponse, error)
+	// Revoke снимает удостоверение человека. Отзыв того, чего у названного
+	// человека нет, — синхронный `NOT_FOUND` с текстом `UserToken <token_id> not
+	// found`, без операции: никогда не существовавшее, уже отозванное и
+	// принадлежащее другому человеку неразличимы — кодом, текстом (кроме эха
+	// идентификатора) и деталями. Проигравший гонку двух отзывов получает
+	// операцию, завершённую тем же отказом; успех с `revoked_at` получает только
+	// отзыв, снявший удостоверение.
 	Revoke(context.Context, *RevokeUserTokenRequest) (*operation.Operation, error)
 	mustEmbedUnimplementedUserTokenServiceServer()
 }

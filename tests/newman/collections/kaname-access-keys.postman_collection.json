@@ -1211,10 +1211,159 @@
                   "];",
                   "pm.test('AK40-BEGIN: величин контракта, попадающих в испытание регистрации 6 · названных и равных объявленным 6', () => pm.expect(_akSix.filter((x) => !x[1]).map((x) => x[0])).to.eql([]));",
                   "pm.test('AK40-BEGIN: запрос свойств удостоверения — отдельно от шести', () => pm.expect(!!__j.extensions && __j.extensions.credProps === true).to.eql(true));",
-                  "pm.test('AK40-BEGIN: человек глазами аутентификатора — платформенный id байтами', () => pm.expect(!!__j.user && __j.user.id === CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(pm.environment.get('akAUserId') || ''))).to.eql(true));",
+                  "const _akHandleFacts = (s, id, email) => { const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; const t = typeof s === 'string' ? s : ''; const canonical = t.length > 0 && t.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(t); const b = []; let acc = 0; let bits = 0; for (const c of t.split('=').join('')) { const v = AB.indexOf(c); if (v < 0) { break; } acc = ((acc << 6) | v) & 0xffffff; bits += 6; if (bits >= 8) { bits -= 8; b.push((acc >> bits) & 255); } } const low = b.map((x) => (x >= 65 && x <= 90 ? x + 32 : x)); const has = (v) => { const e = unescape(encodeURIComponent(String(v || '').toLowerCase())); const n = []; for (let i = 0; i < e.length; i++) { n.push(e.charCodeAt(i)); } if (n.length === 0) { return false; } for (let i = 0; i + n.length <= low.length; i++) { let k = 0; while (k < n.length && low[i + k] === n[k]) { k++; } if (k === n.length) { return true; } } return false; }; return { canonical: canonical, bytes: b.length, zero: b.length > 0 && b.every((x) => x === 0), carriesId: has(id), carriesEmail: has(email) }; };",
+                  "const _akHf = _akHandleFacts(__j.user && __j.user.id, pm.environment.get('akAUserId'), pm.environment.get('akAEmail'));",
+                  "pm.test('AK40-BEGIN: рукоятка человека — 64 байта в канонической записи, не нули', () => pm.expect([_akHf.canonical, _akHf.bytes, _akHf.zero]).to.eql([true, 64, false]));",
+                  "pm.test('AK40-BEGIN: рукоятка не несёт ни id, ни адреса человека', () => pm.expect([!!pm.environment.get('akAUserId'), !!pm.environment.get('akAEmail'), _akHf.carriesId, _akHf.carriesEmail]).to.eql([true, true, false, false]));",
+                  "pm.environment.unset('akAHandle');",
+                  "if (_akHf.canonical && _akHf.bytes === 64) { pm.environment.set('akAHandle', __j.user.id); }",
                   "pm.test('AK40-BEGIN: срок испытания в будущем и короче окна свежести', () => {",
                   "  const __exp = Date.parse(__j.expiresAt || ''); const __now = Date.now();",
                   "  pm.expect([__exp > __now, __exp - __now < 900000]).to.eql([true, true]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACCESSKEY-OK-REGISTRATION-CHALLENGE-NAMES-THE-CONTRACT :: ak40-begin-again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/users/{{akAUserId}}/accessKeys:beginRegistration",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "users",
+                "{{akAUserId}}",
+                "accessKeys:beginRegistration"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'akAToken'",
+                  "const __t = pm.environment.get('akAToken') || pm.variables.get('akAToken') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: akAToken is set (subject under test)', () => {",
+                  "    pm.expect.fail('akAToken is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akAUserId}}/accessKeys:beginRegistration');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akAUserId')) {",
+                  "  pm.test('AK40-BEGIN-AGAIN: человек не назван входом', () => {",
+                  "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.environment.unset('akRegCh40r');",
+                  "pm.test('AK40-BEGIN-AGAIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('AK40-BEGIN-AGAIN: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
+                  "if (__j.challenge) { pm.environment.set('akRegCh40r', __j.challenge); }",
+                  "if (__j.expiresAt) { pm.environment.set('akRegExp40r', __j.expiresAt); }",
+                  "pm.test('AK40-BEGIN-AGAIN: две церемонии одного человека — одна рукоятка', () => pm.expect([!!pm.environment.get('akAHandle'), !!__j.user && __j.user.id === pm.environment.get('akAHandle')]).to.eql([true, true]));"
                 ]
               }
             }
@@ -8539,7 +8688,12 @@
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK05B-BEGIN: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
                   "if (__j.challenge) { pm.environment.set('akRegCh05b', __j.challenge); }",
-                  "if (__j.expiresAt) { pm.environment.set('akRegExp05b', __j.expiresAt); }"
+                  "if (__j.expiresAt) { pm.environment.set('akRegExp05b', __j.expiresAt); }",
+                  "const _akHandleFacts = (s, id, email) => { const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; const t = typeof s === 'string' ? s : ''; const canonical = t.length > 0 && t.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(t); const b = []; let acc = 0; let bits = 0; for (const c of t.split('=').join('')) { const v = AB.indexOf(c); if (v < 0) { break; } acc = ((acc << 6) | v) & 0xffffff; bits += 6; if (bits >= 8) { bits -= 8; b.push((acc >> bits) & 255); } } const low = b.map((x) => (x >= 65 && x <= 90 ? x + 32 : x)); const has = (v) => { const e = unescape(encodeURIComponent(String(v || '').toLowerCase())); const n = []; for (let i = 0; i < e.length; i++) { n.push(e.charCodeAt(i)); } if (n.length === 0) { return false; } for (let i = 0; i + n.length <= low.length; i++) { let k = 0; while (k < n.length && low[i + k] === n[k]) { k++; } if (k === n.length) { return true; } } return false; }; return { canonical: canonical, bytes: b.length, zero: b.length > 0 && b.every((x) => x === 0), carriesId: has(id), carriesEmail: has(email) }; };",
+                  "const _akHf = _akHandleFacts(__j.user && __j.user.id, pm.environment.get('akBUserId'), pm.environment.get('akBEmail'));",
+                  "pm.test('AK05B-BEGIN: рукоятка человека — 64 байта в канонической записи, не нули', () => pm.expect([_akHf.canonical, _akHf.bytes, _akHf.zero]).to.eql([true, 64, false]));",
+                  "pm.test('AK05B-BEGIN: рукоятка не несёт ни id, ни адреса человека', () => pm.expect([!!pm.environment.get('akBUserId'), !!pm.environment.get('akBEmail'), _akHf.carriesId, _akHf.carriesEmail]).to.eql([true, true, false, false]));",
+                  "pm.test('AK05B-BEGIN: у двух разных людей рукоятки разные', () => pm.expect([!!pm.environment.get('akAHandle'), !!__j.user && typeof __j.user.id === 'string' && __j.user.id !== pm.environment.get('akAHandle')]).to.eql([true, true]));"
                 ]
               }
             }

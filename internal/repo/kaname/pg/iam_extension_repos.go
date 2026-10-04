@@ -324,6 +324,25 @@ func (r *SAOAuthClientRepo) DeleteOwnedByID(
 	return out, true, nil
 }
 
+// ExistsOwnedByID — whether service account ownerID holds key id. The predicate
+// is the removal statement's own (`id AND sva_id`): a row of another owner is
+// indistinguishable from an absent one BY CONSTRUCTION.
+//
+// The answer classifies, it does not decide: removal decides under its own row
+// lock, and the loser of a race gets the same "absent" there. A read error is
+// NOT "absent" — it reaches the caller as is, so an unanswered read is never
+// taken for a missing row.
+func (r *SAOAuthClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.ServiceAccountID, id domain.SAOAuthClientID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM service_account_oauth_clients WHERE id = $1 AND sva_id = $2)`,
+		string(id), string(ownerID)).Scan(&exists)
+	if err != nil {
+		return false, mapErr(err, "SAOAuthClient.ExistsOwnedByID", string(id))
+	}
+	return exists, nil
+}
+
 // TouchLastUsed — atomic update last_used_at (RETURNING для проверки exists).
 func (r *SAOAuthClientRepo) TouchLastUsed(ctx context.Context, tx pgx.Tx, id domain.SAOAuthClientID, at time.Time) error {
 	tag, err := tx.Exec(ctx,

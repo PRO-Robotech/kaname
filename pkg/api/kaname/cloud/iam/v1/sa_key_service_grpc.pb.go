@@ -60,6 +60,13 @@ const (
 type SAKeyServiceClient interface {
 	Issue(ctx context.Context, in *IssueSAKeyRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	List(ctx context.Context, in *ListSAKeysRequest, opts ...grpc.CallOption) (*ListSAKeysResponse, error)
+	// Revoke removes a service account key. Revoking what the named service
+	// account does not hold is a synchronous `NOT_FOUND` with the text `SAKey
+	// <key_id> not found`, and no operation: a key that never existed, one
+	// already revoked and one of another service account are indistinguishable —
+	// by code, by text (but for the echo of the id) and by details. The loser of
+	// two concurrent revokes gets an operation ending with the same refusal;
+	// only the revoke that removed the key succeeds with `revoked_at`.
 	Revoke(ctx context.Context, in *RevokeSAKeyRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 }
 
@@ -133,6 +140,13 @@ func (c *sAKeyServiceClient) Revoke(ctx context.Context, in *RevokeSAKeyRequest,
 type SAKeyServiceServer interface {
 	Issue(context.Context, *IssueSAKeyRequest) (*operation.Operation, error)
 	List(context.Context, *ListSAKeysRequest) (*ListSAKeysResponse, error)
+	// Revoke removes a service account key. Revoking what the named service
+	// account does not hold is a synchronous `NOT_FOUND` with the text `SAKey
+	// <key_id> not found`, and no operation: a key that never existed, one
+	// already revoked and one of another service account are indistinguishable —
+	// by code, by text (but for the echo of the id) and by details. The loser of
+	// two concurrent revokes gets an operation ending with the same refusal;
+	// only the revoke that removed the key succeeds with `revoked_at`.
 	Revoke(context.Context, *RevokeSAKeyRequest) (*operation.Operation, error)
 	mustEmbedUnimplementedSAKeyServiceServer()
 }

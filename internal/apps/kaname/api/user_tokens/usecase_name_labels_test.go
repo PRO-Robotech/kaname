@@ -21,7 +21,7 @@ import (
 func TestIssue_NameLabels_MapThrough(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -65,7 +65,7 @@ func TestIssue_NameLabels_MapThrough(t *testing.T) {
 func TestIssue_AccountIDStampedOnMetadata(t *testing.T) {
 	repo := &stubUserClientRepo{accountID: "acc00000000000000042"}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

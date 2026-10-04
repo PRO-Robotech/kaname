@@ -29,7 +29,7 @@ import (
 func TestBAT1_09_IssueSecretCompletesOnTheRequestPathAndCarriesTheSecret(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -88,7 +88,7 @@ func TestBAT1_21_TheSecretIsInNoWrittenPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
 	audit := &stubAudit{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithAuditEmitter(audit)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance().WithAuditEmitter(audit)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -162,7 +162,7 @@ func TestBAT1_21_TheSecretIsInNoWrittenPath(t *testing.T) {
 func TestBAT1_11_UnnamedKindKeepsTheKeypairBehaviourVerbatim(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -193,7 +193,7 @@ func TestBAT1_11_UnnamedKindKeepsTheKeypairBehaviourVerbatim(t *testing.T) {
 // (kaname#362), и отвергается он теперь как значение вне словаря — тем же
 // кодом и с тем же именем поля.
 func TestBAT1_14_ExplicitLegacyKindIsRefusedWithTheFieldName(t *testing.T) {
-	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
+	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -228,7 +228,7 @@ func TestBAT1_14_ExplicitLegacyKindIsRefusedWithTheFieldName(t *testing.T) {
 func TestBAT1_16_TTLAboveTheCeilingIsRefusedAndTheCeilingItselfIsAccepted(t *testing.T) {
 	ceiling := int64(tokenpolicy.SecretCredentialTTLCeiling.Seconds())
 
-	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
+	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
 		CreatedByUserID: "usr00000000000000001",
@@ -245,7 +245,7 @@ func TestBAT1_16_TTLAboveTheCeilingIsRefusedAndTheCeilingItselfIsAccepted(t *tes
 
 	// Положительный контроль: ровно на потолке.
 	repo := &stubUserClientRepo{}
-	uc2 := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{})
+	uc2 := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 	if _, err := uc2.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
 		CreatedByUserID: "usr00000000000000001",
@@ -264,7 +264,7 @@ func TestBAT1_17_UnnamedTTLGetsTheDefaultAndForeverIsUnexpressible(t *testing.T)
 		"отрицательный": -1,
 	} {
 		repo := &stubUserClientRepo{}
-		uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{})
+		uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 		op, err := uc.Execute(context.Background(), IssueInput{
 			UserID:          "usr00000000000000001",
 			CreatedByUserID: "usr00000000000000001",
@@ -291,7 +291,7 @@ func TestBAT1_17_UnnamedTTLGetsTheDefaultAndForeverIsUnexpressible(t *testing.T)
 
 	// Положительный контроль: явный срок применяется дословно.
 	repo := &stubUserClientRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{})
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 	if _, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
 		CreatedByUserID: "usr00000000000000001",

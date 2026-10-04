@@ -68,7 +68,7 @@ ls internal/migrations/*.sql | wc -l
 > сам же считает снятой.
 
 > [!warning] Гейт формы здесь назывался координатой ЧУЖОГО репозитория
-> Прежняя редакция называла держателем `internal/repohygiene`
+> Прежняя редакция называла держателем `PRO-Robotech/kacho:internal/repohygiene`
 > `TestNewMigrationOutranksEveryAppliedOne`. Гейт с этим именем существует,
 > красным бывает и судит каталоги МОНОРЕПО: `git ls-files -- '*/migrations/*.sql'`
 > в клоне `PRO-Robotech/kacho` даёт **210** файлов и **ноль** путей этой службы.
