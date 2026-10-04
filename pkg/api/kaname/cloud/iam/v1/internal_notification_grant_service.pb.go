@@ -27,9 +27,9 @@
 // идентификатор (как `cluster_root`), а не косметическое имя ресурса
 // арендатора; адресация `notification_namespace:<модуль>` ban #15 не задевает.
 //
-// Отказы синхронны, `Operation` при отказе не создаётся. `ErrorInfo.domain` —
-// домен отказов kaname, `metadata = {resource_type: notification_namespace,
-// resource_id}`. Тексты, коды и `reason` — таблица отказов Р5 приёмки NTF-1;
+// Отказы синхронны, `Operation` при отказе не создаётся. Домен в деталях
+// отказа (google.rpc.ErrorInfo) — домен отказов kaname, `metadata =
+// {resource_type: notification_namespace, resource_id}`. Тексты, коды и `reason` — таблица отказов Р5 приёмки NTF-1;
 // здесь они названы у полей, к которым относятся.
 
 package iamv1
