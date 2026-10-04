@@ -10,10 +10,23 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   вердикт: действующее одобрение выводится из записи ревью на отпечаток редакции и внешнего
   события (`change-graph.md` §2)
 - **История review:** (только дописывается) — записей нет
+  - 2026-10-04 · круг 1 · CHANGES_REQUESTED (блокирующих 3: Б1, Б2, Б3) · редакция 1, sha256
+    `35820cb246b540d3aefbb03e80f623f5c0c205bed28a11a6fe0e97a47ffd5ef5` · запись
+    `docs/specs/reviews/first-password-from-a-live-session/35820cb246b540d3aefbb03e80f623f5c0c205bed28a11a6fe0e97a47ffd5ef5.yaml`
 - **Правка ПОСЛЕ объявления состояния:** редакция 1 до первого круга перенесена на ветку волны
   `537` и перемерена против её головы и ствола (§1.0): команды переписи имён и посылки исключают
   путь самого документа, посев «Дано» и FP-12 названы координатами, условие возврата края — со
   счётом. Вердикта не было — переносить и отзывать нечего
+- **Редакция 2 (после круга 1):** строки выше не правлены, вердикт круга 1 относится к редакции
+  1 и на эту не переносится. Корень Б1 и Б2 — сценарий называл исход, не назвав, **на каком
+  посеве и каким харнессом** он строится; поэтому у каждого I/U-сценария теперь свой посев
+  (§4.0), а шаги, двигающие часы, — последними либо на своём посеве. Б1 — FP-11 переписан
+  точными запросами одного глагола, без входов неверным паролем внутри прогона; FP-03 (а) и
+  (б) разведены по своим посевам. Б2 — FP-07 (в) перенесён на уровень U (дублёр авторитета
+  утечек есть только там). Б3 — DoD п.5 требует исполнения FP-12 на стенде и называет исход
+  до посадки входа ключом. Сверх блокирующих: Р3 выровнен с соседним отказом полосы
+  (`ALREADY_EXISTS` / 409), поле `methods` Р5 определено, посев назван честно (личность —
+  прямой вставкой пробы), признак формы — из своего печенья, а не из сессии
 - **Дата:** 2026-10-04
 - **Задача:** `PRO-Robotech/kaname#213` (линия эпика `PRO-Robotech/kacho#1266`, метка
   `release:identity-own`)
@@ -54,7 +67,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 **Разрешает:** глагол заведения первого пароля на слушателе полосы формы службы (Р1…Р7),
 новый вид признака формы, новый вид события аудита, отказ «пароль уже заведён», запись строки
 способа «пароль» существующим оператором вставки из транзакции глагола; пробы FP-01…FP-12,
-кейс набора `tests/newman/` (FP-12), строку страницы `docs/content/api/auth-lane.mdx`.
+кейс набора `tests/newman/` (FP-12), строку страницы `docs/content/api/auth-lane.mdx`; в
+харнессах проб — сборку нового use-case рядом с существующими (`newAVLaneWith`, `newHarness`)
+без изменения их прочих величин.
 
 **Не разрешает** — у каждого свой владелец:
 
@@ -120,6 +135,20 @@ git grep -n 'func decodeForm' -- internal/handler/loginlanehttp                 
 git grep -n 'failOn string' -- internal/apps/kaname/api/humansession           # → 1 (fake_store_test.go): подставной отказ операции писателя
 ```
 
+Добавлено редакцией 2 — фикстуры, на которых строятся посевы §4.0 (на `d2f6f182f` и `8a84dcff6`
+результат один):
+
+```sh
+git grep -n 'func (c \*avClock) Advance' -- internal/handler/loginlanehttp      # → 1: часы I-харнесса — только вперёд
+git grep -n 'NewPasswordRule(12, nil' -- internal/handler/loginlanehttp/address_verification_harness_integration_test.go | wc -l  # → 1: у I-харнесса авторитета утечек нет
+git grep -n 'func newHarness(t \*testing.T, breach' -- internal/apps/kaname/api/humansession | wc -l   # → 1: U-харнесс принимает дублёр авторитета
+git grep -n 'type fakeBreach struct' -- internal/apps/kaname/api/humansession | wc -l                  # → 1: дублёр авторитета утечек
+git grep -n 'func (h \*avLane) failuresOf' -- internal/handler/loginlanehttp | wc -l                   # → 1: счёт следов по адресу на I-харнессе
+git grep -n 'codeAlreadyExists *= 6' -- internal/handler/loginlanehttp/handler.go | wc -l             # → 1: код соседнего «уже заведён» (Р3)
+git grep -n 'def precondition_not_met' -- tests/newman/scripts/gen.py | wc -l                        # → 1: третий исход набора (FP-12)
+git grep -n 'service kaname-login-lane' -- .github/workflows/e2e-newman.yml | wc -l                  # → 1: шаг, исполняющий набор полосы на стенде
+```
+
 ### §1.4 Посылка задачи — перемерена
 
 Посылка: Ф13 §0.2 этот предмет **не разрешает**, и ни одна другая приёмка службы его не
@@ -154,10 +183,18 @@ a credential again` — тот же отказ, что у второго фак�
 
 ### Р3. Заведение ≠ смена: строка есть — отказ состояния
 
-Строка «пароль» у человека уже есть → `FAILED_PRECONDITION` / 400, `reason =
+Строка «пароль» у человека уже есть → `ALREADY_EXISTS` / 409, `reason =
 PASSWORD_ALREADY_SET`, текст `password is already set; change it with the current password`;
 строка не тронута. Гонку двух заведений решает первичный ключ таблицы (§1.2), а не проверка
 перед вставкой: проигравший получает тот же отказ.
+
+**Довод выбора кода.** Отказ рождается нарушением уникальности первичного ключа — словарь
+кодов называет его `ALREADY_EXISTS`; соседний отказ той же полосы «второй фактор уже заведён»
+отдаёт тот же код и статус 409 (`handler.go`, ветка `ErrSecondFactorAlreadyEnrolled`). Один
+предмет «способ уже заведён» на одной полосе — одна пара кода и статуса.
+
+**Отвергнуто:** `FAILED_PRECONDITION` / 400 (редакция 1) — разошлось бы с соседним отказом того
+же рода на той же полосе без довода.
 
 ### Р4. Новое значение — тем же правилом и тем же хешером, что у смены
 
@@ -169,7 +206,9 @@ PASSWORD_ALREADY_SET`, текст `password is already set; change it with the c
 ### Р5. Исход — одна транзакция: строка и событие; сессии не трогаются
 
 Успех — строка способа «пароль» (состояние `active`) и событие `iam.user.password_enrolled`
-(полезная нагрузка: `user_id`, `session_id`, `methods` — материал пароля не несётся) **одним
+(полезная нагрузка: `user_id`, `session_id`, `methods` — материал пароля не несётся; `methods`
+— множество предъявленного **сессией-основанием**, та же форма, что у события смены пароля,
+`change_password.go`, поле `methods` полезной нагрузки `AuditPasswordChanged`) **одним
 исходом**: отказ любой из двух записей не оставляет ни одной. Записи прочих сессий не снимаются,
 отсечка не пишется, носитель не перевыпускается, уровень и момент последнего предъявления сессии
 не меняются (Ф11 Р2: заведение — не предъявление).
@@ -198,24 +237,42 @@ PASSWORD_ALREADY_SET`, текст `password is already set; change it with the c
 
 ## §4 Сценарии
 
-Метка уровня: **U** — use-case со дублёром хранилища; **I** — интеграционная проба слушателя
-полосы на настоящем хранилище (харнесс `avLane` в `internal/handler/loginlanehttp`, управляемые
-часы `avClock`); **E** — кейс набора `tests/newman/` на стенде.
+Метка уровня: **U** — use-case с дублёром хранилища (харнесс `newHarness` в
+`internal/apps/kaname/api/humansession`, часы — поле харнесса); **I** — интеграционная проба
+слушателя полосы на настоящем хранилище (харнесс `avLane` в `internal/handler/loginlanehttp`,
+часы `avClock` — **только вперёд**, `Advance`); **E** — кейс набора `tests/newman/` на стенде.
 
-**Посев «Дано» — один для всех I-сценариев, если не сказано иначе.** Личность `U` — строкой
-`kaname.users` и строкой аккаунта, **без** строки способа входа (форма посева — та же, что
-`serPerson` в `internal/apps/kaname/api/internal_iam/force_logout_session_end_reason_integration_test.go`);
-отметка подтверждения адреса — писателем продукта `MarkEmailVerified` (как `avLane.mark`);
-сессия `S` — операцией выдачи `IssueSession` (форма вызова — та же, что `serLiveSession` того же
-файла) с множеством предъявленного `{assurance.KeyAssertion(true, false)}` вместо
-`PasswordPresented()` у образца (`internal/assurance/level.go`, `func KeyAssertion`; ключ доступа —
-способ, которым такая личность входит, Ф13-19) в момент `t₀` по управляемым часам; признак формы
-`password-enroll` из контекста `S`. Каждый элемент посева — существующий в дереве писатель или
-операция; ни одной вставки строки мимо продукта.
+### §4.0 Посевы — у каждого сценария свой, если не сказано иначе
+
+**Правило редакции 2.** Каждый I- и U-сценарий (и каждая буква внутри сценария, если так сказано
+в нём) строится на **своём** посеве: своя личность, свои сессии, своё состояние часов. Шаги
+одного посева идут в порядке записи; шаг, двигающий часы, ставится последним либо получает свой
+посев. Ни один сценарий не наследует состояние другого.
+
+**Посев I («Дано I»).** Личность `U` — строками `kaname.users` и `kaname.accounts`,
+вставленными **пробой** одной транзакцией, **без** строки способа входа (форма вставки — та
+же, что `serPerson` в
+`internal/apps/kaname/api/internal_iam/force_logout_session_end_reason_integration_test.go`).
+Это единственный шаг посева мимо продукта, и он вынужден: ни один глагол продукта не заводит
+личность без строки «пароль» (регистрация её пишет, §1.2). Отметка подтверждения адреса —
+писателем продукта `MarkEmailVerified` (как `avLane.mark`). Сессия `S` — операцией выдачи
+`IssueSession` через писатель `avLane.sessions` (форма вызова — та же, что в
+`internal/handler/loginlanehttp/step_up_integration_test.go`) с множеством предъявленного
+`{assurance.KeyAssertion(true, false)}` (`internal/assurance/level.go`; способ, которым такая
+личность входит, Ф13-19) и моментом `At = avClock.Now()` — это `t₀`. Признак формы
+`password-enroll` выдаётся признаковым глаголом полосы (`lane.csrf`, как в образце выше);
+контекст формы живёт в своём печенье `kaname_form`, носитель — печенье `kaname_session` со
+значением носителя `S`. Окно свежести харнесса `W` = `laneFreshness`.
+
+**Посев U («Дано U»).** Харнесс `newHarness(t, breach)` — `breach` назван в сценарии (`nil`,
+если авторитет утечек не участвует). Личность — `h.person(t, <id>, <адрес>, "", true)`:
+пустой пароль не пишет строку способа (тело `person` пишет её только при непустом). Сессия —
+`IssueSession` через `h.store.Writer` с `{assurance.KeyAssertion(true, false)}` и `At = h.clock`.
 
 ### FP-01 — личность без пароля заводит пароль из свежей сессии и входит им · I
 
-**Given** посев «Дано»; вторая сессия `S2` той же `U`, выданная той же операцией; часы — `t₀ + 1 мин`
+**Given** «Дано I»; вторая сессия `S2` той же `U`, выданная той же операцией в `t₀`; часы —
+`t₀ + 1 мин`
 **When** `POST /iam/v1/auth/password/enroll` с `{"newPassword": "first-password-of-fp01",
 "csrfToken": <признак>}` и носителем `S`
 **Then** `200`; тело `{"session": {...}}` формы Ф3-01; `Set-Cookie: kaname_session` в ответе
@@ -224,14 +281,16 @@ PASSWORD_ALREADY_SET`, текст `password is already set; change it with the c
 с другим паролем — `401` `authentication failed`
 **And** `S` и `S2` — «сессия есть» (резолв краю), уровень обеих прежний; отсечки у `U` нет
 **And** в очереди аудита ровно одно событие `iam.user.password_enrolled` с `user_id = U`,
-`session_id = S`, без материала пароля
+`session_id = S`, `methods = ["webauthn"]` (предъявленное `S`), без материала пароля
 
 ### FP-02 — у личности со строкой «пароль» тот же глагол отвергается · I
 
-**Given** личность `R`, заведённая регистрацией (строка «пароль» есть), отметка адреса стоит,
-сессия свежая; признак `password-enroll`
+**Given** свой посев: личность `R`, заведённая регистрацией через слушатель (`avLane.register`
+— строка «пароль» есть, носитель регистрации свежий), отметка адреса — `avLane.mark`; признак
+`password-enroll`
 **When** `POST /iam/v1/auth/password/enroll` с `{"newPassword": "another-password-fp02", "csrfToken"}`
-**Then** `400`, `{"code": 9, "message": "password is already set; change it with the current
+носителем регистрации
+**Then** `409`, `{"code": 6, "message": "password is already set; change it with the current
 password", "details": [ErrorInfo reason PASSWORD_ALREADY_SET]}`; без `Set-Cookie`
 **And** вход прежним паролем `R` — `200`, `another-password-fp02` — `401`; события
 `iam.user.password_enrolled` нет
@@ -241,8 +300,9 @@ password", "details": [ErrorInfo reason PASSWORD_ALREADY_SET]}`; без `Set-Coo
 
 ### FP-03 — несвежая сессия: отказ свежести; граница окна включена · I
 
-**Given** посев «Дано»; окно свежести харнесса `W`
-**When** (а) часы `t₀ + W + 1 с`, заведение с годным паролем; (б) часы `t₀ + W` ровно, то же
+**Given** (а) и (б) — **каждый на своём** «Дано I» (своя `U`, своя `S`, свои часы от своего `t₀`)
+**When** (а) `avClock.Advance(W + 1 с)`, заведение с годным паролем; (б) `avClock.Advance(W)`
+ровно, то же
 **Then** (а) `403`, `{"code": 7, "message": "re-authentication required: present a credential
 again", "details": [ErrorInfo reason SESSION_NOT_FRESH]}`; строки нет, события нет; `S` жива;
 (б) `200`, строка заведена
@@ -251,7 +311,7 @@ again", "details": [ErrorInfo reason SESSION_NOT_FRESH]}`; строки нет, 
 
 ### FP-04 — положение подтверждения адреса: отказ положения · I
 
-**Given** посев «Дано» **без** отметки подтверждения адреса
+**Given** «Дано I» **без** отметки подтверждения адреса
 **When** заведение с годным паролем
 **Then** `403`, тело — дословно значение F6b Р3 (`reason EMAIL_NOT_VERIFIED`); без `Set-Cookie`;
 строки нет; `S` жива
@@ -260,60 +320,82 @@ again", "details": [ErrorInfo reason SESSION_NOT_FRESH]}`; строки нет, 
 
 ### FP-05 — сессии нет: единый отказ · I
 
-**When** (а) без носителя; (б) носителем `S` после выхода `POST /iam/v1/auth/logout` (Ф3-15)
+**Given** «Дано I»
+**When** (а) заведение без носителя; (б) выход носителем `S` (`POST /iam/v1/auth/logout`,
+Ф3-15), затем заведение носителем `S`
 **Then** (а), (б) — `401` `{"code": 16, "message": "authentication failed", "details": []}`;
 строки нет
 **And** положительный близнец — FP-01 (носитель живой сессии)
 
 ### FP-06 — форма: поле названо, признак чужого вида отвергнут · I
 
-**When** (а) без `csrfToken`; (б) признак вида `password` вместо `password-enroll`; (в) лишнее
-поле `currentPassword`; (г) без `newPassword`
+**Given** «Дано I»; часы не двигаются; буквы — подряд на этом посеве (каждая — отказ, строки не
+пишет)
+**When** (а) без `csrfToken`; (б) признак вида `password` (`lane.csrf` с видом `password`)
+вместо `password-enroll`; (в) лишнее поле `currentPassword`; (г) без `newPassword`
 **Then** (а) `400` `Illegal argument csrfToken: required`; (б) `403` `form token rejected`, `reason
 FORM_TOKEN_REJECTED`; (в) `400` `Illegal argument currentPassword: unknown field`; (г) `400`
 `Illegal argument newPassword: required`; ни в одном случае строки нет
 **And** положительный близнец — FP-01 (форма `{"newPassword", "csrfToken"}` признаком своего вида)
 
-### FP-07 — новый пароль судится тем же правилом · I
+### FP-07 — новый пароль судится тем же правилом · I (а, б) · U (в)
 
-**When** `newPassword` (а) короче объявленной длины; (б) схож с адресом `U`; (в) найден в базе
-утечек при включённой проверке (дублёр авторитета)
-**Then** каждый — `400`, текст `Illegal argument newPassword: <правило>` с текстом правила Ф3-22;
-число утечек не раскрывается; строки нет
-**And** положительный близнец — FP-01 (годный пароль); различие одно: пароль, нарушающий одно
-правило
+**Given** (а), (б) — «Дано I», подряд на одном посеве (правило I-харнесса — минимум 12, авторитета
+утечек нет); (в) — «Дано U» с `breach = &fakeBreach{found: {"password123456": true}}`
+**When** `newPassword` (а) `short-fp07a` (11 знаков, короче объявленной длины); (б) `<локальная часть адреса U>-fp07b`
+(не короче 12 знаков; локальная часть адреса посева — не короче 4 знаков, условие правила
+сходства); (в) `password123456`
+**Then** (а), (б) — `400`, текст `Illegal argument newPassword: <правило>` с текстом правила Ф3-22
+(`RuleTooShort`, `RuleResemblesEmail`); (в) — ошибка поля `newPassword` с правилом
+`RuleBreached`, число утечек не раскрывается; ни в одном случае строки нет
+**And** положительный близнец: (а), (б) — FP-01 (годный пароль на «Дано I»); (в) — тот же «Дано
+U» с паролем `a clean passphrase`: успех, строка есть. Различие одно: пароль, нарушающий одно
+правило. Образец того же суждения у смены — `TestChangePassword_F3_22_NewPasswordIsJudgedByTheOneRule`
 
 ### FP-08 — два заведения наперегонки: строка одна · I
 
-**Given** посев «Дано» с двумя свежими сессиями `S`, `S2`
+**Given** «Дано I» и вторая сессия `S2` той же `U`, выданная в `t₀`
 **When** параллельно: из `S` — `pw-alpha-fp08`, из `S2` — `pw-bravo-fp08`
-**Then** ровно один ответ `200`, другой — отказ FP-02 (`PASSWORD_ALREADY_SET`); строка «пароль»
-у `U` одна; событие `iam.user.password_enrolled` одно
+**Then** ровно один ответ `200`, другой — отказ FP-02 (`409`, `PASSWORD_ALREADY_SET`); строка
+«пароль» у `U` одна; событие `iam.user.password_enrolled` одно
 **And** вход паролем победителя — `200`, проигравшего — `401`
 **And** положительный близнец — FP-01 (одно заведение)
 
 ### FP-09 — отказ записи события откатывает строку · U
 
-**Given** дублёр хранилища, отказывающий на записи события (`failOn` = операция события)
+**Given** «Дано U» (`breach = nil`); дублёр отказывает на записи события (`failOn = "audit"`)
 **When** заведение с годным паролем
 **Then** `UNAVAILABLE` (на полосе — `503` `request not performed; try again later`); строки нет
-**And** положительный близнец — тот же прогон без подставного отказа: `200`, строка есть,
+**And** положительный близнец — тот же посев без подставного отказа: успех, строка есть,
 событие одно
 
 ### FP-10 — хранилище недоступно на резолве сессии · U
 
-**Given** дублёр хранилища, отказывающий на резолве (`failOn = "resolve"`)
+**Given** «Дано U» (`breach = nil`); дублёр отказывает на резолве (`failOn = "resolve"`)
 **When** заведение с годным паролем
 **Then** `UNAVAILABLE` / `503` `request not performed; try again later`; строки нет
-**And** положительный близнец — FP-09 без подставного отказа
+**And** положительный близнец — положительный близнец FP-09
 
 ### FP-11 — глагол не трогает счёт неверных предъявлений · I
 
-**Given** посев «Дано»; счёт неверных предъявлений по адресу `U` снят до прогона
-**When** подряд: FP-03 (а), FP-06 (г), FP-07 (а), затем FP-01, затем FP-02 на той же `U`
-**Then** счёт по адресу и по источнику после прогона равен снятому до (Р7)
-**And** положительный контроль чувствительности счёта — одно неверное предъявление входа той же
-`U` после прогона увеличивает счёт на 1 (Ф3-28)
+**Given** «Дано I» с одним изменением: сессия `S0` выдана в `t₀`, затем `avClock.Advance(W + 1
+с)` — момент `t₁`; затем сессии `S1`, `S2` той же `U` выданы в `t₁` той же операцией. Снято до
+прогона: `a₀ = avLane.failuresOf(<адрес U>)` и `s₀` — число строк `kaname.login_failures` с
+`scope = 'source'` и ключом источника стенда (`fwd()` — `203.0.113.7`). Все запросы ниже несут
+тот же источник `fwd()`; часы после `t₁` не двигаются
+**When** подряд, только глагол заведения, каждый — со своим признаком `password-enroll`:
+1. носителем `S0`, `newPassword = "first-password-fp11"` — ожидается `403` `SESSION_NOT_FRESH`
+   (строки ещё нет — исход однозначен);
+2. носителем `S1`, тело без `newPassword` — `400` `Illegal argument newPassword: required`;
+3. носителем `S1`, `newPassword = "short-fp11"` — `400` правила длины;
+4. носителем `S1`, `newPassword = "first-password-fp11"` — `200`;
+5. носителем `S2`, `newPassword = "second-password-fp11"` — `409` `PASSWORD_ALREADY_SET`
+
+**Then** после шага 5 `avLane.failuresOf(<адрес U>) = a₀` и счёт по источнику `= s₀` (Р7)
+**And** положительный контроль чувствительности счёта — **после** снятия «Тогда»: один вход
+`POST /iam/v1/auth/login` адресом `U`, паролем `wrong-password-fp11` и тем же источником —
+`401`, и `failuresOf` = `a₀ + 1`, счёт по источнику = `s₀ + 1` (Ф3-28). Внутри прогона шагов 1…5
+входов нет ни одного
 
 ### FP-12 — сквозь стенд: вошедший ключом заводит пароль и входит им · E
 
@@ -321,11 +403,12 @@ FORM_TOKEN_REJECTED`; (в) `400` `Illegal argument currentPassword: unknown fiel
 ключом и фикстурой-аутентификатором (`kaname#268`), вошедшая ключом (Ф13-05, Ф13-19 «а»)
 **When** признак `password-enroll`; заведение годным паролем; выход; вход этим паролем
 **Then** заведение — `200`; вход паролем — `200`; вход иным паролем — `401` `authentication failed`
-**And** повтор заведения из новой сессии — отказ FP-02
-**And** «Дано» производит вход ключом Ф13 — та же полоса реализации (NA8): кейс пишется тем же
-изменением, что этот глагол, и до посадки входа ключом на стенде уходит в «условие не создано»,
-а не в зелёное и не в красное. Сегодня пути входа ключом на полосе нет (§1.1, последняя команда
-→ 0); подставной аутентификатор набора уже есть — `tests/newman/cases/kaname-access-keys.py`
+**And** повтор заведения из новой сессии (выданной входом паролем) — отказ FP-02 (`409`)
+**And** «Дано» производит вход ключом Ф13 — та же полоса реализации (NA8). Пока пути входа
+ключом на полосе нет (§1.1, третья команда → 0), шаг «вошедшая ключом» кейса отдаёт третий
+исход набора — `precondition_not_met` (`tests/newman/scripts/gen.py`, метка
+`[УСЛОВИЕ НЕ СОЗДАНО]`), а не зелёное и не красное продукта; этот исход **не** проходит DoD п.5
+(§7). Подставной аутентификатор набора уже есть — `tests/newman/cases/kaname-access-keys.py`
 
 ## §5 Сценарий → производитель
 
@@ -333,19 +416,21 @@ FORM_TOKEN_REJECTED`; (в) `400` `Illegal argument currentPassword: unknown fiel
 |---|---|---|---|
 | FP-01 | новый глагол: use-case заведения + маршрут полосы; вход паролем — существующий вход | маршрут — `internal/handler/loginlanehttp/handler.go` (рядом с `changePassword`); вход — `login.go` | `git grep -n 'func (h \*Handler) changePassword' -- internal/handler/loginlanehttp` → 1 |
 | FP-01 «And» событие | запись события той же транзакцией | `EmitAudit` писателя сессии | `git grep -n 'EmitAudit(ctx' -- internal/apps/kaname/api/humansession/change_password.go` → 1 (образец) |
-| FP-02 | вставка, натыкающаяся на первичный ключ → отказ Р3 | `insertLoginMethod` + отображение отказа уникальности | §1.2 команда `func insertLoginMethod` → 1 |
+| FP-02 | вставка, натыкающаяся на первичный ключ → отказ Р3 | `insertLoginMethod` + отображение отказа уникальности; код полосы `codeAlreadyExists` | §1.2 команда `func insertLoginMethod` → 1; §1.3 `codeAlreadyExists *= 6` → 1 |
 | FP-03 | окно свежести | `requireFresh` (`sf_enroll.go`) | §1.3 → 1 |
 | FP-04 | ступень положения | `admitted` + объявление пути отказом в `pathPositions` | §1.3 → 1; `git grep -n 'PathRefusedInVerification,' -- internal/handler/loginlanehttp/handler.go \| wc -l` → 7 |
 | FP-05 | резолв сессии по записи | `Store.Resolve` | `git grep -n 'uc.store.Resolve' -- internal/apps/kaname/api/humansession/change_password.go` → 1 (образец) |
 | FP-06 | разбор формы и признака | `decodeForm`, `judgeForm`, `requireFields` | §1.3 → 1 |
-| FP-07 | правило пароля | `PasswordRule.Judge` | `git grep -n 'func (r \*PasswordRule) Judge' -- internal/apps/kaname/api/humansession` → 1 |
+| FP-07 (а, б) | правило пароля | `PasswordRule.Judge` | `git grep -n 'func (r \*PasswordRule) Judge' -- internal/apps/kaname/api/humansession` → 1 |
+| FP-07 (в) | правило пароля с авторитетом утечек; дублёр авторитета U-харнесса | `PasswordRule.Judge` (ветка `Breach != nil`); `fakeBreach`, `newHarness(t, breach)` | §1.3 (ред. 2) `type fakeBreach struct` → 1, `func newHarness(t \*testing.T, breach` → 1 |
 | FP-08 | первичный ключ таблицы | миграция §1.2 | `git grep -n 'PRIMARY KEY (user_id, kind)' -- internal/migrations` → 1 |
 | FP-09, FP-10 | одна транзакция писателя; подставной отказ дублёра | `SessionSetWriter` / `Writer`; `failOn` | §1.3 → 1 |
-| FP-11 | глагол не зовёт `recordFailure` | — (отсутствие вызова) | после реализации: `git grep -n 'recordFailure' -- internal/apps/kaname/api/humansession` не называет файл глагола |
-| FP-12 | глагол + вход ключом Ф13 на стенде | кейс набора `tests/newman/cases/kaname-login-lane.py` | `git grep -n 'loginLaneBaseUrl' -- tests/newman/cases/kaname-login-lane.py \| wc -l` → ≥ 1 |
+| FP-11 | глагол не зовёт `recordFailure`; счёт снимает существующий читатель I-харнесса | `avLane.failuresOf` (адрес); та же таблица `kaname.login_failures` по `scope = 'source'` (источник); контроль — вход паролем `login.go` | §1.3 (ред. 2) `func (h \*avLane) failuresOf` → 1; после реализации: `git grep -n 'recordFailure' -- internal/apps/kaname/api/humansession` не называет файл глагола |
+| FP-12 | глагол + вход ключом Ф13 на стенде; третий исход до посадки входа ключом | кейс набора `tests/newman/cases/kaname-login-lane.py`; `precondition_not_met` (`gen.py`); исполнение — шаг набора полосы в `.github/workflows/e2e-newman.yml` | `git grep -n 'loginLaneBaseUrl' -- tests/newman/cases/kaname-login-lane.py \| wc -l` → ≥ 1; §1.3 (ред. 2) `def precondition_not_met` → 1, `service kaname-login-lane` → 1 |
 
 **Сценариев без производителя — 0.** Производитель «Дано» FP-12 (вход ключом) — Ф13, та же
-полоса реализации; до его посадки кейс — «условие не создано» (FP-12 «And»).
+полоса реализации; до его посадки кейс — «условие не создано» (FP-12 «And»), что DoD п.5 не
+проходит.
 
 ## §6 Инварианты (MUST hold — для ревьюера)
 
@@ -366,9 +451,10 @@ FORM_TOKEN_REJECTED`; (в) `400` `Illegal argument currentPassword: unknown fiel
 | 1 | пробы FP-01…FP-11 написаны **до** кода и красны на базе | прогон проб на базе — красный по каждому FP, не «не выполнилось» |
 | 2 | реализация Р1…Р7 | `go test ./internal/apps/kaname/api/humansession/... ./internal/handler/loginlanehttp/... ./internal/repo/kaname/pg/...` (интеграционные пробы — на хранилище фикстуры `pgtest` дерева) — зелёный, FP-01…FP-11 исполнены |
 | 3 | гейты дерева | `go test ./internal/check/...` зелёный; `make lint` зелёный |
-| 4 | кейс FP-12 | `tests/newman/scripts/validate-cases.py` → 0; строка в `tests/newman/docs/CASES-INDEX.md`; коллекция пересобрана `gen.py` |
-| 5 | документация | `docs/content/api/auth-lane.mdx` несёт строку пути `/iam/v1/auth/password/enroll` с видом признака `password-enroll` |
-| 6 | предикат снятия задачи | `git grep -c '/iam/v1/auth/password/enroll' -- internal/handler/loginlanehttp/handler.go` → 1 и FP-01 зелёный |
+| 4 | кейс FP-12 написан | `tests/newman/scripts/validate-cases.py` → 0; строка в `tests/newman/docs/CASES-INDEX.md`; коллекция пересобрана `gen.py` |
+| 5 | кейс FP-12 исполнен на стенде | шаг наборов посадки own задания `chart-own` в `.github/workflows/e2e-newman.yml` (`--service kaname-login-lane`) завершён кодом 0, и среди исполненных утверждений есть утверждения FP-12 (заведение `200`, вход новым паролем `200`, повтор `409`). **Не пройдено:** любой иной код; в том числе код 3 — утверждения FP-12 с меткой `[УСЛОВИЕ НЕ СОЗДАНО]` (входа ключом на полосе ещё нет). Этот исход законен как промежуточный, но задача `kaname#213` на нём **не закрывается**; предикат его снятия — `git grep -n -E '"/iam/v1/auth/[a-z/-]*key' -- internal/handler/loginlanehttp/handler.go \| wc -l` → ≥ 1 на голове, где гонится прогон, и повторный прогон того же шага — код 0 |
+| 6 | документация | `docs/content/api/auth-lane.mdx` несёт строку пути `/iam/v1/auth/password/enroll` с видом признака `password-enroll` |
+| 7 | предикат снятия задачи | `git grep -c '/iam/v1/auth/password/enroll' -- internal/handler/loginlanehttp/handler.go` → 1, FP-01…FP-11 зелёные (п.2) и п.5 пройден |
 
 ## §8 Открытые вопросы
 
