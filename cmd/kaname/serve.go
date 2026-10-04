@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // grpcStopper — поверхность graceful/forced остановки gRPC-сервера. *grpc.Server
@@ -1043,44 +1045,38 @@ func runServe(cfg config.Config) error {
 	//     UnaryTrustedPrincipalExtract (sets acr) + internalCallerPolicy (which
 	//     denies a non-gateway SAN on a gateway-fronted RPC first, so the SA
 	//     exemption cannot be abused).
-	internalUnary := append([]grpc.UnaryServerInterceptor{
-		// Измеритель задержки первым — здесь живёт горячий путь пер-RPC гейта
-		// прав (`InternalIAMService.Check`), и его задержка есть задержка КАЖДОГО
-		// вызова всей платформы: она входит слагаемым в чужие хвосты, поэтому
-		// собственный ряд у неё обязан быть.
+	// Цепочка внутреннего слушателя — ОДНОЙ функцией корня (internal_chain.go):
+	// её зовёт и проба звена Р2, поэтому проба судит ту цепочку, что поднимает
+	// процесс. Измеритель задержки — первым и снаружи: здесь живёт горячий путь
+	// пер-RPC гейта прав (`InternalIAMService.Check`), и его задержка входит
+	// слагаемым в чужие хвосты, поэтому собственный ряд у неё обязан быть.
+	internalDeps := internalChainDeps{
+		logger:            logger,
+		permRegistry:      permRegistry,
+		authn:             &cfg.AuthN,
+		callerPolicy:      internalCallerPolicy,
+		addressGate:       addressGate,
+		systemViewerFloor: internalSystemViewerFloor,
+		acrFloor:          internalACRFloor,
+	}
+	internalChain, err := internalUnaryChain(internalDeps)
+	if err != nil {
+		return fmt.Errorf("internal listener chain: %w", err)
+	}
+	internalStreamLinks, err := internalStreamChain(internalDeps)
+	if err != nil {
+		return fmt.Errorf("internal listener stream chain: %w", err)
+	}
+	internalServerUnary := append([]grpc.UnaryServerInterceptor{
 		latency.UnaryServerInterceptor(grpcsrv.ListenerInternal),
-		// Panic-recovery immediately inside metrics — same rationale as the
-		// public chain: a handler/interceptor panic on the PDP hot path must
-		// not crash the process (fail-closed cluster-wide); it degrades to a
-		// logged codes.Internal for that one request.
-		grpcsrv.UnaryPanicRecovery(logger),
-		// Same reason as on the public chain, and on the same terms: a refusal
-		// this listener produces carries the machine-readable reason too, so a
-		// client does not have to know which listener (or which layer) said no.
-		// It appends — the step-up PreconditionFailure raised by the acr floor
-		// below survives untouched. See deny_details.go.
-		authzguard.DenyDetailUnary(permRegistry),
-	}, identityUnary(cfg)...)
-	internalUnary = append(internalUnary,
-		internalCallerPolicy.Unary(),
-		addressGate.Unary(),
-		internalSystemViewerFloor.Unary(),
-		internalACRFloor.Unary(),
-	)
-	internalStream := append([]grpc.StreamServerInterceptor{
+	}, internalChain...)
+	internalServerStream := append([]grpc.StreamServerInterceptor{
 		latency.StreamServerInterceptor(grpcsrv.ListenerInternal),
-		grpcsrv.StreamPanicRecovery(logger),
-	}, identityStream(cfg)...)
-	internalStream = append(internalStream,
-		internalCallerPolicy.Stream(),
-		addressGate.Stream(),
-		internalSystemViewerFloor.Stream(),
-		internalACRFloor.Stream(),
-	)
+	}, internalStreamLinks...)
 	internalSrv := grpcsrv.NewServer(
 		internalServerCreds,
-		grpc.ChainUnaryInterceptor(internalUnary...),
-		grpc.ChainStreamInterceptor(internalStream...),
+		grpc.ChainUnaryInterceptor(internalServerUnary...),
+		grpc.ChainStreamInterceptor(internalServerStream...),
 	)
 	logger.Info("kaname listener mTLS",
 		"public_mtls", mtlsCfg.PublicServerMTLS.Enable,
@@ -2233,6 +2229,193 @@ func identityUnary(cfg config.Config) []grpc.UnaryServerInterceptor {
 
 func identityStream(cfg config.Config) []grpc.StreamServerInterceptor {
 	return grpcsrv.PrincipalExtractStream(cfg.AuthN.TrustDomain(), cfg.AuthN.TrustedForwarders())
+}
+
+// ─── ВНУТРЕННЯЯ ЦЕПОЧКА — ОДНОЙ ФУНКЦИЕЙ КОРНЯ ─────────────────────────────
+//
+// Приёмка NTF-1 NTF1-M07, NTF1-M09; замысел З13 «Звено наблюдаемо на голове
+// K5», CX1-107, CX1-110.
+//
+// Сборка вынесена из runServe затем, чтобы её звал и процесс, и проба: проба,
+// перечисляющая перехватчики сама, судила бы свою цепочку, а не ту, что
+// поднимает процесс. Измеритель задержки стоит СНАРУЖИ — его ставит runServe
+// первым, он оборачивает цепочку целиком и прав не решает.
+//
+// Порта проверки прав в deps нет и не заводится: право `ResolveSend` решает
+// обработчик (З18), а не перехватчик. Нулевая зависимость любого звена —
+// ошибка сборки с именем звена: отсутствие зависимости не читается как
+// «звена нет», и сервер без извлечения служебного субъекта не собирается.
+
+// internalChainDeps — зависимости СУЩЕСТВУЮЩИХ звеньев внутренней цепочки.
+type internalChainDeps struct {
+	logger            *slog.Logger
+	permRegistry      *seed.PermissionRegistry
+	authn             *config.AuthNConfig // звено личности (identityUnary + Р2)
+	callerPolicy      *authzguard.CallerPolicy
+	addressGate       *authzguard.AddressGate
+	systemViewerFloor *authzguard.SystemViewerFloor
+	acrFloor          *authzguard.ACRFloor
+}
+
+// missing — имена звеньев, чья зависимость не подана, в порядке цепочки.
+func (d internalChainDeps) missing() []string {
+	var out []string
+	if d.logger == nil {
+		out = append(out, "UnaryPanicRecovery (logger)")
+	}
+	if d.permRegistry == nil {
+		out = append(out, "DenyDetailUnary (permRegistry)")
+	}
+	if d.authn == nil {
+		out = append(out, "identityUnary (authn)")
+	}
+	if d.callerPolicy == nil {
+		out = append(out, "internalCallerPolicy (callerPolicy)")
+	}
+	if d.addressGate == nil {
+		out = append(out, "addressGate (addressGate)")
+	}
+	if d.systemViewerFloor == nil {
+		out = append(out, "internalSystemViewerFloor (systemViewerFloor)")
+	}
+	if d.acrFloor == nil {
+		out = append(out, "internalACRFloor (acrFloor)")
+	}
+	return out
+}
+
+// built — общая часть сборки: проверка зависимостей и звено Р2.
+func (d internalChainDeps) built() (grpcsrv.ServiceIdentity, error) {
+	if miss := d.missing(); len(miss) > 0 {
+		return grpcsrv.ServiceIdentity{}, fmt.Errorf("internalUnaryChain: зависимость звена не подана: %s",
+			strings.Join(miss, ", "))
+	}
+	return serviceIdentityLink(*d.authn, d.permRegistry)
+}
+
+// internalUnaryChain — unary-цепочка внутреннего слушателя без измерителя
+// задержки (его ставит вызывающий первым). Порядок: восстановление после
+// паники; декоратор отказа `DenyDetailUnary` (дописывает машинный `reason`,
+// прав не решает); пара извлечения личности; звено Р2 сразу за ней (кем
+// является сам пир, когда за другого он не говорит, — только на закрытом
+// перечне методов); политика вызывающего; рубеж адреса; полы чтения и уровня
+// доверия.
+func internalUnaryChain(deps internalChainDeps) ([]grpc.UnaryServerInterceptor, error) {
+	link, err := deps.built()
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.Config{AuthN: *deps.authn}
+	internalCallerPolicy, addressGate := deps.callerPolicy, deps.addressGate
+	internalSystemViewerFloor, internalACRFloor := deps.systemViewerFloor, deps.acrFloor
+	internalUnary := append([]grpc.UnaryServerInterceptor{
+		grpcsrv.UnaryPanicRecovery(deps.logger),
+		authzguard.DenyDetailUnary(deps.permRegistry),
+	}, identityUnary(cfg)...)
+	internalUnary = append(internalUnary,
+		link.Unary(),
+		internalCallerPolicy.Unary(),
+		addressGate.Unary(),
+		internalSystemViewerFloor.Unary(),
+		internalACRFloor.Unary(),
+	)
+	return internalUnary, nil
+}
+
+// internalStreamChain — stream-цепочка внутреннего слушателя без измерителя.
+func internalStreamChain(deps internalChainDeps) ([]grpc.StreamServerInterceptor, error) {
+	link, err := deps.built()
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.Config{AuthN: *deps.authn}
+	internalCallerPolicy, addressGate := deps.callerPolicy, deps.addressGate
+	internalSystemViewerFloor, internalACRFloor := deps.systemViewerFloor, deps.acrFloor
+	internalStream := append([]grpc.StreamServerInterceptor{
+		grpcsrv.StreamPanicRecovery(deps.logger),
+	}, identityStream(cfg)...)
+	internalStream = append(internalStream,
+		link.Stream(),
+		internalCallerPolicy.Stream(),
+		addressGate.Stream(),
+		internalSystemViewerFloor.Stream(),
+		internalACRFloor.Stream(),
+	)
+	return internalStream, nil
+}
+
+// serviceIdentityMethods — ЗАКРЫТЫЙ перечень методов звена Р2 в kaname
+// (замысел З13 «Перечень закрыт в корне kaname»): прочие внутренние вызовы
+// модулей служебного субъекта не получают (NTF1-M07). Форма — как в файле
+// настроек, без ведущей косой.
+var serviceIdentityMethods = map[string]struct{}{
+	strings.TrimPrefix(iamv1.InternalNotificationGrantService_ResolveSend_FullMethodName, "/"): {},
+}
+
+// serviceIdentityLink — звено Р2 из ключа `authn.service-identity`.
+//
+// Ключа нет либо обе части пусты — нулевое звено (`NotApplicable`): служебного
+// субъекта нет никому, fail-closed. Отказы называют ручку и значение
+// (NTF1-M09): половина ключа; метод вне закрытого перечня либо вне реестра
+// прав; повтор SAN; прочее (форма SAN, повтор имени, имя вне DNS label) судит
+// конструктор фундамента, а корень называет ручку, из которой пришло значение.
+func serviceIdentityLink(a config.AuthNConfig, reg *seed.PermissionRegistry) (grpcsrv.ServiceIdentity, error) {
+	si := a.ServiceIdentity
+	if si.IsEmpty() {
+		return grpcsrv.ServiceIdentity{}, nil
+	}
+	var findings []string
+	switch {
+	case len(si.Methods) > 0 && len(si.Services) == 0:
+		findings = append(findings, fmt.Sprintf("%s пуст, а %s задан (%s): методы объявлены для служб, "+
+			"которых звено не опознает никогда", config.ServiceIdentityServicesKey,
+			config.ServiceIdentityMethodsKey, strings.Join(si.Methods, ", ")))
+	case len(si.Methods) == 0 && len(si.Services) > 0:
+		findings = append(findings, fmt.Sprintf("%s пуст, а %s задан: службы объявлены, а открыть им нечего",
+			config.ServiceIdentityMethodsKey, config.ServiceIdentityServicesKey))
+	}
+	methods := make([]string, 0, len(si.Methods))
+	for _, m := range si.Methods {
+		if _, ok := serviceIdentityMethods[m]; !ok {
+			findings = append(findings, fmt.Sprintf("%s: метод %q вне закрытого перечня звена {%s}",
+				config.ServiceIdentityMethodsKey, m, strings.Join(sortedMethodSet(), ", ")))
+			continue
+		}
+		if reg != nil {
+			if _, known := reg.LookupFQN(m); !known {
+				findings = append(findings, fmt.Sprintf("%s: метода %q нет в реестре прав процесса",
+					config.ServiceIdentityMethodsKey, m))
+				continue
+			}
+		}
+		methods = append(methods, "/"+m)
+	}
+	table := make(map[string]grpcsrv.ServiceName, len(si.Services))
+	for _, s := range si.Services {
+		if _, dup := table[s.SAN]; dup {
+			findings = append(findings, fmt.Sprintf("%s: SAN %q записан дважды", config.ServiceIdentityServicesKey, s.SAN))
+			continue
+		}
+		table[s.SAN] = grpcsrv.ServiceName(s.Name)
+	}
+	if len(findings) > 0 {
+		return grpcsrv.ServiceIdentity{}, fmt.Errorf("ручка %s не собирается (%d находок):\n  · %s",
+			config.ServiceIdentityKey, len(findings), strings.Join(findings, "\n  · "))
+	}
+	link, err := grpcsrv.NewServiceIdentity(methods, table)
+	if err != nil {
+		return grpcsrv.ServiceIdentity{}, fmt.Errorf("ручка %s: %w", config.ServiceIdentityServicesKey, err)
+	}
+	return link, nil
+}
+
+func sortedMethodSet() []string {
+	out := make([]string, 0, len(serviceIdentityMethods))
+	for m := range serviceIdentityMethods {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // publicIdentityUnary / publicIdentityStream — цепочка личности ПУБЛИЧНОГО

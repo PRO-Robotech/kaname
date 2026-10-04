@@ -55,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // services — собранный набор бизнес-сервисов (один composition-point вместо
@@ -174,6 +175,11 @@ type services struct {
 	// правильное» было невыполнимо — не из-за недосмотра, а из-за раскладки.
 	// Поле закрывает именно это.
 	ownGates *authzcascade.Client
+
+	// notificationGrantHandler — InternalNotificationGrantService (NTF-1 Р5):
+	// решение о письме источника и рычаг администратора кластера над выдачей.
+	// Internal-only (запрет #6), регистрируется на :9091.
+	notificationGrantHandler iamv1.InternalNotificationGrantServiceServer
 }
 
 // ownGateWiringComplaint reports why iam's own authorization gates cannot be trusted with
@@ -653,6 +659,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore,
 		metricsReg, cfg.AuthN.Mode.IsProduction())
+
+	// InternalNotificationGrantService — на той же двери, что Check (место
+	// Д-3), и на том же носителе вопроса об администраторе кластера, что
+	// RevokeAdmin. Полоса отсечки судится строителем: отказ — отказ старта.
+	notificationGrantHandler, err := buildNotificationGrantServer(pool, authzServices.authorizeSvc,
+		relationStore, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -970,6 +985,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accessBindingHandler:   abHandler,
 		internalIAMHandler:     internalIAMHandler,
 		internalClusterHandler: internalClusterHandler,
+
+		// решение о письме источника и Revoke/Restore выдачи (NTF-1 Р5).
+		notificationGrantHandler: notificationGrantHandler,
 
 		// interactive-login client lifecycle.
 		interactiveClientHandler: interactiveClientHandler,

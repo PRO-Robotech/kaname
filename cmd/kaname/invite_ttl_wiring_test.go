@@ -50,6 +50,11 @@ func inviteWiringBaseCfg() config.Config {
 	cfg.AuthN.Login.HasherMemory = 65536
 	cfg.AuthN.Login.HasherIterations = 3
 	cfg.AuthN.Login.HasherParallelism = 4
+	// Полоса отсечки службы выдачи уведомлений (NTF-1 Р5) — тоже ручка без
+	// умолчания, судимая сборкой служб: без неё близнец остановился бы на
+	// отказе полосы, не дойдя до срока приглашения.
+	guard := 30 * time.Second
+	cfg.Notifications.CutoffGuard = &guard
 	return cfg
 }
 

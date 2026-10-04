@@ -238,6 +238,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalBootstrapTokenService` | `MintBootstrapToken` — удостоверение начальной настройки |
 | `:9091`   | `InternalSubscriptionService`   | `Subscribe` — поток изменений семи собственных видов, сужаемый пообъектно |
 | `:9091`   | `InternalHumanSessionService`   | `Resolve` — наша сессия человека по носителю; регистрируется только под посадкой `own` (Ф3) |
+| `:9091`   | `InternalNotificationGrantService` | `ResolveSend` — решение о письме источника (право решает обработчик: служебный субъект `reader` ленты); `Revoke` / `Restore` выдачи — администратор кластера; без REST-привязок (NTF-1 Р5) |
 
 **Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —
 и расходился на ОБОИХ слушателях сразу. `services/iam/internal/check`

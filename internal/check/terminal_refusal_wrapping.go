@@ -50,6 +50,10 @@ const (
 	// terminalRefusalWrapper — надстройка, которой сырой конструктор обязан быть
 	// обёрнут ПРЯМО НА МЕСТЕ вызова.
 	terminalRefusalWrapper = "NewTerminalRefusalRepo"
+	// terminalRefusalTxWrapper — та же надстройка над репозиторием с записью в
+	// транзакции вызывающего (`operations.TxRepo`): она строится над
+	// terminalRefusalWrapper и подменяет текст и в транзакционной записи ошибки.
+	terminalRefusalTxWrapper = "NewTerminalRefusalTxRepo"
 )
 
 // RawOperationsRepoSite — один вызов сырого конструктора с координатой.
@@ -194,13 +198,14 @@ func isRawOperationsRepoCall(call *ast.CallExpr) bool {
 
 // isWrapperCall — узел есть вызов надстройки, под любым именем пакета.
 func isWrapperCall(call *ast.CallExpr) bool {
+	name := ""
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
-		return fun.Name == terminalRefusalWrapper
+		name = fun.Name
 	case *ast.SelectorExpr:
-		return fun.Sel.Name == terminalRefusalWrapper
+		name = fun.Sel.Name
 	}
-	return false
+	return name == terminalRefusalWrapper || name == terminalRefusalTxWrapper
 }
 
 // RefusalTextDecl — одно объявление текста отказа с координатой.

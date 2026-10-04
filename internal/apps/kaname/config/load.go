@@ -45,6 +45,9 @@ func Load(path string) (Config, error) {
 	if err := refuseRetiredSettingsInEnv(os.LookupEnv); err != nil {
 		return Config{}, err
 	}
+	if err := refuseFileOnlyEnv(os.Environ()); err != nil {
+		return Config{}, err
+	}
 	if err := refuseUnknownNestedEnv(os.Environ()); err != nil {
 		return Config{}, err
 	}

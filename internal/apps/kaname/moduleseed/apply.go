@@ -109,6 +109,11 @@ type Writer interface {
 	// WriteServiceTuple кладёт кортеж со служебным субъектом (строка
 	// `notifications`). Кортеж приезжает собранным: см. [ServiceTuple].
 	WriteServiceTuple(ctx context.Context, t ServiceTuple) (changed bool, err error)
+	// EnsureNotificationGrant заводит запись выдачи пространства уведомлений,
+	// если её нет, и не трогает существующую ни в одном поле (надгробие
+	// уважается — приёмка NTF-1 Р5, NTF1-F08). inserted — запись заведена
+	// этим вызовом: только тогда посев пишет проекцию `sender`.
+	EnsureNotificationGrant(ctx context.Context, namespace string) (inserted bool, err error)
 }
 
 // Subject — получатель выдачи, адресованный ПАРОЙ (аккаунт, имя): так он
@@ -313,7 +318,14 @@ func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest, holder man
 	if err != nil {
 		return report, err
 	}
+	grant, err := notificationGrant(m, holder)
+	if err != nil {
+		return report, err
+	}
 	report.DeclaredServiceTuples = len(tuples)
+	if grant != nil {
+		report.DeclaredServiceTuples++
+	}
 
 	err = a.tx.RunInWriteTx(ctx, func(ctx context.Context, w Writer) error {
 		// ПОРЯДОК НЕСУЩИЙ, и держится он ключами, а не памятью.
@@ -369,6 +381,25 @@ func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest, holder man
 				report.WrittenServiceTuples++
 			}
 		}
+		// Запись выдачи пространства и её проекция `sender` — той же
+		// транзакцией. Проекция пишется ТОЛЬКО для записи, заведённой этим
+		// посевом: существующую посев не трогает, и отозванная выдача
+		// перезапуском не оживает (NTF1-F08).
+		if grant != nil {
+			inserted, err := w.EnsureNotificationGrant(ctx, grant.ObjectID())
+			if err != nil {
+				return fmt.Errorf("запись выдачи пространства %q: %w", grant.ObjectID(), err)
+			}
+			if inserted {
+				changed, err := w.WriteServiceTuple(ctx, *grant)
+				if err != nil {
+					return fmt.Errorf("служебный кортеж %s: %w", grant, err)
+				}
+				if changed {
+					report.WrittenServiceTuples++
+				}
+			}
+		}
 		return nil
 	})
 	return report, err
@@ -393,6 +424,21 @@ func notificationTuples(m *manifest.Manifest, holder manifest.NotificationsHolde
 		tuples = append(tuples, t)
 	}
 	return tuples, nil
+}
+
+// notificationGrant — проекция `sender` записи выдачи пространства строки
+// `notifications` манифеста МОДУЛЯ. У службы доступа служебного принципала нет
+// (MRW-1 Р1, NTF1-F21) — записи выдачи у неё тоже нет. Строку уже судил
+// notificationTuples.
+func notificationGrant(m *manifest.Manifest, holder manifest.NotificationsHolder) (*ServiceTuple, error) {
+	if m.Notifications == nil || holder == manifest.HolderAccessService {
+		return nil, nil
+	}
+	t, err := SenderTuple(manifest.NotificationFeed(m, holder))
+	if err != nil {
+		return nil, fmt.Errorf("строка notifications: %w", err)
+	}
+	return &t, nil
 }
 
 // applyBinding кладёт одну выдачу — по одной строке на КАЖДОГО названного

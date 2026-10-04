@@ -1,0 +1,176 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalNotificationGrantService — Internal-only (cluster-internal listener,
+// mTLS). Право модуля слать письма от имени своего пространства уведомлений
+// (приёмка NTF-1 Р5, замысел issue-2915 З18).
+//
+// НИ ОДНОЙ REST-привязки — намеренно и как инвариант (NTF1-C01, C02):
+// служба не маршрутизируется ни на внешний край, ни на REST внутреннего края.
+// Достижима только прямым gRPC по mTLS на внутренний слушатель kaname; имя
+// `Internal…Service` не публикуется на внешнем слушателе (ban #6).
+//
+// Записи выдачи две, обе у kaname:
+//   - запись пространства `{namespace, выдано, отозвано, отсечка}`; кортеж
+//     `sender` — её проекция через очередь kaname той же транзакцией;
+//   - запись шаблона `{namespace, template, отозвано, отсечка шаблона}` — одна
+//     на пару, заводится первым `Revoke(namespace, template)`; оси пространства
+//     и шаблона независимы.
+//
+// `namespace` — имя модуля из закрытого перечня модулей: неизменяемый
+// идентификатор (как `cluster_root`), а не косметическое имя ресурса
+// арендатора; адресация `notification_namespace:<модуль>` ban #15 не задевает.
+//
+// Отказы синхронны, `Operation` при отказе не создаётся. Домен в деталях
+// отказа (google.rpc.ErrorInfo) — домен отказов kaname, `metadata =
+// {resource_type: notification_namespace, resource_id}`. Тексты, коды и `reason` — таблица отказов Р5 приёмки NTF-1;
+// здесь они названы у полей, к которым относятся.
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "corelib/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalNotificationGrantService — решение о письме источника и рычаг
+// оператора над выдачей. См. шапку файла.
+service InternalNotificationGrantService {
+  // ResolveSend — решение о письме строки ленты: `ALLOW`, `NOT_YET_GRANTED`
+  // либо `REVOKED`. Чтение решения, а не мутация ресурса: унарный ответ равен
+  // закоммиченному, `Operation` не возвращается (ban09 судит мутации ресурса,
+  // чей исход клиент поллит).
+  //
+  // Право вызова решает ОБРАБОТЧИК, и только он: первым стейтментом после
+  // проверки формы — субъект вызывающего (служебный принципал из сертификата,
+  // звено Р2 на внутреннем слушателе; метод входит в его закрытый перечень),
+  // затем вопрос к модели `reader` на `notification_feed:<namespace>` той же
+  // дверью, что отвечает `InternalIAMService/Check`. Субъекта нет либо
+  // отношения нет — `PERMISSION_DENIED`, запись выдачи не читается.
+  // Перехватчика проверки прав для этого метода нет, поэтому запись каталога —
+  // освобождение внутреннего слушателя, а не отношение.
+  //
+  // Неизвестное (по форме верное) пространство ошибкой не отвечает: исход
+  // `NOT_YET_GRANTED`. Сбой чтения хранилища kaname — `UNAVAILABLE` с
+  // фиксированным текстом `notification grant service temporarily
+  // unavailable`, а не `NOT_YET_GRANTED`.
+  rpc ResolveSend (ResolveSendRequest) returns (ResolveSendResponse) {
+    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
+  }
+
+  // Revoke — надгробие на выдаче пространства либо, с `template`, на записи
+  // шаблона. Без шаблона снимает кортеж `sender` той же транзакцией; с
+  // шаблоном кортеж не трогает. Переход — CAS в базе kaname; ноль строк —
+  // классификация по состоянию.
+  //
+  // Отказы: выдачи нет — `NOT_FOUND` `RESOURCE_NOT_FOUND`
+  // `NotificationNamespace <id> not found`; уже отозвано — `FAILED_PRECONDITION`
+  // `NOTIFICATION_GRANT_STATE` `NotificationNamespace <id> is already revoked`
+  // (с шаблоном: `… template <name> is already revoked`).
+  //
+  // Право — администратор кластера (`system_admin` на `cluster:cluster_root`),
+  // образец `InternalClusterService/RevokeAdmin`.
+  rpc Revoke (NotificationGrantRequest) returns (corelib.operation.Operation) {
+    option (corelib.api.v1.operation) = {
+      metadata: "NotificationGrantMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.notification_grants.revoke";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Restore — снимает надгробие и ставит отсечку (момент этого вызова); без
+  // шаблона возвращает кортеж `sender` той же транзакцией, с шаблоном работает
+  // только с записью шаблона. Строка ленты, поставленная до отсечки плюс
+  // полоса `notificationCutoffGuard`, остаётся `REVOKED`.
+  //
+  // Отказы: выдачи нет — `NOT_FOUND` `RESOURCE_NOT_FOUND`
+  // `NotificationNamespace <id> not found`; надгробия нет —
+  // `FAILED_PRECONDITION` `NOTIFICATION_GRANT_STATE` `NotificationNamespace <id>
+  // is not revoked` (с шаблоном: `… template <name> is not revoked`).
+  //
+  // Право — администратор кластера, как у `Revoke`.
+  rpc Restore (NotificationGrantRequest) returns (corelib.operation.Operation) {
+    option (corelib.api.v1.operation) = {
+      metadata: "NotificationGrantMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.notification_grants.restore";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+}
+
+// SendDecision — исход `ResolveSend`. Три значения и нуль; нуль читатель
+// считает отказом (неисправностью настройки), а не решением о письме.
+enum SendDecision {
+  // Не назван. Сервер его не отдаёт; читатель классифицирует как исход вне
+  // трёх — отказ, а не `ALLOW`.
+  SEND_DECISION_UNSPECIFIED = 0;
+  // Выдача есть, надгробий пространства и шаблона строки нет, и `enqueued_at`
+  // не раньше каждой имеющейся отсечки плюс полоса.
+  ALLOW = 1;
+  // Записи выдачи нет и надгробия нет (включая неизвестное пространство).
+  NOT_YET_GRANTED = 2;
+  // Надгробие пространства либо шаблона строки, либо `enqueued_at` раньше
+  // отсечки плюс полоса по пространству или по шаблону строки.
+  REVOKED = 3;
+}
+
+// ResolveSendRequest — вход `ResolveSend`. Форма проверяется первым шагом,
+// до вопроса о праве.
+message ResolveSendRequest {
+  // Пространство уведомлений (имя модуля). Пусто — `INVALID_ARGUMENT`
+  // `INVALID_RESOURCE_ID` `namespace: required`; не DNS label —
+  // `INVALID_ARGUMENT` `INVALID_RESOURCE_ID`
+  // `invalid notification_namespace id '<X>'`.
+  string namespace = 1;
+  // Шаблон строки ленты. Не DNS label — `INVALID_ARGUMENT`, `field = template`,
+  // `template: invalid name '<X>'`. Существование шаблона kaname не судит.
+  string template = 2;
+  // Момент постановки строки по часам базы источника, полной точности (не
+  // усекается). Не задан — `INVALID_ARGUMENT`, `field = enqueued_at`,
+  // `enqueued_at: required`.
+  google.protobuf.Timestamp enqueued_at = 3;
+}
+
+// ResolveSendResponse — исход `ResolveSend`.
+message ResolveSendResponse {
+  // Решение о письме; см. `SendDecision`.
+  SendDecision decision = 1;
+}
+
+// NotificationGrantRequest — вход `Revoke` и `Restore`. Форма проверяется
+// первым шагом, синхронно, `Operation` при отказе не создаётся.
+message NotificationGrantRequest {
+  // Пространство уведомлений (имя модуля). Пусто — `INVALID_ARGUMENT`
+  // `INVALID_RESOURCE_ID` `namespace: required`; не DNS label —
+  // `INVALID_ARGUMENT` `INVALID_RESOURCE_ID`
+  // `invalid notification_namespace id '<X>'`.
+  string namespace = 1;
+  // Шаблон. Не задан — вызов о записи пространства; задан — о записи шаблона
+  // этого пространства. Задан и не DNS label — `INVALID_ARGUMENT`,
+  // `field = template`, `template: invalid name '<X>'`.
+  optional string template = 2;
+}
+
+// NotificationGrantMetadata — `Operation.metadata` у `Revoke` и `Restore`.
+message NotificationGrantMetadata {
+  // Пространство, о выдаче которого операция.
+  string namespace = 1;
+  // Шаблон, если операция о записи шаблона; не задан — о записи пространства.
+  optional string template = 2;
+}

@@ -260,7 +260,15 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: []string{"minted_token_revocations_decider_ck"},
 	},
 	// Операция — вид принципала ставит служба.
-	"operations": nil,
+	// Запись выдачи пространства уведомлений и запись шаблона (NTF-1 Р5).
+	// Пространство и шаблон прислал вызывающий (манифест модуля, `Revoke`/
+	// `Restore`), но форму DNS label служба судит сама ДО записи
+	// (`notificationgrant.validateNamespace`, `validateTemplate`; манифест —
+	// `manifest.JudgeNotifications` с namespace == module). Отказ проверки
+	// формы значит «служба пропустила негодное» — дефект службы.
+	"notification_grants":          nil,
+	"notification_template_grants": nil,
+	"operations":                   nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"own_ceilings": nil,
 	// Учёт числа ресурсов ведут схема и служба.

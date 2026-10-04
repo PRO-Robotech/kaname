@@ -92,6 +92,7 @@ var deliveryRoster = []string{
 	"mail_key_files_mounted_test.go",
 	"mail_lane_names_every_letter_kind_injection_test.go",
 	"mail_lane_names_every_letter_kind_test.go",
+	"notification_grant_knobs_render_test.go",
 	"offered_chains_declare_production_posture_injection_test.go",
 	"offered_chains_declare_production_posture_test.go",
 	"operator_keys_carry_no_foreign_prefix_injection_test.go",

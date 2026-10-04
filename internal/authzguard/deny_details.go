@@ -257,3 +257,25 @@ func hasErrorInfo(st *status.Status) bool {
 	}
 	return false
 }
+
+// HandlerDecidedDenial — отказ метода, чьё право решает ОБРАБОТЧИК, а не
+// перехватчик (приёмка NTF-1 Р5, замысел З18: `ResolveSend`).
+//
+// Строка каталога такого метода — освобождение внутреннего слушателя, а не
+// отношение, поэтому декоратор выше действия не находит и машинной причины не
+// дописал бы: отказ ушёл бы голым и был бы неотличим от промаха каталога.
+// Здесь причина та же (`AUTHZ_DENIED`, тот же домен), текст тот же, что у
+// [PermissionDenied]; метаданные называют метод. Декоратор такой отказ не
+// трогает — ErrorInfo уже на месте.
+func HandlerDecidedDenial(fullMethod string) error {
+	st := status.New(codes.PermissionDenied, "permission denied")
+	enriched, err := st.WithDetails(&errdetails.ErrorInfo{
+		Reason:   denyReason,
+		Domain:   denyDomain,
+		Metadata: map[string]string{"fqn": strings.TrimPrefix(fullMethod, "/")},
+	})
+	if err != nil {
+		return st.Err()
+	}
+	return enriched.Err()
+}

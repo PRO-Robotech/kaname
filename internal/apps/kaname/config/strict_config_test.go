@@ -27,6 +27,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -176,13 +177,35 @@ func TestNestedEnvNamesAreDerivedFromTheDecoderKeys(t *testing.T) {
 	names := config.NestedEnvNames()
 	keys := config.DecoderKeys()
 	require.NotEmpty(t, keys, "предпосылка: декодер знает хотя бы один ключ — пустой обход не вердикт")
-	require.Len(t, names, len(keys), "имя на ключ — ровно одно")
+	// Ключи перечня «только файл» (NTF-1 З13, CX1-105) законного имени не
+	// дают: их подпути считаются отдельно, и пустой перечень подпутей —
+	// сломанная предпосылка, а не вердикт.
+	fileOnly := 0
+	isFileOnly := func(k string) bool {
+		for _, fk := range config.FileOnlyKeys() {
+			if k == fk || strings.HasPrefix(k, fk+".") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, k := range keys {
+		if isFileOnly(k) {
+			fileOnly++
+		}
+	}
+	require.Positive(t, fileOnly, "предпосылка: декодер знает подпути ключей «только файл»")
+	require.Len(t, names, len(keys)-fileOnly, "имя на ключ вне перечня «только файл» — ровно одно")
 
 	in := make(map[string]bool, len(names))
 	for _, n := range names {
 		in[n] = true
 	}
 	for _, k := range keys {
+		if isFileOnly(k) {
+			require.False(t, in[config.EnvNameOfKey(k)], "ключ «только файл» %q дал законное имя", k)
+			continue
+		}
 		require.True(t, in[config.EnvNameOfKey(k)], "имя ключа %q не выведено", k)
 	}
 	require.True(t, in["KANAME_REPOSITORY__POSTGRES__URL"],

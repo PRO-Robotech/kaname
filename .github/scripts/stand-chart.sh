@@ -682,6 +682,19 @@ authn:
   ceremony:
     codeTtl: 60s
     refreshTtl: 168h
+# Служба выдачи уведомлений (приёмка NTF-1 Р2, Р5; решение Д112 (в)). Полоса
+# отсечки — величина оператора; накладка называет её сама, той же величиной, что
+# боевой профиль. Звено Р2 открывает ResolveSend службе уведомлений по
+# точному SAN в домене доверия стенда; без блока звена нет, и ResolveSend
+# от неё — отказ (fail-closed).
+notifications:
+  cutoffGuard: 30s
+serviceIdentity:
+  methods:
+    - kaname.cloud.iam.v1.InternalNotificationGrantService/ResolveSend
+  services:
+    - san: "spiffe://$DOMAIN/ns/$NS/sa/notify"
+      name: notify
 # Почтовый узел — приёмник писем стенда (start_mailbox): посадка полосы
 # implicit, лист узла проверяется якорем серверного секрета службы. Без узла
 # письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
