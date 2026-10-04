@@ -36,7 +36,11 @@ type IssueSAKeyRequest struct {
 	// Description of the SAKey.
 	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
 	// Optional ISO duration in seconds. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА:
-	//   - KEYPAIR / FEDERATED — 0 означает БЕССРОЧНО (прежнее поведение);
+	//   - KEYPAIR / FEDERATED — 0 означает «срок не назван», и применяется
+	//     умолчание УСТАНОВКИ (`authn.sakey-default-ttl`, умолчание процесса —
+	//     90 суток). Ключ без срока выдаётся лишь установкой, обнулившей это
+	//     умолчание. Названный срок сверх потолка установки
+	//     (`authn.sakey-max-ttl`, умолчание процесса — 365 суток) ОТВЕРГАЕТСЯ;
 	//   - SECRET — 0 означает «срок не назван», применяется умолчание политики;
 	//     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
 	//     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
