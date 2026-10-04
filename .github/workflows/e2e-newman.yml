@@ -1195,6 +1195,10 @@ jobs:
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_ceremony.py --self-test
 
+      - name: посев хранимых значений способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/seed_stored_value.py --self-test
+
       - name: чистка отчёта способна упасть (самопроба по каждой форме)
         timeout-minutes: 5
         run: python3 .github/scripts/redact-newman-report.py --self-test
@@ -1268,6 +1272,28 @@ jobs:
               exit 1 ;;
             *)
               echo "::error title=Посев церемонии отвергнут продуктом::посев предъявил всё, чего требует контракт церемонии, и получил отказ — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
+      # ТРЕТЬЕ УСЛОВИЕ — «ДАНО» PWV-01 И PWV-02 (kaname#467): люди, чьи значения
+      # формата A (bcrypt) и B (argon2id) положены ПОСЕВОМ, а не написаны
+      # продуктом. Человек заводится регистрацией на полосе, материал его строки
+      # способа входа замещается значением, которое построила сторонняя
+      # библиотека (`tests/newman/scripts/storedvaluemint`); утверждение — само
+      # значение в хранилище, а не вход: вход переписал бы формат A (Р5). Люди
+      # свежие на каждый посев, поэтому посев стоит перед прогоном набора.
+      - name: условие создано — значения форматов A и B положены посевом
+        timeout-minutes: 15
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh seed-stored-value || rc=$?
+          case "$rc" in
+            0) echo "условие создано: storedValueAEmail, storedValueAPassword, storedValueBEmail, storedValueBPassword записаны" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::полоса, база стенда либо построитель значений недоступны — вердикта о продукте нет"
+              exit 1 ;;
+            *)
+              echo "::error title=Посев хранимых значений отвергнут продуктом::регистрация либо строка способа входа не по контракту — это вердикт о дереве"
               exit "$rc" ;;
           esac
 
