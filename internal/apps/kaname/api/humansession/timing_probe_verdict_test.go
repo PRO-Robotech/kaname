@@ -4,6 +4,8 @@
 package humansession_test
 
 import (
+	"math/rand/v2"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,4 +85,54 @@ func TestTimingInjectKnob_UnknownLaneIsRefused(t *testing.T) {
 	require.Nil(t, l)
 	require.True(t, strings.Contains(err.Error(), "нет такой") && strings.Contains(err.Error(), "A"),
 		"отказ обязан назвать и ручку, и законные полосы: %v", err)
+}
+
+// timingFalseRedRate — доля прогонов, в которых критерий Ф1-48 красен на
+// НЕРАЗЛИЧИМЫХ полосах: lanes полос по n обращений, каждое — равномерный
+// остаток в пределах разрешения ожидания (timingWaitResolution). Критерий —
+// тот же timingPairFailures, что судит живой прогон, а не его копия.
+func timingFalseRedRate(n, lanes, trials int) float64 {
+	rng := rand.New(rand.NewPCG(223, 1269))
+	red := 0
+	for range trials {
+		ls := make([]*timingLane, lanes)
+		for k := range ls {
+			l := &timingLane{name: strconv.Itoa(k)}
+			for range n {
+				l.samples = append(l.samples, time.Duration(rng.Int64N(int64(timingWaitResolution))))
+			}
+			ls[k] = l
+		}
+		if failures, _ := timingPairFailures(synthRows(ls...)); len(failures) > 0 {
+			red++
+		}
+	}
+	return float64(red) / float64(trials)
+}
+
+// TestTimingCriterion_PositiveTwinHoldsAtTheDeclaredN — положительный близнец
+// Ф1-48 устойчив при объявленном N (kaname#223): на неразличимых полосах в
+// числе полос живой пробы критерий красен не чаще бюджета ложного красного.
+// Без этого «без ручки — зелёная» держится жребием: при N=12 на 21 паре
+// критерий красен на шуме разрешения ожидания в каждом шестом прогоне
+// (измерено прогоном NA25 — 1 красный из 2, три пары на разностях ниже
+// миллисекунды).
+func TestTimingCriterion_PositiveTwinHoldsAtTheDeclaredN(t *testing.T) {
+	rate := timingFalseRedRate(timingLaneN, timingLaneCount, timingFalseRedTrials)
+	t.Logf("N=%d · полос %d · прогонов %d · доля ложного красного %.5f · бюджет %.5f",
+		timingLaneN, timingLaneCount, timingFalseRedTrials, rate, timingFalseRedBudget)
+	require.LessOrEqual(t, rate, timingFalseRedBudget,
+		"при N=%d критерий Ф1-48 красен на неразличимых полосах в доле %.5f прогонов — выше бюджета %.5f: положительный контроль держится жребием",
+		timingLaneN, rate, timingFalseRedBudget)
+}
+
+// TestTimingCriterion_StabilityCheckRedsOnTheUndersizedN — близнец с ОДНИМ
+// изменённым фактом (N=12, прежнее значение): проверка устойчивости обязана
+// покраснеть, иначе её зелёное при объявленном N ничего не утверждает.
+func TestTimingCriterion_StabilityCheckRedsOnTheUndersizedN(t *testing.T) {
+	const undersized = 12
+	rate := timingFalseRedRate(undersized, timingLaneCount, timingFalseRedTrials)
+	t.Logf("N=%d · доля ложного красного %.5f · бюджет %.5f", undersized, rate, timingFalseRedBudget)
+	require.Greater(t, rate, timingFalseRedBudget,
+		"при N=%d доля ложного красного %.5f не выше бюджета — проверка устойчивости слепа", undersized, rate)
 }
