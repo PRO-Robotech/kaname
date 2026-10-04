@@ -88,9 +88,10 @@ const (
 	svcHumanSess   = "/kaname.cloud.iam.v1.InternalHumanSessionService/"
 	svcBootstrap   = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/"
 	svcNotifyGrant = "/kaname.cloud.iam.v1.InternalNotificationGrantService/"
+	svcRecipients  = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/"
 )
 
-// internalAddressGateTable — таблицы Р4в: 18 строк круга и 16 вне круга.
+// internalAddressGateTable — таблицы Р4в: 18 строк круга и 18 вне круга.
 var internalAddressGateTable = map[string]InternalAddressGateRow{
 	// ── круг края (18) ──
 	svcRevocations + "Revoke": {GateAllowsSelfRevoke,
@@ -115,7 +116,7 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 	svcUser + "UpsertFromIdentity": {GateRefuses,
 		"от лица человека — отказ; без принципала-человека (обратный вызов поставщика от имени системы) рубеж молчит, исход судит правило приглашения"},
 
-	// ── вне круга (16) ──
+	// ── вне круга (18) ──
 	svcIAM + "Check": {GateOutsideCircle,
 		"вопрос о праве субъекта, названного в запросе: ответ судит допуск под дверью решения — неподтверждённому «нет»"},
 	svcIAM + "LookupSubject": {GateOutsideCircle,
@@ -150,6 +151,10 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"рычаг оператора над выдачей: маршрута края нет, человек-принципал до метода не доходит; право system_admin судит путь обслуживания, который заводит K3"},
 	svcNotifyGrant + "Restore": {GateOutsideCircle,
 		"рычаг оператора над выдачей: тот же довод, что у Revoke"},
+	svcRecipients + "Resolve": {GateOutsideCircle,
+		"справочник адресов для службы notify (NTF-3 Р7): вызывающий — служебный принципал по сертификату, маршрута края нет; право решает обработчик вопросом reader на справочник к модели"},
+	svcRecipients + "ListProjectAudience": {GateOutsideCircle,
+		"справочник адресов: тот же довод, что у Resolve"},
 }
 
 // InternalAddressGateTable — таблицы Р4в копией: метод → строка.

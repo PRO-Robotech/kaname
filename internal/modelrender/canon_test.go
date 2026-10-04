@@ -23,7 +23,7 @@ import (
 // с баннером следующего домена.
 //
 // Проба утверждает ЧИСЛО внутриблочных комментариев, а не только число блоков:
-// разборщик, взявший единицу B, дал бы то же число блоков (35) и другое число
+// разборщик, взявший единицу B, дал бы то же число блоков (36) и другое число
 // комментариев, то есть ошибка была бы невидима по первой величине.
 //
 // ЕДИНИЦА здесь — из §0.7 приёмки (строка-комментарий с отступом внутри тела
@@ -44,8 +44,8 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	blocks := modelrender.SplitCanon(dsl)
-	if len(blocks) != 35 {
-		t.Fatalf("блоков %d, ожидалось 35 (канон %s)", len(blocks), path)
+	if len(blocks) != 36 {
+		t.Fatalf("блоков %d, ожидалось 36 (канон %s)", len(blocks), path)
 	}
 
 	inner := 0
@@ -71,7 +71,7 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 // TestB06TypesOutsideModulesAreDerivedNotWritten — перечень типов вне модулей
 // ВЫВОДИТСЯ вычитанием.
 //
-// Утверждается СОСТАВ, а не длина: перечень из восьми других имён прошёл бы проверку
+// Утверждается СОСТАВ, а не длина: перечень из девяти других имён прошёл бы проверку
 // длины и означал бы совсем другое.
 func TestB06TypesOutsideModulesAreDerivedNotWritten(t *testing.T) {
 	_, dsl, err := authzplan.ResolveCanonicalModel()
@@ -79,7 +79,7 @@ func TestB06TypesOutsideModulesAreDerivedNotWritten(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	got := modelrender.TypesOutsideModules(seed.LiteralRows().Resources, dsl)
-	want := []string{"cluster", "group", "iam_fgaproxy", "notification_feed", "notification_namespace", "service", "service_account", "user"}
+	want := []string{"cluster", "group", "iam_fgaproxy", "notification_feed", "notification_namespace", "notification_recipient_directory", "service", "service_account", "user"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("типы вне модулей = %v, ожидалось %v", got, want)
 	}
@@ -87,7 +87,7 @@ func TestB06TypesOutsideModulesAreDerivedNotWritten(t *testing.T) {
 
 // TestB06AnAddedTypeOutsideModulesIsAFinding — ПРИРОСТ перечня есть находка.
 //
-// Половина «восемь сегодня» без этой половины ничего не держит: она зелена и на
+// Половина «девять сегодня» без этой половины ничего не держит: она зелена и на
 // шестом типе, дописанном рукой, — а это дословно признак #1089.
 func TestB06AnAddedTypeOutsideModulesIsAFinding(t *testing.T) {
 	_, dsl, err := authzplan.ResolveCanonicalModel()

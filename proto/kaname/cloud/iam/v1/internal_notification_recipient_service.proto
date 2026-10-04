@@ -1,0 +1,176 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalNotificationRecipientService — справочник адресов получателей писем
+// (приёмка NTF-3 Р7, Р28). Internal-only (cluster-internal listener, mTLS).
+//
+// НИ ОДНОЙ REST-привязки — намеренно и как инвариант (NTF3-30): служба не
+// маршрутизируется ни на внешний край, ни на REST внутреннего края. Достижима
+// только прямым gRPC по mTLS на внутренний слушатель kaname; имя
+// `Internal…Service` не публикуется на внешнем слушателе (ban #6).
+//
+// Вызывающий один — служебный принципал `service:notify` звена Р2: методы
+// внесены в закрытый перечень методов звена в корне kaname. Право — вопрос
+// `reader` на `notification_recipient_directory:root` той же дверью, что
+// отвечает `InternalIAMService/Check`; кортеж заводит только строка манифеста
+// `notify` `recipientDirectory: {readers: [notify]}`. Тип справочника — в
+// перечне типов без надзора администратора облака: адресов мимо модели не
+// читает никто. Отказ права — `PERMISSION_DENIED` `permission denied`,
+// `ErrorInfo{reason: AUTHZ_DENIED}`; право решается до проверки входа.
+//
+// Исход по субъекту — в теле ответа, а не кодом: справочник не производит
+// `NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`. Сбой чтения хранилища
+// kaname — `UNAVAILABLE` фиксированным текстом `notification recipient
+// directory temporarily unavailable`.
+package kaname.cloud.iam.v1;
+
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalNotificationRecipientService — справочник адресов. См. шапку файла.
+service InternalNotificationRecipientService {
+  // Resolve — исход и адрес одного получателя письма. Чтение, а не мутация:
+  // `Operation` не возвращается.
+  //
+  // Проверка входа — синхронно, в порядке: (1) обязательность (`<field>:
+  // required`); (2) `subject` при `account_owner` — `subject: must be empty
+  // for audience account_owner`; (3) тип ссылки, отношение, число ссылок и
+  // смесь типов. Вопрос к модели о праве получателя задаётся только после
+  // проверки входа целиком.
+  rpc Resolve (ResolveRecipientRequest) returns (ResolveRecipientResponse) {
+    option (corelib.authz.v1.permission)        = "iam.notification_recipients.resolve";
+    option (corelib.authz.v1.required_relation) = "reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "notification_recipient_directory"
+      from_request_field: "*"
+    };
+  }
+
+  // ListProjectAudience — субъекты `user:<id>` с действующей (не отозванной,
+  // не истёкшей) привязкой с субъектом-пользователем на `project:<id>`.
+  // Группы не раскрываются, привязки аккаунта не входят, адресов в ответе нет.
+  //
+  // Порядок — по id пользователя по возрастанию; курсор — позиция последнего
+  // выданного id. Отступление от курсора `(created_at, id)` названо: элемент
+  // выдачи — пользователь, выведенный из одной или нескольких привязок, своего
+  // `created_at` у него нет, и пользователь с двумя привязками под курсором
+  // привязки выдавался бы дважды.
+  rpc ListProjectAudience (ListProjectAudienceRequest) returns (ListProjectAudienceResponse) {
+    option (corelib.authz.v1.permission)        = "iam.notification_recipients.listProjectAudience";
+    option (corelib.authz.v1.required_relation) = "reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "notification_recipient_directory"
+      from_request_field: "*"
+    };
+  }
+}
+
+// RecipientResourceRef — ссылка на ресурс, о котором письмо.
+message RecipientResourceRef {
+  // Тип модели прав: вид пространства имён запроса либо `project`, `account`
+  // в любом пространстве. Иное — `INVALID_ARGUMENT`, поле
+  // `resource_refs[i].type`. Членство точное, без строкового префикса.
+  string type = 1;
+  // Идентификатор ресурса. Пусто — `INVALID_ARGUMENT`
+  // `resource_refs[i].id: required`. Формат чужого id справочник не судит.
+  string id = 2;
+}
+
+// RecipientResourceAudience — аудитория «субъект, которому видны ресурсы».
+message RecipientResourceAudience {
+  // Ссылки одного типа, от 1 до 100. Ссылок 0 — `INVALID_ARGUMENT`
+  // `resource_refs: required`; больше 100 либо смесь типов —
+  // `INVALID_ARGUMENT`, поле `resource_refs`. Порядок значим: видимое
+  // подмножество в ответе — в порядке запроса.
+  repeated RecipientResourceRef resource_refs = 1;
+  // Отношение — из закрытого набора `{v_get}` (corelib `notify/spec`). Иное —
+  // `INVALID_ARGUMENT`, поле `relation`.
+  string relation = 2;
+}
+
+// RecipientSelfAudience — адрес самого субъекта, без вопроса о ресурсе.
+message RecipientSelfAudience {}
+
+// RecipientAccountOwnerAudience — адрес владельца аккаунта; субъект запроса
+// не передаётся.
+message RecipientAccountOwnerAudience {
+  // Аккаунт. Пусто — `INVALID_ARGUMENT`
+  // `audience.account_owner.account_id: required`. Аккаунта нет либо у него
+  // нет владельца-пользователя — исход `AUDIENCE_DENIED`.
+  string account_id = 1;
+}
+
+// ResolveRecipientRequest — вход `Resolve`.
+message ResolveRecipientRequest {
+  // Пространство уведомлений (имя модуля). Пусто — `INVALID_ARGUMENT`
+  // `namespace: required` при любой аудитории.
+  string namespace = 1;
+  // Получатель, `user:<id>` либо `service_account:<id>`. Обязателен при
+  // `resource` и `self`: пусто либо без id после `:` — `INVALID_ARGUMENT`
+  // `subject: required`. При `account_owner` задан — `INVALID_ARGUMENT`
+  // `subject: must be empty for audience account_owner`.
+  string subject = 2;
+  // Аудитория — одна из трёх форм. Не задана — `INVALID_ARGUMENT`
+  // `audience: required`.
+  oneof audience {
+    RecipientResourceAudience resource = 3;
+    RecipientSelfAudience self = 4;
+    RecipientAccountOwnerAudience account_owner = 5;
+  }
+}
+
+// RecipientOutcome — исход `Resolve`. Условия проверяются по порядку
+// значений; первое невыполненное даёт исход.
+enum RecipientOutcome {
+  // Не назван. Сервер его не отдаёт; читатель классифицирует как расхождение
+  // версий, а не как адрес.
+  RECIPIENT_OUTCOME_UNSPECIFIED = 0;
+  // Всё выполнено: `address` и `visible_refs` заполнены.
+  RECIPIENT_OUTCOME_ADDRESS = 1;
+  // Субъекта нет.
+  RECIPIENT_OUTCOME_SUBJECT_NOT_FOUND = 2;
+  // Пользователь не в состоянии `ACTIVE`.
+  RECIPIENT_OUTCOME_SUBJECT_INACTIVE = 3;
+  // Для `resource` — ни одна ссылка не видна; для `account_owner` — у
+  // аккаунта нет владельца-пользователя.
+  RECIPIENT_OUTCOME_AUDIENCE_DENIED = 4;
+  // Субъект — учётная запись службы, либо адрес не подтверждён.
+  RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS = 5;
+}
+
+// ResolveRecipientResponse — исход `Resolve`. Кроме исхода `ADDRESS` ни
+// адреса, ни ссылок ответ не несёт.
+message ResolveRecipientResponse {
+  // Исход; см. `RecipientOutcome`.
+  RecipientOutcome outcome = 1;
+  // Подтверждённый адрес; только при `ADDRESS`.
+  string address = 2;
+  // Видимое получателю подмножество ссылок запроса, в порядке запроса; только
+  // при `ADDRESS` и аудитории `resource`, иначе пусто.
+  repeated RecipientResourceRef visible_refs = 3;
+}
+
+// ListProjectAudienceRequest — вход `ListProjectAudience`. Пагинация
+// проверяется первым шагом: `page_size` вне `[0..1000]` и мусорный
+// `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на пустом
+// результате.
+message ListProjectAudienceRequest {
+  // Проект. Пусто — `INVALID_ARGUMENT` `project_id: required`; не по форме —
+  // `INVALID_ARGUMENT` `invalid project id '<X>'`.
+  string project_id = 1;
+  // Непрозрачный курсор; пусто — первая страница.
+  string page_token = 2;
+  // 0 — умолчание 50, наибольшее 1000.
+  int32 page_size = 3;
+}
+
+// ListProjectAudienceResponse — страница субъектов.
+message ListProjectAudienceResponse {
+  // `user:<id>`, по id пользователя по возрастанию; упорядоченный список.
+  repeated string subjects = 1;
+  // Пусто — страница несёт последний элемент выдачи.
+  string next_page_token = 2;
+}

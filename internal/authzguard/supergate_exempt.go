@@ -34,9 +34,14 @@ package authzguard
 import "strings"
 
 // superGateExemptTypes — закрытый перечень типов объектов модели без надзора.
+//
+// `notification_recipient_directory` — справочник адресов (приёмка NTF-3 Р28):
+// адреса пользователей установки читает только `service:notify`, и
+// администратор облака мимо модели их не читает ни на одном месте двери.
 var superGateExemptTypes = map[string]struct{}{
-	"notification_feed":      {},
-	"notification_namespace": {},
+	"notification_feed":                {},
+	"notification_namespace":           {},
+	"notification_recipient_directory": {},
 }
 
 // SuperGateExempt — тип объекта модели objectType из перечня: надзор
