@@ -104,33 +104,45 @@ event_body: >-
   acceptance-reviewer · APPROVED · 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
-  pending_external_event: true
+  issued: true
+  issued_at: '2026-10-04T10:42:05Z'
+  ban1_lifted: true
+  ban1_lifted_note: >-
+    Санкция наступила в момент внешнего события (event ниже), а не в момент вынесения
+    вердикта роли. Текст рецензента выше сохранён как был; флаги переключены публикацией.
   why: >-
     Заключение рецензента — APPROVED, блокирующих ноль. Санкцию выдаёт внешнее событие
     допущенной учётки (review_authority.acceptance-reviewer) в форме заголовка из пяти полей
     (role, verdict, subject, subject_revision, subject_sha256); до его публикации запрет #1 по
-    этому отпечатку в силе. subject_revision — коммит слияния, опубликованный на origin до события.
-  publication_pending:
-    required_for_sanction: true
-    expected_actor: pointpu
-    expected_mode: courier_of_agent_verdict
-    expected_target: PRO-Robotech/kacho#2698
+    этому отпечатку был в силе.
 
 event:
   type: issue_comment
   target: PRO-Robotech/kacho#2698
-  status: pending
-  published: false
-  expected_actor: pointpu
+  status: performed
+  database_id: 5979119016
+  node_id: IC_kwDOTZqgWM8AAAABZGIdqA
+  url: https://github.com/PRO-Robotech/kacho/issues/2698#issuecomment-5979119016
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5979119016
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/2698
+  actor: pointpu
   role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-04T10:42:05Z'
+  body_sha256: 65a58d2290cbc70b05be57af8e4e80877a54130268a515670de1f176e2e94784
   subject_sha256: 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
-  subject_revision_commit: >-
-    коммит слияния origin/537 в 2698 — вписать при публикации
+  subject_revision: e0f2d1a7e96d817f69807aaf3e57a3d6fc951c25
   verdict: APPROVED
+  expected_actor: pointpu
   publication_mode: courier_of_agent_verdict
-  body_for_publication: 'acceptance-reviewer · APPROVED · 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8'
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; прежнее состояние блока
+    («pending») остаётся в истории. subject_revision — коммит слияния origin/537 в 2698,
+    опубликованный на origin до события. Отпечаток предмета перемерен перед публикацией
+    на origin/2698 @ 0c5beeb03 и на e0f2d1a7 (sha256 файла) и совпал с объявленным.
+    Отпечаток тела снят с сырого ответа API.
 
 authority:
   repository: PRO-Robotech/kacho-workspace
