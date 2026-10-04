@@ -38,7 +38,8 @@ type IssueUserTokenRequest struct {
 	// Опциональный TTL в секундах. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА, и это
 	// сказано здесь, потому что комментарий у контроля, противоречащий коду,
 	// провоцирует «починку» кода под неверный комментарий:
-	//   - KEYPAIR — 0 означает БЕССРОЧНО (прежнее поведение, дословно);
+	//   - KEYPAIR — 0 означает БЕССРОЧНО (прежнее поведение, дословно). Это
+	//     отличие от ключа служебной учётки, у которого 0 — умолчание установки;
 	//   - SECRET  — 0 означает «срок не назван», применяется умолчание политики;
 	//     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
 	//     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
@@ -63,9 +64,12 @@ type IssueUserTokenRequest struct {
 	Labels map[string]string `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Вид выдаваемого удостоверения (§2.5 приёмки BAT-1).
 	//
-	// Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: пустой перечень
-	// доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
-	// АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
+	// Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: выдаётся KEYPAIR.
+	// Выдаваемых видов у личности ДВА — KEYPAIR и SECRET. Перечня доверенных
+	// субъектов в этом запросе нет, поэтому FEDERATED недостижим: названный, он
+	// отвергается синхронно, до всякой записи, `INVALID_ARGUMENT` с текстом
+	// «credential_kind: FEDERATED is not available for this credential — it has
+	// no trusted_subjects field».
 	//
 	// Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
 	// потока — отвергается синхронно с именем поля, а не выпускается ключевой
@@ -337,8 +341,9 @@ type ListUserTokensRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the User.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Maximum number of results per page. 0 selects the service default (50);
-	// a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+	// Maximum number of results per page. 0 selects this List's default (100 —
+	// not the platform-wide 50 most Lists of the service apply); a value above
+	// 1000 is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListUserTokensResponse.next_page_token] returned by a previous list request.
