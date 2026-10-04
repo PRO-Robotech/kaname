@@ -118,6 +118,11 @@ ownCeilings:
   accountsPerIdentity: 5
   credentialsPerUser: 12
   credentialsPerServiceAccount: 24
+  # Ключи доступа человека (Ф7 Р8, Ф7-38; kacho#1273): та же форма, тот же
+  # страж, та же величина, что у боевого профиля. Строки здесь не было, и
+  # цепочка стенда отказывала в старте на этом ключе (kaname#281); держит
+  # shipped_chains_declare_every_own_ceiling_test.go.
+  accessKeysPerUser: 3
 
 # Здесь стояло «OpenFGA по умолчанию disabled в dev-overlay»: движок снят целиком
 # стадией S6 эпика #747, выключать нечего и включить нельзя. Вердикт о доступе

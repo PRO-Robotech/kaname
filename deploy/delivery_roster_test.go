@@ -122,6 +122,8 @@ var deliveryRoster = []string{
 	"scrape_declared_test.go",
 	"service_links_are_off_injection_test.go",
 	"service_links_are_off_test.go",
+	"shipped_chains_declare_every_own_ceiling_injection_test.go",
+	"shipped_chains_declare_every_own_ceiling_test.go",
 	"service_routes_every_surface_injection_test.go",
 	"service_routes_every_surface_test.go",
 	"stack_chains_read_the_table_injection_test.go",
