@@ -78,9 +78,19 @@ func akKey(user domain.UserID, cred string) domain.AccessKey {
 	return domain.AccessKey{
 		ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: user,
 		CredentialID: []byte(fmt.Sprintf("%-32s", cred)), PublicKey: []byte{0xa5, 0x01, 0x02},
-		Algorithm: -7, UserHandle: []byte(user), Name: "", Description: "проба",
+		Algorithm: -7, UserHandle: akHandle(), Name: "", Description: "проба",
 		CreatedAt: time.Now().UTC(),
 	}
+}
+
+// akHandle — рукоятка строки: байты носителя (Ф13 Р3), а не `id` человека —
+// фикстура не снисходительнее продукта, чья строка `id` в рукоятке отвергает.
+func akHandle() []byte {
+	h, err := domain.NewCeremonyHandle()
+	if err != nil {
+		panic(err)
+	}
+	return h.Bytes()
 }
 
 func akInsert(t *testing.T, repo *pg.AccessKeyRepo, k domain.AccessKey) domain.AccessKey {

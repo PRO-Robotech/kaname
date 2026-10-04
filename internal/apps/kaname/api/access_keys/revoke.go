@@ -85,8 +85,12 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// NOT_FOUND, а не операцию с ошибкой; чужой ключ этой же полосой — строка
 	// сужена владельцем и не видна (Ф7-27).
 	keyID := domain.AccessKeyID(in.AccessKeyID)
+	keys, err := uc.keysOf(ctx, in.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var owned bool
-	for _, k := range uc.keysOf(ctx, in.UserID) {
+	for _, k := range keys {
 		if k.ID == keyID {
 			owned = true
 			break
@@ -118,13 +122,16 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	return &op, nil
 }
 
-func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) []domain.AccessKey {
+// keysOf — ключи человека. Ошибка чтения — внутренняя ошибка (текст
+// хранилища только в журнал): пустой список вместо неё дал бы отказ о
+// предмете — «ключа нет» либо «последний способ входа», — не установленный
+// ничем (kaname#586).
+func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) ([]domain.AccessKey, error) {
 	keys, _, err := uc.deps.Store.KeysOf(ctx, userID, "", 1000)
 	if err != nil {
-		uc.deps.Logger.Error("access keys: keys unreadable", "err", err.Error())
-		return nil
+		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.keys", err)
 	}
-	return keys
+	return keys, nil
 }
 
 // lastMethodRefusal — человек без пароля с одним ключом (сверх locked)
@@ -139,7 +146,11 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 	}
 	n := lockedCount
 	if n == 0 {
-		n = len(uc.keysOf(ctx, userID))
+		keys, err := uc.keysOf(ctx, userID)
+		if err != nil {
+			return err
+		}
+		n = len(keys)
 	}
 	if n <= 1 {
 		uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)

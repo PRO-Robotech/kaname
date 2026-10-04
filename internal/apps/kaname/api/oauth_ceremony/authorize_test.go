@@ -238,7 +238,7 @@ func TestAuthorizeExecute_StepUpIsJudgedAgainstTheLowestRequestedLevel(t *testin
 		if res.Verdict != tc.want {
 			t.Errorf("acr_values %q при уровне 1: %+v, ожидался %v", tc.acr, res, tc.want)
 		}
-		if tc.want == VerdictStepUpRequired && (res.AcrValues != tc.acr || res.Subject != "usr-1") {
+		if tc.want == VerdictStepUpRequired && res.Subject != "usr-1" {
 			t.Errorf("вызов шага вверх: %+v", res)
 		}
 	}

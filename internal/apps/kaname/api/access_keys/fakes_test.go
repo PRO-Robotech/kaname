@@ -12,6 +12,7 @@ package access_keys_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -26,6 +27,9 @@ type fakeStore struct {
 	users      map[domain.UserID]domain.User
 	keys       map[domain.AccessKeyID]domain.AccessKey
 	challenges map[string]domain.AccessKeyChallenge
+	// handles — рукоятки людей (`user_ceremony_handles`): одна на человека,
+	// первая записанная выигрывает, смены нет — как у ключа строки в базе.
+	handles map[domain.UserID][]byte
 	// ceiling — потолок ключей у человека; nil — не объявлен (KQ002).
 	ceiling *int64
 	audit   []outboxtypes.AuditEvent
@@ -34,12 +38,19 @@ type fakeStore struct {
 	// beforeAdvance — крючок конкуренции (Ф7-20, ветвь б): исполняется перед
 	// сдвигом счётчика, чтобы соседнее утверждение успело перехватить слот.
 	beforeAdvance func()
+	// keysOfFailFrom — с какого по счёту чтения (с единицы) KeysOf отвечает
+	// ошибкой хранилища; 0 — никогда. keysOfCalls — сколько чтений было.
+	keysOfFailFrom int
+	keysOfCalls    int
 }
+
+// keysOfStoreFault — сырой текст хранилища: в ответ он попасть не вправе.
+const keysOfStoreFault = "pg: read access_keys: connection reset by peer at db-internal-7"
 
 func newFakeStore() *fakeStore {
 	ten := int64(10)
 	return &fakeStore{users: map[domain.UserID]domain.User{}, keys: map[domain.AccessKeyID]domain.AccessKey{},
-		challenges: map[string]domain.AccessKeyChallenge{}, ceiling: &ten}
+		challenges: map[string]domain.AccessKeyChallenge{}, handles: map[domain.UserID][]byte{}, ceiling: &ten}
 }
 
 func (s *fakeStore) addUser(id domain.UserID, status domain.InviteStatus) domain.User {
@@ -73,6 +84,10 @@ func (s *fakeStore) KeyByCredentialID(_ context.Context, cred []byte) (domain.Ac
 func (s *fakeStore) KeysOf(_ context.Context, userID domain.UserID, _ string, _ int32) ([]domain.AccessKey, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.keysOfCalls++
+	if s.keysOfFailFrom > 0 && s.keysOfCalls >= s.keysOfFailFrom {
+		return nil, "", errors.New(keysOfStoreFault)
+	}
 	var out []domain.AccessKey
 	for _, k := range s.keys {
 		if k.UserID == userID {
@@ -122,6 +137,32 @@ type fakeWriter struct {
 func (w *fakeWriter) InsertChallenge(_ context.Context, c domain.AccessKeyChallenge) error {
 	w.ops = append(w.ops, func() { w.s.challenges[string(c.Challenge)] = c })
 	return nil
+}
+
+func (w *fakeWriter) EnsureCeremonyHandle(_ context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error) {
+	if err := minted.Validate(); err != nil {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
+	}
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	if _, ok := w.s.users[userID]; !ok {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
+	}
+	if got, ok := w.s.handles[userID]; ok {
+		return domain.RestoreCeremonyHandle(got)
+	}
+	raw := minted.Bytes()
+	for _, other := range w.s.handles {
+		if bytes.Equal(other, raw) {
+			return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "ceremony handle collision")
+		}
+	}
+	w.ops = append(w.ops, func() {
+		if _, ok := w.s.handles[userID]; !ok {
+			w.s.handles[userID] = raw
+		}
+	})
+	return minted, nil
 }
 
 func (w *fakeWriter) ConsumeChallenge(_ context.Context, ch []byte, userID domain.UserID, p domain.AccessKeyChallengePurpose, now time.Time) (bool, error) {
@@ -260,11 +301,16 @@ func (s *fakeStore) keyCount(userID domain.UserID) int {
 type fakeFreshness struct {
 	mu sync.Mutex
 	at map[domain.UserID]time.Time
+	// err — момент предъявления не читается (хранилище сессий недоступно).
+	err error
 }
 
 func (f *fakeFreshness) LastPresentedAt(_ context.Context, id domain.UserID) (time.Time, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return time.Time{}, false, f.err
+	}
 	t, ok := f.at[id]
 	return t, ok, nil
 }

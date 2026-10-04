@@ -288,6 +288,25 @@ CASES.append(Case(
             op_var="opId",
         ),
         poll_operation_until_done(auth="jwtBootstrap"),
+        # CVR-03 (приёмка credential-verbs-refusal-outcomes, задача kaname#522):
+        # ПОВТОРНЫЙ отзыв того же удостоверения — синхронный отказ, а не вторая
+        # операция с успехом. Утверждается ПАРА краю — HTTP 404 и `code: 5` — и
+        # текст владельца дословно: один код зеленел бы и на промахе
+        # маршрутизатора, отвечающем тем же 404. Повтором не оборачивается:
+        # это отрицание.
+        Step(
+            name="revoke-basic-secret-repeat",
+            method="DELETE",
+            path="/iam/v1/users/{{userAAAId}}/tokens/{{batCredId}}",
+            auth="jwtBootstrap",
+            test_script=[
+                *assert_answered("повторный отзыв базового секрета"),
+                *assert_status(404),
+                *assert_grpc_code(5, "NOT_FOUND"),
+                *assert_refusal_message("UserToken {{batCredId}} not found",
+                                        "повторный отзыв: текст владельца дословно"),
+            ],
+        ),
         # ОТРИЦАНИЕ. Повтором НЕ оборачивается: повтор здесь маскировал бы
         # ровно тот дефект, ради которого кейс написан. Вместо повтора —
         # опрос ДО ОТКАЗА с дедлайном «окно вердикта плюс запас»: проба ждёт

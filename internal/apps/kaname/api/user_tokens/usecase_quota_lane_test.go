@@ -37,7 +37,7 @@ func TestQuotaRefusalOnASecretIssueArrivesWithTheOperationItself(t *testing.T) {
 	repo := &stubUserClientRepo{
 		insertErr: iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", quotaRefusalText),
 	}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{})
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -92,7 +92,7 @@ func TestQuotaRefusalOnAKeypairIssueArrivesInTheOperation(t *testing.T) {
 		insertErr: iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", quotaRefusalText),
 	}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

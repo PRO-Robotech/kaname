@@ -1177,6 +1177,30 @@ CASES.append(Case(
         # error this ordering exists to remove.
         *_revoke_key_steps("revoke-key-before", "disKeyBeforeId"),
         *_revoke_key_steps("revoke-key-after", "disKeyAfterId"),
+        # CVR-07 (приёмка credential-verbs-refusal-outcomes, задача kaname#522):
+        # ПОВТОРНЫЙ отзыв уже снятого ключа — синхронный отказ, а не вторая
+        # операция с успехом. Пара краю — HTTP 404 и `code: 5` — и текст
+        # владельца дословно. Повтором не оборачивается: это отрицание.
+        Step(
+            name="revoke-key-before-repeat",
+            method="DELETE",
+            path="/iam/v1/serviceAccounts/{{disSvaId}}/keys/{{disKeyBeforeId}}",
+            auth="jwtAccountAdminAStepUp",
+            pre_script=[
+                "if (!pm.environment.get('disKeyBeforeId')) {",
+                "  pm.test('revoke-key-before-repeat: disKeyBeforeId captured by the issuing step', "
+                "() => pm.expect.fail('disKeyBeforeId is empty — there is no revoked key to revoke again'));",
+                "  pm.execution.skipRequest();",
+                "}",
+            ],
+            test_script=[
+                *assert_answered("revoke-key-before-repeat"),
+                *assert_status(404),
+                *assert_grpc_code(5, "NOT_FOUND"),
+                *assert_refusal_message("SAKey {{disKeyBeforeId}} not found",
+                                        "repeat revoke: owner's verbatim text"),
+            ],
+        ),
         Step(
             name="cleanup-delete-sa",
             method="DELETE",
