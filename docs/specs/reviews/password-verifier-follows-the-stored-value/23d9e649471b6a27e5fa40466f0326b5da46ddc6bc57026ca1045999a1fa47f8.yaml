@@ -1,0 +1,147 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает. Действующий вердикт о
+    ЭТОЙ редакции — эта запись вместе с внешним событием; прежние записи остаются вердиктами о
+    своём содержимом.
+  base_commit: d1646e8ff1f4240b486cc6a1afd5a313aff6bc64
+  base_sha256: ac2feae1d3a2fd28a3d218605e9712b6ee95c695f573620f0e832acc5bd8dd15
+  merged_from: 4fd541df6ca3a267d57004a21263449711389b9d
+  merged_from_sha256: 4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385
+  content_commit: >-
+    ещё нет — догон origin/537 @4fd541df6 в ветку 2698 (@d1646e8ff) подготовлен слиянием
+    --no-ff --no-commit в tmp/kaname-2698; отпечаток перемерить на коммите слияния
+  branch: '2698'
+  worktree: tmp/kaname-2698
+  pull_request: PRO-Robotech/kaname#592
+  task: PRO-Robotech/kacho#2698
+  wave: PRO-Robotech/kaname#537
+  lines: 2459
+  round: 6
+  round_note: >-
+    круг 6 — следующий за записями этого документа (круг 5 — ac2feae1…, редакция 6); в этом
+    заходе прошлых кругов нет
+  predecessor_records: >-
+    docs/specs/reviews/password-verifier-follows-the-stored-value/ac2feae1d3a2fd28a3d218605e9712b6ee95c695f573620f0e832acc5bd8dd15.yaml
+    (APPROVED, редакция 6, kacho#2698, событие 5975778457 — сторона ветки 2698);
+    docs/specs/reviews/password-verifier-follows-the-stored-value/4c7b3d575a937af008283a4155dff5d59c8eb2bf0886ec81f484d3ae06f7a385.yaml
+    (APPROVED, правка датировки kaname#172 поверх редакции 5, событие 5973759083 — сторона origin/537)
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/password-verifier-follows-the-stored-value.md в
+    tmp/kaname-2698 после git merge --no-ff --no-commit origin/537 →
+    23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8; тот же отпечаток у дерева
+    773e3f8388 (git merge-tree --write-tree d1646e8ff origin/537)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+publication_mode: courier_of_agent_verdict
+
+premise_check:
+  premise: >-
+    догон 2698 до 537 меняет документ: обе стороны правили файл от базы d2f6f182f, слияние
+    автоматическое, получается третья редакция, записи на которую нет
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    sha256 файла: d2f6f182f → 4ddddbe6…; d1646e8ff (2698) → ac2feae1…; 4fd541df6 (537) → 4c7b3d57…;
+    дерево слияния 773e3f8388 → 23d9e649…; конфликтов нет (git merge-tree --name-only — пусто).
+
+delta_judged: >-
+  git diff d1646e8ff -- <путь> (против одобренной редакции 6): 21 строка добавлена, 2 снято, оба
+  блока — в шапке: (1) пункт «Ревизии измерения» — PRO-Robotech/kaname@37ee850953 → «эта история,
+  ревизия 37ee850953»; (2) пункт «Правка ПОСЛЕ вердикта (kaname#172)». Знаковые строки дельты
+  побайтово равны дельте d2f6f182f → origin/537 (diff двух наборов ± пуст) — это та же правка,
+  одобренная записями 6bdf21a0… и 4c7b3d57…. Сценарии PWV-01…25, их «Дано/Когда/Тогда»,
+  ведомости §4.3 и §4.3.1, производители, близнецы, DoD, решения Р1…Р9, строки «Статус» и
+  редакций 2…6 побайтово равны редакции 6.
+
+predicates_run:
+  dating_gate: |
+    go test ./internal/check -run TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory -v
+    на дереве слияния → PASS, объявлений замера 77, находок 0 (формы: 6 · 58 · 4 · 9).
+    Близнец — тот же прогон с файлом из d1646e8ff (без правки датировки) → находок 0,
+    «процитировано прозой» 21 против 23. Пара НЕ различает: распознаватель на 537 эту запись
+    больше не судит находкой, так что правка датировки здесь не несущая; вывод «правка снимает
+    находку» из записи 4c7b3d57… на этом дереве не воспроизведён — не зачитывается ни в одну сторону.
+  docs_checks: |
+    go test ./internal/check/... -count=1 (через слот) на дереве слияния → ok (115.6s).
+  revisions_resolve: |
+    git merge-base --is-ancestor 37ee850953 origin/main → 0.
+  constructibility: >-
+    Посева не было: дельта «Дано» и сценариев не трогает; конструируемость — предмет записи
+    ac2feae1… (Д-23 — seedPerson и схема user_login_methods, Д-25/26/28 — названные фикстуры),
+    её фикстуры правкой не менялись.
+
+blocking: []
+
+non_blocking:
+  - id: N1
+    summary: >-
+      Пункт «Правка ПОСЛЕ вердикта (kaname#172)» говорит о базе редакции 4 («вердикт круга 3 …
+      на этот текст не переносится», «файл на 8a84dcff6e побайтово равен базе правки»), а стоит
+      теперь поверх редакции 6; обещание «номер даёт следующая нумерованная редакция, и в её
+      составе эта правка называется» редакцией 6 не исполнено — она писалась на базе без правки.
+      Это продолжение N1 записи 4c7b3d57…; чисел и контракта не касается. Исполнить редакцией 7:
+      назвать правку в её составе и базу слияния.
+  - id: N2
+    summary: >-
+      Строка редакции 6 датирует замер формой PRO-Robotech/kaname@d2f6f182f — той, которую правка
+      kaname#172 закрепляет за предшественниками. Гейт её не судит (объявление не в начале строки,
+      учтено прозой). Следующей редакцией записать «эта история, ревизия d2f6f182f».
+
+coverage:
+  scope: 'дельтой не тронут; scope — предмет записи ac2feae1… (редакция 6)'
+  producers: 'дельтой не тронуты; «Тогда» без производителя дельтой не создано'
+  twins: 'дельтой не тронуты'
+
+event_body: >-
+  acceptance-reviewer · APPROVED · 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: true
+  why: >-
+    Заключение рецензента — APPROVED, блокирующих ноль. Санкцию выдаёт внешнее событие
+    допущенной учётки (review_authority.acceptance-reviewer) в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256); до его публикации запрет #1 по
+    этому отпечатку в силе. subject_revision — коммит слияния, опубликованный на origin до события.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kacho#2698
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kacho#2698
+  status: pending
+  published: false
+  expected_actor: pointpu
+  role: acceptance-reviewer
+  subject_sha256: 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
+  subject_revision_commit: >-
+    коммит слияния origin/537 в 2698 — вписать при публикации
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8'
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
