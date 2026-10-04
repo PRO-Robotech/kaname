@@ -8,6 +8,7 @@ package deploy_test
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -115,7 +116,10 @@ func TestConfigMapHeaderNamesAHolderThatExists(t *testing.T) {
 	require.NotEmpty(t, refs, "шапка %s не называет держателя ни одной координатой", configMapTemplatePath)
 	named := false
 	for _, r := range refs {
-		_, statErr := os.Stat(r[1])
+		// База — корень ЭТОГО модуля, выведенный подъёмом до маркера, а не
+		// рабочий каталог прогона: под чужим деревом относительный путь указал
+		// бы на чужой файл.
+		_, statErr := os.Stat(filepath.Join(serviceRoot(t), "deploy", r[1]))
 		require.NoErrorf(t, statErr, "%s называет deploy/%s, которого в дереве нет — "+
 			"утверждение пережило свой предмет", configMapTemplatePath, r[1])
 		if r[1] == "config_sections_have_a_reader_test.go" {
