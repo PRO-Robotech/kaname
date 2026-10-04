@@ -149,47 +149,72 @@ message User {
   }
 }
 
+// МЕТАДАННЫЕ ДЕЙСТВИЙ НАД ЛИЧНОСТЬЮ — Delete, Update, Block, Unblock,
+// ResetSecondFactor — ОДНОЙ ФОРМЫ, и `account_id` в них не аккаунт действия.
+//
+// Предмет каждого из пяти — строка `iam_user`, одна на всю платформу: гейт
+// задаёт вопрос объекту `iam_user` (`identity_remover`, `record_writer`,
+// `identity_suspender`), а не аккаунту, и следствие действует во всех
+// аккаунтах человека разом — блокировка закрывает вход на платформу, а не в
+// один аккаунт (`Membership.State`).
+//
+// `account_id` переносится в операцию из легаси-колонки `users.account_id`.
+// Колонка пишется ОДИН РАЗ, при первом появлении строки человека, и потом не
+// меняется: у приглашённого это аккаунт ПЕРВОГО приглашения, у
+// зарегистрировавшегося самостоятельно — его личный аккаунт. Ни одного из
+// последующих членств она не называет.
+//
+// Отсюда исполнимое следствие, которое и читает лента операций аккаунта
+// (`AccountService.ListAllOperations`, отбор по этому полю): операция действия
+// над личностью видна в ленте РОВНО ОДНОГО аккаунта — названного колонкой — и не
+// видна в лентах остальных аккаунтов того же человека. Это не утверждение, что
+// действие совершил тот аккаунт или что оно касается только его. Колонка
+// `NOT NULL`, поэтому у этих пяти операций поле не пусто.
+//
+// Поле стоит вторым намеренно: извлекатель `resource_id` фундамента берёт
+// первое поле с суффиксом `_id`, и это должен быть `user_id`; `account_id`
+// фундамент читает по точному имени. Снятие колонки — предмет открытой задачи
+// kacho#1351 (стадия S4-contract); у неё и предикат снятия, и решение о судьбе
+// этого поля.
+
 message DeleteUserMetadata {
-  // ID of the User that is being deleted.
+  // ID of the User (the person, platform-wide) that is being deleted.
   string user_id = 1;
 
-  // ID of the owning Account (denormalized for account-scoped operations
-  // listing — AccountService.ListAllOperations). Non-first field so the
-  // corelib resource_id extractor (first `_id`-suffix match) still picks
-  // `user_id`. Read by exact field name `account_id` by corelib. May be
-  // empty for account-less users (written as SQL NULL — excluded from the
-  // account-scoped list).
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // этим сообщением: адресует ленту операций одного аккаунта и не называет ни
+  // аккаунт действия, ни аккаунты, которых действие касается.
   string account_id = 2;
 }
 
 message UpdateUserMetadata {
-  // ID of the User that is being updated.
+  // ID of the User (the person, platform-wide) that is being updated.
   string user_id = 1;
 
-  // ID of the owning Account (denormalized for account-scoped operations
-  // listing — AccountService.ListAllOperations). Non-first field so the
-  // corelib resource_id extractor (first `_id`-suffix match) still picks
-  // `user_id`. Read by exact field name `account_id` by corelib. May be empty
-  // for account-less users (written as SQL NULL — excluded from the
-  // account-scoped list).
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // `DeleteUserMetadata`.
   string account_id = 2;
 }
 
 message BlockUserMetadata {
-  // ID of the User membership row that is being blocked.
+  // ID of the User (the person, platform-wide) that is being blocked.
+  // Блокировка — свойство личности: она закрывает вход на платформу во всех
+  // аккаунтах человека разом, членства остаются `ACTIVE`.
   string user_id = 1;
 
-  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
-  // Never empty here: a membership row always has an account, and the block is
-  // an act OF that account.
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // `DeleteUserMetadata`. Операция блокировки видна в ленте только этого
+  // аккаунта; распорядители остальных аккаунтов человека её в своей ленте не
+  // видят, хотя блокировка действует и у них.
   string account_id = 2;
 }
 
 message UnblockUserMetadata {
-  // ID of the User membership row that is being unblocked.
+  // ID of the User (the person, platform-wide) that is being unblocked.
   string user_id = 1;
 
-  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // `DeleteUserMetadata`.
   string account_id = 2;
 }
 
@@ -197,7 +222,8 @@ message ResetSecondFactorMetadata {
   // ID of the User whose second factor is being reset.
   string user_id = 1;
 
-  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // `DeleteUserMetadata`.
   string account_id = 2;
 }
 

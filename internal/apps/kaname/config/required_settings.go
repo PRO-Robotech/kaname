@@ -219,7 +219,7 @@ var RequiredSettings = []RequiredSetting{
 			"останавливается",
 		Refusal: "authn.trust-domain",
 	},
-	// ТРИ СОБСТВЕННЫХ ПОТОЛКА (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	// СОБСТВЕННЫЕ ПОТОЛКИ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
 	//
 	// Строки ПОРОЖДАЮТСЯ из таблицы величин (`own_ceilings.go`), а не выписываются
 	// здесь второй раз: ключ, переменная и объяснение живут в одном месте, и
@@ -232,7 +232,7 @@ var RequiredSettings = []RequiredSetting{
 	ownCeilingRequirement("iam.account", "1"),
 	ownCeilingRequirement("iam.user.credential", "2"),
 	ownCeilingRequirement("iam.serviceAccount.credential", "2"),
-	// ЧЕТВЁРТЫЙ ПОТОЛОК — ключи доступа (Ф7 Р8, Ф7-38; kacho#1273): та же форма.
+	// Потолок ключей доступа (Ф7 Р8, Ф7-38; kacho#1273): та же форма.
 	ownCeilingRequirement("iam.user.accessKey", "3"),
 
 	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины своего входа; строки

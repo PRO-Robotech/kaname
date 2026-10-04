@@ -1,0 +1,156 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+  sha256: 1eae5da7a25d3da5367b56254172ac10dc0ed1094d25242e98f54367f31c2b8c
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: d2f6f182fab9d9727a7fab35a82a798005eb0d89
+  content_commit: b0e6b4e57c68c60255d0c29ae8e19ff1f08aa110
+  branch: '133'
+  worktree: tmp/133-a2-f11
+  pull_request: null
+  task: PRO-Robotech/kaname#133
+  wave: PRO-Robotech/kaname#537
+  lines: 1919
+  round: 5
+  round_note: >-
+    Круг следует за четырьмя записями документа (круги 1…4); последняя — круг 4, APPROVED на
+    редакцию 5 (87d47598…). Тот вердикт на редакцию 6 не переносится. Посылка задания «прошлых
+    кругов нет» опровергнута: `ls docs/specs/reviews/assurance-level-is-declared-by-our-session/`
+    → 4 записи.
+  predecessor_record: >-
+    docs/specs/reviews/assurance-level-is-declared-by-our-session/87d47598d5b7fc860492709b7d2fdbca4fb851e0795cd07fce2c336aeb860a66.yaml
+  fingerprint_predicate: >-
+    git show b0e6b4e57c68c60255d0c29ae8e19ff1f08aa110:docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    | sha256sum
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+publication_mode: courier_of_agent_verdict
+scope:
+  reviewed: >-
+    Дифф 16b5cadea..b0e6b4e57 документа (171 вставка, 13 снятий): §3.4 Ф11-34…41, перепись
+    «сценарий → производитель», строки §5, §6 строки 1–2, §7 инв. 2, группа §8, §9 п.2 и п.7, §15.
+    Ф11-01…33 и Р1…Р5, Р7…Р10 не тронуты — сверено диффом.
+  document_edited_by_reviewer: false
+blocking:
+  - id: Б1
+    kind: PRODUCER
+    where: §3.4 «объём исхода (а)», строка З1; §15 «решения»
+    what: >-
+      Канал З1 назван «служба выводит доводы из своей записи сессии вопрошающего», и при этом
+      «край нового значения не несёт, правки фундамента нет». Сам документ (§1.7) называет этот
+      законный канал «по пересланной краем ссылке на сессию». Такой ссылки на границе службы нет:
+      доверенными фундамент объявляет только principal-* и token-acr; полоса нашей сессии края
+      пересылает личность и уровень. Контракт не называет, по чему служба находит запись сессии
+      ЭТОГО вопроса, — производитель «Тогда» Ф11-34/-38/-40 не определён.
+    predicate: >-
+      corelib v1.10.0 principalwire/keys.go:172-182 (Fundament: true — только principal-*,
+      token-acr); PRO-Robotech/kacho@f4c74ba1aa1 gateway/internal/middleware/auth_own_session.go:162-168;
+      kaname@b0e6b4e5 internal/service/authorize_service.go buildCondContext — из доверенного только acr.
+    fix: >-
+      Назвать носитель ссылки на сессию вопроса (что пересылает край и чем фундамент считает это
+      доверенным) либо иной законный канал — и привести §3.4/§15 в согласие с §1.7.
+  - id: Б2
+    kind: TWIN
+    where: §3.4, общее «Дано»; §7 инв. 2
+    what: >-
+      Во всех Ф11-34…41 у личности U одна живая сессия. Ни один сценарий не различает «запись
+      сессии этого вопроса» и «другую запись той же личности»: пробы зеленеют при любом выборе
+      записи. Нужна пара, отличающаяся ровно одним фактом — у U две живые сессии с разными
+      моментами уровня; исход определяется сессией, от имени которой задан вопрос.
+  - id: Б3
+    kind: CONSTRUCTIBILITY
+    where: Ф11-38 «Дано»; перепись производителей, строка 37/38; §9 п.7
+    what: >-
+      «Внутри живой сессии предъявлено утверждение ключа с проверкой пользователя» — производителя
+      нет и он не назван. Глагол повышения принимает password/totp/lookup_secret; одобренная Ф13
+      выносит предъявление ключа в повышении из объёма (к Ф7 #1273 и Ф12 #1281). Строка 37/38
+      переписи называет только момент уровня. Ф11-38 — положительный близнец Ф11-37, без него
+      отрицание неотличимо от «момент не двигается ничем»; п.7 DoD без него недостижим.
+    predicate: >-
+      internal/apps/kaname/api/humansession/step_up.go:10-12;
+      docs/engineering/acceptance/passwordless-login-with-access-key.md:996-999, :1397.
+    fix: >-
+      Назвать производителя (фаза/задача) в переписи и §5 либо взять близнецом предъявление,
+      которое продукт уже производит и которое по Р2 даёт «3».
+non_blocking:
+  - id: В1
+    where: Ф11-39, §7 инв. 2
+    what: >-
+      Пара 39/36 — оба отказа. Положительный близнец, отличающийся одним фактом: Ф11-34 с телом,
+      несущим заведомо слабые доводы, — исход true; ловит чтение тела в обе стороны.
+  - id: В2
+    where: §1.7 и §3.4
+    what: >-
+      Модель названа двумя координатами (internal/authzmodel/fga_model.fga и
+      proto/kaname/cloud/iam/v1/fga_model.fga); файлы сейчас побайтно равны (cmp), но одна
+      координата на предмет надёжнее.
+accepted_parts: >-
+  Условная форма (действует только при записанном исходе (а) в kaname#133) принята: выбор (а)/(б)
+  — внешнее условие, а не открытый вопрос приёмки. Объём (З1, З2 в нём; З3 вне), вырезание тела
+  вопроса, пары 34/35, 34/36, 40/41, 37 (как отрицание), счёт §5.2 и п.7 DoD как предикат —
+  годны.
+predicates_run:
+  - command: >-
+      sha256sum docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    got: >-
+      1eae5da7…c2b8c — равен заявленному; строк 1919
+  - command: >-
+      git grep -nE 'define [a-z_]+: .*with mfa_fresh' -- proto/kaname/cloud/iam/v1/fga_model.fga | wc -l
+    got: >-
+      2 (1108, 1109) — как в §3.4
+  - command: >-
+      gh issue view 133 -R PRO-Robotech/kaname --json comments -q '.comments|length'
+    got: >-
+      1 (OPEN) — выбор не записан, как в §3.4
+  - command: >-
+      grep -c '"compute_instance#[a-z]* with mfa_fresh"' internal/authzmap/conditioned_relation_has_producer_test.go
+    got: >-
+      2 — как в §9 п.7
+  - command: >-
+      awk '/^## §3 /,/^## §4 /' $F | grep -oE '\*\*Ф11-[0-9]+\*\*' | sort -u | wc -l
+    got: >-
+      37 — как в §5.2
+  - command: >-
+      go test -count=1 ./internal/service -run TestAuthorize_Check_StripsForgedSecurityContext
+    got: >-
+      ok — производитель «Тогда» Ф11-39 есть
+  - command: >-
+      go test -count=1 -v ./internal/authzmap -run 'TestConditionedRelationHasAProducer$'
+    got: >-
+      PASS, «1428 lines … 2 `with` clause(s) attributed»
+  - command: >-
+      sed -n 222,242p internal/apps/kaname/seed/bootstrap_admin.go
+    got: >-
+      строка fga_outbox `fga.tuple.write` {object, relation, user} — форма посева общего «Дано» подтверждена
+constructibility: >-
+  Посева на базе не было: стенда в задании нет — «не выполнилось». Из трёх видов «Дано»: факт —
+  названная фикстура (строка журнала, форма подтверждена кодом); сессия «3»/«2» ключом —
+  производитель заказан (Ф13), назван; предъявление ключа внутри сессии (Ф11-38) — производителя
+  нет (Б3).
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 1eae5da7a25d3da5367b56254172ac10dc0ed1094d25242e98f54367f31c2b8c
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Событие не создавалось; для CHANGES_REQUESTED санкции оно не выдаёт и не отзывает.
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  personal_review_by_publishing_actor_claimed: false

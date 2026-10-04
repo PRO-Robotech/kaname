@@ -1254,6 +1254,44 @@ seed_ceremony() {
 	return "$rc"
 }
 
+# ─── ПОСЕВ ХРАНИМЫХ ЗНАЧЕНИЙ ФОРМАТОВ A И B ─────────────────────────────────
+#
+# Отдельная подкоманда ПОСЛЕ `seed-login-lane`: лист края и полоса — её условие.
+# «Дано» позиций PWV-01 и PWV-02 (ID-PW-1 Д-01): человек заводится регистрацией
+# на полосе, а материал его строки способа входа замещается значением, которое
+# построила сторонняя библиотека, — глагола, кладущего формат A, у продукта нет
+# by construction. Запись — одним оператором через `psql` пода базы стенда;
+# оператор уходит вводом, а не аргументами. Разбор шагов и границ — шапка
+# `tests/authz-fixtures/seed_stored_value.py`. Исходы — те же три.
+seed_stored_value() {
+	need_tool python3; need_tool go
+	local f
+	for f in edge.crt edge.key ca.crt; do
+		[ -s "$EDGE_DIR/$f" ] || { unmet "листа края нет в $EDGE_DIR — сначала seed-login-lane"; exit "$RC_UNMET"; }
+	done
+	local pgpod lane
+	pgpod="$("${KCTL[@]}" -n "$NS" get pod -l "app=$RELEASE-postgres" \
+		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+	[ -n "$pgpod" ] || { unmet "пода базы нет — материал положить некуда"; exit "$RC_UNMET"; }
+	if [ -f "$LANE_FORWARD_PID" ] && kill -0 "$(cat "$LANE_FORWARD_PID")" 2>/dev/null; then
+		lane="$(forward_port_of "$LANE_FORWARD_LOG" \
+			"$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+				-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null)")"
+	fi
+	if [ -n "${lane:-}" ]; then
+		LANE_URL="https://127.0.0.1:$lane"
+		say "стенд: полоса входа — живая переадресация посева полосы, $LANE_URL"
+	else
+		start_lane_forward
+	fi
+	local rc=0
+	python3 "$ROOT/tests/authz-fixtures/seed_stored_value.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" \
+		--store-exec "kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname" \
+		|| rc=$?
+	return "$rc"
+}
+
 down() {
 	stop_lane_forward
 	stop_forwards
@@ -1305,12 +1343,16 @@ case "${1:-}" in
 		need_tool kubectl
 		seed_ceremony
 		;;
+	seed-stored-value)
+		need_tool kubectl
+		seed_stored_value
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|seed-stored-value|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac
