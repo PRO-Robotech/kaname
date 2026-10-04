@@ -1,0 +1,122 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: 6ac82b2a3da008cbca25340efe1b413de4fe46a4bca066c5d3511872cabf041a
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (четыре) не
+    трогаются — редакция 6 получает соседнюю запись по своему отпечатку.
+  base_commit: d2f6f182f
+  base_note: >-
+    Ветка 213 — от origin/537 d2f6f182f плюс слияние origin/536 3ccf87458; редакция 5 (2e441e45…)
+    на d59487ada — предшественник по содержимому.
+  content_commit: d17b4831a4e6ef83bd11eb6cb9d4857a42d223d4
+  branch: '213'
+  task: PRO-Robotech/kacho#1271
+  edition_task: PRO-Robotech/kacho#2698
+  edition_tasks_also: [PRO-Robotech/kaname#213]
+  lines: 1795
+  round: 5
+  predecessor_record: docs/specs/reviews/recovery-of-access/2e441e45ba4adae493d0e3263f629d6b6e29669c9562bb724c70f8e1438de341.yaml
+  predecessor_note: >-
+    Круг 4 одобрил редакцию 5 (2e441e45…). Вердикт на редакцию 6 не переносится (change-graph.md
+    §2). Задание называло «прошлых кругов — нет»: опровергнуто каталогом — записей четыре, круг
+    этот пятый.
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в копии ветки 213 @ d17b4831a
+    → 6ac82b2a…; git rev-parse origin/213 → d17b4831a (та же голова); wc -l → 1795;
+    git show d59487ada:<путь> | sha256sum → 2e441e45… (предшественник); git diff d59487ada HEAD
+    -- <путь> → 233+/11-.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующий один (COVERAGE). Санкции на код Ф5-29 по этой редакции нет.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kacho#1271 (задача subject.task) с полями role, verdict, subject,
+      subject_revision d17b4831a4e6ef83bd11eb6cb9d4857a42d223d4, subject_sha256 дословно; блок
+      `event` дописывается отдельным коммитом поверх этой записи.
+
+blocking:
+  - kind: COVERAGE
+    place: §4.2, строка «завершение у личности в состоянии членства PENDING … без строки» (новая в ред. 6)
+    claim: >-
+      Граница обоснована неверным фактом о дереве и принципом, который дисквалифицирует сам Ф5-29.
+      (1) «Сессию выдают только действующей (Ф1-05, Ф1-59)» — дерево выдаёт сессию и PENDING:
+      internal/domain/user.go:69 MaySignInToOwnLane → ACTIVE || PENDING; login.go:316–319
+      (kaname#456, положение подтверждения); verification.go:496 разбирает сессию PENDING.
+      (2) «Посев состояния, которого продукт не производит, сценарием не является» — «Дано» N/NB
+      Ф5-29 (подтверждённый адрес без строки «пароль») в дереве тоже не производится: единственный
+      писатель отметки — MarkEmailVerified (verification.go:461) после разбора сессии; сессии
+      выдают login.go:551 (нужен пароль), register.go:227 (строку заводит), recovery_complete.go:309
+      (без строки откатывается); удаления строк способа нет. Производитель этого состояния — Ф13
+      (не посажена), что документ не называет.
+    fix: >-
+      Обосновать PENDING верным фактом: отметка и активация приглашения — одна транзакция
+      (verification.go:461, 496–507; отказ активации откатывает отметку) — PENDING с подтверждённым
+      адресом не фиксируется. В Р5/§5.5/§7 назвать производителя состояния «Дано» Ф5-29 — Ф13
+      (вход только ключом), сегодня только посев; принцип §4.2 привести к этому различию.
+
+non_blocking:
+  - kind: PRODUCER
+    text: >-
+      Д16: правка строки Ф13 Р12 п. 3 (атрибуция PWV-10) названа «в её доме», но без носителя —
+      назвать задачу.
+  - kind: FORMAT
+    text: >-
+      §7 «Сценариев 29» считает метки с снятым Ф5-23; живых 28. Счёт тот же, что в ред. 5, —
+      назвать единицу словами рядом с числом.
+
+measured:
+  census_5_5: >-
+    Все семь предикатов §5.5 на 8a84dcff6 повторены: :264, 2, :1051, 0, 0, 1, users без таблицы
+    способов, :106/:315, :222, PRIMARY KEY (user_id, kind) :132, :237, verification.go:461,
+    PWV-10 :1303 — совпали; git diff --stat 8a84dcff6 HEAD по файлам §5.5 → пусто.
+  seed_and_twin: >-
+    Временная проба в пакете humansession (удалена; git status --porcelain → пусто): N (h.person с
+    пустым паролем) → завершение store unavailable, повтор снова store unavailable, store-failed=2
+    (код годен — красное §9 подтверждено); NB → то же; близнец W → nil, повтор
+    authentication failed, issued=1 (Ф5-03); близнец WB → authentication failed, blocked=1
+    (Ф5-17). TestRecovery_F5_03_ и TestRecovery_F5_17_ PASS. Посеяно 4 из 4, «не выполнилось» 0.
+  counts: >-
+    awk §6/§7 → 29 · 29 меток (Ф5-23 снят); Ф13 на origin/536 → 5fe6cca1…, §0.2 и Р12 п. 3
+    дословно; git grep -l 2698 origin/536 -- docs/engineering/acceptance → 4.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Событие публикует курьер. Тело: acceptance-reviewer · CHANGES_REQUESTED · sha256
+    6ac82b2a3da008cbca25340efe1b413de4fe46a4bca066c5d3511872cabf041a
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes
