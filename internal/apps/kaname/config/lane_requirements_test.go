@@ -148,6 +148,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.Registration.AdmissionsPerWindow = nil
 	case "срок кода восстановления доступа объявлен":
 		broken.AuthN.Login.RecoveryCodeTTL = 0
+	case "почтовый узел объявлен: адрес узла и адрес отправителя":
+		broken.InviteMail = config.InviteMailConfig{}
 	case "пять величин подтверждения адреса объявлены: срок и предел попыток кода, промежуток, число и окно писем":
 		broken.AuthN.Login.VerificationCodeTTL = 0
 	case "сроки церемонии объявлены в пределах потолков фундамента: срок кода и срок семейства":
