@@ -89,7 +89,11 @@ Coverage (техники: классы эквивалентности резул
                                             непусто, проверка пользователя
                                             «preferred», обнаруживаемое «required»,
                                             аттестация «none»), запрос свойств
-                                            удостоверения, срок меньше окна свежести
+                                            удостоверения, срок меньше окна свежести;
+                                            Ф13-33 (I): рукоятка `user.id` — 64 байта,
+                                            не несёт ни `id`, ни адреса, повторная
+                                            церемония того же человека даёт ту же
+                                            (у человека B — своя, AK05B-BEGIN)
   IAM-ACCESSKEY-OK-REGISTER-LIST-ASSERT   — Ф7-01: результат церемонии → операция →
                                             ключ `ak-…` в перечне с именем, равным `id`
                                             (Ф7-46, пустое имя), описанием и моментом;
@@ -1068,6 +1072,66 @@ def _single_refusal(label, *, record=False):
     return out
 
 
+# Рукоятка церемонии — `user.id` испытания регистрации (приёмка
+# `passwordless-login-with-access-key.md`, Р3, Ф13-33 (I)): 64 случайных байта
+# человека, одни у всех его церемоний, не равные его `id` и не несущие ни `id`,
+# ни адреса. Вхождение судится без учёта регистра — так же, как его судит
+# замок производителя. Разбор — свой, без библиотеки песочницы: функция одна,
+# и её же исполняет проба способности упасть `scripts/ceremony_handle_probe_test.py`.
+_HANDLE_BYTES = 64
+_HANDLE_FACTS_JS = (
+    "const _akHandleFacts = (s, id, email) => {"
+    " const AB = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';"
+    " const t = typeof s === 'string' ? s : '';"
+    " const canonical = t.length > 0 && t.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(t);"
+    " const b = []; let acc = 0; let bits = 0;"
+    " for (const c of t.split('=').join('')) { const v = AB.indexOf(c); if (v < 0) { break; }"
+    " acc = ((acc << 6) | v) & 0xffffff; bits += 6; if (bits >= 8) { bits -= 8; b.push((acc >> bits) & 255); } }"
+    " const low = b.map((x) => (x >= 65 && x <= 90 ? x + 32 : x));"
+    " const has = (v) => { const e = unescape(encodeURIComponent(String(v || '').toLowerCase()));"
+    " const n = []; for (let i = 0; i < e.length; i++) { n.push(e.charCodeAt(i)); }"
+    " if (n.length === 0) { return false; }"
+    " for (let i = 0; i + n.length <= low.length; i++) { let k = 0; while (k < n.length && low[i + k] === n[k]) { k++; } if (k === n.length) { return true; } }"
+    " return false; };"
+    " return { canonical: canonical, bytes: b.length, zero: b.length > 0 && b.every((x) => x === 0),"
+    " carriesId: has(id), carriesEmail: has(email) }; };"
+)
+
+
+def _handle_is_its_own(label, p):
+    """Рукоятка человека `p` в испытании: 64 байта, не нули, без его `id` и адреса.
+
+    `id` и адрес обязаны быть известны набору — иначе «не несёт» выполнялось бы
+    на пустом образце; поэтому их наличие стоит в том же утверждении."""
+    return [
+        _HANDLE_FACTS_JS,
+        f"const _akHf = _akHandleFacts(__j.user && __j.user.id, {_env(p + 'UserId')}, {_env(p + 'Email')});",
+        f"pm.test({js_str(label + f': рукоятка человека — {_HANDLE_BYTES} байта в канонической записи, не нули')}, () => "
+        f"pm.expect([_akHf.canonical, _akHf.bytes, _akHf.zero]).to.eql([true, {_HANDLE_BYTES}, false]));",
+        f"pm.test({js_str(label + ': рукоятка не несёт ни id, ни адреса человека')}, () => "
+        f"pm.expect([!!{_env(p + 'UserId')}, !!{_env(p + 'Email')}, _akHf.carriesId, _akHf.carriesEmail])"
+        ".to.eql([true, true, false, false]));",
+    ]
+
+
+def _handle_same_as(label, p, stored):
+    """Рукоятка этой церемонии равна сохранённой рукоятке `stored`."""
+    return [
+        f"pm.test({js_str(label + ': две церемонии одного человека — одна рукоятка')}, () => "
+        f"pm.expect([!!{_env(stored)}, !!__j.user && __j.user.id === {_env(stored)}]).to.eql([true, true]));",
+    ]
+
+
+def _handle_differs_from(label, p, other):
+    """Рукоятка человека `p` — своя: годной формы и не равна рукоятке `other`."""
+    return [
+        *_handle_is_its_own(label, p),
+        f"pm.test({js_str(label + ': у двух разных людей рукоятки разные')}, () => "
+        f"pm.expect([!!{_env(other)}, !!__j.user && typeof __j.user.id === 'string' && __j.user.id !== {_env(other)}])"
+        ".to.eql([true, true]));",
+    ]
+
+
 def _challenge_named(label):
     """Шесть величин контракта в испытании регистрации (Ф7-40) и перепись пары.
 
@@ -1089,8 +1153,9 @@ def _challenge_named(label):
         "pm.expect(_akSix.filter((x) => !x[1]).map((x) => x[0])).to.eql([]));",
         f"pm.test({js_str(label + ': запрос свойств удостоверения — отдельно от шести')}, () => "
         "pm.expect(!!__j.extensions && __j.extensions.credProps === true).to.eql(true));",
-        f"pm.test({js_str(label + ': человек глазами аутентификатора — платформенный id байтами')}, () => "
-        f"pm.expect(!!__j.user && __j.user.id === CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse({_env('akAUserId')} || ''))).to.eql(true));",
+        *_handle_is_its_own(label, _A),
+        f"pm.environment.unset({js_str(_A + 'Handle')});",
+        f"if (_akHf.canonical && _akHf.bytes === {_HANDLE_BYTES}) {{ {_set(_A + 'Handle', '__j.user.id')} }}",
         f"pm.test({js_str(label + ': срок испытания в будущем и короче окна свежести')}, () => {{",
         "  const __exp = Date.parse(__j.expiresAt || ''); const __now = Date.now();",
         f"  pm.expect([__exp > __now, __exp - __now < {_FRESHNESS_WINDOW_S * 1000}]).to.eql([true, true]); }});",
@@ -1110,6 +1175,8 @@ CASES.append(Case(
         *_human(_A, "ak-a"),
         _list(_A, "ak40-list-empty", count=0),
         _begin_registration(_A, "ak40-begin", "40", tests=_challenge_named("AK40-BEGIN")),
+        _begin_registration(_A, "ak40-begin-again", "40r",
+                            tests=_handle_same_as("AK40-BEGIN-AGAIN", _A, _A + "Handle")),
     ],
 ))
 
@@ -1264,7 +1331,8 @@ CASES.append(Case(
         *_register_ok(_B, "akb", "KB", key=_MAT_SECOND),
         # Ф7-05: идентификатор удостоверения K1 уже принят; ветвь б — другой человек,
         # ветвь а — владелец. Отказы равны, ни у кого ключ не переназначен.
-        _begin_registration(_B, "ak05b-begin", "05b"),
+        _begin_registration(_B, "ak05b-begin", "05b",
+                            tests=_handle_differs_from("AK05B-BEGIN", _B, _A + "Handle")),
         _finish_registration(_B, "ak05b-finish", slot="K1", ch="akRegCh05b", fresh_cred=False,
                              tests=_registration_accepted("D05b", "AK05B-FINISH")),
         _await_op(_B, "ak05b-op", "D05b", ok=False, error_into="akDupErrB"),
