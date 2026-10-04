@@ -35,7 +35,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/corelib` | `v1.10.1-0.20261003193218-f8aa88d1998d` | `LICENSE` |
+| `github.com/PRO-Robotech/corelib` | `v1.10.1-0.20261004054822-21c784a9b1dc` | `LICENSE` |
 | `github.com/dgraph-io/ristretto/v2` | `v2.4.2` | `LICENSE` |
 | `github.com/go-jose/go-jose/v3` | `v3.0.5` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
