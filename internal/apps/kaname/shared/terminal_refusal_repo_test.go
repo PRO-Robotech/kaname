@@ -22,6 +22,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -198,4 +199,57 @@ func TestTerminalRefusalRepoDoesNotInventAnExecutionClaim(t *testing.T) {
 	})
 	assert.False(t, ok,
 		"надстройка не вправе объявлять апгрейд, которого у обёрнутого нет")
+}
+
+// recordingTxRepo — подставной репозиторий с записью в транзакции вызывающего:
+// запоминает статус транзакционной записи ошибки и успеха, текста не трогает.
+type recordingTxRepo struct {
+	recordingRepo
+	gotTxError   *rpcstatus.Status
+	createdDone  int
+	txErrorCalls int
+}
+
+func (r *recordingTxRepo) CreatePendingTx(context.Context, pgx.Tx, operations.Operation, operations.Principal) error {
+	return nil
+}
+
+func (r *recordingTxRepo) CreateDoneTx(context.Context, pgx.Tx, operations.Operation, operations.Principal, *anypb.Any) error {
+	r.createdDone++
+	return nil
+}
+
+func (r *recordingTxRepo) MarkDoneTx(context.Context, pgx.Tx, string, *anypb.Any) error { return nil }
+
+func (r *recordingTxRepo) MarkErrorTx(_ context.Context, _ pgx.Tx, _ string, st *rpcstatus.Status) error {
+	r.txErrorCalls++
+	r.gotTxError = st
+	return nil
+}
+
+// TestTerminalRefusalTxRepo_RewritesTheTransactionalErrorToo — надстройка над
+// репозиторием с записью в транзакции вызывающего подменяет текст синхронной
+// полосы и там (KN-RTX-01), а успех доводит до репозитория нетронутым.
+// Близнец — чужой код с тем же текстом проходит как есть (KN-RTX-03).
+func TestTerminalRefusalTxRepo_RewritesTheTransactionalErrorToo(t *testing.T) {
+	rec := &recordingTxRepo{}
+	wrapped := shared.NewTerminalRefusalTxRepo(rec)
+
+	require.NoError(t, wrapped.MarkErrorTx(context.Background(), nil, "opr-1",
+		grpcstatus.New(codes.Aborted, iamerr.SerializationConflictSyncText).Proto()))
+	require.Equal(t, 1, rec.txErrorCalls)
+	assert.Equal(t, iamerr.SerializationConflictTerminalText, rec.gotTxError.GetMessage())
+
+	require.NoError(t, wrapped.MarkErrorTx(context.Background(), nil, "opr-2",
+		grpcstatus.New(codes.FailedPrecondition, iamerr.SerializationConflictSyncText).Proto()))
+	assert.Equal(t, iamerr.SerializationConflictSyncText, rec.gotTxError.GetMessage(),
+		"чужой код с тем же текстом обязан пройти нетронутым")
+
+	require.NoError(t, wrapped.CreateDoneTx(context.Background(), nil, operations.Operation{}, operations.Principal{}, nil))
+	assert.Equal(t, 1, rec.createdDone, "успех обязан дойти до репозитория")
+
+	// Пуловая запись идёт той же надстройкой.
+	require.NoError(t, wrapped.MarkError(context.Background(), "opr-3",
+		grpcstatus.New(codes.Aborted, iamerr.SerializationConflictSyncText).Proto()))
+	assert.Equal(t, iamerr.SerializationConflictTerminalText, rec.gotError.GetMessage())
 }

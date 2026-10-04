@@ -68,12 +68,32 @@ func TestNTF1F01_ApplierWritesTheFeedReaderTuple(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("перепись: %s\nвызовы: %s", census, strings.Join(w.calls, " · "))
 
-	require.Equal(t, []string{"tuple service:notify reader notification_feed:probe"}, tupleCalls(w.calls))
+	// Р5: строка модуля заводит читателя ленты и — вместе с записью выдачи
+	// пространства — её проекцию `sender`.
+	require.Equal(t, []string{
+		"tuple service:notify reader notification_feed:probe",
+		"tuple service:probe sender notification_namespace:probe",
+	}, tupleCalls(w.calls))
+	require.Contains(t, w.calls, "grant probe", "запись выдачи пространства не заведена")
 	require.Equal(t, 1, census.Seeding, "манифест со строкой notifications — предмет посева")
 	require.Len(t, census.Reports, 1)
-	require.Equal(t, 1, census.Reports[0].DeclaredServiceTuples)
-	require.Equal(t, 1, census.Reports[0].WrittenServiceTuples)
-	require.Contains(t, census.Reports[0].String(), "служебных кортежей 1/1")
+	require.Equal(t, 2, census.Reports[0].DeclaredServiceTuples)
+	require.Equal(t, 2, census.Reports[0].WrittenServiceTuples)
+	require.Contains(t, census.Reports[0].String(), "служебных кортежей 2/2")
+}
+
+// TestNTF1F08_ApplierWritesNoSenderForAnExistingGrant — запись выдачи уже есть
+// (в том числе с надгробием): посев её не трогает и проекцию `sender` не
+// пишет — отозванное перезапуском не оживает. Близнец — F01 выше.
+func TestNTF1F08_ApplierWritesNoSenderForAnExistingGrant(t *testing.T) {
+	w := &recordingWriter{changed: false}
+	census, err := moduleseed.NewApplier(&recordingTx{w: w}).Apply(context.Background(), nil,
+		[]*manifest.Manifest{load(t, probeWithNotifications)})
+	require.NoError(t, err)
+	t.Logf("перепись: %s\nвызовы: %s", census, strings.Join(w.calls, " · "))
+	require.Contains(t, w.calls, "grant probe")
+	require.Equal(t, []string{"tuple service:notify reader notification_feed:probe"}, tupleCalls(w.calls),
+		"проекция sender написана поверх существующей записи выдачи")
 }
 
 // TestNTF1F02_ApplierRefusesAForeignNamespace — `namespace: vpc` у модуля
@@ -122,7 +142,12 @@ func TestUK1_ServiceTupleSubjectComesFromTheFoundation(t *testing.T) {
 	require.NoError(t, err)
 	want := authz.ServiceSubject(grpcsrv.ServiceName("notify"))
 	require.NotEmpty(t, want, "производитель фундамента не дал строки — сравнивать не с чем")
-	require.Equal(t, []string{"tuple " + want + " reader notification_feed:probe"}, tupleCalls(w.calls))
+	sender := authz.ServiceSubject(grpcsrv.ServiceName("probe"))
+	require.NotEmpty(t, sender, "производитель фундамента не дал строки — сравнивать не с чем")
+	require.Equal(t, []string{
+		"tuple " + want + " reader notification_feed:probe",
+		"tuple " + sender + " sender notification_namespace:probe",
+	}, tupleCalls(w.calls))
 }
 
 // TestUK1_ServiceTuplePathNeverCallsFGASubjectRef — путь служебного кортежа —

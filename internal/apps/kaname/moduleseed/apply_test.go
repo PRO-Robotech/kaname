@@ -96,6 +96,10 @@ func (w *recordingWriter) WriteServiceTuple(_ context.Context, t moduleseed.Serv
 	return w.record("tuple " + t.String())
 }
 
+func (w *recordingWriter) EnsureNotificationGrant(_ context.Context, namespace string) (bool, error) {
+	return w.record("grant " + namespace)
+}
+
 // recordingTx — исполнитель транзакций над одним записывающим портом. Считает
 // транзакции: их обязано быть по одной на манифест.
 type recordingTx struct {

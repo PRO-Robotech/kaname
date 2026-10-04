@@ -364,3 +364,18 @@ func build() *runtime.ServeMux {
 		}
 	})
 }
+
+// TestContractRoutesKnowsARoutelessService — предпосылка исключения гейта 2:
+// служба без единого HTTP-маршрута контракта распознаётся как известная и
+// пустая, а не как неизвестная; близнец — внутренняя служба с маршрутами.
+func TestContractRoutesKnowsARoutelessService(t *testing.T) {
+	declared, _ := contractRoutes()
+	routes, known := declared["InternalNotificationGrantService"]
+	if !known || len(routes) != 0 {
+		t.Fatalf("InternalNotificationGrantService: известна=%v, маршрутов %d — ожидалась известная служба без маршрутов",
+			known, len(routes))
+	}
+	if twin := declared["InternalClusterService"]; len(twin) == 0 {
+		t.Fatal("близнец: у InternalClusterService маршрутов контракта ноль — разбор аннотаций слеп")
+	}
+}

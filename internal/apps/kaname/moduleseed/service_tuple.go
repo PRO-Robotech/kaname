@@ -34,6 +34,10 @@ const (
 	relationFeedReader = "reader"
 	// typeNotificationFeed — лента уведомлений пространства.
 	typeNotificationFeed = "notification_feed"
+	// relationNamespaceSender — право слать письма от имени пространства.
+	relationNamespaceSender = "sender"
+	// typeNotificationNamespace — пространство уведомлений модуля.
+	typeNotificationNamespace = "notification_namespace"
 )
 
 // ErrServiceName — имя службы вне формы DNS label: служебного субъекта у него
@@ -84,4 +88,19 @@ func feedReaderTuple(reader, feed string) (ServiceTuple, error) {
 		return ServiceTuple{}, errors.New("moduleseed: лента уведомлений не названа")
 	}
 	return ServiceTuple{user: user, relation: relationFeedReader, objectType: typeNotificationFeed, objectID: feed}, nil
+}
+
+// SenderTuple — `service:<пространство> sender notification_namespace:<пространство>`:
+// проекция записи выдачи пространства (приёмка NTF-1 Р5). Пространство — имя
+// модуля, и служебный субъект модуля назван тем же именем.
+//
+// Её пишет посев — только для вставленной записи выдачи — и снимает и
+// возвращает `Revoke`/`Restore` пространства той же транзакцией, что переход
+// записи. Имя вне формы службы — отказ.
+func SenderTuple(namespace string) (ServiceTuple, error) {
+	user := authz.ServiceSubject(grpcsrv.ServiceName(namespace))
+	if user == "" {
+		return ServiceTuple{}, fmt.Errorf("%w: пространство %q", ErrServiceName, namespace)
+	}
+	return ServiceTuple{user: user, relation: relationNamespaceSender, objectType: typeNotificationNamespace, objectID: namespace}, nil
 }

@@ -424,6 +424,19 @@ func (w moduleSeedWriter) WriteServiceTuple(ctx context.Context, t moduleseed.Se
 	return tag.RowsAffected() > 0, nil
 }
 
+// EnsureNotificationGrant — запись выдачи пространства уведомлений одним
+// оператором `INSERT … ON CONFLICT (namespace) DO NOTHING`: существующую запись
+// посев не трогает ни в одном поле (надгробие уважается, NTF1-F08).
+func (w moduleSeedWriter) EnsureNotificationGrant(ctx context.Context, namespace string) (bool, error) {
+	tag, err := w.tx.Exec(ctx, `
+		INSERT INTO kaname.notification_grants (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, namespace)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // subjectRef переводит получателя выдачи в пару, которой его адресует хранилище.
 func (w moduleSeedWriter) subjectRef(
 	ctx context.Context, subject moduleseed.Subject,

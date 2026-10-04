@@ -104,6 +104,13 @@ var unresolvedMetadata = []string{
 	// и пропускала себя целиком, поэтому самоистечение сработало МОЛЧА и
 	// пролежало непрочитанным (kaname#108).
 	"InviteUserMetadata",
+	// NotificationGrantMetadata — `InternalNotificationGrantService/{Revoke,
+	// Restore}` (NTF-1 Р5). Основание СИЛЬНЕЕ, чем у соседей: строка операции
+	// пишется сразу терминальной (`done=true`) В ТОЙ ЖЕ транзакции, что
+	// CAS-переход записи выдачи, — окна «строка есть, перехода нет» нет вовсе,
+	// даже на гибели процесса: либо коммитятся обе, либо ни одна. Сиротой ей
+	// стать не из чего.
+	"NotificationGrantMetadata",
 	"IssueSAKeyMetadata",
 	"IssueUserTokenMetadata",
 	"RemoveGroupMemberMetadata",

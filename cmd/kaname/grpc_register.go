@@ -142,6 +142,12 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.internalIAMHandler != nil {
 		iamv1.RegisterInternalIAMServiceServer(srv, svcs.internalIAMHandler)
 	}
+	// InternalNotificationGrantService (NTF-1 Р5) — ТОЛЬКО здесь: ни на
+	// публичном слушателе, ни REST-привязок (NTF1-C01, C02). Право `ResolveSend`
+	// решает обработчик (З18), `Revoke`/`Restore` — администратор кластера.
+	if svcs != nil && svcs.notificationGrantHandler != nil {
+		iamv1.RegisterInternalNotificationGrantServiceServer(srv, svcs.notificationGrantHandler)
+	}
 	// Служебных RPC администрирования хранилища отношений здесь больше нет: их
 	// предметом было чужое хранилище — его кортежи, его модель, его store id, — и
 	// вместе с ним снята вся служба.

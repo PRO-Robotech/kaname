@@ -197,7 +197,11 @@ type tupleCall struct{ user, relation, object string }
 // tupleRecorder — порт хранилища, записывающий служебные кортежи и молча
 // соглашающийся со всем остальным: предмет пробы — только строка
 // `notifications`, посев группы в ней не участвует.
-type tupleRecorder struct{ tuples []tupleCall }
+type tupleRecorder struct {
+	tuples []tupleCall
+	// grants — записи выдачи пространства, которые посев попросил завести.
+	grants []string
+}
 
 func (r *tupleRecorder) UpsertServiceAccount(context.Context, string, string, string) (bool, error) {
 	return true, nil
@@ -216,6 +220,11 @@ func (r *tupleRecorder) GrantRole(context.Context, moduleseed.Subject, string, s
 }
 func (r *tupleRecorder) WriteServiceTuple(_ context.Context, tu moduleseed.ServiceTuple) (bool, error) {
 	r.tuples = append(r.tuples, tupleCall{user: tu.User(), relation: tu.Relation(), object: tu.Object()})
+	return true, nil
+}
+
+func (r *tupleRecorder) EnsureNotificationGrant(_ context.Context, namespace string) (bool, error) {
+	r.grants = append(r.grants, namespace)
 	return true, nil
 }
 
@@ -261,6 +270,9 @@ func TestNTF1F21_AccessServiceNotificationsLine(t *testing.T) {
 			if tu.user == "service:kaname" || strings.HasPrefix(tu.object, "notification_namespace:") {
 				t.Fatalf("служба доступа получила служебного принципала либо пространство: %+v", tu)
 			}
+		}
+		if len(rec.grants) != 0 {
+			t.Fatalf("службе доступа заведена запись выдачи пространства: %v", rec.grants)
 		}
 	})
 

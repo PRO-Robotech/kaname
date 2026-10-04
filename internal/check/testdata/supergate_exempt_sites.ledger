@@ -37,7 +37,7 @@ site door internal/service.(*AuthorizeService).resolveRun isClusterAdmin 2 Д-4,
 site door internal/authzguard.(checkAdapter).Check SubjectIsClusterAdminPlainE 1 Д-6
 site door internal/authzguard.AllowsVerb SubjectIsClusterAdminPlainE 1 Д-7
 
-# ── fixed: тип объекта или вопроса закреплён самим use-case; 17 ────────────────
+# ── fixed: тип объекта или вопроса закреплён самим use-case; 18 ────────────────
 site fixed internal/apps/kaname/api/access_binding.requireGrantAuthority IsClusterAdminE 1 привязки
 site fixed internal/apps/kaname/api/access_binding.fgaHoldsAdminE IsClusterAdminE 1 привязки
 site fixed internal/apps/kaname/api/access_binding.(*ListUseCase).Execute SubjectIsClusterAdminPlainE 1 привязки
@@ -55,6 +55,7 @@ site fixed internal/apps/kaname/api/module.requireClusterSystemAdmin IsClusterAd
 site fixed internal/apps/kaname/api/cluster.requireClusterSystemAdmin RequireClusterAdmin 1 объект-cluster
 site fixed internal/apps/kaname/api/internal_iam.(*Handler).requireSystemAdmin RequireClusterAdmin 1 объект-cluster
 site fixed internal/apps/kaname/api/account.(*CreateAccountUseCase).Execute RequireClusterAdmin 1 идентификатор-аккаунта
+site fixed internal/apps/kaname/api/notificationgrant.(*TransitionUseCase).Execute RequireClusterAdmin 1 объект-cluster
 
 # ── definition: определение или обёртка — своего исхода не решают ────────────
 site definition internal/authzguard.IsClusterAdmin SubjectIsClusterAdmin 1

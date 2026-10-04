@@ -80,9 +80,11 @@ package shared
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/operations"
 
@@ -175,4 +177,44 @@ func terminalRefusalStatus(st *rpcstatus.Status) *rpcstatus.Status {
 		return st
 	}
 	return grpcstatus.New(codes.Aborted, iamerr.SerializationConflictTerminalText).Proto()
+}
+
+// TerminalRefusalTxRepo — та же надстройка над репозиторием, который пишет и в
+// транзакции ВЫЗЫВАЮЩЕГО (`operations.TxWriter`): операция, записанная той же
+// транзакцией, что мутация (NTF-1 Р5, Revoke/Restore выдачи уведомлений), не
+// обходит выбор текста отказа. Пуловая часть — [NewTerminalRefusalRepo]
+// целиком, транзакционная запись ошибки — та же подмена текста.
+type TerminalRefusalTxRepo struct {
+	operations.FullRepo
+	tx operations.TxWriter
+}
+
+// NewTerminalRefusalTxRepo оборачивает репозиторий с записью в транзакции
+// вызывающего.
+func NewTerminalRefusalTxRepo(inner operations.TxRepo) *TerminalRefusalTxRepo {
+	return &TerminalRefusalTxRepo{FullRepo: NewTerminalRefusalRepo(inner), tx: inner}
+}
+
+var _ operations.TxRepo = (*TerminalRefusalTxRepo)(nil)
+
+// CreatePendingTx — делегирование: текста отказа у незавершённой операции нет.
+func (r *TerminalRefusalTxRepo) CreatePendingTx(ctx context.Context, tx pgx.Tx, op operations.Operation, p operations.Principal) error {
+	return r.tx.CreatePendingTx(ctx, tx, op, p)
+}
+
+// CreateDoneTx — делегирование: успех текста отказа не несёт.
+func (r *TerminalRefusalTxRepo) CreateDoneTx(ctx context.Context, tx pgx.Tx, op operations.Operation,
+	p operations.Principal, response *anypb.Any) error {
+	return r.tx.CreateDoneTx(ctx, tx, op, p, response)
+}
+
+// MarkDoneTx — делегирование.
+func (r *TerminalRefusalTxRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id string, response *anypb.Any) error {
+	return r.tx.MarkDoneTx(ctx, tx, id, response)
+}
+
+// MarkErrorTx — терминальный отказ в транзакции вызывающего с той же подменой
+// текста синхронной полосы, что у [TerminalRefusalRepo.MarkError].
+func (r *TerminalRefusalTxRepo) MarkErrorTx(ctx context.Context, tx pgx.Tx, id string, st *rpcstatus.Status) error {
+	return r.tx.MarkErrorTx(ctx, tx, id, terminalRefusalStatus(st))
 }

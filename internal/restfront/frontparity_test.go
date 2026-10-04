@@ -416,6 +416,18 @@ func TestRESTAndGRPCServiceSetsMatchBothWays(t *testing.T) {
 		{"внутренний", "registerInternalServices", "registerInternalRESTServices"},
 	}
 
+	// Служба, контракт которой НЕ объявляет ни одного HTTP-маршрута, на
+	// REST-фронте стоять НЕ обязана: «маршруты, объявленные контрактом и
+	// недосягаемые по HTTP» у неё пусты. Приёмка NTF-1 (NTF1-C01, C02) требует
+	// этого для `InternalNotificationGrantService`: достижима только прямым gRPC
+	// по mTLS. Регистрация такой службы на фронте (маршруты генератора по
+	// умолчанию) этим гейтом не судится — у трёх служб она есть и сегодня.
+	declared, _ := contractRoutes()
+	routeless := func(svc string) bool {
+		routes, known := declared[svc]
+		return known && len(routes) == 0
+	}
+
 	inspected := 0
 	for _, p := range pairs {
 		grpcSvcs, foundGRPC, err := registrationsIn(cmdDir, p.grpcFunc, "ServiceServer")
@@ -438,10 +450,16 @@ func TestRESTAndGRPCServiceSetsMatchBothWays(t *testing.T) {
 		}
 
 		var onlyGRPC, onlyREST []string
+		routelessOffFront := 0
 		for _, svc := range sortedKeys(grpcSvcs) {
-			if _, ok := restSvcs[svc]; !ok {
-				onlyGRPC = append(onlyGRPC, svc)
+			if _, onFront := restSvcs[svc]; onFront {
+				continue
 			}
+			if routeless(svc) {
+				routelessOffFront++
+				continue
+			}
+			onlyGRPC = append(onlyGRPC, svc)
 		}
 		for _, svc := range sortedKeys(restSvcs) {
 			if _, ok := grpcSvcs[svc]; !ok {
@@ -451,8 +469,8 @@ func TestRESTAndGRPCServiceSetsMatchBothWays(t *testing.T) {
 		inspected += len(grpcSvcs) + len(restSvcs)
 
 		t.Logf("осмотрено: %s слушатель — служб %d, его REST-фронт — служб %d, "+
-			"только на слушателе %d, только на фронте %d",
-			p.title, len(grpcSvcs), len(restSvcs), len(onlyGRPC), len(onlyREST))
+			"только на слушателе %d (из них без маршрутов контракта, вне вердикта, %d), только на фронте %d",
+			p.title, len(grpcSvcs), len(restSvcs), len(onlyGRPC)+routelessOffFront, routelessOffFront, len(onlyREST))
 
 		if len(grpcSvcs) == 0 {
 			t.Fatalf("%s слушатель: служб ноль — обход пуст, вердикт беспредметен", p.title)
