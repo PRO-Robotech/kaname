@@ -420,11 +420,17 @@ func TestF13_08_ChallengeIsOneTime(t *testing.T) {
 
 // postStatus — POST без require: безопасен из горутины.
 func postStatus(h *sessionLane, path string, body any, cookies ...*http.Cookie) int {
+	return postStatusVia(h.lane, h.c, path, body, cookies...)
+}
+
+// postStatusVia — POST слушателю без require: код ответа либо 0 при отказе
+// транспорта; безопасен из горутины (require.FailNow из неё запрещён).
+func postStatusVia(l *lane, c *http.Client, path string, body any, cookies ...*http.Cookie) int {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return 0
 	}
-	req, err := http.NewRequest(http.MethodPost, h.lane.srv.URL+path, strings.NewReader(string(raw)))
+	req, err := http.NewRequest(http.MethodPost, l.srv.URL+path, strings.NewReader(string(raw)))
 	if err != nil {
 		return 0
 	}
@@ -435,7 +441,7 @@ func postStatus(h *sessionLane, path string, body any, cookies ...*http.Cookie) 
 	for _, ck := range cookies {
 		req.AddCookie(ck)
 	}
-	resp, err := h.c.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return 0
 	}
