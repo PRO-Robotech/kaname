@@ -346,13 +346,16 @@ func (u *IssueRegistryTokenUseCase) WithBasicCredentialResolver(r basicCredentia
 func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueInput) (IssueOutput, error) {
 	p, perr := credsecret.Parse(in.Password)
 	if perr != nil || p.CredentialID != in.Username {
-		return IssueOutput{}, ErrUnauthenticated
+		// Предъявленное не называет удостоверения, которое называет имя: отказ
+		// формы, решённый до авторитета, — той же причиной словаря, что отказ
+		// формы у авторитета (kaname#390).
+		return IssueOutput{}, u.refuseBasic(domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
 	}
 
 	cred, rerr := u.basicResolver.ResolveBasic(ctx, in.Password)
 	if rerr != nil {
 		if errors.Is(rerr, domain.ErrBasicCredentialRefused) {
-			return IssueOutput{}, ErrUnauthenticated
+			return IssueOutput{}, u.refuseBasic(rerr)
 		}
 		// Недоступность авторитета — НЕ отказ в удостоверении: предъявитель ни
 		// при чём, и повтор осмыслен.
@@ -361,7 +364,8 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 	if cred.PrincipalType != "service_account" || cred.PrincipalID == "" {
 		// Докерная полоса выдаёт удостоверение реестра машинному принципалу.
 		// Вид, не принимаемый ЭТОЙ поверхностью, отвергается ТЕМ ЖЕ отказом.
-		return IssueOutput{}, ErrUnauthenticated
+		u.observeKind(OutcomeBasicPrincipalKindRefused)
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrUnauthenticated, ErrBasicPrincipalKindNotAccepted)
 	}
 
 	// Адресат решается ПОСЛЕ проверки: перечень адресатов — сведение о посадке,
@@ -387,6 +391,15 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 	// не обслужившей ни одного входа вообще.
 	u.observeKind(OutcomeBasicAccepted)
 	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: u.now().Unix()}, nil
+}
+
+// refuseBasic — отказ базового секрета: клетка переписи по причине и ошибка,
+// которая наружу есть [ErrUnauthenticated], а внутрь несёт причину — по ней
+// журналит обработчик (kaname#390). Текст причины на провод не уходит:
+// обработчик отвечает фиксированным телом.
+func (u *IssueRegistryTokenUseCase) refuseBasic(refusal error) error {
+	u.observeKind(basicRefusalOutcome(refusal))
+	return fmt.Errorf("%w: %w", ErrUnauthenticated, refusal)
 }
 
 // executeKeyMaterialInWindow — ПРЕЖНЯЯ полоса, доступная только через открытое

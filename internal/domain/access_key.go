@@ -28,6 +28,7 @@ package domain
 // by construction (Р4).
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"time"
@@ -107,8 +108,9 @@ type AccessKey struct {
 	Algorithm int64
 	// SignCount — сохранённое значение счётчика подписи (Р6).
 	SignCount uint32
-	// UserHandle — рукоятка `user.id` церемонии; у ключей Ф7 — платформенный
-	// `id` человека как байты (Ф13 Р3). Пустая — источник переноса её не нёс.
+	// UserHandle — рукоятка `user.id`, которую церемония регистрации положила
+	// в ЭТОТ ключ: байты `CeremonyHandle` человека (64 случайных байта, Ф13
+	// Р3). С ней сверяется каждое утверждение ключа (Ф13-06 «з»).
 	UserHandle  []byte
 	Name        AccessKeyName
 	Description AccessKeyDescription
@@ -134,6 +136,13 @@ func (k AccessKey) Validate() error {
 	}
 	if k.Algorithm == 0 {
 		return fmt.Errorf("Illegal argument algorithm: required")
+	}
+	// ЗАМОК на рукоятку там, где строка судит саму себя: значение, несущее
+	// платформенный `id`, уехало бы в чужой аутентификатор без способа его
+	// оттуда отозвать (Ф13 Р3). Адрес судит производитель
+	// (`CeremonyHandle.CarriesNoNameOf`) — его в строке нет.
+	if len(k.UserHandle) > 0 && bytes.Contains(bytes.ToLower(k.UserHandle), bytes.ToLower([]byte(k.UserID))) {
+		return fmt.Errorf("Illegal argument user_handle: carries the platform user id")
 	}
 	if err := k.Name.Validate(); err != nil {
 		return err

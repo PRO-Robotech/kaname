@@ -1,0 +1,150 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+  sha256: e915db3db6ecdf2aae450120a2b3cff038725cdc741cb19c375555d4aff4a2b7
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: d2f6f182fab9d9727a7fab35a82a798005eb0d89
+  content_commit: f91cb95c819e3cbaadce094880a721b360cf2176
+  branch: '133'
+  worktree: tmp/133-a2-f11
+  pull_request: null
+  task: PRO-Robotech/kaname#133
+  wave: PRO-Robotech/kaname#537
+  lines: 1998
+  round: 6
+  round_note: >-
+    Круг следует за пятью записями документа (круги 1…5); последняя — круг 5, CHANGES_REQUESTED
+    на редакцию 6 (1eae5da7…). Ни один прежний вердикт на редакцию 7 не переносится.
+  predecessor_record: >-
+    docs/specs/reviews/assurance-level-is-declared-by-our-session/1eae5da7a25d3da5367b56254172ac10dc0ed1094d25242e98f54367f31c2b8c.yaml
+  fingerprint_predicate: >-
+    git show f91cb95c819e3cbaadce094880a721b360cf2176:docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    | sha256sum
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+publication_mode: courier_of_agent_verdict
+scope:
+  reviewed: >-
+    Дифф b0e6b4e57..f91cb95c8 документа (115 вставок, 36 снятий): §1.7, Р6 и Р7 (условные абзацы),
+    §3.4 Ф11-34…42 и перепись «сценарий → производитель», строки §5, §5.2, §7 инв. 2, §8, §9 п.7, §16.
+    Ф11-01…33 не тронуты. Коммит меняет один файл (git diff --stat d2f6f182f..f91cb95c8 — только документ).
+  document_edited_by_reviewer: false
+round5_outcomes:
+  Б1: >-
+    закрыто: носитель назван (ссылка в ответе службы о сессии → край → ключ каталога, читаемый
+    фундаментом); «правка фундамента есть» согласовано с §1.7; три производителя в переписи.
+  Б2: >-
+    закрыто: Ф11-37/Ф11-38 — две живые сессии U, отличие одно — от имени какой задан вопрос;
+    инъекции «последняя/первая сессия» краснеют на 37 либо 38.
+  Б3: >-
+    закрыто: предъявление ключа внутри сессии снято вместе с моментом уровня; довод момента —
+    момент аутентификации сессии вопроса; основание (внутри сессии «3» не производится)
+    подтверждено командой.
+  В1: >-
+    закрыто — Ф11-42.
+  В2: >-
+    закрыто — одна координата модели.
+blocking:
+  - id: Б1
+    kind: NEGATIVE
+    where: §3.4 «объём исхода (а)», строка З1; §8 строка Ф11-34…42
+    what: >-
+      Контракт вводит новое правило: запись сессии по ссылке годна, только если она жива и её
+      личность равна доверенной личности вопроса; иначе — как вопрос без нашей сессии. Ни один
+      сценарий и ни одна инъекция §8 это правило не наблюдают: реализация, берущая запись по
+      ссылке без обеих проверок, зеленеет на всех Ф11-34…42.
+    predicate: >-
+      grep -n -iE 'жива|личность равна' $F → единственное попадание — строка 990 (З1); в таблице
+      сценариев §3.4 и в списке инъекций §8 (строка 1631) правила нет.
+    fix: >-
+      Два отрицания с близнецом Ф11-34, каждое меняет один факт: ссылка на запись, оконченную до
+      вопроса, — false; ссылка на живую свежую запись «3» другой личности при доверенной личности
+      U — false. Плюс инъекции «живость не проверена», «личность не сверена».
+  - id: Б2
+    kind: DoD
+    where: §9 п.7; §8 строка Ф11-34…42; §3.4 перепись, производитель «пересылка краем»
+    what: >-
+      П.7 утверждает «край её пересылает (Ф11-38 зелен — без пересылки он красный)». Но §8 ставит
+      Ф11-34…42 на границу службы, где ссылку и уровень доверенными ключами подаёт сама проба.
+      На этом слое пересылка края не исполняется, и Ф11-38 от её отсутствия не краснеет. Третий
+      производитель З1 (kacho, полоса нашей сессии) не наблюдается ни одним сценарием.
+    predicate: >-
+      sed -n 1631p $F — «вопрос о себе — так, как его задаёт край… доверенными ключами от
+      проверенного отправителя»; sed -n 1688p $F — утверждение п.7.
+    fix: >-
+      Сценарий слоя края (как Ф11-18/19) либо сквозной: принятый носитель S → край пересылает
+      ссылку, равную названной службой для S; близнец — клиентское значение того же ключа
+      снимается и не пересылается. Либо переписать п.7 без ложной опоры на Ф11-38.
+non_blocking:
+  - id: В1
+    where: Р7 условный абзац
+    what: >-
+      «Наружу она не выходит: в ответах клиенту её нет» — утверждение поверхности без сценария;
+      достаточно утверждения отсутствия ссылки в ответе клиенту в сценарии слоя края из Б2.
+accepted_parts: >-
+  Условная форма, объём (З1, З2 в нём; З3 вне), пары 34/35, 34/36, 37/38, 39/42, 40/41, общее
+  «Дано» посевом строки журнала, правило момента (Р6, исход (а)), счёт §5.2 (38) и DoD Ф11 (14) — годны.
+predicates_run:
+  - command: >-
+      sha256sum docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    got: >-
+      e915db3d…f2b7 — равен заявленному; строк 1998
+  - command: >-
+      awk '/^## §3 /,/^## §4 /' $F | grep -oE '\*\*Ф11-[0-9]+\*\*' | sort -u | wc -l
+    got: >-
+      38 — как в §5.2
+  - command: >-
+      sed -n 225,242p internal/apps/kaname/seed/bootstrap_admin.go
+    got: >-
+      строка fga_outbox `fga.tuple.write` {object, relation, user} — форма посева общего «Дано» подтверждена
+  - command: >-
+      git grep -n 'EndOtherSessions(' -- '*.go' ':!*_test.go'
+    got: >-
+      пять мест вызова (change_password, recovery_complete, sf_remove, verification, force_logout), входа нет — две живые сессии одной личности законны
+  - command: >-
+      sed -n 795,805p internal/handler/loginlanehttp/login_overlap_integration_test.go
+    got: >-
+      assert.Equal(t, 3, live, "S0, S1 и S2 живы") — близнец 37/38 конструируем
+  - command: >-
+      git grep -n 'withMethod(' -- internal/apps/kaname/api/humansession/ ':!*_test.go'
+    got: >-
+      6 строк; step_up принимает password/totp/lookup_secret (second_factor.go:166-173) — «3» внутри сессии не производится
+  - command: >-
+      grep -c 'Fundament: true' corelib@v1.10.0/principalwire/keys.go
+    got: >-
+      5 — как в §1.7
+  - command: >-
+      awk '/^message HumanSession /,/^}/' human_session_service.proto | grep -cE '^\s+(string|bool|google\.protobuf\.Timestamp) '
+    got: >-
+      7 — как в §1.7
+constructibility: >-
+  Стенда в задании нет — посев не выполнен («не выполнилось» 1). Из видов «Дано»: факт — фикстура
+  названа, форма подтверждена кодом; две живые сессии одной личности — подтверждено пробой дерева;
+  сессия «3» ключом — производитель заказан (Ф13-11); пароль внутри сессии — есть (step_up.go:136).
+event_body: acceptance-reviewer · CHANGES_REQUESTED · e915db3db6ecdf2aae450120a2b3cff038725cdc741cb19c375555d4aff4a2b7
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Событие не создавалось; для CHANGES_REQUESTED санкции оно не выдаёт и не отзывает.
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  personal_review_by_publishing_actor_claimed: false

@@ -165,7 +165,8 @@ class Stand:
                  reject_live: bool = False,
                  accept_tampered: bool = False,
                  operation_carries_secret: bool = False,
-                 revoke_reaches_presentation: bool = True):
+                 revoke_reaches_presentation: bool = True,
+                 repeat_revoke_succeeds: bool = False):
         self.credential_id = credential_id
         self.secret = secret
         # Что край КЛАДЁТ в ответ. По умолчанию — то же, что принимает; ось
@@ -178,6 +179,9 @@ class Stand:
         self.accept_tampered = accept_tampered
         self.operation_carries_secret = operation_carries_secret
         self.revoke_reaches_presentation = revoke_reaches_presentation
+        # Повторный отзыв: законный край отвечает синхронным 404 с текстом
+        # владельца (CVR-03); инъекция — прежний исход, вторая операция с успехом.
+        self.repeat_revoke_succeeds = repeat_revoke_succeeds
         self.revoked = False
         outer = self
 
@@ -215,6 +219,10 @@ class Stand:
 
             def do_DELETE(self):
                 if "/tokens/" in self.path:
+                    if outer.revoked and not outer.repeat_revoke_succeeds:
+                        named = self.path.split("?")[0].rsplit("/", 1)[-1]
+                        return self._send(404, {"code": 5, "message": f"UserToken {named} not found",
+                                                "details": []})
                     outer.revoked = True
                     return self._send(200, {"id": REVOKE_OP_ID, "done": True, "metadata": {}})
                 return self._send(404, {"code": 5, "message": "Not Found"})
@@ -556,6 +564,8 @@ def main() -> int:
          dict(operation_carries_secret=True)),
         ("отзыв не доходит до предъявления — контроль действует только на выдаче",
          dict(revoke_reaches_presentation=False)),
+        ("повторный отзыв отвечает успехом — опечатка неотличима от отзыва",
+         dict(repeat_revoke_succeeds=True)),
     ]
     for name, kw in injections:
         with Stand(credential_id=cred_id, secret=secret, **kw) as st:

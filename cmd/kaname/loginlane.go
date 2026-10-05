@@ -197,7 +197,7 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
-		Challenges:        l.keys,
+		Challenges: l.keys, ChallengeTTL: access_keys.ChallengeTTL,
 		VerificationCodes: l.sessions, SourceWindows: l.sessions, BearerLetters: l.sessions,
 		LetterWindow: l.letterWindow, SourceWindow: l.limits.SourceWindow,
 	}

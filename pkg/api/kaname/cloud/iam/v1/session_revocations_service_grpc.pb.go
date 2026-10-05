@@ -63,8 +63,9 @@ const (
 //     refuses the issuance when the record is refused, so a token of the
 //     ceremony always belongs to its family. The ceremony is mounted on the
 //     external issuing surface of the service under the `own` sign-in
-//     (kaname#423): its authorization endpoint and the `authorization_code`
-//     and `refresh_token` grants of the token endpoint issue these tokens.
+//     (kaname#423): its authorization endpoint answers with an authorization
+//     code, and only the `authorization_code` and `refresh_token` grants of
+//     the token endpoint issue these tokens.
 //
 // A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -109,10 +110,18 @@ type InternalSessionRevocationsServiceClient interface {
 	// on cache miss. A store failure on either half is a fixed INTERNAL, never
 	// `revoked=false`.
 	IsRevoked(ctx context.Context, in *IsRevokedRequest, opts ...grpc.CallOption) (*IsRevokedResponse, error)
-	// ListByUser — admin / audit endpoint: enumerate active revocations for a
-	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was
-	// named here as a second consumer; that pipeline was dropped by migration and
-	// has no code left.
+	// ListByUser — admin / audit endpoint: enumerate the active single-token
+	// revocation rows of a user (one row per revoked `token_jti`, until it is
+	// pruned). A CAEP forwarder was named here as a second consumer; that
+	// pipeline was dropped by migration and has no code left.
+	//
+	// It is NOT a history of forced logouts, and an empty page does not mean
+	// "never logged out by force". Admin force-logout and revoke-all write a
+	// USER-LEVEL cutoff, not a row here (see the service comment above). There
+	// is one cutoff per user and a later one replaces the earlier: the service
+	// keeps no history of cutoffs. The current cutoff is read by
+	// `SessionCutoffOf` below; each forced logout also emits the audit event
+	// `iam.session.force_logout`.
 	//
 	// The whole response is about ONE user the CALLER NAMES, so it is authorized
 	// per-object on that user, and kaname enforces that itself in its own tree
@@ -248,8 +257,9 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 //     refuses the issuance when the record is refused, so a token of the
 //     ceremony always belongs to its family. The ceremony is mounted on the
 //     external issuing surface of the service under the `own` sign-in
-//     (kaname#423): its authorization endpoint and the `authorization_code`
-//     and `refresh_token` grants of the token endpoint issue these tokens.
+//     (kaname#423): its authorization endpoint answers with an authorization
+//     code, and only the `authorization_code` and `refresh_token` grants of
+//     the token endpoint issue these tokens.
 //
 // A CAEP receiver and a back-channel logout endpoint of the external provider were named here as
 // sources too. Neither exists: the CAEP pipeline was dropped by migration and
@@ -294,10 +304,18 @@ type InternalSessionRevocationsServiceServer interface {
 	// on cache miss. A store failure on either half is a fixed INTERNAL, never
 	// `revoked=false`.
 	IsRevoked(context.Context, *IsRevokedRequest) (*IsRevokedResponse, error)
-	// ListByUser — admin / audit endpoint: enumerate active revocations for a
-	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was
-	// named here as a second consumer; that pipeline was dropped by migration and
-	// has no code left.
+	// ListByUser — admin / audit endpoint: enumerate the active single-token
+	// revocation rows of a user (one row per revoked `token_jti`, until it is
+	// pruned). A CAEP forwarder was named here as a second consumer; that
+	// pipeline was dropped by migration and has no code left.
+	//
+	// It is NOT a history of forced logouts, and an empty page does not mean
+	// "never logged out by force". Admin force-logout and revoke-all write a
+	// USER-LEVEL cutoff, not a row here (see the service comment above). There
+	// is one cutoff per user and a later one replaces the earlier: the service
+	// keeps no history of cutoffs. The current cutoff is read by
+	// `SessionCutoffOf` below; each forced logout also emits the audit event
+	// `iam.session.force_logout`.
 	//
 	// The whole response is about ONE user the CALLER NAMES, so it is authorized
 	// per-object on that user, and kaname enforces that itself in its own tree

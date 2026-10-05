@@ -155,7 +155,10 @@ func TestLINEA1_02_AuthorizeIssuesCodeWithStateVerbatimAndBindingFromTheSeam(t *
 }
 
 // TestLINEA1_03_UnauthenticatedSeamIssuesNoCode — LINE-A-1-03: шов отвечает
-// «не-аутентифицирован» → код не выдаётся, записи кода не создаётся.
+// «не-аутентифицирован» → код не выдаётся, записи кода не создаётся. Форма
+// вызова аутентификации — Р11 приёмки ceremony-pace-is-named-by-number (ред. 5,
+// задача kaname#525): 302 на зарегистрированную цель с ровно
+// error=login_required и state дословно — приложению, а не браузеру.
 // Близнец — тот же запрос при сессии (02); отличие ровно в ответе шва.
 func TestLINEA1_03_UnauthenticatedSeamIssuesNoCode(t *testing.T) {
 	w := newCeremonyWorld(t, "LINE-A-1-03", "1")
@@ -169,10 +172,8 @@ func TestLINEA1_03_UnauthenticatedSeamIssuesNoCode(t *testing.T) {
 	before := len(w.codeRecords())
 
 	rec := w.get(lineA1AuthorizePath, q, false)
-	requireNoCodeDelivered(t, w.id, "сессии нет", rec, lineA1R)
-	if rec.Code != http.StatusFound && rec.Code != http.StatusUnauthorized {
-		t.Errorf("%s: без сессии ожидался вызов аутентификации (302 на наш вход либо 401), получено %d", w.id, rec.Code)
-	}
+	requireNoCodeDelivered(t, w.id, "сессии нет", rec)
+	requireErrorReachesTheApplication(t, w.id, "сессии нет", rec, lineA1R, "login_required", state)
 	if after := len(w.codeRecords()); after != before {
 		t.Errorf("%s: без сессии создана запись кода (было %d, стало %d)", w.id, before, after)
 	}
@@ -305,9 +306,10 @@ func TestLINEA1_07_ResponseTypeNotCodeRefusedByRedirect(t *testing.T) {
 }
 
 // TestLINEA1_08_StepUpIsServedAndReachedLevelIsCarried — LINE-A-1-08: сессия
-// уровня "1" и acr_values=2 → код на цель НЕ доставляется (поднимается
-// повторная аутентификация). Близнец — сессия уже уровня "2": код выдаётся, и
-// обмен несёт уровень "2". Отличие — исходный уровень сессии.
+// уровня "1" и acr_values=2 → код на цель НЕ доставляется; приложение
+// получает 302 с error=insufficient_user_authentication и state (Р11,
+// задача kaname#525) и поднимает шаг вверх. Близнец — сессия уже уровня "2":
+// код выдаётся, и обмен несёт уровень "2". Отличие — исходный уровень сессии.
 //
 // Прохождение второго фактора браузером — уровень P (playwright), следующий шаг.
 func TestLINEA1_08_StepUpIsServedAndReachedLevelIsCarried(t *testing.T) {
@@ -320,7 +322,9 @@ func TestLINEA1_08_StepUpIsServedAndReachedLevelIsCarried(t *testing.T) {
 	q := authorizeQuery(low.ic1, lineA1R, state, challenge)
 	q.Set("acr_values", "2")
 	rec := low.get(lineA1AuthorizePath, q, true)
-	requireNoCodeDelivered(t, low.id, "уровень сессии ниже запрошенного", rec, lineA1R)
+	requireNoCodeDelivered(t, low.id, "уровень сессии ниже запрошенного", rec)
+	requireErrorReachesTheApplication(t, low.id, "уровень сессии ниже запрошенного", rec, lineA1R,
+		"insufficient_user_authentication", state)
 
 	high := newCeremonyWorld(t, "LINE-A-1-08", "2")
 	verifier, challenge2 := pkcePair()

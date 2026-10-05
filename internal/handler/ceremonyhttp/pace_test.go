@@ -10,14 +10,16 @@ package ceremonyhttp
 // Посев А: клиент C (knownClient) с адресом возврата r (knownTarget); «годный
 // запрос А» — `client_id=C`, `redirect_uri=r`, `response_type=code`,
 // `code_challenge` по S256, `state` длиной 22 знака, без печенья сессии. Его
-// ответ — 401 `{"error":"login_required"}` («ответ LINE-A-1»). Для удержаний —
-// клиент D, обращения за которым справочник держит до сигнала.
+// ответ — исход без сессии по Р11 (ред. 5, задача kaname#525): 302 на r с
+// ровно `error=login_required` и `state` дословно («ответ без сессии»). Пробы
+// групп E и F утверждают о нём только то, что он не отказ по темпу; форму
+// утверждает группа I. Для удержаний — клиент D, обращения за которым
+// справочник держит до сигнала.
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -191,15 +193,16 @@ func (s *seedA) releaseHolds() {
 
 func (s *seedA) outcome(o Outcome) uint64 { return s.census.Read()[string(o)] }
 
-// requireLineA1 — ответ LINE-A-1: 401 `{"error":"login_required"}`.
-func requireLineA1(t *testing.T, rec *httptest.ResponseRecorder) {
+// requireNoSessionAnswer — ответ без сессии (Р11): 302 на r с ровно
+// `error=login_required` и `state` годного запроса А дословно.
+func requireNoSessionAnswer(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("ожидался ответ LINE-A-1 (401 login_required), получено %d %q", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusFound {
+		t.Fatalf("ожидался ответ без сессии (302 на r с login_required), получено %d %q", rec.Code, rec.Body.String())
 	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] != "login_required" {
-		t.Fatalf("ожидался ответ LINE-A-1, тело %q", rec.Body.String())
+	want := knownTarget + "?" + url.Values{"error": {"login_required"}, "state": {strings.Repeat("s", StateFloor)}}.Encode()
+	if loc := rec.Header().Get("Location"); loc != want {
+		t.Fatalf("ответ без сессии: Location %q, ожидался %q", loc, want)
 	}
 }
 
@@ -228,11 +231,11 @@ func requireTextRefusal(t *testing.T, rec *httptest.ResponseRecorder, status int
 	}
 }
 
-// tenFromP — десять годных запросов А с P в t0, каждый получил ответ LINE-A-1.
+// tenFromP — десять годных запросов А с P в t0, каждый получил ответ без сессии.
 func (s *seedA) tenFromP() {
 	s.t.Helper()
 	for i := 0; i < authorizePace; i++ {
-		requireLineA1(s.t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
+		requireNoSessionAnswer(s.t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
 	}
 }
 
@@ -256,7 +259,7 @@ func TestKNPACE27_EleventhRequestAfter100msPasses(t *testing.T) {
 	s := newSeedA(t, remoteHost)
 	s.tenFromP()
 	s.clock.At(100 * time.Millisecond)
-	requireLineA1(t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
+	requireNoSessionAnswer(t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
 }
 
 func TestKNPACE28_PaceSpendsAnyOutcomeButTheMethodRefusal(t *testing.T) {
@@ -277,14 +280,14 @@ func TestKNPACE28_PaceSpendsAnyOutcomeButTheMethodRefusal(t *testing.T) {
 				t.Fatalf("запрос %d: %d — ожидался 405", i+1, rec.Code)
 			}
 		}
-		requireLineA1(t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
+		requireNoSessionAnswer(t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
 	})
 }
 
 func TestKNPACE29_SourcesAreCountedSeparately(t *testing.T) {
 	s := newSeedA(t, remoteHost)
 	s.tenFromP()
-	requireLineA1(t, s.do(sourceQ, http.MethodGet, goodQueryA(knownClient)))
+	requireNoSessionAnswer(t, s.do(sourceQ, http.MethodGet, goodQueryA(knownClient)))
 }
 
 func TestKNPACE30_RequestAboveTheAuthorizeCeilingIs503(t *testing.T) {
@@ -304,7 +307,7 @@ func TestKNPACE30_RequestAboveTheAuthorizeCeilingIs503(t *testing.T) {
 func TestKNPACE30b_OneHeldFewerRequestIsServed(t *testing.T) {
 	s := newSeedA(t, remoteHost)
 	s.hold(authorizeCeiling - 1)
-	requireLineA1(t, s.do(sourceQ, http.MethodGet, goodQueryA(knownClient)))
+	requireNoSessionAnswer(t, s.do(sourceQ, http.MethodGet, goodQueryA(knownClient)))
 }
 
 func TestKNPACE31_SourcePaceIsDecidedBeforeTheCeiling(t *testing.T) {
@@ -351,7 +354,11 @@ func (l *listenerA) get(san string, forwarded ...string) (int, string) {
 	for _, v := range forwarded {
 		req.Header.Add("X-Forwarded-For", v)
 	}
-	resp, err := l.stand.Client(l.t, san).Do(req)
+	client := l.stand.Client(l.t, san)
+	// Перенаправлению ответа без сессии не следуем: судится ответ слушателя,
+	// а не адрес возврата приложения.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		l.t.Fatalf("запрос к слушателю: %v", err)
 	}
@@ -378,15 +385,15 @@ func requireOnlyCell(t *testing.T, got map[issuingsource.Cell]uint64, want issui
 func TestKNPACE32_EdgeRequestCarriesTheClientAddressAndTheKeyIsIt(t *testing.T) {
 	l := newListenerA(t)
 	for i := 0; i < authorizePace; i++ {
-		if code, body := l.get(issuinglistener.EdgeSAN, "203.0.113.7"); code != http.StatusUnauthorized {
-			t.Fatalf("запрос %d: %d %q — ожидался ответ LINE-A-1", i+1, code, body)
+		if code, body := l.get(issuinglistener.EdgeSAN, "203.0.113.7"); code != http.StatusFound {
+			t.Fatalf("запрос %d: %d %q — ожидался ответ без сессии", i+1, code, body)
 		}
 	}
 	if code, body := l.get(issuinglistener.EdgeSAN, "203.0.113.7"); code != http.StatusTooManyRequests {
 		t.Errorf("первый: %d %q — ожидался 429", code, body)
 	}
-	if code, body := l.get(issuinglistener.EdgeSAN, "203.0.113.8"); code != http.StatusUnauthorized {
-		t.Errorf("второй: %d %q — ожидался ответ LINE-A-1", code, body)
+	if code, body := l.get(issuinglistener.EdgeSAN, "203.0.113.8"); code != http.StatusFound {
+		t.Errorf("второй: %d %q — ожидался ответ без сессии", code, body)
 	}
 	requireOnlyCell(t, l.cells(), issuingsource.Cell{}, 0)
 }
@@ -395,7 +402,7 @@ func TestKNPACE33_HeaderWithoutEdgeCertificateDoesNotChangeTheKey(t *testing.T) 
 	l := newListenerA(t)
 	for i := 1; i <= authorizePace+1; i++ {
 		code, body := l.get("", fmt.Sprintf("203.0.113.%d", i))
-		want := http.StatusUnauthorized
+		want := http.StatusFound
 		if i == authorizePace+1 {
 			want = http.StatusTooManyRequests
 		}
@@ -433,8 +440,8 @@ func TestKNPACE35_EdgeWithoutUsableAddressSharesItsPeerKey(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			l := newListenerA(t)
 			for i := 0; i < authorizePace; i++ {
-				if code, body := l.get(issuinglistener.EdgeSAN, row.ten...); code != http.StatusUnauthorized {
-					t.Fatalf("запрос %d: %d %q — ожидался ответ LINE-A-1", i+1, code, body)
+				if code, body := l.get(issuinglistener.EdgeSAN, row.ten...); code != http.StatusFound {
+					t.Fatalf("запрос %d: %d %q — ожидался ответ без сессии", i+1, code, body)
 				}
 			}
 			if code, body := l.get(issuinglistener.EdgeSAN, row.eleventh...); code != http.StatusTooManyRequests {

@@ -172,6 +172,15 @@ type sessionLaneOptions struct {
 	loginObserver humansession.Observer
 	// loginNow — часы входа (`LoginDeps.Now`); nil — часы процесса.
 	loginNow func() time.Time
+	// recoveryMailLimit — окно писем восстановления адресату
+	// (`invite.mail-rate-limit`, Ф5 Р8 п. 2); нулевое — величина стенда.
+	recoveryMailLimit outboxtypes.InviteMailRateLimit
+	// recoverySourcePace — окно обращений источника полосы запроса кода
+	// (`authn.login.source-attempts` · `source-window`, Ф3 Р10); нулевое —
+	// величина стенда.
+	recoverySourcePace humansession.SourcePace
+	// recoveryObserver — приёмник исходов запроса кода; nil — молчащий.
+	recoveryObserver humansession.Observer
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -275,9 +284,23 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
+	var (
+		recoveryMail                           = laneMailLimit
+		recoverySource                         = laneSourcePace
+		recoveryObserver humansession.Observer = nop
+	)
+	if opts.recoveryMailLimit != (outboxtypes.InviteMailRateLimit{}) {
+		recoveryMail = opts.recoveryMailLimit
+	}
+	if opts.recoverySourcePace != (humansession.SourcePace{}) {
+		recoverySource = opts.recoverySourcePace
+	}
+	if opts.recoveryObserver != nil {
+		recoveryObserver = opts.recoveryObserver
+	}
 	request, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: nop, Now: time.Now, Logger: logger,
-		Sources: sessions, SourcePace: laneSourcePace, MailLimit: laneMailLimit,
+		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: recoveryObserver,
+		Now: time.Now, Logger: logger, Sources: sessions, SourcePace: recoverySource, MailLimit: recoveryMail,
 	})
 	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{

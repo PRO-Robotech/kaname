@@ -899,7 +899,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// kacho#2596), и только потом снят отвечающий. Обратный порядок оборвал бы
 	// каждую их мутацию — недоступность авторитета на пути запроса fail-closed.
 	//
-	// СОБСТВЕННЫЕ ТРИ ПОТОЛКА СЛУЖБЫ ОТСЮДА НЕ УХОДИЛИ: их величину объявляет
+	// СОБСТВЕННЫЕ ПОТОЛКИ СЛУЖБЫ ОТСЮДА НЕ УХОДИЛИ (перечень — таблица
+	// `config.OwnCeilingKnobs`): их величину объявляет
 	// посадка (`config.OwnCeilingsConfig`, проекция в `kaname.own_ceilings`), и
 	// арендаторское чтение своего потолка собирается ниже.
 
@@ -1075,9 +1076,13 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// заводится — у комбинации он один и живёт в таблице полос.
 	ownIssuance := saKeyIssuanceIsOurs(cfg)
 	if !ownIssuance {
-		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток на этой посадке "+
-			"отказывает: ключ обменивается токен-эндпоинтом платформы, а он не включён — "+
-			"выдаётся только секрет",
+		// Предупреждение одно на посадку и называет ОБА пути выдачи, которые
+		// здесь отказывают: решение у них одно (`saKeyIssuanceIsOurs`), и
+		// сборка токенов человека второй строки не печатает.
+		logger.Warn("выдача ключевой пары и федеративного ключа служебных учёток и ключевой пары "+
+			"человека на этой посадке отказывает: ключ обменивается токен-эндпоинтом платформы, "+
+			"а он не включён — выдаётся только секрет",
+			"отказывают", "SAKeyService.Issue (KEYPAIR, FEDERATED), UserTokenService.Issue (KEYPAIR)",
 			"authn.client-token.enabled", cfg.AuthN.ClientToken.Enabled,
 			"снимается", "включением authn.client-token.enabled — контур выдачи на свою чеканку "+
 				"(задача kacho#1120)")
@@ -1146,6 +1151,14 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	issueUC := usertokensapp.NewIssueUserTokenUseCase(userClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
+	// Есть ли у посадки токен-эндпоинт — ТО ЖЕ условие, что у сборки ключей
+	// служебных учёток (`saKeyIssuanceIsOurs`), а не второе чтение ручки:
+	// ключевую пару человека обменивает тот же эндпоинт. Без него она не
+	// выдаётся; предупреждение старта печатает сборка ключей — одно на оба пути.
+	ownIssuance := saKeyIssuanceIsOurs(cfg)
+	if ownIssuance {
+		issueUC.WithOwnIssuance()
+	}
 	// Post-Issue секрет-редактор: после MarkDone с plaintext private_key_pem этот
 	// pg-adapter затирает поле в proto-marshalled response_data (BYTEA) одним UPDATE.
 	issueUC.WithResponseRedactor(kanamepg.NewOpsResponseRedactor(pool, "kaname"))
@@ -1159,7 +1172,7 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	revokeUC.WithAuditEmitter(auditEmitter)
 	listUC := usertokensapp.NewListUserTokensUseCase(userClientRepo)
 
-	logger.Info("user_tokens wired", "provider_client_registration", "none")
+	logger.Info("user_tokens wired", "provider_client_registration", "none", "own_issuance", ownIssuance)
 
 	return usertokensapp.NewHandler(issueUC, revokeUC, listUC)
 }

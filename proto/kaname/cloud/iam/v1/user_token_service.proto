@@ -105,6 +105,13 @@ service UserTokenService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
+  // Revoke снимает удостоверение человека. Отзыв того, чего у названного
+  // человека нет, — синхронный `NOT_FOUND` с текстом `UserToken <token_id> not
+  // found`, без операции: никогда не существовавшее, уже отозванное и
+  // принадлежащее другому человеку неразличимы — кодом, текстом (кроме эха
+  // идентификатора) и деталями. Проигравший гонку двух отзывов получает
+  // операцию, завершённую тем же отказом; успех с `revoked_at` получает только
+  // отзыв, снявший удостоверение.
   rpc Revoke (RevokeUserTokenRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/users/{user_id}/tokens/{token_id}"
@@ -131,7 +138,8 @@ message IssueUserTokenRequest {
   // Опциональный TTL в секундах. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА, и это
   // сказано здесь, потому что комментарий у контроля, противоречащий коду,
   // провоцирует «починку» кода под неверный комментарий:
-  //   * KEYPAIR — 0 означает БЕССРОЧНО (прежнее поведение, дословно);
+  //   * KEYPAIR — 0 означает БЕССРОЧНО (прежнее поведение, дословно). Это
+  //     отличие от ключа служебной учётки, у которого 0 — умолчание установки;
   //   * SECRET  — 0 означает «срок не назван», применяется умолчание политики;
   //     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
   //     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
@@ -157,9 +165,12 @@ message IssueUserTokenRequest {
 
   // Вид выдаваемого удостоверения (§2.5 приёмки BAT-1).
   //
-  // Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: пустой перечень
-  // доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
-  // АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
+  // Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: выдаётся KEYPAIR.
+  // Выдаваемых видов у личности ДВА — KEYPAIR и SECRET. Перечня доверенных
+  // субъектов в этом запросе нет, поэтому FEDERATED недостижим: названный, он
+  // отвергается синхронно, до всякой записи, `INVALID_ARGUMENT` с текстом
+  // «credential_kind: FEDERATED is not available for this credential — it has
+  // no trusted_subjects field».
   //
   // Номер вне словаря — в том числе номер 4 снятого вида строк прежнего
   // потока — отвергается синхронно с именем поля, а не выпускается ключевой
@@ -214,8 +225,9 @@ message IssueUserTokenMetadata {
 message ListUserTokensRequest {
   // ID of the User.
   string user_id    = 1;
-  // Maximum number of results per page. 0 selects the service default (50);
-  // a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+  // Maximum number of results per page. 0 selects this List's default (100 —
+  // not the platform-wide 50 most Lists of the service apply); a value above
+  // 1000 is rejected with INVALID_ARGUMENT rather than clamped.
   int64  page_size  = 2;
   // Page token. To get the next page of results, set [page_token] to the
   // [ListUserTokensResponse.next_page_token] returned by a previous list request.

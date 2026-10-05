@@ -53,6 +53,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -993,6 +994,26 @@ func sessionJSON(v humansession.SessionView) map[string]any {
 		"expiresAt":      v.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
 		"assuranceLevel": v.Session.AssuranceLevel,
 		"emailVerified":  v.EmailVerified,
+	}
+}
+
+// ResponseObjectKeys — ключи объектов тела ответа полосы по имени объекта,
+// снятые с САМИХ производителей тел, а не выписанные: клиентская страница
+// сверяет с ними ключи своих примеров (kaname#247), и второй перечень разошёлся
+// бы с производителем молча — ровно так пример пережил снятое поле.
+func ResponseObjectKeys() map[string][]string {
+	keysOf := func(m map[string]any) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return map[string][]string{
+		"user":      keysOf(userJSON(humansession.SessionView{})),
+		"session":   keysOf(sessionJSON(humansession.SessionView{})),
+		"assurance": keysOf(assuranceJSON(humansession.AssuranceView{})),
 	}
 }
 

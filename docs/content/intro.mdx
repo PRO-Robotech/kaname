@@ -204,15 +204,27 @@ flowchart LR
   </tbody>
 </table>
 
-## Структура монорепо
+## Структура репозитория
+
+Служба — отдельный репозиторий со своим модулем Go; каталоги ниже — его верхний уровень.
 
 <table>
   <thead><tr><th>Каталог</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><strong>services/iam/</strong></td><td>Этот сервис: control-plane IAM (Account / Project / User / SA / Group / Role / AccessBinding)</td></tr>
-    <tr><td><strong>proto/</strong></td><td>Центральные <code>.proto</code> + сгенерированные Go-stubs + FGA-модель авторизации</td></tr>
-    <tr><td><strong>pkg/</strong></td><td>Общие пакеты (db, grpcsrv, grpcclient, config, observability, operations, ids, ...)</td></tr>
-    <tr><td><strong>gateway/</strong></td><td>Edge: gRPC-proxy + REST mux + проверка JWT + per-RPC authz-middleware</td></tr>
-    <tr><td><strong>services/vpc/ · services/compute/ · services/geo/ · services/nlb/</strong></td><td>Консументы IAM: вызывают <code>InternalIAMService.Check</code> на каждом RPC</td></tr>
+    <tr><td><strong>cmd/</strong></td><td>Исполняемые: служба <code>kaname</code>, отдельный <code>migrator</code>, утилита оператора <code>iamctl</code>, генератор таблиц <code>authzmap-tables</code></td></tr>
+    <tr><td><strong>internal/</strong></td><td>Реализация: обработчики, use-case'ы, домен, репозитории, миграции схемы, гейты дерева</td></tr>
+    <tr><td><strong>proto/</strong></td><td>Контракт <code>kaname.cloud.iam.v1</code> и модель прав</td></tr>
+    <tr><td><strong>pkg/</strong></td><td>То, что импортируют потребители: сгенерированные stubs (<code>pkg/api</code>) и клиентские пакеты</td></tr>
+    <tr><td><strong>deploy/</strong></td><td>Helm-чарт службы и профили развёртывания</td></tr>
+    <tr><td><strong>docs/</strong></td><td>Этот сайт (<code>content/</code>) и инженерная часть (<code>engineering/</code>)</td></tr>
+    <tr><td><strong>schema/</strong></td><td>JSON-схема манифеста модуля</td></tr>
+    <tr><td><strong>tests/</strong></td><td>Сквозные пробы: newman, нагрузка, фикстуры прав</td></tr>
+    <tr><td><strong>tools/</strong></td><td>Гейты и измерительные утилиты разработки</td></tr>
+    <tr><td><strong>scripts/</strong></td><td>Хуки репозитория и служебные сценарии</td></tr>
   </tbody>
 </table>
+
+Соседи — отдельные репозитории и связаны **пином версии**, а не общим деревом: фундамент
+<code>PRO-Robotech/corelib</code> служба берёт зависимостью модуля (<code>go.mod</code>), а
+платформа <code>PRO-Robotech/kacho</code> берёт службу так же — пином её модуля и образа. Обратного
+ребра нет: служба платформу не импортирует.
