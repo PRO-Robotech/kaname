@@ -70,30 +70,38 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 )
 
 // ModuleSeedWriteRepo — исполнитель транзакций применителя посева над пулом.
 type ModuleSeedWriteRepo struct {
-	tx *coredb.Transactor
+	pool *pgxpool.Pool
 }
 
 // NewModuleSeedWriteRepo собирает исполнителя транзакций поверх пула.
 func NewModuleSeedWriteRepo(pool *pgxpool.Pool) *ModuleSeedWriteRepo {
-	return &ModuleSeedWriteRepo{tx: coredb.NewTransactor(pool)}
+	return &ModuleSeedWriteRepo{pool: pool}
 }
 
 // RunInWriteTx исполняет fn под ОДНОЙ писательской транзакцией: посев модуля
 // ложится целиком либо не ложится вовсе.
+//
+// Транзакцию открывает открывающий службы (`journalwrite.InTx`): личности,
+// группы и выдачи модулей — журналируемые таблицы, и строка журнала несёт
+// инициатора принципала контекста — у посева это компонент
+// `system:kaname-seed`, его ставит применитель. Открытая мимо него транзакция
+// инициатора не выставляла, и стенд отказывал в пуске `23502` (kaname#484);
+// держат `module_seed_journal_initiator_integration_test.go` и гейт
+// `internal/check` (W4).
 func (r *ModuleSeedWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, moduleseed.Writer) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, moduleSeedWriter{tx: tx}) })
+	return journalwrite.InTx(ctx, r.pool, func(tx pgx.Tx) error { return fn(ctx, moduleSeedWriter{tx: tx}) })
 }
 
 // moduleSeedWriter — `moduleseed.Writer` над одной транзакцией.
