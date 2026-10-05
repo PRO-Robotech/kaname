@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -64,9 +65,21 @@ type VerifyReconcileEngine interface {
 // uses (Design-B). Implemented by the decision door (internal/authzcascade) over the
 // relational form. nil → the gate is a non-fatal skip (no assertion made), so an
 // unwired resolver never crashes boot.
+//
+// SubjectAdmitted стоит в том же порте, а не отдельным необязательным: дверь
+// судит допуск субъекта ПЕРЕД отношением (#456, Р4а), и её «нет» на Check
+// неподтверждённому человеку не говорит ничего о материализации. Страж, у
+// которого спросить о допуске нечем, засчитал бы такой отказ потерей доступа
+// (#610) — поэтому порт без вопроса о допуске невыразим.
 type VerifyRelationChecker interface {
+	SubjectAdmitted(ctx context.Context, subject string) (bool, error)
 	Check(ctx context.Context, subject, relation, object string) (bool, error)
 }
+
+// ReasonRelationUnresolved — причина находки «материализованное чтение не
+// разрешает требуемое отношение». Отказ допуска называется своей причиной —
+// `admission.DenyReason`, тем же значением, которым его называет дверь.
+const ReasonRelationUnresolved = "relation_unresolved"
 
 // BindingRelationCheck — one active binding's required-relation Check triple: the
 // subject, the enforcement relation the catalog gates the binding's read action on
@@ -164,10 +177,14 @@ const verifyFailureLogCap = 50
 //
 // Поля, а не проза: разбирающий журнал отбирает по полю. Проза остаётся в
 // reason — она объясняет, а не адресует.
-func (g *VerifyGate) logFailures(ctx context.Context, msg string, report VerifyReport) {
+//
+// summary — поля сводки сверх общих двух (у сверки отношений — счёт по причинам).
+func (g *VerifyGate) logFailures(ctx context.Context, msg string, report VerifyReport, summary ...any) {
 	g.logger.WarnContext(ctx, msg,
-		slog.Int("failures", len(report.Failures)),
-		slog.Int("bindings_checked", report.BindingsChecked))
+		append([]any{
+			slog.Int("failures", len(report.Failures)),
+			slog.Int("bindings_checked", report.BindingsChecked),
+		}, summary...)...)
 	for i, f := range report.Failures {
 		if i == verifyFailureLogCap {
 			g.logger.WarnContext(ctx, "verify-gate: остаток находок не назван поимённо",
@@ -197,6 +214,50 @@ type VerifyReport struct {
 	BindingsChecked int
 	// Failures — bindings that expected explicit tuples but have none.
 	Failures []VerifyFailure
+	// Refusals — тройки, по которым отношение НЕ спрашивалось: субъект не допущен
+	// к решению (адрес не подтверждён, #456 Р4а). Это не потеря материализации —
+	// запись о выдаче есть и подействует после подтверждения, — и в NoAccessLoss
+	// они не входят. Отдельным полем, а не находкой с другой прозой: потребитель
+	// отчёта различает причины по полю, а не разбором текста.
+	Refusals []VerifyRefusal
+}
+
+// VerifyRefusal — тройка, отвеченная отказом допуска субъекта, а не отношением.
+type VerifyRefusal struct {
+	BindingID domain.AccessBindingID
+	Subject   string
+	Relation  string
+	Object    string
+	// Reason — причина отказа; сейчас одна: admission.DenyReason.
+	Reason string
+}
+
+// ByReason — счёт сверки отношений по каждой причине, включая ноль: «отказов
+// допуска 0» обязано читаться так же явно, как «находок 0». Находки сверки
+// ведомости (Verify) пары не несут и сюда не входят: у них своя сводка.
+func (r VerifyReport) ByReason() map[string]int {
+	out := map[string]int{
+		ReasonRelationUnresolved: 0,
+		admission.DenyReason:     0,
+	}
+	for _, f := range r.Failures {
+		if f.Relation != "" || f.Object != "" || f.Subject != "" {
+			out[ReasonRelationUnresolved]++
+		}
+	}
+	for _, rf := range r.Refusals {
+		out[rf.Reason]++
+	}
+	return out
+}
+
+// reasonAttrs — счёт по причинам полями записи журнала.
+func (r VerifyReport) reasonAttrs() []any {
+	by := r.ByReason()
+	return []any{
+		slog.Int(ReasonRelationUnresolved, by[ReasonRelationUnresolved]),
+		slog.Int(admission.DenyReason, by[admission.DenyReason]),
+	}
 }
 
 // VerifyGate — the contract-phase gate.
@@ -246,7 +307,33 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 		return VerifyReport{}, fmt.Errorf("verify-gate: list active binding relation checks: %w", err)
 	}
 	report := VerifyReport{NoAccessLoss: true, BindingsChecked: len(checks)}
+	// Допуск спрашивается ОДИН раз на субъекта: он не зависит ни от отношения, ни
+	// от объекта, а троек у одного человека — по числу его выдач.
+	admitted := map[string]bool{}
 	for _, c := range checks {
+		ok, seen := admitted[c.Subject]
+		if !seen {
+			var aerr error
+			ok, aerr = g.checker.SubjectAdmitted(ctx, c.Subject)
+			if aerr != nil {
+				// Третий исход — «спросить не смогли»: он не сливается ни с
+				// допуском, ни с отказом.
+				return VerifyReport{}, fmt.Errorf("verify-gate: допуск субъекта %s: %w", c.Subject, aerr)
+			}
+			admitted[c.Subject] = ok
+		}
+		if !ok {
+			// Дверь ответила бы «нет», не вычисляя отношения: ответ про допуск, а
+			// не про материализацию. Спрашивать отношение незачем.
+			report.Refusals = append(report.Refusals, VerifyRefusal{
+				BindingID: c.BindingID,
+				Subject:   c.Subject,
+				Relation:  c.Relation,
+				Object:    c.Object,
+				Reason:    admission.DenyReason,
+			})
+			continue
+		}
 		allowed, cerr := g.checker.Check(ctx, c.Subject, c.Relation, c.Object)
 		if cerr != nil {
 			return VerifyReport{}, fmt.Errorf("verify-gate: fga check %s#%s@%s: %w",
@@ -266,10 +353,10 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 		}
 	}
 	if !report.NoAccessLoss {
-		g.logFailures(ctx, "verify-gate: materialized read tuples that do NOT resolve", report)
+		g.logFailures(ctx, "verify-gate: materialized read tuples that do NOT resolve", report, report.reasonAttrs()...)
 	} else {
-		g.logger.InfoContext(ctx, "verify-gate: every materialized read tuple resolves",
-			slog.Int("bindings_checked", report.BindingsChecked))
+		g.logger.InfoContext(ctx, "verify-gate: every materialized read tuple of an admitted subject resolves",
+			append([]any{slog.Int("bindings_checked", report.BindingsChecked)}, report.reasonAttrs()...)...)
 	}
 	return report, nil
 }

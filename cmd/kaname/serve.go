@@ -106,12 +106,7 @@ func runServe(cfg config.Config) error {
 	for _, w := range cfg.InsecureDevWarnings() {
 		logger.Warn(w)
 	}
-	if cfg.AuthN.Mode == config.ModeProduction {
-		logger.Warn("authn.mode=production: anonymous callers will be rejected (fail-closed)")
-	}
-	if cfg.AuthN.Mode == config.ModeProductionStrict {
-		logger.Warn("authn.mode=production-strict: anonymous rejected + TLS+SSL strictly validated")
-	}
+	logAuthnMode(logger, cfg.AuthN.Mode)
 
 	// Посадка процесса — ЧЕРЕЗ ЦЕНТРАЛЬНЫЙ ДЕСКРИПТОР, и до первого соединения
 	// с базой (задача продукта #1406). Место выбрано не по вкусу: страж
@@ -2177,7 +2172,8 @@ func runServe(cfg config.Config) error {
 				logger.Info("p8 verify-gate: do materialized read tuples resolve",
 					slog.Bool("no_access_loss", relReport.NoAccessLoss),
 					slog.Int("bindings_checked", relReport.BindingsChecked),
-					slog.Int("failures", len(relReport.Failures)))
+					slog.Int("failures", len(relReport.Failures)),
+					slog.Int("admission_refused", len(relReport.Refusals)))
 			}
 		}
 		return nil
