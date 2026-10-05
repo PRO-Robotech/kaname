@@ -69,6 +69,7 @@ func seedAuditUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix
 		fmt.Sprintf("aud-acc-%s-%s", suffix, accID[len(accID)-6:]),
 		string(uid))
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

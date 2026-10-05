@@ -556,9 +556,9 @@ func seedNonOwningUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, su
 	require.NoError(t, pool.QueryRow(ctx, `SELECT account_id FROM users WHERE id = $1`, string(owner)).Scan(&accID))
 
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		string(uid), accID,
 		fmt.Sprintf("ext-%s-%s", suffix, uid),
 		fmt.Sprintf("u-%s-%s@example.com", suffix, uid),

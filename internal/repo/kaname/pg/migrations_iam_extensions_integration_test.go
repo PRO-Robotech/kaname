@@ -309,6 +309,8 @@ func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 		INSERT INTO kaname.projects (id, account_id, name)
 		VALUES ('prj_kac127test001ab', 'acc_kac127test001ab', 'kac127-test-prj')`)
 	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, wayInFixtureSQL)
+	require.NoError(t, err, "посев строки пароля личности фикстуры (kaname#608)")
 
 	require.NoError(t, tx.Commit())
 

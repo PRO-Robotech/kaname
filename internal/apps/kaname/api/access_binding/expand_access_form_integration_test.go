@@ -124,6 +124,7 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	// неотличим от «там всё равно никого нет», и утечка не имела бы чего утекать.
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	     VALUES ('account', 'acc_B', 'viewer', 'user:usr_secret_b')`)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "коммит посева: форма читает СВОЕЙ транзакцией и "+
 		"незакоммиченного не увидит — проба зеленела бы на пустоте")
 }

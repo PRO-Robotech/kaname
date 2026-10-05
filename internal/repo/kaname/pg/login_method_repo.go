@@ -324,6 +324,61 @@ func replaceLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod
 	return tag.RowsAffected() == 1, nil
 }
 
+// putLoginVerifierTx — «заменить материал либо завести строку» ОДНИМ оператором
+// (Ф5 Р5 ветвь «строки нет», Ф5-34, `kacho#2698`; Р9 п. 4, `kaname#608`):
+// завершение восстановления кладёт новый пароль личности, у которой строки
+// пароля может не быть. Строка есть — материал замещается, как у
+// `replaceLoginVerifierTx`; строки нет — заводится. Проверки перед вставкой
+// нет: «не больше одной строки вида» держит ключ (user_id, kind), а
+// конкурирующие предъявления одного кода разводит оператор применения кода
+// раньше этого оператора (Ф5-34 (г)). created=true — строка заведена этим
+// оператором.
+//
+// Вид — только пароль: второй фактор заводится своими операторами ниже.
+func putLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: only an active password row is put by recovery")
+	}
+	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state)
+	      VALUES ($1, $2, $3, $4)
+	      ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier
+	      RETURNING (xmax = 0)`
+	var created bool
+	if err := tx.QueryRow(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal(), string(m.State)).Scan(&created); err != nil {
+		return false, mapErr(err, "LoginMethod.Put", loginMethodHint(m.UserID, m.Kind))
+	}
+	return created, nil
+}
+
+// recoveryTargetSQL — человек по адресу ВМЕСТЕ с подтверждённостью адреса и
+// наличием строки пароля: одно чтение на обеих полосах запроса восстановления
+// (Ф5 Р2, Р7, Р9 п. 2). Порядок тот же, что у чтения человека по адресу.
+// Материал не читается: подзапрос спрашивает только существование строки.
+const recoveryTargetSQL = `
+	SELECT ` + userCols + `, (email_verified_at IS NOT NULL) AS verified,
+	       EXISTS (SELECT 1 FROM ` + loginMethodsTable + ` m
+	                WHERE m.user_id = users.id AND m.kind = 'password') AS has_password
+	  FROM users
+	 WHERE lower(email) = lower($1)
+	 ORDER BY created_at ASC, id ASC
+	 LIMIT 1`
+
+// recoveryTargetRow — исполнитель чтения цели (пул). Живёт в этом файле, потому
+// что запрос называет таблицу секрета; наружу уходят личность и два признака.
+func recoveryTargetRow(ctx context.Context, q loginMethodQuerier, email domain.Email) (domain.User, bool, bool, error) {
+	var (
+		u                     domain.User
+		verified, hasPassword bool
+	)
+	if err := scanUserInto(q.QueryRow(ctx, recoveryTargetSQL, string(email)), &u, &verified, &hasPassword); err != nil {
+		return domain.User{}, false, false, err
+	}
+	return u, verified, hasPassword, nil
+}
+
 // --- второй фактор (Ф12, kacho#1281): операторы над таблицей секрета ---
 
 // upsertPendingTOTPTx — ОДИН оператор заведения (Ф12-05, приёмка Р4 матрица):

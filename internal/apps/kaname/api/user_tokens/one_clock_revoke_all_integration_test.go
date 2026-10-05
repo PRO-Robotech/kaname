@@ -127,6 +127,7 @@ func newOneClockStand(t *testing.T) oneClockStand {
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 		VALUES ($1,$2,'ext-one-clock','clock@example.com','Clock','ACTIVE', now())`, user, account)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return oneClockStand{pool: pool, user: domain.User{ID: domain.UserID(user), AccountID: domain.AccountID(account)}}
 }

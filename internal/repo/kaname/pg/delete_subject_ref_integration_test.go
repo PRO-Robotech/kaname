@@ -45,9 +45,9 @@ import (
 func seedMemberUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID, suffix string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`),
 		uid, accID, "ext-"+suffix+"-"+uid, "m-"+suffix+"@example.com")
 	require.NoError(t, err)
 	return uid

@@ -23,7 +23,10 @@ import (
 // ─── Один писатель отметки ──────────────────────────────────────────────────
 
 // TestTheAddressMarkHasOneWriterTheConfirmVerb — у отметки подтверждения ровно
-// один вызывающий писателя в непроверочном коде: глагол подтверждения.
+// ДВА вызывающих писателя в непроверочном коде: глагол подтверждения и
+// завершение восстановления, заводящее первый пароль личности без способа
+// входа (Ф5 Р9 п. 3–4, редакция 7 — Д16; `kaname#608`). Оператор отметки один;
+// вызывающих двое, и каждый назван файлом. Третий — находка.
 func TestTheAddressMarkHasOneWriterTheConfirmVerb(t *testing.T) {
 	t.Parallel()
 	calls, parsed, err := check.MarkWriterCalls(prodGoFiles(t, moduleRoot(t)))
@@ -34,9 +37,22 @@ func TestTheAddressMarkHasOneWriterTheConfirmVerb(t *testing.T) {
 	if parsed == 0 {
 		t.Fatal("проверка НЕ ИСПОЛНЯЛАСЬ: обход пуст")
 	}
-	if len(calls) != 1 || !strings.HasPrefix(calls[0], "internal/apps/kaname/api/humansession/verification.go:") {
-		t.Fatalf("писатель отметки зовётся не ровно одним глаголом подтверждения: %v", calls)
+	if len(calls) != len(markWriterCallers) {
+		t.Fatalf("писатель отметки зовётся не ровно названными вызывающими %v: %v", markWriterCallers, calls)
 	}
+	for i, c := range calls {
+		if !strings.HasPrefix(c, markWriterCallers[i]+":") {
+			t.Fatalf("вызов %s — не из названного вызывающего %s: %v", c, markWriterCallers[i], calls)
+		}
+	}
+}
+
+// markWriterCallers — названные вызывающие писателя отметки, в порядке обхода
+// (пути по алфавиту): завершение восстановления (первый пароль, Ф5 Р9) и глагол
+// подтверждения (Ф6).
+var markWriterCallers = []string{
+	"internal/apps/kaname/api/humansession/recovery_complete.go",
+	"internal/apps/kaname/api/humansession/verification.go",
 }
 
 // TestTheAddressMarkWriterInjection — второй вызывающий (путь хука поставщика,

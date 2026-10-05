@@ -175,6 +175,7 @@ func TestMembershipIsTheAccountSource(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 
 	// РАСХОЖДЕНИЕ, ради которого написана проба: второе членство, которого нет
@@ -266,6 +267,7 @@ func TestBlockedIdentityGainsNoAccountThroughMembership(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 
 	read := func() []string {

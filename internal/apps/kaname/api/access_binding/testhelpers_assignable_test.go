@@ -102,6 +102,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 		string(uid))
 	require.NoError(t, err)
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

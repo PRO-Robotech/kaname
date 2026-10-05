@@ -74,6 +74,7 @@ func seedAccountWithOwner(t *testing.T, db *sql.DB, tag string) (ownerID, accoun
 		accountID, "acc-"+tag, ownerID)
 	require.NoError(t, err)
 
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit())
 	return ownerID, accountID
 }
@@ -87,7 +88,7 @@ func seedRowInAccount(t *testing.T, db *sql.DB, id, email, accountID, inviteStat
 	if inviteStatus == "PENDING" {
 		externalID = ""
 	}
-	_, err := db.Exec(`
+	_, err := execWithWayIn(t, db, `
 		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		id, externalID, email, "Person", accountID, inviteStatus)
@@ -234,7 +235,7 @@ func TestIntegration_MirrorKeepsMembershipsItDidNotCreate(t *testing.T) {
 			"истинна тождественно и зеленела бы при полностью разрушающем зеркале")
 
 	// Первый вход: строка активируется. Ровно то, что делает `ActivateInvite`.
-	_, err = db.ExecContext(ctx, `
+	_, err = execWithWayIn(t, db, `
 		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, "ext-mirror")

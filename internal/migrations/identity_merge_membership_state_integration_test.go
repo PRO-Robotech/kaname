@@ -144,7 +144,7 @@ func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB
 // перестаёт быть приглашением и получает внешний субъект.
 func logIn(t *testing.T, db *sql.DB, person, externalID string) {
 	t.Helper()
-	res, err := db.Exec(`
+	res, err := execWithWayIn(t, db, `
 		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, externalID)

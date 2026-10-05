@@ -83,6 +83,11 @@ func seedCredentialOwners(t *testing.T, db *sql.DB) {
 	                  VALUES ('usr00000000000000mgr', 'ext-mig', 'mig@example.invalid',
 	                          'acc00000000000000mgr', 'ACTIVE')`)
 	require.NoError(t, err)
+	// Отметка открытого пути той же транзакцией (kaname#608): ACTIVE без способа
+	// входа база не фиксирует, а строка пароля сделала бы откат свода
+	// невозможным по построению — его страж отказывает на любой строке способа.
+	_, err = tx.Exec(`UPDATE kaname.users SET recovery_path_opened_at = now() WHERE id = 'usr00000000000000mgr'`)
+	require.NoError(t, err)
 	_, err = tx.Exec(`INSERT INTO kaname.service_accounts (id, account_id, name)
 	                  VALUES ('sva00000000000000mgr', 'acc00000000000000mgr', 'migrator-down-sa')`)
 	require.NoError(t, err)

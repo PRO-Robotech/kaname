@@ -194,7 +194,7 @@ func TestIntegration_RemovalCapturesEveryScopeOfTheSubject(t *testing.T) {
 	_, accountOne := seedAccountWithOwner(t, db, "one")
 	_, accountTwo := seedAccountWithOwner(t, db, "two")
 
-	_, err := db.ExecContext(ctx,
+	_, err := execWithWayIn(t, db,
 		`INSERT INTO kaname.users (id, external_id, email, account_id)
 		 VALUES ('usr-multi', 'usr-multi', 'multi@example.test', $1)`, accountOne)
 	require.NoError(t, err)

@@ -178,9 +178,7 @@ type VerificationWriter interface {
 	// свёртке глобально. Адрес, на который выдан код, возвращается при
 	// совпадении.
 	PresentVerificationCode(ctx context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time, attempts int) (PresentedCode, domain.Email, error)
-	// MarkEmailVerified — отметка на подтверждённое значение адреса: сверка
-	// адреса и запись — один оператор. marked=false — адрес строки уже не тот.
-	MarkEmailVerified(ctx context.Context, userID domain.UserID, email domain.Email, at time.Time) (marked bool, err error)
+	// MarkEmailVerified — объявлен в `Writer` (вызывающих два, шапка порта).
 	// ActivateInviteOnVerification — активация приглашения, личность и личные
 	// ресурсы тем же исходом (Р11 п. 2). ErrInviteNotValid — приглашение
 	// истекло либо снято.

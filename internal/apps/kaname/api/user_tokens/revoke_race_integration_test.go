@@ -55,6 +55,7 @@ func seedTokenOwner(ctx context.Context, t *testing.T, pool *pgxpool.Pool, suffi
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(accID), fmt.Sprintf("ut-acc-%s-%s", suffix, accID[len(accID)-6:]), string(uid))
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

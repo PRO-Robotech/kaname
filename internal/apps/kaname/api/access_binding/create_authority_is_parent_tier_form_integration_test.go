@@ -143,6 +143,7 @@ func seedCreateAuthorityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	     VALUES ('project', 'prj_ca_home', 'editor', 'user:usr_createauth'),
 	            ('account', 'acc_ca_home', 'editor', 'user:usr_createauth')`)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "коммит посева: форма читает СВОЕЙ транзакцией")
 }
 
@@ -267,6 +268,7 @@ func TestCreateAuthority_RegistryNamespaceKeepsItsReader(t *testing.T) {
 	     ON CONFLICT DO NOTHING`)
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	     VALUES ('registry_registry', 'reg_ca000000000000', 'owner', 'user:usr_regowner_ca')`)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "коммит посева: форма читает СВОЕЙ транзакцией")
 
 	allowed, err := door.Check(ctx, owner, "v_create", registry)

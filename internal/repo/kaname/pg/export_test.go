@@ -3,7 +3,14 @@
 
 package pg
 
-import "io"
+import (
+	"context"
+	"io"
+
+	"github.com/jackc/pgx/v5/pgconn"
+
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+)
 
 // export_test.go — мост для проб пакета, намеренно УЗКИЙ.
 //
@@ -44,4 +51,15 @@ const (
 func (p *OwnInteractiveClientProvider) WithClientSecretEntropy(r io.Reader) *OwnInteractiveClientProvider {
 	p.entropy = r
 	return p
+}
+
+// WriterTx — открытая транзакция писателя репозитория как исполнитель
+// оператора фикстуры (kaname#608): посев строки пароля личности, заведённой
+// `InsertActive`, обязан лечь ТОЙ ЖЕ транзакцией, иначе отложенный ключ
+// инварианта отвергнет фиксацию. Продуктовых путей мимо типа не открывает:
+// файл компилируется только с пробами.
+func WriterTx(w kaname.Writer) interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+} {
+	return w.(*writeTx).tx
 }

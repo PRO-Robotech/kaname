@@ -143,6 +143,7 @@ func seedProbeAccountWithoutOwnerBinding(t *testing.T, ctx context.Context, pool
 		 VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, "probe-acc-"+suffix, uid)
 	require.NoError(t, err, "посев аккаунта")
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

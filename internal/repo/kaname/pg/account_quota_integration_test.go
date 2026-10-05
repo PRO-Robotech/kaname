@@ -73,6 +73,7 @@ func accountQuotaFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		accountID, "quota-acc-"+suffix, userID)
 	require.NoError(t, err, "seed account")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit account quota fixture")
 	return externalID, userID
 }

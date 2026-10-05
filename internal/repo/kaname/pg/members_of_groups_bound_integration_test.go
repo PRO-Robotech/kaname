@@ -103,12 +103,12 @@ func TestIntegration_R914_MembersOfGroupsIsBoundedAndNamesTheTruncation(t *testi
 	// существования, поэтому учётки обязаны быть настоящими.
 	seedMembers := func(group, idPrefix string, n int) {
 		t.Helper()
-		_, err := pool.Exec(ctx, `
+		_, err := pool.Exec(ctx, withWayIn(`
 			INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 			SELECT $1 || lpad(i::text, 6, '0'), $2, $1 || lpad(i::text, 6, '0'),
 			       $1 || lpad(i::text, 6, '0') || '@kacho.local', 'm', 'ACTIVE'
 			  FROM generate_series(1, $3) AS i
-			ON CONFLICT DO NOTHING`, idPrefix, accountID, n)
+			ON CONFLICT DO NOTHING`), idPrefix, accountID, n)
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, `
 			INSERT INTO kaname.group_members (group_id, member_type, member_id)

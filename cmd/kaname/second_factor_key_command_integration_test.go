@@ -124,6 +124,7 @@ func newSFWorld(t *testing.T, n int) *sfWorld {
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, 'acc-sfkey', $2)`, account, string(w.people[0]))
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	previous := sfVerifier(t, sfPrevious)

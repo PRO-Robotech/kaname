@@ -66,6 +66,7 @@ func TestIntegration_CapturedScopesReadWhatTheTriggersWrote(t *testing.T) {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr-own', 'usr-own', 'own@example.test', 'acc-x');
+		INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ('usr-own', 'password', 'fixture-password-row-without-a-known-password');
 		INSERT INTO kaname.accounts (id, name, owner_user_id)
 		VALUES ('acc-x', 'acc-x', 'usr-own');
 		INSERT INTO kaname.groups (id, account_id, name)
@@ -104,6 +105,7 @@ func TestIntegration_CapturedScopesAnswerTheFreshestRow(t *testing.T) {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr-own', 'usr-own', 'own@example.test', 'acc-y');
+		INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ('usr-own', 'password', 'fixture-password-row-without-a-known-password');
 		INSERT INTO kaname.accounts (id, name, owner_user_id)
 		VALUES ('acc-y', 'acc-y', 'usr-own');
 		INSERT INTO kaname.groups (id, account_id, name)

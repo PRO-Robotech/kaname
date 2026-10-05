@@ -800,6 +800,7 @@ func runMatrix(t *testing.T, ctx context.Context, points []matrixPoint) []matrix
 		}
 		t0 := time.Now()
 		f.seedPoint(t, ctx, p.grid())
+		seedWayIn(t, ctx, tx)
 		if err := tx.Commit(ctx); err != nil {
 			t.Fatalf("фиксация посева точки %s: %v", p, err)
 		}

@@ -229,8 +229,10 @@ func (l *sessionWriterLane) seedPerson(t *testing.T) writerPerson {
 	v, err := l.hasher.Hash(writerScenePassword)
 	require.NoError(t, err)
 	_, err = l.s.pool.Exec(ctx,
-		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)`,
+		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)
+		 ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier`,
 		string(uid), v.Reveal())
+	// Строку пароля фикстуры (kaname#608) заменяет пароль сцены, которым войти.
 	require.NoError(t, err, "посев: способ входа паролем")
 	_, err = l.s.pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(uid))
 	require.NoError(t, err, "посев: подтверждённый адрес")
