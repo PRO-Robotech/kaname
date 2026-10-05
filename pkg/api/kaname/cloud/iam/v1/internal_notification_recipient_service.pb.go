@@ -24,6 +24,12 @@
 // читает никто. Отказ права — `PERMISSION_DENIED` `permission denied`,
 // `ErrorInfo{reason: AUTHZ_DENIED}`; право решается до проверки входа.
 //
+// Полоса уверенности обоих методов — рутинная, `required_acr_min = "1"`
+// (решение Д121): вызывающий — служба notify по сертификату, второго фактора у
+// неё нет по построению. Объявление явное: опущенную опцию генератор каталога
+// прав заполняет умолчанием «2». Мутации выдачи права на письма
+// (`InternalNotificationGrantService/Revoke`, `/Restore`) остаются на «2».
+//
 // Исход по субъекту — в теле ответа, а не кодом: справочник не производит
 // `NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`. Сбой чтения хранилища
 // kaname — `UNAVAILABLE` фиксированным текстом `notification recipient
@@ -673,12 +679,12 @@ const file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_raw
 	"#RECIPIENT_OUTCOME_SUBJECT_NOT_FOUND\x10\x02\x12&\n" +
 	"\"RECIPIENT_OUTCOME_SUBJECT_INACTIVE\x10\x03\x12%\n" +
 	"!RECIPIENT_OUTCOME_AUDIENCE_DENIED\x10\x04\x12*\n" +
-	"&RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS\x10\x052\xce\x03\n" +
-	"$InternalNotificationRecipientService\x12\xc2\x01\n" +
-	"\aResolve\x12,.kaname.cloud.iam.v1.ResolveRecipientRequest\x1a-.kaname.cloud.iam.v1.ResolveRecipientResponse\"Z\x8a\xb5\x18#iam.notification_recipients.resolve\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
-	" notification_recipient_directory\x12\x01*\x12\xe0\x01\n" +
-	"\x13ListProjectAudience\x12/.kaname.cloud.iam.v1.ListProjectAudienceRequest\x1a0.kaname.cloud.iam.v1.ListProjectAudienceResponse\"f\x8a\xb5\x18/iam.notification_recipients.listProjectAudience\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
-	" notification_recipient_directory\x12\x01*BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"&RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS\x10\x052\xd8\x03\n" +
+	"$InternalNotificationRecipientService\x12\xc7\x01\n" +
+	"\aResolve\x12,.kaname.cloud.iam.v1.ResolveRecipientRequest\x1a-.kaname.cloud.iam.v1.ResolveRecipientResponse\"_\x8a\xb5\x18#iam.notification_recipients.resolve\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
+	" notification_recipient_directory\x12\x01*\xa2\xb5\x18\x011\x12\xe5\x01\n" +
+	"\x13ListProjectAudience\x12/.kaname.cloud.iam.v1.ListProjectAudienceRequest\x1a0.kaname.cloud.iam.v1.ListProjectAudienceResponse\"k\x8a\xb5\x18/iam.notification_recipients.listProjectAudience\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
+	" notification_recipient_directory\x12\x01*\xa2\xb5\x18\x011BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescOnce sync.Once

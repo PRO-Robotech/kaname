@@ -3057,7 +3057,7 @@
       "object_type": "notification_recipient_directory",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve",
@@ -3067,7 +3067,7 @@
       "object_type": "notification_recipient_directory",
       "from_request_field": "*"
     },
-    "required_acr_min": "2"
+    "required_acr_min": "1"
   },
   {
     "fqn": "kaname.cloud.iam.v1.InternalOperationsService/ListIamOperations",
