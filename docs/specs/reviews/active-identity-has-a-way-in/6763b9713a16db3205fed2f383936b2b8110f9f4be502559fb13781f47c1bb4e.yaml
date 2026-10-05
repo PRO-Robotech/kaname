@@ -28,8 +28,14 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-05'
 
 effective_approval:
-  issued: false
-  why: санкцию выпускает внешнее событие pointpu, а не эта запись.
+  issued: true
+  issued_at: '2026-10-05T01:33:52Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Событие опубликовано курьером в kaname#608 (задача subject.task) в форме
+    `publication_pending.expected_form`; запись приведена к факту события отдельным коммитом,
+    вердикт и разбор не тронуты.
   what_the_event_would_lift: >-
     ban #1 для AWI-01…11, AWI-13 — задача kaname#608: миграция отметки, отложенной проверки и
     переноса; снятие глагола C2 в службе и, переходом пина, в доме платформы.
@@ -46,12 +52,44 @@ effective_approval:
       docs/engineering/acceptance/active-identity-has-a-way-in.md · subject_revision:
       4678dfcf7a0f8768e4ff2ece08e0898699e9c2c5 · subject_sha256:
       6763b9713a16db3205fed2f383936b2b8110f9f4be502559fb13781f47c1bb4e
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5986607810
+    event_url: https://github.com/PRO-Robotech/kaname/issues/608#issuecomment-5986607810
+    remeasured: >-
+      `git show origin/608:docs/engineering/acceptance/active-identity-has-a-way-in.md | sha256sum` на
+      origin/608 @d94589e88 → 6763b971…4e, совпал с именем записи и строкой `subject_sha256`
+      события; содержимое документа на d94589e88 и на content_commit 4678dfcf7 одно (тот же
+      sha256); `gh api repos/PRO-Robotech/kaname/issues/comments/5986607810` → issue_url
+      kaname#608, автор pointpu, author_association MEMBER; пять
+      обязательных строк заголовка дословно.
 
 authority:
   mode: versioned_policy_authority
   policy_document: docs/changes/policy.yaml (воркспейс)
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5986607810
+  node_id: IC_kwDOUO26pM8AAAABZNRiwg
+  url: https://github.com/PRO-Robotech/kaname/issues/608#issuecomment-5986607810
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5986607810
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/608
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T01:33:52Z'
+  body_sha256: ef84b6a295f797d01f1909662aa8c5094d23f5626f55a949b4481d74457a77d7
+  subject_sha256: 6763b9713a16db3205fed2f383936b2b8110f9f4be502559fb13781f47c1bb4e
+  subject_revision: 4678dfcf7a0f8768e4ff2ece08e0898699e9c2c5
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Событие в задаче `subject.task` (kaname#608). Отпечаток тела снят с сырого ответа API
+    (`gh api … | jq -j .body | sha256sum`).
 
 attribution:
   reviewer_kind: claude_agent
