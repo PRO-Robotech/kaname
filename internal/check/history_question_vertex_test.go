@@ -55,7 +55,19 @@ var historyTrunkRefs = []string{"origin/main"}
 // historyCorpusSuffixes — языки, в которых вызов git в этом дереве встречается.
 // Перечень ВЫПИСАН, а не выведен: обход отвечает «что там лежит», а вопрос здесь
 // обратный — «где мы вообще смотрим». Пустой каталог обход прошёл бы молча.
+//
+// Исполняемый сценарий БЕЗ РАСШИРЕНИЯ (`scripts/hooks/pre-push`,
+// `scripts/hooks/commit-msg`) суффиксом не опознаётся; его признак — первая
+// строка `#!`, и он читается вторым правилом переписи (`isExtensionlessScript`).
+// До kaname#371 такие файлы были слепой зоной: `install.sh` рядом судился, а
+// хуки — нет.
 var historyCorpusSuffixes = []string{".go", ".sh", ".py", ".yml", ".yaml", ".mk", "Makefile"}
+
+// isExtensionlessScript — файл без расширения, чья первая строка `#!`.
+func isExtensionlessScript(rel string, body []byte) bool {
+	base := filepath.Base(rel)
+	return !strings.Contains(base, ".") && base != "Makefile" && strings.HasPrefix(string(body), "#!")
+}
 
 // vertexWaiver — запись ведомости: почему вопрос задан ИМЕННО этой вершине.
 type vertexWaiver struct {
@@ -107,12 +119,9 @@ func vertexLedger() map[string]vertexWaiver {
 		"internal/check/acceptance_edit_after_verdict.go#log": {Calls: 3,
 			Why: "вершина умолчания (`git log` без ревизии), и это ВЕРНО: вопрос сравнивает " +
 				"ПОРЯДОК ДВУХ правок внутри одной истории, а не принадлежность названной " +
-				"ревизии. Схлопывание двигает оба операнда вместе, поэтому зелёное полосы " +
-				"красным ствола не становится НИ В ОДНОЙ посадке — замерено тремя посадками " +
-				"(`TestSquashNeverTurnsAGreenLaneIntoARedTrunk`). Обратное направление " +
-				"названо там же и прощено: документ, рождённый полосой, после схлопывания " +
-				"получает одну отметку на оба операнда, и находка исчезает — цена того, что " +
-				"предикат сравнивает отметки, а не ревизии"},
+				"ревизии. Коммит слияния переносит коммиты полосы в ствол с их отметками, " +
+				"поэтому вердикт полосы на стволе тот же в обе стороны — замерено тремя " +
+				"посадками (`TestMergeCommitKeepsTheLaneVerdictOnTheTrunk`)"},
 		"internal/check/docs_measurement_dating_test.go#merge-base": {Calls: 2,
 			Why: "вершина — ПАРАМЕТР `trunk`, и её единственный держатель `serviceTrunkRef` " +
 				"объявлен стволом. Параметром она стала намеренно: иначе ось «ствол или вершина» " +
@@ -134,7 +143,7 @@ func vertexLedger() map[string]vertexWaiver {
 				"вхождение"},
 		"internal/check/history_question_vertex_injection_test.go#log": {Calls: 3,
 			Why: "вершина — СИНТЕТИЧЕСКИЙ репозиторий, который фикстура строит сама, и ставит " +
-				"её она переключением ветки: сперва полоса, затем ствол после схлопывания. " +
+				"её она переключением ветки: сперва полоса, затем ствол после коммита слияния. " +
 				"Вершина здесь и есть предмет замера, а ствола `origin/main` в таком дереве " +
 				"нет вовсе — спрашивать о нём было бы вопросом к тому, чего фикстура не заводит",
 		},
@@ -151,9 +160,8 @@ func vertexLedger() map[string]vertexWaiver {
 		"docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-side/4ee03c398152d87b4cdb74646b2ca34a513476d8d4e31799fec4f453d541cd22.yaml#diff": {Calls: 1,
 			Why: "рецензент сверяет ДВЕ РЕДАКЦИИ одного документа внутри ветки PR (прежняя " +
 				"голова → новая): оба операнда — ревизии полосы by construction, и ствол ни " +
-				"одной из них быть не может — в стволе этой редакции ещё нет. Схлопывание " +
-				"переносит обе в один коммит, и вопрос теряет предмет вместе с ветвью, а не " +
-				"меняет ответ"},
+				"одной из них быть не может — в стволе этой редакции ещё нет. Коммит слияния " +
+				"переносит обе в ствол как есть, и ответ о дельте двух редакций не меняется"},
 		// ── ЗАПИСИ РЕВЬЮ: предмет вопроса — ЛЕЖИТ ЛИ РЕДАКЦИЯ В НАКОПИТЕЛЬНОЙ ЛИНИИ ──
 		"docs/specs/reviews/second-factor-totp-and-recovery-codes/06984af979a6d7a1ca384e5d356d075627cb9a2c56a42942dff75a17a5fae1ad.yaml#merge-base": {Calls: 2,
 			Why: "рецензент устанавливает, что редакция 6 (769aa56a) и её реализация (вливание " +
@@ -192,6 +200,13 @@ func vertexLedger() map[string]vertexWaiver {
 				"момент коммита правила в истории СУДИМОЙ ревизии. Ствол не несёт ни " +
 				"неопубликованных коммитов, ни — до посадки — коммита правила; спросить его " +
 				"значило бы судить пустой диапазон"},
+		"scripts/hooks/commit-msg#log": {Calls: 1,
+			Why: "предмет — коммит, который ПЕРЕПИСЫВАЕТСЯ ЭТИМ вызовом хука (`--amend`, п.9 " +
+				"правила): отпечаток автора и даты нового сообщения сверяется с текущей " +
+				"вершиной, чтобы отличить перепись истории от нового коммита с датой в " +
+				"прошлом. Ствол этого коммита не несёт by construction — он ещё не отправлен; " +
+				"вопрос стволу судил бы чужой коммит. В перепись вошёл с kaname#371 (сценарий " +
+				"без расширения, признак — первая строка `#!`)"},
 		"scripts/hooks/prepush-rule.sh#rev-list": {Calls: 1,
 			Why: "предмет — коммиты, которые уезжают ЭТОЙ отправкой: вершина, поданная git на " +
 				"вход хука, за вычетом всего опубликованного (`--not --remotes`). Ствол " +
@@ -306,9 +321,9 @@ func judgeHistoryVertices(questions []check.HistoryQuestion,
 		case !forgiven:
 			findings = append(findings, fmt.Sprintf(
 				"%s:%d: вопрос об истории задан НЕ СТВОЛУ (вершина: %s, глагол %s, вызовов %d).\n"+
-					"    Здесь вливают схлопыванием: коммит полосы предком ствола не становится "+
-					"никогда, поэтому вердикт «по рабочей вершине» описывает дерево, которого "+
-					"после посадки не будет.\n"+
+					"    Здесь вливают коммитом слияния: ствол после посадки — не вершина полосы, "+
+					"второй родитель несёт то, что легло от соседних полос, поэтому вердикт «по "+
+					"рабочей вершине» описывает подмножество истории, которой станет ствол.\n"+
 					"    Исходов два: перевести вершину на ствол (%s) — либо записать в ведомость "+
 					"`vertexLedger` довод, почему для ЭТОГО вопроса вершина верна, с точным числом "+
 					"вызовов.",
@@ -368,6 +383,27 @@ func censusByVerb(c check.HistoryCensus) string {
 func readHistoryCorpus(t *testing.T, corpusRoot, ownDir string) map[string][]byte {
 	t.Helper()
 	out := map[string][]byte{}
+	// Второе правило переписи — сценарий без расширения по первой строке `#!`.
+	all, err := treecorpus.Under(ownDir)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: состав дерева не прочитан: %v", err)
+	}
+	for _, abs := range all {
+		if strings.Contains(filepath.Base(abs), ".") {
+			continue
+		}
+		b, readErr := os.ReadFile(abs) // #nosec G304 -- путь взят индексом git, не вводом снаружи
+		if readErr != nil {
+			t.Fatalf("чтение %s: %v", abs, readErr)
+		}
+		rel, rerr := filepath.Rel(corpusRoot, abs)
+		if rerr != nil {
+			t.Fatalf("относительный путь для %s: %v", abs, rerr)
+		}
+		if isExtensionlessScript(rel, b) {
+			out[filepath.ToSlash(rel)] = b
+		}
+	}
 	for _, suffix := range historyCorpusSuffixes {
 		paths, err := treecorpus.UnderWithSuffix(ownDir, suffix)
 		if err != nil {
