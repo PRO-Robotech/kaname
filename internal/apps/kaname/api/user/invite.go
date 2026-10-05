@@ -294,11 +294,17 @@ func (uc *InviteUserUseCase) CreateMembership(ctx context.Context, in membership
 }
 
 // admission — то, что синхронная приёмка решила и что нужно транзакции:
-// кандидат идентификатора человека (на случай заведения строки) и след
-// приглашения.
+// кандидат идентификатора человека (на случай заведения строки), след
+// приглашения и выдавший — для выдачи на проект, которую кладёт приглашение.
 type admission struct {
 	candidateUserID domain.UserID
 	invitedBy       domain.UserID
+	// grantedBy — выдавший по правилу `AccessBindingService.Create`
+	// (`authzguard.PrincipalUserID`): человек — его строка, служебная учётка —
+	// её идентификатор. Не `invitedBy`: тот — внешний ключ в `users(id)` и
+	// машину не называет, а столбец аудита выдачи называет любого принципала
+	// (kaname#262).
+	grantedBy domain.UserID
 }
 
 // admit — СИНХРОННАЯ приёмка, общая для обоих глаголов. Всё до чеканки
@@ -427,6 +433,7 @@ func (uc *InviteUserUseCase) admit(ctx context.Context, in InviteUserInput) (adm
 	return admission{
 		candidateUserID: userID,
 		invitedBy:       domain.UserID(authzguard.HumanUserID(ctx)),
+		grantedBy:       domain.UserID(authzguard.PrincipalUserID(ctx)),
 	}, nil
 }
 
@@ -602,6 +609,11 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 					RoleID:       in.RoleID,
 					ResourceType: domain.ResourceType("project"),
 					ResourceID:   string(in.ProjectID),
+					// Выдавший — тем же правилом, что у AccessBindingService.Create:
+					// одно право, положенное двумя глаголами, не различается по полю
+					// аудита (kaname#262). Записи об отзыве и удалении берут актора
+					// отсюда.
+					GrantedByUserID: adm.grantedBy,
 					// F8: whole-project invite grant (explicit allInScope).
 					Target: domain.AccessTarget{AllInScope: true},
 				}

@@ -231,18 +231,28 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
-	// ON CONFLICT (id) DO NOTHING — не проглатывание, а порядок ключей: у вставки
-	// два ключа, и ключ имени создан в схеме раньше первичного, поэтому база
-	// проверяет его первым. Побайтовый повтор создания (тот же id и то же имя)
-	// без этой оговорки отказывался бы текстом имени (AID-13). Арбитр
-	// проверяется до вставки, конфликт идентификатора даёт пустой RETURNING и
-	// отказ ниже; гонку одного id решает та же спекулятивная вставка (AID-14).
-	// Конфликт одного имени по-прежнему приходит отказом accounts_name_unique,
-	// конфликт с реестром выданных — отказом его ключа из триггера.
+	// ON CONFLICT DO NOTHING БЕЗ ЦЕЛИ — арбитрами служат ОБА ключа вставки
+	// (`accounts_pkey` и `accounts_name_unique`; других уникальных ключей у
+	// таблицы нет), и столкновение по любому из них возвращает НОЛЬ строк, не
+	// обрывая транзакцию. Несущих причин две, и обе — порядок, а не проглатывание:
+	//
+	//   - ключ имени создан в схеме раньше первичного, и база проверяет его
+	//     первым; побайтовый повтор создания (тот же id и то же имя) без арбитра
+	//     по id отказывался бы текстом имени (AID-13). Какой ключ занят, решает
+	//     чтение идентификатора ниже — тем же порядком «сначала id»;
+	//   - личный аккаунт регистрации перебирает свободное имя ТОЙ ЖЕ транзакцией
+	//     (`user.BootstrapPersonalResourcesTx`, Ф4 Р9): сырое 23505 сделало бы
+	//     транзакцию негодной до конца её тела, а ноль строк оставляет её годной
+	//     для следующей попытки. Занятость имени судит само ограничение (ban #10).
+	//
+	// Гонку одного id решает та же спекулятивная вставка (AID-14): конкурирующая
+	// незафиксированная строка дожидается своего исхода до решения арбитра.
+	// Конфликт с реестром выданных — по-прежнему отказ его ключа из триггера: он
+	// арбитром не является и поднимается как 23505.
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO NOTHING
+		ON CONFLICT DO NOTHING
 		RETURNING %s`, accountCols)
 
 	row := w.tx.QueryRow(ctx, q,
@@ -251,15 +261,16 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	)
 	out, err := scanAccount(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Account{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+		return domain.Account{}, w.insertConflict(ctx, a)
 	}
 	if err != nil {
-		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
+		// Прочие UNIQUE (ключ реестра выданных из триггера) / FK / CHECK — через
+		// mapErr с verbatim-text hint'ами.
 		switch pgfault.Classify(err).Class {
 		case pgfault.Unique:
-			// Подсказка несёт И идентификатор, И имя: у вставки два ключа
-			// (первичный и имени), плюс ключ реестра выданных из триггера, и текст
-			// обязан не зависеть от того, какой из них база проверила первой.
+			// Подсказка несёт И идентификатор, И имя: ключ реестра выданных
+			// поднимается триггером, и текст обязан не зависеть от того, какой
+			// ключ сработал.
 			return domain.Account{}, mapErr(err, "", accountInsertHint(a.ID, a.Name))
 		case pgfault.ForeignKey:
 			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
@@ -275,6 +286,29 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		*w.ownerFKHintSink = string(a.OwnerUserID)
 	}
 	return out, nil
+}
+
+// insertConflict — какой ключ занял вставку, ответившую нолём строк. Арбитров
+// два (первичный и имени), и порядок ответа — «сначала идентификатор» (AID-13):
+// занятый id называется идентификатором, иначе занятым было имя. Транзакция
+// после нуля строк годна, поэтому чтение идёт ею же и видит строку, решившую
+// арбитра: она зафиксирована к моменту решения.
+//
+// Признак — ErrAlreadyExists в обеих ветвях, текст — тот же, что у сырого
+// 23505 соответствующего ключа (`uniqueText`), так что контракт глагола
+// Create по столкновению не меняется. Если строку, решившую арбитр по id,
+// успели удалить между вставкой и чтением, ответ назовёт имя; повтор вставки
+// тем же id отвергнется ключом реестра выданных текстом идентификатора.
+func (w *accountWriter) insertConflict(ctx context.Context, a domain.Account) error {
+	var idTaken bool
+	if err := w.tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM accounts WHERE id = $1)`, string(a.ID)).Scan(&idTaken); err != nil {
+		return mapErr(err, "", string(a.ID))
+	}
+	if idTaken {
+		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+	}
+	return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", accountNameTakenText(string(a.Name)))
 }
 
 // Update — UPDATE на mutable полях (name, description, labels). owner_user_id
