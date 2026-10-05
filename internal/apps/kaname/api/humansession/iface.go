@@ -212,6 +212,10 @@ type Writer interface {
 	// ReplaceLoginVerifier замещает материал способа входа одним оператором
 	// (ID-PW-1 PWV-10): replaced=false — строки способа нет.
 	ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (replaced bool, err error)
+	// PutPasswordVerifier — строка «пароль» есть — заменить материал, нет —
+	// завести, ОДНИМ оператором (Ф5 Р5, Ф5-34; kacho#2698): писатель
+	// завершения восстановления. Одна строка на личность — ключ хранилища.
+	PutPasswordVerifier(ctx context.Context, m domain.LoginMethod) error
 	// LoginMethod — строка способа входа человека данного вида, прочитанная
 	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —

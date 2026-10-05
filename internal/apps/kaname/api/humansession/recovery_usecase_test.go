@@ -489,7 +489,9 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 	// "login-method" — чтение заведённых способов входа ТОЙ ЖЕ транзакцией
 	// после применения кода: его отказ — отказ исхода, как отказ любой записи
 	// в ней (отказ оператора базы обрывает транзакцию, продолжать её нечем).
-	for _, op := range []string{"replace", "cutoff", "end-others", "login-method", "reset-failures", "audit", "insert", "commit"} {
+	// "put" — запись строки «пароль» завершением (заменить либо завести,
+	// Ф5-34; kacho#2698): прежде здесь стояло замещение "replace".
+	for _, op := range []string{"put", "cutoff", "end-others", "login-method", "reset-failures", "audit", "insert", "commit"} {
 		h.store.failOn = op
 		_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 		require.ErrorIs(t, err, humansession.ErrStoreUnavailable, "отказ на %q", op)

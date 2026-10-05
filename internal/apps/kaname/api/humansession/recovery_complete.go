@@ -257,19 +257,11 @@ func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
 	now time.Time, blocked, emailVerified bool,
 ) (CompleteRecoveryOutput, error) {
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
-	if err != nil {
+	// Строка «пароль» есть — материал заменяется, нет — заводится (Ф5 Р5,
+	// Ф5-34; kacho#2698, исход 1): основание то же — доказанное кодом владение
+	// подтверждённым адресом. Исход завершения от наличия строки не зависит.
+	if err := w.PutPasswordVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive}); err != nil {
 		return CompleteRecoveryOutput{}, err
-	}
-	if !replaced {
-		// Строки способа входа паролем нет: восстанавливать нечего. Запись нового
-		// способа — предмет Ф2 (ID-PW-1), а не этой фазы; заводить его здесь
-		// значило бы завести второго писателя способа входа. Исход откатывается
-		// целиком (код остаётся годным), причина — в журнале, а не в ответе.
-		// Исход для человека решает владелец — `kacho#2698`.
-		uc.logger.Error("recovery completion: the person has no password sign-in method to replace — recovery cannot set one (ID-PW-1 owns the write)",
-			"user_id", string(user.ID))
-		return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: user %s has no password sign-in method", user.ID)
 	}
 	// Все прежние сессии — снятием записей (в нашей посадке) и отсечкой (её
 	// читает край на предъявлении, Ф3 Р7): Ф1 Р4, Ф5-19.

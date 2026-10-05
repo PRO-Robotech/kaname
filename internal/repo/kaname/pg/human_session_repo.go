@@ -838,6 +838,11 @@ func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserToke
 	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
+// PutPasswordVerifier — делегируется адаптеру таблицы секрета (см. шапку).
+func (w *humanSessionWriter) PutPasswordVerifier(ctx context.Context, m domain.LoginMethod) error {
+	return putPasswordVerifierTx(ctx, w.tx, m)
+}
+
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).
 func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
 	return replaceLoginVerifierTx(ctx, w.tx, m)

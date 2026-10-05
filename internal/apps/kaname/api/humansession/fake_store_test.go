@@ -513,6 +513,23 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	return true, nil
 }
 
+// PutPasswordVerifier — заменить либо завести строку «пароль» (Ф5-34): одна
+// строка на личность — ключ карты, как ключ строки хранилища.
+func (w *fakeWriter) PutPasswordVerifier(_ context.Context, m domain.LoginMethod) error {
+	if err := m.Validate(); err != nil {
+		return errFakeArg(err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return errFakeArg("Illegal argument login_method: only an active password row is put by recovery")
+	}
+	w.store.trip()
+	if err := w.fail("put"); err != nil {
+		return err
+	}
+	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
+	return nil
+}
+
 // LoginMethod — то же чтение, что `fakeMethods.Get`, транзакцией дублёра;
 // отказ по имени "login-method". Пустую личность и вид вне словаря адаптер
 // отвергает аргументом, до базы (`getLoginMethod`).

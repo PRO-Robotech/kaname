@@ -487,6 +487,10 @@ func parityCases() []parityCase {
 			Verifier: parityVerifier("material-password-new"), State: domain.LoginMethodStateActive})
 		return said(err, "заменён %v", replaced)
 	})
+	wr("PutPasswordVerifier", "пароль её личности", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		return said(w.PutPasswordVerifier(ctx, domain.LoginMethod{UserID: p.user.ID, Kind: domain.LoginMethodPassword,
+			Verifier: parityVerifier("material-password-put"), State: domain.LoginMethodStateActive}), "записан")
+	})
 	for _, kind := range []domain.LoginMethodKind{domain.LoginMethodPassword, domain.LoginMethodTOTP, domain.LoginMethodLookupSecret} {
 		wr("LoginMethod", "её личность, вид "+string(kind), func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 			m, err := w.LoginMethod(ctx, p.user.ID, kind)

@@ -221,6 +221,11 @@ func (w recordingWriter) ReplaceLoginVerifier(ctx context.Context, m domain.Logi
 	return w.inner.ReplaceLoginVerifier(ctx, m)
 }
 
+func (w recordingWriter) PutPasswordVerifier(ctx context.Context, m domain.LoginMethod) error {
+	defer w.rec("PutPasswordVerifier")()
+	return w.inner.PutPasswordVerifier(ctx, m)
+}
+
 func (w recordingWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	defer record(w.j, w.meter, storeOp{Port: "writer", Name: "LoginMethod(" + string(kind) + ")", LoginMethodRead: true})()
 	return w.inner.LoginMethod(ctx, userID, kind)

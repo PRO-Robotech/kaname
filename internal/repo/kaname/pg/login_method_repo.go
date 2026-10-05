@@ -329,6 +329,34 @@ func replaceLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod
 	return tag.RowsAffected() == 1, nil
 }
 
+// putPasswordVerifierTx — «строка есть — заменить материал, строки нет —
+// завести» ОДНИМ оператором базы (приёмка Ф5, Р5 «Личность без строки
+// „пароль“», сценарий Ф5-34; задача PRO-Robotech/kacho#2698, исход 1).
+// Зовёт его ТОЛЬКО завершение восстановления: основание пароля там — доказанное
+// кодом владение подтверждённым адресом, то же, на котором замещается
+// существующий. Инвариант «у личности не больше одной строки вида „пароль“»
+// держит ключ строки хранилища («человек, вид»), а не чтение перед записью
+// (ban #10); гонку двух предъявлений одного кода решает оператор применения
+// кода до этой записи.
+//
+// Живёт в ЭТОМ файле по той же причине, что замещение: называет таблицу секрета
+// и выпускает материал оператору базы.
+func putPasswordVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) error {
+	if err := m.Validate(); err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: only an active password row is put by recovery")
+	}
+	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state)
+	      VALUES ($1, $2, $3, $4)
+	      ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier`
+	if _, err := tx.Exec(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal(), string(m.State)); err != nil {
+		return mapErr(err, "LoginMethod.Put", loginMethodHint(m.UserID, m.Kind))
+	}
+	return nil
+}
+
 // --- второй фактор (Ф12, kacho#1281): операторы над таблицей секрета ---
 
 // upsertPendingTOTPTx — ОДИН оператор заведения (Ф12-05, приёмка Р4 матрица):
