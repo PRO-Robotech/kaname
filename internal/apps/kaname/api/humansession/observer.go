@@ -69,9 +69,12 @@ func LoginOutcomes() []LoginOutcome {
 type AccessKeyLoginOutcome string
 
 const (
-	AccessKeyLoginIssued            AccessKeyLoginOutcome = "issued"
-	AccessKeyLoginChallengeIssued   AccessKeyLoginOutcome = "challenge-issued"
-	AccessKeyLoginSignature         AccessKeyLoginOutcome = "signature"
+	AccessKeyLoginIssued          AccessKeyLoginOutcome = "issued"
+	AccessKeyLoginChallengeIssued AccessKeyLoginOutcome = "challenge-issued"
+	AccessKeyLoginSignature       AccessKeyLoginOutcome = "signature"
+	// #nosec G101 -- имя клетки счётчика отказов («удостоверение неизвестно»),
+	// а не секрет: значение уходит в метку счётчика, ответ предъявителю у всех
+	// клеток единого отказа один.
 	AccessKeyLoginCredentialUnknown AccessKeyLoginOutcome = "credential-unknown"
 	AccessKeyLoginOrigin            AccessKeyLoginOutcome = "origin"
 	AccessKeyLoginRPIDHash          AccessKeyLoginOutcome = "rp-id-hash"
