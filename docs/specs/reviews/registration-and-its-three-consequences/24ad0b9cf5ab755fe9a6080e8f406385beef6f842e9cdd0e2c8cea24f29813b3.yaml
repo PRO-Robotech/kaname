@@ -1,0 +1,108 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: 24ad0b9cf5ab755fe9a6080e8f406385beef6f842e9cdd0e2c8cea24f29813b3
+  revision: 7
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  content_commit: d76cf2f0ef4adaa633e1075a61b1789e07fdd5c8
+  branch: '456'
+  worktree: tmp/a-f4-27-kaname
+  measured_at: PRO-Robotech/kaname@36fce61d8280 (голова ветки волны 538)
+  task: PRO-Robotech/kaname#256
+  wave: PRO-Robotech/kaname#538
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md
+  fingerprint_reproduced: true
+  lines: 2162
+  round: 2
+  round_note: второй круг захода; первый — CHANGES_REQUESTED на редакции 6 (B1-1, PRODUCER)
+  predecessor_record: docs/specs/reviews/registration-and-its-three-consequences/d7d4a2fdc6e927ba72adad4701848bb5e2ed7891ac43447c4dab2bb74da48950.yaml (CHANGES_REQUESTED, редакция 6)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+publication_mode: courier_of_agent_verdict
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: редакция 7 закрывает B1-1 и ничего сверх заявленного не меняет
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git diff 2c0dcc0ca d76cf2f0e -- <путь> — 23+/3-, только история редакций, третья строка
+    «Тогда» Ф4-27 (активация в исходе подтверждения, kaname#456 Р11 п. 2) и дополнение инв. 12 §8.
+    Производитель сверен: git show 36fce61d8:internal/apps/kaname/api/user/mirror_tx.go —
+    ActivateInviteOnVerificationTx (455) зовёт BootstrapPersonalResourcesTx (461).
+
+class_sweep:
+  predicate: grep -n 'регистраци[еяю]й' <путь> | grep -i 'завед\|создан\|производ'
+  result: >-
+    «заведён(ный) регистрацией» остался у человека с улицы (Ф4-26 :1569/:1583, §7 Ф4-30 :1704,
+    §10а :2008) — верно, Ф4-05; и в датированной переписи §5.4 @39628487 (:1193) — исторический
+    замер, по §0.8 не правится.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 3
+  not_performed: 0
+  detail: те же фикстуры, что в круге 1 (InsertPending Ф4-23, стенд TestEV72, свежий адрес Ф4-26); редакция 7 Given не меняет.
+
+blocking: []
+
+non_blocking:
+  - id: N2-1
+    kind: FORMAT
+    where: §5.4 :1193
+    text: >-
+      строка переписи «владеет = [личный, заведён этой регистрацией]» на @39628487 читается вне
+      даты как противоречие Ф4-23; при следующей правке — сноской указать, что на текущем дереве
+      личный аккаунт приглашённому заводит активация (§5.6).
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-05T11:31:31Z'
+  ban1_lifted: true
+  pending_external_event: false
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5993568905 учётки
+    pointpu на PRO-Robotech/kaname#256 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision d76cf2f0e опубликована на origin раньше события
+    (git branch -r --contains d76cf2f0e даёт origin/456); запрет #1 по этому отпечатку снят.
+    Вердикт и разбор записи не правились.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#256
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#256
+  status: performed
+  published: true
+  database_id: 5993568905
+  node_id: IC_kwDOUO26pM8AAAABZT6aiQ
+  url: https://github.com/PRO-Robotech/kaname/issues/256#issuecomment-5993568905
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5993568905
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T11:31:31Z'
+  body_sha256: 6977ccab8ba8e51dccdb8f86b06105f5f624bc2a75b93767959d7398016248ae
+  subject_sha256: 24ad0b9cf5ab755fe9a6080e8f406385beef6f842e9cdd0e2c8cea24f29813b3
+  subject_revision_commit: d76cf2f0ef4adaa633e1075a61b1789e07fdd5c8
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · 24ad0b9cf5ab755fe9a6080e8f406385beef6f842e9cdd0e2c8cea24f29813b3'
