@@ -133,6 +133,20 @@ Coverage:
   IAM-LOGINLANE-OK-NOT-COUNTED          — N − 1 неверных, отказ формы и отказ признака чужого
                                           контекста счёта не растят: верный пароль проходит
                                           без 429 (Ф3-30, Ф3-36 б; исчерпание ёмкости — I)
+
+Позиции приёмки ID-PW-1 (`password-verifier-follows-the-stored-value.md`, редакция
+5), заведённые kaname#467. «Дано» кладёт посев хранимых значений
+(`tests/authz-fixtures/seed_stored_value.py`, подкоманда `seed-stored-value`
+стенда чарта) и пишет четыре переменные `storedValue{A,B}{Email,Password}`; без
+него каждый шаг уходит в «условие не создано» помеченным утверждением.
+
+  IAM-LOGINLANE-OK-STORED-FORMAT-A      — значение формата A (bcrypt `2a`, стоимость 12),
+                                          положенное посевом: прежний пароль входит, тело —
+                                          ровно `session` и `user`; неверный пароль первым —
+                                          401 тем же текстом (PWV-01)
+  IAM-LOGINLANE-OK-STORED-FORMAT-B      — то же на формате B (argon2id, проходов больше
+                                          ручки — проверяющий читает параметры значения)
+                                          (PWV-02)
 """
 
 import pathlib as _pathlib
@@ -1161,3 +1175,81 @@ CASES.append(Case(
                _login_ok("F30-RIGHT", "ll30Session", "ll30Form", verified=False)),
     ],
 ))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ID-PW-1 PWV-01 и PWV-02 (kaname#467): Ф1-04 на КАЖДОМ формате перечня.
+#
+# «Дано» — человек, чьё проверочное значение положено ПОСЕВОМ и несёт признак
+# формата A (bcrypt `2a`) либо B (argon2id), пароль с посева не менялся (Д-01,
+# Д-02). Значения строит сторонняя библиотека, кладёт посев
+# `tests/authz-fixtures/seed_stored_value.py` (подкоманда `seed-stored-value`
+# стенда посадки `own`) и утверждает его ЗНАЧЕНИЕМ В ХРАНИЛИЩЕ, а не входом:
+# успешный вход переписывает формат A (Р5), и посев, доказавший себя входом,
+# отдал бы кейсу уже не «Дано». Поэтому первый успешный вход этого человека —
+# шаг кейса ниже, и только он.
+#
+# Близнец каждого положительного — НЕВЕРНЫЙ пароль тому же человеку, и он стоит
+# ПЕРВЫМ: отказ значение не переписывает (PWV-08.7), а успешный вход — да, и
+# близнец после него судил бы уже другое значение. Различие с положительным одно —
+# пароль.
+#
+# «Требования сменить или сбросить пароль ответ не несёт» (Ф1 Р1, Р8) утверждается
+# составом тела: ключей ровно два — `session` и `user`. Ключ требования не назван
+# ни одной приёмкой, и проверка «нет ключа с таким-то именем» зеленела бы на любом
+# другом.
+#
+# Повторный прогон набора на том же стенде без нового посева встретит у человека
+# формата A уже переписанное значение, и «на формате A» станет неправдой при
+# зелёном кейсе. Посев поэтому стоит в конвейере перед каждым прогоном набора
+# (`chart-own`), а люди у него свежие на каждый посев.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_STORED_WHY = ("посев хранимых значений (`stand-chart.sh seed-stored-value`) не исполнялся на "
+               "этом стенде — человека с положенным значением формата нет")
+
+
+def _stored_given(letter):
+    """Условие кейса: посев положил человека формата `letter` — иначе третий исход."""
+    email, pw = f"storedValue{letter}Email", f"storedValue{letter}Password"
+    return [
+        f"if (!pm.environment.get({js_str(email)}) || !pm.environment.get({js_str(pw)})) {{",
+        *precondition_not_met(f"«Дано» PWV формата {letter}: {email} и {pw} заданы",
+                              f"{email}/{pw} пусты — {_STORED_WHY}", indent="  "),
+        "}",
+    ]
+
+
+def _body_is_session_and_user(label):
+    return [
+        f"pm.test({js_str(label + ': тело — ровно session и user, требования сменить пароль нет')}, () => {{",
+        "  const j = pm.response.json();",
+        "  pm.expect(Object.keys(j).sort(), JSON.stringify(Object.keys(j))).to.eql(['session', 'user']);",
+        "});",
+    ]
+
+
+def _stored_format_case(letter, position, fmt, sid):
+    src, tok, form, ses = f"llSv{letter}Src", f"llSv{letter}Tok", f"llSv{letter}Form", f"llSv{letter}Session"
+    email, pw = "{{storedValue" + letter + "Email}}", "{{storedValue" + letter + "Password}}"
+    given = _stored_given(letter)
+    return Case(
+        id=f"IAM-LOGINLANE-OK-STORED-FORMAT-{letter}",
+        title=f"Значение формата {letter} ({fmt}), положенное посевом: прежний пароль входит без требования "
+              f"смены; неверный отвергнут тем же отказом ({position})",
+        classes=["CRUD", "NEG", "SEC"],
+        priority="P0",
+        steps=[
+            _csrf(f"{sid}-csrf", "login", tok, form, src, fresh_context=True, first=True),
+            _login(f"{sid}-wrong-password-first", email, "not-the-password-{{runId}}", tok, form, src,
+                   _refused_401(f"{sid.upper()}-WRONG"), extra_pre=given),
+            _login(f"{sid}-right-password", email, pw, tok, form, src,
+                   [*_login_ok(f"{sid.upper()}-RIGHT", ses, form, verified=False),
+                    *_body_is_session_and_user(f"{sid.upper()}-RIGHT")],
+                   extra_pre=given),
+        ],
+    )
+
+
+CASES.append(_stored_format_case("A", "PWV-01", "bcrypt 2a, стоимость 12", "pwv01"))
+CASES.append(_stored_format_case("B", "PWV-02", "argon2id, проходов больше ручки", "pwv02"))

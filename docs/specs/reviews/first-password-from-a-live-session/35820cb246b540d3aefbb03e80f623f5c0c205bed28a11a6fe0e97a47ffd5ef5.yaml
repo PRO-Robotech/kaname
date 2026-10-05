@@ -1,0 +1,119 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/first-password-from-a-live-session.md
+  sha256: 35820cb246b540d3aefbb03e80f623f5c0c205bed28a11a6fe0e97a47ffd5ef5
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена: токен DRAFT — статическая форма объявления;
+    вердикт из неё не выводится и этой записью в неё не вписывается (change-graph.md §2).
+  base_commit: 8a84dcff6eb1ccde68113353ba28d1e1e399f0e6
+  content_commit: 06144d88815ce174912f37e6c8c760decf9b9ab6
+  branch: '596'
+  head_commit: 06144d88815ce174912f37e6c8c760decf9b9ab6
+  task: PRO-Robotech/kaname#213
+  lines: 375
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/first-password-from-a-live-session.md
+  fingerprint_note: >-
+    Отпечаток перемерен по файлу на голове 06144d888 и СОВПАЛ с названным заданием дословно;
+    375 строк (wc -l). Вердикт относится к этому отпечатку и ни к какой другой редакции.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    CHANGES_REQUESTED, блокирующих три. Санкции на кодирование по этому документу нет.
+
+authority:
+  expected_actor: pointpu
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось»: событие публикует курьер, не рецензент. Тело для публикации —
+    `acceptance-reviewer · CHANGES_REQUESTED · 35820cb246b540d3aefbb03e80f623f5c0c205bed28a11a6fe0e97a47ffd5ef5`.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: null
+  personal_review_by_publishing_actor_claimed: false
+
+premises_remeasured:
+  - claim: §1.1–§1.4 и столбец «чем измерено» §5 — все числа
+    outcome: подтверждено на 06144d888 (0 · 0 · 0 · 15 · 10; 4 места записи; по 1 у каждого производителя §1.3; #213 → 1 файл; PathRefusedInVerification → 7; INSERT INTO → 3; loginLaneBaseUrl → 4 ≥ 1)
+  - claim: край не несёт путь (§0.2)
+    outcome: подтверждено — kacho origin/main f4c74ba1a, gateway/internal/middleware/login_lane_paths.go, вхождений password/enroll 0
+  - claim: граница окна свежести включена (Р2, FP-03 б)
+    outcome: подтверждено — sf_enroll.go:84 `now.Sub(s.LastPresentedAt) > d.Freshness`
+  - claim: тексты и коды отказов FP-03…FP-06
+    outcome: подтверждено — handler.go:1035 (SESSION_NOT_FRESH 403), form_token.go:57 (csrfToken required), decodeForm unknown field, admitted без сессии пропускает к глаголу (handler.go:456)
+
+blocking:
+  - id: Б1
+    kind: CONSTRUCTIBILITY
+    title: FP-11 не строится и красен при любом продукте
+    evidence: >-
+      Часы харнесса только вперёд (`avClock.Advance`, address_verification_harness_integration_test.go:97).
+      FP-11 гонит на одной S сперва FP-03 (а) — часы t₀+W+1с, — затем FP-01, чьё «Дано» требует
+      свежей S (t₀+1мин): FP-01 получит SESSION_NOT_FRESH. Кроме того, «And» FP-01 и FP-02 содержат
+      вход неверным паролем (401), который по Р10/Ф3-28 увеличивает счёт, — «Тогда» FP-11
+      («счёт равен снятому до») опровергается самим сценарием.
+    fix: Назвать точные запросы FP-11 (только «Когда» глагола заведения), свежую сессию на каждый шаг либо порядок без перевода часов, без входов неверным паролем внутри прогона.
+  - id: Б2
+    kind: CONSTRUCTIBILITY
+    title: FP-07 (в) помечен I, но харнесс I не имеет дублёра базы утечек
+    evidence: >-
+      avLane строит правило с Breach=nil (address_verification_harness_integration_test.go:190),
+      а Judge при nil не проверяет утечки (password_rule.go:93) — отказ RuleBreached недостижим.
+      Дублёр авторитета есть только в U-харнессе (usecase_test.go:111).
+    fix: Назвать фикстуру — FP-07 (в) на уровне U (харнесс usecase_test.go) либо опцию avLane с дублёром.
+  - id: Б3
+    kind: DoD
+    title: DoD не содержит прогона сквозного кейса
+    evidence: >-
+      §7 п.4 требует лишь validate-cases, строку индекса и пересборку коллекции FP-12; ни один пункт
+      не требует исполнения FP-12 на стенде и не называет допустимый исход до посадки входа ключом
+      (Ф13), хотя FP-12 «And» сам объявляет «условие не создано».
+    fix: Пункт DoD — прогон FP-12 на стенде зелёный; до посадки входа ключом — исход «условие не создано» с предикатом снятия (путь входа ключом на полосе, §1.1 последняя команда → ≥1), и задача не закрывается на нём.
+
+non_blocking:
+  - Посев «Дано» объявляет «ни одной вставки строки мимо продукта», а образец serPerson пишет kaname.users и kaname.accounts прямым INSERT (force_logout_session_end_reason_integration_test.go:110–118) — исправить формулировку.
+  - Р3 выбирает FAILED_PRECONDITION/400 для «уже заведён», тогда как соседний отказ той же полосы «второй фактор уже заведён» — ALREADY_EXISTS/409 (handler.go:1030). Назвать довод расхождения либо выровнять.
+  - Р5 поле `methods` полезной нагрузки не определено (способы входа личности или предъявленное сессии); FP-01 его не утверждает.
+  - «Признак формы из контекста S» — контекст формы живёт в своём печенье (CookieForm), не в сессии; поправить слово.
+
+constructibility:
+  seeded: 0
+  named_fixture_verified: 9
+  of: 12
+  not_executed: >-
+    Посев не исполнялся (интеграционный прогон требует Docker-слота; задача — суд контракта).
+    Фикстуры сверены чтением: avLane/avClock/laneFreshness, serPerson/serLiveSession, IssueSession,
+    KeyAssertion, fakeStore failOn "audit"/"resolve" — существуют. FP-07 и FP-11 — Б1, Б2.
+    FP-12 — «не выполнилось»: вход ключом на полосе не посажен.
+
+producers_named: 12 of 12
+twins_named: 10 of 10 negative
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+next_round:
+  needed: acceptance-author — снять Б1–Б3, редакция 2, новая запись соседним файлом

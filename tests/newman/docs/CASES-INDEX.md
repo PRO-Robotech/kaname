@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 768
+Всего кейсов: 770
 
 ## Перепись по модулям
 
@@ -66,7 +66,7 @@
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
-| `cases/kaname-login-lane.py` | 20 |
+| `cases/kaname-login-lane.py` | 22 |
 | `cases/kaname-recovery-lane.py` | 8 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
@@ -960,7 +960,7 @@
 - `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
 - `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
-## `cases/kaname-login-lane.py` — 20 кейсов
+## `cases/kaname-login-lane.py` — 22 кейсов
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
 > формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
@@ -968,7 +968,8 @@
 > `external` переменная пуста ПО ПОСАДКЕ, и каждый шаг уходит в «условие не
 > создано» помеченным утверждением — не в зелёное и не в красное. Гоняет набор
 > задание `chart-own` процесса `e2e-newman.yml`: стенд чарта посадки `own` с
-> листом края и посевом человека (`stand-chart.sh`, `seed_login_lane.py`);
+> листом края и посевом человека (`stand-chart.sh`, `seed_login_lane.py`), а
+> «Дано» PWV-01/02 — посевом хранимых значений (`seed_stored_value.py`);
 > провенанс и числа замеров — `docs/RESULTS.md`, разделы о полосе входа паролем.
 
 - `IAM-LOGINLANE-OK-CSRF-ISSUED`
@@ -991,6 +992,8 @@
 - `IAM-LOGINLANE-OK-RATE-RESET-ON-SUCCESS`
 - `IAM-LOGINLANE-NEG-RATE-BY-SOURCE`
 - `IAM-LOGINLANE-OK-NOT-COUNTED`
+- `IAM-LOGINLANE-OK-STORED-FORMAT-A`
+- `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 
 ## `cases/kaname-recovery-lane.py` — 8 кейсов
 

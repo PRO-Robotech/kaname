@@ -48,11 +48,54 @@ constructibility: >-
   (t.Setenv KANAME_SECOND_FACTOR_ENC_KEY пустым — форма second_factor_knobs_test.go:30).
 event_body: acceptance-reviewer · APPROVED · c5e535f0573e5ed86a229af1688b05ffad5c179b41b4f99b643cc1c06298486d
 effective_approval:
+  issued: true
+  issued_at: '2026-10-03T19:28:37Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Событие в задаче, которую называет `subject.task`, опубликовано курьером позже круга, и запись
+    приведена к факту события отдельной правкой — вердикт и разбор не тронуты.
   publication_pending:
+    required_for_sanction: true
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5972714888
+    event_url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972714888
+    prior_event: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5965648215
+    remeasured: >-
+      `git show 431654d662b69e062c7013616ef6ed8e2ecaedb1:<путь> | sha256sum` на origin/336 @431654d6 → c5e535f0…486d,
+      совпал с именем записи и строкой `subject_sha256` события;
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5972714888` → issue_url — kaname#269
+      (`subject.task`), автор pointpu, author_association MEMBER, created_at == updated_at;
+      пять обязательных строк заголовка дословно.
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
   policy_field: review_authority.acceptance-reviewer
   authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5972714888
+  node_id: IC_kwDOUO26pM8AAAABZABliA
+  url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972714888
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5972714888
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T19:28:37Z'
+  body_sha256: 3440ab58b00a758b19e383caebcb9b8b15bfe1a36bf9efd84db33399acf931d6
+  subject_sha256: c5e535f0573e5ed86a229af1688b05ffad5c179b41b4f99b643cc1c06298486d
+  subject_revision: 431654d662b69e062c7013616ef6ed8e2ecaedb1
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (запись молчала о событии: блока event не было);
+    отпечаток тела снят с сырого ответа API (`gh api … | jq -j .body | sha256sum`).
+    Прежнее событие с тем же отпечатком — в другой задаче (https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5965648215); оно не снято.
+    subject_revision события — голова ветки PR, на которой отпечаток перемерен; содержимое
+    документа на ней совпадает с content_commit e6c0db4ab (тот же sha256).

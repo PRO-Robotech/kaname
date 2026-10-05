@@ -150,3 +150,70 @@ func TestRevoked_ClientKeyRevokesTokensItIssued(t *testing.T) {
 		t.Error("отзыв заблокировал принципала навсегда вместо снятия выданного")
 	}
 }
+
+// ─── Граница отсечки — включающая (kaname#171, приёмка
+// subject-cutoff-writes-both-records-under-one-lock, стадия S3, Р6) ───────────
+//
+// Момент N — целая секунда: `iat` чеканится в секундах, и равенство с отсечкой
+// выразимо ровно тогда, когда отсечка пришлась на целую секунду.
+
+// boundaryN — момент N сценариев S3.
+var boundaryN = time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+
+// TestRevoked_KN_SCL_14_CutoffExactlyAtIatRevokes — отсечка субъекта ровно в
+// `iat`: токен отозван, как у прочих читателей той же отсечки.
+func TestRevoked_KN_SCL_14_CutoffExactlyAtIatRevokes(t *testing.T) {
+	r := &stubReader{before: map[string]time.Time{"usr-eq": boundaryN}}
+	revoked, err := tokenrevocation.Revoked(context.Background(), r,
+		claims(map[string]any{"sub": "usr-eq", "iat": float64(boundaryN.Unix())}))
+	if err != nil {
+		t.Fatalf("ошибка: %v", err)
+	}
+	if !revoked {
+		t.Errorf("токен с iat, РАВНЫМ отсечке %s, принят: граница правила строгая, "+
+			"а у прочих читателей отсечки — включающая; спрошены ключи: %v", boundaryN, r.asked)
+	}
+}
+
+// TestRevoked_KN_SCL_15_CutoffASecondBeforeIatAdmits — близнец 14: отсечка на
+// секунду раньше `iat`, токен действителен. Без него 14 проходила бы на
+// правиле, которое отзывает всё.
+func TestRevoked_KN_SCL_15_CutoffASecondBeforeIatAdmits(t *testing.T) {
+	r := &stubReader{before: map[string]time.Time{"usr-eq": boundaryN.Add(-time.Second)}}
+	revoked, err := tokenrevocation.Revoked(context.Background(), r,
+		claims(map[string]any{"sub": "usr-eq", "iat": float64(boundaryN.Unix())}))
+	if err != nil {
+		t.Fatalf("ошибка: %v", err)
+	}
+	if revoked {
+		t.Error("токен, выпущенный ПОСЛЕ отсечки, отозван: отзыв обязан действовать вперёд")
+	}
+}
+
+// TestRevoked_KN_SCL_16_ClientKeyBoundaryIsInclusiveToo — та же граница на
+// ключе клиента: граница одна на все ключи отсечки.
+func TestRevoked_KN_SCL_16_ClientKeyBoundaryIsInclusiveToo(t *testing.T) {
+	c := claims(map[string]any{
+		"sub": "usr-eq", "iat": float64(boundaryN.Unix()), "kaname_user_token_id": "utk-1",
+	})
+	t.Run("равенство", func(t *testing.T) {
+		r := &stubReader{before: map[string]time.Time{"utk-1": boundaryN}}
+		revoked, err := tokenrevocation.Revoked(context.Background(), r, c)
+		if err != nil {
+			t.Fatalf("ошибка: %v", err)
+		}
+		if !revoked {
+			t.Errorf("отсечка по ключу клиента ровно в iat не отозвала токен; спрошены ключи: %v", r.asked)
+		}
+	})
+	t.Run("близнец: секундой раньше", func(t *testing.T) {
+		r := &stubReader{before: map[string]time.Time{"utk-1": boundaryN.Add(-time.Second)}}
+		revoked, err := tokenrevocation.Revoked(context.Background(), r, c)
+		if err != nil {
+			t.Fatalf("ошибка: %v", err)
+		}
+		if revoked {
+			t.Error("отсечка по ключу клиента раньше iat отозвала токен, выпущенный после неё")
+		}
+	})
+}

@@ -84,7 +84,8 @@ IAM — не только владелец модели прав, но и **то
 **Программные токены платформа выпускает сама** там, где объявлена своя чеканка
 (`authn.token-signing` + `authn.client-token`): у неё своя ключница, свой подписант и своя запись
 публикуемого набора ключей. Без своего токен-эндпоинта ключевая пара и федеративный ключ не
-выдаются вовсе: обменять такой ключ было бы негде.
+выдаются вовсе — ни служебной учётке, ни человеку: обменять такой ключ было бы негде, и оба
+глагола выдачи отвечают `FAILED_PRECONDITION` с именем настройки `authn.client-token.enabled`.
 
 Токен-эндпоинт (`POST /iam/v1/token`) принимает четыре вида выдачи, и перечень закрыт:
 `client_credentials` и `urn:ietf:params:oauth:grant-type:jwt-bearer` — программные полосы,
@@ -96,7 +97,8 @@ IAM — не только владелец модели прав, но и **то
 
 ## Listener'ы
 
-Сервис поднимает несколько gRPC-listener'ов с разной поверхностью и границей доверия:
+Сервис поднимает два gRPC-listener'а и несколько HTTP-слушателей с разной поверхностью и
+границей доверия:
 
 <table>
   <thead><tr><th>Порт</th><th>Listener</th><th>Кто ходит · транспорт</th><th>Что обслуживает</th></tr></thead>
@@ -104,7 +106,11 @@ IAM — не только владелец модели прав, но и **то
     <tr><td><code>:9090</code></td><td>public</td><td>Tenant через <code>api-gateway</code> (TLS+JWT); peer-сервисы (mTLS)</td><td>Публичные RPC ресурсов + AuthorizeService + OperationService</td></tr>
     <tr><td><code>:9091</code></td><td>internal</td><td>Peer-сервисы (mTLS)</td><td><code>InternalIAMService</code> (<code>Check</code> / <code>RegisterResource</code> / ...) — authz-gate платформы</td></tr>
     <tr><td><code>:9095</code></td><td>metrics</td><td>Prometheus (cluster-internal)</td><td><code>/metrics</code></td></tr>
-    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane</td><td>ровно край платформы (взаимный TLS, допуск по SAN)</td><td>Формы входа: регистрация, вход, выход, смена пароля, восстановление, второй фактор</td></tr>
+    <tr><td><code>:9096</code></td><td>выдача (HTTP)</td><td>край платформы и клиенты выдачи (TLS, сертификат запрашивается)</td><td>Токен-эндпоинт <code>/iam/v1/token</code>, церемония авторизации, докерная полоса <code>/iam/token</code></td></tr>
+    <tr><td><code>:9097</code></td><td>ключи проверки (HTTP)</td><td>потребители набора ключей; авторитет отзыва — край с сертификатом внутреннего УЦ</td><td>Открытые ключи подписи наших токенов, авторитет отзыва</td></tr>
+    <tr><td><code>:9098</code></td><td>public REST</td><td>Tenant, напрямую или через край</td><td>REST-проекция публичных RPC</td></tr>
+    <tr><td><code>:9099</code></td><td>internal REST</td><td>Peer-сервисы (взаимный TLS)</td><td>Служебные поверхности <code>/iam/v1/internal/…</code></td></tr>
+    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane (HTTP)</td><td>ровно край платформы (взаимный TLS, допуск по SAN)</td><td>Формы входа, пятнадцать путей: регистрация, вход, выход, смена пароля, восстановление, второй фактор, церемония повышения, подтверждение адреса</td></tr>
   </tbody>
 </table>
 
@@ -114,7 +120,8 @@ IAM — не только владелец модели прав, но и **то
 - **Internal (`:9091`) не считается доверенным**: он гейтит, кто может звать каждый RPC
   (defense-in-depth против lateral movement), а не «trusted, mTLS достаточно».
 
-Подробнее о ключах — [Конфигурация](/install/configuration).
+Подробнее о ключах — [Конфигурация](/install/configuration); HTTP-слушатели и что на каждом —
+[HTTP-поверхность](/api/rest-surface).
 
 ## Место в платформе — leaf + центральный авторизатор
 

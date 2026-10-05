@@ -1500,7 +1500,7 @@
       ]
     },
     {
-      "name": "IAM-AUTHCODE-NEG-NO-SESSION — 03: запрос авторизации без сессии — 401 login_required; тот же запрос с сессией — код",
+      "name": "IAM-AUTHCODE-NEG-NO-SESSION — 03: запрос авторизации без сессии — 302 на адрес возврата с error=login_required и state; тот же запрос с сессией — код",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -1602,13 +1602,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "pm.test('03: error — login_required', () => pm.expect(j.error, JSON.stringify(j)).to.eql('login_required'));",
-                  "pm.test('03: перенаправления нет — заголовка Location в ответе нет', () => {",
-                  "  const loc = pm.response.headers.get('Location');",
-                  "  pm.expect(loc === null || loc === undefined || loc === '', 'Location=' + String(loc)).to.eql(true);",
-                  "});"
+                  "pm.test('status 302', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(302));",
+                  "const _acParse = (u) => { const s = String(u || ''); const i = s.indexOf('?'); const q = {};",
+                  "  if (i >= 0) { s.slice(i + 1).split('#')[0].split('&').forEach((kv) => { if (!kv) { return; }",
+                  "    const j = kv.indexOf('='); const dec = (x) => decodeURIComponent(x.split('+').join(' '));",
+                  "    const k = dec(j < 0 ? kv : kv.slice(0, j)); (q[k] = q[k] || []).push(j < 0 ? '' : dec(kv.slice(j + 1))); }); }",
+                  "  return { base: i < 0 ? s.split('#')[0] : s.slice(0, i), q: q }; };",
+                  "const _acLoc = pm.response.headers.get('Location') || '';",
+                  "const _acGot = _acParse(_acLoc);",
+                  "pm.test('03: перенаправление ведёт на адрес возврата запроса', () => pm.expect(_acGot.base, _acLoc).to.eql(_acParse(pm.environment.get('_acNsRedirect1')).base));",
+                  "pm.test('03: в перенаправлении ровно error=login_required и state дословно', () => {",
+                  "  const own = _acParse(pm.environment.get('_acNsRedirect1')).q; const got = Object.assign({}, _acGot.q);",
+                  "  Object.keys(own).forEach((k) => { if (JSON.stringify(got[k]) === JSON.stringify(own[k])) { delete got[k]; } });",
+                  "  pm.expect(pm.environment.get('_acNsState1'), 'state запроса не захвачен — сравнивать не с чем').to.be.a('string').and.not.empty;",
+                  "  pm.expect(got, _acLoc).to.eql({error: ['login_required'], state: [pm.environment.get('_acNsState1')]}); });"
                 ]
               }
             }

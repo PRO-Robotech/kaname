@@ -146,7 +146,6 @@ type AuthorizeResult struct {
 	Why         string
 	Subject     string
 	Level       string
-	AcrValues   string
 	RedirectURI string
 }
 
@@ -209,8 +208,10 @@ func (uc *AuthorizeUseCase) Execute(ctx context.Context, target Target, in Autho
 		// Раньше ступени: «допущен ли вообще» решается раньше «чего недостаёт».
 		return refusedByRedirect("access_denied", "the address of the person is not verified")
 	case required > 0 && acrlevel.Rank(login.Level) < required:
-		return AuthorizeResult{Verdict: VerdictStepUpRequired, Subject: login.Subject,
-			AcrValues: strings.TrimSpace(in.AcrValues)}
+		// Запрошенный уровень в исход не переносится: ответ уходит приложению,
+		// которое его само назвало, и строка перенаправления его не несёт (Р11
+		// п.4 приёмки ceremony-pace-is-named-by-number, задача kaname#525).
+		return AuthorizeResult{Verdict: VerdictStepUpRequired, Subject: login.Subject}
 	}
 
 	// Выдача. Граница семейства — правило домена: не позже сессии, в которой

@@ -447,11 +447,7 @@ func (h *Handler) authenticate(r *http.Request, grantType string) (clientasserti
 // восстановления хранилища. Отказы формы и темпа решены до этого места и сюда
 // не приходят.
 func countsAgainstSource(o clientassertion.Outcome) bool {
-	switch o {
-	case clientassertion.OutcomeRegistryUnavailable, clientassertion.OutcomeReplayStoreUnavailable:
-		return false
-	}
-	return true
+	return !clientassertion.OurSide(o)
 }
 
 // errFormMismatch — форма запроса не соответствует объявленному виду выдачи.
@@ -463,9 +459,20 @@ var errFormMismatch = errors.New("clienttokenhttp: request form does not match t
 // утверждение — подписанный материал, из которого восстанавливается
 // предъявление, и запись его в журнал делает журнал носителем предъявительского
 // документа.
+//
+// Запись ОДНА на отказ, уровень — по таблице службы
+// (`docs/engineering/components/32-observability.md`, «Уровни», kaname#390):
+// отклонённое предъявление — WARN; отказ НАШЕЙ стороны
+// ([clientassertion.OurSide]: реестр или хранилище однократности не ответили,
+// отсечку спросить не удалось, выпуск не состоялся) — ERROR. В одном ряду с
+// неверной подписью предъявителя наш сбой терялся бы среди штатных отказов.
 func (h *Handler) refuse(r *http.Request, outcome clientassertion.Outcome, err error) {
 	h.count(outcome)
-	h.cfg.Logger.Warn("client authentication refused",
+	level := slog.LevelWarn
+	if clientassertion.OurSide(outcome) {
+		level = slog.LevelError
+	}
+	h.cfg.Logger.LogAttrs(r.Context(), level, "client authentication refused",
 		slog.String("outcome", string(outcome)),
 		slog.String("path", r.URL.Path),
 		slog.String("err", err.Error()))
