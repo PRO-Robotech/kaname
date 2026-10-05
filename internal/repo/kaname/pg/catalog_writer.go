@@ -15,10 +15,14 @@ package pg
 // бы у всех. Читатель каталога (`catalog_repo.go`) по этой же причине живёт над
 // пулом, а не за `kaname.Reader`; писатель следует за ним.
 //
-// Транзакцию открывает `pkg/db.Transactor` — ЕДИНСТВЕННОЕ платформенное
-// объявление этого паттерна над пулом. Своя последовательность
-// begin→commit→rollback была бы вторым местом об одном предмете и разошлась бы
-// с первым молча.
+// Транзакцию открывает `journalwrite.InTx` — исполнитель над пулом
+// единственного открывающего пишущих транзакций службы: он выставляет
+// инициатора ресурсного журнала (либо его отсутствие) первым оператором.
+// Каталог журналируемых таблиц сегодня не пишет, но транзакция, открытая мимо
+// открывающего, унаследовала бы настройку соединения — и стала бы ровно той
+// формой, которой посев модулей писал журнал без инициатора (kaname#484). Своя
+// последовательность begin→commit→rollback была бы вторым местом об одном
+// предмете и разошлась бы с первым молча.
 //
 // # Отказы приходят СЫРЫМИ, и это решение
 //
@@ -44,10 +48,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -115,12 +118,12 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 
 // CatalogWriteRepo — исполнитель транзакций применителя каталога над пулом.
 type CatalogWriteRepo struct {
-	tx *coredb.Transactor
+	pool *pgxpool.Pool
 }
 
 // NewCatalogWriteRepo собирает исполнителя транзакций поверх пула.
 func NewCatalogWriteRepo(pool *pgxpool.Pool) *CatalogWriteRepo {
-	return &CatalogWriteRepo{tx: coredb.NewTransactor(pool)}
+	return &CatalogWriteRepo{pool: pool}
 }
 
 // RunInWriteTx исполняет fn под ОДНОЙ писательской транзакцией: все шаги
@@ -129,7 +132,7 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, modulecatalog.CatalogWriter) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	return journalwrite.InTx(ctx, r.pool, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 }
 
 // catalogWriter — `modulecatalog.CatalogWriter` над одной транзакцией.

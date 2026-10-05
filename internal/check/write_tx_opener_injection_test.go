@@ -30,9 +30,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 var (
+	_ = coredb.ReadConnCeiling
 	_ = os.Getenv
 	_ pgx.TxOptions
 	_ context.Context
@@ -57,7 +60,7 @@ func TestWriteOpenerGateInjection(t *testing.T) {
 		{
 			name: "W1-pool-begin",
 			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { tx, _ := p.Begin(ctx); _ = tx }\n",
-			want: "W1 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:18 Begin",
+			want: "W1 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 Begin",
 		},
 		{
 			name: "W1-twin-read-only",
@@ -66,12 +69,12 @@ func TestWriteOpenerGateInjection(t *testing.T) {
 		{
 			name: "W1-begin-tx-named-options",
 			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { tx, _ := p.BeginTx(ctx, ceremonyWriterTx()); _ = tx }\n",
-			want: "W1 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:18 BeginTx",
+			want: "W1 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 BeginTx",
 		},
 		{
 			name: "W2-pool-writes-journaled-table",
 			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { _, _ = p.Exec(ctx, `UPDATE users SET labels = $2 WHERE id = $1`) }\n",
-			want: "W2 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:18 Exec — оператор \"UPDATE users\"",
+			want: "W2 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 Exec — оператор \"UPDATE users\"",
 		},
 		{
 			name: "W2-twin-pool-writes-unjournaled-table",
@@ -81,12 +84,37 @@ func TestWriteOpenerGateInjection(t *testing.T) {
 			name: "W2-through-parameter",
 			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { zzRun(ctx, p, `DELETE FROM kaname.group_members WHERE group_id = $1`) }\n" +
 				"func zzRun(ctx context.Context, p *pgxpool.Pool, q string) { _, _ = p.Exec(ctx, q) }\n",
-			want: "W2 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:19 Exec — оператор \"DELETE FROM kaname.group_members\"",
+			want: "W2 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:22 Exec — оператор \"DELETE FROM kaname.group_members\"",
 		},
 		{
 			name: "W3-text-not-derivable",
 			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { _, _ = p.Exec(ctx, os.Getenv(\"Q\")) }\n",
-			want: "W3 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:18 Exec",
+			want: "W3 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 Exec",
+		},
+		{
+			// Открытие функцией пакета pgx, а не методом пула: та же пишущая
+			// транзакция мимо открывающего, другая форма записи.
+			name: "W1-function-form-begin",
+			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { _ = pgx.BeginFunc(ctx, p, func(pgx.Tx) error { return nil }) }\n",
+			want: "W1 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 BeginFunc",
+		},
+		{
+			name: "W1-function-form-twin-read-only",
+			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { _ = pgx.BeginTxFunc(ctx, p, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(pgx.Tx) error { return nil }) }\n",
+		},
+		{
+			// Чужой открывающий: транзакцию открывает пакет фундамента, которому
+			// передан пул, и открытие в дереве службы не видно ни одной из форм
+			// выше (так посев модулей писал журнал без инициатора, kaname#484).
+			name: "W4-foreign-opener-over-pool",
+			body: "func zzInj(p *pgxpool.Pool) { _ = coredb.NewTransactor(p) }\n",
+			want: "W4 " + writeOpenerInjPkg + "/zz_write_opener_injection.go:21 NewTransactor",
+		},
+		{
+			// Близнец: пул передан тому же пакету фундамента, но функции,
+			// транзакции не открывающей.
+			name: "W4-twin-foreign-non-opener",
+			body: "func zzInj(ctx context.Context, p *pgxpool.Pool) { _, _ = coredb.ReadConnCeiling(ctx, p) }\n",
 		},
 	}
 	for _, tc := range cases {

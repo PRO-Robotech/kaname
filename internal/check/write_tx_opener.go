@@ -35,7 +35,13 @@
 //     (значение константы, вычисленное проверкой типов) пишет журналируемую
 //     таблицу: неявная транзакция одиночного оператора инициатора не несёт;
 //   - W3 — тот же вызов, чей текст не константа: судить его нечем, и он
-//     перечисляется, а не прощается.
+//     перечисляется, а не прощается;
+//   - W1 в форме функции — `pgx.BeginFunc` и `pgx.BeginTxFunc`, которым такой
+//     получатель передан доводом: та же транзакция, иная форма записи;
+//   - W4 — чужой открывающий: функция пакета вне модуля, открывающая пишущую
+//     транзакцию на переданном ей пуле (`corelib/db.NewTransactor`). Открытие
+//     живёт в чужом пакете и в дереве службы не видно ни одной из форм выше;
+//     этой формой посев модулей писал журнал без инициатора (kaname#484).
 //
 // Перечень журналируемых таблиц ВЫВОДИТСЯ из цепи миграций — таблицы, на
 // которых живёт триггер функции `resource_journal_emit*` (созданный и не
@@ -46,7 +52,15 @@
 //   - записи функцией базы, вызванной оператором `SELECT f(…)` пулом: текст не
 //     называет таблицу;
 //   - каскада удаления в журналируемую таблицу из оператора над другой
-//     таблицей пулом мимо транзакции.
+//     таблицей пулом мимо транзакции;
+//   - чужого пакета, открывающего транзакцию на переданном пуле, которого нет
+//     в перечне [writeOpenerForeignOpeners]. Такие передачи пересчитываются
+//     (`передач пула чужому пакету`), а не прощаются молча. На ревизии этой
+//     правки их 16: наблюдаемость пула и очередей, ворота числа соединений и
+//     версии схемы, хранилище и сверщик операций, отправщик аудита, повторная
+//     отправка и очистка очереди отношений, очистка ресурсного журнала, чтение
+//     состояния потолков. Пишут они операции, аудит, очередь отношений и сам
+//     журнал (удалением); журналируемых таблиц среди них нет.
 package check
 
 import (
@@ -80,6 +94,22 @@ var writeOpenerStarterTypes = map[string]bool{
 	"*database/sql.Conn":                    true,
 }
 
+// modulePath — путь модуля службы: функция пакета вне него — чужая.
+const modulePath = "github.com/PRO-Robotech/kaname"
+
+// writeOpenerFuncBegins — функции пакета pgx, открывающие транзакцию на
+// переданном получателе (W1 в форме функции).
+var writeOpenerFuncBegins = map[string]bool{
+	"github.com/jackc/pgx/v5.BeginFunc":   true,
+	"github.com/jackc/pgx/v5.BeginTxFunc": true,
+}
+
+// writeOpenerForeignOpeners — функции чужих пакетов, открывающие ПИШУЩУЮ
+// транзакцию на переданном пуле (W4).
+var writeOpenerForeignOpeners = map[string]bool{
+	"github.com/PRO-Robotech/corelib/db.NewTransactor": true,
+}
+
 var (
 	writeOpenerBeginMethods = map[string]bool{"Begin": true, "BeginTx": true, "BeginFunc": true, "BeginTxFunc": true}
 	writeOpenerStmtMethods  = map[string]bool{"Exec": true, "Query": true, "QueryRow": true,
@@ -101,23 +131,27 @@ func (s WriteOpenerSite) String() string {
 
 // WriteOpenerCensus — объём осмотренного.
 type WriteOpenerCensus struct {
-	Packages        int
-	Files           int
-	StarterCalls    int // вызовов методов на типах-получателях
-	BeginCalls      int
-	ReadOnlyBegins  int
-	OpenerBegins    int // открытий внутри файла открывающего (помощником и источником)
-	StmtCalls       int
-	JudgedStmts     int // с константным текстом
+	Packages       int
+	Files          int
+	StarterCalls   int // вызовов на типах-получателях: методов и функций-открывающих
+	BeginCalls     int
+	ReadOnlyBegins int
+	OpenerBegins   int // открытий внутри файла открывающего (помощником и источником)
+	StmtCalls      int
+	JudgedStmts    int // с константным текстом
+	// ForeignHandoffs — передач пула или соединения функции чужого пакета,
+	// не названной ни открывающей, ни чужим открывающим: зона, которую разбор
+	// не судит, — числом.
+	ForeignHandoffs int
 	JournaledTables []string
 }
 
 func (c WriteOpenerCensus) String() string {
 	return fmt.Sprintf("пакетов %d · файлов %d · вызовов на пуле/соединении %d "+
 		"(открытий %d, из них читающих %d, в открывающем %d; операторов %d, "+
-		"с константным текстом %d) · журналируемых таблиц %d [%s]",
+		"с константным текстом %d) · передач пула чужому пакету %d · журналируемых таблиц %d [%s]",
 		c.Packages, c.Files, c.StarterCalls, c.BeginCalls, c.ReadOnlyBegins, c.OpenerBegins,
-		c.StmtCalls, c.JudgedStmts, len(c.JournaledTables), strings.Join(c.JournaledTables, ", "))
+		c.StmtCalls, c.JudgedStmts, c.ForeignHandoffs, len(c.JournaledTables), strings.Join(c.JournaledTables, ", "))
 }
 
 // journalTriggerCreateRe / journalTriggerDropRe — триггер функции журнала на
@@ -253,6 +287,12 @@ func ScanWriteOpeners(root string, patterns []string, tables []string, overlay m
 						census.OpenerBegins++
 					}
 				}
+				if fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func); ok && fn.Pkg() != nil {
+					if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() == nil {
+						writeOpenerJudgeFunc(p, call, fn, rel, inOpener, &census, &sites)
+						return true
+					}
+				}
 				isBegin := writeOpenerBeginMethods[sel.Sel.Name]
 				isStmt := writeOpenerStmtMethods[sel.Sel.Name]
 				if !isBegin && !isStmt {
@@ -309,6 +349,51 @@ func ScanWriteOpeners(root string, patterns []string, tables []string, overlay m
 		return sites[i].Line < sites[j].Line
 	})
 	return sites, census, nil
+}
+
+// writeOpenerJudgeFunc судит вызов функции ПАКЕТА (не метода), которой
+// передан получатель-пул или соединение: открытие в форме функции pgx (W1),
+// чужой открывающий (W4), иначе — передача чужому пакету, пересчитанная.
+// Функции модуля службы не судятся здесь: их тела разбираются сами.
+func writeOpenerJudgeFunc(p *packages.Package, call *ast.CallExpr, fn *types.Func, rel string,
+	inOpener bool, census *WriteOpenerCensus, sites *[]WriteOpenerSite) {
+	starter := false
+	for _, a := range call.Args {
+		if tv, ok := p.TypesInfo.Types[a]; ok && writeOpenerStarterTypes[types.TypeString(tv.Type, nil)] {
+			starter = true
+			break
+		}
+	}
+	if !starter {
+		return
+	}
+	full := fn.Pkg().Path() + "." + fn.Name()
+	pos := p.Fset.Position(call.Pos())
+	site := WriteOpenerSite{File: rel, Line: pos.Line, Method: fn.Name()}
+	switch {
+	case writeOpenerFuncBegins[full]:
+		census.StarterCalls++
+		census.BeginCalls++
+		if inOpener {
+			return
+		}
+		if writeOpenerReadOnly(call) {
+			census.ReadOnlyBegins++
+			return
+		}
+		site.Rule = "W1"
+		site.What = "пишущая транзакция открыта функцией pgx мимо открывающего " + WriteOpenerFile +
+			": инициатора журнала она не выставляет и наследует настройку соединения"
+		*sites = append(*sites, site)
+	case writeOpenerForeignOpeners[full]:
+		census.StarterCalls++
+		site.Rule = "W4"
+		site.What = "пул передан чужому открывающему " + full +
+			": его транзакция открыта мимо " + WriteOpenerFile + " и инициатора журнала не выставляет"
+		*sites = append(*sites, site)
+	case fn.Pkg().Path() != modulePath && !strings.HasPrefix(fn.Pkg().Path(), modulePath+"/"):
+		census.ForeignHandoffs++
+	}
 }
 
 // writeOpenerSQLText — текст оператора, выведенный из констант: значение
