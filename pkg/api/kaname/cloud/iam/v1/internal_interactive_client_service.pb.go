@@ -373,10 +373,13 @@ type UpdateInteractiveClientRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the InteractiveClient to update.
 	InteractiveClientId string `protobuf:"bytes,1,opt,name=interactive_client_id,json=interactiveClientId,proto3" json:"interactive_client_id,omitempty"`
-	// Fields to update. Empty mask → full-object PATCH over mutable fields;
-	// immutable fields present in the body are silently ignored. A mask naming
-	// an immutable field is rejected BY NAME; a mask naming an unknown field is
-	// rejected against the known-set.
+	// Fields to update. Empty mask → full-object PATCH over every mutable field
+	// below. The body carries ONLY mutable fields: the immutable ones (`id`,
+	// `client_id`, `audiences`, `grant_types`, `token_endpoint_auth_method`,
+	// `status`, `created_at`) are not part of this message, so a body cannot
+	// name one. A mask naming an immutable field is rejected BY NAME with
+	// INVALID_ARGUMENT `<field> is immutable after InteractiveClient.Create`; a
+	// mask naming an unknown field is rejected against the known-set.
 	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	// New name.
 	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
