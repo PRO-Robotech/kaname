@@ -167,7 +167,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		switch pgErr.ConstraintName {
 		case "users_active_has_a_way_in_fk":
 			slog.Error("active identity without a way in refused by the schema: a producer wrote ACTIVE without a password row or an open recovery path",
-				append([]any{"constraint", pgErr.ConstraintName, "kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+				append([]any{"constraint", "users_active_has_a_way_in_fk", "kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
 			return iamerr.ErrInternal
 		}
 		// Признак берётся от `fkText`: он и только он знает, какая из двух

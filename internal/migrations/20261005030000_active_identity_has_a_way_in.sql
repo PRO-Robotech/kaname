@@ -35,6 +35,16 @@
 --     нет — её вычисляет база из статуса и отметки, и забыть её не может ни
 --     один производитель.
 --
+--     Тип — `name`, а не `text`, и это несущее. Переписчик написания якоря
+--     кластера (`kaname.rename_cluster_anchor`, миграция 20260906085136) пишет
+--     `UPDATE … SET` в КАЖДУЮ колонку `text` и `character varying` схемы, а
+--     вычисляемая колонка записи не принимает даже на нуле совпавших строк —
+--     переписчик отказывал бы целиком. Значение служебное (одно слово словаря
+--     видов), не написание якоря, и в обход переписчика не входит по типу.
+--     Ключ сравнивает `name` с `text` ключевой колонки оператором семейства
+--     `text_ops`, которое несёт сравнение этих двух типов. Держит
+--     `TestClusterAnchor_*` в `cluster_anchor_way_back_integration_test.go`.
+--
 -- (3) ОТЛОЖЕННЫЙ СОСТАВНОЙ КЛЮЧ `users_active_has_a_way_in_fk`
 --     (id, expected_login_kind) → user_login_methods (user_id, kind). Ключ с
 --     NULL в колонке не судится (MATCH SIMPLE), поэтому `PENDING`, `BLOCKED` и
@@ -86,9 +96,9 @@ UPDATE kaname.users u
          SELECT 1 FROM kaname.user_login_methods m
           WHERE m.user_id = u.id AND m.kind = 'password');
 
-ALTER TABLE kaname.users ADD COLUMN expected_login_kind text
+ALTER TABLE kaname.users ADD COLUMN expected_login_kind name
   GENERATED ALWAYS AS (
-    CASE WHEN invite_status = 'ACTIVE' AND recovery_path_opened_at IS NULL THEN 'password' END
+    CASE WHEN invite_status = 'ACTIVE' AND recovery_path_opened_at IS NULL THEN 'password'::name END
   ) STORED;
 
 COMMENT ON COLUMN kaname.users.expected_login_kind IS
@@ -100,184 +110,9 @@ ALTER TABLE kaname.users
   REFERENCES kaname.user_login_methods (user_id, kind)
   DEFERRABLE INITIALLY DEFERRED;
 
--- =============================================================================
--- ПЕРЕПИСЧИК ЯКОРЯ КЛАСТЕРА НЕ ПИШЕТ В ВЫЧИСЛЯЕМЫЕ КОЛОНКИ
--- =============================================================================
--- `kaname.rename_cluster_anchor` (миграция 20260906085136) обходит КАЖДУЮ
--- текстовую и jsonb-колонку схемы и пишет в неё `UPDATE … SET`. Вычисляемая
--- колонка такой записи не принимает («can only be updated to DEFAULT») даже на
--- нуле совпавших строк, и переписчик отказывал бы целиком. До этой миграции
--- вычисляемых колонок в схеме не было; `expected_login_kind` — первая. Тело
--- переписчика повторено дословно, с одним отбором `is_generated = 'NEVER'` в
--- обходах текста и jsonb: значение вычисляемой колонки база выводит из
--- переписанных соседей сама. Держат `TestClusterAnchor_*` в
--- `cluster_anchor_way_back_integration_test.go`.
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION kaname.rename_cluster_anchor(p_old text, p_new text)
-    RETURNS TABLE(place text, kind text, moved bigint)
-    LANGUAGE plpgsql
-    AS $$
-DECLARE
-    r        record;
-    v_cnt    bigint;
-    v_looked bigint := 0;
-    v_checks text[] := ARRAY[]::text[];
-    v_fks    text[] := ARRAY[]::text[];
-    v_def    text;
-BEGIN
-    IF p_old IS NULL OR p_old = '' OR p_new IS NULL OR p_new = '' THEN
-        RAISE EXCEPTION 'перепись якоря требует обоих написаний.';
-    END IF;
-    IF p_old = p_new THEN
-        RAISE EXCEPTION 'написания совпадают — переписывать нечего.';
-    END IF;
-    IF NOT EXISTS(SELECT 1 FROM kaname.clusters WHERE id = p_old) THEN
-        RAISE EXCEPTION
-            'якоря % в kaname.clusters нет: переход уже прошёл либо написание названо неверно. Текущее написание — %.',
-            p_old, kaname.cluster_anchor();
-    END IF;
-    IF EXISTS(SELECT 1 FROM kaname.clusters WHERE id = p_new) THEN
-        RAISE EXCEPTION 'якорь % уже существует — синглтон не вправе стать парой.', p_new;
-    END IF;
-
-    -- 1. Ограничения-проверки, называющие старое написание, снимаются: без
-    --    этого не завести строку под новым именем, а сама проверка отвергла бы
-    --    результат перехода. Определения запоминаются дословно и возвращаются
-    --    ниже с заменённым написанием.
-    FOR r IN
-        SELECT con.conname AS name, cl.relname AS tbl, pg_get_constraintdef(con.oid) AS def
-          FROM pg_constraint con
-          JOIN pg_namespace ns ON ns.oid = con.connamespace
-          JOIN pg_class cl     ON cl.oid = con.conrelid
-         WHERE ns.nspname = 'kaname' AND con.contype = 'c'
-           AND pg_get_constraintdef(con.oid) LIKE '%' || p_old || '%'
-    LOOP
-        v_checks := v_checks || (r.tbl || '|' || r.name || '|' || replace(r.def, p_old, p_new));
-        EXECUTE format('ALTER TABLE kaname.%I DROP CONSTRAINT %I', r.tbl, r.name);
-        place := r.name; kind := 'ограничение снято'; moved := 1; RETURN NEXT;
-    END LOOP;
-
-    -- 2. Внешние ключи схемы откладываются до конца транзакции.
-    --
-    --    Порядок обхода колонок — каталожный, а не топологический, поэтому
-    --    ребёнок может быть переписан раньше родителя. Откладывание снимает
-    --    вопрос порядка ЦЕЛИКОМ: проверка случится один раз, когда переписано
-    --    всё. Восстанавливаются ключи ниже — в этой же транзакции.
-    FOR r IN
-        SELECT con.conname AS name, cl.relname AS tbl
-          FROM pg_constraint con
-          JOIN pg_namespace ns ON ns.oid = con.connamespace
-          JOIN pg_class cl     ON cl.oid = con.conrelid
-         WHERE ns.nspname = 'kaname' AND con.contype = 'f' AND NOT con.condeferrable
-    LOOP
-        v_fks := v_fks || (r.tbl || '|' || r.name);
-        EXECUTE format('ALTER TABLE kaname.%I ALTER CONSTRAINT %I DEFERRABLE INITIALLY IMMEDIATE',
-                       r.tbl, r.name);
-    END LOOP;
-    SET CONSTRAINTS ALL DEFERRED;
-
-    -- 3. Текстовые колонки — все, кроме самого якоря: его строка переписывается
-    --    последней, когда на неё уже никто не смотрит старым написанием.
-    FOR r IN
-        SELECT c.table_name AS t, c.column_name AS col
-          FROM information_schema.columns c
-          JOIN information_schema.tables tb
-            ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
-         WHERE c.table_schema = 'kaname'
-           AND tb.table_type = 'BASE TABLE'
-           AND c.data_type IN ('text', 'character varying')
-           AND NOT (c.table_name = 'clusters' AND c.column_name = 'id')
-           -- Вычисляемая колонка значения не принимает: её выводит база из
-           -- переписанных соседей (kaname#608, `users.expected_login_kind`).
-           AND c.is_generated = 'NEVER'
-         ORDER BY c.table_name, c.column_name
-    LOOP
-        v_looked := v_looked + 1;
-        EXECUTE format(
-            'UPDATE kaname.%I SET %I = CASE WHEN %I = $1 THEN $2 ELSE $4 END WHERE %I IN ($1, $3)',
-            r.t, r.col, r.col, r.col)
-           USING p_old, p_new, 'cluster:' || p_old, 'cluster:' || p_new;
-        GET DIAGNOSTICS v_cnt = ROW_COUNT;
-        IF v_cnt > 0 THEN
-            place := r.t || '.' || r.col; kind := 'текст'; moved := v_cnt; RETURN NEXT;
-        END IF;
-    END LOOP;
-
-    -- 4. Колонки jsonb — якорь стоит внутри значения.
-    FOR r IN
-        SELECT c.table_name AS t, c.column_name AS col
-          FROM information_schema.columns c
-          JOIN information_schema.tables tb
-            ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
-         WHERE c.table_schema = 'kaname'
-           AND tb.table_type = 'BASE TABLE'
-           AND c.data_type = 'jsonb'
-           AND c.is_generated = 'NEVER'
-         ORDER BY c.table_name, c.column_name
-    LOOP
-        v_looked := v_looked + 1;
-        EXECUTE format(
-            'UPDATE kaname.%I SET %I = replace(%I::text, $1, $2)::jsonb WHERE %I::text LIKE $3',
-            r.t, r.col, r.col, r.col)
-           USING p_old, p_new, '%' || p_old || '%';
-        GET DIAGNOSTICS v_cnt = ROW_COUNT;
-        IF v_cnt > 0 THEN
-            place := r.t || '.' || r.col; kind := 'jsonb'; moved := v_cnt; RETURN NEXT;
-        END IF;
-    END LOOP;
-
-    -- 5. Сам якорь.
-    UPDATE kaname.clusters SET id = p_new WHERE id = p_old;
-    place := 'clusters.id'; kind := 'якорь'; moved := 1; RETURN NEXT;
-
-    -- 6. Отложенные ключи проверяются ЗДЕСЬ, до правки схемы.
-    --
-    --    Порядок несущий, и он куплен отказом: `ALTER TABLE` отвергается, пока
-    --    у таблицы есть неразрешённые события отложенных ключей
-    --    (SQLSTATE 55006). Проверка здесь же означает ещё и то, что отказ ключа
-    --    назовёт СЕБЯ внутри функции, а не превратится в «транзакция не
-    --    закоммитилась» у вызывающего.
-    SET CONSTRAINTS ALL IMMEDIATE;
-    FOREACH v_def IN ARRAY v_fks LOOP
-        EXECUTE format('ALTER TABLE kaname.%I ALTER CONSTRAINT %I NOT DEFERRABLE',
-                       split_part(v_def, '|', 1), split_part(v_def, '|', 2));
-    END LOOP;
-
-    -- 7. Умолчания столбцов. Умолчание, оставшееся прежним, ТИХО вернёт старое
-    --    написание на первой же вставке, не назвавшей столбец, — и вернёт его
-    --    туда, где уже никто не ищет.
-    FOR r IN
-        SELECT c.table_name AS t, c.column_name AS col, c.column_default AS def
-          FROM information_schema.columns c
-         WHERE c.table_schema = 'kaname'
-           AND c.column_default LIKE '%' || p_old || '%'
-         ORDER BY c.table_name, c.column_name
-    LOOP
-        v_looked := v_looked + 1;
-        v_def := replace(r.def, p_old, p_new);
-        EXECUTE format('ALTER TABLE kaname.%I ALTER COLUMN %I SET DEFAULT %s', r.t, r.col, v_def);
-        place := r.t || '.' || r.col; kind := 'умолчание'; moved := 1; RETURN NEXT;
-    END LOOP;
-
-    -- 8. Ограничения-проверки возвращаются с новым написанием. Возврат идёт
-    --    ПОСЛЕДНИМ: проверка, поставленная раньше правки данных, отвергла бы
-    --    строки, ещё не переехавшие.
-    FOREACH v_def IN ARRAY v_checks LOOP
-        EXECUTE format('ALTER TABLE kaname.%I ADD CONSTRAINT %I %s',
-                       split_part(v_def, '|', 1), split_part(v_def, '|', 2), split_part(v_def, '|', 3));
-        place := split_part(v_def, '|', 2); kind := 'ограничение возвращено'; moved := 1; RETURN NEXT;
-    END LOOP;
-
-    place := '(осмотрено мест)'; kind := 'перепись'; moved := v_looked; RETURN NEXT;
-    RETURN;
-END $$;
--- +goose StatementEnd
-
 -- +goose Down
 -- Откат снимает ключ, вычисляемую колонку и отметку; личностей, их статусов и
--- строк способов входа не трогает (AWI §4.1 п. 4). Отбор вычисляемых колонок в
--- переписчике якоря остаётся: без вычисляемых колонок он не отбирает ничего, и
--- поведение переписчика совпадает с прежним.
+-- строк способов входа не трогает (AWI §4.1 п. 4).
 ALTER TABLE kaname.users DROP CONSTRAINT users_active_has_a_way_in_fk;
 ALTER TABLE kaname.users DROP COLUMN expected_login_kind;
 ALTER TABLE kaname.users DROP COLUMN recovery_path_opened_at;
