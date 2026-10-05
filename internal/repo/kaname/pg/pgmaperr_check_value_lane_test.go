@@ -129,6 +129,7 @@ func TestWrapPgErr_ServiceValueLaneJudgesTheRefusingTable(t *testing.T) {
 // переводчика на каждой живой проверке. Совпадение двух перечней не довод:
 // довод — ответ переводчика, который судит по одному из них.
 var cvCallerValueSpec = map[string]struct{}{
+	"access_key_login_challenges_form_context_check":       {},
 	"access_binding_subjects_id_nonempty_ck":               {},
 	"access_binding_subjects_type_ck":                      {},
 	"access_bindings_expires_future_ck":                    {},

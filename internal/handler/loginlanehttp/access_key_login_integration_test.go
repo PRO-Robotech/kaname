@@ -129,6 +129,27 @@ func TestF13_02_BeginFormRefusals(t *testing.T) {
 	require.Equal(t, http.StatusOK, e.status, "Ф13-02 (е): %s", e.body)
 }
 
+// TestF13_02_BeginRefusesAContextTheServiceCouldNotHaveIssued — контекст формы
+// приходит печеньем КАК ЕСТЬ, и признак к нему выдаёт любой `GET …/csrf`:
+// контекст длиннее предела испытания (`domain.AccessKeyLoginChallengeContextMax`)
+// служба выдать не могла (её контекст — 43 знака), и это отказ формы вызывающему,
+// а не «хранилище недоступно» — 503 обвинял бы службу во вводе клиента и считался
+// бы отказом хранилища. Близнец отличается ровно длиной: на пределе — испытание.
+func TestF13_02_BeginRefusesAContextTheServiceCouldNotHaveIssued(t *testing.T) {
+	h := newSessionLane(t)
+	begin := func(n int) reply {
+		ck := &http.Cookie{Name: loginlanehttp.CookieForm, Value: strings.Repeat("c", n)}
+		tok, got := h.lane.csrf(t, h.c, akKindBegin, ck)
+		require.Equal(t, ck.Value, got.Value, "Дано: признак выдан к предъявленному контексту, контекст не сменён")
+		return akBegin(t, h, akForm{begin: tok, cookie: ck}, map[string]any{"csrfToken": tok})
+	}
+	over := begin(domain.AccessKeyLoginChallengeContextMax + 1)
+	require.Equalf(t, http.StatusForbidden, over.status, "контекст длиннее предела — отказ формы, не 503: %s", over.body)
+	require.Contains(t, over.body, "form token rejected")
+	twin := begin(domain.AccessKeyLoginChallengeContextMax)
+	require.Equalf(t, http.StatusOK, twin.status, "БЛИЗНЕЦ: контекст на пределе — испытание выдаётся: %s", twin.body)
+}
+
 // TestF13_26_LoginFormIsNotClosedByTheBeginToken — Ф13-26: признак формы
 // запроса форму подтверждения не закрывает; после выдачи сессии контекст сменён.
 func TestF13_26_LoginFormIsNotClosedByTheBeginToken(t *testing.T) {

@@ -9,6 +9,7 @@
 package check_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -61,6 +62,26 @@ func TestLanePathCount_InjectionBothWays(t *testing.T) {
 	require.Empty(t, auditLanePathCount(tail, 18, &idFactsCensus{}), "законный близнец с хвостом-числительным молчит")
 	require.NotEmpty(t, auditLanePathCount(map[string]string{"a.mdx": "у полосы семнадцать путей", "b.mdx": tail["b.mdx"]}, 18, &idFactsCensus{}),
 		"устаревшее «семнадцать» при восемнадцати путях — находка")
+
+	// Формы записи страницы самой полосы (NA8 волны 4): каждая — пара «верное
+	// число молчит / устаревшее находится», меняется ровно числительное.
+	forms := []string{
+		"Путей у полосы **%s**, и объявлены они одним перечнем",
+		"Что из %s путей ретранслирует край",
+		"Служба обслуживает все %s (`loginlanehttp.Paths()`).",
+	}
+	right := []string{"восемнадцать", "восемнадцати", "восемнадцать"}
+	staleWords := []string{"пятнадцать", "пятнадцати", "пятнадцать"}
+	for i, f := range forms {
+		require.Emptyf(t, auditLanePathCount(map[string]string{"a.mdx": fmt.Sprintf(f, right[i])}, 18, &idFactsCensus{}),
+			"законный близнец формы %q молчит", f)
+		got := auditLanePathCount(map[string]string{"a.mdx": fmt.Sprintf(f, right[i]) + "\n" + fmt.Sprintf(f, staleWords[i])}, 18, &idFactsCensus{})
+		require.Lenf(t, got, 1, "устаревшее число формы %q находится: %v", f, got)
+		require.Containsf(t, got[0], "a.mdx:2 называет «"+staleWords[i]+"»", "находка называет координату и слово: %s", got[0])
+	}
+	// Числительное вдали от якоря — не о путях.
+	far := map[string]string{"a.mdx": "у полосы восемнадцать путей. Срок признака формы — пятнадцать минут, сессия живёт дольше"}
+	require.Empty(t, auditLanePathCount(far, 18, &idFactsCensus{}), "числительное вне окна якоря молчит")
 }
 
 func TestClientIDForm_InjectionBothWays(t *testing.T) {
