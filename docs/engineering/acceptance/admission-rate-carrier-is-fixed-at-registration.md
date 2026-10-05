@@ -13,7 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   - редакция 1 — кругов ноль
 - **Дата:** 2026-10-05
 - **Задача:** `PRO-Robotech/kaname#197` (P2, `release:identity-own`); линия — `PRO-Robotech/kacho#1266`
-- **Ревизия измерения:** `PRO-Robotech/kaname@36fce61d8280` (ветка волны `538`)
+- **Ревизия измерения:** `8a84dcff6eb1` (ствол службы, база ветки волны `538`); интеграционные
+  прогоны сняты на голове волны `36fce61d8280`, и ни один названный ими файл между двумя
+  ревизиями не менялся (команда последнего раздела)
 - **Тип изменения:** инвариант схемы службы (новая миграция); контракт `.proto` не меняется
 - **Сервис:** `kaname`
 
@@ -36,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 ### §1.1 Ключ окна нашей полосы — текущий адрес
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280 · единица — выражение ключа в теле функции триггера
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1 · единица — выражение ключа в теле функции триггера
 git grep -n "THEN lower(u.email) ELSE u.external_id" -- internal/migrations
 #   → 3 строки: 20260917120000_registration_carrier_keys_the_admission_rate.sql:59 (Up);
 #     20260917130000_schema_functions_leave_the_platform_brand.sql:109 (Up — тело под именем
@@ -51,9 +53,10 @@ git grep -n "THEN lower(u.email) ELSE u.external_id" -- internal/migrations
 ### §1.2 Пути смены адреса нет — класс латентный
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1
 go test ./internal/check/ -run 'TestPeopleAddressHasNoWriterInServiceCode$' -count=1 -v
-#   → PASS; перепись: исходники Go 1016 файлов, операторов записи в строки людей 8,
+#   → PASS; перепись: исходники Go 1012 файлов (на голове волны 36fce61d — 1016),
+#     операторов записи в строки людей 8,
 #     колонки списков SET [display_name×2 email_verified_at×1 external_id×1
 #     invite_expires_at×2 invite_status×2 labels×1] — адреса среди них нет; писателей 0
 ```
@@ -67,7 +70,7 @@ go test ./internal/check/ -run 'TestPeopleAddressHasNoWriterInServiceCode$' -cou
 База смену адреса допускает: проба `TestIntegration_AddressVerificationIsBoundToTheValue`
 (`internal/migrations/login_method_schema_integration_test.go`) правит адрес строки человека
 прямым оператором и наблюдает снятие отметки подтверждения. Тот же посев строит «Дано» сценариев
-A197-01 и A197-04. Прогон на ревизии измерения: зелёный (команда §9).
+A197-01 и A197-04. Прогон на голове волны: зелёный (команда §9).
 
 ## §2 Решения
 
@@ -238,11 +241,11 @@ A197-01 и A197-04. Прогон на ревизии измерения: зел�
 |---|---|---|---|
 | A197-01 | отказ `KQ004` и ключ окна | функция триггера `admission_rate_count` — **заказан**: новая миграция этой приёмки читает носитель вместо текущего адреса; отображение `KQ004` → `ErrQuotaRateExceeded` → `RESOURCE_EXHAUSTED`/`QUOTA_RATE_EXCEEDED` — есть: `internal/repo/kaname/pg/pgmaperr.go`, `internal/apps/kaname/shared/quota.go` | `git grep -n 'case "KQ004"' -- internal/repo/kaname/pg/pgmaperr.go` → 1; ключ сегодня — §1.1 |
 | A197-02 | носитель пишется вместе с личностью | регистрация — `RegisterMirrorTx` → `BootstrapPersonalResourcesTx` (`internal/apps/kaname/api/user/mirror_tx.go`) — **заказан**: запись носителя той же транзакцией | `git grep -n 'func BootstrapPersonalResourcesTx' -- internal/apps/kaname/api/user` → 1 |
-| A197-03 | единый отказ и клетка `refused-rate` | `refuse` в `internal/apps/kaname/api/registration/register.go` — есть | `TestRegisterIntegration_F4_12_17_ExhaustedRateIsTheSameRefusalAsOccupied` PASS @36fce61d |
+| A197-03 | единый отказ и клетка `refused-rate` | `refuse` в `internal/apps/kaname/api/registration/register.go` — есть | `TestRegisterIntegration_F4_12_17_ExhaustedRateIsTheSameRefusalAsOccupied` PASS на 36fce61d |
 | A197-04 | носитель приглашённого | `ActivateInviteOnVerificationTx` (`internal/apps/kaname/api/user/mirror_tx.go`) — **заказан**: запись носителя в той же транзакции активации | `git grep -n 'func ActivateInviteOnVerificationTx' -- internal/apps/kaname/api/user` → 1 |
 | A197-05 | отказ базы на правке носителя | ограничение базы — **заказано** новой миграцией | — (производителя сегодня нет; ведёт `kaname#197`) |
 | A197-06 | перенос окон | заполнение носителя в той же миграции — **заказано** | §1.2: писателей адреса 0 — перенос точен |
-| A197-07 | ключ поставщика | ветвь `ELSE u.external_id` функции триггера — есть, сохраняется | `TestRegistrationCarrier_F4_R5_OwnLaneIsKeyedByTheAddress` PASS @36fce61d |
+| A197-07 | ключ поставщика | ветвь `ELSE u.external_id` функции триггера — есть, сохраняется | `TestRegistrationCarrier_F4_R5_OwnLaneIsKeyedByTheAddress` PASS на 36fce61d |
 
 Производитель каждого заказанного «Тогда» — одно изменение реализации `kaname#197`.
 
@@ -273,7 +276,7 @@ A197-01 и A197-04. Прогон на ревизии измерения: зел�
 ## §7 DoD
 
 1. Интеграционные пробы A197-01, A197-04, A197-05, A197-06 написаны **до** миграции и красны на
-   ревизии измерения (A197-01 и A197-04 — заведение проходит; A197-05 — запись принимается;
+   базе изменения (A197-01 и A197-04 — заведение проходит; A197-05 — запись принимается;
    A197-06 — носителя нет), зелёны после. Имена проб начинаются с ID сценария.
 2. A197-02 — проба утверждает носитель после регистрации; A197-03 и A197-07 — существующие
    близнецы зелёны без правки утверждений.
@@ -291,8 +294,17 @@ A197-01 и A197-04. Прогон на ревизии измерения: зел�
 ## §9 Как перепроверить посылки
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280; тяжёлое — через слот
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1; тяжёлое — через слот
 go test -count=1 ./internal/migrations/ ./internal/repo/kaname/pg/ ./internal/apps/kaname/api/registration/ \
   -run 'TestIntegration_AddressVerificationIsBoundToTheValue|TestRegistrationCarrier_|TestAccountRate_|TestRegisterIntegration_F4_12_17' -v
-#   → 2026-10-05: PASS у каждой из 11 проб этого отбора
+#   → 2026-10-05, на 36fce61d8280: PASS у каждой из 11 проб этого отбора
+# Названные пробами и сценариями файлы между стволом и головой волны не менялись:
+git diff --stat 8a84dcff6eb1 36fce61d8280 -- internal/apps/kaname/api/registration/ \
+  internal/repo/kaname/pg/registration_carrier_rate_integration_test.go \
+  internal/repo/kaname/pg/account_admission_rate_integration_test.go internal/repo/kaname/pg/pgmaperr.go \
+  internal/apps/kaname/api/user/mirror_tx.go internal/apps/kaname/shared/quota.go \
+  internal/migrations/login_method_schema_integration_test.go \
+  internal/migrations/20260917120000_registration_carrier_keys_the_admission_rate.sql \
+  internal/migrations/20260917130000_schema_functions_leave_the_platform_brand.sql
+#   → пусто
 ```

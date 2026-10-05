@@ -13,7 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   - редакция 1 — кругов ноль
 - **Дата:** 2026-10-05
 - **Задача:** `PRO-Robotech/kaname#198` (P2, `release:identity-own`); линия — `PRO-Robotech/kacho#1266`
-- **Ревизия измерения:** `PRO-Robotech/kaname@36fce61d8280` (ветка волны `538`)
+- **Ревизия измерения:** `8a84dcff6eb1` (ствол службы, база ветки волны `538`); интеграционные
+  прогоны сняты на голове волны `36fce61d8280`, и ни один названный ими файл между двумя
+  ревизиями не менялся (команда последнего раздела)
 - **Тип изменения:** решение о наблюдаемом поведении, закреплённое пробами; прод-код, схема и
   контракт `.proto` не меняются
 - **Сервис:** `kaname`
@@ -42,7 +44,7 @@ MAIL-23) и остаётся `PENDING`, поэтому регистрация т
 этого исхода в дереве **отсутствует**:
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1
 git grep -n 'OutcomeRefusedInviteExpired' -- '*_test.go' | wc -l      # → 0
 git grep -n 'OutcomeRefusedInviteExpired' -- 'internal/**/*.go' ':!*_test.go' | wc -l   # → 4
 ```
@@ -50,7 +52,7 @@ git grep -n 'OutcomeRefusedInviteExpired' -- 'internal/**/*.go' ':!*_test.go' | 
 ### §1.2 Уборки истёкших приглашений нет
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280 — предикат задачи, дословно
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1 — предикат задачи, дословно
 git grep -ln 'SweepExpiredInvites\|expired invite' -- 'internal/**/*.go' ':!*_test.go'   # → пусто
 # Снятие строки человека в непроверочном коде — одно место, глагол UserService.Delete:
 git grep -n 'DELETE FROM users' -- 'internal/**/*.go' ':!*_test.go'
@@ -74,8 +76,8 @@ git grep -n 'DELETE FROM users' -- 'internal/**/*.go' ':!*_test.go'
 Истёкшая строка приглашения заводится существующим глаголом хранилища `InsertPending` со сроком в
 прошлом — так её строят `TestInviteDeadline_ExpiredRowDoesNotActivate` и
 `TestInviteDeadline_ReInvitingExtendsAnExpiredRow`; живая — тем же глаголом, как в
-`TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane`. Прогон на ревизии
-измерения: зелёный (команда §10).
+`TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane`. Прогон на голове
+волны: зелёный (команда §10).
 
 ## §2 Решения
 
@@ -203,10 +205,10 @@ again to issue a new one`; письма в очередь не поставле�
 | ID | что производит «Тогда» | координата в дереве | чем измерено |
 |---|---|---|---|
 | A198-01 | единый отказ и клетка `refused-invite-expired` | `RegisterMirrorTx` (`internal/apps/kaname/api/user/mirror_tx.go`) → `refuse` (`internal/apps/kaname/api/registration/register.go`) — есть; **проба заказана** | §1.1: проб исхода 0, мест в непроверочном коде 4 |
-| A198-02 | продление срока и регистрация на строку | оператор приглашения с `GREATEST` (`internal/repo/kaname/pg/user_repo.go`) + `RegisterMirrorTx` — есть; **проба сквозь регистрацию заказана** | `TestInviteDeadline_ReInvitingExtendsAnExpiredRow` PASS @36fce61d (уровень хранилища) |
-| A198-03 | снятие строки и новая регистрация; отказ снятия при привязке | `Delete` (`internal/repo/kaname/pg/user_repo.go`) + `BootstrapPersonalResourcesTx` — есть; **проба заказана** | отказ снятия при ссылке привязки — существующая проба `TestUserDelete_ReferencedAsSubjectN_Blocked`, PASS @36fce61d |
+| A198-02 | продление срока и регистрация на строку | оператор приглашения с `GREATEST` (`internal/repo/kaname/pg/user_repo.go`) + `RegisterMirrorTx` — есть; **проба сквозь регистрацию заказана** | `TestInviteDeadline_ReInvitingExtendsAnExpiredRow` PASS на 36fce61d (уровень хранилища) |
+| A198-03 | снятие строки и новая регистрация; отказ снятия при привязке | `Delete` (`internal/repo/kaname/pg/user_repo.go`) + `BootstrapPersonalResourcesTx` — есть; **проба заказана** | отказ снятия при ссылке привязки — существующая проба `TestUserDelete_ReferencedAsSubjectN_Blocked`, PASS на 36fce61d |
 | A198-04 | отказ `ResendInvite` на истёкшей строке | `internal/apps/kaname/api/user/resend_invite.go` — есть; **проба заказана** | `git grep -n 'has expired — invite again' -- internal/apps/kaname/api/user/resend_invite.go` → 1; в пробах → 0 |
-| §4 | отсутствие уборки | предикат §1.2 | → пусто @36fce61d |
+| §4 | отсутствие уборки | предикат §1.2 | → пусто @8a84dcff6eb1 |
 
 Все заказанные производители — пробы одного изменения `kaname#198`; прод-код у них есть.
 
@@ -250,8 +252,15 @@ again to issue a new one`; письма в очередь не поставле�
 ## §10 Как перепроверить посылки
 
 ```sh
-# ДОМ: PRO-Robotech/kaname @36fce61d8280; тяжёлое — через слот
+# ДОМ: PRO-Robotech/kaname @8a84dcff6eb1; тяжёлое — через слот
 go test -count=1 ./internal/repo/kaname/pg/ ./internal/apps/kaname/api/registration/ \
   -run 'TestInviteDeadline_ExpiredRowDoesNotActivate|TestInviteDeadline_ReInvitingExtendsAnExpiredRow|TestRegisterIntegration_F4_23|TestRegisterIntegration_F4_11_24' -v
-#   → 2026-10-05: PASS у каждой из 4 проб
+#   → 2026-10-05, на 36fce61d8280: PASS у каждой из 4 проб; там же
+#     TestUserDelete_ReferencedAsSubjectN_Blocked — PASS
+# Названные пробами и сценариями файлы между стволом и головой волны не менялись:
+git diff --stat 8a84dcff6eb1 36fce61d8280 -- internal/apps/kaname/api/registration/ \
+  internal/repo/kaname/pg/user_repo.go internal/repo/kaname/pg/invite_deadline_integration_test.go \
+  internal/repo/kaname/pg/delete_subject_ref_integration_test.go \
+  internal/apps/kaname/api/user/mirror_tx.go internal/apps/kaname/api/user/resend_invite.go
+#   → пусто
 ```
