@@ -1,0 +1,75 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+  sha256: f85ce7312024e68d63939fbad2bd42e286846aaf03f1b6c47bd8513694ecd394
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 36fce61d
+  content_commit: 83a504d68290e9062045cebbc03336a57a4f284f
+  branch: '197'
+  task: PRO-Robotech/kaname#197
+  related_tasks: [PRO-Robotech/kacho#1266]
+  lines: 487
+  round: 3
+  predecessor_record: docs/specs/reviews/admission-rate-carrier-is-fixed-at-registration/a992a8c9945fceab19fe44ec07dc091f352b915902f6f326c32844b7d8cac977.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+    в копии kacho-workspace/tmp/kaname-197-198-acc @ 83a504d68 → f85ce731…8694ecd394 (совпал с заданием)
+  measurement_revisions: >-
+    Замеры по дереву — в копии kaname-197-198-acc @ 83a504d68; посев — одноразовая база
+    postgres:16-alpine через слот, прототип триггера Р1/Р2 и мутант «перезапись присланного».
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  why: "Блокирующих 0; одобрение действует после публикации события курьером."
+
+previous_round_blockers:
+  - kind: COVERAGE
+    outcome: closed
+    by: "Сценарий A197-09: вставка и чеканка с присланным чужим носителем → KQ006, строки нет / строка остаётся приглашением; близнецы в один факт (носитель = адрес); DoD п.1 требует красного обоих отрицательных на реализации, перезаписывающей присланное."
+
+blocking: []
+
+important_nonblocking:
+  - "A197-09, DoD п.1: «красны на базе изменения» — на базе столбца носителя нет, проба падает ошибкой SQL (42703), а не утверждением; несущим красным служит мутант «перезапись присланного», уже названный в DoD — держать его в доказательстве DoD."
+  - "Присланный носитель, равный адресу без учёта регистра, но не в нижнем (`OWN-M@…`): по тексту Р2 п.2 это KQ006 (отличен от lower(адреса)), а не 23514 Р2 п.1; прототип даёт KQ006 (BEFORE-триггер раньше CHECK). Сценарием не утверждается — учесть в пробе либо комментарии миграции."
+
+confirmed:
+  - "Сценариев 9 (A197-01…09), строк §4 «сценарий → производитель» 9: производитель у «Тогда» 9 из 9; заказанные — kaname#197."
+  - "Близнец у отрицаний: 01, 04, 05 (два), 06, 08 (три), 09 (два) — свои; 03, 07 — существующие пробы."
+  - "Конструируемость A197-09 посеяна (прототип): вставка с чужим носителем → KQ006, строк 0; близнец → проходит; чеканка PENDING→own: с чужим носителем → KQ006, строка остаётся PENDING/''/''; близнец → ACTIVE, носитель inv-n; совместно с A197-05 (смена адреса проходит, правка на другой и на '' → KQ006, то же значение проходит), A197-08 второй близнец (пустой → lower(адреса)) и поставщик с носителем → 23514."
+  - "Мутант «база перезаписывает присланное адресом»: оба отрицательных A197-09 проходят (строка m создана; n стала ACTIVE с носителем адреса) — пробы A197-09 его ловят; A197-05 и A197-08 его не ловят, т.е. A197-09 несущий."
+  - "KQ006 свободен: git grep ERRCODE в internal/migrations → KQ001…KQ005; `\"users\": {` в check_value_lanes.go → 1."
+  - "Сцена EV-72 (address_verification_invite_integration_test.go, newAVLane/registerInvitee/confirm) существует; ActivateInviteTx — mirror_tx.go:321, вызов поставщиком — internal_upsert.go:330 (§5)."
+  - "§8: открытых вопросов нет; DoD измерим, п.7 — доказательство комментарием в kaname#197."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#197
+  status: pending
+  published: false
+  body: "role: acceptance-reviewer · verdict: APPROVED · subject: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md · subject_revision: 83a504d68290e9062045cebbc03336a57a4f284f · subject_sha256: f85ce7312024e68d63939fbad2bd42e286846aaf03f1b6c47bd8513694ecd394"
+  publication_mode: courier_of_agent_verdict
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
