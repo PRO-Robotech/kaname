@@ -187,6 +187,16 @@ func (uc *BeginAccessKeyLoginUseCase) Execute(ctx context.Context, in BeginAcces
 	if in.FormContext == "" {
 		return BeginAccessKeyLoginOutput{}, FieldRequired("csrfToken")
 	}
+	// Контекст приходит печеньем КАК ЕСТЬ, и признак к нему выдаёт любой
+	// `GET …/csrf`, поэтому его длина — ввод вызывающего, а не значение службы:
+	// свой контекст служба чеканит 43 знаками (`NewFormContext`), и длиннее
+	// предела строки испытания он быть не может. Такой контекст — отказ формы
+	// здесь, до счёта попытки и до записи; дойди он до хранилища, его отказ
+	// записи прочёлся бы отказом хранилища (503) — обвинением службы во вводе
+	// клиента.
+	if len(in.FormContext) > domain.AccessKeyLoginChallengeContextMax {
+		return BeginAccessKeyLoginOutput{}, ErrFormTokenRejected
+	}
 	if hit, err := uc.gate.check(ctx, "", in.Source); err != nil {
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginStoreFailed)
 		return BeginAccessKeyLoginOutput{}, ErrStoreUnavailable
