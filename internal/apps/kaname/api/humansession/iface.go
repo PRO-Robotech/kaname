@@ -288,6 +288,35 @@ type Writer interface {
 	Rollback(ctx context.Context) error
 }
 
+// AccessKeyLoginStore — хранилище ПОЛОСЫ ВХОДА ключом (Ф13 Р2, Р3, Р13).
+//
+// ГРАНИЦА НАЗВАНА. Полоса входа человека не знает: она обнаруживает его по
+// предъявленному удостоверению. Поэтому испытание здесь привязано к КОНТЕКСТУ
+// ФОРМЫ, а не к человеку, и живёт в своей таблице — инвариант испытаний
+// церемоний Ф7 («строка принадлежит вызывающему») этим не ослабляется.
+// Моменты выдачи, срока и предъявления испытания ставит хранилище своими
+// часами: испытание выдаёт одна реплика, предъявляют другой.
+type AccessKeyLoginStore interface {
+	// IssueChallenge кладёт выданное испытание сроком ttl, ЗАМЕЩАЯ живое
+	// испытание того же контекста одной транзакцией (Ф13-03).
+	IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge, ttl time.Duration) error
+	// ConsumeChallenge — ОДИН оператор однократности (Ф13-08): строка этого
+	// контекста, не потреблённая и не истёкшая, получает отметку.
+	// consumed=false — её нет, она потреблена, истекла либо выдана другому
+	// контексту; различать это вызывающему незачем — отказ один (Р7).
+	ConsumeChallenge(ctx context.Context, challenge []byte, formContext string) (consumed bool, err error)
+	// KeyByCredentialID — строка ключа по идентификатору удостоверения;
+	// found=false — строки нет. Снятый ключ и «удостоверения не было» суть
+	// одно состояние (Р15).
+	KeyByCredentialID(ctx context.Context, credentialID []byte) (domain.AccessKey, bool, error)
+	// AdvanceSignCount — атомарный сдвиг счётчика и момента предъявления с
+	// условием на прежнее значение (Ф7 Р6): advanced=false — проигравший.
+	AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (advanced bool, err error)
+	// UserOf — человек, которому принадлежит найденная строка ключа: ему и
+	// выдаётся сессия (Р3). Нет человека — NOT_FOUND.
+	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
 // EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора
 // (Ф12-44): строки `pending`, чей срок (окно Р8 от момента заведения) истёк,
 // — `confirm` их уже не примет ни при каком коде.

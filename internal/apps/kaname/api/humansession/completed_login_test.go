@@ -346,6 +346,11 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 			_, err := NewRegenerateBackupCodesUseCase(SecondFactorDeps{Store: store})
 			return err
 		},
+		// Вход ключом (Ф13): хранилище испытаний дано, хранилища способов нет.
+		"AccessKeyLoginUseCase": func() error {
+			_, err := NewAccessKeyLoginUseCase(AccessKeyLoginDeps{Store: store, Keys: noKeyLoginStore{}})
+			return err
+		},
 	}
 
 	readers := enrollmentReaders(t)
@@ -405,3 +410,8 @@ func TestEnrolledForCompletionReadsTheKeyTable(t *testing.T) {
 		t.Fatal("чтение ключей отказало, а ось выведена — неизвестное прочитано как «нет ключа»")
 	}
 }
+
+// noKeyLoginStore — хранилище испытаний полосы входа ключом, которое сборка
+// лишь проверяет на присутствие; его методы проба не зовёт.
+type noKeyLoginStore struct{ AccessKeyLoginStore }
+

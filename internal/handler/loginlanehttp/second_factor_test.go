@@ -336,8 +336,10 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	} {
 		require.Contains(t, loginlanehttp.Paths(), p)
 	}
-	// Путей полосы — 15: два глагола подтверждения адреса (kaname#456, Р6).
-	require.Len(t, loginlanehttp.Paths(), 15)
+	// Путей полосы — 17: два глагола подтверждения адреса (kaname#456, Р6) и
+	// два глагола входа ключом (Ф13, kaname#613). Число — перепись популяции,
+	// двигает его тот, кто популяцию изменил.
+	require.Len(t, loginlanehttp.Paths(), 17)
 }
 
 // TestLane_F12_RefusalsCarryTheirTokens — отказы глаголов семейства (Р4):

@@ -44,6 +44,11 @@ type IssueInput struct {
 	// EmitAudit — писать ли событие выдачи здесь; выдающий глагол, у которого
 	// своё событие (регистрация, восстановление), выключает.
 	EmitAudit bool
+	// AccessKeyID — ключ, утверждением которого выдана сессия (Ф13 Р10);
+	// пусто — выдача не ключом. Поле идёт ТОЛЬКО в событие выдачи: состав
+	// ЗАПИСИ сессии им не расширяется (Ф13 §7 инв. 11) — ключ есть факт о
+	// том, ЧЕМ вошли, а не свойство сессии, и читателя в записи у него нет.
+	AccessKeyID domain.AccessKeyID
 }
 
 // IssueSession — запись, память первой аутентификации и (если просили)
@@ -88,16 +93,21 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 		return domain.HumanSession{}, domain.SessionBearer{}, err
 	}
 	if in.EmitAudit {
+		// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
+		// неизменяемым идентификатором, сессия — своим, ключ — адресом `ak-…`
+		// (Ф7 Р10); идентификатор удостоверения в событие не выходит.
+		payload := map[string]any{
+			"user_id":    string(in.User.ID),
+			"session_id": string(s.ID),
+			"methods":    methods,
+		}
+		if in.AccessKeyID != "" {
+			payload["access_key_id"] = string(in.AccessKeyID)
+		}
 		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 			EventType:       AuditSessionIssued,
 			TenantAccountID: string(in.User.AccountID),
-			// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
-			// неизменяемым идентификатором, сессия — своим.
-			Payload: map[string]any{
-				"user_id":    string(in.User.ID),
-				"session_id": string(s.ID),
-				"methods":    methods,
-			},
+			Payload:         payload,
 		}); err != nil {
 			return domain.HumanSession{}, domain.SessionBearer{}, err
 		}

@@ -92,15 +92,20 @@ const (
 	// запрос письма и предъявление кода — два глагола под сессией человека.
 	PathVerifyEmail        = "/iam/v1/auth/verify-email"
 	PathVerifyEmailConfirm = "/iam/v1/auth/verify-email/confirm"
+	// Вход ключом доступа (Ф13 Р1, kaname#613): выдача испытания и
+	// предъявление утверждения — два глагола, два вида признака формы.
+	PathAccessKeyBegin = "/iam/v1/auth/access-key/begin"
+	PathAccessKeyLogin = "/iam/v1/auth/access-key/login"
 )
 
-// Paths — пятнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// Paths — семнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
 // для ретрансляции (§8 инв. 7).
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
 		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
+		PathAccessKeyBegin, PathAccessKeyLogin,
 	}
 }
 
@@ -119,14 +124,18 @@ const (
 // pathPositions — объявление Р2 для каждого пути полосы. Путь, заводимый
 // позже, объявляет себя здесь той же правкой, что заводит путь.
 var pathPositions = map[string]PathPosition{
-	PathRegister:                PathAvailableInVerification,
-	PathLogin:                   PathAvailableInVerification,
-	PathCSRF:                    PathAvailableInVerification,
-	PathLogout:                  PathAvailableInVerification,
-	PathVerifyEmail:             PathAvailableInVerification,
-	PathVerifyEmailConfirm:      PathAvailableInVerification,
-	PathRecovery:                PathAvailableInVerification,
-	PathRecoveryComplete:        PathAvailableInVerification,
+	PathRegister:           PathAvailableInVerification,
+	PathLogin:              PathAvailableInVerification,
+	PathCSRF:               PathAvailableInVerification,
+	PathLogout:             PathAvailableInVerification,
+	PathVerifyEmail:        PathAvailableInVerification,
+	PathVerifyEmailConfirm: PathAvailableInVerification,
+	PathRecovery:           PathAvailableInVerification,
+	PathRecoveryComplete:   PathAvailableInVerification,
+	// Вход ключом выдаёт сессию так же, как вход паролем: положения
+	// подтверждения у вызывающего до выдачи нет.
+	PathAccessKeyBegin:          PathAvailableInVerification,
+	PathAccessKeyLogin:          PathAvailableInVerification,
 	PathPassword:                PathRefusedInVerification,
 	PathSecondFactor:            PathRefusedInVerification,
 	PathSecondFactorEnroll:      PathRefusedInVerification,
@@ -189,6 +198,11 @@ type Lane interface {
 	// AddressPosition — положение сессии носителя по ТЕКУЩЕЙ отметке (Р1):
 	// его спрашивает отказ положения на путях, объявленных отказом Р2.
 	AddressPosition(ctx context.Context, bearer domain.SessionBearer) (humansession.Position, error)
+	// Вход ключом доступа (Ф13 Р1): испытание выдаётся, не назвав человека;
+	// предъявление утверждения выдаёт сессию той же формой ответа, что вход
+	// паролем.
+	BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error)
+	AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -249,6 +263,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
 	h.mux.HandleFunc(PathVerifyEmail, h.method(http.MethodPost, h.requestEmailVerification))
 	h.mux.HandleFunc(PathVerifyEmailConfirm, h.method(http.MethodPost, h.confirmEmailVerification))
+	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
+	h.mux.HandleFunc(PathAccessKeyLogin, h.method(http.MethodPost, h.accessKeyLogin))
 	return h, nil
 }
 

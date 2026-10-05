@@ -90,6 +90,14 @@ type stubLane struct {
 	regenIn    []humansession.RegenerateBackupCodesInput
 	stepUpIn   []humansession.StepUpInput
 
+	// Вход ключом доступа (Ф13).
+	akBeginOut humansession.BeginAccessKeyLoginOutput
+	akBeginErr error
+	akLoginOut humansession.LoginOutput
+	akLoginErr error
+	akBeginIn  []humansession.BeginAccessKeyLoginInput
+	akLoginIn  []humansession.AccessKeyLoginInput
+
 	// Подтверждение адреса (kaname#456).
 	verifyOut        humansession.RequestVerificationOutput
 	verifyErr        error
@@ -104,6 +112,16 @@ type stubLane struct {
 // Подтверждение адреса (kaname#456): дублёр отвечает объявленным исходом;
 // положение по умолчанию — «сессии нет», и отказ положения на пути, объявленном
 // отказом, не срабатывает: предмет соседних проб — глаголы, а не положение.
+func (s *stubLane) BeginAccessKeyLogin(_ context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	s.akBeginIn = append(s.akBeginIn, in)
+	return s.akBeginOut, s.akBeginErr
+}
+
+func (s *stubLane) AccessKeyLogin(_ context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	s.akLoginIn = append(s.akLoginIn, in)
+	return s.akLoginOut, s.akLoginErr
+}
+
 func (s *stubLane) RequestEmailVerification(_ context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
 	s.verifyIn = append(s.verifyIn, b)
 	return s.verifyOut, s.verifyErr

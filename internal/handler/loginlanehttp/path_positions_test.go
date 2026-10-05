@@ -153,8 +153,10 @@ func TestEveryLanePathIsDeclaredInTheR2List(t *testing.T) {
 	for _, f := range findings {
 		t.Error(f)
 	}
-	if len(Paths()) != 15 || len(positions) != 15 {
-		t.Errorf("путей полосы не 15: перечень %d, строк Р2 %d", len(Paths()), len(positions))
+	// Перепись популяции, а не предел: её двигает заведение глагола — Ф13
+	// добавила два (`access-key/begin`, `access-key/login`, kaname#613).
+	if len(Paths()) != 17 || len(positions) != 17 {
+		t.Errorf("путей полосы не 17: перечень %d, строк Р2 %d", len(Paths()), len(positions))
 	}
 	for _, p := range Paths() {
 		if _, ok := positions[p]; !ok {

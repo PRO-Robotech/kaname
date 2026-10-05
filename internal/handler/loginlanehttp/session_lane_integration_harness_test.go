@@ -63,6 +63,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -108,6 +109,18 @@ type sessionVerbs struct {
 	stepUp   *humansession.StepUpUseCase
 	request  *humansession.RequestRecoveryUseCase
 	complete *humansession.CompleteRecoveryUseCase
+	// Вход ключом доступа (Ф13): НАСТОЯЩИЕ глаголы — дублёр отвечал бы
+	// объявленным исходом, и утверждение о сессии зеленело бы при любом коде.
+	akBegin *humansession.BeginAccessKeyLoginUseCase
+	akLogin *humansession.AccessKeyLoginUseCase
+}
+
+func (v sessionVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	return v.akBegin.Execute(ctx, in)
+}
+
+func (v sessionVerbs) AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	return v.akLogin.Execute(ctx, in)
 }
 
 func (v sessionVerbs) Login(ctx context.Context, in humansession.LoginInput) (humansession.LoginOutput, error) {
@@ -310,8 +323,22 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, time.Now)
 	require.NoError(t, err)
 
+	// Полоса входа ключом (Ф13) — теми же хранилищами и той же привязкой,
+	// что корень композиции, с привязкой стенда (`laneKeyBinding`).
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	akDeps := humansession.AccessKeyLoginDeps{
+		Store: sessions, Keys: kanamepg.NewAccessKeyLoginRepo(pool, accessKeys), Methods: methods,
+		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
+		UserVerification: access_keys.UserVerificationAssertion,
+		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+	}
+	akBegin, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
+	require.NoError(t, err)
+	akLogin, err := humansession.NewAccessKeyLoginUseCase(akDeps)
+	require.NoError(t, err)
+
 	l := newLaneOver(t, sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
-		stepUp: stepUp, request: request, complete: complete}, "")
+		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin}, "")
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),

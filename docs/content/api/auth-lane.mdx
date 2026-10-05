@@ -36,6 +36,8 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email</code></td><td>запрос письма с кодом подтверждения адреса</td><td><code>verify-email</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email/confirm</code></td><td>предъявление кода подтверждения; новый носитель той же сессии</td><td><code>verify-email-confirm</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/access-key/begin</code></td><td>испытание входа ключом доступа; человека запрос не называет</td><td><code>access-key-begin</code></td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/access-key/login</code></td><td>вход ключом доступа без пароля; отвечает как вход паролем</td><td><code>access-key-login</code></td><td>нет</td></tr>
   </tbody>
 </table>
 
@@ -130,7 +132,7 @@ SAN проверенного клиентского сертификата по�
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
 `recovery`, `recovery-complete`, `second-factor`, `step-up`, `verify-email`,
-`verify-email-confirm`.
+`verify-email-confirm`, `access-key-begin`, `access-key-login`.
 
 <CodeBlock language="bash">
   {dedent`
@@ -140,7 +142,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm access-key-begin access-key-login]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -314,6 +316,75 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 `missingForLevel2` — какие способы (`totp`, `lookup_secret`) его предъявление в этой сессии
 выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
 запасным кодом — `2`; один пароль либо код восстановления — `1`.
+
+### Вход ключом доступа — `POST /iam/v1/auth/access-key/{begin,login}` {#access-key-login}
+
+Ключ доступа — **первичный** способ входа, а не добавка к паролю: человек без пароля входит им и
+получает ту же сессию, что вошедший паролем. Обращений два, и у каждого **свой** вид признака
+формы — `access-key-begin` у испытания и `access-key-login` у предъявления; контекст формы
+(`kaname_form`) при этом один. Церемония входа поэтому стоит **двух** обращений к
+`GET /iam/v1/auth/csrf` — по признаку на каждый вид: признак испытания предъявлению не годится,
+и наоборот (`403`, `form token rejected`).
+
+**Первое — испытание.** Тело — одно поле `csrfToken`; запрос не называет человека вовсе. Ответ —
+параметры предъявления для браузерного интерфейса: `allowCredentials` — **пустой массив
+словом** (браузер сам предлагает подходящее обнаруживаемое удостоверение, служба не подсказывает,
+у кого оно есть); `timeout` — срок испытания в миллисекундах; `rpId` и `userVerification`
+(`preferred`) — величины привязки службы.
+
+<CodeBlock language="json">
+  {dedent`
+    POST /iam/v1/auth/access-key/begin
+    {"csrfToken": "…"}
+
+    200
+    {"publicKey": {
+      "challenge": "…", "rpId": "console.example", "timeout": 300000,
+      "userVerification": "preferred", "allowCredentials": []
+    }}
+  `}
+</CodeBlock>
+
+Испытание живёт при **контексте формы**, а не при человеке, и оно **одно** на контекст: повторное
+обращение замещает прежнее. Предъявление гасит испытание при любом исходе, поэтому второе
+предъявление с тем же испытанием не проходит никогда — утверждение собирают заново с нового
+`begin`. Каждое `begin` считается попыткой по источнику: частые испытания с одного адреса
+упираются в тот же `429` `TOO_MANY_ATTEMPTS`, что и неверные пароли.
+
+**Второе — предъявление.** Тело несёт ответ браузера. Поля — base64url **без дополнения**; все
+перечисленные ниже обязательны, `userHandle` в том числе: по нему служба сверяет, чей это ключ.
+
+<CodeBlock language="json">
+  {dedent`
+    POST /iam/v1/auth/access-key/login
+    {"csrfToken": "…", "credential": {
+      "id": "…", "rawId": "…", "type": "public-key",
+      "response": {"clientDataJSON": "…", "authenticatorData": "…",
+                   "signature": "…", "userHandle": "…"}
+    }}
+  `}
+</CodeBlock>
+
+Поле вне этого перечня отвергается `400` с его именем, а не глотается. Стандартная сериализация
+браузера (`PublicKeyCredential.toJSON()`) несёт ещё `clientExtensionResults` и
+`authenticatorAttachment` — **снимите их** перед отправкой, иначе первый же вызов получит `400`.
+Поля `secondFactor` у этой формы тоже нет: второй фактор вход ключом не требует и не принимает.
+
+Ответ успеха — **та же форма, что у входа паролем**: `user`, `session`, печенье `kaname_session`
+и новый `kaname_form` (оба признака прежнего контекста после выдачи негодны). Уровень сессии
+выводится из флагов **этого** утверждения: ключ, выполнивший проверку пользователя и не
+допускающий резервного копирования, даёт `3`; всякое другое утверждение ключа — `2`.
+
+Отказ входа ключом — **тот же один отказ**, что у входа паролем: `401`, код `16`,
+`authentication failed`, без печенья. Что именно не сошлось — испытание, удостоверение,
+рукоятка, подпись, блокировка, — ответ не говорит; различает причины только оператор службы по
+её счётчикам. Отказ **формы** (поле не прислано, лишнее поле, чужой вид признака) остаётся
+отличимым: он про запрос, а не про личность. Пароль полоса ключа не читает и не требует —
+полосы входа независимы, и человек с паролем и ключом входит любой.
+
+Утраченный единственный ключ у человека без пароля возвращается **восстановлением по
+подтверждённому адресу** (`POST /iam/v1/auth/recovery`, затем `…/recovery/complete` с новым
+паролем); после входа паролем человек заводит новый ключ и снимает утраченный.
 
 ### Ключи доступа (WebAuthn) — `AccessKeyService`
 
