@@ -302,6 +302,11 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 	return *at, true, nil
 }
 
+// AccessKeyEnrolled — порт `loginmethod.Store` (ось «заведено», ключ доступа).
+func (r *LoginMethodRepo) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return accessKeyEnrolled(ctx, r.pool, userID)
+}
+
 // replaceLoginVerifierTx — ЗАМЕЩЕНИЕ материала одним оператором (ID-PW-1
 // PWV-10, фаза Ф3 `kacho#1269`): новое значение кладётся `UPDATE` по паре
 // (человек, вид); строки нет — replaced=false, вставки нет (заводит способ

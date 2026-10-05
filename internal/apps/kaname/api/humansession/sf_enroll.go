@@ -237,12 +237,6 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	methods := withMethod(resolved.Session.PresentedMethods, assurance.MethodTOTP)
-	level, err := levelOf(methods)
-	if err != nil {
-		uc.deps.Logger.Error("second factor confirm: level not derived", "err", err.Error())
-		return ConfirmOutput{}, ErrStoreUnavailable
-	}
 
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
@@ -280,7 +274,8 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
+	rec, err := presentInSession(ctx, w, resolved.Session, assurance.MethodTOTP, bearer.Digest(), now)
+	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
@@ -289,14 +284,14 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	// единственный писатель, а не эта полоса.
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: addressKey, Presented: methods,
+		AddressKey: addressKey, Level: rec.Level,
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditSecondFactorEnrolled, user, resolved.Session.ID, assurance.MethodTOTP); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	if err := emitStepUpJournal(ctx, w, user, resolved.Session, assurance.MethodTOTP, level); err != nil {
+	if err := emitStepUpJournal(ctx, w, user, resolved.Session, assurance.MethodTOTP, rec.Level); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -306,24 +301,24 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	uc.deps.Observer.SecondFactorEventObserved(SecondFactorEnrollmentConfirmed)
 
 	s := resolved.Session
-	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = methods, level, now
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	return ConfirmOutput{
 		View:        SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:      bearer,
 		BackupCodes: codes,
-		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, methods),
+		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}, nil
 }
 
 // assuranceAfter — вид `assurance` после зафиксированного предъявления:
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
-func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, presented []string) AssuranceView {
+func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, rec PresentedRecord) AssuranceView {
 	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}
-	return assuranceViewOf(presented, enrolled)
+	return assuranceViewOf(rec, enrolled)
 }
 
 func (uc *ConfirmSecondFactorUseCase) recordFailure(ctx context.Context, addressKey, source string, at time.Time) error {

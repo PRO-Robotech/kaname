@@ -17,10 +17,11 @@ package internal_iam_test
 //
 // Функция прод-дерева, ссылающаяся на дверь, пишущую строки `human_sessions`:
 // методы писателя сессии (`InsertSession`, `EndSession`, `EndOtherSessions`,
-// `RotateBearer`, `PresentInSession`), выдача (`IssueSession`) и уборка
-// (`SweepUnservableSessions`). Сами двери — адаптер `internal/repo/kaname/pg`
-// и тело `IssueSession` — писателями не считаются: писатель — тот, кто их
-// зовёт.
+// `RotateBearer`, `PresentInSession`), выдача (`IssueSession`), предъявление
+// внутри сессии (`presentInSession` — единственный вызывающий записи уровня,
+// kaname#343) и уборка (`SweepUnservableSessions`). Сами двери — адаптер
+// `internal/repo/kaname/pg`, тела `IssueSession` и `presentInSession` —
+// писателями не считаются: писатель — тот, кто их зовёт.
 //
 // # Все законные формы ссылки
 //
@@ -56,6 +57,7 @@ var sessionRowDoors = map[string]bool{
 	"InsertSession": true, "EndSession": true, "EndOtherSessions": true,
 	"RotateBearer": true, "PresentInSession": true,
 	"IssueSession": true, "SweepUnservableSessions": true,
+	"presentInSession": true,
 }
 
 // writerSceneLedger — писатель → сцена внахлёст с удалением личности либо
@@ -82,7 +84,7 @@ var writerSceneLedger = map[string]string{
 const exemptNoOverlap = "—"
 
 // doorBodies — тела дверей: они зовут двери, но писателями не являются.
-var doorBodies = map[string]bool{"humansession.IssueSession": true}
+var doorBodies = map[string]bool{"humansession.IssueSession": true, "humansession.presentInSession": true}
 
 // writerCensus — объём осмотренного.
 type writerCensus struct {

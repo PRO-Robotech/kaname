@@ -97,5 +97,6 @@ func TestHumanSessionWriter_343_PresentInSessionNeverLowersTheRecordedLevel(t *t
 // presentInSessionOf — вызов оператора предъявления; уровень, который он
 // записал, судится чтением строки, а не его ответом.
 func presentInSessionOf(ctx context.Context, w humansession.Writer, id domain.HumanSessionID, methods []string, candidate string, next domain.SessionBearer, at time.Time) error {
-	return w.PresentInSession(ctx, id, methods, candidate, next.Digest(), at)
+	_, err := w.PresentInSession(ctx, id, methods, candidate, next.Digest(), at)
+	return err
 }

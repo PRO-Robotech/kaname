@@ -193,10 +193,19 @@ type Writer interface {
 	// последнего предъявления сдвигается на presentedAt.
 	RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error
 	// PresentInSession — предъявление способа ВНУТРИ сессии (Ф11 Р5, Ф12):
-	// множество предъявленного, уровень (по правилу, вычислен вызывающим),
-	// новый дайджест носителя и момент последнего предъявления — одной записью
-	// на живой строке; момент аутентификации и срок не трогаются.
-	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error
+	// множество предъявленного, уровень, новый дайджест носителя и момент
+	// последнего предъявления — одной записью на живой строке; момент
+	// аутентификации и срок не трогаются.
+	//
+	// candidate — уровень, который правило выводит из множества вызывающего;
+	// ЗАПИСЬ уровня решает оператор, с условием на прежнее значение
+	// (kaname#343): кандидат ниже записанного запись не понижает (Ф11 Р2), выше
+	// — поднимает. Множество предъявленного накапливается тем же оператором:
+	// способ, предъявленный конкурентом между чтением и записью, не теряется.
+	// Ответ — то, что ЛЕГЛО, и копии уровня читают его, а не кандидата.
+	// Кардинальность судит тот же оператор: строки нет либо она снята —
+	// NOT_FOUND.
+	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (PresentedRecord, error)
 	// UpsertCutoff — операция записи отсечки (§4.1 п.17): момент монотонен;
 	// причина и актор идут за ПРИНЯТЫМ моментом, на равных стоит последняя.
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
@@ -208,6 +217,10 @@ type Writer interface {
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —
 	// вложенного захвата соединения у него нет (шапка `completed_login.go`).
 	LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
+	// AccessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа,
+	// прочитанная ЭТОЙ транзакцией (то же чтение, что
+	// `loginmethod.Store.AccessKeyEnrolled`, без второго соединения).
+	AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error)
 	// RecordFailure — одно неверное предъявление по оси и ключу.
 	RecordFailure(ctx context.Context, scope FailureScope, key string, at time.Time) error
 	// ResetFailures снимает счёт по оси и ключу (успешный вход обнуляет счёт по
@@ -297,4 +310,12 @@ type FailureSweeper interface {
 // истёкшие строки, которые оператор применения уже не обслужит.
 type RecoveryCodeSweeper interface {
 	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// PresentedRecord — то, что легло в запись сессии предъявлением внутри неё
+// (`Writer.PresentInSession`): накопленное множество предъявленного и уровень
+// после условия на прежнее значение.
+type PresentedRecord struct {
+	Methods []string
+	Level   string
 }

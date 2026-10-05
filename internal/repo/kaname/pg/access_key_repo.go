@@ -413,3 +413,18 @@ func (r *LoginMethodRepo) HasPassword(ctx context.Context, userID domain.UserID)
 	}
 	return false, err
 }
+
+// accessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа. Один
+// оператор на оба носителя чтения — пул (`LoginMethodRepo.AccessKeyEnrolled`)
+// и транзакцию записи сессии (`humanSessionWriter.AccessKeyEnrolled`): таблицу
+// ключей называет только этот файл.
+func accessKeyEnrolled(ctx context.Context, q loginMethodQuerier, userID domain.UserID) (bool, error) {
+	if userID == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	var has bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_access_keys WHERE user_id = $1)`, string(userID)).Scan(&has); err != nil {
+		return false, mapErr(err, "AccessKey.Enrolled", string(userID))
+	}
+	return has, nil
+}

@@ -18,6 +18,7 @@ package humansession
 
 import (
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // resetSpyWriter — дублёр записи, отвечающий ТОЛЬКО за обнуление. Порт встроен
@@ -58,12 +60,10 @@ var axisDecision = map[string]axisVerdict{
 	assurance.MethodTOTP.String():         {InAxis: true, Why: "строка `totp` в состоянии `active`"},
 	assurance.MethodLookupSecret.String(): {InAxis: true, Why: "выводится из той же строки `totp`: набор запасных кодов чеканится вместе с ней"},
 	assurance.MethodRecoveryCode.String(): {InAxis: false, Why: "код восстановления не заводится строкой способа входа: он выдаётся потоком восстановления, даёт «1» и ко «2» не прибавляет"},
-	assurance.MethodWebAuthn.String(): {InAxis: false, Why: "ключ доступа — ресурс СВОЕЙ таблицы, строки `webauthn` в способах входа НЕТ " +
-		"(`internal/domain/access_key.go`). Следствие названо прямо: у личности, чей второй фактор — ключ, " +
-		"требуемый уровень считается как «1», и вход одним паролём счёт обнулит. Сегодня недостижимо — " +
-		"потребителя, поднимающего уровень сессии утверждением ключа, в прод-коде нет; появится (Ф13) — " +
-		"ось обязана учесть ключи тем же изменением; появление потребителя стережёт " +
-		"`TestAccessKeyPresentationHasNoSessionLevelConsumer` (`internal/check`)"},
+	assurance.MethodWebAuthn.String(): {InAxis: true, Why: "ключ доступа — ресурс СВОЕЙ таблицы, строки `webauthn` в способах входа НЕТ " +
+		"(`internal/domain/access_key.go`); в ось входит отдельным чтением `AccessKeyEnrolled` с тех пор, как ключ " +
+		"стал производителем уровня сессии (Ф13). Без него у личности с паролем и ключом требуемый уровень был бы «1», " +
+		"и вход одним паролём счёт обнулял бы"},
 }
 
 // TestEnrolledAxisReadsExactlyTheLoginMethodKinds — ПРЕМИСА оси «заведено».
@@ -99,8 +99,10 @@ func TestEnrolledAxisReadsExactlyTheLoginMethodKinds(t *testing.T) {
 		if decision.InAxis {
 			inAxis++
 		}
-		// Запасной код — единственный, кто в оси есть, а видом строки не является.
-		viaRow := kinds[name] || name == assurance.MethodLookupSecret.String()
+		// Запасной код и ключ — в оси есть, а видом строки способа входа не
+		// являются: первый выводится из строки `totp`, второй читается своей
+		// таблицей (`enrolledForCompletion`).
+		viaRow := kinds[name] || name == assurance.MethodLookupSecret.String() || name == assurance.MethodWebAuthn.String()
 		if decision.InAxis != viaRow {
 			t.Fatalf("решение об оси и дерево разошлись у способа %q: решение говорит «в оси = %v», "+
 				"а вид строки способа входа %v.\nПричина решения: %s",
@@ -108,7 +110,7 @@ func TestEnrolledAxisReadsExactlyTheLoginMethodKinds(t *testing.T) {
 		}
 	}
 	t.Logf("перепись: способов в словаре %d, видов строк способов входа %d, в оси «заведено» %d; "+
-		"исключены: код восстановления и ключ доступа — у обоих строки способа входа нет",
+		"исключён: код восстановления — строки способа входа у него нет; ключ доступа — в оси своим чтением",
 		len(vocabulary), len(kinds), inAxis)
 }
 
@@ -128,51 +130,58 @@ func TestLoginCompletedToEnrolledLevel(t *testing.T) {
 	recovery := []string{assurance.MethodRecoveryCode.String()}
 	key := []string{assurance.MethodWebAuthn.String()}
 
+	withKey := []assurance.Method{assurance.MethodPassword, assurance.MethodWebAuthn}
+	passwordKey := []string{assurance.MethodWebAuthn.String(), assurance.MethodPassword.String()}
+
+	// reached — уровень ЗАПИСИ сессии после успеха (выданный либо легший
+	// предъявлением внутри сессии); presented — слова записи, ради переписи
+	// покрытия словаря: решение их не читает (kaname#208, `session_level.go`).
 	cases := []struct {
 		lane      string
 		enrolled  []assurance.Method
 		presented []string
+		reached   string
 		want      bool
 	}{
 		// вход (login.go)
-		{"вход паролём у личности БЕЗ фактора — завершённый вход (Ф3 Р10 без изменений)", noFactor, password, true},
-		{"вход паролём у личности С фактором — сессия «1», вход НЕ завершён (Ф12-14, замок #287)", withFactor, password, false},
-		{"вход паролём и кодом по времени — «2» (Ф12-11)", withFactor, passwordTOTP, true},
-		{"вход паролём и запасным кодом — «2» (Ф12-12)", withFactor, passwordBackup, true},
+		{"вход паролём у личности БЕЗ фактора — завершённый вход (Ф3 Р10 без изменений)", noFactor, password, "1", true},
+		{"вход паролём у личности С фактором — сессия «1», вход НЕ завершён (Ф12-14, замок #287)", withFactor, password, "1", false},
+		{"вход паролём и кодом по времени — «2» (Ф12-11)", withFactor, passwordTOTP, "2", true},
+		{"вход паролём и запасным кодом — «2» (Ф12-12)", withFactor, passwordBackup, "2", true},
 
 		// церемония (step_up.go)
-		{"церемония кодом из сессии «1» — доводит до «2» (Ф12-15/18)", withFactor, passwordTOTP, true},
-		{"церемония паролем у личности С фактором — остаётся «1» (замок #287)", withFactor, password, false},
-		{"церемония паролем у личности БЕЗ фактора — «1» и есть её полный уровень", noFactor, password, true},
+		{"церемония кодом из сессии «1» — доводит до «2» (Ф12-15/18)", withFactor, passwordTOTP, "2", true},
+		{"церемония паролем у личности С фактором — остаётся «1» (замок #287)", withFactor, password, "1", false},
+		{"церемония паролем у личности БЕЗ фактора — «1» и есть её полный уровень", noFactor, password, "1", true},
 
 		// глаголы под сессией (sf_enroll.go, sf_remove.go, sf_backup_codes.go).
 		// Снимок «заведено» берётся ДО транзакции, поэтому подтверждение видит
 		// строку ещё `pending`, а снятие — ещё `active`; решение от этого не
 		// меняется, и обе пары закреплены здесь.
-		{"подтверждение заведения: код принят, строка ещё `pending`", noFactor, passwordTOTP, true},
-		{"подтверждение заведения: строка уже `active` (снимок после записи)", withFactor, passwordTOTP, true},
-		{"снятие фактора: код принят, строка ещё `active`", withFactor, passwordTOTP, true},
-		{"снятие фактора: строка уже снята (снимок после записи)", noFactor, passwordTOTP, true},
-		{"перечеканка запасных кодов: код принят, фактор на месте", withFactor, passwordBackup, true},
+		{"подтверждение заведения: код принят, строка ещё `pending`", noFactor, passwordTOTP, "2", true},
+		{"подтверждение заведения: строка уже `active` (снимок после записи)", withFactor, passwordTOTP, "2", true},
+		{"снятие фактора: код принят, строка ещё `active`", withFactor, passwordTOTP, "2", true},
+		{"снятие фактора: строка уже снята (снимок после записи)", noFactor, passwordTOTP, "2", true},
+		{"перечеканка запасных кодов: код принят, фактор на месте", withFactor, passwordBackup, "2", true},
 
 		// завершение восстановления (recovery_complete.go; Ф5 Р5, Ф5-25,
 		// kaname#305): сессия восстановления — «1»; у заблокированной дом не
 		// зовётся вовсе — сессии нет.
-		{"восстановление у личности БЕЗ фактора: код восстановления даёт «1»", noFactor, recovery, true},
-		{"восстановление у личности С фактором: «1» ниже «2»", withFactor, recovery, false},
+		{"восстановление у личности БЕЗ фактора: код восстановления даёт «1»", noFactor, recovery, "1", true},
+		{"восстановление у личности С фактором: «1» ниже «2»", withFactor, recovery, "1", false},
 
-		// ключ доступа: в ось «заведено» не входит (см. TestEnrolledAxis…).
-		// Предъявленный ключ уровень ПОДНИМАЕТ — эта половина работает;
-		// заведённый ключ требуемый уровень НЕ поднимает, и это названный
-		// остаток, а не молчание.
-		{"ключ предъявлен: «2» достигнуто, требуемое «1» — обнуляет", noFactor, key, true},
-		{"ключ ЗАВЕДЁН как второй фактор, предъявлен один пароль: ось ключа не видит, требуемое «1» — " +
-			"обнуляет (остаток, снимается вместе с потребителем Ф13)", noFactor, password, true},
+		// ключ доступа (Ф13): в оси «заведено» — своим чтением и худшим исходом
+		// флагов (`assurance.GuaranteedLevels`): заведённый ключ требует «2».
+		{"вход ключом без проверки пользователя у личности с паролем и ключом — «2» (Ф13-32)", withKey, key, "2", true},
+		{"вход ключом с проверкой пользователя — «3»", withKey, key, "3", true},
+		{"вход паролём у личности с паролем и ключом — «1» ниже «2»: НЕ обнуляет (окно подбора закрыто)", withKey, password, "1", false},
+		{"предъявление пароля внутри сессии ключа — запись «3» прежняя", withKey, passwordKey, "3", true},
+		{"ключ без пароля у личности без иных способов — «2»", []assurance.Method{assurance.MethodWebAuthn}, key, "2", true},
 
 		// fail-closed
-		{"заведённого нет вовсе — уровень неизвестен", nil, password, false},
-		{"предъявленного нет вовсе — уровня нет", withFactor, nil, false},
-		{"предъявлено слово вне словаря — уровня нет", withFactor, []string{"smoke-signal"}, false},
+		{"заведённого нет вовсе — уровень неизвестен", nil, password, "1", false},
+		{"уровня нет вовсе", withFactor, nil, "", false},
+		{"уровень вне оси", withFactor, []string{"smoke-signal"}, "smoke-signal", false},
 	}
 	// ПРЕМИСА: пустая таблица зеленеет, печатая «закреплено 0», — число
 	// печаталось бы, не утверждая ничего. Непустота требуется отдельно.
@@ -203,9 +212,9 @@ func TestLoginCompletedToEnrolledLevel(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.lane, func(t *testing.T) {
 			t.Parallel()
-			if got := loginCompletedToEnrolledLevel(tc.presented, tc.enrolled); got != tc.want {
+			if got := loginCompletedToEnrolledLevel(tc.reached, tc.enrolled); got != tc.want {
 				t.Fatalf("вход завершён до уровня всех заведённых способов = %v, ожидалось %v\n"+
-					"  заведено:    %v\n  предъявлено: %v", got, tc.want, tc.enrolled, tc.presented)
+					"  заведено:    %v\n  достигнуто: %q (слова записи %v)", got, tc.want, tc.enrolled, tc.reached, tc.presented)
 			}
 		})
 	}
@@ -227,15 +236,15 @@ func TestResetFailuresRefusesOnUnknownEnrollment(t *testing.T) {
 	}{
 		{"заведённое прочитано, вход завершён — обнуляет", completedLogin{
 			Enrolled: []assurance.Method{assurance.MethodPassword}, EnrolledKnown: true,
-			AddressKey: "a@example.invalid", Presented: []string{assurance.MethodPassword.String()},
+			AddressKey: "a@example.invalid", Level: "1",
 		}, true},
 		{"заведённое НЕ прочитано — счёт остаётся", completedLogin{
 			EnrolledKnown: false,
-			AddressKey:    "a@example.invalid", Presented: []string{assurance.MethodPassword.String()},
+			AddressKey:    "a@example.invalid", Level: "1",
 		}, false},
 		{"ключа адреса нет — обнулять нечего", completedLogin{
 			Enrolled: []assurance.Method{assurance.MethodPassword}, EnrolledKnown: true,
-			AddressKey: "", Presented: []string{assurance.MethodPassword.String()},
+			AddressKey: "", Level: "1",
 		}, false},
 	}
 	for _, tc := range cases {
@@ -367,4 +376,32 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 	}
 	t.Logf("перепись: полос, читающих заведённое до транзакции, %d (%s) — все отказывают в сборке без хранилища способов",
 		len(names), strings.Join(names, ", "))
+}
+
+// TestEnrolledForCompletionReadsTheKeyTable — ключ доступа попадает в ось
+// «заведено» ТОЛЬКО по ответу своего чтения: есть строка ключа — `webauthn` в
+// оси; нет — оси прежние; чтение отказало — отказ всего вывода (fail-closed:
+// неизвестное «заведено» счёт не обнуляет).
+func TestEnrolledForCompletionReadsTheKeyTable(t *testing.T) {
+	t.Parallel()
+	read := func(_ context.Context, _ domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+		if kind == domain.LoginMethodPassword {
+			return domain.LoginMethod{Kind: kind}, nil
+		}
+		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrNotFound, "not found")
+	}
+	keys := func(has bool, err error) accessKeyRead {
+		return func(context.Context, domain.UserID) (bool, error) { return has, err }
+	}
+	got, err := enrolledForCompletion(t.Context(), read, keys(true, nil), "usr-a")
+	if err != nil || len(got) != 2 || got[1] != assurance.MethodWebAuthn {
+		t.Fatalf("строка ключа есть: ось %v, ошибка %v — ожидалось [password webauthn]", got, err)
+	}
+	got, err = enrolledForCompletion(t.Context(), read, keys(false, nil), "usr-a")
+	if err != nil || len(got) != 1 || got[0] != assurance.MethodPassword {
+		t.Fatalf("строки ключа нет: ось %v, ошибка %v — ожидалось [password]", got, err)
+	}
+	if _, err := enrolledForCompletion(t.Context(), read, keys(false, errors.New("store down")), "usr-a"); err == nil {
+		t.Fatal("чтение ключей отказало, а ось выведена — неизвестное прочитано как «нет ключа»")
+	}
 }
