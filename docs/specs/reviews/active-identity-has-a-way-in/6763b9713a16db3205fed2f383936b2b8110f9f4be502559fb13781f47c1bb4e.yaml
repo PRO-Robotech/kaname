@@ -1,0 +1,115 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/active-identity-has-a-way-in.md
+  sha256: 6763b9713a16db3205fed2f383936b2b8110f9f4be502559fb13781f47c1bb4e
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; запись первая в каталоге.
+  content_commit: 4678dfcf7a0f8768e4ff2ece08e0898699e9c2c5
+  branch: '608'
+  base_branch: '296'
+  task: PRO-Robotech/kaname#608
+  lines: 387
+  round: 1
+  predecessor_record: null
+  pair: docs/engineering/acceptance/recovery-of-access.md (87e67fc2…, круг 5, CHANGES_REQUESTED)
+  pair_note: >-
+    Вердикт этого документа о его отпечатке. AWI-12 утверждается в Ф5 ссылкой; санкция на
+    Ф5-29…33 (выход) этой записью не выпускается — она за одобрением редакции Ф5.
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/active-identity-has-a-way-in.md в копии ветки 608 @
+    4678dfcf7 → 6763b971…; wc -l → 387.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  why: санкцию выпускает внешнее событие pointpu, а не эта запись.
+  what_the_event_would_lift: >-
+    ban #1 для AWI-01…11, AWI-13 — задача kaname#608: миграция отметки, отложенной проверки и
+    переноса; снятие глагола C2 в службе и, переходом пина, в доме платформы.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#608 с полями role, verdict, subject, subject_revision
+      4678dfcf7a0f8768e4ff2ece08e0898699e9c2c5, subject_sha256 дословно; блок `event`
+      дописывается по факту публикации тем же заходом.
+    body: >-
+      role: acceptance-reviewer · verdict: APPROVED · subject: PRO-Robotech/kaname
+      docs/engineering/acceptance/active-identity-has-a-way-in.md · subject_revision:
+      4678dfcf7a0f8768e4ff2ece08e0898699e9c2c5 · subject_sha256:
+      6763b9713a16db3205fed2f383936b2b8110f9f4be502559fb13781f47c1bb4e
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: Документ целиком.
+  counts: >-
+    Сценариев 13, производитель назван у 13 (предикаты §3 → 13 · 13); у каждого отрицания
+    близнец одним фактом (§5 п. 1), отказ проверки базы в паре с фиксацией.
+
+measured:
+  census_1: >-
+    Все предикаты §1 и §6 на 8a84dcff6eb1 совпали: proto :33, wiring.go:384, register.go:222,
+    три INSERT и три DELETE строки способа входа, каскад :134, users_email_check :3109,
+    умолчание ACTIVE :3105, фикстуры 26, DELETE-фикстура :102, UpTo 14, перепись глагола 35,
+    контроль LookupSubject 20; дом платформы 2afc06571c7 — 8 и 7.
+  active_producers: >-
+    Перепись писателей статуса ACTIVE сверх §1: InsertActive (BootstrapPersonalResourcesTx,
+    NewIdentity) — регистрация (пароль той же транзакцией) и снимаемый C2; ActivateInviteTx —
+    снимаемый C2 и активация на подтверждении (строка уже с паролем); Unblock — AWI-06; PENDING
+    не блокируется. Посев установки — единственная строка PENDING (0001_initial.sql:3880), C1 её
+    не судит. Строка пароля бывает только active (user_login_methods_pending_only_totp_check).
+  seed_constructibility: >-
+    Отдельная база postgres:16, 47 миграций 8a84dcff6eb1 пофайлово; посев A–E (+ ACTIVE с паролем
+    и вторым фактором) прямой вставкой; прототип отметки и отложенных constraint-триггеров на
+    users и user_login_methods. Исходы: AWI-11 — отметки ровно у A, D, E, изменённых столбцов 0;
+    AWI-01 отказ при фиксации (check_violation), строки нет; AWI-02 фиксация; AWI-03 фиксация;
+    AWI-04 отказ / близнец фиксация; AWI-05 отказ / близнец фиксация; AWI-06 отказ / близнец
+    фиксация; AWI-07 фиксация; перепись AWI-13 на посеве → 0 и 2. Посеяно 9 из 13 (AWI-01…07,
+    11, 13 на посеве); AWI-08, 09, 10, 12 — названные фикстуры (пробы полос, слушатель, дерево,
+    Ф5). «Не выполнилось» 1: AWI-13 на поднятом стенде не читался. База снята.
+
+blocking: []
+
+non_blocking:
+  - kind: COVERAGE
+    text: >-
+      §4.1 п. 1 объявляет проверку на смене вида строки способа входа — сценария нет; добавить
+      близнец к AWI-04 (смена вида или владельца строки пароля) либо снять из объёма.
+  - kind: TWIN
+    text: >-
+      AWI-11: у D (BLOCKED без пароля) нет близнеца одним фактом — BLOCKED с паролем без отметки.
+  - kind: FORMAT
+    text: >-
+      AWI-01 «пустая личность» — читать как «пустая схема»; AWI-13 «чем измерено» опирается на
+      разбор вне дерева — до выкатки перемерить на стенде.
+  - kind: CONVENTION
+    text: >-
+      23514 из фиксации маппится общим маппером в INVALID_ARGUMENT; на полосе продукта такой
+      отказ — дефект нашей записи, а не ввода. Назвать в реализации фиксированный INTERNAL.
+
+route_signs:
+  proto: yes
+  schema: yes
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes
