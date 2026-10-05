@@ -50,14 +50,22 @@ const (
 // выпускается ключевой парой. Порядок —
 // docs/engineering/architecture/provider-mirror-column-retirement.md.
 //
-// У ЛИЧНОСТИ ВИДОВ ТРИ, А НЕ ЧЕТЫРЕ: FEDERATED недостижим by construction — в
-// её контракте нет поля, которым он задаётся.
+// ВИДЫ ПО ГЛАГОЛАМ ВЫДАЧИ — у каждого свой перечень:
+//
+//	SAKeyService.Issue     — KEYPAIR, SECRET, FEDERATED;
+//	UserTokenService.Issue — KEYPAIR, SECRET.
+//
+// У личности FEDERATED недостижим: в её контракте нет перечня доверенных
+// субъектов, которым он задаётся. Названный в запросе выдачи человеку, он
+// отвергается синхронно, до всякой записи, `INVALID_ARGUMENT` с текстом
+// «credential_kind: FEDERATED is not available for this credential — it has
+// no trusted_subjects field».
 type CredentialKind int32
 
 const (
 	// Вид не назван вызывающим. В запросе выдачи разрешается сохранённым
-	// поведением: пустой перечень доверенных субъектов ⇒ KEYPAIR, непустой ⇒
-	// FEDERATED. В ОТВЕТЕ и в строке ресурса не встречается никогда — вид
+	// поведением: у ключа служебной учётки пустой перечень доверенных субъектов
+	// ⇒ KEYPAIR, непустой ⇒ FEDERATED; у токена человека ⇒ KEYPAIR. В ОТВЕТЕ и в строке ресурса не встречается никогда — вид
 	// ЗАПИСЫВАЕТСЯ при вставке, а читателем не вычисляется.
 	CredentialKind_CREDENTIAL_KIND_UNSPECIFIED CredentialKind = 0
 	// Ключевая пара ES256. Вызывающий сам собирает и подписывает
@@ -70,7 +78,8 @@ const (
 	// сроком, отзывом на предъявлении и узнаваемой маркой.
 	CredentialKind_CREDENTIAL_KIND_SECRET CredentialKind = 2
 	// Удостоверение предъявляет ВНЕШНИЙ издатель по перечню доверенных субъектов.
-	// Ни ключевого материала, ни секрета у нас нет.
+	// Ни ключевого материала, ни секрета у нас нет. Выдаётся только ключу
+	// служебной учётки.
 	CredentialKind_CREDENTIAL_KIND_FEDERATED CredentialKind = 3
 )
 

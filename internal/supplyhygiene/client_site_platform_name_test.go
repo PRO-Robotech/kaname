@@ -73,6 +73,8 @@ const (
 	whyNeighborEdgeRelay = "край платформы — сосед, ретранслирующий формы полосы входа: перечень " +
 		"ретранслируемых путей живёт у него, и страница называет его репозиторий, ревизию и " +
 		"запрос на слияние, по которым читатель этот перечень проверит (kaname#204)"
+	whyNeighborPlatformPin = "репозиторий платформы — соседа, который берёт службу пином её " +
+		"модуля и образа: введение называет его как направление ребра зависимостей (kaname#234)"
 	whyRelyingPartyName = "видимое имя доверяющей стороны церемонии ключа доступа («Kacho Cloud») — " +
 		"литерал контракта, решённый приёмкой (Ф7 Р9): аутентификатор показывает его человеку при " +
 		"выборе удостоверения, и страница называет его дословно, как испытание; токен — первое слово"
@@ -93,6 +95,7 @@ var clientSiteStay = []ClientSiteStay{
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_stream_seconds", Count: 1, Why: whyFoundationSeries},
 	{Page: "docs/content/api/auth-lane.mdx", Token: "Kacho", Count: 2, Why: whyRelyingPartyName},
 	{Page: "docs/content/api/auth-lane.mdx", Token: "PRO-Robotech/kacho", Count: 1, Why: whyNeighborEdgeRelay},
+	{Page: "docs/content/api/overview.mdx", Token: "kacho_", Count: 1, Why: whyFoundationSecretLabel},
 	{Page: "docs/content/api/project.mdx", Token: "https://github.com/PRO-Robotech/kacho/issues/1231", Count: 1, Why: whyTrackerAddress},
 	{Page: "docs/content/api/quotas.mdx", Token: "Kachō", Count: 1, Why: whyNeighborServiceDocs},
 	{Page: "docs/content/api/tokens.mdx", Token: "kacho_", Count: 2, Why: whyFoundationSecretLabel},
@@ -114,6 +117,7 @@ var clientSiteStay = []ClientSiteStay{
 	// вторым местом об одном предмете, и находкой того гейта.
 	{Page: "docs/content/install/deploy.mdx", Token: retiredSchema, Count: 4, Why: whyLegacySchema},
 	{Page: "docs/content/install/deploy.mdx", Token: "KACHO_MIGRATOR_DROP_APPROVED", Count: 1, Why: whyFoundationKnob},
+	{Page: "docs/content/intro.mdx", Token: "PRO-Robotech/kacho", Count: 1, Why: whyNeighborPlatformPin},
 	{Page: "docs/content/intro.mdx", Token: "kacho-compute", Count: 1, Why: whyNeighborService},
 	{Page: "docs/content/intro.mdx", Token: "kacho-geo", Count: 1, Why: whyNeighborService},
 	{Page: "docs/content/intro.mdx", Token: "kacho-nlb", Count: 1, Why: whyNeighborService},

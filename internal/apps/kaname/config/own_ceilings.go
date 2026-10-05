@@ -11,10 +11,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// own_ceilings.go — ЧЕТЫРЕ СОБСТВЕННЫХ ПОТОЛКА СЛУЖБЫ ДОСТУПА, объявленные
-// ПОСАДКОЙ (приёмка `KAN-QUOTA-1`, `П25`, §2.0/§2.1; задача продукта #2117;
-// четвёртый — ключи доступа, приёмка `access-keys-are-ours.md` Р8, Ф7-38,
-// задача kacho#1273).
+// own_ceilings.go — СОБСТВЕННЫЕ ПОТОЛКИ СЛУЖБЫ ДОСТУПА, объявленные ПОСАДКОЙ
+// (приёмка `KAN-QUOTA-1`, `П25`, §2.0/§2.1; задача продукта #2117; ключи
+// доступа — приёмка `access-keys-are-ours.md` Р8, Ф7-38, задача kacho#1273).
+// Перечень — таблица `OwnCeilingKnobs` ниже, и только она: проза числа не
+// выписывает, чтобы не разойтись с таблицей при следующей строке.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ ЭТО ПОСАДКА, А НЕ НАСТРОЙКА С УМОЛЧАНИЕМ
@@ -109,7 +110,7 @@ var OwnCeilingKnobs = []ownCeilingKnob{
 	},
 }
 
-// OwnCeilingsConfig — четыре величины посадки.
+// OwnCeilingsConfig — величины посадки, по полю на строку `OwnCeilingKnobs`.
 type OwnCeilingsConfig struct {
 	// AccountsPerIdentity — потолок вида `iam.account`.
 	AccountsPerIdentity *int64 `mapstructure:"accounts-per-identity"`
@@ -121,7 +122,8 @@ type OwnCeilingsConfig struct {
 	AccessKeysPerUser *int64 `mapstructure:"access-keys-per-user"`
 }
 
-// Validate — страж посадки: каждая из четырёх величин объявлена и неотрицательна.
+// Validate — страж посадки: каждая величина таблицы `OwnCeilingKnobs` объявлена
+// и неотрицательна.
 //
 // Отказ по КАЖДОЙ величине сразу (multierr), а не по первой: оператор, узнающий
 // перечень по одному имени за перезапуск, платит перекатом за каждую строку.

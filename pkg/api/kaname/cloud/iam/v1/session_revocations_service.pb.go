@@ -296,7 +296,9 @@ type ListByUserRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// User whose revocations to list.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Page size (default 100, max 1000).
+	// Page size. 0 selects this List's default (100 — not the platform-wide 50
+	// most Lists of the service apply); a value above 1000 is rejected with
+	// INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
