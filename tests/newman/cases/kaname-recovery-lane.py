@@ -11,6 +11,13 @@
   {{loginLaneBaseUrl}}   — слушатель формы (посадка `own`; под `external` не поднят)
   {{loginLaneEmail}}     — почта человека с подтверждённым адресом (посев)
   {{standMailboxUrl}}    — чтение приёмника писем стенда (`stand-mailbox.py`; посев)
+  {{ownRestBaseUrl}}     — собственный публичный фронт: блокировка и опрос операций
+  {{iamRegistryTokenBaseUrl}} — поверхность выдачи: код авторизации и обмен на токен
+  {{oauthClientId}} · {{oauthClientSecret}} · {{oauthRedirectUri}} — клиент церемонии
+                           (посев церемонии), которым кейс куёт предъявителя надзора
+  {{cloudSupervisorEmail}} · {{cloudSupervisorPassword}} · {{cloudSupervisorTotpSecret}}
+                         — надзор облака стенда: `system_admin` и второй фактор
+                           (посев церемонии стенда чарта, kaname#468)
 
 ТРЕТЬЯ КАТЕГОРИЯ НАЗВАНА ВСЛУХ — та же, что у набора входа: на автономном стенде
 службы посадка `own` не поднята, `loginLaneBaseUrl` пуст, и каждый шаг уходит в
@@ -36,10 +43,10 @@
 ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ. Доставку письма за пределы кластера и наблюдаемость
 недоставленного (вторая половина Ф1-31, производитель `kacho#1773`); ответ при
 недоступном почтовом узле (стенд держит узел поднятым весь прогон); время ответа
-двух полос запроса; блокировку администратором (её глаголу нужен распорядитель
-повышенного уровня, которого стенд не куёт); состав ответа службы краю о сессии
-(глагол внутреннего слушателя без HTTP-привязки). Почему и кто держит каждое —
-ведомость долга позиций `.github/scripts/newman-suite-debt.py`.
+двух полос запроса; окна частоты запроса кода (клетки счётчика исходов набор
+не читает); состав ответа службы краю о
+сессии (глагол внутреннего слушателя без HTTP-привязки). Почему и кто держит
+каждое — ведомость долга позиций `.github/scripts/newman-suite-debt.py`.
 
 Coverage:
   IAM-RECOVERY-OK-REQUEST-SAME-ANSWER   — запрос кода для существующего и для
@@ -66,6 +73,15 @@ Coverage:
   IAM-RECOVERY-OK-ENDS-EVERY-SESSION    — Ф5-19: две живые сессии (восстановление запрошено
                                           из первой) после завершения негодны обе; выданная
                                           завершением — годна
+  IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED — Ф5-17: заблокированная надзором облака проходит
+                                          восстановление — отказ завершения равен отказу входа
+                                          заблокированной, новым паролем войти нельзя; после
+                                          снятия блокировки надзором входит новым, а не прежним
+  IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN — Ф5-25: после N_адрес − 1 неверных
+                                          завершение у личности с фактором (а) счёт не обнуляет
+                                          (401, затем 429), у близнеца без фактора (б) — обнуляет
+                                          (401, 401), у заблокированной (в) — отказ завершения
+                                          сосчитан, следующая попытка — 429
 
 Техники: классы эквивалентности (годный / негодный пароль; свой / чужой /
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
@@ -531,7 +547,9 @@ def _session_probe(p, name, cookie_var, alive):
     )
 
 
-def _login(p, tag, password_var, *, ok, store=None):
+def _login(p, tag, password_var, *, ok, store=None, user_var=None, keep=None, same_as=None):
+    """Вход паролем. `user_var` — куда положить id человека из тела успеха;
+    `keep` — запомнить тело отказа; `same_as` — отказ побайтово равен запомненному."""
     label = f"{tag.upper()}"
     test = ([*_status_is(200, label),
              "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
@@ -540,6 +558,17 @@ def _login(p, tag, password_var, *, ok, store=None):
              *_capture(p, "kaname_session", store or "LoginCookie", label),
              *_capture(p, "kaname_form", "FormCookie", label, required=False)]
             if ok else _refused(401, 16, "authentication failed", label))
+    if ok and user_var:
+        test += [
+            f"pm.test({js_str(label + ': тело называет человека')}, () => "
+            "pm.expect(typeof (__j.user && __j.user.id) === 'string' && __j.user.id.length > 0).to.eql(true));",
+            f"if (__j.user && __j.user.id) {{ pm.environment.set({js_str(_v(p, user_var))}, __j.user.id); }}",
+        ]
+    if not ok and keep:
+        test += [f"pm.environment.set({js_str(keep)}, pm.response.text());"]
+    if not ok and same_as:
+        test += [f"pm.test({js_str(label + ': тело отказа побайтово равно запомненному')}, () => "
+                 f"pm.expect(pm.response.text() === pm.environment.get({js_str(same_as)})).to.eql(true));"]
     return [
         _csrf_step(p, f"{tag}-csrf", "login"),
         _post(p, tag, _LOGIN,
@@ -780,5 +809,501 @@ CASES.append(Case(
         _session_probe(_P19, "every-session-first-ended", "FirstCookie", alive=False),
         _session_probe(_P19, "every-session-second-ended", "SecondCookie", alive=False),
         _session_probe(_P19, "every-session-recovered-alive", "RecoveredCookie", alive=True),
+    ],
+))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# БЛОКИРОВКА АДМИНИСТРАТОРОМ (Ф5-17, Ф5-25) — kaname#468.
+#
+# ПРИЁМКА — `docs/engineering/acceptance/recovery-of-access.md`, одобренная
+# редакция с отпечатком `17b2d02c…` (запись
+# `docs/specs/reviews/recovery-of-access/17b2d02c8bff38378135467750b21e026118c62fd9d8828538c6315b6d4644e3.yaml`,
+# APPROVED). Текст сценариев Ф5-17 и Ф5-25 в редакции 9 (`be4dfb5a…`, kaname#608)
+# тот же байт в байт; кейсы написаны по нему, а не по коду глаголов.
+#
+# КТО БЛОКИРУЕТ. `UserService.Block` / `Unblock` спрашивают отношение
+# `identity_suspender` — надзор облака — и пол уровня «2». Такого человека заводит
+# посев церемонии стенда чарта (`seed_ceremony.py`, kaname#468): свой человек с
+# `system_admin` на кластере и заведённым вторым фактором; в окружение уезжают
+# его адрес, пароль и секрет фактора. Предъявителя кейс куёт сам — вход паролем
+# со вторым фактором (сессия «2») → код авторизации → обмен, — и предъявляет его
+# собственному публичному фронту, где живут глаголы блокировки и опрос операций.
+# Пустой ключ посева — «условие не создано» помеченным утверждением.
+#
+# Техники: переходы состояния личности (действующая → заблокирована → снова
+# действующая) с исходом каждого перехода, прочитанным из операции; таблица
+# решений Ф5-25 по двум входам (второй фактор заведён · личность заблокирована) с
+# близнецом (б), отличающимся от (а) и (в) одним фактом; граница счёта по адресу
+# (`N_адрес − 1` неверных → завершение → первая и вторая попытки после).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_OWN_WHY = ("собственный публичный фронт службы: глаголы блокировки и опрос операций; "
+            "адрес пишет посев церемонии стенда посадки `own`")
+_ISSUANCE_WHY = ("поверхность выдачи службы: точка авторизации и обмен кода на токен; "
+                 "адрес пишет посев церемонии стенда посадки `own`")
+_AUTHORIZE = "/iam/v1/authorize"
+_TOKEN = "/iam/v1/token"
+_SECOND_FACTOR_ENROLL = "/iam/v1/auth/second-factor/enroll"
+_SECOND_FACTOR_CONFIRM = "/iam/v1/auth/second-factor/confirm"
+_SUPERVISOR_KEYS = ("cloudSupervisorEmail", "cloudSupervisorPassword", "cloudSupervisorTotpSecret")
+_SUPERVISOR_WHY = ("надзор облака стенда (`identity_suspender` уровнем «2») — его адрес, пароль и "
+                   "секрет фактора пишет посев церемонии стенда чарта (`stand-chart.sh "
+                   "seed-ceremony`); без них блокировать личность кейсу нечем")
+# Предел опроса операции и пауза между опросами (мс): операция блокировки — одна
+# запись строки личности; предел покрывает загруженный раннер с запасом.
+_OP_POLL_CAP = 60
+_OP_POLL_MS = 500
+
+# Код по времени в песочнице прогонщика: base32 → HMAC-SHA1 (crypto-js) →
+# динамическое усечение → шесть цифр (RFC 6238). Ступень — свежее последней
+# принятой: повторно предъявленную ступень служба отвергает (Ф12-15), а оба кейса
+# блокировки входят одним надзором.
+_TOTP_JS = [
+    "const __totp = (secretB32, step) => {",
+    "  const CryptoJS = require('crypto-js');",
+    "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
+    "  let bits = 0, value = 0; const bytes = [];",
+    "  for (const ch of String(secretB32 || '').toUpperCase()) {",
+    "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
+    "    value = (value << 5) | idx; bits += 5;",
+    "    if (bits >= 8) { bytes.push((value >>> (bits - 8)) & 0xff); bits -= 8; }",
+    "  }",
+    "  const toHex = arr => arr.map(b => b.toString(16).padStart(2, '0')).join('');",
+    "  const msg = []; let s = step;",
+    "  for (let i = 7; i >= 0; i--) { msg[i] = s % 256; s = Math.floor(s / 256); }",
+    "  const mac = CryptoJS.HmacSHA1(CryptoJS.enc.Hex.parse(toHex(msg)), CryptoJS.enc.Hex.parse(toHex(bytes)));",
+    "  const h = CryptoJS.enc.Hex.stringify(mac);",
+    "  const off = parseInt(h.slice(-1), 16);",
+    "  const bin = (parseInt(h.slice(off * 2, off * 2 + 8), 16) & 0x7fffffff) % 1000000;",
+    "  return String(bin).padStart(6, '0');",
+    "};",
+    "const __stepNow = () => Math.floor(Date.now() / 1000 / 30);",
+]
+
+
+def _require_supervisor():
+    """Ключи надзора облака заданы посевом — иначе третий исход, а не красное."""
+    missing = " || ".join(f"!pm.environment.get({js_str(k)})" for k in _SUPERVISOR_KEYS)
+    return [
+        f"if ({missing}) {{",
+        *precondition_not_met("посев стенда: " + ", ".join(_SUPERVISOR_KEYS) + " заданы",
+                              _SUPERVISOR_WHY, indent="  "),
+        "}",
+    ]
+
+
+def _supervisor_bearer(s, tag):
+    """Предъявитель надзора облака уровнем «2»: вход со вторым фактором → код → обмен."""
+    up = tag.upper()
+    login_label = f"{up}-LOGIN"
+    authorize_label, exchange_label = f"{up}-AUTHORIZE", f"{up}-EXCHANGE"
+    query = _v(s, "Query")
+    return [
+        _csrf_step(s, f"{tag}-csrf-login", "login", init=[
+            *_require_supervisor(),
+            f"pm.environment.set({js_str(_v(s, 'Src'))}, '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+            *(f"pm.environment.unset({js_str(_v(s, n))});" for n in (
+                "FormCookie", "SessionCookie", "Csrf", "OauthCode", "Token", "Verifier", "State")),
+        ]),
+        Step(
+            name=f"{tag}-login", method="POST", path=_LOGIN,
+            body={"email": "{{cloudSupervisorEmail}}", "password": "{{cloudSupervisorPassword}}",
+                  "secondFactor": {"method": "totp", "code": f"{{{{{_v(s, 'TotpCode')}}}}}"},
+                  "csrfToken": f"{{{{{_v(s, 'Csrf')}}}}}"},
+            pre_script=[
+                *_require_supervisor(),
+                *_TOTP_JS,
+                "const __last = parseInt(pm.environment.get('rcvSupervisorLastStep') || '0', 10);",
+                "let __step = __stepNow();",
+                # Ступень, уже принятая службой, второй раз не проходит: ждём
+                # следующую — настоящей паузой, не дольше одной ступени.
+                "if (__step <= __last) {",
+                "  const _tw = Date.now(); while (__stepNow() <= __last && Date.now() - _tw < 31000) { /* wait for the next TOTP step */ }",
+                "  __step = __stepNow();",
+                "}",
+                f"pm.environment.set({js_str(_v(s, 'TotpStep'))}, String(__step));",
+                f"pm.environment.set({js_str(_v(s, 'TotpCode'))}, __totp(pm.environment.get('cloudSupervisorTotpSecret'), __step));",
+                *require_env_url("loginLaneBaseUrl", _LOGIN, _LANE_WHY), *_src_pre(s),
+                *_with_cookies(("kaname_form", _v(s, "FormCookie"))),
+            ],
+            insecure_tls=True, auth="anonymous", cookie_jar=False,
+            test_script=[
+                *_status_is(200, login_label),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                f"pm.test({js_str(login_label + ': сессия уровня «2» — вход со вторым фактором')}, () => "
+                "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                f"if (pm.response.code === 200) {{ pm.environment.set('rcvSupervisorLastStep', pm.environment.get({js_str(_v(s, 'TotpStep'))})); }}",
+                *_capture(s, "kaname_session", "SessionCookie", login_label),
+            ],
+        ),
+        Step(
+            name=f"{tag}-authorize", method="GET", path=_AUTHORIZE + "?{{" + query + "}}",
+            pre_script=[
+                "if (!pm.environment.get('oauthClientId') || !pm.environment.get('oauthClientSecret') || !pm.environment.get('oauthRedirectUri')) {",
+                *precondition_not_met(
+                    "посев стенда: oauthClientId, oauthClientSecret, oauthRedirectUri заданы",
+                    "посев церемонии стенда посадки own (`stand-chart.sh seed-ceremony`) не завёл "
+                    "конфиденциального клиента — выковать предъявитель надзора нечем", indent="  "),
+                "}",
+                "const __b64u = (wa) => { let x = CryptoJS.enc.Base64.stringify(wa).split('+').join('-')"
+                ".split('/').join('_'); while (x.endsWith('=')) { x = x.slice(0, -1); } return x; };",
+                "const __ver = __b64u(CryptoJS.lib.WordArray.random(32));",
+                "const __st = __b64u(CryptoJS.lib.WordArray.random(32));",
+                f"pm.environment.set({js_str(_v(s, 'Verifier'))}, __ver);",
+                f"pm.environment.set({js_str(_v(s, 'State'))}, __st);",
+                "const __q = [['response_type', 'code'], ['client_id', pm.environment.get('oauthClientId')],",
+                "  ['redirect_uri', pm.environment.get('oauthRedirectUri')], ['scope', 'openid'], ['state', __st],",
+                "  ['code_challenge', __b64u(CryptoJS.SHA256(__ver))], ['code_challenge_method', 'S256']]",
+                "  .map((kv) => encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1])).join('&');",
+                f"pm.environment.set({js_str(query)}, __q);",
+                *require_env_url("iamRegistryTokenBaseUrl", _AUTHORIZE + "?{{" + query + "}}", _ISSUANCE_WHY),
+                f"if (!pm.environment.get({js_str(_v(s, 'SessionCookie'))})) {{",
+                *report_then_skip(f"{authorize_label}: сессия надзора не захвачена входом",
+                                  "вход выше не выдал kaname_session — точке авторизации нечего "
+                                  "предъявить; причина — в шаге входа, не здесь", indent="  "),
+                "} else {",
+                f"  pm.request.headers.upsert({{key: 'Cookie', value: 'kaname_session=' + pm.environment.get({js_str(_v(s, 'SessionCookie'))})}});",
+                "}",
+            ],
+            insecure_tls=True, auth="anonymous", cookie_jar=False, follow_redirects=False,
+            test_script=[
+                *_status_is(302, authorize_label),
+                "const __loc = String(pm.response.headers.get('Location') || '');",
+                "const __qs = {}; (__loc.split('?')[1] || '').split('#')[0].split('&').forEach((kv) => { const i = kv.indexOf('=');",
+                "  if (i > 0) { __qs[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); } });",
+                f"pm.test({js_str(authorize_label + ': перенаправление несёт код и state запроса')}, () => "
+                f"pm.expect([typeof __qs.code === 'string' && __qs.code.length > 0, __qs.state === pm.environment.get({js_str(_v(s, 'State'))})]).to.eql([true, true]));",
+                f"if (__qs.code) {{ pm.environment.set({js_str(_v(s, 'OauthCode'))}, __qs.code); }}",
+            ],
+        ),
+        Step(
+            name=f"{tag}-exchange", method="POST", path=_TOKEN,
+            form=[("grant_type", "authorization_code"), ("code", "{{_rcvFCode}}"),
+                  ("redirect_uri", "{{_rcvFRedirect}}"), ("code_verifier", "{{_rcvFVerifier}}")],
+            pre_script=[
+                f"if (!pm.environment.get({js_str(_v(s, 'OauthCode'))})) {{",
+                *report_then_skip(f"{exchange_label}: код не выдан точкой авторизации",
+                                  "шаг авторизации выше не выдал code — обменивать нечего; "
+                                  "причина — в нём, не здесь", indent="  "),
+                "}",
+                f"pm.variables.set('_rcvFCode', encodeURIComponent(pm.environment.get({js_str(_v(s, 'OauthCode'))}) || ''));",
+                "pm.variables.set('_rcvFRedirect', encodeURIComponent(pm.environment.get('oauthRedirectUri') || ''));",
+                f"pm.variables.set('_rcvFVerifier', encodeURIComponent(pm.environment.get({js_str(_v(s, 'Verifier'))}) || ''));",
+                *require_env_url("iamRegistryTokenBaseUrl", _TOKEN, _ISSUANCE_WHY),
+                "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' + "
+                "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
+                "  encodeURIComponent(pm.environment.get('oauthClientId') || '') + ':' + "
+                "encodeURIComponent(pm.environment.get('oauthClientSecret') || '')))});",
+            ],
+            insecure_tls=True, auth="anonymous", cookie_jar=False,
+            test_script=[
+                f"pm.environment.unset({js_str(_v(s, 'Token'))});",
+                *_status_is(200, exchange_label),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                f"pm.test({js_str(exchange_label + ': выдан токен доступа надзора')}, () => "
+                "pm.expect(typeof __j.access_token === 'string' && __j.access_token.length > 0).to.eql(true));",
+                f"if (__j.access_token) {{ pm.environment.set({js_str(_v(s, 'Token'))}, __j.access_token); }}",
+            ],
+        ),
+    ]
+
+
+def _admin_verb(s, p, name, verb):
+    """`:block` / `:unblock` личности `p` предъявителем надзора `s`; id операции — в `<p><Verb>Op`."""
+    label = name.upper()
+    op = _v(p, verb.capitalize() + "Op")
+    path = f"/iam/v1/users/{{{{{_v(p, 'UserId')}}}}}:{verb}"
+    return Step(
+        name=name, method="POST", path=path, body={}, auth=_v(s, "Token"), insecure_tls=True,
+        pre_script=[
+            *require_env_url("ownRestBaseUrl", path, _OWN_WHY),
+            f"if (!pm.environment.get({js_str(_v(p, 'UserId'))}) || !pm.environment.get({js_str(_v(s, 'Token'))})) {{",
+            *report_then_skip(f"{label}: человек либо предъявитель надзора не захвачен",
+                              "вход человека не назвал user.id либо обмен не выдал токен надзора — "
+                              "путь глагола не собрать; причина — в шаге выше", indent="  "),
+            "}",
+            f"pm.environment.unset({js_str(op)});",
+        ],
+        test_script=[
+            *_status_is(200, label),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.test({js_str(label + ': ответ — операция с id')}, () => "
+            "pm.expect(typeof __j.id === 'string' && __j.id.length > 0).to.eql(true));",
+            f"if (typeof __j.id === 'string' && __j.id) {{ pm.environment.set({js_str(op)}, __j.id); }}",
+        ],
+    )
+
+
+def _admin_op(s, p, name, verb, state):
+    """Исход операции `:verb`: `done`, без ошибки, личность `p` в состоянии `state`."""
+    label = name.upper()
+    op = _v(p, verb.capitalize() + "Op")
+    counter, started = f"_rop_{p}_{name}".replace("-", "_"), f"_rops_{p}_{name}".replace("-", "_")
+    path = "/operations/{{" + op + "}}"
+    return Step(
+        name=name, method="GET", path=path, auth=_v(s, "Token"), insecure_tls=True,
+        pre_script=[
+            *require_env_url("ownRestBaseUrl", path, _OWN_WHY),
+            f"if (!pm.environment.get({js_str(op)})) {{",
+            *report_then_skip(f"{label}: операция не возвращена шагом выше",
+                              "глагол выше отвергнут синхронно либо не вернул id операции — "
+                              "опрашивать нечего; причина — в нём, не здесь", indent="  "),
+            "}",
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter)}, '0');",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            "}",
+        ],
+        test_script=[
+            f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"if (pm.response.code === 200 && !__j.done && __n < {_OP_POLL_CAP}) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+            f"  const _opd = Date.now(); while (Date.now() - _opd < {_OP_POLL_MS}) {{ /* inter-poll delay: operation not done yet */ }}",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(counter)});",
+            f"pm.environment.unset({js_str(started)});",
+            *_status_is(200, label),
+            f"pm.test({js_str(label + ': операция завершена')}, () => pm.expect(__j.done).to.eql(true));",
+            f"pm.test({js_str(label + ': операция без ошибки и с ответом')}, () => "
+            "pm.expect([!!__j.error, !!__j.response], JSON.stringify(__j.error || {})).to.eql([false, true]));",
+            f"pm.test({js_str(label + ': личность — та, что названа, в состоянии ' + state)}, () => "
+            f"pm.expect([__j.response && __j.response.id, __j.response && __j.response.inviteStatus])"
+            f".to.eql([pm.environment.get({js_str(_v(p, 'UserId'))}), {js_str(state)}]));",
+        ],
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-17: блокировка НЕ снимается восстановлением.
+# ───────────────────────────────────────────────────────────────────────────
+_P17, _S17 = "rcvG", "rcvSG"
+CASES.append(Case(
+    id="IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED",
+    title="Ф5-17: заблокированная проходит восстановление — учётные данные сменены, войти нельзя; "
+          "снимает блокировку администратор, после чего входит новым паролем, а не прежним",
+    classes=["NEG", "SEC", "STATE"],
+    priority="P0",
+    steps=[
+        *_person(_P17, "blocked"),
+        *_login(_P17, "blocked-login-before-block", "Password", ok=True, user_var="UserId"),
+        *_supervisor_bearer(_S17, "blocked-supervisor"),
+        _admin_verb(_S17, _P17, "blocked-block", "block"),
+        _admin_op(_S17, _P17, "blocked-block-op", "block", "BLOCKED"),
+        # Блокировка в силе ДО восстановления: прежний (верный) пароль — единый отказ.
+        *_login(_P17, "blocked-login-old-refused", "Password", ok=False, keep="rcvBlockedRefusal"),
+        *_recovery_code(_P17, "blocked"),
+        _csrf_step(_P17, "blocked-csrf-complete", "recovery-complete"),
+        # Ф1-59: учётные данные сменяются, сессии нет; ответ — тот же отказ, что на
+        # входе заблокированной.
+        _complete(_P17, "blocked-complete", test_script=[
+            *_refused(401, 16, "authentication failed", "BLOCKED-COMPLETE"),
+            "pm.test('BLOCKED-COMPLETE: отказ побайтово равен отказу входа заблокированной', () => "
+            "pm.expect(pm.response.text() === pm.environment.get('rcvBlockedRefusal')).to.eql(true));",
+        ]),
+        # Главное «Тогда»: войти по-прежнему нельзя — и новым паролем тоже.
+        *_login(_P17, "blocked-login-new-refused", "NewPassword", ok=False, same_as="rcvBlockedRefusal"),
+        # Близнец: снимает администратор. После снятия новый пароль входит, а
+        # прежний — нет: значит, восстановление сменило учётные данные, пока
+        # личность была заблокирована, а не просто отказало.
+        _admin_verb(_S17, _P17, "blocked-unblock", "unblock"),
+        _admin_op(_S17, _P17, "blocked-unblock-op", "unblock", "ACTIVE"),
+        *_login(_P17, "blocked-login-new-after-unblock", "NewPassword", ok=True),
+        *_login(_P17, "blocked-login-old-after-unblock", "Password", ok=False),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-25: завершение обнуляет счёт по адресу только как вход, завершённый до
+# уровня всех заведённых факторов. Величины — из профиля посадки, который стенд
+# `chart-own` ставит как есть (`deploy/values.prod.yaml`, узел `authn.login`).
+# ───────────────────────────────────────────────────────────────────────────
+import pathlib as _rl_pathlib  # noqa: E402
+import re as _rl_re  # noqa: E402
+
+_RL_PROFILE = _rl_pathlib.Path(__file__).resolve().parents[3] / "deploy" / "values.prod.yaml"
+
+
+def _rl_profile(key):
+    found = _rl_re.findall(rf"^    {key}: (\S+)\s*$", _RL_PROFILE.read_text(encoding="utf-8"), _rl_re.M)
+    if len(found) != 1:
+        raise SystemExit(f"kaname-recovery-lane: ключ профиля authn.login.{key} найден "
+                         f"{len(found)} раз в {_RL_PROFILE} — ждали ровно один")
+    return found[0]
+
+
+_N_ADDR = int(_rl_profile("addressAttempts"))
+_N_SRC = int(_rl_profile("sourceAttempts"))
+_T_ADDR = _rl_profile("addressWindow")
+_T_SRC = _rl_profile("sourceWindow")
+# «Дано» Ф5-25: `N_адрес ≥ 2` и `N_источник > N_адрес + 1`. Профиль, где это не так,
+# сценария не строит — генерация отказывает с именем условия, а не зеленеет.
+if _N_ADDR < 2:
+    raise SystemExit("kaname-recovery-lane: addressAttempts < 2 — серия N_адрес − 1 и две попытки "
+                     "после завершения (Ф5-25) не строятся")
+if not _N_SRC > _N_ADDR + 1:
+    raise SystemExit("kaname-recovery-lane: sourceAttempts ≤ addressAttempts + 1 — отказ по "
+                     "источнику наступил бы раньше отказа по адресу (Ф5-25)")
+
+_WRONG_PASSWORD = "Wrong-{{runId}}-not-the-password"
+_TOO_MANY = "too many attempts; try again later"
+
+
+def _wrong_logins(p, name, times):
+    """Ровно `times` неверных паролей на входе подряд; каждый — единый отказ 401."""
+    counter, started, bad = (f"_wl_{p}_{name}".replace("-", "_"), f"_wls_{p}_{name}".replace("-", "_"),
+                             f"_wlb_{p}_{name}".replace("-", "_"))
+    label = name.upper()
+    step = _post(p, name, _LOGIN,
+                 {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": _WRONG_PASSWORD,
+                  "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+                 test_script=[
+                     f"const __i = parseInt(pm.environment.get({js_str(counter)}) || '0', 10) + 1;",
+                     f"const __bad = parseInt(pm.environment.get({js_str(bad)}) || '0', 10) + (pm.response.code === 401 ? 0 : 1);",
+                     f"pm.environment.set({js_str(bad)}, String(__bad));",
+                     f"if (__i < {times}) {{",
+                     f"  pm.environment.set({js_str(counter)}, String(__i));",
+                     "  const _wld = Date.now(); while (Date.now() - _wld < 50) { /* pace between presentations */ }",
+                     "  pm.execution.setNextRequest(pm.info.requestName);",
+                     "  return;",
+                     "}",
+                     f"pm.environment.unset({js_str(counter)});",
+                     f"pm.environment.unset({js_str(started)});",
+                     f"pm.environment.unset({js_str(bad)});",
+                     f"pm.test({js_str(label + f': серия исполнена полностью — {times} неверных')}, () => pm.expect(__i).to.eql({times}));",
+                     f"pm.test({js_str(label + ': каждое неверное предъявление серии — единый отказ 401')}, () => pm.expect(__bad).to.eql(0));",
+                 ])
+    step.pre_script = [
+        f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+        f"  pm.environment.set({js_str(counter)}, '0');",
+        f"  pm.environment.set({js_str(bad)}, '0');",
+        f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+        "}",
+        *step.pre_script,
+    ]
+    return step
+
+
+def _wrong_login(p, name, *, limited):
+    """Одна попытка неверным паролем: 401 единым отказом либо 429 формы Ф3-28."""
+    label = name.upper()
+    if limited:
+        test = [
+            *_refused(429, 8, _TOO_MANY, label),
+            f"pm.test({js_str(label + ': причина — TOO_MANY_ATTEMPTS')}, () => "
+            "pm.expect((Array.isArray(__r.details) ? __r.details : []).map(d => d.reason)).to.include('TOO_MANY_ATTEMPTS'));",
+            f"pm.test({js_str(label + ': Retry-After — положительное число секунд')}, () => "
+            "pm.expect(parseInt(pm.response.headers.get('Retry-After') || '0', 10) > 0).to.eql(true));",
+        ]
+    else:
+        test = _refused(401, 16, "authentication failed", label)
+    return _post(p, name, _LOGIN,
+                 {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": _WRONG_PASSWORD,
+                  "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+                 test_script=test)
+
+
+def _enroll_second_factor(p, tag):
+    """Второй фактор человека `p`: заведение → подтверждение кодом по времени (Ф12)."""
+    up = tag.upper()
+    return [
+        _csrf_step(p, f"{tag}-csrf-second-factor", "second-factor", with_session="SessionCookie"),
+        _post(p, f"{tag}-enroll", _SECOND_FACTOR_ENROLL, {"csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              with_session="SessionCookie",
+              test_script=[
+                  *_status_is(200, f"{up}-ENROLL"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(up + '-ENROLL: секрет выдан')}, () => "
+                  "pm.expect(typeof __j.secret === 'string' && __j.secret.length > 0).to.eql(true));",
+                  f"if (__j.secret) {{ pm.environment.set({js_str(_v(p, 'TotpSecret'))}, __j.secret); }}",
+              ]),
+        Step(
+            name=f"{tag}-confirm", method="POST", path=_SECOND_FACTOR_CONFIRM,
+            body={"code": f"{{{{{_v(p, 'TotpCode')}}}}}", "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+            pre_script=[
+                *_TOTP_JS,
+                f"pm.environment.set({js_str(_v(p, 'TotpCode'))}, __totp(pm.environment.get({js_str(_v(p, 'TotpSecret'))}), __stepNow()));",
+                *require_env_url("loginLaneBaseUrl", _SECOND_FACTOR_CONFIRM, _LANE_WHY), *_src_pre(p),
+                *_with_cookies(("kaname_form", _v(p, "FormCookie")), ("kaname_session", _v(p, "SessionCookie"))),
+            ],
+            insecure_tls=True, auth="anonymous", cookie_jar=False,
+            test_script=[
+                *_status_is(200, f"{up}-CONFIRM"),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                f"pm.test({js_str(up + '-CONFIRM: фактор заведён — сессия уровня «2»')}, () => "
+                "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                *_capture(p, "kaname_session", "SessionCookie", f"{up}-CONFIRM", required=False),
+            ],
+        ),
+    ]
+
+
+_P25A, _P25B, _P25C, _S25 = "rcvLA", "rcvLB", "rcvLC", "rcvSL"
+_N_BEFORE = _N_ADDR - 1
+
+
+def _f5_25_series(p, tag):
+    """`N_адрес − 1` неверных паролей на входе в окне `T_адрес` — до завершения."""
+    return [_csrf_step(p, f"{tag}-csrf-login", "login"), _wrong_logins(p, f"{tag}-wrong-before", _N_BEFORE)]
+
+
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN",
+    title=f"Ф5-25: N_адрес={_N_ADDR}, N_источник={_N_SRC}; после {_N_BEFORE} неверных завершение "
+          "обнуляет счёт по адресу только у незаблокированной без второго фактора",
+    classes=["SEC", "BVA", "STATE"],
+    priority="P0",
+    steps=[
+        # Величины печатаются утверждением: «Дано» сценария названо числом.
+        Step(
+            name="rl-profile-csrf", method="GET", path=f"{_CSRF}?form=login",
+            pre_script=[*require_env_url("loginLaneBaseUrl", f"{_CSRF}?form=login", _LANE_WHY)],
+            insecure_tls=True, auth="anonymous", cookie_jar=False,
+            test_script=[
+                *_status_is(200, "RL-PROFILE"),
+                f"pm.test({js_str(f'RL-PROFILE: профиль — N_адрес={_N_ADDR} за {_T_ADDR}, N_источник={_N_SRC} за {_T_SRC}; N_адрес ≥ 2 и N_источник > N_адрес + 1')}, () => "
+                f"pm.expect([{_N_ADDR} >= 2, {_N_SRC} > {_N_ADDR} + 1]).to.eql([true, true]));",
+            ],
+        ),
+        # (а) A — второй фактор заведён: завершение выдаёт сессию, счёт НЕ обнулён.
+        *_person(_P25A, "rl-a"),
+        *_enroll_second_factor(_P25A, "rl-a"),
+        *_recovery_code(_P25A, "rl-a"),
+        *_f5_25_series(_P25A, "rl-a"),
+        _csrf_step(_P25A, "rl-a-csrf-complete", "recovery-complete"),
+        _complete(_P25A, "rl-a-complete", test_script=_issued(_P25A, "RL-A-COMPLETE")),
+        _csrf_step(_P25A, "rl-a-csrf-login-after", "login"),
+        _wrong_login(_P25A, "rl-a-wrong-after-first", limited=False),
+        _wrong_login(_P25A, "rl-a-wrong-after-second", limited=True),
+        # (б) B — близнец: второго фактора нет, не заблокирована — счёт обнулён.
+        *_person(_P25B, "rl-b"),
+        *_recovery_code(_P25B, "rl-b"),
+        *_f5_25_series(_P25B, "rl-b"),
+        _csrf_step(_P25B, "rl-b-csrf-complete", "recovery-complete"),
+        _complete(_P25B, "rl-b-complete", test_script=_issued(_P25B, "RL-B-COMPLETE")),
+        _csrf_step(_P25B, "rl-b-csrf-login-after", "login"),
+        _wrong_login(_P25B, "rl-b-wrong-after-first", limited=False),
+        _wrong_login(_P25B, "rl-b-wrong-after-second", limited=False),
+        # (в) C — заблокирована администратором: учётные данные сменены, сессии
+        # нет, отказ завершения сосчитан N-й попыткой, счёт не обнулён.
+        *_person(_P25C, "rl-c"),
+        *_login(_P25C, "rl-c-login-before-block", "Password", ok=True, user_var="UserId"),
+        *_supervisor_bearer(_S25, "rl-supervisor"),
+        _admin_verb(_S25, _P25C, "rl-c-block", "block"),
+        _admin_op(_S25, _P25C, "rl-c-block-op", "block", "BLOCKED"),
+        *_recovery_code(_P25C, "rl-c"),
+        *_f5_25_series(_P25C, "rl-c"),
+        _csrf_step(_P25C, "rl-c-csrf-complete", "recovery-complete"),
+        _complete(_P25C, "rl-c-complete", test_script=_refused(401, 16, "authentication failed", "RL-C-COMPLETE")),
+        _csrf_step(_P25C, "rl-c-csrf-login-after", "login"),
+        _wrong_login(_P25C, "rl-c-wrong-after-first", limited=True),
+        # Уборка: личность C снова действующая — следующий прогон заводит своих,
+        # но заблокированная строка не остаётся на стенде.
+        _admin_verb(_S25, _P25C, "rl-c-unblock", "unblock"),
+        _admin_op(_S25, _P25C, "rl-c-unblock-op", "unblock", "ACTIVE"),
     ],
 ))
