@@ -362,13 +362,26 @@ func (uc *AccessKeyLoginUseCase) Execute(ctx context.Context, in AccessKeyLoginI
 	}
 
 	// (8) Выдача — одним исходом.
-	out, err := uc.issue(ctx, user, key.ID, res.Flags, now)
-	if err != nil {
+	out, outcome := uc.issue(ctx, user, key.ID, res.Flags, now)
+	switch outcome {
+	case issueDone:
+		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginIssued)
+		return out, nil
+	case issueNoRow:
+		// Личность удалена после чтения строки ключа: строки ключа больше нет
+		// тоже (каскад) — то же состояние, что «удостоверения нет» (Р15).
+		return LoginOutput{}, uc.refuse(ctx, AccessKeyLoginCredentialUnknown, in.Source, now)
+	case issueBeforeCutoff:
+		// Момент входа не позже отсечки личности: доступ снят распорядителем
+		// (блокировка, принудительный выход) либо сменой пароля в тот же
+		// момент. Клетка — «блокировка»: отказ — о снятом доступе личности, не о
+		// ключе; попыткой не считается — предъявление было верным (Ф3 Р3).
+		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginBlocked)
+		return LoginOutput{}, ErrAuthenticationFailed
+	default:
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginStoreFailed)
 		return LoginOutput{}, ErrStoreUnavailable
 	}
-	uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginIssued)
-	return out, nil
 }
 
 // assertionRefusalOutcome — клетка отказа проверяющего. Отказы без своей
@@ -409,30 +422,42 @@ func (uc *AccessKeyLoginUseCase) refuse(ctx context.Context, outcome AccessKeyLo
 	return ErrAuthenticationFailed
 }
 
-// issue — выдача одним исходом: запись, память первой аутентификации, событие
-// с `id` ключа и решение о счёте по адресу — одной транзакцией. Уровень
-// вычисляет правило Ф11 по флагам ЭТОГО утверждения (Р4): полоса приносит
-// предъявленное, а не уровень.
+// issue — выдача одним исходом: захват строки личности с её отсечкой,
+// запись, память первой аутентификации, событие с `id` ключа и решение о счёте
+// по адресу — одной транзакцией, в том же порядке замков, что у входа паролем
+// (`LoginUseCase.issue`, kaname#382): строка личности — первым оператором,
+// иначе выдача шла бы навстречу удалению личности. Уровень вычисляет правило
+// Ф11 по флагам ЭТОГО утверждения (Р4): полоса приносит предъявленное.
 func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, keyID domain.AccessKeyID,
 	flags webauthnverify.Flags, now time.Time,
-) (LoginOutput, error) {
+) (LoginOutput, issueOutcome) {
+	m := now.Truncate(time.Microsecond)
 	// Ось «заведено» — ДО транзакции записи (шапка `completed_login.go`).
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, issueFailed
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	cutoff, hasCutoff, err := w.LockPersonForLogin(ctx, user.ID)
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return LoginOutput{}, issueNoRow
+	case err != nil:
+		return LoginOutput{}, issueFailed
+	case hasCutoff && !m.After(cutoff):
+		return LoginOutput{}, issueBeforeCutoff
+	}
 	s, bearer, err := IssueSession(ctx, w, IssueInput{
 		User:        user,
 		Presented:   []assurance.Presentation{assurance.KeyAssertion(flags.UserVerified, flags.BackupEligible)},
-		At:          now,
+		At:          m,
 		TTL:         uc.deps.TTL,
 		EmitAudit:   true,
 		AccessKeyID: keyID,
 	})
 	if err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, issueFailed
 	}
 	// Успешный вход обнуляет счёт по адресу человека — как всякий успешный
 	// вход (Р9, Ф3 Р10); решает единственный писатель обнуления.
@@ -440,12 +465,12 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
 		AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 	}); err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, issueFailed
 	}
 	if err := w.Commit(ctx); err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, issueFailed
 	}
-	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: uc.emailVerified(ctx, user)}, Bearer: bearer}, nil
+	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: uc.emailVerified(ctx, user)}, Bearer: bearer}, issueDone
 }
 
 // emailVerified — подтверждённость адреса для ответа. Источник не ответил —

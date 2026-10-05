@@ -414,4 +414,3 @@ func TestEnrolledForCompletionReadsTheKeyTable(t *testing.T) {
 // noKeyLoginStore — хранилище испытаний полосы входа ключом, которое сборка
 // лишь проверяет на присутствие; его методы проба не зовёт.
 type noKeyLoginStore struct{ AccessKeyLoginStore }
-

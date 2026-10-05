@@ -63,6 +63,7 @@ var sessionRowDoors = map[string]bool{
 // writerSceneLedger — писатель → сцена внахлёст с удалением личности либо
 // причина, по которой её нет. Ключ — «пакет.Получатель.функция».
 var writerSceneLedger = map[string]string{
+	"humansession.AccessKeyLoginUseCase.issue":          "TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock",
 	"humansession.ChangePasswordUseCase.Execute":        "TestIntegration_PasswordChangeAndIdentityDeletionDoNotDeadlock",
 	"humansession.CompleteRecoveryUseCase.complete":     "TestIntegration_SessionWriterRecoveryCompletionAndIdentityDeletionDoNotDeadlock",
 	"humansession.ConfirmSecondFactorUseCase.Execute":   "TestIntegration_SessionWriterSecondFactorConfirmAndIdentityDeletionDoNotDeadlock",
