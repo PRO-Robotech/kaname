@@ -357,6 +357,21 @@ func putPasswordVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod)
 	return nil
 }
 
+// EnrollLoginMethod — заведение строки способа входа в транзакции писателя
+// сессии (приёмка A7 Р3, Р4; kaname#213): ЕДИНСТВЕННЫЙ оператор вставки
+// (`insertLoginMethod`), нарушение ключа «человек, вид» — enrolled=false.
+// Метод писателя сессии объявлен ЗДЕСЬ: право назвать таблицу секрета дано
+// этому файлу.
+func (w *humanSessionWriter) EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	if _, err := insertLoginMethod(ctx, w.tx, m); err != nil {
+		if stderrors.Is(err, iamerr.ErrAlreadyExists) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // --- второй фактор (Ф12, kacho#1281): операторы над таблицей секрета ---
 
 // upsertPendingTOTPTx — ОДИН оператор заведения (Ф12-05, приёмка Р4 матрица):

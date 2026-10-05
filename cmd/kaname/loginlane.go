@@ -526,6 +526,15 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Заведение первого пароля из живой сессии (kaname#213): то же правило и тот
+	// же хешер, что у смены (A7 Р4), окно свежести — правки своих данных.
+	enrollPasswordUC, err := humansession.NewEnrollPasswordUseCase(humansession.EnrollPasswordDeps{
+		Store: sessions, Hasher: hasher, Rule: rule, Freshness: cfg.AuthN.SelfServiceFreshness,
+		Observer: rec, Now: time.Now, Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	resolveUC, err := humansession.NewResolveUseCase(sessions, rec, time.Now)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -661,7 +670,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
 		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
-		akBegin: akBeginUC, akLogin: akLoginUC,
+		akBegin: akBeginUC, akLogin: akLoginUC, enrollPassword: enrollPasswordUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -768,6 +777,12 @@ type laneVerbs struct {
 	// Вход ключом доступа (Ф13).
 	akBegin *humansession.BeginAccessKeyLoginUseCase
 	akLogin *humansession.AccessKeyLoginUseCase
+	// Заведение первого пароля из живой сессии (kaname#213).
+	enrollPassword *humansession.EnrollPasswordUseCase
+}
+
+func (v laneVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	return v.enrollPassword.Execute(ctx, in)
 }
 
 func (v laneVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {

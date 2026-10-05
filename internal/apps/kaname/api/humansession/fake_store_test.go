@@ -513,6 +513,29 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	return true, nil
 }
 
+// EnrollLoginMethod — заведение строки «пароль» (A7 Р3): строка есть —
+// enrolled=false, как нарушение ключа «человек, вид» у адаптера.
+func (w *fakeWriter) EnrollLoginMethod(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, errFakeArg(err.Error())
+	}
+	w.store.trip()
+	if err := w.fail("enroll-method"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	_, exists := w.store.verifiers[m.UserID]
+	w.store.mu.Unlock()
+	if m.Kind != domain.LoginMethodPassword {
+		return false, errFakeArg("Illegal argument login_method: the double enrolls only the password row")
+	}
+	if exists {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
+	return true, nil
+}
+
 // PutPasswordVerifier — заменить либо завести строку «пароль» (Ф5-34): одна
 // строка на личность — ключ карты, как ключ строки хранилища.
 func (w *fakeWriter) PutPasswordVerifier(_ context.Context, m domain.LoginMethod) error {

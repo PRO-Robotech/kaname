@@ -54,6 +54,13 @@ func TestLanePathCount_InjectionBothWays(t *testing.T) {
 	require.NotEmpty(t, auditLanePathCount(silent, 15, &idFactsCensus{}))
 
 	require.NotEmpty(t, auditLanePathCount(twin, 99, &idFactsCensus{}), "число вне словаря — отказ")
+
+	// Числительное, чей хвост — другое числительное, читается целым словом:
+	// «восемнадцать» не есть «семнадцать».
+	tail := map[string]string{"a.mdx": "у полосы восемнадцать путей", "b.mdx": "(восемнадцать путей)"}
+	require.Empty(t, auditLanePathCount(tail, 18, &idFactsCensus{}), "законный близнец с хвостом-числительным молчит")
+	require.NotEmpty(t, auditLanePathCount(map[string]string{"a.mdx": "у полосы семнадцать путей", "b.mdx": tail["b.mdx"]}, 18, &idFactsCensus{}),
+		"устаревшее «семнадцать» при восемнадцати путях — находка")
 }
 
 func TestClientIDForm_InjectionBothWays(t *testing.T) {

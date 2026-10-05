@@ -175,6 +175,13 @@ func auditJournalCallout(page string, kinds []string, c *idFactsCensus) []string
 	return findings
 }
 
+// namesPathCount — называет ли страница «<числительное> пут…» ЦЕЛЫМ словом:
+// «семнадцать» — хвост «восемнадцать», и поиск подстроки читал бы второе
+// первым (гейт краснел на верной странице, когда путей стало восемнадцать).
+func namesPathCount(page, word string) bool {
+	return regexp.MustCompile(`(^|[^\p{L}])` + regexp.QuoteMeta(word) + ` пут`).MatchString(page)
+}
+
 // auditLanePathCount — каждая страница называет число путей полосы числом
 // перечня слушателя и никаким другим.
 func auditLanePathCount(pages map[string]string, n int, c *idFactsCensus) []string {
@@ -187,12 +194,12 @@ func auditLanePathCount(pages map[string]string, n int, c *idFactsCensus) []stri
 	for _, rel := range sortedKeys(boolKeys(pages)) {
 		c.lanePages++
 		page := pages[rel]
-		if !strings.Contains(page, want+" пут") {
+		if !namesPathCount(page, want) {
 			findings = append(findings, fmt.Sprintf(
 				"%s не называет число путей полосы входа (%s, по `loginlanehttp.Paths()`)", rel, want))
 		}
 		for num, word := range idFactsNumerals {
-			if num != n && strings.Contains(page, word+" пут") {
+			if num != n && namesPathCount(page, word) {
 				findings = append(findings, fmt.Sprintf(
 					"%s называет «%s пут…», а у слушателя путей %s", rel, word, want))
 			}

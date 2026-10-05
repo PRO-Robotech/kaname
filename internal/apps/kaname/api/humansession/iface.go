@@ -216,6 +216,12 @@ type Writer interface {
 	// завести, ОДНИМ оператором (Ф5 Р5, Ф5-34; kacho#2698): писатель
 	// завершения восстановления. Одна строка на личность — ключ хранилища.
 	PutPasswordVerifier(ctx context.Context, m domain.LoginMethod) error
+	// EnrollLoginMethod — ЗАВЕДЕНИЕ строки способа входа существующим
+	// оператором вставки (приёмка A7 Р3, Р4; kaname#213): enrolled=false —
+	// строка этого вида у человека уже есть. Решает ключ строки хранилища
+	// («человек, вид»), а не проверка перед вставкой: из двух одновременных
+	// заведений проходит одно.
+	EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (enrolled bool, err error)
 	// LoginMethod — строка способа входа человека данного вида, прочитанная
 	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —

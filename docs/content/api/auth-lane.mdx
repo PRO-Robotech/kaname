@@ -26,6 +26,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/login</code></td><td>вход паролем, необязательно — с кодом второго фактора</td><td><code>login</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/logout</code></td><td>выход: запись сессии гасится на стороне сервера</td><td><code>logout</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/password</code></td><td>смена пароля с подтверждением текущим; все прочие сессии человека завершаются</td><td><code>password</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/password/enroll</code></td><td>заведение первого пароля из свежей сессии человеком, у которого пароля нет; сессии не трогаются</td><td><code>password-enroll</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery</code></td><td>запрос кода восстановления письмом</td><td><code>recovery</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery/complete</code></td><td>предъявление кода с новым паролем; отвечает как вход</td><td><code>recovery-complete</code></td><td>нет</td></tr>
     <tr><td><code>GET /iam/v1/auth/second-factor</code></td><td>состояние второго фактора</td><td>—</td><td>да</td></tr>
@@ -132,7 +133,7 @@ SAN проверенного клиентского сертификата по�
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
 `recovery`, `recovery-complete`, `second-factor`, `step-up`, `verify-email`,
-`verify-email-confirm`, `access-key-begin`, `access-key-login`.
+`verify-email-confirm`, `access-key-begin`, `access-key-login`, `password-enroll`.
 
 <CodeBlock language="bash">
   {dedent`
@@ -142,7 +143,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm access-key-begin access-key-login]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm access-key-begin access-key-login password-enroll]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -227,6 +228,21 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 Требует печенья сессии. Успех — `200 {"session": {…}}` и **новое** `kaname_session`: сессия
 перевыпускается, все **прочие** сессии человека завершаются. Неподошедший текущий пароль и
 отсутствующая сессия отвечают одним `401`.
+
+### Заведение первого пароля — `POST /iam/v1/auth/password/enroll` {#password-enroll}
+
+Человек, у которого пароля нет (он входит ключом доступа), заводит его из **своей свежей**
+сессии: `{ "newPassword", "csrfToken" }`, признак вида `password-enroll`. Текущего пароля здесь
+нет by construction — его и нет. Сессия должна быть свежей (момент последнего предъявления не
+старше окна правки своих данных; ровно окно — свежая), иначе `403` `SESSION_NOT_FRESH` —
+предъявите способ входа ещё раз. Без подтверждённого адреса — отказ положения подтверждения
+(`403` `EMAIL_NOT_VERIFIED`). Новый пароль судится тем же правилом, что при смене.
+
+Успех — `200` с `{"session": {...}}` той же формы, что у входа, **без** `Set-Cookie`: прочие
+сессии живут, носитель не перевыпускается, уровень сессии не меняется. Если пароль у человека
+уже есть — `409` `ALREADY_EXISTS`, `PASSWORD_ALREADY_SET`, `password is already set; change it
+with the current password`: пароль меняют через `POST /iam/v1/auth/password` с текущим. Глагол
+секрета не предъявляет и в счёт неверных предъявлений не идёт.
 
 ### Восстановление доступа — два обращения
 

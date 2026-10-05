@@ -98,6 +98,11 @@ type stubLane struct {
 	akBeginIn  []humansession.BeginAccessKeyLoginInput
 	akLoginIn  []humansession.AccessKeyLoginInput
 
+	// Заведение первого пароля (kaname#213).
+	enrollPwOut humansession.EnrollPasswordOutput
+	enrollPwErr error
+	enrollPwIn  []humansession.EnrollPasswordInput
+
 	// Подтверждение адреса (kaname#456).
 	verifyOut        humansession.RequestVerificationOutput
 	verifyErr        error
@@ -112,6 +117,11 @@ type stubLane struct {
 // Подтверждение адреса (kaname#456): дублёр отвечает объявленным исходом;
 // положение по умолчанию — «сессии нет», и отказ положения на пути, объявленном
 // отказом, не срабатывает: предмет соседних проб — глаголы, а не положение.
+func (s *stubLane) EnrollPassword(_ context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	s.enrollPwIn = append(s.enrollPwIn, in)
+	return s.enrollPwOut, s.enrollPwErr
+}
+
 func (s *stubLane) BeginAccessKeyLogin(_ context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
 	s.akBeginIn = append(s.akBeginIn, in)
 	return s.akBeginOut, s.akBeginErr
