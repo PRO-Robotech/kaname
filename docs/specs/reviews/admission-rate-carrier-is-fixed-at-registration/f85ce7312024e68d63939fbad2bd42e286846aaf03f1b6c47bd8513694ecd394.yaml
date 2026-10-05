@@ -63,10 +63,28 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#197
-  status: pending
-  published: false
-  body: "role: acceptance-reviewer · verdict: APPROVED · subject: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md · subject_revision: 83a504d68290e9062045cebbc03336a57a4f284f · subject_sha256: f85ce7312024e68d63939fbad2bd42e286846aaf03f1b6c47bd8513694ecd394"
-  publication_mode: courier_of_agent_verdict
+  status: performed
+  published: true
+  database_id: 5993396322
+  node_id: IC_kwDOUO26pM8AAAABZTv4Yg
+  url: https://github.com/PRO-Robotech/kaname/issues/197#issuecomment-5993396322
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5993396322
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/197
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T11:20:09Z'
+  body_sha256: 20d1b9ac9f64142d45e32488aa57d1c0beb7b3f164585b82d9ed0ed41fa9d10c
+  subject_sha256: f85ce7312024e68d63939fbad2bd42e286846aaf03f1b6c47bd8513694ecd394
+  subject_revision: 83a504d68290e9062045cebbc03336a57a4f284f
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; заключение рецензента не правилось.
+    Отпечаток предмета сверен: git show 83a504d68:<путь> | sha256sum даёт f85ce7312024e68d…,
+    совпал с объявленным. Отпечаток тела снят с сырого ответа API
+    (gh api repos/PRO-Robotech/kaname/issues/comments/5993396322).
 
 attribution:
   reviewer_kind: claude_agent

@@ -60,10 +60,28 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#198
-  status: pending
-  published: false
-  body: "role: acceptance-reviewer · verdict: APPROVED · subject: docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md · subject_revision: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0 · subject_sha256: 826d25f5161aa06a156bac421af13148d545640ad8ac1e8de60da2d7b256e2c8"
-  publication_mode: courier_of_agent_verdict
+  status: performed
+  published: true
+  database_id: 5993396593
+  node_id: IC_kwDOUO26pM8AAAABZTv5cQ
+  url: https://github.com/PRO-Robotech/kaname/issues/198#issuecomment-5993396593
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5993396593
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/198
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T11:20:10Z'
+  body_sha256: 4fe53a3a7e04e56b33809bdca6d193462d827b6874f023430616392488548d3b
+  subject_sha256: 826d25f5161aa06a156bac421af13148d545640ad8ac1e8de60da2d7b256e2c8
+  subject_revision: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; заключение рецензента не правилось.
+    Отпечаток предмета сверен: git show 3827cbfcc:<путь> | sha256sum даёт 826d25f5161aa06a…,
+    совпал с объявленным. Отпечаток тела снят с сырого ответа API
+    (gh api repos/PRO-Robotech/kaname/issues/comments/5993396593).
 
 attribution:
   reviewer_kind: claude_agent
