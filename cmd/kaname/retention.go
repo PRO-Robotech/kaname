@@ -36,20 +36,20 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// startRetentionSweeper поднимает фоновую уборку и подключает её величины к
-// съёму.
+// buildRetentionSweeper собирает фоновую уборку и подключает её величины к
+// съёму. НЕ запускает: старт — [startRetentionSweeps], после последнего отказа
+// старта (#253).
 //
 // Отказывает, а не предупреждает: величины уже проверены стражем старта
 // конфигурации, поэтому отказ здесь означает расхождение построителя со
 // стражем — то есть ровно то состояние, в котором стенд поднимать нельзя.
-func startRetentionSweeper(
-	ctx context.Context,
+func buildRetentionSweeper(
 	pool *pgxpool.Pool,
 	cfg config.Config,
 	reg *metrics.Registry,
 	human retention.HumanSessionReapers,
 	logger *slog.Logger,
-) error {
+) (*retention.Sweeper, error) {
 	sweeper, err := retention.New(
 		cfg.Retention.Sweep(),
 		// За базовым перечнем — предметы полосы входа: сессии человека, журнал
@@ -88,7 +88,7 @@ func startRetentionSweeper(
 		logger.With(slog.String("component", "retention_sweep")),
 	)
 	if err != nil {
-		return fmt.Errorf("фоновая уборка: %w", err)
+		return nil, fmt.Errorf("фоновая уборка: %w", err)
 	}
 
 	// Величина обязана иметь читателя: накопитель без него считает в никуда.
@@ -99,7 +99,42 @@ func startRetentionSweeper(
 		})
 	}
 
-	sweeper.Start(ctx)
+	return sweeper, nil
+}
+
+// startRetentionSweeps запускает обе уборки по сроку: ресурсного журнала и
+// таблиц службы.
+//
+// # Место — после ПОСЛЕДНЕГО отказа старта (#253)
+//
+// Первый проход уборки идёт сразу. Запущенная раньше стража, который ещё может
+// отвергнуть старт, она встречала закрытие пула `defer`-ом корня на этом отказе,
+// и проходы в полёте докладывали «retention sweep failed: closed pool» как СВОЙ
+// отказ — шесть WARN над единственной строкой ERROR, которая и есть предмет.
+// Порядок держит гейт `TestRetentionSweepsStartAfterTheLastBootRefusal`.
+//
+// # Контекст — корневой контекст задач
+//
+// Его отменяет `defer rootShutdown.Stop()`, стоящий ПОСЛЕ `defer pool.Close()`,
+// то есть исполняемый раньше: уборки получают отмену прежде, чем пул закроется.
+//
+// # Отказ — только до первого запуска
+//
+// Уборка журнала поднимается вызовом фундамента, который собирает и запускает
+// одним шагом и отказывает до запуска; поэтому она идёт первой, а уборка таблиц
+// службы, собранная заранее, запускается без отказа. Отказ этой функции, таким
+// образом, наступает раньше, чем запущена хоть одна уборка.
+func startRetentionSweeps(
+	ctx context.Context,
+	own *retention.Sweeper,
+	pool *pgxpool.Pool,
+	cfg config.Config,
+	logger *slog.Logger,
+) error {
+	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
+		return err
+	}
+	own.Start(ctx)
 	logger.Info("retention sweep is on",
 		slog.String("interval", cfg.Retention.Interval.String()),
 		slog.Int("batch", cfg.Retention.Batch),

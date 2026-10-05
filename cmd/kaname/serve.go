@@ -503,12 +503,6 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
-	// Уборка ресурсного журнала подписки — своим уборщиком (см.
-	// `subscription_wiring.go`, там же довод, почему не предметом общего).
-	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
-		return err
-	}
-
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
@@ -528,8 +522,10 @@ func runServe(cfg config.Config) error {
 
 	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
 	// предмета обслуживает ОДНА петля: три расписания об одном предмете
-	// разошлись бы молча.
-	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
+	// разошлись бы молча. Здесь — только СБОРКА: запуск стоит после последнего
+	// отказа старта (`startRetentionSweeps`, #253).
+	retentionSweeper, err := buildRetentionSweeper(pool, cfg, metricsReg, lane.retentionReapers(), logger)
+	if err != nil {
 		return err
 	}
 	// `InternalHumanSessionService.Resolve` — внутренний слушатель, исполнитель
@@ -2178,6 +2174,14 @@ func runServe(cfg config.Config) error {
 		}
 		return nil
 	})
+
+	// Уборки по сроку — ресурсного журнала подписки (своим уборщиком, довод в
+	// `subscription_wiring.go`) и таблиц службы — запускаются ЗДЕСЬ: после
+	// последнего отказа старта и на корневом контексте задач (#253, шапка
+	// `startRetentionSweeps`).
+	if err := startRetentionSweeps(taskCtx, retentionSweeper, pool, cfg, logger); err != nil {
+		return err
+	}
 
 	var group errgroup.Group
 	for _, task := range tasks {
