@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 770
+Всего кейсов: 772
 
 ## Перепись по модулям
 
@@ -41,7 +41,7 @@
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
 | `cases/iam-account-redesign.py` | 9 |
-| `cases/iam-account.py` | 56 |
+| `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
@@ -455,7 +455,7 @@
 - `IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG`
 - `IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT`
 
-## `cases/iam-account.py` — 56 кейсов
+## `cases/iam-account.py` — 58 кейсов
 
 > Case-set для AccountService.
 
@@ -515,6 +515,8 @@
 - `IAM-ACC-ID-22`
 - `IAM-ACC-ID-23`
 - `IAM-ACC-ID-25`
+- `IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE`
+- `IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME`
 
 ## `cases/iam-authz-grant-check-propagation.py` — 10 кейсов
 

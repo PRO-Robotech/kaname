@@ -25886,6 +25886,2480 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE — Ф4-29: Create с именем из пространства личных аккаунтов → 400 резерва; близнец без дефиса на границе → аккаунт заведён",
+      "description": "class:NEG | class:VAL | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: f429-create-reserved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"personal-cloud-{{rsvTail}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
+                  "const _t = _rid.slice(-12);",
+                  "pm.environment.set('rsvTail', _t);",
+                  "pm.environment.set('rsvTailUpper', _t.toUpperCase() + 'X');",
+                  "if (_t.length === 0) {",
+                  "  pm.test('fixture: runId is seeded (name entropy source for rsvTail)', () => pm.expect(_t.length, 'runId').to.be.above(0));",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('refusal text is the owner\\'s verbatim tone', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('Illegal argument name: prefix \\'personal-cloud-\\' is reserved for personal accounts');",
+                  "});",
+                  "pm.test('синхронный отказ: операции нет', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, JSON.stringify(j)).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: f429-reserved-account-absent",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts?pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts?pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts?pageSize=1000');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('аккаунта с отвергнутым именем нет', () => {",
+                  "  const want = 'personal-cloud-' + pm.environment.get('rsvTail');",
+                  "  const names = (pm.response.json().accounts || []).map(a => a.name);",
+                  "  pm.expect(names, JSON.stringify(names)).to.not.include(want);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: f429-bad-form-keeps-the-form-refusal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"personal-cloud-{{rsvTailUpper}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('отказ формы, а не резерва', () => {",
+                  "  const m = pm.response.json().message || '';",
+                  "  pm.expect(m, m).to.match(/^Illegal argument name: must match /);",
+                  "  pm.expect(m, m).to.not.include('is reserved for personal accounts');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: f429-twin-create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"personal-cloud{{rsvTail}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rsvAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('rsvAccId') === -1) _pv.push('rsvAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('rsvPrjId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('rsvPrjId') === -1) _pv.push('rsvPrjId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{opId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "if (pm.response.code !== 200) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('rsvAccId');",
+                  "    pm.environment.unset('rsvPrjId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom rsvAccId, rsvPrjId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE :: f429-twin-created",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('аккаунт заведён с именем близнеца', () => {",
+                  "  pm.expect(pm.response.json().name).to.eql('personal-cloud' + pm.environment.get('rsvTail'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME — Ф4-30: переименование в пространство личных аккаунтов → 400 резерва, имя прежнее; близнецы — переименование без дефиса, правка меток и повтор имени личного аккаунта",
+      "description": "class:NEG | class:VAL | priority:P1",
+      "item": [
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-rename-reserved",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"personal-cloud-{{rsvTail}}\", \"updateMask\": \"name\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('rsvAccId')) {",
+                  "  pm.test('«Дано» Ф4-30: аккаунт вызывающего заведён близнецом Ф4-29', () => {",
+                  "    pm.expect.fail('rsvAccId пуст — близнец Ф4-29 аккаунта не завёл');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('refusal text is the owner\\'s verbatim tone', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('Illegal argument name: prefix \\'personal-cloud-\\' is reserved for personal accounts');",
+                  "});",
+                  "pm.test('синхронный отказ: операции нет', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, JSON.stringify(j)).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-name-unchanged",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('имя аккаунта осталось прежним', () => {",
+                  "  pm.expect(pm.response.json().name).to.eql('personal-cloud' + pm.environment.get('rsvTail'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-twin-rename",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"personal-cloudz{{rsvTail}}\", \"updateMask\": \"name\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{opId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "if (pm.response.code !== 200) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-twin-renamed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsv'",
+                  "const __t = pm.environment.get('jwtHumanAccRsv') || pm.variables.get('jwtHumanAccRsv') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsv is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsv is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('имя сменилось', () => {",
+                  "  pm.expect(pm.response.json().name).to.eql('personal-cloudz' + pm.environment.get('rsvTail'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-personal-account-read",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{ceremonyAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{ceremonyAccountId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{ceremonyAccountId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('ceremonyAccountId')) {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] «Дано» Ф4-30: личный аккаунт человека церемонии', () => {",
+                  "    pm.expect.fail('ceremonyAccountId пуст — волна церемонии его не записала');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('fixture: это личный аккаунт — имя несёт префикс', () => pm.expect(j.name, j.name).to.match(/^personal-cloud-/));",
+                  "pm.test('fixture: меток у личного аккаунта нет — кейс вернёт их пустыми', () => pm.expect(Object.keys(j.labels || {}), JSON.stringify(j.labels)).to.be.empty);",
+                  "pm.environment.set('rsvPersonalName', j.name);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-personal-account-labels",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{ceremonyAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{ceremonyAccountId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"labels\": {\"f430\": \"{{rsvTail}}\"}, \"updateMask\": \"labels\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{ceremonyAccountId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: poll-op #2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{opId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "if (pm.response.code !== 200) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-personal-account-same-name",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{ceremonyAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{ceremonyAccountId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"{{rsvPersonalName}}\", \"updateMask\": \"name\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{ceremonyAccountId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "",
+                  "// Ждать можно ПРАВА на существующее имя, а не появление самого имени: адрес,",
+                  "// собранный из незахваченной переменной, окно видимости не наполнит никогда.",
+                  "const _rpath = ((pm.request.url && pm.request.url.path) || []).map(function (s) {",
+                  "  return String(s && s.value !== undefined ? s.value : s);",
+                  "});",
+                  "const _rblank = _rpath.some(function (v) {",
+                  "  if (v === '') { return true; }",
+                  "  var _d = v; try { _d = decodeURIComponent(v); } catch (e) { _d = v; }",
+                  "  return /\\{\\{[^}]*\\}\\}/.test(_d);",
+                  "});",
+                  "if (_rblank) {",
+                  "  pm.environment.unset('_authRetryCount');",
+                  "  pm.environment.unset('_authRetryStarted');",
+                  "  pm.test('step addresses a captured variable', function () {",
+                  "    pm.expect.fail('адрес шага собран из НЕЗАХВАЧЕННОЙ переменной (/' + _rpath.join('/') +",
+                  "      '): предыдущий шаг не захватил её, повторять нечего');",
+                  "  });",
+                  "}",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if (!_rblank && [403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: poll-op #3",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{opId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "if (pm.response.code !== 200) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-personal-account-after",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{ceremonyAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{ceremonyAccountId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{ceremonyAccountId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('метка поставлена, имя прежнее', () => {",
+                  "  pm.expect(j.name).to.eql(pm.environment.get('rsvPersonalName'));",
+                  "  pm.expect((j.labels || {}).f430).to.eql(pm.environment.get('rsvTail'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: f430-personal-account-labels-restore",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{ceremonyAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{ceremonyAccountId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"labels\": {}, \"updateMask\": \"labels\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{ceremonyAccountId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: poll-op #4",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
+                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{opId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                  "if (pm.response.code !== 200) {",
+                  "  pm.environment.unset('_pollCount');",
+                  "  return;",
+                  "}",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: teardown-rsv-project",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{rsvPrjId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{rsvPrjId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsvStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccRsvStepUp') || pm.variables.get('jwtHumanAccRsvStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsvStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsvStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/projects/{{rsvPrjId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_rsv_project') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_rsv_project', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_rsv_project', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_rsv_project') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_rsv_project', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_rsv_project');",
+                  "pm.environment.unset('_poll200_started_teardown_rsv_project');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_rsvPrjRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_rsvPrjRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: teardown-rsv-project-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_rsvPrjRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_rsvPrjRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsvStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccRsvStepUp') || pm.variables.get('jwtHumanAccRsvStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsvStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsvStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{_rsvPrjRevOp}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__rsvPrjRevOpStarted') !== pm.info.requestName) { pm.environment.set('__rsvPrjRevOpCount', '0'); pm.environment.set('__rsvPrjRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_rsvPrjRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__rsvPrjRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__rsvPrjRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__rsvPrjRevOpCount'); pm.environment.unset('__rsvPrjRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: teardown-rsv-account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{rsvAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{rsvAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsvStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccRsvStepUp') || pm.variables.get('jwtHumanAccRsvStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsvStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsvStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{rsvAccId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_rsv_account') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_rsv_account', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_rsv_account', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_rsv_account') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_rsv_account', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_rsv_account');",
+                  "pm.environment.unset('_poll200_started_teardown_rsv_account');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_rsvAccRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_rsvAccRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME :: teardown-rsv-account-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_rsvAccRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_rsvAccRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccRsvStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccRsvStepUp') || pm.variables.get('jwtHumanAccRsvStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanAccRsvStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccRsvStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{_rsvAccRevOp}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__rsvAccRevOpStarted') !== pm.info.requestName) { pm.environment.set('__rsvAccRevOpCount', '0'); pm.environment.set('__rsvAccRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_rsvAccRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__rsvAccRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__rsvAccRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__rsvAccRevOpCount'); pm.environment.unset('__rsvAccRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

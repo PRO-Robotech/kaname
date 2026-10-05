@@ -333,6 +333,18 @@ func isConnectionFailure(err error) bool {
 	return stderrors.Is(err, pgconn.ErrConnClosed)
 }
 
+// accountNameTakenText — текст занятого имени аккаунта. Имя формы
+// идентификатора носит только аккаунт с этим самым идентификатором (Р6, CHECK
+// `accounts_name_is_not_a_foreign_id`), значит конфликт такого имени — это
+// конфликт идентификатора, и текст тот же. Единственное написание для обоих
+// исходов ключа имени: сырого 23505 и нуля строк вставки (`insertConflict`).
+func accountNameTakenText(name string) string {
+	if ids.IsValid(name, domain.PrefixAccount) {
+		return fmt.Sprintf("Account %s already exists", name)
+	}
+	return fmt.Sprintf("Account with name %s already exists", name)
+}
+
 func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	switch pgErr.ConstraintName {
 	// Идентификатор аккаунта может прислать вызывающий (kaname#549, Р4), поэтому
@@ -351,10 +363,7 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// Без этой ветви ответ на запрос с пустым именем зависел бы от порядка,
 		// в котором база проверяет два ключа одной вставки.
 		_, name := splitAccountInsertHint(idHint)
-		if ids.IsValid(name, domain.PrefixAccount) {
-			return fmt.Sprintf("Account %s already exists", name)
-		}
-		return fmt.Sprintf("Account with name %s already exists", name)
+		return accountNameTakenText(name)
 	// Имени `users_external_id_unique` в этом перечне НЕТ и заводить его не
 	// надо: ни одна миграция такого ключа не создаёт. Оно стояло здесь и
 	// молчало — ветвь, которую сервер не выберет никогда, выглядит покрытием и

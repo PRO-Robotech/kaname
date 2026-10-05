@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// register_integration_test.go — ТРИ СЛЕДСТВИЯ РЕГИСТРАЦИИ — ОДНА ТРАНЗАКЦИЯ
+// register_integration_test.go — ЧЕТЫРЕ СЛЕДСТВИЯ РЕГИСТРАЦИИ — ОДНА ТРАНЗАКЦИЯ
 // нашей базы (приёмка Ф4 `docs/engineering/acceptance/registration-and-its-three-consequences.md`,
 // Р1, Р3, Р6; сценарии Ф4-01…Ф4-05, Ф4-11, Ф4-13, Ф4-20, Ф4-23, Ф4-24; Ф1-62).
 //
@@ -219,7 +219,15 @@ func (h *harness) register(t *testing.T, uc *registration.RegisterUseCase, email
 func (h *harness) assertAllThree(t *testing.T, email string, out registration.Output) {
 	t.Helper()
 	r := h.rowsFor(t, email)
-	require.Equal(t, rows{users: 1, methods: 1, sessions: 1, accounts: 1}, r, "три следствия одним исходом")
+	require.Equal(t, rows{users: 1, methods: 1, sessions: 1, accounts: 1}, r, "четыре следствия одним исходом")
+
+	// Ф4-05 (§10а п. 1): личный аккаунт ровно один, его владелец — зарегистрировавшийся
+	// (счёт строкой выше идёт по владельцу), и проект в нём ровно один.
+	var projects int
+	require.NoError(t, h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM projects p JOIN accounts a ON a.id = p.account_id
+		   JOIN users u ON u.id = a.owner_user_id WHERE lower(u.email) = lower($1)`, email).Scan(&projects))
+	require.Equal(t, 1, projects, "Ф4-05: в личном аккаунте ровно один проект")
 
 	var status, ext string
 	var verifiedAt *time.Time
@@ -244,7 +252,7 @@ func freshEmail(tag string) string {
 }
 
 // TestRegisterIntegration_F4_01_05_SuccessGivesAllThreeConsequences — Ф4-01 и
-// положительный контроль Ф4-05: ни одного внесённого различия — все три
+// положительный контроль Ф4-05: ни одного внесённого различия — все четыре
 // следствия на месте после ОДНОГО обращения.
 func TestRegisterIntegration_F4_01_05_SuccessGivesAllThreeConsequences(t *testing.T) {
 	h := newHarness(t)
@@ -324,7 +332,7 @@ func TestRegisterIntegration_F4_11_24_OccupiedAddressIsOneRefusal(t *testing.T) 
 }
 
 // TestRegisterIntegration_F1_62_ConcurrentRegistrationsAdmitExactlyOne — две
-// регистрации одним свободным адресом ОДНОВРЕМЕННО: ровно одна даёт все три
+// регистрации одним свободным адресом ОДНОВРЕМЕННО: ровно одна даёт все четыре
 // следствия, вторая получает тот же отказ, что занятость (Ф1-22, С6).
 func TestRegisterIntegration_F1_62_ConcurrentRegistrationsAdmitExactlyOne(t *testing.T) {
 	h := newHarness(t)

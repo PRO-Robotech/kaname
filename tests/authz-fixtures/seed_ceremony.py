@@ -154,7 +154,7 @@ MINTED_CEREMONY = ("jwtHumanCeremony", "ceremonyUserId", "ceremonyEmail")
 # кейсов в одного человека значит воспроизводить сценарий, который продукт
 # отвергает. Имена слотов — те, что читают кейсы (`cases/iam-account.py`,
 # `cases/iam-account-redesign.py`, `cases/rbac-visibility-set.py`).
-ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop",
+ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop", "AccRsv",
                    "AccRdDerive", "AccRdSaga", "AccRdRestrict", "RbacVisSet",
                    # Арендаторы полосы «идентификатор указан при создании» (kaname#549,
                    # приёмка account-id-may-be-supplied-at-create §6.2): по человеку на
