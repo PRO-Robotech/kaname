@@ -389,8 +389,8 @@ func TestCreate_InsertFails_CompensatesTheRegistration(t *testing.T) {
 }
 
 // TestUpdate_EmptyMask_AppliesEveryMutableField — scenario 07's positive half.
-// An empty mask is a full-object PATCH over the mutable fields; the immutable
-// values carried in the body are ignored rather than refused.
+// An empty mask is a full-object PATCH over the mutable fields; the stored
+// immutable values stay as they are (the request has no field to carry them).
 func TestUpdate_EmptyMask_AppliesEveryMutableField(t *testing.T) {
 	stored := validStored()
 	stored.ClientID = "provider-original"

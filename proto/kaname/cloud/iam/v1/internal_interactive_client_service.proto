@@ -262,10 +262,13 @@ message UpdateInteractiveClientRequest {
   // ID of the InteractiveClient to update.
   string interactive_client_id = 1;
 
-  // Fields to update. Empty mask → full-object PATCH over mutable fields;
-  // immutable fields present in the body are silently ignored. A mask naming
-  // an immutable field is rejected BY NAME; a mask naming an unknown field is
-  // rejected against the known-set.
+  // Fields to update. Empty mask → full-object PATCH over every mutable field
+  // below. The body carries ONLY mutable fields: the immutable ones (`id`,
+  // `client_id`, `audiences`, `grant_types`, `token_endpoint_auth_method`,
+  // `status`, `created_at`) are not part of this message, so a body cannot
+  // name one. A mask naming an immutable field is rejected BY NAME with
+  // INVALID_ARGUMENT `<field> is immutable after InteractiveClient.Create`; a
+  // mask naming an unknown field is rejected against the known-set.
   google.protobuf.FieldMask update_mask = 2;
 
   // New name.

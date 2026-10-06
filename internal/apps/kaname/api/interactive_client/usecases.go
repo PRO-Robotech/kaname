@@ -405,8 +405,9 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 		return nil, shared.MapRepoErr(err)
 	}
 
-	// Empty mask → full-object PATCH over the mutable fields; immutable values
-	// present in the body are silently ignored (api-conventions).
+	// Empty mask → full-object PATCH over the mutable fields (api-conventions).
+	// The request message carries no immutable field at all, so there is nothing
+	// in the body to apply or to ignore beyond this set (kaname#562).
 	set := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		set[normalizeFieldPath(p)] = true

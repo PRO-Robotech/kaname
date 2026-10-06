@@ -526,9 +526,9 @@ type ListSAKeysRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the ServiceAccount.
 	ServiceAccountId string `protobuf:"bytes,1,opt,name=service_account_id,json=serviceAccountId,proto3" json:"service_account_id,omitempty"`
-	// Maximum number of results per page. 0 selects this List's default (100 —
-	// not the platform-wide 50 most Lists of the service apply); a value above
-	// 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+	// Maximum number of results per page. 0 selects the platform default (50),
+	// the same one every List of the service applies; a value outside [0..1000]
+	// is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListSAKeysResponse.next_page_token] returned by a previous list request.
