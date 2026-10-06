@@ -1,0 +1,13 @@
+name: user-token-issued
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  user_id: {type: text, presence: required}
+  token_id: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Выпущен токен пользователя"
+  en: "User token issued"

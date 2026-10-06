@@ -1,0 +1,6 @@
+blocks:
+  - heading: "Access recovery"
+  - p: "Your access recovery code:"
+  - code: "{{ code }}"
+  - kv: [{key: "Requested", value: "{{ requested_at }}"}]
+  - warning: "If this was not you, do nothing."

@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Second factor changed"
+  - p: "The second sign-in factor of the account was changed."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "Change", value: "{{ change }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

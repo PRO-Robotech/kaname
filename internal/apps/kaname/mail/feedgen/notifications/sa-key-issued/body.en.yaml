@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Service account key issued"
+  - p: "A key was issued for a service account."
+  - kv: [{key: "Service account", value: "{{ service_account_id }}"}, {key: "Key", value: "{{ key_id }}"}, {key: "Account", value: "{{ account_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

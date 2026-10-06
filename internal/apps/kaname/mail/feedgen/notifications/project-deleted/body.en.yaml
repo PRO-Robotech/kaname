@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Project deleted"
+  - p: "A project of the account was deleted."
+  - kv: [{key: "Project", value: "{{ project_id }}"}, {key: "Account", value: "{{ account_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

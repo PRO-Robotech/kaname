@@ -1,0 +1,12 @@
+name: registration
+class: security
+recipient: address
+ttl: 1h
+limits:
+  - {scope: recipient, window: 24h, max: 44}
+attributes:
+  code: {type: secret, presence: required}
+  requested_at: {type: timestamp, presence: required}
+subject:
+  ru: "Код регистрации"
+  en: "Registration code"

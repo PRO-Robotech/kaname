@@ -1,0 +1,11 @@
+name: registration-existing
+class: security
+recipient: address
+ttl: 1h
+limits:
+  - {scope: recipient, window: 24h, max: 44}
+attributes:
+  requested_at: {type: timestamp, presence: required}
+subject:
+  ru: "Попытка регистрации на ваш адрес"
+  en: "Registration attempt with your address"

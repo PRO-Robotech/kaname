@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Removed from the account"
+  - p: "A user was removed from the account."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "Account", value: "{{ account_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."
