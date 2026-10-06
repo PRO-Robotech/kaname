@@ -87,8 +87,8 @@ important:
       Команды по дереву платформы записаны псевдо-путём 'PRO-Robotech/kacho@680d1794:gateway/**'
       как pathspec — в таком виде они ничего не находят (git grep и git log выдают пусто). Утверждения
       верны: перемерено формой git grep -n 'addressRefusalText *=' 680d1794 -- gateway ':!*_test.go'
-      → address_refusal.go:43, значение прежнее; git log -S'confirm it with the code from the letter'
-      680d1794 -- gateway → 81f7bf3504e, 97e018f606d, c13dd559ba2. Записать исполнимой формой, как
+      → address_refusal.go:43, значение прежнее; поиск по истории платформы (ревизия 680d1794, каталог gateway, образец «confirm it with the code from the letter»)
+      → 81f7bf3504e, 97e018f606d, c13dd559ba2. Записать исполнимой формой, как
       это уже сделано в F6b §Р3.
   - id: I2
     kind: COVERAGE
