@@ -46,8 +46,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/check"
 )
 
-// requiredSecurityList — координата перечня по приёмке (Р3, NTF2-99).
-const requiredSecurityList = "notifications/required-security.yaml"
+// requiredSecurityList — координата перечня. Приёмка (Р3, NTF2-99) называет её
+// `notifications/required-security.yaml` рядом с `notifications/*/notification.yaml`;
+// правило генератора corelib (cmd/notifygen ntf2_99_test.go, notify/spec load.go)
+// кладёт перечень в каталог шаблонов владельца — обе координаты приёмки в одном
+// каталоге, `<владелец>/notifications/`. Перечень вне каталога шаблонов
+// генератор отвергает «файл вне раскладки шаблона» либо как каталог без пакета Go.
+const requiredSecurityList = requiredSecurityCatalog + "/required-security.yaml"
 
 // requiredSecurityCatalog — каталог шаблонов kaname: владелец генератора — пакет
 // функций постановки feedgen (замысел З1, И28; вывод notifygen).
