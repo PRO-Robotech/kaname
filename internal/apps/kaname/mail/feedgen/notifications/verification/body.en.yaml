@@ -1,0 +1,6 @@
+blocks:
+  - heading: "Email address confirmation"
+  - p: "Enter this code on the address confirmation screen:"
+  - code: "{{ code }}"
+  - kv: [{key: "Requested", value: "{{ requested_at }}"}]
+  - warning: "If this was not you, do nothing."

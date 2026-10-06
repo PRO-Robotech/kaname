@@ -1,0 +1,13 @@
+name: second-factor-changed
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  user_id: {type: text, presence: required}
+  change: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Второй фактор изменён"
+  en: "Second factor changed"

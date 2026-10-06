@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Access key changed"
+  - p: "An access key of the account was changed."
+  - kv: [{key: "Key", value: "{{ access_key_id }}"}, {key: "Change", value: "{{ change }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

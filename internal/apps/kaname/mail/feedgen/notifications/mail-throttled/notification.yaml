@@ -1,0 +1,11 @@
+name: mail-throttled
+class: security
+recipient: address
+ttl: 24h
+limits:
+  - {scope: recipient, window: 24h, max: 1}
+attributes:
+  requested_at: {type: timestamp, presence: required}
+subject:
+  ru: "Письма на ваш адрес приостановлены"
+  en: "Mail to your address is paused"

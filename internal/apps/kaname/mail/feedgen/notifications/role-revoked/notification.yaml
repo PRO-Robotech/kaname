@@ -1,0 +1,14 @@
+name: role-revoked
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  role_id: {type: text, presence: required}
+  resource_id: {type: text, presence: required}
+  subject_id: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Роль отозвана"
+  en: "Role revoked"

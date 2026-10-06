@@ -1,0 +1,12 @@
+name: recovery
+class: security
+recipient: address
+ttl: 1h
+limits:
+  - {scope: recipient, window: 24h, max: 49}
+attributes:
+  code: {type: secret, presence: required}
+  requested_at: {type: timestamp, presence: required}
+subject:
+  ru: "Код восстановления доступа"
+  en: "Access recovery code"

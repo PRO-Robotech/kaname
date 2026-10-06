@@ -1,0 +1,5 @@
+blocks:
+  - heading: "User token issued"
+  - p: "A token was issued for the account."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "Token", value: "{{ token_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

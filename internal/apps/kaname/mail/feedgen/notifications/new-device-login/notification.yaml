@@ -1,0 +1,12 @@
+name: new-device-login
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  user_id: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Вход с нового устройства"
+  en: "Sign-in from a new device"

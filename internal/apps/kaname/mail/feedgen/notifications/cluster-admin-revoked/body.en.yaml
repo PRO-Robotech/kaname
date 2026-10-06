@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Cloud administrator rights revoked"
+  - p: "Cloud administrator rights were revoked from a user."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."
