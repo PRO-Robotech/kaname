@@ -344,7 +344,7 @@
                   "});",
                   "pm.test('REG-POSITION: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('email address is not verified');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)');",
                   "});",
                   "pm.test('REG-POSITION: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('REG-POSITION: токен отказа EMAIL_NOT_VERIFIED', () => {",

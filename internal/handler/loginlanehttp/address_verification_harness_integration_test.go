@@ -80,7 +80,7 @@ const (
 )
 
 // avRefusalBody — значение отказа положения на полосе формы (Р3) побайтово.
-const avRefusalBody = `{"code":7,"message":"email address is not verified","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"EMAIL_NOT_VERIFIED","domain":"iam.kaname.cloud"}]}`
+const avRefusalBody = `{"code":7,"message":"email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"EMAIL_NOT_VERIFIED","domain":"iam.kaname.cloud"}]}`
 
 // avClock — управляемые часы глаголов стенда.
 type avClock struct {
