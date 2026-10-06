@@ -51,7 +51,12 @@
 -- Имя триггера несёт `zz_` намеренно: Postgres исполняет BEFORE-триггеры одного
 -- события в порядке ИМЁН, и сравнивать `NEW` с `OLD` обязан последний из них —
 -- триггер, исполненный после и переписавший значимый столбец, иначе прошёл бы
--- мимо версии.
+-- мимо версии. Исключение одно — `users`: последнее место там держит снятие
+-- отметки подтверждения адреса (`users_email_change_drops_verification`, проба
+-- Н2), и триггер версии назван так, чтобы исполняться ДО него; тот пишет только
+-- отметку подтверждения — служебный столбец. Соседей после триггера версии
+-- держит закрытым перечнем с доводом проба
+-- `authz_rev_stamp_neighbours_integration_test.go`.
 --
 -- =============================================================================
 -- СТРОКИ, ЛЕЖАЩИЕ ДО ЭТОЙ МИГРАЦИИ
@@ -392,13 +397,13 @@ END;
 $$;
 -- +goose StatementEnd
 
-CREATE TRIGGER users_zz_authz_rev_trg
+CREATE TRIGGER users_authz_rev_trg
   BEFORE INSERT OR UPDATE ON kaname.users
   FOR EACH ROW EXECUTE FUNCTION kaname.users_authz_rev_stamp();
 
 -- +goose Down
 
-DROP TRIGGER users_zz_authz_rev_trg ON kaname.users;
+DROP TRIGGER users_authz_rev_trg ON kaname.users;
 DROP FUNCTION kaname.users_authz_rev_stamp();
 ALTER TABLE kaname.users DROP COLUMN authz_rev;
 
