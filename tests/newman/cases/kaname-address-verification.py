@@ -952,10 +952,53 @@ def _exchange(p, name):
     )
 
 
+def _fresh_totp_step(s, name):
+    """Ждёт начала ступени кода по времени, начавшейся ПОСЛЕ входа в шаг.
+
+    Надзор облака входит и в другом наборе того же прогона (восстановление), а
+    принятую ступень служба второй раз не принимает (Ф12-15). Коллекции идут одна
+    за другой, поэтому ступень, начавшаяся позже первого исполнения этого шага,
+    не была предъявлена никем. Ожидание — опросом признака формы входа (чтение,
+    ничего не меняющее) с настоящей паузой: одной паузой ждать нельзя, песочница
+    прогонщика обрывает скрипт на 30 с. Предел — две ступени."""
+    label = name.upper()
+    path = f"{_CSRF}?form=login"
+    start, count = f"_{s}TotpFrom", f"_{s}TotpWait"
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[
+            *_require_keys(_SUPERVISOR_KEYS, _SUPERVISOR_WHY),
+            *require_env_url("loginLaneBaseUrl", path, _LANE_WHY),
+            f"if (pm.environment.get({js_str(start + 'Req')}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(start)}, String(Math.floor(Date.now() / 1000 / 30)));",
+            f"  pm.environment.set({js_str(count)}, '0');",
+            f"  pm.environment.set({js_str(start + 'Req')}, pm.info.requestName);",
+            "}",
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            f"const __from = parseInt(pm.environment.get({js_str(start)}) || '0', 10);",
+            f"const __n = parseInt(pm.environment.get({js_str(count)}) || '0', 10);",
+            "if (pm.response.code === 200 && Math.floor(Date.now() / 1000 / 30) <= __from && __n < 70) {",
+            f"  pm.environment.set({js_str(count)}, String(__n + 1));",
+            "  const _tsd = Date.now(); while (Date.now() - _tsd < 1000) { /* inter-poll delay: next TOTP step not started yet */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(count)});",
+            f"pm.environment.unset({js_str(start + 'Req')});",
+            *_status_is(200, label),
+            f"pm.test({js_str(label + ': началась ступень кода, которой до этого набора не было')}, () => "
+            "pm.expect(Math.floor(Date.now() / 1000 / 30) > __from).to.eql(true));",
+        ],
+    )
+
+
 def _supervisor_bearer(s, tag, *, init=()):
     """Токен надзора облака уровнем «2»: вход со вторым фактором → код → обмен."""
     up = tag.upper()
     return [
+        _fresh_totp_step(s, f"{tag}-totp-step-fresh"),
         _csrf_step(s, f"{tag}-csrf-login", "login", with_session=None, init=[
             *_require_keys(_SUPERVISOR_KEYS, _SUPERVISOR_WHY),
             *init,

@@ -7607,6 +7607,107 @@
       "description": "class:CRUD | class:STATE | priority:P1",
       "item": [
         {
+          "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS :: f427-inviter-totp-step-fresh",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (!pm.environment.get('cloudSupervisorEmail') || !pm.environment.get('cloudSupervisorPassword') || !pm.environment.get('cloudSupervisorTotpSecret')) {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] посев стенда: cloudSupervisorEmail, cloudSupervisorPassword, cloudSupervisorTotpSecret заданы', () => {",
+                  "    pm.expect.fail('надзор облака стенда — единственный человек стенда `chart-own` с уровнем «2», которого требует глагол приглашения; его адрес, пароль и секрет фактора пишет посев церемонии стенда чарта (`stand-chart.sh seed-ceremony`)');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_avSTotpFromReq') !== pm.info.requestName) {",
+                  "  pm.environment.set('_avSTotpFrom', String(Math.floor(Date.now() / 1000 / 30)));",
+                  "  pm.environment.set('_avSTotpWait', '0');",
+                  "  pm.environment.set('_avSTotpFromReq', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __from = parseInt(pm.environment.get('_avSTotpFrom') || '0', 10);",
+                  "const __n = parseInt(pm.environment.get('_avSTotpWait') || '0', 10);",
+                  "if (pm.response.code === 200 && Math.floor(Date.now() / 1000 / 30) <= __from && __n < 70) {",
+                  "  pm.environment.set('_avSTotpWait', String(__n + 1));",
+                  "  const _tsd = Date.now(); while (Date.now() - _tsd < 1000) { /* inter-poll delay: next TOTP step not started yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_avSTotpWait');",
+                  "pm.environment.unset('_avSTotpFromReq');",
+                  "pm.test('F427-INVITER-TOTP-STEP-FRESH: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('F427-INVITER-TOTP-STEP-FRESH: началась ступень кода, которой до этого набора не было', () => pm.expect(Math.floor(Date.now() / 1000 / 30) > __from).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS :: f427-inviter-csrf-login",
           "request": {
             "method": "GET",
