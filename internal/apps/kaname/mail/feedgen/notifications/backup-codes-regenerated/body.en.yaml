@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Backup codes regenerated"
+  - p: "Backup sign-in codes were regenerated; the previous ones no longer work."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

@@ -1,0 +1,6 @@
+blocks:
+  - heading: "Completing the registration"
+  - p: "Your registration code:"
+  - code: "{{ code }}"
+  - kv: [{key: "Requested", value: "{{ requested_at }}"}]
+  - warning: "If this was not you, do nothing."

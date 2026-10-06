@@ -1,0 +1,8 @@
+blocks:
+  - heading: "Вас пригласили в облако"
+  - p: "Вас пригласили в аккаунт облака."
+  - p: "Приглашение отправил {{ inviter_address }}."
+    when: inviter_address
+  - kv: [{key: "Аккаунт", value: "{{ account_id }}"}, {key: "Действует до", value: "{{ expires_at }}"}]
+  - button: {text: "Принять приглашение", token: token, path: "/registration"}
+  - warning: "Если вы не ждали приглашения — ничего не делайте."

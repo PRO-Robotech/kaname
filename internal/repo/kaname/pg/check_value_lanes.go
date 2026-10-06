@@ -57,6 +57,14 @@ package pg
 // приходит предикатом `isLoginMethodsTable` — все её проверки судят значения
 // службы.
 //
+// Таблицы ленты извещений (порождены notifygen, NTF-2) здесь тоже не
+// называются: их имена производит только corelib, и литерал с суффиксом таблицы
+// ленты вне его — находка гейта NTF1-B19. Строку, окно и вклад строки в окно
+// пишет библиотека ленты по шаблону службы, состояние, исход и номер схемы — из
+// её закрытых словарей; вызывающий в эти таблицы не присылает ничего. Решение о
+// них приходит предикатом `isFeedTable` — все их проверки судят значения
+// службы, в том числе заведённые следующей версией схемы ленты.
+//
 // Отказ 23514, поднятый триггером БЕЗ клаузы `CONSTRAINT` (вид участника группы,
 // вид субъекта выдачи, ярус потолка, адреса возврата клиента), имени не несёт и
 // разбору по нему не поддаётся; каждый такой триггер судит присланное и отвечает
@@ -66,7 +74,23 @@ package pg
 import (
 	"maps"
 	"slices"
+
+	"github.com/PRO-Robotech/corelib/notify/feed"
 )
+
+// feedService — префикс ленты извещений службы «схема.служба»: тот, что служба
+// отдала `notifygen init -service` (заголовок миграции ленты). По нему corelib
+// узнаёт таблицы ленты, не отдавая их имён.
+const feedService = "kaname.kaname"
+
+// isFeedTable — «отказ пришёл от таблицы ленты извещений службы?». Предикат, а
+// не имя: перепись сверяет таблицу отказа, не собирая её имени сам. Негодный
+// префикс не узнаёт ни одной таблицы — отказ уходит без решения, и проба
+// переписи на живой схеме называет каждую проверку ленты.
+func isFeedTable(name string) bool {
+	tables, err := feed.TablesOf(feedService)
+	return err == nil && tables.Has(name)
+}
 
 // checkTableLanes — решение переписи о таблице, куда попадает присланное:
 // каждая её проверка в одном из двух перечней.
@@ -241,6 +265,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 		service: append(slices.Sorted(maps.Keys(interactiveClientProducedValueChecks)),
 			"interactive_clients_name_check"),
 	},
+	// Счёт актов приглашения (NTF-2, З24): строку пишет служба по акту, который
+	// она уже приняла, — идентификатор, вид акта, свёртку адресата, момент и
+	// отметку письма чеканит она, аккаунт — тот, чей акт принят.
+	"invite_acts": nil,
 	// Очередь писем — событие и адресата пишет служба.
 	"invite_mail_outbox": nil,
 	// Окно писем: адресата приводит к канонической форме служба.
@@ -251,6 +279,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 		caller:  []string{"login_failures_key_check"},
 		service: []string{"login_failures_scope_check"},
 	},
+	// Окно писем адресата (NTF-2, З11): назначение и вид письма — словарь
+	// службы, свёртку ключа, момент и строку ленты ставит служба.
+	"mail_window_letters": nil,
+	"mail_windows":        nil,
 	// Членство — идентификатор и состояние чеканит служба.
 	"memberships": nil,
 	// Отсечка выпущенных токенов: субъект и причину прислал вызывающий;
@@ -271,6 +303,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"operations":                   nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"own_ceilings": nil,
+	// Ожидающая регистрация «сначала письмо» (NTF-2, З14): присланные адрес,
+	// пароль и код в строку не попадают — их свёртки, хеш пароля, сроки и
+	// идентификатор чеканит служба.
+	"pending_registrations": nil,
 	// Учёт числа ресурсов ведут схема и служба.
 	"project_resource_quotas": nil,
 	// Описание и метки прислал вызывающий; форму имени служба судит сама (#718).
@@ -423,6 +459,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 		service: []string{"session_revocations_revoked_by_check"},
 	},
+	// Журнал извещений безопасности (NTF-2, З16): событие аудита, шаблон и
+	// адресата называет служба в транзакции события.
+	"security_notice_ledger": nil,
 	// Окно запросов с адреса источника (kaname#456): полосу называет служба,
 	// адрес источника ставит край, счёт ведёт служба.
 	"source_request_windows": nil,
@@ -433,6 +472,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"token_families": nil,
 	// Ключ подписи порождает и ведёт служба.
 	"token_signing_keys": nil,
+	// Доверенное устройство (NTF-2, З18): свёртку метки, человека и момент
+	// выдачи чеканит служба.
+	"trusted_devices": nil,
 	// Ключ доступа: описание и материал удостоверения (идентификатор, ключ,
 	// алгоритм, счётчик) — из ответа аутентификатора, который прислал
 	// вызывающий. Идентификатор и дескриптор человека чеканит служба, форму
@@ -503,9 +545,13 @@ const (
 )
 
 // writtenWhollyByService — объявляет ли перепись таблицу написанной службой
-// целиком (`nil`): ни одно её значение не приходит от вызывающего. Адаптер,
+// целиком (`nil` либо таблица ленты извещений, `isFeedTable`): ни одно её
+// значение не приходит от вызывающего. Адаптер,
 // судящий отказ своей таблицы классом, спрашивает это здесь, а не решает сам.
 func writtenWhollyByService(table string) bool {
+	if isFeedTable(table) {
+		return true
+	}
 	lanes, declared := checkValueLanes[table]
 	return declared && lanes == nil
 }
@@ -515,7 +561,7 @@ func checkValueLaneOf(table, constraint string) checkValueLane {
 	if constraint == "" {
 		return checkLaneUndecided
 	}
-	if isLoginMethodsTable(table) {
+	if isLoginMethodsTable(table) || isFeedTable(table) {
 		return checkLaneService
 	}
 	lanes, declared := checkValueLanes[table]

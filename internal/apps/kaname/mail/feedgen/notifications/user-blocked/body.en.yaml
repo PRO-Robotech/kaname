@@ -1,0 +1,5 @@
+blocks:
+  - heading: "User blocked"
+  - p: "A user was blocked across the installation."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

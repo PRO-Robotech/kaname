@@ -1,0 +1,8 @@
+blocks:
+  - heading: "You are invited to the cloud"
+  - p: "You are invited to an account in the cloud."
+  - p: "The invitation was sent by {{ inviter_address }}."
+    when: inviter_address
+  - kv: [{key: "Account", value: "{{ account_id }}"}, {key: "Valid until", value: "{{ expires_at }}"}]
+  - button: {text: "Accept the invitation", token: token, path: "/registration"}
+  - warning: "If you did not expect an invitation, do nothing."

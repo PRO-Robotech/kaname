@@ -1,0 +1,13 @@
+name: service-account-disabled
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  service_account_id: {type: text, presence: required}
+  account_id: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Сервисный аккаунт отключён"
+  en: "Service account disabled"

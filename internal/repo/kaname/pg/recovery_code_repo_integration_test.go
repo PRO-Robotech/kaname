@@ -46,6 +46,23 @@ func rcInsert(t *testing.T, repo *pg.HumanSessionRepo, c domain.RecoveryCode) {
 	ctx := context.Background()
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	require.NoError(t, w.InsertRecoveryCode(ctx, c))
+	require.NoError(t, w.Commit(ctx))
+}
+
+// rcIssue — выдача кода порядком варианта использования: прежние неприменённые
+// коды личности вытесняются той же транзакцией, затем вставляется новый. Живой
+// код у личности один (частичный UNIQUE recovery_codes_one_live_per_user, З12),
+// и вторую вставку без вытеснения база отвергает.
+func rcIssue(t *testing.T, repo *pg.HumanSessionRepo, c domain.RecoveryCode) {
+	t.Helper()
+	ctx := context.Background()
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	_, err = w.SupersedeRecoveryCodes(ctx, c.UserID)
+	require.NoError(t, err)
 	require.NoError(t, w.InsertRecoveryCode(ctx, c))
 	require.NoError(t, w.Commit(ctx))
 }
@@ -177,9 +194,11 @@ func TestRecoveryCodes_F5_04_ExpiredIsRefusedAndDoesNotRevive(t *testing.T) {
 	_, ok = rcConsume(t, repo, user, value.Digest(), hsBase.Add(rcTTL+time.Minute))
 	require.False(t, ok, "Ф5-04: повторное предъявление не оживляет код")
 
-	// Положительный контроль — тот же код до срока проходит.
+	// Положительный контроль — код той же формы до срока проходит. Истёкший
+	// неприменённый код живым для индекса остаётся (срок индекс не судит),
+	// поэтому новый выдаётся порядком варианта использования.
 	code2, value2 := rcCode(t, "rcv-04b", user, hsBase)
-	rcInsert(t, repo, code2)
+	rcIssue(t, repo, code2)
 	_, ok = rcConsume(t, repo, user, value2.Digest(), hsBase.Add(rcTTL-time.Second))
 	require.True(t, ok)
 }
@@ -295,19 +314,22 @@ func TestRecoveryCodes_SweepRemovesConsumedAndExpiredOnly(t *testing.T) {
 	pool := hsPool(t)
 	repo := pg.NewHumanSessionRepo(pool)
 	ctx := context.Background()
-	user := lmPeople(t, pool, "rcsw", 1)[0]
+	// Живой код у личности один (З12): истёкший неприменённый код — у второй
+	// личности, применённый и живой — у первой (применённый живым не считается).
+	people := lmPeople(t, pool, "rcsw", 2)
+	user, other := people[0], people[1]
 	// Часы уборки — базы; строки датируются от «сейчас» базы.
 	var dbNow time.Time
 	require.NoError(t, pool.QueryRow(ctx, `SELECT now()`).Scan(&dbNow))
 
-	expired, _ := rcCode(t, "rcv-sw-expired", user, dbNow.Add(-time.Hour))
+	expired, _ := rcCode(t, "rcv-sw-expired", other, dbNow.Add(-time.Hour))
 	consumed, consumedValue := rcCode(t, "rcv-sw-consumed", user, dbNow.Add(-time.Minute))
 	live, _ := rcCode(t, "rcv-sw-live", user, dbNow)
 	rcInsert(t, repo, expired)
 	rcInsert(t, repo, consumed)
-	rcInsert(t, repo, live)
 	_, ok := rcConsume(t, repo, user, consumedValue.Digest(), dbNow)
 	require.True(t, ok)
+	rcInsert(t, repo, live)
 
 	removed, full, err := repo.SweepUnservableRecoveryCodes(ctx, 0, 100)
 	require.NoError(t, err)
@@ -315,7 +337,8 @@ func TestRecoveryCodes_SweepRemovesConsumedAndExpiredOnly(t *testing.T) {
 	require.EqualValues(t, 2, removed, "снимаются истёкшая и применённая")
 
 	var ids []string
-	rows, err := pool.Query(ctx, `SELECT id FROM recovery_codes WHERE user_id = $1`, string(user))
+	rows, err := pool.Query(ctx, `SELECT id FROM recovery_codes WHERE user_id = ANY($1) ORDER BY id`,
+		[]string{string(user), string(other)})
 	require.NoError(t, err)
 	for rows.Next() {
 		var id string

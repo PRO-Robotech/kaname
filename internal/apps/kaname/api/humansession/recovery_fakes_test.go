@@ -61,8 +61,40 @@ func (w *fakeWriter) InsertRecoveryCode(_ context.Context, c domain.RecoveryCode
 	if _, ok := w.store.users[c.UserID]; !ok {
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s not found", c.UserID)
 	}
+	// Живой код у личности один (частичный UNIQUE recovery_codes_one_live_per_user,
+	// З12): живой — не применён и не вытеснен, срок индекс не судит. Адаптер
+	// видит записи своей транзакции, поэтому и дублёр судит по своему виду:
+	// зафиксированные строки минус снятые этой транзакцией плюс вставленные ею.
+	if w.liveCodeOf(c.UserID) {
+		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "RecoveryCode.Insert %s already exists", c.ID)
+	}
+	w.codesAdded = append(w.codesAdded, c)
 	w.ops = append(w.ops, func() { row := c; w.store.codes[c.ID] = &row })
 	return nil
+}
+
+// liveCodeOf — есть ли у личности живой код в виде этой транзакции.
+func (w *fakeWriter) liveCodeOf(userID domain.UserID) bool {
+	for id, c := range w.store.codes {
+		if c.UserID == userID && c.ConsumedAt == nil && !w.codesEnded[id] {
+			return true
+		}
+	}
+	for _, c := range w.codesAdded {
+		if c.UserID == userID && !w.codesEnded[c.ID] {
+			return true
+		}
+	}
+	return false
+}
+
+// endCode — строка кода снята этой транзакцией (вытеснена либо применена):
+// живой её транзакция больше не видит.
+func (w *fakeWriter) endCode(id domain.RecoveryCodeID) {
+	if w.codesEnded == nil {
+		w.codesEnded = map[domain.RecoveryCodeID]bool{}
+	}
+	w.codesEnded[id] = true
 }
 
 func (w *fakeWriter) SupersedeRecoveryCodes(_ context.Context, userID domain.UserID) (int, error) {
@@ -72,9 +104,19 @@ func (w *fakeWriter) SupersedeRecoveryCodes(_ context.Context, userID domain.Use
 	}
 	n := 0
 	for id, c := range w.store.codes {
-		if c.UserID == userID && c.ConsumedAt == nil {
+		if c.UserID == userID && c.ConsumedAt == nil && !w.codesEnded[id] {
 			n++
 			id := id
+			w.endCode(id)
+			w.ops = append(w.ops, func() { delete(w.store.codes, id) })
+		}
+	}
+	// Оператор адаптера видит и коды, вставленные этой же транзакцией.
+	for _, c := range w.codesAdded {
+		if c.UserID == userID && !w.codesEnded[c.ID] {
+			n++
+			id := c.ID
+			w.endCode(id)
 			w.ops = append(w.ops, func() { delete(w.store.codes, id) })
 		}
 	}
@@ -91,8 +133,9 @@ func (w *fakeWriter) ConsumeRecoveryCode(_ context.Context, userID domain.UserID
 		return domain.RecoveryCode{}, false, err
 	}
 	for _, c := range w.store.codes {
-		if c.UserID == userID && c.Digest == digest && c.ConsumedAt == nil && now.Before(c.ExpiresAt) {
+		if c.UserID == userID && c.Digest == digest && c.ConsumedAt == nil && now.Before(c.ExpiresAt) && !w.codesEnded[c.ID] {
 			row := c
+			w.endCode(c.ID)
 			at := now
 			w.ops = append(w.ops, func() { row.ConsumedAt = &at })
 			out := *c

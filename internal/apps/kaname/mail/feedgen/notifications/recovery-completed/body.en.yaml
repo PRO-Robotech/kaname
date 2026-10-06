@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Access recovered"
+  - p: "Access to the account was recovered and the password was set again."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

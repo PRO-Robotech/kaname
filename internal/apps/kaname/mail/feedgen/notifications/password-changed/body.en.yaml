@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Password changed"
+  - p: "The account password was changed."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

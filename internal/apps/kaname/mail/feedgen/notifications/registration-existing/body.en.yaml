@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Registration attempt"
+  - p: "Someone tried to register with this address, but an account already uses it. If this was you, sign in with your password."
+  - kv: [{key: "Requested", value: "{{ requested_at }}"}]
+  - warning: "If this was not you, do nothing."

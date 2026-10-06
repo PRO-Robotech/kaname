@@ -1,0 +1,13 @@
+name: access-key-changed
+class: security
+recipient: subject
+ttl: 72h
+limits:
+  - {scope: recipient, window: 24h, max: 10}
+attributes:
+  access_key_id: {type: text, presence: required}
+  change: {type: text, presence: required}
+  occurred_at: {type: timestamp, presence: required}
+subject:
+  ru: "Ключ входа изменён"
+  en: "Access key changed"

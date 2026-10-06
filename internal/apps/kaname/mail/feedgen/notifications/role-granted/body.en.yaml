@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Role granted"
+  - p: "A role was granted on a resource."
+  - kv: [{key: "Role", value: "{{ role_id }}"}, {key: "Resource", value: "{{ resource_id }}"}, {key: "Grantee", value: "{{ subject_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."
