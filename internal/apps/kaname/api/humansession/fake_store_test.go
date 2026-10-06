@@ -251,6 +251,11 @@ type fakeWriter struct {
 	// ключевого замка дверь снятия исполняет оператор подъёма, у сильного —
 	// нет.
 	sessionSet bool
+	// codesAdded и codesEnded — вид этой транзакции на коды восстановления до
+	// фиксации: вставленные ею и снятые ею (вытеснены либо применены). Адаптер
+	// свои записи в транзакции видит, и «живой код один» судится по этому виду.
+	codesAdded []domain.RecoveryCode
+	codesEnded map[domain.RecoveryCodeID]bool
 }
 
 // errFakeSecondPerson — вторая личность в транзакции, уже держащей строку

@@ -542,6 +542,17 @@ func parityCases() []parityCase {
 			UserID: p.user.ID, Digest: domain.CodeDigest(hexOf("new-code-" + p.tag)), IssuedAt: parityNow,
 			ExpiresAt: parityNow.Add(5 * time.Minute)}), "записан")
 	})
+	// Законный близнец: та же вставка после вытеснения прежнего кода той же
+	// транзакцией (порядок выдачи кода у варианта использования) — живой код у
+	// личности снова один, и обе стороны записывают.
+	wr("InsertRecoveryCode", "новый код её личности после вытеснения прежнего", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		if _, err := w.SupersedeRecoveryCodes(ctx, p.user.ID); err != nil {
+			return said(err, "")
+		}
+		return said(w.InsertRecoveryCode(ctx, domain.RecoveryCode{ID: domain.RecoveryCodeID("rcv-parity-next-" + p.tag),
+			UserID: p.user.ID, Digest: domain.CodeDigest(hexOf("next-code-" + p.tag)), IssuedAt: parityNow,
+			ExpiresAt: parityNow.Add(5 * time.Minute)}), "записан")
+	})
 	wr("SupersedeRecoveryCodes", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		n, err := w.SupersedeRecoveryCodes(ctx, p.user.ID)
 		return said(err, "снято %d", n)
