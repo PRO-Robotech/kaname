@@ -28,7 +28,7 @@ subject:
   task_premise_remeasured: >-
     ПОДТВЕРДИЛАСЬ целиком. Сценариев 63 (grep -oE '^\*\*EV-[0-9]{2}' | sort -u → 63), повторов 0.
     Клон платформы на 680d1794b6b8: git grep -n 'addressRefusalText *=' 680d1794:gateway -- ':!*_test.go'
-    → 680d1794:gateway:internal/middleware/address_refusal.go:43, код 0; git log -S… 680d1794 -- gateway
+    → 680d1794:gateway:internal/middleware/address_refusal.go:43, код 0; поиск истории по образцу текста (ревизия 680d1794, путь gateway)
     → 81f7bf3504e, 97e018f606d, c13dd559ba2; форма редакции 7 → пусто, код 1. Гейты на 8835e650e:
     TestAcceptancePathCoordinateResolves — координат 966, находок 0; TestHistoryQuestionsAreAskedOfTheTrunk
     — вопросов 128, находок 0. Довод о записи круга 5 перемерен экспериментом: в отдельной копии на
