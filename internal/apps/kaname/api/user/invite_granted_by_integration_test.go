@@ -48,7 +48,7 @@ func TestInviteIntegration_ProjectGrantCarriesTheGranter(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	inviter, accID := seedUserWithAccount(t, ctx, repo, "grantedby")
+	inviter, accID := seedUserWithAccount(t, ctx, pool, "grantedby")
 	projID := ids.NewID(domain.PrefixProject)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO kaname.projects (id, account_id, name, description, labels, created_at)
