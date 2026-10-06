@@ -29,6 +29,7 @@ const (
 	InternalIAMService_PollSubjectChanges_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges"
 	InternalIAMService_RegisterResource_FullMethodName         = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
 	InternalIAMService_UnregisterResource_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource"
+	InternalIAMService_CurrentAuthzRevision_FullMethodName     = "/kaname.cloud.iam.v1.InternalIAMService/CurrentAuthzRevision"
 	InternalIAMService_ResolveBasicCredential_FullMethodName   = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
 	InternalIAMService_GetRoleCompiled_FullMethodName          = "/kaname.cloud.iam.v1.InternalIAMService/GetRoleCompiled"
 	InternalIAMService_CheckBasicCredentialLive_FullMethodName = "/kaname.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive"
@@ -151,6 +152,26 @@ type InternalIAMServiceClient interface {
 	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
 	// нет google.api.http.
 	UnregisterResource(ctx context.Context, in *UnregisterResourceRequest, opts ...grpc.CallOption) (*UnregisterResourceResponse, error)
+	// CurrentAuthzRevision — токен версии прав службы доступа (приёмка NTF-3, Р30
+	// «Производитель токена»; сценарий NTF3-179).
+	//
+	// Ответ — текстовая форма ПОЛНОГО снимка транзакций базы службы доступа на
+	// момент вызова (`pg_snapshot`), а не его нижняя граница: транзакция, шедшая в
+	// момент вызова, в снимке не видна, даже если она старше уже завершённых.
+	// Модуль-владелец вида зовёт метод ДО открытия транзакции записи, в которой
+	// пишется строка журнала, и кладёт значение в эту транзакцию как `R_E` события.
+	// Вопрос об аудитории события отбрасывает каждую исходную строку права, чья
+	// версия `authz_rev` в этом снимке не видна: право, выданное либо изменённое
+	// после снятия токена, адресата события не даёт ни при каком порядке коммитов.
+	//
+	// Токен не кэшируется и между транзакциями не переиспользуется: один вызов на
+	// транзакцию записи. Отказ пути токена у вызывающего — его мутация fail-closed.
+	//
+	// Круг вызывающих — тот же, что у `RegisterResource`: модуль-владелец вида
+	// (mTLS client-cert → ServiceAccount → `fga_writer` на `cluster:cluster_root`);
+	// прочие — PERMISSION_DENIED, в том числе `notify`: токен он берёт из строки
+	// события. cluster-internal listener :9091 only — нет google.api.http (ban #6).
+	CurrentAuthzRevision(ctx context.Context, in *CurrentAuthzRevisionRequest, opts ...grpc.CallOption) (*CurrentAuthzRevisionResponse, error)
 	// GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
 	// Role's COMPILED permission set (`module.resource.resourceName.verb` 4-segment
 	// form) that backs FGA emission. This authz-topology projection is Internal-ONLY
@@ -273,6 +294,16 @@ func (c *internalIAMServiceClient) UnregisterResource(ctx context.Context, in *U
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UnregisterResourceResponse)
 	err := c.cc.Invoke(ctx, InternalIAMService_UnregisterResource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalIAMServiceClient) CurrentAuthzRevision(ctx context.Context, in *CurrentAuthzRevisionRequest, opts ...grpc.CallOption) (*CurrentAuthzRevisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CurrentAuthzRevisionResponse)
+	err := c.cc.Invoke(ctx, InternalIAMService_CurrentAuthzRevision_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +457,26 @@ type InternalIAMServiceServer interface {
 	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
 	// нет google.api.http.
 	UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error)
+	// CurrentAuthzRevision — токен версии прав службы доступа (приёмка NTF-3, Р30
+	// «Производитель токена»; сценарий NTF3-179).
+	//
+	// Ответ — текстовая форма ПОЛНОГО снимка транзакций базы службы доступа на
+	// момент вызова (`pg_snapshot`), а не его нижняя граница: транзакция, шедшая в
+	// момент вызова, в снимке не видна, даже если она старше уже завершённых.
+	// Модуль-владелец вида зовёт метод ДО открытия транзакции записи, в которой
+	// пишется строка журнала, и кладёт значение в эту транзакцию как `R_E` события.
+	// Вопрос об аудитории события отбрасывает каждую исходную строку права, чья
+	// версия `authz_rev` в этом снимке не видна: право, выданное либо изменённое
+	// после снятия токена, адресата события не даёт ни при каком порядке коммитов.
+	//
+	// Токен не кэшируется и между транзакциями не переиспользуется: один вызов на
+	// транзакцию записи. Отказ пути токена у вызывающего — его мутация fail-closed.
+	//
+	// Круг вызывающих — тот же, что у `RegisterResource`: модуль-владелец вида
+	// (mTLS client-cert → ServiceAccount → `fga_writer` на `cluster:cluster_root`);
+	// прочие — PERMISSION_DENIED, в том числе `notify`: токен он берёт из строки
+	// события. cluster-internal listener :9091 only — нет google.api.http (ban #6).
+	CurrentAuthzRevision(context.Context, *CurrentAuthzRevisionRequest) (*CurrentAuthzRevisionResponse, error)
 	// GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
 	// Role's COMPILED permission set (`module.resource.resourceName.verb` 4-segment
 	// form) that backs FGA emission. This authz-topology projection is Internal-ONLY
@@ -511,6 +562,9 @@ func (UnimplementedInternalIAMServiceServer) RegisterResource(context.Context, *
 }
 func (UnimplementedInternalIAMServiceServer) UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UnregisterResource not implemented")
+}
+func (UnimplementedInternalIAMServiceServer) CurrentAuthzRevision(context.Context, *CurrentAuthzRevisionRequest) (*CurrentAuthzRevisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CurrentAuthzRevision not implemented")
 }
 func (UnimplementedInternalIAMServiceServer) ResolveBasicCredential(context.Context, *ResolveBasicCredentialRequest) (*ResolveBasicCredentialResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResolveBasicCredential not implemented")
@@ -650,6 +704,24 @@ func _InternalIAMService_UnregisterResource_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalIAMService_CurrentAuthzRevision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CurrentAuthzRevisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalIAMServiceServer).CurrentAuthzRevision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalIAMService_CurrentAuthzRevision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalIAMServiceServer).CurrentAuthzRevision(ctx, req.(*CurrentAuthzRevisionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _InternalIAMService_ResolveBasicCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResolveBasicCredentialRequest)
 	if err := dec(in); err != nil {
@@ -734,6 +806,10 @@ var InternalIAMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UnregisterResource",
 			Handler:    _InternalIAMService_UnregisterResource_Handler,
+		},
+		{
+			MethodName: "CurrentAuthzRevision",
+			Handler:    _InternalIAMService_CurrentAuthzRevision_Handler,
 		},
 		{
 			MethodName: "ResolveBasicCredential",

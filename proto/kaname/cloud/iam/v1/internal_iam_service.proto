@@ -201,6 +201,30 @@ service InternalIAMService {
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
 
+  // CurrentAuthzRevision — токен версии прав службы доступа (приёмка NTF-3, Р30
+  // «Производитель токена»; сценарий NTF3-179).
+  //
+  // Ответ — текстовая форма ПОЛНОГО снимка транзакций базы службы доступа на
+  // момент вызова (`pg_snapshot`), а не его нижняя граница: транзакция, шедшая в
+  // момент вызова, в снимке не видна, даже если она старше уже завершённых.
+  // Модуль-владелец вида зовёт метод ДО открытия транзакции записи, в которой
+  // пишется строка журнала, и кладёт значение в эту транзакцию как `R_E` события.
+  // Вопрос об аудитории события отбрасывает каждую исходную строку права, чья
+  // версия `authz_rev` в этом снимке не видна: право, выданное либо изменённое
+  // после снятия токена, адресата события не даёт ни при каком порядке коммитов.
+  //
+  // Токен не кэшируется и между транзакциями не переиспользуется: один вызов на
+  // транзакцию записи. Отказ пути токена у вызывающего — его мутация fail-closed.
+  //
+  // Круг вызывающих — тот же, что у `RegisterResource`: модуль-владелец вида
+  // (mTLS client-cert → ServiceAccount → `fga_writer` на `cluster:cluster_root`);
+  // прочие — PERMISSION_DENIED, в том числе `notify`: токен он берёт из строки
+  // события. cluster-internal listener :9091 only — нет google.api.http (ban #6).
+  rpc CurrentAuthzRevision (CurrentAuthzRevisionRequest) returns (CurrentAuthzRevisionResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
   // GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
   // Role's COMPILED permission set (`module.resource.resourceName.verb` 4-segment
   // form) that backs FGA emission. This authz-topology projection is Internal-ONLY
@@ -588,6 +612,17 @@ message PollSubjectChangesResponse {
 }
 
 // GetRoleCompiledRequest — the role whose compiled permissions to read (F5).
+// CurrentAuthzRevisionRequest — полей нет: снимок берётся на момент вызова.
+message CurrentAuthzRevisionRequest {}
+
+// CurrentAuthzRevisionResponse — токен версии прав.
+message CurrentAuthzRevisionResponse {
+  // authz_rev — текстовая форма `pg_snapshot` базы службы доступа на момент
+  // вызова (`xmin:xmax:xip,…`). Вызывающий хранит её как есть и не разбирает:
+  // сравнивает с версией строки права сама служба доступа.
+  string authz_rev = 1;
+}
+
 message GetRoleCompiledRequest {
   // ID of the Role.
   string role_id = 1;
