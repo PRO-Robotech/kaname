@@ -131,7 +131,7 @@ func headVersionFrom(opts *rootOptions, migrationsFS fs.FS) func(context.Context
 		if err := migratorcli.SetupGoose(migrationsFS, spec); err != nil {
 			return 0, err
 		}
-		dsn, err := migratorcli.ResolveDSN(opts.dsn, configDSN)
+		dsn, err := resolveDSN(opts.dsn)
 		if err != nil {
 			return 0, err
 		}
