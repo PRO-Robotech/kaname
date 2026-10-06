@@ -1,0 +1,129 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: 60278225702d6174ea60abad5b473c60227415c6c63bd4245f36b078f4e54ccd
+  revision: 6
+  revisions_judged: [6]
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 6 — эта запись.
+  base_commit: 2cf9c8528b1f
+  content_commit: c43831cdc93be45f05b3807fab01d2bc9b7797ad
+  branch: '526'
+  branch_base: '296'
+  task: PRO-Robotech/kaname#526
+  edge_pair: >-
+    PRO-Robotech/kacho-workspace docs/specs/sub-phase-F6b-console-and-edge-confirmed-address-gate-acceptance.md,
+    редакция 7, SHA-256 5c967d30b6e3d3ad631d910a5dd2f3d77add060dbd7c2a88abb121e3ae78ec3d — не менялась,
+    запись APPROVED на этот отпечаток уже есть (ветка 896-f6b-r3-526, коммит a7f4c02c3); нового круга по ней нет
+  lines: 1936
+  round: 5
+  round_in_this_cycle: "2 из 2"
+  predecessor_record: docs/specs/reviews/access-beyond-login-needs-a-verified-address/94d6a4b65322772fa94ae52b9d71e7b0403bfd9bb26541fb9d8508a6960fb6bd.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 526 на 00d98d626 → 60278225…4ccd; git show origin/526:<путь> | sha256sum —
+    то же; wc -l → 1936.
+  fingerprint_reproduced: true
+  task_premise_remeasured: >-
+    ПОДТВЕРДИЛАСЬ: отпечаток и число строк совпали; сценариев 63 (grep -cE '^\*\*EV-[0-9]{2} — ' → 63),
+    повторов меток 0 (grep -oE '^\*\*EV-[0-9]{2}' | sort | uniq -d | wc -l → 0); отпечаток F6b 5c967d30…ec3d
+    совпал (sha256sum в копии ws-526).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-06T10:27:46Z'
+blocking_count: 0
+blocking_kinds_distinct: []
+important_count: 2
+
+delta_against_previous:
+  previous_sha256: 94d6a4b65322772fa94ae52b9d71e7b0403bfd9bb26541fb9d8508a6960fb6bd
+  diff_command: git diff 543419ece c43831cdc -- <док> → 35 добавлений, 9 удалений, один файл
+  judged: строки истории ревью, §0.5 (команды по дереву платформы), §0.6, EV-14 (а), §7 абзац уровня E, §9 п. 16
+
+resolved_blocking:
+  - id: B1
+    kind: DoD
+    resolution: >-
+      §9 п. 16: образец переписи git grep -nE 'email address is not verified($|[^:])' -- . ':!docs'.
+      Перемерено в обе стороны: на 543419ece → 11 строк (как и голый образец, и образец [^:]), на HEAD 00d98d626
+      → 11 строк в 7 файлах; на файле из трёх строк (новый текст в Go-литерале, прежний голым, прежний в
+      кавычках) образец дал 2 попадания, строку нового текста не нашёл. Пункт теперь выполним: условие «0 после
+      правки» и «не ноль нового текста» больше не противоречат.
+  - id: B2
+    kind: FORMAT
+    resolution: >-
+      EV-14 (а): тело — полный JSON; message побайтово совпадает с текстом Р3 в таблице Р3 (строки 547–549) и
+      в §0.5 (строка 200); domain iam.kaname.cloud — значение константы avRefusalBody
+      (internal/handler/loginlanehttp/address_verification_harness_integration_test.go:83 @ 543419ece), проверено.
+
+resolved_important:
+  - id: I1
+    resolution: >-
+      §0.5: команды исполнимы. Перемерено в клоне платформы: git grep -n 'addressRefusalText *=' 680d1794 --
+      gateway ':!*_test.go' → address_refusal.go:43, значение прежнее; git log -S'confirm it with the code from
+      the letter' 680d1794 -- gateway → 81f7bf3504e, 97e018f606d, c13dd559ba2.
+  - id: I3
+    resolution: EV-14 называет литерал значением домена Р3 на ревизии измерения — одна величина, одна форма.
+
+important:
+  - id: I2r
+    kind: COVERAGE
+    where: "§7, абзац об уровне E"
+    finding: >-
+      Условие переписано верно (login_lane_paths.go:283–284 @ 680d1794 объявляют verify-email и
+      verify-email-confirm, открытые до подтверждения адреса), но вопрос круга 4 о составе условных сценариев
+      остался без ответа: второй «When» EV-14 идёт путём verify-email-confirm через край, а условие выкатки
+      по-прежнему названо только у «четырёх последних» (EV-20, EV-21, EV-30, EV-32). Исход EV-14 на уровне E
+      на старом крае был бы «условие не создано», а не красное. Не блокирует: уровень E EV-14 уже связан с
+      посадкой края п. 17 (копия текста края), а исход трёхзначный по §7 в целом. Учесть при следующей правке.
+  - id: I4
+    kind: CONVENTION
+    where: "парный документ F6b, строки 1958–1959 (не предмет этой записи)"
+    finding: >-
+      F6b называет парой редакцию 5 службы (94d6a4b6…), которая получила возврат; значение Р3 у редакции 6 то
+      же, поэтому утверждение F6b о тексте верно, но отпечаток пары устарел. Обновлять ли — решение автора
+      F6b; вердикт F6b на 5c967d30 этим не затронут.
+
+constructibility:
+  seeded: 0
+  by_named_fixture: 1
+  not_executed: 0
+  detail: >-
+    «Дано» EV-14 не менялось; строится стендом address_verification_harness_integration_test.go (как в круге 4:
+    letters() — код из строки очереди, confirm() — шаг, token() — признак из печенья контекста формы). Прочие
+    «Дано» не тронуты (§0.6, проверено диффом). Посев не ставился: интеграция в этом круге не исполнялась.
+
+producers:
+  without_producer: []
+  checked: >-
+    EV-14 (а): тело — avRefusalBody пробы (после правки — с новым текстом), производитель текста —
+    admission.TextNotVerified; DoD п. 16 — git grep по дереву службы.
+twins:
+  negatives_with_twin: "EV-14 (а) ↔ (б): отличающий факт — исполнен ли названный шаг"
+
+disclosure: >-
+  Путь в теле — публичный путь полосы формы из документации API; адресов, ящиков, кодов, механики обхода нет.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: false
+
+event_body_for_publication: "acceptance-reviewer · APPROVED · 60278225702d6174ea60abad5b473c60227415c6c63bd4245f36b078f4e54ccd"
+event:
+  status: not_performed
+  note: событие публикует курьер; блок дописывается к факту отдельным коммитом
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
