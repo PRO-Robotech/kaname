@@ -819,7 +819,7 @@ _OWN_WHY = ("собственный публичный фронт службы: 
 _ISSUANCE_WHY = ("поверхность выдачи службы: точка авторизации и обмен кода на токен; "
                  "адрес пишет посев церемонии стенда посадки `own`")
 _AUTHORIZE = "/iam/v1/authorize"
-_TOKEN = "/iam/v1/token"
+_EXCHANGE_PATH = "/iam/v1/token"
 _ME = "/iam/v1/me"
 _INVITE = "/iam/v1/users:invite"
 _SUPERVISOR_KEYS = ("cloudSupervisorEmail", "cloudSupervisorPassword", "cloudSupervisorTotpSecret")
@@ -857,6 +857,11 @@ _TOTP_JS = [
     "  return String(bin).padStart(6, '0');",
     "};",
 ]
+
+
+def _env_ref(key):
+    """Подстановка переменной окружения прогона в тело шага: `{{<key>}}`."""
+    return "{{" + key + "}}"
 
 
 def _require_keys(keys, why):
@@ -917,7 +922,7 @@ def _exchange(p, name):
     label = name.upper()
     code_v, redirect_v, verifier_v = f"_{p}FCode", f"_{p}FRedirect", f"_{p}FVerifier"
     return Step(
-        name=name, method="POST", path=_TOKEN,
+        name=name, method="POST", path=_EXCHANGE_PATH,
         form=[("grant_type", "authorization_code"), ("code", "{{" + code_v + "}}"),
               ("redirect_uri", "{{" + redirect_v + "}}"), ("code_verifier", "{{" + verifier_v + "}}")],
         pre_script=[
@@ -929,7 +934,7 @@ def _exchange(p, name):
             f"pm.variables.set({js_str(code_v)}, encodeURIComponent(pm.environment.get({js_str(_v(p, 'OauthCode'))}) || ''));",
             f"pm.variables.set({js_str(redirect_v)}, encodeURIComponent(pm.environment.get('oauthRedirectUri') || ''));",
             f"pm.variables.set({js_str(verifier_v)}, encodeURIComponent(pm.environment.get({js_str(_v(p, 'Verifier'))}) || ''));",
-            *require_env_url("iamRegistryTokenBaseUrl", _TOKEN, _ISSUANCE_WHY),
+            *require_env_url("iamRegistryTokenBaseUrl", _EXCHANGE_PATH, _ISSUANCE_WHY),
             "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' + "
             "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
             "  encodeURIComponent(pm.environment.get('oauthClientId') || '') + ':' + "
@@ -960,7 +965,7 @@ def _supervisor_bearer(s, tag, *, init=()):
         ]),
         Step(
             name=f"{tag}-login", method="POST", path=_LOGIN,
-            body={"email": "{{cloudSupervisorEmail}}", "password": "{{cloudSupervisorPassword}}",
+            body={"email": _env_ref("cloudSupervisorEmail"), "password": _env_ref("cloudSupervisorPassword"),
                   "secondFactor": {"method": "totp", "code": f"{{{{{_v(s, 'TotpCode')}}}}}"},
                   "csrfToken": f"{{{{{_v(s, 'Csrf')}}}}}"},
             pre_script=[
