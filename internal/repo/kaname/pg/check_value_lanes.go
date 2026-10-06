@@ -57,6 +57,14 @@ package pg
 // приходит предикатом `isLoginMethodsTable` — все её проверки судят значения
 // службы.
 //
+// Таблицы ленты извещений (порождены notifygen, NTF-2) здесь тоже не
+// называются: их имена производит только corelib, и литерал с суффиксом таблицы
+// ленты вне его — находка гейта NTF1-B19. Строку, окно и вклад строки в окно
+// пишет библиотека ленты по шаблону службы, состояние, исход и номер схемы — из
+// её закрытых словарей; вызывающий в эти таблицы не присылает ничего. Решение о
+// них приходит предикатом `isFeedTable` — все их проверки судят значения
+// службы, в том числе заведённые следующей версией схемы ленты.
+//
 // Отказ 23514, поднятый триггером БЕЗ клаузы `CONSTRAINT` (вид участника группы,
 // вид субъекта выдачи, ярус потолка, адреса возврата клиента), имени не несёт и
 // разбору по нему не поддаётся; каждый такой триггер судит присланное и отвечает
@@ -66,7 +74,23 @@ package pg
 import (
 	"maps"
 	"slices"
+
+	"github.com/PRO-Robotech/corelib/notify/feed"
 )
+
+// feedService — префикс ленты извещений службы «схема.служба»: тот, что служба
+// отдала `notifygen init -service` (заголовок миграции ленты). По нему corelib
+// узнаёт таблицы ленты, не отдавая их имён.
+const feedService = "kaname.kaname"
+
+// isFeedTable — «отказ пришёл от таблицы ленты извещений службы?». Предикат, а
+// не имя: перепись сверяет таблицу отказа, не собирая её имени сам. Негодный
+// префикс не узнаёт ни одной таблицы — отказ уходит без решения, и проба
+// переписи на живой схеме называет каждую проверку ленты.
+func isFeedTable(name string) bool {
+	tables, err := feed.TablesOf(feedService)
+	return err == nil && tables.Has(name)
+}
 
 // checkTableLanes — решение переписи о таблице, куда попадает присланное:
 // каждая её проверка в одном из двух перечней.
@@ -521,9 +545,13 @@ const (
 )
 
 // writtenWhollyByService — объявляет ли перепись таблицу написанной службой
-// целиком (`nil`): ни одно её значение не приходит от вызывающего. Адаптер,
+// целиком (`nil` либо таблица ленты извещений, `isFeedTable`): ни одно её
+// значение не приходит от вызывающего. Адаптер,
 // судящий отказ своей таблицы классом, спрашивает это здесь, а не решает сам.
 func writtenWhollyByService(table string) bool {
+	if isFeedTable(table) {
+		return true
+	}
 	lanes, declared := checkValueLanes[table]
 	return declared && lanes == nil
 }
@@ -533,7 +561,7 @@ func checkValueLaneOf(table, constraint string) checkValueLane {
 	if constraint == "" {
 		return checkLaneUndecided
 	}
-	if isLoginMethodsTable(table) {
+	if isLoginMethodsTable(table) || isFeedTable(table) {
 		return checkLaneService
 	}
 	lanes, declared := checkValueLanes[table]
