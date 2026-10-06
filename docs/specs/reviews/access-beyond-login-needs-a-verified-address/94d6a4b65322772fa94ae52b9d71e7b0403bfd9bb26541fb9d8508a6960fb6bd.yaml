@@ -145,6 +145,16 @@ route_signs:
   new_domain: false
   security_surface: false
 
+effective_approval:
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт CHANGES_REQUESTED санкции не выдаёт и не отзывает. Учётка названа, потому что гейт
+      записей ревью (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в
+      subject.task этой учёткой: без неё запись не судима, и его исход — «не выполнилось».
+
 event_body_for_publication: "acceptance-reviewer · CHANGES_REQUESTED · 94d6a4b65322772fa94ae52b9d71e7b0403bfd9bb26541fb9d8508a6960fb6bd"
 event:
   status: not_performed
