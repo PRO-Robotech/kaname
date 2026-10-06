@@ -487,7 +487,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Человек: адрес, отображаемое имя, метки и внешний субъект прислал
 	// вызывающий (арендатор либо внутренний глагол заведения личности). Состояние
 	// приглашения ставит служба, но его согласие с внешним субъектом нарушает
-	// присланный пустой субъект — и эта проверка остаётся полосой ввода.
+	// присланный пустой субъект — и эта проверка остаётся полосой ввода. Носитель
+	// окна темпа назначает база при чеканке личности нашей полосы (kaname#197):
+	// вызывающий его не присылает, и отказ его проверки — дефект службы.
 	"users": {
 		caller: []string{
 			"users_display_name_check",
@@ -496,7 +498,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"users_invite_status_consistency",
 			"users_labels_valid",
 		},
-		service: []string{"users_invite_status_check"},
+		service: []string{"users_invite_status_check", "users_own_lane_admission_carrier_check"},
 	},
 }
 
