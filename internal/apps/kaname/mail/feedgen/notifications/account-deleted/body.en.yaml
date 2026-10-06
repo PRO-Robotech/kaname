@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Account deleted"
+  - p: "The account was deleted."
+  - kv: [{key: "Account", value: "{{ account_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

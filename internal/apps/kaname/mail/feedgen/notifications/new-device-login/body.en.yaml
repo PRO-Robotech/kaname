@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Sign-in from a new device"
+  - p: "Someone signed in to the account from a device we have not seen before."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

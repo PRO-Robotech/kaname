@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Cloud administrator rights granted"
+  - p: "A user was granted cloud administrator rights."
+  - kv: [{key: "User", value: "{{ user_id }}"}, {key: "When", value: "{{ occurred_at }}"}]
+  - warning: "If you did not expect this change, contact the cloud administrator."

@@ -1,0 +1,5 @@
+blocks:
+  - heading: "Too many mail requests"
+  - p: "Too many letters were requested for this address, so we have paused sending them for a while."
+  - kv: [{key: "Last request", value: "{{ requested_at }}"}]
+  - warning: "If this was not you, do nothing."
