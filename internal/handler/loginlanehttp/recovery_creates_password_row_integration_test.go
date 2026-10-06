@@ -40,9 +40,7 @@ func (h *sessionLane) dropPasswordRow(t *testing.T) {
 	t.Helper()
 	// Дано: адрес подтверждён — писателем продукта (Ф6), как у Ф5-24.
 	require.NoError(t, kanamepg.NewLoginMethodRepo(h.pool).MarkEmailVerified(h.ctx, h.user.ID, h.user.Email, time.Now().UTC()))
-	tag, err := h.pool.Exec(h.ctx, `DELETE FROM user_login_methods WHERE user_id = $1 AND kind = 'password'`, string(h.user.ID))
-	require.NoError(t, err)
-	require.EqualValues(t, 1, tag.RowsAffected(), "Дано: строка «пароль» снята записью")
+	seedPasswordless(t, h.ctx, h.pool, h.user.ID)
 }
 
 func TestLaneIntegration_F5_34_RecoveryCreatesTheMissingPasswordRow(t *testing.T) {

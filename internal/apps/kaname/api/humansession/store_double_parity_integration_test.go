@@ -493,6 +493,11 @@ func parityCases() []parityCase {
 			Verifier: parityVerifier("material-password-put"), State: domain.LoginMethodStateActive})
 		return said(err, "заведён %v", created)
 	})
+	wr("EnrollLoginMethod", "пароль её личности", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		enrolled, err := w.EnrollLoginMethod(ctx, domain.LoginMethod{UserID: p.user.ID, Kind: domain.LoginMethodPassword,
+			Verifier: parityVerifier("material-password-enroll"), State: domain.LoginMethodStateActive})
+		return said(err, "заведён %v", enrolled)
+	})
 	wr("MarkEmailVerified", "её адрес", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		marked, err := w.MarkEmailVerified(ctx, p.user.ID, p.user.Email, parityNow)
 		return said(err, "отмечен %v", marked)

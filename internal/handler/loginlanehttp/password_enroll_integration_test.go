@@ -46,9 +46,7 @@ const (
 func fpGiven(t *testing.T, h *avLane, tag string, verified bool) avSession {
 	t.Helper()
 	s := h.register(t, freshAddress(tag))
-	tag2, err := h.pool.Exec(h.ctx, `DELETE FROM kaname.user_login_methods WHERE user_id = $1 AND kind = 'password'`, string(s.user))
-	require.NoError(t, err)
-	require.EqualValues(t, 1, tag2.RowsAffected(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка «пароль» снята записью")
+	seedPasswordless(t, h.ctx, h.pool, s.user)
 	if verified {
 		h.mark(t, s)
 	}

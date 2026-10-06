@@ -555,9 +555,7 @@ func TestF13_19_PasswordlessPersonSignsInWithAKey(t *testing.T) {
 	h := newSessionLane(t)
 	ref := f302(t, h)
 	k := givenAcceptedKey(t, h, h.user.ID)
-	tag, err := h.pool.Exec(h.ctx, `DELETE FROM user_login_methods WHERE user_id = $1 AND kind = 'password'`, string(h.user.ID))
-	require.NoError(t, err)
-	require.EqualValues(t, 1, tag.RowsAffected(), "Дано: строка способа «пароль» снята записью (§5 преамбула)")
+	seedPasswordless(t, h.ctx, h.pool, h.user.ID)
 
 	f := givenAKForm(t, h)
 	c := givenChallenge(t, h, f)
