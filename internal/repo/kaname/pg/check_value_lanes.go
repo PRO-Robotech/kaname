@@ -249,12 +249,6 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"invite_mail_outbox": nil,
 	// Окно писем: адресата приводит к канонической форме служба.
 	"invite_mail_windows": nil,
-	// Лента уведомлений службы (порождена notifygen, NTF-2): строку, окно и
-	// вклад строки в окно пишет библиотека ленты по шаблону службы; состояние,
-	// исход и номер схемы — из её закрытых словарей.
-	"kaname_notification_contrib": nil,
-	"kaname_notification_outbox":  nil,
-	"kaname_notification_window":  nil,
 	// Неудачный вход: ключ — присланный адрес (писатель сам отвечает на пустой
 	// полосой ввода); область — словарь службы.
 	"login_failures": {
