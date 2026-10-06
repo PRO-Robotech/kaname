@@ -793,6 +793,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 			kanamepg.NewSubjectChangeRepo(pool, logger))).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
+		// NTF-3 Р30 — токен версии прав `R_E` для того же круга модулей-владельцев
+		// видов, что у регистрации, и за той же дверью.
+		WithAuthzRevision(kanamepg.NewAuthzRevisionReader(pool)).
 		// #1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
 		// промахе своего кэша вердикта; отзыв доходит до предъявления тем, что
 		// резолв не находит СНЯТОЙ строки.

@@ -279,3 +279,27 @@ func HandlerDecidedDenial(fullMethod string) error {
 	}
 	return enriched.Err()
 }
+
+// HandlerDenied — отказ PERMISSION_DENIED с машинным признаком, который
+// обработчик ставит САМ: для метода, чья строка каталога освобождена
+// (`<exempt>`), а круг вызывающих судит дверь в обработчике.
+//
+// `DenyDetailUnary` такой строке признака не дописывает намеренно: действия у
+// неё нет, а отсутствие действия — то, по чему вызывающий узнаёт промах
+// каталога. Методу, чей контракт обещает `ErrorInfo{reason: AUTHZ_DENIED}`
+// (NTF-3 Р30 «Производитель токена», NTF3-179 (г)), признак ставится здесь —
+// тем же токеном и тем же доменом, что у декоратора, и без действия и яруса:
+// права, которое можно попросить, у такого метода нет. Текст — дословно
+// «permission denied», как у любого отказа: различимый текст был бы оракулом.
+func HandlerDenied(fullMethod string) error {
+	st := status.New(codes.PermissionDenied, "permission denied")
+	enriched, err := st.WithDetails(&errdetails.ErrorInfo{
+		Reason:   denyReason,
+		Domain:   denyDomain,
+		Metadata: map[string]string{"fqn": strings.TrimPrefix(fullMethod, "/")},
+	})
+	if err != nil {
+		return st.Err()
+	}
+	return enriched.Err()
+}

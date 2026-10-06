@@ -928,6 +928,17 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // применяется, — причём молча, потому что добавление проходит успешно и ни одна
 // проверка «строки записаны» этого не заметит.
 //
+// # Замена РАЗНОСТНАЯ, а не «снять всё — положить заново»
+//
+// Пара, которая есть и во входе, и в таблице, не удаляется и не вставляется
+// заново: удаляется только пара, которой во входе нет, вставляется только новая
+// (`ON CONFLICT DO NOTHING` оставляет лежащую строку той же). Строка пары несёт
+// версию прав `authz_rev` (приёмка NTF-3, Р30 «Колонка версии прав»), и вставка
+// ставит её всегда: перевставка неизменной пары двигала бы версию, и досев
+// старта службы доступа (`seed.ReseedSystemRoleVerbs`) на каждом перезапуске
+// сужал бы аудиторию ожидающих событий (NTF3-183). Итоговое состояние то же, что
+// у полной замены, — меняется только то, какие строки ради него переписаны.
+//
 // Пары приходят от вызывающего уже переведёнными: перевод «точечное разрешение →
 // тип модели + глагол» — это код (закрытый каталог типов, приведение имени), и
 // повторять его в SQL значило бы завести второе место, знающее соответствие.
@@ -952,8 +963,19 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // какой слой ответил. Поэтому проверка, заведённая здесь снова и отвечающая
 // иначе, покраснеет.
 func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error {
+	objectTypes := make([]string, 0, len(pairs))
+	verbs := make([]string, 0, len(pairs))
+	for _, pv := range pairs {
+		objectTypes = append(objectTypes, pv.ObjectType)
+		verbs = append(verbs, pv.Verb)
+	}
 	if _, err := w.tx.Exec(ctx,
-		`DELETE FROM kaname.role_verb WHERE role_id = $1`, string(roleID)); err != nil {
+		`DELETE FROM kaname.role_verb rv
+		  WHERE rv.role_id = $1
+		    AND NOT EXISTS (
+		          SELECT 1 FROM unnest($2::text[], $3::text[]) AS p(object_type, verb)
+		           WHERE p.object_type = rv.object_type AND p.verb = rv.verb)`,
+		string(roleID), objectTypes, verbs); err != nil {
 		return mapErr(err, "", string(roleID))
 	}
 	for _, pv := range pairs {

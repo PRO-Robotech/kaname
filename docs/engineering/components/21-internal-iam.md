@@ -19,6 +19,13 @@ kacho-loadbalancer) общаются с kaname:
   указателя для ресурса чужого сервиса. Намерение ложится строкой журнала
   `kaname.fga_outbox`, и триггер журнала складывает из неё прямой факт **в той же
   транзакции**: дренажа наружу нет — применять не к чему и некому.
+- `CurrentAuthzRevision{}` → `{authz_rev}` — токен версии прав: текстовая форма
+  полного снимка транзакций базы kaname на момент вызова (`pg_snapshot`).
+  Модуль-владелец вида зовёт его до открытия транзакции записи и кладёт в строку
+  события; вопрос об аудитории события отбрасывает строку права, чья версия
+  `authz_rev` в этом снимке не видна. Круг вызывающих и дверь — те же, что у
+  `RegisterResource`; прочим — `PERMISSION_DENIED` с `ErrorInfo{reason:
+  AUTHZ_DENIED}` (приёмка NTF-3, Р30).
 
 **Use-cases:**
 - api-gateway: validate JWT → LookupSubject → resolve principal → propagate to backend.
@@ -42,6 +49,7 @@ kacho-loadbalancer) общаются с kaname:
 | `PollSubjectChanges`    | sync             | Drain subject_change_outbox (since_id ledger).  |
 | `RegisterResource`      | sync             | Постановка иерархического указателя через журнал. |
 | `UnregisterResource`    | sync             | Снятие того же указателя.                        |
+| `CurrentAuthzRevision`  | sync             | Токен версии прав: снимок транзакций базы.       |
 
 > [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (#788)
 > Он писал кортёж создателя в движок НАПРЯМУЮ, мимо журнала `kaname.fga_outbox`,
