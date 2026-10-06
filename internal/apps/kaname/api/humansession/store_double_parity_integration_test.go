@@ -473,8 +473,9 @@ func parityCases() []parityCase {
 		return said(w.RotateBearer(ctx, p.session, domain.BearerDigest(hexOf("rotated-"+p.tag)), parityNow), "сменён")
 	})
 	wr("PresentInSession", "её сессия", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
-		return said(w.PresentInSession(ctx, p.session, []string{"password", "totp"}, "2",
-			domain.BearerDigest(hexOf("presented-"+p.tag)), parityNow), "записано")
+		rec, err := w.PresentInSession(ctx, p.session, []string{"password", "totp"}, "2",
+			domain.BearerDigest(hexOf("presented-"+p.tag)), parityNow)
+		return said(err, "записано %v уровня %s", rec.Methods, rec.Level)
 	})
 	wr("UpsertCutoff", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		return said(w.UpsertCutoff(ctx, domain.UserTokenRevocation{UserID: p.user.ID, RevokeBefore: parityNow,
@@ -505,6 +506,10 @@ func parityCases() []parityCase {
 			return said(err, "строка %s", m.State)
 		})
 	}
+	wr("AccessKeyEnrolled", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		has, err := w.AccessKeyEnrolled(ctx, p.user.ID)
+		return said(err, "ключ заведён %v", has)
+	})
 	wr("UpsertPendingTOTP", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		accepted, err := w.UpsertPendingTOTP(ctx, domain.LoginMethod{UserID: p.user.ID, Kind: domain.LoginMethodTOTP,
 			Verifier: parityVerifier("material-totp-new"), State: domain.LoginMethodStatePending, CreatedAt: parityNow})

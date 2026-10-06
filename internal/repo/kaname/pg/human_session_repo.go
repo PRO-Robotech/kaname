@@ -778,24 +778,49 @@ func (w *humanSessionWriter) RotateBearer(ctx context.Context, id domain.HumanSe
 // записью множество предъявленного, уровень, новый дайджест и момент; момент
 // аутентификации и срок не трогаются by construction (их нет в SET). Словарь
 // способов и ось уровня судит CHECK строки, а не эта функция.
-func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+//
+// УСЛОВИЕ НА ПРЕЖНЕЕ ЗНАЧЕНИЕ — В ОПЕРАТОРЕ (kaname#343). Кандидат уровня
+// приносит вызывающий, ЗАПИСЬ решает оператор: кандидат ниже записанного
+// запись не понижает (Ф11 Р2 — понижение в пределах сессии невыразимо), выше —
+// поднимает. Порядок ступеней назван явно — позицией в перечне оси, а не
+// сравнением текста; кандидат вне оси пишется как есть и отвергается CHECK
+// строки — условие не глотает негодное значение. Множество накапливается тем же оператором: способ,
+// предъявленный конкурентом между чтением сессии и этой записью, не теряется,
+// и уровень, поднятый конкурентом, не откатывается. Ответ — то, что ЛЕГЛО
+// (`RETURNING`), кардинальность — тот же оператор: строки нет либо она снята —
+// NOT_FOUND.
+func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (humansession.PresentedRecord, error) {
 	if digest == "" {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
 	}
 	if len(methods) == 0 {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.presented_methods: required")
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.presented_methods: required")
 	}
-	tag, err := w.tx.Exec(ctx, `
+	var rec humansession.PresentedRecord
+	err := w.tx.QueryRow(ctx, `
 		UPDATE human_sessions
-		   SET presented_methods = $2, assurance_level = $3, bearer_digest = $4, last_presented_at = $5
-		 WHERE id = $1 AND ended_at IS NULL`, string(id), methods, level, string(digest), presentedAt)
+		   SET presented_methods = presented_methods
+		                           || ARRAY(SELECT m FROM unnest($2::text[]) WITH ORDINALITY AS p(m, n)
+		                                     WHERE m <> ALL (presented_methods) ORDER BY n),
+		       assurance_level   = CASE
+		                             WHEN array_position(ARRAY['1','2','3'], $3::text) IS NULL
+		                               OR array_position(ARRAY['1','2','3'], $3::text)
+		                                > array_position(ARRAY['1','2','3'], assurance_level)
+		                             THEN $3::text
+		                             ELSE assurance_level
+		                           END,
+		       bearer_digest     = $4,
+		       last_presented_at = $5
+		 WHERE id = $1 AND ended_at IS NULL
+		RETURNING presented_methods, assurance_level`,
+		string(id), methods, candidate, string(digest), presentedAt).Scan(&rec.Methods, &rec.Level)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
 	if err != nil {
-		return mapErr(err, "HumanSession.Present", string(id))
+		return humansession.PresentedRecord{}, mapErr(err, "HumanSession.Present", string(id))
 	}
-	if tag.RowsAffected() != 1 {
-		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
-	}
-	return nil
+	return rec, nil
 }
 
 // UpsertCutoff — ТА ЖЕ дверь, что у прочих писателей отсечки: кладёт ОБЕ
@@ -829,6 +854,11 @@ func (w *humanSessionWriter) PutLoginVerifier(ctx context.Context, m domain.Logi
 // оператор — адаптера таблицы секрета (`getLoginMethod`), как и у `Get` пулом.
 func (w *humanSessionWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	return getLoginMethod(ctx, w.tx, userID, kind)
+}
+
+// AccessKeyEnrolled — тем же соединением транзакции (ось «заведено»).
+func (w *humanSessionWriter) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return accessKeyEnrolled(ctx, w.tx, userID)
 }
 
 // Операторы второго фактора (Ф12) — те же делегации: таблицу секрета называет

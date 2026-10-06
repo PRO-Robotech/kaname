@@ -201,9 +201,14 @@ func (w recordingWriter) RotateBearer(ctx context.Context, id domain.HumanSessio
 	return w.inner.RotateBearer(ctx, id, digest, presentedAt)
 }
 
-func (w recordingWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+func (w recordingWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (humansession.PresentedRecord, error) {
 	defer w.rec("PresentInSession")()
-	return w.inner.PresentInSession(ctx, id, methods, level, digest, presentedAt)
+	return w.inner.PresentInSession(ctx, id, methods, candidate, digest, presentedAt)
+}
+
+func (w recordingWriter) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	defer record(w.j, w.meter, storeOp{Port: "writer", Name: "AccessKeyEnrolled", LoginMethodRead: true})()
+	return w.inner.AccessKeyEnrolled(ctx, userID)
 }
 
 func (w recordingWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
@@ -229,6 +234,11 @@ func (w recordingWriter) MarkEmailVerified(ctx context.Context, userID domain.Us
 func (w recordingWriter) CloseRecoveryPath(ctx context.Context, userID domain.UserID) error {
 	defer w.rec("CloseRecoveryPath")()
 	return w.inner.CloseRecoveryPath(ctx, userID)
+}
+
+func (w recordingWriter) EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	defer w.rec("EnrollLoginMethod")()
+	return w.inner.EnrollLoginMethod(ctx, m)
 }
 
 func (w recordingWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {

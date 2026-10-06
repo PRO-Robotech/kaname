@@ -45,6 +45,10 @@ const (
 	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
 	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
 	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
+	// AccessKeyLoginOutcomesMetric — исходы полосы входа ключом (Ф13 Р10,
+	// Ф13-30): наружу отказы неразличимы, и это единственное место, где
+	// причина видна.
+	AccessKeyLoginOutcomesMetric = Namespace + "_access_key_login_outcomes_total"
 	// Подтверждение адреса (kaname#456, П13): исходы глаголов подтверждения и
 	// отказы положения на путях полосы.
 	AddressVerificationOutcomesMetric = Namespace + "_address_verification_outcomes_total"
@@ -72,6 +76,7 @@ type LoginLaneRecorder struct {
 	sfPresent    *prometheus.CounterVec
 	sfRefuse     *prometheus.CounterVec
 	sfEvent      *prometheus.CounterVec
+	akLogin      *prometheus.CounterVec
 	addrVerify   *prometheus.CounterVec
 }
 
@@ -176,6 +181,11 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
 					"regenerated, a backup code consumed.",
 			}, []string{"event"}),
+			akLogin: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: AccessKeyLoginOutcomesMetric,
+				Help: "Access-key sign-in lane outcomes by reason: the caller sees one refusal for all of them, " +
+					"so this is where the reason lives. Revoked keys and keys that never existed share one cell.",
+			}, []string{"outcome"}),
 			addrVerify: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: AddressVerificationOutcomesMetric,
 				Help: "Outcomes of the address-verification verbs and position refusals: letter queued or paced, " +
@@ -185,7 +195,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify)
+			rec.addrVerify, rec.akLogin)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -229,6 +239,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.SecondFactorRefusals() {
 			rec.sfRefuse.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.AccessKeyLoginOutcomes() {
+			rec.akLogin.WithLabelValues(string(o)).Add(0)
 		}
 		for _, o := range humansession.SecondFactorEvents() {
 			rec.sfEvent.WithLabelValues(string(o)).Add(0)
@@ -303,6 +316,11 @@ func (l *LoginLaneRecorder) SecondFactorPresentationObserved(m assurance.Method,
 
 func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFactorRefusal) {
 	l.sfRefuse.WithLabelValues(string(o)).Inc()
+}
+
+// AccessKeyLoginObserved — клетка исхода полосы входа ключом.
+func (l *LoginLaneRecorder) AccessKeyLoginObserved(o humansession.AccessKeyLoginOutcome) {
+	l.akLogin.WithLabelValues(string(o)).Inc()
 }
 
 func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {

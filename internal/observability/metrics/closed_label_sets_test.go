@@ -186,6 +186,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "отказы глаголов подтверждения и отказы положения не различимы снаружи; «ноль отказов» обязан быть отличим от «полоса не исполнялась»",
 	},
+	AccessKeyLoginOutcomesMetric: {
+		Cells: len(humansession.AccessKeyLoginOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вход ключом отвечает ОДНИМ отказом на все причины (Ф13 Р7): испытание, удостоверение, рукоятка и подпись снаружи неразличимы by construction, и клетка — единственное место, где причина видна. Ноль по ней до первого события обязан быть виден (Ф3 Р14), иначе непровязанная полоса выглядит как полоса без отказов",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },

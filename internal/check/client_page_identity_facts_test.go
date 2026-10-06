@@ -31,7 +31,10 @@ import (
 //     страница называет ПОИМЁННО — и поэтому сверяются они с объявлением
 //     владельца (`subscriptionjournal.Journal`) в обе стороны;
 //   - число путей полосы входа на двух страницах отстало от перечня слушателя
-//     (kaname#504). Сверяется с `loginlanehttp.Paths()`;
+//     (kaname#504), а затем — на странице самой полосы, которую гейт не читал,
+//     и формами записи, которых его образец «N пут…» не знал (NA8 волны 4:
+//     «Путей у полосы **N**», «из N-и путей», «все N (`…Paths()`)»).
+//     Сверяется с `loginlanehttp.Paths()`;
 //   - умолчание размера страницы на обзоре расходилось с общим валидатором
 //     (kaname#513). Сверяется с `corevalidate.DefaultPageSize`;
 //   - форма идентификатора клиента в `iss`/`sub` на странице токенов шла через
@@ -51,6 +54,7 @@ const (
 	idFactsOverviewRel     = "docs/content/api/overview.mdx"
 	idFactsRestSurfaceRel  = "docs/content/api/rest-surface.mdx"
 	idFactsArchOverviewRel = "docs/content/architecture/overview.mdx"
+	idFactsAuthLaneRel     = "docs/content/api/auth-lane.mdx"
 	idFactsTokensRel       = "docs/content/api/tokens.mdx"
 	idFactsIntroRel        = "docs/content/intro.mdx"
 )
@@ -87,15 +91,16 @@ var idFactsNumerals = map[int]string{
 
 // idFactsCensus — объём осмотренного. Печатается всегда.
 type idFactsCensus struct {
-	journalKinds   int // видов у владельца журнала
-	calloutSpans   int // код-спанов во врезке о журнале
-	calloutKinds   int // из них — слов вида
-	lanePages      int // страниц, судимых по числу путей полосы
-	tokenIDSpans   int // код-спанов страницы токенов с идентификатором клиента
-	paginationRead bool
-	firstCallRead  bool
-	layoutDirs     int // каталогов верхнего уровня в дереве
-	layoutRows     int // строк таблицы раскладки
+	journalKinds    int // видов у владельца журнала
+	calloutSpans    int // код-спанов во врезке о журнале
+	calloutKinds    int // из них — слов вида
+	lanePages       int // страниц, судимых по числу путей полосы
+	laneCountClaims int // числительных у слова «пут…» либо `Paths()` на них
+	tokenIDSpans    int // код-спанов страницы токенов с идентификатором клиента
+	paginationRead  bool
+	firstCallRead   bool
+	layoutDirs      int // каталогов верхнего уровня в дереве
+	layoutRows      int // строк таблицы раскладки
 }
 
 func idFactsSpans(text string) []string {
@@ -175,6 +180,61 @@ func auditJournalCallout(page string, kinds []string, c *idFactsCensus) []string
 	return findings
 }
 
+// idFactsCountWindow — сколько слов между числительным и якорем ещё связывают
+// их: «Путей у полосы **N**» — три слова между якорем и числом.
+const idFactsCountWindow = 3
+
+// idFactsCountToken — слово страницы либо имя перечня `Paths()` целиком.
+var idFactsCountToken = regexp.MustCompile(`Paths\(\)|\p{L}+`)
+
+// idFactsNumeralForms — каждая форма числительного словаря и его значение:
+// именительный («пятнадцать»), родительный/дательный/предложный («пятнадцати»),
+// творительный («пятнадцатью»). Слово сверяется ЦЕЛЫМ: «семнадцать» — хвост
+// «восемнадцать», и поиск подстроки читал бы второе первым.
+var idFactsNumeralForms = func() map[string]int {
+	out := map[string]int{}
+	for n, w := range idFactsNumerals {
+		out[w] = n
+		out[strings.TrimSuffix(w, "ь")+"и"] = n
+		out[w+"ю"] = n
+	}
+	return out
+}()
+
+// pathCountClaim — числительное, связанное с путями полосы, и его строка.
+type pathCountClaim struct {
+	word string
+	n    int
+	line int
+}
+
+// pathCountClaims — все числительные словаря страницы в окне
+// `idFactsCountWindow` слов от якоря: слова на «пут» либо `Paths()`. Формы
+// записи, которые страницы полосы употребляют (kaname#504, NA8 волны 4):
+// «N путей», «Путей у полосы **N**», «из N-и путей», «все N (`…Paths()`)».
+func pathCountClaims(page string) []pathCountClaim {
+	idx := idFactsCountToken.FindAllStringIndex(page, -1)
+	anchor := func(i int) bool {
+		w := page[idx[i][0]:idx[i][1]]
+		return w == "Paths()" || strings.HasPrefix(strings.ToLower(w), "пут")
+	}
+	var out []pathCountClaim
+	for i, span := range idx {
+		word := page[span[0]:span[1]]
+		n, ok := idFactsNumeralForms[strings.ToLower(word)]
+		if !ok {
+			continue
+		}
+		for j := max(0, i-idFactsCountWindow); j <= min(len(idx)-1, i+idFactsCountWindow); j++ {
+			if j != i && anchor(j) {
+				out = append(out, pathCountClaim{word: word, n: n, line: strings.Count(page[:span[0]], "\n") + 1})
+				break
+			}
+		}
+	}
+	return out
+}
+
 // auditLanePathCount — каждая страница называет число путей полосы числом
 // перечня слушателя и никаким другим.
 func auditLanePathCount(pages map[string]string, n int, c *idFactsCensus) []string {
@@ -186,16 +246,20 @@ func auditLanePathCount(pages map[string]string, n int, c *idFactsCensus) []stri
 	var findings []string
 	for _, rel := range sortedKeys(boolKeys(pages)) {
 		c.lanePages++
-		page := pages[rel]
-		if !strings.Contains(page, want+" пут") {
+		named := false
+		for _, claim := range pathCountClaims(pages[rel]) {
+			c.laneCountClaims++
+			if claim.n == n {
+				named = true
+				continue
+			}
+			findings = append(findings, fmt.Sprintf(
+				"%s:%d называет «%s» числом путей полосы, а у слушателя путей %s (`loginlanehttp.Paths()`)",
+				rel, claim.line, claim.word, want))
+		}
+		if !named {
 			findings = append(findings, fmt.Sprintf(
 				"%s не называет число путей полосы входа (%s, по `loginlanehttp.Paths()`)", rel, want))
-		}
-		for num, word := range idFactsNumerals {
-			if num != n && strings.Contains(page, word+" пут") {
-				findings = append(findings, fmt.Sprintf(
-					"%s называет «%s пут…», а у слушателя путей %s", rel, word, want))
-			}
 		}
 	}
 	sort.Strings(findings)
@@ -346,16 +410,17 @@ func TestClientPagesAgreeWithTheirProducers(t *testing.T) {
 	findings = append(findings, auditLanePathCount(map[string]string{
 		idFactsRestSurfaceRel:  idFactsRead(t, idFactsRestSurfaceRel),
 		idFactsArchOverviewRel: idFactsRead(t, idFactsArchOverviewRel),
+		idFactsAuthLaneRel:     idFactsRead(t, idFactsAuthLaneRel),
 	}, len(loginlanehttp.Paths()), &c)...)
 	findings = append(findings, auditClientIDForm(idFactsRead(t, idFactsTokensRel), &c)...)
 	findings = append(findings, auditPaginationDefault(overview, corevalidate.DefaultPageSize, &c)...)
 	findings = append(findings, auditFirstCallSection(overview, &c)...)
 	findings = append(findings, auditTreeLayout(idFactsRead(t, idFactsIntroRel), idFactsTopDirs(t), &c)...)
 
-	t.Logf("осмотрено: видов журнала %d, код-спанов врезки %d (слов вида %d), страниц полосы %d, "+
+	t.Logf("осмотрено: видов журнала %d, код-спанов врезки %d (слов вида %d), страниц полосы %d (числительных у путей %d), "+
 		"спанов идентификатора клиента %d, раздел пагинации прочитан %v, раздел первого вызова найден %v, "+
 		"каталогов дерева %d, строк раскладки %d",
-		c.journalKinds, c.calloutSpans, c.calloutKinds, c.lanePages, c.tokenIDSpans,
+		c.journalKinds, c.calloutSpans, c.calloutKinds, c.lanePages, c.laneCountClaims, c.tokenIDSpans,
 		c.paginationRead, c.firstCallRead, c.layoutDirs, c.layoutRows)
 	require.NotZero(t, c.journalKinds, "объявление владельца журнала не прочитано")
 	require.NotZero(t, c.lanePages, "страницы полосы не прочитаны")

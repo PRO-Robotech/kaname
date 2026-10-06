@@ -277,7 +277,11 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	position, err := humansession.NewPositionUseCase(sessions, clock.Now)
 	require.NoError(t, err)
 
-	verbs := avVerbs{stubLane: &stubLane{}, register: register, login: login, logout: logout, change: change,
+	enrollPw, err := humansession.NewEnrollPasswordUseCase(humansession.EnrollPasswordDeps{
+		Store: sessions, Hasher: hasher, Rule: rule, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger,
+	})
+	require.NoError(t, err)
+	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, register: register, login: login, logout: logout, change: change,
 		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
 		requestV: requestV, confirmV: confirmV, position: position}
 	l := newLaneOver(t, verbs, "")
@@ -350,6 +354,12 @@ type avVerbs struct {
 	requestV  *humansession.RequestVerificationUseCase
 	confirmV  *humansession.ConfirmVerificationUseCase
 	position  *humansession.PositionUseCase
+	// Заведение первого пароля (kaname#213) — НАСТОЯЩИЙ глагол.
+	enrollPw *humansession.EnrollPasswordUseCase
+}
+
+func (v avVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	return v.enrollPw.Execute(ctx, in)
 }
 
 func (v avVerbs) RequestEmailVerification(ctx context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {

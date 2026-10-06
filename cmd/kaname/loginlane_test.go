@@ -146,3 +146,31 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	var none *loginLane
 	require.Nil(t, none.resetSecondFactorUseCase(nil, nil), "непостроенной полосе глагол не провязан")
 }
+
+// TestLoginLane_F13_14_KeyLaneAddsWebAuthnAndTheThirdLevel — Ф13-14 (Р14):
+// провязка полосы входа ключом добавляет `webauthn` в перечень провязанных
+// способов, и правило выводит из него «1», «2», «3»; близнец — та же полоса
+// без полосы ключа — «1», «2» (Ф12-34, проба выше). Различие пары — ровно
+// одно: собраны ли испытания полосы входа ключом. Реестр уборки получает
+// шестым… девятым предметом испытания полосы входа.
+func TestLoginLane_F13_14_KeyLaneAddsWebAuthnAndTheThirdLevel(t *testing.T) {
+	keys := kanamepg.NewAccessKeyRepo(nil)
+	lane := &loginLane{
+		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
+		freshness: 15 * time.Minute, keys: keys, keyFreshness: kanamepg.NewHumanSessionFreshness(nil),
+		loginChallenges: kanamepg.NewAccessKeyLoginRepo(nil, keys),
+		letterWindow:    24 * time.Hour, limits: humansession.Limits{SourceWindow: time.Hour},
+	}
+	require.Equal(t, []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret, assurance.MethodWebAuthn},
+		lane.signInMethods())
+	require.Equal(t, []string{"1", "2", "3"}, assurance.PresentableLevels(lane.signInMethods()).Strings(),
+		"Ф13-14: с полосой ключа предъявимы «1», «2», «3» — выведено правилом, а не выписано")
+
+	names := map[string]time.Duration{}
+	for _, s := range retention.WithHumanSessions(nil, lane.retentionReapers()) {
+		names[s.Name] = s.Grace
+	}
+	require.Len(t, names, 9, "девятый предмет уборки — испытания полосы входа ключом (Ф13)")
+	require.Contains(t, names, retention.SubjectAccessKeyLoginChallenges)
+	require.Zero(t, names[retention.SubjectAccessKeyLoginChallenges])
+}

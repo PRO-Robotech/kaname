@@ -118,6 +118,9 @@ const (
 	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
 	// заводит начало церемонии либо предъявления под живой сессией.
 	SubjectAccessKeyChallenges = "access_key_challenges"
+	// SubjectAccessKeyLoginChallenges — испытания ПОЛОСЫ ВХОДА ключом (Ф13,
+	// kaname#613): своя таблица, привязанная к контексту формы.
+	SubjectAccessKeyLoginChallenges = "access_key_login_challenges"
 	// SubjectVerificationCodes — коды подтверждения адреса (kaname#456, Р7,
 	// Р9): строки старше окна писем, которые ни предъявление, ни предел писем
 	// уже не прочтут. Темп задаёт человек: строку заводит письмо подтверждения.
@@ -148,6 +151,10 @@ type HumanSessionReapers struct {
 	// Ф7-34); порог уборки испытаний. Нулевой порог снимал бы предъявленное
 	// испытание первым же проходом, и повтор читался бы «не выдавалось».
 	ChallengeTTL time.Duration
+	// LoginChallenges — уборщик испытаний ПОЛОСЫ ВХОДА ключом (Ф13,
+	// kaname#613); nil — полоса входа ключом не провязана, и предмета уборки
+	// у реестра нет (таблица пустует by construction).
+	LoginChallenges AccessKeyLoginChallengeReaper
 	// Подтверждение адреса (kaname#456): коды, окна источника, письма с
 	// истёкшим кодом; LetterWindow — окно писем подтверждения, SourceWindow —
 	// окно обращений источника.
@@ -199,6 +206,12 @@ type AccessKeyChallengeReaper interface {
 	SweepUnservableChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// AccessKeyLoginChallengeReaper — порт уборщика истёкших и предъявленных
+// испытаний полосы входа ключом.
+type AccessKeyLoginChallengeReaper interface {
+	SweepUnservableLoginChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: уборщики приходят от собранной полосы,
 // и неполный их набор — отказ, а не уборщик без предмета, который выглядел бы
@@ -208,7 +221,7 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 		r.VerificationCodes == nil || r.SourceWindows == nil || r.BearerLetters == nil || r.LetterWindow <= 0 || r.SourceWindow <= 0 {
 		return base
 	}
-	return append(base,
+	subjects := append(base,
 		Subject{
 			Name: SubjectHumanSessions,
 			// Порог — функция предиката читателя: запись годна к снятию, как
@@ -272,6 +285,18 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			Sweep: r.BearerLetters.SweepExpiredBearerLetters,
 		},
 	)
+	if r.LoginChallenges != nil {
+		subjects = append(subjects, Subject{
+			Name: SubjectAccessKeyLoginChallenges,
+			// Порог — ноль: оператор однократности полосы входа не обслужит ни
+			// истёкшую, ни предъявленную строку, а три состояния испытания
+			// наружу НЕ различаются (Ф13 Р7 — один отказ), и хранить строку
+			// ради различимости незачем.
+			Grace: 0,
+			Sweep: r.LoginChallenges.SweepUnservableLoginChallenges,
+		})
+	}
+	return subjects
 }
 
 // SweepFunc — один проход уборщика по одному предмету.

@@ -92,15 +92,24 @@ const (
 	// запрос письма и предъявление кода — два глагола под сессией человека.
 	PathVerifyEmail        = "/iam/v1/auth/verify-email"
 	PathVerifyEmailConfirm = "/iam/v1/auth/verify-email/confirm"
+	// Вход ключом доступа (Ф13 Р1, kaname#613): выдача испытания и
+	// предъявление утверждения — два глагола, два вида признака формы.
+	PathAccessKeyBegin = "/iam/v1/auth/access-key/begin"
+	PathAccessKeyLogin = "/iam/v1/auth/access-key/login"
+	// PathPasswordEnroll — заведение первого пароля из живой сессии
+	// (kaname#213, приёмка A7 Р1): подпуть семейства пароля.
+	// #nosec G101 -- это ПУТЬ глагола, а не значение пароля.
+	PathPasswordEnroll = "/iam/v1/auth/password/enroll"
 )
 
-// Paths — пятнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// Paths — восемнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
 // для ретрансляции (§8 инв. 7).
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
 		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
+		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll,
 	}
 }
 
@@ -119,14 +128,18 @@ const (
 // pathPositions — объявление Р2 для каждого пути полосы. Путь, заводимый
 // позже, объявляет себя здесь той же правкой, что заводит путь.
 var pathPositions = map[string]PathPosition{
-	PathRegister:                PathAvailableInVerification,
-	PathLogin:                   PathAvailableInVerification,
-	PathCSRF:                    PathAvailableInVerification,
-	PathLogout:                  PathAvailableInVerification,
-	PathVerifyEmail:             PathAvailableInVerification,
-	PathVerifyEmailConfirm:      PathAvailableInVerification,
-	PathRecovery:                PathAvailableInVerification,
-	PathRecoveryComplete:        PathAvailableInVerification,
+	PathRegister:           PathAvailableInVerification,
+	PathLogin:              PathAvailableInVerification,
+	PathCSRF:               PathAvailableInVerification,
+	PathLogout:             PathAvailableInVerification,
+	PathVerifyEmail:        PathAvailableInVerification,
+	PathVerifyEmailConfirm: PathAvailableInVerification,
+	PathRecovery:           PathAvailableInVerification,
+	PathRecoveryComplete:   PathAvailableInVerification,
+	// Вход ключом выдаёт сессию так же, как вход паролем: положения
+	// подтверждения у вызывающего до выдачи нет.
+	PathAccessKeyBegin:          PathAvailableInVerification,
+	PathAccessKeyLogin:          PathAvailableInVerification,
 	PathPassword:                PathRefusedInVerification,
 	PathSecondFactor:            PathRefusedInVerification,
 	PathSecondFactorEnroll:      PathRefusedInVerification,
@@ -134,6 +147,9 @@ var pathPositions = map[string]PathPosition{
 	PathSecondFactorRemove:      PathRefusedInVerification,
 	PathSecondFactorBackupCodes: PathRefusedInVerification,
 	PathStepUp:                  PathRefusedInVerification,
+	// Заведение пароля — правка своих данных: в положении подтверждения адреса
+	// отказ (A7 Р2, F6b Р2).
+	PathPasswordEnroll: PathRefusedInVerification,
 }
 
 // PathPositions — объявление Р2 копией.
@@ -189,6 +205,13 @@ type Lane interface {
 	// AddressPosition — положение сессии носителя по ТЕКУЩЕЙ отметке (Р1):
 	// его спрашивает отказ положения на путях, объявленных отказом Р2.
 	AddressPosition(ctx context.Context, bearer domain.SessionBearer) (humansession.Position, error)
+	// Вход ключом доступа (Ф13 Р1): испытание выдаётся, не назвав человека;
+	// предъявление утверждения выдаёт сессию той же формой ответа, что вход
+	// паролем.
+	BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error)
+	AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error)
+	// EnrollPassword — заведение первого пароля из живой сессии (kaname#213).
+	EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -249,6 +272,9 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
 	h.mux.HandleFunc(PathVerifyEmail, h.method(http.MethodPost, h.requestEmailVerification))
 	h.mux.HandleFunc(PathVerifyEmailConfirm, h.method(http.MethodPost, h.confirmEmailVerification))
+	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
+	h.mux.HandleFunc(PathAccessKeyLogin, h.method(http.MethodPost, h.accessKeyLogin))
+	h.mux.HandleFunc(PathPasswordEnroll, h.method(http.MethodPost, h.enrollPassword))
 	return h, nil
 }
 
@@ -621,6 +647,42 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
+}
+
+// passwordEnrollForm — форма заведения первого пароля (A7 Р1): закрытый набор.
+type passwordEnrollForm struct {
+	NewPassword string `json:"newPassword"`
+	CSRFToken   string `json:"csrfToken"`
+}
+
+// enrollPassword — заведение первого пароля из живой сессии (kaname#213):
+// форма → признак своего вида → положение подтверждения → поле → глагол.
+// Ответ — сессия как есть, БЕЗ Set-Cookie: глагол носитель не перевыпускает
+// (A7 Р5, Р6).
+func (h *Handler) enrollPassword(w http.ResponseWriter, r *http.Request) {
+	var form passwordEnrollForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormPasswordEnroll, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathPasswordEnroll, humansession.TextRequestNotPerformed) {
+		return
+	}
+	if err := requireFields(map[string]string{"newPassword": form.NewPassword}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.EnrollPassword(r.Context(), humansession.EnrollPasswordInput{
+		Bearer: h.bearer(r), NewPassword: form.NewPassword,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
 }
 
@@ -1050,6 +1112,9 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrEnrollmentNotPending):
 		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextEnrollmentNotPending,
 			&errorInfo{Reason: humansession.ReasonEnrollmentNotPending, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrPasswordAlreadySet):
+		writeRefusal(w, http.StatusConflict, codeAlreadyExists, humansession.TextPasswordAlreadySet,
+			&errorInfo{Reason: humansession.ReasonPasswordAlreadySet, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrSecondFactorAlreadyEnrolled):
 		writeRefusal(w, http.StatusConflict, codeAlreadyExists, humansession.TextSecondFactorAlreadyEnrolled,
 			&errorInfo{Reason: humansession.ReasonSecondFactorAlreadyEnrolled, Domain: h.cfg.RefusalDomain})

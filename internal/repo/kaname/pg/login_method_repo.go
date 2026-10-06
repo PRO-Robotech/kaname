@@ -302,6 +302,11 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 	return *at, true, nil
 }
 
+// AccessKeyEnrolled — порт `loginmethod.Store` (ось «заведено», ключ доступа).
+func (r *LoginMethodRepo) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return accessKeyEnrolled(ctx, r.pool, userID)
+}
+
 // replaceLoginVerifierTx — ЗАМЕЩЕНИЕ материала одним оператором (ID-PW-1
 // PWV-10, фаза Ф3 `kacho#1269`): новое значение кладётся `UPDATE` по паре
 // (человек, вид); строки нет — replaced=false, вставки нет (заводит способ
@@ -377,6 +382,21 @@ func recoveryTargetRow(ctx context.Context, q loginMethodQuerier, email domain.E
 		return domain.User{}, false, false, err
 	}
 	return u, verified, hasPassword, nil
+}
+
+// EnrollLoginMethod — заведение строки способа входа в транзакции писателя
+// сессии (приёмка A7 Р3, Р4; kaname#213): ЕДИНСТВЕННЫЙ оператор вставки
+// (`insertLoginMethod`), нарушение ключа «человек, вид» — enrolled=false.
+// Метод писателя сессии объявлен ЗДЕСЬ: право назвать таблицу секрета дано
+// этому файлу.
+func (w *humanSessionWriter) EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	if _, err := insertLoginMethod(ctx, w.tx, m); err != nil {
+		if stderrors.Is(err, iamerr.ErrAlreadyExists) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // --- второй фактор (Ф12, kacho#1281): операторы над таблицей секрета ---

@@ -200,10 +200,19 @@ type Writer interface {
 	// последнего предъявления сдвигается на presentedAt.
 	RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error
 	// PresentInSession — предъявление способа ВНУТРИ сессии (Ф11 Р5, Ф12):
-	// множество предъявленного, уровень (по правилу, вычислен вызывающим),
-	// новый дайджест носителя и момент последнего предъявления — одной записью
-	// на живой строке; момент аутентификации и срок не трогаются.
-	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error
+	// множество предъявленного, уровень, новый дайджест носителя и момент
+	// последнего предъявления — одной записью на живой строке; момент
+	// аутентификации и срок не трогаются.
+	//
+	// candidate — уровень, который правило выводит из множества вызывающего;
+	// ЗАПИСЬ уровня решает оператор, с условием на прежнее значение
+	// (kaname#343): кандидат ниже записанного запись не понижает (Ф11 Р2), выше
+	// — поднимает. Множество предъявленного накапливается тем же оператором:
+	// способ, предъявленный конкурентом между чтением и записью, не теряется.
+	// Ответ — то, что ЛЕГЛО, и копии уровня читают его, а не кандидата.
+	// Кардинальность судит тот же оператор: строки нет либо она снята —
+	// NOT_FOUND.
+	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (PresentedRecord, error)
 	// UpsertCutoff — операция записи отсечки (§4.1 п.17): момент монотонен;
 	// причина и актор идут за ПРИНЯТЫМ моментом, на равных стоит последняя.
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
@@ -223,11 +232,21 @@ type Writer interface {
 	// исходом, что заводит первый пароль (пара `active-identity-has-a-way-in.md`
 	// AWI-10, Ф5-30). Единственный снимающий оператор.
 	CloseRecoveryPath(ctx context.Context, userID domain.UserID) error
+	// EnrollLoginMethod — ЗАВЕДЕНИЕ строки способа входа существующим
+	// оператором вставки (приёмка A7 Р3, Р4; kaname#213): enrolled=false —
+	// строка этого вида у человека уже есть. Решает ключ строки хранилища
+	// («человек, вид»), а не проверка перед вставкой: из двух одновременных
+	// заведений проходит одно.
+	EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (enrolled bool, err error)
 	// LoginMethod — строка способа входа человека данного вида, прочитанная
 	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —
 	// вложенного захвата соединения у него нет (шапка `completed_login.go`).
 	LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
+	// AccessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа,
+	// прочитанная ЭТОЙ транзакцией (то же чтение, что
+	// `loginmethod.Store.AccessKeyEnrolled`, без второго соединения).
+	AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error)
 	// RecordFailure — одно неверное предъявление по оси и ключу.
 	RecordFailure(ctx context.Context, scope FailureScope, key string, at time.Time) error
 	// ResetFailures снимает счёт по оси и ключу (успешный вход обнуляет счёт по
@@ -295,6 +314,35 @@ type Writer interface {
 	Rollback(ctx context.Context) error
 }
 
+// AccessKeyLoginStore — хранилище ПОЛОСЫ ВХОДА ключом (Ф13 Р2, Р3, Р13).
+//
+// ГРАНИЦА НАЗВАНА. Полоса входа человека не знает: она обнаруживает его по
+// предъявленному удостоверению. Поэтому испытание здесь привязано к КОНТЕКСТУ
+// ФОРМЫ, а не к человеку, и живёт в своей таблице — инвариант испытаний
+// церемоний Ф7 («строка принадлежит вызывающему») этим не ослабляется.
+// Моменты выдачи, срока и предъявления испытания ставит хранилище своими
+// часами: испытание выдаёт одна реплика, предъявляют другой.
+type AccessKeyLoginStore interface {
+	// IssueChallenge кладёт выданное испытание сроком ttl, ЗАМЕЩАЯ живое
+	// испытание того же контекста одной транзакцией (Ф13-03).
+	IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge, ttl time.Duration) error
+	// ConsumeChallenge — ОДИН оператор однократности (Ф13-08): строка этого
+	// контекста, не потреблённая и не истёкшая, получает отметку.
+	// consumed=false — её нет, она потреблена, истекла либо выдана другому
+	// контексту; различать это вызывающему незачем — отказ один (Р7).
+	ConsumeChallenge(ctx context.Context, challenge []byte, formContext string) (consumed bool, err error)
+	// KeyByCredentialID — строка ключа по идентификатору удостоверения;
+	// found=false — строки нет. Снятый ключ и «удостоверения не было» суть
+	// одно состояние (Р15).
+	KeyByCredentialID(ctx context.Context, credentialID []byte) (domain.AccessKey, bool, error)
+	// AdvanceSignCount — атомарный сдвиг счётчика и момента предъявления с
+	// условием на прежнее значение (Ф7 Р6): advanced=false — проигравший.
+	AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (advanced bool, err error)
+	// UserOf — человек, которому принадлежит найденная строка ключа: ему и
+	// выдаётся сессия (Р3). Нет человека — NOT_FOUND.
+	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
 // EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора
 // (Ф12-44): строки `pending`, чей срок (окно Р8 от момента заведения) истёк,
 // — `confirm` их уже не примет ни при каком коде.
@@ -317,4 +365,12 @@ type FailureSweeper interface {
 // истёкшие строки, которые оператор применения уже не обслужит.
 type RecoveryCodeSweeper interface {
 	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// PresentedRecord — то, что легло в запись сессии предъявлением внутри неё
+// (`Writer.PresentInSession`): накопленное множество предъявленного и уровень
+// после условия на прежнее значение.
+type PresentedRecord struct {
+	Methods []string
+	Level   string
 }

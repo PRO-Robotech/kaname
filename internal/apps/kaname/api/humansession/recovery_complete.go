@@ -339,7 +339,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		// «1», и при заведённом втором факторе вход не завершён. У
 		// заблокированной решения нет вовсе — сессии нет. Заведённое читается
 		// ЭТОЙ транзакцией и только здесь, после точки решения (шапка).
-		enrolled, err := enrolledMethods(ctx, w.LoginMethod, user.ID)
+		enrolled, err := enrolledForCompletion(ctx, w.LoginMethod, w.AccessKeyEnrolled, user.ID)
 		if err != nil {
 			uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
 				"user_id", string(user.ID), "err", err.Error())
@@ -347,7 +347,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		}
 		if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 			Enrolled: enrolled, EnrolledKnown: true,
-			AddressKey: AddressKey(string(user.Email)), Presented: methods,
+			AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 		}); err != nil {
 			return CompleteRecoveryOutput{}, err
 		}

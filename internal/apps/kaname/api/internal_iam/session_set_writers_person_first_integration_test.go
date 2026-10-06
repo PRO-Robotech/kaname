@@ -73,7 +73,7 @@ func secondFactorRemovalSessionWrites(ctx context.Context, repo *kanamepg.HumanS
 	if err != nil {
 		return 0, err
 	}
-	if err := w.PresentInSession(ctx, keep, []string{"password", "lookup_secret"}, "2", rotated, now); err != nil {
+	if _, err := w.PresentInSession(ctx, keep, []string{"password", "lookup_secret"}, "2", rotated, now); err != nil {
 		return 0, err
 	}
 	if err := w.Commit(ctx); err != nil {
