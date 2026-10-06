@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 772
+Всего кейсов: 774
 
 ## Перепись по модулям
 
@@ -67,7 +67,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 22 |
-| `cases/kaname-recovery-lane.py` | 8 |
+| `cases/kaname-recovery-lane.py` | 10 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 6 |
 | `cases/kaname-access-keys.py` | 10 |
@@ -997,7 +997,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-A`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 
-## `cases/kaname-recovery-lane.py` — 8 кейсов
+## `cases/kaname-recovery-lane.py` — 10 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1005,7 +1005,9 @@
 > завершения набор берёт из письма у приёмника писем стенда (`standMailboxUrl`,
 > дверь `GET /codes`), людей заводит сам — регистрацией и подтверждением адреса.
 > Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
-> прогонщика, что набор входа, после него.
+> прогонщика, что набор входа, после него. Блокировку личности (Ф5-17, Ф5-25)
+> зовёт надзор облака стенда — своего человека с `system_admin` и вторым
+> фактором кладёт посев церемонии (kaname#468); его предъявитель кейс куёт сам.
 
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
@@ -1015,6 +1017,8 @@
 - `IAM-RECOVERY-NEG-RATE-LIMIT`
 - `IAM-RECOVERY-OK-NEW-PASSWORD-SIGNS-IN`
 - `IAM-RECOVERY-OK-ENDS-EVERY-SESSION`
+- `IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED`
+- `IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN`
 
 ## `cases/kaname-registration.py` — 2 кейса
 

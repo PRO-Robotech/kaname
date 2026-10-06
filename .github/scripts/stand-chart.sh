@@ -1245,12 +1245,16 @@ seed_ceremony() {
 	ensure_forward grpc-internal "$RELEASE-internal" grpc-internal; grpc="127.0.0.1:$FORWARD_PORT"
 	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
 	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+	# Надзор облака (kaname#468) посев заводит сам — регистрацией с подтверждением
+	# адреса кодом из письма, как посев полосы своего человека.
+	ensure_forward mailbox "$MAIL_SVC" http; local mailbox="http://127.0.0.1:$FORWARD_PORT"
 
 	local rc=0
 	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
 		python3 "$ROOT/tests/authz-fixtures/seed_ceremony.py" \
 		--lane-url "$LANE_URL" --issuance-url "$issuance" --own-url "$own" \
-		--grpc-addr "$grpc" --pki "$cdir" || rc=$?
+		--grpc-addr "$grpc" --pki "$cdir" --mailbox-url "$mailbox" \
+		--email-domain "$DOMAIN" || rc=$?
 	return "$rc"
 }
 
