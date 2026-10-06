@@ -82,6 +82,9 @@ type fakeStore struct {
 	trips atomic.Int64
 	// mailWindow — окна писем восстановления по адресату (kaname#456).
 	mailWindow map[string]int
+	// openPath — отметка открытого пути восстановления (kaname#608): ставит
+	// её только перенос, снимает только завершение восстановления.
+	openPath map[domain.UserID]bool
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.
@@ -103,6 +106,7 @@ func newFakeStore() *fakeStore {
 		cutoffs: map[domain.UserID]fakeCutoff{}, verifiers: map[domain.UserID]domain.LoginVerifier{},
 		factors: map[domain.UserID]map[domain.LoginMethodKind]*domain.LoginMethod{},
 		codes:   map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
+		openPath: map[domain.UserID]bool{},
 	}
 }
 
@@ -479,6 +483,57 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	}
 	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
 	return true, nil
+}
+
+// PutLoginVerifier — «заменить либо завести» одним оператором (Ф5-34), как у
+// адаптера: вид — только пароль, отказ по имени "put-verifier".
+func (w *fakeWriter) PutLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, errFakeArg(err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return false, errFakeArg("Illegal argument login_method: only an active password row is put by recovery")
+	}
+	w.store.trip()
+	if err := w.fail("put-verifier"); err != nil {
+		return false, err
+	}
+	_, exists := w.store.verifiers[m.UserID]
+	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
+	return !exists, nil
+}
+
+// MarkEmailVerified — сверка адреса и отметка одним оператором, как у адаптера
+// (`markEmailVerifiedSQL`): адрес не тот либо личности нет — marked=false;
+// отказ по имени "mark-verified".
+func (w *fakeWriter) MarkEmailVerified(_ context.Context, userID domain.UserID, email domain.Email, at time.Time) (bool, error) {
+	if userID == "" || at.IsZero() {
+		return false, errFakeArg("Illegal argument email_verified_at: user and moment required")
+	}
+	w.store.trip()
+	if err := w.fail("mark-verified"); err != nil {
+		return false, err
+	}
+	u, ok := w.store.users[userID]
+	if !ok || humansession.AddressKey(string(u.Email)) != humansession.AddressKey(string(email)) {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() { w.store.verified[userID] = true })
+	return true, nil
+}
+
+// CloseRecoveryPath — снятие отметки открытого пути одним оператором; отказ
+// по имени "close-path".
+func (w *fakeWriter) CloseRecoveryPath(_ context.Context, userID domain.UserID) error {
+	if userID == "" {
+		return errFakeArg("Illegal argument user_id: required")
+	}
+	w.store.trip()
+	if err := w.fail("close-path"); err != nil {
+		return err
+	}
+	w.ops = append(w.ops, func() { delete(w.store.openPath, userID) })
+	return nil
 }
 
 // LoginMethod — то же чтение, что `fakeMethods.Get`, транзакцией дублёра;

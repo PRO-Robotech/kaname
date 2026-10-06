@@ -86,9 +86,10 @@ func disclosureRootAsk(t *testing.T, reg *metrics.Registry, strangerVerified, st
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 	                       VALUES ($1, $1, $1 || '@example.test', $2, now())`, owner, acc)
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев владельца")
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	for _, u := range []string{admin, stranger} {
-		exec(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ($1, $1, $1 || '@example.test', $2)`, u, acc)
+		exec(withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ($1, $1, $1 || '@example.test', $2)`), u, acc)
 	}
 	fact("user:"+admin, "admin", "account", acc)
 	mark(admin)

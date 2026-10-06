@@ -260,9 +260,9 @@ func TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling(t *testing.T
 		`SELECT account_id FROM users WHERE id = $1`, ownerID).Scan(&hostAccount))
 
 	external := "ext-quota-no-row-" + ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		ids.NewID(domain.PrefixUser), hostAccount, external,
 		"quota-no-row@example.com", "Quota No Row")
 	require.NoError(t, err, "seed invited member")

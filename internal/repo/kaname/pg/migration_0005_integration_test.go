@@ -126,6 +126,7 @@ func newRbacFixture(t *testing.T, ctx context.Context, suffix string) *rbacFixtu
 	exec(`INSERT INTO kaname.roles (id, name, permissions, cluster_id)
 	      VALUES ($1, $2, '["compute.instance.*.get"]'::jsonb, 'cluster_root')`,
 		roleID, "kaname.probe"+suffix)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	return &rbacFixture{pool: pool, roleID: roleID}

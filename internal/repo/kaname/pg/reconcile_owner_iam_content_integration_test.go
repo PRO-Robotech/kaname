@@ -87,9 +87,9 @@ func seedNativeSA(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc dom
 func seedNativeUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc domain.AccountID, suffix string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		uid, string(acc), "ext-"+suffix+"-"+uid, "u-"+suffix+"@example.com", "U "+suffix)
 	require.NoError(t, err, "seed native user")
 	return uid

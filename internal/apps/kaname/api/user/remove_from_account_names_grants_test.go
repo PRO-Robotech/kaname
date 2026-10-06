@@ -63,38 +63,30 @@ func dsnWithSchema(t *testing.T) string {
 }
 
 // seedUserWithAccount заводит человека и его аккаунт; членство ставит зеркало S1.
-func seedUserWithAccount(t *testing.T, ctx context.Context, repo Repo, suffix string) (domain.UserID, domain.AccountID) {
+// Сырым SQL одной транзакцией со строкой пароля: действующую личность без
+// способа входа база не фиксирует (kaname#608).
+func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) (domain.UserID, domain.AccountID) {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 
-	w, err := repo.Writer(ctx)
+	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	committed := false
-	defer func() {
-		if !committed {
-			_ = w.Rollback(ctx)
-		}
-	}()
-
-	_, err = w.UsersW().InsertActive(ctx, domain.User{
-		ID:           uid,
-		AccountID:    accID,
-		ExternalID:   domain.ExternalSubject("ext-" + suffix + "-" + string(uid)),
-		Email:        domain.Email(fmt.Sprintf("u-%s-%s@example.com", strings.ToLower(suffix), strings.ToLower(string(uid[4:10])))),
-		DisplayName:  domain.DisplayName("User " + suffix),
-		InviteStatus: domain.InviteStatusActive,
-	})
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
+		fmt.Sprintf("u-%s-%s@example.com", strings.ToLower(suffix), strings.ToLower(string(uid[4:10]))),
+		"User "+suffix)
 	require.NoError(t, err)
-	_, err = w.AccountsW().Insert(ctx, domain.Account{
-		ID:          accID,
-		Name:        domain.AccountName(fmt.Sprintf("acc-%s-%s", strings.ToLower(suffix), strings.ToLower(string(accID[4:10])))),
-		OwnerUserID: uid,
-		Labels:      domain.Labels{},
-	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
+		VALUES ($1, $2, $3, '{}'::jsonb)`,
+		string(accID), fmt.Sprintf("acc-%s-%s", strings.ToLower(suffix), strings.ToLower(string(accID[4:10]))), string(uid))
 	require.NoError(t, err)
-	require.NoError(t, w.Commit(ctx))
-	committed = true
+	seedWayIn(t, ctx, tx)
+	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }
 
@@ -153,13 +145,13 @@ func TestRemoveFromAccount_RefusalNamesTheGrantsThatHold(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	uid, accID := seedUserWithAccount(t, ctx, repo, "hold")
+	uid, accID := seedUserWithAccount(t, ctx, pool, "hold")
 	role := someRoleID(t, ctx, pool)
 	blocking := grantOnAccount(t, ctx, pool, uid, accID, role)
 
 	// Выдача того же человека в ЧУЖОМ аккаунте — она членство НЕ держит и в
 	// отказе называться не должна (граница анти-оракула).
-	_, foreignAcc := seedUserWithAccount(t, ctx, repo, "othr")
+	_, foreignAcc := seedUserWithAccount(t, ctx, pool, "othr")
 	foreign := grantOnAccount(t, ctx, pool, uid, foreignAcc, role)
 
 	uc := NewRemoveFromAccountUseCase(repo, nil)
@@ -214,7 +206,7 @@ func TestRemoveFromAccount_SucceedsOnceTheGrantIsGone(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	uid, accID := seedUserWithAccount(t, ctx, repo, "free")
+	uid, accID := seedUserWithAccount(t, ctx, pool, "free")
 	role := someRoleID(t, ctx, pool)
 	blocking := grantOnAccount(t, ctx, pool, uid, accID, role)
 
@@ -245,7 +237,7 @@ func TestRemoveFromAccount_RefusalNamesGrantsScopedOnAccountProjects(t *testing.
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	uid, accID := seedUserWithAccount(t, ctx, repo, "proj")
+	uid, accID := seedUserWithAccount(t, ctx, pool, "proj")
 	role := someRoleID(t, ctx, pool)
 
 	projID := ids.NewID(domain.PrefixProject)

@@ -818,6 +818,13 @@ func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.
 	return replaceLoginVerifierTx(ctx, w.tx, m)
 }
 
+// PutLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку):
+// завершение восстановления кладёт пароль и тогда, когда строки ещё нет
+// (Ф5-34, Р9 п. 4).
+func (w *humanSessionWriter) PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	return putLoginVerifierTx(ctx, w.tx, m)
+}
+
 // LoginMethod — чтение строки способа входа тем же соединением транзакции;
 // оператор — адаптера таблицы секрета (`getLoginMethod`), как и у `Get` пулом.
 func (w *humanSessionWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {

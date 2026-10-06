@@ -253,6 +253,7 @@ func adapterSide(t *testing.T, ctx context.Context, people []parityPerson) parit
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		string(people[1].user.AccountID), "acc-parity", string(owner))
 	require.NoError(t, err)
+	seedOpenPath(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	methods := kanamepg.NewLoginMethodRepo(pool)
 	for _, p := range people {
@@ -404,7 +405,7 @@ func parityCases() []parityCase {
 	} {
 		st("RecoveryTarget", a.form, func(ctx context.Context, s humansession.Store, p parityPerson) string {
 			target, found, err := s.RecoveryTarget(ctx, a.email(p))
-			return said(err, "найден %v подтверждён %v", found, target.EmailVerified)
+			return said(err, "найден %v подтверждён %v пароль %v", found, target.EmailVerified, target.HasPassword)
 		})
 	}
 	cs = append(cs, parityCase{method: "Store.Writer", form: "—",
@@ -485,6 +486,18 @@ func parityCases() []parityCase {
 		replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: p.user.ID, Kind: domain.LoginMethodPassword,
 			Verifier: parityVerifier("material-password-new"), State: domain.LoginMethodStateActive})
 		return said(err, "заменён %v", replaced)
+	})
+	wr("PutLoginVerifier", "пароль её личности", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		created, err := w.PutLoginVerifier(ctx, domain.LoginMethod{UserID: p.user.ID, Kind: domain.LoginMethodPassword,
+			Verifier: parityVerifier("material-password-put"), State: domain.LoginMethodStateActive})
+		return said(err, "заведён %v", created)
+	})
+	wr("MarkEmailVerified", "её адрес", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		marked, err := w.MarkEmailVerified(ctx, p.user.ID, p.user.Email, parityNow)
+		return said(err, "отмечен %v", marked)
+	})
+	wr("CloseRecoveryPath", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		return said(w.CloseRecoveryPath(ctx, p.user.ID), "снята")
 	})
 	for _, kind := range []domain.LoginMethodKind{domain.LoginMethodPassword, domain.LoginMethodTOTP, domain.LoginMethodLookupSecret} {
 		wr("LoginMethod", "её личность, вид "+string(kind), func(ctx context.Context, w humansession.Writer, p parityPerson) string {

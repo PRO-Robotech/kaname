@@ -248,6 +248,7 @@ func cutoffMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tag str
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, owner)
 	require.NoError(t, err, "посев аккаунта %s", tag)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return member
 }

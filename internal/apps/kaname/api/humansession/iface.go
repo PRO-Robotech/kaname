@@ -66,10 +66,17 @@ type Resolved struct {
 }
 
 // RecoveryTarget — человек, которому адресован запрос восстановления, вместе с
-// подтверждённостью его адреса (Ф1-25: код — для подтверждённого адреса).
+// подтверждённостью его адреса и наличием строки пароля. Код восстановления
+// выдаётся на подтверждённый адрес, а также на неподтверждённый адрес личности
+// `ACTIVE`, у которой нет способа входа (Ф5 Р9): предъявление такого кода
+// подтверждает адрес и заводит первый пароль одной транзакцией.
 type RecoveryTarget struct {
 	User          domain.User
 	EmailVerified bool
+	// HasPassword — у личности есть строка способа входа «пароль». Читается
+	// ТЕМ ЖЕ чтением, что личность и подтверждённость (Ф5 Р9 п. 2): лишнее
+	// чтение на одной полосе стало бы различием по времени (Р7).
+	HasPassword bool
 }
 
 // RecoveryMailIntent — намерение отправить письмо восстановления: пишется той же
@@ -110,8 +117,8 @@ type Store interface {
 	// FirstAuthentication — момент первой аутентификации личности нашей
 	// посадкой (Р5). found=false — посадка эту личность ещё не аутентифицировала.
 	FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error)
-	// RecoveryTarget — человек по адресу вместе с подтверждённостью адреса
-	// ОДНИМ чтением: обе полосы запроса восстановления (адрес есть · адреса
+	// RecoveryTarget — человек по адресу вместе с подтверждённостью адреса и
+	// наличием строки пароля ОДНИМ чтением (Ф5 Р9 п. 2): обе полосы запроса восстановления (адрес есть · адреса
 	// нет) стоят одинаково (Ф5 Р2, Р7). found=false — адреса нет ни у кого.
 	RecoveryTarget(ctx context.Context, email domain.Email) (RecoveryTarget, bool, error)
 	// Writer открывает транзакцию записи. Вызывающий обязан Commit либо Rollback.
@@ -203,6 +210,19 @@ type Writer interface {
 	// ReplaceLoginVerifier замещает материал способа входа одним оператором
 	// (ID-PW-1 PWV-10): replaced=false — строки способа нет.
 	ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (replaced bool, err error)
+	// PutLoginVerifier — «заменить материал либо завести строку» одним
+	// оператором (Ф5 Р5 ветвь «строки нет», Ф5-34; Р9 п. 4): created=true —
+	// строки пароля не было, и её завёл этот оператор.
+	PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (created bool, err error)
+	// MarkEmailVerified — отметка на подтверждённое значение адреса: сверка
+	// адреса и запись — один оператор. marked=false — адрес строки уже не тот.
+	// Вызывающих два: глагол подтверждения (Ф6) и завершение восстановления,
+	// заводящее первый пароль (Ф5 Р9 п. 3).
+	MarkEmailVerified(ctx context.Context, userID domain.UserID, email domain.Email, at time.Time) (marked bool, err error)
+	// CloseRecoveryPath снимает отметку открытого пути восстановления — тем же
+	// исходом, что заводит первый пароль (пара `active-identity-has-a-way-in.md`
+	// AWI-10, Ф5-30). Единственный снимающий оператор.
+	CloseRecoveryPath(ctx context.Context, userID domain.UserID) error
 	// LoginMethod — строка способа входа человека данного вида, прочитанная
 	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —

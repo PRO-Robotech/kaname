@@ -266,6 +266,7 @@ func seedTargetMemberFixture(db *sql.DB) error {
 		VALUES ('acc_rw_probe', 'rw-probe', 'usr_rw_probe');
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr_rw_probe', 'ext-rw-probe', 'rw-probe@example.test', 'acc_rw_probe');
+		` + wayInGuardedSQL + `;
 		COMMIT;`); err != nil {
 		return err
 	}

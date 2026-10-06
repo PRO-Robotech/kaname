@@ -63,6 +63,8 @@ func seedInviterAndPendingInvite(t *testing.T, ctx context.Context, repo *kaname
 		InvitedBy:    inviterID,
 	}, time.Time{})
 	require.NoError(t, err)
+	_, err = kanamepg.WriterTx(w).Exec(ctx, inviteePasswordSQL, string(inviteeID))
+	require.NoError(t, err, "пароль приглашённого — до активации (kaname#456, kaname#608)")
 	require.NoError(t, w.Commit(ctx))
 	return inviterID, accID, inviteeID
 }

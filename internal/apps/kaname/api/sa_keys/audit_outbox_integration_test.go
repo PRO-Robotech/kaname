@@ -106,6 +106,7 @@ func seedSAKeyUserAndSA(t *testing.T, ctx context.Context, pool *pgxpool.Pool, s
 		fmt.Sprintf("sak-sa-%s", suffix))
 	require.NoError(t, err)
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, svaID
 }

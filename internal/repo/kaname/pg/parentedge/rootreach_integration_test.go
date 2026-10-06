@@ -125,6 +125,7 @@ func seedTenantRows(t *testing.T, pool *pgxpool.Pool, accountID string, projectI
 				"фикстура ничего не посеяла", prj, landed)
 		}
 	}
+	seedWayIn(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("фиксация посева арендатора: %v", err)
 	}

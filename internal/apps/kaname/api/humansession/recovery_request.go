@@ -4,7 +4,9 @@
 package humansession
 
 // recovery_request.go — ЗАПРОС КОДА ВОССТАНОВЛЕНИЯ (Ф5-01, Ф5-02, Ф5-09; Р1,
-// Р2, Р3): для подтверждённого адреса чеканится код со сроком нашей настройки,
+// Р2, Р3, Р9): для подтверждённого адреса — а также для неподтверждённого
+// адреса личности `ACTIVE`, у которой нет способа входа (Ф5 Р9), — чеканится
+// код со сроком нашей настройки,
 // и письмо ложится в НАШУ очередь своим видом события — той же транзакцией,
 // что строка кода. Ответ вызывающему один при любом исходе и постановки не
 // ждёт (Р2): исход различим только клеткой счётчика.
@@ -136,8 +138,10 @@ func (uc *RequestRecoveryUseCase) Execute(ctx context.Context, in RequestRecover
 	case !found:
 		uc.observer.RecoveryRequestObserved(RecoveryRequestNoRow)
 		return nil
-	case !target.EmailVerified:
-		// Ф1-25: код — для подтверждённого адреса. Ответ тот же.
+	case !target.EmailVerified && !withoutWayIn(target):
+		// Ф1-25: код — для подтверждённого адреса. Ответ тот же. Исключение
+		// одно — действующая личность без строки пароля (Ф5 Р9 п. 1, Ф5-29):
+		// иного выхода у неё нет, и предъявленный код докажет владение ящиком.
 		uc.observer.RecoveryRequestObserved(RecoveryRequestUnverified)
 		return nil
 	}
@@ -195,4 +199,11 @@ func (uc *RequestRecoveryUseCase) write(ctx context.Context, user domain.User, c
 		return err
 	}
 	return w.Commit(ctx)
+}
+
+// withoutWayIn — действующая личность без строки пароля (Ф5 Р9 п. 6: «без
+// способа входа» судится строкой пароля). `PENDING` и `BLOCKED` сюда не входят:
+// неподтверждённый адрес у них кода не получает, как прежде (Ф5-32).
+func withoutWayIn(t RecoveryTarget) bool {
+	return t.User.InviteStatus == domain.InviteStatusActive && !t.HasPassword
 }

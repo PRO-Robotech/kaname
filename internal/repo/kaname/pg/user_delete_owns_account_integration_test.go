@@ -108,6 +108,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w3))
 	require.NoError(t, w3.Commit(ctx))
 
 	w4, err := repo.Writer(ctx)

@@ -69,6 +69,7 @@ func newReclaimFixture(t *testing.T) *reclaimFixture {
 		_, err = tx.Exec(ctx, q)
 		require.NoError(t, err, "посев владельцев удостоверений")
 	}
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return &reclaimFixture{pool: pool}
 }

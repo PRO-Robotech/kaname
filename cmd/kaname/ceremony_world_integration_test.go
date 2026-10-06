@@ -423,6 +423,7 @@ func (w *ceremonyWorld) seedPerson() {
 		account, "acc-"+strings.ToLower(account[3:9]), string(w.user)); err != nil {
 		w.fixture("посев аккаунта: %v", err)
 	}
+	seedWayIn(w.t, w.ctx, tx)
 	if err := tx.Commit(w.ctx); err != nil {
 		w.fixture("коммит посева человека: %v", err)
 	}

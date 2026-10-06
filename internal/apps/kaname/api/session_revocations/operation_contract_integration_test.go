@@ -95,6 +95,7 @@ func seedRevokeUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) domai
 		string(accID), "seed-acc-"+string(accID)[len(accID)-6:], string(uid))
 	require.NoError(t, err, "seed account")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit seed")
 	return uid
 }

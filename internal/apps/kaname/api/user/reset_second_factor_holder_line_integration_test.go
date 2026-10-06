@@ -82,7 +82,7 @@ func TestResetSecondFactorHolderLineOnBadIdsFromRealDB(t *testing.T) {
 	// промахивается ВСЕГДА. Существующая строка найдена — служба идёт дальше, к
 	// состоянию фактора, и отвечает «фактора нет» (строки способа не сеяны), то есть
 	// `FAILED_PRECONDITION`, а НЕ `NOT_FOUND`.
-	present, _ := seedUserWithAccount(t, ctx, repo, "hold2")
+	present, _ := seedUserWithAccount(t, ctx, pool, "hold2")
 	ucFound := NewResetSecondFactorUseCase(repo, nil, &rsfMethods{}, nil)
 	_, err = ucFound.Execute(ownerCtx(), present)
 	require.Error(t, err, "у существующего человека второго фактора нет — сброс отвечает отказом состояния")

@@ -88,6 +88,7 @@ func upsertUser(t *testing.T, ctx context.Context, repo *kanamepg.Repository, ex
 	})
 	require.NoError(t, err, "InsertActive target")
 
+	seedWayIn(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 	committed = true
 	return target, true

@@ -134,6 +134,7 @@ func withCountedPool(t *testing.T, seed func(ctx context.Context, tx pgx.Tx)) (
 		t.Fatalf("транзакция посева: %v", err)
 	}
 	seed(ctx, tx)
+	seedWayIn(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("коммит посева: %v", err)
 	}

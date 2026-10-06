@@ -113,6 +113,7 @@ func TestIntegration_CheckValueLaneOnRealServerRefusals(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ('acc00000000000cvreal', 'cv-real', 'usr00000000000cvreal')`)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	capture := func(q string, args ...any) *pgconn.PgError {

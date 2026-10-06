@@ -216,6 +216,21 @@ func (w recordingWriter) ReplaceLoginVerifier(ctx context.Context, m domain.Logi
 	return w.inner.ReplaceLoginVerifier(ctx, m)
 }
 
+func (w recordingWriter) PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	defer w.rec("PutLoginVerifier")()
+	return w.inner.PutLoginVerifier(ctx, m)
+}
+
+func (w recordingWriter) MarkEmailVerified(ctx context.Context, userID domain.UserID, email domain.Email, at time.Time) (bool, error) {
+	defer w.rec("MarkEmailVerified")()
+	return w.inner.MarkEmailVerified(ctx, userID, email, at)
+}
+
+func (w recordingWriter) CloseRecoveryPath(ctx context.Context, userID domain.UserID) error {
+	defer w.rec("CloseRecoveryPath")()
+	return w.inner.CloseRecoveryPath(ctx, userID)
+}
+
 func (w recordingWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	defer record(w.j, w.meter, storeOp{Port: "writer", Name: "LoginMethod(" + string(kind) + ")", LoginMethodRead: true})()
 	return w.inner.LoginMethod(ctx, userID, kind)

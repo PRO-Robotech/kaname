@@ -155,6 +155,21 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	case pgfault.Unique: // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case pgfault.ForeignKey: // foreign_key_violation
+		// Инвариант «у ACTIVE есть способ входа либо открытый путь
+		// восстановления» (kaname#608): строку без способа входа производит НАШ
+		// код — ни один глагол не принимает от вызывающего ни статуса, ни
+		// отметки, ни строки пароля в обход своих операторов. Поэтому отказ —
+		// внутренняя ошибка фиксированным текстом, а не «предусловие» с именем
+		// ограничения: вызывающему исправить нечего, и текст не различает для
+		// постороннего ничего о чужой учётке. Журнал называет ограничение и
+		// подсказку вызывающего репозитория. Ключ —
+		// `20261005030000_active_identity_has_a_way_in.sql`.
+		switch pgErr.ConstraintName {
+		case "users_active_has_a_way_in_fk":
+			slog.Error("active identity without a way in refused by the schema: a producer wrote ACTIVE without a password row or an open recovery path",
+				append([]any{"constraint", "users_active_has_a_way_in_fk", "kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
 		// Признак берётся от `fkText`: он и только он знает, какая из двух
 		// сторон ссылки нарушена. Обе вложены в ErrFailedPrecondition, поэтому
 		// код отказа не меняется — меняется различимость.

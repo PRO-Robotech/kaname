@@ -81,6 +81,7 @@ func (w *gateWorld) person(t *testing.T, id string, verified bool) {
 		_, err = tx.Exec(w.ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, id)
 		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка")
 	}
+	seedWayIn(t, w.ctx, tx)
 	require.NoError(t, tx.Commit(w.ctx), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): фиксация")
 }
 
