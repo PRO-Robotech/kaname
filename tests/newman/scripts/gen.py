@@ -1332,15 +1332,26 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
 
 
 def assert_op_success(auth: str = AUTH_INHERIT_OP, op_var: str = "opId") -> Step:
-    """The auth parameter ensures the step carries a valid Bearer token; by default
-    it inherits the principal that minted `op_var` (AUTH_INHERIT_OP)."""
-    return Step(name="assert-op-success", method="GET", path="/operations/{{" + op_var + "}}",
-                auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True),
-                test_script=[
-                    "const j = pm.response.json();",
-                    "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                    "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",
-                ])
+    """Поллит /operations/{op_var} до done и проверяет, что операция завершилась
+    успехом: `response` есть, `error` нет.
+
+    The auth parameter ensures the step carries a valid Bearer token; by default
+    it inherits the principal that minted `op_var` (AUTH_INHERIT_OP).
+
+    Опрос — ТОТ ЖЕ, что у `poll_operation_until_done` (один на дерево:
+    `gen_shared.op_poll_step`, бюджет POLL_CAP, реальная пауза между опросами,
+    счётчик по имени шага); от него этот шаг отличается только утверждением об
+    успехе в хвосте. Прежнее одиночное чтение гонялось с асинхронным воркером:
+    мутация ставит Operation, которая к немедленному GET ещё не `done`, и шаг
+    судил промежуточный конверт (kaname#624, IAM-ACC-ID-23 `assert-op-success #2`:
+    `"done":false`, а следующий шаг того же кейса видел правку применённой).
+    Держит `tests/newman/scripts/op_success_poll_test.py`.
+    """
+    return replace(
+        _op_poll(auth, op_var, True, tail=(
+            "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",
+        )),
+        name="assert-op-success")
 
 
 # ---------------------------------------------------------------------------
@@ -1987,14 +1998,21 @@ def _iam_item_hook(step, item):
 #     законный случай, и запрос просто не отправляется.
 def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True) -> Step:
     """Шаг опроса операции набора iam — общее тело плюс три его решения."""
+    return _op_poll(auth, "opId", required)
+
+
+def _op_poll(auth: str, op_var: str, required: bool, tail=()) -> Step:
+    """Общее тело опроса набора: `poll_operation_until_done` и `assert_op_success`
+    отличаются только переменной операции и хвостом утверждений."""
     return gen_shared.op_poll_step(
         Step,
         auth=auth,
+        op_var=op_var,
         budget=POLL_CAP,
         interval_ms=500,
         unique_name=False,
         pre_extra=[
-            *_op_id_guard("opId", required),
+            *_op_id_guard(op_var, required),
             "// poll-counter reset on first entry (request-name-scoped flag);",
             "// re-invocations via setNextRequest skip the reset.",
             "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
@@ -2002,7 +2020,8 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
             "  pm.environment.set('_pollStarted', pm.info.requestName);",
             "}",
         ],
-        step_extra={"op_var": "opId"},
+        step_extra={"op_var": op_var},
+        tail=tail,
     )
 
 
