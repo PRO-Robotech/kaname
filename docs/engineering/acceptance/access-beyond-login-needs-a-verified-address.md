@@ -235,9 +235,9 @@ git grep -n 'ReasonNotVerified = ' 2cf9c8528b1f -- internal ':!*_test.go'   # �
 
 ```sh
 # ДОМ: PRO-Robotech/kacho @ 680d1794 · единица — строка не-тестового Go края
-git grep -n 'addressRefusalText *=' 680d1794 -- gateway ':!*_test.go'
+git grep -n 'addressRefusalText *=' -- 'PRO-Robotech/kacho@680d1794:gateway/**' ':!*_test.go'
 #   → 1: gateway/internal/middleware/address_refusal.go:43, значение `email address is not verified`
-git log --format='%h %s' -S'confirm it with the code from the letter' 680d1794 -- gateway | head -3
+git log --format='%h %s' -S'confirm it with the code from the letter' -- 'PRO-Robotech/kacho@680d1794:gateway/**' | head -3
 #   → 81f7bf350 откат к значению F6b Р3; 97e018f60; c13dd559b — сторона края вводила этот текст
 #     раньше приёмки и откачена: смена текста — предмет приёмки, а не полосы края
 ```
