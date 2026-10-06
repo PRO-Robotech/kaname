@@ -1,19 +1,11 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// audiencefence_test.go — гейт ограды вопроса об аудитории (приёмка NTF-3,
-// kacho#2918, сценарий NTF3-180; Р30 «Какие строки читает вопрос с оградой»,
-// «Колонка версии прав», редакция 39; Д133, Д134 B1).
+// authzrevcolumn_test.go — гейт писателя версии прав (приёмка NTF-3,
+// kacho#2918, сценарий NTF3-180 (б), (д) и перечень значимых столбцов; Р30
+// «Колонка версии прав», редакция 39; Д133, Д134 B1; полоса K1).
 //
 // # Что судится
-//
-// Множество F — таблицы, которые читает вопрос с оградой, — выводится РАЗБОРОМ
-// запросов дерева, а не перечнем автора: запрос вопроса с оградой — строковый
-// литерал Go вне проб, несущий предикат ограды `pg_visible_in_snapshot(`
-// (Р30: версия строки видна в снимке `R_E`; токен — полный снимок, поэтому
-// иная законная форма ограды — сравнение с нижней границей снимка — Р30
-// запрещена, и распознавателю знать её не нужно). Таблицы запроса — ссылки
-// `kaname.<имя>` в литерале, кроме вызовов функций.
 //
 // Множество V — таблицы базы, сыгранной цепью миграций дерева, у которых есть
 // колонка `authz_rev`. У каждой таблицы V судится поведение, а не текст:
@@ -27,32 +19,26 @@
 //     каждого столбца по очереди — и те, что версию двигают, печатаются
 //     перечнем значимых столбцов таблицы; пустой перечень — находка.
 //
-// Требования: F непусто; V непусто; F = V; F не содержит таблиц объектной
-// стороны (NTF3-180 (в)). Перепись печатается всегда.
+// Требования: V непусто; ни одной находки у таблиц V. Перепись печатается
+// всегда.
 //
 // # Чего гейт НЕ судит
 //
-// Единственного производителя проекции (`TestObjectProjectionHasOneProducer`,
-// NTF3-180 (г)) — это предмет полосы поколения объекта (B2), не этой.
+// Равенства V множеству F — таблиц, которые читает вопрос об аудитории с
+// оградой (NTF3-180 (а), (в)). F выводится разбором запроса вопроса, и судить
+// равенство можно только на дереве, где этот запрос есть: гейт равенства
+// входит в дерево одним изменением с запросом, который он судит. Здесь —
+// писатель версии, у которого читатель не предполагается.
 //
-// Запрос, собранный подстановкой из нескольких литералов, судится по
-// литералу, несущему предикат ограды: таблица, приходящая подстановкой из
-// другого литерала, в F не попадёт. Это граница распознавателя, названная
-// здесь, а не умолчанная.
+// Единственного производителя проекции (NTF3-180 (г)) — это предмет полосы
+// поколения объекта.
 package repohygiene_test
 
 import (
 	"context"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -61,127 +47,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
-
-// fencePredicate — признак запроса вопроса с оградой.
-const fencePredicate = "pg_visible_in_snapshot("
-
-// objectSideTables — таблицы объектной стороны (Р30): зеркало, рёбра предков и
-// областей, материализованные кортежи привязок. Вопрос с оградой их не читает:
-// метки и цепь берутся из фактов события.
-var objectSideTables = map[string]bool{
-	"resource_mirror":               true,
-	"resource_parent_edge":          true,
-	"resource_scope_edge":           true,
-	"access_binding_emitted_tuples": true,
-}
-
-// fenceQuery — один запрос вопроса с оградой и таблицы, которые он читает.
-type fenceQuery struct {
-	at     string
-	tables []string
-}
-
-// fenceWalk — итог обхода дерева.
-type fenceWalk struct {
-	files, literals int
-	queries         []fenceQuery
-}
-
-// tableRefRE — ссылка на таблицу схемы; вызов функции схемы отсекается
-// проверкой следующего символа.
-func tableRefRE(schema string) *regexp.Regexp {
-	return regexp.MustCompile(`\b` + regexp.QuoteMeta(schema) + `\.([a-z_][a-z0-9_]*)\b(\s*\()?`)
-}
 
 // triggerDefRE — форма `pg_get_triggerdef`: имя, момент и события, таблица,
 // остаток (FOR EACH ROW [WHEN …] EXECUTE FUNCTION …).
 var triggerDefRE = regexp.MustCompile(`^CREATE (?:CONSTRAINT )?TRIGGER \S+ (.+?) ON \S+( FOR EACH .*)$`)
-
-// literalValue — значение строкового выражения из литералов и их сложения.
-func literalValue(e ast.Expr) (string, bool) {
-	switch x := e.(type) {
-	case *ast.BasicLit:
-		if x.Kind != token.STRING {
-			return "", false
-		}
-		s, err := strconv.Unquote(x.Value)
-		return s, err == nil
-	case *ast.BinaryExpr:
-		if x.Op != token.ADD {
-			return "", false
-		}
-		l, ok1 := literalValue(x.X)
-		r, ok2 := literalValue(x.Y)
-		return l + r, ok1 && ok2
-	case *ast.ParenExpr:
-		return literalValue(x.X)
-	}
-	return "", false
-}
-
-// walkFenceQueries обходит не-пробные файлы Go под dirs и собирает запросы с
-// предикатом ограды.
-func walkFenceQueries(t *testing.T, schema string, dirs ...string) fenceWalk {
-	t.Helper()
-	re := tableRefRE(schema)
-	var w fenceWalk
-	fset := token.NewFileSet()
-	for _, dir := range dirs {
-		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
-			if err != nil {
-				return fmt.Errorf("%s не разбирается: %w", path, err)
-			}
-			w.files++
-			seen := map[ast.Node]bool{}
-			ast.Inspect(f, func(n ast.Node) bool {
-				e, ok := n.(ast.Expr)
-				if !ok || seen[n] {
-					return true
-				}
-				s, ok := literalValue(e)
-				if !ok {
-					return true
-				}
-				// Сложение литералов судится целиком, его части повторно — нет.
-				ast.Inspect(n, func(m ast.Node) bool { seen[m] = true; return true })
-				w.literals++
-				if !strings.Contains(s, fencePredicate) {
-					return false
-				}
-				q := fenceQuery{at: fset.Position(e.Pos()).String()}
-				set := map[string]bool{}
-				for _, m := range re.FindAllStringSubmatch(s, -1) {
-					if m[2] != "" {
-						continue // вызов функции схемы, не таблица
-					}
-					set[m[1]] = true
-				}
-				for tbl := range set {
-					q.tables = append(q.tables, tbl)
-				}
-				sort.Strings(q.tables)
-				w.queries = append(w.queries, q)
-				return false
-			})
-			return nil
-		})
-		require.NoErrorf(t, err, "обход %s", dir)
-	}
-	return w
-}
 
 // revisioned — таблица с колонкой версии прав и итог суда над ней.
 type revisioned struct {
@@ -446,58 +316,22 @@ func judgeTrigger(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema 
 	}
 }
 
-// fenceVerdict — сравнение F и V; находки поимённо.
-func fenceVerdict(w fenceWalk, revs []revisioned) []string {
+// revisionVerdict — находки по таблицам V поимённо; пустое V — находка.
+func revisionVerdict(revs []revisioned) []string {
 	var findings []string
-	if w.files == 0 {
-		findings = append(findings, "обход дерева прочитал 0 файлов Go — вердикт беспредметен")
-	}
-	if len(w.queries) == 0 {
-		findings = append(findings, fmt.Sprintf("запросов вопроса с оградой 0 (литералов с %q нет среди %d литералов "+
-			"в %d файлах) — множество читаемых таблиц пусто", fencePredicate, w.literals, w.files))
-	}
 	if len(revs) == 0 {
-		findings = append(findings, "таблиц с колонкой authz_rev 0")
+		findings = append(findings, "таблиц с колонкой authz_rev 0 — вердикт беспредметен")
 	}
-	read := map[string][]string{}
-	for _, q := range w.queries {
-		for _, tbl := range q.tables {
-			read[tbl] = append(read[tbl], q.at)
-		}
-	}
-	have := map[string]bool{}
 	for _, r := range revs {
-		have[r.table] = true
 		findings = append(findings, r.findings...)
-	}
-	for tbl, at := range read {
-		if objectSideTables[tbl] {
-			findings = append(findings, fmt.Sprintf("вопрос с оградой читает таблицу объектной стороны %s (%s) — "+
-				"метки и цепь берутся из фактов события (NTF3-180 (в))", tbl, strings.Join(at, ", ")))
-			continue
-		}
-		if !have[tbl] {
-			findings = append(findings, fmt.Sprintf("вопрос с оградой читает таблицу %s без колонки authz_rev (%s) — "+
-				"её правка прошла бы мимо ограды (NTF3-180 (а))", tbl, strings.Join(at, ", ")))
-		}
-	}
-	for _, r := range revs {
-		if _, ok := read[r.table]; !ok && len(w.queries) > 0 {
-			findings = append(findings, fmt.Sprintf("таблица %s несёт authz_rev, а вопрос с оградой её не читает — "+
-				"множества не равны", r.table))
-		}
 	}
 	sort.Strings(findings)
 	return findings
 }
 
-// censusOf — перепись: печатается всегда.
-func censusOf(w fenceWalk, revs []revisioned) string {
+// revisionCensus — перепись: печатается всегда.
+func revisionCensus(revs []revisioned) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "файлов Go %d, литералов %d, запросов вопроса с оградой %d\n", w.files, w.literals, len(w.queries))
-	for _, q := range w.queries {
-		fmt.Fprintf(&b, "  запрос %s читает: %s\n", q.at, strings.Join(q.tables, ", "))
-	}
 	fmt.Fprintf(&b, "таблиц с authz_rev %d\n", len(revs))
 	for _, r := range revs {
 		fmt.Fprintf(&b, "  %s: значимые столбцы [%s]\n", r.table, strings.Join(r.significant, ", "))
@@ -505,24 +339,21 @@ func censusOf(w fenceWalk, revs []revisioned) string {
 	return b.String()
 }
 
-// TestAudienceFenceReadsOnlyRevisionedTables — NTF3-180 на дереве службы
-// доступа: таблицы вопроса с оградой равны таблицам с колонкой версии прав и
-// её триггером, сравнивающим значимые столбцы.
-func TestAudienceFenceReadsOnlyRevisionedTables(t *testing.T) {
+// TestAuthzRevisionIsStampedByItsTrigger — NTF3-180 (б), (д) на базе службы
+// доступа: у каждой таблицы с колонкой версии прав версию ставит построчный
+// триггер BEFORE INSERT OR UPDATE, сравнивающий значимые столбцы.
+func TestAuthzRevisionIsStampedByItsTrigger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("гейт поднимает Postgres с цепью миграций дерева")
 	}
-	root := platformtree.Require(t)
-	w := walkFenceQueries(t, "kaname", filepath.Join(root, "internal"), filepath.Join(root, "cmd"))
-
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 	revs := judgeRevisioned(t, ctx, pool, "kaname")
 
-	t.Logf("перепись гейта ограды:\n%s", censusOf(w, revs))
-	if f := fenceVerdict(w, revs); len(f) > 0 {
-		t.Fatalf("гейт ограды (NTF3-180): находок %d\n  · %s", len(f), strings.Join(f, "\n  · "))
+	t.Logf("перепись гейта версии прав:\n%s", revisionCensus(revs))
+	if f := revisionVerdict(revs); len(f) > 0 {
+		t.Fatalf("гейт версии прав (NTF3-180 (б), (д)): находок %d\n  · %s", len(f), strings.Join(f, "\n  · "))
 	}
 }
