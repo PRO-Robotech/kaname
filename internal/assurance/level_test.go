@@ -339,6 +339,45 @@ func TestPresentableLevels_FollowsTheRuleOverWiredMethods(t *testing.T) {
 	}
 }
 
+// TestGuaranteedLevels_KeyCountsAtItsWorstFlags — ось «заведено» судит то, что
+// способ даёт ВСЕГДА: ключ — «2» (строка «утверждение ключа доступа
+// (любое)»), а не «3» лучшего исхода. Близнец каждой строки с ключом —
+// PresentableLevels на тех же способах: различие ровно в исходе флагов ключа;
+// у способов без флагов обе функции совпадают.
+func TestGuaranteedLevels_KeyCountsAtItsWorstFlags(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		enrolled []Method
+		want     []string
+	}{
+		{"ничего не заведено", nil, nil},
+		{"только пароль", []Method{MethodPassword}, []string{"1"}},
+		{"пароль и второй фактор", []Method{MethodPassword, MethodTOTP, MethodLookupSecret}, []string{"1", "2"}},
+		{"только ключ", []Method{MethodWebAuthn}, []string{"2"}},
+		{"пароль и ключ", []Method{MethodPassword, MethodWebAuthn}, []string{"1", "2"}},
+	}
+	for _, c := range cases {
+		got := GuaranteedLevels(c.enrolled).Strings()
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: GuaranteedLevels(%v) = %v, ожидалось %v", c.name, c.enrolled, got, c.want)
+		}
+		hasKey := false
+		for _, m := range c.enrolled {
+			hasKey = hasKey || m == MethodWebAuthn
+		}
+		best := PresentableLevels(c.enrolled).Strings()
+		sort.Strings(best)
+		if !hasKey && !reflect.DeepEqual(got, best) {
+			t.Errorf("%s: без ключа худший и лучший исходы обязаны совпадать: %v против %v", c.name, got, best)
+		}
+		if hasKey && reflect.DeepEqual(got, best) {
+			t.Errorf("%s: с ключом исходы обязаны различаться — функция не отличает флаги ключа", c.name)
+		}
+	}
+}
+
 // TestInjection_RemovedRuleRowIsNamedByTheSet — снятая строка правила
 // краснеет ИМЕНЕМ НАБОРА (§8, инъекция группы «правило вывода»).
 //

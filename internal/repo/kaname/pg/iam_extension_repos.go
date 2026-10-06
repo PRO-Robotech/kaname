@@ -255,14 +255,13 @@ func unmarshalTrustedSubjects(body []byte) ([]domain.TrustedSubject, error) {
 // List returns OAuth clients owned by the given SA, paged by id ASC.
 func (r *SAOAuthClientRepo) List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error) {
 	// page_size outside [0..maxListPageSize] is REJECTED, never clamped (a clamp
-	// returns a short page indistinguishable from a complete one). 0 → default.
-	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
-		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
-			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	// returns a short page indistinguishable from a complete one). 0 → the
+	// platform default, the same one every other List of the service applies.
+	limit, err := effectivePageSize(pageSize)
+	if err != nil {
+		return nil, "", err
 	}
-	if pageSize == 0 {
-		pageSize = 100
-	}
+	pageSize = safeconv.ClampInt32(limit) // already bounded to [1..maxListPageSize]: no clamp happens
 	q := `SELECT ` + socCols + `
 	        FROM service_account_oauth_clients
 	       WHERE sva_id = $1 AND id > $2

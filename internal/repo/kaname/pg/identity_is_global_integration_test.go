@@ -189,6 +189,7 @@ func TestIntegration_FirstLoginActivatesEveryMembership(t *testing.T) {
 		_, aerr := w.UsersW().ActivateInvite(ctx, u.ID,
 			domain.ExternalSubject("ext-"+string(u.ID)), domain.DisplayName("Logged In"))
 		require.NoError(t, aerr)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

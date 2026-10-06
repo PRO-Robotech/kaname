@@ -43,9 +43,9 @@ import (
 func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID domain.AccountID, suffix string) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		string(uid), string(accID),
 		"ext-spu-"+suffix+"-"+string(uid),
 		"u-spu-"+suffix+"@example.com",

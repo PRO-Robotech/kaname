@@ -337,11 +337,13 @@ type AssuranceView struct {
 	MissingForLevel2 []string
 }
 
-// assuranceViewOf — вид из множества предъявленного и заведённых способов
-// личности; уровень — только правилом (§7 инв. 8).
-func assuranceViewOf(presented []string, enrolled []assurance.Method) AssuranceView {
-	level, _ := assurance.LevelOf(presentationsOf(presented))
-	view := AssuranceView{Level: level.String(), MissingForLevel2: []string{}}
+// assuranceViewOf — вид из записи сессии и заведённых способов личности:
+// уровень — ЧТЕНИЕ записи (Ф11 Р1, kaname#208), недостающее — правилом над
+// множеством записи (§7 инв. 8).
+func assuranceViewOf(rec PresentedRecord, enrolled []assurance.Method) AssuranceView {
+	presented := rec.Methods
+	level, _ := recordedLevel(rec.Level)
+	view := AssuranceView{Level: rec.Level, MissingForLevel2: []string{}}
 	for _, l := range assurance.PresentableLevels(enrolled) {
 		if l == assurance.Level2 {
 			view.Level2Reachable = true
@@ -414,14 +416,4 @@ func withMethod(presented []string, m assurance.Method) []string {
 		}
 	}
 	return append(append([]string(nil), presented...), m.String())
-}
-
-// levelOf — уровень множества правилом; множество, не дающее уровня, у живой
-// сессии не бывает (база не пропускает), поэтому отказ — наш дефект.
-func levelOf(presented []string) (string, error) {
-	level, ok := assurance.LevelOf(presentationsOf(presented))
-	if !ok {
-		return "", fmt.Errorf("session methods %v yield no assurance level", presented)
-	}
-	return level.String(), nil
 }

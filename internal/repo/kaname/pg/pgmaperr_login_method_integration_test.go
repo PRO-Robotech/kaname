@@ -55,6 +55,7 @@ func TestWrapPgErr_LoginMethodOnRealServerRefusals(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ('acc00000000000lmreal', 'lm-real', 'usr00000000000lmreal')`)
 	require.NoError(t, err)
+	seedOpenPath(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	const user = domain.UserID("usr00000000000lmreal")
 

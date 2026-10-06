@@ -108,6 +108,7 @@ func lockOrderScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, n int
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, user)
 	require.NoError(t, err, "посев аккаунта")
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	_, err = pool.Exec(ctx, `

@@ -23,7 +23,9 @@ package humansession
 //
 //	форма → частота (обе оси) → правило нового пароля → ЧТЕНИЕ адреса →
 //	ОДНА транзакция: применить код (один оператор) — ТОЧКА РЕШЕНИЯ; дальше
-//	только у применённого кода: записать материал · снять записи ВСЕХ прежних
+//	только у применённого кода: записать материал (заменить либо завести; у
+//	заведённого впервые — отметка подтверждения адреса и снятие открытого пути,
+//	Ф5 Р9 п. 3) · снять записи ВСЕХ прежних
 //	сессий · отсечка «смена пароля» актором-человеком · журнал по ключу потока ·
 //	у незаблокированной — выдача сессии, чтение заведённых способов входа ЭТОЙ
 //	ЖЕ транзакцией и решение о счёте по адресу местом решения входа · событие ·
@@ -257,19 +259,34 @@ func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
 	now time.Time, blocked, emailVerified bool,
 ) (CompleteRecoveryOutput, error) {
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
+	// Материал — «заменить либо завести» одним оператором (Р5 ветвь «строки
+	// нет», Ф5-34): у личности без строки пароля завершение заводит первый
+	// пароль, а не откатывается (`kacho#2698`, Р9 п. 3).
+	created, err := w.PutLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil {
 		return CompleteRecoveryOutput{}, err
 	}
-	if !replaced {
-		// Строки способа входа паролем нет: восстанавливать нечего. Запись нового
-		// способа — предмет Ф2 (ID-PW-1), а не этой фазы; заводить его здесь
-		// значило бы завести второго писателя способа входа. Исход откатывается
-		// целиком (код остаётся годным), причина — в журнале, а не в ответе.
-		// Исход для человека решает владелец — `kacho#2698`.
-		uc.logger.Error("recovery completion: the person has no password sign-in method to replace — recovery cannot set one (ID-PW-1 owns the write)",
-			"user_id", string(user.ID))
-		return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: user %s has no password sign-in method", user.ID)
+	if created {
+		// Первый пароль (Р9 п. 3): код дошёл до ящика, и предъявивший доказал
+		// владение адресом — отметка подтверждения ставится тем же оператором,
+		// что у глагола подтверждения (Ф6), если её не было; отметка открытого
+		// пути снимается. Всё — той же транзакцией: отказ любого шага
+		// откатывает исход целиком, код остаётся годным (Ф5-33).
+		if !emailVerified {
+			marked, err := w.MarkEmailVerified(ctx, user.ID, user.Email, now)
+			if err != nil {
+				return CompleteRecoveryOutput{}, err
+			}
+			if !marked {
+				// Адрес строки сменился между чтением и записью: подтверждать
+				// нечего — код доставлен на прежнее значение.
+				return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: address of user %s changed before the first password was set", user.ID)
+			}
+			emailVerified = true
+		}
+		if err := w.CloseRecoveryPath(ctx, user.ID); err != nil {
+			return CompleteRecoveryOutput{}, err
+		}
 	}
 	// Все прежние сессии — снятием записей (в нашей посадке) и отсечкой (её
 	// читает край на предъявлении, Ф3 Р7): Ф1 Р4, Ф5-19.
@@ -322,7 +339,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		// «1», и при заведённом втором факторе вход не завершён. У
 		// заблокированной решения нет вовсе — сессии нет. Заведённое читается
 		// ЭТОЙ транзакцией и только здесь, после точки решения (шапка).
-		enrolled, err := enrolledMethods(ctx, w.LoginMethod, user.ID)
+		enrolled, err := enrolledForCompletion(ctx, w.LoginMethod, w.AccessKeyEnrolled, user.ID)
 		if err != nil {
 			uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
 				"user_id", string(user.ID), "err", err.Error())
@@ -330,7 +347,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		}
 		if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 			Enrolled: enrolled, EnrolledKnown: true,
-			AddressKey: AddressKey(string(user.Email)), Presented: methods,
+			AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 		}); err != nil {
 			return CompleteRecoveryOutput{}, err
 		}

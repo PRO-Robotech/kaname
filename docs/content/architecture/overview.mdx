@@ -33,7 +33,7 @@ flowchart TD
     <tr><td><strong>domain</strong></td><td><code>internal/domain/</code></td><td>Сущности + <code>Validate()</code>; закрытые наборы (verbs, subject-types). Только stdlib + proto</td></tr>
     <tr><td><strong>use-case</strong></td><td><code>internal/apps/kaname/api/&lt;resource&gt;/</code></td><td>Бизнес-логика; определяет port-интерфейсы (Repo, Client). Не импортирует transport</td></tr>
     <tr><td><strong>repo (adapter)</strong></td><td><code>internal/repo/</code></td><td>Реализация портов на handwritten pgx; SQLSTATE → sentinel; outbox-emit в TX</td></tr>
-    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Почтовый отправитель. Дороги к прежнему издателю здесь больше нет: последняя — обмен докерного контура — снята (kaname#494)</td></tr>
+    <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Почтовый отправитель; сверка пароля с авторитетом утечек (<code>breachcheck</code>)</td></tr>
     <tr><td><strong>handler</strong></td><td><code>internal/handler/</code></td><td>Тонкий transport: parse → use-case → format. Без бизнес-логики</td></tr>
     <tr><td><strong>authz</strong></td><td><code>internal/authzguard</code>, <code>authzmap</code>, <code>authztypes</code></td><td>Интерсепторы, permission-map, verb→relation, объектные типы</td></tr>
     <tr><td><strong>composition root</strong></td><td><code>cmd/kaname/</code></td><td>Единственное место wiring (serve.go); <code>cmd/migrator/</code> — миграции</td></tr>
@@ -110,7 +110,7 @@ IAM — не только владелец модели прав, но и **то
     <tr><td><code>:9097</code></td><td>ключи проверки (HTTP)</td><td>потребители набора ключей; авторитет отзыва — край с сертификатом внутреннего УЦ</td><td>Открытые ключи подписи наших токенов, авторитет отзыва</td></tr>
     <tr><td><code>:9098</code></td><td>public REST</td><td>Tenant, напрямую или через край</td><td>REST-проекция публичных RPC</td></tr>
     <tr><td><code>:9099</code></td><td>internal REST</td><td>Peer-сервисы (взаимный TLS)</td><td>Служебные поверхности <code>/iam/v1/internal/…</code></td></tr>
-    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane (HTTP)</td><td>ровно край платформы (взаимный TLS, допуск по SAN)</td><td>Формы входа, пятнадцать путей: регистрация, вход, выход, смена пароля, восстановление, второй фактор, церемония повышения, подтверждение адреса</td></tr>
+    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane (HTTP)</td><td>ровно край платформы (взаимный TLS, допуск по SAN)</td><td>Формы входа, восемнадцать путей: регистрация, вход, выход, смена и заведение пароля, восстановление, второй фактор, церемония повышения, подтверждение адреса, вход ключом доступа</td></tr>
   </tbody>
 </table>
 

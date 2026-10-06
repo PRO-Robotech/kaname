@@ -128,6 +128,7 @@ func lmSeed(t *testing.T, db *sql.DB, tag string) (owner, member string) {
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, owner)
 	require.NoError(t, err, "посев аккаунта %s", tag)
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit())
 	return owner, member
 }

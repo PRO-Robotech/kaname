@@ -232,6 +232,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
 			domain.ExternalSubject("ext-rmres-activated"), domain.DisplayName("Excluded"))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 
@@ -260,6 +261,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
 			domain.ExternalSubject("ext-rmres-kept"), domain.DisplayName("Kept"))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 	keptAfter := membershipsOf(t, ctx, pool, kept)

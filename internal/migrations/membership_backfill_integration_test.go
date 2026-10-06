@@ -95,6 +95,7 @@ func seedUser(t *testing.T, db *sql.DB, tag, inviteStatus string) (userID, accou
 		accountID, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта для класса %s", inviteStatus)
 
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit())
 	return userID, accountID
 }

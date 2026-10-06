@@ -77,9 +77,9 @@ func seedLabeledPerson(
 ) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, labels)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6::jsonb)`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6::jsonb)`),
 		string(uid), string(columnAccount),
 		fmt.Sprintf("ext-%s-%s", suffix, uid),
 		fmt.Sprintf("p-%s-%s@example.com", suffix, uid),

@@ -2187,6 +2187,286 @@ CASES.append(Case(
 ))
 
 
+# ---------------------------------------------------------------------------
+# Ф4-29, Ф4-30 — пространство имён личных аккаунтов зарезервировано
+# (приёмка `registration-and-its-three-consequences.md`, Р9 п. 3; kaname#256)
+# ---------------------------------------------------------------------------
+#
+# Префикс `personal-cloud-` — знак личного аккаунта, который заводит СИСТЕМА
+# как следствие регистрации. Арендатор глаголами `Create` и `Update` в это
+# пространство не входит: синхронный отказ до операции, `INVALID_ARGUMENT`,
+# текст Р9 п. 3 побайтово. Каждое утверждение отказа стоит рядом с близнецом,
+# отличающимся ОДНИМ фактом — дефисом на границе префикса: без близнеца отказ
+# зеленел бы и на продукте, отвергающем любое имя.
+#
+# Человек — свой слот (`AccRsv`): положительный близнец Ф4-29 заводит аккаунт, а
+# заведение списывается с темпа личности. Тот же аккаунт служит «Дано» Ф4-30.
+# Второй положительный близнец Ф4-30 — правка прочих полей САМОГО личного
+# аккаунта: это личный аккаунт человека церемонии (`ceremonyAccountId`, его
+# завела регистрация), метка ставится и снимается тем же кейсом.
+_HUMAN_RSV = "jwtHumanAccRsv"
+_HUMAN_RSV_STEPUP = "jwtHumanAccRsvStepUp"
+_RSV_REFUSAL = "Illegal argument name: prefix 'personal-cloud-' is reserved for personal accounts"
+
+
+def _rsv_tail_script() -> list:
+    """Хвост имён кейса из `runId`: строчные латиница и цифры, не длиннее 12.
+
+    Фикстура не снисходительнее продукта: пустой хвост — не «имя без хвоста», а
+    несозданное условие, и шаг снимается, назвав переменную.
+    """
+    return [
+        "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
+        "const _t = _rid.slice(-12);",
+        "pm.environment.set('rsvTail', _t);",
+        "pm.environment.set('rsvTailUpper', _t.toUpperCase() + 'X');",
+        "if (_t.length === 0) {",
+        "  pm.test('fixture: runId is seeded (name entropy source for rsvTail)', "
+        "() => pm.expect(_t.length, 'runId').to.be.above(0));",
+        "  pm.execution.skipRequest();",
+        "}",
+    ]
+
+
+def _rsv_refused() -> list:
+    return [
+        *assert_status(400),
+        *assert_grpc_code(3, "INVALID_ARGUMENT"),
+        *assert_refusal_message(_RSV_REFUSAL),
+        "pm.test('синхронный отказ: операции нет', () => {",
+        "  const j = pm.response.json();",
+        "  pm.expect(j.id, JSON.stringify(j)).to.be.undefined;",
+        "});",
+    ]
+
+
+CASES.append(Case(
+    id="IAM-ACC-F4-29-RESERVED-PREFIX-ON-CREATE",
+    title="Ф4-29: Create с именем из пространства личных аккаунтов → 400 резерва; "
+          "близнец без дефиса на границе → аккаунт заведён",
+    classes=["NEG", "VAL"],
+    priority="P1",
+    steps=[
+        Step(
+            name="f429-create-reserved",
+            method="POST",
+            path="/iam/v1/accounts",
+            body={"name": "personal-cloud-{{rsvTail}}"},
+            auth=_HUMAN_RSV,
+            pre_script=_rsv_tail_script(),
+            test_script=_rsv_refused(),
+        ),
+        Step(
+            name="f429-reserved-account-absent",
+            method="GET",
+            path="/iam/v1/accounts?pageSize=1000",
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                "pm.test('аккаунта с отвергнутым именем нет', () => {",
+                "  const want = 'personal-cloud-' + pm.environment.get('rsvTail');",
+                "  const names = (pm.response.json().accounts || []).map(a => a.name);",
+                "  pm.expect(names, JSON.stringify(names)).to.not.include(want);",
+                "});",
+            ],
+        ),
+        # Порядок проверок: имя негодной ФОРМЫ с тем же префиксом получает прежний
+        # отказ формы, а не отказ резерва.
+        Step(
+            name="f429-bad-form-keeps-the-form-refusal",
+            method="POST",
+            path="/iam/v1/accounts",
+            body={"name": "personal-cloud-{{rsvTailUpper}}"},
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('отказ формы, а не резерва', () => {",
+                "  const m = pm.response.json().message || '';",
+                "  pm.expect(m, m).to.match(/^Illegal argument name: must match /);",
+                "  pm.expect(m, m).to.not.include('is reserved for personal accounts');",
+                "});",
+            ],
+        ),
+        # Положительный близнец — одно различие: нет дефиса на границе префикса.
+        Step(
+            name="f429-twin-create",
+            method="POST",
+            path="/iam/v1/accounts",
+            body={"name": "personal-cloud{{rsvTail}}"},
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accountId", "rsvAccId"),
+                *save_from_response("j.metadata && j.metadata.defaultProjectId", "rsvPrjId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="f429-twin-created",
+            method="GET",
+            path="/iam/v1/accounts/{{rsvAccId}}",
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                "pm.test('аккаунт заведён с именем близнеца', () => {",
+                "  pm.expect(pm.response.json().name).to.eql('personal-cloud' + pm.environment.get('rsvTail'));",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-ACC-F4-30-RESERVED-PREFIX-ON-RENAME",
+    title="Ф4-30: переименование в пространство личных аккаунтов → 400 резерва, имя прежнее; "
+          "близнецы — переименование без дефиса, правка меток и повтор имени личного аккаунта",
+    classes=["NEG", "VAL"],
+    priority="P1",
+    steps=[
+        # «Дано» — аккаунт вызывающего, заведённый близнецом Ф4-29.
+        Step(
+            name="f430-rename-reserved",
+            method="PATCH",
+            path="/iam/v1/accounts/{{rsvAccId}}",
+            body={"name": "personal-cloud-{{rsvTail}}", "updateMask": "name"},
+            auth=_HUMAN_RSV,
+            # Аккаунта нет — его не завёл близнец Ф4-29: находка о продукте или о
+            # кейсе, а не о харнессе, поэтому без метки третьего исхода.
+            pre_script=[
+                "if (!pm.environment.get('rsvAccId')) {",
+                *report_then_skip("«Дано» Ф4-30: аккаунт вызывающего заведён близнецом Ф4-29",
+                                  "rsvAccId пуст — близнец Ф4-29 аккаунта не завёл", indent="  "),
+                "}",
+            ],
+            test_script=_rsv_refused(),
+        ),
+        Step(
+            name="f430-name-unchanged",
+            method="GET",
+            path="/iam/v1/accounts/{{rsvAccId}}",
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                "pm.test('имя аккаунта осталось прежним', () => {",
+                "  pm.expect(pm.response.json().name).to.eql('personal-cloud' + pm.environment.get('rsvTail'));",
+                "});",
+            ],
+        ),
+        # Первый положительный близнец — одно различие: нет дефиса на границе.
+        Step(
+            name="f430-twin-rename",
+            method="PATCH",
+            path="/iam/v1/accounts/{{rsvAccId}}",
+            body={"name": "personal-cloudz{{rsvTail}}", "updateMask": "name"},
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="f430-twin-renamed",
+            method="GET",
+            path="/iam/v1/accounts/{{rsvAccId}}",
+            auth=_HUMAN_RSV,
+            test_script=[
+                *assert_status(200),
+                "pm.test('имя сменилось', () => {",
+                "  pm.expect(pm.response.json().name).to.eql('personal-cloudz' + pm.environment.get('rsvTail'));",
+                "});",
+            ],
+        ),
+        # Второй положительный близнец — правка прочих полей САМОГО личного
+        # аккаунта, чьё имя несёт префикс, и повтор его текущего имени.
+        Step(
+            name="f430-personal-account-read",
+            method="GET",
+            path="/iam/v1/accounts/{{ceremonyAccountId}}",
+            auth=_HUMAN,
+            pre_script=[
+                "if (!pm.environment.get('ceremonyAccountId')) {",
+                *precondition_not_met("«Дано» Ф4-30: личный аккаунт человека церемонии",
+                                      "ceremonyAccountId пуст — волна церемонии его не записала",
+                                      indent="  "),
+                "}",
+            ],
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('fixture: это личный аккаунт — имя несёт префикс', () => "
+                "pm.expect(j.name, j.name).to.match(/^personal-cloud-/));",
+                "pm.test('fixture: меток у личного аккаунта нет — кейс вернёт их пустыми', () => "
+                "pm.expect(Object.keys(j.labels || {}), JSON.stringify(j.labels)).to.be.empty);",
+                "pm.environment.set('rsvPersonalName', j.name);",
+            ],
+        ),
+        Step(
+            name="f430-personal-account-labels",
+            method="PATCH",
+            path="/iam/v1/accounts/{{ceremonyAccountId}}",
+            body={"labels": {"f430": "{{rsvTail}}"}, "updateMask": "labels"},
+            auth=_HUMAN,
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="f430-personal-account-same-name",
+            method="PATCH",
+            path="/iam/v1/accounts/{{ceremonyAccountId}}",
+            body={"name": "{{rsvPersonalName}}", "updateMask": "name"},
+            auth=_HUMAN,
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="f430-personal-account-after",
+            method="GET",
+            path="/iam/v1/accounts/{{ceremonyAccountId}}",
+            auth=_HUMAN,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('метка поставлена, имя прежнее', () => {",
+                "  pm.expect(j.name).to.eql(pm.environment.get('rsvPersonalName'));",
+                "  pm.expect((j.labels || {}).f430).to.eql(pm.environment.get('rsvTail'));",
+                "});",
+            ],
+        ),
+        Step(
+            name="f430-personal-account-labels-restore",
+            method="PATCH",
+            path="/iam/v1/accounts/{{ceremonyAccountId}}",
+            body={"labels": {}, "updateMask": "labels"},
+            auth=_HUMAN,
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        # Уборка: сперва дочерний проект (FK RESTRICT), затем аккаунт.
+        *reliable_delete("teardown-rsv-project", "/iam/v1/projects/{{rsvPrjId}}",
+                         auth=_HUMAN_RSV_STEPUP, op_key="rsvPrj"),
+        *reliable_delete("teardown-rsv-account", "/iam/v1/accounts/{{rsvAccId}}",
+                         auth=_HUMAN_RSV_STEPUP, op_key="rsvAcc"),
+    ],
+))
+
+
 # Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; kaname#398):
 # предъявители людей куёт своя церемония службы на автономном стенде
 # (`tests/authz-fixtures/seed_ceremony.py --wave`), и краю платформы здесь

@@ -91,12 +91,6 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	if err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
-	methods := withMethod(resolved.Session.PresentedMethods, in.Factor.Method)
-	level, err := levelOf(methods)
-	if err != nil {
-		uc.deps.Logger.Error("backup codes regenerate: level not derived", "err", err.Error())
-		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
-	}
 
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
@@ -126,7 +120,8 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	}); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
-	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
+	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	if err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
@@ -135,14 +130,14 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	// единственный писатель, а не эта полоса.
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: addressKey, Presented: methods,
+		AddressKey: addressKey, Level: rec.Level,
 	}); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditBackupCodesRegenerated, user, resolved.Session.ID, in.Factor.Method); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
-	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Factor.Method, level); err != nil {
+	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Factor.Method, rec.Level); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -152,12 +147,12 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	uc.deps.Observer.SecondFactorEventObserved(SecondFactorBackupCodesMinted)
 
 	s := resolved.Session
-	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = methods, level, now
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	return RegenerateBackupCodesOutput{
 		View:        SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:      bearer,
 		BackupCodes: codes,
-		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, methods),
+		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}, nil
 }
 

@@ -57,27 +57,28 @@ package humansession
 // транзакции после замещения материала пароля: строка `password` на месте,
 // строк второго фактора транзакция не трогает — решение то же, что до записи.
 //
-// # Ключи доступа в ось «заведено» НЕ ВХОДЯТ — и это названо, а не подразумевается
+// # Ключи доступа в ось «заведено» ВХОДЯТ — своим чтением и своим худшим исходом
 //
 // «Заведено» выводится из строк способов входа, а строки вида `webauthn` в
 // способах входа НЕТ by construction: ключ — ресурс своей таблицы
-// (`internal/domain/access_key.go`). Значит у личности, чей второй фактор —
-// ключ доступа, требуемый уровень считается как «1», и вход одним паролём счёт
-// обнулит. Сегодня это недостижимо: предъявление ключа производится
-// (`access_keys.FinishAssertion`), но потребителя, поднимающего им уровень
-// сессии, в прод-коде нет — ни одна полоса не строит сессию из утверждения
-// ключа. Появится такой потребитель (Ф13,
-// `docs/engineering/acceptance/passwordless-login-with-access-key.md`) — ось
-// обязана учесть ключи ТЕМ ЖЕ изменением, иначе окно подбора вернётся молча.
+// (`internal/domain/access_key.go`). С полосой входа ключом (Ф13,
+// `docs/engineering/acceptance/passwordless-login-with-access-key.md`) ключ
+// стал производителем уровня сессии, и ось читает его отдельно: есть у личности
+// хоть одна строка ключа — в оси стоит `webauthn` (`AccessKeyEnrolled` у обоих
+// носителей чтения). Без этого у личности с паролем и ключом требуемый уровень
+// считался бы «1», и вход одним паролём счёт обнулял бы — окно подбора,
+// которое ось и закрывает.
 //
-// Предикат снятия: у предъявления ключа появился потребитель — в прод-коде
-// вне словаря, производителя и декодера слов записи взято имя
-// `assurance.KeyAssertion` либо `assurance.MethodWebAuthn` или прочитано поле
-// `Presentation` ответа проверки утверждения. Это событие стережёт проба
-// `TestAccessKeyPresentationHasNoSessionLevelConsumer` (`internal/check`): она
-// краснеет на первом таком обращении. Проба оси
-// `TestEnrolledAxisReadsExactlyTheLoginMethodKinds` стережёт ДРУГОЕ — что ось
-// читает ровно виды строк способов входа — и о потребителе ключа не говорит.
+// Требуемый уровень считается ХУДШИМ исходом флагов ключа
+// (`assurance.GuaranteedLevels`), а не лучшим: ключ производит «2» всегда, «3» —
+// лишь утверждением с проверкой пользователя. Лучший исход требовал бы «3» у
+// каждого заведённого ключа, и вход ключом без проверки пользователя перестал
+// бы обнулять счёт — против Ф13 Р9 («успешный вход ключом обнуляет счёт по
+// адресу — как всякий успешный вход»).
+//
+// Уровень, ДОСТИГНУТЫЙ входом, приходит сюда записанным (`completedLogin.Level`),
+// а не пересчитывается от имён способов: имена не несут флагов утверждения
+// ключа (`session_level.go`).
 //
 // # Ранжирование — чужое
 //
@@ -110,8 +111,9 @@ type completedLogin struct {
 	EnrolledKnown bool
 	// AddressKey — нормализованный ключ почты: ось, которую обнуляют.
 	AddressKey string
-	// Presented — слова предъявленного в этой сессии ПОСЛЕ текущего успеха.
-	Presented []string
+	// Level — уровень записи сессии ПОСЛЕ текущего успеха: выданный операцией
+	// выдачи либо легший предъявлением внутри сессии.
+	Level string
 }
 
 // enrollmentBeforeWrite — заведённые способы входа, прочитанные ДО открытия
@@ -132,7 +134,7 @@ type completedLogin struct {
 func enrollmentBeforeWrite(
 	ctx context.Context, methods loginmethod.Store, logger *slog.Logger, userID domain.UserID,
 ) ([]assurance.Method, bool) {
-	enrolled, err := enrolledMethods(ctx, methods.Get, userID)
+	enrolled, err := enrolledForCompletion(ctx, methods.Get, methods.AccessKeyEnrolled, userID)
 	if err != nil {
 		logger.ErrorContext(ctx, "failure reset: enrolled login methods unreadable — the address counter is left standing",
 			"user_id", string(userID), "err", err.Error())
@@ -147,7 +149,7 @@ func resetFailuresOnCompletedLogin(ctx context.Context, w Writer, in completedLo
 	if in.AddressKey == "" || !in.EnrolledKnown {
 		return nil
 	}
-	if !loginCompletedToEnrolledLevel(in.Presented, in.Enrolled) {
+	if !loginCompletedToEnrolledLevel(in.Level, in.Enrolled) {
 		return nil
 	}
 	if err := w.ResetFailures(ctx, FailureByAddress, in.AddressKey); err != nil {
@@ -156,21 +158,21 @@ func resetFailuresOnCompletedLogin(ctx context.Context, w Writer, in completedLo
 	return nil
 }
 
-// loginCompletedToEnrolledLevel — доводит ли предъявленное в сессии вход до
+// loginCompletedToEnrolledLevel — доводит ли достигнутый уровень вход до
 // уровня ВСЕХ заведённых у личности способов входа.
 //
 // Уровень заведённого считается тем же правилом, что уровень сессии
-// (`assurance.PresentableLevels`), а не своей таблицей «способ → уровень»:
-// заведённый код по времени и заведённый запасной код дают одно и то же «2»,
-// и достаточно ЛЮБОГО из них — поэтому вопрос ставится об уровне, а не о
-// покрытии множества заведённых способов.
+// (`assurance.GuaranteedLevels` — ключ в худшем исходе флагов, шапка), а не
+// своей таблицей «способ → уровень»: заведённый код по времени и заведённый
+// запасной код дают одно и то же «2», и достаточно ЛЮБОГО из них — поэтому
+// вопрос ставится об уровне, а не о покрытии множества заведённых способов.
 //
-// Пустое множество заведённого и множество предъявленного без уровня — «не
-// завершён» (fail-closed): у живой сессии ни того, ни другого не бывает, а
-// молчаливое «да» здесь открывало бы окно подбора.
-func loginCompletedToEnrolledLevel(presented []string, enrolled []assurance.Method) bool {
+// Пустое множество заведённого и уровень вне оси — «не завершён»
+// (fail-closed): у живой сессии ни того, ни другого не бывает, а молчаливое
+// «да» здесь открывало бы окно подбора.
+func loginCompletedToEnrolledLevel(reached string, enrolled []assurance.Method) bool {
 	required := 0
-	for _, l := range assurance.PresentableLevels(enrolled) {
+	for _, l := range assurance.GuaranteedLevels(enrolled) {
 		if r := acrlevel.Rank(l.String()); r > required {
 			required = r
 		}
@@ -178,9 +180,29 @@ func loginCompletedToEnrolledLevel(presented []string, enrolled []assurance.Meth
 	if required == 0 {
 		return false
 	}
-	reached, ok := assurance.LevelOf(presentationsOf(presented))
-	if !ok {
-		return false
+	return acrlevel.Rank(reached) >= required
+}
+
+// accessKeyRead — есть ли у личности строка ключа доступа; носителей два, как
+// у loginMethodRead: пул (`loginmethod.Store`) и транзакция (`Writer`).
+type accessKeyRead func(ctx context.Context, userID domain.UserID) (bool, error)
+
+// enrolledForCompletion — ось «заведено» единственного писателя обнуления:
+// строки способов входа плюс ключ доступа (шапка). Ответ церемонии второго
+// фактора ключа не читает: в церемонии ключ не предъявляется (Ф12 Р4), и
+// «2 достижимо ключом» назвало бы недостающим то, что этой церемонией не
+// предъявить.
+func enrolledForCompletion(ctx context.Context, read loginMethodRead, keys accessKeyRead, userID domain.UserID) ([]assurance.Method, error) {
+	out, err := enrolledMethods(ctx, read, userID)
+	if err != nil {
+		return nil, err
 	}
-	return acrlevel.Rank(reached.String()) >= required
+	has, err := keys(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		out = append(out, assurance.MethodWebAuthn)
+	}
+	return out, nil
 }

@@ -89,12 +89,6 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	methods := withMethod(resolved.Session.PresentedMethods, in.Factor.Method)
-	level, err := levelOf(methods)
-	if err != nil {
-		uc.deps.Logger.Error("second factor remove: level not derived", "err", err.Error())
-		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
-	}
 
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
@@ -128,7 +122,8 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonSecondFactorRemoved); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
+	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
@@ -137,14 +132,14 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	// единственный писатель, а не эта полоса.
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: addressKey, Presented: methods,
+		AddressKey: addressKey, Level: rec.Level,
 	}); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditSecondFactorRemoved, user, resolved.Session.ID, in.Factor.Method); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Factor.Method, level); err != nil {
+	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Factor.Method, rec.Level); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -154,11 +149,11 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	uc.deps.Observer.SecondFactorEventObserved(SecondFactorRemoved)
 
 	s := resolved.Session
-	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = methods, level, now
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	out := RemoveSecondFactorOutput{
 		View:      SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:    bearer,
-		Assurance: assuranceAfter(ctx, uc.deps, user.ID, methods),
+		Assurance: assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}
 	// Снятие убирает фактор целиком: набора запасных кодов больше нет, поэтому
 	// ответ несёт `backupCodesRemaining: 0` ВСЕГДА — и при снятии запасным кодом,

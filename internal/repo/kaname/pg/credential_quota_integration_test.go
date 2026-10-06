@@ -108,6 +108,7 @@ func credQuotaFixtureWithVictim(t *testing.T, ctx context.Context, pool *pgxpool
 		"victim-"+suffix+"-"+victimID+"@example.invalid", "Cred Victim "+suffix)
 	require.NoError(t, err, "посев второго человека")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "фиксация фикстуры")
 	return userID, svaID, accountID, victimID
 }

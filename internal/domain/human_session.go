@@ -309,10 +309,23 @@ const (
 	// другому не годится.
 	FormVerifyEmail        FormKind = "verify-email"
 	FormVerifyEmailConfirm FormKind = "verify-email-confirm"
+	// Вход ключом доступа (Ф13 Р1, решение владельца 2026-09-22): ДВА вида на
+	// два глагола `access-key/begin` и `access-key/login`. Оба меняют состояние
+	// — `begin` заводит испытание и считается попыткой, `login` выдаёт сессию,
+	// — и проверка «вид признака — вид ЭТОЙ формы» (Ф3 Р12) обязана их
+	// различать: признак формы запроса на форме подтверждения не предъявим, и
+	// наоборот. Контекст при этом ОДИН (печенье `kaname_form`).
+	FormAccessKeyBegin FormKind = "access-key-begin"
+	FormAccessKeyLogin FormKind = "access-key-login"
+	// FormPasswordEnroll — заведение первого пароля из живой сессии (kaname#213,
+	// приёмка A7 Р1): свой вид, не вид смены — заведение и смена суть разные
+	// действия с разными основаниями.
+	FormPasswordEnroll FormKind = "password-enroll"
 )
 
 var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete,
-	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm}
+	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm, FormAccessKeyBegin, FormAccessKeyLogin,
+	FormPasswordEnroll}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

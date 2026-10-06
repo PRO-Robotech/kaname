@@ -65,6 +65,7 @@ func TestIntegration_RemovalReachesTheGrantHolderAndNobodyElse(t *testing.T) {
 		VALUES ('acc-1', 'test-account', 'usr-1') ON CONFLICT DO NOTHING;
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr-1', 'ext-1', 'usr-1@kaname.local', 'acc-1') ON CONFLICT DO NOTHING;
+		INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ('usr-1', 'password', 'fixture-password-row-without-a-known-password') ON CONFLICT DO NOTHING;
 		INSERT INTO kaname.service_accounts (id, account_id, name)
 		VALUES ('sva-1', 'acc-1', 'sva-one') ON CONFLICT DO NOTHING;
 		INSERT INTO kaname.access_bindings

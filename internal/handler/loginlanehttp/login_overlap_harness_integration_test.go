@@ -649,10 +649,14 @@ func (h *overlapLane) seedMember(t *testing.T) overlapPerson {
 	t.Helper()
 	q := overlapPerson{id: domain.UserID(ids.NewID(domain.PrefixUser)), email: "ovq-" + ids.NewID("tst")[3:11] + "@example.invalid"}
 	_, err := h.pool.Exec(h.ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		SELECT $1, account_id, $2, $3, 'Login Overlap Member', 'ACTIVE'
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, recovery_path_opened_at)
+		SELECT $1, account_id, $2, $3, 'Login Overlap Member', 'ACTIVE', now()
 		  FROM kaname.users WHERE id = $4`,
 		string(q.id), "ext-"+string(q.id), q.email, string(h.user.ID))
+	// Отметка открытого пути — до строки пароля: строка пароля кладётся
+	// писателем продукта своим соединением, и без отметки строку личности
+	// отверг бы инвариант kaname#608 раньше, чем пароль появится. Снимается
+	// сразу после пароля — Q остаётся ACTIVE с паролем и без отметки.
 	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: строка личности Q")
 	v, err := h.hasher.Hash(integrationPassword)
 	require.NoError(t, err)
@@ -661,6 +665,8 @@ func (h *overlapLane) seedMember(t *testing.T) overlapPerson {
 		CreatedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: строка пароля Q")
+	_, err = h.pool.Exec(h.ctx, `UPDATE kaname.users SET recovery_path_opened_at = NULL WHERE id = $1`, string(q.id))
+	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: снятие отметки пути у Q")
 	var owned, bindings, memberships int
 	require.NoError(t, h.pool.QueryRow(h.ctx, `
 		SELECT (SELECT count(*) FROM kaname.accounts WHERE owner_user_id = $1),

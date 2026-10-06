@@ -563,7 +563,7 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 	// заведённом факторе выдаёт сессию «1» — успех, но не завершённый вход.
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: AddressKey(string(user.Email)), Presented: methods,
+		AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 	}); err != nil {
 		return LoginOutput{}, settled, issueFailed
 	}

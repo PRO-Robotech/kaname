@@ -53,6 +53,51 @@ func LoginOutcomes() []LoginOutcome {
 	}
 }
 
+// AccessKeyLoginOutcome — исход полосы входа КЛЮЧОМ (Ф13 Р10, Ф13-30).
+// Наружу все отказы уходят одним ответом (Р7); причина различима только этой
+// клеткой и журналом службы.
+//
+// Перечень клеток единого отказа — ровно тот, что объявлен приёмкой (Ф13-30):
+// подпись · удостоверение неизвестно · происхождение · хэш имени · присутствие
+// · счётчик · испытание · рукоятка · блокировка. У каждой есть исход, который
+// её увеличивает; клетки «ключ снят» НЕТ — снятие удаляет строку, и у
+// проверяющего это то же состояние, что «удостоверения не было» (Р15).
+// Отказы проверяющего, у которых своей клетки нет (негодная форма данных
+// утверждения, тип клиентских данных, алгоритм вне перечня), считает клетка
+// «подпись»: утверждение не сверено открытым ключом строки — это и есть её
+// предмет. Проигравший конкуренции за сдвиг счётчика — клетка «счётчик».
+type AccessKeyLoginOutcome string
+
+const (
+	AccessKeyLoginIssued          AccessKeyLoginOutcome = "issued"
+	AccessKeyLoginChallengeIssued AccessKeyLoginOutcome = "challenge-issued"
+	AccessKeyLoginSignature       AccessKeyLoginOutcome = "signature"
+	// #nosec G101 -- имя клетки счётчика отказов («удостоверение неизвестно»),
+	// а не секрет: значение уходит в метку счётчика, ответ предъявителю у всех
+	// клеток единого отказа один.
+	AccessKeyLoginCredentialUnknown AccessKeyLoginOutcome = "credential-unknown"
+	AccessKeyLoginOrigin            AccessKeyLoginOutcome = "origin"
+	AccessKeyLoginRPIDHash          AccessKeyLoginOutcome = "rp-id-hash"
+	AccessKeyLoginPresence          AccessKeyLoginOutcome = "presence"
+	AccessKeyLoginCounter           AccessKeyLoginOutcome = "counter"
+	AccessKeyLoginChallenge         AccessKeyLoginOutcome = "challenge"
+	AccessKeyLoginUserHandle        AccessKeyLoginOutcome = "user-handle"
+	AccessKeyLoginBlocked           AccessKeyLoginOutcome = "blocked"
+	AccessKeyLoginRateLimited       AccessKeyLoginOutcome = "rate-limited"
+	AccessKeyLoginStoreFailed       AccessKeyLoginOutcome = "store-failed"
+)
+
+// AccessKeyLoginOutcomes — закрытый перечень: приёмник засевает им клетки
+// нулём до первого события (Ф3 Р14).
+func AccessKeyLoginOutcomes() []AccessKeyLoginOutcome {
+	return []AccessKeyLoginOutcome{
+		AccessKeyLoginIssued, AccessKeyLoginChallengeIssued,
+		AccessKeyLoginSignature, AccessKeyLoginCredentialUnknown, AccessKeyLoginOrigin, AccessKeyLoginRPIDHash,
+		AccessKeyLoginPresence, AccessKeyLoginCounter, AccessKeyLoginChallenge, AccessKeyLoginUserHandle,
+		AccessKeyLoginBlocked, AccessKeyLoginRateLimited, AccessKeyLoginStoreFailed,
+	}
+}
+
 // RewriteOutcome — исход переписывания материала при успешной проверке
 // (Ф3-43; ID-PW-1 PWV-08…11, 19): переписано · не требовалось · отказ записи ·
 // не переписывается по причине (72 байта · нулевой байт).
@@ -107,7 +152,7 @@ type RecoveryRequestOutcome string
 const (
 	RecoveryRequestQueued      RecoveryRequestOutcome = "queued"       // код выдан, письмо в очереди
 	RecoveryRequestNoRow       RecoveryRequestOutcome = "no-row"       // адреса нет ни у кого
-	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён (Ф1-25)
+	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён, и личность не из Ф5 Р9 (Ф1-25)
 	RecoveryRequestStoreFailed RecoveryRequestOutcome = "store-failed" // хранилище не ответило
 	// Пределы запроса (kaname#456): окно обращений источника полно · окно писем
 	// адресата полно · работа вне пути ответа не принята — предел одновременных
@@ -165,6 +210,9 @@ type Observer interface {
 	SecondFactorPresentationObserved(method assurance.Method, outcome PresentationOutcome)
 	SecondFactorRefusalObserved(refusal SecondFactorRefusal)
 	SecondFactorEventObserved(event SecondFactorEvent)
+	// AccessKeyLoginObserved — исход полосы входа ключом (Ф13 Р10): наружу
+	// отказы неразличимы, поэтому причина живёт только здесь.
+	AccessKeyLoginObserved(outcome AccessKeyLoginOutcome)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
@@ -183,3 +231,4 @@ func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome)        
 func (NopObserver) SecondFactorPresentationObserved(assurance.Method, PresentationOutcome) {}
 func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)                        {}
 func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}
+func (NopObserver) AccessKeyLoginObserved(AccessKeyLoginOutcome)                           {}

@@ -229,6 +229,7 @@ func seedVerdictTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) ve
 		exec(`INSERT INTO kaname.service_accounts (id, account_id, name)
 		      VALUES ($1, $2, $3)`, sa, tn.accountID, sa)
 	}
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return tn
 }

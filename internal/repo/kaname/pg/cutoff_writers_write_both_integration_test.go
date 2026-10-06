@@ -333,10 +333,10 @@ func TestIntegration_PoolDoorRollsBackTheFirstRecordWhenTheSecondFails(t *testin
 	// ПОЗЖЕ стоящего — иначе замок отбросил бы причину, и отказа не случилось бы.
 	longReason := strings.Repeat("z", 130)
 	other := domain.UserID(scene.UserID + "-2")
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1, account_id, $2, $3, display_name, invite_status
-		  FROM kaname.users WHERE id = $4`,
+		  FROM kaname.users WHERE id = $4`),
 		string(other), "ext-"+string(other), string(other)+"@example.invalid", scene.UserID)
 	require.NoError(t, err, "посев второго человека")
 

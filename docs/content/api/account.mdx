@@ -16,7 +16,16 @@ import dedent from 'ts-dedent'
 Каждый аккаунт имеет ровно одного **владельца** (`ownerUserId`) — пользователя-администратора,
 получающего полный доступ к содержимому аккаунта.
 
-Аккаунт создаётся **self-service**: аутентифицированный пользователь заводит собственный аккаунт.
+**Личный аккаунт у человека уже есть**: его заводит регистрация на
+[полосе входа](/api/auth-lane) той же транзакцией, что и самого человека, и его идентификатор
+читается в `GET /iam/v1/me` — запись `accounts[]`, чьи роли содержат `owner`. Звать `Create`
+перед первым действием не нужно. Имя личного аккаунта — `personal-cloud-<хвост>`, и префикс
+`personal-cloud-` **зарезервирован** за личными аккаунтами: `Create` и правка имени с таким
+префиксом отвергаются синхронно (таблица ошибок ниже); аккаунты, уже носящие такое имя, не
+переименовываются.
+
+Дополнительный аккаунт создаётся **self-service**: аутентифицированный пользователь заводит
+собственный аккаунт.
 `ownerUserId` при этом **не присылается** — владельцем становится сам вызывающий, и край выводит
 его из проверенного удостоверения. Захватывать чужое владение нечем by construction, поэтому
 сравнения «владелец обязан совпадать с вызывающим» в контракте нет.
@@ -223,6 +232,7 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
     <tr><td><code>id</code> в теле <code>Create</code> от того, кто не администратор облака</td><td><code>PERMISSION_DENIED</code></td><td><code>"permission denied"</code>. Синхронно, до операции; ответ не зависит от того, занят ли идентификатор. Модель прав недоступна — <code>UNAVAILABLE</code> <code>"authz backend unavailable"</code>, повтор осмыслен</td></tr>
     <tr><td><code>id</code> занят живым аккаунтом либо выдан когда-либо</td><td><code>ALREADY_EXISTS</code></td><td><code>"Account &lt;id&gt; already exists"</code> в исходе операции. Текст один для живого, удалённого и посеянного; повтор того же запроса получает тот же отказ</td></tr>
     <tr><td><code>name</code> в форме идентификатора аккаунта, не равный собственному <code>id</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument name: the account id form is reserved for the account's own id"</code>. На <code>Create</code> и <code>Update</code></td></tr>
+    <tr><td><code>name</code> начинается с <code>personal-cloud-</code> (на <code>Update</code> — только когда имя меняется)</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument name: prefix 'personal-cloud-' is reserved for personal accounts"</code>. Синхронно, до заведения операции; имя негодной формы получает прежний отказ формы. Правка прочих полей личного аккаунта и повтор его текущего имени не отвергаются</td></tr>
     <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"ownerUserId is immutable after Account.Create"</code></td></tr>
     <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта — <strong>включая созданный вместе с ним <code>default</code></strong></td></tr>
     <tr><td>Нет нужного отношения</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>

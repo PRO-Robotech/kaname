@@ -76,6 +76,7 @@ func raceRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix stri
 		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		"acc_rwrace"+suffix, "rwrace-"+strings.ToLower(suffix), "usr_rwrace"+suffix)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	_, err = pool.Exec(ctx, `

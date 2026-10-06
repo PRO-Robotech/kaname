@@ -90,6 +90,7 @@ func kac127SeedUserAndAccount(t *testing.T, ctx context.Context, pool *pgxpool.P
 		 VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
 		uid, "ext-"+suffix, "u-"+suffix+"@kac127.local", accID)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

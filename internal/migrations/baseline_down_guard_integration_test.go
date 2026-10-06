@@ -103,6 +103,7 @@ func seedSecretCredentialOwners(t *testing.T, db *sql.DB) {
 	_, err = tx.Exec(`INSERT INTO kaname.service_accounts (id, account_id, name)
 	                  VALUES ('sva00000000000000dwn', 'acc00000000000000dwn', 'down-guard-sa')`)
 	require.NoError(t, err, "посев служебной учётки")
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit(), "посев владельцев удостоверений")
 }
 

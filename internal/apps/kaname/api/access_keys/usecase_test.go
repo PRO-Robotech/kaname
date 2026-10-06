@@ -24,6 +24,7 @@ import (
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
@@ -1010,7 +1011,7 @@ func TestAccessKey_F7_33_RegistrationDoesNotWriteTheSession(t *testing.T) {
 	t.Parallel()
 	var w access_keys.Writer
 	_, presents := w.(interface {
-		PresentInSession(context.Context, domain.HumanSessionID, []string, string, domain.BearerDigest, time.Time) error
+		PresentInSession(context.Context, domain.HumanSessionID, []string, string, domain.BearerDigest, time.Time) (humansession.PresentedRecord, error)
 	})
 	require.False(t, presents, "порт записи ключа не пополняет множество предъявленного (Ф7-33)")
 }

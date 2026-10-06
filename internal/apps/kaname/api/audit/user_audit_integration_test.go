@@ -4,7 +4,7 @@
 package audit_test
 
 // user_audit_integration_test.go — User audit slice.
-// UpsertFromIdentity insert-branch → iam.user.created;
+// UpsertFromIdentity insert-branch → отказ базы (kaname#608), следа нет;
 // activate-invite update-branch → iam.user.updated; Delete → iam.user.deleted.
 //
 // UpsertFromIdentity is the InternalUserService bootstrap/provision path
@@ -24,52 +24,43 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
+// TestUserAudit_5_2_14_UpsertInsertIsRefusedAndLeavesNoTrace — ветвь заведения
+// новой личности внутренним глаголом заведения по внешнему удостоверению
+// производит `ACTIVE` без способа входа, и с инвариантом kaname#608
+// (`users_active_has_a_way_in_fk`, приёмка `active-identity-has-a-way-in.md`
+// AWI-01, C2) база отвергает её фиксацию: операция завершается отказом, строки
+// личности нет, события заведения нет — событие ложится той же транзакцией и
+// откатывается вместе с ней. Прежде проба утверждала здесь событие заведения;
+// производитель этого события на живом пути — регистрация.
+func TestUserAudit_5_2_14_UpsertInsertIsRefusedAndLeavesNoTrace(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// No caller principal → provision bootstrap path. actor = system/bootstrap.
 	bootstrapCtx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "bootstrap", DisplayName: "kaname-bootstrap"})
 
 	uc := user.NewUpsertFromIdentityUseCase(env.repo, env.opsRepo)
-	_, err := uc.Execute(bootstrapCtx, user.UpsertFromIdentityInput{
+	op, err := uc.Execute(bootstrapCtx, user.UpsertFromIdentityInput{
 		ExternalID:  domain.ExternalSubject("ext-sub-5214-insert"),
 		Email:       domain.Email("u-5214-insert@example.com"),
 		DisplayName: domain.DisplayName("Upsert Insert"),
 	})
-	require.NoError(t, err)
+	require.NoError(t, err, "приём операции синхронный; отказ — исход операции")
 	awaitWorkers(t)
 
-	usrID := singleID(t, ctx, env, `SELECT id FROM kaname.users WHERE external_id = $1 AND email = $2`,
-		"ext-sub-5214-insert", "u-5214-insert@example.com")
+	done, err := env.opsRepo.Get(ctx, op.ID)
+	require.NoError(t, err)
+	require.True(t, done.Done, "операция завершена")
+	require.NotNil(t, done.Error, "AWI-01: заведение ACTIVE без способа входа обязано получить отказ базы")
 
-	r := requireOneAuditRow(ctx, t, env.pool, "iam.user.created", usrID)
-	require.Equal(t, "user", r.payload["resource_type"])
-	require.Equal(t, usrID, r.payload["resource_id"])
-	// Provision without a principal → IsAnonymous(bootstrap)=true →
-	// PrincipalUserID="" → the use-case records the non-fabricated system
-	// identity "system" (never an invented user id). 5.2-14.
-	require.Equal(t, "system", r.payload["actor"],
-		"provision actor is the system identity, never fabricated")
-	require.Regexp(t, evtIDFormat, r.id)
-
-	// Здесь стояло требование, чтобы нагрузка НЕСЛА почту и отображаемое имя.
-	// Требование пришпиливало утечку: приёмник журнала кладёт все поля как есть,
-	// шага сокрытия нет ни одного, и оба поля уезжали в поток службы
-	// (`kacho#2483`). Проба не ослаблена, а ПЕРЕВЁРНУТА — утверждает теперь
-	// отсутствие, — и утверждает его НА ЧИТАЕМОМ СЛЕДЕ, а не о коде.
-	//
-	// Положительный контроль выше обязателен: без него отрицание зеленело бы на
-	// пустой нагрузке и на неэмитированном событии.
-	for _, k := range []string{"email", "display_name", "displayName", "external_id"} {
-		require.NotContains(t, r.payload, k,
-			"личные данные в поток аудита не уезжают: %s", k)
-	}
-	// И их там нет НЕ потому, что значения пусты: субъект в следе назван, просто
-	// назван идентификатором. Корреляция сохранена, срок хранения потока больше
-	// не есть срок хранения личных данных.
-	require.NotEmpty(t, r.payload["resource_id"], "субъект назван — идентификатором, а не почтой")
+	var n int
+	require.NoError(t, env.pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.users WHERE external_id = $1`, "ext-sub-5214-insert").Scan(&n))
+	require.Zero(t, n, "строки личности после отказа нет")
+	require.NoError(t, env.pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.audit_outbox WHERE event_type = 'iam.user.created'
+		   AND event_payload->>'actor' = 'system'`).Scan(&n))
+	require.Zero(t, n, "события заведения после отказа нет: оно откатилось той же транзакцией")
 }
 
 func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
@@ -87,6 +78,11 @@ func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 		VALUES ($1, $2, '', $3, $4, 'PENDING', now())`,
 		string(pendingID), string(accID), "u-5214-activate@example.com", "Pending Invitee")
+	require.NoError(t, err)
+	// Пароль приглашённого — регистрацией раньше активации (kaname#456,
+	// Р11 п. 1): активация не производит ACTIVE без способа входа (kaname#608).
+	_, err = env.pool.Exec(ctx, `INSERT INTO kaname.user_login_methods (user_id, kind, verifier)
+		VALUES ($1, 'password', 'fixture-password-row-without-a-known-password')`, string(pendingID))
 	require.NoError(t, err)
 
 	bootstrapCtx := operations.WithPrincipal(context.Background(),

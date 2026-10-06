@@ -34,6 +34,34 @@ import (
 // Returns Config + error. Validate() is invoked separately by the caller
 // (in main).
 func Load(path string) (Config, error) {
+	cfg, _, err := load(path)
+	return cfg, err
+}
+
+// LoadWithAddressSources — то же, что [Load], и сверх того ИМЕНА источников,
+// которыми адрес базы объявлен в конфигурации службы: ключ
+// `repository.postgres.url` в файле, переменная полного адреса, заданные ручки по
+// полям. Умолчание источником не считается — пустой перечень значит «адрес не
+// объявлен, действует умолчание»: у ключа адреса умолчание есть, и по
+// разобранному значению объявление от его отсутствия не отличить.
+//
+// Читатель — точка наката (`cmd/migrator`). Сверх конфигурации службы у неё два
+// своих источника адреса, и правило у неё то же, что у службы: объявленным
+// может быть ровно один, иначе отказ, называющий все (#532). Отвечать здесь
+// приходится именами, а не значениями: значения несут пароль базы, а отказ
+// уезжает в журнал пода.
+//
+// Провенанс отдаётся рядом с [Config], а не полем внутри неё: поля [Config] —
+// это настройка, и пробы, обходящие их отражением, судят каждое как ручку.
+func LoadWithAddressSources(path string) (Config, []string, error) {
+	cfg, v, err := load(path)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	return cfg, addressDeclarations(v, path), nil
+}
+
+func load(path string) (Config, *viper.Viper, error) {
 	v := viper.New()
 	RegisterDefaults(v)
 
@@ -45,7 +73,7 @@ func Load(path string) (Config, error) {
 	// СНЯТЫЕ КЛЮЧИ ИЗ ОКРУЖЕНИЯ отвергаются ДО всякого чтения: переменная, которую
 	// загрузчик больше не привязывает, иначе прошла бы молча (retired_settings.go).
 	if err := refuseRetiredSettingsInEnv(os.LookupEnv); err != nil {
-		return Config{}, err
+		return Config{}, nil, err
 	}
 
 	// ДОСТАВКА МАНИФЕСТОВ привязывается к окружению ЯВНО (задача #1875).
@@ -107,7 +135,7 @@ func Load(path string) (Config, error) {
 		"api-server.registry-token.service": "KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE",
 	} {
 		if err := v.BindEnv(key, env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", key, err)
 		}
 	}
 
@@ -117,29 +145,29 @@ func Load(path string) (Config, error) {
 	// и переменная, названная текстом отказа, перестала бы доезжать до поля.
 	for _, k := range OwnCeilingKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
 	for _, k := range LoginLaneKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
 	for _, k := range RegistrationKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
 	for _, k := range AccessKeyKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
 	// Сроки церемонии (kaname#318) — та же причина: умолчания нет намеренно,
 	// незаданная величина доезжает до стража нулём.
 	for _, k := range CeremonyLifespanKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
-			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+			return Config{}, nil, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
 
@@ -147,19 +175,19 @@ func Load(path string) (Config, error) {
 	if path != "" {
 		v.SetConfigFile(path)
 		if err := v.ReadInConfig(); err != nil {
-			return Config{}, fmt.Errorf("read config %q: %w", path, err)
+			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
 		}
 		// Снятый ключ в файле — отказ, а не молчание: у разбора нет запрета на
 		// незнакомые ключи, и без этой проверки строка профиля, написанная под
 		// прежнюю посадку, была бы принята и проигнорирована.
 		if err := refuseRetiredSettingsInFile(v, path); err != nil {
-			return Config{}, err
+			return Config{}, nil, err
 		}
 	}
 
 	// Legacy ENV → new keys (backward-compat).
 	if err := applyLegacyEnv(v); err != nil {
-		return Config{}, err
+		return Config{}, nil, err
 	}
 
 	// Inject the password from password-from-env (when set) into both the
@@ -185,10 +213,39 @@ func Load(path string) (Config, error) {
 		)
 	}
 	if err := v.Unmarshal(&cfg, decoderOpts); err != nil {
-		return Config{}, fmt.Errorf("unmarshal config: %w", err)
+		return Config{}, nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	return cfg, nil
+	return cfg, v, nil
+}
+
+// addressDeclarations — какими источниками адрес базы ОБЪЯВЛЕН, в порядке
+// клиентской страницы настройки: файл, полный адрес переменной, ручки по полям.
+//
+// Обе формы окружения разом сюда не доезжают — их отвергает refuseAmbiguousDSN
+// раньше. Имена ручек по полям берутся из того же объявления, что читают сборка
+// строки и текст её отказа (splitDSNEnvNames), а заданность — тем же предикатом
+// (`os.LookupEnv`): своя редакция «что считается заданным» разошлась бы с
+// правилом службы молча.
+func addressDeclarations(v *viper.Viper, path string) []string {
+	var out []string
+	if path != "" && v.InConfig(postgresURLKey) {
+		out = append(out, postgresURLKey+" in "+path)
+	}
+	if urlEnv := envNameOf(postgresURLKey); envIsSet(urlEnv) {
+		out = append(out, urlEnv)
+	}
+	for _, name := range splitDSNEnvNames {
+		if envIsSet(name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func envIsSet(name string) bool {
+	_, ok := os.LookupEnv(name)
+	return ok
 }
 
 // applyLegacyEnv — bridge from legacy ENV names to new viper keys. Applied

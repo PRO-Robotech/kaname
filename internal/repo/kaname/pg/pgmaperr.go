@@ -155,6 +155,21 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	case pgfault.Unique: // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case pgfault.ForeignKey: // foreign_key_violation
+		// Инвариант «у ACTIVE есть способ входа либо открытый путь
+		// восстановления» (kaname#608): строку без способа входа производит НАШ
+		// код — ни один глагол не принимает от вызывающего ни статуса, ни
+		// отметки, ни строки пароля в обход своих операторов. Поэтому отказ —
+		// внутренняя ошибка фиксированным текстом, а не «предусловие» с именем
+		// ограничения: вызывающему исправить нечего, и текст не различает для
+		// постороннего ничего о чужой учётке. Журнал называет ограничение и
+		// подсказку вызывающего репозитория. Ключ —
+		// `20261005030000_active_identity_has_a_way_in.sql`.
+		switch pgErr.ConstraintName {
+		case "users_active_has_a_way_in_fk":
+			slog.Error("active identity without a way in refused by the schema: a producer wrote ACTIVE without a password row or an open recovery path",
+				append([]any{"constraint", "users_active_has_a_way_in_fk", "kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+			return iamerr.ErrInternal
+		}
 		// Признак берётся от `fkText`: он и только он знает, какая из двух
 		// сторон ссылки нарушена. Обе вложены в ErrFailedPrecondition, поэтому
 		// код отказа не меняется — меняется различимость.
@@ -333,6 +348,18 @@ func isConnectionFailure(err error) bool {
 	return stderrors.Is(err, pgconn.ErrConnClosed)
 }
 
+// accountNameTakenText — текст занятого имени аккаунта. Имя формы
+// идентификатора носит только аккаунт с этим самым идентификатором (Р6, CHECK
+// `accounts_name_is_not_a_foreign_id`), значит конфликт такого имени — это
+// конфликт идентификатора, и текст тот же. Единственное написание для обоих
+// исходов ключа имени: сырого 23505 и нуля строк вставки (`insertConflict`).
+func accountNameTakenText(name string) string {
+	if ids.IsValid(name, domain.PrefixAccount) {
+		return fmt.Sprintf("Account %s already exists", name)
+	}
+	return fmt.Sprintf("Account with name %s already exists", name)
+}
+
 func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	switch pgErr.ConstraintName {
 	// Идентификатор аккаунта может прислать вызывающий (kaname#549, Р4), поэтому
@@ -351,10 +378,7 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// Без этой ветви ответ на запрос с пустым именем зависел бы от порядка,
 		// в котором база проверяет два ключа одной вставки.
 		_, name := splitAccountInsertHint(idHint)
-		if ids.IsValid(name, domain.PrefixAccount) {
-			return fmt.Sprintf("Account %s already exists", name)
-		}
-		return fmt.Sprintf("Account with name %s already exists", name)
+		return accountNameTakenText(name)
 	// Имени `users_external_id_unique` в этом перечне НЕТ и заводить его не
 	// надо: ни одна миграция такого ключа не создаёт. Оно стояло здесь и
 	// молчало — ветвь, которую сервер не выберет никогда, выглядит покрытием и

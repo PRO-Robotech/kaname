@@ -176,6 +176,7 @@ func seedTx(t *testing.T, ctx context.Context, conn *pgx.Conn, seed func(pgx.Tx)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	seed(tx)
+	seedWayIn(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("посев: фиксация отвергнута (%v).\nОтложенные ссылки проверяются НА "+
 			"КОММИТЕ, поэтому отказ здесь означает, что посев оставил пару "+

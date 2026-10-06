@@ -89,6 +89,7 @@ func catalogRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix s
 		VALUES ($1, $2, $3, $4, '["iam.users.*.read"]'::jsonb)`,
 		string(rid), string(accID), "ct1_"+suffix, "catalog referent "+suffix)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return rid
 }

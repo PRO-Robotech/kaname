@@ -220,6 +220,7 @@ func seedCostRoles(t *testing.T, ctx context.Context, pool *pgxpool.Pool, roles 
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, "cost-acc-"+accID[len(accID)-6:], uid)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	roleIDs := make([]string, 0, roles)
