@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/corelib/notify/feed"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
@@ -407,4 +408,21 @@ func TestCheckValueCensus_IssuanceTableLaneHasOneHome(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestCheckValueCensus_FeedPrefixIsAServiceName — посылка `isFeedTable`: префикс
+// ленты службы годен corelib. Негодный префикс не узнал бы ни одной таблицы
+// ленты молча — их проверки ушли бы без решения в полосу ввода. Близнец: таблица
+// службы с похожим окончанием (очередь писем приглашений) лентой не признаётся и
+// решается своей записью переписи. Сами таблицы ленты эта проба не называет —
+// их имена производит только corelib (NTF1-B19); узнавание каждой проверки
+// ленты держит проба переписи на живой схеме
+// (`TestIntegration_CheckLedgerCoversTheLiveSchema`).
+func TestCheckValueCensus_FeedPrefixIsAServiceName(t *testing.T) {
+	_, err := feed.TablesOf(feedService)
+	require.NoError(t, err, "префикс ленты службы %q отвергнут corelib", feedService)
+
+	require.False(t, isFeedTable("invite_mail_outbox"), "близнец: очередь писем приглашений — не лента")
+	require.True(t, writtenWhollyByService("invite_mail_outbox"), "близнец решается своей записью переписи")
+	require.False(t, isFeedTable(""), "пустое имя таблицы лентой не признаётся")
 }
