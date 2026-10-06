@@ -213,7 +213,7 @@ CASES.append(Case(
             pre_script=[*_lane(_STATUS), *_with_cookies(("kaname_session", "regSessionCookie"), ("kaname_form", "regFormCookie"))],
             insecure_tls=True,
             auth="anonymous",
-            test_script=_refusal(403, 7, "email address is not verified", "REG-POSITION", reason="EMAIL_NOT_VERIFIED"),
+            test_script=_refusal(403, 7, "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)", "REG-POSITION", reason="EMAIL_NOT_VERIFIED"),
         ),
         Step(
             name="reg-no-session-twin",

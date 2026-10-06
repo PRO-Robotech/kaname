@@ -136,7 +136,7 @@ _PROBE = "/iam/v1/auth/second-factor"
 
 _HEAD_VERIFY = "Код подтверждения:"
 _REFUSED = "authentication failed"
-_NOT_VERIFIED = "email address is not verified"
+_NOT_VERIFIED = "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)"
 _NOT_VERIFIED_REASON = "EMAIL_NOT_VERIFIED"
 # Домен отказов службы — константа продукта (`internal/refusaldomain`,
 # `ProductSuffix` и `ServiceIAM`), а не величина посадки.

@@ -102,7 +102,7 @@ func requireRefusalR3(t *testing.T, err error, what string) {
 	st, ok := status.FromError(err)
 	require.Truef(t, ok, "%s: отказ — статус gRPC: %v", what, err)
 	require.Equalf(t, codes.PermissionDenied, st.Code(), "%s: код", what)
-	require.Equalf(t, "email address is not verified", st.Message(), "%s: текст", what)
+	require.Equalf(t, "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)", st.Message(), "%s: текст", what)
 	var infos []*errdetails.ErrorInfo
 	for _, d := range st.Details() {
 		if i, ok := d.(*errdetails.ErrorInfo); ok {
