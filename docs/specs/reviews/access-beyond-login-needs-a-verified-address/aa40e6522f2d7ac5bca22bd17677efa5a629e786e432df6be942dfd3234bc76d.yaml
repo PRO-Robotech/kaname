@@ -1,0 +1,133 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: aa40e6522f2d7ac5bca22bd17677efa5a629e786e432df6be942dfd3234bc76d
+  revision: 7
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 7 — эта запись.
+  base_commit: 290de8d66
+  content_commit: efd68d750d38bbe548c831440ba891b33bbc387d
+  merge_commit: 6f4fe5a84b2adae53b75494ad127af073d5f4887
+  branch: '526'
+  branch_base: '296'
+  task: PRO-Robotech/kaname#526
+  edge_pair: PRO-Robotech/kacho-workspace docs/specs/sub-phase-F6b-console-and-edge-confirmed-address-gate-acceptance.md, редакция 8, 78501adb…
+  lines: 2002
+  round: 6
+  round_in_this_cycle: "1 из 2"
+  predecessor_record: docs/specs/reviews/access-beyond-login-needs-a-verified-address/60278225702d6174ea60abad5b473c60227415c6c63bd4245f36b078f4e54ccd.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 526 на efd68d750 → aa40e652…bc76d, совпало с заданием; wc -l → 2002;
+    git show 290de8d66:<путь> | sha256sum → 60278225… (одобрен кругом 5). origin/526 = efd68d750.
+  fingerprint_reproduced: true
+  task_premise_remeasured: >-
+    ПОДТВЕРДИЛАСЬ в части слияния и чисел: merge-base --is-ancestor 39d86cfe 526 → 0; сценариев 63
+    (grep -oE '^\*\*EV-[0-9]{2}' | sort -u → 63), повторов 0; числа 18 · 5 · 31 и две функции
+    производителя EV-62 перемерены на 2cf9c8528b1f, 7d96c16bc, 8a84dcff6eb1 и efd68d750 — совпали;
+    производитель утверждает 18 и 17 (address_gate_integration_test.go:230, :257 @ 2cf9c8528b1f).
+    ОПРОВЕРГНУТА в части находки md:243: исправление сделало команды неисполнимыми (B1).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-06T12:53:24Z'
+blocking_count: 1
+blocking_kinds_distinct: [FORMAT]
+important_count: 1
+
+delta_against_approved:
+  approved_sha256: 60278225702d6174ea60abad5b473c60227415c6c63bd4245f36b078f4e54ccd
+  diff_command: git diff 290de8d66 efd68d750 -- <док> → один файл документа и запись круга 5
+  judged: >-
+    Сведение kaname#458 по существу: числа круга края (18, «прочие 17», сумма строк Р4в 18,
+    знаменатель 31, вне круга 13) доведены до B1, §1.11, Р2, Р4в, EV-62, §9 п. 5; прежние строки
+    истории сохранены, номер редакции без коллизии. Условие уровня E у второго «Когда» EV-14 (I2r
+    круга 5) и строка §3.2 о паре F6b — замечаний нет. Решения, ID и «Дано» не тронуты.
+
+blocking:
+  - id: B1
+    kind: FORMAT
+    where: "§0.5, второй блок команд (стр. 268 и 270); §0.7, последняя строка таблицы"
+    finding: >-
+      Обе команды по дереву платформы записаны с псевдо-путём 'PRO-Robotech/kacho@680d1794:gateway'
+      как pathspec. В клоне платформы на 680d1794 они ничего не находят: git grep выдаёт пусто
+      (код 1), git log — пусто; документ же печатает под ними «→ 1: address_refusal.go:43» и три
+      коммита. Это ровно I1 круга 4 (FORMAT, та же форма), снятый кругом 5 («команды исполнимы»), —
+      редакция 7 его возвращает. Обоснование в §0.7 перевёрнуто: команды объявлены с домом клона
+      платформы, где путь gateway есть; пустоту судит как раз новая форма.
+    evidence: >-
+      В клоне платформы: git grep -n 'addressRefusalText *=' 680d1794 --
+      'PRO-Robotech/kacho@680d1794:gateway' ':!*_test.go' → пусто, код 1; та же команда с путём gateway →
+      680d1794:gateway/internal/middleware/address_refusal.go:43; поиск истории по образцу текста,
+      путь gateway, ревизия платформы 680d1794 (голова ветки эпика 1266 чужого дома) → 81f7bf3504e,
+      97e018f606d, c13dd559ba2, с псевдо-путём — пусто.
+    fix: >-
+      Команда обязана быть исполнимой дословно и при этом не давать гейту путевых координат мёртвый
+      путь. Исполнимая форма, проверенная в клоне платформы: git grep -n 'addressRefusalText *='
+      680d1794:gateway -- ':!*_test.go' → «680d1794:gateway:internal/middleware/address_refusal.go:43»
+      (путь — в древовидном аргументе, а не в pathspec). Гейт путевых координат судит только git grep
+      и git ls-files, поэтому строке поиска истории форма с путём gateway возвращается без помехи. Прохождение
+      хука на новой форме подтвердить его прогоном; не проходит — запись в ведомость исключений гейта с
+      задачей и предикатом снятия, а не неисполнимая команда. Строку §0.7 переписать по факту.
+
+important:
+  - id: I1
+    kind: CONVENTION
+    where: "запись круга 5 60278225….yaml, resolved_important I1"
+    finding: >-
+      Строка разрешения I1 в записи круга 5 переписана после вердикта (коммит 6f4fe5a84). Содержание
+      замера сохранено и правка оговорена в самой записи, исходник цел в 290de8d66, так что
+      свидетельство не потеряно; но запись ревью — только дописывается, а находка гейта истории о
+      прежней записи лечится у гейта или ведомостью, а не переписью чужого вердикта. Не блокирует
+      этот документ; учесть в следующем круге: не расширять правку и, если гейт позволяет,
+      вернуть строку к исходной.
+
+constructibility:
+  seeded: 0
+  by_named_fixture: 1
+  not_executed: 0
+  detail: >-
+    Дельта меняет только числа EV-62; «Дано» не тронуто. Перепись круга строится существующей
+    пробой TestEV62_EdgeCircleOnTheInternalListener (address_gate_integration_test.go @ 2cf9c8528b1f),
+    она уже требует круг 18 и 17 отказов. Посев не ставился.
+
+producers:
+  without_producer: []
+  checked: "EV-62: TestEV62_EdgeCircleOnTheInternalListener и TestInternalAddressGateTablesAreClosed — 2 функции на 4 ревизиях"
+twins:
+  negatives_with_twin: "EV-62 (а) ↔ (б) — не тронуто дельтой"
+
+disclosure: "Дельта — числа методов и команды по дереву; механики, адресов, секретов нет. Замечаний нет."
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт CHANGES_REQUESTED санкции не выдаёт и не отзывает. Учётка названа, потому что гейт
+      записей ревью (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в
+      subject.task этой учёткой: без неё запись не судима, и его исход — «не выполнилось».
+
+event_body_for_publication: "acceptance-reviewer · CHANGES_REQUESTED · aa40e6522f2d7ac5bca22bd17677efa5a629e786e432df6be942dfd3234bc76d"
+event:
+  status: not_performed
+  note: событие публикует курьер; блок дописывается к факту отдельным коммитом
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
