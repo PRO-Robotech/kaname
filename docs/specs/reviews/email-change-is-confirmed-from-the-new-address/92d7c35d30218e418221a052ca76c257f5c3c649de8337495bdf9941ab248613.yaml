@@ -1,0 +1,81 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  sha256: 92d7c35d30218e418221a052ca76c257f5c3c649de8337495bdf9941ab248613
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — описание, а не вердикт; шапка не правлена намеренно (change-graph.md §2).
+    Действующий вердикт о редакции 2 — эта запись плюс внешнее событие.
+  base_commit: d9e233f4205ca7683bb4d1cd3e392c2ad4913f11
+  content_commit: none (файл не закоммичен в ветке 635-email-change-acceptance)
+  task: https://github.com/PRO-Robotech/kaname/issues/635
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  lines: 791
+verdict: APPROVED
+round: 2
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-06T22:59:22Z'
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body: 'acceptance-reviewer · APPROVED · 92d7c35d30218e418221a052ca76c257f5c3c649de8337495bdf9941ab248613'
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - cad0d55bb5db27ce95c1d35a64eb3f6667a6a5a9bb6a7de31c358ce7a5edc6b2.yaml (круг 1, CHANGES_REQUESTED)
+
+premise:
+  task_premise: «глагола смены нет» — подтверждена
+  command: git grep -c -E 'email-change|email_changed|EMAIL_IN_USE|emailChange|newEmail|user_email_change' -- . ":!$D" | wc -l → 0 @d9e233f4
+
+round_1_blockers:
+  B1:
+    status: closed
+    evidence: >-
+      Р8 п.8 называет op = event_type = user_email_change, subject_type = user, без адресов;
+      расширение subject_change_op_check новой миграцией — в шапке, §0.2, §6 п.2.
+      Перемерено: CHECK только 0001_initial.sql:2957 (git grep -l → 1); EmitSubjectChangeEvent
+      пишет subject_id/op/event_type/payload{subject_id,subject_type,op,event_type}
+      (internal/repo/kaname/pg/access_binding_repo.go:1085); гейт судит SelectorExpr по имени
+      EmitSubjectChangeSelector (internal/check/subject_change_flush_parity.go:99,176), перечень
+      subjectChangeProducerRoster (subject_change_flush_parity_test.go:52) — 5 файлов;
+      читатель края op не переносит (pkg/subjectchange/watcher.go:56), имя субъекта строит
+      из subject_type+subject_id (reader.go:76) — subject_type=user обязателен и назван.
+  B2:
+    status: closed
+    evidence: avLane.subjectChanges(user); EC-02 и EC-14 — ровно 1, EC-10(а) и EC-15 — 0, EC-10(б) — 1; h.pool в харнессе есть.
+  B3:
+    status: closed
+    evidence: >-
+      Р6 считает принятые запросы; Р4 — запрос на занятый адрес записывается без кода и расходует
+      оба окна; Р5 — любой принятый запрос вытесняет прежний код. EC-09 сравнивает повторы 429 с
+      равным Retry-After; EC-13 — два посева, различие только в занятости N₂. Р4/Р5/Р6/EC-09/EC-13
+      между собой согласованы.
+  B4:
+    status: closed
+    evidence: EC-18(б) — под новой сессией S₂; laneSessionTTL = 24h (session_lane_integration_harness_test.go:83) названа.
+  important_round_1: все четыре учтены (EC-19 ручка и L=3 в одном стенде; граница отсечки в Р8; Р4 «любой строкой»; EC-21 путём A197-04).
+
+blocking: []
+
+minor:
+  - '§1.5 «3 места вызова» верно для предиката с (ctx, но гейт считает 5 производителей (delete/revoke передают метод значением); после изменения перечень станет 6 — при правке страниц называть число гейта.'
+  - 'Комментарий к subject_change_op_check (0001_initial.sql:2967) ссылается на гейт TestQueueEventValueHasAProducer, которого в дереве kaname нет (git grep → только сам комментарий): производитель значения держится только EC-02/EC-24, а не этим гейтом — не полагаться на комментарий.'
+  - 'Р6 «под тем же ограничением, что у приглашения и восстановления» — в реализации назвать ручку стенда, из которой берётся значение окна адресата для email-change (в харнессе — avOptions.recoveryLettersPerRecipient).'
+
+constructibility:
+  seeded: 0
+  by_named_fixture: 24 из 24 I/U (avLane.register/mark/login/invite/inviter/letters/markedAt/endReason/auditEvents/pool, avClock.Advance, newAVLaneWith+avOptions, сцена A197-04, гейты internal/check); subjectChanges заводится изменением поверх h.pool
+  not_executed: 'EC-25…EC-27 — стенд с доставкой (kacho#1773); посев не ставился: стенда и разрешения на посев в задании нет. DoD п.6 даёт им третий исход «условие не создано».'
+twins: у всех отрицаний близнец назван
+producers: 27 из 27 строк §5
