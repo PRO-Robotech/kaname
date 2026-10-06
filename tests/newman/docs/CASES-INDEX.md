@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 774
+Всего кейсов: 775
 
 ## Перепись по модулям
 
@@ -69,7 +69,7 @@
 | `cases/kaname-login-lane.py` | 22 |
 | `cases/kaname-recovery-lane.py` | 10 |
 | `cases/kaname-registration.py` | 2 |
-| `cases/kaname-address-verification.py` | 6 |
+| `cases/kaname-address-verification.py` | 7 |
 | `cases/kaname-access-keys.py` | 10 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1059,7 +1059,7 @@
 - `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
 - `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
 
-## `cases/kaname-address-verification.py` — 6 кейсов
+## `cases/kaname-address-verification.py` — 7 кейсов
 
 > Подтверждение адреса и положение подтверждения (kaname#456, приёмка
 > `access-beyond-login-needs-a-verified-address.md`, позиции уровня E): сессия
@@ -1080,6 +1080,7 @@
 - `IAM-ADDRVERIFY-NEG-PASSWORD-CHANGE-REFUSED`
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
+- `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
 
 ## `cases/kaname-second-factor.py` — 18 кейсов
 
