@@ -1,0 +1,99 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-sessions-are-listed-and-ended-by-their-owner.md
+  sha256: b304ad58c8dc331d14bd86b1c5baa6830efff1a2fc754d490b48238d278d1a98
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: d9e233f42
+  content_commit: null
+  content_commit_note: >-
+    На момент круга документ в ветке 634-own-sessions-acceptance не закоммичен (git status: ??).
+    Отпечаток снят с рабочего дерева копии tmp/634-own-sessions-acceptance.
+  branch: 634-own-sessions-acceptance
+  task: PRO-Robotech/kaname#634
+  related_tasks: [PRO-Robotech/kacho#3061, PRO-Robotech/kaname#540, PRO-Robotech/kacho#2969]
+  lines: 706
+  round: 1
+  fingerprint_predicate: sha256sum <док> → b304ad58…8d1a98 (совпал с заданием)
+publication_mode: courier_of_agent_verdict
+
+verdict: RETURN
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+blocking:
+  - kind: COVERAGE
+    where: Р3 «Границы значения», OS-04
+    claim: >-
+      Р3 объявляет два поведения, у которых нет ни одного сценария: (1) байты не-UTF-8 в
+      заголовке заменяются U+FFFD; (2) урезание до 512 «знаков». OS-04 (б) проверяет урезание
+      только однобайтовым `x`, на котором «знак», «руна» и «байт» совпадают. Слово «знак» не
+      определено (руна или байт).
+    why_blocking: >-
+      Столбец пишется в транзакции выдачи сессии, то есть на пути входа. Если байты не-UTF-8
+      не обезврежены, или урезание по байтам разрезало многобайтовую руну, хранилище отвергнет
+      строку, и откажет сам вход (503) для любого клиента с таким заголовком. Решение принято,
+      но держателя у него нет, поэтому реализация вправе его пропустить, и ни одна проба этого
+      не заметит.
+    measured: >-
+      Слушатель полосы читает заголовки net/http; httpguts допускает в значении байты ≥0x80
+      (obs-text), так что такой вход до глагола доходит. Поле пишет IssueSession
+      (internal/apps/kaname/api/humansession/issue.go:57), которую зовут login.go:551,
+      register.go:227, recovery_complete.go:326, access_key_login.go:461.
+    required: >-
+      Назвать единицу («знак» = руна Unicode) и добавить в OS-04 буквы: (г) значение с байтами
+      не-UTF-8 → вход 200, а в перечне на их месте U+FFFD; (д) 600 двухбайтовых рун → 512 рун,
+      и значение остаётся допустимым UTF-8. Положительный близнец обеих букв — (а), различие
+      одно.
+
+important:
+  - kind: PRODUCER
+    where: §5 строка OS-05
+    note: >-
+      Названный производитель `ValidatePageToken` (internal/apps/kaname/shared/pagination.go:23)
+      отдаёт gRPC-статус с текстом `Illegal argument pageToken` и деталью BadRequest. OS-05 же
+      утверждает `Illegal argument pageToken: malformed` и пустой `details`. Тексту OS-05
+      отвечает FieldError полосы (refusals.go:63) поверх `pagetoken.WellFormed`; производителя
+      назвать так. То же касается `corevalidate.PageSize` и текста про pageSize.
+  - kind: CONSTRUCTIBILITY
+    where: OS-16 Given
+    note: >-
+      Написано «тот же путь, что у кейсов подтверждения в tests/newman/cases/kaname-login-lane.py».
+      В этом файле кейсов подтверждения нет: grep verif/confirm находит только печенья.
+      Подтверждение кодом из письма живёт в tests/newman/cases/kaname-address-verification.py
+      (`_await_letter`, `_confirm`). Человек обязан быть свежим, а не посевным
+      `{{loginLaneEmail}}`: `end-others` по общему посевному человеку сняло бы сессии кейсов
+      соседних наборов того же шага.
+  - kind: COVERAGE
+    where: OS-05
+    note: >-
+      Нет нижней границы `pageSize=-1`. Именно на ней дерево уже ловило насыщающее приведение
+      (pagination.go, шапка ValidateRawPagination). Рекомендую букву (з).
+  - kind: FORMAT
+    where: OS-13 (в)
+    note: >-
+      Если повышение перевыпускает носитель, следующий `end` идёт новым носителем `S_A`.
+      Стоит сказать это явно.
+
+verified_true:
+  - "§1.1 перемерено @d9e233f42: 115 0; Internal: Resolve, SessionCutoffOf; путей 18; видов 13"
+  - "§1.4: EndSession :547, endSessionsOfSQL :578, EndOtherSessions :592; requireFresh sf_enroll.go:83 (граница включена: `>`)"
+  - "Посев «Дано I» конструируем: avLane.register/login/mark/resolve/endReasonByID/auditEvents есть (address_verification_harness_integration_test.go:427–611); created_at = now() БД, поэтому порядок выдачи детерминирован при замороженных avClock"
+  - "Подтверждение адреса делает RotateBearer той же записи и EndOtherSessions(email-verified) (verification.go:466–476): соседняя приёмка F8-S5 строит свой посев на этом"
+  - "Отзыв выданного без отсечки законен: семейства токенов судятся краем через IsRevoked (session_revocations_service.proto, шапка)"
+  - "failOn resolve/audit у U-харнесса есть (fake_store_test.go:125, :299)"
+
+counts:
+  scenarios: 16
+  producer_named: 16 of 16 (one imprecise — OS-05)
+  twin_named: 16 of 16
+  constructibility: >-
+    Названной фикстурой показан посев I/I-V/U, OS-03, OS-09(д), OS-13, OS-14. Живого посева
+    этим кругом не ставилось (не выполнилось 0 / не ставилось 16): сценарии на ещё не
+    существующих глаголах до кода исполнить нечем.
+
+event_body: "acceptance-reviewer · RETURN · sha256 b304ad58c8dc331d14bd86b1c5baa6830efff1a2fc754d490b48238d278d1a98"
