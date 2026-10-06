@@ -1,0 +1,158 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md
+  sha256: 94d6a4b65322772fa94ae52b9d71e7b0403bfd9bb26541fb9d8508a6960fb6bd
+  revision: 5
+  revisions_judged: [4, 5]
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится: вердикт о редакции 5 — эта запись.
+  base_commit: 2cf9c8528b1f
+  content_commit: 543419ece751c0cff08daa1d345dd7bec2a886f6
+  branch: '526'
+  branch_base: '296'
+  task: PRO-Robotech/kaname#526
+  edge_pair: PRO-Robotech/kacho-workspace docs/specs/sub-phase-F6b-console-and-edge-confirmed-address-gate-acceptance.md, редакция 7
+  lines: 1910
+  round: 4
+  round_in_this_cycle: "1 из 2"
+  predecessor_record: docs/specs/reviews/access-beyond-login-needs-a-verified-address/f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 526 на 543419ec → 94d6a4b6…fb6bd, совпало с заданием; wc -l → 1910.
+    Промежуточные отпечатки: fb8189dad → f2d1fe85… (одобрен кругом 3), dc700b737 → 487e1d73…,
+    9c2126d67 (редакция 4) → 4ba15a2d…; на 487e1d73 и 4ba15a2d записей нет — один круг судит дельту
+    f2d1fe85 → 94d6a4b6.
+  fingerprint_reproduced: true
+  task_premise_remeasured: >-
+    ПОДТВЕРДИЛАСЬ: отпечаток и число строк совпали; сценариев 63
+    (grep -cE '^\*\*EV-[0-9]{2} — ' → 63), повторов меток 0; редакция 4 записи не имеет
+    (каталог записей — три файла, на 32dd2b23, 5fb3e84e, f2d1fe85).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-06T10:02:37Z'
+blocking_count: 2
+blocking_kinds_distinct: [DoD, FORMAT]
+important_count: 3
+
+delta_against_approved:
+  approved_sha256: f2d1fe852333af5412591a7ef2740d651086c408715e2083f47d3d075a755853
+  diff_command: git diff fb8189dad 543419ec -- <док> → 217 добавлений, 12 удалений, один файл
+  revision_4_judged: >-
+    Формулировки Ф5 Д16 (а) (EV-86 «Тогда») и Д21 (а) (строка Р2, строка §3.2) и оговорка kaname#564
+    к таблице Р4в. Замечаний нет: решения, ID и «Дано» не тронуты, производитель второго вызывающего
+    назван честно как посадка kaname#608, а не сегодняшний факт.
+  revision_5_judged: >-
+    Текст Р3 со шагом на трёх поверхностях, абзацы «Текст называет шаг» и «Один писатель у службы,
+    одна копия у края», строка §3.2 о копии края, EV-14, DoD п. 16 и п. 17, строка §10.
+
+blocking:
+  - id: B1
+    kind: DoD
+    where: "§9 п. 16"
+    finding: >-
+      Предикат «git grep -n 'email address is not verified' -- . ':!docs' → 0 строк после правки»
+      невыполним: новый текст начинается этой же строкой, поэтому каждая переутверждённая проба и
+      сама константа совпадут с образцом. Пункт одновременно требует «git grep -c нового текста — не
+      ноль в каждом файле» — два условия взаимоисключающи, исход п. 16 объективно всегда «не пройдено».
+    measured: >-
+      git grep -n 'email address is not verified' 543419ec -- . ':!docs' | wc -l → 11 (контроль: образец
+      находит прежние написания в 7 файлах); новый литерал содержит образец префиксом — после правки
+      число не станет 0.
+    fix: >-
+      Якорить образец на конце прежнего литерала, например
+      git grep -nE 'email address is not verified[^:]' -- . ':!docs' → 0 (либо образец с закрывающей кавычкой), как сделала
+      сторона края (F6b §6 п. 10, образец с закрывающей кавычкой; там на 680d1794 → 13, контроль
+      показан). Контроль предложенного образца в обе стороны: на 543419ec → 11 (прежние написания найдены), на строке нового текста → 0.
+  - id: B2
+    kind: FORMAT
+    where: "EV-14, первое «Тогда» (а)"
+    finding: >-
+      Тело задано как {"code":7,"message": + T + ,"details":[…]}: T в EV-14 не определено, а в соседних
+      сценариях той же редакции T — момент постановки письма (EV-23, EV-33) и токен (EV-69).
+      Центральное утверждение сценария — дословный текст — выражено незаполненной подстановкой и не
+      является ни корректным JSON, ни ссылкой на значение.
+    fix: >-
+      Подставить литерал Р3 (в кавычках, как в таблице Р3) либо явно сказать «message — дословно текст
+      Р3», как EV-11 (а).
+
+important:
+  - id: I1
+    kind: FORMAT
+    where: "§0.5, второй блок команд"
+    finding: >-
+      Команды по дереву платформы записаны псевдо-путём 'PRO-Robotech/kacho@680d1794:gateway/**'
+      как pathspec — в таком виде они ничего не находят (git grep и git log выдают пусто). Утверждения
+      верны: перемерено формой git grep -n 'addressRefusalText *=' 680d1794 -- gateway ':!*_test.go'
+      → address_refusal.go:43, значение прежнее; git log -S'confirm it with the code from the letter'
+      680d1794 -- gateway → 81f7bf3504e, 97e018f606d, c13dd559ba2. Записать исполнимой формой, как
+      это уже сделано в F6b §Р3.
+  - id: I2
+    kind: COVERAGE
+    where: "§7, абзац об уровне E"
+    finding: >-
+      «У четырёх последних условие одно — край ретранслирует два новых пути (kacho#2900)… до неё
+      исход на уровне E — условие не создано». На 680d1794 край объявляет путь подтверждения
+      доступным до подтверждения (gateway/internal/middleware/login_lane_paths.go:284), а EV-14 на
+      уровне E тоже опирается на ретрансляцию пути подтверждения и в перечень не внесён. Уточнить:
+      условие создано (тогда «не создано» снять) либо EV-14 входит в число условных.
+  - id: I3
+    kind: CONVENTION
+    where: "EV-14 (а) и таблица Р3"
+    finding: >-
+      Таблица Р3 пишет домен заглушкой «<домен отказов службы>», EV-14 — литералом iam.kaname.cloud.
+      Литерал верен (internal/refusaldomain: ServiceIAM + ProductSuffix), но одно значение в двух
+      формах — повод выбрать одну.
+
+constructibility:
+  seeded: 0
+  by_named_fixture: 1
+  not_executed: 0
+  detail: >-
+    EV-14 строится существующим стендом пробы полосы формы
+    internal/handler/loginlanehttp/address_verification_harness_integration_test.go: letters() читает
+    код из строки очереди, confirm() предъявляет его, token() выводит признак из печенья контекста
+    формы. «Тем же телом» после шага годно: подтверждение адреса печенья контекста формы не меняет
+    (formCookie ставят только csrf, login, register, completeRecovery и вход ключом доступа —
+    handler.go:519, 565, 601, 743, access_key_login.go:150; confirmEmailVerification — нет), а смена
+    пароля свежести ступени не требует (change_password.go: Execute). Посев не ставился: прогон
+    интеграции в этом круге не исполнялся.
+
+producers:
+  without_producer: []
+  checked: >-
+    EV-14: текст — admission.TextNotVerified (admission.go:59 @ 2cf9c8528b1f, писатель один),
+    readers — verification.go:55; шаг — глагол подтверждения; объявление пути —
+    PathPositions() (handler.go:156), PathVerifyEmailConfirm: PathAvailableInVerification
+    (handler.go:136). Путь опубликован: auth-lane.mdx:39 и :70. Помощник requireRefusalR3
+    (address_gate_integration_test.go:100), _NOT_VERIFIED (kaname-address-verification.py:139) —
+    существуют.
+twins:
+  negatives_with_twin: "EV-14 (а) ↔ (б): отличающий факт — исполнен ли названный шаг"
+
+disclosure: >-
+  Путь в тексте — публичный путь внешней полосы формы, опубликованный в документации API; адресов
+  развёртывания, ящиков, кодов в тексте нет. Замечаний нет.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: false
+
+event_body_for_publication: "acceptance-reviewer · CHANGES_REQUESTED · 94d6a4b65322772fa94ae52b9d71e7b0403bfd9bb26541fb9d8508a6960fb6bd"
+event:
+  status: not_performed
+  note: событие публикует курьер; блок дописывается к факту отдельным коммитом
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
