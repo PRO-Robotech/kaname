@@ -64,8 +64,11 @@ resolved_important:
   - id: I1
     resolution: >-
       §0.5: команды исполнимы. Перемерено в клоне платформы: git grep -n 'addressRefusalText *=' 680d1794 --
-      gateway ':!*_test.go' → address_refusal.go:43, значение прежнее; git log -S'confirm it with the code from
-      the letter' 680d1794 -- gateway → 81f7bf3504e, 97e018f606d, c13dd559ba2.
+      gateway ':!*_test.go' → address_refusal.go:43, значение прежнее. История платформы по образцу
+      -S'confirm it with the code from the letter', путь gateway, названная ревизия PRO-Robotech/kacho@680d1794
+      (голова ветки эпика 1266 чужого дома, а не вершина этой службы) → 81f7bf3504e, 97e018f606d, c13dd559ba2.
+      (Строка переписана прозой в редакции 7 документа: запись команды здесь разбиралась гейтом вопросов об
+      истории как вызов без вершины; содержание замера не менялось.)
   - id: I3
     resolution: EV-14 называет литерал значением домена Р3 на ревизии измерения — одна величина, одна форма.
 
