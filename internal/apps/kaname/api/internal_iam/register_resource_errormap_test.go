@@ -49,6 +49,7 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 		failBeginTxBeginner{err: errors.New("failed to connect to `host=iamdb port=5432 user=kaname`: connection refused")},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		noResidual{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -69,6 +70,7 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 type fakeRegistrar struct {
 	registerErr   error
 	unregisterErr error
+	publishErr    error
 }
 
 func (f *fakeRegistrar) Register(_ context.Context, _ registerInput) error {
@@ -77,6 +79,10 @@ func (f *fakeRegistrar) Register(_ context.Context, _ registerInput) error {
 
 func (f *fakeRegistrar) Unregister(_ context.Context, _ unregisterInput) error {
 	return f.unregisterErr
+}
+
+func (f *fakeRegistrar) Publish(_ context.Context, _ publicationInput) error {
+	return f.publishErr
 }
 
 // rawPgxErr mimics a bare fmt.Errorf-wrapped pgx connection failure — exactly the
@@ -118,7 +124,7 @@ func TestInternalIAM_RegisterResource_ErrorMapping(t *testing.T) {
 			h := newRegistrarHandler(&fakeRegistrar{registerErr: tc.err})
 
 			_, err := h.RegisterResource(context.Background(), &iamv1.RegisterResourceRequest{
-				SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
+				Tuples: []*iamv1.RegisteredTuple{{SubjectId: "user:usr_x", Relation: "owner"}}, Object: "vpc_network:enp_1",
 				Generation: 1,
 			})
 			require.Error(t, err)
@@ -142,7 +148,7 @@ func TestInternalIAM_UnregisterResource_ErrorMapping(t *testing.T) {
 			h := newRegistrarHandler(&fakeRegistrar{unregisterErr: tc.err})
 
 			_, err := h.UnregisterResource(context.Background(), &iamv1.UnregisterResourceRequest{
-				SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
+				Object:     "vpc_network:enp_1",
 				Generation: 2,
 			})
 			require.Error(t, err)

@@ -434,28 +434,27 @@ func (x *CheckResponse) GetReason() string {
 // TOMBSTONE: `WriteCreatorTupleRequest` and `WriteCreatorTupleResponse` were
 // removed together with the `WriteCreatorTuple` RPC (#788). Never re-add
 // messages under these names.
-// RegisterResourceRequest — Internal FGA-proxy register-owner-tuple payload.
-// Форма симметрична CheckRequest.
+// RegisterResourceRequest — регистрация СОБЫТИЯ объекта (`CREATED`, `UPDATED`):
+// набор кортежей события на объекте `object`, состояние объекта (метки, цепь
+// предков) и поколение события (приёмка NTF-3, Р30 «Единица поколения — событие»).
+//
+// Единица поколения — событие, а не кортеж: одно событие — один вызов с одним
+// поколением, и всё, что событие несёт, применяется атомарно под ним — либо
+// целиком, либо исход REJECTED_STALE без единой записи. Применение по одному
+// кортежу запрещено: второй кортеж того же события пришёл бы с тем же
+// поколением, не новее головы, и пропал бы.
 type RegisterResourceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// FGA-subject string. Формат "<type>:<id>", напр.:
-	//
-	//	"user:<usr…>"
-	//	"service_account:<sva…>"
-	//	"<owner-type>:<id>"
-	SubjectId string `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
-	// FGA-relation для owner-tuple (как правило "admin" / "parent").
-	Relation string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
 	// Объект решения. Формат "<type>:<id>" словарём МОДЕЛИ прав
 	// (НЕ permission-каталог), напр. "vpc_network:<net…>",
 	// "compute_instance:<...>".
 	Object string `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
-	// Trace-id для correlation в логах (модуль ↔ IAM ↔ FGA). Optional.
+	// Trace-id для correlation в логах (модуль ↔ IAM). Optional.
 	TraceId string `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	// Tenant labels зеркала ресурса. Output-only mirror в
+	// Метки объекта на момент события. Output-only mirror в
 	// `kaname.resource_mirror`; source of truth = owner-сервис. Питает
-	// `bySelector` (matchLabels) и containment. Пусто для legacy-caller'ов
-	// (graceful). IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
+	// `bySelector` (matchLabels) и containment. Заменяют прежние как состояние.
+	// IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Parent project id ресурса (`prj…`), если ресурс project-scoped.
 	// Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
@@ -464,16 +463,6 @@ type RegisterResourceRequest struct {
 	// Parent account id ресурса (`acc…`), если применимо. Mirror /
 	// containment на account-scope.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
-	// Версия владельца у ПУБЛИКАЦИИ для анонимного чтения — и только у неё.
-	//
-	// Читается одним путём: чистой выдачей `user:* # v_get` (публикация объекта),
-	// чей порядок записи и снятия держит `kaname.public_read_publication` по этой
-	// версии (kaname#107). Регистрация ОБЪЕКТА её не читает — версия объекта есть
-	// `generation` ниже, — и потому отвергает: `INVALID_ARGUMENT`
-	// `source_version: …` (принять и проигнорировать запрещено,
-	// `api-conventions.md`). Пусто у публикации — намерение без версии, порядка
-	// не доказывающее (fail-closed для снятия).
-	SourceVersion *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
 	// Цепь родительства регистрируемого объекта, от БЛИЖАЙШЕГО предка к дальнему.
 	//
 	// Каждый элемент — объект в форме `"<type>:<id>"`, той же, что `object` выше:
@@ -488,38 +477,41 @@ type RegisterResourceRequest struct {
 	// области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
 	// неотличимо от честного отказа.
 	//
-	// АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
-	//
-	// ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
-	// обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
-	// как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
-	// применённая регистрация заменяет набор рёбер объекта целиком, иначе право
-	// пережило бы перенос объекта в другую область. Следствие, названное прямо:
-	// регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
-	// предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
-	// (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
-	// iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
-	// держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
-	//
-	// ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
-	// читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
-	// обещает возможность, которой нет, а форма E получает объект без предка —
-	// то есть ровно тот дефект, ради которого поле и заводится.
+	// ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Цепь есть
+	// СОСТОЯНИЕ, и применённая регистрация заменяет набор рёбер объекта целиком,
+	// иначе право пережило бы перенос объекта в другую область. Следствие,
+	// названное прямо: регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже
+	// записанных предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей
+	// стороне (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его
+	// иерархия; iam чужой формы не додумывает. Свойство «каждый потребитель
+	// называет цепь» держится гейтом по дереву (internal/repohygiene), а не этим
+	// абзацем.
 	ParentChain []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
-	// Поколение объекта у владельца: целое, строго растущее на каждое изменение
-	// объекта, — то же `g_E`, что владелец ставит в строку `resource-event` своего
-	// журнала (приёмка NTF-3, Р30 «Приём поколения — CAS», «Поколение и проекция»).
+	// Поколение события объекта у владельца: целое, строго растущее на каждое
+	// событие объекта, — то же `g_E`, что владелец ставит в строку `resource-event`
+	// своего журнала и берёт из счётчика объекта своей базы (приёмка NTF-3, Р30
+	// «Приём поколения — CAS», «Производитель поколения — счётчик объекта модуля»).
 	//
-	// Обязательно у регистрации и у снятия объекта: `0` — `INVALID_ARGUMENT`
-	// `generation: required`; приёма без поколения нет. Применяется, только если
-	// строго новее головы объекта в службе доступа (`kaname.object_head`, включая
-	// надгробие снятия); иначе исход `REJECTED_STALE` — зеркало, рёбра предков,
-	// голова и кортежи не меняются, а вызов отвечает успехом (контракт прокси
-	// идемпотентен: отказ породил бы вечный повтор у дренажа владельца).
+	// Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`; приёма без
+	// поколения нет. Применяется, только если строго новее головы объекта в
+	// службе доступа (`kaname.object_head`, включая надгробие снятия); иначе исход
+	// `REJECTED_STALE` — зеркало, рёбра предков, голова и кортежи не меняются, а
+	// вызов отвечает успехом (контракт прокси идемпотентен: отказ породил бы вечный
+	// повтор у дренажа владельца). Регистрация, применённая при отсутствии головы
+	// либо поверх надгробия, начинает ВОПЛОЩЕНИЕ объекта, и её поколение служба
+	// доступа хранит при голове как границу воплощения.
+	Generation int64 `protobuf:"varint,10,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Набор кортежей события на объекте `object`: структурные (субъект — предок
+	// объекта) и владения (субъект — `user`, `service_account`, `group#member`).
 	//
-	// У чистой выдачи `user:* # v_get` (публикация) поколения нет: её порядок —
-	// `source_version` выше; поколение там — `INVALID_ARGUMENT`.
-	Generation    int64 `protobuf:"varint,10,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Непустой (`INVALID_ARGUMENT` `tuples: required`); пара в наборе одна
+	// (`tuples: duplicate <subject_id>#<relation>`); подстановочного субъекта в
+	// наборе нет (`tuples: wildcard subject is published by
+	// SetPublicReadPublication`) — публикация для анонимного чтения идёт своим
+	// методом. Применённая регистрация пишет кортежи набора, которых ещё нет;
+	// кортеж, отсутствующий в наборе следующего поколения, регистрацией не
+	// снимается — его снимает только снятие объекта.
+	Tuples        []*RegisteredTuple `protobuf:"bytes,11,rep,name=tuples,proto3" json:"tuples,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -552,20 +544,6 @@ func (x *RegisterResourceRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RegisterResourceRequest.ProtoReflect.Descriptor instead.
 func (*RegisterResourceRequest) Descriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *RegisterResourceRequest) GetSubjectId() string {
-	if x != nil {
-		return x.SubjectId
-	}
-	return ""
-}
-
-func (x *RegisterResourceRequest) GetRelation() string {
-	if x != nil {
-		return x.Relation
-	}
-	return ""
 }
 
 func (x *RegisterResourceRequest) GetObject() string {
@@ -603,13 +581,6 @@ func (x *RegisterResourceRequest) GetParentAccountId() string {
 	return ""
 }
 
-func (x *RegisterResourceRequest) GetSourceVersion() *timestamppb.Timestamp {
-	if x != nil {
-		return x.SourceVersion
-	}
-	return nil
-}
-
 func (x *RegisterResourceRequest) GetParentChain() []string {
 	if x != nil {
 		return x.ParentChain
@@ -624,6 +595,73 @@ func (x *RegisterResourceRequest) GetGeneration() int64 {
 	return 0
 }
 
+func (x *RegisterResourceRequest) GetTuples() []*RegisteredTuple {
+	if x != nil {
+		return x.Tuples
+	}
+	return nil
+}
+
+// RegisteredTuple — кортеж набора события: субъект и отношение на объекте
+// запроса регистрации.
+type RegisteredTuple struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Субъект. Формат "<type>:<id>" либо "<type>:<id>#<relation>", напр.
+	//
+	//	"user:<usr…>"
+	//	"service_account:<sva…>"
+	//	"registry_registry:<reg…>"
+	SubjectId string `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
+	// Отношение субъекта к объекту ("parent", "project", "owner").
+	Relation      string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisteredTuple) Reset() {
+	*x = RegisteredTuple{}
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisteredTuple) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisteredTuple) ProtoMessage() {}
+
+func (x *RegisteredTuple) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisteredTuple.ProtoReflect.Descriptor instead.
+func (*RegisteredTuple) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RegisteredTuple) GetSubjectId() string {
+	if x != nil {
+		return x.SubjectId
+	}
+	return ""
+}
+
+func (x *RegisteredTuple) GetRelation() string {
+	if x != nil {
+		return x.Relation
+	}
+	return ""
+}
+
 // RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
 // контракта (повтор → OK) опирается на пустой ответ без уникального id.
 type RegisterResourceResponse struct {
@@ -634,7 +672,7 @@ type RegisterResourceResponse struct {
 
 func (x *RegisterResourceResponse) Reset() {
 	*x = RegisterResourceResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +684,7 @@ func (x *RegisterResourceResponse) String() string {
 func (*RegisterResourceResponse) ProtoMessage() {}
 
 func (x *RegisterResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,42 +697,19 @@ func (x *RegisterResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResourceResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResourceResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{6}
 }
 
-// UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
-// Поля — те же, ЗА ИСКЛЮЧЕНИЕМ `parent_chain`: снятие адресуется объектом, и
-// цепь предков ему не нужна. Прежняя редакция говорила «идентичны», и это стало
-// бы ложью в момент появления девятого поля у соседа — правится здесь же, а не
-// «когда-нибудь», потому что расхождение в прозе не даёт конфликта слияния.
+// UnregisterResourceRequest — снятие объекта (`DELETED`), адресованное объектом:
+// оно снимает ВСЕ кортежи на объекте, зеркало, рёбра предков и публикацию
+// объекта и кладёт надгробие одной транзакцией приёма (приёмка NTF-3, Р30
+// «Единица поколения — событие»).
 type UnregisterResourceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// FGA-subject string (см. RegisterResourceRequest.subject_id).
-	SubjectId string `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
-	// FGA-relation owner-tuple (см. RegisterResourceRequest.relation).
-	Relation string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
 	// FGA-object string (см. RegisterResourceRequest.object).
 	Object string `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
 	// Trace-id для correlation в логах. Optional.
 	TraceId string `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	// Поля 5/6/7 зарезервированы под форму-симметрию с RegisterResourceRequest.
-	// Unregister удаляет mirror-строку по `object`; эти поля
-	// игнорируются на приеме (симметрия shape, не семантики).
-	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Project the resource belonged to. Empty when the resource is not project-scoped.
-	ParentProjectId string `protobuf:"bytes,6,opt,name=parent_project_id,json=parentProjectId,proto3" json:"parent_project_id,omitempty"`
-	// Account the resource belonged to. Empty when the resource is not account-scoped.
-	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
-	// Версия владельца у снятия ПУБЛИКАЦИИ — и только у него.
-	//
-	// Читается двумя путями, оба про публикацию: снятием чистой выдачи
-	// `user:* # v_get` и снятием объекта, чей тип допускает публикацию, — объект
-	// уносит свою публикацию с собой под ЭТОЙ версией, и запоздавшее открытие,
-	// не новее её, удалённый объект не опубликует (kaname#107). Пусто — снятие
-	// без версии, применяемое fail-closed. У снятия объекта, чей тип публикации
-	// не допускает, читателя нет — `INVALID_ARGUMENT` `source_version: …`.
-	// Порядок САМОГО объекта — `generation` ниже.
-	SourceVersion *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
 	// Поколение снятия объекта (см. RegisterResourceRequest.generation).
 	// Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`. Применённое
 	// снятие оставляет НАДГРОБИЕ — голову объекта с этим поколением: регистрация
@@ -706,7 +721,7 @@ type UnregisterResourceRequest struct {
 
 func (x *UnregisterResourceRequest) Reset() {
 	*x = UnregisterResourceRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +733,7 @@ func (x *UnregisterResourceRequest) String() string {
 func (*UnregisterResourceRequest) ProtoMessage() {}
 
 func (x *UnregisterResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,21 +746,7 @@ func (x *UnregisterResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterResourceRequest.ProtoReflect.Descriptor instead.
 func (*UnregisterResourceRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *UnregisterResourceRequest) GetSubjectId() string {
-	if x != nil {
-		return x.SubjectId
-	}
-	return ""
-}
-
-func (x *UnregisterResourceRequest) GetRelation() string {
-	if x != nil {
-		return x.Relation
-	}
-	return ""
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UnregisterResourceRequest) GetObject() string {
@@ -762,34 +763,6 @@ func (x *UnregisterResourceRequest) GetTraceId() string {
 	return ""
 }
 
-func (x *UnregisterResourceRequest) GetLabels() map[string]string {
-	if x != nil {
-		return x.Labels
-	}
-	return nil
-}
-
-func (x *UnregisterResourceRequest) GetParentProjectId() string {
-	if x != nil {
-		return x.ParentProjectId
-	}
-	return ""
-}
-
-func (x *UnregisterResourceRequest) GetParentAccountId() string {
-	if x != nil {
-		return x.ParentAccountId
-	}
-	return ""
-}
-
-func (x *UnregisterResourceRequest) GetSourceVersion() *timestamppb.Timestamp {
-	if x != nil {
-		return x.SourceVersion
-	}
-	return nil
-}
-
 func (x *UnregisterResourceRequest) GetGeneration() int64 {
 	if x != nil {
 		return x.Generation
@@ -797,8 +770,8 @@ func (x *UnregisterResourceRequest) GetGeneration() int64 {
 	return 0
 }
 
-// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
-// отсутствующего tuple → OK (контракт идемпотентности).
+// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Снятие
+// устаревшим поколением → OK (контракт идемпотентности).
 type UnregisterResourceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -807,7 +780,7 @@ type UnregisterResourceResponse struct {
 
 func (x *UnregisterResourceResponse) Reset() {
 	*x = UnregisterResourceResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -819,7 +792,7 @@ func (x *UnregisterResourceResponse) String() string {
 func (*UnregisterResourceResponse) ProtoMessage() {}
 
 func (x *UnregisterResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -832,7 +805,135 @@ func (x *UnregisterResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterResourceResponse.ProtoReflect.Descriptor instead.
 func (*UnregisterResourceResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{7}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{8}
+}
+
+// SetPublicReadPublicationRequest — намерение владельца о публикации объекта
+// для анонимного чтения (кортеж `user:* v_get`).
+type SetPublicReadPublicationRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Объект публикации. Формат "<type>:<id>" словарём МОДЕЛИ прав; тип обязан
+	// допускать публикацию (`INVALID_ARGUMENT` `object: type <type> does not admit
+	// public read`).
+	Object string `protobuf:"bytes,1,opt,name=object,proto3" json:"object,omitempty"`
+	// Открывает ли намерение объект для анонимного чтения.
+	Published bool `protobuf:"varint,2,opt,name=published,proto3" json:"published,omitempty"`
+	// Версия владельца намерения публикации — штамп строки намерения модуля,
+	// поставленный транзакцией записи. Обязательна (`INVALID_ARGUMENT`
+	// `publication_version: required`). Применяется, только если строго новее
+	// хранимой версии публикации объекта (kaname#107).
+	PublicationVersion *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=publication_version,json=publicationVersion,proto3" json:"publication_version,omitempty"`
+	// Trace-id для correlation в логах. Optional.
+	TraceId string `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	// Поколение объекта по счётчику модуля в транзакции намерения публикации —
+	// признак ВОПЛОЩЕНИЯ объекта, а не порядок публикации. Обязательно
+	// (`INVALID_ARGUMENT` `object_generation: required`).
+	ObjectGeneration int64 `protobuf:"varint,5,opt,name=object_generation,json=objectGeneration,proto3" json:"object_generation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SetPublicReadPublicationRequest) Reset() {
+	*x = SetPublicReadPublicationRequest{}
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPublicReadPublicationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPublicReadPublicationRequest) ProtoMessage() {}
+
+func (x *SetPublicReadPublicationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPublicReadPublicationRequest.ProtoReflect.Descriptor instead.
+func (*SetPublicReadPublicationRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetPublicReadPublicationRequest) GetObject() string {
+	if x != nil {
+		return x.Object
+	}
+	return ""
+}
+
+func (x *SetPublicReadPublicationRequest) GetPublished() bool {
+	if x != nil {
+		return x.Published
+	}
+	return false
+}
+
+func (x *SetPublicReadPublicationRequest) GetPublicationVersion() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PublicationVersion
+	}
+	return nil
+}
+
+func (x *SetPublicReadPublicationRequest) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
+func (x *SetPublicReadPublicationRequest) GetObjectGeneration() int64 {
+	if x != nil {
+		return x.ObjectGeneration
+	}
+	return 0
+}
+
+// SetPublicReadPublicationResponse — пусто; success implicit (gRPC OK), в том
+// числе на устаревшем намерении (контракт идемпотентен).
+type SetPublicReadPublicationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPublicReadPublicationResponse) Reset() {
+	*x = SetPublicReadPublicationResponse{}
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPublicReadPublicationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPublicReadPublicationResponse) ProtoMessage() {}
+
+func (x *SetPublicReadPublicationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPublicReadPublicationResponse.ProtoReflect.Descriptor instead.
+func (*SetPublicReadPublicationResponse) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{10}
 }
 
 // ForceLogoutRequest — admin force-logout payload.
@@ -854,7 +955,7 @@ type ForceLogoutRequest struct {
 
 func (x *ForceLogoutRequest) Reset() {
 	*x = ForceLogoutRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +967,7 @@ func (x *ForceLogoutRequest) String() string {
 func (*ForceLogoutRequest) ProtoMessage() {}
 
 func (x *ForceLogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +980,7 @@ func (x *ForceLogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutRequest.ProtoReflect.Descriptor instead.
 func (*ForceLogoutRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{8}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ForceLogoutRequest) GetUserId() string {
@@ -914,7 +1015,7 @@ type ForceLogoutMetadata struct {
 
 func (x *ForceLogoutMetadata) Reset() {
 	*x = ForceLogoutMetadata{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -926,7 +1027,7 @@ func (x *ForceLogoutMetadata) String() string {
 func (*ForceLogoutMetadata) ProtoMessage() {}
 
 func (x *ForceLogoutMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -939,7 +1040,7 @@ func (x *ForceLogoutMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutMetadata.ProtoReflect.Descriptor instead.
 func (*ForceLogoutMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{9}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ForceLogoutMetadata) GetUserId() string {
@@ -969,7 +1070,7 @@ type ForceLogoutResult struct {
 
 func (x *ForceLogoutResult) Reset() {
 	*x = ForceLogoutResult{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1082,7 @@ func (x *ForceLogoutResult) String() string {
 func (*ForceLogoutResult) ProtoMessage() {}
 
 func (x *ForceLogoutResult) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1095,7 @@ func (x *ForceLogoutResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutResult.ProtoReflect.Descriptor instead.
 func (*ForceLogoutResult) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{10}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ForceLogoutResult) GetRevokedCount() int32 {
@@ -1023,7 +1124,7 @@ type PollSubjectChangesRequest struct {
 
 func (x *PollSubjectChangesRequest) Reset() {
 	*x = PollSubjectChangesRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1035,7 +1136,7 @@ func (x *PollSubjectChangesRequest) String() string {
 func (*PollSubjectChangesRequest) ProtoMessage() {}
 
 func (x *PollSubjectChangesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1048,7 +1149,7 @@ func (x *PollSubjectChangesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollSubjectChangesRequest.ProtoReflect.Descriptor instead.
 func (*PollSubjectChangesRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{11}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PollSubjectChangesRequest) GetSinceId() int64 {
@@ -1101,7 +1202,7 @@ type SubjectChange struct {
 
 func (x *SubjectChange) Reset() {
 	*x = SubjectChange{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1113,7 +1214,7 @@ func (x *SubjectChange) String() string {
 func (*SubjectChange) ProtoMessage() {}
 
 func (x *SubjectChange) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1126,7 +1227,7 @@ func (x *SubjectChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubjectChange.ProtoReflect.Descriptor instead.
 func (*SubjectChange) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{12}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SubjectChange) GetId() int64 {
@@ -1181,7 +1282,7 @@ type PollSubjectChangesResponse struct {
 
 func (x *PollSubjectChangesResponse) Reset() {
 	*x = PollSubjectChangesResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1193,7 +1294,7 @@ func (x *PollSubjectChangesResponse) String() string {
 func (*PollSubjectChangesResponse) ProtoMessage() {}
 
 func (x *PollSubjectChangesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1206,7 +1307,7 @@ func (x *PollSubjectChangesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollSubjectChangesResponse.ProtoReflect.Descriptor instead.
 func (*PollSubjectChangesResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{13}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PollSubjectChangesResponse) GetChanges() []*SubjectChange {
@@ -1233,7 +1334,7 @@ type CurrentAuthzRevisionRequest struct {
 
 func (x *CurrentAuthzRevisionRequest) Reset() {
 	*x = CurrentAuthzRevisionRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1245,7 +1346,7 @@ func (x *CurrentAuthzRevisionRequest) String() string {
 func (*CurrentAuthzRevisionRequest) ProtoMessage() {}
 
 func (x *CurrentAuthzRevisionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1258,7 +1359,7 @@ func (x *CurrentAuthzRevisionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentAuthzRevisionRequest.ProtoReflect.Descriptor instead.
 func (*CurrentAuthzRevisionRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{14}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{17}
 }
 
 // CurrentAuthzRevisionResponse — токен версии прав.
@@ -1274,7 +1375,7 @@ type CurrentAuthzRevisionResponse struct {
 
 func (x *CurrentAuthzRevisionResponse) Reset() {
 	*x = CurrentAuthzRevisionResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1286,7 +1387,7 @@ func (x *CurrentAuthzRevisionResponse) String() string {
 func (*CurrentAuthzRevisionResponse) ProtoMessage() {}
 
 func (x *CurrentAuthzRevisionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1299,7 +1400,7 @@ func (x *CurrentAuthzRevisionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentAuthzRevisionResponse.ProtoReflect.Descriptor instead.
 func (*CurrentAuthzRevisionResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{15}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CurrentAuthzRevisionResponse) GetAuthzRev() string {
@@ -1319,7 +1420,7 @@ type GetRoleCompiledRequest struct {
 
 func (x *GetRoleCompiledRequest) Reset() {
 	*x = GetRoleCompiledRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1331,7 +1432,7 @@ func (x *GetRoleCompiledRequest) String() string {
 func (*GetRoleCompiledRequest) ProtoMessage() {}
 
 func (x *GetRoleCompiledRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1344,7 +1445,7 @@ func (x *GetRoleCompiledRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoleCompiledRequest.ProtoReflect.Descriptor instead.
 func (*GetRoleCompiledRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{16}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetRoleCompiledRequest) GetRoleId() string {
@@ -1368,7 +1469,7 @@ type GetRoleCompiledResponse struct {
 
 func (x *GetRoleCompiledResponse) Reset() {
 	*x = GetRoleCompiledResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1380,7 +1481,7 @@ func (x *GetRoleCompiledResponse) String() string {
 func (*GetRoleCompiledResponse) ProtoMessage() {}
 
 func (x *GetRoleCompiledResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1393,7 +1494,7 @@ func (x *GetRoleCompiledResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoleCompiledResponse.ProtoReflect.Descriptor instead.
 func (*GetRoleCompiledResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{17}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetRoleCompiledResponse) GetRoleId() string {
@@ -1425,7 +1526,7 @@ type ResolveBasicCredentialRequest struct {
 
 func (x *ResolveBasicCredentialRequest) Reset() {
 	*x = ResolveBasicCredentialRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1437,7 +1538,7 @@ func (x *ResolveBasicCredentialRequest) String() string {
 func (*ResolveBasicCredentialRequest) ProtoMessage() {}
 
 func (x *ResolveBasicCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1450,7 +1551,7 @@ func (x *ResolveBasicCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveBasicCredentialRequest.ProtoReflect.Descriptor instead.
 func (*ResolveBasicCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{18}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ResolveBasicCredentialRequest) GetPresented() string {
@@ -1485,7 +1586,7 @@ type ResolveBasicCredentialResponse struct {
 
 func (x *ResolveBasicCredentialResponse) Reset() {
 	*x = ResolveBasicCredentialResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1497,7 +1598,7 @@ func (x *ResolveBasicCredentialResponse) String() string {
 func (*ResolveBasicCredentialResponse) ProtoMessage() {}
 
 func (x *ResolveBasicCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +1611,7 @@ func (x *ResolveBasicCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveBasicCredentialResponse.ProtoReflect.Descriptor instead.
 func (*ResolveBasicCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{19}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ResolveBasicCredentialResponse) GetPrincipalType() string {
@@ -1563,7 +1664,7 @@ type CheckBasicCredentialLiveRequest struct {
 
 func (x *CheckBasicCredentialLiveRequest) Reset() {
 	*x = CheckBasicCredentialLiveRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1676,7 @@ func (x *CheckBasicCredentialLiveRequest) String() string {
 func (*CheckBasicCredentialLiveRequest) ProtoMessage() {}
 
 func (x *CheckBasicCredentialLiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1689,7 @@ func (x *CheckBasicCredentialLiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBasicCredentialLiveRequest.ProtoReflect.Descriptor instead.
 func (*CheckBasicCredentialLiveRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{20}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CheckBasicCredentialLiveRequest) GetCredentialId() string {
@@ -1615,7 +1716,7 @@ type CheckBasicCredentialLiveResponse struct {
 
 func (x *CheckBasicCredentialLiveResponse) Reset() {
 	*x = CheckBasicCredentialLiveResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1627,7 +1728,7 @@ func (x *CheckBasicCredentialLiveResponse) String() string {
 func (*CheckBasicCredentialLiveResponse) ProtoMessage() {}
 
 func (x *CheckBasicCredentialLiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1640,7 +1741,7 @@ func (x *CheckBasicCredentialLiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBasicCredentialLiveResponse.ProtoReflect.Descriptor instead.
 func (*CheckBasicCredentialLiveResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{21}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{24}
 }
 
 var File_kaname_cloud_iam_v1_internal_iam_service_proto protoreflect.FileDescriptor
@@ -1671,44 +1772,44 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x12HIGHER_CONSISTENCY\x10\x02\"A\n" +
 	"\rCheckResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xf2\x03\n" +
-	"\x17RegisterResourceRequest\x12\x1d\n" +
-	"\n" +
-	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
-	"\brelation\x18\x02 \x01(\tR\brelation\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xea\x03\n" +
+	"\x17RegisterResourceRequest\x12\x16\n" +
 	"\x06object\x18\x03 \x01(\tR\x06object\x12\x19\n" +
 	"\btrace_id\x18\x04 \x01(\tR\atraceId\x12P\n" +
 	"\x06labels\x18\x05 \x03(\v28.kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntryR\x06labels\x12*\n" +
 	"\x11parent_project_id\x18\x06 \x01(\tR\x0fparentProjectId\x12*\n" +
-	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12A\n" +
-	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x12!\n" +
+	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12!\n" +
 	"\fparent_chain\x18\t \x03(\tR\vparentChain\x12\x1e\n" +
 	"\n" +
 	"generation\x18\n" +
 	" \x01(\x03R\n" +
-	"generation\x1a9\n" +
+	"generation\x12<\n" +
+	"\x06tuples\x18\v \x03(\v2$.kaname.cloud.iam.v1.RegisteredTupleR\x06tuples\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1a\n" +
-	"\x18RegisterResourceResponse\"\xd3\x03\n" +
-	"\x19UnregisterResourceRequest\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\b\x10\tR\n" +
+	"subject_idR\brelationR\x0esource_version\"L\n" +
+	"\x0fRegisteredTuple\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
-	"\brelation\x18\x02 \x01(\tR\brelation\x12\x16\n" +
+	"\brelation\x18\x02 \x01(\tR\brelation\"\x1a\n" +
+	"\x18RegisterResourceResponse\"\xe6\x01\n" +
+	"\x19UnregisterResourceRequest\x12\x16\n" +
 	"\x06object\x18\x03 \x01(\tR\x06object\x12\x19\n" +
-	"\btrace_id\x18\x04 \x01(\tR\atraceId\x12R\n" +
-	"\x06labels\x18\x05 \x03(\v2:.kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntryR\x06labels\x12*\n" +
-	"\x11parent_project_id\x18\x06 \x01(\tR\x0fparentProjectId\x12*\n" +
-	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12A\n" +
-	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x12\x1e\n" +
+	"\btrace_id\x18\x04 \x01(\tR\atraceId\x12\x1e\n" +
 	"\n" +
 	"generation\x18\n" +
 	" \x01(\x03R\n" +
-	"generation\x1a9\n" +
-	"\vLabelsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1c\n" +
-	"\x1aUnregisterResourceResponse\"`\n" +
+	"generationJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tR\n" +
+	"subject_idR\brelationR\x06labelsR\x11parent_project_idR\x11parent_account_idR\x0esource_version\"\x1c\n" +
+	"\x1aUnregisterResourceResponse\"\xec\x01\n" +
+	"\x1fSetPublicReadPublicationRequest\x12\x16\n" +
+	"\x06object\x18\x01 \x01(\tR\x06object\x12\x1c\n" +
+	"\tpublished\x18\x02 \x01(\bR\tpublished\x12K\n" +
+	"\x13publication_version\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x12publicationVersion\x12\x19\n" +
+	"\btrace_id\x18\x04 \x01(\tR\atraceId\x12+\n" +
+	"\x11object_generation\x18\x05 \x01(\x03R\x10objectGeneration\"\"\n" +
+	" SetPublicReadPublicationResponse\"`\n" +
 	"\x12ForceLogoutRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x19\n" +
@@ -1748,7 +1849,7 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"F\n" +
 	"\x1fCheckBasicCredentialLiveRequest\x12#\n" +
 	"\rcredential_id\x18\x01 \x01(\tR\fcredentialId\"\"\n" +
-	" CheckBasicCredentialLiveResponse2\x94\r\n" +
+	" CheckBasicCredentialLiveResponse2\xc1\x0e\n" +
 	"\x12InternalIAMService\x12\xb6\x01\n" +
 	"\rLookupSubject\x12).kaname.cloud.iam.v1.LookupSubjectRequest\x1a*.kaname.cloud.iam.v1.LookupSubjectResponse\"N\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02':\x01*\"\"/iam/v1/internal/iam:lookupSubject\x12\x96\x01\n" +
 	"\x05Check\x12!.kaname.cloud.iam.v1.CheckRequest\x1a\".kaname.cloud.iam.v1.CheckResponse\"F\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/iam/v1/internal/iam:check\x12\xa3\x01\n" +
@@ -1756,7 +1857,8 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x13ForceLogoutMetadata\x12\x11ForceLogoutResult\x12\x98\x01\n" +
 	"\x12PollSubjectChanges\x12..kaname.cloud.iam.v1.PollSubjectChangesRequest\x1a/.kaname.cloud.iam.v1.PollSubjectChangesResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x92\x01\n" +
 	"\x10RegisterResource\x12,.kaname.cloud.iam.v1.RegisterResourceRequest\x1a-.kaname.cloud.iam.v1.RegisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x98\x01\n" +
-	"\x12UnregisterResource\x12..kaname.cloud.iam.v1.UnregisterResourceRequest\x1a/.kaname.cloud.iam.v1.UnregisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x9e\x01\n" +
+	"\x12UnregisterResource\x12..kaname.cloud.iam.v1.UnregisterResourceRequest\x1a/.kaname.cloud.iam.v1.UnregisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xaa\x01\n" +
+	"\x18SetPublicReadPublication\x124.kaname.cloud.iam.v1.SetPublicReadPublicationRequest\x1a5.kaname.cloud.iam.v1.SetPublicReadPublicationResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x9e\x01\n" +
 	"\x14CurrentAuthzRevision\x120.kaname.cloud.iam.v1.CurrentAuthzRevisionRequest\x1a1.kaname.cloud.iam.v1.CurrentAuthzRevisionResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xda\x01\n" +
 	"\x16ResolveBasicCredential\x122.kaname.cloud.iam.v1.ResolveBasicCredentialRequest\x1a3.kaname.cloud.iam.v1.ResolveBasicCredentialResponse\"W\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x020:\x01*\"+/iam/v1/internal/iam:resolveBasicCredential\x12\x8f\x01\n" +
 	"\x0fGetRoleCompiled\x12+.kaname.cloud.iam.v1.GetRoleCompiledRequest\x1a,.kaname.cloud.iam.v1.GetRoleCompiledResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xaa\x01\n" +
@@ -1775,7 +1877,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(CheckRequest_Consistency)(0),            // 0: kaname.cloud.iam.v1.CheckRequest.Consistency
 	(*LookupSubjectRequest)(nil),             // 1: kaname.cloud.iam.v1.LookupSubjectRequest
@@ -1783,65 +1885,68 @@ var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(*CheckRequest)(nil),                     // 3: kaname.cloud.iam.v1.CheckRequest
 	(*CheckResponse)(nil),                    // 4: kaname.cloud.iam.v1.CheckResponse
 	(*RegisterResourceRequest)(nil),          // 5: kaname.cloud.iam.v1.RegisterResourceRequest
-	(*RegisterResourceResponse)(nil),         // 6: kaname.cloud.iam.v1.RegisterResourceResponse
-	(*UnregisterResourceRequest)(nil),        // 7: kaname.cloud.iam.v1.UnregisterResourceRequest
-	(*UnregisterResourceResponse)(nil),       // 8: kaname.cloud.iam.v1.UnregisterResourceResponse
-	(*ForceLogoutRequest)(nil),               // 9: kaname.cloud.iam.v1.ForceLogoutRequest
-	(*ForceLogoutMetadata)(nil),              // 10: kaname.cloud.iam.v1.ForceLogoutMetadata
-	(*ForceLogoutResult)(nil),                // 11: kaname.cloud.iam.v1.ForceLogoutResult
-	(*PollSubjectChangesRequest)(nil),        // 12: kaname.cloud.iam.v1.PollSubjectChangesRequest
-	(*SubjectChange)(nil),                    // 13: kaname.cloud.iam.v1.SubjectChange
-	(*PollSubjectChangesResponse)(nil),       // 14: kaname.cloud.iam.v1.PollSubjectChangesResponse
-	(*CurrentAuthzRevisionRequest)(nil),      // 15: kaname.cloud.iam.v1.CurrentAuthzRevisionRequest
-	(*CurrentAuthzRevisionResponse)(nil),     // 16: kaname.cloud.iam.v1.CurrentAuthzRevisionResponse
-	(*GetRoleCompiledRequest)(nil),           // 17: kaname.cloud.iam.v1.GetRoleCompiledRequest
-	(*GetRoleCompiledResponse)(nil),          // 18: kaname.cloud.iam.v1.GetRoleCompiledResponse
-	(*ResolveBasicCredentialRequest)(nil),    // 19: kaname.cloud.iam.v1.ResolveBasicCredentialRequest
-	(*ResolveBasicCredentialResponse)(nil),   // 20: kaname.cloud.iam.v1.ResolveBasicCredentialResponse
-	(*CheckBasicCredentialLiveRequest)(nil),  // 21: kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
-	(*CheckBasicCredentialLiveResponse)(nil), // 22: kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
-	nil,                                      // 23: kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	nil,                                      // 24: kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	(*User)(nil),                             // 25: kaname.cloud.iam.v1.User
-	(*ServiceAccount)(nil),                   // 26: kaname.cloud.iam.v1.ServiceAccount
-	(*timestamppb.Timestamp)(nil),            // 27: google.protobuf.Timestamp
-	(*operation.Operation)(nil),              // 28: corelib.operation.Operation
+	(*RegisteredTuple)(nil),                  // 6: kaname.cloud.iam.v1.RegisteredTuple
+	(*RegisterResourceResponse)(nil),         // 7: kaname.cloud.iam.v1.RegisterResourceResponse
+	(*UnregisterResourceRequest)(nil),        // 8: kaname.cloud.iam.v1.UnregisterResourceRequest
+	(*UnregisterResourceResponse)(nil),       // 9: kaname.cloud.iam.v1.UnregisterResourceResponse
+	(*SetPublicReadPublicationRequest)(nil),  // 10: kaname.cloud.iam.v1.SetPublicReadPublicationRequest
+	(*SetPublicReadPublicationResponse)(nil), // 11: kaname.cloud.iam.v1.SetPublicReadPublicationResponse
+	(*ForceLogoutRequest)(nil),               // 12: kaname.cloud.iam.v1.ForceLogoutRequest
+	(*ForceLogoutMetadata)(nil),              // 13: kaname.cloud.iam.v1.ForceLogoutMetadata
+	(*ForceLogoutResult)(nil),                // 14: kaname.cloud.iam.v1.ForceLogoutResult
+	(*PollSubjectChangesRequest)(nil),        // 15: kaname.cloud.iam.v1.PollSubjectChangesRequest
+	(*SubjectChange)(nil),                    // 16: kaname.cloud.iam.v1.SubjectChange
+	(*PollSubjectChangesResponse)(nil),       // 17: kaname.cloud.iam.v1.PollSubjectChangesResponse
+	(*CurrentAuthzRevisionRequest)(nil),      // 18: kaname.cloud.iam.v1.CurrentAuthzRevisionRequest
+	(*CurrentAuthzRevisionResponse)(nil),     // 19: kaname.cloud.iam.v1.CurrentAuthzRevisionResponse
+	(*GetRoleCompiledRequest)(nil),           // 20: kaname.cloud.iam.v1.GetRoleCompiledRequest
+	(*GetRoleCompiledResponse)(nil),          // 21: kaname.cloud.iam.v1.GetRoleCompiledResponse
+	(*ResolveBasicCredentialRequest)(nil),    // 22: kaname.cloud.iam.v1.ResolveBasicCredentialRequest
+	(*ResolveBasicCredentialResponse)(nil),   // 23: kaname.cloud.iam.v1.ResolveBasicCredentialResponse
+	(*CheckBasicCredentialLiveRequest)(nil),  // 24: kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
+	(*CheckBasicCredentialLiveResponse)(nil), // 25: kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
+	nil,                                      // 26: kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
+	(*User)(nil),                             // 27: kaname.cloud.iam.v1.User
+	(*ServiceAccount)(nil),                   // 28: kaname.cloud.iam.v1.ServiceAccount
+	(*timestamppb.Timestamp)(nil),            // 29: google.protobuf.Timestamp
+	(*operation.Operation)(nil),              // 30: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_depIdxs = []int32{
-	25, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
-	26, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
+	27, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
+	28, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
 	0,  // 2: kaname.cloud.iam.v1.CheckRequest.consistency:type_name -> kaname.cloud.iam.v1.CheckRequest.Consistency
-	23, // 3: kaname.cloud.iam.v1.RegisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	27, // 4: kaname.cloud.iam.v1.RegisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	24, // 5: kaname.cloud.iam.v1.UnregisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	27, // 6: kaname.cloud.iam.v1.UnregisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	13, // 7: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
-	27, // 8: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 9: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
-	3,  // 10: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
-	9,  // 11: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
-	12, // 12: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
-	5,  // 13: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
-	7,  // 14: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
-	15, // 15: kaname.cloud.iam.v1.InternalIAMService.CurrentAuthzRevision:input_type -> kaname.cloud.iam.v1.CurrentAuthzRevisionRequest
-	19, // 16: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
-	17, // 17: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
-	21, // 18: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
+	26, // 3: kaname.cloud.iam.v1.RegisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
+	6,  // 4: kaname.cloud.iam.v1.RegisterResourceRequest.tuples:type_name -> kaname.cloud.iam.v1.RegisteredTuple
+	29, // 5: kaname.cloud.iam.v1.SetPublicReadPublicationRequest.publication_version:type_name -> google.protobuf.Timestamp
+	16, // 6: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
+	29, // 7: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 8: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
+	3,  // 9: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
+	12, // 10: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
+	15, // 11: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
+	5,  // 12: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
+	8,  // 13: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
+	10, // 14: kaname.cloud.iam.v1.InternalIAMService.SetPublicReadPublication:input_type -> kaname.cloud.iam.v1.SetPublicReadPublicationRequest
+	18, // 15: kaname.cloud.iam.v1.InternalIAMService.CurrentAuthzRevision:input_type -> kaname.cloud.iam.v1.CurrentAuthzRevisionRequest
+	22, // 16: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
+	20, // 17: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
+	24, // 18: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
 	2,  // 19: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
 	4,  // 20: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
-	28, // 21: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
-	14, // 22: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
-	6,  // 23: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
-	8,  // 24: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
-	16, // 25: kaname.cloud.iam.v1.InternalIAMService.CurrentAuthzRevision:output_type -> kaname.cloud.iam.v1.CurrentAuthzRevisionResponse
-	20, // 26: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
-	18, // 27: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
-	22, // 28: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
-	19, // [19:29] is the sub-list for method output_type
-	9,  // [9:19] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	30, // 21: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
+	17, // 22: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
+	7,  // 23: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
+	9,  // 24: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
+	11, // 25: kaname.cloud.iam.v1.InternalIAMService.SetPublicReadPublication:output_type -> kaname.cloud.iam.v1.SetPublicReadPublicationResponse
+	19, // 26: kaname.cloud.iam.v1.InternalIAMService.CurrentAuthzRevision:output_type -> kaname.cloud.iam.v1.CurrentAuthzRevisionResponse
+	23, // 27: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
+	21, // 28: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
+	25, // 29: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
+	19, // [19:30] is the sub-list for method output_type
+	8,  // [8:19] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_internal_iam_service_proto_init() }
@@ -1867,7 +1972,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   24,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

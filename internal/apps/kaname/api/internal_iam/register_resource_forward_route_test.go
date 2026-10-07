@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -143,7 +143,7 @@ func (r *guardedReconciler) snapshotPasses() []string {
 
 func newRouteRig() (*RegisterResourceUseCase, *guardedReconciler) {
 	rec := newGuardedReconciler()
-	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 		WithReconcile(&countingReconcileEvents{}).
 		WithObjectReconciler(rec, nil)
 	return uc, rec
@@ -158,15 +158,15 @@ type routeReq struct {
 	generation int64
 }
 
-func (r *routeReq) GetSubjectId() string                     { return "project:" + r.project }
-func (r *routeReq) GetRelation() string                      { return "project" }
-func (r *routeReq) GetObject() string                        { return r.object }
-func (r *routeReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
-func (r *routeReq) GetGeneration() int64                     { return r.generation }
-func (r *routeReq) GetLabels() map[string]string             { return r.labels }
-func (r *routeReq) GetParentProjectId() string               { return r.project }
-func (r *routeReq) GetParentAccountId() string               { return r.account }
-func (r *routeReq) GetParentChain() []string                 { return nil }
+func (r *routeReq) GetTuples() []*iamv1.RegisteredTuple {
+	return []*iamv1.RegisteredTuple{{SubjectId: "project:" + r.project, Relation: "project"}}
+}
+func (r *routeReq) GetObject() string            { return r.object }
+func (r *routeReq) GetGeneration() int64         { return r.generation }
+func (r *routeReq) GetLabels() map[string]string { return r.labels }
+func (r *routeReq) GetParentProjectId() string   { return r.project }
+func (r *routeReq) GetParentAccountId() string   { return r.account }
+func (r *routeReq) GetParentChain() []string     { return nil }
 
 // TestRegisterResource_NewerGenerationSameProjection_StaysOnAdditivePath — поколение
 // новее головы, проекция БАЙТ-ИДЕНТИЧНА. Такая регистрация обязана остаться на
@@ -252,7 +252,7 @@ func TestRegisterResource_Unregister_AlwaysKeepsDeleteStalePath(t *testing.T) {
 		project: "prj-1", account: "acc-1",
 		labels: map[string]string{"tier": "gold"}, generation: 1}))
 	require.NoError(t, uc.Unregister(ctx, &unregReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+		object:     "vpc_network:net-1",
 		generation: 2}))
 
 	assert.Equal(t, []string{"additive", "full-exclusive"}, rec.snapshotPasses(),
@@ -311,7 +311,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 	t.Run("успешные запуски посчитаны, и метка называет выбранный путь", func(t *testing.T) {
 		rec := newGuardedReconciler()
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(rec, nil).
 			WithMetrics(met)
@@ -333,7 +333,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 
 	t.Run("отказ ускорителя посчитан, а не только залогирован", func(t *testing.T) {
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(&failingReconciler{err: assertAnError}, nil).
 			WithMetrics(met)

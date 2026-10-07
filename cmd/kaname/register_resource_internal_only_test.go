@@ -81,14 +81,14 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 	defer cancel()
 
 	_, err := pubClient.RegisterResource(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: "vpc_network:enp1",
 		Generation: 1,
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"A-09a: RegisterResource must NOT exist on the external listener (ban #6)")
 
 	_, err = pubClient.UnregisterResource(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Object:     "vpc_network:enp1",
 		Generation: 2,
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
@@ -102,7 +102,7 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 	intClient := iamv1.NewInternalIAMServiceClient(intConn)
 
 	_, err = intClient.RegisterResource(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: "vpc_network:enp1",
 		Generation: 1,
 	})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
@@ -111,7 +111,7 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 		"A-09b: with no FGA-proxy gate wired the internal RPC fails closed (reached authz gate)")
 
 	_, err = intClient.UnregisterResource(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Object:     "vpc_network:enp1",
 		Generation: 2,
 	})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),

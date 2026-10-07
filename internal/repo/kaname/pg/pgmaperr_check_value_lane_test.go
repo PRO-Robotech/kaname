@@ -174,6 +174,7 @@ var cvCallerValueSpec = map[string]struct{}{
 	"object_head_type_nonempty":                            {},
 	"projects_description_check":                           {},
 	"projects_labels_valid":                                {},
+	"public_read_publication_object_generation_positive":   {},
 	"public_read_publication_object_id_nonempty":           {},
 	"public_read_publication_object_type_model_dictionary": {},
 	"recovery_completions_external_id_check":               {},

@@ -42,10 +42,11 @@
 //     least-priv-гейт принимающей стороны судил реального вызывающего, а не
 //     только предъявленный сертификат. Отвергает молчаливую потерю личности
 //     (vpc/storage/registry).
-//  4. ОТКАЗ НА ОДНОМ tuple'е — не прекращает набор (форма nlb): пробуются ВСЕ,
+//  4. ОТКАЗ НА ОДНОМ событии — не прекращает набор (форма nlb): пробуются ВСЕ,
 //     ошибки объединяются. Отвергает короткое замыкание (vpc/storage/registry),
-//     при котором указатель принадлежности не доезжает из-за соседа по набору, а
-//     вызывающий видит один отказ вместо всех.
+//     при котором событие соседнего объекта не доезжает из-за отказа на первом, а
+//     вызывающий видит один отказ вместо всех. Кортежи ОДНОГО события едут одним
+//     вызовом и применяются атомарно — делить их нечего.
 //  5. ПОЛЯ ЗЕРКАЛА — форвардится всё, что у доставки есть, включая TraceID и
 //     ParentAccountID (форма nlb — самая полная). Пустое поле принимающая
 //     сторона обрабатывает штатно; недосланное — молча обедняет зеркало.
@@ -105,23 +106,28 @@ var (
 	ErrUnversioned = errors.New("owner-register: регистрация без поколения объекта")
 )
 
-// Tuple — отношение, которое регистрация ставит на объект.
+// Tuple — кортеж набора события: отношение субъекта к объекту регистрации.
 type Tuple struct {
 	SubjectID string
 	Relation  string
-	Object    string
 }
 
-// Registration — ОДНА строка durable-намерения, готовая к синхронной доставке.
+// Registration — ОДНО событие объекта, готовое к синхронной доставке: одна строка
+// durable-намерения — один вызов.
 //
-// Единица — tuple. Принимающая сторона применяет регистрацию, только если её
-// поколение СТРОГО новее головы объекта; голова — ПО ОБЪЕКТУ. Значит второй tuple
-// того же объекта с тем же поколением — исход REJECTED_STALE: он ничего не
-// записывает, хотя вызов отвечает успехом. Набор, несущий на один объект больше
-// одного tuple'а одним поколением, теряет все, кроме первого применённого, — и
-// это свойство принимающей стороны, а не этого пакета.
+// Единица — СОБЫТИЕ, а не кортеж (приёмка NTF-3, Р30 «Единица поколения —
+// событие»). Принимающая сторона применяет регистрацию, только если её поколение
+// СТРОГО новее головы объекта; голова — ПО ОБЪЕКТУ. Поэтому все кортежи события
+// едут одним вызовом под одним поколением и применяются атомарно: кортеж, отправленный
+// отдельным вызовом с тем же поколением, был бы REJECTED_STALE и не записал бы
+// ничего, хотя вызов ответил бы успехом.
 type Registration struct {
-	Tuple Tuple
+	// Object — объект события, `"<type>:<id>"` словарём модели прав.
+	Object string
+
+	// Tuples — набор кортежей события на Object: непустой, без повторов, без
+	// подстановочного субъекта (публикация — свой метод принимающей стороны).
+	Tuples []Tuple
 
 	// TraceID — идентификатор ресурса, к которому относится доставка.
 	TraceID string
@@ -186,14 +192,12 @@ func New(cli RegisterRPC) (*Registrar, error) {
 	return &Registrar{cli: cli, timeout: defaultTimeout}, nil
 }
 
-// Register доставляет каждую регистрацию набора владельцу прав.
+// Register доставляет каждое событие набора владельцу прав — одним вызовом на
+// событие.
 //
-// НЕ КОРОТКОЗАМЫКАЕТСЯ: отказ на одной строке не отменяет попытки по остальным,
-// и все отказы возвращаются объединёнными. Причина не в полноте отчёта, а в
-// том, ЧТО стоит первым в наборе: указатель принадлежности объекта. Через него
-// администратор аккаунта достаёт объект вообще; потерять его из-за отказа на
-// соседнем tuple'е значит потерять весь административный ярус на этом ресурсе
-// до дренажа.
+// НЕ КОРОТКОЗАМЫКАЕТСЯ: отказ на одном событии не отменяет попытки по остальным
+// (у модуля событие одного вызова — разные объекты: сеть, её маршрутная таблица,
+// её группа безопасности), и все отказы возвращаются объединёнными.
 func (r *Registrar) Register(ctx context.Context, regs []Registration) error {
 	if r == nil || r.cli == nil {
 		return ErrNoClient
@@ -206,14 +210,17 @@ func (r *Registrar) Register(ctx context.Context, regs []Registration) error {
 	var errs []error
 	for _, reg := range regs {
 		if reg.Generation <= 0 {
-			errs = append(errs, fmt.Errorf("%s: %w", reg.Tuple.Object, ErrUnversioned))
+			errs = append(errs, fmt.Errorf("%s: %w", reg.Object, ErrUnversioned))
 			continue
+		}
+		tuples := make([]*iamv1.RegisteredTuple, 0, len(reg.Tuples))
+		for _, t := range reg.Tuples {
+			tuples = append(tuples, &iamv1.RegisteredTuple{SubjectId: t.SubjectID, Relation: t.Relation})
 		}
 		cctx, cancel := context.WithTimeout(ctx, r.timeout)
 		_, err := r.cli.RegisterResource(cctx, &iamv1.RegisterResourceRequest{
-			SubjectId:       reg.Tuple.SubjectID,
-			Relation:        reg.Tuple.Relation,
-			Object:          reg.Tuple.Object,
+			Object:          reg.Object,
+			Tuples:          tuples,
 			TraceId:         reg.TraceID,
 			Labels:          reg.Labels,
 			ParentProjectId: reg.ParentProjectID,
@@ -223,7 +230,7 @@ func (r *Registrar) Register(ctx context.Context, regs []Registration) error {
 		})
 		cancel()
 		if err != nil {
-			errs = append(errs, fmt.Errorf("регистрация %s: %w", reg.Tuple.Object, err))
+			errs = append(errs, fmt.Errorf("регистрация %s: %w", reg.Object, err))
 		}
 	}
 	return errors.Join(errs...)

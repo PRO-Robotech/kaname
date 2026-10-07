@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -63,8 +63,8 @@ func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, int64
 	return true, nil
 }
 
-// regReq satisfies the registerInput interface (tupleInput + versionedInput +
-// labels + parent-scope) the use-case consumes at the handler boundary.
+// regReq satisfies the registerInput interface the use-case consumes at the handler
+// boundary: an event of one object carrying ONE tuple of its set.
 type regReq struct {
 	subject  string
 	relation string
@@ -76,25 +76,18 @@ type regReq struct {
 	chain []string
 }
 
-func (r *regReq) GetSubjectId() string                     { return r.subject }
-func (r *regReq) GetRelation() string                      { return r.relation }
-func (r *regReq) GetObject() string                        { return r.object }
-func (r *regReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
-func (r *regReq) GetLabels() map[string]string             { return nil }
-func (r *regReq) GetParentProjectId() string               { return "" }
-func (r *regReq) GetParentAccountId() string               { return "" }
-func (r *regReq) GetParentChain() []string                 { return r.chain }
-
-// GetGeneration — поколение объекта. Пробы этого дублёра судят материализацию, а не
-// приём поколения, поэтому у регистрации объекта оно всегда задано и всегда одно
-// (приёма без поколения нет), а у публикации `user:* # v_get` его нет — её порядок
-// несёт версия владельца, и поколение там отвергается.
-func (r *regReq) GetGeneration() int64 {
-	if r.subject == "user:*" {
-		return 0
-	}
-	return 1
+func (r *regReq) GetObject() string { return r.object }
+func (r *regReq) GetTuples() []*iamv1.RegisteredTuple {
+	return []*iamv1.RegisteredTuple{{SubjectId: r.subject, Relation: r.relation}}
 }
+func (r *regReq) GetLabels() map[string]string { return nil }
+func (r *regReq) GetParentProjectId() string   { return "" }
+func (r *regReq) GetParentAccountId() string   { return "" }
+func (r *regReq) GetParentChain() []string     { return r.chain }
+
+// GetGeneration — поколение события. Пробы этого дублёра судят материализацию, а не
+// приём поколения, поэтому оно всегда задано и всегда одно (приёма без поколения нет).
+func (r *regReq) GetGeneration() int64 { return 1 }
 
 // smObjectReconciler records post-commit forward calls (the create-path additive
 // fast-path the register use-case drives post-commit), regardless of which entry point
@@ -129,7 +122,7 @@ func (r *smObjectReconciler) snapshot() [][2]string {
 func newRegUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{})
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, noResidual{})
 	if rec != nil {
 		uc = uc.WithObjectReconciler(rec, nil)
 	}

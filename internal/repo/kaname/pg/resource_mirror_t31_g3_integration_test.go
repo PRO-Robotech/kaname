@@ -74,6 +74,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 
 	const objType, objID = "vpc.network", "net-g3"
@@ -81,8 +82,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 
 	// Given: a network registered with a label (Create-time emit) at generation 1.
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:" + prj,
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:" + prj, Relation: "parent"}},
 		Object:          "vpc_network:" + objID,
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: prj,
@@ -100,8 +100,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	// RegisterResource (mirror.upsert) with labels={} and a NEWER generation
 	// (G-3: upsert {}, NOT UnregisterResource).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:" + prj,
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:" + prj, Relation: "parent"}},
 		Object:          "vpc_network:" + objID,
 		Labels:          map[string]string{}, // empty — full removal
 		ParentProjectId: prj,

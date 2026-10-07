@@ -39,7 +39,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -155,15 +155,15 @@ type versionedReq struct {
 	generation                int64
 }
 
-func (r *versionedReq) GetSubjectId() string                     { return r.subject }
-func (r *versionedReq) GetRelation() string                      { return r.relation }
-func (r *versionedReq) GetObject() string                        { return r.object }
-func (r *versionedReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
-func (r *versionedReq) GetGeneration() int64                     { return r.generation }
-func (r *versionedReq) GetLabels() map[string]string             { return r.labels }
-func (r *versionedReq) GetParentProjectId() string               { return "prj-1" }
-func (r *versionedReq) GetParentAccountId() string               { return "acc-1" }
-func (r *versionedReq) GetParentChain() []string                 { return nil }
+func (r *versionedReq) GetTuples() []*iamv1.RegisteredTuple {
+	return []*iamv1.RegisteredTuple{{SubjectId: r.subject, Relation: r.relation}}
+}
+func (r *versionedReq) GetObject() string            { return r.object }
+func (r *versionedReq) GetGeneration() int64         { return r.generation }
+func (r *versionedReq) GetLabels() map[string]string { return r.labels }
+func (r *versionedReq) GetParentProjectId() string   { return "prj-1" }
+func (r *versionedReq) GetParentAccountId() string   { return "acc-1" }
+func (r *versionedReq) GetParentChain() []string     { return nil }
 
 type redeliveryRig struct {
 	uc      *RegisterResourceUseCase
@@ -178,7 +178,11 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	// На объекте стоит то, что кладёт его регистрация: снятие обязано его назвать.
+	standing := standingResidual{tuples: []service.RelationTuple{
+		{User: "project:prj-1", Relation: "project", Object: "vpc_network:net-1"},
+	}}
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, standing).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}
@@ -280,7 +284,7 @@ func TestRegisterResource_GrantRevokeGrant_NotCollapsed(t *testing.T) {
 	}))
 	// REVOKE (unregister — the resource is deleted).
 	require.NoError(t, rig.uc.Unregister(ctx, &unregReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+		object:     "vpc_network:net-1",
 		generation: 2,
 	}))
 	require.Equal(t, 1, rig.emitter.deletes, "the unregister enqueues the tuple delete")
@@ -309,7 +313,7 @@ func TestRegisterResource_StaleWithdrawal_ChangesNothing(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
 	withdraw := func() *unregReq {
-		return &unregReq{subject: "project:prj-1", relation: "project", object: "vpc_network:net-1", generation: 2}
+		return &unregReq{object: "vpc_network:net-1", generation: 2}
 	}
 
 	require.NoError(t, rig.uc.Unregister(ctx, withdraw()))
@@ -333,15 +337,12 @@ func TestRegisterResource_StaleWithdrawal_ChangesNothing(t *testing.T) {
 
 // unregReq satisfies unregisterInput.
 type unregReq struct {
-	subject, relation, object string
-	generation                int64
+	object     string
+	generation int64
 }
 
-func (r *unregReq) GetSubjectId() string                     { return r.subject }
-func (r *unregReq) GetRelation() string                      { return r.relation }
-func (r *unregReq) GetObject() string                        { return r.object }
-func (r *unregReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
-func (r *unregReq) GetGeneration() int64                     { return r.generation }
+func (r *unregReq) GetObject() string    { return r.object }
+func (r *unregReq) GetGeneration() int64 { return r.generation }
 
 // TestRegisterResource_WithoutGeneration_IsRefused — there is no admission without a
 // generation (Р30 «Поколение и проекция», NTF3-174 (н)): `0` is INVALID_ARGUMENT naming
@@ -364,7 +365,7 @@ func TestRegisterResource_WithoutGeneration_IsRefused(t *testing.T) {
 		{"register 0", func() error { return rig.uc.Register(ctx, reg(0)) }, "required"},
 		{"register -1", func() error { return rig.uc.Register(ctx, reg(-1)) }, "must be positive"},
 		{"unregister 0", func() error {
-			return rig.uc.Unregister(ctx, &unregReq{subject: "project:prj-1", relation: "project", object: "vpc_network:net-1"})
+			return rig.uc.Unregister(ctx, &unregReq{object: "vpc_network:net-1"})
 		}, "required"},
 	} {
 		err := c.call()

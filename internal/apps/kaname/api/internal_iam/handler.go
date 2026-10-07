@@ -67,14 +67,15 @@ type relationWriteGate interface {
 }
 
 // resourceRegistrar — narrow use-case port for RegisterResource /
-// UnregisterResource. Implemented by *RegisterResourceUseCase. Register
-// consumes the mirror fields (labels + parent-scope) + the object's generation via
-// registerInput; Unregister consumes the tuple + the withdrawal's generation via
-// unregisterInput (applied only when newer than the object's head, leaving the
-// tombstone). The publication's source_version is read only on the publication paths.
+// UnregisterResource / SetPublicReadPublication. Implemented by
+// *RegisterResourceUseCase. Register consumes the event — object, set of tuples,
+// mirror fields and generation; Unregister — the object and the withdrawal's
+// generation (applied only when newer than the object's head, leaving the tombstone);
+// Publish — the owner's publication intent with its version and incarnation.
 type resourceRegistrar interface {
 	Register(ctx context.Context, in registerInput) error
 	Unregister(ctx context.Context, in unregisterInput) error
+	Publish(ctx context.Context, in publicationInput) error
 }
 
 // roleCompiledReader — narrow read port returning a Role's compiled permission
@@ -184,19 +185,28 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	return nil
 }
 
-// RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
-// into kaname.fga_outbox, out of which a trigger folds the direct fact in the
-// same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
+// RegisterResource — регистрация события объекта: набор кортежей события, метки,
+// цепь предков и поколение одним применением. Идемпотентно: повтор события → OK,
+// никогда AlreadyExists.
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
-// (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
+// (cert→SA → `fga_writer@cluster:cluster_root`) and the proxy-write rule on EVERY
+// tuple of the set. Форма события судится ДО правила: пустой набор, повтор пары и
+// подстановочный субъект — ошибка входа с полем `tuples`, а не отказ по правам.
+// cluster-internal :9091.
 func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (*iamv1.RegisterResourceResponse, error) {
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	object, set, err := validateRegistration(req)
+	if err != nil {
 		return nil, err
+	}
+	for _, t := range set {
+		if err := validateProxyTuple(domain, t.subject, t.relation, string(object)); err != nil {
+			return nil, err
+		}
 	}
 	if h.registrar == nil {
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
@@ -212,15 +222,19 @@ func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResou
 	return &iamv1.RegisterResourceResponse{}, nil
 }
 
-// UnregisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple
-// delete. Idempotent: absent tuple → OK, never NotFound (drainer
-// cannot_delete→success). Same authz gate as RegisterResource.
+// UnregisterResource — снятие объекта, адресованное объектом: все кортежи на нём,
+// зеркало, цепь и публикация уходят, голова становится надгробием. Идемпотентно:
+// устаревшее снятие → OK, никогда NotFound. Same authz gate as RegisterResource.
 func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (*iamv1.UnregisterResourceResponse, error) {
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	object, err := validateObject("object", req.GetObject())
+	if err != nil {
+		return nil, err
+	}
+	if err := validateObjectWithdrawal(domain, object); err != nil {
 		return nil, err
 	}
 	if h.registrar == nil {
@@ -232,6 +246,50 @@ func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterR
 		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.UnregisterResourceResponse{}, nil
+}
+
+// validateObjectWithdrawal — вправе ли вызывающий снять объект. Снятие уносит
+// иерархические кортежи на объекте, поэтому право снять объект есть ровно право
+// поставить на нём иерархический кортеж — его и судит правило проксируемой записи
+// (тип объекта принадлежит модулю вызывающего, тип не запрещён). Отношение
+// подставлено иерархическое, субъекта у снятия нет; правило его не судит, кроме
+// пары публикации, которой здесь нет.
+func validateObjectWithdrawal(callerDomain string, object objectRef) error {
+	return validateProxyTuple(callerDomain, "", string(proxytuple.RelationParent), string(object))
+}
+
+// SetPublicReadPublication — намерение владельца о публикации объекта для
+// анонимного чтения: свой метод и своя версия (Р30 «Публикация для анонимного
+// чтения»; NTF3-186). Ответ — успех и на устаревшем намерении.
+//
+// Дверь та же, что у RegisterResource; круг сужен владением ТИПОМ объекта — модуль,
+// чей тип допускает публикацию. Форма намерения судится до владения: тип, не
+// допускающий публикации, — ошибка входа с полем `object`, а не отказ по правам.
+// Отказ по правам — с машинным признаком контракта (`ErrorInfo{reason:
+// AUTHZ_DENIED}`), без причины в тексте.
+func (h *Handler) SetPublicReadPublication(ctx context.Context, req *iamv1.SetPublicReadPublicationRequest) (*iamv1.SetPublicReadPublicationResponse, error) {
+	domain, err := h.authorizeRegistration(ctx)
+	if err != nil {
+		if status.Code(err) == codes.PermissionDenied {
+			return nil, authzguard.HandlerDenied(iamv1.InternalIAMService_SetPublicReadPublication_FullMethodName)
+		}
+		return nil, err
+	}
+	object, _, _, err := validatePublication(req)
+	if err != nil {
+		return nil, err
+	}
+	if proxytuple.ValidateTuple(domain, proxytuple.PublicReadSubject, string(proxytuple.PublicReadRelation),
+		string(object), proxytuple.WithTypeOwner(catalogTypeOwner{})) != nil {
+		return nil, authzguard.HandlerDenied(iamv1.InternalIAMService_SetPublicReadPublication_FullMethodName)
+	}
+	if h.registrar == nil {
+		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
+	}
+	if err := h.registrar.Publish(ctx, req); err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	return &iamv1.SetPublicReadPublicationResponse{}, nil
 }
 
 // authorizeRegistration runs the ReBAC gate and returns the caller's module

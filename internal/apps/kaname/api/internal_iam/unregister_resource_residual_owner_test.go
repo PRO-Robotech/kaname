@@ -40,6 +40,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -84,8 +86,8 @@ func (s *factStore) applyDelete(tuples []service.RelationTuple) {
 	}
 }
 
-// ObjectTuples — что СЕЙЧАС стоит на объекте (порт читателя остатка).
-func (s *factStore) ObjectTuples(_ context.Context, object string) ([]service.RelationTuple, error) {
+// ObjectTuplesTx — что СЕЙЧАС стоит на объекте (порт читателя снимаемого).
+func (s *factStore) ObjectTuplesTx(_ context.Context, _ service.Tx, object string) ([]service.RelationTuple, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.readErr != nil {
@@ -156,17 +158,52 @@ func (b *factTxBeginner) Begin(context.Context) (service.Tx, error) {
 
 // ApplyTx — порт публикации в этом дублёре: публикация ложится строкой журнала в
 // транзакцию и меняет факты на ФИКСАЦИИ, как триггер проекции в базе. Порядок версий
-// дублёр не судит (его держит проба с базой): предмет проб этого файла — что снятие
-// объекта ДОВОДИТ публикацию, а не в каком порядке пришли доставки.
-func (s *factStore) ApplyTx(_ context.Context, tx service.Tx, objectType, objectID string, published bool, _ time.Time) (bool, error) {
-	tuple := service.RelationTuple{User: "user:*", Relation: "v_get", Object: objectType + ":" + objectID}
-	if published {
+// и воплощение дублёр не судит (их держат пробы с базой): предмет проб этого файла —
+// что снятие объекта ДОВОДИТ публикацию, а не в каком порядке пришли доставки.
+func (s *factStore) ApplyTx(_ context.Context, tx service.Tx, in service.PublicReadIntent) (bool, error) {
+	tuple := publicTuple(in.ObjectType, in.ObjectID)
+	if in.Published {
 		tx.(*factTx).writes = append(tx.(*factTx).writes, tuple)
 	} else {
 		tx.(*factTx).deletes = append(tx.(*factTx).deletes, tuple)
 	}
 	return true, nil
 }
+
+// WithdrawTx — снятие объекта уносит его публикацию.
+func (s *factStore) WithdrawTx(_ context.Context, tx service.Tx, objectType, objectID string) error {
+	tx.(*factTx).deletes = append(tx.(*factTx).deletes, publicTuple(objectType, objectID))
+	return nil
+}
+
+// DropStaleIncarnationTx — в дублёре воплощений нет: прежнего воплощения не бывает.
+func (s *factStore) DropStaleIncarnationTx(context.Context, service.Tx, string, string, string) error {
+	return nil
+}
+
+func publicTuple(objectType, objectID string) service.RelationTuple {
+	return service.RelationTuple{User: "user:*", Relation: "v_get", Object: objectType + ":" + objectID}
+}
+
+// eventReq — событие объекта с набором кортежей: одна регистрация — один вызов.
+type eventReq struct {
+	object string
+	set    [][2]string
+}
+
+func (r *eventReq) GetObject() string { return r.object }
+func (r *eventReq) GetTuples() []*iamv1.RegisteredTuple {
+	out := make([]*iamv1.RegisteredTuple, 0, len(r.set))
+	for _, t := range r.set {
+		out = append(out, &iamv1.RegisteredTuple{SubjectId: t[0], Relation: t[1]})
+	}
+	return out
+}
+func (r *eventReq) GetGeneration() int64         { return 1 }
+func (r *eventReq) GetLabels() map[string]string { return nil }
+func (r *eventReq) GetParentProjectId() string   { return "" }
+func (r *eventReq) GetParentAccountId() string   { return "" }
+func (r *eventReq) GetParentChain() []string     { return nil }
 
 // journalEmitter — порт журнала намерений. Он ничего не применяет сам: применение —
 // свойство коммита, как и в базе.
@@ -185,20 +222,16 @@ func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []se
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s).
-		WithResidualTupleReader(s)
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s, s)
 	return uc, txb
 }
 
 // registerRegistryWithOwner воспроизводит то, что делает потребитель, пишущий `owner`:
-// две регистрации на один объект — иерархическая и creator'ская.
+// одно событие создания с набором из иерархического кортежа и кортежа создателя.
 func registerRegistryWithOwner(t *testing.T, uc *RegisterResourceUseCase, object, project, owner string) {
 	t.Helper()
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: project, relation: "project", object: object,
-	}))
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: owner, relation: "owner", object: object,
+	require.NoError(t, uc.Register(context.Background(), &eventReq{
+		object: object, set: [][2]string{{project, "project"}, {owner, "owner"}},
 	}))
 }
 
@@ -226,10 +259,7 @@ func TestUnregisterResource_OwnerAccessIsActuallyGoneAfterWithdrawal(t *testing.
 	require.True(t, store.resolveVerb(owner, "v_delete", object),
 		"положительный контроль: до снятия владелец обязан иметь глагол, иначе проверка ниже ничего не утверждает")
 
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: proj, relation: "project", object: object,
-		generation: 2,
-	}))
+	require.NoError(t, uc.Unregister(context.Background(), &unregReq{object: object, generation: 2}))
 
 	assert.False(t, store.resolveVerb(owner, "v_delete", object),
 		"после снятия регистрации доступа быть НЕ ДОЛЖНО: уцелевший owner выводит все пять глаголов, "+
@@ -255,10 +285,7 @@ func TestUnregisterResource_ProbeCatchesAdditiveWithdrawal(t *testing.T) {
 	uc, _ := newRegUCWithStore(t, store)
 
 	registerRegistryWithOwner(t, uc, object, proj, owner)
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: proj, relation: "project", object: object,
-		generation: 2,
-	}))
+	require.NoError(t, uc.Unregister(context.Background(), &unregReq{object: object, generation: 2}))
 
 	assert.True(t, store.resolveVerb(owner, "v_delete", object),
 		"инъекция аддитивного снятия обязана СОХРАНИТЬ доступ — иначе главная проба не различала бы "+
@@ -268,9 +295,9 @@ func TestUnregisterResource_ProbeCatchesAdditiveWithdrawal(t *testing.T) {
 // TestUnregisterResource_WithdrawsThePublicReadGrantOfATornDownObject — публичное чтение
 // удалённого репозитория тоже обязано исчезнуть.
 //
-// Потребитель сегодня снимает его отдельным намерением, но полагаться на то, что каждый
-// потребитель вспомнит про каждое отношение, — это и есть источник исходного дефекта:
-// перечень отношений знает принимающая сторона, она и обязана довести снятие до конца.
+// Отдельного снятия публикации у снимаемого объекта нет (приёмка NTF-3, Р30): перечень
+// того, что стоит на объекте, знает принимающая сторона, она и обязана довести снятие до
+// конца.
 func TestUnregisterResource_WithdrawsThePublicReadGrantOfATornDownObject(t *testing.T) {
 	const (
 		object = "registry_repository:reg_x/app"
@@ -282,27 +309,24 @@ func TestUnregisterResource_WithdrawsThePublicReadGrantOfATornDownObject(t *test
 	require.NoError(t, uc.Register(context.Background(), &regReq{
 		subject: proj, relation: "parent", object: object,
 	}))
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: "user:*", relation: "v_get", object: object,
+	require.NoError(t, uc.Publish(context.Background(), &pubReq{
+		object: object, published: true, version: time.Now(), objectGeneration: 1,
 	}))
 	require.True(t, store.resolveVerb("user:*", "v_get", object), "положительный контроль")
 
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: proj, relation: "parent", object: object,
-		generation: 2,
-	}))
+	require.NoError(t, uc.Unregister(context.Background(), &unregReq{object: object, generation: 2}))
 
 	assert.False(t, store.resolveVerb("user:*", "v_get", object),
 		"снесённый объект не может оставаться публично читаемым")
 }
 
-// TestUnregisterResource_PureGrantWithdrawal_LeavesTheLivingObjectIntact — снятие ОДНОЙ
-// выдачи не есть снос объекта.
+// TestPublish_ClosingLeavesTheLivingObjectIntact — закрытие публикации не есть снос
+// объекта.
 //
-// Законный близнец той же формы: если бы доведение снятия срабатывало на любом снятии,
-// отзыв публичного чтения у ЖИВОГО репозитория снёс бы заодно доступ его владельца.
-// Гейт обязан молчать здесь и краснеть выше.
-func TestUnregisterResource_PureGrantWithdrawal_LeavesTheLivingObjectIntact(t *testing.T) {
+// Законный близнец той же формы: если бы доведение снятия срабатывало на закрытии
+// публикации, отзыв публичного чтения у ЖИВОГО репозитория снёс бы заодно доступ его
+// владельца. Гейт обязан молчать здесь и краснеть выше.
+func TestPublish_ClosingLeavesTheLivingObjectIntact(t *testing.T) {
 	const (
 		object = "registry_repository:reg_x/app"
 		owner  = "service_account:sva_creator"
@@ -310,26 +334,21 @@ func TestUnregisterResource_PureGrantWithdrawal_LeavesTheLivingObjectIntact(t *t
 	)
 	store := &factStore{}
 	uc, _ := newRegUCWithStore(t, store)
+	v := time.Now()
 
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: parent, relation: "parent", object: object,
+	require.NoError(t, uc.Register(context.Background(), &eventReq{
+		object: object, set: [][2]string{{parent, "parent"}, {owner, "owner"}},
 	}))
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: owner, relation: "owner", object: object,
-	}))
-	require.NoError(t, uc.Register(context.Background(), &regReq{
-		subject: "user:*", relation: "v_get", object: object,
-	}))
+	require.NoError(t, uc.Publish(context.Background(), &pubReq{object: object, published: true, version: v, objectGeneration: 1}))
+	require.True(t, store.resolveVerb("user:*", "v_get", object), "положительный контроль")
 
 	// Репозиторий стал приватным — объект жив.
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: "user:*", relation: "v_get", object: object,
-	}))
+	require.NoError(t, uc.Publish(context.Background(), &pubReq{object: object, published: false, version: v.Add(time.Second), objectGeneration: 1}))
 
 	assert.False(t, store.resolveVerb("user:*", "v_get", object),
 		"публичное чтение снято")
 	assert.True(t, store.resolveVerb(owner, "v_delete", object),
-		"владелец ЖИВОГО репозитория обязан сохранить доступ: снятие одной выдачи — не снос объекта")
+		"владелец ЖИВОГО репозитория обязан сохранить доступ: закрытие публикации — не снос объекта")
 }
 
 // TestUnregisterResource_ResidualReadFailure_FailsClosed — отказ чтения остатка не может
@@ -343,24 +362,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 	store := &factStore{readErr: errors.New("store unreachable")}
 	uc, _ := newRegUCWithStore(t, store)
 
-	err := uc.Unregister(context.Background(), &unregReq{
-		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
-		generation: 2,
-	})
+	err := uc.Unregister(context.Background(), &unregReq{object: "registry_registry:reg_doomed", generation: 2})
 	require.Error(t, err,
 		"нечитаемый остаток обязан отказать: тихий успех оставил бы доступ стоять, а повтор снятия идемпотентен")
-}
-
-// TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour — непровязанный
-// читатель остатка оставляет прежний путь (снимается только названное намерение), но не
-// ломает снятие.
-func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
-	store := &factStore{}
-	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store) // без WithResidualTupleReader
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
-		generation: 2,
-	}))
-	require.True(t, txb.tx.committed)
 }

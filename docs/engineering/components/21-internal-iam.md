@@ -15,10 +15,21 @@ kacho-loadbalancer) общаются с kaname:
 - `ListPermissions` — catalog-mode listing (все permissions из IAM-domain).
 - `PollSubjectChanges(since_id, limit)` — для api-gateway authz-cache
   invalidation poll (см. [`29-relational-verdict.md`](29-relational-verdict.md)).
-- `RegisterResource` / `UnregisterResource` — постановка и снятие иерархического
-  указателя для ресурса чужого сервиса. Намерение ложится строкой журнала
-  `kaname.fga_outbox`, и триггер журнала складывает из неё прямой факт **в той же
+- `RegisterResource` / `UnregisterResource` — регистрация события объекта чужого
+  сервиса и снятие объекта (приёмка NTF-3, Р30 «Единица поколения — событие»).
+  Регистрация несёт набор кортежей события `tuples`, метки, цепь предков и
+  поколение события `generation` и применяется атомарно — либо целиком, либо
+  исход REJECTED_STALE без записи (поколение не новее головы объекта). Снятие
+  адресуется объектом и поколением: уносит все кортежи на объекте, зеркало, цепь
+  и публикацию, голова становится надгробием. Кортежи ложатся строками журнала
+  `kaname.fga_outbox`, и триггер журнала складывает из них прямой факт **в той же
   транзакции**: дренажа наружу нет — применять не к чему и некому.
+- `SetPublicReadPublication{object, published, publication_version,
+  object_generation}` — публикация объекта для анонимного чтения (`user:*
+  v_get`) своим методом: порядок — версия публикации владельца, ложится только на
+  текущее воплощение объекта (`object_generation` против головы). Круг — модуль-
+  владелец типа, допускающего публикацию (сегодня registry); прочим —
+  `PERMISSION_DENIED` с `ErrorInfo{reason: AUTHZ_DENIED}`.
 - `CurrentAuthzRevision{}` → `{authz_rev}` — токен версии прав: текстовая форма
   полного снимка транзакций базы kaname на момент вызова (`pg_snapshot`).
   Модуль-владелец вида зовёт его до открытия транзакции записи и кладёт в строку
@@ -47,8 +58,9 @@ kacho-loadbalancer) общаются с kaname:
 | `Check`                 | sync             | per-RPC authz gate (Cascade + FGA + OPA).       |
 | `ListPermissions`       | sync             | Catalog all permissions (debug).                |
 | `PollSubjectChanges`    | sync             | Drain subject_change_outbox (since_id ledger).  |
-| `RegisterResource`      | sync             | Постановка иерархического указателя через журнал. |
-| `UnregisterResource`    | sync             | Снятие того же указателя.                        |
+| `RegisterResource`      | sync             | Событие объекта: набор кортежей под одним поколением. |
+| `UnregisterResource`    | sync             | Снятие объекта: все кортежи на нём, надгробие.   |
+| `SetPublicReadPublication` | sync          | Публикация для анонимного чтения своим порядком. |
 | `CurrentAuthzRevision`  | sync             | Токен версии прав: снимок транзакций базы.       |
 
 > [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (#788)

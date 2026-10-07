@@ -42,6 +42,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
@@ -51,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/journalfixture"
 )
 
@@ -72,10 +75,10 @@ func publicReadRig(t *testing.T) (*internal_iam.RegisterResourceUseCase, *pgxpoo
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
-		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
-		WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
+		WithAccountResolver(kanamepg.NewProjectAccountResolver())
 	return uc, pool
 }
 
@@ -83,13 +86,16 @@ const (
 	publicReadSubject  = "user:*"
 	publicReadRelation = "v_get"
 	publicReadType     = "registry_repository"
+	// publicReadHeadType — тот же тип словарём каталога: ключ головы объекта.
+	publicReadHeadType = "registry.repositories"
 )
 
 func publicReadObject(id string) string { return publicReadType + ":" + id }
 
 // publish / withdraw — доставка намерения владельца ровно той формы, в какой её
-// шлёт реестр: только кортеж и версия, без области и меток. Нулевая версия —
-// доставка без маркера (контракт трактует её как «-infinity»).
+// шлёт реестр: метод публикации с версией публикации и поколением воплощения
+// (Р30 «Публикация для анонимного чтения»). Объект, которого служба доступа не
+// регистрировала, — воплощение 1 (головы нет, публикация ложится).
 func publish(t *testing.T, uc *internal_iam.RegisterResourceUseCase, id string, v time.Time) {
 	t.Helper()
 	require.NoError(t, publishE(uc, id, v))
@@ -103,23 +109,22 @@ func withdraw(t *testing.T, uc *internal_iam.RegisterResourceUseCase, id string,
 // publishE / withdrawE — те же доставки, отдающие ошибку вызывающему: из горутины
 // гонки провалить пробу нельзя, поэтому исход собирается и судится после ожидания.
 func publishE(uc *internal_iam.RegisterResourceUseCase, id string, v time.Time) error {
-	req := &iamv1.RegisterResourceRequest{
-		SubjectId: publicReadSubject, Relation: publicReadRelation, Object: publicReadObject(id),
-	}
-	if !v.IsZero() {
-		req.SourceVersion = timestamppb.New(v)
-	}
-	return uc.Register(context.Background(), req)
+	return intendE(uc, id, true, v, 1)
 }
 
 func withdrawE(uc *internal_iam.RegisterResourceUseCase, id string, v time.Time) error {
-	req := &iamv1.UnregisterResourceRequest{
-		SubjectId: publicReadSubject, Relation: publicReadRelation, Object: publicReadObject(id),
+	return intendE(uc, id, false, v, 1)
+}
+
+// intendE — намерение публикации воплощения g; нулевая версия — поле не задано.
+func intendE(uc *internal_iam.RegisterResourceUseCase, id string, published bool, v time.Time, g int64) error {
+	req := &iamv1.SetPublicReadPublicationRequest{
+		Object: publicReadObject(id), Published: published, ObjectGeneration: g,
 	}
 	if !v.IsZero() {
-		req.SourceVersion = timestamppb.New(v)
+		req.PublicationVersion = timestamppb.New(v)
 	}
-	return uc.Unregister(context.Background(), req)
+	return uc.Publish(context.Background(), req)
 }
 
 // anonymousRead — вопрос, который задаёт плоскость данных реестра на анонимном
@@ -220,33 +225,34 @@ func TestPublicRead_InOrderRepublicationOpens(t *testing.T) {
 	requirePublic(t, pool, id, "запоздавшая доставка старшего закрытия сняла более новую публикацию")
 }
 
-// TestPublicRead_UnversionedWithdrawalClosesFailClosed — доставка снятия БЕЗ
-// версии порядка не доказывает, и потому применяется в сторону отказа: снятие,
-// проглоченное за недоказанностью, было бы стоящим лишним доступом. Версия
-// хранимого открытия при этом не отступает — запоздавшая доставка того же
-// открытия по-прежнему старше ничего не открывает.
-func TestPublicRead_UnversionedWithdrawalClosesFailClosed(t *testing.T) {
+// TestPublicRead_UnversionedIntentIsRefused — намерение без версии порядка не
+// доказывает, и приём его не допускает: INVALID_ARGUMENT по полю
+// `publication_version`, публикация не изменена (NTF3-186 (г) (1)). Прежний путь
+// «снятие без версии применяется в сторону отказа» снят вместе с полем версии у
+// снятия объекта: версию публикации несёт только метод публикации, и она
+// обязательна. Законный близнец — то же снятие с версией закрывает.
+func TestPublicRead_UnversionedIntentIsRefused(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const id = "reg00000000nover/team/app"
 	v1, v2 := versions()
 
 	publish(t, uc, id, v1)
 	requirePublic(t, pool, id, "открытие с версией")
-	withdraw(t, uc, id, time.Time{})
-	requirePrivate(t, pool, id, "снятие без версии обязано закрывать")
-	publish(t, uc, id, v1)
-	requirePrivate(t, pool, id, "повтор того же открытия после снятия без версии открыл снова")
+	err := withdrawE(uc, id, time.Time{})
+	require.Error(t, err, "снятие публикации без версии принято")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "снятие без версии: %v", err)
+	requirePublic(t, pool, id, "отвергнутое снятие без версии изменило публикацию")
 
-	// Законный близнец: открытие НОВЕЕ хранимой версии открывает.
-	publish(t, uc, id, v2)
-	requirePublic(t, pool, id, "открытие новее всего известного")
+	withdraw(t, uc, id, v2)
+	requirePrivate(t, pool, id, "близнец: снятие с версией закрывает")
 }
 
 // TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt — снятие САМОГО
-// ресурса снимает и его публикацию, под версией снятия. Идентификатор
-// репозитория — его ИМЯ внутри реестра: публикация, пережившая удалённый
-// репозиторий, отдала бы анонимное чтение следующему репозиторию с тем же
-// именем.
+// ресурса снимает и его публикацию. Идентификатор репозитория — его ИМЯ внутри
+// реестра: публикация, пережившая удалённый репозиторий, отдала бы анонимное
+// чтение следующему репозиторию с тем же именем. Запоздавшая публикация прежнего
+// воплощения после снятия не ложится — её отвергает надгробие головы, при любой
+// версии.
 func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const (
@@ -255,30 +261,29 @@ func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 	)
 	v1, v2 := versions()
 	parent := &iamv1.RegisterResourceRequest{
-		SubjectId: "registry_registry:" + reg, Relation: "parent", Object: publicReadObject(id),
+		Object:      publicReadObject(id),
+		Tuples:      []*iamv1.RegisteredTuple{{SubjectId: "registry_registry:" + reg, Relation: "parent"}},
 		ParentChain: []string{"registry_registry:" + reg}, Generation: 1,
 	}
 	require.NoError(t, uc.Register(context.Background(), parent))
-	publish(t, uc, id, v1.Add(time.Microsecond))
+	require.NoError(t, intendE(uc, id, true, v1, 1))
 	requirePublic(t, pool, id, "опубликованный живой репозиторий")
 
 	require.NoError(t, uc.Unregister(context.Background(), &iamv1.UnregisterResourceRequest{
-		SubjectId: parent.SubjectId, Relation: "parent", Object: parent.Object,
-		SourceVersion: timestamppb.New(v2), Generation: 2,
+		Object: parent.Object, Generation: 2,
 	}))
 	requirePrivate(t, pool, id, "удалённый репозиторий остался публично читаемым")
 
-	publish(t, uc, id, v1.Add(time.Microsecond)) // запоздавшая доставка прежнего открытия
-	requirePrivate(t, pool, id, "запоздавшая доставка открытия опубликовала удалённый репозиторий")
+	require.NoError(t, intendE(uc, id, true, v2, 1)) // запоздавшая публикация прежнего воплощения
+	requirePrivate(t, pool, id, "запоздавшая публикация опубликовала удалённый репозиторий")
 
-	// Законный близнец: репозиторий с тем же именем создан заново и опубликован
-	// ПОЗЖЕ снятия — это новое намерение, и оно открывает.
+	// Законный близнец: репозиторий с тем же именем создан заново (поколение 3,
+	// новое воплощение) и опубликован — это новое намерение, и оно открывает.
 	v3 := v2.Add(time.Millisecond)
 	require.NoError(t, uc.Register(context.Background(), &iamv1.RegisterResourceRequest{
-		SubjectId: parent.SubjectId, Relation: "parent", Object: parent.Object,
-		ParentChain: parent.ParentChain, Generation: 3,
+		Object: parent.Object, Tuples: parent.Tuples, ParentChain: parent.ParentChain, Generation: 3,
 	}))
-	publish(t, uc, id, v3.Add(time.Microsecond))
+	require.NoError(t, intendE(uc, id, true, v3, 3))
 	requirePublic(t, pool, id, "новый репозиторий с тем же именем опубликован после снятия прежнего")
 }
 
@@ -377,13 +382,19 @@ func TestPublicRead_WithdrawalWhoseTransactionStartedFirstStillCloses(t *testing
 
 	openTx, err := txb.Begin(journalfixture.Writing(ctx))
 	require.NoError(t, err)
-	applied, err := pub.ApplyTx(ctx, openTx, publicReadType, id, true, v1)
+	applied, err := pub.ApplyTx(ctx, openTx, service.PublicReadIntent{
+		ObjectType: publicReadType, ObjectID: id, HeadType: publicReadHeadType,
+		Published: true, Version: v1, ObjectGeneration: 1,
+	})
 	require.NoError(t, err)
 	require.True(t, applied, "первое намерение по объекту обязано примениться")
 	require.NoError(t, openTx.Commit(ctx))
 	requirePublic(t, pool, id, "открытие зафиксировано")
 
-	applied, err = pub.ApplyTx(ctx, closeTx, publicReadType, id, false, v2)
+	applied, err = pub.ApplyTx(ctx, closeTx, service.PublicReadIntent{
+		ObjectType: publicReadType, ObjectID: id, HeadType: publicReadHeadType,
+		Published: false, Version: v2, ObjectGeneration: 1,
+	})
 	require.NoError(t, err)
 	require.True(t, applied, "снятие новее открытия обязано примениться")
 	require.NoError(t, closeTx.Commit(ctx))

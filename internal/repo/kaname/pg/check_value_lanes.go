@@ -301,12 +301,16 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"notification_grants":          nil,
 	"notification_template_grants": nil,
 	// Голова объекта: тип и идентификатор — присланные владельцем (через приём),
-	// поколение — его же; пишет только триггер `resource_event`.
-	"object_head": {caller: []string{
-		"object_head_generation_positive",
-		"object_head_id_nonempty",
-		"object_head_type_nonempty",
-	}},
+	// поколение — его же; границу воплощения выводит служба из того, на что
+	// легла регистрация. Пишет только триггер `resource_event`.
+	"object_head": {
+		caller: []string{
+			"object_head_generation_positive",
+			"object_head_id_nonempty",
+			"object_head_type_nonempty",
+		},
+		service: []string{"object_head_incarnation_within_generation", "object_head_live_has_incarnation"},
+	},
 	"operations": nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"own_ceilings": nil,
@@ -323,8 +327,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Очередь компенсаций поставщика — пишет служба.
 	"provider_compensation_outbox": nil,
-	// Публикация чтения: тип и идентификатор объекта прислал его владелец.
+	// Публикация чтения: тип, идентификатор объекта и поколение его воплощения
+	// прислал владелец.
 	"public_read_publication": {caller: []string{
+		"public_read_publication_object_generation_positive",
 		"public_read_publication_object_id_nonempty",
 		"public_read_publication_object_type_model_dictionary",
 	}},

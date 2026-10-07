@@ -59,6 +59,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver())
@@ -137,8 +138,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	// uses on Create), at generation 1.
 	uc := newRegisterUCWired(pool)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:" + string(fx.prj),
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:" + string(fx.prj), Relation: "parent"}},
 		Object:          "vpc_network:net-treska",
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: string(fx.prj),
@@ -158,8 +158,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	// the exact edge added on label-Update; here we drive it directly (IAM is
 	// the callee — it must revoke regardless of which consumer emitted).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:" + string(fx.prj),
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:" + string(fx.prj), Relation: "parent"}},
 		Object:          "vpc_network:net-treska",
 		Labels:          map[string]string{}, // label removed (upsert {}, not Unregister)
 		ParentProjectId: string(fx.prj),

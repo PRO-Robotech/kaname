@@ -78,6 +78,7 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 	return uc, pool
 }
@@ -128,8 +129,7 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	// «путь регистрации не работает вовсе».
 	const liveObj = "compute_instance:inst-live-1990"
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          liveObj,
 		ParentProjectId: "prj-1990",
 		Generation:      1,
@@ -141,8 +141,7 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	seedAppliedType(t, ctx, pool)
 	const appliedObj = appliedType + ":obj-1990"
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          appliedObj,
 		ParentProjectId: "prj-1990",
 		Generation:      1,
@@ -175,8 +174,7 @@ func TestUnregisterResource_AppliedTypeLeavesNoMirrorRow(t *testing.T) {
 
 	const objID = "obj-1990-teardown"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          appliedType + ":" + objID,
 		ParentProjectId: "prj-1990",
 		Generation:      1,
@@ -186,8 +184,6 @@ func TestUnregisterResource_AppliedTypeLeavesNoMirrorRow(t *testing.T) {
 		"условие сценария не создано: снимать нечего")
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId:  req.SubjectId,
-		Relation:   req.Relation,
 		Object:     req.Object,
 		Generation: 2,
 	}))

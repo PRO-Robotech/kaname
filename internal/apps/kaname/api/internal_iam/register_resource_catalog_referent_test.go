@@ -81,6 +81,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		noResidual{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -129,6 +130,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		noResidual{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

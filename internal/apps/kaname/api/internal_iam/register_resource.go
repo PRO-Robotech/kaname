@@ -3,24 +3,22 @@
 
 // register_resource.go — RegisterResourceUseCase (Internal FGA-proxy).
 //
-// RegisterResource / UnregisterResource let a resource-owning module
-// (vpc/compute/nlb) register or remove an owner-hierarchy FGA tuple *through
-// IAM* — the module never writes FGA directly. The tuple intent is
-// enqueued into kaname.fga_outbox in ONE writer-tx (atomic emit-in-tx,
-// ban #10) and applied asynchronously by the existing drainer
-// (clients/fga_applier.go), whose idempotent classification makes the contract:
+// RegisterResource / UnregisterResource let a resource-owning module register an
+// EVENT of its object, or withdraw the object, *through IAM* — the module never
+// writes relations directly. SetPublicReadPublication lets the owner of a type that
+// admits it publish an object for anonymous read.
 //
-//	repeat register of the same tuple → OK  (already_exists → ErrAlreadyApplied)
-//	unregister of an absent tuple     → OK  (cannot_delete  → ErrAlreadyApplied)
+// THE UNIT OF A GENERATION IS THE EVENT, NOT THE TUPLE (приёмка NTF-3, Р30
+// «Единица поколения — событие»). A registration carries the event's whole set of
+// tuples under one generation and is applied atomically — the projection admission
+// (mirror, parent chain, object head) and the journal rows of the set commit in ONE
+// writer-tx, or the generation is REJECTED_STALE and nothing is written. Applying
+// tuple by tuple would lose every tuple after the first: they would arrive with the
+// same generation, not newer than the head. A withdrawal is addressed by the object
+// and takes EVERY relationship this proxy could have written on it.
 //
-// so neither AlreadyExists nor NotFound ever surfaces (proto contract).
-//
-// Sync unary per the proto (RegisterResourceResponse is empty); the
-// at-least-once retry guarantee is provided by the caller-side drainer,
-// not by an LRO. The tuple is taken verbatim from the request: the
-// payload already carries the pre-composed FGA strings ({subject_id, relation,
-// object}), so this use-case is the generic owner-tuple relay, not a
-// resource-type-aware composer.
+// The contract stays idempotent: a stale or repeated delivery is REJECTED_STALE and
+// the call answers OK, so neither AlreadyExists nor NotFound ever surfaces.
 package internal_iam
 
 import (
@@ -32,6 +30,8 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
@@ -112,29 +112,27 @@ type accountResolver interface {
 // Срок стал нулевым: строка журнала, положенная той же транзакцией, порождает
 // прямой факт триггером — в момент коммита, в обе стороны. Ускорять нечего.
 
-// residualTupleReader — narrow read port: name every relationship STILL standing on an
-// object, so a withdrawal can finish the job instead of removing only the one tuple it
-// happened to be handed.
+// residualTupleReader — narrow read port: name every relationship standing on an
+// object, IN THE WITHDRAWAL'S OWN TX, after its generation was admitted.
 //
-// WHY THE WITHDRAWING SIDE CANNOT NAME THEM ITSELF. A registration writes three kinds of
-// relationship, and the consumer can name only one of them at teardown. The object→scope
-// pointer it holds. The per-object verbs are derived from grants and belong to the
-// reconciler. The third — the creator's own `owner` — is written through this proxy at
-// create time from the caller's identity, and NOTHING stores that identity afterwards:
-// neither the consumer's own row nor this mirror carries the subject. So the only side
-// that can still name that tuple when the resource is being destroyed is the side that
-// holds the store.
+// WHY THE WITHDRAWING SIDE CANNOT NAME THEM ITSELF. A registration writes the event's
+// tuples — the object→scope pointer and the creator's own `owner` among them — and at
+// teardown the consumer holds none of them: the withdrawal is addressed by the object
+// alone. So the only side that can name what must go is the side that holds the store.
+// Measured on the stand 2026-08-04, before the withdrawal read them: the creator's
+// `owner` survived a delivered withdrawal in 180 of 180 registry registrations and in 60
+// of 60 repository ones — an object answering ALLOW for the rest of its existence to
+// someone the product had already told it was gone.
 //
-// Leaving it to the consumer is what produced the defect this port exists to close. The
-// withdrawal was emitted, delivered and marked sent with no error, and the creator kept a
-// relationship from which the model derives ALL FIVE verbs — an object answering ALLOW
-// for the rest of its existence to someone the product had already told it was gone. The
-// class is invisible to every assertion of the form "we called it": measured on the stand
-// 2026-08-04, the residue survived a delivered withdrawal in 180 of 180 registry
-// registrations and in 60 of 60 repository ones.
+// WHY IN THE TX, AFTER THE ADMISSION. The admission compares the generation with the
+// object's head and holds the head row's lock until commit. A set read after it is
+// complete: a registration committed before the admission is in it, one arriving after
+// waits on the head and goes REJECTED_STALE. A set read BEFORE the tx would miss a
+// registration committed between the read and the admission, and its tuples would
+// outlive the object.
 type residualTupleReader interface {
-	// ObjectTuples returns the relationships currently standing on the object.
-	ObjectTuples(ctx context.Context, object string) ([]service.RelationTuple, error)
+	// ObjectTuplesTx returns the relationships currently standing on the object.
+	ObjectTuplesTx(ctx context.Context, tx service.Tx, object string) ([]service.RelationTuple, error)
 }
 
 type objectReconciler interface {
@@ -175,13 +173,13 @@ const (
 	// Двух шагов прямого применения кортежей здесь больше нет: их предметом было
 	// ускорение доставки в чужое хранилище, а доставка стала тождеством коммита.
 	// stepResidualRead — the object-scoped listing a withdrawal performs to name what
-	// it must still take away. Counted for the same reason the two above are: this step
+	// it must take away. Counted for the same reason the two above are: this step
 	// can only fail by refusing the withdrawal, so "never failed" and "never ran" would
 	// otherwise look identical, and the second is how the residue survived unnoticed in
 	// the first place.
 	stepResidualRead = "residual_read"
-	// stepResidualWithdraw — recorded ONCE PER TUPLE the withdrawal took away beyond the
-	// one it was handed. A permanent zero on this series says the teardown path has
+	// stepResidualWithdraw — recorded ONCE PER TUPLE the withdrawal took away. A
+	// permanent zero on this series says the teardown path has
 	// stopped removing anything extra, which is precisely the defect state.
 	stepResidualWithdraw = "residual_withdraw"
 
@@ -189,60 +187,46 @@ const (
 	outcomeError = "error"
 )
 
-// RegisterResourceRequest / UnregisterResourceRequest fields the use-case
-// consumes. We accept the proto messages directly at the handler boundary and
-// pass a small value struct here to keep the use-case transport-agnostic.
+// tupleIntent — one relationship on an object: the unit the journal carries.
 type tupleIntent struct {
 	subject  string
 	relation string
 	object   string
 }
 
-// splitObject разбирает объект FGA `<type>:<id>` на имя типа и непрозрачный
-// идентификатор. `validateTuple` уже потребовал грамматику `<type>:<id>`,
-// поэтому разрез по первому двоеточию безопасен.
+// objectRef — an object in the rights MODEL dictionary, `<type>:<id>`, already
+// validated by validateObject.
+type objectRef string
+
+// split разбирает объект `<type>:<id>` на имя типа и непрозрачный идентификатор.
+// `validateObject` уже потребовал грамматику `<type>:<id>`, поэтому разрез по первому
+// двоеточию безопасен.
 //
-// ПЕРЕВОДА ЗДЕСЬ БОЛЬШЕ НЕТ, и это несущее место (kacho#1990). Стоявший тут
-// обратный перевод спрашивал словарь, ПОРОЖДЁННЫЙ СБОРКОЙ, и на промахе
-// оставлял имя МОДЕЛИ там, где колонка названа словарём КАТАЛОГА, — то есть
-// объект типа, заведённого применением манифеста в работающем процессе, в
-// зеркало не попадал вовсе. Имя каталога теперь спрашивается у живой строки, в
-// той же транзакции, что пишет зеркало (`catalog_type.go`).
-func (t tupleIntent) splitObject() (fgaType, id string) {
-	colon := strings.IndexByte(t.object, ':')
-	return t.object[:colon], t.object[colon+1:]
+// ПЕРЕВОДА ЗДЕСЬ НЕТ, и это несущее место (kacho#1990). Имя каталога спрашивается у
+// живой строки, в той же транзакции, что пишет зеркало (`catalog_type.go`).
+func (o objectRef) split() (modelType, id string) {
+	colon := strings.IndexByte(string(o), ':')
+	return string(o)[:colon], string(o)[colon+1:]
 }
 
-// isPureGrant reports whether the intent only opens the object for anonymous
-// read (`user:* #v_get`) instead of describing the object's own state.
-//
-// Such an intent carries no parent scope and no labels — nothing about the
-// resource changed — yet it addresses the SAME object key as the resource's own
-// registration. Feeding it through the projection path would overwrite the
-// resource's parent scope with the empty one it carries and, on withdrawal,
-// delete the projection of a resource that still exists. So a pure grant is
-// applied as a publication (see publish) and nothing else.
-func (t tupleIntent) isPureGrant() bool {
-	return proxytuple.IsPublicReadGrant(t.subject, t.relation)
-}
-
-// publicReadPublisher — narrow write port for the ONE pure grant the proxy admits:
-// publication of an object for anonymous read (`user:* #v_get`). Implemented by
-// *repo/kaname/pg.PublicReadPublisher.
+// publicReadPublisher — narrow write port for the publication of an object for
+// anonymous read (`user:* #v_get`). Implemented by *repo/kaname/pg.PublicReadPublisher.
 //
 // ApplyTx applies the owner's intent inside the caller-owned tx IN THE ORDER OF THE
-// OWNER'S VERSIONS: an intent not newer than the last one applied to the object
-// changes nothing and enqueues no journal row, so a late delivery cannot overturn a
-// newer one in either direction. `objectType` is the MODEL dictionary name (the
-// tuple's own), not the catalog one. A zero `version` is a delivery without a marker:
-// it proves no order, so a withdrawal is applied fail-closed and a publication
-// overrides nothing that carries a version.
+// OWNER'S VERSIONS and only to the object's CURRENT incarnation, judged by its head: an
+// intent not newer than the last one applied, or for a withdrawn incarnation, changes
+// nothing and enqueues no journal row, so a late delivery cannot overturn a newer one
+// in either direction nor land on a repository re-created under the same name.
+// WithdrawTx takes the publication with the withdrawn object; DropStaleIncarnationTx
+// drops a publication of an earlier incarnation once a registration began a new one.
 //
 // A PORT, NOT A TUPLE EMIT, AND THE DIFFERENCE IS THE WHOLE FIX (kaname#107). The
-// journal alone cannot say "closed at v2": removal deletes the fact, and a late
-// open at v1 would then find an empty slot. The publication keeps that tombstone.
+// journal alone cannot say "closed at v2": removal deletes the fact, and a late open at
+// v1 would then find an empty slot. The publication row keeps that order.
 type publicReadPublisher interface {
-	ApplyTx(ctx context.Context, tx service.Tx, objectType, objectID string, published bool, version time.Time) (applied bool, err error)
+	ApplyTx(ctx context.Context, tx service.Tx, in service.PublicReadIntent) (applied bool, err error)
+	WithdrawTx(ctx context.Context, tx service.Tx, objectType, objectID string) error
+	DropStaleIncarnationTx(ctx context.Context, tx service.Tx, objectType, objectID, headType string) error
 }
 
 // admitsPublication reports whether an object of this MODEL type may carry a
@@ -268,8 +252,8 @@ type RegisterResourceUseCase struct {
 	publications publicReadPublisher   // ОБЯЗАТЕЛЕН, см. конструктор
 	reconcile    reconcileEventEmitter // optional, nil-safe
 	accounts     accountResolver       // optional, nil-safe
+	residual     residualTupleReader   // ОБЯЗАТЕЛЕН, см. конструктор
 	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
-	residual     residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
 	metrics      materializationRecorder
 	logger       *slog.Logger
 }
@@ -290,14 +274,23 @@ type RegisterResourceUseCase struct {
 // состояние, в котором запоздавшая доставка открытия после закрытия возвращала бы
 // анонимное чтение (kaname#107). Опция с «нет — значит голый кортеж» делала бы
 // этот дефект молчаливым умолчанием.
+//
+// `residual` — ТОЖЕ ПАРАМЕТР. Снятие адресуется объектом и не несёт ни одного
+// кортежа: что снимать, называет только он. Без него снятие убирало бы зеркало и
+// оставляло бы все отношения на объекте — объект, которого нет, отвечал бы «доступ
+// есть».
 func NewRegisterResourceUseCase(
 	emitter relationOutboxEmitter,
 	mirror resourceMirrorEmitter,
 	txb service.TxBeginner,
 	catalogTypes catalogTypeReader,
 	publications publicReadPublisher,
+	residual residualTupleReader,
 ) *RegisterResourceUseCase {
-	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes, publications: publications}
+	return &RegisterResourceUseCase{
+		emitter: emitter, mirror: mirror, txb: txb,
+		catalogTypes: catalogTypes, publications: publications, residual: residual,
+	}
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -322,14 +315,6 @@ func (uc *RegisterResourceUseCase) WithObjectReconciler(r objectReconciler, logg
 	return uc
 }
 
-// WithResidualTupleReader wires the reader that names what is STILL standing on an object
-// whose registration is being withdrawn. nil-safe: without it the withdrawal removes only
-// the tuple it was handed, which is the pre-existing behaviour.
-func (uc *RegisterResourceUseCase) WithResidualTupleReader(r residualTupleReader) *RegisterResourceUseCase {
-	uc.residual = r
-	return uc
-}
-
 // WithMetrics wires the OPTIONAL post-commit observability recorder. nil-safe: without
 // it the accelerators still run and still log, they are just not counted.
 func (uc *RegisterResourceUseCase) WithMetrics(m materializationRecorder) *RegisterResourceUseCase {
@@ -349,13 +334,14 @@ func (uc *RegisterResourceUseCase) observe(step string, err error) {
 	uc.metrics.ObserveRegisterPostCommit(step, outcome)
 }
 
-// Register validates the tuple, labels and generation, then puts the registration into
-// the projection admission AND — when its generation was newer than the object's head
-// and so applied — enqueues an fga.tuple.write row, in ONE writer-tx (atomic co-commit,
-// ban #10). A generation not newer than the head is REJECTED_STALE: nothing is written,
-// and the call still answers OK (the proxy is idempotent).
+// Register validates the event — object, set of tuples, labels and generation — then
+// puts the registration into the projection admission AND, when its generation was
+// newer than the object's head and so applied, enqueues the event's whole set of
+// tuples, in ONE writer-tx (atomic co-commit, ban #10). A generation not newer than the
+// head is REJECTED_STALE: nothing is written, and the call still answers OK (the proxy
+// is idempotent).
 func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInput) error {
-	t, err := validateTuple(in)
+	object, tuples, err := validateRegistration(in)
 	if err != nil {
 		return err
 	}
@@ -366,34 +352,20 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	if err := corevalidate.Labels("labels", labels); err != nil {
 		return err
 	}
-	fgaType, objID := t.splitObject()
-	if t.isPureGrant() {
-		// Publication only: no projection write and no binding fan-out to drive (no
-		// binding's desired set depends on the wildcard tuple). Its redelivery gate is
-		// the publication's own — the owner's version, compared by the store.
-		if err := refuseGenerationOnPublication(in); err != nil {
-			return err
-		}
-		return uc.publish(ctx, t, true, sourceVersion(in))
-	}
 	gen, err := requireGeneration(in)
 	if err != nil {
 		return err
 	}
-	// The object's order is its generation; the publication's version has no reader
-	// on this path, and accepting it silently is forbidden (api-conventions).
-	if in.GetSourceVersion() != nil {
-		return shared.InvalidArg("source_version", "not accepted for an object registration")
-	}
-	objType, changed, projectionUnchanged, err := uc.emit(ctx, t, service.ResourceMirrorRow{
-		ObjectType:      fgaType,
+	modelType, objID := object.split()
+	objType, changed, projectionUnchanged, err := uc.applyRegistration(ctx, object, tuples, service.ResourceMirrorRow{
+		ObjectType:      modelType,
 		ObjectID:        objID,
 		ParentProjectID: in.GetParentProjectId(),
 		ParentAccountID: in.GetParentAccountId(),
 		ParentChain:     in.GetParentChain(),
 		Labels:          labels,
 		Generation:      gen,
-	}, true, time.Time{})
+	})
 	if err != nil {
 		return err
 	}
@@ -402,7 +374,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	// intent — and both carry the SAME generation. The object's head therefore recognises
 	// the second delivery: it is not newer, REJECTED_STALE, nothing written. When nothing
 	// changed there is, by construction, nothing to materialise — the delivery that DID
-	// apply emitted the owner tuple and the reconcile event — so the expensive forward
+	// apply emitted the event's tuples and the reconcile event — so the expensive forward
 	// reconcile fan-out is skipped. Before the gate, iam re-ran the whole materialisation
 	// on every duplicate (measured: two byte-identical 27-row fga_outbox batches 6.7 ms
 	// apart for one created network).
@@ -415,7 +387,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	if !changed {
 		return nil
 	}
-	// Instant-visibility: after the owner-tuple + mirror + reconcile event COMMIT, drive
+	// Instant-visibility: after the event's tuples + mirror + reconcile event COMMIT, drive
 	// a SYNCHRONOUS ADDITIVE forward materialization so the creator's per-object v_get
 	// materializes before the consumer's create-Operation reports done — a
 	// create→immediate-GET resolves ALLOW without waiting for the async reconcile-outbox
@@ -518,18 +490,6 @@ func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, o
 	}
 }
 
-// sourceVersion extracts the owner's version of a PUBLICATION from the request — the one
-// path that reads it (the pure grant `user:* # v_get`, and the publication an object
-// takes with it on withdrawal). Nil proto Timestamp → zero time.Time: an intent without a
-// marker, which the publication store applies fail-closed for a withdrawal.
-func sourceVersion(in versionedInput) time.Time {
-	ts := in.GetSourceVersion()
-	if ts == nil {
-		return time.Time{}
-	}
-	return ts.AsTime()
-}
-
 // requireGeneration takes the object's generation from the request. There is no
 // admission without one (Р30 «Поколение и проекция», NTF3-174 (н)): the inherited path
 // «an empty version is −∞ and always applies» is gone, so `0` is a refusal that names the
@@ -545,68 +505,24 @@ func requireGeneration(in generationInput) (int64, error) {
 	}
 }
 
-// refuseGenerationOnPublication refuses a generation on the pure grant: a publication is
-// ordered by the owner's source_version, and a generation there would have no reader.
-func refuseGenerationOnPublication(in generationInput) error {
-	if in.GetGeneration() != 0 {
-		return shared.InvalidArg("generation", "not accepted for a publication")
-	}
-	return nil
-}
-
-// Unregister validates the tuple and generation, then puts the withdrawal into the
-// projection admission AND — when applied — enqueues an fga.tuple.delete row in ONE
-// writer-tx (symmetry). The applied withdrawal leaves the object's tombstone.
-// Labels/parent on the Unregister payload are not read (the object is addressed by its
-// (type,id)).
+// Unregister validates the object and the withdrawal's generation, then puts the
+// withdrawal into the projection admission AND — when applied — takes EVERY
+// relationship this proxy could have written on the object and the object's
+// publication, in ONE writer-tx. The applied withdrawal leaves the object's tombstone.
+// A withdrawal not newer than the head is REJECTED_STALE: the object was already
+// re-registered past it (or withdrawn by a newer one), and removing its tuples now would
+// revoke what the newer state still grants; nothing is enqueued and nothing is
+// materialized.
 func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregisterInput) error {
-	t, err := validateTuple(in)
+	object, err := validateObject("object", in.GetObject())
 	if err != nil {
 		return err
-	}
-	if t.isPureGrant() {
-		// Withdrawing the public grant removes the wildcard tuple. The resource
-		// itself is untouched and its projection must survive.
-		if err := refuseGenerationOnPublication(in); err != nil {
-			return err
-		}
-		return uc.publish(ctx, t, false, sourceVersion(in))
 	}
 	gen, err := requireGeneration(in)
 	if err != nil {
 		return err
 	}
-	fgaType, objID := t.splitObject()
-	// The withdrawal's source_version is the version under which the object takes its
-	// PUBLICATION with it — read only for a type that admits one. Elsewhere it has no
-	// reader, and accepting it silently is forbidden (api-conventions).
-	if modelType, _ := t.splitObject(); in.GetSourceVersion() != nil && !admitsPublication(modelType) {
-		return shared.InvalidArg("source_version", "not accepted for an object whose type carries no publication")
-	}
-	// EVERY relationship THIS PROXY COULD HAVE WRITTEN ON THE OBJECT GOES WITH IT.
-	//
-	// Withdrawing a hierarchy tuple is not "remove one edge", it is "this object no
-	// longer exists". The request names one edge because that is all the consumer can
-	// name; the rest — the creator's `owner` above all — was written from an identity
-	// nobody stored, so only the side holding the store can still name it. Reading it
-	// here is what turns a withdrawal that was merely DELIVERED into one that took
-	// effect. Read BEFORE the tx: it is an external call and must not hold a DB
-	// connection open across it.
-	residual, err := uc.residualTuples(ctx, t)
-	if err != nil {
-		return err
-	}
-	// The generation is the withdrawal's place in the object's order: applied only when
-	// strictly newer than the head, and then it leaves the TOMBSTONE — a registration not
-	// newer than it does not bring the object back. A withdrawal not newer than the head is
-	// REJECTED_STALE: the object was already re-registered past it (or withdrawn by a newer
-	// one), and removing its tuples now would revoke what the newer state still grants.
-	// Nothing is enqueued and nothing is materialized.
-	objType, applied, _, err := uc.emit(ctx, t, service.ResourceMirrorRow{
-		ObjectType: fgaType,
-		ObjectID:   objID,
-		Generation: gen,
-	}, false, sourceVersion(in), residual...)
+	objType, applied, err := uc.applyWithdrawal(ctx, object, gen)
 	if err != nil {
 		return err
 	}
@@ -631,79 +547,58 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// The guard is NEVER lifted here (noStale = false), and that is not caution but
 	// mechanism: the removal IS the delete-stale diff, so an additive pass would strip
 	// nothing at all.
-	uc.syncReconcile(ctx, objType, objID, false)
+	_, id := object.split()
+	uc.syncReconcile(ctx, objType, id, false)
 	return nil
 }
 
-// residualTuples names what a teardown must take away IN ADDITION to the tuple the
-// request carries: every relationship still standing on the object that this proxy is
-// permitted to write. The set is not re-spelled here — it is asked of the declaration
-// (corelib/authz/proxytuple.IsProxyWritable), so a set that changes cannot leave a residue
-// behind a comment that still names the old one. Returns nil for a pure-grant
-// withdrawal and when no reader is wired.
+// withdrawnTuples names what the withdrawal takes away: every relationship standing
+// on the object that this proxy is permitted to write. The set is not re-spelled here
+// — it is asked of the declaration (corelib/authz/proxytuple.IsProxyWritable), so a set
+// that changes cannot leave a residue behind a comment that still names the old one.
 //
 // WHY THE SET IS EXACTLY THE PROXY-WRITABLE ONE, AND NOT "EVERYTHING ON THE OBJECT".
 // The per-object verbs are NOT ours to remove: they are derived from grants and the
 // reconciler's delete-stale pass — already driven from here — is what takes them away.
 // Removing them here would race that pass and, worse, would make this the second place
 // deciding the same question. The proxy-writable set is precisely the complement: the
-// relationships nothing else can account for once the object is gone.
+// relationships nothing else can account for once the object is gone. The publication
+// (`user:* #v_get`) is proxy-writable but goes by its own path, with its row and under
+// its version (publicReadPublisher.WithdrawTx): a bare delete of the verb row carries no
+// owner version, and the projection does not fold such a row at all.
 //
-// WHY A READ FAILURE IS AN ERROR AND NOT A SHRUG. Passing silently would restore the
-// original defect and make it permanent AND quiet: the caller would be told the
-// withdrawal succeeded while the access stood. The withdrawal intent is durable in the
-// consumer's own outbox and a repeat is a no-op at the drainer, so refusing here costs a
-// redelivery and nothing else (§Hardening-инвариант 8: a control that
-// degrades on failure must distinguish a blip from a standing misconfiguration — here we
-// refuse to take the risk at all, because the failure mode is a standing over-grant).
-func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIntent) ([]service.RelationTuple, error) {
-	if uc.residual == nil {
-		return nil, nil
-	}
-	standing, err := uc.residual.ObjectTuples(ctx, t.object)
+// WHY A READ FAILURE IS AN ERROR AND NOT A SHRUG. Passing silently would leave the
+// relationships standing on an object the product has withdrawn — a standing
+// over-grant. The withdrawal intent is durable in the consumer's own outbox and a
+// repeat is a no-op once applied, so refusing here costs a redelivery and nothing else
+// (§Hardening-инвариант 8).
+func (uc *RegisterResourceUseCase) withdrawnTuples(ctx context.Context, tx service.Tx, object objectRef) ([]service.RelationTuple, error) {
+	standing, err := uc.residual.ObjectTuplesTx(ctx, tx, string(object))
 	uc.observe(stepResidualRead, err)
 	if err != nil {
 		// Retriable, opaque: the consumer's drainer redelivers the identical intent.
-		// Never echo the store's transport text (endpoint + store id leak).
-		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "authz backend unavailable")
+		// Never echo the store's text.
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	out := make([]service.RelationTuple, 0, len(standing))
 	for _, have := range standing {
-		if have.Relation == t.relation && have.User == t.subject {
-			continue // the request already carries this one
-		}
 		if !proxytuple.IsProxyWritable(have.User, have.Relation) {
 			continue // not ours to remove — see the doc above
 		}
 		if proxytuple.IsPublicReadGrant(have.User, have.Relation) {
-			// The publication is withdrawn by its own path, in the owner's order (see
-			// emit): a bare delete of the verb row carries no owner version, and the
-			// projection does not fold such a row at all.
-			continue
+			continue // the publication goes by its own path — see the doc above
 		}
 		out = append(out, have)
 	}
 	for range out {
 		uc.observe(stepResidualWithdraw, nil)
 	}
-	if len(out) == 0 {
-		return nil, nil
-	}
 	return out, nil
 }
 
-// tupleInput — the minimal transport-agnostic shape both RPCs share. Satisfied
-// by the proto Register/Unregister request messages (handler adapts them).
-type tupleInput interface {
-	GetSubjectId() string
-	GetRelation() string
+// objectInput — the object both the withdrawal and the publication address.
+type objectInput interface {
 	GetObject() string
-}
-
-// versionedInput — carries the owner's version of a PUBLICATION (see sourceVersion).
-// Both proto request messages satisfy it.
-type versionedInput interface {
-	GetSourceVersion() *timestamppb.Timestamp
 }
 
 // generationInput — carries the object's generation (register: state; unregister:
@@ -712,13 +607,14 @@ type generationInput interface {
 	GetGeneration() int64
 }
 
-// registerInput — Register additionally consumes the mirror fields (labels +
-// parent-scope), the generation and — for a publication only — the source_version.
-// Satisfied by *iamv1.RegisterResourceRequest.
+// registerInput — Register consumes the event: the object, the set of its tuples,
+// the mirror fields (labels + parent-scope) and the generation. Satisfied by
+// *iamv1.RegisterResourceRequest — the set's element type is the contract's own, the
+// same way LookupSubjectUseCase consumes its request.
 type registerInput interface {
-	tupleInput
-	versionedInput
+	objectInput
 	generationInput
+	GetTuples() []*iamv1.RegisteredTuple
 	GetLabels() map[string]string
 	GetParentProjectId() string
 	GetParentAccountId() string
@@ -727,41 +623,103 @@ type registerInput interface {
 	GetParentChain() []string
 }
 
-// unregisterInput — Unregister consumes the tuple, the tombstone generation and — for
-// the object's publication — the source_version. Satisfied by
-// *iamv1.UnregisterResourceRequest.
+// unregisterInput — Unregister consumes the object and the tombstone generation.
+// Satisfied by *iamv1.UnregisterResourceRequest.
 type unregisterInput interface {
-	tupleInput
-	versionedInput
+	objectInput
 	generationInput
 }
 
-func validateTuple(in tupleInput) (tupleIntent, error) {
-	subject := strings.TrimSpace(in.GetSubjectId())
-	relation := strings.TrimSpace(in.GetRelation())
-	object := strings.TrimSpace(in.GetObject())
+// publicationInput — Publish consumes the owner's intent about anonymous read.
+// Satisfied by *iamv1.SetPublicReadPublicationRequest.
+type publicationInput interface {
+	objectInput
+	GetPublished() bool
+	GetPublicationVersion() *timestamppb.Timestamp
+	GetObjectGeneration() int64
+}
 
-	if subject == "" {
-		return tupleIntent{}, shared.InvalidArg("subject_id", "required")
+// wildcardSubjectRefusal — набор события подстановочного субъекта не несёт:
+// публикация для анонимного чтения идёт своим методом (Р30, NTF3-185 (в)).
+const wildcardSubjectRefusal = "wildcard subject is published by SetPublicReadPublication"
+
+// validateObject requires the FGA `<type>:<id>` object and names `field` on refusal.
+func validateObject(field, v string) (objectRef, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", shared.InvalidArg(field, "required")
 	}
-	if relation == "" {
-		return tupleIntent{}, shared.InvalidArg("relation", "required")
+	if err := validateRelationString(field, v); err != nil {
+		return "", err
 	}
-	if object == "" {
-		return tupleIntent{}, shared.InvalidArg("object", "required")
+	return objectRef(v), nil
+}
+
+// validateRegistration validates the event: the object and its set of tuples. The set
+// is non-empty, carries every pair once and no wildcard subject (Р30 «Единица поколения
+// — событие»); each refusal names the field `tuples`.
+func validateRegistration(in registerInput) (objectRef, []tupleIntent, error) {
+	object, err := validateObject("object", in.GetObject())
+	if err != nil {
+		return "", nil, err
 	}
-	// FGA object/subject grammar: `<type>:<id>`, no whitespace and no `#`
-	// (the latter is the userset separator and would corrupt the tuple).
-	if err := validateRelationString("subject_id", subject); err != nil {
-		return tupleIntent{}, err
+	set := in.GetTuples()
+	if len(set) == 0 {
+		return "", nil, shared.InvalidArg("tuples", "required")
 	}
-	if err := validateRelationString("object", object); err != nil {
-		return tupleIntent{}, err
+	seen := make(map[string]struct{}, len(set))
+	out := make([]tupleIntent, 0, len(set))
+	for _, el := range set {
+		subject := strings.TrimSpace(el.GetSubjectId())
+		relation := strings.TrimSpace(el.GetRelation())
+		switch {
+		case subject == "":
+			return "", nil, shared.InvalidArg("tuples", "subject_id required")
+		case relation == "":
+			return "", nil, shared.InvalidArg("tuples", "relation required")
+		case strings.HasSuffix(subject, ":*"):
+			return "", nil, shared.InvalidArg("tuples", wildcardSubjectRefusal)
+		}
+		if validateRelationString("tuples", subject) != nil {
+			return "", nil, shared.InvalidArg("tuples", "invalid subject_id")
+		}
+		if strings.ContainsAny(relation, " \t\n#:") {
+			return "", nil, shared.InvalidArg("tuples", "invalid relation")
+		}
+		key := subject + "#" + relation
+		if _, dup := seen[key]; dup {
+			return "", nil, shared.InvalidArg("tuples", "duplicate "+key)
+		}
+		seen[key] = struct{}{}
+		out = append(out, tupleIntent{subject: subject, relation: relation, object: string(object)})
 	}
-	if strings.ContainsAny(relation, " \t\n#:") {
-		return tupleIntent{}, shared.InvalidArg("relation", "invalid relation")
+	return object, out, nil
+}
+
+// validatePublication validates the owner's publication intent: the object of a type
+// that admits public read, the publication's version and the incarnation's generation.
+func validatePublication(in publicationInput) (objectRef, time.Time, int64, error) {
+	object, err := validateObject("object", in.GetObject())
+	if err != nil {
+		return "", time.Time{}, 0, err
 	}
-	return tupleIntent{subject: subject, relation: relation, object: object}, nil
+	v := in.GetPublicationVersion()
+	if v == nil {
+		return "", time.Time{}, 0, shared.InvalidArg("publication_version", "required")
+	}
+	if err := v.CheckValid(); err != nil || v.AsTime().IsZero() {
+		return "", time.Time{}, 0, shared.InvalidArg("publication_version", "invalid timestamp")
+	}
+	switch g := in.GetObjectGeneration(); {
+	case g == 0:
+		return "", time.Time{}, 0, shared.InvalidArg("object_generation", "required")
+	case g < 0:
+		return "", time.Time{}, 0, shared.InvalidArg("object_generation", "must be positive")
+	}
+	if modelType, _ := object.split(); !admitsPublication(modelType) {
+		return "", time.Time{}, 0, shared.InvalidArg("object", "type "+modelType+" does not admit public read")
+	}
+	return object, v.AsTime(), in.GetObjectGeneration(), nil
 }
 
 // validateRelationString enforces the FGA `<type>:<id>` shape: exactly one ':',
@@ -774,183 +732,242 @@ func validateRelationString(field, v string) error {
 	if colon <= 0 || colon == len(v)-1 {
 		return shared.InvalidArg(field, "invalid "+field)
 	}
-	// Exactly one ':' — a second colon is rejected. objectType() splits on the
-	// FIRST colon, so a two-colon value would make the resource_mirror /
-	// reconcile-outbox key ("a:b" from "type:a:b") diverge from the verbatim FGA
-	// tuple object string ("type:a:b") — the mirror row and the tuple then
-	// reference different objects.
+	// Exactly one ':' — a second colon is rejected. split() cuts on the FIRST colon,
+	// so a two-colon value would make the resource_mirror / reconcile-outbox key ("a:b"
+	// from "type:a:b") diverge from the verbatim tuple object string ("type:a:b") — the
+	// mirror row and the tuple then reference different objects.
 	if strings.IndexByte(v[colon+1:], ':') >= 0 {
 		return shared.InvalidArg(field, "invalid "+field)
 	}
 	return nil
 }
 
-// publish applies the owner's intent about anonymous read of ONE object — the pure
-// grant `user:* #v_get` — in its own writer-tx, through the publication port.
+// Publish applies the owner's intent about anonymous read of ONE object — the pure
+// grant `user:* #v_get` — in its own writer-tx, through the publication port
+// (Р30 «Публикация для анонимного чтения»; NTF3-186).
 //
-// WHAT IT DOES. The publication store compares the intent's version with the last
-// one applied to the object and applies it only when strictly newer; an applied
-// intent enqueues the journal row out of which the projection folds (or removes) the
-// direct fact in the same commit. A stale or repeated delivery changes nothing and
-// enqueues nothing — and that is the success of the call, not a refusal: the proxy's
-// contract is idempotent, and a consumer redelivering an intent already superseded
-// must hear OK, never an error it would retry forever.
+// WHAT IT DOES. The publication store judges the object's incarnation by its head
+// (a withdrawn incarnation is never published), compares the intent's version with the
+// last one applied and applies it only when strictly newer; an applied intent enqueues
+// the journal row out of which the projection folds (or removes) the direct fact in the
+// same commit. A stale or repeated delivery, or one for another incarnation, changes
+// nothing and enqueues nothing — and that is the success of the call, not a refusal: the
+// proxy's contract is idempotent, and a consumer redelivering an intent already
+// superseded must hear OK, never an error it would retry forever.
 //
 // WHY THE VERSION IS THE OWNER'S AND NOT A CLOCK HERE. The producer delivers every
 // publication TWICE — synchronously after its commit and through its durable queue —
-// both carrying the one version its writer-tx stamped, while a withdrawal travels the
-// queue alone. The service therefore sees the intents of one object in any order,
-// with repeats. Only the owner's version can tell which one is newest; a clock read
-// here would order deliveries, not intents, and a late synchronous open arriving after
-// the close would reopen a private object.
+// both carrying the one version its writer-tx stamped. The service therefore sees the
+// intents of one object in any order, with repeats. Only the owner's version can tell
+// which one is newest; a clock read here would order deliveries, not intents, and a late
+// synchronous open arriving after the close would reopen a private object.
 //
-// NO DIRECT FACT IS WRITTEN HERE, BY DESIGN. It is folded out of the journal row by
-// the schema, identically for every producer; a second writer here would be a second
-// place about one subject.
-func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, published bool, version time.Time) error {
-	tx, err := uc.txb.Begin(ctx)
+// NO DIRECT FACT IS WRITTEN HERE, BY DESIGN. It is folded out of the journal row by the
+// schema, identically for every producer; a second writer here would be a second place
+// about one subject.
+func (uc *RegisterResourceUseCase) Publish(ctx context.Context, in publicationInput) error {
+	object, version, objectGeneration, err := validatePublication(in)
 	if err != nil {
-		// Same opaque, no-leak contract as emit: retriable Unavailable.
-		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return err
+	}
+	tx, err := uc.begin(ctx)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
-	objType, objID := t.splitObject()
-	if _, err := uc.publications.ApplyTx(ctx, tx, objType, objID, published, version); err != nil {
+	modelType, id := object.split()
+	headType, err := uc.catalogObjectType(ctx, tx, modelType)
+	if err != nil {
+		return fmt.Errorf("resolve catalog object type: %w", err)
+	}
+	if _, err := uc.publications.ApplyTx(ctx, tx, service.PublicReadIntent{
+		ObjectType:       modelType,
+		ObjectID:         id,
+		HeadType:         headType,
+		Published:        in.GetPublished(),
+		Version:          version,
+		ObjectGeneration: objectGeneration,
+	}); err != nil {
 		return fmt.Errorf("apply public-read publication: %w", err)
 	}
+	return commit(ctx, tx)
+}
+
+// begin opens the writer-tx of one admission. Backend-down at connection acquisition →
+// retriable Unavailable (the handler maps ErrUnavailable → codes.Unavailable; the
+// caller's transactional-outbox drainer then re-delivers). Fixed opaque message — never
+// surface the raw pgx driver text (host/port/user/db).
+func (uc *RegisterResourceUseCase) begin(ctx context.Context) (service.Tx, error) {
+	tx, err := uc.txb.Begin(ctx)
+	if err != nil {
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+	}
+	return tx, nil
+}
+
+// commit fixes the admission. Backend-down at commit → retriable Unavailable (same
+// opaque, no-leak contract as begin): nothing durably landed, the caller's drainer
+// re-delivers.
+func commit(ctx context.Context, tx service.Tx) error {
 	if err := tx.Commit(ctx); err != nil {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	return nil
 }
 
-// emit puts the registration (write=true) or withdrawal (write=false) intent into the
-// projection admission AND, when it applied, enqueues the owner-tuple fga_outbox rows and
-// the reconcile event — all in ONE writer-tx: they commit together or roll back together
-// (atomic co-commit, ban #10).
+// applyRegistration puts the registration into the projection admission AND, when it
+// applied, enqueues the event's set of tuples, drops a publication of a previous
+// incarnation and enqueues the reconcile event — all in ONE writer-tx: they commit
+// together or roll back together (atomic co-commit, ban #10).
 //
 // It returns whether the generation APPLIED (`changed`). False is REJECTED_STALE: the
-// generation was not newer than the object's head — a late or repeated delivery — and the
-// trigger wrote nothing. Then nothing else is enqueued either, in BOTH directions: the
-// acceptance's rule is that a stale intent changes neither the mirror, nor the tombstone,
-// nor the tuples (Р30 «Приём поколения — CAS»). A stale withdrawal is not a swallowed
-// revoke — the head proves a newer state of the object was already applied, and removing
-// its tuples now would revoke what that newer state still grants.
+// generation was not newer than the object's head — a late or repeated delivery — and
+// the trigger wrote nothing; then nothing else is enqueued either (Р30 «Приём поколения
+// — CAS»).
 //
-// `row.ObjectType` приходит сюда именем словаря МОДЕЛИ — тем, что стояло в
-// кортеже, — и переводится в имя словаря КАТАЛОГА ВНУТРИ транзакции, до первого
-// обращения к зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный
-// проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
-// перевод у него разошёлся бы с первым молча.
-//
-// `publicationVersion` — версия, под которой снятие объекта уносит его публикацию
-// (только write=false; см. Unregister).
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, publicationVersion time.Time, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
-	tx, err := uc.txb.Begin(ctx)
+// `row.ObjectType` приходит сюда именем словаря МОДЕЛИ — тем, что стояло в объекте, — и
+// переводится в имя словаря КАТАЛОГА ВНУТРИ транзакции, до первого обращения к
+// зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный проход
+// материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй перевод у него
+// разошёлся бы с первым молча.
+func (uc *RegisterResourceUseCase) applyRegistration(ctx context.Context, object objectRef, set []tupleIntent, row service.ResourceMirrorRow) (objectType string, changed, projectionUnchanged bool, err error) {
+	tx, err := uc.begin(ctx)
 	if err != nil {
-		// Backend-down at connection acquisition → retriable Unavailable (the
-		// handler maps ErrUnavailable → codes.Unavailable; the caller's
-		// transactional-outbox drainer then re-delivers). Fixed opaque message —
-		// never surface the raw pgx driver text (host/port/user/db).
-		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return "", false, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
+	modelType := row.ObjectType
 	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990).
 	if row.ObjectType, err = uc.catalogObjectType(ctx, tx, row.ObjectType); err != nil {
 		return "", false, false, fmt.Errorf("resolve catalog object type: %w", err)
 	}
 	objectType = row.ObjectType
 
-	// The tuple named by the request, plus whatever the caller established must go with
-	// it (see residualTuples): one atomic enqueue, so a withdrawal cannot commit half of
-	// its own removal.
-	tuples := append([]service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}, extra...)
-	if write {
-		// Backfill parent_account_id SAME-DB from projects.account_id when the
-		// owner supplied only parent_project_id (IAM owns Project — no peer-call, no
-		// cycle). The owner-supplied value (if any) wins only when the project is not
-		// resolvable (graceful: a not-yet-mirrored project keeps the owner's value).
-		if uc.accounts != nil && row.ParentAccountID == "" && row.ParentProjectID != "" {
-			accID, ok, rerr := uc.accounts.AccountForProjectTx(ctx, tx, row.ParentProjectID)
-			if rerr != nil {
-				return "", false, false, fmt.Errorf("resolve account for project: %w", rerr)
-			}
-			if ok {
-				row.ParentAccountID = accID
-			}
+	// Backfill parent_account_id SAME-DB from projects.account_id when the owner
+	// supplied only parent_project_id (IAM owns Project — no peer-call, no cycle). The
+	// owner-supplied value (if any) wins only when the project is not resolvable
+	// (graceful: a not-yet-mirrored project keeps the owner's value).
+	if uc.accounts != nil && row.ParentAccountID == "" && row.ParentProjectID != "" {
+		accID, ok, rerr := uc.accounts.AccountForProjectTx(ctx, tx, row.ParentProjectID)
+		if rerr != nil {
+			return "", false, false, fmt.Errorf("resolve account for project: %w", rerr)
 		}
-		// The admission runs FIRST so its verdict gates the enqueues below.
-		if changed, projectionUnchanged, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
-			// Тип без живой строки каталога — это ОТКАЗ ВХОДУ, а не сбой записи.
-			// Он выносится сюда до обёртки: обёртка «upsert resource mirror» —
-			// внутреннее имя шага, и, доехав до провода, она сказала бы
-			// вызывающему про наше устройство вместо того, что чинить.
-			//
-			// Полоса называет ПОЛЕ (`object`) отдельным элементом отказа, а не
-			// прозой: вызывающий машинно узнаёт, какой из трёх элементов кортежа
-			// негоден. Чей это тип — вопрос другой полосы, и на неё отвечает
-			// правило приёма отказом по правам, без причины.
-			if stderrors.Is(err, iamerr.ErrUnknownResourceType) {
-				return "", false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
-			}
-			return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
-		}
-		if !changed {
-			return objectType, false, false, nil
-		}
-		if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
-			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
-		}
-	} else {
-		if changed, err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.Generation); err != nil {
-			return "", false, false, fmt.Errorf("delete resource mirror: %w", err)
-		}
-		if !changed {
-			return objectType, false, false, nil
-		}
-		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
-			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
-		}
-		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE WITHDRAWAL'S VERSION.
-		//
-		// Withdrawing the hierarchy tuple means "this object no longer exists", and a
-		// publication cannot outlive its object: a repository's id is its NAME inside
-		// the registry, so a surviving publication would hand anonymous read to the
-		// next repository created under that name. The withdrawal is recorded
-		// whether or not a publication stands right now — a publication delivered
-		// LATE, older than this withdrawal, must find the tombstone, not an empty
-		// slot. Same tx: the object's removal cannot commit without it.
-		if modelType, modelID := t.splitObject(); admitsPublication(modelType) {
-			if _, err = uc.publications.ApplyTx(ctx, tx, modelType, modelID, false, publicationVersion); err != nil {
-				return "", false, false, fmt.Errorf("withdraw public-read publication: %w", err)
-			}
+		if ok {
+			row.ParentAccountID = accID
 		}
 	}
-	// Enqueue a reconcile event in the SAME writer-tx as the projection change (atomic
-	// co-commit, ban #10). The reconciler re-evaluates every binding member referencing
-	// this object (selector membership / byName containment / PENDING→ACTIVE verify).
-	// nil-safe when the reconciler is unwired (the periodic sweep then catches up). Only
-	// an APPLIED intent reaches here — a stale one returned above with nothing enqueued.
-	if uc.reconcile != nil {
-		// NOTE: keep these literals in sync with reconcile_outbox.EventUpsert /
-		// reconcile_outbox.EventDelete (the drainer reads them). They are inlined
-		// here rather than imported because this use-case must not depend on the
-		// repo (pg) package — clean-arch dependency rule.
-		eventType := "mirror.upsert"
-		if !write {
-			eventType = "mirror.delete"
+	// The admission runs FIRST so its verdict gates the enqueues below.
+	if changed, projectionUnchanged, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
+		// Тип без живой строки каталога — это ОТКАЗ ВХОДУ, а не сбой записи. Он
+		// выносится сюда до обёртки: обёртка «upsert resource mirror» — внутреннее имя
+		// шага, и, доехав до провода, она сказала бы вызывающему про наше устройство
+		// вместо того, что чинить. Полоса называет ПОЛЕ (`object`) отдельным
+		// элементом отказа, а не прозой.
+		if stderrors.Is(err, iamerr.ErrUnknownResourceType) {
+			return "", false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
 		}
-		if err = uc.reconcile.EmitTx(ctx, tx, eventType, row.ObjectType, row.ObjectID); err != nil {
-			return "", false, false, fmt.Errorf("emit reconcile event: %w", err)
+		return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
+	}
+	if !changed {
+		return objectType, false, false, nil
+	}
+	tuples := make([]service.RelationTuple, 0, len(set))
+	for _, t := range set {
+		tuples = append(tuples, service.RelationTuple{User: t.subject, Relation: t.relation, Object: t.object})
+	}
+	if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
+		return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
+	}
+	// A NEW INCARNATION DOES NOT INHERIT AN OLDER ONE'S PUBLICATION. A registration that
+	// began the incarnation (no head, or over the tombstone) moved the head's
+	// incarnation boundary; a publication that landed for an earlier incarnation while
+	// the head was absent is dropped here, in the same tx (Р30 «Публикация для
+	// анонимного чтения»). On a live incarnation there is no such row and this is a
+	// no-op.
+	if admitsPublication(modelType) {
+		_, id := object.split()
+		if err = uc.publications.DropStaleIncarnationTx(ctx, tx, modelType, id, objectType); err != nil {
+			return "", false, false, fmt.Errorf("drop stale public-read publication: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
-		// contract as Begin). The row/tuple did not durably land; the caller's
-		// drainer re-delivers.
-		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+	if err = uc.emitReconcile(ctx, tx, "mirror.upsert", row); err != nil {
+		return "", false, false, err
+	}
+	if err = commit(ctx, tx); err != nil {
+		return "", false, false, err
 	}
 	return objectType, true, projectionUnchanged, nil
+}
+
+// applyWithdrawal puts the withdrawal into the projection admission AND, when it
+// applied, takes every proxy-writable relationship standing on the object — read in
+// this tx, after the admission (see residualTupleReader) — and the object's publication,
+// and enqueues the reconcile event, all in ONE writer-tx.
+//
+// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT. Withdrawing means "this object no
+// longer exists", and a publication cannot outlive its object: a repository's id is its
+// NAME inside the registry, so a surviving publication would hand anonymous read to the
+// next repository created under that name. After the withdrawal a late publication of
+// the withdrawn incarnation is refused by the head (the tombstone), not by a row.
+func (uc *RegisterResourceUseCase) applyWithdrawal(ctx context.Context, object objectRef, gen int64) (objectType string, applied bool, err error) {
+	tx, err := uc.begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+
+	modelType, id := object.split()
+	if objectType, err = uc.catalogObjectType(ctx, tx, modelType); err != nil {
+		return "", false, fmt.Errorf("resolve catalog object type: %w", err)
+	}
+	if applied, err = uc.mirror.DeleteTx(ctx, tx, objectType, id, gen); err != nil {
+		return "", false, fmt.Errorf("delete resource mirror: %w", err)
+	}
+	if !applied {
+		return objectType, false, nil
+	}
+	tuples, err := uc.withdrawnTuples(ctx, tx, object)
+	if err != nil {
+		return "", false, err
+	}
+	if len(tuples) > 0 {
+		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
+			return "", false, fmt.Errorf("emit fga outbox: %w", err)
+		}
+	}
+	if admitsPublication(modelType) {
+		if err = uc.publications.WithdrawTx(ctx, tx, modelType, id); err != nil {
+			return "", false, fmt.Errorf("withdraw public-read publication: %w", err)
+		}
+	}
+	if err = uc.emitReconcile(ctx, tx, "mirror.delete", service.ResourceMirrorRow{ObjectType: objectType, ObjectID: id}); err != nil {
+		return "", false, err
+	}
+	if err = commit(ctx, tx); err != nil {
+		return "", false, err
+	}
+	return objectType, true, nil
+}
+
+// emitReconcile enqueues a reconcile event in the SAME writer-tx as the projection
+// change (atomic co-commit, ban #10). The reconciler re-evaluates every binding member
+// referencing this object (selector membership / byName containment / PENDING→ACTIVE
+// verify). nil-safe when the reconciler is unwired (the periodic sweep then catches up).
+// Only an APPLIED intent reaches here — a stale one returned before with nothing
+// enqueued.
+//
+// NOTE: keep the event literals in sync with reconcile_outbox.EventUpsert /
+// reconcile_outbox.EventDelete (the drainer reads them). They are inlined at the callers
+// rather than imported because this use-case must not depend on the repo (pg) package
+// — clean-arch dependency rule.
+func (uc *RegisterResourceUseCase) emitReconcile(ctx context.Context, tx service.Tx, eventType string, row service.ResourceMirrorRow) error {
+	if uc.reconcile == nil {
+		return nil
+	}
+	if err := uc.reconcile.EmitTx(ctx, tx, eventType, row.ObjectType, row.ObjectID); err != nil {
+		return fmt.Errorf("emit reconcile event: %w", err)
+	}
+	return nil
 }

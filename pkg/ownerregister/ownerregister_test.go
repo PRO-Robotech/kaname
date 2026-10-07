@@ -42,7 +42,11 @@ func (r *recordingRPC) RegisterResource(ctx context.Context, in *iamv1.RegisterR
 
 func reg(object string, g int64) ownerregister.Registration {
 	return ownerregister.Registration{
-		Tuple:           ownerregister.Tuple{SubjectID: "project:prj-1", Relation: "project", Object: object},
+		Object: object,
+		Tuples: []ownerregister.Tuple{
+			{SubjectID: "project:prj-1", Relation: "project"},
+			{SubjectID: "user:usr-1", Relation: "owner"},
+		},
 		TraceID:         "res-1",
 		Labels:          map[string]string{"env": "prod"},
 		ParentProjectID: "prj-1",
@@ -52,8 +56,7 @@ func reg(object string, g int64) ownerregister.Registration {
 }
 
 // TestGenerationFromWriterTxIsForwardedVerbatim — поколение, проставленное в
-// writer-транзакции, доезжает до владельца прав БЕЗ ИЗМЕНЕНИЙ, а версия
-// публикации (поле, которое регистрация объекта не читает) не отправляется.
+// writer-транзакции, доезжает до владельца прав БЕЗ ИЗМЕНЕНИЙ.
 //
 // Обе доставки одной строки обязаны нести одно значение — иначе гашение
 // редоставки у принимающей стороны зависит от того, кто выиграл гонку.
@@ -74,13 +77,11 @@ func TestGenerationFromWriterTxIsForwardedVerbatim(t *testing.T) {
 	if gotG := rpc.got[0].GetGeneration(); gotG != stamp {
 		t.Fatalf("поколение изменилось в пути: отправлено %d, проставлено writer-транзакцией %d", gotG, stamp)
 	}
-	if sv := rpc.got[0].GetSourceVersion(); sv != nil {
-		t.Fatalf("регистрация объекта несёт версию публикации %v — принимающая сторона её отвергнет", sv)
-	}
 }
 
 // TestEveryFieldOfTheMirrorFeedIsForwarded — форвардится ВЕСЬ набор полей
-// зеркала, включая TraceID и ParentAccountID.
+// зеркала, включая TraceID и ParentAccountID, и ВЕСЬ набор кортежей события —
+// одним вызовом (приёмка NTF-3, Р30 «Единица поколения — событие»).
 //
 // Их недосылали три регистратора из пяти. Недосланное поле не роняет ничего
 // сразу — оно молча обедняет зеркало владельца прав, а по зеркалу резолвится
@@ -92,11 +93,20 @@ func TestEveryFieldOfTheMirrorFeedIsForwarded(t *testing.T) {
 	if err := r.Register(context.Background(), []ownerregister.Registration{in}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	if len(rpc.got) != 1 {
+		t.Fatalf("событие ушло %d вызовами, ждали один — кортежи одного поколения по отдельности теряются", len(rpc.got))
+	}
 	got := rpc.got[0]
+	if len(got.GetTuples()) != len(in.Tuples) {
+		t.Fatalf("кортежей события в пути %d, отправлено %d", len(got.GetTuples()), len(in.Tuples))
+	}
+	for i, tp := range in.Tuples {
+		if g := got.GetTuples()[i]; g.GetSubjectId() != tp.SubjectID || g.GetRelation() != tp.Relation {
+			t.Fatalf("кортеж %d события изменился в пути: %s#%s, ждали %s#%s", i, g.GetSubjectId(), g.GetRelation(), tp.SubjectID, tp.Relation)
+		}
+	}
 	for _, c := range []struct{ name, want, have string }{
-		{"SubjectId", in.Tuple.SubjectID, got.GetSubjectId()},
-		{"Relation", in.Tuple.Relation, got.GetRelation()},
-		{"Object", in.Tuple.Object, got.GetObject()},
+		{"Object", in.Object, got.GetObject()},
 		{"TraceId", in.TraceID, got.GetTraceId()},
 		{"ParentProjectId", in.ParentProjectID, got.GetParentProjectId()},
 		{"ParentAccountId", in.ParentAccountID, got.GetParentAccountId()},
@@ -140,8 +150,8 @@ func TestNilClientRefusesInsteadOfSilentlyDoingNothing(t *testing.T) {
 	}
 }
 
-// TestFailureOnOneTupleDoesNotAbandonTheRest — отказ на одной строке НЕ
-// прекращает набор: пробуются все, отказы объединяются.
+// TestFailureOnOneTupleDoesNotAbandonTheRest — отказ на одном событии НЕ
+// прекращает набор событий: пробуются все, отказы объединяются.
 //
 // Положительная половина утверждения обязательна: без неё «все отвергнуты»
 // зеленело бы на полностью мёртвом регистраторе. Поэтому здесь сразу два факта

@@ -2930,6 +2930,16 @@
     "exempt_reason": "INTERNAL_LISTENER"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.InternalIAMService/SetPublicReadPublication",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.InternalIAMService/UnregisterResource",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",

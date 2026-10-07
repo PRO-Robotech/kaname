@@ -23,8 +23,8 @@
 // # Что наблюдается
 //
 // Состояние базы службы доступа: строка зеркала (`source_version::text` —
-// форма, читаемая при любом типе столбца), голова объекта (колонка поколения
-// находится по схеме: единственная `bigint` вне ключа) и кортеж `parent` на
+// форма, читаемая при любом типе столбца), голова объекта (колонка
+// `generation`, `bigint`) и кортеж `parent` на
 // объекте в `relation_fact`. Значение метрики исхода REJECTED_STALE не
 // утверждается — имени у неё в приёмке нет (вопрос к приёмке в возврате).
 //
@@ -86,8 +86,7 @@ func setGeneration(t *testing.T, m proto.Message, g int64) {
 func regAt(t *testing.T, id string, labels map[string]string, g int64) *iamv1.RegisterResourceRequest {
 	t.Helper()
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId:       genSubject,
-		Relation:        genRelation,
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: genSubject, Relation: genRelation}},
 		Object:          genObject(id),
 		Labels:          labels,
 		ParentProjectId: genProjectID,
@@ -102,9 +101,7 @@ func regAt(t *testing.T, id string, labels map[string]string, g int64) *iamv1.Re
 func unregAt(t *testing.T, id string, g int64) *iamv1.UnregisterResourceRequest {
 	t.Helper()
 	req := &iamv1.UnregisterResourceRequest{
-		SubjectId: genSubject,
-		Relation:  genRelation,
-		Object:    genObject(id),
+		Object: genObject(id),
 	}
 	if g != 0 {
 		setGeneration(t, req, g)
@@ -131,35 +128,21 @@ func (p genProbe) mirror(t *testing.T, ctx context.Context, id string) (gen stri
 	return gen, labels, true
 }
 
-// headColumn — колонка поколения головы объекта: единственная `bigint` вне
-// ключа (object_type, object_id) таблицы kaname.object_head.
+// headColumn — колонка поколения головы объекта `generation` таблицы
+// kaname.object_head; её отсутствие — красный с текстом, а не ошибка запроса.
 func (p genProbe) headColumn(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	rows, err := p.pool.Query(ctx, `
-		SELECT column_name, data_type FROM information_schema.columns
-		 WHERE table_schema = 'kaname' AND table_name = 'object_head'
-		 ORDER BY ordinal_position`)
-	require.NoError(t, err)
-	defer rows.Close()
-	var all, bigints []string
-	for rows.Next() {
-		var name, typ string
-		require.NoError(t, rows.Scan(&name, &typ))
-		all = append(all, name+" "+typ)
-		if typ == "bigint" && name != "object_type" && name != "object_id" {
-			bigints = append(bigints, name)
-		}
-	}
-	require.NoError(t, rows.Err())
-	if len(all) == 0 {
-		t.Fatalf("таблицы kaname.object_head нет — головы объекта нет, сравнивать поколение не с чем " +
+	var typ string
+	err := p.pool.QueryRow(ctx, `
+		SELECT data_type FROM information_schema.columns
+		 WHERE table_schema = 'kaname' AND table_name = 'object_head' AND column_name = 'generation'`).Scan(&typ)
+	if err == pgx.ErrNoRows {
+		t.Fatalf("у kaname.object_head нет колонки generation — головы объекта нет, сравнивать поколение не с чем " +
 			"(Р30 «Приём поколения — CAS»)")
 	}
-	if len(bigints) != 1 {
-		t.Fatalf("kaname.object_head: колонок bigint вне ключа %d (%v), ожидается одна — поколение головы; столбцы: %v",
-			len(bigints), bigints, all)
-	}
-	return bigints[0]
+	require.NoError(t, err)
+	require.Equal(t, "bigint", typ, "kaname.object_head.generation")
+	return "generation"
 }
 
 // head — поколение головы объекта.

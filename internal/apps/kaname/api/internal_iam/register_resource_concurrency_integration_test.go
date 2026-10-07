@@ -44,10 +44,11 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp00000000000000002",
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: "vpc_network:enp00000000000000002",
 		Generation: 1,
 	}
 

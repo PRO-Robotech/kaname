@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,8 +44,6 @@ func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 	uc, txb := newRegUC(t, rec)
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject:    "project:prj_owner",
-		relation:   "project",
 		object:     "storage_volume:vol_gone",
 		generation: 2,
 	}))
@@ -64,7 +63,7 @@ func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
 	uc, txb := newRegUC(t, nil)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
+		object:     "storage_volume:vol_gone",
 		generation: 2,
 	}), "nil reconciler must be a non-fatal no-op")
 	require.True(t, txb.tx.committed)
@@ -77,27 +76,24 @@ func TestUnregisterResource_ReconcileError_NonFatal(t *testing.T) {
 	rec := &smObjectReconciler{err: errors.New("reconcile transient")}
 	uc, txb := newRegUC(t, rec)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
+		object:     "storage_volume:vol_gone",
 		generation: 2,
 	}), "a post-commit reconcile error must not fail a committed withdrawal (queue is the backstop)")
 	require.True(t, txb.tx.committed)
 	require.Len(t, rec.snapshot(), 1)
 }
 
-// TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone — withdrawing the
-// public wildcard grant says nothing about the object's own projection, so it must not
-// drive an object pass. Without this the previous tests could be satisfied by
-// reconciling unconditionally, which would re-derive membership for an object that is
-// still alive and untouched.
-func TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone(t *testing.T) {
+// TestPublish_ClosingDrivesNoObjectPass — closing the public read of an object says
+// nothing about the object's own projection, so it must not drive an object pass.
+// Without this the previous tests could be satisfied by reconciling unconditionally,
+// which would re-derive membership for an object that is still alive and untouched.
+func TestPublish_ClosingDrivesNoObjectPass(t *testing.T) {
 	rec := &smObjectReconciler{}
 	uc, _ := newRegUC(t, rec)
 
-	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject:  "user:*",
-		relation: "v_get",
-		object:   "geo_region:reg_ru_central",
+	require.NoError(t, uc.Publish(context.Background(), &pubReq{
+		object: "registry_repository:reg_x/app", published: false, version: time.Now(), objectGeneration: 1,
 	}))
 	assert.Empty(t, rec.snapshot(),
-		"a pure-grant withdrawal touches no projection, so it must drive no object pass")
+		"closing a publication touches no projection, so it must drive no object pass")
 }

@@ -97,7 +97,8 @@ func newEventHarness(t *testing.T) *eventHarness {
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
-	).WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
+		kanamepg.NewResidualTupleReader(),
+	)
 	gate := &switchableGate{domain: "registry"}
 	return &eventHarness{
 		h:    internaliam.NewHandler(nil, nil).WithResourceRegistrar(uc, gate),

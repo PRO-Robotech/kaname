@@ -78,14 +78,38 @@ type ResourceMirrorEmitter interface {
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, generation int64) (applied bool, err error)
 }
 
-// PublicReadPublisher — применяет намерение владельца о публикации объекта для
-// анонимного чтения (`user:* #v_get`) в транзакции вызывающего, ПОРЯДКОМ ВЕРСИЙ
-// ВЛАДЕЛЬЦА: намерение, не новее последнего применённого по объекту, не меняет
-// ничего и строки журнала не кладёт. `objectType` — словарь модели прав.
-// Нулевая `version` — доставка без маркера (см. public_read.ApplyTx).
-// Реализация — *repo/kaname/pg.PublicReadPublisher (kaname#107).
+// PublicReadIntent — намерение владельца о публикации одного объекта для
+// анонимного чтения (`user:* #v_get`).
+type PublicReadIntent struct {
+	// ObjectType / ObjectID — объект в словаре МОДЕЛИ прав, как в кортеже
+	// публикации.
+	ObjectType string
+	ObjectID   string
+	// HeadType — тип того же объекта в словаре КАТАЛОГА: ключ головы объекта
+	// (`kaname.object_head`), по которой судится воплощение.
+	HeadType string
+	// Published — открывает (true) или закрывает (false).
+	Published bool
+	// Version — версия владельца намерения публикации; обязательна.
+	Version time.Time
+	// ObjectGeneration — поколение воплощения объекта у владельца; обязательно.
+	ObjectGeneration int64
+}
+
+// PublicReadPublisher — публикация объекта для анонимного чтения в транзакции
+// вызывающего (kaname#107; приёмка NTF-3, Р30 «Публикация для анонимного
+// чтения»). Реализация — *repo/kaname/pg.PublicReadPublisher.
+//
+//   - ApplyTx — применяет намерение ПОРЯДКОМ ВЕРСИЙ ВЛАДЕЛЬЦА и только к
+//     ТЕКУЩЕМУ воплощению объекта; иначе REJECTED_STALE (`applied == false`),
+//     ничего не меняя и строки журнала не кладя.
+//   - WithdrawTx — снятие объекта уносит его публикацию (строку и прямой факт).
+//   - DropStaleIncarnationTx — регистрация, начавшая воплощение, снимает
+//     публикацию прежнего воплощения.
 type PublicReadPublisher interface {
-	ApplyTx(ctx context.Context, tx Tx, objectType, objectID string, published bool, version time.Time) (applied bool, err error)
+	ApplyTx(ctx context.Context, tx Tx, in PublicReadIntent) (applied bool, err error)
+	WithdrawTx(ctx context.Context, tx Tx, objectType, objectID string) error
+	DropStaleIncarnationTx(ctx context.Context, tx Tx, objectType, objectID, headType string) error
 }
 
 // AuditEvent — service-layer payload for a durable kaname.audit_outbox
