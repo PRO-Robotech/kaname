@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // admitCall — один допуск класса, как его видел дублёр огибающей.
@@ -178,7 +179,8 @@ func TestLogin_F3_31_EveryOutcomeAfterTheRateGateHoldsUntilTheFloor(t *testing.T
 
 	// Хранилище не ответило ПОСЛЕ ворот частоты.
 	broken, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: failingUsers{}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(func() time.Time { return h.clock }),
+		Store:       h.store, Users: failingUsers{}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
 		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},
@@ -257,7 +259,8 @@ func TestLogin_F3_31_TheClassReadIsAdmittedBeforeTheFloorIsTaken(t *testing.T) {
 func TestNewLoginUseCase_RequiresTheTimingEnvelope(t *testing.T) {
 	h := newHarness(t, nil)
 	_, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(func() time.Time { return h.clock }),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
 		Logger: slog.New(slog.DiscardHandler), TOTP: h.totp, Sets: h.verifier,
 	})
@@ -326,7 +329,8 @@ func capacityPairOutcomes(t *testing.T, h *harness, verifier humansession.Verifi
 	t.Helper()
 	obs := newCountingObserver()
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
+		CutoffClock: momentclock.Func(func() time.Time { return h.clock }),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: obs, Now: func() time.Time { return h.clock },
 		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},
@@ -395,7 +399,8 @@ func TestLogin_F3_31_TheCapacitySlotIsFreeDuringTheWait(t *testing.T) {
 	duringCompute := func(verifier humansession.Verifier, slotOwner *passwordverify.Verifier, computed <-chan struct{}) (map[humansession.LoginOutcome]int, time.Duration) {
 		obs := newCountingObserver()
 		login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-			Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
+			CutoffClock: momentclock.Func(func() time.Time { return h.clock }),
+			Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
 			Hasher: h.hasher, TTL: ucTTL, Observer: obs, Now: func() time.Time { return h.clock },
 			Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
 			Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},

@@ -21,6 +21,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 var unitBase = time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
@@ -205,7 +206,8 @@ func newUnit(t *testing.T, mut func(*unitStore)) *unit {
 	require.True(t, ok)
 	obs := &unitObserver{}
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: store, Rule: rule, Hasher: &recordingHasher{rec: rec, inner: inner}, Lane: lane,
+		CutoffClock: momentclock.Func(func() time.Time { return unitBase }),
+		Store:       store, Rule: rule, Hasher: &recordingHasher{rec: rec, inner: inner}, Lane: lane,
 		TTL: 24 * time.Hour, Observer: obs, Now: func() time.Time { return unitBase },
 		Logger: slog.New(slog.DiscardHandler),
 		Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace,
@@ -311,7 +313,8 @@ func TestRegister_R4_LaneMustDeclareEveryConsequence(t *testing.T) {
 	deps := func(lane registration.Lane) registration.Deps {
 		inner, _ := passwordverify.NewHasher(floorHasher())
 		rule, _ := humansession.NewPasswordRule(12, nil, humansession.NopObserver{}, slog.New(slog.DiscardHandler))
-		return registration.Deps{Store: &unitStore{rec: &recorder{}}, Rule: rule, Hasher: inner, Lane: lane, TTL: time.Hour,
+		return registration.Deps{
+			CutoffClock: momentclock.Func(time.Now), Store: &unitStore{rec: &recorder{}}, Rule: rule, Hasher: inner, Lane: lane, TTL: time.Hour,
 			Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace}
 	}
 	full, ok := registration.LaneByName(registration.LanePassword)

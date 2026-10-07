@@ -55,6 +55,7 @@ import (
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -174,7 +175,7 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		AllowedAudiences: []string{audRegistry},
 		DefaultAudience:  audRegistry,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Clock:            momentclock.Func(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }),
 	}, newSigner(t), stubClaims{}, noCutoffs{})
 	require.NoError(t, err)
 
@@ -224,7 +225,7 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 	require.NoError(t, err)
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      "https://kaname.kacho.local",
-		Clock:       func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Clock:       momentclock.Func(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, stubKeys{mat: tokensigner.SigningMaterial{
 		KID:           "kacho-test",

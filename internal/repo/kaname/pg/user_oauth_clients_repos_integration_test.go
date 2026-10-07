@@ -42,6 +42,8 @@ import (
 // newUOC — доменная строка токена под данного user, с уникальным id.
 func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 	return domain.UserOAuthClient{
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,

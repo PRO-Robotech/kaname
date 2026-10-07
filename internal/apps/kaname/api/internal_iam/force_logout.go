@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // forceLogoutOperationRepo — Operation-порт ForceLogout. Шире operations.Repo
@@ -152,6 +153,17 @@ func (h *Handler) WithOwnSessions(s OwnSessions) *Handler {
 	return h
 }
 
+// WithCutoffClock — привязывает источник момента отсечки. Composition-root only.
+//
+// Корень подаёт тот же источник, что всем писателям моментов, сравниваемых с
+// отсечкой (kaname#589). Непровязанный — закрытый отказ глагола (Unavailable):
+// отсечка часами процесса этой реплики судилась бы против моментов, которые
+// ставят другие.
+func (h *Handler) WithCutoffClock(c revocationpolicy.Clock) *Handler {
+	h.cutoffClock = c
+	return h
+}
+
 // WithOperations — attaches the Operation repository ForceLogout persists its
 // operation row in. Composition-root only. A nil repo stays fail-closed
 // (ForceLogout returns Unavailable): handing back an operation id that names no
@@ -202,7 +214,8 @@ func (h *Handler) requireSystemAdmin(ctx context.Context) error {
 // ForceLogout — end the target's own login sessions and record a user-level
 // revoke-all cutoff, with the audit event carrying the teardown's outcome.
 //
-// We set revoke_before = now(): a reader of the cutoff refuses any token whose
+// We set revoke_before = the shared clock's moment (kaname#589): a reader of
+// the cutoff refuses any token whose
 // session authenticated at or before it. Once the user re-authenticates, the
 // authentication instant advances past the cutoff and new sessions are allowed
 // again (no permanent lockout).
@@ -233,7 +246,14 @@ func (h *Handler) ForceLogout(ctx context.Context, req *iamv1.ForceLogoutRequest
 	if reason == "" {
 		reason = domain.RevokeReasonAdminForceLogout
 	}
-	now := time.Now().UTC()
+	// Момент отсечки — из общего источника, до записи операции: глагол,
+	// которому не поставить момент, не оставляет следа (kaname#589).
+	now, err := revocationpolicy.Moment(ctx, h.cutoffClock)
+	if err != nil {
+		slog.ErrorContext(ctx, "ForceLogout: cutoff moment unavailable",
+			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
 
 	marker := domain.UserTokenRevocation{
 		UserID:       domain.UserID(userID),

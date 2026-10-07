@@ -672,6 +672,15 @@ authn:
 # implicit, лист узла проверяется якорем серверного секрета службы. Без узла
 # письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
 # положении подтверждения (kaname#456).
+# Окно писем адресату (MAIL-25) объявлено ЯВНО, величиной умолчания процесса:
+# кейсы частоты запроса кода (Ф5-26) печатают N и окно, а посев seed_mail_pace.py
+# читает их из карты настроек процесса. Необъявленное окно процесс берёт
+# умолчанием, которого в карте нет, — и «проба печатает N» было бы числом,
+# выписанным в кейсе, а не ответом стенда.
+invite:
+  mailRateLimit:
+    maxPerWindow: 3
+    window: 1h
 inviteMail:
   relay: "$MAIL_SVC.$NS.svc.cluster.local:465"
   from: "kaname@$DOMAIN"
@@ -1131,6 +1140,43 @@ ensure_forward() {
 	say "стенд: $tag переадресована — 127.0.0.1:$port (порт службы $remote)"
 }
 
+# ensure_deploy_forward <тег> <имя порта контейнера> — переадресация порта
+# ВЫКАТА службы, которого Service не объявляет (слушатель метрик: его читает
+# собиратель изнутри кластера). Номер читается у выката по имени, местный выбирает
+# ядро; живая переадресация того же тега переиспользуется. Итог — в FORWARD_PORT.
+ensure_deploy_forward() {
+	local tag="$1" pname="$2" remote pid i port=""
+	local pidf="$WORK/forward-$tag.pid" logf="$WORK/forward-$tag.log"
+	remote="$("${KCTL[@]}" -n "$NS" get deploy "$RELEASE" \
+		-o "jsonpath={.spec.template.spec.containers[*].ports[?(@.name==\"$pname\")].containerPort}" 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у выката $RELEASE нет порта $pname — чарт не объявил поверхность, которую читает посев"
+		exit 1
+	fi
+	if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+		port="$(forward_port_of "$logf" "$remote")"
+	fi
+	if [ -z "$port" ]; then
+		if [ -f "$pidf" ]; then kill "$(cat "$pidf")" 2>/dev/null || true; fi
+		nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "deploy/$RELEASE" ":$remote" \
+			> "$logf" 2>&1 < /dev/null &
+		pid=$!
+		echo "$pid" > "$pidf"
+		for i in $(seq 1 30); do
+			port="$(forward_port_of "$logf" "$remote")"
+			[ -n "$port" ] && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+	fi
+	if [ -z "$port" ]; then
+		unmet "переадресация $tag (deploy/$RELEASE:$pname) не встала: $(tail -2 "$logf" 2>/dev/null | tr '\n' ' ')"
+		exit "$RC_UNMET"
+	fi
+	FORWARD_PORT="$port"
+	say "стенд: $tag переадресована — 127.0.0.1:$port (порт выката $remote)"
+}
+
 stop_forwards() {
 	local f
 	for f in "$WORK"/forward-*.pid; do
@@ -1288,11 +1334,42 @@ seed_stored_value() {
 	else
 		start_lane_forward
 	fi
-	local rc=0
+	local rc=0 store_exec="kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
 	python3 "$ROOT/tests/authz-fixtures/seed_stored_value.py" \
-		--base-url "$LANE_URL" --pki "$EDGE_DIR" \
-		--store-exec "kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname" \
-		|| rc=$?
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	seed_store_companions "$store_exec"
+}
+
+# ─── СОСЕДИ ПОСЕВА ХРАНИЛИЩЕМ: ТЕ ЖЕ ДВЕРИ, ТОТ ЖЕ ИСПОЛНИТЕЛЬ ЗАПИСИ ───────────
+#
+# Ещё два «Дано», у которых часть строится ЗАПИСЬЮ, — и потому они стоят в той же
+# подкоманде, что посев хранимых значений: условие у них то же (полоса, лист края,
+# под базы стенда), и исходы те же три.
+#
+#   · `seed_mail_pace.py` — Ф5-26, Ф5-27, Ф5-14 набора восстановления: адрес
+#     слушателя метрик (порт выката, Service его не объявляет), величины окон из
+#     КАРТЫ НАСТРОЕК, которую читает процесс (`<релиз>-config`, `config.yaml`), и
+#     адресат с окном писем приглашения, заполненным до величины;
+#   · `seed_key_person.py` — FP-12 набора полосы входа: личность с ключом доступа
+#     и без строки пароля. Ключ заводится глаголом собственного фронта под токеном
+#     нашей церемонии (клиента завёл посев церемонии — он идёт раньше), строка
+#     пароля снимается записью.
+seed_store_companions() {
+	local store_exec="$1" rc=0 mailbox metrics issuance own cfg="$WORK/process-config.yaml"
+	ensure_forward mailbox "$MAIL_SVC" http; mailbox="http://127.0.0.1:$FORWARD_PORT"
+	ensure_deploy_forward metrics metrics; metrics="https://127.0.0.1:$FORWARD_PORT"
+	"${KCTL[@]}" -n "$NS" get configmap "$RELEASE-config" -o 'jsonpath={.data.config\.yaml}' \
+		> "$cfg" 2>/dev/null || true
+	python3 "$ROOT/tests/authz-fixtures/seed_mail_pace.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --metrics-url "$metrics" \
+		--config-file "$cfg" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+	python3 "$ROOT/tests/authz-fixtures/seed_key_person.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" \
+		--issuance-url "$issuance" --own-url "$own" --store-exec "$store_exec" || rc=$?
 	return "$rc"
 }
 

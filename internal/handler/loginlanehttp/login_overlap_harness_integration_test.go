@@ -90,6 +90,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -604,7 +605,7 @@ func newOverlapLane(t *testing.T) *overlapLane {
 	h.force = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 		WithAdminChecker(overlapAllowAdmin{}).
 		WithOperations(operations.NewRepo(h.pool, "kaname")).
-		WithOwnSessions(overlapForceSide{inner: kanamepg.NewHumanSessionRepo(h.pool), exit: h.exit})
+		WithOwnSessions(overlapForceSide{inner: kanamepg.NewHumanSessionRepo(h.pool), exit: h.exit}).WithCutoffClock(momentclock.Func(time.Now))
 	h.cutoffs = sessionrev.NewHandler(nil, nil).WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(h.pool))
 	status, err := humansession.NewSecondFactorStatusUseCase(h.secondFactor)
 	require.NoError(t, err)

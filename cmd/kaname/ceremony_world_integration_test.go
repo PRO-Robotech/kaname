@@ -115,6 +115,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -573,7 +574,7 @@ func (w *ceremonyWorld) buildSurface() {
 	}
 	w.priv, w.kid = priv, "kaname-line-a-1"
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: lineA1Issuer, Clock: time.Now, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: lineA1Issuer, Clock: momentclock.Func(time.Now), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ceremonyKeys{store: kanamepg.NewSigningKeyRepo(w.pool), mat: tokensigner.SigningMaterial{
 		KID:           domain.KeyID(w.kid),
 		Algorithm:     domain.SigningAlgES256,

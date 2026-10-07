@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // rsfMethods — дублёр хранилища способов: одна строка `totp` в заданном состоянии.
@@ -160,7 +161,7 @@ func rsfReason(t *testing.T, err error) string {
 func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 	methods := rsfActive()
 	sessions := &rsfSessions{methods: methods}
-	uc := NewResetSecondFactorUseCase(newUpdUserRepo(), newUpdOpsRepo(), methods, sessions)
+	uc := NewResetSecondFactorUseCase(newUpdUserRepo(), newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now))
 
 	op, err := uc.Execute(context.Background(), domain.UserID(updUserID))
 	require.Error(t, err)
@@ -175,7 +176,7 @@ func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 
 	absentRepo := newUpdUserRepo()
 	absentRepo.getErr = iamerr.Wrapf(iamerr.ErrNotFound, "User usr000000000000absnt not found")
-	op, err = NewResetSecondFactorUseCase(absentRepo, newUpdOpsRepo(), methods, sessions).Execute(ownerCtx(), "usr000000000000absnt")
+	op, err = NewResetSecondFactorUseCase(absentRepo, newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), "usr000000000000absnt")
 	require.Error(t, err)
 	assert.Nil(t, op)
 	assert.Equal(t, codes.NotFound, status.Code(err))
@@ -194,7 +195,7 @@ func TestResetSecondFactor_F12_30_NotEnrolledIsOneRefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sessions := &rsfSessions{methods: methods}
 			ops := newUpdOpsRepo()
-			op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
+			op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
 			require.Error(t, err)
 			assert.Nil(t, op, "отказ до порождения Operation")
 			assert.Equal(t, codes.FailedPrecondition, status.Code(err))
@@ -220,7 +221,7 @@ func TestResetSecondFactor_F12_30_ResetIsOneTransaction(t *testing.T) {
 	sessions := &rsfSessions{methods: methods}
 	repo := newUpdUserRepo()
 	before := time.Now().UTC()
-	op, err := NewResetSecondFactorUseCase(repo, newUpdOpsRepo(), methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err := NewResetSecondFactorUseCase(repo, newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err)
 	require.NotNil(t, op)
 	assert.Contains(t, op.Description, "Reset second factor")
@@ -253,7 +254,7 @@ func TestResetSecondFactor_F12_30_ResetIsOneTransaction(t *testing.T) {
 	methods2 := rsfActive()
 	sessions2 := &rsfSessions{methods: methods2, failOn: "audit"}
 	ops2 := newUpdOpsRepo()
-	op, err = NewResetSecondFactorUseCase(newUpdUserRepo(), ops2, methods2, sessions2).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err = NewResetSecondFactorUseCase(newUpdUserRepo(), ops2, methods2, sessions2).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err)
 	require.NoError(t, operations.Wait(context.Background()))
 	assert.NotNil(t, methods2.row, "при отказе записи события строка не снята")
@@ -273,7 +274,7 @@ func TestResetSecondFactor_F12_30_RaceWithSelfRemoval(t *testing.T) {
 	methods := rsfActive()
 	sessions := &rsfSessions{methods: methods, failOn: "vanish"}
 	ops := newUpdOpsRepo()
-	op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err, "синхронная проверка видела active")
 	require.NoError(t, operations.Wait(context.Background()))
 	assert.Zero(t, sessions.commits)

@@ -107,6 +107,21 @@ type BootstrapAdminResult struct {
 	UserID        string // resolved user id
 }
 
+// BootstrapAddressAttr — как журнал называет адрес администратора посева:
+// признаком «задан / не задан», никогда значением (kaname#631).
+//
+// Адрес — персональные данные, а петля посева пишет журнал на каждом проходе
+// до схождения. Там, где строка уже найдена, администратора называет её
+// непрозрачный `user_id`; до этого журналу известно лишь, что адрес задан.
+// Отпечаток адреса сюда не годится: без ключа он перебирается словарём и
+// остаётся тем же адресом под другим именем.
+func BootstrapAddressAttr(email string) slog.Attr {
+	if strings.TrimSpace(email) == "" {
+		return slog.String("bootstrap_address", "unset")
+	}
+	return slog.String("bootstrap_address", "set")
+}
+
 // RunBootstrapAdmin — execute the bootstrap flow.
 //
 // Pool — kaname master pgxpool (post-migration). Logger — slog.Default-
@@ -187,11 +202,11 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 		if anyRow {
 			logger.WarnContext(ctx,
 				"bootstrap admin row exists but may not authenticate, skipping cluster admin grant",
-				slog.String("email", email))
+				BootstrapAddressAttr(email))
 			return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotActive}, nil
 		}
 		logger.InfoContext(ctx, "bootstrap admin user not registered yet, skipping cluster admin grant",
-			slog.String("email", email))
+			BootstrapAddressAttr(email))
 		return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipNotRegistered}, nil
 	case err != nil:
 		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: lookup user by email: %w", err)
@@ -212,7 +227,6 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 			// Idempotent / concurrent HA — winner already INSERTed.
 			logger.WarnContext(ctx,
 				"concurrent bootstrap detected, cluster admin grant already created by another instance",
-				slog.String("email", email),
 				slog.String("user_id", userID))
 			return BootstrapAdminResult{Skipped: true, SkipReason: BootstrapSkipConcurrentRace, UserID: userID}, nil
 		}
@@ -279,7 +293,6 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 	}
 
 	logger.InfoContext(ctx, "bootstrap admin: cluster admin grant + outbox enqueue committed",
-		slog.String("email", email),
 		slog.String("user_id", userID),
 		slog.String("grant_id", grantID),
 		slog.String("fga_outbox_id", fgaOutboxID),

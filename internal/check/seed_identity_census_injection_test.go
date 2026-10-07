@@ -398,30 +398,28 @@ func TestSeedCensusRevision_OutcomeOfEveryAnswer(t *testing.T) {
 		"третья категория 1 · проходов 1")
 }
 
-// TestSeedCensusRevision_TrunkAndHeadDisagreeOnTheSameCommit — СКВОЗНАЯ проба:
-// от синтетического репозитория до текста отказа.
+// TestSeedCensusRevision_HeadCarriedCommitPassesAndAStrayOneIsFound — СКВОЗНАЯ
+// проба: от синтетического репозитория до текста отказа (kaname#639).
 //
 // Дерево повторяет наш порядок работ: ствол `main` стоит на месте, полоса влита
-// в рабочую вершину — ровно то, что видит запрос слияния до схлопывания.
-// Различие между двумя прогонами ОДНО: какая вершина названа.
-func TestSeedCensusRevision_TrunkAndHeadDisagreeOnTheSameCommit(t *testing.T) {
+// в отправляемую голову. Вливание коммитом слияния сделает коммит полосы предком
+// ствола, поэтому он засчитан уже сейчас; коммит, не влитый в голову, — находка.
+// Различие между двумя ревизиями ОДНО: входит ли коммит в историю головы.
+func TestSeedCensusRevision_HeadCarriedCommitPassesAndAStrayOneIsFound(t *testing.T) {
 	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
+	ancestry := gitAncestry(t, r.dir, r.root, "main")
 
-	byTrunk := seedCensusRevisionOutcome(r.aside, "main", gitAncestry(t, r.dir, r.root, "main")(r.aside))
-	if byTrunk.Fatal == "" {
-		t.Fatalf("по СТВОЛУ коммит полосы, в него не влитый, прошёл как своя ревизия — "+
-			"вердикт описывает рабочую вершину, а не дерево, в которое работа едет (%s)", r.aside)
+	if lane := seedCensusRevisionOutcome(r.aside, "main", ancestry(r.aside)); lane.Fatal != "" {
+		t.Fatalf("коммит, который несёт отправляемая голова, объявлен чужим (%s) — "+
+			"вливание коммитом слияния сделает находку ложной", lane.Fatal)
 	}
 
-	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же репозиторий, тот же коммит, вершина — рабочая.
-	// Без него красное выше объяснялось бы поломкой предиката, а не подменой
-	// вершины: единственное различие обязано быть названо и быть ОДНИМ.
-	byHead := seedCensusRevisionOutcome(r.aside, "HEAD", gitAncestry(t, r.dir, r.root, "HEAD")(r.aside))
-	if byHead.Fatal != "" {
-		t.Fatalf("по РАБОЧЕЙ ВЕРШИНЕ влитый в неё коммит объявлен чужим (%s) — значит "+
-			"инъекция выше ничего не различает", byHead.Fatal)
+	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же репозиторий, тот же ствол, коммит вне истории
+	// головы. Без него проход выше объяснялся бы ослаблением до резолва.
+	stray := seedCensusRevisionOutcome(r.stray, "main", ancestry(r.stray))
+	if stray.Fatal == "" {
+		t.Fatalf("коммит вне истории и ствола, и головы прошёл как своя ревизия (%s)", r.stray)
 	}
 
-	t.Log("вершина различает: по стволу — находка, по рабочей вершине — проход; " +
-		"дерево одно, коммит один, различие одно")
+	t.Log("история головы засчитана, коммит вне неё — находка; дерево одно, различие одно")
 }

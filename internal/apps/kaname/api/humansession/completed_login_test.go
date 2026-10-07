@@ -26,10 +26,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // resetSpyWriter — дублёр записи, отвечающий ТОЛЬКО за обнуление. Порт встроен
@@ -327,7 +329,7 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 	store := absentMethodsStore{}
 	build := map[string]func() error{
 		"LoginUseCase": func() error {
-			_, err := NewLoginUseCase(LoginDeps{Store: store, Users: absentUsers{}})
+			_, err := NewLoginUseCase(LoginDeps{CutoffClock: momentclock.Func(time.Now), Store: store, Users: absentUsers{}})
 			return err
 		},
 		"StepUpUseCase": func() error {
@@ -348,7 +350,7 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 		},
 		// Вход ключом (Ф13): хранилище испытаний дано, хранилища способов нет.
 		"AccessKeyLoginUseCase": func() error {
-			_, err := NewAccessKeyLoginUseCase(AccessKeyLoginDeps{Store: store, Keys: noKeyLoginStore{}})
+			_, err := NewAccessKeyLoginUseCase(AccessKeyLoginDeps{CutoffClock: momentclock.Func(time.Now), Store: store, Keys: noKeyLoginStore{}})
 			return err
 		},
 	}

@@ -96,6 +96,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const (
@@ -370,7 +371,8 @@ func argon2Class(memory, iterations, parallelism uint32) domain.PasswordCostClas
 // не должна упереться в предел (Ф3-30), а умолчание харнесса низкое намеренно.
 func rebuildLoginWithLimits(h *harness, attempts int, window time.Duration) error {
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(func() time.Time { return h.clock }),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
 		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelopePort, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: attempts, AddressWindow: window, SourceAttempts: attempts * 10, SourceWindow: window},

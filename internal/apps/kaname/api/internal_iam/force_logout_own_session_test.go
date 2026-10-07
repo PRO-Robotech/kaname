@@ -27,6 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -186,7 +187,7 @@ func ownSessionHandler(own *recordingOwnSessions) (*Handler, *recordingForceLogo
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true}).
 		WithOperations(ops).
-		WithOwnSessions(own)
+		WithOwnSessions(own).WithCutoffClock(momentclock.Func(time.Now))
 	return h, ops
 }
 

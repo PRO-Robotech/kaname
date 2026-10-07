@@ -102,8 +102,12 @@ const (
 	PathPasswordEnroll = "/iam/v1/auth/password/enroll"
 )
 
-// Paths — восемнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
-// для ретрансляции (§8 инв. 7).
+// Paths — восемнадцать глаголов полосы. Регистрации в New объявляют то же
+// множество второй раз; равенство двух объявлений держит проба
+// TestLaneServesExactlyItsDeclaredPaths (kaname#280): путь только здесь — 404
+// слушателя, путь только в New — обслуживается мимо перечня. Край платформы
+// этот перечень кодом не читает (internal/ из другого модуля не
+// импортируется): он держит своё объявление и переносит пути правкой.
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
