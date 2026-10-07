@@ -3,7 +3,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""ПОСЕВ ЛИЧНОСТИ БЕЗ ПАРОЛЯ С КЛЮЧОМ ДОСТУПА на стенде посадки `own`.
+"""ПОСЕВ ЛИЧНОСТЕЙ БЕЗ ПАРОЛЯ С КЛЮЧОМ ДОСТУПА на стенде посадки `own`.
 
 ПРЕДМЕТ. «Дано» позиции FP-12 приёмки заведения первого пароля
 (`docs/engineering/acceptance/first-password-from-a-live-session.md`, kaname#213):
@@ -11,6 +11,15 @@
 Кейс `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD` набора
 `kaname-login-lane` входит ключом сам — посев кладёт ему человека и ключ и
 больше ничего (`MINTED_KEYS`).
+
+ЛИЧНОСТЕЙ ДВЕ, И КАЖДАЯ — СВОЕГО НАБОРА (kaname#643). Вторая — «Дано» полосы
+«личность без пароля» приёмки входа ключом (`passwordless-login-with-access-key.md`,
+§5 преамбула: «записью»): Ф13-19, Ф13-22, Ф13-23 и Ф13-25 набора ключей доступа
+(`kaname-access-keys`). Одной личности на оба набора не хватает by construction:
+FP-12 заводит ей пароль, и после прогона полосы входа она уже не «без пароля», а
+Ф13-25 заводит пароль восстановлением. Набор ключей доступа идёт после полосы
+входа, поэтому у каждого своя личность, свои ключи окружения — по приставке
+(`PREFIXES`), — и посев одной не трогает другую.
 
 ПОЧЕМУ ЧАСТЬ — ЗАПИСЬЮ. Личность без строки способа «пароль» продукт не
 производит ни одним глаголом: регистрация пишет строку, а регистрации ключом без
@@ -92,7 +101,11 @@ from seed_stored_value import EMAIL_RE, PsqlStore  # noqa: E402
 RC_FINDING = 1
 RC_UNMET = 75
 
-MINTED_KEYS = ("keyPersonEmail", "keyPersonCredentialId", "keyPersonUserHandle", "keyPersonOrigin")
+# Приставка — чья личность: `keyPerson` — FP-12 полосы входа, `f13Person` — полоса
+# «личность без пароля» Ф13 набора ключей доступа.
+PREFIXES = ("keyPerson", "f13Person")
+FIELDS = ("Email", "CredentialId", "UserHandle", "Origin")
+MINTED_KEYS = tuple(prefix + field for prefix in PREFIXES for field in FIELDS)
 MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 DOMAIN = "kaname.local"
@@ -319,7 +332,7 @@ def client_of(env_file: pathlib.Path) -> tuple[str, str, str]:
 
 
 def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
-         sleep=time.sleep) -> dict:
+         sleep=time.sleep, prefix: str = PREFIXES[0]) -> dict:
     key = (keys or authenticator_keys())[KEY_SLOT]
     rp_id, origin = binding or profile_binding()
     email = f"key-person-{secrets.token_hex(6)}@{DOMAIN}"
@@ -339,13 +352,24 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
     say("  ok   строка способа «пароль» снята записью; вход прежним паролем отвергнут — остался ключ")
     # Происхождение уезжает тем же посевом, что доказал по нему регистрацию: кейс
     # собирает утверждение с ним же, и второго разбора профиля у кейса нет.
-    return {"keyPersonEmail": email, "keyPersonCredentialId": b64u(cred_id),
-            "keyPersonUserHandle": b64u(handle), "keyPersonOrigin": origin}
+    return {prefix + "Email": email, prefix + "CredentialId": b64u(cred_id),
+            prefix + "UserHandle": b64u(handle), prefix + "Origin": origin}
+
+
+def seed_all(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
+             sleep=time.sleep) -> dict:
+    """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка."""
+    patch: dict = {}
+    for prefix in PREFIXES:
+        patch.update(seed(lane, mailbox, doors, store, client, keys=keys, binding=binding,
+                          sleep=sleep, prefix=prefix))
+        say(f"  ok   личность «{prefix}» положена")
+    return patch
 
 
 def run(args: argparse.Namespace) -> int:
     pki = pathlib.Path(args.pki)
-    patch = seed(LaneHttp(args.base_url, pki), Mailbox(args.mailbox_url),
+    patch = seed_all(LaneHttp(args.base_url, pki), Mailbox(args.mailbox_url),
                  Doors(pki, args.issuance_url, args.own_url), PsqlStore(shlex.split(args.store_exec)),
                  client_of(pathlib.Path(args.env_file)))
     replaced = write_env(patch, pathlib.Path(args.env_file), pathlib.Path(args.env_template))
@@ -457,16 +481,21 @@ def self_test() -> int:
         def sow(doors=None, store=None, after_login=None):
             login_answer["value"] = after_login
             d, s = doors or _FakeDoors(rp=rp), store or _FakeStore()
-            return _outcome(lambda: seed(None, None, d, s, ("c", "s", "r"), sleep=lambda _: None)), d, s
+            return _outcome(lambda: seed_all(None, None, d, s, ("c", "s", "r"), sleep=lambda _: None)), d, s
 
         (kind, text), d, s = sow()
-        _c("законный мир — ключ заведён, затем строка пароля снята, вход паролем отвергнут",
-           kind == "ok" and len(d.finished) == 1 and len(s.sql) == 1 and "DELETE" in s.sql[0], f"{kind}: {text}")
+        _c("законный мир — у каждой из двух личностей ключ заведён, затем строка пароля снята, вход "
+           "паролем отвергнут",
+           kind == "ok" and len(d.finished) == len(PREFIXES) == 2 and len(s.sql) == 2
+           and all("DELETE" in q for q in s.sql) and s.sql[0] != s.sql[1], f"{kind}: {text}")
         patch = json.loads(text.replace("'", '"')) if kind == "ok" else {}
         _c("объявленные ключи = записываемые (в обе стороны)", set(patch) == set(MINTED_KEYS), f"{patch}")
-        _c("рукоятка и удостоверение — base64url без выравнивания (форма полосы входа ключом)",
-           kind == "ok" and "=" not in patch["keyPersonUserHandle"] and len(unb64(patch["keyPersonUserHandle"])) == 64
-           and len(unb64(patch["keyPersonCredentialId"])) == 16, f"{patch}")
+        _c("рукоятка и удостоверение — base64url без выравнивания (форма полосы входа ключом) у обеих",
+           kind == "ok" and all("=" not in patch[p + "UserHandle"] and len(unb64(patch[p + "UserHandle"])) == 64
+                                and len(unb64(patch[p + "CredentialId"])) == 16 for p in PREFIXES), f"{patch}")
+        _c("личности разные: своя почта и своё удостоверение у каждой приставки",
+           kind == "ok" and patch["keyPersonEmail"] != patch["f13PersonEmail"]
+           and patch["keyPersonCredentialId"] != patch["f13PersonCredentialId"], f"{patch}")
         for label, kw, want in [
             ("испытание без рукоятки — находка", {"doors": _FakeDoors(handle=False, rp=rp)}, "finding"),
             ("доверяющая сторона чужая — находка", {"doors": _FakeDoors(rp="elsewhere")}, "finding"),

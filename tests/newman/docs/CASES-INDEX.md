@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 783
+Всего кейсов: 799
 
 ## Перепись по модулям
 
@@ -71,7 +71,7 @@
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
-| `cases/kaname-access-keys.py` | 10 |
+| `cases/kaname-access-keys.py` | 26 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -1044,7 +1044,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 10 кейсов
+## `cases/kaname-access-keys.py` — 26 кейсов
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1058,6 +1058,14 @@
 > потолок ключей набор берёт из `deploy/values.prod.yaml` при генерации.
 > Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
 > прогонщика, последним.
+>
+> Вход без пароля ключом доступа (Ф13, kaname#643, приёмка
+> `passwordless-login-with-access-key.md`): два глагола полосы формы
+> (`access-key/begin`, `access-key/login`) на `loginLaneBaseUrl` тем же
+> подставным аутентификатором; единый отказ входа сверяется побайтово с отказом
+> неверному паролю. «Личность без пароля» кладёт посев стенда
+> (`seed_key_person.py`, приставка `f13Person`); код по времени — функцией набора
+> второго фактора, разбором его модуля.
 
 - `IAM-ACCESSKEY-OK-REGISTRATION-CHALLENGE-NAMES-THE-CONTRACT`
 - `IAM-ACCESSKEY-OK-REGISTER-LIST-ASSERT`
@@ -1069,6 +1077,22 @@
 - `IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT`
 - `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
 - `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
+- `IAM-AKLOGIN-NEG-PERSON-WITHOUT-KEY-ROW`
+- `IAM-AKLOGIN-OK-CHALLENGE-NAMES-NOBODY`
+- `IAM-AKLOGIN-NEG-BEGIN-FORM`
+- `IAM-AKLOGIN-OK-SIGN-IN-WITHOUT-PASSWORD`
+- `IAM-AKLOGIN-NEG-LOGIN-FORM`
+- `IAM-AKLOGIN-NEG-CHALLENGE-REPLACED`
+- `IAM-AKLOGIN-NEG-CHALLENGE-ONE-TIME`
+- `IAM-AKLOGIN-NEG-LOGIN-FORM-KIND`
+- `IAM-AKLOGIN-BVA-BEGIN-BY-SOURCE`
+- `IAM-AKLOGIN-BVA-KEY-LOGIN-RESETS-ADDRESS-COUNT`
+- `IAM-AKLOGIN-OK-TWO-LANES-INDEPENDENT`
+- `IAM-AKLOGIN-OK-LEVEL-COPIES-READ-THE-RECORD`
+- `IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS`
+- `IAM-AKLOGIN-OK-PASSWORDLESS-PERSON`
+- `IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON`
+- `IAM-AKLOGIN-OK-CLEANUP-KEYS`
 
 ## `cases/kaname-address-verification.py` — 8 кейсов
 
