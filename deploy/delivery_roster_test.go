@@ -122,6 +122,7 @@ var deliveryRoster = []string{
 	"schema_mechanism_precedes_the_service_test.go",
 	"scrape_declared_injection_test.go",
 	"scrape_declared_test.go",
+	"second_factor_alert_cells_test.go",
 	"service_links_are_off_injection_test.go",
 	"service_links_are_off_test.go",
 	"shipped_chains_declare_every_own_ceiling_injection_test.go",
