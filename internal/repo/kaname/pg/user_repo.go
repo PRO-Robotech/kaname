@@ -91,9 +91,9 @@ func (r *userReader) GetByEmail(ctx context.Context, email domain.Email) (domain
 	u, err := scanUser(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with email %s not found", email)
+			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with this email not found")
 		}
-		return domain.User{}, mapErr(err, "", string(email))
+		return domain.User{}, mapErr(err, "", "")
 	}
 	return u, nil
 }
@@ -119,9 +119,9 @@ func (r *userReader) GetByAccountEmail(ctx context.Context, accountID domain.Acc
 	u, err := scanUser(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with email %s not found in account %s", email, accountID)
+			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with this email not found in account %s", accountID)
 		}
-		return domain.User{}, mapErr(err, "", string(email))
+		return domain.User{}, mapErr(err, "", string(accountID))
 	}
 	return u, nil
 }
@@ -178,7 +178,7 @@ func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email)
 		fmt.Sprintf(`SELECT %s FROM users WHERE invite_status = 'PENDING' AND lower(email) = lower($1) ORDER BY created_at ASC`, userCols),
 		string(email))
 	if err != nil {
-		return nil, mapErr(err, "", string(email))
+		return nil, mapErr(err, "", "")
 	}
 	defer rows.Close()
 	var out []domain.User
@@ -271,7 +271,7 @@ func (r *userReader) FindActiveByEmail(ctx context.Context, email domain.Email) 
 		fmt.Sprintf(`SELECT %s FROM users WHERE invite_status = 'ACTIVE' AND lower(email) = lower($1) ORDER BY created_at ASC`, userCols),
 		string(email))
 	if err != nil {
-		return nil, mapErr(err, "", string(email))
+		return nil, mapErr(err, "", "")
 	}
 	defer rows.Close()
 	var out []domain.User
@@ -641,7 +641,7 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 		inserted bool
 	)
 	if err := scanUserWithInserted(row, &out, &inserted); err != nil {
-		return domain.User{}, false, mapErr(err, "", string(u.Email))
+		return domain.User{}, false, mapErr(err, "", string(u.ID))
 	}
 	return out, inserted, nil
 }
