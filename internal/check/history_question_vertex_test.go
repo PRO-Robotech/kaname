@@ -122,10 +122,13 @@ func vertexLedger() map[string]vertexWaiver {
 				"ревизии. Коммит слияния переносит коммиты полосы в ствол с их отметками, " +
 				"поэтому вердикт полосы на стволе тот же в обе стороны — замерено тремя " +
 				"посадками (`TestMergeCommitKeepsTheLaneVerdictOnTheTrunk`)"},
-		"internal/check/docs_measurement_dating_test.go#merge-base": {Calls: 2,
-			Why: "вершина — ПАРАМЕТР `trunk`, и её единственный держатель `serviceTrunkRef` " +
-				"объявлен стволом. Параметром она стала намеренно: иначе ось «ствол или вершина» " +
-				"нечем подать синтетике, и она осталась бы без доказательства падучести"},
+		"internal/check/docs_measurement_dating_test.go#merge-base": {Calls: 3,
+			Why: "два вызова судят ПАРАМЕТР `trunk`, чей единственный держатель `serviceTrunkRef` " +
+				"объявлен стволом; параметром он стал намеренно — иначе ось «ствол или вершина» " +
+				"нечем подать синтетике. Третий спрашивает отправляемую голову `HEAD` и только " +
+				"ПОСЛЕ отказа ствола (kaname#639): вливают коммитом слияния, поэтому ответ «да» " +
+				"монотонен по вливанию и переносится на ствол, а «нет» выносится лишь о коммите " +
+				"вне обеих историй (`TestGitAncestry_ACommitOutsideTheHeadIsStillAForeignLine`)"},
 		"internal/check/docs_measurement_dating_test.go#cat-file": {Calls: 1,
 			Why: "вопрос о РЕЗОЛВЕ объекта, а не о вхождении: вершины у него нет by construction. " +
 				"Вхождение спрашивается следующим оператором — у `merge-base` выше"},

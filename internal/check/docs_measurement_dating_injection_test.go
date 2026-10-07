@@ -341,6 +341,7 @@ type synthRepo struct {
 	middle string // коммит внутри истории HEAD
 	head   string // вершина `main`
 	aside  string // резолвится, предком HEAD НЕ является
+	stray  string // только у buildSynthRepoWithLaneMergedIntoHead: вне истории и ствола, и головы
 }
 
 // absentRevision — правильной формы хеш, которого нет ни в одном дереве.
@@ -666,39 +667,74 @@ func TestDatingDeclarationSurvivesALineWrap(t *testing.T) {
 		"продолжение затянуло соседний пункт списка — находка цитирует чужую ревизию")
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ВЕРШИНА СУДА — СТВОЛ, А НЕ `HEAD`
+// ВЕРШИНА СУДА — ИСТОРИЯ ОТПРАВЛЯЕМОЙ ГОЛОВЫ ВМЕСТЕ СО СТВОЛОМ (kaname#639)
 //
-// Пара ниже отличается РОВНО ОДНИМ фактом — какая вершина названа, — и на одном
-// и том же дереве даёт ПРОТИВОПОЛОЖНЫЕ вердикты о ТОМ ЖЕ коммите. Это и есть
-// класс, ради которого вершина стала параметром: работа едет в ствол
-// схлопыванием, поэтому коммит ветки, предок рабочей вершины, предком ствола не
-// станет никогда, и вердикт «по HEAD» описывает дерево, которого после посадки
-// не будет.
+// Здесь вливают КОММИТОМ СЛИЯНИЯ, и на каждом уровне каскада: полоса → волна →
+// ветка эпика → ствол. Коммит, предок отправляемой головы, предком ствола
+// становится ровно в момент её вливания и уже не перестаёт им быть: ответ «да»
+// о вхождении монотонен по вливанию. Прежняя редакция судила один ствол и
+// потому отказывала приёмке, датированной головой ветки эпика, — посадка этой
+// ветки сделала бы находку ложной, а до посадки её нечем было снять.
+//
+// Ослаблением до «любая резолвящаяся ревизия» это не становится: коммит, который
+// резолвится, но в историю отправляемой головы НЕ входит, — по-прежнему чужая
+// линия (близнец ниже). Пара отличается РОВНО ОДНИМ фактом: входит ли коммит в
+// историю головы.
 
-// TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead — ИНЪЕКЦИЯ.
-func TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead(t *testing.T) {
+// TestGitAncestry_ACommitCarriedByTheHeadIsAncestryBeforeTheTrunkHasIt — ИНЪЕКЦИЯ
+// той ложной находки, ради которой заведена задача: коммит полосы, влитый в
+// голову, но не в ствол.
+func TestGitAncestry_ACommitCarriedByTheHeadIsAncestryBeforeTheTrunkHasIt(t *testing.T) {
 	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
 
-	require.Equal(t, ancestryNo, gitAncestry(t, r.dir, r.root, "main")(r.aside),
-		"коммит полосы, в ствол НЕ влитый, признан входящим в его историю: "+
-			"вердикт описывает рабочую вершину, а не дерево, в которое работа едет")
+	require.Equal(t, ancestryYes, gitAncestry(t, r.dir, r.root, "main")(r.aside),
+		"коммит, который несёт отправляемая голова, объявлен чужой линией: вливание "+
+			"коммитом слияния сделает его предком ствола, и находка окажется ложной")
 }
 
-// TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded — ЗАКОННЫЙ БЛИЗНЕЦ.
-// Тот же репозиторий, тот же коммит; различие одно — названа рабочая вершина.
-// Прохождение здесь доказывает, что инъекция выше ловит ИМЕННО подмену вершины,
-// а не поломку предиката.
-func TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded(t *testing.T) {
+// TestGitAncestry_ACommitOutsideTheHeadIsStillAForeignLine — ЗАКОННЫЙ БЛИЗНЕЦ:
+// то же дерево, тот же ствол; различие одно — коммит в историю головы не входит.
+// Прохождение здесь доказывает, что правка выше не ослабила предикат до резолва.
+func TestGitAncestry_ACommitOutsideTheHeadIsStillAForeignLine(t *testing.T) {
 	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
 
-	require.Equal(t, ancestryYes, gitAncestry(t, r.dir, r.root, "HEAD")(r.aside),
-		"по рабочей вершине коммит, в неё влитый, обязан быть предком — "+
-			"иначе пара выше ничего не различает")
+	require.Equal(t, ancestryNo, gitAncestry(t, r.dir, r.root, "main")(r.stray),
+		"коммит вне истории и ствола, и головы признан предком — предикат "+
+			"«резолвится» подменил предикат «входит в историю»")
+}
+
+// TestDatingGate_HeadCarriedRevisionIsCreditedForeignAndUndatedStayFindings —
+// СКВОЗНАЯ проба: от синтетического репозитория до текста находки гейта. Три
+// документа, три положения: ревизия из истории головы — засчитана; ревизия вне
+// её — ЧУЖАЯ ЛИНИЯ; форма без хеша — САМОССЫЛКА.
+func TestDatingGate_HeadCarriedRevisionIsCreditedForeignAndUndatedStayFindings(t *testing.T) {
+	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
+	ancestry := gitAncestry(t, r.dir, r.root, "main")
+	declare := func(hash string) string {
+		return "**Замер на ревизии `" + hash + "`** (единица счёта — вызовы): таких мест **2**.\n"
+	}
+
+	lane, laneCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": declare(r.aside[:12])}, map[string]string{}, ancestry)
+	require.Empty(t, lane, "приёмка, датированная коммитом из истории головы, дала находку")
+	require.Equal(t, 1, laneCensus.dated)
+
+	stray, strayCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": declare(r.stray[:12])}, map[string]string{}, ancestry)
+	require.Len(t, stray, 1, "ревизия вне истории головы оставила гейт зелёным")
+	require.Contains(t, stray[0], "ЧУЖАЯ ЛИНИЯ")
+	require.Equal(t, 1, strayCensus.foreign)
+
+	undated, undatedCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": synthUndated}, map[string]string{}, ancestry)
+	require.Len(t, undated, 1, "замер без хеша оставил гейт зелёным")
+	require.Contains(t, undated[0], "САМОССЫЛКА")
+	require.Equal(t, 1, undatedCensus.undated)
 }
 
 // buildSynthRepoWithLaneMergedIntoHead — дерево, повторяющее наш порядок работ:
-// ствол `main` стоит на месте, полоса влита в рабочую вершину.
+// ствол `main` стоит на месте, полоса влита в отправляемую голову (`aside`), и
+// рядом лежит коммит, который не влит никуда (`stray`).
 func buildSynthRepoWithLaneMergedIntoHead(t *testing.T, dir string) synthRepo {
 	t.Helper()
 	r := buildSynthRepo(t, dir)
@@ -707,17 +743,27 @@ func buildSynthRepoWithLaneMergedIntoHead(t *testing.T, dir string) synthRepo {
 	env := append(gitenv.Env(),
 		"GIT_AUTHOR_NAME=probe", "GIT_AUTHOR_EMAIL=probe@invalid",
 		"GIT_COMMITTER_NAME=probe", "GIT_COMMITTER_EMAIL=probe@invalid")
-	git := func(args ...string) {
+	git := func(args ...string) string {
 		t.Helper()
 		c := gitenv.Command(dir, args...)
 		c.Env = env
-		if out, err := c.CombinedOutput(); err != nil {
+		out, err := c.CombinedOutput()
+		if err != nil {
 			t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: git %v: %v\n%s", args, err, out)
 		}
+		return strings.TrimSpace(string(out))
 	}
-	// Рабочая вершина отвязывается от ствола и вбирает полосу: `main` остаётся
-	// там, где был, ровно как ствол остаётся до схлопывания.
+	// Коммит, не влитый никуда: ответвлён от ствола и в голову не попадает.
+	git("checkout", "--quiet", "-b", "stray", "main")
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	git("add", "c.txt")
+	git("commit", "--quiet", "-m", "c.txt:x")
+	r.stray = git("rev-parse", "HEAD")
+	// Отправляемая голова отвязывается от ствола и вбирает полосу: `main`
+	// остаётся там, где был, ровно как ствол остаётся до вливания ветки эпика.
 	git("checkout", "--quiet", "--detach", "main")
-	git("merge", "--quiet", "--no-ff", "-m", "слияние полосы в рабочую вершину", r.aside)
+	git("merge", "--quiet", "--no-ff", "-m", "слияние полосы в отправляемую голову", r.aside)
 	return r
 }
