@@ -27,9 +27,7 @@ import (
 
 const EventInviteMailSend = "mail.invite.send"
 const EventRecoveryMailSend = "mail.recovery.send"
-const EventVerificationMailSend = "mail.verification.send"
-const EventEmailChangeMailSend = "mail.email-change.send"
-const EventEmailChangedMailSend = "mail.email-changed.send"
+const EventVerificationMailSend = "mail.verification.send"; const EventEmailChangeMailSend = "mail.email-change.send"; const EventEmailChangedMailSend = "mail.email-changed.send"
 
 func send(c *smtp.Client) error { return nil }
 `
@@ -544,9 +542,7 @@ import (
 
 const EventInviteMailSend = "mail.invite.send"
 const EventRecoveryMailSend = "mail.recovery.send"
-const EventVerificationMailSend = "mail.verification.send"
-const EventEmailChangeMailSend = "mail.email-change.send"
-const EventEmailChangedMailSend = "mail.email-changed.send"
+const EventVerificationMailSend = "mail.verification.send"; const EventEmailChangeMailSend = "mail.email-change.send"; const EventEmailChangedMailSend = "mail.email-changed.send"
 
 func deliver(conn net.Conn, host string) error {
 	c, err := smtp.NewClient(conn, host)
@@ -573,9 +569,7 @@ import (
 
 const EventInviteMailSend = "mail.invite.send"
 const EventRecoveryMailSend = "mail.recovery.send"
-const EventVerificationMailSend = "mail.verification.send"
-const EventEmailChangeMailSend = "mail.email-change.send"
-const EventEmailChangedMailSend = "mail.email-changed.send"
+const EventVerificationMailSend = "mail.verification.send"; const EventEmailChangeMailSend = "mail.email-change.send"; const EventEmailChangedMailSend = "mail.email-changed.send"
 
 func deliver(conn net.Conn, host string) error {
 	c, err := smtp.NewClient(conn, host)
@@ -601,9 +595,7 @@ import (
 
 const EventInviteMailSend = "mail.invite.send"
 const EventRecoveryMailSend = "mail.recovery.send"
-const EventVerificationMailSend = "mail.verification.send"
-const EventEmailChangeMailSend = "mail.email-change.send"
-const EventEmailChangedMailSend = "mail.email-changed.send"
+const EventVerificationMailSend = "mail.verification.send"; const EventEmailChangeMailSend = "mail.email-change.send"; const EventEmailChangedMailSend = "mail.email-changed.send"
 
 func deliver(conn net.Conn, host string) error {
 	c, err := smtp.NewClient(conn, host)
