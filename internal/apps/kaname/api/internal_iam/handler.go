@@ -101,6 +101,10 @@ type Handler struct {
 	registrar resourceRegistrar
 	regGate   relationWriteGate
 
+	// authzRevision — токен версии прав для круга регистрации (NTF-3 Р30). nil →
+	// CurrentAuthzRevision fail-closed Unavailable.
+	authzRevision authzRevisionReader
+
 	// basicCredentials — авторитет о предъявленном базовом секрете (#1142).
 	// nil → глагол fail-closed Unavailable.
 	basicCredentials basicCredentialResolver

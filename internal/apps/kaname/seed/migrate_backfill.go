@@ -382,6 +382,14 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 // roleWriter.ReplaceRuleSelectors row shape (pgx encodes a nil []string as SQL NULL,
 // which violates NOT NULL — normalize to '{}'; a nil match_labels marshals to "null" —
 // normalize to '{}') so the seed and the custom-role path agree byte-for-byte.
+//
+// Разностная запись (приёмка NTF-3, Р30 «Колонка версии прав»; NTF3-183): строка,
+// чьё содержимое уже совпадает с посевом, НЕ переписывается вовсе — условие
+// `WHERE … IS DISTINCT FROM` у `DO UPDATE` оставляет её той же строкой. Версию
+// прав `authz_rev` переписывание тем же содержимым и так не двинуло бы (её ставит
+// триггер по значимым столбцам), но перезапуск службы доступа не должен и
+// трогать строку права, которую он не меняет: ни отметкой `updated_at`, ни
+// новой версией кортежа.
 func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel domain.RuleSelector) error {
 	labelsJSON, err := json.Marshal(sel.MatchLabels)
 	if err != nil {
@@ -395,7 +403,7 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		resourceNames = []string{}
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.role_rule_selectors
+		`INSERT INTO kaname.role_rule_selectors AS cur
 		   (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, now(), now())
 		 ON CONFLICT (role_id, rule_fp) DO UPDATE
@@ -403,7 +411,10 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		        object_types   = EXCLUDED.object_types,
 		        resource_names = EXCLUDED.resource_names,
 		        match_labels   = EXCLUDED.match_labels,
-		        updated_at     = now()`,
+		        updated_at     = now()
+		  WHERE (cur.arm, cur.object_types, cur.resource_names, cur.match_labels)
+		        IS DISTINCT FROM
+		        (EXCLUDED.arm, EXCLUDED.object_types, EXCLUDED.resource_names, EXCLUDED.match_labels)`,
 		roleID, sel.RuleFP, selectorArmText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 	); err != nil {
 		return fmt.Errorf("sync system role selectors: upsert selector %s/%s: %w", roleID, sel.RuleFP, err)
