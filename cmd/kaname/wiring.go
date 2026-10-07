@@ -52,6 +52,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -246,6 +247,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	metricsReg *metrics.Registry,
 	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kanameRepo is built and passed in by main()
+
+	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
+	// на все глаголы этого корня (kaname#589): ForceLogout, отзыв-всех, выдача
+	// удостоверения человека. Строится на ведущем пуле.
+	sharedClock, sharedClockErr := buildSharedClock(pool)
+	if sharedClockErr != nil {
+		log.Fatalf("shared clock: %v", sharedClockErr)
+	}
 
 	// relationStore — ТО значение, которое получают собственные стражи iam, и
 	// причина, по которой страж не может спросить «мимо»: другого значения для него
@@ -768,6 +777,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// снималась у него (kaname#313); поставщика больше нет (kaname#363), и
 		// сессия входа человека — всегда наша строка.
 		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool)).
+		// Момент отсечки ForceLogout — общим источником (kaname#589).
+		WithCutoffClock(sharedClock).
 		// ForceLogout returns an Operation — the row it names is persisted here,
 		// before the cutoff is written and terminally after it, so the id the
 		// admin gets back is queryable and the force-logout shows up in the
@@ -797,7 +808,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// listener's own gates narrow the calling MODULE and never read `user_id`;
 	// unwired, the RPC serves nobody but the caller themselves.
 	sessionRevocationsHandler := sessionrevapp.NewHandler(
-		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo),
+		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo, sharedClock),
 		sessionRevAdapter,
 	).WithRelationStore(relationStore).
 		// SessionCutoffOf — отсечка субъекта на полосу БРАУЗЕРНОЙ сессии края.
@@ -810,7 +821,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя, наша чеканка) ──
-	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
+	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, sharedClock, logger)
 
 	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
 	// Чеканит НАШ подписант: дороги к внешнему поставщику на этом пути нет ни
@@ -1142,7 +1153,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 // намерений здесь нет: компенсировать нечего — единственный след выдачи это своя
 // строка, и она либо закоммичена, либо откачена.
 func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
-	logger *slog.Logger) *usertokensapp.Handler {
+	sharedClock revocationpolicy.Clock, logger *slog.Logger) *usertokensapp.Handler {
 	userClientRepo := kanamepg.NewUserOAuthClientRepo(pool)
 
 	// Durable audit_outbox emitter — эмитит iam.user_token.{issued,revoked} строки
@@ -1150,7 +1161,9 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	// key material.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
-	issueUC := usertokensapp.NewIssueUserTokenUseCase(userClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
+	// Момент выдачи — тем же общим источником, что отсечка (kaname#589).
+	issueUC := usertokensapp.NewIssueUserTokenUseCase(userClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo).
+		WithIssuanceClock(sharedClock)
 	// Есть ли у посадки токен-эндпоинт — ТО ЖЕ условие, что у сборки ключей
 	// служебных учёток (`saKeyIssuanceIsOurs`), а не второе чтение ручки:
 	// ключевую пару человека обменивает тот же эндпоинт. Без него она не

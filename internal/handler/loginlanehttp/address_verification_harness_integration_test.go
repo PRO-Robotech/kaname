@@ -58,6 +58,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -221,14 +222,16 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       pgRegistrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Letter: pace,
 		Sources: sessions, SourcePace: humansession.SourcePace{Limit: perSource, Window: time.Hour},
 		Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
 		Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: clock.Now, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})

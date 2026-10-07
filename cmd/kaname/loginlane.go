@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -129,6 +130,9 @@ type loginLane struct {
 	// letterWindow — окно писем подтверждения адреса (kaname#456, Р9): порог
 	// уборки строк кодов, по которым считается предел писем.
 	letterWindow time.Duration
+	// clock — общий источник моментов, сравниваемых с отсечкой (kaname#589):
+	// им же отсечку ставит сброс второго фактора.
+	clock revocationpolicy.Clock
 }
 
 // secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
@@ -179,7 +183,8 @@ func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo
 	if !l.wired() {
 		return nil
 	}
-	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
+	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions}).
+		WithCutoffClock(l.clock)
 }
 
 // secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
@@ -508,10 +513,17 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: totp verifier: %w", err)
 	}
+	// Моменты, сравниваемые с отсечкой (сессия, отсечка), — общим источником на
+	// все реплики (kaname#589); часы процесса остаются полосе для окон частоты
+	// и сроков, с отсечкой не сравниваемых.
+	sharedClock, err := buildSharedClock(pool)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
-		Envelope: envelope, TOTP: totp, Sets: verifier,
+		Envelope: envelope, TOTP: totp, Sets: verifier, CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -561,6 +573,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
 		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
+		CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -579,7 +592,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	}
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
 		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
-		Observer: rec, Now: time.Now, Logger: logger,
+		Observer: rec, Now: time.Now, Logger: logger, CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -667,6 +680,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		Binding: cfg.AuthN.AccessKeys.Binding(), ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
 		Limits:           limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+		CutoffClock: sharedClock,
 	}
 	akBeginUC, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
 	if err != nil {
@@ -701,6 +715,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
 		loginChallenges: loginChallenges,
 		verifier:        verifier, letterWindow: login.VerificationResendWindow,
+		clock: sharedClock,
 	}, nil
 }
 

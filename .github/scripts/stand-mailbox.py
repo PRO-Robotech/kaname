@@ -34,7 +34,19 @@
     чистка отчёта (`.github/scripts/redact-newman-report.py`) не режет. Под
     именем `codes` значение срезается ИМЕНЕМ, поэтому набор читает узел только
     этой дверью. Строку-заголовок называет вызывающий: формы писем службы узел
-    не знает.
+    не знает;
+  · ЗАДЕРЖКА ПРИЁМА — `POST /hold` и `POST /release`, состояние — `GET /hold`:
+    `{"hold": <bool>, "refusedWhileHeld": <число>}`. Пока приём задержан, узел
+    на каждое соединение отвечает ВРЕМЕННЫМ отказом приветствия
+    (`421 4.3.2 …`) и закрывает его, а число таких отказов растёт. Это «Дано»
+    позиции Ф5-14 приёмки восстановления: письма НЕ покидают кластер, и
+    недоставленное обязано быть видно наблюдаемостью службы; после `release`
+    доставка возвращается. Отказ — именно временный (4xx): постоянный (5xx)
+    отправитель службы читает настройкой и отравляет строку
+    (`internal/clients/invite_mail.go`, `classifySMTPErr`), и строка ушла бы
+    из очереди без доставки — проба увидела бы «возраст вернулся к нулю» там,
+    где письмо потеряно. Число отказов — положительный контроль: служба
+    ПЫТАЛАСЬ сдать письмо и получила отказ, а не молчала.
 
   Удостоверения у узла нет, и отправителю службы его не задают: подделывать
   чужое письмо на стенде некому, а половина настройки удостоверения была бы
@@ -50,7 +62,10 @@
 адресату в порядке приёма, строка с удвоенной точкой разворачивается, тело в 8
 битах доезжает дословно; ЗАКОННЫЙ БЛИЗНЕЦ — письмо другому адресату в чтение
 этого адреса не попадает, а неизвестному адресату перечень пуст; открытый текст
-на порту узла письма не сдаёт — TLS обязателен.
+на порту узла письма не сдаёт — TLS обязателен; задержанный приём отвечает
+временным отказом 4xx и письма не принимает, счёт отказов растёт, а после
+снятия задержки то же письмо принимается (близнец — один изменённый факт,
+задержка); двери чтения задержка не трогает.
 """
 
 from __future__ import annotations
@@ -83,12 +98,35 @@ BODY_LIMIT = 1 << 20
 IDLE_TIMEOUT_S = 60
 
 
+# Ответ приветствия на задержанном приёме. Код — ВРЕМЕННЫЙ (4xx): постоянный
+# отправитель службы читает настройкой и отравляет строку очереди.
+HOLD_REPLY = "421 4.3.2 stand mailbox is on hold: try again later"
+
+
 class Store:
-    """Принятые письма в памяти, по порядку приёма."""
+    """Принятые письма в памяти, по порядку приёма, и задержка приёма."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._msgs: list[dict] = []
+        self._held = False
+        self._refused = 0
+
+    def set_hold(self, held: bool) -> dict:
+        with self._lock:
+            self._held = held
+            return {"hold": self._held, "refusedWhileHeld": self._refused}
+
+    def hold_state(self) -> dict:
+        with self._lock:
+            return {"hold": self._held, "refusedWhileHeld": self._refused}
+
+    def refuse_if_held(self) -> bool:
+        """True — приём задержан, и отказ сосчитан."""
+        with self._lock:
+            if self._held:
+                self._refused += 1
+            return self._held
 
     def add(self, sender: str, rcpts: list[str], data: str) -> None:
         now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -161,6 +199,9 @@ def make_smtp_handler(store: Store, ctx: ssl.SSLContext):
                 return
             sender, rcpts = "", []
             try:
+                if store.refuse_if_held():
+                    self._say(HOLD_REPLY)
+                    return
                 self._say("220 stand-mailbox ESMTP")
                 while True:
                     raw = self.rfile.readline(LINE_LIMIT + 2)
@@ -261,6 +302,24 @@ def make_http_handler(store: Store):
                     return
                 self._send(200, {"codes": [code_after(m["data"], after) for m in store.to(to)]})
                 return
+            if u.path == "/hold":
+                self._send(200, store.hold_state())
+                return
+            self._send(404, {"message": "not found"})
+
+        def do_POST(self) -> None:  # noqa: N802 — имя задаёт http.server
+            path = urllib.parse.urlsplit(self.path).path
+            # У глаголов задержки тела нет; присланная длина вычитывается, чтобы
+            # соединение не повисло на непрочитанном.
+            length = int(self.headers.get("Content-Length") or 0)
+            if 0 < length <= LINE_LIMIT:
+                self.rfile.read(length)
+            if path == "/hold":
+                self._send(200, store.set_hold(True))
+                return
+            if path == "/release":
+                self._send(200, store.set_hold(False))
+                return
             self._send(404, {"message": "not found"})
 
     return Handler
@@ -342,6 +401,16 @@ def _codes(port: int, to: str, after: str) -> tuple[int, object]:
         return e.code, json.loads(e.read().decode("utf-8")).get("message")
 
 
+def _hold(port: int, verb: str) -> tuple[int, dict]:
+    import urllib.request
+    method = "GET" if verb == "state" else "POST"
+    path = "/hold" if verb in ("state", "hold") else "/release"
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                 data=b"" if method == "POST" else None, method=method)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+
 def self_test() -> int:
     import smtplib
 
@@ -408,6 +477,45 @@ def self_test() -> int:
             plain = "отказано"
         _c("открытый текст на порту узла приветствия не получает — TLS обязателен",
            plain == "отказано", plain)
+
+        # ЗАДЕРЖКА ПРИЁМА: один изменённый факт против законного приёма выше.
+        st0 = _hold(hport, "state")
+        _c("задержки нет до первого вызова, отказов ноль",
+           st0 == (200, {"hold": False, "refusedWhileHeld": 0}), f"{st0}")
+        held = _hold(hport, "hold")
+        _c("POST /hold включает задержку",
+           held == (200, {"hold": True, "refusedWhileHeld": 0}), f"{held}")
+        before = len(_read(hport, "h@stand.invalid"))
+        refusal = ""
+        try:
+            with smtplib.SMTP_SSL("localhost", sport, context=client_ctx, timeout=10) as s:
+                s.sendmail("kaname@kaname.local", ["h@stand.invalid"], b"Subject: held\r\n\r\nH\r\n")
+            refusal = "принято"
+        except smtplib.SMTPConnectError as e:
+            refusal = f"{e.smtp_code}"
+        except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
+            refusal = f"{type(e).__name__}: {e}"
+        _c("задержанный приём отвечает ВРЕМЕННЫМ отказом приветствия 421, а не постоянным 5xx",
+           refusal == "421", refusal)
+        _c("задержанный приём письма не принимает",
+           len(_read(hport, "h@stand.invalid")) == before, f"{_read(hport, 'h@stand.invalid')}")
+        st1 = _hold(hport, "state")
+        _c("отказ на задержке сосчитан — отправитель пытался сдать, а не молчал",
+           st1 == (200, {"hold": True, "refusedWhileHeld": 1}), f"{st1}")
+        _c("двери чтения задержка не трогает",
+           _codes(hport, "a@stand.invalid", "Код подтверждения:") == (200, ["ABCDE-FGHIJ", None]), "")
+        rel = _hold(hport, "release")
+        _c("POST /release снимает задержку, счёт отказов сохранён",
+           rel == (200, {"hold": False, "refusedWhileHeld": 1}), f"{rel}")
+        after = "не принято"
+        try:
+            with smtplib.SMTP_SSL("localhost", sport, context=client_ctx, timeout=10) as s:
+                s.sendmail("kaname@kaname.local", ["h@stand.invalid"], b"Subject: held\r\n\r\nH\r\n")
+            after = "принято"
+        except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
+            after = f"{type(e).__name__}: {e}"
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: то же письмо после снятия задержки принимается",
+           after == "принято" and len(_read(hport, "h@stand.invalid")) == before + 1, after)
         smtp.shutdown()
         http.shutdown()
     print()
@@ -417,7 +525,8 @@ def self_test() -> int:
     print("ДОКАЗАНО: узел принимает письма только поверх TLS, разворачивает удвоенную "
           "точку, тело в 8 битах доезжает дословно, чтение отдаёт письма адресата по "
           "порядку и не отдаёт чужих, а чтение кодов — код после названной строки по "
-          "письму на элемент.")
+          "письму на элемент; задержанный приём отвечает временным отказом, считает "
+          "его и после снятия принимает то же письмо.")
     return 0
 
 

@@ -14,8 +14,10 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // issueTokenNamed выпускает токен с заданным именем и возвращает строку,
@@ -24,7 +26,7 @@ func issueTokenNamed(t *testing.T, name string) domain.UserOAuthClient {
 	t.Helper()
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -84,7 +86,7 @@ func TestIssueUserToken_MalformedName_Rejected(t *testing.T) {
 		t.Run(tc.label, func(t *testing.T) {
 			repo := &stubUserClientRepo{}
 			ops := &stubOpsRepo{}
-			uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+			uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 			_, err := uc.Execute(context.Background(), IssueInput{
 				UserID:          "usr00000000000000001",
 				CreatedByUserID: "usr00000000000000001",

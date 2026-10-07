@@ -49,6 +49,10 @@ func TestUserTokenIssuance_FollowsTheExchangeEndpoint(t *testing.T) {
 	call := operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: user})
 	req := &iamv1.IssueUserTokenRequest{UserId: user, CredentialKind: iamv1.CredentialKind_CREDENTIAL_KIND_KEYPAIR}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	clock, err := buildSharedClock(pool)
+	if err != nil {
+		t.Fatalf("общий источник моментов не построен: %v", err)
+	}
 
 	for _, tc := range []struct {
 		name    string
@@ -64,7 +68,7 @@ func TestUserTokenIssuance_FollowsTheExchangeEndpoint(t *testing.T) {
 			if got := saKeyIssuanceIsOurs(cfg); got != tc.enabled {
 				t.Fatalf("предпосылка: saKeyIssuanceIsOurs = %v при ручке %v", got, tc.enabled)
 			}
-			h := buildUserTokensHandler(pool, nil, cfg, logger)
+			h := buildUserTokensHandler(pool, nil, cfg, clock, logger)
 			_, err := h.Issue(call, req)
 			if got := grpcstatus.Code(err); got != tc.want {
 				t.Fatalf("исход выдачи ключевой пары человека %v (%v), ожидался %v", got, err, tc.want)

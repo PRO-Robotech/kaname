@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const revokeTestAdminID = "usr0000000000000admin"
@@ -57,7 +58,7 @@ func newRevokeHandler(t *testing.T) (*sessionrev.Handler, *pgxpool.Pool) {
 
 	adapter := kanamepg.NewSessionRevocationsAdapter(pool)
 	h := sessionrev.NewHandler(
-		sessionrev.NewRevokeUseCase(adapter, operations.NewRepo(pool, "kaname")),
+		sessionrev.NewRevokeUseCase(adapter, operations.NewRepo(pool, "kaname"), momentclock.Func(time.Now)),
 		adapter,
 	)
 	return h, pool

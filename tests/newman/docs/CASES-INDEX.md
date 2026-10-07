@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 778
+Всего кейсов: 782
 
 ## Перепись по модулям
 
@@ -66,8 +66,8 @@
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
-| `cases/kaname-login-lane.py` | 22 |
-| `cases/kaname-recovery-lane.py` | 10 |
+| `cases/kaname-login-lane.py` | 23 |
+| `cases/kaname-recovery-lane.py` | 13 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 7 |
 | `cases/kaname-email-change.py` | 3 |
@@ -963,7 +963,7 @@
 - `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
 - `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
-## `cases/kaname-login-lane.py` — 22 кейсов
+## `cases/kaname-login-lane.py` — 23 кейсов
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
 > формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
@@ -972,8 +972,10 @@
 > создано» помеченным утверждением — не в зелёное и не в красное. Гоняет набор
 > задание `chart-own` процесса `e2e-newman.yml`: стенд чарта посадки `own` с
 > листом края и посевом человека (`stand-chart.sh`, `seed_login_lane.py`), а
-> «Дано» PWV-01/02 — посевом хранимых значений (`seed_stored_value.py`);
-> провенанс и числа замеров — `docs/RESULTS.md`, разделы о полосе входа паролем.
+> «Дано» PWV-01/02 — посевом хранимых значений (`seed_stored_value.py`), «Дано»
+> FP-12 (личность без пароля с ключом) — посевом `seed_key_person.py` той же
+> подкоманды; провенанс и числа замеров — `docs/RESULTS.md`, разделы о полосе
+> входа паролем.
 
 - `IAM-LOGINLANE-OK-CSRF-ISSUED`
 - `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
@@ -997,8 +999,9 @@
 - `IAM-LOGINLANE-OK-NOT-COUNTED`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-A`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
+- `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 10 кейсов
+## `cases/kaname-recovery-lane.py` — 13 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1009,6 +1012,10 @@
 > прогонщика, что набор входа, после него. Блокировку личности (Ф5-17, Ф5-25)
 > зовёт надзор облака стенда — своего человека с `system_admin` и вторым
 > фактором кладёт посев церемонии (kaname#468); его предъявитель кейс куёт сам.
+> Окна частоты запроса кода (Ф5-26, Ф5-27) и возраст неотправленного письма
+> (Ф5-14) кейсы читают клетками слушателя метрик процесса (`standMetricsUrl`);
+> величины окон и адресата с заполненным окном приглашения кладёт посев
+> `seed_mail_pace.py`, задержку приёма — дверь `POST /hold` приёмника писем.
 
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
@@ -1020,6 +1027,9 @@
 - `IAM-RECOVERY-OK-ENDS-EVERY-SESSION`
 - `IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED`
 - `IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN`
+- `IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE`
+- `IAM-RECOVERY-NEG-PACED-PER-RECIPIENT`
+- `IAM-RECOVERY-NEG-PACED-PER-SOURCE`
 
 ## `cases/kaname-registration.py` — 2 кейса
 
