@@ -255,7 +255,8 @@ func (r *HumanSessionRepo) ChargeSource(ctx context.Context, lane humansession.S
 var _ humansession.SourcePacer = (*HumanSessionRepo)(nil)
 
 // sweepExpiredCodeLettersSQL — строки очереди писем, чей КОД истёк: письмо
-// восстановления и письмо подтверждения несут открытое значение кода до сдачи
+// восстановления, письмо подтверждения и письмо с кодом смены адреса
+// (kaname#635) несут открытое значение кода до сдачи
 // узлу, и строка, код которой уже ничего не подтверждает и ничего не
 // восстанавливает, держит предъявителя без предмета. Снимается и
 // недоставленная: отравленная строка отметки доставки не получит никогда, а
@@ -264,7 +265,7 @@ const sweepExpiredCodeLettersSQL = `
 	DELETE FROM invite_mail_outbox
 	 WHERE ctid IN (
 	       SELECT ctid FROM invite_mail_outbox
-	        WHERE event_type IN ('mail.recovery.send', 'mail.verification.send')
+	        WHERE event_type IN ('mail.recovery.send', 'mail.verification.send', 'mail.email-change.send')
 	          AND created_at + make_interval(mins => COALESCE((payload->>'code_valid_minutes')::int, 0))
 	              <= now() - $1::interval
 	        LIMIT $2)`

@@ -79,6 +79,19 @@ func TestLanePathCount_InjectionBothWays(t *testing.T) {
 		require.Lenf(t, got, 1, "устаревшее число формы %q находится: %v", f, got)
 		require.Containsf(t, got[0], "a.mdx:2 называет «"+staleWords[i]+"»", "находка называет координату и слово: %s", got[0])
 	}
+	// Составное числительное (kaname#634, 21 путь) читается ДВУМЯ словами:
+	// законный близнец молчит каждой падежной формой, а «двадцать» без «один» —
+	// устаревшее число и находится.
+	for _, f := range []string{"Путей у полосы **двадцать один**", "Что из двадцати одного пути ретранслирует край",
+		"Служба обслуживает все двадцать один (`loginlanehttp.Paths()`)."} {
+		require.Emptyf(t, auditLanePathCount(map[string]string{"a.mdx": f}, 21, &idFactsCensus{}), "законный близнец %q молчит", f)
+	}
+	gotCompound := auditLanePathCount(map[string]string{"a.mdx": "у полосы двадцать один путь\nу полосы двадцать путей"}, 21, &idFactsCensus{})
+	require.Len(t, gotCompound, 1, "«двадцать» при 21 пути — находка: %v", gotCompound)
+	require.Contains(t, gotCompound[0], "a.mdx:2 называет «двадцать»")
+	require.NotEmpty(t, auditLanePathCount(map[string]string{"a.mdx": "у полосы двадцать один путь"}, 20, &idFactsCensus{}),
+		"«двадцать один» при 20 путях — находка, а не «двадцать» плюс лишнее слово")
+
 	// Числительное вдали от якоря — не о путях.
 	far := map[string]string{"a.mdx": "у полосы восемнадцать путей. Срок признака формы — пятнадцать минут, сессия живёт дольше"}
 	require.Empty(t, auditLanePathCount(far, 18, &idFactsCensus{}), "числительное вне окна якоря молчит")

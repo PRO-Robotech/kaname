@@ -250,12 +250,15 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, kind mailWindowKin
 }
 
 // mailWindowKind — вид письма в ключе окна частоты: словарь ограничения
-// `invite_mail_windows_kind_check` (миграция `20260927190000`).
+// `invite_mail_windows_kind_check` (миграции `20260927190000`, `20261007150000`).
 type mailWindowKind string
 
 const (
 	mailWindowInvite   mailWindowKind = "invite"
 	mailWindowRecovery mailWindowKind = "recovery"
+	// mailWindowEmailChange — письмо с кодом смены адреса на новый адрес
+	// (kaname#635, Р6; миграция `20261007150000`).
+	mailWindowEmailChange mailWindowKind = "email-change"
 )
 
 // AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.

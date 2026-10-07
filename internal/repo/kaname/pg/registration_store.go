@@ -74,6 +74,26 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 	if err != nil {
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
+	return holdPersonOf(ctx, w, userID)
+}
+
+// EmailChangeWriter — транзакция глаголов смены адреса (kaname#635, Р6, Р8):
+// тот же состав и тот же первый оператор, что у подтверждения адреса. Исход
+// смены снимает прочие сессии человека, а запрос смены судит темп человека, и
+// одновременные обращения одного человека сериализованы замком строки
+// человека, взятым первым.
+func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
+	w, err := beginHumanSessionWriter(ctx, s.pool)
+	if err != nil {
+		return nil, mapErr(err, "EmailChange.Writer", "")
+	}
+	return holdPersonOf(ctx, w, userID)
+}
+
+// holdPersonOf — ПЕРВЫМ оператором открытой транзакции строка человека взята
+// замком писателя нескольких сессий; писатель сессии и писатель зеркала — над
+// той же `pgx.Tx`. Отказ замка откатывает транзакцию.
+func holdPersonOf(ctx context.Context, w *humanSessionWriter, userID domain.UserID) (*RegistrationWriter, error) {
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		_ = w.tx.Rollback(ctx)
 		return nil, err

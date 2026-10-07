@@ -15,7 +15,11 @@
 // `docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md`, Р4):
 // заведение, подтверждение, снятие, перечеканка запасных кодов, чтение
 // состояния и церемония повышения внутри сессии; форма входа при этом несёт
-// необязательное поле `secondFactor`.
+// необязательное поле `secondFactor`. Три глагола своих сессий (задача
+// PRO-Robotech/kaname#634; приёмка
+// `docs/engineering/acceptance/own-sessions-are-listed-and-ended-by-their-owner.md`,
+// Р1…Р10): перечень своих живых сессий, выход из выбранной и из всех, кроме
+// текущей, — субъект из носителя, ответ синхронный.
 //
 // # Кто вправе звать — РОВНО край, и это судится здесь, до тела запроса
 //
@@ -100,9 +104,18 @@ const (
 	// (kaname#213, приёмка A7 Р1): подпуть семейства пароля.
 	// #nosec G101 -- это ПУТЬ глагола, а не значение пароля.
 	PathPasswordEnroll = "/iam/v1/auth/password/enroll"
+	// Смена адреса почты (kaname#635, приёмка email-change Р1): запрос смены
+	// и предъявление кода с нового адреса — два глагола под сессией человека.
+	PathEmailChange        = "/iam/v1/auth/email-change"
+	PathEmailChangeConfirm = "/iam/v1/auth/email-change/confirm"
+	// Свои сессии (kaname#634, Р1): перечень на корне семейства, два снимающих
+	// глагола подпутями.
+	PathSessions          = "/iam/v1/auth/sessions"
+	PathSessionsEnd       = "/iam/v1/auth/sessions/end"
+	PathSessionsEndOthers = "/iam/v1/auth/sessions/end-others"
 )
 
-// Paths — восемнадцать глаголов полосы. Регистрации в New объявляют то же
+// Paths — двадцать три глагола полосы. Регистрации в New объявляют то же
 // множество второй раз; равенство двух объявлений держит проба
 // TestLaneServesExactlyItsDeclaredPaths (kaname#280): путь только здесь — 404
 // слушателя, путь только в New — обслуживается мимо перечня. Край платформы
@@ -113,7 +126,8 @@ func Paths() []string {
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
 		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
-		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll,
+		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll, PathEmailChange, PathEmailChangeConfirm,
+		PathSessions, PathSessionsEnd, PathSessionsEndOthers,
 	}
 }
 
@@ -154,6 +168,15 @@ var pathPositions = map[string]PathPosition{
 	// Заведение пароля — правка своих данных: в положении подтверждения адреса
 	// отказ (A7 Р2, F6b Р2).
 	PathPasswordEnroll: PathRefusedInVerification,
+	// Смена адреса — правка своих данных: в положении подтверждения отказ
+	// (приёмка email-change Р2); опечатку при регистрации путь не правит.
+	PathEmailChange:        PathRefusedInVerification,
+	PathEmailChangeConfirm: PathRefusedInVerification,
+	// Свои сессии (kaname#634, Р8): сессия без отметки подтверждения перечня не
+	// видит и снимать не может — отказ положения.
+	PathSessions:          PathRefusedInVerification,
+	PathSessionsEnd:       PathRefusedInVerification,
+	PathSessionsEndOthers: PathRefusedInVerification,
 }
 
 // PathPositions — объявление Р2 копией.
@@ -172,9 +195,14 @@ const (
 	CookieForm    = "kaname_form"
 )
 
-// HeaderForwardedFor — единственный заголовок, который слушатель читает у
-// допущенного вызывающего: ОДИН адрес, выведенный краем (Р2, Р10).
+// HeaderForwardedFor — заголовок адреса источника у допущенного вызывающего:
+// ОДИН адрес, выведенный краем (Р2, Р10).
 const HeaderForwardedFor = "X-Forwarded-For"
+
+// HeaderUserAgent — описание клиента, как его доставил край (kaname#634, Р3).
+// Читается ровно выдающими глаголами — его значение идёт только в запись
+// выдаваемой сессии, — и служба его не разбирает и не толкует.
+const HeaderUserAgent = "User-Agent"
 
 // maxBody — потолок тела формы; форма из трёх строк в него помещается с
 // запасом, а тело, которое в него не помещается, формой не является.
@@ -216,6 +244,14 @@ type Lane interface {
 	AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error)
 	// EnrollPassword — заведение первого пароля из живой сессии (kaname#213).
 	EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error)
+	// Смена адреса почты (kaname#635, Р1): запрос смены и предъявление кода.
+	RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error)
+	ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error)
+	// Свои сессии (kaname#634): перечень, выход из выбранной и из всех, кроме
+	// текущей.
+	ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error)
+	EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error)
+	EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -279,6 +315,11 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
 	h.mux.HandleFunc(PathAccessKeyLogin, h.method(http.MethodPost, h.accessKeyLogin))
 	h.mux.HandleFunc(PathPasswordEnroll, h.method(http.MethodPost, h.enrollPassword))
+	h.mux.HandleFunc(PathEmailChange, h.method(http.MethodPost, h.requestEmailChange))
+	h.mux.HandleFunc(PathEmailChangeConfirm, h.method(http.MethodPost, h.confirmEmailChange))
+	h.mux.HandleFunc(PathSessions, h.method(http.MethodGet, h.ownSessions))
+	h.mux.HandleFunc(PathSessionsEnd, h.method(http.MethodPost, h.endOwnSession))
+	h.mux.HandleFunc(PathSessionsEndOthers, h.method(http.MethodPost, h.endOtherOwnSessions))
 	return h, nil
 }
 
@@ -393,6 +434,19 @@ type verifyEmailConfirmForm struct {
 	CSRFToken string `json:"csrfToken"`
 }
 
+// emailChangeForm — запрос смены адреса (приёмка email-change Р1): новый адрес
+// и признак. Набор закрыт: поле `email` — отказ разбора с его именем.
+type emailChangeForm struct {
+	NewEmail  string `json:"newEmail"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// emailChangeConfirmForm — предъявление кода смены.
+type emailChangeConfirmForm struct {
+	Code      string `json:"code"`
+	CSRFToken string `json:"csrfToken"`
+}
+
 // recoveryCompleteForm — предъявление: адрес, код и новый пароль. Текущего
 // пароля здесь НЕТ by construction — код и есть доказательство (Ф5 Р1).
 type recoveryCompleteForm struct {
@@ -400,6 +454,17 @@ type recoveryCompleteForm struct {
 	Code        string `json:"code"`
 	NewPassword string `json:"newPassword"`
 	CSRFToken   string `json:"csrfToken"`
+}
+
+// endOwnSessionForm — выход из выбранной (Р1): запись и признак.
+type endOwnSessionForm struct {
+	SessionID string `json:"sessionId"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// endOtherOwnSessionsForm — выход из всех, кроме текущей (Р1): только признак.
+type endOtherOwnSessionsForm struct {
+	CSRFToken string `json:"csrfToken"`
 }
 
 // decodeForm — строгий разбор: неизвестное поле называется, а не глотается
@@ -540,7 +605,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
 	}
-	in := humansession.LoginInput{Email: form.Email, Password: form.Password, Source: h.source(r)}
+	in := humansession.LoginInput{Email: form.Email, Password: form.Password, Source: h.source(r), Client: h.client(r)}
 	if len(form.SecondFactor) > 0 && string(form.SecondFactor) != "null" {
 		var nested secondFactorField
 		if err := decodeNested("secondFactor", form.SecondFactor, &nested); err != nil {
@@ -589,7 +654,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.lane.Register(r.Context(), registration.Input{
-		Email: form.Email, Password: form.Password, Source: h.source(r),
+		Email: form.Email, Password: form.Password, Source: h.source(r), Client: h.client(r),
 	})
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
@@ -733,6 +798,7 @@ func (h *Handler) completeRecovery(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.lane.CompleteRecovery(r.Context(), humansession.CompleteRecoveryInput{
 		Email: form.Email, Code: form.Code, NewPassword: form.NewPassword, Source: h.source(r),
+		Client: h.client(r),
 	})
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
@@ -1005,10 +1071,177 @@ func (h *Handler) confirmEmailVerification(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
 }
 
+// --- смена адреса почты (kaname#635, приёмка email-change Р1, Р2) ---
+
+// requestEmailChange — запрос смены: форма → признак своего вида → положение
+// подтверждения → глагол. Успех — `200 {}` без печений; `Retry-After` называет
+// промежуток до следующего разрешённого запроса. Ответ на занятый адрес
+// побайтово тот же, что на свободный (Р4).
+func (h *Handler) requestEmailChange(w http.ResponseWriter, r *http.Request) {
+	var form emailChangeForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormEmailChange, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathEmailChange, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.RequestEmailChange(r.Context(), humansession.RequestEmailChangeInput{
+		Bearer: h.bearer(r), NewEmail: form.NewEmail,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(out.NextAllowedIn))))
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// confirmEmailChange — предъявление кода смены: успех — тело `session` той же
+// формы, что у `verify-email/confirm`, и НОВЫЙ носитель той же сессии;
+// контекст формы прежний.
+func (h *Handler) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
+	var form emailChangeConfirmForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormEmailChangeConfirm, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathEmailChangeConfirm, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.ConfirmEmailChange(r.Context(), humansession.ConfirmEmailChangeInput{
+		Bearer: h.bearer(r), Code: form.Code,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
+}
+
 // source — адрес источника: значение заголовка допущенного вызывающего как
 // есть, цепочка не разбирается (Р10).
 func (h *Handler) source(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get(HeaderForwardedFor))
+}
+
+// client — описание клиента выдающего запроса (kaname#634, Р3): значение
+// заголовка, как его доставил край, приведённое типом домена (замена байтов вне
+// UTF-8, предел 512 рун). Нет заголовка либо он пуст — описания нет. Приведение
+// не отказывает и исхода глагола не меняет.
+func (h *Handler) client(r *http.Request) domain.ClientDescription {
+	return domain.NewClientDescription(r.Header.Get(HeaderUserAgent))
+}
+
+// --- свои сессии (kaname#634) ---
+
+// ownSessionsQuery — параметры перечня из строки запроса (Р1, Р4): набор
+// закрыт — лишний параметр называется отказом; повтор параметра — отказ, а не
+// выбор одного из значений. Судится ДО любого чтения хранилища.
+func ownSessionsQuery(r *http.Request) (humansession.OwnSessionsPage, error) {
+	q := r.URL.Query()
+	names := make([]string, 0, len(q))
+	for name := range q {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		switch name {
+		case humansession.OwnSessionsPageSizeParam, humansession.OwnSessionsPageTokenParam:
+			if len(q[name]) != 1 {
+				return humansession.OwnSessionsPage{}, &humansession.FieldError{Field: name, Rule: "must be given once"}
+			}
+		default:
+			return humansession.OwnSessionsPage{}, &humansession.FieldError{Field: name, Rule: "unknown field"}
+		}
+	}
+	_, sizeGiven := q[humansession.OwnSessionsPageSizeParam]
+	return humansession.ParseOwnSessionsPage(q.Get(humansession.OwnSessionsPageSizeParam), sizeGiven,
+		q.Get(humansession.OwnSessionsPageTokenParam))
+}
+
+// ownSessions — перечень своих живых сессий (Р4): параметры → положение →
+// глагол. Признака не требует (чтение, как состояние второго фактора).
+func (h *Handler) ownSessions(w http.ResponseWriter, r *http.Request) {
+	page, err := ownSessionsQuery(r)
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.admitted(w, r, PathSessions, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.ListOwnSessions(r.Context(), humansession.ListOwnSessionsInput{Bearer: h.bearer(r), Page: page})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	items := make([]map[string]any, 0, len(out.Sessions))
+	for _, s := range out.Sessions {
+		items = append(items, ownSessionJSON(s))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": items, "nextPageToken": out.NextPageToken})
+}
+
+// endOwnSession — выход из выбранной (Р5): форма → признак `session-end` →
+// поле `sessionId` и его форма → положение → глагол. Ответ без Set-Cookie:
+// носитель текущей записи не перевыпускается (Р6).
+func (h *Handler) endOwnSession(w http.ResponseWriter, r *http.Request) {
+	var form endOwnSessionForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSessionEnd, form.CSRFToken) {
+		return
+	}
+	if form.SessionID == "" {
+		h.writeError(w, humansession.FieldRequired("sessionId"), humansession.TextRequestNotPerformed)
+		return
+	}
+	id, ok := domain.ParseHumanSessionID(form.SessionID)
+	if !ok {
+		h.writeError(w, &humansession.FieldError{Field: "sessionId", Rule: domain.TextHumanSessionIDRule},
+			humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.admitted(w, r, PathSessionsEnd, humansession.TextRequestNotPerformed) {
+		return
+	}
+	if _, err := h.lane.EndOwnSession(r.Context(), humansession.EndOwnSessionInput{Bearer: h.bearer(r), SessionID: id}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ended": true})
+}
+
+// endOtherOwnSessions — выход из всех, кроме текущей (Р7): форма → признак →
+// положение → глагол; ответ — число снятых, без Set-Cookie.
+func (h *Handler) endOtherOwnSessions(w http.ResponseWriter, r *http.Request) {
+	var form endOtherOwnSessionsForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSessionEnd, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathSessionsEndOthers, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.EndOtherOwnSessions(r.Context(), humansession.EndOtherOwnSessionsInput{Bearer: h.bearer(r)})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ended": out.Ended})
 }
 
 // --- печенья (Р3) ---
@@ -1052,6 +1285,23 @@ func assuranceJSON(a humansession.AssuranceView) map[string]any {
 		missing = []string{}
 	}
 	return map[string]any{"level": a.Level, "level2Reachable": a.Level2Reachable, "missingForLevel2": missing}
+}
+
+// ownSessionJSON — элемент перечня своих сессий (Р4): набор ключей закрыт;
+// `userAgent` — только у записи, чей выдающий запрос назвал клиента (Р3):
+// отсутствие — отсутствие ключа, а не пустая строка. Моменты — до секунды.
+func ownSessionJSON(s humansession.OwnSession) map[string]any {
+	out := map[string]any{
+		"id":              string(s.Session.ID),
+		"current":         s.Current,
+		"authenticatedAt": s.Session.AuthenticatedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+		"lastPresentedAt": s.Session.LastPresentedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+		"expiresAt":       s.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+	}
+	if !s.Session.Client.IsZero() {
+		out["userAgent"] = s.Session.Client.Value()
+	}
+	return out
 }
 
 func sessionJSON(v humansession.SessionView) map[string]any {
@@ -1133,9 +1383,22 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrInviteNotValid):
 		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextInviteNotValid,
 			&errorInfo{Reason: humansession.ReasonInviteNotValid, Domain: h.cfg.RefusalDomain})
+	// Смена адреса (kaname#635, Р4): новый адрес заняли между запросом и
+	// предъявлением — 409 с признаком; видит его только владелец кода.
+	case errors.Is(err, humansession.ErrEmailInUse):
+		writeRefusal(w, http.StatusConflict, codeAlreadyExists, humansession.TextEmailInUse,
+			&errorInfo{Reason: humansession.ReasonEmailInUse, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrEmailNotVerified):
 		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextEmailNotVerified,
 			&errorInfo{Reason: humansession.ReasonEmailNotVerified, Domain: h.cfg.RefusalDomain})
+	// Свои сессии (kaname#634, Р5): названная запись — не живая своя — 404
+	// одним текстом, без идентификатора; названа текущая — 400 состояния.
+	case errors.Is(err, humansession.ErrSessionNotFound):
+		writeRefusal(w, http.StatusNotFound, codeNotFound, humansession.TextSessionNotFound,
+			&errorInfo{Reason: humansession.ReasonSessionNotFound, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrSessionIsCurrent):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextSessionIsCurrent,
+			&errorInfo{Reason: humansession.ReasonSessionIsCurrent, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrSecondFactorUnavailable):
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextSecondFactorUnavailable, nil)
 	case errors.Is(err, humansession.ErrStoreUnavailable), errors.Is(err, humansession.ErrBreachAuthorityMisconfigured):
@@ -1162,6 +1425,7 @@ func retryAfterSeconds(d time.Duration) int64 {
 // Коды `google.rpc.Code`, которые отдаёт полоса.
 const (
 	codeInvalidArgument    = 3
+	codeNotFound           = 5
 	codeAlreadyExists      = 6
 	codePermissionDenied   = 7
 	codeResourceExhausted  = 8

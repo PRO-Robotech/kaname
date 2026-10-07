@@ -23,10 +23,11 @@ import (
 // ─── Один писатель отметки ──────────────────────────────────────────────────
 
 // TestTheAddressMarkHasOneWriterTheConfirmVerb — у отметки подтверждения ровно
-// ДВА вызывающих писателя в непроверочном коде: глагол подтверждения и
+// ТРИ вызывающих писателя в непроверочном коде: глагол подтверждения,
 // завершение восстановления, заводящее первый пароль личности без способа
-// входа (Ф5 Р9 п. 3–4, редакция 7 — Д16; `kaname#608`). Оператор отметки один;
-// вызывающих двое, и каждый назван файлом. Третий — находка.
+// входа (Ф5 Р9 п. 3–4, редакция 7 — Д16; `kaname#608`), и исход смены адреса,
+// ставящий отметку на новый адрес (kaname#635, Р8 п. 2). Оператор отметки один;
+// каждый вызывающий назван файлом. Четвёртый — находка.
 func TestTheAddressMarkHasOneWriterTheConfirmVerb(t *testing.T) {
 	t.Parallel()
 	calls, parsed, err := check.MarkWriterCalls(prodGoFiles(t, moduleRoot(t)))
@@ -51,6 +52,9 @@ func TestTheAddressMarkHasOneWriterTheConfirmVerb(t *testing.T) {
 // (пути по алфавиту): завершение восстановления (первый пароль, Ф5 Р9) и глагол
 // подтверждения (Ф6).
 var markWriterCallers = []string{
+	// Исход смены адреса (kaname#635, Р8 п. 2): отметка ставится существующим
+	// оператором на новый адрес той же транзакцией, третьего писателя нет.
+	"internal/apps/kaname/api/humansession/email_change.go",
 	"internal/apps/kaname/api/humansession/recovery_complete.go",
 	"internal/apps/kaname/api/humansession/verification.go",
 }
@@ -236,8 +240,8 @@ func TestEveryMailWriterChargesItsWindowFirst(t *testing.T) {
 	for _, f := range findings {
 		t.Error(f)
 	}
-	if len(census.Writers) != 3 {
-		t.Errorf("писателей очереди писем не три (приглашение, восстановление, подтверждение): %v", census.Writers)
+	if len(census.Writers) != 5 {
+		t.Errorf("писателей очереди писем не пять (приглашение, восстановление, подтверждение, код смены адреса, уведомление о смене): %v", census.Writers)
 	}
 }
 

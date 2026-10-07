@@ -29,6 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/pagetoken"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -41,6 +43,9 @@ type fakeRow struct {
 	digest domain.BearerDigest
 	ended  *time.Time
 	reason string
+	// seq — порядок вставки: у адаптера порядок выдачи несёт `created_at`
+	// базы, у дублёра — счётчик (`SessionsOf` сортирует по нему, затем по id).
+	seq int64
 }
 
 type fakeFailure struct {
@@ -88,6 +93,8 @@ type fakeStore struct {
 	openPath map[domain.UserID]bool
 	// keys — у кого заведена строка ключа доступа (ось «заведено», Ф13).
 	keys map[domain.UserID]bool
+	// inserted — счётчик вставок записей сессии (`fakeRow.seq`).
+	inserted int64
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.
@@ -140,6 +147,50 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 		return humansession.Resolved{Session: r.s, User: f.users[r.s.UserID], EmailVerified: f.verified[r.s.UserID]}, humansession.SessionFound, nil
 	}
 	return humansession.Resolved{}, humansession.NoSessionUnknown, nil
+}
+
+// SessionsOf — живые записи личности страницей (kaname#634): отказы
+// аргументом адаптера — до оператора; порядок — вставка (seq), затем id.
+func (f *fakeStore) SessionsOf(_ context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	if size < 0 || size > 1000 {
+		return nil, "", errFakeArg("page_size must be in [0..1000] (0 means default)")
+	}
+	limit := int(size)
+	if limit == 0 {
+		limit = 50
+	}
+	after := int64(0)
+	if token != "" {
+		c, ok := pagetoken.Decode(token)
+		if !ok || c == nil {
+			return nil, "", errFakeArg("Illegal argument pageToken: malformed")
+		}
+		after = c.CreatedAt.UnixMicro()
+	}
+	f.trip()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failOn == "list" {
+		return nil, "", errFakePort
+	}
+	var rows []*fakeRow
+	for _, r := range f.rows {
+		if r.s.UserID == userID && r.ended == nil && !r.s.Expired(now) && r.seq > after {
+			rows = append(rows, r)
+		}
+	}
+	slices.SortFunc(rows, func(a, b *fakeRow) int { return int(a.seq - b.seq) })
+	next := ""
+	if len(rows) > limit {
+		last := rows[limit-1]
+		next = pagetoken.Encode(pagetoken.Cursor{CreatedAt: time.UnixMicro(last.seq).UTC(), ID: string(last.s.ID)})
+		rows = rows[:limit]
+	}
+	out := make([]domain.HumanSession, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.s)
+	}
+	return out, next, nil
 }
 
 func (f *fakeStore) CountFailures(_ context.Context, scope humansession.FailureScope, key string, since time.Time) (int, error) {
@@ -313,7 +364,10 @@ func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, dig
 	if err := w.fail("insert"); err != nil {
 		return err
 	}
-	w.ops = append(w.ops, func() { w.store.rows[s.ID] = &fakeRow{s: s, digest: digest} })
+	w.ops = append(w.ops, func() {
+		w.store.inserted++
+		w.store.rows[s.ID] = &fakeRow{s: s, digest: digest, seq: w.store.inserted}
+	})
 	return nil
 }
 
@@ -378,6 +432,64 @@ func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, k
 		w.store.trip()
 	}
 	return n, nil
+}
+
+// EndOwnSession — снятие ОДНОЙ живой записи личности (kaname#634): условие на
+// субъекта, живость и срок — у оператора, как у адаптера; снята — второй
+// оператор (отзыв выданного в ней).
+func (w *fakeWriter) EndOwnSession(_ context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	if target == "" {
+		return false, errFakeArg("Illegal argument human_session.id: required")
+	}
+	if err := w.holdPerson(userID); err != nil {
+		return false, err
+	}
+	w.store.trip()
+	if err := w.fail("end-own"); err != nil {
+		return false, err
+	}
+	r, ok := w.store.rows[target]
+	if !ok || r.s.UserID != userID || r.ended != nil || r.s.Expired(now) {
+		return false, nil
+	}
+	w.store.trip()
+	w.ops = append(w.ops, func() { r.ended = &now; r.reason = reason })
+	return true, nil
+}
+
+// EndOtherLiveSessions — прочие ЖИВЫЕ записи личности, кроме keep (kaname#634);
+// снятые идентификаторы — в порядке id.
+func (w *fakeWriter) EndOtherLiveSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	if err := w.holdPerson(userID); err != nil {
+		return nil, err
+	}
+	w.store.trip()
+	if err := w.fail("end-others-live"); err != nil {
+		return nil, err
+	}
+	var ended []domain.HumanSessionID
+	for id, r := range w.store.rows {
+		if r.s.UserID == userID && id != keep && r.ended == nil && !r.s.Expired(now) {
+			ended = append(ended, id)
+			row := r
+			w.ops = append(w.ops, func() { row.ended = &now; row.reason = reason })
+		}
+	}
+	slices.Sort(ended)
+	if len(ended) > 0 {
+		w.store.trip()
+	}
+	return ended, nil
+}
+
+// SessionLive — жива ли запись личности на now (kaname#634): чтение после замка.
+func (w *fakeWriter) SessionLive(_ context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	w.store.trip()
+	if err := w.fail("live"); err != nil {
+		return false, err
+	}
+	r, ok := w.store.rows[id]
+	return ok && r.s.UserID == userID && r.ended == nil && !r.s.Expired(now), nil
 }
 
 func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {

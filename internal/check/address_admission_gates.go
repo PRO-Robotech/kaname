@@ -275,10 +275,16 @@ type MailWriterCensus struct {
 	ChargedByCaller int
 }
 
+// mailPacedByCaller — вызовы, которыми вызывающий решает предел писем раньше
+// писателя очереди: `InsertVerificationCodePaced` — предел писем
+// подтверждения, решаемый вставкой строки кода; `InsertEmailChangeCodePaced` —
+// темп запросов смены адреса (kaname#635, Р6); `PresentEmailChangeCode` —
+// уведомление о смене, одно на применённый код, выданный под этим темпом (Р7).
+var mailPacedByCaller = []string{"InsertVerificationCodePaced", "InsertEmailChangeCodePaced", "PresentEmailChangeCode"}
+
 // MailWriterFindings — каждый писатель очереди наших писем списывает окно
 // раньше постановки: сам (`chargeInviteMailWindowTx`) либо каждый его
-// вызывающий (`InsertVerificationCodePaced` — предел писем подтверждения,
-// решаемый вставкой строки кода). Пустая перепись — находка.
+// вызывающий (`mailPacedByCaller`). Пустая перепись — находка.
 func MailWriterFindings(files map[string]string) (MailWriterCensus, []string, error) {
 	pfs, err := parseAll(files)
 	if err != nil {
@@ -330,7 +336,11 @@ func MailWriterFindings(files map[string]string) (MailWriterCensus, []string, er
 						continue
 					}
 					callers++
-					if chargedBefore(g.calls, gc.pos, "InsertVerificationCodePaced") {
+					paced := false
+					for _, by := range mailPacedByCaller {
+						paced = paced || chargedBefore(g.calls, gc.pos, by)
+					}
+					if paced {
 						charged++
 					} else {
 						findings = append(findings, fmt.Sprintf("%s:%d %s зовёт писателя очереди %s, не решив предел писем раньше",

@@ -111,6 +111,9 @@ type LoginInput struct {
 	// SecondFactor — предъявление кода второго фактора (Ф12 Р5); nil — без
 	// него, сессия уровня «1».
 	SecondFactor *SecondFactorPresentation
+	// Client — описание клиента выдающего запроса (kaname#634, Р3): идёт в
+	// запись выдаваемой сессии и больше никуда.
+	Client domain.ClientDescription
 }
 
 // SessionView — то, что глагол отдаёт транспорту для ответа (Ф3-01).
@@ -343,7 +346,7 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 	// (5) Выдача — одним исходом: захват строки личности и её отсечка, запись,
 	// память, сброс счёта, событие. Отказы транзакции выдачи уходят отсюда —
 	// под огибающей и до переписывания материала.
-	out, settled, outcome := uc.issue(ctx, user, factor)
+	out, settled, outcome := uc.issue(ctx, user, factor, in.Client)
 	switch outcome {
 	case issueDone:
 	case issueBeforeCutoff:
@@ -518,7 +521,9 @@ const (
 // Ни один отказ транзакцию выдачи не фиксирует: `defer Rollback` откатывает её
 // целиком, вместе с записью второго фактора, если она уже сделана (отказ
 // хранилища после неё). Отказ по отсечке и «строки нет» приходят раньше неё.
-func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *preparedPresentation) (LoginOutput, settledPresentation, issueOutcome) {
+func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *preparedPresentation,
+	client domain.ClientDescription,
+) (LoginOutput, settledPresentation, issueOutcome) {
 	var settled settledPresentation
 	// Момент сессии — из общего источника (kaname#589), до транзакции выдачи.
 	m, err := sharedMoment(ctx, uc.clock, uc.logger, "login")
@@ -568,6 +573,7 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *pre
 		At:        m,
 		TTL:       uc.ttl,
 		EmitAudit: true,
+		Client:    client,
 	})
 	if err != nil {
 		return LoginOutput{}, settled, issueFailed

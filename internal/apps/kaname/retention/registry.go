@@ -125,6 +125,10 @@ const (
 	// Р9): строки старше окна писем, которые ни предъявление, ни предел писем
 	// уже не прочтут. Темп задаёт человек: строку заводит письмо подтверждения.
 	SubjectVerificationCodes = "email_verification_codes"
+	// SubjectEmailChangeCodes — отложенные смены адреса и их коды (kaname#635,
+	// Р5, Р6): строки старше окна темпа, которые ни предъявление, ни темп уже
+	// не прочтут. Темп задаёт человек: строку заводит принятый запрос смены.
+	SubjectEmailChangeCodes = "email_change_codes"
 	// SubjectSourceRequestWindows — окна обращений без удостоверения по
 	// источнику (регистрация, запрос восстановления): строка на источник, темп
 	// задаёт внешний.
@@ -163,6 +167,15 @@ type HumanSessionReapers struct {
 	BearerLetters     BearerLetterReaper
 	LetterWindow      time.Duration
 	SourceWindow      time.Duration
+	// EmailChangeCodes — уборщик отложенных смен адреса (kaname#635); порог —
+	// LetterWindow: смена считает темп теми же величинами. nil — глагол смены
+	// не провязан, и предмета уборки у реестра нет.
+	EmailChangeCodes EmailChangeCodeReaper
+}
+
+// EmailChangeCodeReaper — порт уборщика отложенных смен адреса.
+type EmailChangeCodeReaper interface {
+	SweepUnservableEmailChangeCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
 // VerificationCodeReaper — порт уборщика кодов подтверждения адреса.
@@ -285,6 +298,15 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			Sweep: r.BearerLetters.SweepExpiredBearerLetters,
 		},
 	)
+	if r.EmailChangeCodes != nil {
+		subjects = append(subjects, Subject{
+			Name: SubjectEmailChangeCodes,
+			// Порог — окно темпа: строки принятых запросов считают предел за
+			// окно, и снятая раньше строка удлинила бы предел.
+			Grace: r.LetterWindow,
+			Sweep: r.EmailChangeCodes.SweepUnservableEmailChangeCodes,
+		})
+	}
 	if r.LoginChallenges != nil {
 		subjects = append(subjects, Subject{
 			Name: SubjectAccessKeyLoginChallenges,

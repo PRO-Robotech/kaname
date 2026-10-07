@@ -68,6 +68,7 @@ var writerSceneLedger = map[string]string{
 	"humansession.CompleteRecoveryUseCase.complete":     "TestIntegration_SessionWriterRecoveryCompletionAndIdentityDeletionDoNotDeadlock",
 	"humansession.ConfirmSecondFactorUseCase.Execute":   "TestIntegration_SessionWriterSecondFactorConfirmAndIdentityDeletionDoNotDeadlock",
 	"humansession.ConfirmVerificationUseCase.Execute":   "TestIntegration_SessionWriterAddressVerificationAndIdentityDeletionDoNotDeadlock",
+	"humansession.ConfirmEmailChangeUseCase.Execute":    "TestIntegration_SessionWriterEmailChangeAndIdentityDeletionDoNotDeadlock",
 	"humansession.LoginUseCase.issue":                   "TestIntegration_SessionWriterSecondFactorLoginAndIdentityDeletionDoNotDeadlock",
 	"humansession.LogoutUseCase.Execute":                "TestIntegration_SessionWriterLogoutAndIdentityDeletionDoNotDeadlock",
 	"humansession.RegenerateBackupCodesUseCase.Execute": "TestIntegration_SessionWriterBackupCodesAndIdentityDeletionDoNotDeadlock",
