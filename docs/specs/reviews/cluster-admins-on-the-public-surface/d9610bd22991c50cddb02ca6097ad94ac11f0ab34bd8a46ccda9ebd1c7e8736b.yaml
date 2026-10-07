@@ -1,0 +1,112 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 51cd8f0dc
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (рабочее дерево копии kaname-661-accept); запись судит
+    содержимое по отпечатку.
+  branch: '661'
+  task: PRO-Robotech/kaname#661
+  round: 3 (подтверждение координат после APPROVED круга 2)
+  predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/a2efb0ac56a306da31d487693e679ce7debb314edb163a9c22d92d1753baf75a.yaml
+  fingerprint_predicate: >-
+    sha256sum документа @ 51cd8f0dc рабочее дерево → d9610bd2…e8736b (совпал с заданием);
+    git show HEAD:<док> | sha256sum → a2efb0ac…1753baf75a.
+  publication_mode: запись в дереве; внешнее событие публикует курьер
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+scope_of_diff:
+  predicate: git diff -U0 -- <док> @ 51cd8f0dc
+  observed: >-
+    Дельта против a2efb0ac — ровно строки 52, 648, 828 (до правки) и запись о правке
+    (новые строки 19–24). Иных изменений нет. Посылка задания подтверждена.
+
+blocking:
+  - kind: DoD
+    where: DoD S3 п.1, строка 834 нового текста
+    claim: >-
+      Счётный предикат `git grep -c '"/iam/v1/internal/cluster' --
+      PRO-Robotech/kacho:ui-future/shared/src/api/cluster.ts` → 0 больше не способен упасть:
+      `PRO-Robotech/kacho:` внутри pathspec git — не координата, а буквальный несуществующий
+      путь, и команда молчит при любом содержимом файла.
+    predicate: >-
+      в project/kacho: новая форма → вывода нет, exit=1; прежняя форма
+      `-- ui-future/shared/src/api/cluster.ts` → `ui-future/shared/src/api/cluster.ts:2`, exit=0
+      (сегодня честно красная, как и должна до S3).
+    fix: >-
+      Команду оставить исполнимой (голый pathspec), а дом назвать вне pathspec — например
+      «в дереве `PRO-Robotech/kacho`: `git grep -c … -- ui-future/shared/src/api/cluster.ts`»
+      либо отдельной координатой рядом; требование хука удовлетворять текстом вокруг
+      команды, а не порчей её аргумента.
+  - kind: DoD
+    where: §«Что НЕ входит», строка 58 нового текста
+    claim: >-
+      Предикат снятия InternalClusterService `git grep -n 'internal/cluster' --
+      PRO-Robotech/kacho:tests PRO-Robotech/kacho:ui-future PRO-Robotech/kacho:gateway/tests`
+      по той же причине тождественно даёт ноль — условие снятия выполнено вакуумно уже сегодня.
+    fix: тот же — pathspec голый, дом `PRO-Robotech/kacho` назван словами «в платформе» / координатой вне команды.
+
+non_blocking:
+  - >-
+    Строка 654: префикс дома у имени функции, а путь файла на соседней строке 653
+    (`gateway/internal/restmux/external_isolation_test.go`) остался без дома — координату
+    логичнее ставить на путь (`PRO-Robotech/kacho:gateway/internal/restmux/external_isolation_test.go`),
+    имя пробы — голым.
+
+constructibility: >-
+  Посев не требовался: сценарии, коды, payload по существу не менялись (дельта сверена).
+  Посевы круга 2 остаются в его записи.
+
+semantic_carryover: >-
+  Смысл одобрен кругом 2 (a2efb0ac); одобрение к этому отпечатку не переносится.
+  Следующая редакция, исправляющая лишь два предиката, судится тем же кругом подтверждения.
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: false
+  why: >-
+    Отказ санкции не выдаёт и не отзывает; одобрение по предмету несёт запись
+    круга 4 (5a86c0fa…) и её событие.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Блок дописан кругом 5 (без изменения subject и вердикта): гейт записей ревью
+      (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в subject.task
+      этой учёткой; без неё запись не судима, и его исход — «не выполнилось».
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: not_performed
+  published: false
+  required_for_sanction: false
+  publication_expected_from_orchestrator: false
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b'
+  note: >-
+    На kaname#661 событий с subject_sha256 d9610bd2… нет (gh api …/issues/661/comments
+    @ 2026-10-07: одно событие полномочия, APPROVED на 5a86c0fa…). Отказу внешнее полномочие
+    не нужно; публикация после одобрения следующей редакции не требуется.

@@ -1,0 +1,115 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: a2efb0ac56a306da31d487693e679ce7debb314edb163a9c22d92d1753baf75a
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: a697a6856
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена автором (рабочее дерево ветки 661); запись судит содержимое
+    по отпечатку, а не коммит.
+  branch: '661'
+  task: PRO-Robotech/kaname#661
+  related_tasks: [PRO-Robotech/kacho#3093, PRO-Robotech/kacho#3094, PRO-Robotech/kacho#3091, PRO-Robotech/kaname#540]
+  lines: 862
+  round: 2
+  predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+    в копии kacho-workspace/tmp/kaname-661-accept @ a697a6856 → a2efb0ac…1753baf75a (совпал с заданием)
+  measurement_revisions: >-
+    Служба — копия kaname-661-accept @ a697a6856 (дерево кода = 76ca2c8aa + запись круга 1).
+    Платформа — `git show/grep ffbe930dbe` в project/kacho (только чтение объектов).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих ноль. Одобрение действует с публикацией внешнего события (курьер);
+    до события запись — объявление, а не санкция.
+
+blocking: []
+
+round1_blocking_resolution:
+  - kind: CONSTRUCTIBILITY
+    scenario: CAP-03
+    status: resolved
+    measured: >-
+      `invite.go:334-335,530-568` — Invite принимает displayName, валидация длины 1..128
+      (`domain/types.go:173`), строка PENDING несёт имя; регистрация полосой по адресу
+      приглашения строку не активирует (`mirror_tx.go` RegisterMirrorTx), активация в исходе
+      подтверждения зовёт `ActivateInviteTx(..., "", ...)` (`mirror_tx.go:511`), а оператор
+      `COALESCE(NULLIF($2,''), display_name)` (`user_repo.go:678`) имя сохраняет.
+      Регистрация с displayName отвергается (`loginlanehttp/register_test.go:104-106`),
+      UpdateUserRequest — только labels (`user_service.proto:575`). «Непусто» утверждается
+      отдельно до равенства; посев утверждает имя до выдачи ключа.
+  - kind: CONSTRUCTIBILITY
+    scenario: CAP-24
+    status: resolved
+    measured: >-
+      Отрицание несёт один субъект `sva-nogrant`: ffbe930dbe `prodseed_matrix.py:671,873,945`
+      (`subject(acctA, "ps-nogrant-…")` — служебная учётка, от порога освобождена);
+      `principal_pairings.py:119`. Модель: `define system_admin: [user, service_account]`
+      прямое, `system_viewer` его не выводит — 403 производится пообъектным вопросом края.
+  - kind: FORMAT
+    scenario: CAP-26, CAP-28
+    status: resolved
+    measured: >-
+      CAP-26: 404 + application/json + {code:5,"Not Found"} от publicMux, второго производителя
+      нет — ffbe930dbe `restmux/mux.go:1020-1046`, `external_isolation_test.go:181`,
+      `external_refusal_shape_test.go:18`. CAP-28: Дано/Когда/Тогда, субъект — фикстура
+      `registerAndSignIn` (`ui-future/e2e/specs/deny.spec.ts` и др.), один исход: блок
+      `cluster-admins-forbidden` на 401|403 (`ClusterAdminsPage.tsx:68-71,195-200`), кнопки
+      `cluster-admins-grant-button`/`cluster-admins-revoke-*` рендерятся только в ветке
+      `cluster-admins-page` (:172,217,223). Выделенный сценарий получил CAP-30 — ID стабильны.
+  - kind: FORMAT
+    scenario: CAP-14
+    status: resolved
+    measured: >-
+      Вторая выдача — `target`, назначенная первым шагом этого же кейса; близнец снимает
+      `target`; засеянные выдачи и ADMIN_SLOTS не трогаются.
+
+important_nonblocking:
+  - "§2 «sva-nogrant — без единой выдачи»: неточно — `prodseed_matrix.py:463` даёт каждой SA матрицы пол `system_viewer` @ cluster. Различающий факт CAP-24 (кортеж `system_admin`) от этого не меняется; поправить формулировку при следующей правке («без `system_admin`, пол `system_viewer`»)."
+  - "§4 посев `target`: подтверждение адреса требует кода письма — назвать механизм захвата кода (тот же, что у `seed_login_lane.py`), чтобы посев не стал предпосылкой без производителя."
+  - "CAP-18…22: явного «Дано» (субъект и состояние) по-прежнему нет; уровень интеграционной пробы/гейта это терпит, но трассировку облегчило бы."
+  - "Нон-блокеры круга 1 (CAP-09 близнец положительный, аудит — уровень интеграции, тело CAP-21 дословно, единый предикат S3.1, фикстура равного granted_at CAP-23) учтены."
+
+confirmed:
+  - "Производитель назван у каждого «Тогда» (§3, 30 из 30)."
+  - "Близнец назван у каждого отрицания (CAP-07…18, 21, 24, 25 — контроль + CAP-27, 26, 28), отличается одним фактом либо назван второй факт (CAP-25)."
+  - "Посылка задания (четыре блокирующих круга 1 закрыты, sha a2efb0ac…) — подтверждена."
+
+constructibility:
+  seeded: 0
+  named_fixtures_confirmed: 12
+  not_executed: >-
+    Посев на стенде не выполнялся: стенд и разрешение на посев заданием не названы —
+    «не выполнилось», третий исход. Конструируемость судима чтением фикстур и кода:
+    jwtSANoGrant, registerAndSignIn, ADMIN_SLOTS/slot_keys, путь Invite→регистрация→
+    подтверждение с сохранением имени. Слоты h-plain/target/sva-target и имя target
+    заказаны S1 (kaname#661) с производителем по коду.
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    Событие публикует курьер. Тело:
+    acceptance-reviewer · APPROVED · sha256 a2efb0ac56a306da31d487693e679ce7debb314edb163a9c22d92d1753baf75a
