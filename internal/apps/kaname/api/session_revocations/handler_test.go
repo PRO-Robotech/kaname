@@ -38,6 +38,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // fakeRevoker — in-memory writer port. Records both the per-jti RevokeTx and the
@@ -176,7 +177,7 @@ func newHandlerWithOps(w sessionRevocationWriter, r reader) (*Handler, *recordin
 	ops := &recordingOpsRepo{}
 	var uc revoker
 	if w != nil {
-		uc = NewRevokeUseCase(w, ops)
+		uc = NewRevokeUseCase(w, ops, momentclock.Func(time.Now))
 	}
 	return NewHandler(uc, r), ops
 }
@@ -404,7 +405,7 @@ func TestRevoke_WriteFailure_MarksOperationError(t *testing.T) {
 // reintroduce it silently.
 func TestRevoke_NilOperationRepo_FailsClosed(t *testing.T) {
 	w := &fakeRevoker{}
-	h := NewHandler(NewRevokeUseCase(w, nil), &fakeReader{})
+	h := NewHandler(NewRevokeUseCase(w, nil, momentclock.Func(time.Now)), &fakeReader{})
 
 	_, err := h.Revoke(context.Background(), &iamv1.RevokeRequest{
 		TokenJti: "jti-123",

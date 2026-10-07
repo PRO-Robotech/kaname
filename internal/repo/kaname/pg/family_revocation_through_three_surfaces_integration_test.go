@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -112,7 +113,7 @@ func newFamilyRig(t *testing.T, pool *pgxpool.Pool) familyRig {
 		Issuer: assertionIssuer,
 		// Выпуск в прошлом относительно часов базы: отметка выпуска секундной
 		// точности не попадает в одну секунду с моментами, которые ставит база.
-		Clock:       func() time.Time { return time.Now().UTC().Add(-time.Minute) },
+		Clock:       momentclock.Func(func() time.Time { return time.Now().UTC().Add(-time.Minute) }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, rig.keys)
 	require.NoError(t, err)

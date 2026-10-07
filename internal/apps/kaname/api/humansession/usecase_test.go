@@ -23,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -111,7 +112,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	h.rule, err = humansession.NewPasswordRule(8, breach, h.obs, logger)
 	require.NoError(t, err)
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(now),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
 		Envelope: h.envelopePort, TOTP: h.totp, Sets: h.verifier,
 	})
@@ -132,7 +134,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+		CutoffClock: momentclock.Func(now),
+		Store:       recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
 		Observer: h.obs, Now: now, Logger: logger,
 	})
 	require.NoError(t, err)

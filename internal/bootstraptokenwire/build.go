@@ -96,7 +96,10 @@ func (m localMint) MintToken(ctx context.Context, in bootstraptoken.MintInput) (
 		Claims:    claims,
 	})
 	if serr != nil {
-		if errors.Is(serr, tokensigner.ErrNoSigningKey) {
+		if errors.Is(serr, tokensigner.ErrNoSigningKey) || errors.Is(serr, tokensigner.ErrClockUnavailable) {
+			// Ключа нет либо источник момента выпуска не ответил (kaname#589):
+			// оба — недоступность, которую лечит повтор.
+			//
 			// Причина ОБОРАЧИВАЕТСЯ, а не подменяется. Наружу отказ уйдёт
 			// фиксированным текстом (собирается в use-case) — оракула здесь нет;
 			// а в журнал попадёт то, что ответила ключница.

@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -131,7 +132,7 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	require.NoError(t, ks.EnsureSigningKey(ctx))
 
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: ctIssuer, Clock: clock, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: ctIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
 

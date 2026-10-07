@@ -73,6 +73,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -239,7 +240,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
 		Letter: laneLetterPace, Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: laneSourcePace,
 	})
@@ -279,7 +281,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 		loginNow = opts.loginNow
 	}
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: momentclock.Func(loginNow),
+		Store:       loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
 		Limits: limits, TTL: laneSessionTTL, Observer: loginObserver, Now: loginNow, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
@@ -317,7 +320,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	})
 	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, time.Now)
@@ -327,7 +331,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	// что корень композиции, с привязкой стенда (`laneKeyBinding`).
 	accessKeys := kanamepg.NewAccessKeyRepo(pool)
 	akDeps := humansession.AccessKeyLoginDeps{
-		Store: sessions, Keys: kanamepg.NewAccessKeyLoginRepo(pool, accessKeys), Methods: methods,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       sessions, Keys: kanamepg.NewAccessKeyLoginRepo(pool, accessKeys), Methods: methods,
 		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
 		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,

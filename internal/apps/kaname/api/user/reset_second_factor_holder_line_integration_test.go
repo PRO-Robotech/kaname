@@ -27,6 +27,7 @@ package user
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -38,6 +39,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // TestResetSecondFactorHolderLineOnBadIdsFromRealDB — держатель на кривом и
@@ -57,7 +59,7 @@ func TestResetSecondFactorHolderLineOnBadIdsFromRealDB(t *testing.T) {
 	// Форму судит `ValidateResourceID` до `repo.Reader`, поэтому репозиторий здесь
 	// не задействован — но проба идёт через тот же вход, что и остальные исходы.
 	badForm := "not-a-user-id"
-	uc := NewResetSecondFactorUseCase(repo, nil, nil, nil)
+	uc := NewResetSecondFactorUseCase(repo, nil, nil, nil).WithCutoffClock(momentclock.Func(time.Now))
 	_, err = uc.Execute(ownerCtx(), domain.UserID(badForm))
 	require.Error(t, err, "кривой по форме id обязан быть отвергнут")
 	require.Equalf(t, codes.InvalidArgument, status.Code(err),
@@ -83,7 +85,7 @@ func TestResetSecondFactorHolderLineOnBadIdsFromRealDB(t *testing.T) {
 	// состоянию фактора, и отвечает «фактора нет» (строки способа не сеяны), то есть
 	// `FAILED_PRECONDITION`, а НЕ `NOT_FOUND`.
 	present, _ := seedUserWithAccount(t, ctx, pool, "hold2")
-	ucFound := NewResetSecondFactorUseCase(repo, nil, &rsfMethods{}, nil)
+	ucFound := NewResetSecondFactorUseCase(repo, nil, &rsfMethods{}, nil).WithCutoffClock(momentclock.Func(time.Now))
 	_, err = ucFound.Execute(ownerCtx(), present)
 	require.Error(t, err, "у существующего человека второго фактора нет — сброс отвечает отказом состояния")
 	require.NotEqualf(t, codes.NotFound, status.Code(err),

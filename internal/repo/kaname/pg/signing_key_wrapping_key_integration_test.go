@@ -27,6 +27,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -60,7 +61,7 @@ func bootIAM(t *testing.T, ctx context.Context, dsn string, wrapKey byte, clock 
 		return nil, nil, err
 	}
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: wrapProbeIssuer, Clock: clock, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: wrapProbeIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
 	return ks, signer, nil

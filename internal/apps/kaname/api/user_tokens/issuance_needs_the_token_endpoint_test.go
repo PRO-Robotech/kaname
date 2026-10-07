@@ -21,12 +21,14 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // clientTokenKnob — ручка, которую обязан назвать отказ.
@@ -70,7 +72,7 @@ func TestIssue_WithoutTheTokenEndpoint_KeypairIsRefusedNamingTheKnob(t *testing.
 		t.Run(name, func(t *testing.T) {
 			repo := &stubUserClientRepo{}
 			ops := &stubOpsRepo{}
-			op, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).Execute(context.Background(), issueByOwner(kind, 0))
+			op, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).Execute(context.Background(), issueByOwner(kind, 0))
 			require.Error(t, err, "выдача ключевой пары, которую обменять негде, обязана отказать")
 			require.Nil(t, op, "отказ синхронный: операции не заводится")
 			require.Equal(t, codes.FailedPrecondition, grpcstatus.Code(err), "отказ: %v", err)
@@ -96,7 +98,7 @@ func TestIssue_WithTheTokenEndpoint_KeypairIsIssued(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := &stubUserClientRepo{}
 			ops := &stubOpsRepo{}
-			_, err := withTokenEndpoint(NewIssueUserTokenUseCase(repo, &stubTx{}, ops)).
+			_, err := withTokenEndpoint(NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now))).
 				Execute(context.Background(), issueByOwner(kind, 0))
 			require.NoError(t, err)
 			waitForOp(t, ops)
@@ -111,7 +113,7 @@ func TestIssue_WithTheTokenEndpoint_KeypairIsIssued(t *testing.T) {
 func TestIssue_WithoutTheTokenEndpoint_SecretIsIssued(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	op, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).
+	op, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).
 		Execute(context.Background(), issueByOwner(domain.CredentialKindSecret, 3600))
 	require.NoError(t, err, "секрет не обменивается и эндпоинта не требует")
 	require.NotNil(t, op)
@@ -126,7 +128,7 @@ func TestIssue_WithoutTheTokenEndpoint_SecretIsIssued(t *testing.T) {
 func TestIssue_WithoutTheTokenEndpoint_MalformedRequestIsRefusedFirst(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	_, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).
+	_, err := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).
 		Execute(context.Background(), issueByOwner(domain.CredentialKindKeypair, -1))
 	require.Equal(t, codes.InvalidArgument, grpcstatus.Code(err), "отказ: %v", err)
 	require.Contains(t, grpcstatus.Convert(err).Message(), "ttl_seconds")
