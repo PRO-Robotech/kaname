@@ -54,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -140,7 +141,8 @@ func newNotEnrolledHarness(t *testing.T) *notEnrolledHarness {
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: 24 * time.Hour, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
 		Letter: laneLetterPace, Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: laneSourcePace,
 	})
@@ -160,7 +162,8 @@ func newNotEnrolledHarness(t *testing.T) *notEnrolledHarness {
 
 	sessions := kanamepg.NewHumanSessionRepo(pool)
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: sessions, Users: kanamepg.NewUserDirectory(kanamepg.New(pool, nil)), Methods: kanamepg.NewLoginMethodRepo(pool),
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       sessions, Users: kanamepg.NewUserDirectory(kanamepg.New(pool, nil)), Methods: kanamepg.NewLoginMethodRepo(pool),
 		Verifier: verifier, Hasher: hasher,
 		Limits: humansession.Limits{AddressAttempts: 5, AddressWindow: 10 * time.Minute, SourceAttempts: 50, SourceWindow: 10 * time.Minute},
 		TTL:    24 * time.Hour, Observer: humansession.NopObserver{}, Now: time.Now, Logger: logger,

@@ -19,11 +19,17 @@
 // алгоритмов, запрет `alg=none`, форма заголовка, требование `kid`), а не
 // подписывающая функция.
 //
-// # Часы — вход
+// # Часы — вход, и они ОДНИ на все реплики
 //
 // Источник времени передаётся, а не берётся из окружения. Без этого сценарии
 // расхождения часов недетерминированы, а детерминизм входа — условие того,
 // чтобы проба вообще могла упасть предсказуемо.
+//
+// `iat` сравнивается с отсечкой отзыва (`tokenrevocation`), а отсечку ставит
+// общий для всех реплик источник — первичная база (kaname#589). Поэтому и `iat`
+// ставит он, а не часы процесса реплики: иначе граница правила была бы
+// расхождением часов двух реплик. Источник сетевой и может не ответить — это
+// отказ выпуска ([ErrClockUnavailable]), а не подпись часами процесса.
 package tokensigner
 
 import (
@@ -63,10 +69,19 @@ var (
 	// ErrNoSigningKey — подписывающего ключа нет. Отказ, а не подпись
 	// умолчанием.
 	ErrNoSigningKey = errors.New("tokensigner: no signing key")
+	// ErrClockUnavailable — источник момента выпуска не ответил либо ответил
+	// нулевым моментом. Отказ, а не подпись другими часами.
+	ErrClockUnavailable = errors.New("tokensigner: issue moment unavailable")
 )
 
-// Clock — источник времени подписанта.
-type Clock func() time.Time
+// Clock — источник момента выпуска (`iat`, `nbf` и отсчёт `exp`).
+//
+// Форма та же, что у порта моментов правила отсечки
+// (`revocationpolicy.Clock`), и это требование: корень подаёт сюда тот же
+// источник, что писателям отсечки (kaname#589).
+type Clock interface {
+	Now(ctx context.Context) (time.Time, error)
+}
 
 // SigningMaterial — подписной материал, отданный ключницей: приватная половина
 // уже развёрнута, алгоритм закреплён за ключом.
@@ -192,7 +207,14 @@ func (s *Signer) Sign(ctx context.Context, req Request) (Token, error) {
 		return Token{}, err
 	}
 
-	now := s.cfg.Clock().UTC().Truncate(time.Second)
+	at, err := s.cfg.Clock.Now(ctx)
+	if err != nil {
+		return Token{}, fmt.Errorf("%w: %w", ErrClockUnavailable, err)
+	}
+	if at.IsZero() {
+		return Token{}, fmt.Errorf("%w: zero moment", ErrClockUnavailable)
+	}
+	now := at.UTC().Truncate(time.Second)
 	exp := now.Add(req.TTL)
 	if !req.NotAfter.IsZero() && exp.After(req.NotAfter) {
 		exp = req.NotAfter.UTC()

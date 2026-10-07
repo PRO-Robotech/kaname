@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -81,7 +82,8 @@ func newSFHarness(t *testing.T) *sfHarness {
 	require.NoError(t, err)
 	// Вход читает второй фактор теми же портами.
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(now),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: sfLimits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
 		Envelope: h.envelopePort, TOTP: totp, Sets: h.verifier,
 	})

@@ -98,6 +98,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -174,7 +175,8 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 
 	l := &sessionWriterLane{s: s, users: users, hasher: hasher, owner: seedForceLogoutUser(t, ctx, s.pool)}
 	l.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: s.sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       s.sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
 		Limits: limits, TTL: 24 * time.Hour, Observer: nop, Now: time.Now, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
@@ -204,7 +206,8 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 	})
 	require.NoError(t, err)
 	l.complete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: s.sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: 24 * time.Hour, Observer: nop,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       s.sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: 24 * time.Hour, Observer: nop,
 		Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)

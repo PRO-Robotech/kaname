@@ -78,6 +78,9 @@ func (a *LocalMintAdapter) MintToken(ctx context.Context, in registrytokenuc.Min
 	}
 	return registrytokenuc.MintOutput{
 		AccessToken: tok.Token,
-		ExpiresIn:   int(time.Until(tok.ExpiresAt).Seconds()),
+		// Срок — от отметки выпуска, а не от часов этой реплики: отметку
+		// ставит общий источник (kaname#589), и разница с часами процесса
+		// легла бы в ответ.
+		ExpiresIn: int(tok.ExpiresAt.Sub(tok.IssuedAt).Seconds()),
 	}, nil
 }

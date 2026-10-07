@@ -24,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -52,7 +53,7 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 	require.NoError(t, err)
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      issuerID,
-		Clock:       func() time.Time { return now },
+		Clock:       momentclock.Func(func() time.Time { return now }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, stubKeys{mat: tokensigner.SigningMaterial{
 		KID:           "kacho-test",
@@ -182,7 +183,7 @@ func newUseCaseWithCutoffs(t *testing.T, mutate ...func(*client_token.Config)) (
 		AllowedAudiences: []string{audResource, audRegistry},
 		DefaultAudience:  audResource,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return now },
+		Clock:            momentclock.Func(func() time.Time { return now }),
 	}
 	for _, m := range mutate {
 		m(&cfg)
@@ -461,7 +462,7 @@ func TestUseCaseRefusesToBuildOnDegenerateConfiguration(t *testing.T) {
 		AllowedAudiences: []string{audResource},
 		DefaultAudience:  audResource,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return now },
+		Clock:            momentclock.Func(func() time.Time { return now }),
 	}
 	for name, brk := range map[string]func(*client_token.Config){
 		"перечень адресатов пуст":          func(c *client_token.Config) { c.AllowedAudiences = nil },

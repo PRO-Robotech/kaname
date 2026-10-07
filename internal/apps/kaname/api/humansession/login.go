@@ -70,6 +70,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // UserDirectory — чтение человека по адресу (порт над репозиторием зеркала).
@@ -127,15 +128,18 @@ type LoginOutput struct {
 
 // LoginUseCase — вход паролем.
 type LoginUseCase struct {
-	store     Store
-	users     UserDirectory
-	methods   loginmethod.Store
-	verifier  Verifier
-	hasher    Hasher
-	limits    Limits
-	ttl       time.Duration
-	observer  Observer
-	now       func() time.Time
+	store    Store
+	users    UserDirectory
+	methods  loginmethod.Store
+	verifier Verifier
+	hasher   Hasher
+	limits   Limits
+	ttl      time.Duration
+	observer Observer
+	now      func() time.Time
+	// clock — ОБЩИЙ для всех реплик источник момента сессии (kaname#589);
+	// now остаётся часами процесса для счёта попыток и окон частоты.
+	clock     revocationpolicy.Clock
 	logger    *slog.Logger
 	gate      attemptGate
 	rewriteOn bool
@@ -155,8 +159,11 @@ type LoginDeps struct {
 	TTL      time.Duration
 	Observer Observer
 	Now      func() time.Time
-	Logger   *slog.Logger
-	Envelope TimingEnvelope
+	// CutoffClock — источник момента аутентификации выдаваемой сессии: тот же,
+	// что ставит отсечку отзыва-всех (kaname#589). Обязателен.
+	CutoffClock revocationpolicy.Clock
+	Logger      *slog.Logger
+	Envelope    TimingEnvelope
 	// TOTP и Sets — проверяющие второго фактора (Ф12 Р5, Р6): поле
 	// `secondFactor` без них не судится, поэтому оба обязательны.
 	TOTP TOTPVerifier
@@ -185,6 +192,8 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 		return nil, fmt.Errorf("login: totp verifier required")
 	case d.Sets == nil:
 		return nil, fmt.Errorf("login: backup code set verifier required")
+	case d.CutoffClock == nil:
+		return nil, fmt.Errorf("login: %w", errNoCutoffClock)
 	}
 	if err := d.Limits.Validate(); err != nil {
 		return nil, err
@@ -200,7 +209,7 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 	}
 	return &LoginUseCase{
 		store: d.Store, users: d.Users, methods: d.Methods, verifier: d.Verifier, hasher: d.Hasher,
-		limits: d.Limits, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
+		limits: d.Limits, ttl: d.TTL, observer: d.Observer, now: d.Now, clock: d.CutoffClock, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer}, rewriteOn: true,
 		envelope: d.Envelope,
 		factor: presenter{deps: SecondFactorDeps{
@@ -334,7 +343,7 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 	// (5) Выдача — одним исходом: захват строки личности и её отсечка, запись,
 	// память, сброс счёта, событие. Отказы транзакции выдачи уходят отсюда —
 	// под огибающей и до переписывания материала.
-	out, settled, outcome := uc.issue(ctx, user, now, factor)
+	out, settled, outcome := uc.issue(ctx, user, factor)
 	switch outcome {
 	case issueDone:
 	case issueBeforeCutoff:
@@ -500,7 +509,8 @@ const (
 //
 // # Момент входа — в разрешении хранилища (Р1)
 //
-// m — показание часов входа, усечённое до микросекунды: хранилище держит оба
+// m — показание ОБЩЕГО для всех реплик источника (kaname#589), взятое до
+// открытия транзакции и усечённое до микросекунды: хранилище держит оба
 // момента до микросекунды, и край судит пару в его разрешении. Одно и то же m
 // сравнивается с отсечкой и уходит в выдачу. Вход накрыт ⟺ m не позже
 // отсечки — граница включающая, как у края («годна ⟺ строго позже»).
@@ -508,9 +518,13 @@ const (
 // Ни один отказ транзакцию выдачи не фиксирует: `defer Rollback` откатывает её
 // целиком, вместе с записью второго фактора, если она уже сделана (отказ
 // хранилища после неё). Отказ по отсечке и «строки нет» приходят раньше неё.
-func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time, factor *preparedPresentation) (LoginOutput, settledPresentation, issueOutcome) {
+func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *preparedPresentation) (LoginOutput, settledPresentation, issueOutcome) {
 	var settled settledPresentation
-	m := now.Truncate(time.Microsecond)
+	// Момент сессии — из общего источника (kaname#589), до транзакции выдачи.
+	m, err := sharedMoment(ctx, uc.clock, uc.logger, "login")
+	if err != nil {
+		return LoginOutput{}, settled, issueFailed
+	}
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.methods, uc.logger, user.ID)
