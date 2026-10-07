@@ -50,3 +50,22 @@ important:
     note: Замечание круга 2 о User-Agent у http.Client харнесса остаётся в силе (см. записи ee608e2e и 3c1eea51).
 
 event_body: "acceptance-reviewer · ACCEPT · sha256 63333cc2f8a0a99588f0f7c3cc01218e12fc6a11c553be0c9f81096a093e2878"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#634
+  status: performed
+  published: true
+  database_id: 6035940401
+  node_id: "IC_kwDOUO26pM8AAAABZ8UkMQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/634#issuecomment-6035940401"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6035940401"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T10:23:07Z"
+  body_sha256: "87b31b3908152d6bddd9ce3301846e23469796e96181b5a0fbb35e2e654422e9"
+  subject_sha256: "63333cc2f8a0a99588f0f7c3cc01218e12fc6a11c553be0c9f81096a093e2878"
+  subject_revision_commit: "5947c44cd5e551f8f9ef467e6a015e952b4f612b"
+  verdict: "ACCEPT"
+  publication_mode: scripts/rituals/approval-event.sh
