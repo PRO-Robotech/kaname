@@ -11,6 +11,7 @@ package check_test
 // значит красное в сцене принадлежит внесённому факту, а не корпусу.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -106,9 +107,9 @@ func lawfulLoginVerifierSpec() check.LoginVerifierSpec {
 	spec.AllowedFiles = map[string]string{
 		lvOwner: "адаптер хранилища кладёт материал в базу аргументом оператора",
 	}
-	spec.OpaqueConsumers = map[string]string{
-		"LoginMethodRepo.Create → r.pool.QueryRow": "оператор вставки строки способа: материал и запрос с именем таблицы — его аргументы",
-		"LoginMethodRepo.Get → r.pool.QueryRow":    "оператор чтения строки способа: запрос с именем таблицы — его аргумент",
+	spec.OpaqueConsumers = map[string]check.LoginVerifierConsumer{
+		"LoginMethodRepo.Create → r.pool.QueryRow": absorbing("оператор вставки строки способа: материал и запрос с именем таблицы — его аргументы"),
+		"LoginMethodRepo.Get → r.pool.QueryRow":    absorbing("оператор чтения строки способа: запрос с именем таблицы — его аргумент"),
 	}
 	return spec
 }
@@ -142,6 +143,13 @@ func TestLoginVerifierGate_LawfulCorpusIsSilent(t *testing.T) {
 	}, census.ConsumerUses)
 	require.Equal(t, 1, census.Material.ToConsumer)
 	require.Equal(t, 2, census.Name.ToConsumer)
+	// Виды потребителей (kaname#139): оба оператора базы — поглощающие, и ни
+	// один результат не прослежен — «потребителей 2» и «результатов 0» названы
+	// порознь.
+	require.Equal(t, 2, census.ConsumersAbsorbing)
+	require.Zero(t, census.ConsumersTransforming)
+	require.Equal(t, 1, census.Material.Absorbed)
+	require.Zero(t, census.Material.Transformed+census.Material.ReturnsInFile+census.Material.IntoType)
 	require.Zero(t, census.Material.Undeclared+census.Name.Undeclared+census.Material.ToCorpus+census.Name.ToCorpus)
 }
 
@@ -156,6 +164,10 @@ func TestLoginVerifierGate_Injection(t *testing.T) {
 		wantFinding string
 		// wantPremise — подстрока отказа премисы.
 		wantPremise string
+		// at — строка кода в файле-владельце, на которую находка обязана
+		// указать координатой «файл:строка»: красное от соседней строки — не
+		// красное этой сцены.
+		at string
 	}
 	scenes := []scene{
 		{
@@ -875,10 +887,200 @@ const loginMethodsTable = "user_login_methods"
 				c[lvOwner] += "\nvar last string\n\nfunc shadowed(v interface{ Reveal() string }) {\n\tlast := v.Reveal()\n\t_ = last\n}\n"
 			},
 		},
+		// ── kaname#139: РЕЗУЛЬТАТ ОБЪЯВЛЕННОГО ПОТРЕБИТЕЛЯ ──────────────────────
+		// Строковая операция над материалом возвращает ЧАСТИ того же материала;
+		// оператор базы — признак исхода. Сцены ниже различают эти два вида и
+		// позиции результата: каждая меняет против законного корпуса один факт.
+		{
+			name: "результат преобразующего потребителя, взятый от материала, выносится возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Head(v interface{ Reveal() string }) string {\n\thead, _, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn head\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Head → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return head",
+		},
+		{
+			name: "вторая позиция преобразующего потребителя несёт предмет так же, как первая",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Tail(v interface{ Reveal() string }) string {\n\t_, rest, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn rest\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Tail → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return rest",
+		},
+		{
+			name: "позиция ошибки разборщика несёт вход и выносится возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Cost(v interface{ Reveal() string }) error {\n\t_, err := strconv.ParseUint(v.Reveal(), 10, 32)\n\treturn err\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Cost → strconv.ParseUint", 0),
+			wantFinding: "материал выносится возвратом",
+			at:          "return err",
+		},
+		{
+			name: "часть материала уходит по цепочке преобразующих и выносится элементом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) First(v interface{ Reveal() string }) string {\n\t_, rest, _ := strings.Cut(v.Reveal(), \"$\")\n\tparts := strings.Split(rest, \",\")\n\treturn parts[0]\n}\n"
+			},
+			spec: func(s *check.LoginVerifierSpec) {
+				lvDeclareTransforming("LoginMethodRepo.First → strings.Cut", 2)(s)
+				lvDeclareTransforming("LoginMethodRepo.First → strings.Split")(s)
+			},
+			wantFinding: "материал выносится возвратом",
+			at:          "return parts[0]",
+		},
+		{
+			name: "часть материала отдана необъявленному вызову — находка у вызова, а не молчание",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Fields(v interface{ Reveal() string }) int {\n\t_, rest, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn len(strings.Fields(rest))\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Fields → strings.Cut", 2),
+			wantFinding: "ключ «LoginMethodRepo.Fields → strings.Fields»",
+			at:          "return len(strings.Fields(rest))",
+		},
+		{
+			name: "помощник разрешённого файла возвращает часть и зовётся из соседнего файла пакета",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc head(m string) string {\n\th, _, _ := strings.Cut(m, \"$\")\n\treturn h\n}\n\nfunc (r *LoginMethodRepo) Size(v interface{ Reveal() string }) int { return len(head(v.Reveal())) }\n"
+				c["internal/repo/kaname/pg/costclass.go"] = lvGo("pg", "func prefixOf(m string) string { return head(m) }")
+			},
+			spec:        lvDeclareTransforming("head → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return h",
+		},
+		{
+			name: "помощник, зовущийся только своим файлом, отдаёт часть вызывающему, а тот выносит её возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc head(m string) string {\n\th, _, _ := strings.Cut(m, \"$\")\n\treturn h\n}\n\nfunc (r *LoginMethodRepo) Prefix(v interface{ Reveal() string }) string { return head(v.Reveal()) }\n"
+			},
+			spec:        lvDeclareTransforming("head → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return head(v.Reveal())",
+		},
+		{
+			name: "кортеж объявлением переменных: вторая позиция преобразующего выносится возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Rest(v interface{ Reveal() string }) string {\n\tvar _, rest, _ = strings.Cut(v.Reveal(), \"$\")\n\treturn rest\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Rest → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return rest",
+		},
+		{
+			name: "приведение части к числу не очищает её: байт материала выносится возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Lead(v interface{ Reveal() string }) uint8 {\n\thead, _, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn uint8(head[0])\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Lead → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return uint8(head[0])",
+		},
+		{
+			name: "помощник, взятый значением, а не вызовом, — его возврат судится как вынос",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc head(m string) string {\n\th, _, _ := strings.Cut(m, \"$\")\n\treturn h\n}\n\nfunc (r *LoginMethodRepo) Size(v interface{ Reveal() string }) int { return len(head(v.Reveal())) }\n\nvar headOf = head\n"
+			},
+			spec:        lvDeclareTransforming("head → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return h",
+		},
+		{
+			name: "часть материала передана функции файла объявления, которая не конструирует тип",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c["internal/domain/login_method.go"] += "\nfunc Describe(m string) string { return m }\n"
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Label(v interface{ Reveal() string }) string {\n\thead, _, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn domain.Describe(head)\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Label → strings.Cut", 2),
+			wantFinding: "передан `domain.Describe`, объявленной в internal/domain/login_method.go",
+			at:          "return domain.Describe(head)",
+		},
+		{
+			name: "законный близнец: преобразованный материал возвращается в свой тип конструктором",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Trimmed(v interface{ Reveal() string }) (domain.LoginVerifier, error) {\n\treturn domain.NewLoginVerifier(strings.TrimSpace(v.Reveal()))\n}\n"
+			},
+			spec: lvDeclareTransforming("LoginMethodRepo.Trimmed → strings.TrimSpace"),
+		},
+		{
+			name: "законный близнец: из части преобразующего наружу уходит длина",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Head(v interface{ Reveal() string }) int {\n\thead, _, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn len(head)\n}\n"
+			},
+			spec: lvDeclareTransforming("LoginMethodRepo.Head → strings.Cut", 2),
+		},
+		{
+			name: "законный близнец: наружу уходит признак «разделитель найден» — чистая позиция",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Marked(v interface{ Reveal() string }) bool {\n\t_, _, found := strings.Cut(v.Reveal(), \"$\")\n\treturn found\n}\n"
+			},
+			spec: lvDeclareTransforming("LoginMethodRepo.Marked → strings.Cut", 2),
+		},
+		{
+			name: "законный близнец: оператор базы возвращает признак исхода",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Put(user string, v interface{ Reveal() string }) (bool, error) {\n\tvar created bool\n\terr := r.pool.QueryRow(\"INSERT INTO \"+loginMethodsTable+\" (user_id, verifier) VALUES ($1, $2) RETURNING true\", user, v.Reveal()).Scan(&created)\n\treturn created, err\n}\n"
+			},
+			spec: lvDeclareAbsorbing("LoginMethodRepo.Put → r.pool.QueryRow"),
+		},
+		{
+			name: "законный близнец: помощник, зовущийся только своим файлом, отдаёт часть вызывающему, тот — длину",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc head(m string) string {\n\th, _, _ := strings.Cut(m, \"$\")\n\treturn h\n}\n\nfunc (r *LoginMethodRepo) Size(v interface{ Reveal() string }) int { return len(head(v.Reveal())) }\n"
+			},
+			spec: lvDeclareTransforming("head → strings.Cut", 2),
+		},
+		{
+			name: "премиса: потребитель объявлен без вида",
+			spec: func(s *check.LoginVerifierSpec) {
+				s.OpaqueConsumers["LoginMethodRepo.Get → r.pool.QueryRow"] = check.LoginVerifierConsumer{Reason: "оператор чтения"}
+			},
+			wantPremise: "«LoginMethodRepo.Get → r.pool.QueryRow»: вид не объявлен",
+		},
+		{
+			name: "премиса: потребитель объявлен без причины",
+			spec: func(s *check.LoginVerifierSpec) {
+				s.OpaqueConsumers["LoginMethodRepo.Get → r.pool.QueryRow"] = check.LoginVerifierConsumer{Kind: check.ConsumerAbsorbing}
+			},
+			wantPremise: "причина не названа",
+		},
+		{
+			name: "премиса: поглощающему объявлены чистые позиции",
+			spec: func(s *check.LoginVerifierSpec) {
+				s.OpaqueConsumers["LoginMethodRepo.Get → r.pool.QueryRow"] = check.LoginVerifierConsumer{
+					Kind: check.ConsumerAbsorbing, Reason: "оператор чтения", Clean: map[int]string{0: "строка исхода"},
+				}
+			},
+			wantPremise: "у поглощающего чисты все позиции",
+		},
+		{
+			name: "премиса: чистая позиция преобразующего без причины",
+			spec: func(s *check.LoginVerifierSpec) {
+				s.OpaqueConsumers["LoginMethodRepo.Get → r.pool.QueryRow"] = check.LoginVerifierConsumer{
+					Kind: check.ConsumerTransforming, Reason: "оператор чтения", Clean: map[int]string{0: ""},
+				}
+			},
+			wantPremise: "чистая позиция 0 без причины",
+		},
 		{
 			name: "объявленный потребитель без предмета истекает",
 			spec: func(s *check.LoginVerifierSpec) {
-				s.OpaqueConsumers["LoginMethodRepo.Delete → r.pool.Exec"] = "оператор удаления строки способа"
+				s.OpaqueConsumers["LoginMethodRepo.Delete → r.pool.Exec"] = absorbing("оператор удаления строки способа")
 			},
 			wantFinding: "потребитель «LoginMethodRepo.Delete → r.pool.Exec»",
 		},
@@ -945,6 +1147,11 @@ func isLoginMethodsTable(name string) bool { return name != "" }
 				require.NoError(t, err)
 				require.NotEmpty(t, findings, "внесённый дефект обязан быть найден")
 				require.Contains(t, strings.Join(findings, "\n"), sc.wantFinding, "находка обязана называть координату")
+				if sc.at != "" {
+					line := lvLineOf(t, corpus[lvOwner], sc.at)
+					require.Contains(t, strings.Join(findings, "\n"), fmt.Sprintf("%s:%d: ", lvOwner, line),
+						"находка обязана указать на строку %q", sc.at)
+				}
 			default:
 				require.NoError(t, err)
 				require.Empty(t, findings, "законный близнец обязан молчать")
@@ -957,4 +1164,74 @@ func isLoginMethodsTable(name string) bool { return name != "" }
 func TestLoginVerifierGate_EmptyCorpusIsNotClean(t *testing.T) {
 	_, _, err := auditInjected(t, check.TreeCorpus{})
 	require.ErrorIs(t, err, check.ErrEmptyTraversal)
+}
+
+// lvImporting — файл-владелец синтетики импортирует ещё и пакеты imports.
+func lvImporting(c check.TreeCorpus, imports ...string) {
+	var b strings.Builder
+	b.WriteString("import (\n")
+	for _, imp := range imports {
+		fmt.Fprintf(&b, "\t%q\n", imp)
+	}
+	b.WriteString("\n\t\"github.com/PRO-Robotech/kaname/internal/domain\"\n)")
+	c[lvOwner] = strings.Replace(c[lvOwner], `import "github.com/PRO-Robotech/kaname/internal/domain"`, b.String(), 1)
+}
+
+// lvLineOf — номер строки, где в тексте src впервые стоит needle.
+func lvLineOf(t *testing.T, src, needle string) int {
+	t.Helper()
+	i := strings.Index(src, needle)
+	require.GreaterOrEqualf(t, i, 0, "строки %q в синтетике нет — сцена не построена", needle)
+	return strings.Count(src[:i], "\n") + 1
+}
+
+// lvDeclareTransforming — объявить потребителя ПРЕОБРАЗУЮЩИМ: результат несёт
+// предмет во всех позициях, кроме clean.
+func lvDeclareTransforming(key string, clean ...int) func(*check.LoginVerifierSpec) {
+	return func(s *check.LoginVerifierSpec) {
+		c := check.LoginVerifierConsumer{Kind: check.ConsumerTransforming, Reason: "сцена: преобразующий"}
+		if len(clean) > 0 {
+			c.Clean = map[int]string{}
+			for _, pos := range clean {
+				c.Clean[pos] = "сцена: позиция признака либо числа"
+			}
+		}
+		s.OpaqueConsumers[key] = c
+	}
+}
+
+// lvDeclareAbsorbing — объявить потребителя ПОГЛОЩАЮЩИМ: результат предмета не несёт.
+func lvDeclareAbsorbing(key string) func(*check.LoginVerifierSpec) {
+	return func(s *check.LoginVerifierSpec) {
+		s.OpaqueConsumers[key] = absorbing("сцена: поглощающий")
+	}
+}
+
+// absorbing — объявление поглощающего потребителя с причиной.
+func absorbing(reason string) check.LoginVerifierConsumer {
+	return check.LoginVerifierConsumer{Kind: check.ConsumerAbsorbing, Reason: reason}
+}
+
+// TestLoginVerifierGate_TracedResultsAreCountedApart — перепись называет
+// прослеженные результаты отдельно от объявленных потребителей (kaname#139):
+// «потребителей 3» при «результатов прослежено 0» и при «1» — разные
+// утверждения, и читатель переписи обязан их различать.
+func TestLoginVerifierGate_TracedResultsAreCountedApart(t *testing.T) {
+	corpus := lawfulLoginVerifierCorpus()
+	lvImporting(corpus, "strings")
+	corpus[lvOwner] += "\nfunc head(m string) string {\n\th, _, _ := strings.Cut(m, \"$\")\n\treturn h\n}\n\n" +
+		"func (r *LoginMethodRepo) Size(v interface{ Reveal() string }) int { return len(head(v.Reveal())) }\n"
+	spec := lawfulLoginVerifierSpec()
+	lvDeclareTransforming("head → strings.Cut", 2)(&spec)
+
+	findings, census, err := check.AuditLoginVerifierContainment(corpus, spec)
+	require.NoError(t, err)
+	t.Log(census)
+	require.Empty(t, findings)
+	require.Equal(t, 1, census.ConsumersTransforming)
+	require.Equal(t, 1, census.CleanPositions)
+	require.Equal(t, 1, census.Material.Transformed, "результат преобразующего прослежен — и назван числом")
+	require.Equal(t, 1, census.Material.ReturnsInFile, "возврат помощника своему файлу прослежен у вызывающего")
+	require.Contains(t, census.String(), "преобразующих 1")
+	require.Contains(t, census.String(), "возвратов своему файлу прослежено 1")
 }

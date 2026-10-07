@@ -61,8 +61,9 @@
 // Правило 3 — вынос: возврат, именованный результат, переменная пакета (своего
 // и чужого, её поле, элемент, ключ карты), память параметра и получателя,
 // канал, аргумент функции чужого файла, непрозрачный вызов без объявления
-// потребителя, встроенный вывод. Полный перечень и то, что несёт предмет, —
-// шапка `login_verifier_flow.go`. Переменная пакета в разрешённом файле, чьё
+// потребителя, встроенный вывод. Результат ПРЕОБРАЗУЮЩЕГО потребителя несёт
+// предмет и ведётся дальше (kaname#139). Полный перечень и то, что несёт
+// предмет, — шапка `login_verifier_flow.go`. Переменная пакета в разрешённом файле, чьё
 // значение обращается к выходу, — вынос материала сама по себе.
 //
 // Объявление предмета (имя выхода, файл и тип, где он объявлен, имя таблицы,
@@ -79,7 +80,9 @@
 //   - файл-владелец таблицы называет её хоть раз: иначе второе правило ослепло;
 //   - каждый разрешённый файл выход ИСПОЛЬЗУЕТ, каждый объявленный потребитель
 //     получает предмет: разрешение без предмета — место, куда вызов вносят
-//     незамеченным (послабление обязано истекать само).
+//     незамеченным (послабление обязано истекать само);
+//   - каждый потребитель объявлен с ВИДОМ и причиной, чистая позиция
+//     преобразующего — с причиной: иначе отказ прогона, а не «находок ноль».
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
@@ -122,9 +125,78 @@ type LoginVerifierSpec struct {
 	// уезжает в перепись: разрешение без названной причины снимается следующим.
 	AllowedFiles map[string]string
 	// OpaqueConsumers — вызов, которому материал либо имя таблицы отданы по
-	// существу, → причина. Ключ — «функция → вызов», как его печатает находка:
-	// `Тип.Метод → r.pool.QueryRow`. Объявление без вызова — находка.
-	OpaqueConsumers map[string]string
+	// существу, → его вид и причина. Ключ — «функция → вызов», как его печатает
+	// находка: `Тип.Метод → r.pool.QueryRow`. Объявление без вызова — находка;
+	// объявление без вида — отказ прогона (kaname#139).
+	OpaqueConsumers map[string]LoginVerifierConsumer
+}
+
+// LoginVerifierConsumerKind — что потребитель делает с полученным предметом.
+// Нулевое значение — «вид не объявлен», и гейт на нём отказывает: молчаливое
+// умолчание любого из двух видов было бы решением, которого никто не принимал.
+type LoginVerifierConsumerKind int
+
+const (
+	consumerKindUndeclared LoginVerifierConsumerKind = iota
+	// ConsumerAbsorbing — ПОГЛОЩАЮЩИЙ: предмет уходит в него и не возвращается;
+	// результат — признак исхода (оператор базы: строка исхода, число строк,
+	// ошибка драйвера) либо величина односторонней функции. Ни одна позиция
+	// результата предмета не несёт.
+	ConsumerAbsorbing
+	// ConsumerTransforming — ПРЕОБРАЗУЮЩИЙ: результат собран ИЗ предмета
+	// (строковая операция, декодирование, разборщик, чья ошибка несёт вход).
+	// Каждая позиция результата несёт предмет, кроме объявленных чистыми, и
+	// разбор ведёт её дальше так же, как выход `Reveal`.
+	ConsumerTransforming
+)
+
+func (k LoginVerifierConsumerKind) String() string {
+	switch k {
+	case consumerKindUndeclared:
+		return "вид не объявлен"
+	case ConsumerAbsorbing:
+		return "поглощающий"
+	case ConsumerTransforming:
+		return "преобразующий"
+	}
+	return "вид вне перечня"
+}
+
+// LoginVerifierConsumer — объявление потребителя.
+type LoginVerifierConsumer struct {
+	Kind LoginVerifierConsumerKind
+	// Clean — позиции результата ПРЕОБРАЗУЮЩЕГО (с нуля), которые предмета не
+	// несут, → причина, сверенная с кодом вызова. У поглощающего пусто: у него
+	// чисты все позиции, и вторая запись того же утверждения разошлась бы с первой.
+	Clean map[int]string
+	// Reason — почему предмет отдан этому вызову по существу.
+	Reason string
+}
+
+// lvValidateConsumers — объявление каждого потребителя полно: вид, причина,
+// причины чистых позиций. Неполное объявление — отказ прогона, а не «находок
+// ноль»: потребитель без вида означал бы молча выбранное умолчание.
+func lvValidateConsumers(consumers map[string]LoginVerifierConsumer) error {
+	for _, k := range lvSortedKeys(consumers) {
+		c := consumers[k]
+		switch {
+		case c.Kind != ConsumerAbsorbing && c.Kind != ConsumerTransforming:
+			return fmt.Errorf("потребитель «%s»: %s — поглощающий (результат предмета не несёт) "+
+				"либо преобразующий (результат собран из предмета) выбирается объявлением, а не умолчанием", k, c.Kind)
+		case strings.TrimSpace(c.Reason) == "":
+			return fmt.Errorf("потребитель «%s»: причина не названа — объявление без причины неотличимо "+
+				"от прощённой утечки", k)
+		case c.Kind == ConsumerAbsorbing && len(c.Clean) > 0:
+			return fmt.Errorf("потребитель «%s»: у поглощающего чисты все позиции результата — перечень "+
+				"чистых позиций у него второе утверждение того же и обязан отсутствовать", k)
+		}
+		for pos, why := range c.Clean {
+			if pos < 0 || strings.TrimSpace(why) == "" {
+				return fmt.Errorf("потребитель «%s»: чистая позиция %d без причины либо вне результата", k, pos)
+			}
+		}
+	}
+	return nil
 }
 
 // LoginVerifierCensus — объём осмотренного по каждой оси.
@@ -143,6 +215,9 @@ type LoginVerifierCensus struct {
 	Material, Name LoginVerifierFlowCensus
 	// ConsumerUses — объявленный потребитель → вызовов с предметом.
 	ConsumerUses map[string]int
+	// ConsumersAbsorbing, ConsumersTransforming — объявлений по виду;
+	// CleanPositions — чистых позиций, объявленных преобразующим.
+	ConsumersAbsorbing, ConsumersTransforming, CleanPositions int
 }
 
 // формы записи имени таблицы — ключи переписи.
@@ -173,10 +248,12 @@ func (c LoginVerifierCensus) String() string {
 	return fmt.Sprintf("перепись: не-тестовых файлов Go прочитано %d (разобрано %d) · объявлений выхода %d · "+
 		"обращений к выходу %d, из них в разрешённых файлах [%s] · упоминаний таблицы %d (%s), "+
 		"из них у владельца %d · связанных имён, несущих таблицу, %d %v · поток материала: %s · "+
-		"поток имени таблицы: %s · потребителей объявлено %d [%s]",
+		"поток имени таблицы: %s · потребителей объявлено %d (поглощающих %d, преобразующих %d, "+
+		"чистых позиций у преобразующих %d) [%s]",
 		c.FilesRead, c.FilesParsed, c.AccessorDecls, c.AccessorUses, strings.Join(allowed, " "),
 		total, strings.Join(forms, ", "), c.OwnerTableNamings, len(c.Bindings), c.Bindings,
-		c.Material, c.Name, len(c.ConsumerUses), strings.Join(consumers, " "))
+		c.Material, c.Name, len(c.ConsumerUses), c.ConsumersAbsorbing, c.ConsumersTransforming,
+		c.CleanPositions, strings.Join(consumers, " "))
 }
 
 // lvFile — разобранный файл корпуса.
@@ -322,6 +399,18 @@ func (ix *lvIndex) localConst(id *ast.Ident) ast.Expr {
 
 // isConversion — вызываемое есть тип строки либо среза байтов: `string`,
 // `[]byte`, `[]rune`, тип корпуса (своего пакета, локальный, другого пакета).
+// lvPredeclaredTypes — предобъявленные типы Go, приведение к которым — поток
+// значения, а не вызов: `uint8(части[0])` несёт часть материала так же, как
+// `string(части)`. Приведение к числу не «очищает» значение — оно судится у
+// стока результата (kaname#139: до этого числовое приведение несущего было
+// необъявленным непрозрачным вызовом).
+var lvPredeclaredTypes = map[string]bool{
+	"string": true, "bool": true, "byte": true, "rune": true, "any": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true, "uintptr": true,
+	"float32": true, "float64": true, "complex64": true, "complex128": true,
+}
+
 func (ix *lvIndex) isConversion(f *lvFile, fun ast.Expr) bool {
 	switch t := fun.(type) {
 	case *ast.ParenExpr:
@@ -342,7 +431,7 @@ func (ix *lvIndex) isConversion(f *lvFile, fun ast.Expr) bool {
 			}
 		}
 		_, fn := ix.funcs[f.dir][t.Name]
-		return t.Name == "string" && !fn && ix.bindings[f.dir]["string"] == nil
+		return lvPredeclaredTypes[t.Name] && !fn && ix.bindings[f.dir][t.Name] == nil
 	case *ast.SelectorExpr:
 		if dir := ix.importDir(f, t.X); dir != "" {
 			return ix.types[dir][t.Sel.Name]
@@ -619,6 +708,17 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 	if spec.Accessor == "" || spec.Table == "" || spec.DeclRel == "" || spec.DeclType == "" || spec.TableOwnerRel == "" {
 		return nil, c, fmt.Errorf("объявление предмета неполно (%+v) — судить нечего", spec)
 	}
+	if err := lvValidateConsumers(spec.OpaqueConsumers); err != nil {
+		return nil, c, fmt.Errorf("проверка НЕ ИСПОЛНЯЛАСЬ: %w", err)
+	}
+	for _, cons := range spec.OpaqueConsumers {
+		if cons.Kind == ConsumerAbsorbing {
+			c.ConsumersAbsorbing++
+			continue
+		}
+		c.ConsumersTransforming++
+		c.CleanPositions += len(cons.Clean)
+	}
 
 	// Проход первый: разбор, индекс по каталогу пакета, свёртка связанных имён.
 	ix, files, read, err := newLVIndex(corpus, spec.Table)
@@ -721,7 +821,9 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 	for rel := range spec.AllowedFiles {
 		allowedSet[rel] = true
 	}
-	material := lvSubject{noun: "материал", keep: allowedSet, isSource: func(_ *lvFile, e ast.Expr) bool {
+	material := lvSubject{noun: "материал", keep: allowedSet, intoType: func(fn lvFunc) bool {
+		return lvConstructs(fn, spec.DeclRel, spec.DeclType)
+	}, isSource: func(_ *lvFile, e ast.Expr) bool {
 		switch n := e.(type) {
 		case *ast.SelectorExpr:
 			return n.Sel.Name == spec.Accessor
@@ -794,14 +896,31 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 				"потребитель «%s» («%s») объявлен без предмета: ни материал, ни имя таблицы этому вызову "+
 					"не отданы. Объявление, которому нечего разрешать, есть место, куда вызов вносят "+
 					"незамеченным, — снимается вместе с предметом",
-				k, spec.OpaqueConsumers[k]))
+				k, spec.OpaqueConsumers[k].Reason))
 		}
 	}
 	sort.Strings(findings)
 	return findings, c, nil
 }
 
-func lvSortedKeys(m map[string]string) []string {
+// lvConstructs — fn есть конструктор типа материала: функция без получателя в
+// файле объявления выхода, чей результат называет сам тип. Материал, отданный
+// ей, возвращается под защиту своего типа — это не вынос. Метод типа, функция
+// другого файла пакета либо функция, возвращающая иное, конструктором не
+// являются и судятся как прочие функции корпуса.
+func lvConstructs(fn lvFunc, declRel, declType string) bool {
+	if fn.file == nil || fn.file.rel != declRel || fn.decl == nil || fn.decl.Recv != nil || fn.decl.Type.Results == nil {
+		return false
+	}
+	for _, fld := range fn.decl.Type.Results.List {
+		if id, ok := fld.Type.(*ast.Ident); ok && id.Name == declType {
+			return true
+		}
+	}
+	return false
+}
+
+func lvSortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
