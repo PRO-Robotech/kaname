@@ -124,6 +124,11 @@ func liveAuthLaneContract() authLaneContract {
 			// Смена адреса почты (kaname#635).
 			humansession.TextEmailInUse,
 			humansession.ReasonEmailInUse,
+			// Свои сессии (kaname#634).
+			humansession.TextSessionNotFound,
+			humansession.TextSessionIsCurrent,
+			humansession.ReasonSessionNotFound,
+			humansession.ReasonSessionIsCurrent,
 		},
 		Cookies:  []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
 		BodyKeys: loginlanehttp.ResponseObjectKeys(),

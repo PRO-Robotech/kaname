@@ -1,0 +1,80 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-sessions-are-listed-and-ended-by-their-owner.md
+  sha256: ee608e2e445edef3ff7dd29d0b1bacd29aee5f627bb66a63d136822718ba4439
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 34af95c50
+  content_commit: null
+  content_commit_note: >-
+    На момент круга документ в ветке 634-own-sessions-acceptance не закоммичен (git status: ??).
+    Отпечаток снят с рабочего дерева копии tmp/634-own-sessions-acceptance.
+  branch: 634-own-sessions-acceptance
+  task: PRO-Robotech/kaname#634
+  related_tasks: [PRO-Robotech/kacho#3061, PRO-Robotech/kaname#540, PRO-Robotech/kacho#2969]
+  lines: 729
+  round: 2
+  previous_record: docs/specs/reviews/own-sessions-are-listed-and-ended-by-their-owner/b304ad58c8dc331d14bd86b1c5baa6830efff1a2fc754d490b48238d278d1a98.yaml
+  fingerprint_predicate: sha256sum <док> → ee608e2e…4ba4439 (совпал с заданием)
+publication_mode: courier_of_agent_verdict
+
+verdict: ACCEPT
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+blocking: []
+
+round1_blocking_closed:
+  - kind: COVERAGE
+    where: Р3 «Границы значения», OS-04
+    closed_by: >-
+      Р3 называет единицу (руна) и порядок приведения (замена каждого байта вне UTF-8 на U+FFFD,
+      затем урезание до 512 рун; исход входа не меняется). OS-04 несёт (г) байты 0xFF 0xFE → две
+      U+FFFD и (д) 600 рун «ж» → 512 рун; на всех пяти входах 200 и проверка utf8.Valid тела
+      перечня. Близнец (г) и (д) — (а), различие одно. §5 разделён: у (г), (д) производитель —
+      новый тип домена, держатель — проба OS-04.
+    can_fail: >-
+      (г) отличает «каждый байт» от «каждый пробег»: strings.ToValidUTF8 дал бы одну U+FFFD
+      (измерено: "a\xff\xfeb" → "a�b"). (д) отличает урезание по байтам (256 рун) от
+      урезания по рунам (512). Непривёденный байт роняет запись в хранилище, и «200» на (г)
+      краснеет.
+
+important:
+  - kind: CONSTRUCTIBILITY
+    where: «Дано I» (S_C «без заголовка»), OS-04 (в) и «запись регистрации»
+    note: >-
+      Харнесс ходит настоящим http.Client (handler_test.go:279 lane.do). Клиент Go без
+      заданного User-Agent подставляет `Go-http-client/1.1`; заданный пустым — заголовок не
+      шлёт вовсе (измерено). Поэтому: S_C и (в) обязаны ставить Header.Set("User-Agent", ""),
+      иначе OS-01 «у S_C ключа нет» покраснеет на исправном продукте (дефект фикстуры, не
+      продукта); «пустое значение» (в) на проводе неотличимо от «нет заголовка», что
+      Р3 и так приравнивает; для записи регистрации проба должна сама задать заголовок —
+      «взять из своего запроса» при незаданном значении даст пустоту, а сервер увидит
+      `Go-http-client/1.1`.
+  - kind: FORMAT
+    where: OS-04 When
+    note: >-
+      «три входа `avLane.login`», а букв пять (а)…(д); Тогда говорит «пяти входов». У (б)
+      осталось слово «знаков» — на ASCII совпадает с руной, но лучше «рун».
+
+verified_true:
+  - "FieldError: refusals.go:63, текст `Illegal argument <поле>: <правило>`; writeError отдаёт его 400, код 3, без деталей (handler.go:1090–1091) — производитель OS-05 назван верно"
+  - "pagetoken.WellFormed — pagination.go:30; MaxListPageSize int32 = 1000 — pagination.go:40"
+  - "OS-05 (з) pageSize=-1 добавлен (замечание круга 1 учтено)"
+  - "OS-16 Given перенесён на свежего человека kaname-address-verification.py (_verified_person) — замечание круга 1 учтено"
+
+counts:
+  scenarios: 16
+  producer_named: 16 of 16
+  twin_named: 16 of 16
+  constructibility: >-
+    Посеяны входы OS-04 (г) и (д) тем же путём, что у харнесса (http.Client → httptest-сервер):
+    2 из 2 доходят до слушателя без изменения (12 байт, невалидный UTF-8; 600 рун, 1200 байт).
+    Сценарии целиком на ещё не существующих глаголах до кода исполнить нечем (не ставилось 16);
+    фикстуры названы, посевы I/I-V/U подтверждены кругом 1.
+
+event_body: "acceptance-reviewer · ACCEPT · sha256 ee608e2e445edef3ff7dd29d0b1bacd29aee5f627bb66a63d136822718ba4439"

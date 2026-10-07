@@ -120,6 +120,15 @@ type stubLane struct {
 	changeConfirmOut humansession.ConfirmEmailChangeOutput
 	changeConfirmErr error
 	changeConfirmIn  []humansession.ConfirmEmailChangeInput
+	// Свои сессии (kaname#634).
+	ownListOut      humansession.ListOwnSessionsOutput
+	ownListErr      error
+	ownListIn       []humansession.ListOwnSessionsInput
+	ownEndErr       error
+	ownEndIn        []humansession.EndOwnSessionInput
+	ownEndOthersOut humansession.EndOtherOwnSessionsOutput
+	ownEndOthersErr error
+	ownEndOthersIn  []humansession.EndOtherOwnSessionsInput
 }
 
 func (s *stubLane) RequestEmailChange(_ context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
@@ -130,6 +139,21 @@ func (s *stubLane) RequestEmailChange(_ context.Context, in humansession.Request
 func (s *stubLane) ConfirmEmailChange(_ context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
 	s.changeConfirmIn = append(s.changeConfirmIn, in)
 	return s.changeConfirmOut, s.changeConfirmErr
+}
+
+func (s *stubLane) ListOwnSessions(_ context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	s.ownListIn = append(s.ownListIn, in)
+	return s.ownListOut, s.ownListErr
+}
+
+func (s *stubLane) EndOwnSession(_ context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	s.ownEndIn = append(s.ownEndIn, in)
+	return humansession.EndOwnSessionOutput{}, s.ownEndErr
+}
+
+func (s *stubLane) EndOtherOwnSessions(_ context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	s.ownEndOthersIn = append(s.ownEndOthersIn, in)
+	return s.ownEndOthersOut, s.ownEndOthersErr
 }
 
 // Подтверждение адреса (kaname#456): дублёр отвечает объявленным исходом;

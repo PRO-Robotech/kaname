@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 782
+Всего кейсов: 783
 
 ## Перепись по модулям
 
@@ -69,7 +69,7 @@
 | `cases/kaname-login-lane.py` | 23 |
 | `cases/kaname-recovery-lane.py` | 13 |
 | `cases/kaname-registration.py` | 2 |
-| `cases/kaname-address-verification.py` | 7 |
+| `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
 | `cases/kaname-access-keys.py` | 10 |
 | `cases/kaname-second-factor.py` | 18 |
@@ -1070,7 +1070,7 @@
 - `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
 - `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
 
-## `cases/kaname-address-verification.py` — 7 кейсов
+## `cases/kaname-address-verification.py` — 8 кейсов
 
 > Подтверждение адреса и положение подтверждения (kaname#456, приёмка
 > `access-beyond-login-needs-a-verified-address.md`, позиции уровня E): сессия
@@ -1083,7 +1083,10 @@
 > письмами ждёт по `Retry-After` ответа службы. На автономном стенде посадки
 > `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Гоняет набор
 > задание `chart-own` процесса `e2e-newman.yml` тем же вызовом прогонщика,
-> последним.
+> последним. Свои сессии (kaname#634, OS-16) — перечень, выход из выбранной и
+> из всех, кроме текущей, — живут здесь же: им нужен тот же свежий человек с
+> подтверждённым адресом; служба стенда без этих путей (404) — «условие не
+> создано».
 
 - `IAM-ADDRVERIFY-OK-REGISTRATION-OPENS-THE-POSITION`
 - `IAM-ADDRVERIFY-OK-LETTER-ONLY-ON-REQUEST`
@@ -1092,6 +1095,7 @@
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 - `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
+- `IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED`
 
 ## `cases/kaname-email-change.py` — 3 кейса
 

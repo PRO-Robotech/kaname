@@ -116,6 +116,17 @@ Coverage (техники: классы эквивалентности сесси
                                           (уровень «2» глагола приглашения), адреса
                                           выдачи и фронта, клиент церемонии и ключи
                                           надзора пишет посев церемонии стенда чарта
+  IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED — OS-16 (приёмка kaname#634,
+                                          `own-sessions-are-listed-and-ended-by-their-owner.md`):
+                                          свежий человек с подтверждённым адресом
+                                          входит трижды; перечень носителем N1 —
+                                          200, ≥ 3 записей, current ровно у N1;
+                                          выход из выбранной (N2) — 200, перечень
+                                          носителем N2 — 401; выход из всех, кроме
+                                          текущей, — 200, ended ≥ 1; последний
+                                          перечень — одна запись, текущая. Служба
+                                          стенда без путей своих сессий (404 на
+                                          перечень) — «условие не создано»
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — идентификаторы КОММЕНТАРИЕМ, а не строкой: перепись
@@ -1184,5 +1195,133 @@ CASES.append(Case(
             "pm.expect(__theirs.length === 1 && !__roles(__theirs[0]).includes('owner')).to.eql(true));",
         ], retry_predicate="(() => { let j; try { j = pm.response.json(); } catch (e) { return false; } "
                            "return !Array.isArray(j.accounts) || j.accounts.length < 2; })()"),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# OS-16 (kaname#634): свои сессии сквозь стенд — две и более сессии, перечень,
+# выход из выбранной и из всех, кроме текущей. Человек — свой, свежий:
+# `end-others` по человеку посева сняло бы сессии кейсов соседних наборов.
+# Запись N2 находится в перечне по описанию клиента, которым её назвал вход
+# (`User-Agent` запроса выдачи, Р3): так кейс заодно судит, что описание
+# доходит до перечня.
+# ───────────────────────────────────────────────────────────────────────────
+_POS = "avS"
+_SESSIONS = "/iam/v1/auth/sessions"
+_SESSIONS_END = "/iam/v1/auth/sessions/end"
+_SESSIONS_END_OTHERS = "/iam/v1/auth/sessions/end-others"
+_OS_AGENT = "kaname-newman-os16-"
+_OS_WHY = ("слушатель полосы формы стенда не обслуживает путей своих сессий (перечень отвечает "
+           "404): образ службы на стенде старше kaname#634 либо пути не ретранслированы краем — "
+           "это условие, которого стенд не создал, а не ответ продукта")
+
+
+def _os_guard(p):
+    """Пути своих сессий есть на стенде — иначе «условие не создано» и шаг не идёт."""
+    return [
+        f"if (pm.environment.get({js_str(_v(p, 'NoOwnSessions'))}) === '1') {{",
+        *precondition_not_met("пути своих сессий обслуживаются слушателем полосы стенда", _OS_WHY, indent="  "),
+        "}",
+    ]
+
+
+def _os_login(p, n):
+    """Вход той же личности с описанием клиента `<_OS_AGENT><n>`; носитель — в `<p>N<n>Cookie`."""
+    name = f"os16-login-{n}"
+    label = name.upper()
+    return [
+        _csrf_step(p, f"{name}-csrf", "login", with_session=None),
+        _post(p, name, _LOGIN,
+              {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": f"{{{{{_v(p, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              extra_pre=[f"pm.request.headers.upsert({{key: 'User-Agent', value: {js_str(_OS_AGENT + str(n))}}});"],
+              test_script=[
+                  *_status_is(200, label),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(label + ': emailVerified true')}, () => "
+                  "pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
+                  *_capture(p, "kaname_session", f"N{n}Cookie", label),
+                  *_capture(p, "kaname_form", "FormCookie", label, required=False),
+              ]),
+    ]
+
+
+def _os_list(p, name, cookie_var, test_script, *, first=False):
+    label = name.upper()
+    guard = [] if first else _os_guard(p)
+    return Step(
+        name=name, method="GET", path=_SESSIONS,
+        pre_script=[*guard, *require_env_url("loginLaneBaseUrl", _SESSIONS, _LANE_WHY), *_src_pre(p),
+                    f"pm.test({js_str(label + ': предъявляемый носитель был выдан (контроль непустоты)')}, () => "
+                    f"pm.expect(!!pm.environment.get({js_str(_v(p, cookie_var))})).to.eql(true));",
+                    *_with_cookies(("kaname_session", _v(p, cookie_var)))],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=list(test_script),
+    )
+
+
+_OS_PARSE = [
+    "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+    "const __s = Array.isArray(__j.sessions) ? __j.sessions : [];",
+    "const __cur = __s.filter(x => x.current === true);",
+]
+
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED",
+    title="Свои сессии сквозь стенд: перечень — текущая помечена, выход из выбранной снимает её (её носитель — 401), выход из всех, кроме текущей, оставляет одну (OS-16)",
+    classes=["CRUD", "SEC"],
+    priority="P0",
+    steps=[
+        *_verified_person(_POS, "os16"),
+        *_os_login(_POS, 1),
+        *_os_login(_POS, 2),
+        *_os_login(_POS, 3),
+        _os_list(_POS, "os16-list-n1", "N1Cookie", [
+            f"if (pm.response.code === 404) {{ pm.environment.set({js_str(_v(_POS, 'NoOwnSessions'))}, '1'); }} else {{",
+            f"  pm.environment.unset({js_str(_v(_POS, 'NoOwnSessions'))});",
+            *("  " + x for x in _status_is(200, "OS16-LIST-N1")),
+            *("  " + x for x in _OS_PARSE),
+            "  pm.test('OS16-LIST-N1: записей не меньше трёх', () => pm.expect(__s.length >= 3).to.eql(true));",
+            "  pm.test('OS16-LIST-N1: current ровно у одной записи', () => pm.expect(__cur.length).to.eql(1));",
+            f"  pm.test('OS16-LIST-N1: текущая — запись N1 (её описание клиента)', () => "
+            f"pm.expect(__cur.length === 1 && __cur[0].userAgent === {js_str(_OS_AGENT + '1')}).to.eql(true));",
+            f"  const __n2 = __s.filter(x => x.userAgent === {js_str(_OS_AGENT + '2')});",
+            "  pm.test('OS16-LIST-N1: запись N2 названа своим описанием клиента ровно один раз', () => "
+            "pm.expect(__n2.length).to.eql(1));",
+            "  pm.test('OS16-LIST-N1: запись N2 — не текущая', () => "
+            "pm.expect(__n2.length === 1 && __n2[0].current === false).to.eql(true));",
+            f"  pm.environment.set({js_str(_v(_POS, 'N2Id'))}, __n2.length === 1 ? String(__n2[0].id) : '');",
+            "  pm.test('OS16-LIST-N1: nextPageToken — строка', () => pm.expect(typeof __j.nextPageToken).to.eql('string'));",
+            "}",
+        ], first=True),
+        _csrf_step(_POS, "os16-end-csrf", "session-end", init=_os_guard(_POS), with_session="N1Cookie"),
+        _post(_POS, "os16-end-n2", _SESSIONS_END,
+              {"sessionId": f"{{{{{_v(_POS, 'N2Id')}}}}}", "csrfToken": f"{{{{{_v(_POS, 'Csrf')}}}}}"},
+              with_session="N1Cookie", extra_pre=_os_guard(_POS),
+              test_script=[
+                  *_status_is(200, "OS16-END-N2"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('OS16-END-N2: тело — {\"ended\": true}', () => pm.expect(__j.ended).to.eql(true));",
+                  *_no_cookies("OS16-END-N2"),
+              ]),
+        _os_list(_POS, "os16-list-n2-gone", "N2Cookie", _refused(401, 16, _REFUSED, "OS16-LIST-N2", empty_details=True)),
+        _csrf_step(_POS, "os16-end-others-csrf", "session-end", init=_os_guard(_POS), with_session="N1Cookie"),
+        _post(_POS, "os16-end-others", _SESSIONS_END_OTHERS,
+              {"csrfToken": f"{{{{{_v(_POS, 'Csrf')}}}}}"},
+              with_session="N1Cookie", extra_pre=_os_guard(_POS),
+              test_script=[
+                  *_status_is(200, "OS16-END-OTHERS"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('OS16-END-OTHERS: ended — число не меньше одного', () => "
+                  "pm.expect(typeof __j.ended === 'number' && __j.ended >= 1).to.eql(true));",
+                  *_no_cookies("OS16-END-OTHERS"),
+              ]),
+        _os_list(_POS, "os16-list-n1-alone", "N1Cookie", [
+            *_status_is(200, "OS16-LIST-ALONE"),
+            *_OS_PARSE,
+            "pm.test('OS16-LIST-ALONE: запись ровно одна', () => pm.expect(__s.length).to.eql(1));",
+            "pm.test('OS16-LIST-ALONE: и она текущая', () => pm.expect(__cur.length).to.eql(1));",
+        ]),
     ],
 ))

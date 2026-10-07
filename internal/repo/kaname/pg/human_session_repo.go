@@ -146,6 +146,72 @@ func (r *HumanSessionRepo) OldestFailureSince(ctx context.Context, scope humanse
 	return *at, true, nil
 }
 
+// sessionsOfSQL — живые записи личности на момент $2 (без отметки снятия, срок
+// позже $2) после курсора ($3, $4) в порядке выдачи (kaname#634, Р4). Срок
+// судится переданным моментом, а не `now()` базы: часы — у вызывающего (форма
+// Ф-д), как у `Resolve`. Порядок `(created_at, id)` — порядок курсора службы;
+// строки одной личности ищет индекс `human_sessions_user_id_idx`.
+const sessionsOfSQL = `
+	SELECT id, user_id, authenticated_at, last_presented_at, expires_at,
+	       assurance_level, presented_methods, user_agent, created_at
+	  FROM human_sessions
+	 WHERE user_id = $1 AND ended_at IS NULL AND expires_at > $2
+	   AND (created_at, id) > ($3::timestamptz, $4::text)
+	 ORDER BY created_at, id
+	 LIMIT $5`
+
+// SessionsOf — см. порт. Курсор и величина страницы судятся здесь ещё раз
+// (авторитетный повтор проверки на границе приложения): мусор — отказ
+// аргументом, а не молчаливая обрезка.
+func (r *HumanSessionRepo) SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	limit, err := effectivePageSize(size)
+	if err != nil {
+		return nil, "", err
+	}
+	var (
+		afterTS time.Time
+		afterID string
+	)
+	if token != "" {
+		afterTS, afterID, err = decodePageToken(token)
+		if err != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument pageToken: malformed")
+		}
+	}
+	rows, err := r.pool.Query(ctx, sessionsOfSQL, string(userID), now, afterTS, afterID, limit+1)
+	if err != nil {
+		return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+	}
+	defer rows.Close()
+	var out []domain.HumanSession
+	for rows.Next() {
+		var (
+			s       domain.HumanSession
+			methods []string
+			client  *string
+		)
+		if err := rows.Scan(&s.ID, &s.UserID, &s.AuthenticatedAt, &s.LastPresentedAt, &s.ExpiresAt,
+			&s.AssuranceLevel, &methods, &client, &s.CreatedAt); err != nil {
+			return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+		}
+		s.PresentedMethods = methods
+		if client != nil {
+			s.Client = domain.NewClientDescription(*client)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+	}
+	next := ""
+	if int64(len(out)) > limit {
+		last := out[limit-1]
+		next = encodePageToken(last.CreatedAt, string(last.ID))
+		out = out[:limit]
+	}
+	return out, next, nil
+}
+
 // FirstAuthentication — см. порт.
 func (r *HumanSessionRepo) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
 	return firstAuthenticationQ(ctx, r.pool, userID)
@@ -490,13 +556,20 @@ func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSe
 	if digest == "" {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
 	}
+	// Описание клиента (kaname#634, Р3): отсутствие — NULL, а не пустая строка;
+	// значение приведено типом домена и пишется только здесь — операцией выдачи.
+	var client *string
+	if !s.Client.IsZero() {
+		v := s.Client.Value()
+		client = &v
+	}
 	_, err := w.tx.Exec(ctx, `
 		INSERT INTO human_sessions
 		    (id, user_id, bearer_digest, authenticated_at, last_presented_at, expires_at,
-		     assurance_level, presented_methods)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		     assurance_level, presented_methods, user_agent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		string(s.ID), string(s.UserID), string(digest), s.AuthenticatedAt, s.LastPresentedAt, s.ExpiresAt,
-		s.AssuranceLevel, s.PresentedMethods)
+		s.AssuranceLevel, s.PresentedMethods, client)
 	if err != nil {
 		return mapErr(err, "HumanSession.Insert", string(s.ID))
 	}
@@ -580,6 +653,49 @@ const endSessionsOfSQL = `
 		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL
 		 RETURNING id`
 
+// endLiveSessionsOfSQL — та же операция над ЖИВЫМИ записями: срок позже момента
+// снятия $3 (kaname#634, Р7). Истёкшая не снятая запись не «сессия» человека —
+// перечень её не показывает, и снятие «всех, кроме текущей» её не считает.
+const endLiveSessionsOfSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL AND expires_at > $3
+		 RETURNING id`
+
+// endOwnLiveSessionSQL — ровно одна запись $2, если она — живая запись личности
+// $1 на момент $3 (kaname#634, Р5): субъект, живость и срок — условие ЭТОГО
+// оператора, а не чтение перед ним.
+const endOwnLiveSessionSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id = $2 AND ended_at IS NULL AND expires_at > $3
+		 RETURNING id`
+
+// sessionEndKind — форма набора, который снимает дверь. Перечень закрыт;
+// нулевое значение — «не названо», и дверь его отвергает.
+type sessionEndKind int
+
+const (
+	// endUnendedExcept — все не снятые записи личности, кроме keep (истёкшие —
+	// тоже): смена пароля, снятие фактора, восстановление, подтверждение
+	// адреса, принудительный выход.
+	endUnendedExcept sessionEndKind = iota + 1
+	// endLiveExcept — все ЖИВЫЕ на at записи личности, кроме keep: «все, кроме
+	// текущей» (kaname#634).
+	endLiveExcept
+	// endLiveTarget — ровно target, если она — живая на at запись личности:
+	// выход из выбранной (kaname#634).
+	endLiveTarget
+)
+
+// sessionEndSet — что снимает дверь: форма, личность, исключаемая либо
+// названная запись, момент снятия (он же момент суждения о сроке).
+type sessionEndSet struct {
+	kind   sessionEndKind
+	userID domain.UserID
+	keep   domain.HumanSessionID
+	target domain.HumanSessionID
+	at     time.Time
+}
+
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
@@ -593,7 +709,62 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		return 0, err
 	}
-	return endSessionsAndRevokeWhatTheyHold(ctx, w.tx, userID, keep, at, reason)
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endUnendedExcept, userID: userID, keep: keep, at: at}, reason)
+	return len(ended), err
+}
+
+// EndOtherLiveSessions — см. порт: прочие ЖИВЫЕ записи личности на now, кроме
+// keep (kaname#634, Р7), той же дверью снятия. Строку личности дверь берёт сама,
+// как у EndOtherSessions.
+func (w *humanSessionWriter) EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		return nil, err
+	}
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endLiveExcept, userID: userID, keep: keep, at: now}, reason)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.HumanSessionID, 0, len(ended))
+	for _, id := range ended {
+		out = append(out, domain.HumanSessionID(id))
+	}
+	return out, nil
+}
+
+// EndOwnSession — см. порт: ровно target, если она — живая запись личности на
+// now (kaname#634, Р5). Владение, живость и срок — в операторе той же двери
+// снятия (ban #10); ноль строк — «такой живой записи у личности нет».
+func (w *humanSessionWriter) EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	if target == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.id: required")
+	}
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		return false, err
+	}
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endLiveTarget, userID: userID, target: target, at: now}, reason)
+	if err != nil {
+		return false, err
+	}
+	return len(ended) == 1, nil
+}
+
+// sessionLiveSQL — жива ли запись личности на момент $3.
+const sessionLiveSQL = `
+	SELECT EXISTS (SELECT 1 FROM human_sessions
+	                WHERE id = $1 AND user_id = $2 AND ended_at IS NULL AND expires_at > $3)`
+
+// SessionLive — см. порт. Оператор транзакции писателя на уровне `read
+// committed` (`ceremonyWriterTx`): его снимок взят ПОСЛЕ замка личности, и
+// снятие, зафиксированное за ожидание замка, он видит.
+func (w *humanSessionWriter) SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	var live bool
+	if err := w.tx.QueryRow(ctx, sessionLiveSQL, string(id), string(userID), now).Scan(&live); err != nil {
+		return false, mapErr(err, "HumanSession.Live", string(id))
+	}
+	return live, nil
 }
 
 // endSessionsAndRevokeWhatTheyHold — ЕДИНСТВЕННЫЙ способ снять сессии: снимает
@@ -637,9 +808,16 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 // Отзыв адресуется снятым записям поимённо. Второй запрос «а какие это были»
 // вернул бы уже снятые строки вперемешку с теми, что сняли до нас, — и отозвал
 // бы выданное в чужих сессиях.
-func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID domain.UserID,
-	keep domain.HumanSessionID, at time.Time, reason string,
-) (int, error) {
+//
+// # ФОРМ НАБОРА ТРИ, ДВЕРЬ ОДНА (kaname#634)
+//
+// Свои сессии снимают «все живые, кроме текущей» и «ровно выбранную, если она
+// живая и своя». Это другие ПРЕДИКАТЫ набора, а не другое действие, и операторы
+// каждой формы исполняет ЭТА функция: заведи их отдельным помощником — он снимал
+// бы записи и не отзывал выданного, то есть был бы ровно той половиной действия,
+// которую дверь делает непредставимой. Форма выбирается закрытым перечнем
+// (`sessionEndKind`), не строкой оператора от вызывающего.
+func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, set sessionEndSet, reason string) ([]string, error) {
 	// Оператор снятия исполняется ЗДЕСЬ, а не в отдельном помощнике, и это
 	// решение: помощник, снимающий записи и не отзывающий выданного, был бы
 	// функцией, делающей ПОЛОВИНУ действия, — то есть ровно тем состоянием,
@@ -650,28 +828,42 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
 	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
 	// них — то есть слишком поздно.
-	rows, err := tx.Query(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
+	userID := string(set.userID)
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	switch set.kind {
+	case endUnendedExcept:
+		rows, err = tx.Query(ctx, endSessionsOfSQL, userID, string(set.keep), set.at, reason)
+	case endLiveExcept:
+		rows, err = tx.Query(ctx, endLiveSessionsOfSQL, userID, string(set.keep), set.at, reason)
+	case endLiveTarget:
+		rows, err = tx.Query(ctx, endOwnLiveSessionSQL, userID, string(set.target), set.at, reason)
+	default:
+		return nil, iamerr.Wrapf(iamerr.ErrInternal, "session end: set kind %d is not declared", set.kind)
+	}
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.End", string(userID))
+		return nil, mapErr(err, "HumanSession.End", userID)
 	}
 	var ended []string
 	for rows.Next() {
 		var id string
 		if serr := rows.Scan(&id); serr != nil {
 			rows.Close()
-			return 0, mapErr(serr, "HumanSession.End", string(userID))
+			return nil, mapErr(serr, "HumanSession.End", userID)
 		}
 		ended = append(ended, id)
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
-		return 0, mapErr(rerr, "HumanSession.End", string(userID))
+		return nil, mapErr(rerr, "HumanSession.End", userID)
 	}
 	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
-		return 0, rerr
+		return nil, rerr
 	}
-	return len(ended), nil
+	return ended, nil
 }
 
 // ForceLogoutWriter — транзакция записи для административного принудительного

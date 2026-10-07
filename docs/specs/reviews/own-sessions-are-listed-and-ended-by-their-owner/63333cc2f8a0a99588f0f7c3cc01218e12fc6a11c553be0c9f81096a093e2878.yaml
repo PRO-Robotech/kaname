@@ -1,0 +1,71 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-sessions-are-listed-and-ended-by-their-owner.md
+  sha256: 63333cc2f8a0a99588f0f7c3cc01218e12fc6a11c553be0c9f81096a093e2878
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 3b2272e37
+  content_commit: null
+  content_commit_note: >-
+    Редакция 4 не закоммичена (git status: M поверх 3b2272e37, где лежит одобренная кругом 3
+    редакция 3c1eea51…e959a). Отпечаток снят с рабочего дерева копии tmp/634-own-sessions-acceptance.
+  branch: '634'
+  task: PRO-Robotech/kaname#634
+  round: 4
+  round_kind: confirmation
+  previous_record: docs/specs/reviews/own-sessions-are-listed-and-ended-by-their-owner/3c1eea51c437351a8f3dab6df86cbc7d62c0f3b238cd220e59d5ba7304ce959a.yaml
+  fingerprint_predicate: sha256sum <док> → 63333cc2…2e878 (совпал с заданием); git show HEAD:<док> | sha256sum → 3c1eea51…e959a
+publication_mode: courier_of_agent_verdict
+
+verdict: ACCEPT
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+blocking: []
+
+delta_against_approved:
+  predicate: git diff HEAD -- <док>  (numstat 18+, 4-; ханки @@ -8,4 +8,7 @@ и @@ -15,0 +19,11 @@)
+  body_identity: >-
+    sed -n '/^- \*\*Дата/,$p' от HEAD и от рабочего дерева → оба 2dcc7e68…32006: всё начиная со
+    строки «Дата» побайтово совпадает с одобренной редакцией.
+  hunks:
+    - where: шапка, строка «Статус»
+      change: редакция 4 после круга 3; правка только шапки; вердикт круга 3 не переносится
+    - where: шапка, «История review» (дописано, прежняя строка круга 1 не тронута)
+      change: круг 2 ACCEPT ee608e2e; редакция 3 коммитом 3b2272e37 (сценариев 0); круг 3 ACCEPT 3c1eea51; редакция 4 — шапка
+      verified: >-
+        git show 8b1e65f1b:<док> | sha256sum → ee608e2e…4ba4439; git show HEAD(3b2272e37):<док> |
+        sha256sum → 3c1eea51…e959a; обе записи ревью существуют в дереве (git ls-files) с вердиктом ACCEPT
+  scenarios_touched: 0
+  conclusion: >-
+    Дифф — только запись о правке и строка состояния, факты в ней сверены. Одобрение круга 3
+    по смыслу переносится на редакцию 4 новой записью.
+
+important:
+  - kind: CONSTRUCTIBILITY
+    note: Замечание круга 2 о User-Agent у http.Client харнесса остаётся в силе (см. записи ee608e2e и 3c1eea51).
+
+event_body: "acceptance-reviewer · ACCEPT · sha256 63333cc2f8a0a99588f0f7c3cc01218e12fc6a11c553be0c9f81096a093e2878"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#634
+  status: performed
+  published: true
+  database_id: 6035940401
+  node_id: "IC_kwDOUO26pM8AAAABZ8UkMQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/634#issuecomment-6035940401"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6035940401"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T10:23:07Z"
+  body_sha256: "87b31b3908152d6bddd9ce3301846e23469796e96181b5a0fbb35e2e654422e9"
+  subject_sha256: "63333cc2f8a0a99588f0f7c3cc01218e12fc6a11c553be0c9f81096a093e2878"
+  subject_revision_commit: "5947c44cd5e551f8f9ef467e6a015e952b4f612b"
+  verdict: "ACCEPT"
+  publication_mode: scripts/rituals/approval-event.sh
