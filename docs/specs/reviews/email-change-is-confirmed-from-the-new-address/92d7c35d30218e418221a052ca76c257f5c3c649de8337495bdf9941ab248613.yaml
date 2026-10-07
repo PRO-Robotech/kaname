@@ -19,11 +19,23 @@ round: 2
 reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-06T22:59:22Z'
 event:
-  type: none
-  status: not_performed
-  published: false
-  publication_expected_from_orchestrator: true
-  body: 'acceptance-reviewer · APPROVED · 92d7c35d30218e418221a052ca76c257f5c3c649de8337495bdf9941ab248613'
+  type: issue_comment
+  target: PRO-Robotech/kaname#635
+  status: performed
+  published: true
+  database_id: 6035885763
+  node_id: "IC_kwDOUO26pM8AAAABZ8ROww"
+  url: "https://github.com/PRO-Robotech/kaname/issues/635#issuecomment-6035885763"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6035885763"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T10:19:32Z"
+  body_sha256: "4e3810b3f286b7bd29a71c7cc73cca3c352c231acaf96bc4397102ab486d24ed"
+  subject_sha256: "92d7c35d30218e418221a052ca76c257f5c3c649de8337495bdf9941ab248613"
+  subject_revision_commit: "67b382886620812d12964997a455c122d36bba2b"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
