@@ -57,4 +57,14 @@ important:
   - kind: CONSTRUCTIBILITY
     note: Замечание круга 2 о User-Agent у http.Client харнесса остаётся в силе (см. previous_record).
 
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт ACCEPT выдаёт санкцию только вместе с внешним событием на этот отпечаток. Учётка названа, потому что гейт
+      записей ревью (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в
+      subject.task этой учёткой: без неё запись не судима, и его исход — «не выполнилось».
+
 event_body: "acceptance-reviewer · ACCEPT · sha256 3c1eea51c437351a8f3dab6df86cbc7d62c0f3b238cd220e59d5ba7304ce959a"

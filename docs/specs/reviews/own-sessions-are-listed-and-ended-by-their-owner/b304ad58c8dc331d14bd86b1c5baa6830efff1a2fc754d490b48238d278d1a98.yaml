@@ -96,4 +96,14 @@ counts:
     этим кругом не ставилось (не выполнилось 0 / не ставилось 16): сценарии на ещё не
     существующих глаголах до кода исполнить нечем.
 
+effective_approval:
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт RETURN санкции не выдаёт и не отзывает. Учётка названа, потому что гейт
+      записей ревью (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в
+      subject.task этой учёткой: без неё запись не судима, и его исход — «не выполнилось».
+
 event_body: "acceptance-reviewer · RETURN · sha256 b304ad58c8dc331d14bd86b1c5baa6830efff1a2fc754d490b48238d278d1a98"
