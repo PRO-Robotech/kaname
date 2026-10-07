@@ -1044,6 +1044,44 @@ const loginMethodsTable = "user_login_methods"
 				c[lvOwner] += "\nfunc lens(m string) (int, int) { return len(m), 1 }\n\nfunc (r *LoginMethodRepo) SizeFn(v interface{ Reveal() string }) func() (int, int) {\n\treturn func() (int, int) { return lens(v.Reveal()) }\n}\n"
 			},
 		},
+		// Замыкание на месте аргументом (второй круг ревью #139): `g(func() (A, B)
+		// {…}())` многозначно так же, как `g(f())`, но его результат судится
+		// целиком — значит несущее получают ВСЕ параметры g, как все позиции
+		// кортежа в присваивании, а не только параметр 0.
+		{
+			name: "аргументом: замыкание на месте отдаёт несущую позицию 1 помощнику своего файла, тот — вызывающему",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc pick(_ uint64, err error) error { return err }\n\nfunc (r *LoginMethodRepo) Check(v interface{ Reveal() string }) error {\n\treturn pick(func() (uint64, error) { return strconv.ParseUint(v.Reveal(), 10, 32) }())\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Check → strconv.ParseUint", 0),
+			wantFinding: "материал выносится возвратом",
+			at:          "return pick(func()",
+		},
+		{
+			name: "аргументом: замыкание на месте отдаёт несущую позицию 1 замыканию-получателю, оно — вызывающему",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Pass(v interface{ Reveal() string }) error {\n\treturn func(_ uint64, err error) error { return err }(func() (uint64, error) { return strconv.ParseUint(v.Reveal(), 10, 32) }())\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Pass → strconv.ParseUint", 0),
+			wantFinding: "материал выносится возвратом",
+			at:          "return func(_ uint64, err error)",
+		},
+		{
+			name: "законный близнец: замыкание на месте несёт материал, а помощник своего файла не отдаёт ни одного параметра",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc drop(_ uint64, _ error) bool { return true }\n\nfunc (r *LoginMethodRepo) Drop(v interface{ Reveal() string }) bool {\n\treturn drop(func() (uint64, error) { return strconv.ParseUint(v.Reveal(), 10, 32) }())\n}\n"
+			},
+			spec: lvDeclareTransforming("LoginMethodRepo.Drop → strconv.ParseUint", 0),
+		},
+		{
+			name: "законный близнец: замыкание на месте материала не несёт, помощник отдаёт параметр 1",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc pick(_ uint64, err error) error { return err }\n\nfunc (r *LoginMethodRepo) Plain() error {\n\treturn pick(func() (uint64, error) { return 1, nil }())\n}\n"
+			},
+		},
 		{
 			name: "чистая позиция вне результата вызова истекает: ей нечего разрешать",
 			edit: func(c check.TreeCorpus) {

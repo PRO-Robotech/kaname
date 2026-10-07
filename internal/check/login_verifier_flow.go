@@ -894,6 +894,18 @@ func (fl *lvFlow) receives(c *ast.CallExpr) bool {
 // (у непрозрачной g — аргумент 0): строже, а не слабее.
 func (fl *lvFlow) argCarried(c *ast.CallExpr) []int {
 	if len(c.Args) == 1 && c.Ellipsis == token.NoPos {
+		if n, ok := fl.litArity(c.Args[0]); ok {
+			// Замыкание на месте (`g(func() (A, B) {…}())`) судится целиком,
+			// как в присваивании кортежем: несёт — получают все n позиций.
+			if !fl.carries(c.Args[0]) {
+				return nil
+			}
+			out := make([]int, n)
+			for i := range out {
+				out[i] = i
+			}
+			return out
+		}
 		if inner, ok := fl.multiValued(c.Args[0]); ok {
 			params, variadic, known := fl.signature(lvCallee(c.Fun))
 			n, sized := fl.resultArity(inner)
@@ -930,6 +942,21 @@ func (fl *lvFlow) argCarried(c *ast.CallExpr) []int {
 		}
 	}
 	return out
+}
+
+// litArity — e есть вызов замыкания на месте с n > 1 позициями результата;
+// число позиций называет само замыкание.
+func (fl *lvFlow) litArity(e ast.Expr) (int, bool) {
+	c, ok := lvUnparen(e).(*ast.CallExpr)
+	if !ok {
+		return 0, false
+	}
+	lit, ok := lvCallee(c.Fun).(*ast.FuncLit)
+	if !ok {
+		return 0, false
+	}
+	n := lvFieldCount(lit.Type.Results)
+	return n, n > 1
 }
 
 // multiValued — e есть вызов, который МОЖЕТ быть многозначным: не замыкание на
