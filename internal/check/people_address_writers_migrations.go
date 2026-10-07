@@ -1011,7 +1011,7 @@ func matchPeopleLedger(sites []peopleSite, ledger []PeopleAppliedSite, migration
 	for _, e := range ledger {
 		if !IsMigrationFile(e.Rel) {
 			stale = append(stale, fmt.Sprintf("%s:%d — запись ведомости применённых миграций называет не миграцию каталога %s: "+
-				"у исходников Go ведомости нет", e.Rel, e.Line, MigrationsDirRel))
+				"у исходников Go ведомости нет — законного писателя Go называет перечень people_address_lawful_writers.go", e.Rel, e.Line, MigrationsDirRel))
 			continue
 		}
 		if _, ok := migrations[e.Rel]; !ok {
