@@ -52,6 +52,7 @@ package clients
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -257,13 +258,29 @@ type InviteMailTransport interface {
 // InviteMailSender — транспорт поверх SMTP.
 type InviteMailSender struct {
 	relay MailRelay
+	// now — часы отправителя: ими ставится `Date` письма (kaname#630). Одно
+	// поле на отправителя, как `Now` у остальных обработчиков службы, — а не
+	// обращение к стене процесса из сборки письма.
+	now func() time.Time
 }
 
 // NewInviteMailSender конструирует транспорт. Величины НЕ проверяются здесь:
 // вырожденная настройка обязана дать наблюдаемый исход `misconfigured` на
 // попытке, а не тихий отказ конструирования, который никто не считает.
+//
+// Часы по умолчанию — `time.Now`, тем же правилом, что у остальных
+// обработчиков службы (`Deps.Now == nil → time.Now`); подменяются WithClock.
 func NewInviteMailSender(relay MailRelay) *InviteMailSender {
-	return &InviteMailSender{relay: relay}
+	return &InviteMailSender{relay: relay, now: time.Now}
+}
+
+// WithClock ставит часы отправителя — ими датируется каждое письмо. nil
+// оставляет часы по умолчанию: «часов нет» у отправителя непредставимо.
+func (s *InviteMailSender) WithClock(now func() time.Time) *InviteMailSender {
+	if now != nil {
+		s.now = now
+	}
+	return s
 }
 
 // defaultAttemptTimeout — предел попытки, применяемый, когда вызывающий его не
@@ -305,6 +322,14 @@ func (s *InviteMailSender) Send(ctx context.Context, ev MailEvent) error {
 		// путь закрыт и здесь: отправка «никому» — форма отправки без предмета.
 		return fmt.Errorf("%w: invite mail names no recipient", drainer.ErrPermanent)
 	}
+	// Штамп письма (`Date`, `Message-ID`) ставится ДО разговора с узлом: письмо,
+	// которому его не поставить, не уходит ни при каком входе, и узел о нём не
+	// узнаёт. Собирается письмо здесь же, один раз на попытку.
+	stamp, err := s.stamp()
+	if err != nil {
+		return err
+	}
+	letter := renderMail(relay, ev, stamp)
 	// ПАРА удостоверения: половина настройки хуже отсутствия обеих, потому что
 	// выглядит настроенной (Р4). Проверяется ОДНИМ предикатом с тем, что читает
 	// транспорт, — иначе страж и потребитель разойдутся ровно там, где
@@ -367,7 +392,8 @@ func (s *InviteMailSender) Send(ctx context.Context, ev MailEvent) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	if herr := client.Hello(localHelloName(relay.From)); herr != nil {
+	// Представляемся доменом отправителя — тем же, в котором отчеканен штамп.
+	if herr := client.Hello(stamp.domain); herr != nil {
 		return classifySMTPErr(addr, "EHLO", herr)
 	}
 
@@ -408,7 +434,7 @@ func (s *InviteMailSender) Send(ctx context.Context, ev MailEvent) error {
 	if err != nil {
 		return classifySMTPErr(addr, "DATA", err)
 	}
-	if _, werr := w.Write(RenderMail(relay, ev)); werr != nil {
+	if _, werr := w.Write(letter); werr != nil {
 		return fmt.Errorf("%w: write mail body to %s: %w", ErrMailTransient, addr, werr)
 	}
 	if cerr := w.Close(); cerr != nil {
@@ -560,15 +586,78 @@ func ClassifyInviteMailOutcome(err error) string {
 	}
 }
 
-// localHelloName — имя, которым мы представляемся узлу. Берётся из домена
-// СВОЕГО адреса отправителя: узел вправе сверять его, а `localhost` многие
-// ретрансляторы отвергают.
-func localHelloName(from string) string {
-	at := strings.LastIndex(addressOnly(from), "@")
-	if at < 0 || at+1 >= len(addressOnly(from)) {
-		return "localhost"
+// senderDomain — домен адреса отправителя: им представляемся узлу (EHLO) и в
+// нём чеканим `Message-ID`. ОДИН предикат на оба места: адрес, который уходит
+// в MAIL FROM, и домен штампа письма берутся из одного значения.
+//
+// Домена нет либо он не годится в правую часть msg-id (RFC 5322 §3.6.4:
+// dot-atom без пробелов, скобок и пустых меток) — ok=false. Молчаливого
+// `localhost` нет: узел вправе отвергнуть такое приветствие, а `Message-ID` в
+// чужом домене отличать письма не обязан, — это настройка, и решает её оператор.
+func senderDomain(from string) (string, bool) {
+	addr := addressOnly(from)
+	at := strings.LastIndex(addr, "@")
+	if at < 0 {
+		return "", false
 	}
-	return addressOnly(from)[at+1:]
+	domain := addr[at+1:]
+	if domain == "" || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") ||
+		strings.Contains(domain, "..") {
+		return "", false
+	}
+	for i := 0; i < len(domain); i++ {
+		if !isDomainByte(domain[i]) {
+			return "", false
+		}
+	}
+	return domain, true
+}
+
+// isDomainByte — байт, допустимый в dot-atom правой части msg-id: atext
+// RFC 5322 §3.2.3, точка и восьмибитные байты UTF-8 (RFC 6532). Управляющих,
+// пробелов и `<>@[]` в нём нет — значит, и CRLF в заголовок через домен не
+// попадает.
+func isDomainByte(c byte) bool {
+	switch {
+	case c >= 0x80, c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte(".!#$%&'*+-/=?^_`{|}~", c) >= 0
+}
+
+// letterStamp — штамп отправки письма (kaname#630): момент и идентификатор.
+// RFC 5322 требует `Date` у каждого письма; `Message-ID` — то, по чему адресат и
+// промежуточные узлы отличают одно письмо от другого. Ставит его ТОЛЬКО
+// отправитель (stamp): момент — от его часов, идентификатор — из
+// криптографически стойкого источника, в домене отправителя.
+type letterStamp struct {
+	date      time.Time
+	messageID string
+	// domain — домен отправителя, в котором отчеканен messageID; им же
+	// отправитель представляется узлу.
+	domain string
+}
+
+// stamp чеканит штамп одного письма. Отказ — по НАСТРОЙКЕ: без домена
+// отправителя `Message-ID` чеканить негде, и письмо без него не уходит.
+//
+// Левая часть `Message-ID` — 128 случайных бит (`crypto/rand.Text`) и ничего
+// сверх: заголовок видят адресат и каждый промежуточный узел, поэтому в нём нет
+// ни адреса получателя, ни строки человека, ни аккаунта, ни кода, ни строки
+// очереди. Повтор попытки чеканит новый штамп: принятое узлом письмо повторно
+// не сдаётся (MAIL-53), так что два письма с одним идентификатором не уходят.
+func (s *InviteMailSender) stamp() (letterStamp, error) {
+	domain, ok := senderDomain(s.relay.From)
+	if !ok {
+		return letterStamp{}, fmt.Errorf("%w: mail headers: sender address has no domain "+
+			"(invite-mail.from) — Message-ID is minted in the sender domain, "+
+			"and there is no built-in default for it", ErrMailMisconfigured)
+	}
+	return letterStamp{
+		date:      s.now(),
+		messageID: "<" + rand.Text() + "@" + domain + ">",
+		domain:    domain,
+	}, nil
 }
 
 // addressOnly снимает отображаемое имя: `Kachō <a@b>` → `a@b`.
@@ -582,16 +671,36 @@ func addressOnly(s string) string {
 	return s
 }
 
-// RenderMail — тело письма по виду события. Вид неизвестный применитель до
-// транспорта не доводит (постоянный отказ), поэтому здесь исходов два.
+// RenderMail — письмо целиком по виду события, со штампом отправки, который
+// поставил бы отправитель с часами по умолчанию (NewInviteMailSender). Вид
+// неизвестный применитель до транспорта не доводит (постоянный отказ), поэтому
+// здесь исходов два.
+//
+// Адрес отправителя без домена — nil: письма без штампа не бывает, и отдавать
+// его нельзя даже для осмотра. Отправка судит тот же отказ сама (Send).
 func RenderMail(relay MailRelay, ev MailEvent) []byte {
+	return renderStamped(relay, ev, renderMail)
+}
+
+// renderStamped — сборка письма для осмотра: штамп ставит отправитель по
+// умолчанию, отказ штампа — nil.
+func renderStamped(relay MailRelay, ev MailEvent, render func(MailRelay, MailEvent, letterStamp) []byte) []byte {
+	stamp, err := NewInviteMailSender(relay).stamp()
+	if err != nil {
+		return nil
+	}
+	return render(relay, ev, stamp)
+}
+
+// renderMail — письмо по виду события с данным штампом.
+func renderMail(relay MailRelay, ev MailEvent, stamp letterStamp) []byte {
 	switch ev.Kind {
 	case EventRecoveryMailSend:
-		return RenderRecoveryMail(relay, ev)
+		return renderRecoveryMail(relay, ev, stamp)
 	case EventVerificationMailSend:
-		return RenderVerificationMail(relay, ev)
+		return renderVerificationMail(relay, ev, stamp)
 	default:
-		return RenderInviteMail(relay, ev)
+		return renderInviteMail(relay, ev, stamp)
 	}
 }
 
@@ -629,12 +738,18 @@ func verificationScreenAddress(loginURL string) string {
 // сверх. Кода в адресе нет: адрес ведёт на экран, код вводится руками, — так
 // устроены и письма восстановления и приглашения, и письмо, действующее одним
 // нажатием, приучало бы нажимать на ссылки о своей учётной записи.
+//
+// Штамп — как у RenderMail; адрес отправителя без домена — nil.
 func RenderVerificationMail(relay MailRelay, ev MailEvent) []byte {
+	return renderStamped(relay, ev, renderVerificationMail)
+}
+
+func renderVerificationMail(relay MailRelay, ev MailEvent, stamp letterStamp) []byte {
 	subject := "Код подтверждения адреса"
 	if relay.FromName != "" {
 		subject = "Код подтверждения адреса — " + relay.FromName
 	}
-	b := mailHeaders(relay, ev, subject)
+	b := mailHeaders(relay, ev, subject, stamp)
 	b.WriteString("Подтвердите адрес почты, чтобы продолжить работу.\r\n")
 	b.WriteString("\r\n")
 	b.WriteString("Код подтверждения:\r\n")
@@ -657,15 +772,22 @@ func RenderVerificationMail(relay MailRelay, ev MailEvent) []byte {
 	return []byte(b.String())
 }
 
-// mailHeaders — общая шапка обоих видов: отправитель, получатель, тема,
-// кодировка. Заголовки код не несут — он только в теле.
-func mailHeaders(relay MailRelay, ev MailEvent, subject string) *strings.Builder {
+// mailHeaders — общая шапка всех видов: штамп отправки (момент и
+// идентификатор, kaname#630), отправитель, получатель, тема, кодировка.
+// Заголовки код не несут — он только в теле. Штамп обязателен параметром: шапки
+// без `Date` и `Message-ID` эта функция не собирает.
+//
+// `Date` — в форме RFC 5322 §3.3 (`time.RFC1123Z`) и в UTC: момент письма не
+// сообщает часового пояса узла, на котором служба работает.
+func mailHeaders(relay MailRelay, ev MailEvent, subject string, stamp letterStamp) *strings.Builder {
 	from := addressOnly(relay.From)
 	displayFrom := from
 	if relay.FromName != "" {
 		displayFrom = fmt.Sprintf("%s <%s>", relay.FromName, from)
 	}
 	var b strings.Builder
+	b.WriteString("Date: " + stamp.date.UTC().Format(time.RFC1123Z) + "\r\n")
+	b.WriteString("Message-ID: " + stamp.messageID + "\r\n")
 	b.WriteString("From: " + displayFrom + "\r\n")
 	b.WriteString("To: " + addressOnly(ev.To) + "\r\n")
 	b.WriteString("Subject: " + mimeEncodedHeader(subject) + "\r\n")
@@ -682,7 +804,13 @@ func mailHeaders(relay MailRelay, ev MailEvent, subject string) *strings.Builder
 // кодовая, Ф5 §1.2), ни утверждения «доставлено» (Р15 ID-MAIL-1 — продукт видит
 // сдачу узлу, а не получение). Адрес консоли, если объявлен, стоит отдельной
 // строкой и кода не несёт.
+//
+// Штамп — как у RenderMail; адрес отправителя без домена — nil.
 func RenderRecoveryMail(relay MailRelay, ev MailEvent) []byte {
+	return renderStamped(relay, ev, renderRecoveryMail)
+}
+
+func renderRecoveryMail(relay MailRelay, ev MailEvent, stamp letterStamp) []byte {
 	loginURL := ev.LoginURL
 	if loginURL == "" {
 		loginURL = relay.LoginURL
@@ -694,7 +822,7 @@ func RenderRecoveryMail(relay MailRelay, ev MailEvent) []byte {
 		subject = "Код восстановления доступа — " + relay.FromName
 		product = relay.FromName
 	}
-	b := mailHeaders(relay, ev, subject)
+	b := mailHeaders(relay, ev, subject, stamp)
 	b.WriteString("Кто-то — возможно, вы — запросил восстановление доступа к " + product + ".\r\n")
 	b.WriteString("\r\n")
 	b.WriteString("Код восстановления:\r\n")
@@ -725,7 +853,13 @@ func RenderRecoveryMail(relay MailRelay, ev MailEvent) []byte {
 //
 // Предъявителя письмо НЕ несёт (Р24): в нём призыв и адрес страницы входа, а
 // доступ даёт владение почтовым ящиком, доказанное подтверждением адреса.
+//
+// Штамп — как у RenderMail; адрес отправителя без домена — nil.
 func RenderInviteMail(relay MailRelay, ev MailEvent) []byte {
+	return renderStamped(relay, ev, renderInviteMail)
+}
+
+func renderInviteMail(relay MailRelay, ev MailEvent, stamp letterStamp) []byte {
 	loginURL := ev.LoginURL
 	if loginURL == "" {
 		loginURL = relay.LoginURL
@@ -747,7 +881,7 @@ func RenderInviteMail(relay MailRelay, ev MailEvent) []byte {
 		invitedTo = "Вас пригласили работать в " + relay.FromName + "."
 	}
 
-	b := mailHeaders(relay, ev, subject)
+	b := mailHeaders(relay, ev, subject, stamp)
 	b.WriteString(invitedTo + "\r\n")
 	b.WriteString("\r\n")
 	if loginURL != "" {
