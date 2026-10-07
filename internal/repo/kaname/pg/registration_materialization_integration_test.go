@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // regStore — адаптер хранилища регистрации к порту (тем же способом, что
@@ -86,7 +87,8 @@ func TestRegistrationMaterialization_F4_20_22_SessionIsValidBeforeDelivery(t *te
 	lane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: regStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: lane,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       regStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: lane,
 		TTL: 24 * time.Hour, Now: time.Now, Logger: slog.New(slog.DiscardHandler),
 		Letter:  humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
 		Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},

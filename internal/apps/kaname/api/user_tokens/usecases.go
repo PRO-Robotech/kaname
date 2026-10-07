@@ -60,6 +60,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -113,7 +114,10 @@ type IssueUserTokenUseCase struct {
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → без audit-строки.
 	audit auditEmitter
-	now   func() time.Time
+	// clock — ОБЩИЙ для всех реплик источник момента выдачи (kaname#589): тот
+	// же, что ставит отсечку отзыва-всех. Не подан — выдача отказывает, а не
+	// берёт часы процесса.
+	clock revocationpolicy.Clock
 	// logger — поверхность для сбоев detached redaction-goroutine.
 	logger *slog.Logger
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
@@ -125,6 +129,17 @@ type IssueUserTokenUseCase struct {
 	// тем же условием, что сборка ключей служебных учёток. Умолчание — отказ:
 	// полусобранная сборка не выдаёт ключ, который нечем обменять.
 	ownIssuance bool
+}
+
+// WithIssuanceClock провязывает источник момента выдачи. Composition-root only.
+//
+// Корень подаёт сюда тот же источник, что писателям отсечки отзыва-всех:
+// момент выдачи сравнивается с отсечкой, и два источника сделали бы границу
+// правила их расхождением (kaname#589). Непровязанный источник — отказ выдачи
+// ([shared.MomentUnavailableMessage]), а не часы процесса.
+func (u *IssueUserTokenUseCase) WithIssuanceClock(c revocationpolicy.Clock) *IssueUserTokenUseCase {
+	u.clock = c
+	return u
 }
 
 // WithOwnIssuance объявляет, что у посадки есть токен-эндпоинт
@@ -170,7 +185,6 @@ func NewIssueUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, ops opera
 		repo:    r,
 		tx:      tx,
 		opsRepo: ops,
-		now:     time.Now,
 	}
 }
 
@@ -374,7 +388,10 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 			// предсказуемого вида: угадываемое удостоверение хуже отсутствующего.
 			return nil, status.Error(codes.Internal, "credential minting failed")
 		}
-		issued := u.now().UTC()
+		issued, err := u.issuanceMoment(ctx)
+		if err != nil {
+			return nil, err
+		}
 		expires := issued.Add(ttl)
 		row := domain.UserOAuthClient{
 			ID:              tokenID,
@@ -525,9 +542,13 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		return nil, fmt.Errorf("generate user token keypair: %w", err)
 	}
 
-	// 2. Персистим строку удостоверения в TX. Момент выдачи и срок — от ОДНИХ
-	//    часов, тех же, что ставят отсечку отзыва-всех (kaname#388).
-	issued := u.now().UTC()
+	// 2. Персистим строку удостоверения в TX. Момент выдачи и срок — от ОДНОГО
+	//    источника, того же, что ставит отсечку отзыва-всех (kaname#388,
+	//    kaname#589), и до открытия транзакции.
+	issued, err := u.issuanceMoment(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row := domain.UserOAuthClient{
 		CreatedAt:       issued,
 		ID:              tokenID,
@@ -577,8 +598,8 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
 	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
 
-	// Момент выдачи ставит ВЫДАЮЩИЙ — часами варианта использования, теми же,
-	// что пишут отсечку отзыва-всех (kaname#388). Строка без момента ушла бы
+	// Момент выдачи ставит ВЫДАЮЩИЙ — общим источником, тем же, что пишет
+	// отсечку отзыва-всех (kaname#388, kaname#589). Строка без момента ушла бы
 	// в умолчание столбца, то есть к часам базы, — ко второму источнику
 	// времени, и граница правила отсечки стала бы разницей двух часов.
 	// Непроставленный момент — наш дефект, а не вход вызывающего.
@@ -617,6 +638,25 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	}
 	committed = true
 	return persisted, nil
+}
+
+// issuanceMoment — момент выдачи из общего источника.
+//
+// Не ответил — отказ выдачи фиксированным текстом, называющим шаг; класс
+// причины уходит в журнал, текст причины — нет: ошибка драйвера несёт
+// координаты соединения.
+func (u *IssueUserTokenUseCase) issuanceMoment(ctx context.Context) (time.Time, error) {
+	at, err := revocationpolicy.Moment(ctx, u.clock)
+	if err != nil {
+		logger := u.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.ErrorContext(ctx, "user_tokens.Issue: issuance moment unavailable",
+			"step", "issuance-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return time.Time{}, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
+	return at, nil
 }
 
 // ───────────────── Revoke use-case ─────────────────

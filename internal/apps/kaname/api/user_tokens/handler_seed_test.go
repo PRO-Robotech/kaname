@@ -13,19 +13,21 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 func TestHandlerIssue_SAPrincipal_CreatedByIsTargetUser(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 	h := NewHandler(issue, nil, nil)
 
 	// Caller is the bootstrap-admin SA (service_account principal).
@@ -44,7 +46,7 @@ func TestHandlerIssue_SAPrincipal_CreatedByIsTargetUser(t *testing.T) {
 func TestHandlerIssue_UserPrincipal_CreatedByIsPrincipal(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 	h := NewHandler(issue, nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
@@ -59,7 +61,7 @@ func TestHandlerIssue_UserPrincipal_CreatedByIsPrincipal(t *testing.T) {
 }
 
 func TestHandlerIssue_UserPrincipal_SpoofedCreatedBy_Rejected(t *testing.T) {
-	issue := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
+	issue := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 	h := NewHandler(issue, nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),

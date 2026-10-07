@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // fakeForceLogoutChecker — authzguard.RelationChecker spy for ForceLogout.
@@ -55,7 +57,7 @@ func forceLogoutHandlerWithGate(rec *fakeForceLogoutRecorder, chk *fakeForceLogo
 		// закрыто, и пробы стража судили бы отказ провязки вместо своего
 		// предмета (kaname#313). Отсечку кладёт его транзакция (kaname#340),
 		// поэтому это та же заглушка, что считает отсечки.
-		WithOwnSessions(rec)
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now))
 }
 
 func ctxAdmin(id string) context.Context {
@@ -113,7 +115,7 @@ func TestForceLogout_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 
 func TestForceLogout_DeniesWhenCheckerNil(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
-	h := NewHandler(NewLookupSubjectUseCase(nil), nil).WithOwnSessions(rec) // no checker
+	h := NewHandler(NewLookupSubjectUseCase(nil), nil).WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now)) // no checker
 	_, err := h.ForceLogout(ctxAdmin("usr0000000000000admin"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
 	})

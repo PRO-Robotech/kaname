@@ -11,12 +11,14 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // createdByStubRepo lets a test drive AccountForUser to model an absent
@@ -39,7 +41,7 @@ func (s *createdByStubRepo) AccountForUser(ctx context.Context, id domain.UserID
 // sync INVALID_ARGUMENT, and NO async Operation is started.
 func TestIssue_SACallerRejectedSync(t *testing.T) {
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -62,7 +64,7 @@ func TestIssue_SACallerRejectedSync(t *testing.T) {
 func TestIssue_NonexistentCreatedByRejectedSync(t *testing.T) {
 	repo := &createdByStubRepo{missing: map[string]bool{"usr00000000000000404": true}}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

@@ -15,12 +15,14 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // truncatedUserID — префикс верен, длина на один символ меньше требуемой.
@@ -39,7 +41,7 @@ func TestIssueUserToken_UserIDLengthIsJudged(t *testing.T) {
 	require.Len(t, truncatedUserID, domain.ShortIDLen-1,
 		"отрицание обязано отличаться от контроля РОВНО длиной")
 
-	uc := NewIssueUserTokenUseCase(nil, nil, nil).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(nil, nil, nil).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	t.Run("truncated is rejected by format", func(t *testing.T) {
 		// created_by намеренно не назван: без починки исполнение проходит

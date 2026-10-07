@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const forceLogoutAdminID = "usr0000000000000admin"
@@ -62,7 +63,7 @@ func newForceLogoutHandler(t *testing.T) (*internaliam.Handler, *pgxpool.Pool) {
 		// корень под `own`. Без него глагол отказывает закрыто, и пробы
 		// контракта операции судили бы отказ провязки вместо своего предмета
 		// (kaname#313).
-		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool)).WithCutoffClock(momentclock.Func(time.Now))
 	return h, pool
 }
 
@@ -215,7 +216,7 @@ func TestForceLogout_UnwiredOperationRepo_FailsClosed(t *testing.T) {
 		WithAdminChecker(allowAdmin{}).
 		// The teardown IS wired, as the composition root wires it, so the refusal
 		// below is the operation repository's and nothing else's.
-		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool)).WithCutoffClock(momentclock.Func(time.Now))
 	// deliberately no WithOperations
 
 	_, err = h.ForceLogout(forceLogoutAdminCtx(), &iamv1.ForceLogoutRequest{UserId: string(uid)})

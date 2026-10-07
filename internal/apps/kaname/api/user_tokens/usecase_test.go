@@ -24,6 +24,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // ---- Mocks ----
@@ -216,7 +217,7 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -281,7 +282,7 @@ func TestIssue_ValidationErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
+			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{}).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 			_, err := uc.Execute(context.Background(), tc.in)
 			if grpcstatus.Code(err) != codes.InvalidArgument {
 				t.Fatalf("code = %v, want InvalidArgument", grpcstatus.Code(err))
@@ -296,7 +297,7 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
 	audit := &stubAudit{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance().WithAuditEmitter(audit)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance().WithAuditEmitter(audit)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001", Description: "cli",

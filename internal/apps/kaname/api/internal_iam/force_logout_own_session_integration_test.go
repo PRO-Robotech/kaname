@@ -53,6 +53,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // ownPostureForceLogoutHandler — обработчик, собранный КАК ЕГО СОБИРАЕТ КОРЕНЬ
@@ -64,7 +65,7 @@ func ownPostureForceLogoutHandler(t *testing.T, pool *pgxpool.Pool) *internaliam
 	return internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 		WithAdminChecker(allowAdmin{}).
 		WithOperations(operations.NewRepo(pool, "kaname")).
-		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool))
+		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool)).WithCutoffClock(momentclock.Func(time.Now))
 }
 
 // ownSessionBearerDigest — свёртка носителя в форме, которую держит

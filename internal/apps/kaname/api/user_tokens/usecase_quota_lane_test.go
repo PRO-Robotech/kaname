@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const quotaRefusalText = "iam.user usr00000000000000001 has reached its limit of 10 iam.user.credential"
@@ -37,7 +38,7 @@ func TestQuotaRefusalOnASecretIssueArrivesWithTheOperationItself(t *testing.T) {
 	repo := &stubUserClientRepo{
 		insertErr: iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", quotaRefusalText),
 	}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -92,7 +93,7 @@ func TestQuotaRefusalOnAKeypairIssueArrivesInTheOperation(t *testing.T) {
 		insertErr: iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", quotaRefusalText),
 	}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

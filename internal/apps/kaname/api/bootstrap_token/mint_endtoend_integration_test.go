@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -119,7 +120,7 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 	keys := newMemKeys(t)
 	signer, err := tokensigner.New(tokensigner.Config{
 		Issuer:      testIssuer,
-		Clock:       time.Now,
+		Clock:       momentclock.Func(time.Now),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, keys)
 	require.NoError(t, err)
