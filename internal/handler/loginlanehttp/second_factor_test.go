@@ -306,6 +306,11 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	require.Contains(t, domain.FormKinds(), domain.FormStepUp)
 	require.Equal(t, domain.FormKind("second-factor"), domain.FormSecondFactor)
 	require.Equal(t, domain.FormKind("step-up"), domain.FormStepUp)
+	// Свои сессии (kaname#634, Р1): один вид на оба снимающих глагола — в том же
+	// закрытом перечне.
+	require.Contains(t, domain.FormKinds(), domain.FormSessionEnd)
+	require.Equal(t, domain.FormKind("session-end"), domain.FormSessionEnd)
+	require.Len(t, domain.FormKinds(), 14, "видов признака — 14 (приёмка kaname#634, Р1)")
 
 	stub := &stubLane{}
 	l := newLane(t, stub, "")
@@ -336,11 +341,11 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	} {
 		require.Contains(t, loginlanehttp.Paths(), p)
 	}
-	// Путей полосы — 18: два глагола подтверждения адреса (kaname#456, Р6),
-	// два глагола входа ключом (Ф13, kaname#613) и заведение первого пароля
-	// (kaname#213). Число — перепись популяции, двигает его тот, кто популяцию
-	// изменил.
-	require.Len(t, loginlanehttp.Paths(), 18)
+	// Путей полосы — 21: два глагола подтверждения адреса (kaname#456, Р6),
+	// два глагола входа ключом (Ф13, kaname#613), заведение первого пароля
+	// (kaname#213) и три глагола своих сессий (kaname#634). Число — перепись
+	// популяции, двигает его тот, кто популяцию изменил.
+	require.Len(t, loginlanehttp.Paths(), 21)
 }
 
 // TestLane_F12_RefusalsCarryTheirTokens — отказы глаголов семейства (Р4):

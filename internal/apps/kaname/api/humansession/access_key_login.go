@@ -236,6 +236,9 @@ type AccessKeyLoginInput struct {
 	// рукояткой строки безусловно, и отсутствующее значение — отказ ФОРМЫ.
 	UserHandle []byte
 	Source     string
+	// Client — описание клиента выдающего запроса (kaname#634, Р3): идёт в
+	// запись выдаваемой сессии и больше никуда.
+	Client domain.ClientDescription
 }
 
 // AccessKeyLoginUseCase — вход ключом.
@@ -372,7 +375,7 @@ func (uc *AccessKeyLoginUseCase) Execute(ctx context.Context, in AccessKeyLoginI
 	}
 
 	// (8) Выдача — одним исходом.
-	out, outcome := uc.issue(ctx, user, key.ID, res.Flags, now)
+	out, outcome := uc.issue(ctx, user, key.ID, res.Flags, now, in.Client)
 	switch outcome {
 	case issueDone:
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginIssued)
@@ -439,7 +442,7 @@ func (uc *AccessKeyLoginUseCase) refuse(ctx context.Context, outcome AccessKeyLo
 // иначе выдача шла бы навстречу удалению личности. Уровень вычисляет правило
 // Ф11 по флагам ЭТОГО утверждения (Р4): полоса приносит предъявленное.
 func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, keyID domain.AccessKeyID,
-	flags webauthnverify.Flags, now time.Time,
+	flags webauthnverify.Flags, now time.Time, client domain.ClientDescription,
 ) (LoginOutput, issueOutcome) {
 	m := now.Truncate(time.Microsecond)
 	// Ось «заведено» — ДО транзакции записи (шапка `completed_login.go`).
@@ -465,6 +468,7 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 		TTL:         uc.deps.TTL,
 		EmitAudit:   true,
 		AccessKeyID: keyID,
+		Client:      client,
 	})
 	if err != nil {
 		return LoginOutput{}, issueFailed

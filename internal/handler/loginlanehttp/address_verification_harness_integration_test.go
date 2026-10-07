@@ -281,7 +281,16 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		Store: sessions, Hasher: hasher, Rule: rule, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
-	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, register: register, login: login, logout: logout, change: change,
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы над тем же хранилищем, окно
+	// свежести — величина стенда (Ф1 §4.1).
+	ownDeps := humansession.OwnSessionsDeps{Store: sessions, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger}
+	ownList, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEnd, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEndOthers, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, ownList: ownList, ownEnd: ownEnd, ownEndOthers: ownEndOthers, register: register, login: login, logout: logout, change: change,
 		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
 		requestV: requestV, confirmV: confirmV, position: position}
 	l := newLaneOver(t, verbs, "")
@@ -356,6 +365,22 @@ type avVerbs struct {
 	position  *humansession.PositionUseCase
 	// Заведение первого пароля (kaname#213) — НАСТОЯЩИЙ глагол.
 	enrollPw *humansession.EnrollPasswordUseCase
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы.
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v avVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
 }
 
 func (v avVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {

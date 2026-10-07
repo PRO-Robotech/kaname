@@ -87,6 +87,19 @@ var idFactsNumerals = map[int]string{
 	10: "десять", 11: "одиннадцать", 12: "двенадцать", 13: "тринадцать",
 	14: "четырнадцать", 15: "пятнадцать", 16: "шестнадцать", 17: "семнадцать",
 	18: "восемнадцать", 19: "девятнадцать", 20: "двадцать",
+	// Составное — двумя словами (kaname#634 довёл перечень до 21): формы падежей
+	// у него свои, они — в idFactsCompoundForms.
+	21: "двадцать один",
+}
+
+// idFactsCompoundForms — составные числительные словаря всеми падежными
+// формами, которые страницы употребляют: «двадцать один путь», «из двадцати
+// одного», «двадцатью одним». Составное читается ДВУМЯ словами подряд и
+// поглощает второе: без этого «двадцать» в «двадцать один» читалось бы числом
+// 20 — устаревшим, — а «один» вне составного не числительное словаря.
+var idFactsCompoundForms = map[string]int{
+	"двадцать один": 21, "двадцати одного": 21, "двадцати одному": 21,
+	"двадцатью одним": 21, "двадцати одном": 21,
 }
 
 // idFactsCensus — объём осмотренного. Печатается всегда.
@@ -194,6 +207,9 @@ var idFactsCountToken = regexp.MustCompile(`Paths\(\)|\p{L}+`)
 var idFactsNumeralForms = func() map[string]int {
 	out := map[string]int{}
 	for n, w := range idFactsNumerals {
+		if strings.Contains(w, " ") {
+			continue // составное — idFactsCompoundForms
+		}
 		out[w] = n
 		out[strings.TrimSuffix(w, "ь")+"и"] = n
 		out[w+"ю"] = n
@@ -219,18 +235,30 @@ func pathCountClaims(page string) []pathCountClaim {
 		return w == "Paths()" || strings.HasPrefix(strings.ToLower(w), "пут")
 	}
 	var out []pathCountClaim
-	for i, span := range idx {
+	for i := 0; i < len(idx); i++ {
+		span := idx[i]
 		word := page[span[0]:span[1]]
-		n, ok := idFactsNumeralForms[strings.ToLower(word)]
+		last := i
+		n, ok := 0, false
+		if i+1 < len(idx) {
+			next := page[idx[i+1][0]:idx[i+1][1]]
+			if cn, cok := idFactsCompoundForms[strings.ToLower(word+" "+next)]; cok {
+				n, ok, last, word = cn, true, i+1, word+" "+next
+			}
+		}
+		if !ok {
+			n, ok = idFactsNumeralForms[strings.ToLower(word)]
+		}
 		if !ok {
 			continue
 		}
-		for j := max(0, i-idFactsCountWindow); j <= min(len(idx)-1, i+idFactsCountWindow); j++ {
-			if j != i && anchor(j) {
+		for j := max(0, i-idFactsCountWindow); j <= min(len(idx)-1, last+idFactsCountWindow); j++ {
+			if (j < i || j > last) && anchor(j) {
 				out = append(out, pathCountClaim{word: word, n: n, line: strings.Count(page[:span[0]], "\n") + 1})
 				break
 			}
 		}
+		i = last
 	}
 	return out
 }

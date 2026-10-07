@@ -658,6 +658,23 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Свои сессии (kaname#634): три глагола над хранилищем сессии; окно свежести
+	// снятия — величина правки своих данных (Р8), та же, что у второго фактора.
+	ownDeps := humansession.OwnSessionsDeps{
+		Store: sessions, Freshness: cfg.AuthN.SelfServiceFreshness, Observer: rec, Now: time.Now, Logger: logger,
+	}
+	ownListUC, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndUC, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndOthersUC, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -671,6 +688,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
 		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
 		akBegin: akBeginUC, akLogin: akLoginUC, enrollPassword: enrollPasswordUC,
+		ownList: ownListUC, ownEnd: ownEndUC, ownEndOthers: ownEndOthersUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -779,6 +797,22 @@ type laneVerbs struct {
 	akLogin *humansession.AccessKeyLoginUseCase
 	// Заведение первого пароля из живой сессии (kaname#213).
 	enrollPassword *humansession.EnrollPasswordUseCase
+	// Свои сессии (kaname#634).
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v laneVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
 }
 
 func (v laneVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {

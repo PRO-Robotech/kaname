@@ -96,6 +96,9 @@ type CompleteRecoveryInput struct {
 	Code        string
 	NewPassword string
 	Source      string
+	// Client — описание клиента выдающего запроса (kaname#634, Р3): идёт в
+	// запись выдаваемой сессии и больше никуда.
+	Client domain.ClientDescription
 }
 
 // CompleteRecoveryOutput — состав ответа и носитель выданной сессии.
@@ -237,7 +240,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	// Код применён: учётные данные сменяются у ЛЮБОЙ личности, включая
 	// заблокированную (Ф5-17); сессия выдаётся только действующей (Ф1-59).
 	blocked := user.InviteStatus != domain.InviteStatusActive
-	out, err := uc.complete(ctx, w, user, code, fresh, now, blocked, target.EmailVerified)
+	out, err := uc.complete(ctx, w, user, code, fresh, now, blocked, target.EmailVerified, in.Client)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
@@ -257,7 +260,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 // решение о счёте по адресу местом решения входа · событие · фиксация.
 func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
-	now time.Time, blocked, emailVerified bool,
+	now time.Time, blocked, emailVerified bool, client domain.ClientDescription,
 ) (CompleteRecoveryOutput, error) {
 	// Материал — «заменить либо завести» одним оператором (Р5 ветвь «строки
 	// нет», Ф5-34): у личности без строки пароля завершение заводит первый
@@ -328,6 +331,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 			Presented: presentationsOf(methods),
 			At:        now.Add(time.Microsecond),
 			TTL:       uc.ttl,
+			Client:    client,
 		})
 		if err != nil {
 			return CompleteRecoveryOutput{}, err
