@@ -27,7 +27,8 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-07'
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-07T20:55:17Z"
   ban1_lifted: false
   pending_external_event: true
   why: >-
@@ -98,11 +99,18 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#661
-  status: not_performed
-  published: false
-  required_for_sanction: true
-  publication_expected_from_orchestrator: true
-  body_for_publication: 'acceptance-reviewer · APPROVED · 686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a'
-  note: >-
-    Событие публикует курьер (scripts/rituals/approval-event.sh воркспейса) после коммита
-    редакции; блок приводится к факту события тем же заходом.
+  status: performed
+  published: true
+  database_id: 6046676724
+  node_id: "IC_kwDOUO26pM8AAAABaGj29A"
+  url: "https://github.com/PRO-Robotech/kaname/issues/661#issuecomment-6046676724"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6046676724"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T20:55:17Z"
+  body_sha256: "c962dcc03bc85bc3fe507e9dc0f00894cbd2ce31ab1ff9da6017b693b0dbfdf7"
+  subject_sha256: "686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a"
+  subject_revision_commit: "d67841b42432bb5407281edc6e5683c0e388a8ad"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
