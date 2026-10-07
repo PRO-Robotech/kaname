@@ -464,14 +464,15 @@ type RegisterResourceRequest struct {
 	// Parent account id ресурса (`acc…`), если применимо. Mirror /
 	// containment на account-scope.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
-	// Монотонный per-object source-version. Маркер «версии
-	// состояния» ресурса у владельца (compute), проставляемый в момент эмита
-	// register-intent внутри writer-tx источника. IAM применяет register в mirror
-	// ТОЛЬКО если этот source_version строго новее уже хранимого (last-source-
-	// state-wins, НЕ last-applier-wins): под HA-drainer reorder двух register одного
-	// object (реплика применяет v2, затем stale v1) устаревший intent → no-op, а не
-	// перезапись свежих labels. Пусто/нулевой → legacy-caller (graceful): IAM
-	// трактует как «-infinity», т.е. любой register применяется (back-compat).
+	// Версия владельца у ПУБЛИКАЦИИ для анонимного чтения — и только у неё.
+	//
+	// Читается одним путём: чистой выдачей `user:* # v_get` (публикация объекта),
+	// чей порядок записи и снятия держит `kaname.public_read_publication` по этой
+	// версии (kaname#107). Регистрация ОБЪЕКТА её не читает — версия объекта есть
+	// `generation` ниже, — и потому отвергает: `INVALID_ARGUMENT`
+	// `source_version: …` (принять и проигнорировать запрещено,
+	// `api-conventions.md`). Пусто у публикации — намерение без версии, порядка
+	// не доказывающее (fail-closed для снятия).
 	SourceVersion *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
 	// Цепь родительства регистрируемого объекта, от БЛИЖАЙШЕГО предка к дальнему.
 	//
@@ -504,7 +505,21 @@ type RegisterResourceRequest struct {
 	// читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
 	// обещает возможность, которой нет, а форма E получает объект без предка —
 	// то есть ровно тот дефект, ради которого поле и заводится.
-	ParentChain   []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
+	ParentChain []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
+	// Поколение объекта у владельца: целое, строго растущее на каждое изменение
+	// объекта, — то же `g_E`, что владелец ставит в строку `resource-event` своего
+	// журнала (приёмка NTF-3, Р30 «Приём поколения — CAS», «Поколение и проекция»).
+	//
+	// Обязательно у регистрации и у снятия объекта: `0` — `INVALID_ARGUMENT`
+	// `generation: required`; приёма без поколения нет. Применяется, только если
+	// строго новее головы объекта в службе доступа (`kaname.object_head`, включая
+	// надгробие снятия); иначе исход `REJECTED_STALE` — зеркало, рёбра предков,
+	// голова и кортежи не меняются, а вызов отвечает успехом (контракт прокси
+	// идемпотентен: отказ породил бы вечный повтор у дренажа владельца).
+	//
+	// У чистой выдачи `user:* # v_get` (публикация) поколения нет: её порядок —
+	// `source_version` выше; поколение там — `INVALID_ARGUMENT`.
+	Generation    int64 `protobuf:"varint,10,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -602,6 +617,13 @@ func (x *RegisterResourceRequest) GetParentChain() []string {
 	return nil
 }
 
+func (x *RegisterResourceRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
 // RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
 // контракта (повтор → OK) опирается на пустой ответ без уникального id.
 type RegisterResourceResponse struct {
@@ -663,14 +685,21 @@ type UnregisterResourceRequest struct {
 	ParentProjectId string `protobuf:"bytes,6,opt,name=parent_project_id,json=parentProjectId,proto3" json:"parent_project_id,omitempty"`
 	// Account the resource belonged to. Empty when the resource is not account-scoped.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
-	// Tombstone-version: момент Delete у владельца (now() на
-	// эмите unregister-intent). IAM удаляет mirror-строку ТОЛЬКО если этот
-	// source_version >= хранимого (tombstone не старше последнего примененного
-	// register) — Delete-после-Update reorder (unregister(v2) затем stale что-либо)
-	// не теряет свежее состояние. Пусто/нулевой → legacy (graceful): безусловный
-	// DELETE (back-compat). Остаточный edge (stale register ПОСЛЕ unregister →
-	// возможный dangling) чистит reconcile-sweep — см. docs/architecture.
+	// Версия владельца у снятия ПУБЛИКАЦИИ — и только у него.
+	//
+	// Читается двумя путями, оба про публикацию: снятием чистой выдачи
+	// `user:* # v_get` и снятием объекта, чей тип допускает публикацию, — объект
+	// уносит свою публикацию с собой под ЭТОЙ версией, и запоздавшее открытие,
+	// не новее её, удалённый объект не опубликует (kaname#107). Пусто — снятие
+	// без версии, применяемое fail-closed. У снятия объекта, чей тип публикации
+	// не допускает, читателя нет — `INVALID_ARGUMENT` `source_version: …`.
+	// Порядок САМОГО объекта — `generation` ниже.
 	SourceVersion *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
+	// Поколение снятия объекта (см. RegisterResourceRequest.generation).
+	// Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`. Применённое
+	// снятие оставляет НАДГРОБИЕ — голову объекта с этим поколением: регистрация
+	// поколения не новее надгробия зеркала не восстанавливает (`REJECTED_STALE`).
+	Generation    int64 `protobuf:"varint,10,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -759,6 +788,13 @@ func (x *UnregisterResourceRequest) GetSourceVersion() *timestamppb.Timestamp {
 		return x.SourceVersion
 	}
 	return nil
+}
+
+func (x *UnregisterResourceRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
 }
 
 // UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
@@ -1635,7 +1671,7 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x12HIGHER_CONSISTENCY\x10\x02\"A\n" +
 	"\rCheckResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xd2\x03\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xf2\x03\n" +
 	"\x17RegisterResourceRequest\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
@@ -1646,11 +1682,15 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x11parent_project_id\x18\x06 \x01(\tR\x0fparentProjectId\x12*\n" +
 	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12A\n" +
 	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x12!\n" +
-	"\fparent_chain\x18\t \x03(\tR\vparentChain\x1a9\n" +
+	"\fparent_chain\x18\t \x03(\tR\vparentChain\x12\x1e\n" +
+	"\n" +
+	"generation\x18\n" +
+	" \x01(\x03R\n" +
+	"generation\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1a\n" +
-	"\x18RegisterResourceResponse\"\xb3\x03\n" +
+	"\x18RegisterResourceResponse\"\xd3\x03\n" +
 	"\x19UnregisterResourceRequest\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
@@ -1660,7 +1700,11 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x06labels\x18\x05 \x03(\v2:.kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntryR\x06labels\x12*\n" +
 	"\x11parent_project_id\x18\x06 \x01(\tR\x0fparentProjectId\x12*\n" +
 	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12A\n" +
-	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x1a9\n" +
+	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x12\x1e\n" +
+	"\n" +
+	"generation\x18\n" +
+	" \x01(\x03R\n" +
+	"generation\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1c\n" +

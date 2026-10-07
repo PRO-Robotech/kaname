@@ -243,11 +243,13 @@ func newGridFixture(t *testing.T, ctx context.Context, tx pgx.Tx) *gridFixture {
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
 		ObjectType: "iam.project", ObjectID: "prj-1",
 		ParentAccountID: "acc-1", ParentChain: []string{"account:acc-1"},
+		Generation: 1,
 	}))
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
 		ObjectType: "registry.registries", ObjectID: "reg-1",
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		ParentChain: []string{"project:prj-1", "account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Flush(ctx))
 	return f
@@ -291,6 +293,7 @@ func (f *gridFixture) growN(t *testing.T, ctx context.Context, target int) {
 			ParentAccountID: "acc-1",
 			Labels:          map[string]string{"env": "prod"},
 			ParentChain:     []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+			Generation:      1,
 		}))
 	}
 	must(t, s.Flush(ctx))
@@ -1106,6 +1109,7 @@ func TestScaleGrid_ScopeCardinalityIsMeasuredNotAssumed(t *testing.T) {
 		ObjectType: probeCatalogType, ObjectID: "repo-0000000",
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		ParentChain: []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Flush(ctx))
 
@@ -1172,6 +1176,7 @@ func TestScaleGrid_ScopeCardinalityIsMeasuredNotAssumed(t *testing.T) {
 		ObjectType: probeCatalogType, ObjectID: "repo-shallow",
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		ParentChain: []string{"account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Flush(ctx))
 

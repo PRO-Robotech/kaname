@@ -43,9 +43,10 @@ func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 	uc, txb := newRegUC(t, rec)
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
-		subject:  "project:prj_owner",
-		relation: "project",
-		object:   "storage_volume:vol_gone",
+		subject:    "project:prj_owner",
+		relation:   "project",
+		object:     "storage_volume:vol_gone",
+		generation: 2,
 	}))
 	require.NotNil(t, txb.tx)
 	require.True(t, txb.tx.committed, "unregister must commit the writer-tx")
@@ -64,6 +65,7 @@ func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
 	uc, txb := newRegUC(t, nil)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
+		generation: 2,
 	}), "nil reconciler must be a non-fatal no-op")
 	require.True(t, txb.tx.committed)
 }
@@ -76,6 +78,7 @@ func TestUnregisterResource_ReconcileError_NonFatal(t *testing.T) {
 	uc, txb := newRegUC(t, rec)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
+		generation: 2,
 	}), "a post-commit reconcile error must not fail a committed withdrawal (queue is the backstop)")
 	require.True(t, txb.tx.committed)
 	require.Len(t, rec.snapshot(), 1)

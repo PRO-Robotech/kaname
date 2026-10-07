@@ -26,7 +26,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -52,7 +51,7 @@ func TestParentEdges_AreWrittenInTheModelDictionary(t *testing.T) {
 		ObjectID:        "inst-dict",
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
-		SourceVersion:   time.Now().Truncate(time.Microsecond),
+		Generation:      1,
 		ParentChain:     []string{"project:prj-P", "account:acc-A"},
 	})
 

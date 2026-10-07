@@ -421,14 +421,15 @@ message RegisterResourceRequest {
   // containment на account-scope.
   string parent_account_id = 7;
 
-  // Монотонный per-object source-version. Маркер «версии
-  // состояния» ресурса у владельца (compute), проставляемый в момент эмита
-  // register-intent внутри writer-tx источника. IAM применяет register в mirror
-  // ТОЛЬКО если этот source_version строго новее уже хранимого (last-source-
-  // state-wins, НЕ last-applier-wins): под HA-drainer reorder двух register одного
-  // object (реплика применяет v2, затем stale v1) устаревший intent → no-op, а не
-  // перезапись свежих labels. Пусто/нулевой → legacy-caller (graceful): IAM
-  // трактует как «-infinity», т.е. любой register применяется (back-compat).
+  // Версия владельца у ПУБЛИКАЦИИ для анонимного чтения — и только у неё.
+  //
+  // Читается одним путём: чистой выдачей `user:* # v_get` (публикация объекта),
+  // чей порядок записи и снятия держит `kaname.public_read_publication` по этой
+  // версии (kaname#107). Регистрация ОБЪЕКТА её не читает — версия объекта есть
+  // `generation` ниже, — и потому отвергает: `INVALID_ARGUMENT`
+  // `source_version: …` (принять и проигнорировать запрещено,
+  // `api-conventions.md`). Пусто у публикации — намерение без версии, порядка
+  // не доказывающее (fail-closed для снятия).
   google.protobuf.Timestamp source_version = 8;
 
   // Цепь родительства регистрируемого объекта, от БЛИЖАЙШЕГО предка к дальнему.
@@ -462,6 +463,21 @@ message RegisterResourceRequest {
   // обещает возможность, которой нет, а форма E получает объект без предка —
   // то есть ровно тот дефект, ради которого поле и заводится.
   repeated string parent_chain = 9;
+
+  // Поколение объекта у владельца: целое, строго растущее на каждое изменение
+  // объекта, — то же `g_E`, что владелец ставит в строку `resource-event` своего
+  // журнала (приёмка NTF-3, Р30 «Приём поколения — CAS», «Поколение и проекция»).
+  //
+  // Обязательно у регистрации и у снятия объекта: `0` — `INVALID_ARGUMENT`
+  // `generation: required`; приёма без поколения нет. Применяется, только если
+  // строго новее головы объекта в службе доступа (`kaname.object_head`, включая
+  // надгробие снятия); иначе исход `REJECTED_STALE` — зеркало, рёбра предков,
+  // голова и кортежи не меняются, а вызов отвечает успехом (контракт прокси
+  // идемпотентен: отказ породил бы вечный повтор у дренажа владельца).
+  //
+  // У чистой выдачи `user:* # v_get` (публикация) поколения нет: её порядок —
+  // `source_version` выше; поколение там — `INVALID_ARGUMENT`.
+  int64 generation = 10;
 }
 
 // RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
@@ -495,14 +511,22 @@ message UnregisterResourceRequest {
   // Account the resource belonged to. Empty when the resource is not account-scoped.
   string parent_account_id = 7;
 
-  // Tombstone-version: момент Delete у владельца (now() на
-  // эмите unregister-intent). IAM удаляет mirror-строку ТОЛЬКО если этот
-  // source_version >= хранимого (tombstone не старше последнего примененного
-  // register) — Delete-после-Update reorder (unregister(v2) затем stale что-либо)
-  // не теряет свежее состояние. Пусто/нулевой → legacy (graceful): безусловный
-  // DELETE (back-compat). Остаточный edge (stale register ПОСЛЕ unregister →
-  // возможный dangling) чистит reconcile-sweep — см. docs/architecture.
+  // Версия владельца у снятия ПУБЛИКАЦИИ — и только у него.
+  //
+  // Читается двумя путями, оба про публикацию: снятием чистой выдачи
+  // `user:* # v_get` и снятием объекта, чей тип допускает публикацию, — объект
+  // уносит свою публикацию с собой под ЭТОЙ версией, и запоздавшее открытие,
+  // не новее её, удалённый объект не опубликует (kaname#107). Пусто — снятие
+  // без версии, применяемое fail-closed. У снятия объекта, чей тип публикации
+  // не допускает, читателя нет — `INVALID_ARGUMENT` `source_version: …`.
+  // Порядок САМОГО объекта — `generation` ниже.
   google.protobuf.Timestamp source_version = 8;
+
+  // Поколение снятия объекта (см. RegisterResourceRequest.generation).
+  // Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`. Применённое
+  // снятие оставляет НАДГРОБИЕ — голову объекта с этим поколением: регистрация
+  // поколения не новее надгробия зеркала не восстанавливает (`REJECTED_STALE`).
+  int64 generation = 10;
 }
 
 // UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление

@@ -24,7 +24,6 @@ package resource_mirror_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -81,7 +80,7 @@ func TestResourceMirror_UpsertTx_TypeOutsideCatalogIsRefused(t *testing.T) {
 				ObjectID:        tc.objectID,
 				ParentProjectID: "prj-P",
 				ParentAccountID: "acc-A",
-				SourceVersion:   time.Now().UTC(),
+				Generation:      1,
 			})
 
 			if tc.accepted {
@@ -201,30 +200,32 @@ func TestResourceMirror_UpsertTx_VersionBumpAlsoNeedsALiveType(t *testing.T) {
 	// закрытия честно сработает и назовёт её виновной.
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	first := time.Now().UTC().Add(-time.Minute)
 	_, err = tx.Exec(ctx,
 		`INSERT INTO kaname.resource_mirror
 		   (object_type, object_id, parent_project_id, source_version)
-		 VALUES ('compute.disk', 'dsk-bump', 'prj-P', $1)`, first)
+		 VALUES ('compute.disk', 'dsk-bump', 'prj-P', 1)`)
 	require.NoError(t, err)
 
-	// Та же проекция, версия строго новее — ровно вход полосы «поднять версию».
+	// Та же проекция, поколение строго новее — ровно вход «сдвинуть только поколение».
 	_, uerr := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType:      "compute.disk",
 		ObjectID:        "dsk-bump",
 		ParentProjectID: "prj-P",
-		SourceVersion:   time.Now().UTC(),
+		Generation:      2,
 	})
 	require.ErrorIs(t, uerr, iamerr.ErrUnknownResourceType,
-		"полоса поднятия версии обязана спрашивать каталог наравне со вставкой")
+		"сдвиг одного поколения обязан спрашивать каталог наравне со вставкой")
 
-	// Контроль: отметка версии НЕ сдвинулась — отказ не применил половину работы.
-	var stored time.Time
+	// Контроль: поколение НЕ сдвинулось и головы нет — отказ не применил половину работы.
+	var stored, heads int64
 	require.NoError(t, tx.QueryRow(ctx,
 		`SELECT source_version FROM kaname.resource_mirror
 		  WHERE object_type = 'compute.disk' AND object_id = 'dsk-bump'`).Scan(&stored))
-	require.WithinDuration(t, first, stored, time.Second,
-		"отвергнутая регистрация не вправе сдвинуть отметку версии")
+	require.Equal(t, int64(1), stored, "отвергнутая регистрация не вправе сдвинуть поколение")
+	require.NoError(t, tx.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.object_head
+		  WHERE object_type = 'compute.disk' AND object_id = 'dsk-bump'`).Scan(&heads))
+	require.Equal(t, int64(0), heads, "отвергнутая регистрация не вправе завести голову")
 }
 
 // TestResourceMirror_DeleteTx_DoesNotAskTheCatalog — снятие ресурса, чей тип уже
@@ -254,15 +255,15 @@ func TestResourceMirror_DeleteTx_DoesNotAskTheCatalog(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	stamp := time.Now().UTC().Add(-time.Minute)
 	_, err = tx.Exec(ctx,
 		`INSERT INTO kaname.resource_mirror
 		   (object_type, object_id, parent_project_id, source_version)
-		 VALUES ('compute.disk', 'dsk-withdraw', 'prj-P', $1)`, stamp)
+		 VALUES ('compute.disk', 'dsk-withdraw', 'prj-P', 1)`)
 	require.NoError(t, err)
 
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.disk", "dsk-withdraw", time.Now().UTC()),
-		"снятие обязано работать и на типе, снятом с платформы")
+	out, err := resource_mirror.DeleteTx(ctx, tx, "compute.disk", "dsk-withdraw", 2)
+	require.NoError(t, err, "снятие обязано работать и на типе, снятом с платформы")
+	require.True(t, out.Applied, "снятие поколением новее головы применяется")
 
 	var n int
 	require.NoError(t, tx.QueryRow(ctx,

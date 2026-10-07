@@ -403,6 +403,7 @@ func seedWDObjects(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 			ParentProjectID: prj, ParentAccountID: acc,
 			Labels:      labels,
 			ParentChain: []string{"project:" + prj, "account:" + acc},
+			Generation:  1,
 		}))
 	}
 	require.NoError(t, s.Flush(ctx))

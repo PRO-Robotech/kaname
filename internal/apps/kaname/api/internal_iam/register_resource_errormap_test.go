@@ -119,6 +119,7 @@ func TestInternalIAM_RegisterResource_ErrorMapping(t *testing.T) {
 
 			_, err := h.RegisterResource(context.Background(), &iamv1.RegisterResourceRequest{
 				SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
+				Generation: 1,
 			})
 			require.Error(t, err)
 			assert.Equal(t, tc.want, status.Code(err))
@@ -142,6 +143,7 @@ func TestInternalIAM_UnregisterResource_ErrorMapping(t *testing.T) {
 
 			_, err := h.UnregisterResource(context.Background(), &iamv1.UnregisterResourceRequest{
 				SubjectId: "user:usr_x", Relation: "owner", Object: "vpc_network:enp_1",
+				Generation: 2,
 			})
 			require.Error(t, err)
 			assert.Equal(t, tc.want, status.Code(err))

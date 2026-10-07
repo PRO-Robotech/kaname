@@ -76,13 +76,6 @@ func corpusFamilies() []corpusFamily {
 			Want: []string{check.SubjectChangeProducerRootRel + "/user/list.go"},
 		},
 		{
-			Name:    "mirrorcatalogcondition",
-			Build:   check.MirrorCandidateCorpus,
-			Present: map[string]string{"internal/repo/emitter.go": goBody, "internal/repo/emitter_test.go": goBody},
-			Absent:  map[string]string{"internal/repo/emitter_test.go": goBody, "docs/x.go": goBody},
-			Want:    []string{"internal/repo/emitter.go"},
-		},
-		{
 			Name:    "clienttruth_kaname_exclusion_form",
 			Build:   check.ExclusionFormGoCorpus,
 			Present: map[string]string{check.ExclusionReaderDirRel + "/read.go": goBody, "INSTALL.md": "тело"},

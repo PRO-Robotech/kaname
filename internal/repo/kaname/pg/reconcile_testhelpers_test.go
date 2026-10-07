@@ -44,7 +44,9 @@ func seedComputeEditorRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 }
 
 // seedMirrorRow UPSERTs a resource_mirror row directly (simulating a
-// compute→iam RegisterResource landing). sourceVersion orders monotonic updates.
+// compute→iam RegisterResource landing). sourceVersion orders monotonic updates: the
+// fixture stores it as the row's generation (microseconds since the epoch), which keeps
+// the order the callers give it.
 func seedMirrorRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID, parentProject, parentAccount string, labels map[string]string, sourceVersion time.Time) {
 	t.Helper()
 	payload := jsonObject(labels)
@@ -59,7 +61,7 @@ func seedMirrorRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objTyp
 		       source_version    = EXCLUDED.source_version,
 		       updated_at        = now()
 		 WHERE kaname.resource_mirror.source_version < EXCLUDED.source_version`,
-		objType, objID, parentProject, parentAccount, payload, sourceVersion)
+		objType, objID, parentProject, parentAccount, payload, sourceVersion.UnixMicro())
 	require.NoError(t, err, "seed resource_mirror row")
 }
 

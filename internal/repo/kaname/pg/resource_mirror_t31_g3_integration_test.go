@@ -30,7 +30,6 @@ package pg_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -39,7 +38,6 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -47,14 +45,14 @@ import (
 
 // readMirrorRowT31 reads the full tenant-facing projection of a mirror row.
 // found=false when the row is absent (i.e. it was Unregister-DELETEd).
-func readMirrorRowT31(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) (found bool, parentPrj, parentAcc, labelsText string, sourceVersion time.Time) {
+func readMirrorRowT31(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) (found bool, parentPrj, parentAcc, labelsText string, sourceVersion int64) {
 	t.Helper()
 	err := pool.QueryRow(ctx,
 		`SELECT parent_project_id, parent_account_id, labels::text, source_version
 		   FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2`,
 		objType, objID).Scan(&parentPrj, &parentAcc, &labelsText, &sourceVersion)
 	if err != nil {
-		return false, "", "", "", time.Time{}
+		return false, "", "", "", 0
 	}
 	return true, parentPrj, parentAcc, labelsText, sourceVersion
 }
@@ -81,8 +79,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	const objType, objID = "vpc.network", "net-g3"
 	const prj, acc = "prj-g3", "acc-g3"
 
-	// Given: a network registered with a label (Create-time emit) at v0.
-	v0 := time.Now().Add(-time.Minute)
+	// Given: a network registered with a label (Create-time emit) at generation 1.
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + prj,
 		Relation:        "parent",
@@ -90,7 +87,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: prj,
 		ParentAccountId: acc,
-		SourceVersion:   timestamppb.New(v0),
+		Generation:      1,
 	}))
 
 	found0, prj0, acc0, labels0, srcV0 := readMirrorRowT31(t, ctx, pool, objType, objID)
@@ -100,7 +97,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	require.JSONEq(t, `{"network":"treska"}`, labels0)
 
 	// When: the label is fully removed → consumer (#113 fix) re-emits
-	// RegisterResource (mirror.upsert) with labels={} and a NEWER source_version
+	// RegisterResource (mirror.upsert) with labels={} and a NEWER generation
 	// (G-3: upsert {}, NOT UnregisterResource).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + prj,
@@ -109,7 +106,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		Labels:          map[string]string{}, // empty — full removal
 		ParentProjectId: prj,
 		ParentAccountId: acc,
-		SourceVersion:   timestamppb.New(v0.Add(time.Minute)),
+		Generation:      2,
 	}))
 
 	// Then (G-3): the row is STILL PRESENT (upsert, not Unregister-DELETE) ...
@@ -124,9 +121,9 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	assert.Equal(t, prj, prj1, "parent_project_id preserved (registration not torn down)")
 	assert.Equal(t, acc, acc1, "parent_account_id preserved (registration not torn down)")
 
-	// ... and source_version ADVANCED (monotonic upsert applied, not a no-op).
-	assert.True(t, srcV1.After(srcV0),
-		"source_version advanced (monotonic upsert applied the newer label-removal)")
+	// ... and the generation ADVANCED (the newer label-removal applied, not a no-op).
+	assert.Greater(t, srcV1, srcV0,
+		"generation advanced (the newer label-removal applied)")
 
 	// Exactly one row by the (object_type, object_id) PK — no duplicate / split.
 	var n int

@@ -140,8 +140,8 @@ func seedMirrorObject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, obj
 	_, err := pool.Exec(ctx, `
 		INSERT INTO kaname.resource_mirror
 		  (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, now())`,
-		objType, objID, prj, acc, time.Now())
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, 1, now())`,
+		objType, objID, prj, acc)
 	require.NoError(t, err, "строка зеркала объекта")
 }
 

@@ -300,7 +300,14 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// формы значит «служба пропустила негодное» — дефект службы.
 	"notification_grants":          nil,
 	"notification_template_grants": nil,
-	"operations":                   nil,
+	// Голова объекта: тип и идентификатор — присланные владельцем (через приём),
+	// поколение — его же; пишет только триггер `resource_event`.
+	"object_head": {caller: []string{
+		"object_head_generation_positive",
+		"object_head_id_nonempty",
+		"object_head_type_nonempty",
+	}},
+	"operations": nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"own_ceilings": nil,
 	// Ожидающая регистрация «сначала письмо» (NTF-2, З14): присланные адрес,
@@ -334,13 +341,24 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"refresh_tokens": nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
+	// Приём регистрации и снятия объекта: тип, идентификатор и поколение прислал
+	// владелец; вид намерения ставит и метки сериализует служба. Строку пишет
+	// служба, исход ставит триггер `resource_event`.
+	"resource_event_intake": {
+		caller: []string{
+			"resource_event_intake_generation_positive",
+			"resource_event_intake_id_nonempty",
+			"resource_event_intake_type_nonempty",
+		},
+		service: []string{"resource_event_intake_change", "resource_event_intake_labels_object"},
+	},
 	// Журнал ресурсов — событие пишет служба.
 	"resource_journal": nil,
 	// Зеркало чужого ресурса: тип и идентификатор прислала служба-владелец;
-	// метки служба сериализует в объект сама.
+	// метки служба сериализует в объект сама, поколение пишет триггер.
 	"resource_mirror": {
 		caller:  []string{"resource_mirror_id_nonempty", "resource_mirror_type_nonempty"},
-		service: []string{"resource_mirror_labels_object"},
+		service: []string{"resource_mirror_generation_nonnegative", "resource_mirror_labels_object"},
 	},
 	// Цепь предков: идентификаторы объекта и родителя прислал владелец; типы
 	// переводит в словарь модели и глубину считает служба.
@@ -352,6 +370,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 		service: []string{
 			"resource_parent_edge_depth_bounded",
+			"resource_parent_edge_generation_nonnegative",
 			"resource_parent_edge_object_type_model_dictionary",
 			"resource_parent_edge_object_type_nonempty",
 			"resource_parent_edge_parent_type_model_dictionary",

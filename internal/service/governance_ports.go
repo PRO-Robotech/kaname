@@ -54,38 +54,28 @@ type ResourceMirrorRow struct {
 	// области выдачи и из каскада.
 	ParentChain []string
 	Labels      map[string]string
-	// SourceVersion — monotonic per-object marker from the owner.
-	// The mirror UPSERT applies a register only when this is strictly newer than
-	// the stored version (last-source-state-wins). Zero → '-infinity' (legacy).
-	SourceVersion time.Time
+	// Generation — поколение объекта у владельца (строго растущее целое на
+	// каждое изменение объекта). Обязательно: приёма без поколения нет.
+	// Регистрация применяется, только если оно строго новее головы объекта
+	// (`kaname.object_head`, включая надгробие снятия); иначе REJECTED_STALE.
+	Generation int64
 }
 
-// ResourceMirrorEmitter — port for UPSERT/DELETE of a kaname.resource_mirror
-// row inside a caller-owned writer-tx. Atomic with the
-// owner-tuple fga_outbox emit (one writer-tx): a rolled-back caller-tx leaves
-// neither the mirror row nor the tuple intent. The mirror-fill path only FILLS
-// the mirror; the reconciler reads it. UPSERT-on-PK gives idempotency under the
-// at-least-once drainer.
-// UpsertTx reports TWO independent DB-decided facts about the write, because the
-// duplicate delivery every consumer performs cannot be recognised by one of them alone.
+// ResourceMirrorEmitter — порт приёма регистрации и снятия объекта в проекцию
+// (зеркало, цепь предков, голова объекта) в транзакции вызывающего: атомарно с
+// намерением кортежа владельца в `fga_outbox`. Проекцию пишет ОДИН
+// производитель — триггер `resource_event` базы службы доступа; порт кладёт
+// намерение и возвращает исход приёма, решённый базой.
 //
-//   - `applied` — the statement CHANGED a row. The monotonic guard means a register
-//     whose SourceVersion is not strictly newer than the stored one updates ZERO rows —
-//     a redelivery whose work was already done, so the second delivery skips it.
-//   - `projectionUnchanged` — the write advanced ONLY SourceVersion: parent-scope and
-//     labels were already byte-identical. This is the case `applied` CANNOT see. The
-//     two deliveries of one registration carry DIFFERENT versions (the synchronous
-//     registrar stamps wall-clock after the commit; the drainer replays the version the
-//     DB stamped inside the writer-tx, i.e. earlier), and their arrival order is not
-//     fixed — so when the drainer arrives first, the synchronous call applies with the
-//     NEWER version while changing nothing about the object. Only a registration that
-//     REPLACED a different projection can have made an earlier materialization stale,
-//     and only that one needs the delete-stale-capable reconcile pass.
-//
-// Reporting both costs nothing: the statements already evaluate the conditions.
+//   - `applied` — поколение строго новее головы, проекция записана. Ложь —
+//     REJECTED_STALE: запоздалая или повторная доставка, не изменившая ничего
+//     (ни зеркала, ни надгробия, ни цепи).
+//   - `projectionUnchanged` (только регистрация) — применённая регистрация
+//     сдвинула ТОЛЬКО поколение: родитель и метки уже были теми же, ничто
+//     материализованное по прежним фактам устареть не могло.
 type ResourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
-	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
+	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, generation int64) (applied bool, err error)
 }
 
 // PublicReadPublisher — применяет намерение владельца о публикации объекта для

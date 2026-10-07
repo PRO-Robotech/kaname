@@ -16,50 +16,50 @@ package internal_iam
 // the stand: two byte-identical 27-row fga_outbox batches 6.7 ms apart for one created
 // network; 2.21 outbox rows per distinct tuple table-wide.
 //
-// THE COORDINATION. The two paths already carry the discriminator — a monotonic
-// source_version. The sync registrar stamps time.Now() AFTER the commit; the drainer
-// replays the version the DB stamped INSIDE the writer-tx, i.e. strictly earlier. The
-// mirror UPSERT is already guarded `WHERE resource_mirror.source_version <
-// EXCLUDED.source_version`, so the drainer's replay updates ZERO rows — it is already a
-// detected no-op whose result the use-case discarded. Reading that result and skipping
-// the downstream work is the fix.
+// THE COORDINATION. Both deliveries carry the SAME discriminator — the object's
+// generation, which the owner stamps once per change. The admission compares it with the
+// object's head (Р30 «Приём поколения — CAS»): the second delivery is not newer, so it is
+// REJECTED_STALE and writes nothing. Reading that verdict and skipping the downstream work
+// is the gate.
 //
 // WHY THIS AND NOT QUEUE DEDUP. Collapsing unsent outbox rows by (event type, payload)
 // silently drops a re-grant: grant → revoke → grant folds into grant → revoke, losing
-// the grant. This gate keys on APPLIED STATE via a MONOTONIC version, not on queue
-// contents, so a later re-registration always carries a newer version (and a revoke
-// removes the mirror row outright) and is therefore never swallowed — pinned below.
+// the grant. This gate keys on APPLIED STATE via the object's generation, not on queue
+// contents, so a later re-registration always carries a newer generation and is never
+// swallowed — pinned below.
 
 import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// ── fakes modelling the monotonic mirror ────────────────────────────────────
+// ── fakes modelling the admission against the object's head ─────────────────
 
-// versionedMirror models kaname.resource_mirror's monotonic UPSERT guard: a row is
-// written only when the incoming source_version is STRICTLY newer than the stored one,
-// and the emitter reports whether it changed anything.
+// versionedMirror models the projection admission: an intent applies only when its
+// generation is STRICTLY newer than the object's head — the tombstone of a withdrawal
+// included — and the emitter reports whether it applied.
 type versionedMirror struct {
 	mu       sync.Mutex
-	stored   map[string]time.Time
+	heads    map[string]int64
 	upserts  int // UpsertTx calls
 	deletes  int // DeleteTx calls
-	mutated  int // calls that actually changed a row
+	mutated  int // calls that actually applied
 	labelsOf map[string]map[string]string
 }
 
 func newVersionedMirror() *versionedMirror {
-	return &versionedMirror{stored: map[string]time.Time{}, labelsOf: map[string]map[string]string{}}
+	return &versionedMirror{heads: map[string]int64{}, labelsOf: map[string]map[string]string{}}
 }
 
 func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
@@ -67,15 +67,15 @@ func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.
 	defer m.mu.Unlock()
 	m.upserts++
 	key := row.ObjectType + ":" + row.ObjectID
-	prev, exists := m.stored[key]
-	if exists && !row.SourceVersion.After(prev) {
-		return false, false, nil // stale/equal replay — 0 rows updated
+	if row.Generation <= m.heads[key] {
+		return false, false, nil // REJECTED_STALE — nothing written
 	}
-	// projectionUnchanged: the write advanced only the version. These cases vary labels
-	// and nothing else, so labels are what the fake compares (the SQL statement compares
-	// parent-scope too — see resource_mirror.UpsertTx).
-	unchanged := exists && sameStringMap(m.labelsOf[key], row.Labels)
-	m.stored[key] = row.SourceVersion
+	// projectionUnchanged: the write advanced only the generation. These cases vary
+	// labels and nothing else, so labels are what the fake compares (the trigger compares
+	// parent-scope too).
+	prev, exists := m.labelsOf[key]
+	unchanged := exists && sameStringMap(prev, row.Labels)
+	m.heads[key] = row.Generation
 	m.labelsOf[key] = row.Labels
 	m.mutated++
 	return true, unchanged, nil
@@ -94,17 +94,18 @@ func sameStringMap(a, b map[string]string) bool {
 	return true
 }
 
-func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, generation int64) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
 	key := ot + ":" + oid
-	if prev, exists := m.stored[key]; exists && !prev.After(tombstone) {
-		delete(m.stored, key)
-		delete(m.labelsOf, key)
-		m.mutated++
+	if generation <= m.heads[key] {
+		return false, nil // REJECTED_STALE
 	}
-	return nil
+	m.heads[key] = generation // the tombstone
+	delete(m.labelsOf, key)
+	m.mutated++
+	return true, nil
 }
 
 // countingEmitter counts the owner-tuple rows enqueued into fga_outbox.
@@ -147,23 +148,22 @@ func (r *countingReconcileEvents) count() int {
 	return len(r.events)
 }
 
-// versionedReq is a registerInput carrying an explicit source_version + labels.
+// versionedReq is a registerInput carrying an explicit generation + labels.
 type versionedReq struct {
 	subject, relation, object string
 	labels                    map[string]string
-	version                   time.Time
+	generation                int64
 }
 
-func (r *versionedReq) GetSubjectId() string { return r.subject }
-func (r *versionedReq) GetRelation() string  { return r.relation }
-func (r *versionedReq) GetObject() string    { return r.object }
-func (r *versionedReq) GetSourceVersion() *timestamppb.Timestamp {
-	return timestamppb.New(r.version)
-}
-func (r *versionedReq) GetLabels() map[string]string { return r.labels }
-func (r *versionedReq) GetParentProjectId() string   { return "prj-1" }
-func (r *versionedReq) GetParentAccountId() string   { return "acc-1" }
-func (r *versionedReq) GetParentChain() []string     { return nil }
+func (r *versionedReq) GetSubjectId() string                     { return r.subject }
+func (r *versionedReq) GetRelation() string                      { return r.relation }
+func (r *versionedReq) GetObject() string                        { return r.object }
+func (r *versionedReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
+func (r *versionedReq) GetGeneration() int64                     { return r.generation }
+func (r *versionedReq) GetLabels() map[string]string             { return r.labels }
+func (r *versionedReq) GetParentProjectId() string               { return "prj-1" }
+func (r *versionedReq) GetParentAccountId() string               { return "acc-1" }
+func (r *versionedReq) GetParentChain() []string                 { return nil }
 
 type redeliveryRig struct {
 	uc      *RegisterResourceUseCase
@@ -184,197 +184,210 @@ func newRedeliveryRig() *redeliveryRig {
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}
 }
 
-// TestRegisterResource_DrainerReplay_DoesNoDuplicateWork — the core contract. The sync
-// registrar delivers first with the post-commit wall-clock version; the drainer replays
-// the same registration with the DB version stamped inside the writer-tx (strictly
-// earlier). The replay must be recognised as a no-op: no owner-tuple row, no reconcile
-// event, no forward reconcile fan-out.
+// TestRegisterResource_SecondDeliveryOfOneGeneration_DoesNoDuplicateWork — the core
+// contract. The sync registrar and the drainer deliver the SAME generation; whichever
+// arrives second is not newer than the head and must be recognised as a no-op: no
+// owner-tuple row, no reconcile event, no forward reconcile fan-out.
 //
-// RED before the gate: the use-case discarded the mirror UPSERT's result and re-ran the
+// RED before the gate: the use-case discarded the admission's verdict and re-ran the
 // whole materialisation — 2 tuple rows, 2 reconcile events, 2 forward passes.
-func TestRegisterResource_DrainerReplay_DoesNoDuplicateWork(t *testing.T) {
+func TestRegisterResource_SecondDeliveryOfOneGeneration_DoesNoDuplicateWork(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
+	req := func() *versionedReq {
+		return &versionedReq{
+			subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+			labels: map[string]string{"tier": "gold"}, generation: 1,
+		}
+	}
 
-	inTx := time.Now()                           // stamped by the DB inside the producer's writer-tx
-	postCommit := inTx.Add(3 * time.Millisecond) // stamped by the sync registrar after commit
-
-	// (1) The synchronous registrar's delivery — this one does the work.
-	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "gold"}, version: postCommit,
-	}))
+	// (1) The first delivery — this one does the work.
+	require.NoError(t, rig.uc.Register(ctx, req()))
 	require.Equal(t, 1, rig.emitter.writes, "the first delivery enqueues the owner tuple")
 	require.Equal(t, 1, rig.events.count(), "the first delivery enqueues the reconcile event")
 	require.Len(t, rig.recon.snapshot(), 1, "the first delivery drives the forward reconcile")
 
-	// (2) The register-drainer's replay of the SAME registration, carrying the older
-	// in-writer-tx version. Nothing about the resource changed.
-	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "gold"}, version: inTx,
-	}))
+	// (2) The other delivery of the SAME generation; and a third, as an at-least-once
+	// retry would. Nothing about the resource changed.
+	require.NoError(t, rig.uc.Register(ctx, req()))
+	require.NoError(t, rig.uc.Register(ctx, req()))
 
 	assert.Equal(t, 1, rig.emitter.writes,
-		"a replay that changed no mirror row must not enqueue the owner tuple again")
+		"a delivery not newer than the head must not enqueue the owner tuple again")
 	assert.Equal(t, 1, rig.events.count(),
-		"a replay that changed no mirror row must not enqueue another reconcile event")
+		"a delivery not newer than the head must not enqueue another reconcile event")
 	assert.Len(t, rig.recon.snapshot(), 1,
-		"a replay that changed no mirror row must not re-run the forward reconcile fan-out")
-	assert.Equal(t, 1, rig.mirror.mutated, "exactly one delivery mutated the mirror")
+		"a delivery not newer than the head must not re-run the forward reconcile fan-out")
+	assert.Equal(t, 1, rig.mirror.mutated, "exactly one delivery applied")
 }
 
-// TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork — the same contract for an
-// exactly-equal version (an at-least-once redelivery of the identical row, e.g. a
-// drainer retry after a transient error): equal is not newer, so it is a no-op.
-func TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork(t *testing.T) {
+// TestRegisterResource_OlderGeneration_DoesNoWork — a late delivery of an OLDER
+// generation (the producer's queue reordered two changes) changes nothing either.
+func TestRegisterResource_OlderGeneration_DoesNoWork(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
-	v := time.Now()
-
-	req := func() *versionedReq {
-		return &versionedReq{
-			subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-			labels: map[string]string{"tier": "gold"}, version: v,
-		}
-	}
-	require.NoError(t, rig.uc.Register(ctx, req()))
-	require.NoError(t, rig.uc.Register(ctx, req()))
-	require.NoError(t, rig.uc.Register(ctx, req()))
-
-	assert.Equal(t, 1, rig.emitter.writes, "three identical deliveries do the work once")
-	assert.Equal(t, 1, rig.events.count(), "three identical deliveries enqueue one reconcile event")
-	assert.Len(t, rig.recon.snapshot(), 1, "three identical deliveries drive one forward reconcile")
-}
-
-// TestRegisterResource_NewerVersion_StillMaterializes — the gate must not swallow real
-// change. A label UPDATE re-registers the object with a NEWER version; the rematerialise
-// path (the closed revoke defect) must still fire in full.
-func TestRegisterResource_NewerVersion_StillMaterializes(t *testing.T) {
-	rig := newRedeliveryRig()
-	ctx := context.Background()
-	v1 := time.Now()
 
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "gold"}, version: v1,
+		labels: map[string]string{"tier": "bronze"}, generation: 3,
+	}))
+	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
+		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+		labels: map[string]string{"tier": "gold"}, generation: 2,
+	}))
+
+	assert.Equal(t, 1, rig.emitter.writes, "the older generation enqueues nothing")
+	assert.Equal(t, 1, rig.events.count(), "the older generation enqueues no reconcile event")
+	assert.Len(t, rig.recon.snapshot(), 1, "the older generation drives no forward reconcile")
+}
+
+// TestRegisterResource_NewerGeneration_StillMaterializes — the gate must not swallow
+// real change. A label UPDATE re-registers the object with a NEWER generation; the
+// rematerialise path (the closed revoke defect) must still fire in full.
+func TestRegisterResource_NewerGeneration_StillMaterializes(t *testing.T) {
+	rig := newRedeliveryRig()
+	ctx := context.Background()
+
+	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
+		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+		labels: map[string]string{"tier": "gold"}, generation: 1,
 	}))
 	// Label UPDATE — the grant-matching label is removed. This MUST rematerialise, so a
 	// now-unmatched grant is revoked by the reconcile pass it drives.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "bronze"}, version: v1.Add(time.Second),
+		labels: map[string]string{"tier": "bronze"}, generation: 2,
 	}))
 
-	assert.Equal(t, 2, rig.emitter.writes, "a newer version re-enqueues the owner tuple")
-	assert.Equal(t, 2, rig.events.count(), "a newer version enqueues another reconcile event")
-	assert.Len(t, rig.recon.snapshot(), 2, "a newer version re-runs the forward reconcile")
+	assert.Equal(t, 2, rig.emitter.writes, "a newer generation re-enqueues the owner tuple")
+	assert.Equal(t, 2, rig.events.count(), "a newer generation enqueues another reconcile event")
+	assert.Len(t, rig.recon.snapshot(), 2, "a newer generation re-runs the forward reconcile")
 }
 
 // TestRegisterResource_GrantRevokeGrant_NotCollapsed — the anti-trap regression, at the
 // producer boundary. The trap the obvious dedup falls into is collapsing
-// grant → revoke → grant into grant → revoke. Because this gate keys on a MONOTONIC
-// version (and an unregister removes the mirror row outright) rather than on payload
-// equality, the second grant is always materialised.
+// grant → revoke → grant into grant → revoke. Because this gate keys on the object's
+// generation rather than on payload equality, the second grant — a newer generation than
+// the tombstone — is always materialised.
 func TestRegisterResource_GrantRevokeGrant_NotCollapsed(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
-	base := time.Now()
 
 	// GRANT.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "gold"}, version: base,
+		labels: map[string]string{"tier": "gold"}, generation: 1,
 	}))
 	// REVOKE (unregister — the resource is deleted).
 	require.NoError(t, rig.uc.Unregister(ctx, &unregReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		version: base.Add(time.Second),
+		generation: 2,
 	}))
 	require.Equal(t, 1, rig.emitter.deletes, "the unregister enqueues the tuple delete")
 
-	// GRANT AGAIN — a re-created resource with the same identity coordinates. The
-	// producer-side de-dup must NOT swallow this.
+	// GRANT AGAIN — newer than the tombstone. The producer-side de-dup must NOT swallow
+	// this.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		labels: map[string]string{"tier": "gold"}, version: base.Add(2 * time.Second),
+		labels: map[string]string{"tier": "gold"}, generation: 3,
 	}))
 
 	assert.Equal(t, 2, rig.emitter.writes,
 		"the re-grant after a revoke must be re-emitted — never collapsed into grant → revoke")
 	// Three passes, one per step: both grants AND the revoke in between drive their
-	// materialisation in-process. The revoke's pass is what keeps withdrawal off the
-	// reconcile queue's critical path (see unregister_resource_sync_revoke_test.go);
-	// before it, this sequence produced two passes and the middle step's removal waited
-	// for the drainer.
+	// materialisation in-process (see unregister_resource_sync_revoke_test.go).
 	assert.Len(t, rig.recon.snapshot(), 3,
 		"grant, revoke and re-grant each drive their own post-commit pass")
 }
 
-// TestRegisterResource_UnregisterAlwaysMaterializes — revokes are never gated. An
-// unregister always enqueues the tuple delete and the reconcile event, even when the
-// mirror row is already gone: a swallowed revoke is an over-grant, and the asymmetry is
-// deliberate (fail-closed — the cost saving is taken only on the grant path).
-func TestRegisterResource_UnregisterAlwaysMaterializes(t *testing.T) {
+// TestRegisterResource_StaleWithdrawal_ChangesNothing — a withdrawal not newer than the
+// head is REJECTED_STALE: no tuple delete, no reconcile event, no forward pass. The head
+// proves a newer state of the object was already applied (or a newer withdrawal), and
+// removing its tuples now would revoke what that state still grants. Twin by one fact:
+// the first withdrawal of the same generation applied in full.
+func TestRegisterResource_StaleWithdrawal_ChangesNothing(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
-	v := time.Now()
+	withdraw := func() *unregReq {
+		return &unregReq{subject: "project:prj-1", relation: "project", object: "vpc_network:net-1", generation: 2}
+	}
 
-	require.NoError(t, rig.uc.Unregister(ctx, &unregReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1", version: v,
-	}))
-	require.NoError(t, rig.uc.Unregister(ctx, &unregReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1", version: v,
-	}))
+	require.NoError(t, rig.uc.Unregister(ctx, withdraw()))
+	require.Equal(t, 1, rig.emitter.deletes, "twin: the first withdrawal enqueues the tuple delete")
+	require.Equal(t, 1, rig.events.count(), "twin: the first withdrawal enqueues the reconcile event")
+	require.Len(t, rig.recon.snapshot(), 1, "twin: the first withdrawal drives its pass")
 
-	assert.Equal(t, 2, rig.emitter.deletes, "every unregister enqueues the tuple delete")
-	assert.Equal(t, 2, rig.events.count(), "every unregister enqueues the reconcile event")
+	require.NoError(t, rig.uc.Unregister(ctx, withdraw()),
+		"a stale withdrawal is a success of the call: the proxy is idempotent")
+	assert.Equal(t, 1, rig.emitter.deletes, "a stale withdrawal enqueues no tuple delete")
+	assert.Equal(t, 1, rig.events.count(), "a stale withdrawal enqueues no reconcile event")
+	assert.Len(t, rig.recon.snapshot(), 1, "a stale withdrawal drives no pass")
+
+	// A registration not newer than the tombstone does not bring the object back.
+	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
+		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+		labels: map[string]string{"tier": "gold"}, generation: 1,
+	}))
+	assert.Equal(t, 0, rig.emitter.writes, "a registration not newer than the tombstone writes no tuple")
 }
 
 // unregReq satisfies unregisterInput.
 type unregReq struct {
 	subject, relation, object string
-	version                   time.Time
+	generation                int64
 }
 
-func (r *unregReq) GetSubjectId() string { return r.subject }
-func (r *unregReq) GetRelation() string  { return r.relation }
-func (r *unregReq) GetObject() string    { return r.object }
-func (r *unregReq) GetSourceVersion() *timestamppb.Timestamp {
-	return timestamppb.New(r.version)
-}
+func (r *unregReq) GetSubjectId() string                     { return r.subject }
+func (r *unregReq) GetRelation() string                      { return r.relation }
+func (r *unregReq) GetObject() string                        { return r.object }
+func (r *unregReq) GetSourceVersion() *timestamppb.Timestamp { return nil }
+func (r *unregReq) GetGeneration() int64                     { return r.generation }
 
-// TestRegisterResource_UnversionedProducer_IsNeverGated — the gate requires positive
-// proof of redelivery, and an unversioned producer supplies none.
-//
-// A caller that sends no source_version maps to '-infinity', which loses EVERY monotonic
-// comparison — so after the first write its registrations report `changed = false` for a
-// reason that has nothing to do with redelivery. Gating on that would suppress real
-// materialisation and push the caller onto the async drain, widening its read-your-writes
-// window instead of saving anything.
-//
-// This is not hypothetical: registry's synchronous registrar sends no source_version, and
-// gating it stalled the registry-redesign suite on the live stand (6.8s → >10min of retry
-// looping) before this guard was added.
-func TestRegisterResource_UnversionedProducer_IsNeverGated(t *testing.T) {
+// TestRegisterResource_WithoutGeneration_IsRefused — there is no admission without a
+// generation (Р30 «Поколение и проекция», NTF3-174 (н)): `0` is INVALID_ARGUMENT naming
+// the field, nothing reaches the admission, nothing is enqueued. The inherited path
+// «an unversioned producer always applies» is gone. Twin by one fact: generation 1
+// applies.
+func TestRegisterResource_WithoutGeneration_IsRefused(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
+	reg := func(g int64) *versionedReq {
+		return &versionedReq{subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
+			labels: map[string]string{"tier": "gold"}, generation: g}
+	}
 
-	// An unversioned producer: source_version is the zero time ⇒ '-infinity'.
-	unversioned := func() *versionedReq {
-		return &versionedReq{
-			subject: "project:prj-1", relation: "project", object: "registry_repository:rep-1",
-			labels: map[string]string{"tier": "gold"}, version: time.Time{},
+	for _, c := range []struct {
+		name string
+		call func() error
+		desc string
+	}{
+		{"register 0", func() error { return rig.uc.Register(ctx, reg(0)) }, "required"},
+		{"register -1", func() error { return rig.uc.Register(ctx, reg(-1)) }, "must be positive"},
+		{"unregister 0", func() error {
+			return rig.uc.Unregister(ctx, &unregReq{subject: "project:prj-1", relation: "project", object: "vpc_network:net-1"})
+		}, "required"},
+	} {
+		err := c.call()
+		require.Error(t, err, c.name)
+		require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", c.name, err)
+		field, desc := fieldViolation(err)
+		assert.Equal(t, "generation", field, c.name)
+		assert.Equal(t, c.desc, desc, c.name)
+	}
+	assert.Zero(t, rig.mirror.upserts+rig.mirror.deletes, "a refused intent never reaches the admission")
+	assert.Zero(t, rig.emitter.writes+rig.emitter.deletes, "a refused intent enqueues nothing")
+
+	require.NoError(t, rig.uc.Register(ctx, reg(1)), "twin: generation 1 applies")
+	assert.Equal(t, 1, rig.emitter.writes)
+}
+
+// fieldViolation — поле и описание первого нарушения BadRequest отказа.
+func fieldViolation(err error) (field, desc string) {
+	for _, d := range status.Convert(err).Details() {
+		if br, ok := d.(*errdetails.BadRequest); ok && len(br.GetFieldViolations()) > 0 {
+			v := br.GetFieldViolations()[0]
+			return v.GetField(), v.GetDescription()
 		}
 	}
-	for i := 0; i < 3; i++ {
-		require.NoError(t, rig.uc.Register(ctx, unversioned()))
-	}
-
-	assert.Equal(t, 3, rig.emitter.writes,
-		"an unversioned register must always enqueue the owner tuple — '-infinity' is not proof of redelivery")
-	assert.Equal(t, 3, rig.events.count(),
-		"an unversioned register must always enqueue the reconcile event")
-	assert.Len(t, rig.recon.snapshot(), 3,
-		"an unversioned register must always drive the forward reconcile (its sync fast path)")
+	return "", ""
 }

@@ -256,7 +256,7 @@ func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 	v1, v2 := versions()
 	parent := &iamv1.RegisterResourceRequest{
 		SubjectId: "registry_registry:" + reg, Relation: "parent", Object: publicReadObject(id),
-		ParentChain: []string{"registry_registry:" + reg}, SourceVersion: timestamppb.New(v1),
+		ParentChain: []string{"registry_registry:" + reg}, Generation: 1,
 	}
 	require.NoError(t, uc.Register(context.Background(), parent))
 	publish(t, uc, id, v1.Add(time.Microsecond))
@@ -264,7 +264,7 @@ func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 
 	require.NoError(t, uc.Unregister(context.Background(), &iamv1.UnregisterResourceRequest{
 		SubjectId: parent.SubjectId, Relation: "parent", Object: parent.Object,
-		SourceVersion: timestamppb.New(v2),
+		SourceVersion: timestamppb.New(v2), Generation: 2,
 	}))
 	requirePrivate(t, pool, id, "удалённый репозиторий остался публично читаемым")
 
@@ -276,7 +276,7 @@ func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 	v3 := v2.Add(time.Millisecond)
 	require.NoError(t, uc.Register(context.Background(), &iamv1.RegisterResourceRequest{
 		SubjectId: parent.SubjectId, Relation: "parent", Object: parent.Object,
-		ParentChain: parent.ParentChain, SourceVersion: timestamppb.New(v3),
+		ParentChain: parent.ParentChain, Generation: 3,
 	}))
 	publish(t, uc, id, v3.Add(time.Microsecond))
 	requirePublic(t, pool, id, "новый репозиторий с тем же именем опубликован после снятия прежнего")

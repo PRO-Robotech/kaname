@@ -15,14 +15,16 @@ package pg
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/journalwrite"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 )
 
 // backfillSingletonLockKey — the well-known advisory-lock key for the backfill
@@ -207,62 +209,67 @@ func (a *BackfillAdapter) ListOwnerBindingsMissingMembers(ctx context.Context) (
 	return out, rows.Err()
 }
 
-// SeedSmokeMirrorObject creates a synthetic resource_mirror row (project/account
-// parented + labels) for the forward-smoke (verify-gate). A now() source_version
-// wins any monotonic-version guard.
+// SeedSmokeMirrorObject registers a synthetic object (project/account parented +
+// labels) for the forward-smoke (verify-gate).
+//
+// It goes through the ONE projection producer — the admission whose trigger
+// `resource_event` writes the mirror, the chain and the head — and not around it: the
+// smoke row lands in the LIVE table of the running cluster, and writing what the
+// product would not accept (a type retired from the catalog) would make the smoke
+// prove a path the product does not have. The catalog's verdict comes back as the
+// producer's refusal, naming the type.
+//
+// The smoke object is the service's own, so the service is its owner and stamps its
+// next generation itself — one past the head, in the same transaction; the head's CAS
+// still decides, and a concurrent writer surfaces as a refusal, never as a silent
+// overwrite.
 func (a *BackfillAdapter) SeedSmokeMirrorObject(ctx context.Context, objectType, objectID, parentProject, parentAccount string, labels map[string]string) error {
-	labelsJSON, err := json.Marshal(labels)
-	if err != nil {
-		return fmt.Errorf("backfill: marshal smoke labels: %w", err)
-	}
-	if len(labels) == 0 {
-		labelsJSON = []byte("{}")
-	}
-	// Условие каталога — то же, каким его спрашивает эталонная полоса
-	// (`resource_mirror.UpsertTx`). Дымовая проба кладёт строку в БОЕВУЮ таблицу
-	// поднятого кластера, а не в свою: тип, снятый из каталога, производитель бы
-	// отверг, и обойти его здесь значило бы записать то, что продукт не
-	// принимает. Инвариант, выраженный в одном операторе из нескольких, — это
-	// инвариант, которого нет.
-	//
-	// Явные приведения обязательны: в списке `SELECT` тип параметра не выводится
-	// из колонки назначения, как он выводился в форме `VALUES`.
-	tag, err := a.pool.Exec(ctx,
-		`INSERT INTO kaname.resource_mirror
-		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, now(), now()
-		  WHERE EXISTS (
-		    SELECT 1 FROM kaname.catalog_resource WHERE dotted = $1 AND live
-		  )
-		 ON CONFLICT (object_type, object_id) DO UPDATE
-		    SET parent_project_id = EXCLUDED.parent_project_id,
-		        parent_account_id = EXCLUDED.parent_account_id,
-		        labels            = EXCLUDED.labels,
-		        source_version    = now(),
-		        updated_at        = now()`,
-		objectType, objectID, parentProject, parentAccount, string(labelsJSON))
-	if err != nil {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: %w", objectType, objectID, err)
-	}
-	// Ноль строк здесь означает РОВНО «тип не живой»: ветка `DO UPDATE` условия
-	// не несёт, поэтому на живом типе она применяется всегда. Отказ НАЗЫВАЕТ
-	// причину: без него дымовая проба сказала бы «объект не материализовался» —
-	// то есть обвинила бы прямой путь в том, чего он не делал.
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: resource type %q "+
-			"is not a live entry of the platform resource catalog",
-			objectType, objectID, objectType)
-	}
-	return nil
+	return a.smokeIntake(ctx, "seed", objectType, objectID, func(tx pgx.Tx, gen int64) (resource_mirror.Outcome, error) {
+		return resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+			ObjectType:      objectType,
+			ObjectID:        objectID,
+			ParentProjectID: parentProject,
+			ParentAccountID: parentAccount,
+			Labels:          labels,
+			Generation:      gen,
+		})
+	})
 }
 
-// RemoveSmokeMirrorObject removes the synthetic forward-smoke mirror row.
+// RemoveSmokeMirrorObject withdraws the synthetic forward-smoke object through the same
+// producer: the mirror row and its chain go, the head stays as the tombstone.
 func (a *BackfillAdapter) RemoveSmokeMirrorObject(ctx context.Context, objectType, objectID string) error {
-	_, err := a.pool.Exec(ctx,
-		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`,
-		objectType, objectID)
+	return a.smokeIntake(ctx, "remove", objectType, objectID, func(tx pgx.Tx, gen int64) (resource_mirror.Outcome, error) {
+		return resource_mirror.DeleteTx(ctx, tx, objectType, objectID, gen)
+	})
+}
+
+// smokeIntake runs one admission of the smoke object in its own transaction, with the
+// generation one past the object's head.
+func (a *BackfillAdapter) smokeIntake(ctx context.Context, step, objectType, objectID string,
+	admit func(tx pgx.Tx, gen int64) (resource_mirror.Outcome, error),
+) error {
+	tx, err := journalwrite.Begin(ctx, a.pool)
 	if err != nil {
-		return fmt.Errorf("backfill: remove smoke mirror object %s:%s: %w", objectType, objectID, err)
+		return fmt.Errorf("backfill: %s smoke mirror object %s:%s: begin: %w", step, objectType, objectID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	head, err := resource_mirror.HeadGenerationTx(ctx, tx, objectType, objectID)
+	if err != nil {
+		return fmt.Errorf("backfill: %s smoke mirror object %s:%s: %w", step, objectType, objectID, err)
+	}
+	out, err := admit(tx, head+1)
+	if err != nil {
+		return fmt.Errorf("backfill: %s smoke mirror object %s:%s: %w", step, objectType, objectID, err)
+	}
+	if !out.Applied {
+		// The head moved between the read and the admission: another writer of the
+		// smoke object. Not applied is a refusal here, never a silent success.
+		return fmt.Errorf("backfill: %s smoke mirror object %s:%s: generation %d not newer than the head "+
+			"(REJECTED_STALE) — a concurrent writer of the smoke object", step, objectType, objectID, head+1)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("backfill: %s smoke mirror object %s:%s: commit: %w", step, objectType, objectID, err)
 	}
 	return nil
 }

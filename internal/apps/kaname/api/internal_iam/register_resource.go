@@ -49,20 +49,21 @@ type relationOutboxEmitter interface {
 	EmitDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error
 }
 
-// resourceMirrorEmitter — narrow write port for the
-// output-only mirror: UPSERT/DELETE a kaname.resource_mirror row inside the
-// caller-owned tx (atomic co-commit with the owner-tuple emit, ban #10).
-// Implemented by *repo/kaname/pg.ResourceMirrorEmitter.
+// resourceMirrorEmitter — narrow write port: put a registration or withdrawal intent
+// into the projection admission inside the caller-owned tx (atomic co-commit with the
+// owner-tuple emit, ban #10). The projection — mirror, parent chain and object head — is
+// written by ONE producer, the database trigger `resource_event`, which compares the
+// generation with the object's head (Р30 «Приём поколения — CAS»). Implemented by
+// *repo/kaname/pg.ResourceMirrorEmitter.
 //
-// UpsertTx reports TWO verdicts the statements already compute: whether a row was
-// written at all (the monotonic guard — a redelivery carrying an OLDER version updates
-// zero rows), and whether the write left the selector-relevant projection byte-identical
-// (a redelivery carrying the NEWER version — it applies, but nothing about the object
-// changed). The register path needs both: the first tells it there is nothing to do, the
-// second tells it that what it must do cannot involve removing anything.
+// Both methods report whether the generation APPLIED: false is REJECTED_STALE — a late or
+// repeated delivery that changed nothing (mirror, tombstone, chain). UpsertTx also reports
+// whether the applied write left the selector-relevant projection byte-identical: the
+// register path needs both — the first tells it there is nothing to do, the second that
+// what it must do cannot involve removing anything.
 type resourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
-	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error
+	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, generation int64) (applied bool, err error)
 }
 
 // reconcileEventEmitter — narrow write port: enqueue a reconcile
@@ -348,8 +349,11 @@ func (uc *RegisterResourceUseCase) observe(step string, err error) {
 	uc.metrics.ObserveRegisterPostCommit(step, outcome)
 }
 
-// Register validates the tuple + labels, then UPSERTs the mirror row AND enqueues
-// an fga.tuple.write row in ONE writer-tx (atomic co-commit, ban #10).
+// Register validates the tuple, labels and generation, then puts the registration into
+// the projection admission AND — when its generation was newer than the object's head
+// and so applied — enqueues an fga.tuple.write row, in ONE writer-tx (atomic co-commit,
+// ban #10). A generation not newer than the head is REJECTED_STALE: nothing is written,
+// and the call still answers OK (the proxy is idempotent).
 func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInput) error {
 	t, err := validateTuple(in)
 	if err != nil {
@@ -367,7 +371,19 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		// Publication only: no projection write and no binding fan-out to drive (no
 		// binding's desired set depends on the wildcard tuple). Its redelivery gate is
 		// the publication's own — the owner's version, compared by the store.
+		if err := refuseGenerationOnPublication(in); err != nil {
+			return err
+		}
 		return uc.publish(ctx, t, true, sourceVersion(in))
+	}
+	gen, err := requireGeneration(in)
+	if err != nil {
+		return err
+	}
+	// The object's order is its generation; the publication's version has no reader
+	// on this path, and accepting it silently is forbidden (api-conventions).
+	if in.GetSourceVersion() != nil {
+		return shared.InvalidArg("source_version", "not accepted for an object registration")
 	}
 	objType, changed, projectionUnchanged, err := uc.emit(ctx, t, service.ResourceMirrorRow{
 		ObjectType:      fgaType,
@@ -376,39 +392,27 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		ParentAccountID: in.GetParentAccountId(),
 		ParentChain:     in.GetParentChain(),
 		Labels:          labels,
-		SourceVersion:   sourceVersion(in),
-	}, true)
+		Generation:      gen,
+	}, true, time.Time{})
 	if err != nil {
 		return err
 	}
 	// REDELIVERY GATE. Every consumer delivers each registration TWICE — a synchronous
 	// post-commit call plus the at-least-once register-drainer replaying the same durable
-	// intent — and the two carry the SAME monotonic source_version lineage (the sync path
-	// stamps wall-clock AFTER the commit, the drainer replays the version the DB stamped
-	// INSIDE the writer-tx, i.e. strictly earlier). The mirror's monotonic guard therefore
-	// already recognises the second delivery: it changes zero rows. When nothing changed
-	// there is, by construction, nothing to materialise — the delivery that DID write the
-	// row emitted the owner tuple and the reconcile event — so the expensive forward
-	// reconcile fan-out is skipped. Before this, iam re-ran the whole materialisation on
-	// every duplicate (measured: two byte-identical 27-row fga_outbox batches 6.7 ms apart
-	// for one created network).
+	// intent — and both carry the SAME generation. The object's head therefore recognises
+	// the second delivery: it is not newer, REJECTED_STALE, nothing written. When nothing
+	// changed there is, by construction, nothing to materialise — the delivery that DID
+	// apply emitted the owner tuple and the reconcile event — so the expensive forward
+	// reconcile fan-out is skipped. Before the gate, iam re-ran the whole materialisation
+	// on every duplicate (measured: two byte-identical 27-row fga_outbox batches 6.7 ms
+	// apart for one created network).
 	//
-	// This is keyed on APPLIED STATE via a MONOTONIC version, NOT on queue contents.
+	// This is keyed on APPLIED STATE via the object's generation, NOT on queue contents.
 	// De-duplicating unsent outbox rows by (event type, payload) would silently drop a
-	// re-grant — grant → revoke → grant folds into grant → revoke — whereas a genuine
-	// re-registration always carries a newer version (and an unregister removes the mirror
-	// row outright), so it can never be swallowed. The revoke path is deliberately NOT
-	// gated at all: a swallowed revoke is an over-grant, so Unregister always materialises.
-	//
-	// UNVERSIONED PRODUCERS ARE NEVER GATED. A caller that sends no source_version maps to
-	// '-infinity', which loses every monotonic comparison — so its writes report `changed
-	// = false` for reasons that have NOTHING to do with redelivery, and gating them would
-	// suppress REAL materialisation. (Measured: registry's synchronous registrar sends no
-	// version, so every re-registration after the first would have lost its fast path and
-	// fallen back to the async drain — a widened read-your-writes window, not a saving.)
-	// The gate therefore requires positive proof of redelivery — a version to compare —
-	// and fails OPEN into doing the work when it has none.
-	if !changed && !sourceVersion(in).IsZero() {
+	// re-grant, whereas a genuine re-registration always carries a newer generation, so it
+	// can never be swallowed. There is no admission without a generation, so there is no
+	// longer an unversioned producer the gate would have to let through blind.
+	if !changed {
 		return nil
 	}
 	// Instant-visibility: after the owner-tuple + mirror + reconcile event COMMIT, drive
@@ -423,13 +427,12 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	// successful).
 	//
 	// WHICH ENTRY POINT, AND WHY THE GATE ABOVE IS NOT ENOUGH. The gate above recognises
-	// only the duplicate that arrives with an OLDER version. Which of the two deliveries
-	// arrives first is not fixed, and when the drainer wins, the synchronous registrar's
-	// call carries the NEWER version — it applies, so the gate lets it through, and the
-	// GUARDED forward then finds the members the first delivery just wrote and routes the
+	// a delivery whose generation is not newer than the head. A NEWER generation that
+	// changed nothing a selector reads (a labels-only round trip back to the same value,
+	// a re-registration of the same state) applies, so the gate lets it through, and the
+	// GUARDED forward would then find the members an earlier delivery wrote and route the
 	// object to the FULL EXCLUSIVE recompute, on the single binding every object of the
-	// account shares — one avoidable EXCLUSIVE pass per registered object, on the single
-	// binding every object of the account contends for.
+	// account shares — one avoidable EXCLUSIVE pass per such registration.
 	//
 	// WHAT THIS IS AND IS NOT MEASURED TO FIX. The escalation is real and this removes it,
 	// but do NOT read it as the whole of the materialization window: on a kind stand
@@ -444,8 +447,8 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	// makes which-path-ran observable instead of inferred — it is how the above was
 	// established at all.
 	//
-	// `projectionUnchanged` is the mirror's own SQL verdict that the write advanced only
-	// source_version: parent-scope and labels — everything a selector reads — were
+	// `projectionUnchanged` is the admission trigger's own verdict that the write advanced
+	// only the generation: parent-scope and labels — everything a selector reads — were
 	// already byte-identical. Nothing an earlier pass materialized from those facts can
 	// have gone stale, so the delete-stale-capable pass has no work to do and the
 	// registration stays additive. It is NOT the caller's word: iam derives it from the
@@ -515,9 +518,10 @@ func (uc *RegisterResourceUseCase) syncReconcile(ctx context.Context, objType, o
 	}
 }
 
-// sourceVersion extracts the owner-stamped monotonic version from the request.
-// Nil/zero proto Timestamp → zero time.Time, which the mirror
-// emitter normalizes to '-infinity' (legacy producer, applies unconditionally).
+// sourceVersion extracts the owner's version of a PUBLICATION from the request — the one
+// path that reads it (the pure grant `user:* # v_get`, and the publication an object
+// takes with it on withdrawal). Nil proto Timestamp → zero time.Time: an intent without a
+// marker, which the publication store applies fail-closed for a withdrawal.
 func sourceVersion(in versionedInput) time.Time {
 	ts := in.GetSourceVersion()
 	if ts == nil {
@@ -526,9 +530,35 @@ func sourceVersion(in versionedInput) time.Time {
 	return ts.AsTime()
 }
 
-// Unregister validates the tuple, then DELETEs the mirror row AND enqueues an
-// fga.tuple.delete row in ONE writer-tx (symmetry). Labels/parent on the
-// Unregister payload are ignored (the row is removed by its (type,id) PK).
+// requireGeneration takes the object's generation from the request. There is no
+// admission without one (Р30 «Поколение и проекция», NTF3-174 (н)): the inherited path
+// «an empty version is −∞ and always applies» is gone, so `0` is a refusal that names the
+// field, not a degraded write.
+func requireGeneration(in generationInput) (int64, error) {
+	switch g := in.GetGeneration(); {
+	case g == 0:
+		return 0, shared.InvalidArg("generation", "required")
+	case g < 0:
+		return 0, shared.InvalidArg("generation", "must be positive")
+	default:
+		return g, nil
+	}
+}
+
+// refuseGenerationOnPublication refuses a generation on the pure grant: a publication is
+// ordered by the owner's source_version, and a generation there would have no reader.
+func refuseGenerationOnPublication(in generationInput) error {
+	if in.GetGeneration() != 0 {
+		return shared.InvalidArg("generation", "not accepted for a publication")
+	}
+	return nil
+}
+
+// Unregister validates the tuple and generation, then puts the withdrawal into the
+// projection admission AND — when applied — enqueues an fga.tuple.delete row in ONE
+// writer-tx (symmetry). The applied withdrawal leaves the object's tombstone.
+// Labels/parent on the Unregister payload are not read (the object is addressed by its
+// (type,id)).
 func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregisterInput) error {
 	t, err := validateTuple(in)
 	if err != nil {
@@ -537,9 +567,22 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	if t.isPureGrant() {
 		// Withdrawing the public grant removes the wildcard tuple. The resource
 		// itself is untouched and its projection must survive.
+		if err := refuseGenerationOnPublication(in); err != nil {
+			return err
+		}
 		return uc.publish(ctx, t, false, sourceVersion(in))
 	}
+	gen, err := requireGeneration(in)
+	if err != nil {
+		return err
+	}
 	fgaType, objID := t.splitObject()
+	// The withdrawal's source_version is the version under which the object takes its
+	// PUBLICATION with it — read only for a type that admits one. Elsewhere it has no
+	// reader, and accepting it silently is forbidden (api-conventions).
+	if modelType, _ := t.splitObject(); in.GetSourceVersion() != nil && !admitsPublication(modelType) {
+		return shared.InvalidArg("source_version", "not accepted for an object whose type carries no publication")
+	}
 	// EVERY relationship THIS PROXY COULD HAVE WRITTEN ON THE OBJECT GOES WITH IT.
 	//
 	// Withdrawing a hierarchy tuple is not "remove one edge", it is "this object no
@@ -553,21 +596,22 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	if err != nil {
 		return err
 	}
-	// SourceVersion carries the unregister tombstone-version: the mirror DELETE
-	// fires only if it is >= the stored register (Delete-after-Update reorder
-	// cannot wipe a fresher row).
-	//
-	// The revoke path is NEVER gated on "did the mirror change": a swallowed revoke is a
-	// standing over-grant, so the tuple-delete and the reconcile event are enqueued
-	// unconditionally (fail-closed). The producer-cost saving is taken only on the grant
-	// path, where a no-op is provably a redelivery of work already done.
-	objType, _, _, err := uc.emit(ctx, t, service.ResourceMirrorRow{
-		ObjectType:    fgaType,
-		ObjectID:      objID,
-		SourceVersion: sourceVersion(in),
-	}, false, residual...)
+	// The generation is the withdrawal's place in the object's order: applied only when
+	// strictly newer than the head, and then it leaves the TOMBSTONE — a registration not
+	// newer than it does not bring the object back. A withdrawal not newer than the head is
+	// REJECTED_STALE: the object was already re-registered past it (or withdrawn by a newer
+	// one), and removing its tuples now would revoke what the newer state still grants.
+	// Nothing is enqueued and nothing is materialized.
+	objType, applied, _, err := uc.emit(ctx, t, service.ResourceMirrorRow{
+		ObjectType: fgaType,
+		ObjectID:   objID,
+		Generation: gen,
+	}, false, sourceVersion(in), residual...)
 	if err != nil {
 		return err
+	}
+	if !applied {
+		return nil
 	}
 	// SYMMETRY WITH Register. Registration drives its materialization in-process right
 	// after the commit; withdrawal used to hand its materialization entirely to the
@@ -656,32 +700,40 @@ type tupleInput interface {
 	GetObject() string
 }
 
-// versionedInput — carries the owner-stamped monotonic source_version
-// (register: state-version; unregister: tombstone-version). Both proto request
-// messages satisfy it.
+// versionedInput — carries the owner's version of a PUBLICATION (see sourceVersion).
+// Both proto request messages satisfy it.
 type versionedInput interface {
 	GetSourceVersion() *timestamppb.Timestamp
 }
 
+// generationInput — carries the object's generation (register: state; unregister:
+// tombstone). Both proto request messages satisfy it.
+type generationInput interface {
+	GetGeneration() int64
+}
+
 // registerInput — Register additionally consumes the mirror fields (labels +
-// parent-scope) + the source_version. Satisfied by
-// *iamv1.RegisterResourceRequest.
+// parent-scope), the generation and — for a publication only — the source_version.
+// Satisfied by *iamv1.RegisterResourceRequest.
 type registerInput interface {
 	tupleInput
 	versionedInput
+	generationInput
 	GetLabels() map[string]string
 	GetParentProjectId() string
 	GetParentAccountId() string
-	// GetParentChain — цепь предков произвольной формы. Пусто у вызывающего,
-	// который её не шлёт; тогда предки читаются из двух полей выше, как раньше.
+	// GetParentChain — цепь предков произвольной формы. Пусто — «предков нет»:
+	// применённая регистрация заменяет набор рёбер объекта целиком.
 	GetParentChain() []string
 }
 
-// unregisterInput — Unregister consumes the tuple + the tombstone source_version.
-// Satisfied by *iamv1.UnregisterResourceRequest.
+// unregisterInput — Unregister consumes the tuple, the tombstone generation and — for
+// the object's publication — the source_version. Satisfied by
+// *iamv1.UnregisterResourceRequest.
 type unregisterInput interface {
 	tupleInput
 	versionedInput
+	generationInput
 }
 
 func validateTuple(in tupleInput) (tupleIntent, error) {
@@ -773,22 +825,28 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 	return nil
 }
 
-// emit runs the owner-tuple fga_outbox emit AND the resource_mirror UPSERT/DELETE
-// in ONE writer-tx — both commit together or roll back together (atomic
-// co-commit, ban #10). write=true → register (UPSERT + tuple.write);
-// write=false → unregister (DELETE + tuple.delete).
-// It returns whether the mirror statement actually CHANGED a row. On the register path a
-// false means the monotonic guard rejected the write as not-newer — a redelivery of a
-// registration already applied — and the owner-tuple + reconcile-event enqueues are
-// SKIPPED with it (they were performed by the delivery that did write the row). The
-// unregister path always enqueues (a swallowed revoke would be an over-grant), so its
-// flag is informational only.
+// emit puts the registration (write=true) or withdrawal (write=false) intent into the
+// projection admission AND, when it applied, enqueues the owner-tuple fga_outbox rows and
+// the reconcile event — all in ONE writer-tx: they commit together or roll back together
+// (atomic co-commit, ban #10).
+//
+// It returns whether the generation APPLIED (`changed`). False is REJECTED_STALE: the
+// generation was not newer than the object's head — a late or repeated delivery — and the
+// trigger wrote nothing. Then nothing else is enqueued either, in BOTH directions: the
+// acceptance's rule is that a stale intent changes neither the mirror, nor the tombstone,
+// nor the tuples (Р30 «Приём поколения — CAS»). A stale withdrawal is not a swallowed
+// revoke — the head proves a newer state of the object was already applied, and removing
+// its tuples now would revoke what that newer state still grants.
+//
 // `row.ObjectType` приходит сюда именем словаря МОДЕЛИ — тем, что стояло в
 // кортеже, — и переводится в имя словаря КАТАЛОГА ВНУТРИ транзакции, до первого
 // обращения к зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный
 // проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
 // перевод у него разошёлся бы с первым молча.
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
+//
+// `publicationVersion` — версия, под которой снятие объекта уносит его публикацию
+// (только write=false; см. Unregister).
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, publicationVersion time.Time, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
@@ -809,7 +867,6 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	// it (see residualTuples): one atomic enqueue, so a withdrawal cannot commit half of
 	// its own removal.
 	tuples := append([]service.RelationTuple{{User: t.subject, Relation: t.relation, Object: t.object}}, extra...)
-	changed = true
 	if write {
 		// Backfill parent_account_id SAME-DB from projects.account_id when the
 		// owner supplied only parent_project_id (IAM owns Project — no peer-call, no
@@ -824,9 +881,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 				row.ParentAccountID = accID
 			}
 		}
-		// The mirror UPSERT runs FIRST so its monotonic verdict can gate the two
-		// enqueues below. Ordering within the tx is otherwise irrelevant — all three
-		// statements still commit together or roll back together (ban #10).
+		// The admission runs FIRST so its verdict gates the enqueues below.
 		if changed, projectionUnchanged, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
 			// Тип без живой строки каталога — это ОТКАЗ ВХОДУ, а не сбой записи.
 			// Он выносится сюда до обёртки: обёртка «upsert resource mirror» —
@@ -842,28 +897,23 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			}
 			return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
-		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its
-		// `changed = false` proves nothing about redelivery — treat it as changed so a
-		// real registration is never suppressed (see the gate note in Register). For the
-		// same reason it can prove nothing about staleness either: the version-only bump
-		// it never satisfies is what would have established that, so it keeps the guard.
-		if row.SourceVersion.IsZero() {
-			changed = true
-			projectionUnchanged = false
+		if !changed {
+			return objectType, false, false, nil
 		}
-		if changed {
-			if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
-				return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
-			}
+		if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
+			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 	} else {
+		if changed, err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.Generation); err != nil {
+			return "", false, false, fmt.Errorf("delete resource mirror: %w", err)
+		}
+		if !changed {
+			return objectType, false, false, nil
+		}
 		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
 			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
-		if err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion); err != nil {
-			return "", false, false, fmt.Errorf("delete resource mirror: %w", err)
-		}
-		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE SAME VERSION.
+		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE WITHDRAWAL'S VERSION.
 		//
 		// Withdrawing the hierarchy tuple means "this object no longer exists", and a
 		// publication cannot outlive its object: a repository's id is its NAME inside
@@ -873,21 +923,17 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// LATE, older than this withdrawal, must find the tombstone, not an empty
 		// slot. Same tx: the object's removal cannot commit without it.
 		if modelType, modelID := t.splitObject(); admitsPublication(modelType) {
-			if _, err = uc.publications.ApplyTx(ctx, tx, modelType, modelID, false, row.SourceVersion); err != nil {
+			if _, err = uc.publications.ApplyTx(ctx, tx, modelType, modelID, false, publicationVersion); err != nil {
 				return "", false, false, fmt.Errorf("withdraw public-read publication: %w", err)
 			}
 		}
 	}
-	// Enqueue a reconcile event in the SAME writer-tx as the mirror
-	// change (atomic co-commit, ban #10). The reconciler re-evaluates every
-	// binding member referencing this object (selector membership / byName
-	// containment / PENDING→ACTIVE verify). nil-safe when the reconciler is
-	// unwired (the periodic sweep then catches up).
-	//
-	// Skipped on a no-op register (see the redelivery gate in Register): the mirror is
-	// byte-for-byte what it already was, so re-running the reconciler over it would
-	// re-derive an identical desired set and change nothing.
-	if uc.reconcile != nil && changed {
+	// Enqueue a reconcile event in the SAME writer-tx as the projection change (atomic
+	// co-commit, ban #10). The reconciler re-evaluates every binding member referencing
+	// this object (selector membership / byName containment / PENDING→ACTIVE verify).
+	// nil-safe when the reconciler is unwired (the periodic sweep then catches up). Only
+	// an APPLIED intent reaches here — a stale one returned above with nothing enqueued.
+	if uc.reconcile != nil {
 		// NOTE: keep these literals in sync with reconcile_outbox.EventUpsert /
 		// reconcile_outbox.EventDelete (the drainer reads them). They are inlined
 		// here rather than imported because this use-case must not depend on the
@@ -906,5 +952,5 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// drainer re-delivers.
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
-	return objectType, changed, projectionUnchanged, nil
+	return objectType, true, projectionUnchanged, nil
 }

@@ -540,6 +540,7 @@ func seedConditionedFacts(t *testing.T, ctx context.Context, tx pgx.Tx, n int) {
 		ObjectType: probeCatalogType, ObjectID: "repo-truncate",
 		ParentProjectID: "prj-trunc", ParentAccountID: "acc-1",
 		ParentChain: []string{"project:prj-trunc", "account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Flush(ctx))
 	for i := 0; i < n; i++ {

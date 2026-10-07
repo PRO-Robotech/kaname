@@ -48,6 +48,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 
 	req := &iamv1.RegisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp00000000000000002",
+		Generation: 1,
 	}
 
 	const n = 8
@@ -66,10 +67,11 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		require.NoError(t, e, "concurrent register #%d must succeed (idempotent, no INTERNAL leak)", i)
 	}
 
-	// All N enqueued (at-least-once); the drainer idempotently collapses them.
+	// All N carry ONE generation: exactly one applies against the object's head, the
+	// rest are REJECTED_STALE and write nothing — yet every call answers OK.
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox
 		  WHERE payload->>'object' = 'vpc_network:enp00000000000000002'`).Scan(&count))
-	require.Equal(t, n, count, "each concurrent call enqueues its own outbox row")
+	require.Equal(t, 1, count, "one generation applies once, however many deliveries race")
 }

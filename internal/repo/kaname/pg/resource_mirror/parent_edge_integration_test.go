@@ -26,7 +26,6 @@ package resource_mirror_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -75,21 +74,20 @@ func TestParentEdges_ReRegistrationWithChainDoesNotEmptyTheSet(t *testing.T) {
 	defer pool.Close()
 
 	chain := []string{"project:prj-P", "account:acc-A"}
-	v1 := time.Now().Truncate(time.Microsecond)
 
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-chain-keep", ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A", Labels: map[string]string{"env": "dev"},
-		SourceVersion: v1, ParentChain: chain,
+		Generation: 1, ParentChain: chain,
 	})
 	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-keep"),
 		"первая регистрация не записала цепь — дальше проверять нечего")
 
-	// Правка меток: тот же объект, та же цепь, версия строго новее.
+	// Правка меток: тот же объект, та же цепь, поколение строго новее.
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-chain-keep", ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A", Labels: map[string]string{"env": "prod"},
-		SourceVersion: v1.Add(time.Second), ParentChain: chain,
+		Generation: 2, ParentChain: chain,
 	})
 
 	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-keep"),
@@ -112,16 +110,15 @@ func TestParentEdges_ReRegistrationWithoutChainEmptiesTheSet(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	v1 := time.Now().Truncate(time.Microsecond)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-chain-lost", ParentProjectID: "prj-P",
-		SourceVersion: v1, ParentChain: []string{"project:prj-P"},
+		Generation: 1, ParentChain: []string{"project:prj-P"},
 	})
 	require.NotEmpty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-lost"))
 
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-chain-lost", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod"}, SourceVersion: v1.Add(time.Second),
+		Labels: map[string]string{"env": "prod"}, Generation: 2,
 	})
 
 	require.Empty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-chain-lost"),
@@ -140,14 +137,13 @@ func TestParentEdges_MovedObjectLosesTheOldAncestor(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	v1 := time.Now().Truncate(time.Microsecond)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-moved", ParentProjectID: "prj-OLD",
-		SourceVersion: v1, ParentChain: []string{"project:prj-OLD"},
+		Generation: 1, ParentChain: []string{"project:prj-OLD"},
 	})
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-moved", ParentProjectID: "prj-NEW",
-		SourceVersion: v1.Add(time.Second), ParentChain: []string{"project:prj-NEW"},
+		Generation: 2, ParentChain: []string{"project:prj-NEW"},
 	})
 
 	require.Equal(t, []string{"project:prj-NEW"},

@@ -23,7 +23,6 @@ package internal_iam
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,8 +64,8 @@ func (m refusingMirror) UpsertTx(_ context.Context, _ service.Tx, row service.Re
 	return true, false, nil
 }
 
-func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
-	return nil
+func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, int64) (bool, error) {
+	return true, nil
 }
 
 // TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument — отказ

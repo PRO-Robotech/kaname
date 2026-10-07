@@ -43,7 +43,6 @@ package relverdict_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -150,14 +149,12 @@ func TestScopeChainTakesTheParentFromTheJournalNotTheStateTable(t *testing.T) {
 			"это форма 198 из 236 проектов стенда", inJournal)
 
 		// Объект арендатора под этим проектом — РОВНО ОДНО звено, как шлёт vpc.
-		base := time.Now().UTC().Truncate(time.Microsecond)
 		registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-j",
-			ownerregister.ParentChain(nil, "prj-journal", ""), "prj-journal", "", base)
+			ownerregister.ParentChain(nil, "prj-journal", ""), "prj-journal", "", 1)
 		// Второй объект — под проектом, которого не знает НИ ОДИН из двух
 		// источников. Он держит отрицание (4).
 		registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-nowhere",
-			ownerregister.ParentChain(nil, "prj-nowhere", ""), "prj-nowhere", "",
-			base.Add(time.Millisecond))
+			ownerregister.ParentChain(nil, "prj-nowhere", ""), "prj-nowhere", "", 1)
 
 		ask := func(subject, objectID string) relverdict.Verdict {
 			t.Helper()

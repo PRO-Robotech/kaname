@@ -82,12 +82,14 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 
 	_, err := pubClient.RegisterResource(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Generation: 1,
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"A-09a: RegisterResource must NOT exist on the external listener (ban #6)")
 
 	_, err = pubClient.UnregisterResource(ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Generation: 2,
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"A-09a: UnregisterResource must NOT exist on the external listener (ban #6)")
@@ -101,6 +103,7 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 
 	_, err = intClient.RegisterResource(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Generation: 1,
 	})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"A-09b: RegisterResource must be reachable on the internal listener")
@@ -109,6 +112,7 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 
 	_, err = intClient.UnregisterResource(ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp1",
+		Generation: 2,
 	})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"A-09b: UnregisterResource must be reachable on the internal listener")

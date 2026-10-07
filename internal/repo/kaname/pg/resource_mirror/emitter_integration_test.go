@@ -1,17 +1,17 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// emitter_integration_test.go — integration tests for the resource_mirror
-// emit-in-tx helper. Mirror of the fga_outbox emitter tests.
+// emitter_integration_test.go — integration tests for the projection admission
+// (resource_mirror.UpsertTx / DeleteTx → trigger `resource_event`).
 //
 // Verifies (DB-side):
-//   - UpsertTx INSERTs/UPSERTs one row per (object_type, object_id) with the
-//     labels + parent_* copied from the owner payload;
+//   - an applied registration writes one mirror row per (object_type, object_id) with
+//     the labels + parent_* copied from the owner payload, and the head;
 //   - rollback of the caller tx discards the row (atomic emit-in-tx, ban #10);
-//   - repeat UpsertTx of the same key does not duplicate (PK, idempotent);
-//   - changed labels on the same key are overwritten last-write (mirror side);
+//   - a generation not newer than the head — equal, older, or not newer than the
+//     tombstone of a withdrawal — writes nothing (REJECTED_STALE);
 //   - empty labels payload lands as '{}';
-//   - DeleteTx removes the row by (object_type, object_id).
+//   - an applied withdrawal removes the row and leaves the tombstone.
 //
 // Skipped under `go test -short`.
 package resource_mirror_test
@@ -19,8 +19,8 @@ package resource_mirror_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -50,6 +50,7 @@ func TestResourceMirror_UpsertTx_InsertsRowAtomically(t *testing.T) {
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
 		Labels:          map[string]string{"env": "dev", "team": "core"},
+		Generation:      1,
 	})))
 	require.NoError(t, tx.Commit(ctx))
 
@@ -77,7 +78,8 @@ func TestResourceMirror_UpsertTx_EmptyLabelsLandsAsObject(t *testing.T) {
 		ObjectType:      "compute.instance",
 		ObjectID:        "inst-nolabels",
 		ParentProjectID: "prj-P",
-		Labels:          nil, // legacy / no-labels caller
+		Labels:          nil, // no-labels caller
+		Generation:      1,
 	})))
 	require.NoError(t, tx.Commit(ctx))
 
@@ -99,6 +101,7 @@ func TestResourceMirror_UpsertTx_RollbackDiscardsRow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, upsertErr(resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-rollback", ParentProjectID: "prj-P",
+		Generation: 1,
 	})))
 	require.NoError(t, tx.Rollback(ctx))
 
@@ -117,7 +120,7 @@ func TestResourceMirror_UpsertTx_RepeatDoesNotDuplicate(t *testing.T) {
 
 	row := resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-dup", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "dev"},
+		Labels: map[string]string{"env": "dev"}, Generation: 1,
 	}
 	upsertCommitted(t, ctx, pool, row)
 	upsertCommitted(t, ctx, pool, row) // repeat — drainer retry (β-06)
@@ -126,10 +129,7 @@ func TestResourceMirror_UpsertTx_RepeatDoesNotDuplicate(t *testing.T) {
 		"PK (object_type,object_id) ⇒ exactly one row on repeat")
 }
 
-// Two DISTINCT source-states (monotonically increasing source_version) → the
-// newer one's labels win (last-SOURCE-state-wins). Updated from the
-// pre-hardening "last-applier-wins" form, which carried no version: under the new
-// conditional UPSERT two genuine source mutations carry distinct emit-versions.
+// Two DISTINCT source-states (increasing generations) → the newer one's labels win.
 func TestResourceMirror_UpsertTx_OverwritesLabelsLastWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -139,32 +139,26 @@ func TestResourceMirror_UpsertTx_OverwritesLabelsLastWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	v1 := time.Now().Truncate(time.Microsecond)
-	v2 := v1.Add(time.Second)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-upd", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "dev"}, SourceVersion: v1,
+		Labels: map[string]string{"env": "dev"}, Generation: 1,
 	})
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-upd", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod", "team": "core"}, SourceVersion: v2,
+		Labels: map[string]string{"env": "prod", "team": "core"}, Generation: 2,
 	})
 
 	_, _, _, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-upd")
-	require.Equal(t, map[string]string{"env": "prod", "team": "core"}, gotLabels, "newer source-state wins (UPSERT)")
+	require.Equal(t, map[string]string{"env": "prod", "team": "core"}, gotLabels, "newer generation wins")
 	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-upd"))
+	require.Equal(t, int64(2), readMirrorVersion(t, ctx, pool, "compute.instance", "inst-upd"))
+	require.Equal(t, int64(2), readHead(t, ctx, pool, "compute.instance", "inst-upd"))
 }
 
-// TestResourceMirror_UpsertTx_StaleSourceVersionIsNoop — the mirror UPSERT must
-// be last-SOURCE-state-wins, not
-// last-APPLIER-wins. Under an HA register-drainer two register-intents for ONE
-// object can be applied out of order (replica B applies v2, then replica A
-// applies the stale v1). Apply v2-labels first, then the stale v1 → the mirror
-// must KEEP v2-labels (the stale v1 is a no-op, not an error: at-least-once OK).
-//
-// Without the conditional `WHERE source_version < EXCLUDED.source_version`
-// guard the second UPSERT would last-applier-win → v1 overwrites v2.
-func TestResourceMirror_UpsertTx_StaleSourceVersionIsNoop(t *testing.T) {
+// TestResourceMirror_UpsertTx_OlderGenerationIsNoop — two register-intents for ONE
+// object applied out of order (replica B applies g2, then replica A the stale g1): the
+// stale one is REJECTED_STALE, the mirror keeps g2's labels — a no-op, not an error.
+func TestResourceMirror_UpsertTx_OlderGenerationIsNoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -173,30 +167,25 @@ func TestResourceMirror_UpsertTx_StaleSourceVersionIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	v1 := time.Now().Truncate(time.Microsecond)
-	v2 := v1.Add(time.Second)
-
-	// Apply the NEWER state first (v2-labels), as the reordered HA-drainer would.
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-reorder", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod"}, SourceVersion: v2,
+		Labels: map[string]string{"env": "prod"}, Generation: 2,
 	})
-	// Now the STALE older register-intent (v1-labels) arrives — must be a no-op.
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-reorder", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "dev"}, SourceVersion: v1,
+		Labels: map[string]string{"env": "dev"}, Generation: 1,
 	})
 
 	_, _, _, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-reorder")
 	require.Equal(t, map[string]string{"env": "prod"}, gotLabels,
-		"last-source-state-wins: stale v1 register must NOT overwrite the already-applied v2")
-	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-reorder"))
+		"the stale g1 register must NOT overwrite the already-applied g2")
+	require.Equal(t, int64(2), readHead(t, ctx, pool, "compute.instance", "inst-reorder"))
 }
 
-// TestResourceMirror_UpsertTx_SameSourceVersionIsIdempotentNoop — a repeated
-// register-intent carrying the SAME source_version (drainer retry of one intent)
-// must be a no-op, not an error and not a spurious update (at-least-once).
-func TestResourceMirror_UpsertTx_SameSourceVersionIsIdempotentNoop(t *testing.T) {
+// TestResourceMirror_DeleteTx_StaleWithdrawalDoesNotWipeFreshRow — a withdrawal whose
+// generation is not newer than the head (the object was re-registered past it) is
+// REJECTED_STALE: the fresh row stays, the head is unchanged.
+func TestResourceMirror_DeleteTx_StaleWithdrawalDoesNotWipeFreshRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -205,80 +194,22 @@ func TestResourceMirror_UpsertTx_SameSourceVersionIsIdempotentNoop(t *testing.T)
 	require.NoError(t, err)
 	defer pool.Close()
 
-	v := time.Now().Truncate(time.Microsecond)
-	row := resource_mirror.Row{
-		ObjectType: "compute.instance", ObjectID: "inst-idem-ver", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod"}, SourceVersion: v,
-	}
-	upsertCommitted(t, ctx, pool, row)
-	upsertCommitted(t, ctx, pool, row) // drainer retry of the SAME intent
-
-	_, _, _, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-idem-ver")
-	require.Equal(t, map[string]string{"env": "prod"}, gotLabels)
-	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-idem-ver"))
-	require.Equal(t, v.UTC(), readMirrorVersion(t, ctx, pool, "compute.instance", "inst-idem-ver").UTC())
-}
-
-// TestResourceMirror_UpsertTx_NewerSourceVersionApplies — the in-order case:
-// a register-intent strictly NEWER than the stored version overwrites labels and
-// advances source_version (the normal label-sync path still works).
-func TestResourceMirror_UpsertTx_NewerSourceVersionApplies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
-	require.NoError(t, err)
-	defer pool.Close()
-
-	v1 := time.Now().Truncate(time.Microsecond)
-	v2 := v1.Add(time.Second)
-	upsertCommitted(t, ctx, pool, resource_mirror.Row{
-		ObjectType: "compute.instance", ObjectID: "inst-newer", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "dev"}, SourceVersion: v1,
-	})
-	upsertCommitted(t, ctx, pool, resource_mirror.Row{
-		ObjectType: "compute.instance", ObjectID: "inst-newer", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod", "team": "core"}, SourceVersion: v2,
-	})
-
-	_, _, _, gotLabels := readMirror(t, ctx, pool, "compute.instance", "inst-newer")
-	require.Equal(t, map[string]string{"env": "prod", "team": "core"}, gotLabels, "newer source_version applies")
-	require.Equal(t, v2.UTC(), readMirrorVersion(t, ctx, pool, "compute.instance", "inst-newer").UTC())
-}
-
-// TestResourceMirror_DeleteTx_StaleTombstoneDoesNotWipeFreshRow — Delete-after-
-// Update reorder: an unregister tombstone OLDER than the stored register must NOT
-// wipe the fresh mirror row (the row reflects a newer state than the tombstone).
-//
-// DeleteTx is conditional `WHERE source_version <= $tombstone`.
-func TestResourceMirror_DeleteTx_StaleTombstoneDoesNotWipeFreshRow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
-	require.NoError(t, err)
-	defer pool.Close()
-
-	older := time.Now().Truncate(time.Microsecond)
-	newer := older.Add(time.Second)
-
-	// Stored register reflects the NEWER state (v2).
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-stale-del", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod"}, SourceVersion: newer,
+		Labels: map[string]string{"env": "prod"}, Generation: 3,
 	})
-	// A STALE tombstone (older than the stored register) arrives — must be a no-op.
-	deleteCommitted(t, ctx, pool, "compute.instance", "inst-stale-del", older)
+	require.False(t, deleteCommitted(t, ctx, pool, "compute.instance", "inst-stale-del", 2),
+		"a withdrawal not newer than the head is not applied")
 
 	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-stale-del"),
-		"stale tombstone must NOT wipe a fresher mirror row")
+		"a stale withdrawal must NOT wipe a fresher mirror row")
+	require.Equal(t, int64(3), readHead(t, ctx, pool, "compute.instance", "inst-stale-del"))
 }
 
-// TestResourceMirror_DeleteTx_FreshTombstoneRemovesRow — the in-order Delete:
-// an unregister tombstone >= the stored register version removes the row.
-func TestResourceMirror_DeleteTx_FreshTombstoneRemovesRow(t *testing.T) {
+// TestResourceMirror_DeleteTx_LeavesATombstone — the in-order withdrawal removes the row
+// and leaves the TOMBSTONE: a registration not newer than it does not bring the row
+// back; a newer one does (twin by one fact).
+func TestResourceMirror_DeleteTx_LeavesATombstone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -287,19 +218,27 @@ func TestResourceMirror_DeleteTx_FreshTombstoneRemovesRow(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	regV := time.Now().Truncate(time.Microsecond)
-	delV := regV.Add(time.Second)
-	upsertCommitted(t, ctx, pool, resource_mirror.Row{
-		ObjectType: "compute.instance", ObjectID: "inst-fresh-del", ParentProjectID: "prj-P",
-		Labels: map[string]string{"env": "prod"}, SourceVersion: regV,
-	})
-	deleteCommitted(t, ctx, pool, "compute.instance", "inst-fresh-del", delV)
+	row := func(g int64) resource_mirror.Row {
+		return resource_mirror.Row{
+			ObjectType: "compute.instance", ObjectID: "inst-tomb", ParentProjectID: "prj-P",
+			Labels: map[string]string{"env": "prod"}, Generation: g,
+		}
+	}
+	upsertCommitted(t, ctx, pool, row(1))
+	require.True(t, deleteCommitted(t, ctx, pool, "compute.instance", "inst-tomb", 2))
+	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-tomb"))
+	require.Equal(t, int64(2), readHead(t, ctx, pool, "compute.instance", "inst-tomb"), "the tombstone")
 
-	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-fresh-del"),
-		"a tombstone >= the stored register version removes the row")
+	upsertCommitted(t, ctx, pool, row(2))
+	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-tomb"),
+		"a registration not newer than the tombstone does not bring the row back")
+
+	upsertCommitted(t, ctx, pool, row(3))
+	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-tomb"),
+		"twin: a registration newer than the tombstone applies")
 }
 
-func TestResourceMirror_DeleteTx_RemovesRow(t *testing.T) {
+func TestResourceMirror_DeleteTx_AbsentObjectLeavesTheTombstone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -308,20 +247,40 @@ func TestResourceMirror_DeleteTx_RemovesRow(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	upsertCommitted(t, ctx, pool, resource_mirror.Row{
-		ObjectType: "compute.instance", ObjectID: "inst-del", ParentProjectID: "prj-P",
-	})
-	require.Equal(t, 1, countMirror(t, ctx, pool, "compute.instance", "inst-del"))
+	require.True(t, deleteCommitted(t, ctx, pool, "compute.instance", "inst-absent", 5),
+		"withdrawal of a never-registered object applies (idempotent, β-07/D-β5)")
+	require.Equal(t, int64(5), readHead(t, ctx, pool, "compute.instance", "inst-absent"),
+		"and leaves the tombstone a late registration must find")
+}
+
+// TestResourceMirror_ZeroGenerationIsRefused — there is no admission without a
+// generation: the call refuses before the admission, and writes nothing.
+func TestResourceMirror_ZeroGenerationIsRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	defer pool.Close()
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-del", time.Time{}))
-	require.NoError(t, tx.Commit(ctx))
-
-	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-del"))
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+		ObjectType: "compute.instance", ObjectID: "inst-zero", ParentProjectID: "prj-P",
+	})
+	require.ErrorContains(t, err, "there is no admission without a generation")
+	_, err = resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-zero", 0)
+	require.ErrorContains(t, err, "there is no admission without a generation")
 }
 
-func TestResourceMirror_DeleteTx_AbsentIsNoop(t *testing.T) {
+// TestResourceMirror_ParentDerivedFromTheChainWhenColumnsAreEmpty — a registration with
+// BOTH parent columns empty and a chain naming a project and an account gets them from
+// the chain (nearest of each kind): a row with a chain and no columns is invisible to
+// materialization (kacho#2051), and the producer — not a second writer — closes it.
+// Twin by one fact: columns sent by the owner are kept as they are.
+func TestResourceMirror_ParentDerivedFromTheChainWhenColumnsAreEmpty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -330,12 +289,61 @@ func TestResourceMirror_DeleteTx_AbsentIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	tx, err := pool.Begin(ctx)
+	chain := []string{"registry_registry:reg-1", "project:prj-chain", "account:acc-chain"}
+	upsertCommitted(t, ctx, pool, resource_mirror.Row{
+		ObjectType: "registry.repositories", ObjectID: "reg-1/app", ParentChain: chain, Generation: 1,
+	})
+	_, prj, acc, _ := readMirror(t, ctx, pool, "registry.repositories", "reg-1/app")
+	require.Equal(t, "prj-chain", prj, "project derived from the chain")
+	require.Equal(t, "acc-chain", acc, "account derived from the chain")
+
+	upsertCommitted(t, ctx, pool, resource_mirror.Row{
+		ObjectType: "registry.repositories", ObjectID: "reg-1/kept", ParentChain: chain,
+		ParentProjectID: "prj-owner", Generation: 1,
+	})
+	_, prj, acc, _ = readMirror(t, ctx, pool, "registry.repositories", "reg-1/kept")
+	require.Equal(t, "prj-owner", prj, "twin: the owner's column is kept")
+	require.Equal(t, "", acc, "twin: nothing derived when the owner named a parent")
+}
+
+// TestResourceMirror_MalformedAncestorIsARefusalThatWritesNothing — a chain link that is
+// not `"<type>:<id>"` is a REFUSAL, not a skip: a skipped link makes the chain shorter
+// than the real one, and the object lands under an ancestor it is not under. The trigger
+// refuses before the head is compared, so nothing — head, mirror, chain — is written.
+// Twin: a colon inside the id is fine (the separator is the FIRST colon).
+func TestResourceMirror_MalformedAncestorIsARefusalThatWritesNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = tx.Rollback(ctx) })
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-absent", time.Time{}),
-		"delete of absent row must be OK (idempotent, β-07/D-β5)")
-	require.NoError(t, tx.Commit(ctx))
+	defer pool.Close()
+
+	bad := []string{"", "project", ":prj-abc", "project:"}
+	for i, link := range bad {
+		id := fmt.Sprintf("inst-badlink-%d", i)
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		_, err = resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
+			ObjectType: "compute.instance", ObjectID: id, ParentChain: []string{link}, Generation: 1,
+		})
+		require.ErrorContains(t, err, "непонятая форма предка", "link %q", link)
+		require.NoError(t, tx.Commit(ctx))
+		require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", id), "link %q: no mirror row", link)
+		require.Equal(t, int64(0), readHead(t, ctx, pool, "compute.instance", id), "link %q: no head", link)
+	}
+
+	upsertCommitted(t, ctx, pool, resource_mirror.Row{
+		ObjectType: "compute.instance", ObjectID: "inst-goodlink",
+		ParentChain: []string{"account:acc:weird"}, Generation: 1,
+	})
+	var parentID string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT parent_id FROM kaname.resource_parent_edge
+		 WHERE object_type = 'compute_instance' AND object_id = 'inst-goodlink' AND depth = 1`).Scan(&parentID))
+	require.Equal(t, "acc:weird", parentID, "twin: the rest after the first colon is the id")
+	t.Logf("осмотрено: непонятых звеньев %d, законных 1", len(bad))
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -348,17 +356,29 @@ func upsertCommitted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, row 
 	require.NoError(t, tx.Commit(ctx))
 }
 
-func deleteCommitted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string, tombstone time.Time) {
+func deleteCommitted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string, generation int64) bool {
 	t.Helper()
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, objType, objID, tombstone))
+	out, err := resource_mirror.DeleteTx(ctx, tx, objType, objID, generation)
+	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
+	return out.Applied
 }
 
-func readMirrorVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) time.Time {
+// readHead — поколение головы объекта; 0 — головы нет.
+func readHead(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) int64 {
 	t.Helper()
-	var v time.Time
+	var g int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT coalesce((SELECT generation FROM kaname.object_head
+		                   WHERE object_type = $1 AND object_id = $2), 0)`, objType, objID).Scan(&g))
+	return g
+}
+
+func readMirrorVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType, objID string) int64 {
+	t.Helper()
+	var v int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT source_version FROM kaname.resource_mirror
 		  WHERE object_type = $1 AND object_id = $2`, objType, objID).Scan(&v))
@@ -393,9 +413,9 @@ func countMirror(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objType,
 func upsertErr(_ resource_mirror.Outcome, err error) error { return err }
 
 // TestResourceMirror_UpsertTx_ReportsWhetherRowChanged pins the redelivery signal the
-// register use-case gates on: the monotonic guard's verdict, surfaced as `changed`.
-// A fresh INSERT and a strictly-newer register report true; a stale or equal
-// source_version reports false, having updated zero rows.
+// register use-case gates on: the head's verdict, surfaced as `Applied`. A fresh
+// registration and a strictly-newer one report true; an equal or older generation
+// reports false, having written nothing.
 func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -405,11 +425,10 @@ func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	base := time.Now().UTC().Truncate(time.Microsecond)
-	row := func(v time.Time, labels map[string]string) resource_mirror.Row {
+	row := func(g int64, labels map[string]string) resource_mirror.Row {
 		return resource_mirror.Row{
 			ObjectType: "compute.instance", ObjectID: "inst-changed",
-			ParentProjectID: "prj-P", Labels: labels, SourceVersion: v,
+			ParentProjectID: "prj-P", Labels: labels, Generation: g,
 		}
 	}
 	exec := func(r resource_mirror.Row) bool {
@@ -421,31 +440,22 @@ func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 		return out.Applied
 	}
 
-	require.True(t, exec(row(base, map[string]string{"tier": "gold"})),
-		"a fresh INSERT changed the row")
-	require.False(t, exec(row(base, map[string]string{"tier": "gold"})),
-		"an EQUAL source_version updates zero rows — the drainer replay of an applied register")
-	require.False(t, exec(row(base.Add(-time.Second), map[string]string{"tier": "gold"})),
-		"a STALE source_version updates zero rows")
-	require.True(t, exec(row(base.Add(time.Second), map[string]string{"tier": "bronze"})),
-		"a strictly-NEWER source_version applies — a real label update must never be gated away")
+	require.True(t, exec(row(2, map[string]string{"tier": "gold"})), "a fresh registration applies")
+	require.False(t, exec(row(2, map[string]string{"tier": "gold"})),
+		"an EQUAL generation writes nothing — the second delivery of an applied register")
+	require.False(t, exec(row(1, map[string]string{"tier": "gold"})), "an OLDER generation writes nothing")
+	require.True(t, exec(row(3, map[string]string{"tier": "bronze"})),
+		"a strictly-NEWER generation applies — a real label update must never be gated away")
 }
 
 // TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced pins the SECOND verdict
-// — the one `Applied` cannot express.
+// — the one `Applied` cannot express: did an applied write REPLACE part of the projection
+// a selector reads (parent-scope, labels), or did it only advance the generation?
 //
-// Every consumer delivers each registration twice and the two deliveries carry DIFFERENT
-// source_versions (the synchronous registrar stamps wall-clock after the commit, the
-// drainer replays the version stamped inside the writer-tx). Their arrival order is not
-// fixed, so the duplicate that arrives SECOND may be the NEWER one: it applies, and
-// `Applied` alone therefore cannot tell it from a genuine label update. Only the second
-// verdict can: did this write REPLACE part of the projection a selector reads
-// (parent-scope, labels), or did it only advance the version?
-//
-// The distinction is not a saving — it decides whether the caller may take the additive
-// materialization path or must take the delete-stale one, i.e. whether a revoke gets
-// applied. So both directions are pinned here: a version-only redelivery reports
-// unchanged, and EVERY projection edit reports replaced.
+// The distinction decides whether the caller may take the additive materialization path
+// or must take the delete-stale one, i.e. whether a revoke gets applied. So both
+// directions are pinned: a generation-only change reports unchanged, and EVERY projection
+// edit reports replaced.
 func TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -455,7 +465,6 @@ func TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced(t *testing.
 	require.NoError(t, err)
 	defer pool.Close()
 
-	base := time.Now().UTC().Truncate(time.Microsecond)
 	exec := func(r resource_mirror.Row) resource_mirror.Outcome {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
@@ -464,62 +473,44 @@ func TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced(t *testing.
 		require.NoError(t, tx.Commit(ctx))
 		return out
 	}
-	row := func(v time.Time, prj, acc string, labels map[string]string) resource_mirror.Row {
+	row := func(g int64, prj, acc string, labels map[string]string) resource_mirror.Row {
 		return resource_mirror.Row{
 			ObjectType: "vpc.network", ObjectID: "net-projection",
-			ParentProjectID: prj, ParentAccountID: acc, Labels: labels, SourceVersion: v,
+			ParentProjectID: prj, ParentAccountID: acc, Labels: labels, Generation: g,
 		}
 	}
 	gold := map[string]string{"tier": "gold", "env": "dev"}
 
-	// A fresh INSERT replaced nothing, but it is not the "only the version moved" case
-	// either — there was no stored projection to compare with. It reports Applied without
-	// the exemption, so the caller keeps its guarded path (conservative by construction).
-	out := exec(row(base, "prj-P", "acc-A", gold))
-	require.True(t, out.Applied, "a fresh INSERT applies")
+	// A fresh registration had no stored projection to compare with: Applied without the
+	// exemption, so the caller keeps its guarded path (conservative by construction).
+	out := exec(row(1, "prj-P", "acc-A", gold))
+	require.True(t, out.Applied, "a fresh registration applies")
 	require.False(t, out.ProjectionUnchanged, "there was no stored projection to leave unchanged")
 
-	// THE RACE. Same registration, newer version, identical projection — including the
-	// same labels written in a DIFFERENT key order, which jsonb equality must not treat
-	// as a different projection.
-	out = exec(row(base.Add(time.Second), "prj-P", "acc-A", map[string]string{"env": "dev", "tier": "gold"}))
-	require.True(t, out.Applied, "a strictly-newer version applies")
+	// Newer generation, identical projection — including the same labels in a DIFFERENT
+	// key order, which jsonb equality must not treat as a different projection.
+	out = exec(row(2, "prj-P", "acc-A", map[string]string{"env": "dev", "tier": "gold"}))
+	require.True(t, out.Applied, "a strictly-newer generation applies")
 	require.True(t, out.ProjectionUnchanged,
-		"a redelivery that only advanced the version replaced nothing — nothing materialized "+
+		"a write that only advanced the generation replaced nothing — nothing materialized "+
 			"from these facts can have gone stale")
 
-	// A LABEL EDIT — the grant-matching label is dropped. This is the case whose revoke
-	// must reach the delete-stale pass.
-	out = exec(row(base.Add(2*time.Second), "prj-P", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
+	// A LABEL EDIT — the grant-matching label is dropped.
+	out = exec(row(3, "prj-P", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
 	require.True(t, out.Applied)
 	require.False(t, out.ProjectionUnchanged, "a label edit REPLACED the projection")
 
 	// A MOVE to another parent — the second axis a selector reads.
-	out = exec(row(base.Add(3*time.Second), "prj-Q", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
+	out = exec(row(4, "prj-Q", "acc-A", map[string]string{"tier": "bronze", "env": "dev"}))
 	require.True(t, out.Applied)
 	require.False(t, out.ProjectionUnchanged, "a parent-project move REPLACED the projection")
 
-	out = exec(row(base.Add(4*time.Second), "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
+	out = exec(row(5, "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
 	require.True(t, out.Applied)
 	require.False(t, out.ProjectionUnchanged, "a parent-account move REPLACED the projection")
 
 	// A NOT-NEWER redelivery is not applied at all, and claims no exemption with it.
-	out = exec(row(base.Add(4*time.Second), "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
-	require.False(t, out.Applied, "an equal source_version updates zero rows")
+	out = exec(row(5, "prj-Q", "acc-B", map[string]string{"tier": "bronze", "env": "dev"}))
+	require.False(t, out.Applied, "an equal generation writes nothing")
 	require.False(t, out.ProjectionUnchanged, "a write that did not happen exempts nothing")
-
-	// AN UNVERSIONED PRODUCER ('-infinity') can never satisfy `source_version < $6`, so it
-	// never earns the exemption — it supplies no proof and keeps the guarded path.
-	out = exec(resource_mirror.Row{
-		ObjectType: "vpc.network", ObjectID: "net-unversioned",
-		ParentProjectID: "prj-P", Labels: gold,
-	})
-	require.True(t, out.Applied, "a fresh unversioned INSERT applies")
-	require.False(t, out.ProjectionUnchanged)
-	out = exec(resource_mirror.Row{
-		ObjectType: "vpc.network", ObjectID: "net-unversioned",
-		ParentProjectID: "prj-P", Labels: gold,
-	})
-	require.False(t, out.ProjectionUnchanged,
-		"'-infinity' loses every monotonic comparison — an unversioned producer proves nothing")
 }

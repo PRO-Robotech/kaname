@@ -95,6 +95,7 @@ func TestScaleGridSeeder_RowForRowMatchesTheProducer(t *testing.T) {
 			ParentAccountID: row.ParentAccountID,
 			Labels:          row.Labels,
 			ParentChain:     row.ParentChain,
+			Generation:      1,
 		}); err != nil {
 			t.Fatalf("производитель на объекте %q: %v", row.ObjectID, err)
 		}
@@ -113,16 +114,11 @@ func TestScaleGridSeeder_RowForRowMatchesTheProducer(t *testing.T) {
 
 	// Свойство КОДА, а не машины: пообъектного обмена нет.
 	//
-	// Стейтментов на объект — 3 + длина ЕГО цепи, а не константа: у листа три
-	// предка, у его деда один. Ожидание считается ПО НАБОРУ, потому что
-	// константа здесь была бы верна лишь для однородной цепи — и первая
-	// редакция этой пробы на ней и упала, объявив расхождением собственную
-	// арифметику.
+	// Стейтмент на объект — ОДИН: вставка приёма производителя
+	// (`resource_mirror.StmtIntake`); зеркало, голову и рёбра пишет триггер
+	// `resource_event`, тот же для обоих путей.
 	objects := int64(len(parityRows()))
-	var wantStatements int64
-	for _, r := range parityRows() {
-		wantStatements += int64(3 + len(r.ParentChain))
-	}
+	wantStatements := objects
 	maxExchanges := (objects+scalegrid.BatchObjects-1)/scalegrid.BatchObjects + 1
 	t.Logf("посевщик: объектов %d, стейтментов %d, обменов с БД %d (предел по сценарию R7-1-01: %d)",
 		s.Objects(), s.Statements(), s.Exchanges(), maxExchanges)
@@ -131,7 +127,7 @@ func TestScaleGridSeeder_RowForRowMatchesTheProducer(t *testing.T) {
 			"и посев миллиона стоил бы миллиона круговых обменов", s.Exchanges(), maxExchanges)
 	}
 	if s.Statements() != wantStatements {
-		t.Errorf("стейтментов подано %d, у производителя их 3+len(цепь) на объект — по набору %d: "+
+		t.Errorf("стейтментов подано %d, у производителя их один на объект — по набору %d: "+
 			"расхождение означает, что посевщик выпускает НЕ ТУ форму, а не ту же быстрее",
 			s.Statements(), wantStatements)
 	}
@@ -168,11 +164,13 @@ func parityRows() []scalegrid.MirrorRow {
 			ObjectType: "iam.project", ObjectID: "prj-1",
 			ParentAccountID: "acc-1",
 			ParentChain:     []string{"account:acc-1"},
+			Generation:      1,
 		},
 		scalegrid.MirrorRow{
 			ObjectType: "registry.registries", ObjectID: "reg-1",
 			ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 			ParentChain: []string{"project:prj-1", "account:acc-1"},
+			Generation:  1,
 		},
 	)
 	for i := 0; i < seederParityObjects; i++ {
@@ -183,6 +181,7 @@ func parityRows() []scalegrid.MirrorRow {
 			ParentAccountID: "acc-1",
 			Labels:          map[string]string{"env": "prod", "tier": "gold"},
 			ParentChain:     parityChain,
+			Generation:      1,
 		})
 	}
 	return rows

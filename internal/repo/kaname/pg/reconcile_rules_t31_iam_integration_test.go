@@ -39,7 +39,6 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -135,9 +134,8 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	// Given: the network is in the mirror WITH the matching label, reconciled
 	// ACTIVE (member row materialized + FGA write-tuple emitted). The mirror row
 	// is created via the real RegisterResource use-case (same edge the consumer
-	// uses on Create), with an early source_version.
+	// uses on Create), at generation 1.
 	uc := newRegisterUCWired(pool)
-	v0 := time.Now().Add(-time.Minute)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + string(fx.prj),
 		Relation:        "parent",
@@ -145,7 +143,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: string(fx.prj),
 		ParentAccountId: string(fx.accID),
-		SourceVersion:   timestamppb.New(v0),
+		Generation:      1,
 	}))
 	require.NoError(t, rec.ReconcileBinding(ctx, bid)) // materialize the ACTIVE member
 
@@ -156,7 +154,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 		"ACTIVE member emits the v_get/v_list write-tuple")
 
 	// When: the label is REMOVED on the source resource → the consumer
-	// re-emits RegisterResource with labels={} and a NEWER source_version. This is
+	// re-emits RegisterResource with labels={} and a NEWER generation. This is
 	// the exact edge added on label-Update; here we drive it directly (IAM is
 	// the callee — it must revoke regardless of which consumer emitted).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
@@ -166,7 +164,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 		Labels:          map[string]string{}, // label removed (upsert {}, not Unregister)
 		ParentProjectId: string(fx.prj),
 		ParentAccountId: string(fx.accID),
-		SourceVersion:   timestamppb.New(v0.Add(time.Minute)), // monotonic newer
+		Generation:      2, // newer generation
 	}))
 
 	// Drive the REAL worker drain path (RegisterResource enqueued a mirror.upsert

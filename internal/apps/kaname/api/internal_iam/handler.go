@@ -68,10 +68,10 @@ type relationWriteGate interface {
 
 // resourceRegistrar — narrow use-case port for RegisterResource /
 // UnregisterResource. Implemented by *RegisterResourceUseCase. Register
-// consumes the mirror fields (labels + parent-scope) + the hardening
-// source_version via registerInput; Unregister consumes the tuple + the
-// tombstone source_version via unregisterInput (mirror row removed by PK,
-// conditionally on the tombstone-version).
+// consumes the mirror fields (labels + parent-scope) + the object's generation via
+// registerInput; Unregister consumes the tuple + the withdrawal's generation via
+// unregisterInput (applied only when newer than the object's head, leaving the
+// tombstone). The publication's source_version is read only on the publication paths.
 type resourceRegistrar interface {
 	Register(ctx context.Context, in registerInput) error
 	Unregister(ctx context.Context, in unregisterInput) error

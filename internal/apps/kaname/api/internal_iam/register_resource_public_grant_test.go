@@ -29,6 +29,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -42,12 +44,13 @@ import (
 type mirrorSpy struct {
 	mu      sync.Mutex
 	rows    map[string]service.ResourceMirrorRow
+	heads   map[string]int64 // the object's head, tombstone included
 	upserts int
 	deletes int
 }
 
 func newMirrorSpy() *mirrorSpy {
-	return &mirrorSpy{rows: map[string]service.ResourceMirrorRow{}}
+	return &mirrorSpy{rows: map[string]service.ResourceMirrorRow{}, heads: map[string]int64{}}
 }
 
 func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
@@ -55,24 +58,27 @@ func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.Resour
 	defer m.mu.Unlock()
 	m.upserts++
 	key := row.ObjectType + ":" + row.ObjectID
-	if prev, ok := m.rows[key]; ok && !row.SourceVersion.After(prev.SourceVersion) {
-		return false, false, nil
+	if row.Generation <= m.heads[key] {
+		return false, false, nil // REJECTED_STALE: not newer than the head
 	}
+	m.heads[key] = row.Generation
 	m.rows[key] = row
 	// These cases are about the wildcard grant, which writes no projection at all; they
 	// never claim staleness-freedom, so the guarded entry point stays in force.
 	return true, false, nil
 }
 
-func (m *mirrorSpy) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *mirrorSpy) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, generation int64) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
 	key := ot + ":" + oid
-	if prev, ok := m.rows[key]; ok && !prev.SourceVersion.After(tombstone) {
-		delete(m.rows, key)
+	if generation <= m.heads[key] {
+		return false, nil // REJECTED_STALE
 	}
-	return nil
+	m.heads[key] = generation // the tombstone
+	delete(m.rows, key)
+	return true, nil
 }
 
 func (m *mirrorSpy) row(key string) (service.ResourceMirrorRow, bool) {
@@ -89,20 +95,27 @@ func (m *mirrorSpy) counts() (upserts, deletes int) {
 }
 
 // grantReq — a register/unregister input as the public-grant intent really
-// arrives: tuple only, no parent scope, no labels.
+// arrives: tuple only, no parent scope, no labels — plus the object's own registration
+// and withdrawal around it. `version` is the publication's order (the owner's
+// source_version), `generation` the object's; each request carries what its path reads.
 type grantReq struct {
 	subject, relation, object string
 	parentProject             string
 	labels                    map[string]string
 	version                   time.Time
+	generation                int64
 }
 
 func (r *grantReq) GetSubjectId() string { return r.subject }
 func (r *grantReq) GetRelation() string  { return r.relation }
 func (r *grantReq) GetObject() string    { return r.object }
 func (r *grantReq) GetSourceVersion() *timestamppb.Timestamp {
+	if r.version.IsZero() {
+		return nil
+	}
 	return timestamppb.New(r.version)
 }
+func (r *grantReq) GetGeneration() int64         { return r.generation }
 func (r *grantReq) GetLabels() map[string]string { return r.labels }
 func (r *grantReq) GetParentProjectId() string   { return r.parentProject }
 func (r *grantReq) GetParentAccountId() string   { return "" }
@@ -152,7 +165,7 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
 		parentProject: "prj0000000000000proj", labels: map[string]string{"tier": "gold"},
-		version: base,
+		generation: 1,
 	}))
 	row, ok := mirror.row(key)
 	require.True(t, ok, "the repository registration writes the mirror row")
@@ -197,7 +210,7 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 	base := time.Now()
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
-		parentProject: "prj0000000000000proj", version: base,
+		parentProject: "prj0000000000000proj", generation: 1,
 	}))
 	require.NotEqual(t, 0, emitter.writes)
 
@@ -230,11 +243,11 @@ func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
 	base := time.Now()
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
-		parentProject: "prj0000000000000proj", version: base,
+		parentProject: "prj0000000000000proj", generation: 1,
 	}))
 	require.NoError(t, uc.Unregister(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
-		version: base.Add(5 * time.Millisecond),
+		version: base.Add(5 * time.Millisecond), generation: 2,
 	}))
 
 	_, ok := mirror.row(key)
@@ -255,14 +268,13 @@ func TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlon
 	ctx := context.Background()
 	const network = "vpc_network:enp0000000000000net1"
 
-	base := time.Now()
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: network,
-		parentProject: "prj0000000000000proj", version: base,
+		parentProject: "prj0000000000000proj", generation: 1,
 	}))
 	require.NoError(t, uc.Unregister(ctx, &grantReq{
 		subject: "project:prj0000000000000proj", relation: "project", object: network,
-		version: base.Add(5 * time.Millisecond),
+		generation: 2,
 	}))
 	assert.Empty(t, pub.seen(), "a type that admits no publication must not reach the publication port")
 }
@@ -298,4 +310,85 @@ func TestRegisterResource_PublicGrant_StoreFailureIsARefusal(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assertAnError)
+}
+
+// TestRegisterResource_EachPathReadsOnlyItsOwnVersion — two orders, two fields, and a
+// field a path does not read is refused rather than silently ignored (api-conventions,
+// «принято-и-проигнорировано — ЗАПРЕЩЕНО»): the object is ordered by its generation, the
+// publication by the owner's source_version. Each refusal names its field; its twin — the
+// same request without the foreign field — applies.
+func TestRegisterResource_EachPathReadsOnlyItsOwnVersion(t *testing.T) {
+	const network = "vpc_network:enp0000000000000net2"
+	v := time.Date(2026, 10, 7, 1, 2, 3, 0, time.UTC)
+
+	for _, c := range []struct {
+		name  string
+		call  func(uc *RegisterResourceUseCase) error
+		twin  func(uc *RegisterResourceUseCase) error
+		field string
+	}{
+		{
+			name: "object registration carrying source_version",
+			call: func(uc *RegisterResourceUseCase) error {
+				return uc.Register(context.Background(), &grantReq{subject: "project:prj0000000000000proj",
+					relation: "project", object: network, parentProject: "prj0000000000000proj", generation: 1, version: v})
+			},
+			twin: func(uc *RegisterResourceUseCase) error {
+				return uc.Register(context.Background(), &grantReq{subject: "project:prj0000000000000proj",
+					relation: "project", object: network, parentProject: "prj0000000000000proj", generation: 1})
+			},
+			field: "source_version",
+		},
+		{
+			name: "publication carrying a generation",
+			call: func(uc *RegisterResourceUseCase) error {
+				return uc.Register(context.Background(), &grantReq{subject: "user:*", relation: "v_get",
+					object: publicGrantObject, version: v, generation: 1})
+			},
+			twin: func(uc *RegisterResourceUseCase) error {
+				return uc.Register(context.Background(), &grantReq{subject: "user:*", relation: "v_get",
+					object: publicGrantObject, version: v})
+			},
+			field: "generation",
+		},
+		{
+			name: "publication withdrawal carrying a generation",
+			call: func(uc *RegisterResourceUseCase) error {
+				return uc.Unregister(context.Background(), &grantReq{subject: "user:*", relation: "v_get",
+					object: publicGrantObject, version: v, generation: 1})
+			},
+			twin: func(uc *RegisterResourceUseCase) error {
+				return uc.Unregister(context.Background(), &grantReq{subject: "user:*", relation: "v_get",
+					object: publicGrantObject, version: v})
+			},
+			field: "generation",
+		},
+		{
+			name: "withdrawal of an object whose type carries no publication, with source_version",
+			call: func(uc *RegisterResourceUseCase) error {
+				return uc.Unregister(context.Background(), &grantReq{subject: "project:prj0000000000000proj",
+					relation: "project", object: network, generation: 2, version: v})
+			},
+			twin: func(uc *RegisterResourceUseCase) error {
+				return uc.Unregister(context.Background(), &grantReq{subject: "project:prj0000000000000proj",
+					relation: "project", object: network, generation: 2})
+			},
+			field: "source_version",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			uc, mirror, emitter, _, pub := publicGrantRig()
+			err := c.call(uc)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+			field, _ := fieldViolation(err)
+			assert.Equal(t, c.field, field, "the refusal names the field the path does not read")
+			ups, dels := mirror.counts()
+			assert.Zero(t, ups+dels, "a refused intent never reaches the admission")
+			assert.Zero(t, emitter.writes+emitter.deletes, "a refused intent enqueues nothing")
+			assert.Empty(t, pub.seen(), "a refused intent reaches no publication")
+
+			require.NoError(t, c.twin(uc), "twin: the same request without the foreign field applies")
+		})
+	}
 }

@@ -228,6 +228,7 @@ func TestUnregisterResource_OwnerAccessIsActuallyGoneAfterWithdrawal(t *testing.
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: proj, relation: "project", object: object,
+		generation: 2,
 	}))
 
 	assert.False(t, store.resolveVerb(owner, "v_delete", object),
@@ -256,6 +257,7 @@ func TestUnregisterResource_ProbeCatchesAdditiveWithdrawal(t *testing.T) {
 	registerRegistryWithOwner(t, uc, object, proj, owner)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: proj, relation: "project", object: object,
+		generation: 2,
 	}))
 
 	assert.True(t, store.resolveVerb(owner, "v_delete", object),
@@ -287,6 +289,7 @@ func TestUnregisterResource_WithdrawsThePublicReadGrantOfATornDownObject(t *test
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: proj, relation: "parent", object: object,
+		generation: 2,
 	}))
 
 	assert.False(t, store.resolveVerb("user:*", "v_get", object),
@@ -342,6 +345,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 
 	err := uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
+		generation: 2,
 	})
 	require.Error(t, err,
 		"нечитаемый остаток обязан отказать: тихий успех оставил бы доступ стоять, а повтор снятия идемпотентен")
@@ -356,6 +360,7 @@ func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *test
 	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
+		generation: 2,
 	}))
 	require.True(t, txb.tx.committed)
 }
