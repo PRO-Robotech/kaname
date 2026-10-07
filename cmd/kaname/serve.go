@@ -1860,16 +1860,9 @@ func runServe(cfg config.Config) error {
 			Observer: metricsReg.NewBootstrapAdminRecorder(),
 		},
 	)
-	tasks = append(tasks, func() error {
-		if bootstrapEmail == "" {
-			logger.Info("bootstrap admin disabled (KANAME_BOOTSTRAP_ROOT_EMAIL unset)")
-			return nil
-		}
-		logger.Info("bootstrap admin reconciler starting", "email", bootstrapEmail)
-		// Non-fatal: reconciler errors must not crash the server. It returns
-		// nil on convergence / terminal-skip / shutdown by design.
+	tasks = append(tasks, bootstrapAdminTask(logger, bootstrapEmail, func() error {
 		return bootstrapReconciler.Run(taskCtx)
-	})
+	}))
 
 	// γ reconciler-worker (epic «Resource-scoped AccessBinding», D7). Drains
 	// resource_reconcile_outbox (Q1=(c) event-driven, written atomically by
