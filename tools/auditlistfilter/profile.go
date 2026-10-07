@@ -376,11 +376,11 @@ var Profile = listfiltergate.Profile{
 				"the reason above stops being true — at which point this must become RowFilter. " +
 				"The exclusion expires with its method: retire the RPC and this entry becomes a finding.",
 		},
-		"recipientdirectory.ListProjectAudience": {
+		"recipientdirectory.ListEventAudience": {
 			Shape: listfiltergate.ClusterScoped,
 			Reason: "the recipient directory (NTF-3 Р7, Р28) answers ONE caller — the mail gateway " +
 				"`service:notify` — and the page is not a page of objects the caller may or may not see: " +
-				"it is the user audience of a project, read for that caller as a whole. What bounds the " +
+				"it is the user audience of one version of a resource event, read for that caller as a whole. What bounds the " +
 				"caller is the directory right itself, asked as the handler's FIRST statement: " +
 				"`reader` on `notification_recipient_directory:root`, a relation defined `[service]` " +
 				"with NO `user:*`, no group and no cascade, written only by the notify manifest line " +

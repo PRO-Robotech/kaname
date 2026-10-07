@@ -22,8 +22,10 @@ import (
 )
 
 // door — дверь решения kaname: та же функция вердикта, что отвечает
-// `InternalIAMService/Check` (место Д-3). Через неё идут оба вопроса
-// справочника: право вызывающего на справочник и право получателя на ресурс.
+// `InternalIAMService/Check` (место Д-3). Через неё идут право вызывающего на
+// справочник и право получателя на аккаунт (`account_reader`). Вопрос об
+// аудитории версии события идёт НЕ дверью: дверь отвечает о праве сейчас, а
+// аудитория — о праве, не менявшемся с токена события (eventAudienceReader).
 // Реализуется *service.AuthorizeService.
 type door interface {
 	CheckRelation(ctx context.Context, req service.CheckRelationRequest) (*service.CheckResult, error)
@@ -38,9 +40,11 @@ type recipientReader interface {
 	ReadAccountOwner(ctx context.Context, accountID string) (string, bool, error)
 }
 
-// audienceReader — аудитория проекта. Реализуется *kanamepg.RecipientDirectoryRepo.
-type audienceReader interface {
-	// ListProjectUsers — id пользователей с действующей прямой привязкой на
-	// проект projectID, строго больше afterID, по возрастанию, не больше limit.
-	ListProjectUsers(ctx context.Context, projectID, afterID string, limit int) ([]string, error)
+// eventAudienceReader — аудитория версии события (Р30). Реализуется
+// *kanamepg.RecipientDirectoryRepo.
+type eventAudienceReader interface {
+	// ReadEventAudience — барьер поколения и страница аудитории ОДНИМ снимком
+	// не старше токена. Исход, не являющийся страницей (поколение не применено,
+	// токен новее снимка), — в Verdict, а не ошибкой; ошибка — сбой чтения.
+	ReadEventAudience(ctx context.Context, q domain.EventAudienceQuestion) (domain.EventAudiencePage, error)
 }

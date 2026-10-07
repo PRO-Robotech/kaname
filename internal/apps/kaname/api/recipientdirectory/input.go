@@ -3,33 +3,34 @@
 
 package recipientdirectory
 
-// input.go — вход `Resolve` и его проверка (приёмка NTF-3 Р7, «Проверка входа
-// `Resolve`»).
+// input.go — вход `Resolve` и `ListEventAudience` и его проверка (приёмка
+// NTF-3 Р7, «Проверка входа `Resolve`»; `ListEventAudience`).
 //
-// Порядок несущий и записан решением: (1) обязательность; (2) `subject` при
-// `account_owner`; (3) тип, отношение, число ссылок, смесь типов. Вся проверка
-// стоит до любого вопроса к модели о праве получателя: без шага (1) пустой id
-// ушёл бы к модели объектом `storage_volume:` и вернулся бы исходом по
-// субъекту, неотличимым от законного, а пустой набор ссылок дал бы
-// `AUDIENCE_DENIED` без единого вопроса.
+// Порядок `Resolve` несущий и записан решением: (1) обязательность; (2)
+// `subject` при `account_owner`; (3) форма и тип объекта `event`, форма токена
+// и цепей предков. Вся проверка стоит до любого вопроса об аудитории: без шага
+// (1) пустой id ушёл бы вопросом и вернулся бы исходом по субъекту,
+// неотличимым от законного.
 //
-// Перепись отказов — одиннадцать, по тексту Р7: namespace, audience, subject
-// при resource/self, resource_refs пуст, resource_refs[i].id, account_id,
-// subject при account_owner, тип, отношение, больше 100, смесь.
+// Перепись отказов `Resolve` по тексту Р7 — десять: namespace, audience,
+// subject при event/self/account_reader, audience.event.object,
+// audience.event.source_version, audience.event.authz_rev,
+// account_reader.account_id, account_owner.account_id, subject при
+// account_owner, форма и тип объекта. Сверх неё — форма токена и элемента цепи
+// предков: строку, которую служба не выдавала, вопрос не принимает и не
+// угадывает (отказ с именем поля, а не сбой базы на разборе).
 
 import (
 	"fmt"
 	"slices"
 	"strings"
 
-	"github.com/PRO-Robotech/corelib/notify/spec"
+	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
-
-// maxResourceRefs — наибольшее число ссылок одного вызова.
-const maxResourceRefs = 100
 
 // AudienceKind — форма аудитории `Resolve`.
 type AudienceKind int
@@ -37,32 +38,34 @@ type AudienceKind int
 const (
 	// AudienceUnset — форма не задана.
 	AudienceUnset AudienceKind = iota
-	// AudienceResource — субъект, которому видны ресурсы.
-	AudienceResource
+	// AudienceEvent — субъект входит в аудиторию версии события (Р30).
+	AudienceEvent
 	// AudienceSelf — сам субъект.
 	AudienceSelf
+	// AudienceAccountReader — субъект имеет `v_get` на аккаунт.
+	AudienceAccountReader
 	// AudienceAccountOwner — владелец аккаунта.
 	AudienceAccountOwner
 )
 
-// ResourceRef — ссылка на ресурс письма.
-type ResourceRef struct {
-	Type string
-	ID   string
+// EventRef — версия события: объект, поколение, токен, факты.
+type EventRef struct {
+	// Object — `<тип модели>:<id>`.
+	Object     string
+	Generation int64
+	AuthzRev   string
+	Facts      domain.EventFacts
 }
-
-// String — `<тип>:<id>`, объект модели прав.
-func (r ResourceRef) String() string { return r.Type + ":" + r.ID }
 
 // ResolveRequest — вход `Resolve`, разобранный транспортом.
 type ResolveRequest struct {
 	Namespace string
 	Subject   string
 	Audience  AudienceKind
-	// Refs и Relation — только при AudienceResource.
-	Refs     []ResourceRef
-	Relation string
-	// AccountID — только при AudienceAccountOwner.
+	// Event и ViaSubscription — только при AudienceEvent.
+	Event           EventRef
+	ViaSubscription bool
+	// AccountID — при AudienceAccountReader и AudienceAccountOwner.
 	AccountID string
 }
 
@@ -83,8 +86,9 @@ func (r ResolveRequest) validate() error {
 	if r.Audience == AudienceAccountOwner && r.Subject != "" {
 		return shared.InvalidArg("subject", "subject: must be empty for audience account_owner")
 	}
-	if r.Audience == AudienceResource {
-		return r.validateResource()
+	if r.Audience == AudienceEvent {
+		return r.Event.validateForm("audience.event.", func(typ string) bool { return typeOfNamespace(typ, r.Namespace) },
+			fmt.Sprintf("is not a resource type of namespace '%s'", r.Namespace))
 	}
 	return nil
 }
@@ -97,22 +101,18 @@ func (r ResolveRequest) required() error {
 	switch r.Audience {
 	case AudienceUnset:
 		return shared.InvalidArg("audience", "audience: required")
-	case AudienceResource, AudienceSelf:
+	case AudienceEvent, AudienceSelf, AudienceAccountReader:
 		if !subjectNamed(r.Subject) {
 			return shared.InvalidArg("subject", "subject: required")
 		}
 	case AudienceAccountOwner:
 	}
 	switch r.Audience {
-	case AudienceResource:
-		if len(r.Refs) == 0 {
-			return shared.InvalidArg("resource_refs", "resource_refs: required")
-		}
-		for i, ref := range r.Refs {
-			if ref.ID == "" {
-				field := fmt.Sprintf("resource_refs[%d].id", i)
-				return shared.InvalidArg(field, field+": required")
-			}
+	case AudienceEvent:
+		return r.Event.required("audience.event.")
+	case AudienceAccountReader:
+		if r.AccountID == "" {
+			return shared.InvalidArg("audience.account_reader.account_id", "audience.account_reader.account_id: required")
 		}
 	case AudienceAccountOwner:
 		if r.AccountID == "" {
@@ -123,51 +123,78 @@ func (r ResolveRequest) required() error {
 	return nil
 }
 
-// validateResource — шаг (3): отношение, число ссылок, тип каждой ссылки,
-// смесь типов.
-func (r ResolveRequest) validateResource() error {
-	relations := spec.DirectoryRelations()
-	if !slices.Contains(relations, r.Relation) {
-		return shared.InvalidArg("relation", fmt.Sprintf("relation: '%s' is not in {%s}",
-			r.Relation, strings.Join(relations, ", ")))
-	}
-	if len(r.Refs) > maxResourceRefs {
-		return shared.InvalidArg("resource_refs", fmt.Sprintf("resource_refs: at most %d references, got %d",
-			maxResourceRefs, len(r.Refs)))
-	}
-	for i, ref := range r.Refs {
-		if !typeOfNamespace(ref.Type, r.Namespace) {
-			field := fmt.Sprintf("resource_refs[%d].type", i)
-			return shared.InvalidArg(field, fmt.Sprintf("%s: '%s' is not a resource type of namespace '%s'",
-				field, ref.Type, r.Namespace))
-		}
-	}
-	for _, ref := range r.Refs[1:] {
-		if ref.Type != r.Refs[0].Type {
-			return shared.InvalidArg("resource_refs", fmt.Sprintf(
-				"resource_refs: references of one type only, got %s and %s", r.Refs[0].Type, ref.Type))
-		}
+// required — обязательность полей версии события; prefix — путь поля в
+// сообщении запроса (`audience.event.` у `Resolve`, пусто у списка).
+func (e EventRef) required(prefix string) error {
+	switch {
+	case e.Object == "":
+		return shared.InvalidArg(prefix+"object", prefix+"object: required")
+	case e.Generation == 0:
+		return shared.InvalidArg(prefix+"source_version", prefix+"source_version: required")
+	case e.AuthzRev == "":
+		return shared.InvalidArg(prefix+"authz_rev", prefix+"authz_rev: required")
 	}
 	return nil
 }
 
-// anchorTypes — типы, принимаемые в любом пространстве: якорь снятия и
-// контакт (Р7).
-var anchorTypes = []string{"project", "account"}
+// validateForm — форма и тип объекта, поколение, форма токена и цепей
+// предков. admitted судит тип модели объекта; notAdmitted — хвост текста
+// отказа по типу.
+func (e EventRef) validateForm(prefix string, admitted func(string) bool, notAdmitted string) error {
+	typ, id, ok := strings.Cut(e.Object, ":")
+	if !ok || typ == "" || id == "" {
+		return shared.InvalidArg(prefix+"object",
+			fmt.Sprintf("%sobject: '%s' is not in the form <type>:<id>", prefix, e.Object))
+	}
+	if !admitted(typ) {
+		return shared.InvalidArg(prefix+"object", fmt.Sprintf("%sobject: '%s' %s", prefix, typ, notAdmitted))
+	}
+	if e.Generation < 0 {
+		return shared.InvalidArg(prefix+"source_version",
+			fmt.Sprintf("%ssource_version: must be positive, got %d", prefix, e.Generation))
+	}
+	if !domain.ValidAuthzRevisionForm(e.AuthzRev) {
+		return shared.InvalidArg(prefix+"authz_rev",
+			prefix+"authz_rev: not an authorization revision issued by this service")
+	}
+	if field, entry, bad := e.Facts.MalformedChainEntry(); bad {
+		path := prefix + "facts." + field
+		return shared.InvalidArg(path, fmt.Sprintf("%s: '%s' is not in the form <type>:<id>", path, entry))
+	}
+	return nil
+}
+
+// split — тип модели и id объекта (форма уже проверена).
+func (e EventRef) split() (string, string) {
+	typ, id, _ := strings.Cut(e.Object, ":")
+	return typ, id
+}
 
 // typeOfNamespace — тип модели прав typ объявлен модулем пространства
-// namespace либо якорный. Членство точное: модуль типа берётся переходником
-// имени закрытой таблицы (`authzmap.DottedType`, её порождают манифесты
-// модулей) и сравнивается целиком, поэтому тип с общим началом имени без
-// разделителя не входит (УК3-07), а неизвестный таблице тип — тоже.
+// namespace. Членство точное: модуль типа берётся переходником имени закрытой
+// таблицы (`authzmap.DottedType`, её порождают манифесты модулей) и
+// сравнивается целиком, поэтому тип с общим началом имени без разделителя не
+// входит (УК3-07), а неизвестный таблице тип — тоже.
 func typeOfNamespace(typ, namespace string) bool {
-	if slices.Contains(anchorTypes, typ) {
-		return true
+	if !eventObjectType(typ) {
+		return false
 	}
-	dotted, ok := authzmap.DottedType(typ)
-	if !ok {
+	dotted, known := authzmap.DottedType(typ)
+	if !known {
 		return false
 	}
 	module, _, ok := authzmap.SplitObjectType(dotted)
 	return ok && module == namespace
+}
+
+// eventObjectType — typ — тип модели ресурса модуля: известен закрытой
+// таблице каталога и не входит в запретный набор правила приёма
+// (`proxytuple.ForbiddenObjectTypes`: кластер, иерархия, субъекты, типы службы
+// доступа). Только у таких объектов есть поколение события — голова объекта
+// пишется регистрацией модуля-владельца.
+func eventObjectType(typ string) bool {
+	if _, known := authzmap.DottedType(typ); !known {
+		return false
+	}
+	return !slices.Contains(proxytuple.ForbiddenObjectTypes(), typ)
 }

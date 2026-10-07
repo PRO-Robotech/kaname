@@ -2352,9 +2352,9 @@ func internalStreamChain(deps internalChainDeps) ([]grpc.StreamServerInterceptor
 // Методы справочника адресов (NTF-3 Р28) — вызывающий их один, `service:notify`;
 // вне перечня у вызова `notify` субъекта нет.
 var serviceIdentityMethods = map[string]struct{}{
-	strings.TrimPrefix(iamv1.InternalNotificationGrantService_ResolveSend_FullMethodName, "/"):             {},
-	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_Resolve_FullMethodName, "/"):             {},
-	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_ListProjectAudience_FullMethodName, "/"): {},
+	strings.TrimPrefix(iamv1.InternalNotificationGrantService_ResolveSend_FullMethodName, "/"):           {},
+	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_Resolve_FullMethodName, "/"):           {},
+	strings.TrimPrefix(iamv1.InternalNotificationRecipientService_ListEventAudience_FullMethodName, "/"): {},
 }
 
 // serviceIdentityLink — звено Р2 из ключа `authn.service-identity`.

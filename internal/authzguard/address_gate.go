@@ -157,7 +157,7 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"рычаг оператора над выдачей: тот же довод, что у Revoke"},
 	svcRecipients + "Resolve": {GateOutsideCircle,
 		"справочник адресов для службы notify (NTF-3 Р7): вызывающий — служебный принципал по сертификату, маршрута края нет; право решает обработчик вопросом reader на справочник к модели"},
-	svcRecipients + "ListProjectAudience": {GateOutsideCircle,
+	svcRecipients + "ListEventAudience": {GateOutsideCircle,
 		"справочник адресов: тот же довод, что у Resolve"},
 }
 

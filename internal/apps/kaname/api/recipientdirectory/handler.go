@@ -19,11 +19,11 @@ type Handler struct {
 	iamv1.UnimplementedInternalNotificationRecipientServiceServer
 
 	resolve  *ResolveUseCase
-	audience *ListProjectAudienceUseCase
+	audience *ListEventAudienceUseCase
 }
 
 // NewHandler — сборка из двух use-case'ов. Композиционный корень — cmd/kaname.
-func NewHandler(resolve *ResolveUseCase, audience *ListProjectAudienceUseCase) *Handler {
+func NewHandler(resolve *ResolveUseCase, audience *ListEventAudienceUseCase) *Handler {
 	return &Handler{resolve: resolve, audience: audience}
 }
 
@@ -36,34 +36,39 @@ func (h *Handler) Resolve(ctx context.Context, req *iamv1.ResolveRecipientReques
 	resp := &iamv1.ResolveRecipientResponse{Outcome: outcomeToProto(res.Outcome)}
 	if res.Outcome == domain.RecipientAddress {
 		resp.Address = res.Address
-		for _, ref := range res.Visible {
-			resp.VisibleRefs = append(resp.VisibleRefs, &iamv1.RecipientResourceRef{Type: ref.Type, Id: ref.ID})
-		}
 	}
 	return resp, nil
 }
 
-// ListProjectAudience — страница субъектов проекта.
-func (h *Handler) ListProjectAudience(ctx context.Context, req *iamv1.ListProjectAudienceRequest) (*iamv1.ListProjectAudienceResponse, error) {
-	page, err := h.audience.Execute(ctx, req.GetProjectId(), req.GetPageToken(), req.GetPageSize())
+// ListEventAudience — страница аудитории версии события.
+func (h *Handler) ListEventAudience(ctx context.Context, req *iamv1.ListEventAudienceRequest) (*iamv1.ListEventAudienceResponse, error) {
+	e := EventRef{
+		Object: req.GetObject(), Generation: req.GetSourceVersion(), AuthzRev: req.GetAuthzRev(),
+		Facts: factsOf(req.GetFacts()),
+	}
+	page, err := h.audience.Execute(ctx, e, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err
 	}
-	return &iamv1.ListProjectAudienceResponse{Subjects: page.Subjects, NextPageToken: page.NextPageToken}, nil
+	return &iamv1.ListEventAudienceResponse{Subjects: page.Subjects, NextPageToken: page.NextPageToken}, nil
 }
 
 // resolveRequestOf — вход use-case'а из сообщения контракта.
 func resolveRequestOf(req *iamv1.ResolveRecipientRequest) ResolveRequest {
 	out := ResolveRequest{Namespace: req.GetNamespace(), Subject: req.GetSubject()}
 	switch a := req.GetAudience().(type) {
-	case *iamv1.ResolveRecipientRequest_Resource:
-		out.Audience = AudienceResource
-		out.Relation = a.Resource.GetRelation()
-		for _, ref := range a.Resource.GetResourceRefs() {
-			out.Refs = append(out.Refs, ResourceRef{Type: ref.GetType(), ID: ref.GetId()})
+	case *iamv1.ResolveRecipientRequest_Event:
+		out.Audience = AudienceEvent
+		out.Event = EventRef{
+			Object: a.Event.GetObject(), Generation: a.Event.GetSourceVersion(), AuthzRev: a.Event.GetAuthzRev(),
+			Facts: factsOf(a.Event.GetFacts()),
 		}
+		out.ViaSubscription = a.Event.GetViaSubscription()
 	case *iamv1.ResolveRecipientRequest_Self:
 		out.Audience = AudienceSelf
+	case *iamv1.ResolveRecipientRequest_AccountReader:
+		out.Audience = AudienceAccountReader
+		out.AccountID = a.AccountReader.GetAccountId()
 	case *iamv1.ResolveRecipientRequest_AccountOwner:
 		out.Audience = AudienceAccountOwner
 		out.AccountID = a.AccountOwner.GetAccountId()
@@ -71,6 +76,18 @@ func resolveRequestOf(req *iamv1.ResolveRecipientRequest) ResolveRequest {
 		out.Audience = AudienceUnset
 	}
 	return out
+}
+
+// factsOf — факты события из сообщения контракта (nil — фактов нет).
+func factsOf(f *iamv1.RecipientEventFacts) domain.EventFacts {
+	return domain.EventFacts{
+		ProjectID:           f.GetProjectId(),
+		AccountID:           f.GetAccountId(),
+		Labels:              f.GetLabels(),
+		ParentChain:         f.GetParentChain(),
+		PreviousLabels:      f.GetPreviousLabels(),
+		PreviousParentChain: f.GetPreviousParentChain(),
+	}
 }
 
 func outcomeToProto(o domain.RecipientOutcome) iamv1.RecipientOutcome {

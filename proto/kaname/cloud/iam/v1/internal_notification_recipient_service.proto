@@ -27,9 +27,16 @@ syntax = "proto3";
 // (`InternalNotificationGrantService/Revoke`, `/Restore`) остаются на «2».
 //
 // Исход по субъекту — в теле ответа, а не кодом: справочник не производит
-// `NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`. Сбой чтения хранилища
-// kaname — `UNAVAILABLE` фиксированным текстом `notification recipient
-// directory temporarily unavailable`.
+// `NOT_FOUND` и `ALREADY_EXISTS`. Сбой чтения хранилища kaname — `UNAVAILABLE`
+// фиксированным текстом `notification recipient directory temporarily
+// unavailable`.
+//
+// Вопрос об аудитории версии события (Р30) — `ListEventAudience` и форма
+// `event` у `Resolve` — знает два отказа вызова кодом, а не исходом:
+// поколение объекта службой доступа ещё не применено — `UNAVAILABLE`
+// `ErrorInfo{reason: OBJECT_GENERATION_NOT_APPLIED}` (ждём, а не угадываем);
+// токен версии прав, не выданный этой службой (не форма снимка либо снимок
+// новее текущего), — `INVALID_ARGUMENT` с полем `authz_rev`.
 package kaname.cloud.iam.v1;
 
 import "corelib/authz/v1/authz_options.proto";
@@ -43,9 +50,9 @@ service InternalNotificationRecipientService {
   //
   // Проверка входа — синхронно, в порядке: (1) обязательность (`<field>:
   // required`); (2) `subject` при `account_owner` — `subject: must be empty
-  // for audience account_owner`; (3) тип ссылки, отношение, число ссылок и
-  // смесь типов. Вопрос к модели о праве получателя задаётся только после
-  // проверки входа целиком.
+  // for audience account_owner`; (3) форма и тип объекта `event`, форма
+  // токена `authz_rev`. Вопрос об аудитории задаётся только после проверки
+  // входа целиком.
   rpc Resolve (ResolveRecipientRequest) returns (ResolveRecipientResponse) {
     option (corelib.authz.v1.permission)        = "iam.notification_recipients.resolve";
     option (corelib.authz.v1.required_relation) = "reader";
@@ -56,17 +63,23 @@ service InternalNotificationRecipientService {
     option (corelib.authz.v1.required_acr_min)  = "1";
   }
 
-  // ListProjectAudience — субъекты `user:<id>` с действующей (не отозванной,
-  // не истёкшей) привязкой с субъектом-пользователем на `project:<id>`.
-  // Группы не раскрываются, привязки аккаунта не входят, адресов в ответе нет.
+  // ListEventAudience — субъекты `user:<id>` аудитории версии события (Р30):
+  // поколение `source_version` объекта `object`, ограда токена `authz_rev`,
+  // отбор по меткам и цепи предков — по фактам события `facts`. Права уровня
+  // кластера, подстановочные и условные права, сервисные аккаунты и
+  // служебные субъекты в перечень не входят; группы раскрыты в членов;
+  // адресов в ответе нет.
   //
   // Порядок — по id пользователя по возрастанию; курсор — позиция последнего
   // выданного id. Отступление от курсора `(created_at, id)` названо: элемент
-  // выдачи — пользователь, выведенный из одной или нескольких привязок, своего
-  // `created_at` у него нет, и пользователь с двумя привязками под курсором
-  // привязки выдавался бы дважды.
-  rpc ListProjectAudience (ListProjectAudienceRequest) returns (ListProjectAudienceResponse) {
-    option (corelib.authz.v1.permission)        = "iam.notification_recipients.listProjectAudience";
+  // выдачи — пользователь аудитории, своего `created_at` у него нет.
+  //
+  // Пагинация проверяется первым шагом (`page_size` вне `[0..1000]`, мусорный
+  // `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на
+  // непримененном поколении); затем обязательность `object`,
+  // `source_version`, `authz_rev`; затем форма и тип `object` и форма токена.
+  rpc ListEventAudience (ListEventAudienceRequest) returns (ListEventAudienceResponse) {
+    option (corelib.authz.v1.permission)        = "iam.notification_recipients.listEventAudience";
     option (corelib.authz.v1.required_relation) = "reader";
     option (corelib.authz.v1.scope_extractor)   = {
       object_type:        "notification_recipient_directory"
@@ -76,31 +89,63 @@ service InternalNotificationRecipientService {
   }
 }
 
-// RecipientResourceRef — ссылка на ресурс, о котором письмо.
-message RecipientResourceRef {
-  // Тип модели прав: вид пространства имён запроса либо `project`, `account`
-  // в любом пространстве. Иное — `INVALID_ARGUMENT`, поле
-  // `resource_refs[i].type`. Членство точное, без строкового префикса.
-  string type = 1;
-  // Идентификатор ресурса. Пусто — `INVALID_ARGUMENT`
-  // `resource_refs[i].id: required`. Формат чужого id справочник не судит.
-  string id = 2;
+// RecipientEventFacts — факты объекта на момент события (Р3), переданные
+// вызывающим из строки `resource-event`. Отбор по меткам и цепи предков
+// судится по ним, а не по зеркалу службы доступа: к моменту вопроса зеркало
+// может нести более новое поколение. Принимает их только круг `notify`
+// (справочник — только `service:notify`, Р28).
+//
+// У `UPDATED` аудитория — объединение аудиторий поколений `g_E − 1` и `g_E`:
+// `previous_labels` и `previous_parent_chain` несут факты поколения
+// `g_E − 1`; у `CREATED` и `DELETED` они пусты (у `DELETED` текущие поля —
+// факты поколения `g_E − 1`, то есть объекта до снятия).
+message RecipientEventFacts {
+  // Проект объекта; пусто у объекта вне проекта.
+  string project_id = 1;
+  // Аккаунт объекта.
+  string account_id = 2;
+  // Метки объекта поколения события; набор, порядок не значим.
+  map<string, string> labels = 3;
+  // Цепь предков `<тип модели>:<id>` от ближайшего; объект `cluster` в цепи
+  // аудиторию не расширяет (права уровня кластера аудитории не образуют).
+  repeated string parent_chain = 4;
+  // Метки поколения `g_E − 1` (только у `UPDATED`); набор.
+  map<string, string> previous_labels = 5;
+  // Цепь предков поколения `g_E − 1` (только у `UPDATED`).
+  repeated string previous_parent_chain = 6;
 }
 
-// RecipientResourceAudience — аудитория «субъект, которому видны ресурсы».
-message RecipientResourceAudience {
-  // Ссылки одного типа, от 1 до 100. Ссылок 0 — `INVALID_ARGUMENT`
-  // `resource_refs: required`; больше 100 либо смесь типов —
-  // `INVALID_ARGUMENT`, поле `resource_refs`. Порядок значим: видимое
-  // подмножество в ответе — в порядке запроса.
-  repeated RecipientResourceRef resource_refs = 1;
-  // Отношение — из закрытого набора `{v_get}` (corelib `notify/spec`). Иное —
-  // `INVALID_ARGUMENT`, поле `relation`.
-  string relation = 2;
+// RecipientEventAudience — аудитория «субъект входит в аудиторию версии
+// события» (Р30).
+message RecipientEventAudience {
+  // Объект `<тип модели>:<id>`; тип — вид пространства имён запроса. Пусто —
+  // `INVALID_ARGUMENT` `audience.event.object: required`; иная форма либо
+  // тип — `INVALID_ARGUMENT` с полем `audience.event.object`.
+  string object = 1;
+  // Поколение объекта `g_E`. `0` — `INVALID_ARGUMENT`
+  // `audience.event.source_version: required`.
+  int64 source_version = 2;
+  // Токен версии прав `R_E` (`InternalIAMService/CurrentAuthzRevision`).
+  // Пусто — `INVALID_ARGUMENT` `audience.event.authz_rev: required`.
+  string authz_rev = 3;
+  // Факты объекта на момент события.
+  RecipientEventFacts facts = 4;
+  // Подписчик цели, которого нет в строках аудитории приёма (Р11): права
+  // уровня кластера учитываются ТОЛЬКО при этом признаке; подстановочные и
+  // условные права — ни при каком.
+  bool via_subscription = 5;
 }
 
 // RecipientSelfAudience — адрес самого субъекта, без вопроса о ресурсе.
 message RecipientSelfAudience {}
+
+// RecipientAccountReaderAudience — субъект имеет `v_get` на `account:<id>`
+// (контакт безопасности, Р19, Р20). Не событие ресурса: ограды у вопроса нет.
+message RecipientAccountReaderAudience {
+  // Аккаунт. Пусто — `INVALID_ARGUMENT`
+  // `audience.account_reader.account_id: required`.
+  string account_id = 1;
+}
 
 // RecipientAccountOwnerAudience — адрес владельца аккаунта; субъект запроса
 // не передаётся.
@@ -113,19 +158,26 @@ message RecipientAccountOwnerAudience {
 
 // ResolveRecipientRequest — вход `Resolve`.
 message ResolveRecipientRequest {
+  // Форма `resource{resource_refs, relation}` снята (приёмка NTF-3 §4,
+  // редакция 35): вопрос о праве при отправке заменён вопросом об аудитории
+  // версии события.
+  reserved 3;
+  reserved "resource";
+
   // Пространство уведомлений (имя модуля). Пусто — `INVALID_ARGUMENT`
   // `namespace: required` при любой аудитории.
   string namespace = 1;
   // Получатель, `user:<id>` либо `service_account:<id>`. Обязателен при
-  // `resource` и `self`: пусто либо без id после `:` — `INVALID_ARGUMENT`
-  // `subject: required`. При `account_owner` задан — `INVALID_ARGUMENT`
-  // `subject: must be empty for audience account_owner`.
+  // `event`, `self` и `account_reader`: пусто либо без id после `:` —
+  // `INVALID_ARGUMENT` `subject: required`. При `account_owner` задан —
+  // `INVALID_ARGUMENT` `subject: must be empty for audience account_owner`.
   string subject = 2;
-  // Аудитория — одна из трёх форм. Не задана — `INVALID_ARGUMENT`
+  // Аудитория — одна из четырёх форм. Не задана — `INVALID_ARGUMENT`
   // `audience: required`.
   oneof audience {
-    RecipientResourceAudience resource = 3;
+    RecipientEventAudience event = 6;
     RecipientSelfAudience self = 4;
+    RecipientAccountReaderAudience account_reader = 7;
     RecipientAccountOwnerAudience account_owner = 5;
   }
 }
@@ -136,47 +188,56 @@ enum RecipientOutcome {
   // Не назван. Сервер его не отдаёт; читатель классифицирует как расхождение
   // версий, а не как адрес.
   RECIPIENT_OUTCOME_UNSPECIFIED = 0;
-  // Всё выполнено: `address` и `visible_refs` заполнены.
+  // Всё выполнено: `address` заполнен.
   RECIPIENT_OUTCOME_ADDRESS = 1;
   // Субъекта нет.
   RECIPIENT_OUTCOME_SUBJECT_NOT_FOUND = 2;
   // Пользователь не в состоянии `ACTIVE`.
   RECIPIENT_OUTCOME_SUBJECT_INACTIVE = 3;
-  // Для `resource` — ни одна ссылка не видна; для `account_owner` — у
-  // аккаунта нет владельца-пользователя.
+  // Для `event` — субъекта нет в аудитории версии (права нет, право
+  // изменилось после `R_E`, право только уровня кластера без
+  // `via_subscription`, право только условное); для `account_reader` — у
+  // субъекта нет `v_get` на аккаунт; для `account_owner` — у аккаунта нет
+  // владельца-пользователя.
   RECIPIENT_OUTCOME_AUDIENCE_DENIED = 4;
   // Субъект — учётная запись службы, либо адрес не подтверждён.
   RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS = 5;
 }
 
-// ResolveRecipientResponse — исход `Resolve`. Кроме исхода `ADDRESS` ни
-// адреса, ни ссылок ответ не несёт.
+// ResolveRecipientResponse — исход `Resolve`. Кроме исхода `ADDRESS` адреса
+// ответ не несёт.
 message ResolveRecipientResponse {
+  // Подмножество `visible_refs` снято вместе с формой `resource` (§4).
+  reserved 3;
+  reserved "visible_refs";
+
   // Исход; см. `RecipientOutcome`.
   RecipientOutcome outcome = 1;
   // Подтверждённый адрес; только при `ADDRESS`.
   string address = 2;
-  // Видимое получателю подмножество ссылок запроса, в порядке запроса; только
-  // при `ADDRESS` и аудитории `resource`, иначе пусто.
-  repeated RecipientResourceRef visible_refs = 3;
 }
 
-// ListProjectAudienceRequest — вход `ListProjectAudience`. Пагинация
-// проверяется первым шагом: `page_size` вне `[0..1000]` и мусорный
-// `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на пустом
-// результате.
-message ListProjectAudienceRequest {
-  // Проект. Пусто — `INVALID_ARGUMENT` `project_id: required`; не по форме —
-  // `INVALID_ARGUMENT` `invalid project id '<X>'`.
-  string project_id = 1;
+// ListEventAudienceRequest — вход `ListEventAudience`.
+message ListEventAudienceRequest {
+  // Объект `<тип модели>:<id>`; тип — из типов опубликованных видов. Пусто —
+  // `INVALID_ARGUMENT` `object: required`; иная форма либо тип —
+  // `INVALID_ARGUMENT` с полем `object`.
+  string object = 1;
+  // Поколение объекта `g_E`. `0` — `INVALID_ARGUMENT`
+  // `source_version: required`.
+  int64 source_version = 2;
+  // Токен версии прав `R_E`. Пусто — `INVALID_ARGUMENT` `authz_rev: required`.
+  string authz_rev = 3;
+  // Факты объекта на момент события.
+  RecipientEventFacts facts = 4;
   // Непрозрачный курсор; пусто — первая страница.
-  string page_token = 2;
+  string page_token = 5;
   // 0 — умолчание 50, наибольшее 1000.
-  int32 page_size = 3;
+  int32 page_size = 6;
 }
 
-// ListProjectAudienceResponse — страница субъектов.
-message ListProjectAudienceResponse {
+// ListEventAudienceResponse — страница аудитории.
+message ListEventAudienceResponse {
   // `user:<id>`, по id пользователя по возрастанию; упорядоченный список.
   repeated string subjects = 1;
   // Пусто — страница несёт последний элемент выдачи.

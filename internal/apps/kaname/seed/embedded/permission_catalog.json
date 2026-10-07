@@ -3070,8 +3070,8 @@
     "required_acr_min": "2"
   },
   {
-    "fqn": "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience",
-    "permission": "iam.notification_recipients.listProjectAudience",
+    "fqn": "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListEventAudience",
+    "permission": "iam.notification_recipients.listEventAudience",
     "required_relation": "reader",
     "scope_extractor": {
       "object_type": "notification_recipient_directory",

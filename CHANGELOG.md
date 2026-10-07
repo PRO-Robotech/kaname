@@ -33,6 +33,24 @@
 
 Состояние вершины ствола. Записи станут первой версией, когда она будет выпущена.
 
+### Справочник адресов: аудитория версии события с оградой
+
+- **ЛОМАЕТ** — службы уведомлений (`service:notify`), читающей справочник
+  `InternalNotificationRecipientService`. Аудитория письма — аудитория **версии
+  события** объекта: новый глагол `ListEventAudience{object, source_version,
+  authz_rev, facts, page_token, page_size}` отдаёт пользователей `user:<id>`,
+  чьё право читать объект есть и не менялось с токена версии прав события
+  (`authz_rev` — `InternalIAMService/CurrentAuthzRevision`); у `Resolve` формы
+  аудитории — `event{object, source_version, authz_rev, facts, via_subscription}`,
+  `self`, `account_reader{account_id}`, `account_owner{account_id}`. Права
+  уровня кластера (только при `via_subscription`), подстановочные и условные
+  права, сервисные аккаунты аудитории не образуют. Поколение объекта, ещё не
+  применённое службой доступа, — `UNAVAILABLE` с `ErrorInfo{reason:
+  OBJECT_GENERATION_NOT_APPLIED}`. Сняты: глагол `ListProjectAudience`, форма
+  `resource{resource_refs, relation}` и поле ответа `visible_refs` (`reserved`
+  номер и имя). Что поменять: перевести приём событий на `ListEventAudience`, а
+  адресованные строки — на `Resolve{event}` с полями строки `resource-event`.
+
 ### Регистрация объекта — событием с поколением, публикация — своим глаголом
 
 - **ЛОМАЕТ** — модулей, регистрирующих свои объекты в службе доступа.
